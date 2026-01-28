@@ -3,11 +3,10 @@ const mongoose = require("mongoose");
 const Order_Schema = new mongoose.Schema(
   {
     order_id: { type: String, required: true },
-    item: [{
+    item: {
       item_code: { type: String, required: true, unique: true },
-      name: { type: String, required: true },
       description: { type: String }
-    }],
+    },
     ETD: { type: Date },
     order_date: { type: Date, default: Date.now() },
     status: { type: String, enum: ["Pending", "To be requested", "Requested", "QC Done"], default: "Pending" },
