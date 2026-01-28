@@ -3,6 +3,7 @@ const connectDB = require("./config/connectDB");
 const cors = require("cors");
 require("dotenv").config();
 const orderRouter = require("./routers/orders.route");
+const authRouter = require("./routers/auth.router");
 
 const app = express();
 const PORT = process.env.PORT;
@@ -15,12 +16,25 @@ app.use(
     credentials: true
   })
 );
-app.use("/orders", orderRouter);
+
+app.use((req, res, next) => {
+  const contentType = req.headers["content-type"] || "";
+
+  if (contentType.includes("multipart/form-data")) {
+    // Let multer handle it
+    return next();
+  }
+
+  // JSON / URLENCODED requests
+  express.json()(req, res, next);
+});
+
 app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
 
 // routes AFTER middleware
 
+app.use("/orders", orderRouter);
+app.use("/auth", authRouter);
 
 app.get("/", (req, res) => {
   res.send({ message: "Server OK" });

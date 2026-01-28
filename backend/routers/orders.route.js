@@ -1,19 +1,25 @@
 const express = require("express");
 const upload = require("../config/multer.config");
+const authenticate = require("../middlewares/auth.middleware");
+const authorize = require("../middlewares/authorize.middleware");
 const {
   uploadOrders,
   getOrders,
-  getOrderById
+  getOrderById,
 } = require("../controllers/order.controller");
 
 const router = express.Router();
 
-// Upload orders via Excel
-router.post("/upload-orders", upload.single("file"), uploadOrders);
+router.post(
+  "/upload-orders",
+  authenticate,
+  authorize("admin", "manager", "dev"),
+  upload.single("file"),
+  uploadOrders,
+);
 
 // List orders (pagination + sorting)
-router.get("/", getOrders);
-
+router.get("/", authenticate, authorize("admin", "manager", "QC", "dev"), getOrders);
 // Get order by ID
 router.get("/:id", getOrderById);
 

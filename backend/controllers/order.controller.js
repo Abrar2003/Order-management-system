@@ -1,5 +1,8 @@
 const XLSX = require("xlsx");
 const Order = require("../models/order.model");
+const dateParser = require("../helpers/dateparsser");
+const deleteFile = require("../helpers/fileCleanup");
+
 
 // Upload Orders Controller
 exports.uploadOrders = async (req, res) => {
@@ -14,7 +17,6 @@ exports.uploadOrders = async (req, res) => {
     const sheetData = XLSX.utils.sheet_to_json(
       workbook.Sheets[sheetName]
     );
-
     // Transform rows to Order schema
     const orders = sheetData.map((row) => ({
       order_id: row.PO,
@@ -22,8 +24,9 @@ exports.uploadOrders = async (req, res) => {
         item_code: row.item_code,
         description: row.description,
       },
-      ETD: row.ETD,
-      order_date: row.order_date,
+      vendor: row.vendor,
+      ETD: dateParser(row.ETD),
+      order_date: dateParser(row.order_date),
       status: "Pending",
       quantity: row.quantity,
     }));
@@ -40,6 +43,10 @@ exports.uploadOrders = async (req, res) => {
       message: "Upload failed",
       error: error.message,
     });
+  }
+  finally {
+    // Cleanup uploaded file
+    deleteFile(req.file?.path);
   }
 };
 
