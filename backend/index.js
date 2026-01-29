@@ -2,8 +2,9 @@ const express = require("express");
 const connectDB = require("./config/connectDB");
 const cors = require("cors");
 require("dotenv").config();
-const orderRouter = require("./routers/orders.route");
-const authRouter = require("./routers/auth.router");
+const orderRouter = require("./routers/orders.routes");
+const authRouter = require("./routers/auth.routes");
+const qcRouter = require("./routers/qc.routes");
 
 const app = express();
 const PORT = process.env.PORT;
@@ -35,6 +36,7 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use("/orders", orderRouter);
 app.use("/auth", authRouter);
+app.use("/qc", qcRouter);
 
 app.get("/", (req, res) => {
   res.send({ message: "Server OK" });

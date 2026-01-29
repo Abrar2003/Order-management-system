@@ -89,3 +89,100 @@
   background-color: #2563eb;
   color: white;
 }
+
+/* ===== Modal Overlay ===== */
+.modalOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  inset: 0;
+}
+
+/* ===== Modal Box ===== */
+.modalBox {
+  background: #ffffff;
+  width: 420px;
+  max-width: 90%;
+  padding: 24px;
+  border-radius: 8px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  animation: modalFadeIn 0.2s ease-in-out;
+}
+
+/* ===== Modal Heading ===== */
+.modalBox h3 {
+  margin-top: 0;
+  margin-bottom: 16px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+/* ===== Modal Text ===== */
+.modalBox p {
+  margin: 6px 0;
+  font-size: 14px;
+  color: #374151;
+}
+
+/* ===== Labels ===== */
+.modalBox label {
+  display: block;
+  margin-top: 12px;
+  margin-bottom: 4px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* ===== Inputs & Select ===== */
+.modalBox select,
+.modalBox input {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  outline: none;
+}
+
+.modalBox select:focus,
+.modalBox input:focus {
+  border-color: #2563eb;
+}
+
+/* ===== Buttons ===== */
+.modalBox button {
+  padding: 8px 14px;
+  font-size: 14px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.modalBox button:first-child {
+  background-color: #2563eb;
+  color: white;
+}
+
+.modalBox button:last-child {
+  background-color: #e5e7eb;
+  color: #111827;
+}
+
+/* ===== Animation ===== */
+@keyframes modalFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}

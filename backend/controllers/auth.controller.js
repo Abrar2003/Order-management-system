@@ -14,7 +14,7 @@ const signup = async (req, res) => {
     }
 
     const existingUser = await User.findOne({
-      $or: [{ username }, { email }]
+      $or: [{ username }, { email }],
     });
 
     if (existingUser) {
@@ -29,11 +29,11 @@ const signup = async (req, res) => {
       role: "user",
       email,
       phone,
-      name
+      name,
     });
 
     return res.status(201).json({
-      message: "User registered successfully"
+      message: "User registered successfully",
     });
   } catch (err) {
     return res.status(500).json({ message: err.message });
@@ -61,32 +61,48 @@ const signin = async (req, res) => {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    console.log("Generating token for user:", user.username, user.role);
     const token = jwt.sign(
       {
         id: user._id,
-        role: user.role
+        role: user.role,
       },
       process.env.JWT_SECRET,
-      { expiresIn: "1d" }
+      { expiresIn: "1d" },
     );
 
-    console.log("User signed in:", user.username);
     return res.json({
       token,
       user: {
         id: user._id,
         username: user.username,
         role: user.role,
-        name: user.name
-      }
+        name: user.name,
+      },
     });
   } catch (err) {
     return res.status(500).json({ message: err.message });
   }
 };
 
+// GET /users?role=QC
+const getUsers = async (req, res) => {
+  try {
+    const { role } = req.query;
+
+    const filter = {};
+    if (role) filter.role = role;
+
+    const users = await User.find(filter)
+      .select("_id name role email") // never send password
+      .sort({ name: 1 });
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
 module.exports = {
   signup,
-  signin
+  signin,
+  getUsers,
 };
