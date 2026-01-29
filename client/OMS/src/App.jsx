@@ -17,7 +17,7 @@ function App() {
               <Orders />
             </ProtectedRoute>
           }
-        />
+        />  
 
         {/* default redirect */}
         <Route path="*" element={<Navigate to="/orders" />} />
