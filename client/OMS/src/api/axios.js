@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const instance = axios.create({
-  baseURL: "http://localhost:8008/",
+  baseURL: "https://order-management-system-ebld.onrender.com/",
 });
 
 // axios.js
