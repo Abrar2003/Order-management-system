@@ -1,15 +1,27 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import SignIn from "./auth/Signin";
-import Orders from "./pages/Orders";
-import ProtectedRoute from "./routes/ProtectedRoute";
+import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+
 import "./App.css";
 
-function App() {
+import ProtectedRoute from "./routes/ProtectedRoute";
+
+
+import SignIn from "./pages/Signin";
+import Orders from "./pages/Orders";
+import QCPage from "./pages/QcPage";
+// import Users from "./pages/Users"; // later
+
+const App = () => {
   return (
-    <BrowserRouter>
+    <Router>
       <Routes>
+
+        {/* Public */}
         <Route path="/signin" element={<SignIn />} />
 
+        {/* Default redirect */}
+        <Route path="/" element={<Navigate to="/orders" replace />} />
+
+        {/* Protected Routes */}
         <Route
           path="/orders"
           element={
@@ -17,13 +29,35 @@ function App() {
               <Orders />
             </ProtectedRoute>
           }
-        />  
+        />
 
-        {/* default redirect */}
-        <Route path="*" element={<Navigate to="/orders" />} />
+        <Route
+          path="/qc"
+          element={
+            <ProtectedRoute>
+              <QCPage />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Optional future */}
+        {/* 
+        <Route
+          path="/users"
+          element={
+            <ProtectedRoute>
+              <Users />
+            </ProtectedRoute>
+          }
+        />
+        */}
+
+        {/* Fallback */}
+        <Route path="*" element={<Navigate to="/orders" replace />} />
+
       </Routes>
-    </BrowserRouter>
+    </Router>
   );
-}
+};
 
 export default App;

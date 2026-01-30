@@ -1,13 +1,55 @@
 import axios from "../api/axios";
+import { jwtDecode } from "jwt-decode";
 
+const TOKEN_KEY = "ALLFATHERODIN";
+
+/**
+ * Sign in user
+ */
 export const signin = async (credentials) => {
   const res = await axios.post("/auth/signin", credentials);
+
+  // assuming backend returns { token: "..." }
+  if (res.data?.token) {
+    localStorage.setItem(TOKEN_KEY, res.data.token);
+  }
+
   return res.data;
 };
 
-export const getToken = () => localStorage.getItem("token");
-
-export const logout = () => {
-  localStorage.removeItem("token");
+/**
+ * Get token from localStorage
+ */
+export const getToken = () => {
+  return localStorage.getItem(TOKEN_KEY);
 };
 
+/**
+ * Decode user from JWT token
+ */
+export const getUserFromToken = () => {
+  try {
+    const token = getToken();
+    if (!token) return null;
+
+    const decoded = jwtDecode(token);
+
+    return {
+      _id: decoded._id,
+      name: decoded.name,
+      role: decoded.role,
+      email: decoded.email,
+    };
+  } catch (error) {
+    console.error("Invalid token:", error);
+    logout(); // clear broken token
+    return null;
+  }
+};
+
+/**
+ * Logout user
+ */
+export const logout = () => {
+  localStorage.removeItem(TOKEN_KEY);
+};

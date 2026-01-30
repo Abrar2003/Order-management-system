@@ -14,7 +14,6 @@ const Orders = () => {
   const [showAlignModal, setShowAlignModal] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
 
-
   const user = getUserFromToken();
   const role = user?.role;
 
@@ -44,7 +43,10 @@ const Orders = () => {
       {canManageOrders && (
         <div style={{ margin: "10px 0", textAlign: "right" }}>
           <button
-            onClick={() => setShowUploadModal(true)}
+            className="primaryButton"
+            onClick={() => {
+              setShowUploadModal(true)
+            }}
             style={{
               padding: "8px 16px",
               backgroundColor: "#2563eb",
@@ -57,7 +59,15 @@ const Orders = () => {
           </button>
         </div>
       )}
-      <div className="orderTableContainer">
+      <div
+        className="orderTableContainer"
+        style={{
+          border: "1px solid #111827",
+          width: "100%",
+          borderRadius: "8px",
+          padding: "16px",
+        }}
+      >
         <table className="orderTable">
           <thead className="tableHead">
             <tr>
@@ -65,32 +75,58 @@ const Orders = () => {
               <th>Order Date</th> <th>ETD</th> <th>Quantity</th> <th>Status</th>
               {canManageOrders && <th>Action</th>}
             </tr>
+
+            {/* <div style={{ height: "20px" }}></div> */}
           </thead>
+          <div style={{ height: "20px" }}></div>
           <tbody className="tableBody">
             {orders.map((order) => (
-              <tr key={order._id}>
-                <td>{order.order_id}</td> <td>{order.vendor}</td>
-                <td>{order.item?.item_code}</td>
-                <td>{order.item?.description}</td>
-                <td>{new Date(order.order_date).toLocaleDateString()}</td>
-                <td>
-                  {order.ETD ? new Date(order.ETD).toLocaleDateString() : "N/A"}
-                </td>
-                <td>{order.quantity}</td> <td>{order.status}</td>
-                {canManageOrders && (
+              <>
+                <tr className="tableRow" key={order._id}>
+                  <td>{order.order_id}</td>
+                  <td>{order.vendor}</td>
+                  <td>{order.item?.item_code}</td>
+                  <td>{order.item?.description}</td>
+                  <td>{new Date(order.order_date).toLocaleDateString()}</td>
                   <td>
-                    <button
-                      onClick={() => {
-                        setSelectedOrder(order);
-                        setShowAlignModal(true);
-                        console.log("QC aligned");
-                      }}
-                    >
-                      Align Inspector
-                    </button>
+                    {order.ETD
+                      ? new Date(order.ETD).toLocaleDateString()
+                      : "N/A"}
                   </td>
-                )}
-              </tr>
+                  <td>{order.quantity}</td> <td>{order.status}</td>
+                  {canManageOrders && (
+                    <td>
+                      {order.qc_record ? (
+                        <span
+                          style={{
+                            fontSize: "12px",
+                            fontWeight: "bold",
+                            color: "#16a34a",
+                          }}
+                        >
+                          {order.qc_record.inspector.name} is aligned
+                        </span>
+                      ) : (
+                        <button
+                          className="secondayButton"
+                          style={{
+                            fontSize: "12px",
+                            fontWeight: "bold",
+                            width: "100%",
+                          }}
+                          onClick={() => {
+                            setSelectedOrder(order);
+                            setShowAlignModal(true);
+                          }}
+                        >
+                          Align Inspector
+                        </button>
+                      )}
+                    </td>
+                  )}
+                </tr>
+                <div style={{ height: "20px" }}></div>
+              </>
             ))}
             {orders.length === 0 && (
               <tr>

@@ -47,6 +47,7 @@ const AlignQCModal = ({ order, onClose, onSuccess }) => {
     );
 
     alert("QC alignment successful");
+    window.location.reload();
 
     onSuccess();
   } catch (err) {
