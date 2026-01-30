@@ -12,6 +12,11 @@ const Order_Schema = new mongoose.Schema(
     order_date: { type: Date, default: Date.now() },
     status: { type: String, enum: ["Pending", "Under Inspection", "Finalized"], default: "Pending" },
     quantity: { type: Number, required: true },
+    qc_record: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "qc",
+      default: null,
+    },
   },
   { timestamps: true }
 );

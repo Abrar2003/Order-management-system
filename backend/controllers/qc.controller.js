@@ -1,4 +1,6 @@
 const QC = require("../models/qc.model");
+const Order = require("../models/order.model")
+const mongoose = require("mongoose");
 
 /**
  * GET /qclist
@@ -6,30 +8,87 @@ const QC = require("../models/qc.model");
  */
 exports.getQCList = async (req, res) => {
   try {
-    const { page = 1, limit = 20 } = req.query;
+    const {
+      page = 1,
+      limit = 20,
+      search = "",
+      inspector,
+      vendor,
+    } = req.query;
+
     const skip = (page - 1) * limit;
 
-    const data = await QC.find()
-      .populate("order", "order_id vendor")
-      .populate("inspector", "name role")
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(Number(limit));
+    const matchStage = {};
 
-    const total = await QC.countDocuments();
+    // 🔍 Inspector filter
+    if (inspector) {
+      matchStage.inspector = new mongoose.Types.ObjectId(inspector);
+    }
+
+    // 🔍 Search filter
+    if (search) {
+      matchStage.$or = [
+        { "item.item_code": { $regex: search, $options: "i" } },
+      ];
+    }
+
+    const pipeline = [
+      {
+        $lookup: {
+          from: "orders",
+          localField: "order",
+          foreignField: "_id",
+          as: "order",
+        },
+      },
+      { $unwind: "$order" },
+
+      // 🔍 Vendor search (order.vendor)
+      ...(vendor
+        ? [{ $match: { "order.vendor": vendor } }]
+        : []),
+
+      { $match: matchStage },
+
+      {
+        $lookup: {
+          from: "users",
+          localField: "inspector",
+          foreignField: "_id",
+          as: "inspector",
+        },
+      },
+      { $unwind: "$inspector" },
+
+      { $sort: { createdAt: -1 } },
+      { $skip: skip },
+      { $limit: Number(limit) },
+    ];
+
+    const data = await QC.aggregate(pipeline);
+
+    // 📊 Count
+    const countPipeline = pipeline.filter(
+      (stage) => !stage.$skip && !stage.$limit && !stage.$sort
+    );
+
+    const totalRecords = (await QC.aggregate(countPipeline)).length;
 
     res.json({
       data,
       pagination: {
         page: Number(page),
-        totalPages: Math.ceil(total / limit),
-        totalRecords: total,
+        totalPages: Math.ceil(totalRecords / limit),
+        totalRecords,
       },
     });
   } catch (err) {
+    console.error(err);
     res.status(500).json({ message: err.message });
   }
 };
+
+
 
 /**
  * POST /align-qc
@@ -63,6 +122,13 @@ exports.alignQC = async (req, res) => {
       remarks,
       createdBy: req.user._id,
     });
+
+    const orderRecord = await Order.findById(order);
+
+    orderRecord.status = "Under Inspection";
+    orderRecord.qc_record = qc._id;
+
+    await orderRecord.save();
 
     res.status(201).json({
       message: "QC aligned successfully",

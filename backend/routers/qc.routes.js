@@ -7,7 +7,7 @@ const qcController = require("../controllers/qc.controller");
 
 // GET all QC
 router.get(
-  "/qclist",
+  "/list",
   auth,
   authorize("admin", "manager", "QC", "Dev"),
   qcController.getQCList

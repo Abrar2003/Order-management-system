@@ -53,32 +53,35 @@ exports.uploadOrders = async (req, res) => {
 // Get Orders (Pagination + Sorting)
 exports.getOrders = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-
-    const sortField = req.query.sort || "createdAt";
-    const sortOrder = req.query.order === "asc" ? 1 : -1;
+    const { page = 1, limit = 20 } = req.query;
 
     const skip = (page - 1) * limit;
 
-    const [orders, total] = await Promise.all([
-      Order.find()
-        .sort({ [sortField]: sortOrder })
-        .skip(skip)
-        .limit(limit),
-      Order.countDocuments(),
-    ]);
+    const orders = await Order.find()
+      .populate({
+        path: "qc_record",
+        populate: {
+          path: "inspector",
+          select: "name role",
+        },
+      })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(Number(limit));
 
-    res.status(200).json({
+    const total = await Order.countDocuments();
+
+    res.json({
       data: orders,
       pagination: {
-        total,
-        page,
+        page: Number(page),
         totalPages: Math.ceil(total / limit),
+        totalRecords: total,
       },
     });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message });
   }
 };
 
