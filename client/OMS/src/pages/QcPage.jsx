@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
 import { getUserFromToken } from "../auth/auth.utils";
+import { useNavigate } from "react-router-dom";
 
 const QC = () => {
   const [qcList, setQcList] = useState([]);
@@ -17,6 +18,7 @@ const QC = () => {
 
   const token = localStorage.getItem("token");
   const user = getUserFromToken();
+  const navigate = useNavigate();
 
   useEffect(() => {
     fetchQC();
@@ -59,6 +61,17 @@ const QC = () => {
     setInspectors(res.data);
   };
 
+  const handleDetailsClick = (qc) => {
+    navigate(`/qc/${qc._id}`);
+  }
+
+  const handleSearch = (e) => {
+    e.preventDefault();
+    setPage(1);
+    const formData = new FormData(e.target);
+    setSearch(formData.get("search"));
+  }
+
   return (
     <>
       <Navbar />
@@ -68,13 +81,15 @@ const QC = () => {
       {/* Filters */}
       <div className="filters">
 
+<div>
+
         <select
           value={inspector}
           onChange={(e) => {
             setPage(1);
             setInspector(e.target.value);
           }}
-        >
+          >
           <option value="">All Inspectors</option>
           {inspectors.map((qc) => (
             <option key={qc._id} value={qc._id}>
@@ -89,7 +104,7 @@ const QC = () => {
             setPage(1);
             setVendor(e.target.value);
           }}
-        >
+          >
           <option value="">All Vendors</option>
           {vendors.map((v) => (
             <option key={v} value={v}>
@@ -97,6 +112,14 @@ const QC = () => {
             </option>
           ))}
         </select>
+          </div>
+          <div>
+            <form onSubmit={(e) => handleSearch(e)}>
+
+            <input type="text" name="search" placeholder="Item code" />
+            <button type="submit">Search</button>
+            </form>
+          </div>
       </div>
 
       {/* Table */}
@@ -146,6 +169,10 @@ const QC = () => {
                         fontWeight: "bold",
                         width: "100%",
                       }}
+                      onClick={(e) =>{
+                        e.preventDefault();
+                        handleDetailsClick(qc)
+                      } }
                     >
                       See Details
                     </button>

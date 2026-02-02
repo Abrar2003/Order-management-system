@@ -6,6 +6,8 @@ const {
   uploadOrders,
   getOrders,
   getOrderById,
+  getVendorSummaryByBrand,
+  getOrdersByBrandAndStatus,
 } = require("../controllers/order.controller");
 
 const router = express.Router();
@@ -20,7 +22,14 @@ router.post(
 
 // List orders (pagination + sorting)
 router.get("/", authenticate, authorize("admin", "manager", "QC", "dev"), getOrders);
+
 // Get order by ID
 router.get("/:id", getOrderById);
+
+//get orders by brand and status
+router.get("/brand/:brand/vendor/:vendor/status/:status", authenticate, getOrdersByBrandAndStatus);
+
+// Get vendor summary by brand
+router.get("/:brand/vendor-summary", authenticate, getVendorSummaryByBrand);
 
 module.exports = router;

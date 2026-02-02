@@ -10,7 +10,7 @@ router.post("/signin", signin);
 router.get(
   "/",
   auth,
-  authorize("admin", "manager", "Dev"),
+  authorize("admin", "manager", "Dev", "QC"),
   getUsers
 );
 

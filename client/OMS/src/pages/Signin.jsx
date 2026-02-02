@@ -23,7 +23,7 @@ const SignIn = () => {
     }
 
     localStorage.setItem("token", res.token);
-    navigate("/orders");
+    navigate("/");
   } catch (err) {
     console.error(err);
     setError("Invalid credentials");

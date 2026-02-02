@@ -3,7 +3,6 @@ const Order = require("../models/order.model");
 const dateParser = require("../helpers/dateparsser");
 const deleteFile = require("../helpers/fileCleanup");
 
-
 // Upload Orders Controller
 exports.uploadOrders = async (req, res) => {
   try {
@@ -14,9 +13,7 @@ exports.uploadOrders = async (req, res) => {
     // Read Excel file
     const workbook = XLSX.readFile(req.file.path);
     const sheetName = workbook.SheetNames[0];
-    const sheetData = XLSX.utils.sheet_to_json(
-      workbook.Sheets[sheetName]
-    );
+    const sheetData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
     // Transform rows to Order schema
     const orders = sheetData.map((row) => ({
       order_id: row.PO,
@@ -24,6 +21,7 @@ exports.uploadOrders = async (req, res) => {
         item_code: row.item_code,
         description: row.description,
       },
+      brand: row.brand,
       vendor: row.vendor,
       ETD: dateParser(row.ETD),
       order_date: dateParser(row.order_date),
@@ -43,8 +41,7 @@ exports.uploadOrders = async (req, res) => {
       message: "Upload failed",
       error: error.message,
     });
-  }
-  finally {
+  } finally {
     // Cleanup uploaded file
     deleteFile(req.file?.path);
   }
@@ -53,11 +50,11 @@ exports.uploadOrders = async (req, res) => {
 // Get Orders (Pagination + Sorting)
 exports.getOrders = async (req, res) => {
   try {
-    const { page = 1, limit = 20 } = req.query;
+    const { page = 1, limit = 20, brand } = req.query;
 
     const skip = (page - 1) * limit;
 
-    const orders = await Order.find()
+    const orders = await Order.find(brand ? { brand } : {})
       .populate({
         path: "qc_record",
         populate: {
@@ -88,7 +85,13 @@ exports.getOrders = async (req, res) => {
 // Get Order by ID
 exports.getOrderById = async (req, res) => {
   try {
-    const order = await Order.findById(req.params.id);
+    const order = await Order.find({ order_id: req.params.id }).populate({
+      path: "qc_record",
+      populate: {
+        path: "inspector",
+        select: "name role",
+      },
+    });
 
     if (!order) {
       return res.status(404).json({ error: "Not found" });
@@ -96,6 +99,177 @@ exports.getOrderById = async (req, res) => {
 
     res.status(200).json(order);
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    res.status(500).json({ error: error.message });
+  }
+};
+
+exports.getVendorSummaryByBrand = async (req, res) => {
+  try {
+    const { brand } = req.params;
+    const today = new Date();
+
+    const result = await Order.aggregate([
+      // 1️⃣ Filter by brand
+      {
+        $match: { brand },
+      },
+
+      // 2️⃣ Group by vendor
+      {
+        $group: {
+          _id: "$vendor",
+
+          // DISTINCT order IDs
+          orders: {
+            $addToSet: "$order_id",
+          },
+
+          // DISTINCT delayed order IDs
+          delayedOrders: {
+            $addToSet: {
+              $cond: [
+                {
+                  $and: [
+                    { $lt: ["$ETD", today] },
+                    { $ne: ["$status", "Finalized"] },
+                  ],
+                },
+                "$order_id",
+                "$$REMOVE",
+              ],
+            },
+          },
+
+          pendingOrders: {
+            $addToSet: {
+              $cond: [{ $ne: ["$status", "Shipped"] }, "$order_id", "$$REMOVE"],
+            },
+          },
+
+          shippedOrders: {
+            $addToSet: {
+              $cond: [{ $eq: ["$status", "Shipped"] }, "$order_id", "$$REMOVE"],
+            },
+          },
+        },
+      },
+      // 3️⃣ Shape final response
+      {
+        $project: {
+          _id: 0,
+          vendor: "$_id",
+          orders: 1,
+          delayedOrders: 1,
+
+          // Optional counts
+          totalOrders: { $size: "$orders" },
+          totalDelayedOrders: { $size: "$delayedOrders" },
+          totalPending: { $size: "$pendingOrders" },
+          totalShipped: { $size: "$shippedOrders" },
+        },
+      },
+
+      // 4️⃣ Optional sort
+      {
+        $sort: { totalDelayedOrders: -1 },
+      },
+    ]);
+
+    if (!result.length) {
+      return res.status(404).json({
+        message: "No vendors found for this brand",
+      });
+    }
+
+    res.status(200).json({
+      message: "Distinct vendor orders retrieved successfully",
+      data: result,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+exports.getOrdersByBrandAndStatus = async (req, res) => {
+  try {
+    const { brand, vendor, status } = req.params;
+    const { isDelayed } = req.query;
+
+    // validation
+    if (!brand || !vendor) {
+      return res.status(400).json({
+        message: "Brand and Vendor are required",
+      });
+    }
+
+    const today = new Date();
+
+    // base match filter
+    const matchStage = {
+      brand,
+      vendor,
+    };
+
+    // status logic
+    if (status && status !== "all") {
+      if (status.toLowerCase() === "pending") {
+        // Pending = anything NOT shipped
+        matchStage.status = { $ne: "Shipped" };
+      } else {
+        matchStage.status = status;
+      }
+    }
+
+    // 🚨 Delay logic
+    if (isDelayed === "true") {
+      matchStage.ETD = { $lt: today };      // ETD passed
+      matchStage.status = { $ne: "Shipped" }; // not shipped
+    }
+
+    const orders = await Order.aggregate([
+      // 1️⃣ Filter
+      { $match: matchStage },
+
+      // 2️⃣ Group by order_id
+      {
+        $group: {
+          _id: "$order_id",
+          items: { $sum: 1 },
+          brand: { $first: "$brand" },
+          vendor: { $first: "$vendor" },
+          ETD: { $first: "$ETD" },
+          order_date: { $first: "$order_date" },
+        },
+      },
+
+      // 3️⃣ Shape output
+      {
+        $project: {
+          _id: 0,
+          order_id: "$_id",
+          items: 1,
+          brand: 1,
+          vendor: 1,
+          ETD: 1,
+          order_date: 1,
+        },
+      },
+
+      // 4️⃣ Sort latest first
+      { $sort: { order_date: -1 } },
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      count: orders.length,
+      data: orders,
+    });
+  } catch (error) {
+    console.error("Get Orders Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch orders",
+      error: error.message,
+    });
   }
 };

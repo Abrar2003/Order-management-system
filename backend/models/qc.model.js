@@ -20,6 +20,11 @@ const qcSchema = new mongoose.Schema(
       required: true,
     },
 
+    labels: {
+      type: Array,
+      default: [],
+      required: true
+    },
     quantities: {
       client_demand: {
         type: Number,

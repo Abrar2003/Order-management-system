@@ -29,4 +29,11 @@ router.patch(
   qcController.updateQC
 );
 
+router.get(
+  "/:id",
+  auth,
+  authorize("admin", "manager", "QC", "Dev"),
+  qcController.getQCById
+);
+
 module.exports = router;

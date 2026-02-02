@@ -2,17 +2,16 @@ import { useEffect, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
 import { getUserFromToken } from "../auth/auth.utils";
-import UploadOrdersModal from "../components/UploadOrdersModal";
+// import UploadOrdersModal from "../components/UploadOrdersModal";
 import AlignQCModal from "../components/AlignQcModal";
+import { useSearchParams } from "react-router-dom";
 import "../App.css";
 
 const Orders = () => {
   const [orders, setOrders] = useState([]);
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [showUploadModal, setShowUploadModal] = useState(false);
   const [showAlignModal, setShowAlignModal] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [ searchParams ] = useSearchParams();
 
   const user = getUserFromToken();
   const role = user?.role;
@@ -23,42 +22,23 @@ const Orders = () => {
     const token = localStorage.getItem("token");
 
     axios
-      .get(`/orders?page=${page}&limit=20`, {
+      .get(`/orders/${searchParams.get("order_id")}`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
       })
       .then((res) => {
-        setOrders(res.data.data);
-        setTotalPages(res.data.pagination.totalPages);
+        setOrders(res.data);
+        console.log("orders data", res.data)
       })
       .catch((err) => {
         console.error(err);
       });
-  }, [page]);
+  }, []);
 
   return (
     <>
       <Navbar />
-      {canManageOrders && (
-        <div style={{ margin: "10px 0", textAlign: "right" }}>
-          <button
-            className="primaryButton"
-            onClick={() => {
-              setShowUploadModal(true)
-            }}
-            style={{
-              padding: "8px 16px",
-              backgroundColor: "#2563eb",
-              color: "#fff",
-              border: "none",
-              borderRadius: "4px",
-            }}
-          >
-            Upload Orders
-          </button>
-        </div>
-      )}
       <div
         className="orderTableContainer"
         style={{
@@ -71,7 +51,7 @@ const Orders = () => {
         <table className="orderTable">
           <thead className="tableHead">
             <tr>
-              <th>PO</th> <th>Vendor</th> <th>Item</th> <th>Description</th>
+              <th>PO</th> <th>Brand</th> <th>Vendor</th> <th>Item</th> <th>Description</th>
               <th>Order Date</th> <th>ETD</th> <th>Quantity</th> <th>Status</th>
               {canManageOrders && <th>Action</th>}
             </tr>
@@ -80,10 +60,11 @@ const Orders = () => {
           </thead>
           <div style={{ height: "20px" }}></div>
           <tbody className="tableBody">
-            {orders.map((order) => (
+            {orders?.map((order) => (
               <>
                 <tr className="tableRow" key={order._id}>
                   <td>{order.order_id}</td>
+                  <td>{order.brand}</td>
                   <td>{order.vendor}</td>
                   <td>{order.item?.item_code}</td>
                   <td>{order.item?.description}</td>
@@ -136,7 +117,7 @@ const Orders = () => {
           </tbody>
         </table>
       </div>
-      <div style={{ marginTop: "20px", textAlign: "center" }}>
+      {/* <div style={{ marginTop: "20px", textAlign: "center" }}>
         <button
           disabled={page === 1}
           onClick={() => setPage((prev) => prev - 1)}
@@ -152,16 +133,8 @@ const Orders = () => {
         >
           Next
         </button>
-      </div>
-      {showUploadModal && (
-        <UploadOrdersModal
-          onClose={() => setShowUploadModal(false)}
-          onSuccess={() => {
-            // reload first page after upload
-            setPage(1);
-          }}
-        />
-      )}
+      </div> */}
+      
       {showAlignModal && selectedOrder && (
         <AlignQCModal
           order={selectedOrder}

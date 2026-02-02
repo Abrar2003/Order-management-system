@@ -107,6 +107,10 @@ exports.alignQC = async (req, res) => {
       return res.status(400).json({ message: "QC already aligned" });
     }
 
+    if( quantities.vendor_provision > quantities.client_demand){
+      return res.status(400).json({message: "vendor provision can't be greater than client demand"})
+    }
+
     const qc = await QC.create({
       order,
       item,
@@ -141,21 +145,56 @@ exports.alignQC = async (req, res) => {
 
 /**
  * PATCH /update-qc/:id
- * QC inspector updates checked / passed / rejected
+ * QC inspector updates checked / passed / rejected with allocated labels
  */
 exports.updateQC = async (req, res) => {
   try {
-    const { qc_checked, qc_passed, qc_rejected, remarks } = req.body;
+    const { qc_checked, qc_passed, qc_rejected, remarks, labels } = req.body;
 
-    const qc = await QC.findById(req.params.id);
+    const qc = await QC.findById(req.params.id).populate("inspector");
     if (!qc) {
       return res.status(404).json({ message: "QC record not found" });
     }
 
+    // 🔐 Verify that the current user is the assigned inspector
+    if (qc.inspector._id.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: "You are not authorized to update this QC record" });
+    }
+
+    // 📋 Validate and update labels if provided
+    if (labels && Array.isArray(labels) && labels.length > 0) {
+      const Inspector = require("../models/inspector.model");
+      
+      const inspector = await Inspector.findOne({ user: req.user._id });
+      if (!inspector) {
+        return res.status(404).json({ message: "Inspector record not found" });
+      }
+
+      // Check if all provided labels are in alloted_labels
+      const unauthorizedLabels = labels.filter(
+        label => !inspector.alloted_labels.includes(label)
+      );
+
+      if (unauthorizedLabels.length > 0) {
+        return res.status(403).json({ 
+          message: `You are not authorized to use labels: ${unauthorizedLabels.join(", ")}. Allocated labels: ${inspector.alloted_labels.join(", ")}`,
+          unauthorized_labels: unauthorizedLabels,
+          allocated_labels: inspector.alloted_labels
+        });
+      }
+
+      // Update used_labels in inspector model (add new labels, avoid duplicates)
+      const newUsedLabels = [...new Set([...inspector.used_labels, ...labels])];
+      inspector.used_labels = newUsedLabels;
+      await inspector.save();
+
+      // Update labels in QC record
+      qc.labels = labels;
+    }
+
+    // Update QC quantities
     if (qc_checked !== undefined) qc.quantities.qc_checked = qc_checked;
-
     if (qc_passed !== undefined) qc.quantities.qc_passed = qc_passed;
-
     if (qc_rejected !== undefined) qc.quantities.qc_rejected = qc_rejected;
 
     qc.quantities.pending =
@@ -168,8 +207,24 @@ exports.updateQC = async (req, res) => {
     res.json({
       message: "QC updated successfully",
       data: qc,
-    });
+    }); 
   } catch (err) {
     res.status(400).json({ message: err.message });
+  }
+};
+
+exports.getQCById = async (req, res) => {
+  try {
+    const qc = await QC.findById(req.params.id)
+      .populate("inspector", "name email role")
+      .populate("createdBy", "name email role")
+      .populate("order");
+
+    if (!qc) {
+      return res.status(404).json({ message: "QC record not found" });
+    }
+    res.json({ data: qc });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 };
