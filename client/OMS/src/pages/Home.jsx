@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
-import { getUserFromToken } from "../auth/auth.utils";
 import { useNavigate } from "react-router-dom";
 import "../App.css";
 
@@ -43,23 +42,33 @@ const navigate = useNavigate();
   // Fetch orders for selected brand
   useEffect(() => {
     if (!selectedBrand) return;
+    let isMounted = true;
 
-    setLoading(true);
-    axios
-      .get(`/orders/${selectedBrand}/vendor-summary`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      })
-      .then((res) => {
+    const fetchVendorSummary = async () => {
+      try {
+        setLoading(true);
+        const res = await axios.get(`/orders/${selectedBrand}/vendor-summary`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (!isMounted) return;
         setVendorSummary(res.data.data);
-        setLoading(false);
-      })
-      .catch((err) => {
+        setTotalPages(1);
+      } catch (err) {
+        if (!isMounted) return;
         console.error(err);
-        setLoading(false);
         setVendorSummary([]);
-      });
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    };
+
+    fetchVendorSummary();
+
+    return () => {
+      isMounted = false;
+    };
   }, [selectedBrand, page, token]);
 
   return (
@@ -86,9 +95,9 @@ const navigate = useNavigate();
           <span
             style={{
                 fontWeight: "600",
-                color: "#374151",
                 fontSize: "14px",
             }}
+            className="brandSpan"
             >
             Brands:
           </span>

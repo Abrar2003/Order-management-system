@@ -11,8 +11,10 @@
   },
   "dependencies": {
     "axios": "^1.13.4",
+    "jsbarcode": "^3.12.3",
     "jwt-decode": "^4.0.0",
     "react": "^19.2.0",
+    "react-barcode": "^1.6.1",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.13.0"
   },

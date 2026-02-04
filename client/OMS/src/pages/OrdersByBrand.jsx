@@ -25,13 +25,10 @@ const OrdersByBrand = () => {
 
         const token = localStorage.getItem("token");
 
-        if(status === undefined) {
-          status = "all";
-        }
-
+        const effectiveStatus = status ?? "all";
 
         const res = await axios.get(
-          `/orders/brand/${brand}/vendor/${vendor}/status/${status}?isDelayed=${status === "delayed" ? "true" : "false"}`,
+          `/orders/brand/${brand}/vendor/${vendor}/status/${effectiveStatus}?isDelayed=${effectiveStatus === "delayed" ? "true" : "false"}`,
           {
             headers: {
               Authorization: `Bearer ${token}`,
@@ -90,7 +87,7 @@ const OrdersByBrand = () => {
         >
          <span style={spanStyle}>Brand: {brand}</span>
           <span style={spanStyle}>Vendor: {vendor}</span>
-          <span style={spanStyle}>Status: {status}</span>
+          <span style={spanStyle}>Status: {status ?? "all"}</span>
         </div>
 
        <table className="orderTable">

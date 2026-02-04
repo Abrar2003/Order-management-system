@@ -1,7 +1,7 @@
 import axios from "../api/axios";
 import { jwtDecode } from "jwt-decode";
 
-const TOKEN_KEY = "ALLFATHERODIN";
+const TOKEN_KEY = "token";
 
 /**
  * Sign in user
@@ -11,7 +11,7 @@ export const signin = async (credentials) => {
 
   // assuming backend returns { token: "..." }
   if (res.data?.token) {
-    localStorage.setItem(TOKEN_KEY, res.data.token);
+    localStorage.setItem("token", res.data.token);
   }
 
   return res.data;
@@ -25,12 +25,41 @@ export const getToken = () => {
 };
 
 /**
+ * Check if token is expired
+ */
+export const isTokenExpired = () => {
+  try {
+    const token = getToken();
+    if (!token) return true;
+
+    const decoded = jwtDecode(token);
+    const currentTime = Date.now() / 1000;
+
+    // Check if token exp exists and if it's less than current time
+    if (decoded.exp && decoded.exp < currentTime) {
+      return true;
+    }
+
+    return false;
+  } catch (error) {
+    console.error("Error checking token expiry:", error);
+    return true; // treat invalid token as expired
+  }
+};
+
+/**
  * Decode user from JWT token
  */
 export const getUserFromToken = () => {
   try {
     const token = getToken();
     if (!token) return null;
+
+    // Check if token is expired
+    if (isTokenExpired()) {
+      logout();
+      return null;
+    }
 
     const decoded = jwtDecode(token);
 

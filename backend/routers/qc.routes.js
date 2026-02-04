@@ -21,7 +21,7 @@ router.post(
   qcController.alignQC
 );
 
-// Update QC (QC role)
+// Update QC (Inspector only)
 router.patch(
   "/update-qc/:id",
   auth,

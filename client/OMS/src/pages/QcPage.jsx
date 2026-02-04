@@ -1,7 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
-import { getUserFromToken } from "../auth/auth.utils";
 import { useNavigate } from "react-router-dom";
 
 const QC = () => {
@@ -17,18 +16,9 @@ const QC = () => {
   const [totalPages, setTotalPages] = useState(1);
 
   const token = localStorage.getItem("token");
-  const user = getUserFromToken();
   const navigate = useNavigate();
 
-  useEffect(() => {
-    fetchQC();
-  }, [page, search, inspector, vendor]);
-
-  useEffect(() => {
-    fetchInspectors();
-  }, []);
-
-  const fetchQC = async () => {
+  const fetchQC = useCallback(async () => {
     const res = await axios.get("/qc/list", {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -50,16 +40,26 @@ const QC = () => {
       ...new Set(res.data.data.map((qc) => qc.order.vendor)),
     ];
     setVendors(uniqueVendors);
-  };
+  }, [token, page, search, inspector, vendor]);
 
-  const fetchInspectors = async () => {
+  const fetchInspectors = useCallback(async () => {
     const res = await axios.get("/auth/?role=QC", {
       headers: {
         Authorization: `Bearer ${token}`,
       },
     });
     setInspectors(res.data);
-  };
+  }, [token]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchQC();
+  }, [fetchQC]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchInspectors();
+  }, [fetchInspectors]);
 
   const handleDetailsClick = (qc) => {
     navigate(`/qc/${qc._id}`);

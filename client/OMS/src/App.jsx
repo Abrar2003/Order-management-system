@@ -15,6 +15,7 @@ import Orders from "./pages/Orders";
 import QCPage from "./pages/QcPage";
 import QcDetails from "./pages/QcDetails";
 import OrdersByBrand from "./pages/OrdersByBrand";
+import Signup from "./pages/Signup";
 
 // import Users from "./pages/Users"; // later
 
@@ -69,6 +70,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <OrdersByBrand />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/users/new"
+            element={
+              <ProtectedRoute>
+                <Signup />
               </ProtectedRoute>
             }
           />

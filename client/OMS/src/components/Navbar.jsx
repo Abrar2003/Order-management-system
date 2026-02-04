@@ -1,37 +1,64 @@
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { logout, getToken, getUserFromToken } from "../auth/auth.service";
 import "../App.css";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import UploadOrdersModal from "./UploadOrdersModal";
+import AllocateLabelsModal from "./AllocateLabelsModal";
 
 
 const Navbar = () => {
   const token = getToken();
   const user = getUserFromToken();
   const role = user?.role;
-    const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showAllocateModal, setShowAllocateModal] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const userMenuRef = useRef(null);
+  const getInitialTheme = () => {
+    const stored = localStorage.getItem("theme");
+    if (stored === "light" || stored === "dark" || stored === "system") return stored;
+    return "system";
+  };
+  const [theme, setTheme] = useState(getInitialTheme);
   
- const canManageOrders = ["admin", "manager", "Dev"].includes(role);
+  const canManageOrders = ["admin", "manager", "Dev"].includes(role);
+  const canManageLabels = ["admin", "manager"].includes(role);
+  const canCreateUsers = role === "admin";
 
   const navigate = useNavigate();
-  const location = useLocation();
-
   if (!token) return null;
-
-  const spanStyle = {
-    cursor: "pointer",
-    marginRight: "20px",
-    fontSize: "16px",
-    fontWeight: "bold"
-  };
 
   const handleLogout = () => {
     logout();
     navigate("/signin");
   };
 
-  const isActive = (path) =>
-    location.pathname === path ? { textDecoration: "underline" } : {};
+  useEffect(() => {
+    if (theme === "system") {
+      delete document.documentElement.dataset.theme;
+    } else {
+      document.documentElement.dataset.theme = theme;
+    }
+    localStorage.setItem("theme", theme);
+  }, [theme]);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target)) {
+        setShowUserMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const toggleTheme = () => {
+    setTheme((prev) => {
+      if (prev === "system") return "light";
+      if (prev === "light") return "dark";
+      return "system";
+    });
+  };
 
   return (
     <nav
@@ -44,9 +71,6 @@ const Navbar = () => {
         zIndex: 1000,
         alignItems: "center",
         padding: "1 rem 2rem",
-        backgroundColor: "#1f2937",
-        color: "#fff",
-        borderRadius: "0 16px 0 16px",
       }}
       className="Navbar"
     >
@@ -68,12 +92,13 @@ const Navbar = () => {
         </span> */}
 
         {["QC", "admin", "manager", "Dev"].includes(role) && (
-          <span
-            style={{...spanStyle,  border: "1px solid #aba7a7", padding: "6px 12px", borderRadius: "4px"}}
+          <button
+            type="button"
+            className="navPillButton"
             onClick={() => navigate("/qc")}
           >
             QC
-          </span>
+          </button>
         )}
 
         {/* {["admin", "manager", "Dev"].includes(role) && (
@@ -88,54 +113,86 @@ const Navbar = () => {
 
       {/* Right: User + Logout */}
       <div style={{ display: "flex", alignItems: "center", width: "40%", justifyContent: "space-evenly" }}>
-        <span style={spanStyle}>
-          {user?.name} ({role})
-        </span>
-
-        {canManageOrders && (
-        <div style={{ margin: "10px 0", textAlign: "right"}}>
+        <div className="userMenu" ref={userMenuRef}>
           <button
-            // className="primaryButton"
-            onClick={() => {
-              setShowUploadModal(true)
-            }}
-            style={{
-              padding: "6px 14px",
-              backgroundColor: "#2563eb",
-              border: "none",
-              color: "#fff",
-              cursor: "pointer",
-              borderRadius: "4px",
-              width: "100%"
-          }}
+            className="userMenuButton"
+            type="button"
+            onClick={() => setShowUserMenu((prev) => !prev)}
           >
-            Upload Orders
+            {user?.name} ({role})
           </button>
-        </div>
-      )}
+          {showUserMenu && (
+            <div className="userMenuDropdown">
+              {canManageLabels && (
+                <button
+                  type="button"
+                  className="userMenuItem"
+                  onClick={() => {
+                    setShowAllocateModal(true);
+                    setShowUserMenu(false);
+                  }}
+                >
+                  Allocate Labels
+                </button>
+              )}
+              {canCreateUsers && (
+                <button
+                  type="button"
+                  className="userMenuItem"
+                  onClick={() => {
+                    navigate("/users/new");
+                    setShowUserMenu(false);
+                  }}
+                >
+                  Create User
+                </button>
+              )}
+              {canManageOrders && (
+                <button
+                  type="button"
+                  className="userMenuItem"
+                  onClick={() => {
+                    setShowUploadModal(true);
+                    setShowUserMenu(false);
+                  }}
+                >
+                  Update Orders
+                </button>
+              )}
               <button
+                type="button"
+                className="userMenuItem danger"
                 onClick={handleLogout}
-                style={{
-                  padding: "6px 14px",
-                  backgroundColor: "#ef4444",
-                  border: "none",
-                  color: "#fff",
-                  cursor: "pointer",
-                  borderRadius: "4px",
-                }}
               >
                 Logout
               </button>
+            </div>
+          )}
+        </div>
+        <button className="themeToggle" type="button" onClick={toggleTheme} title="Toggle theme">
+          {theme === "system"
+            ? "Theme: System"
+            : theme === "dark"
+              ? "Theme: Dark"
+              : "Theme: Light"}
+        </button>
+
       </div>
       {showUploadModal && (
               <UploadOrdersModal
                 onClose={() => setShowUploadModal(false)}
                 onSuccess={() => {
-                  // reload first page after upload
-                  setPage(1);
+                  setShowUploadModal(false);
                 }}
               />
             )}
+      {showAllocateModal && (
+        <AllocateLabelsModal
+          onClose={() => {
+            setShowAllocateModal(false);
+          }}
+        />
+      )}
     </nav>
   );
 };

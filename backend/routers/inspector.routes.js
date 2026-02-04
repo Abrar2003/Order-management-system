@@ -6,7 +6,7 @@ const inspectorController = require("../controllers/inspector.controller");
 
 // 🔐 All routes require authentication and Manager/Admin authorization
 router.use(auth);
-router.use(authorize("Manager", "Admin"));
+router.use(authorize("manager", "admin"));
 
 /**
  * GET /inspectors

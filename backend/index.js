@@ -7,6 +7,7 @@ const authRouter = require("./routers/auth.routes");
 const qcRouter = require("./routers/qc.routes");
 const brandRouter = require("./routers/brand.route");
 const inspectorRouter = require("./routers/inspector.routes");
+const userRouter = require("./routers/user.routes");
 
 const app = express();
 const PORT = process.env.PORT;
@@ -15,7 +16,7 @@ const PORT = process.env.PORT;
 app.use(
   cors({
     origin: "*",
-    methods: ["GET", "POST", "PUT", "DELETE"],
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
     credentials: true
   })
 );
@@ -41,6 +42,7 @@ app.use("/auth", authRouter);
 app.use("/qc", qcRouter);
 app.use("/brands", brandRouter);
 app.use("/inspectors", inspectorRouter);
+app.use("/users", userRouter);
 
 app.get("/", (req, res) => {
   res.send({ message: "Server OK" });

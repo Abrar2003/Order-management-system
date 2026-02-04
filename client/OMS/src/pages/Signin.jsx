@@ -17,12 +17,10 @@ const SignIn = () => {
   try {
     const res = await signin(form);
 
-
     if (!res.token) {
       throw new Error("Token missing");
     }
 
-    localStorage.setItem("token", res.token);
     navigate("/");
   } catch (err) {
     console.error(err);

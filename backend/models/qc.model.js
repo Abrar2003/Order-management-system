@@ -20,9 +20,36 @@ const qcSchema = new mongoose.Schema(
       required: true,
     },
 
+    cbm: {
+      type: Number,
+      default: 0,
+      requried: true
+    },
+
+    barcode: {
+      type: Number,
+      required: true,
+      default: 0
+    },
+    packed_size: {
+      type: Boolean,
+      required: true,
+      default: false
+    },
+    finishing: {
+      type: Boolean,
+      required: true,
+      default: false
+    },
+    branding: {
+      type: Boolean,
+      required: true,
+      default: false
+    },
+
     labels: {
-      type: Array,
-      default: [],
+      type: [],
+      default: [], 
       required: true
     },
     quantities: {

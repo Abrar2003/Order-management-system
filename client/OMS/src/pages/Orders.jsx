@@ -34,7 +34,7 @@ const Orders = () => {
       .catch((err) => {
         console.error(err);
       });
-  }, []);
+  }, [searchParams]);
 
   return (
     <>
@@ -141,7 +141,6 @@ const Orders = () => {
           onClose={() => setShowAlignModal(false)}
           onSuccess={() => {
             setShowAlignModal(false);
-            setPage(1);
           }}
         />
       )}
