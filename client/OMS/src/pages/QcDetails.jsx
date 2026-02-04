@@ -63,14 +63,15 @@ const QcDetails = () => {
   const navigate = useNavigate();
   const user = getUserFromToken();
   const userId = user?.id || user?._id;
-  const hasPending =
+  const isAdmin = user?.role === "admin";
+  const requirementsMet =
+    Boolean(qc?.packed_size) && Boolean(qc?.finishing) && Boolean(qc?.branding);
+  const hasPendingQuantities =
     (qc?.quantities?.qc_checked || 0) === 0 ||
-    (qc?.quantities?.pending || 0) > 0 ||
-    !qc.finishing ||
-    !qc.branding ||
-    !qc.packed_size;
+    (qc?.quantities?.pending || 0) > 0;
+  const qcIsPending = hasPendingQuantities || !requirementsMet;
   const canUpdateQc =
-    user?.role === "QC" && qc?.inspector?._id === userId && hasPending;
+    isAdmin || (user?.role === "QC" && qc?.inspector?._id === userId && qcIsPending);
   const sortedLabels = useMemo(() => normalizeLabels(qc?.labels), [qc?.labels]);
   const labelRange = sortedLabels.length
     ? `${sortedLabels[0]} - ${sortedLabels[sortedLabels.length - 1]}`
@@ -85,6 +86,18 @@ const QcDetails = () => {
     ? rejectedLabels.join(", ")
     : "None";
   const barcodeValue = qc?.barcode > 0 ? String(qc.barcode) : "";
+  const cbmData = useMemo(() => {
+    if (!qc) return { top: 0, bottom: 0, total: 0 };
+    const cbmValue = qc.cbm;
+    if (typeof cbmValue === "number") {
+      return { top: 0, bottom: 0, total: cbmValue };
+    }
+    return {
+      top: Number(cbmValue?.top) || 0,
+      bottom: Number(cbmValue?.bottom) || 0,
+      total: Number(cbmValue?.total) || 0,
+    };
+  }, [qc]);
 
   const fetchQcDetails = useCallback(async () => {
     try {
@@ -160,10 +173,6 @@ const QcDetails = () => {
                 <label>Pending</label>
                 <p>{qc.quantities.pending}</p>
               </div>
-              <div className="qc-info-item">
-                <label>CBM</label>
-                <p>{qc.cbm > 0 ? qc.cbm : "Not Set"}</p>
-              </div>
             </div>
           </div>
 
@@ -224,6 +233,18 @@ const QcDetails = () => {
             <h3 className="qc-section-title">QC Attributes</h3>
             <div className="qc-info-grid">
               <div className="qc-info-item">
+                <label>CBM Top</label>
+                <p>{cbmData.top > 0 ? cbmData.top : "Not Set"}</p>
+              </div>
+              <div className="qc-info-item">
+                <label>CBM Bottom</label>
+                <p>{cbmData.bottom > 0 ? cbmData.bottom : "Not Set"}</p>
+              </div>
+              <div className="qc-info-item">
+                <label>CBM Total</label>
+                <p>{cbmData.total > 0 ? cbmData.total : "Not Set"}</p>
+              </div>
+              <div className="qc-info-item">
                 <label>Packed Size</label>
                 <div className="qc-display-box">
                   <span style={{ textAlign: "center", width: "100%" }}>
@@ -267,9 +288,9 @@ const QcDetails = () => {
               title={
                 canUpdateQc
                   ? ""
-                  : user?.role !== "QC" || qc?.inspector?._id !== userId
-                    ? "Only the assigned QC inspector can update this record."
-                    : "No pending quantity left to update."
+                  : user?.role === "QC" && qc?.inspector?._id === userId
+                    ? "No pending quantity left to update."
+                    : "Only the assigned QC inspector or admin can update this record."
               }
             >
               Update QC Record

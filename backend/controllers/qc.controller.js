@@ -180,6 +180,9 @@ exports.updateQC = async (req, res) => {
       labels,
       vendor_provision,
       cbm,
+      cbm_top,
+      cbm_bottom,
+      cbm_total,
       barcode,
       packed_size,
       finishing,
@@ -198,9 +201,10 @@ exports.updateQC = async (req, res) => {
       vendor_provision !== undefined;
     const hasLabelPayload =
       Array.isArray(labels) && labels.length > 0;
+    const isAdmin = req.user.role === "admin";
 
-    // 🔐 Verify that the current user is the assigned inspector
-    if (qc.inspector._id.toString() !== req.user._id.toString()) {
+    // 🔐 Verify that the current user is the assigned inspector (admins can override)
+    if (!isAdmin && qc.inspector._id.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: "You are not authorized to update this QC record" });
     }
 
@@ -214,7 +218,7 @@ exports.updateQC = async (req, res) => {
       qc.quantities.client_demand - qc.quantities.qc_passed;
     const requirementsMet = qc.packed_size && qc.finishing && qc.branding;
 
-    if (hasPriorUpdate && currentPending <= 0) {
+    if (!isAdmin && hasPriorUpdate && currentPending <= 0) {
       if (requirementsMet) {
         return res.status(400).json({
           message: "QC record is finalized and cannot be updated",
@@ -247,19 +251,78 @@ exports.updateQC = async (req, res) => {
       return { error: `${fieldName} must be a boolean` };
     };
 
-    if (cbm !== undefined) {
-      if (qc.cbm > 0) {
-        if (Number(cbm) !== qc.cbm) {
+    const existingCbm =
+      qc.cbm && typeof qc.cbm === "object"
+        ? {
+            top: Number(qc.cbm.top) || 0,
+            bottom: Number(qc.cbm.bottom) || 0,
+            total: Number(qc.cbm.total) || 0,
+          }
+        : {
+            top: 0,
+            bottom: 0,
+            total: Number(qc.cbm) || 0,
+          };
+
+    const hasCbmTop = cbm_top !== undefined && cbm_top !== "";
+    const hasCbmBottom = cbm_bottom !== undefined && cbm_bottom !== "";
+    const hasCbmTotal = cbm_total !== undefined && cbm_total !== "";
+    const hasLegacyCbm = cbm !== undefined && cbm !== "";
+    const hasCbmPayload = hasCbmTop || hasCbmBottom || hasCbmTotal || hasLegacyCbm;
+    const cbmAlreadySet =
+      existingCbm.top > 0 || existingCbm.bottom > 0 || existingCbm.total > 0;
+
+    if (hasCbmPayload) {
+      if ((hasCbmTop || hasCbmBottom) && (hasCbmTotal || hasLegacyCbm)) {
+        return res.status(400).json({
+          message: "Provide either CBM total or CBM top/bottom, not both",
+        });
+      }
+
+      if (hasCbmTop !== hasCbmBottom) {
+        return res.status(400).json({
+          message: "Both CBM top and bottom are required",
+        });
+      }
+
+      const parsedTop = hasCbmTop ? parsePositiveInt(cbm_top, "cbm_top") : null;
+      const parsedBottom = hasCbmBottom
+        ? parsePositiveInt(cbm_bottom, "cbm_bottom")
+        : null;
+      const parsedTotal = hasCbmTotal
+        ? parsePositiveInt(cbm_total, "cbm_total")
+        : hasLegacyCbm
+          ? parsePositiveInt(cbm, "cbm_total")
+          : null;
+
+      if (parsedTop?.error || parsedBottom?.error || parsedTotal?.error) {
+        return res.status(400).json({
+          message: parsedTop?.error || parsedBottom?.error || parsedTotal?.error,
+        });
+      }
+
+      if (cbmAlreadySet) {
+        const mismatch =
+          (parsedTop && parsedTop.value !== existingCbm.top) ||
+          (parsedBottom && parsedBottom.value !== existingCbm.bottom) ||
+          (parsedTotal && parsedTotal.value !== existingCbm.total);
+        if (mismatch) {
           return res.status(400).json({
             message: "cbm can only be set once",
           });
         }
-      } else {
-        const parsed = parsePositiveInt(cbm, "cbm");
-        if (parsed.error) {
-          return res.status(400).json({ message: parsed.error });
-        }
-        qc.cbm = parsed.value;
+      } else if (parsedTotal) {
+        qc.cbm = {
+          top: 0,
+          bottom: 0,
+          total: parsedTotal.value,
+        };
+      } else if (parsedTop && parsedBottom) {
+        qc.cbm = {
+          top: parsedTop.value,
+          bottom: parsedBottom.value,
+          total: parsedTop.value + parsedBottom.value,
+        };
       }
     }
 

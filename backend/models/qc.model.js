@@ -21,9 +21,9 @@ const qcSchema = new mongoose.Schema(
     },
 
     cbm: {
-      type: Number,
-      default: 0,
-      requried: true
+      top: { type: Number, default: 0 },
+      bottom: { type: Number, default: 0 },
+      total: { type: Number, default: 0 },
     },
 
     barcode: {

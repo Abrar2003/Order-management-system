@@ -21,11 +21,11 @@ router.post(
   qcController.alignQC
 );
 
-// Update QC (Inspector only)
+// Update QC (Inspector or Admin)
 router.patch(
   "/update-qc/:id",
   auth,
-  authorize("QC"),
+  authorize("QC", "admin"),
   qcController.updateQC
 );
 

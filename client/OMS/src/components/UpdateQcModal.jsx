@@ -8,7 +8,9 @@ const UpdateQcModal = ({ qc, onClose, onUpdated }) => {
     qc_passed: "",
     qc_rejected: "",
     offeredQuantity: "",
-    cbm: "",
+    cbm_top: "",
+    cbm_bottom: "",
+    cbm_total: "",
     barcode: "",
     packed_size: false,
     finishing: false,
@@ -20,15 +22,45 @@ const UpdateQcModal = ({ qc, onClose, onUpdated }) => {
   });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const cbmExisting = (() => {
+    if (!qc) return { top: 0, bottom: 0, total: 0 };
+    const cbmValue = qc.cbm;
+    if (typeof cbmValue === "number") {
+      return { top: 0, bottom: 0, total: cbmValue };
+    }
+    return {
+      top: Number(cbmValue?.top) || 0,
+      bottom: Number(cbmValue?.bottom) || 0,
+      total: Number(cbmValue?.total) || 0,
+    };
+  })();
+  const cbmLocked =
+    cbmExisting.top > 0 || cbmExisting.bottom > 0 || cbmExisting.total > 0;
+  const hasCbmTopOrBottom =
+    form.cbm_top.trim() !== "" || form.cbm_bottom.trim() !== "";
+  const hasCbmTotal = form.cbm_total.trim() !== "";
+  const disableCbmTopBottom = cbmLocked || hasCbmTotal;
+  const disableCbmTotal = cbmLocked || hasCbmTopOrBottom;
 
   useEffect(() => {
     if (!qc) return;
+    const cbmValue = qc.cbm;
+    const cbmData =
+      typeof cbmValue === "number"
+        ? { top: 0, bottom: 0, total: cbmValue }
+        : {
+            top: Number(cbmValue?.top) || 0,
+            bottom: Number(cbmValue?.bottom) || 0,
+            total: Number(cbmValue?.total) || 0,
+          };
     setForm({
       qc_checked: "",
       qc_passed: "",
       qc_rejected: "",
       offeredQuantity: "",
-      cbm: qc.cbm > 0 ? String(qc.cbm) : "",
+      cbm_top: cbmData.top > 0 ? String(cbmData.top) : "",
+      cbm_bottom: cbmData.bottom > 0 ? String(cbmData.bottom) : "",
+      cbm_total: cbmData.total > 0 ? String(cbmData.total) : "",
       barcode: qc.barcode > 0 ? String(qc.barcode) : "",
       packed_size: Boolean(qc.packed_size),
       finishing: Boolean(qc.finishing),
@@ -132,26 +164,59 @@ const UpdateQcModal = ({ qc, onClose, onUpdated }) => {
       return;
     }
 
-    const cbmValue = form.cbm.trim();
+    const cbmTopValue = form.cbm_top.trim();
+    const cbmBottomValue = form.cbm_bottom.trim();
+    const cbmTotalValue = form.cbm_total.trim();
     const barcodeValue = form.barcode.trim();
-
-    // if (cbmValue !== "" && qc.cbm > 0) {
-    //   setError("CBM can only be set once.");
-    //   return;
-    // }
 
     // if (barcodeValue !== "" && qc.barcode > 0) {
     //   setError("Barcode can only be set once.");
     //   return;
     // }
 
-    const cbmParsed = cbmValue === "" ? null : Number(cbmValue);
-    const barcodeParsed = barcodeValue === "" ? null : Number(barcodeValue);
+    const cbmHasTop = cbmTopValue !== "";
+    const cbmHasBottom = cbmBottomValue !== "";
+    const cbmHasTotal = cbmTotalValue !== "";
 
-    if (cbmParsed !== null && (!Number.isInteger(cbmParsed) || cbmParsed <= 0)) {
-      setError("CBM must be a positive integer.");
+    if ((cbmHasTop || cbmHasBottom) && cbmHasTotal) {
+      setError("Provide either CBM total or CBM top/bottom.");
       return;
     }
+
+    if (cbmHasTop !== cbmHasBottom) {
+      setError("Both CBM top and bottom are required.");
+      return;
+    }
+
+    const cbmTopParsed = cbmHasTop ? Number(cbmTopValue) : null;
+    const cbmBottomParsed = cbmHasBottom ? Number(cbmBottomValue) : null;
+    const cbmTotalParsed = cbmHasTotal ? Number(cbmTotalValue) : null;
+
+    if (
+      cbmTopParsed !== null &&
+      (!Number.isInteger(cbmTopParsed) || cbmTopParsed <= 0)
+    ) {
+      setError("CBM top must be a positive integer.");
+      return;
+    }
+
+    if (
+      cbmBottomParsed !== null &&
+      (!Number.isInteger(cbmBottomParsed) || cbmBottomParsed <= 0)
+    ) {
+      setError("CBM bottom must be a positive integer.");
+      return;
+    }
+
+    if (
+      cbmTotalParsed !== null &&
+      (!Number.isInteger(cbmTotalParsed) || cbmTotalParsed <= 0)
+    ) {
+      setError("CBM total must be a positive integer.");
+      return;
+    }
+
+    const barcodeParsed = barcodeValue === "" ? null : Number(barcodeValue);
 
     if (barcodeParsed !== null && (!Number.isInteger(barcodeParsed) || barcodeParsed <= 0)) {
       setError("Barcode must be a positive integer.");
@@ -204,7 +269,11 @@ const UpdateQcModal = ({ qc, onClose, onUpdated }) => {
       payload.vendor_provision = offeredQuantity;
     }
 
-    if (cbmParsed !== null) payload.cbm = cbmParsed;
+    if (cbmHasTotal) payload.cbm_total = cbmTotalParsed;
+    if (cbmHasTop && cbmHasBottom) {
+      payload.cbm_top = cbmTopParsed;
+      payload.cbm_bottom = cbmBottomParsed;
+    }
     if (barcodeParsed !== null) payload.barcode = barcodeParsed;
     if (!qc.packed_size && form.packed_size) payload.packed_size = true;
     if (!qc.finishing && form.finishing) payload.finishing = true;
@@ -251,16 +320,42 @@ const UpdateQcModal = ({ qc, onClose, onUpdated }) => {
 
         <div className="inputContainer qc-modal-grid">
           <div className="qc-modal-field">
-            <label>CBM</label>
+            <label>CBM Top</label>
             <input
               type="number"
-              name="cbm"
-              // value={form.cbm}
+              name="cbm_top"
+              value={form.cbm_top}
               onChange={handleChange}
               min="1"
               step="1"
-              disabled={qc.cbm > 0}
-              placeholder={qc.cbm > 0 ? "Already set" : "Enter CBM"}
+              disabled={disableCbmTopBottom}
+              placeholder={cbmLocked ? "Already set" : "Enter top CBM"}
+            />
+          </div>
+          <div className="qc-modal-field">
+            <label>CBM Bottom</label>
+            <input
+              type="number"
+              name="cbm_bottom"
+              value={form.cbm_bottom}
+              onChange={handleChange}
+              min="1"
+              step="1"
+              disabled={disableCbmTopBottom}
+              placeholder={cbmLocked ? "Already set" : "Enter bottom CBM"}
+            />
+          </div>
+          <div className="qc-modal-field">
+            <label>CBM Total</label>
+            <input
+              type="number"
+              name="cbm_total"
+              value={form.cbm_total}
+              onChange={handleChange}
+              min="1"
+              step="1"
+              disabled={disableCbmTotal}
+              placeholder={cbmLocked ? "Already set" : "Enter total CBM"}
             />
           </div>
           <div className="qc-modal-field">

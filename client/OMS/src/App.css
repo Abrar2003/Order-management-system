@@ -632,6 +632,7 @@ table {
   box-shadow: rgba(0, 0, 0, 0.24) 0px 3px 8px;
   background-color: var(--nav-bg) !important;
   color: var(--nav) !important;
+  border: 1px solid var(--qc-nav-border);
   border-radius: 0 16px 0 16px;
   padding: 1rem 2rem !important;
   top: 0 !important;
