@@ -5,8 +5,8 @@ const auth = require("../middlewares/auth.middleware");
 const authorize = require("../middlewares/authorize.middleware");
 const userController = require("../controllers/user.controller");
 
-router.use(auth);
-router.use(authorize("admin"));
+// router.use(auth);
+// // router.use(authorize("admin"));
 
 /**
  * POST /users
