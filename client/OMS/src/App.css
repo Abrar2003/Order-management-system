@@ -315,6 +315,26 @@ table {
   font-size: 16px;
 }
 
+.authPasswordRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.authPasswordToggle {
+  padding: 10px 12px;
+  font-size: 14px;
+  border: 1px solid var(--qc-border);
+  background: var(--qc-surface-muted);
+  color: var(--qc-text);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.authPasswordToggle:hover {
+  background: var(--qc-surface);
+}
+
 .authContainer {
   max-width: 520px;
   margin: 40px auto 0;
