@@ -86,16 +86,20 @@ const QcDetails = () => {
     ? rejectedLabels.join(", ")
     : "None";
   const barcodeValue = qc?.barcode > 0 ? String(qc.barcode) : "";
+  const isPositiveCbmValue = (value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0;
+  };
   const cbmData = useMemo(() => {
-    if (!qc) return { top: 0, bottom: 0, total: 0 };
+    if (!qc) return { top: "", bottom: "", total: "" };
     const cbmValue = qc.cbm;
-    if (typeof cbmValue === "number") {
-      return { top: 0, bottom: 0, total: cbmValue };
+    if (typeof cbmValue === "number" || typeof cbmValue === "string") {
+      return { top: "", bottom: "", total: String(cbmValue) };
     }
     return {
-      top: Number(cbmValue?.top) || 0,
-      bottom: Number(cbmValue?.bottom) || 0,
-      total: Number(cbmValue?.total) || 0,
+      top: cbmValue?.top ?? "",
+      bottom: cbmValue?.bottom ?? "",
+      total: cbmValue?.total ?? "",
     };
   }, [qc]);
 
@@ -187,6 +191,10 @@ const QcDetails = () => {
                 <label>Description</label>
                 <p>{qc.item.description}</p>
               </div>
+              <div className="qc-info-item">
+                <label>Request Date</label>
+                <p>{new Date(qc.request_date).toLocaleDateString()}</p>
+              </div>
             </div>
           </div>
 
@@ -234,15 +242,17 @@ const QcDetails = () => {
             <div className="qc-info-grid">
               <div className="qc-info-item">
                 <label>CBM Top</label>
-                <p>{cbmData.top > 0 ? cbmData.top : "Not Set"}</p>
+                <p>{isPositiveCbmValue(cbmData.top) ? cbmData.top : "Not Set"}</p>
               </div>
               <div className="qc-info-item">
                 <label>CBM Bottom</label>
-                <p>{cbmData.bottom > 0 ? cbmData.bottom : "Not Set"}</p>
+                <p>
+                  {isPositiveCbmValue(cbmData.bottom) ? cbmData.bottom : "Not Set"}
+                </p>
               </div>
               <div className="qc-info-item">
                 <label>CBM Total</label>
-                <p>{cbmData.total > 0 ? cbmData.total : "Not Set"}</p>
+                <p>{isPositiveCbmValue(cbmData.total) ? cbmData.total : "Not Set"}</p>
               </div>
               <div className="qc-info-item">
                 <label>Packed Size</label>
@@ -302,6 +312,7 @@ const QcDetails = () => {
       {showUpdateModal && (
         <UpdateQcModal
           qc={qc}
+          isAdmin={isAdmin}
           onClose={() => setShowUpdateModal(false)}
           onUpdated={() => {
             setShowUpdateModal(false);

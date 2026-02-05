@@ -119,7 +119,7 @@ exports.getQCList = async (req, res) => {
  */
 exports.alignQC = async (req, res) => {
   try {
-    const { order, item, inspector, quantities, remarks } = req.body;
+    const { order, item, inspector, quantities, remarks, request_date } = req.body;
 
     const existingQC = await QC.findOne({
       order: order,
@@ -134,10 +134,15 @@ exports.alignQC = async (req, res) => {
       return res.status(400).json({message: "vendor provision can't be greater than client demand"})
     }
 
+    if (new Date(request_date).getTime() < Date.now()){
+      return res.status(400).json({message: "request date must be a present date or future date"})
+    }
+
     const qc = await QC.create({
       order,
       item,
       inspector,
+      request_date,
       quantities: {
         client_demand: quantities.client_demand,
         vendor_provision: quantities.vendor_provision,
@@ -234,11 +239,71 @@ exports.updateQC = async (req, res) => {
     const parsePositiveInt = (value, fieldName) => {
       const parsed = Number(value);
       if (!Number.isInteger(parsed) || parsed <= 0) {
-        return {
-          error: `${fieldName} must be a positive integer`,
-        };
+        return { error: `${fieldName} must be a positive integer` };
       }
       return { value: parsed };
+    };
+
+    const normalizeDecimalString = (value) => {
+      if (value === undefined || value === null) return null;
+      const raw = typeof value === "string" ? value.trim() : String(value);
+      if (raw === "") return null;
+      if (!/^\d+(\.\d+)?$/.test(raw)) return null;
+      const [intRaw, fracRaw = ""] = raw.split(".");
+      let intPart = intRaw.replace(/^0+(?=\d)/, "");
+      if (intPart === "") intPart = "0";
+      let fracPart = fracRaw.replace(/0+$/, "");
+      if (fracPart === "") return intPart;
+      return `${intPart}.${fracPart}`;
+    };
+
+    const parsePositiveDecimalString = (value, fieldName) => {
+      const raw = typeof value === "string" ? value.trim() : String(value);
+      const normalized = normalizeDecimalString(raw);
+      if (!normalized || normalized === "0") {
+        return { error: `${fieldName} must be a positive number` };
+      }
+      return { value: raw, normalized };
+    };
+
+    const addBigIntStrings = (left, right) => {
+      let i = left.length - 1;
+      let j = right.length - 1;
+      let carry = 0;
+      let out = "";
+
+      while (i >= 0 || j >= 0 || carry) {
+        const digitLeft = i >= 0 ? Number(left[i]) : 0;
+        const digitRight = j >= 0 ? Number(right[j]) : 0;
+        const sum = digitLeft + digitRight + carry;
+        out = String(sum % 10) + out;
+        carry = Math.floor(sum / 10);
+        i -= 1;
+        j -= 1;
+      }
+
+      return out.replace(/^0+(?=\d)/, "");
+    };
+
+    const addDecimalStrings = (left, right) => {
+      const [leftIntRaw, leftFracRaw = ""] = left.split(".");
+      const [rightIntRaw, rightFracRaw = ""] = right.split(".");
+      const fracLen = Math.max(leftFracRaw.length, rightFracRaw.length);
+      const leftFrac = leftFracRaw.padEnd(fracLen, "0");
+      const rightFrac = rightFracRaw.padEnd(fracLen, "0");
+      const leftInt = leftIntRaw.replace(/^0+(?=\d)/, "") || "0";
+      const rightInt = rightIntRaw.replace(/^0+(?=\d)/, "") || "0";
+      const sum = addBigIntStrings(leftInt + leftFrac, rightInt + rightFrac);
+
+      if (fracLen === 0) {
+        return sum.replace(/^0+(?=\d)/, "") || "0";
+      }
+
+      const padded = sum.padStart(fracLen + 1, "0");
+      const intPart = padded.slice(0, -fracLen);
+      const fracPart = padded.slice(-fracLen);
+      const intClean = intPart.replace(/^0+(?=\d)/, "") || "0";
+      return `${intClean}.${fracPart}`;
     };
 
     const parseBoolean = (value, fieldName) => {
@@ -254,14 +319,14 @@ exports.updateQC = async (req, res) => {
     const existingCbm =
       qc.cbm && typeof qc.cbm === "object"
         ? {
-            top: Number(qc.cbm.top) || 0,
-            bottom: Number(qc.cbm.bottom) || 0,
-            total: Number(qc.cbm.total) || 0,
+            top: qc.cbm.top ?? "0",
+            bottom: qc.cbm.bottom ?? "0",
+            total: qc.cbm.total ?? "0",
           }
         : {
-            top: 0,
-            bottom: 0,
-            total: Number(qc.cbm) || 0,
+            top: "0",
+            bottom: "0",
+            total: qc.cbm ?? "0",
           };
 
     const hasCbmTop = cbm_top !== undefined && cbm_top !== "";
@@ -269,8 +334,15 @@ exports.updateQC = async (req, res) => {
     const hasCbmTotal = cbm_total !== undefined && cbm_total !== "";
     const hasLegacyCbm = cbm !== undefined && cbm !== "";
     const hasCbmPayload = hasCbmTop || hasCbmBottom || hasCbmTotal || hasLegacyCbm;
+    const normalizedExisting = {
+      top: normalizeDecimalString(existingCbm.top) || "0",
+      bottom: normalizeDecimalString(existingCbm.bottom) || "0",
+      total: normalizeDecimalString(existingCbm.total) || "0",
+    };
     const cbmAlreadySet =
-      existingCbm.top > 0 || existingCbm.bottom > 0 || existingCbm.total > 0;
+      normalizedExisting.top !== "0" ||
+      normalizedExisting.bottom !== "0" ||
+      normalizedExisting.total !== "0";
 
     if (hasCbmPayload) {
       if ((hasCbmTop || hasCbmBottom) && (hasCbmTotal || hasLegacyCbm)) {
@@ -285,14 +357,16 @@ exports.updateQC = async (req, res) => {
         });
       }
 
-      const parsedTop = hasCbmTop ? parsePositiveInt(cbm_top, "cbm_top") : null;
+      const parsedTop = hasCbmTop
+        ? parsePositiveDecimalString(cbm_top, "cbm_top")
+        : null;
       const parsedBottom = hasCbmBottom
-        ? parsePositiveInt(cbm_bottom, "cbm_bottom")
+        ? parsePositiveDecimalString(cbm_bottom, "cbm_bottom")
         : null;
       const parsedTotal = hasCbmTotal
-        ? parsePositiveInt(cbm_total, "cbm_total")
+        ? parsePositiveDecimalString(cbm_total, "cbm_total")
         : hasLegacyCbm
-          ? parsePositiveInt(cbm, "cbm_total")
+          ? parsePositiveDecimalString(cbm, "cbm_total")
           : null;
 
       if (parsedTop?.error || parsedBottom?.error || parsedTotal?.error) {
@@ -301,11 +375,11 @@ exports.updateQC = async (req, res) => {
         });
       }
 
-      if (cbmAlreadySet) {
+      if (cbmAlreadySet && !isAdmin) {
         const mismatch =
-          (parsedTop && parsedTop.value !== existingCbm.top) ||
-          (parsedBottom && parsedBottom.value !== existingCbm.bottom) ||
-          (parsedTotal && parsedTotal.value !== existingCbm.total);
+          (parsedTop && parsedTop.normalized !== normalizedExisting.top) ||
+          (parsedBottom && parsedBottom.normalized !== normalizedExisting.bottom) ||
+          (parsedTotal && parsedTotal.normalized !== normalizedExisting.total);
         if (mismatch) {
           return res.status(400).json({
             message: "cbm can only be set once",
@@ -313,15 +387,15 @@ exports.updateQC = async (req, res) => {
         }
       } else if (parsedTotal) {
         qc.cbm = {
-          top: 0,
-          bottom: 0,
+          top: "0",
+          bottom: "0",
           total: parsedTotal.value,
         };
       } else if (parsedTop && parsedBottom) {
         qc.cbm = {
           top: parsedTop.value,
           bottom: parsedBottom.value,
-          total: parsedTop.value + parsedBottom.value,
+          total: addDecimalStrings(parsedTop.value, parsedBottom.value),
         };
       }
     }

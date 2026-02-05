@@ -9,6 +9,10 @@ const qcSchema = new mongoose.Schema(
       index: true,
     },
 
+    request_date: {
+      type: Date,
+      required: true
+    },
     item: {
         item_code: {type: String, required: true},
         description: {type: String, required: true}
@@ -21,9 +25,9 @@ const qcSchema = new mongoose.Schema(
     },
 
     cbm: {
-      top: { type: Number, default: 0 },
-      bottom: { type: Number, default: 0 },
-      total: { type: Number, default: 0 },
+      top: { type: String, default: "0" },
+      bottom: { type: String, default: "0" },
+      total: { type: String, default: "0" },
     },
 
     barcode: {

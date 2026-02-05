@@ -5,70 +5,84 @@ import "../App.css";
 const AlignQCModal = ({ order, onClose, onSuccess }) => {
   const [inspectors, setInspectors] = useState([]);
   const [inspector, setInspector] = useState("");
+  const [request_date, setReqDate] = useState(null);
   const [vendorProvision, setVendorProvision] = useState("");
 
   useEffect(() => {
     const token = localStorage.getItem("token");
 
-    axios.get("/auth/?role=QC", {
+    axios
+      .get("/auth/?role=QC", {
         headers: {
           Authorization: `Bearer ${token}`,
-        }
-      }).then((res) => {
-      setInspectors(res.data);
-    });
+        },
+      })
+      .then((res) => {
+        setInspectors(res.data);
+      });
   }, []);
 
   const handleSubmit = async () => {
-  const token = localStorage.getItem("token");
+    const token = localStorage.getItem("token");
 
-  if (!inspector || !vendorProvision) {
-    alert("All fields are required");
-    return;
-  }
+    if (!inspector || !vendorProvision) {
+      alert("All fields are required");
+      return;
+    }
 
-  try {
-    await axios.post(
-      "/qc/align-qc",
-      {
-        order: order._id,
-        item: order.item,
-        inspector,
-        quantities: {
-          client_demand: order.quantity,
-          vendor_provision: Number(vendorProvision),
+    try {
+      await axios.post(
+        "/qc/align-qc",
+        {
+          order: order._id,
+          item: order.item,
+          request_date,
+          inspector,
+          quantities: {
+            client_demand: order.quantity,
+            vendor_provision: Number(vendorProvision),
+          },
         },
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
         },
-      }
-    );
+      );
 
-    alert("QC alignment successful");
-    window.location.reload();
+      alert("QC alignment successful");
+      window.location.reload();
 
-    onSuccess();
-  } catch (err) {
-    console.error(err);
-    alert("QC alignment failed");
-  }
-};
-
+      onSuccess();
+    } catch (err) {
+      console.error(err);
+      alert("QC alignment failed");
+    }
+  };
 
   return (
     <div className="modalOverlay">
       <div className="modalBox">
         <h3>Align QC Inspector</h3>
 
-        <p><b>Order ID:</b> {order.order_id}</p>
-        <p><b>Item:</b> {order.item.item_code}</p>
-        <p><b>Description:</b> {order.item.description}</p>
-        <p><b>Client Demand:</b> {order.quantity}</p>
+        <p>
+          <b>Order ID:</b> {order.order_id}
+        </p>
+        <p>
+          <b>Item:</b> {order.item.item_code}
+        </p>
+        <p>
+          <b>Description:</b> {order.item.description}
+        </p>
+        <p>
+          <b>Client Demand:</b> {order.quantity}
+        </p>
 
         <label>QC Inspector</label>
-        <select value={inspector} onChange={(e) => setInspector(e.target.value)}>
+        <select
+          value={inspector}
+          onChange={(e) => setInspector(e.target.value)}
+        >
           <option value="">Select Inspector</option>
           {inspectors.map((qc) => (
             <option key={qc._id} value={qc._id}>
@@ -76,7 +90,12 @@ const AlignQCModal = ({ order, onClose, onSuccess }) => {
             </option>
           ))}
         </select>
-
+        <label>Request Date</label>
+        <input
+          type="date"
+          value={request_date}
+          onChange={(e) => setReqDate(e.target.value)}
+        />
         <label>Vendor Provision</label>
         <input
           type="number"
