@@ -2,15 +2,19 @@ import { useEffect, useState } from "react";
 import api from "../api/axios";
 import "../App.css";
 
+
+const createEmptyLBH = () => ({
+  l: "",
+  b: "",
+  h: "",
+});
+
 const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const [form, setForm] = useState({
     qc_checked: "",
     qc_passed: "",
     qc_rejected: "",
     offeredQuantity: "",
-    cbm_top: "",
-    cbm_bottom: "",
-    cbm_total: "",
     barcode: "",
     packed_size: false,
     finishing: false,
@@ -19,56 +23,34 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     labelEnd: "",
     rejectedLabels: "",
     remarks: "",
+    LBH_top: createEmptyLBH(),
+    LBH_bottom: createEmptyLBH(),
+    LBH: createEmptyLBH(),
   });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const isPositiveCbmValue = (value) => {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) && parsed > 0;
-  };
-
-  const cbmExisting = (() => {
-    if (!qc) return { top: "", bottom: "", total: "" };
-    const cbmValue = qc.cbm;
-    if (typeof cbmValue === "number" || typeof cbmValue === "string") {
-      return { top: "", bottom: "", total: String(cbmValue) };
-    }
-    return {
-      top: cbmValue?.top ?? "",
-      bottom: cbmValue?.bottom ?? "",
-      total: cbmValue?.total ?? "",
-    };
-  })();
-  const cbmLocked =
-    !isAdmin &&
-    (isPositiveCbmValue(cbmExisting.top) ||
-      isPositiveCbmValue(cbmExisting.bottom) ||
-      isPositiveCbmValue(cbmExisting.total));
-  const hasCbmTopOrBottom =
-    form.cbm_top.trim() !== "" || form.cbm_bottom.trim() !== "";
-  const hasCbmTotal = form.cbm_total.trim() !== "";
-  const disableCbmTopBottom = cbmLocked || hasCbmTotal;
-  const disableCbmTotal = cbmLocked || hasCbmTopOrBottom;
+  const hasLBHTotal =
+    form.LBH.l.trim() !== "" ||
+    form.LBH.b.trim() !== "" ||
+    form.LBH.h.trim() !== "";
+  const hasLBHTop =
+    form.LBH_top.l.trim() !== "" ||
+    form.LBH_top.b.trim() !== "" ||
+    form.LBH_top.h.trim() !== "";
+  const hasLBHBottom =
+    form.LBH_bottom.l.trim() !== "" ||
+    form.LBH_bottom.b.trim() !== "" ||
+    form.LBH_bottom.h.trim() !== "";
+  const disableLBHTopBottom = hasLBHTotal;
+  const disableLBHTotal = hasLBHTop || hasLBHBottom;
 
   useEffect(() => {
     if (!qc) return;
-    const cbmValue = qc.cbm;
-    const cbmData =
-      typeof cbmValue === "number" || typeof cbmValue === "string"
-        ? { top: "", bottom: "", total: String(cbmValue) }
-        : {
-            top: cbmValue?.top ?? "",
-            bottom: cbmValue?.bottom ?? "",
-            total: cbmValue?.total ?? "",
-          };
     setForm({
       qc_checked: "",
       qc_passed: "",
       qc_rejected: "",
       offeredQuantity: "",
-      cbm_top: isPositiveCbmValue(cbmData.top) ? String(cbmData.top) : "",
-      cbm_bottom: isPositiveCbmValue(cbmData.bottom) ? String(cbmData.bottom) : "",
-      cbm_total: isPositiveCbmValue(cbmData.total) ? String(cbmData.total) : "",
       barcode: qc.barcode > 0 ? String(qc.barcode) : "",
       packed_size: Boolean(qc.packed_size),
       finishing: Boolean(qc.finishing),
@@ -77,12 +59,26 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       labelEnd: "",
       rejectedLabels: "",
       remarks: qc.remarks ?? "",
+      LBH_top: createEmptyLBH(),
+      LBH_bottom: createEmptyLBH(),
+      LBH: createEmptyLBH(),
     });
   }, [qc]);
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
     setForm((prev) => ({ ...prev, [name]: type === "checkbox" ? checked : value }));
+  };
+
+  const handleLBHChange = (section, field) => (e) => {
+    const { value } = e.target;
+    setForm((prev) => ({
+      ...prev,
+      [section]: {
+        ...prev[section],
+        [field]: value,
+      },
+    }));
   };
 
   const parseLabels = (start, end) => {
@@ -167,60 +163,61 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       return;
     }
 
-    if (filteredLabels.length > qcChecked && qcChecked > 0) {
-      setError("Labels count cannot exceed QC checked quantity.");
-      return;
-    }
-
-    const cbmTopValue = form.cbm_top.trim();
-    const cbmBottomValue = form.cbm_bottom.trim();
-    const cbmTotalValue = form.cbm_total.trim();
     const barcodeValue = form.barcode.trim();
+    const parseLBHTriplet = (value, label) => {
+      const l = value.l.trim();
+      const b = value.b.trim();
+      const h = value.h.trim();
+      const hasAny = l !== "" || b !== "" || h !== "";
 
-    // if (barcodeValue !== "" && qc.barcode > 0) {
-    //   setError("Barcode can only be set once.");
-    //   return;
-    // }
+      if (!hasAny) return { value: null, hasValue: false };
+      if (l === "" || b === "" || h === "") {
+        return { error: `${label} requires L, B, and H`, hasValue: true };
+      }
 
-    const cbmHasTop = cbmTopValue !== "";
-    const cbmHasBottom = cbmBottomValue !== "";
-    const cbmHasTotal = cbmTotalValue !== "";
+      const lNum = Number(l);
+      const bNum = Number(b);
+      const hNum = Number(h);
 
-    if ((cbmHasTop || cbmHasBottom) && cbmHasTotal) {
-      setError("Provide either CBM total or CBM top/bottom.");
+      if (
+        [lNum, bNum, hNum].some(
+          (num) => !Number.isFinite(num) || num <= 0,
+        )
+      ) {
+        return { error: `${label} values must be positive numbers`, hasValue: true };
+      }
+
+      return { value: { l: lNum, b: bNum, h: hNum }, hasValue: true };
+    };
+
+    const totalLBH = parseLBHTriplet(form.LBH, "LBH");
+    const topLBH = parseLBHTriplet(form.LBH_top, "LBH top");
+    const bottomLBH = parseLBHTriplet(form.LBH_bottom, "LBH bottom");
+
+    if (totalLBH.hasValue && (topLBH.hasValue || bottomLBH.hasValue)) {
+      setError("Provide either LBH or LBH top/bottom, not both.");
       return;
     }
 
-    if (cbmHasTop !== cbmHasBottom) {
-      setError("Both CBM top and bottom are required.");
+    if (topLBH.hasValue !== bottomLBH.hasValue) {
+      setError("Both LBH top and bottom are required.");
       return;
     }
 
-    const cbmTopParsed = cbmHasTop ? Number(cbmTopValue) : null;
-    const cbmBottomParsed = cbmHasBottom ? Number(cbmBottomValue) : null;
-    const cbmTotalParsed = cbmHasTotal ? Number(cbmTotalValue) : null;
-
-    if (
-      cbmTopParsed !== null &&
-      (!Number.isFinite(cbmTopParsed) || cbmTopParsed <= 0)
-    ) {
-      setError("CBM top must be a positive number.");
+    if (totalLBH.error || topLBH.error || bottomLBH.error) {
+      setError(totalLBH.error || topLBH.error || bottomLBH.error);
       return;
     }
 
-    if (
-      cbmBottomParsed !== null &&
-      (!Number.isFinite(cbmBottomParsed) || cbmBottomParsed <= 0)
-    ) {
-      setError("CBM bottom must be a positive number.");
-      return;
-    }
+    const hasDualLbhForLabels =
+      (topLBH.hasValue && bottomLBH.hasValue) ||
+      (Number(qc?.cbm?.top) > 0 && Number(qc?.cbm?.bottom) > 0);
+    const labelMultiplier = hasDualLbhForLabels ? 2 : 1;
 
-    if (
-      cbmTotalParsed !== null &&
-      (!Number.isFinite(cbmTotalParsed) || cbmTotalParsed <= 0)
-    ) {
-      setError("CBM total must be a positive number.");
+    if (filteredLabels.length > qcChecked * labelMultiplier && qcChecked > 0) {
+      setError(
+        `Labels count cannot exceed ${labelMultiplier}x QC checked quantity.`,
+      );
       return;
     }
 
@@ -277,10 +274,10 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       payload.vendor_provision = offeredQuantity;
     }
 
-    if (cbmHasTotal) payload.cbm_total = cbmTotalValue;
-    if (cbmHasTop && cbmHasBottom) {
-      payload.cbm_top = cbmTopValue;
-      payload.cbm_bottom = cbmBottomValue;
+    if (totalLBH.hasValue && totalLBH.value) payload.LBH = totalLBH.value;
+    if (topLBH.hasValue && bottomLBH.hasValue && topLBH.value && bottomLBH.value) {
+      payload.LBH_top = topLBH.value;
+      payload.LBH_bottom = bottomLBH.value;
     }
     if (barcodeParsed !== null) payload.barcode = barcodeParsed;
     if (!qc.packed_size && form.packed_size) payload.packed_size = true;
@@ -328,44 +325,93 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
         <div className="inputContainer qc-modal-grid">
           <div className="qc-modal-field">
-            <label>CBM Top</label>
+            <label>LBH Total - L B H</label>
             <input
               type="number"
-              name="cbm_top"
-              value={form.cbm_top}
-              onChange={handleChange}
+              value={form.LBH.l}
+              onChange={handleLBHChange("LBH", "l")}
               min="0"
               step="any"
-              disabled={disableCbmTopBottom && !isAdmin}
-              placeholder={cbmLocked && !isAdmin ? "Already set" : "Enter top CBM"}
+              disabled={disableLBHTotal}
+            />
+            <label>LBH Total - B</label>
+             <input
+              type="number"
+              value={form.LBH.b}
+              onChange={handleLBHChange("LBH", "b")}
+              min="0"
+              step="any"
+              disabled={disableLBHTotal}
+            />
+            <label>LBH Total - H</label>
+            <input
+              type="number"
+              value={form.LBH.h}
+              onChange={handleLBHChange("LBH", "h")}
+              min="0"
+              step="any"
+              disabled={disableLBHTotal}
             />
           </div>
           <div className="qc-modal-field">
-            <label>CBM Bottom</label>
+            <label>LBH Top - L</label>
             <input
               type="number"
-              name="cbm_bottom"
-              value={form.cbm_bottom}
-              onChange={handleChange}
+              value={form.LBH_top.l}
+              onChange={handleLBHChange("LBH_top", "l")}
               min="0"
               step="any"
-              disabled={disableCbmTopBottom && !isAdmin}
-              placeholder={cbmLocked && !isAdmin ? "Already set" : "Enter bottom CBM"}
+              disabled={disableLBHTopBottom}
+            />
+            <label>LBH Top - B</label>
+            <input
+              type="number"
+              value={form.LBH_top.b}
+              onChange={handleLBHChange("LBH_top", "b")}
+              min="0"
+              step="any"
+              disabled={disableLBHTopBottom}
+            />
+            <label>LBH Top - H</label>
+            <input
+              type="number"
+              value={form.LBH_top.h}
+              onChange={handleLBHChange("LBH_top", "h")}
+              min="0"
+              step="any"
+              disabled={disableLBHTopBottom}
             />
           </div>
           <div className="qc-modal-field">
-            <label>CBM Total</label>
+            <label>LBH Bottom - L</label>
             <input
               type="number"
-              name="cbm_total"
-              value={form.cbm_total}
-              onChange={handleChange}
+              value={form.LBH_bottom.l}
+              onChange={handleLBHChange("LBH_bottom", "l")}
               min="0"
               step="any"
-              disabled={disableCbmTotal && !isAdmin}
-              placeholder={cbmLocked && !isAdmin ? "Already set" : "Enter total CBM"}
+              disabled={disableLBHTopBottom}
+            />
+            <label>LBH Bottom - B</label>
+            <input
+              type="number"
+              value={form.LBH_bottom.b}
+              onChange={handleLBHChange("LBH_bottom", "b")}
+              min="0"
+              step="any"
+              disabled={disableLBHTopBottom}
+            />
+            <label>LBH Bottom - H</label>
+            <input
+              type="number"
+              value={form.LBH_bottom.h}
+              onChange={handleLBHChange("LBH_bottom", "h")}
+              min="0"
+              step="any"
+              disabled={disableLBHTopBottom}
             />
           </div>
+          
           <div className="qc-modal-field">
             <label>Barcode</label>
             <input

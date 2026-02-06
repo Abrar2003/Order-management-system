@@ -86,101 +86,102 @@ const Navbar = () => {
         </button>
       </div>
 
-      {/* Middle: Navigation Links */}
-      <div className="navLinks">
-        {/* <span
-          style={spanStyle}
-          onClick={() => navigate("/orders")}
-        >
-          Orders
-        </span> */}
-
-        {["QC", "admin", "manager", "Dev"].includes(role) && (
-          <button
-            type="button"
-            className="navPillButton"
-            onClick={() => handleNavigate("/qc")}
+      <div className="navRight">
+        {/* Middle: Navigation Links */}
+        <div className="navLinks">
+          {/* <span
+            style={spanStyle}
+            onClick={() => navigate("/orders")}
           >
-            QC
-          </button>
-        )}
+            Orders
+          </span> */}
 
-        {/* {["admin", "manager", "Dev"].includes(role) && (
-          <span
-            style={{ cursor: "pointer", ...isActive("/users") }}
-            onClick={() => navigate("/users")}
-          >
-            Users
-          </span>
-        )} */}
-      </div>
-
-      {/* Right: User + Logout */}
-      <div className="navActions">
-        <div className="userMenu" ref={userMenuRef}>
-          <button
-            className="userMenuButton"
-            type="button"
-            onClick={() => setShowUserMenu((prev) => !prev)}
-          >
-            {user?.name} ({role})
-          </button>
-          {showUserMenu && (
-            <div className="userMenuDropdown">
-              {canManageLabels && (
-                <button
-                  type="button"
-                  className="userMenuItem"
-                  onClick={() => {
-                    setShowAllocateModal(true);
-                    setShowUserMenu(false);
-                  }}
-                >
-                  Allocate Labels
-                </button>
-              )}
-              {canCreateUsers && (
-                <button
-                  type="button"
-                  className="userMenuItem"
-                  onClick={() => {
-                    handleNavigate("/users/new");
-                    setShowUserMenu(false);
-                  }}
-                >
-                  Create User
-                </button>
-              )}
-              {canManageOrders && (
-                <button
-                  type="button"
-                  className="userMenuItem"
-                  onClick={() => {
-                    setShowUploadModal(true);
-                    setShowUserMenu(false);
-                  }}
-                >
-                  Update Orders
-                </button>
-              )}
-              <button
-                type="button"
-                className="userMenuItem danger"
-                onClick={handleLogout}
-              >
-                Logout
-              </button>
-            </div>
+          {["QC", "admin", "manager", "Dev"].includes(role) && (
+            <button
+              type="button"
+              className="navPillButton"
+              onClick={() => handleNavigate("/qc")}
+            >
+              QC
+            </button>
           )}
-        </div>
-        <button className="themeToggle" type="button" onClick={toggleTheme} title="Toggle theme">
-          {theme === "system"
-            ? "Theme: System"
-            : theme === "dark"
-              ? "Theme: Dark"
-              : "Theme: Light"}
-        </button>
 
+          {/* {["admin", "manager", "Dev"].includes(role) && (
+            <span
+              style={{ cursor: "pointer", ...isActive("/users") }}
+              onClick={() => navigate("/users")}
+            >
+              Users
+            </span>
+          )} */}
+        </div>
+
+        {/* Right: User + Logout */}
+        <div className="navActions">
+          <div className="userMenu" ref={userMenuRef}>
+            <button
+              className="userMenuButton"
+              type="button"
+              onClick={() => setShowUserMenu((prev) => !prev)}
+            >
+              {user?.name} ({role})
+            </button>
+            {showUserMenu && (
+              <div className="userMenuDropdown">
+                {canManageLabels && (
+                  <button
+                    type="button"
+                    className="userMenuItem"
+                    onClick={() => {
+                      setShowAllocateModal(true);
+                      setShowUserMenu(false);
+                    }}
+                  >
+                    Allocate Labels
+                  </button>
+                )}
+                {canCreateUsers && (
+                  <button
+                    type="button"
+                    className="userMenuItem"
+                    onClick={() => {
+                      handleNavigate("/users/new");
+                      setShowUserMenu(false);
+                    }}
+                  >
+                    Create User
+                  </button>
+                )}
+                {canManageOrders && (
+                  <button
+                    type="button"
+                    className="userMenuItem"
+                    onClick={() => {
+                      setShowUploadModal(true);
+                      setShowUserMenu(false);
+                    }}
+                  >
+                    Update Orders
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="userMenuItem danger"
+                  onClick={handleLogout}
+                >
+                  Logout
+                </button>
+              </div>
+            )}
+          </div>
+          <button className="themeToggle" type="button" onClick={toggleTheme} title="Toggle theme">
+            {theme === "system"
+              ? "Theme: System"
+              : theme === "dark"
+                ? "Theme: Dark"
+                : "Theme: Light"}
+          </button>
+        </div>
       </div>
 
       {showMobileMenu && (

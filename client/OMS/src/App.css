@@ -529,9 +529,11 @@ table {
 /* ===== Inputs & Select ===== */
 .inputContainer {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 30%));
   gap: 16px;
   margin-top: 16px;
+  align-items: center;
+  justify-content: center;
 }
 
 .qc-modal-grid {
@@ -669,7 +671,7 @@ table {
   display: flex;
   align-items: center;
   gap: 12px;
-  flex: 1 1 auto;
+  flex: 0 0 30%;
 }
 
 .navTitle {
@@ -678,19 +680,24 @@ table {
   padding-right: 20px;
 }
 
-.navLinks {
+.navRight {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 12px;
-  flex: 0 0 50%;
+  flex: 0 0 30%;
+}
+
+.navLinks {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .navActions {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
   gap: 12px;
-  flex: 0 0 40%;
 }
 
 .navHamburger {
@@ -744,8 +751,7 @@ table {
     padding: 0.75rem 1rem !important;
   }
 
-  .navLinks,
-  .navActions {
+  .navRight {
     display: none;
   }
 
@@ -756,6 +762,10 @@ table {
   .navBrand {
     width: 100%;
     justify-content: space-between;
+  }
+
+  .navBrand {
+    flex: 1 1 100%;
   }
 }
 
@@ -907,6 +917,12 @@ table {
 
 .backButton:hover {
   background-color: var(--qc-surface-muted);
+}
+
+@media (max-width: 900px) {
+  .backButton {
+    display: none;
+  }
 }
 
 .qc-card {

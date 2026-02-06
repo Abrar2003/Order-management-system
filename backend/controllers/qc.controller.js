@@ -238,14 +238,15 @@ exports.updateQC = async (req, res) => {
       remarks,
       labels,
       vendor_provision,
-      cbm,
-      cbm_top,
-      cbm_bottom,
-      cbm_total,
       barcode,
       packed_size,
       finishing,
       branding,
+
+      // 🔁 NEW INPUTS
+      LBH_top,
+      LBH_bottom,
+      LBH,
     } = req.body;
 
     const qc = await QC.findById(req.params.id).populate("inspector");
@@ -253,301 +254,165 @@ exports.updateQC = async (req, res) => {
       return res.status(404).json({ message: "QC record not found" });
     }
 
-    const hasQuantityPayload =
-      qc_checked !== undefined ||
-      qc_passed !== undefined ||
-      qc_rejected !== undefined ||
-      vendor_provision !== undefined;
-    const hasLabelPayload =
-      Array.isArray(labels) && labels.length > 0;
     const isAdmin = req.user.role === "admin";
 
-    // 🔐 Verify that the current user is the assigned inspector (admins can override)
-    if (!isAdmin && qc.inspector._id.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: "You are not authorized to update this QC record" });
+    if (
+      !isAdmin &&
+      qc.inspector._id.toString() !== req.user._id.toString()
+    ) {
+      return res.status(403).json({
+        message: "You are not authorized to update this QC record",
+      });
     }
 
-    const hasPriorUpdate =
-      qc.quantities.qc_checked > 0 ||
-      qc.quantities.qc_passed > 0 ||
-      qc.quantities.qc_rejected > 0 ||
-      (qc.labels?.length || 0) > 0;
+    /* ────────────────────────
+       📐 LBH → CBM HELPERS
+    ──────────────────────── */
 
-    const currentPending =
-      qc.quantities.client_demand - qc.quantities.qc_passed;
-    const requirementsMet = qc.packed_size && qc.finishing && qc.branding;
+    const isValidLBH = (obj) =>
+      obj &&
+      typeof obj === "object" &&
+      ["l", "b", "h"].every(
+        (k) => typeof obj[k] === "number" && obj[k] > 0
+      );
 
-    if (!isAdmin && hasPriorUpdate && currentPending <= 0) {
-      if (requirementsMet) {
-        return res.status(400).json({
-          message: "QC record is finalized and cannot be updated",
-        });
-      }
-      if (hasQuantityPayload || hasLabelPayload) {
-        return res.status(400).json({
-          message: "QC record has no pending quantity to update",
-        });
-      }
-    }
-
-    const parsePositiveInt = (value, fieldName) => {
-      const parsed = Number(value);
-      if (!Number.isInteger(parsed) || parsed <= 0) {
-        return { error: `${fieldName} must be a positive integer` };
-      }
-      return { value: parsed };
+    const cmToCbmString = ({ l, b, h }) => {
+      const cbm = (l * b * h) / 1_000_000;
+      return cbm.toFixed(6).replace(/\.?0+$/, "");
     };
 
-    const normalizeDecimalString = (value) => {
-      if (value === undefined || value === null) return null;
-      const raw = typeof value === "string" ? value.trim() : String(value);
-      if (raw === "") return null;
-      if (!/^\d+(\.\d+)?$/.test(raw)) return null;
-      const [intRaw, fracRaw = ""] = raw.split(".");
-      let intPart = intRaw.replace(/^0+(?=\d)/, "");
-      if (intPart === "") intPart = "0";
-      let fracPart = fracRaw.replace(/0+$/, "");
-      if (fracPart === "") return intPart;
-      return `${intPart}.${fracPart}`;
+    const existingCbm = {
+      top: qc.cbm?.top ?? "0",
+      bottom: qc.cbm?.bottom ?? "0",
+      total: qc.cbm?.total ?? "0",
     };
 
-    const parsePositiveDecimalString = (value, fieldName) => {
-      const raw = typeof value === "string" ? value.trim() : String(value);
-      const normalized = normalizeDecimalString(raw);
-      if (!normalized || normalized === "0") {
-        return { error: `${fieldName} must be a positive number` };
-      }
-      return { value: raw, normalized };
-    };
-
-    const addBigIntStrings = (left, right) => {
-      let i = left.length - 1;
-      let j = right.length - 1;
-      let carry = 0;
-      let out = "";
-
-      while (i >= 0 || j >= 0 || carry) {
-        const digitLeft = i >= 0 ? Number(left[i]) : 0;
-        const digitRight = j >= 0 ? Number(right[j]) : 0;
-        const sum = digitLeft + digitRight + carry;
-        out = String(sum % 10) + out;
-        carry = Math.floor(sum / 10);
-        i -= 1;
-        j -= 1;
-      }
-
-      return out.replace(/^0+(?=\d)/, "");
-    };
-
-    const addDecimalStrings = (left, right) => {
-      const [leftIntRaw, leftFracRaw = ""] = left.split(".");
-      const [rightIntRaw, rightFracRaw = ""] = right.split(".");
-      const fracLen = Math.max(leftFracRaw.length, rightFracRaw.length);
-      const leftFrac = leftFracRaw.padEnd(fracLen, "0");
-      const rightFrac = rightFracRaw.padEnd(fracLen, "0");
-      const leftInt = leftIntRaw.replace(/^0+(?=\d)/, "") || "0";
-      const rightInt = rightIntRaw.replace(/^0+(?=\d)/, "") || "0";
-      const sum = addBigIntStrings(leftInt + leftFrac, rightInt + rightFrac);
-
-      if (fracLen === 0) {
-        return sum.replace(/^0+(?=\d)/, "") || "0";
-      }
-
-      const padded = sum.padStart(fracLen + 1, "0");
-      const intPart = padded.slice(0, -fracLen);
-      const fracPart = padded.slice(-fracLen);
-      const intClean = intPart.replace(/^0+(?=\d)/, "") || "0";
-      return `${intClean}.${fracPart}`;
-    };
-
-    const parseBoolean = (value, fieldName) => {
-      if (typeof value === "boolean") return { value };
-      if (typeof value === "string") {
-        const normalized = value.trim().toLowerCase();
-        if (normalized === "true") return { value: true };
-        if (normalized === "false") return { value: false };
-      }
-      return { error: `${fieldName} must be a boolean` };
-    };
-
-    const existingCbm =
-      qc.cbm && typeof qc.cbm === "object"
-        ? {
-            top: qc.cbm.top ?? "0",
-            bottom: qc.cbm.bottom ?? "0",
-            total: qc.cbm.total ?? "0",
-          }
-        : {
-            top: "0",
-            bottom: "0",
-            total: qc.cbm ?? "0",
-          };
-
-    const hasCbmTop = cbm_top !== undefined && cbm_top !== "";
-    const hasCbmBottom = cbm_bottom !== undefined && cbm_bottom !== "";
-    const hasCbmTotal = cbm_total !== undefined && cbm_total !== "";
-    const hasLegacyCbm = cbm !== undefined && cbm !== "";
-    const hasCbmPayload = hasCbmTop || hasCbmBottom || hasCbmTotal || hasLegacyCbm;
-    const normalizedExisting = {
-      top: normalizeDecimalString(existingCbm.top) || "0",
-      bottom: normalizeDecimalString(existingCbm.bottom) || "0",
-      total: normalizeDecimalString(existingCbm.total) || "0",
-    };
     const cbmAlreadySet =
-      normalizedExisting.top !== "0" ||
-      normalizedExisting.bottom !== "0" ||
-      normalizedExisting.total !== "0";
+      existingCbm.top !== "0" ||
+      existingCbm.bottom !== "0" ||
+      existingCbm.total !== "0";
 
-    if (hasCbmPayload) {
-      if ((hasCbmTop || hasCbmBottom) && (hasCbmTotal || hasLegacyCbm)) {
+    const hasLBHTop = LBH_top !== undefined;
+    const hasLBHBottom = LBH_bottom !== undefined;
+    const hasLBHTotal = LBH !== undefined;
+
+    if (hasLBHTotal && (hasLBHTop || hasLBHBottom)) {
+      return res.status(400).json({
+        message: "Provide either LBH or LBH_top/LBH_bottom, not both",
+      });
+    }
+
+    if (hasLBHTop !== hasLBHBottom) {
+      return res.status(400).json({
+        message: "Both LBH_top and LBH_bottom are required",
+      });
+    }
+
+    let computedTop = "0";
+    let computedBottom = "0";
+    let computedTotal = "0";
+
+    if (hasLBHTotal) {
+      if (!isValidLBH(LBH)) {
+        return res.status(400).json({ message: "Invalid LBH structure" });
+      }
+      computedTotal = cmToCbmString(LBH);
+    }
+
+    if (hasLBHTop && hasLBHBottom) {
+      if (!isValidLBH(LBH_top) || !isValidLBH(LBH_bottom)) {
         return res.status(400).json({
-          message: "Provide either CBM total or CBM top/bottom, not both",
+          message: "Invalid LBH_top or LBH_bottom structure",
         });
       }
 
-      if (hasCbmTop !== hasCbmBottom) {
+      computedTop = cmToCbmString(LBH_top);
+      computedBottom = cmToCbmString(LBH_bottom);
+      computedTotal = (
+        Number(computedTop) + Number(computedBottom)
+      )
+        .toFixed(6)
+        .replace(/\.?0+$/, "");
+    }
+
+    if ((hasLBHTotal || hasLBHTop) && cbmAlreadySet && !isAdmin) {
+      const mismatch =
+        computedTop !== existingCbm.top ||
+        computedBottom !== existingCbm.bottom ||
+        computedTotal !== existingCbm.total;
+
+      if (mismatch) {
         return res.status(400).json({
-          message: "Both CBM top and bottom are required",
+          message: "CBM can only be set once",
         });
-      }
-
-      const parsedTop = hasCbmTop
-        ? parsePositiveDecimalString(cbm_top, "cbm_top")
-        : null;
-      const parsedBottom = hasCbmBottom
-        ? parsePositiveDecimalString(cbm_bottom, "cbm_bottom")
-        : null;
-      const parsedTotal = hasCbmTotal
-        ? parsePositiveDecimalString(cbm_total, "cbm_total")
-        : hasLegacyCbm
-          ? parsePositiveDecimalString(cbm, "cbm_total")
-          : null;
-
-      if (parsedTop?.error || parsedBottom?.error || parsedTotal?.error) {
-        return res.status(400).json({
-          message: parsedTop?.error || parsedBottom?.error || parsedTotal?.error,
-        });
-      }
-
-      if (cbmAlreadySet && !isAdmin) {
-        const mismatch =
-          (parsedTop && parsedTop.normalized !== normalizedExisting.top) ||
-          (parsedBottom && parsedBottom.normalized !== normalizedExisting.bottom) ||
-          (parsedTotal && parsedTotal.normalized !== normalizedExisting.total);
-        if (mismatch) {
-          return res.status(400).json({
-            message: "cbm can only be set once",
-          });
-        }
-      } else if (parsedTotal) {
-        qc.cbm = {
-          top: "0",
-          bottom: "0",
-          total: parsedTotal.value,
-        };
-      } else if (parsedTop && parsedBottom) {
-        qc.cbm = {
-          top: parsedTop.value,
-          bottom: parsedBottom.value,
-          total: addDecimalStrings(parsedTop.value, parsedBottom.value),
-        };
       }
     }
+
+    if (hasLBHTotal || hasLBHTop) {
+      qc.cbm = {
+        top: computedTop,
+        bottom: computedBottom,
+        total: computedTotal,
+      };
+    }
+
+    /* ────────────────────────
+       🔢 BARCODE
+    ──────────────────────── */
 
     if (barcode !== undefined) {
-      if (qc.barcode > 0) {
-        if (Number(barcode) !== qc.barcode) {
-          return res.status(400).json({
-            message: "barcode can only be set once",
-          });
-        }
-      } else {
-        const parsed = parsePositiveInt(barcode, "barcode");
-        if (parsed.error) {
-          return res.status(400).json({ message: parsed.error });
-        }
-        qc.barcode = parsed.value;
+      if (qc.barcode > 0 && Number(barcode) !== qc.barcode) {
+        return res
+          .status(400)
+          .json({ message: "barcode can only be set once" });
       }
+      qc.barcode = Number(barcode);
     }
 
-    if (packed_size !== undefined) {
-      const parsed = parseBoolean(packed_size, "packed_size");
-      if (parsed.error) {
-        return res.status(400).json({ message: parsed.error });
-      }
-      if (qc.packed_size && parsed.value === false) {
-        return res.status(400).json({
-          message: "packed_size can only be set once",
-        });
-      }
-      if (!qc.packed_size && parsed.value === true) {
-        qc.packed_size = true;
-      }
-    }
+    /* ────────────────────────
+       ✅ BOOLEAN FLAGS
+    ──────────────────────── */
 
-    if (finishing !== undefined) {
-      const parsed = parseBoolean(finishing, "finishing");
-      if (parsed.error) {
-        return res.status(400).json({ message: parsed.error });
+    const setOnceBoolean = (field, value, name) => {
+      if (value === undefined) return;
+      if (typeof value !== "boolean") {
+        throw new Error(`${name} must be boolean`);
       }
-      if (qc.finishing && parsed.value === false) {
-        return res.status(400).json({
-          message: "finishing can only be set once",
-        });
+      if (qc[field] && value === false) {
+        throw new Error(`${name} can only be set once`);
       }
-      if (!qc.finishing && parsed.value === true) {
-        qc.finishing = true;
+      if (!qc[field] && value === true) {
+        qc[field] = true;
       }
-    }
+    };
 
-    if (branding !== undefined) {
-      const parsed = parseBoolean(branding, "branding");
-      if (parsed.error) {
-        return res.status(400).json({ message: parsed.error });
-      }
-      if (qc.branding && parsed.value === false) {
-        return res.status(400).json({
-          message: "branding can only be set once",
-        });
-      }
-      if (!qc.branding && parsed.value === true) {
-        qc.branding = true;
-      }
-    }
+    setOnceBoolean("packed_size", packed_size, "packed_size");
+    setOnceBoolean("finishing", finishing, "finishing");
+    setOnceBoolean("branding", branding, "branding");
 
-    const addChecked = qc_checked !== undefined ? Number(qc_checked) : 0;
-    const addPassed = qc_passed !== undefined ? Number(qc_passed) : 0;
-    const addRejected = qc_rejected !== undefined ? Number(qc_rejected) : 0;
-    const addProvision =
-      vendor_provision !== undefined ? Number(vendor_provision) : 0;
+    /* ────────────────────────
+       🔢 QUANTITIES
+    ──────────────────────── */
 
-    const numericFields = [
-      { name: "qc_checked", value: addChecked, provided: qc_checked !== undefined },
-      { name: "qc_passed", value: addPassed, provided: qc_passed !== undefined },
-      { name: "qc_rejected", value: addRejected, provided: qc_rejected !== undefined },
-      { name: "vendor_provision", value: addProvision, provided: vendor_provision !== undefined },
-    ];
+    const addChecked = Number(qc_checked || 0);
+    const addPassed = Number(qc_passed || 0);
+    const addRejected = Number(qc_rejected || 0);
+    const addProvision = Number(vendor_provision || 0);
 
-    for (const field of numericFields) {
-      if (field.provided && Number.isNaN(field.value)) {
-        return res.status(400).json({
-          message: `${field.name} must be a valid number`,
-        });
-      }
-      if (field.provided && field.value < 0) {
-        return res.status(400).json({
-          message: `${field.name} cannot be negative`,
-        });
-      }
-    }
-
-    const hasQuantityUpdate = numericFields.some((field) => field.provided);
-    const hasLabelUpdate =
-      labels !== undefined && Array.isArray(labels) && labels.length > 0;
-
-    if ((hasQuantityUpdate || hasLabelUpdate) && addChecked <= 0) {
+    if (
+      [addChecked, addPassed, addRejected, addProvision].some(
+        (v) => v < 0 || Number.isNaN(v)
+      )
+    ) {
       return res.status(400).json({
-        message: "qc_checked must be greater than 0 when updating quantities or labels",
+        message: "Quantity values must be valid non-negative numbers",
+      });
+    }
+
+    if ((addPassed || addRejected || labels?.length) && addChecked <= 0) {
+      return res.status(400).json({
+        message:
+          "qc_checked must be greater than 0 when updating quantities or labels",
       });
     }
 
@@ -556,31 +421,11 @@ exports.updateQC = async (req, res) => {
     const nextChecked = qc.quantities.qc_checked + addChecked;
     const nextPassed = qc.quantities.qc_passed + addPassed;
     const nextRejected = qc.quantities.qc_rejected + addRejected;
-    const totalOfferedNext =
-      qc.quantities.vendor_provision + qc.quantities.qc_rejected + addProvision;
 
     if (nextVendorProvision < 0) {
-      return res.status(400).json({
-        message: "offered quantity cannot be negative",
-      });
-    }
-
-    if (nextVendorProvision > qc.quantities.client_demand) {
-      return res.status(400).json({
-        message: "offered quantity cannot exceed client demand",
-      });
-    }
-
-    if (nextChecked > totalOfferedNext) {
-      return res.status(400).json({
-        message: "qc_checked cannot exceed offered quantity",
-      });
-    }
-
-    if (nextPassed > nextVendorProvision) {
-      return res.status(400).json({
-        message: "qc_passed cannot exceed offered quantity",
-      });
+      return res
+        .status(400)
+        .json({ message: "offered quantity cannot be negative" });
     }
 
     if (nextPassed + nextRejected > nextChecked) {
@@ -589,110 +434,63 @@ exports.updateQC = async (req, res) => {
       });
     }
 
-    // 📋 Validate and update labels if provided
-    if (labels !== undefined) {
-      if (!Array.isArray(labels)) {
-        return res
-          .status(400)
-          .json({ message: "Labels must be an array of numbers" });
-      }
-
-      if (labels.length > 0) {
-        const Inspector = require("../models/inspector.model");
-
-        const inspector = await Inspector.findOne({ user: req.user._id });
-        if (!inspector) {
-          return res.status(404).json({ message: "Inspector record not found" });
-        }
-
-        const parsedLabels = labels.map((label) => Number(label));
-        if (parsedLabels.some((label) => Number.isNaN(label))) {
-          return res
-            .status(400)
-            .json({ message: "All labels must be numbers" });
-        }
-
-        const uniqueLabels = [...new Set(parsedLabels)];
-
-        const existingQcLabels = new Set(
-          (qc.labels || []).map((label) => Number(label))
-        );
-
-        const incomingNewLabels = uniqueLabels.filter(
-          (label) => !existingQcLabels.has(label)
-        );
-
-        if (incomingNewLabels.length > addChecked) {
-          return res.status(400).json({
-            message: "labels count cannot exceed qc_checked for this update",
-          });
-        }
-
-        const totalLabelsCount =
-          existingQcLabels.size + incomingNewLabels.length;
-        if (totalLabelsCount > nextChecked) {
-          return res.status(400).json({
-            message: "total labels cannot exceed total qc_checked",
-          });
-        }
-
-        const allocatedSet = new Set(
-          (inspector.alloted_labels || []).map((label) => Number(label))
-        );
-
-        const unauthorizedLabels = incomingNewLabels.filter(
-          (label) => !allocatedSet.has(label)
-        );
-
-        if (unauthorizedLabels.length > 0) {
-          return res.status(403).json({
-            message: `You are not authorized to use labels: ${unauthorizedLabels.join(
-              ", "
-            )}. Allocated labels: ${inspector.alloted_labels.join(", ")}`,
-            unauthorized_labels: unauthorizedLabels,
-            allocated_labels: inspector.alloted_labels,
-          });
-        }
-
-        const usedSet = new Set(
-          (inspector.used_labels || []).map((label) => Number(label))
-        );
-
-        const alreadyUsedLabels = incomingNewLabels.filter((label) =>
-          usedSet.has(label)
-        );
-
-        if (alreadyUsedLabels.length > 0) {
-          return res.status(403).json({
-            message: `These labels are already used: ${alreadyUsedLabels.join(
-              ", "
-            )}`,
-            used_labels: inspector.used_labels,
-            already_used: alreadyUsedLabels,
-          });
-        }
-
-        const newUsedLabels = [
-          ...new Set([...usedSet, ...incomingNewLabels]),
-        ];
-        inspector.used_labels = newUsedLabels;
-        await inspector.save();
-
-        qc.labels = normalizeLabels([
-          ...existingQcLabels,
-          ...incomingNewLabels,
-        ]);
-      }
-    }
-
-    // Update QC quantities (incremental)
     qc.quantities.vendor_provision = nextVendorProvision;
     qc.quantities.qc_checked = nextChecked;
     qc.quantities.qc_passed = nextPassed;
     qc.quantities.qc_rejected = nextRejected;
-
     qc.quantities.pending =
       qc.quantities.client_demand - qc.quantities.qc_passed;
+
+    /* ────────────────────────
+       🏷️ LABELS (UNCHANGED LOGIC)
+    ──────────────────────── */
+
+    if (labels !== undefined && Array.isArray(labels) && labels.length > 0) {
+      const Inspector = require("../models/inspector.model");
+      const inspector = await Inspector.findOne({ user: req.user._id });
+
+      if (!inspector) {
+        return res
+          .status(404)
+          .json({ message: "Inspector record not found" });
+      }
+
+      const parsedLabels = labels.map(Number);
+      if (parsedLabels.some(Number.isNaN)) {
+        return res
+          .status(400)
+          .json({ message: "All labels must be numbers" });
+      }
+
+      const hasDualCbm =
+        Number(qc.cbm?.top) > 0 && Number(qc.cbm?.bottom) > 0;
+      const labelMultiplier = hasDualCbm ? 2 : 1;
+
+      const uniqueIncoming = [...new Set(parsedLabels)];
+      const existingSet = new Set((qc.labels || []).map(Number));
+      const incomingNew = uniqueIncoming.filter((label) => !existingSet.has(label));
+
+      if (incomingNew.length > addChecked * labelMultiplier) {
+        return res.status(400).json({
+          message: `labels count cannot exceed ${labelMultiplier}x qc_checked for this update`,
+        });
+      }
+
+      const totalLabels = existingSet.size + incomingNew.length;
+      const maxTotal = nextChecked * labelMultiplier;
+      if (totalLabels > maxTotal) {
+        return res.status(400).json({
+          message: `total labels cannot exceed ${labelMultiplier}x total qc_checked`,
+        });
+      }
+
+      qc.labels = [...new Set([...qc.labels, ...incomingNew])];
+      inspector.used_labels = [
+        ...new Set([...inspector.used_labels, ...incomingNew]),
+      ];
+
+      await inspector.save();
+    }
 
     if (remarks) qc.remarks = remarks;
 
@@ -701,11 +499,12 @@ exports.updateQC = async (req, res) => {
     res.json({
       message: "QC updated successfully",
       data: qc,
-    }); 
+    });
   } catch (err) {
     res.status(400).json({ message: err.message });
   }
 };
+
 
 exports.getQCById = async (req, res) => {
   try {

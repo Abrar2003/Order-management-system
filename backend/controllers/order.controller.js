@@ -14,26 +14,98 @@ exports.uploadOrders = async (req, res) => {
     const workbook = XLSX.readFile(req.file.path);
     const sheetName = workbook.SheetNames[0];
     const sheetData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
-    // Transform rows to Order schema
-    const orders = sheetData.map((row) => ({
-      order_id: row.PO,
-      item: {
-        item_code: row.item_code,
-        description: row.description,
-      },
-      brand: row.brand,
-      vendor: row.vendor,
-      ETD: dateParser(row.ETD),
-      order_date: dateParser(row.order_date),
-      status: "Pending",
-      quantity: row.quantity,
-    }));
+    const normalizeValue = (value) => {
+      if (value === undefined || value === null) return "";
+      return String(value).trim();
+    };
+    const normalizeKey = (orderId, itemCode) =>
+      `${normalizeValue(orderId)}__${normalizeValue(itemCode)}`;
 
-    await Order.insertMany(orders);
+    const duplicateEntries = [];
+    const seenKeys = new Set();
+
+    // Transform rows to Order schema (dedupe within file)
+    const orders = sheetData
+      .map((row) => {
+        const orderId =
+          row.PO !== undefined && row.PO !== null ? String(row.PO).trim() : row.PO;
+        const itemCode =
+          row.item_code !== undefined && row.item_code !== null
+            ? String(row.item_code).trim()
+            : row.item_code;
+        const key = normalizeKey(orderId, itemCode);
+
+        if (seenKeys.has(key)) {
+          duplicateEntries.push({
+            order_id: orderId,
+            item_code: itemCode,
+            reason: "duplicate_in_file",
+          });
+          return null;
+        }
+
+        seenKeys.add(key);
+
+        return {
+          order_id: orderId,
+          item: {
+            item_code: itemCode,
+            description: row.description,
+          },
+          brand: row.brand,
+          vendor: row.vendor,
+          ETD: dateParser(row.ETD),
+          order_date: dateParser(row.order_date),
+          status: "Pending",
+          quantity: row.quantity,
+        };
+      })
+      .filter(Boolean);
+
+    let newOrders = orders;
+
+    if (orders.length > 0) {
+      const existing = await Order.find({
+        $or: orders.map((order) => ({
+          order_id: order.order_id,
+          "item.item_code": order.item.item_code,
+        })),
+      }).select("order_id item.item_code");
+
+      const existingKeys = new Set(
+        existing.map((order) =>
+          normalizeKey(order.order_id, order.item.item_code),
+        ),
+      );
+
+      newOrders = orders.filter((order) => {
+        const key = normalizeKey(order.order_id, order.item.item_code);
+        if (existingKeys.has(key)) {
+          duplicateEntries.push({
+            order_id: order.order_id,
+            item_code: order.item.item_code,
+            reason: "already_exists",
+          });
+          return false;
+        }
+        return true;
+      });
+    }
+
+    if (newOrders.length > 0) {
+      await Order.insertMany(newOrders);
+    }
 
     res.status(201).json({
-      message: "Orders uploaded successfully",
-      count: orders.length,
+      message:
+        duplicateEntries.length > 0 && newOrders.length > 0
+          ? "Orders uploaded with duplicates skipped"
+          : newOrders.length > 0
+            ? "Orders uploaded successfully"
+            : "No new orders to upload",
+      inserted_count: newOrders.length,
+      duplicate_count: duplicateEntries.length,
+      duplicate_entries: duplicateEntries,
     });
   } catch (error) {
     console.error(error);
