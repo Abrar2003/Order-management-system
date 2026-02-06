@@ -2,11 +2,31 @@ import { useEffect, useState } from "react";
 import axios from "../api/axios";
 import "../App.css";
 
-const AlignQCModal = ({ order, onClose, onSuccess }) => {
+const formatDateInput = (value) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
+};
+
+const AlignQCModal = ({
+  order,
+  onClose,
+  onSuccess,
+  initialInspector = "",
+  initialVendorProvision = "",
+  initialRequestDate = "",
+}) => {
   const [inspectors, setInspectors] = useState([]);
-  const [inspector, setInspector] = useState("");
-  const [request_date, setReqDate] = useState(null);
-  const [vendorProvision, setVendorProvision] = useState("");
+  const [inspector, setInspector] = useState(
+    initialInspector ? String(initialInspector) : "",
+  );
+  const [request_date, setReqDate] = useState(formatDateInput(initialRequestDate));
+  const [vendorProvision, setVendorProvision] = useState(
+    initialVendorProvision !== undefined && initialVendorProvision !== null
+      ? String(initialVendorProvision)
+      : "",
+  );
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -21,6 +41,16 @@ const AlignQCModal = ({ order, onClose, onSuccess }) => {
         setInspectors(res.data);
       });
   }, []);
+
+  useEffect(() => {
+    setInspector(initialInspector ? String(initialInspector) : "");
+    setReqDate(formatDateInput(initialRequestDate));
+    setVendorProvision(
+      initialVendorProvision !== undefined && initialVendorProvision !== null
+        ? String(initialVendorProvision)
+        : "",
+    );
+  }, [initialInspector, initialRequestDate, initialVendorProvision]);
 
   const handleSubmit = async () => {
     const token = localStorage.getItem("token");

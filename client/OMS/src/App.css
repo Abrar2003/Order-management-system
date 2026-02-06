@@ -1034,6 +1034,8 @@ table {
 .qc-card-footer {
   display: flex;
   justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
   margin-top: 30px;
   padding-top: 20px;
   border-top: 1px solid var(--qc-border);

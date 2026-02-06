@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import UpdateQcModal from "../components/UpdateQcModal";
+import AlignQCModal from "../components/AlignQcModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import "../App.css";
 // import JsBarcode from "jsbarcode";
@@ -60,10 +61,12 @@ const QcDetails = () => {
   const [qc, setQc] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [showAlignModal, setShowAlignModal] = useState(false);
   const navigate = useNavigate();
   const user = getUserFromToken();
   const userId = user?.id || user?._id;
   const isAdmin = user?.role === "admin";
+  const canRealign = ["admin", "manager"].includes(user?.role);
   const requirementsMet =
     Boolean(qc?.packed_size) && Boolean(qc?.finishing) && Boolean(qc?.branding);
   const hasPendingQuantities =
@@ -291,6 +294,14 @@ const QcDetails = () => {
           </div>
 
           <div className="qc-card-footer">
+            {canRealign && (
+              <button
+                onClick={() => setShowAlignModal(true)}
+                className="secondayButton"
+              >
+                Re-align QC
+              </button>
+            )}
             <button
               onClick={handleUpdateQc}
               className="primaryButton"
@@ -316,6 +327,20 @@ const QcDetails = () => {
           onClose={() => setShowUpdateModal(false)}
           onUpdated={() => {
             setShowUpdateModal(false);
+            fetchQcDetails();
+          }}
+        />
+      )}
+
+      {showAlignModal && (
+        <AlignQCModal
+          order={qc?.order}
+          initialInspector={qc?.inspector?._id}
+          initialVendorProvision={qc?.quantities?.vendor_provision}
+          initialRequestDate={qc?.request_date}
+          onClose={() => setShowAlignModal(false)}
+          onSuccess={() => {
+            setShowAlignModal(false);
             fetchQcDetails();
           }}
         />

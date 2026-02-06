@@ -126,16 +126,70 @@ exports.alignQC = async (req, res) => {
       "item.item_code": item.item_code,
     });
 
-    if (existingQC) {
-      return res.status(400).json({ message: "QC already aligned" });
+    const clientDemand = Number(quantities?.client_demand);
+    const vendorProvision = Number(quantities?.vendor_provision);
+
+    if (Number.isNaN(clientDemand) || Number.isNaN(vendorProvision)) {
+      return res.status(400).json({
+        message: "client demand and vendor provision must be valid numbers",
+      });
     }
 
-    if( quantities.vendor_provision > quantities.client_demand){
+    if( vendorProvision > clientDemand){
       return res.status(400).json({message: "vendor provision can't be greater than client demand"})
     }
 
     if (new Date(request_date).getTime() < Date.now()){
       return res.status(400).json({message: "request date must be a present date or future date"})
+    }
+
+    if (existingQC) {
+      if (clientDemand < existingQC.quantities.qc_passed) {
+        return res.status(400).json({
+          message: "client demand cannot be less than already passed quantity",
+        });
+      }
+
+      if (vendorProvision < existingQC.quantities.qc_passed) {
+        return res.status(400).json({
+          message: "vendor provision cannot be less than already passed quantity",
+        });
+      }
+
+      const totalOffered =
+        vendorProvision + (existingQC.quantities.qc_rejected || 0);
+
+      if ((existingQC.quantities.qc_checked || 0) > totalOffered) {
+        return res.status(400).json({
+          message: "vendor provision cannot be less than already checked quantity",
+        });
+      }
+
+      existingQC.inspector = inspector;
+      existingQC.request_date = request_date;
+      existingQC.item = item;
+      existingQC.quantities.client_demand = clientDemand;
+      existingQC.quantities.vendor_provision = vendorProvision;
+      existingQC.quantities.pending =
+        clientDemand - (existingQC.quantities.qc_passed || 0);
+
+      if (remarks !== undefined) {
+        existingQC.remarks = remarks;
+      }
+
+      await existingQC.save();
+
+      const orderRecord = await Order.findById(order);
+      if (orderRecord) {
+        orderRecord.status = "Under Inspection";
+        orderRecord.qc_record = existingQC._id;
+        await orderRecord.save();
+      }
+
+      return res.status(200).json({
+        message: "QC re-aligned successfully",
+        data: existingQC,
+      });
     }
 
     const qc = await QC.create({
@@ -144,12 +198,12 @@ exports.alignQC = async (req, res) => {
       inspector,
       request_date,
       quantities: {
-        client_demand: quantities.client_demand,
-        vendor_provision: quantities.vendor_provision,
+        client_demand: clientDemand,
+        vendor_provision: vendorProvision,
         qc_checked: 0,
         qc_passed: 0,
         qc_rejected: 0,
-        pending: quantities.client_demand - quantities.vendor_provision,
+        pending: clientDemand - vendorProvision,
       },
       remarks,
       createdBy: req.user._id,

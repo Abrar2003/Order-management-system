@@ -191,7 +191,7 @@ const Navbar = () => {
           {["QC", "admin", "manager", "Dev"].includes(role) && (
             <button
               type="button"
-              className="navPillButton navMobileButton"
+              className="userMenuItem navMobileButton"
               onClick={() => handleNavigate("/qc")}
             >
               QC
