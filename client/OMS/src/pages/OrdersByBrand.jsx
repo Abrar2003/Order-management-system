@@ -11,12 +11,6 @@ const OrdersByBrand = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const spanStyle = {
-    fontWeight: "bold",
-    fontSize: "18px",
-    padding: "4px 8px",
-  };
-
   useEffect(() => {
     const fetchOrders = async () => {
       try {
@@ -33,7 +27,7 @@ const OrdersByBrand = () => {
             headers: {
               Authorization: `Bearer ${token}`,
             },
-          }
+          },
         );
 
         setOrders(res.data.data);
@@ -54,80 +48,95 @@ const OrdersByBrand = () => {
   return (
     <>
       <Navbar />
-<div
-          className="orderTableContainer"
-          style={{
-              width: "90%",
-              borderRadius: "8px",
-              padding: "16px",
-              display: "flex",
-              flexDirection: "column",
-              margin: "auto",
-            }}
-            >
-          {loading ? (
-            <div style={{ textAlign: "center", padding: "20px" }}>
-              Loading...
-            </div>
-          ) : (
-            <>
+      <div className="qc-details-header">
+        <button onClick={() => navigate(-1)} className="backButton">
+          ← Back
+        </button>
+        <h2 className="qc-details-title">Orders by Brand</h2>
+      </div>
       <div
-          style={{
-              // backgroundColor: "#f3f4f6",
-              padding: "0.5rem 1rem",
-              borderBottom: "1px solid #e5e7eb",
-              margin: "20px auto",
-              borderRadius: "4px",
-              display: "flex",
-              alignItems: "center",
-              gap: "12px",
-              flexWrap: "wrap",
-              boxShadow: "rgba(0, 0, 0, 0.24) 0px 3px 8px",
-            }}
-        >
-         <span style={spanStyle}>Brand: {brand}</span>
-          <span style={spanStyle}>Vendor: {vendor}</span>
-          <span style={spanStyle}>Status: {status ?? "all"}</span>
-        </div>
+        className="orderTableContainer"
+        style={{
+          width: "90%",
+          borderRadius: "8px",
+          padding: "16px",
+          display: "flex",
+          flexDirection: "column",
+          margin: "auto",
+        }}
+      >
+        {loading ? (
+          <div style={{ textAlign: "center", padding: "20px" }}>Loading...</div>
+        ) : (
+          <>
+            <div
+             className="orderDetailsDiv"
+              style={{
+                // backgroundColor: "#f3f4f6",
+                padding: "0.5rem 1rem",
+                borderBottom: "1px solid #e5e7eb",
+                margin: "20px auto",
+                borderRadius: "4px",
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+                flexWrap: "wrap",
+                boxShadow: "rgba(0, 0, 0, 0.24) 0px 3px 8px",
+              }}
+            >
+              <span>Brand: {brand}</span>
+              <span>Vendor: {vendor}</span>
+              <span>Status: {status ?? "all"}</span>
+            </div>
 
-       <table className="orderTable">
-                <thead className="tableHead">
-          <tr>
-            <th>Order ID</th>
-            {/* <th>Brand</th>
+            <table className="orderTable">
+              <thead className="tableHead">
+                <tr>
+                  <th>Order ID</th>
+                  {/* <th>Brand</th>
             <th>Vendor</th> */}
-            <th>Items</th>
-            <th>Order Date</th>
-            <th>ETD</th>
-          </tr>
-        </thead>
-<div style={{ height: "20px" }}></div>
-                <tbody className="tableBody">
-          {orders.length === 0 && (
-            <tr>
-              <td colSpan="9">No orders found</td>
-            </tr>
-          )}
+                  <th>Items</th>
+                  <th>Order Date</th>
+                  <th>ETD</th>
+                </tr>
+              </thead>
+              <div style={{ height: "20px" }}></div>
+              <tbody className="tableBody">
+                {orders.length === 0 && (
+                  <tr>
+                    <td colSpan="9">No orders found</td>
+                  </tr>
+                )}
 
-          {orders.map((order) => (
-            <tr key={order._id} style={{ cursor: "pointer" }} onClick={ ()=> navigate( `/orders?order_id=${order.order_id}`) } >
-              <td>{order.order_id}</td>
-              {/* <td>{order.brand}</td>
+                {orders.map((order) => (
+                  <tr
+                    key={order._id}
+                    style={{ cursor: "pointer" }}
+                    onClick={() =>
+                      navigate(`/orders?order_id=${order.order_id}`)
+                    }
+                  >
+                    <td>{order.order_id}</td>
+                    {/* <td>{order.brand}</td>
               <td>{order.vendor}</td> */}
-              <td>{order.items}</td>
-              <td>{order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}</td>
-              <td>
-                {order.ETD
-                  ? new Date(order.ETD).toLocaleDateString()
-                  : "N/A"}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+                    <td>{order.items}</td>
+                    <td>
+                      {order.order_date
+                        ? new Date(order.order_date).toLocaleDateString()
+                        : "N/A"}
+                    </td>
+                    <td>
+                      {order.ETD
+                        ? new Date(order.ETD).toLocaleDateString()
+                        : "N/A"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </>
         )}
-        </div>
+      </div>
     </>
   );
 };

@@ -13,6 +13,7 @@ const Navbar = () => {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showAllocateModal, setShowAllocateModal] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
   const userMenuRef = useRef(null);
   const getInitialTheme = () => {
     const stored = localStorage.getItem("theme");
@@ -31,6 +32,11 @@ const Navbar = () => {
   const handleLogout = () => {
     logout();
     navigate("/signin");
+  };
+
+  const handleNavigate = (path) => {
+    navigate(path);
+    setShowMobileMenu(false);
   };
 
   useEffect(() => {
@@ -62,28 +68,26 @@ const Navbar = () => {
 
   return (
     <nav
-      style={{
-        width: "90%",
-        display: "flex",
-        justifyContent: "space-between",
-        position: "sticky",
-        top: 0,
-        zIndex: 1000,
-        alignItems: "center",
-        padding: "1 rem 2rem",
-      }}
       className="Navbar"
     >
       {/* Left: Brand */}
-      <h2
-        style={{ margin: 0, cursor: "pointer", paddingRight: "20px" }}
-        onClick={() => navigate("/")}
-      >
-        Order Management System
-      </h2>
+      <div className="navBrand">
+        <h2 className="navTitle" onClick={() => handleNavigate("/")}>
+          Order Management System
+        </h2>
+        <button
+          type="button"
+          className="navHamburger"
+          onClick={() => setShowMobileMenu((prev) => !prev)}
+          aria-label="Toggle navigation"
+          aria-expanded={showMobileMenu}
+        >
+          {showMobileMenu ? "✕" : "☰"}
+        </button>
+      </div>
 
       {/* Middle: Navigation Links */}
-      <div style={{ display: "flex", width: "50%", justifyContent: "right" }}>
+      <div className="navLinks">
         {/* <span
           style={spanStyle}
           onClick={() => navigate("/orders")}
@@ -95,7 +99,7 @@ const Navbar = () => {
           <button
             type="button"
             className="navPillButton"
-            onClick={() => navigate("/qc")}
+            onClick={() => handleNavigate("/qc")}
           >
             QC
           </button>
@@ -112,7 +116,7 @@ const Navbar = () => {
       </div>
 
       {/* Right: User + Logout */}
-      <div style={{ display: "flex", alignItems: "center", width: "40%", justifyContent: "space-evenly" }}>
+      <div className="navActions">
         <div className="userMenu" ref={userMenuRef}>
           <button
             className="userMenuButton"
@@ -140,7 +144,7 @@ const Navbar = () => {
                   type="button"
                   className="userMenuItem"
                   onClick={() => {
-                    navigate("/users/new");
+                    handleNavigate("/users/new");
                     setShowUserMenu(false);
                   }}
                 >
@@ -178,6 +182,75 @@ const Navbar = () => {
         </button>
 
       </div>
+
+      {showMobileMenu && (
+        <div className="navMobileMenu">
+          <div className="navMobileUser">
+            {user?.name} ({role})
+          </div>
+          {["QC", "admin", "manager", "Dev"].includes(role) && (
+            <button
+              type="button"
+              className="navPillButton navMobileButton"
+              onClick={() => handleNavigate("/qc")}
+            >
+              QC
+            </button>
+          )}
+          {canManageLabels && (
+            <button
+              type="button"
+              className="userMenuItem navMobileButton"
+              onClick={() => {
+                setShowAllocateModal(true);
+                setShowMobileMenu(false);
+              }}
+            >
+              Allocate Labels
+            </button>
+          )}
+          {canCreateUsers && (
+            <button
+              type="button"
+              className="userMenuItem navMobileButton"
+              onClick={() => handleNavigate("/users/new")}
+            >
+              Create User
+            </button>
+          )}
+          {canManageOrders && (
+            <button
+              type="button"
+              className="userMenuItem navMobileButton"
+              onClick={() => {
+                setShowUploadModal(true);
+                setShowMobileMenu(false);
+              }}
+            >
+              Update Orders
+            </button>
+          )}
+          <button
+            className="themeToggle navMobileButton"
+            type="button"
+            onClick={toggleTheme}
+            title="Toggle theme"
+          >
+            {theme === "system"
+              ? "Theme: System"
+              : theme === "dark"
+                ? "Theme: Dark"
+                : "Theme: Light"}
+          </button>
+          <button
+            type="button"
+            className="userMenuItem danger navMobileButton"
+            onClick={handleLogout}
+          >
+            Logout
+          </button>
+        </div>
+      )}
       {showUploadModal && (
               <UploadOrdersModal
                 onClose={() => setShowUploadModal(false)}

@@ -32,7 +32,12 @@ const SignIn = () => {
 
   return (
     <div className="authContainer">
-      <h2>Sign In</h2>
+      <div className="qc-details-header">
+        <button onClick={() => navigate(-1)} className="backButton">
+          ← Back
+        </button>
+        <h2 className="qc-details-title">Sign In</h2>
+      </div>
 
       {error && <p style={{ color: "red" }}>{error}</p>}
 

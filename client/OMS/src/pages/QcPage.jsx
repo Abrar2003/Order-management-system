@@ -76,7 +76,12 @@ const QC = () => {
     <>
       <Navbar />
 
-      <h2>QC Records</h2>
+      <div className="qc-details-header">
+        <button onClick={() => navigate(-1)} className="backButton">
+          ← Back
+        </button>
+        <h2 className="qc-details-title">QC Records</h2>
+      </div>
 
       {/* Filters */}
       <div className="filters">

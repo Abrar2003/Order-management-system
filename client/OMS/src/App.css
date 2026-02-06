@@ -648,6 +648,13 @@ table {
 }
 
 .Navbar {
+  width: 90%;
+  display: flex;
+  justify-content: space-between;
+  position: sticky;
+  z-index: 1000;
+  align-items: center;
+  gap: 16px;
   margin: auto;
   box-shadow: rgba(0, 0, 0, 0.24) 0px 3px 8px;
   background-color: var(--nav-bg) !important;
@@ -656,6 +663,100 @@ table {
   border-radius: 0 16px 0 16px;
   padding: 1rem 2rem !important;
   top: 0 !important;
+}
+
+.navBrand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1 1 auto;
+}
+
+.navTitle {
+  margin: 0;
+  cursor: pointer;
+  padding-right: 20px;
+}
+
+.navLinks {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  flex: 0 0 50%;
+}
+
+.navActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex: 0 0 40%;
+}
+
+.navHamburger {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--qc-surface);
+  color: var(--qc-text);
+  border: 1px solid var(--qc-border);
+  cursor: pointer;
+  font-size: 20px;
+  font-weight: 700;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.navHamburger:hover {
+  background: var(--qc-surface-muted);
+  border-color: var(--qc-border-strong);
+}
+
+.navMobileMenu {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--qc-border);
+  background: var(--qc-surface);
+  box-shadow: var(--qc-shadow-soft);
+}
+
+.navMobileUser {
+  font-weight: 700;
+  color: var(--qc-text);
+}
+
+.navMobileButton {
+  width: 100%;
+  justify-content: center;
+}
+
+@media (max-width: 900px) {
+  .Navbar {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    align-items: stretch;
+    padding: 0.75rem 1rem !important;
+  }
+
+  .navLinks,
+  .navActions {
+    display: none;
+  }
+
+  .navHamburger {
+    display: inline-flex;
+  }
+
+  .navBrand {
+    width: 100%;
+    justify-content: space-between;
+  }
 }
 
 .themeToggle {
@@ -877,6 +978,17 @@ table {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.orderDetailsDiv span {
+  font-size: 16px;
+  color: var(--qc-text);
+  font-weight: 500;
+  margin: 0;
+  padding: 8px 12px;
+  background-color: var(--qc-surface-muted);
+  border-radius: 6px;
+  border-left: 3px solid var(--qc-primary);
 }
 
 .qc-display-box input[type="checkbox"] {

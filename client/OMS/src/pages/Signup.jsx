@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import { getUserFromToken } from "../auth/auth.utils";
@@ -8,6 +8,7 @@ import "../App.css";
 const Signup = () => {
   const user = getUserFromToken();
   const isAdmin = user?.role === "admin";
+  const navigate = useNavigate();
   const roles = useMemo(
     () => ["admin", "manager", "QC", "Dev", "user"],
     []
@@ -73,7 +74,12 @@ const Signup = () => {
     <>
       <Navbar />
       <div className="authContainer signupContainer">
-        <h2>Create User</h2>
+        <div className="qc-details-header">
+          <button onClick={() => navigate(-1)} className="backButton">
+            ← Back
+          </button>
+          <h2 className="qc-details-title">Create User</h2>
+        </div>
         <p className="authSubtitle">Admin-only user creation</p>
 
         {error && <div className="authError">{error}</div>}
