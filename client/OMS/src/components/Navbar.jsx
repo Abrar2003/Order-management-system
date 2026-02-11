@@ -75,6 +75,16 @@ const Navbar = () => {
         <h2 className="navTitle" onClick={() => handleNavigate("/")}>
           Order Management System
         </h2>
+        <div className="navLinks navRight">
+           {["QC", "admin", "manager", "Dev"].includes(role) && (
+            <button
+              type="button"
+              className="navPillButton"
+              onClick={() => handleNavigate("/open-orders")}
+            >Open Orders</button>
+          )}
+        </div>
+       
         <button
           type="button"
           className="navHamburger"
@@ -106,14 +116,7 @@ const Navbar = () => {
             </button>
           )}
 
-          {/* {["admin", "manager", "Dev"].includes(role) && (
-            <span
-              style={{ cursor: "pointer", ...isActive("/users") }}
-              onClick={() => navigate("/users")}
-            >
-              Users
-            </span>
-          )} */}
+          
         </div>
 
         {/* Right: User + Logout */}
@@ -164,6 +167,7 @@ const Navbar = () => {
                     Update Orders
                   </button>
                 )}
+                
                 <button
                   type="button"
                   className="userMenuItem danger"
@@ -196,6 +200,15 @@ const Navbar = () => {
               onClick={() => handleNavigate("/qc")}
             >
               QC
+            </button>
+          )}
+          {["QC", "admin", "manager", "Dev"].includes(role) && (
+            <button
+              type="button"
+              className="userMenuItem navMobileButton"
+              onClick={() => handleNavigate("/open-orders")}
+            >
+              Open Orders
             </button>
           )}
           {canManageLabels && (

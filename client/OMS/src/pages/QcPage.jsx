@@ -63,14 +63,14 @@ const QC = () => {
 
   const handleDetailsClick = (qc) => {
     navigate(`/qc/${qc._id}`);
-  }
+  };
 
   const handleSearch = (e) => {
     e.preventDefault();
     setPage(1);
     const formData = new FormData(e.target);
     setSearch(formData.get("search"));
-  }
+  };
 
   return (
     <>
@@ -85,46 +85,43 @@ const QC = () => {
 
       {/* Filters */}
       <div className="filters">
-
-<div>
-
-        <select
-          value={inspector}
-          onChange={(e) => {
-            setPage(1);
-            setInspector(e.target.value);
-          }}
+        <div>
+          <select
+            value={inspector}
+            onChange={(e) => {
+              setPage(1);
+              setInspector(e.target.value);
+            }}
           >
-          <option value="">All Inspectors</option>
-          {inspectors.map((qc) => (
-            <option key={qc._id} value={qc._id}>
-              {qc.name}
-            </option>
-          ))}
-        </select>
+            <option value="">All Inspectors</option>
+            {inspectors.map((qc) => (
+              <option key={qc._id} value={qc._id}>
+                {qc.name}
+              </option>
+            ))}
+          </select>
 
-        <select
-          value={vendor}
-          onChange={(e) => {
-            setPage(1);
-            setVendor(e.target.value);
-          }}
+          <select
+            value={vendor}
+            onChange={(e) => {
+              setPage(1);
+              setVendor(e.target.value);
+            }}
           >
-          <option value="">All Vendors</option>
-          {vendors.map((v) => (
-            <option key={v} value={v}>
-              {v}
-            </option>
-          ))}
-        </select>
-          </div>
-          <div>
-            <form onSubmit={(e) => handleSearch(e)}>
-
+            <option value="">All Vendors</option>
+            {vendors.map((v) => (
+              <option key={v} value={v}>
+                {v}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <form onSubmit={(e) => handleSearch(e)}>
             <input type="text" name="search" placeholder="Item code" />
             <button type="submit">Search</button>
-            </form>
-          </div>
+          </form>
+        </div>
       </div>
 
       {/* Table */}
@@ -174,10 +171,10 @@ const QC = () => {
                         fontWeight: "bold",
                         width: "100%",
                       }}
-                      onClick={(e) =>{
+                      onClick={(e) => {
                         e.preventDefault();
-                        handleDetailsClick(qc)
-                      } }
+                        handleDetailsClick(qc);
+                      }}
                     >
                       See Details
                     </button>

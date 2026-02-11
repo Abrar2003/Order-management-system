@@ -110,9 +110,6 @@ exports.getQCList = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
-
-
 /**
  * POST /align-qc
  * Manager/Admin aligns QC + vendor provision
@@ -195,6 +192,10 @@ exports.alignQC = async (req, res) => {
     const qc = await QC.create({
       order,
       item,
+      order_meta: {
+        vendor: orderRecord.vendor,
+        brand: orderRecord.brand
+      },
       inspector,
       request_date,
       quantities: {

@@ -5,9 +5,11 @@ const authorize = require("../middlewares/authorize.middleware");
 const {
   uploadOrders,
   getOrders,
+  getOrdersByFilters,
   getOrderById,
   getVendorSummaryByBrand,
   getOrdersByBrandAndStatus,
+  getOrderSummary
 } = require("../controllers/order.controller");
 
 const router = express.Router();
@@ -23,13 +25,19 @@ router.post(
 // List orders (pagination + sorting)
 router.get("/", authenticate, authorize("admin", "manager", "QC", "dev"), getOrders);
 
-// Get order by ID
-router.get("/:id", getOrderById);
+// List order's brands and vendors
+router.get("/brands-and-vendors", authenticate, getOrderSummary)
 
 //get orders by brand and status
 router.get("/brand/:brand/vendor/:vendor/status/:status", authenticate, getOrdersByBrandAndStatus);
 
+// get orders with optional filters via query params
+router.get("/filters", authenticate, getOrdersByBrandAndStatus);
+
 // Get vendor summary by brand
 router.get("/:brand/vendor-summary", authenticate, getVendorSummaryByBrand);
+
+// Get order by ID   
+router.get("/order-by-id/:id", getOrderById);
 
 module.exports = router;

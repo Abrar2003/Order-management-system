@@ -134,7 +134,7 @@ exports.getOrders = async (req, res) => {
           select: "name role",
         },
       })
-      .sort({ createdAt: -1 })
+      .sort({ order_id: -1 })
       .skip(skip)
       .limit(Number(limit));
 
@@ -264,26 +264,37 @@ exports.getVendorSummaryByBrand = async (req, res) => {
 
 exports.getOrdersByBrandAndStatus = async (req, res) => {
   try {
-    const { brand, vendor, status } = req.params;
-    const { isDelayed } = req.query;
+    const normalizeFilterValue = (value) => {
+      if (value === undefined || value === null) return null;
+      const cleaned = String(value).trim();
+      if (!cleaned) return null;
+      const lowered = cleaned.toLowerCase();
+      if (lowered === "all" || lowered === "undefined" || lowered === "null") {
+        return null;
+      }
+      return cleaned;
+    };
 
-    // validation
-    if (!brand || !vendor) {
-      return res.status(400).json({
-        message: "Brand and Vendor are required",
-      });
-    }
+    const brand = normalizeFilterValue(req.query.brand ?? req.params.brand);
+    const vendor = normalizeFilterValue(req.query.vendor ?? req.params.vendor);
+    const status = normalizeFilterValue(req.query.status ?? req.params.status);
+    const { isDelayed } = req.query;
 
     const today = new Date();
 
     // base match filter
-    const matchStage = {
-      brand,
-      vendor,
-    };
+    const matchStage = {};
+
+    if (brand) {
+      matchStage.brand = brand;
+    }
+
+    if (vendor) {
+      matchStage.vendor = vendor;
+    }
 
     // status logic
-    if (status && status !== "all") {
+    if (status) {
       if (status.toLowerCase() === "pending") {
         // Pending = anything NOT shipped
         matchStage.status = { $ne: "Shipped" };
@@ -341,6 +352,111 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to fetch orders",
+      error: error.message,
+    });
+  }
+};
+
+exports.getOrdersByFilters = async (req, res) => {
+  try {
+    const normalizeFilterValue = (value) => {
+      if (value === undefined || value === null) return null;
+      const cleaned = String(value).trim();
+      if (!cleaned) return null;
+      const lowered = cleaned.toLowerCase();
+      if (lowered === "all" || lowered === "undefined" || lowered === "null") {
+        return null;
+      }
+      return cleaned;
+    };
+
+    const parsePositiveInt = (value, fallback) => {
+      const parsedValue = Number.parseInt(value, 10);
+      if (Number.isNaN(parsedValue) || parsedValue < 1) {
+        return fallback;
+      }
+      return parsedValue;
+    };
+
+    const vendor = normalizeFilterValue(req.query.vendor);
+    const brand = normalizeFilterValue(req.query.brand);
+    const status = normalizeFilterValue(req.query.status);
+
+    const page = parsePositiveInt(req.query.page, 1);
+    const limit = parsePositiveInt(req.query.limit, 20);
+    const skip = (page - 1) * limit;
+
+    const matchStage = {};
+
+    if (vendor) {
+      matchStage.vendor = vendor;
+    }
+
+    if (brand) {
+      matchStage.brand = brand;
+    }
+
+    if (status) {
+      matchStage.status = status;
+    }
+
+    const [orders, totalRecords] = await Promise.all([
+      Order.find(matchStage)
+        .populate({
+          path: "qc_record",
+          populate: {
+            path: "inspector",
+            select: "name role",
+          },
+        })
+        .sort({ order_date: -1, order_id: -1 })
+        .skip(skip)
+        .limit(Number(limit)),
+      Order.countDocuments(matchStage),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      data: orders,
+      pagination: {
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(totalRecords / limit)),
+        totalRecords,
+      },
+    });
+  } catch (error) {
+    console.error("Get Orders By Filters Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch filtered orders",
+      error: error.message,
+    });
+  }
+};
+
+exports.getOrderSummary = async (req, res) => {
+  try {
+    const [vendors, brands] = await Promise.all([
+      Order.distinct("vendor"),
+      Order.distinct("brand"),
+    ]);
+
+    const normalizeList = (values) =>
+      values
+        .filter((value) => value !== undefined && value !== null)
+        .map((value) => String(value).trim())
+        .filter((value) => value.length > 0)
+        .sort((a, b) => a.localeCompare(b));
+
+    return res.status(200).json({
+      vendors: normalizeList(vendors),
+      brands: normalizeList(brands),
+    });
+  } catch (error) {
+    console.error("Get Order Summary Error:", error);
+    return res.status(500).json({
+      message: "Failed to fetch order summary",
       error: error.message,
     });
   }

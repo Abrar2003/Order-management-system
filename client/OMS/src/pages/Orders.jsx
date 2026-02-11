@@ -82,6 +82,8 @@ const Orders = () => {
                 boxShadow: "rgba(0, 0, 0, 0.24) 0px 3px 8px",
               }}
             >
+                              <span>Order: {orders[0].order_id}</span>
+
               <span>Brand: {orders[0].brand}</span>
               <span>Vendor: {orders[0].vendor}</span>
               <span>Status: {orders[0].status ?? "all"}</span>

@@ -16,6 +16,7 @@ import QCPage from "./pages/QcPage";
 import QcDetails from "./pages/QcDetails";
 import OrdersByBrand from "./pages/OrdersByBrand";
 import Signup from "./pages/Signup";
+import OpenOrders from "./pages/OpenOrders";
 
 // import Users from "./pages/Users"; // later
 
@@ -43,6 +44,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <Orders />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/open-orders"
+            element={
+              <ProtectedRoute>
+                <OpenOrders />
               </ProtectedRoute>
             }
           />

@@ -8,8 +8,11 @@ const qcSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-
-    request_date: {
+    order_meta : {
+      vendor: {type: String, requried: true},
+      brand: {type: String, required:true}
+    },
+    request_date: { 
       type: Date,
       required: true
     },
@@ -98,5 +101,24 @@ const qcSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+// 1) Inspector dashboard + date sort/filter
+qcSchema.index({ inspector: 1, request_date: -1 });
+
+// 2) Vendor + date (common for ops views)
+qcSchema.index({ "order_meta.vendor": 1, request_date: -1 });
+
+// 3) Brand + date
+qcSchema.index({ "order_meta.brand": 1, request_date: -1 });
+
+// 4) Item code + date
+qcSchema.index({ "item.item_code": 1, request_date: -1 });
+
+// 5) If you often filter by vendor+brand together:
+qcSchema.index({ "order_meta.vendor": 1, "order_meta.brand": 1, request_date: -1 });
+
+// Optional (only if you do a LOT of date range queries without other filters)
+qcSchema.index({ request_date: -1 });
+
 
 module.exports = mongoose.model("qc", qcSchema);
