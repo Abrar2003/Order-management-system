@@ -1,8 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
-import { getUserFromToken } from "../auth/auth.utils";
-import AlignQCModal from "../components/AlignQcModal";
 import { useNavigate } from "react-router-dom";
 import "../App.css";
 
@@ -14,30 +12,18 @@ const defaultFilters = {
 
 const OpenOrders = () => {
   const [orders, setOrders] = useState([]);
-  const [showAlignModal, setShowAlignModal] = useState(false);
-  const [selectedOrder, setSelectedOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [totalPages, setTotalPages] = useState(1);
-  const [totalVendors, setTotalVedors] = useState([]);
+  const [totalVendors, setTotalVendors] = useState([]);
   const [totalBrands, setTotalBrands] = useState([]);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
   const [filters, setFilters] = useState(defaultFilters);
 
   const navigate = useNavigate();
-
-  const user = getUserFromToken();
   const token = localStorage.getItem("token");
 
-  const handleSearch = (e) => {
-    e.preventDefault();
-    setPage(1);
-    const formData = new FormData(e.target);
-    getSearchedOrder(formData.get("search"));
-  };
-
-  const getOrdersByFilters = async () => {
-    
+  const getOrdersByFilters = useCallback(async () => {
     setLoading(true);
 
     try {
@@ -54,8 +40,19 @@ const OpenOrders = () => {
         },
       });
 
-      setOrders(res?.data?.data ?? []);
-      setTotalPages(res?.data?.pagination?.totalPages ?? 1);
+      const incomingOrders = res?.data?.data ?? [];
+
+      if (res?.data?.pagination) {
+        setOrders(incomingOrders);
+        setTotalPages(res.data.pagination.totalPages || 1);
+      } else {
+        const total = incomingOrders.length;
+        const nextTotalPages = Math.max(1, Math.ceil(total / limit));
+        const start = (page - 1) * limit;
+        const end = start + limit;
+        setOrders(incomingOrders.slice(start, end));
+        setTotalPages(nextTotalPages);
+      }
     } catch (err) {
       console.error(err);
       setOrders([]);
@@ -63,115 +60,99 @@ const OpenOrders = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filters.brand, filters.status, filters.vendor, limit, page, token]);
 
-  const getSearchedOrder = async (id) => {
-    
+  const getSearchedOrder = useCallback(async (id) => {
+    if (!id) return;
+
     setLoading(true);
 
     try {
-        const res = await axios.get(`/orders/order-by-id/${id}`, {
-            headers: {
-                Authorization: `Bearer ${token}`
-            }
-        })
-        setOrders(res.data)
+      const res = await axios.get(`/orders/order-by-id/${id}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      setOrders(res.data || []);
+      setTotalPages(1);
+      setPage(1);
     } catch (error) {
-        console.log(error);
-        alert("error searching the order");
+      console.error(error);
+      alert("Error searching the order");
     } finally {
-        setLoading(false);
+      setLoading(false);
     }
-  };
+  }, [token]);
 
-  const getOrderSummary = async () => {
-
-    setLoading(true);
-
+  const getOrderSummary = useCallback(async () => {
     try {
       const data = await axios.get("/orders/brands-and-vendors", {
         headers: {
           Authorization: `Bearer ${token}`,
         },
       });
-      setTotalBrands(data.data.brands);
-      setTotalVedors(data.data.vendors);
+      setTotalBrands(data.data.brands || []);
+      setTotalVendors(data.data.vendors || []);
     } catch (error) {
-      console.log(error.message);
-      alert("error fetching orders summary");
-      return null;
-    } finally {
-      setLoading(false);
+      console.error(error.message);
+      alert("Error fetching order summary");
     }
-  };
+  }, [token]);
 
   useEffect(() => {
     getOrderSummary();
-  }, []);
+  }, [getOrderSummary]);
 
   useEffect(() => {
     getOrdersByFilters();
-  }, [filters, page, limit]);
+  }, [getOrdersByFilters]);
 
   const updatePage = (nextPage) => {
     if (nextPage < 1 || nextPage > totalPages) return;
+    setPage(nextPage);
+  };
+
+  const handleSearch = (e) => {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const searchValue = formData.get("search");
+    getSearchedOrder(searchValue);
   };
 
   return (
     <>
       <Navbar />
-      <div className="qc-details-header">
-        <button onClick={() => navigate(-1)} className="backButton">
-          {"<- Back"}
-        </button>
-        <h2 className="qc-details-title">Orders</h2>
-      </div>
 
-      <div
-        className="orderTableContainer"
-        style={{
-          width: "90%",
-          borderRadius: "8px",
-          padding: "16px",
-          display: "flex",
-          flexDirection: "column",
-          margin: "auto",
-        }}
-      >
-        {loading ? (
-          <div style={{ textAlign: "center", padding: "20px" }}>Loading...</div>
-        ) : (
-          <>
-            <div
-              className="orderDetailsDiv"
-              style={{
-                padding: "0.5rem 1rem",
-                borderBottom: "1px solid #e5e7eb",
-                margin: "20px auto",
-                borderRadius: "4px",
-                display: "flex",
-                alignItems: "center",
-                gap: "12px",
-                flexWrap: "wrap",
-                boxShadow: "rgba(0, 0, 0, 0.24) 0px 3px 8px",
-              }}
-            >
-              <span>Brand: {filters.brand}</span>
-              <span>Vendor: {filters.vendor}</span>
-              <span>Status: {filters.status}</span>
-            </div>
+      <div className="page-shell py-3">
+        <div className="d-flex justify-content-between align-items-center mb-3">
+          <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => navigate(-1)}>
+            Back
+          </button>
+          <h2 className="h4 mb-0">Open Orders</h2>
+          <span className="d-none d-md-inline" />
+        </div>
 
-            <div className="filters">
-              <div>
+        <div className="card om-card mb-3">
+          <div className="card-body d-flex flex-wrap gap-2">
+            <span className="om-summary-chip">Brand: {filters.brand}</span>
+            <span className="om-summary-chip">Vendor: {filters.vendor}</span>
+            <span className="om-summary-chip">Status: {filters.status}</span>
+          </div>
+        </div>
+
+        <div className="card om-card mb-3">
+          <div className="card-body">
+            <div className="row g-2 align-items-end">
+              <div className="col-md-3">
+                <label className="form-label">Vendor</label>
                 <select
-                  name="vendors"
-                  id="vendor-select"
+                  className="form-select"
                   value={filters.vendor}
                   onChange={(e) => {
                     setPage(1);
                     setFilters({ ...filters, vendor: e.target.value });
                   }}
-                  defaultValue={"all"}
                 >
                   <option value="all">Select Vendor</option>
                   {totalVendors.map((vendor) => (
@@ -180,10 +161,12 @@ const OpenOrders = () => {
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div className="col-md-3">
+                <label className="form-label">Brand</label>
                 <select
-                  name="brands"
-                  id="brand-select"
-                  defaultValue={"all"}
+                  className="form-select"
                   value={filters.brand}
                   onChange={(e) => {
                     setPage(1);
@@ -197,10 +180,12 @@ const OpenOrders = () => {
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div className="col-md-2">
+                <label className="form-label">Status</label>
                 <select
-                  name="status"
-                  id="status-select"
-                  defaultValue={"all"}
+                  className="form-select"
                   value={filters.status}
                   onChange={(e) => {
                     setPage(1);
@@ -215,89 +200,106 @@ const OpenOrders = () => {
                 </select>
               </div>
 
-              <div>
-                <form
-                  onSubmit={(e) => handleSearch(e)}
-                >
-                  <input type="text" name="search" placeholder="Search by Order ID"/>
-                  <button type="submit" className="secondayButton">Search 🔍</button>
+              <div className="col-md-4">
+                <form onSubmit={handleSearch} className="row g-2">
+                  <div className="col-8">
+                    <label className="form-label">Search by Order ID</label>
+                    <input type="text" name="search" className="form-control" placeholder="Order ID" />
+                  </div>
+                  <div className="col-4 d-flex align-items-end">
+                    <button type="submit" className="btn btn-primary w-100">
+                      Search
+                    </button>
+                  </div>
                 </form>
               </div>
-              
             </div>
-            <table className="orderTable">
-              <thead className="tableHead">
-                <tr>
-                  <th>Order ID</th>
-                  <th>Brand</th>
-                  <th>Vendor</th>
-                  <th>Items</th>
-                  <th>Order Date</th>
-                  <th>ETD</th>
-                </tr>
-              </thead>
-              <div style={{ height: "20px" }}></div>
-              <tbody className="tableBody">
-                {orders.length === 0 && (
-                  <tr>
-                    <td colSpan="9">No orders found</td>
-                  </tr>
-                )}
+          </div>
+        </div>
 
-                {orders.map((order) => (
-                  <tr
-                    key={order._id}
-                    style={{ cursor: "pointer" }}
-                    onClick={() =>
-                      navigate(`/orders?order_id=${order.order_id}`)
-                    }
-                  >
-                    <td>{order.order_id}</td>
-                    <td>{order.brand}</td>
-                    <td>{order.vendor}</td>
-                    <td>{order.items}</td>
-                    <td>
-                      {order.order_date
-                        ? new Date(order.order_date).toLocaleDateString()
-                        : "N/A"}
-                    </td>
-                    <td>
-                      {order.ETD
-                        ? new Date(order.ETD).toLocaleDateString()
-                        : "N/A"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </>
-        )}
-      </div>
-      <div style={{ marginTop: "20px", textAlign: "center" }}>
-        <button disabled={page === 1} onClick={() => updatePage(page - 1)}>
-          Prev
-        </button>
-        <span style={{ margin: "0 15px" }}>
-          Page {page} of {totalPages}
-        </span>
-        <button
-          disabled={page >= totalPages}
-          onClick={() => updatePage(page + 1)}
-        >
-          Next
-        </button>
-      </div>
+        <div className="card om-card">
+          <div className="card-body p-0">
+            {loading ? (
+              <div className="text-center py-4">Loading...</div>
+            ) : (
+              <div className="table-responsive">
+                <table className="table table-striped table-hover align-middle om-table mb-0">
+                  <thead className="table-primary">
+                    <tr>
+                      <th>Order ID</th>
+                      <th>Brand</th>
+                      <th>Vendor</th>
+                      <th>Items</th>
+                      <th>Order Date</th>
+                      <th>ETD</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {orders.length === 0 && (
+                      <tr>
+                        <td colSpan="6" className="text-center py-4">
+                          No orders found
+                        </td>
+                      </tr>
+                    )}
 
-      {showAlignModal && selectedOrder && (
-        <AlignQCModal
-          order={selectedOrder}
-          onClose={() => setShowAlignModal(false)}
-          onSuccess={() => {
-            setShowAlignModal(false);
-            getOrdersByFilters();
-          }}
-        />
-      )}
+                    {orders.map((order) => (
+                      <tr
+                        key={`${order._id || order.order_id}-${order.order_date || ""}`}
+                        className="table-clickable"
+                        onClick={() => navigate(`/orders?order_id=${order.order_id}`)}
+                      >
+                        <td>{order.order_id}</td>
+                        <td>{order.brand}</td>
+                        <td>{order.vendor}</td>
+                        <td>{order.items}</td>
+                        <td>{order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}</td>
+                        <td>{order.ETD ? new Date(order.ETD).toLocaleDateString() : "N/A"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="d-flex justify-content-center align-items-center gap-3 mt-3">
+          <button type="button" className="btn btn-outline-secondary btn-sm" disabled={page === 1} onClick={() => updatePage(page - 1)}>
+            Prev
+          </button>
+          <span className="small fw-semibold">
+            Page {page} of {totalPages}
+          </span>
+          <button
+            type="button"
+            className="btn btn-outline-secondary btn-sm"
+            disabled={page >= totalPages}
+            onClick={() => updatePage(page + 1)}
+          >
+            Next
+          </button>
+        </div>
+
+        <div className="d-flex justify-content-end mt-3">
+          <div className="input-group om-limit-control">
+            <span className="input-group-text">Limit</span>
+            <select
+              className="form-select"
+              value={limit}
+              onChange={(e) => {
+                setPage(1);
+                setLimit(Number(e.target.value));
+              }}
+            >
+              <option value={10}>10</option>
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
+          </div>
+        </div>
+      </div>
     </>
   );
 };

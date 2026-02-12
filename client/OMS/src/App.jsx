@@ -22,7 +22,7 @@ import OpenOrders from "./pages/OpenOrders";
 
 const App = () => {
   return (
-    <div className="App">
+    <div className="app-shell">
       <Router>
         <Routes>
           {/* Public */}

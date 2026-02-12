@@ -1,4 +1,6 @@
 const QC = require("../models/qc.model");
+const Inspection = require("../models/inspection.model");
+
 const Order = require("../models/order.model")
 const mongoose = require("mongoose");
 
@@ -29,79 +31,102 @@ const findRejectedLabels = (sortedLabels = []) => {
  * GET /qclist
  * Fetch all QC records (pagination optional)
  */
+const escapeRegex = (value = "") =>
+  String(value).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 exports.getQCList = async (req, res) => {
+
+  await QC.createIndexes();
   try {
     const {
       page = 1,
       limit = 20,
       search = "",
-      inspector,
-      vendor,
+      inspector = "",
+      vendor = "",
+      brand = "",
+      order = "",
+      from = "",
+      to = "",
+      sort = "-request_date",
     } = req.query;
 
-    const skip = (page - 1) * limit;
+    const pageNum = Math.max(1, Number(page));
+    const limitNum = Math.min(100, Math.max(1, Number(limit)));
+    const skip = (pageNum - 1) * limitNum;
 
-    const matchStage = {};
+    const match = {};
 
-    // 🔍 Inspector filter
-    if (inspector) {
-      matchStage.inspector = new mongoose.Types.ObjectId(inspector);
+    if (inspector) match.inspector = new mongoose.Types.ObjectId(inspector);
+    if (vendor) match["order_meta.vendor"] = vendor;
+    if (brand) match["order_meta.brand"] = brand;
+
+    if (order && String(order).trim()) {
+      const q = escapeRegex(order);
+      match["order_meta.order_id"] = { $regex: `^${q}`, $options: "i" };
     }
 
-    // 🔍 Search filter
-    if (search) {
-      matchStage.$or = [
-        { "item.item_code": { $regex: search, $options: "i" } },
-      ];
+    if (search && String(search).trim()) {
+      const q = escapeRegex(search);
+      match["item.item_code"] = { $regex: `^${q}`, $options: "i" };
     }
+
+    if (from || to) {
+      match.request_date = {};
+      if (from) match.request_date.$gte = String(from);
+      if (to) match.request_date.$lte = String(to);
+    }
+
+    let sortStage = { request_date: -1 };
+    if (sort === "request_date") sortStage = { request_date: 1 };
+    if (sort === "-request_date") sortStage = { request_date: -1 };
+    if (sort === "createdAt") sortStage = { createdAt: 1 };
+    if (sort === "-createdAt") sortStage = { createdAt: -1 };
 
     const pipeline = [
+      { $match: match },
+      { $sort: sortStage },
       {
-        $lookup: {
-          from: "orders",
-          localField: "order",
-          foreignField: "_id",
-          as: "order",
+        $facet: {
+          data: [
+            { $skip: skip },
+            { $limit: limitNum },
+
+            {
+              $lookup: {
+                from: "users",
+                localField: "inspector",
+                foreignField: "_id",
+                as: "inspector",
+              },
+            },
+            { $unwind: { path: "$inspector", preserveNullAndEmptyArrays: true } },
+
+            {
+              $lookup: {
+                from: "orders",
+                localField: "order",
+                foreignField: "_id",
+                as: "order",
+              },
+            },
+            { $unwind: { path: "$order", preserveNullAndEmptyArrays: true } },
+          ],
+          totalCount: [{ $count: "count" }],
         },
       },
-      { $unwind: "$order" },
-
-      // 🔍 Vendor search (order.vendor)
-      ...(vendor
-        ? [{ $match: { "order.vendor": vendor } }]
-        : []),
-
-      { $match: matchStage },
-
-      {
-        $lookup: {
-          from: "users",
-          localField: "inspector",
-          foreignField: "_id",
-          as: "inspector",
-        },
-      },
-      { $unwind: "$inspector" },
-
-      { $sort: { createdAt: -1 } },
-      { $skip: skip },
-      { $limit: Number(limit) },
     ];
 
-    const data = await QC.aggregate(pipeline);
+    const result = await QC.aggregate(pipeline).allowDiskUse(true);
 
-    // 📊 Count
-    const countPipeline = pipeline.filter(
-      (stage) => !stage.$skip && !stage.$limit && !stage.$sort
-    );
-
-    const totalRecords = (await QC.aggregate(countPipeline)).length;
+    const data = result?.[0]?.data || [];
+    const totalRecords = result?.[0]?.totalCount?.[0]?.count || 0;
 
     res.json({
       data,
       pagination: {
-        page: Number(page),
-        totalPages: Math.ceil(totalRecords / limit),
+        page: pageNum,
+        totalPages: Math.ceil(totalRecords / limitNum) || 1,
         totalRecords,
       },
     });
@@ -110,13 +135,14 @@ exports.getQCList = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
 /**
  * POST /align-qc
  * Manager/Admin aligns QC + vendor provision
  */
 exports.alignQC = async (req, res) => {
   try {
-    const { order, item, inspector, quantities, remarks, request_date } = req.body;
+    const { order, item, quantities, remarks, request_date } = req.body;
 
     const existingQC = await QC.findOne({
       order: order,
@@ -124,19 +150,48 @@ exports.alignQC = async (req, res) => {
     });
 
     const clientDemand = Number(quantities?.client_demand);
-    const vendorProvision = Number(quantities?.vendor_provision);
+    const quantityRequested = Number(
+      quantities?.quantity_requested ?? quantities?.vendor_provision
+    );
+    const hasVendorProvisionInput =
+      quantities?.vendor_provision !== undefined &&
+      quantities?.vendor_provision !== null &&
+      quantities?.vendor_provision !== "";
+    const vendorProvision =
+      !hasVendorProvisionInput
+        ? 0
+        : Number(quantities?.vendor_provision);
 
-    if (Number.isNaN(clientDemand) || Number.isNaN(vendorProvision)) {
+    if (
+      Number.isNaN(clientDemand) ||
+      Number.isNaN(quantityRequested) ||
+      Number.isNaN(vendorProvision)
+    ) {
       return res.status(400).json({
-        message: "client demand and vendor provision must be valid numbers",
+        message:
+          "client demand, quantity requested and vendor provision must be valid numbers",
       });
     }
 
-    if( vendorProvision > clientDemand){
-      return res.status(400).json({message: "vendor provision can't be greater than client demand"})
+    if (clientDemand < 0 || quantityRequested < 0 || vendorProvision < 0) {
+      return res.status(400).json({
+        message: "Quantity values must be valid non-negative numbers",
+      });
     }
 
-    if (new Date(request_date).getTime() < Date.now()){
+    if (quantityRequested > clientDemand) {
+      return res.status(400).json({
+        message: "quantity requested can't be greater than client demand",
+      });
+    }
+
+    if (hasVendorProvisionInput && vendorProvision > quantityRequested) {
+      return res.status(400).json({
+        message: "vendor provision can't be greater than quantity requested",
+      });
+    }
+
+    if (new Date(request_date) < Date.now()){
       return res.status(400).json({message: "request date must be a present date or future date"})
     }
 
@@ -147,14 +202,30 @@ exports.alignQC = async (req, res) => {
         });
       }
 
-      if (vendorProvision < existingQC.quantities.qc_passed) {
+      if (quantityRequested < existingQC.quantities.qc_passed) {
+        return res.status(400).json({
+          message: "quantity requested cannot be less than already passed quantity",
+        });
+      }
+
+      if (quantityRequested < (existingQC.quantities.vendor_provision || 0)) {
+        return res.status(400).json({
+          message:
+            "quantity requested cannot be less than already provisioned quantity",
+        });
+      }
+
+      if (hasVendorProvisionInput && vendorProvision < existingQC.quantities.qc_passed) {
         return res.status(400).json({
           message: "vendor provision cannot be less than already passed quantity",
         });
       }
 
       const totalOffered =
-        vendorProvision + (existingQC.quantities.qc_rejected || 0);
+        (hasVendorProvisionInput
+          ? vendorProvision
+          : (existingQC.quantities.vendor_provision || 0)) +
+        (existingQC.quantities.qc_rejected || 0);
 
       if ((existingQC.quantities.qc_checked || 0) > totalOffered) {
         return res.status(400).json({
@@ -162,11 +233,15 @@ exports.alignQC = async (req, res) => {
         });
       }
 
-      existingQC.inspector = inspector;
+      // const dateOnly = new Date(req.body.request_date)
+
       existingQC.request_date = request_date;
       existingQC.item = item;
       existingQC.quantities.client_demand = clientDemand;
-      existingQC.quantities.vendor_provision = vendorProvision;
+      existingQC.quantities.quantity_requested = quantityRequested;
+      if (hasVendorProvisionInput) {
+        existingQC.quantities.vendor_provision = vendorProvision;
+      }
       existingQC.quantities.pending =
         clientDemand - (existingQC.quantities.qc_passed || 0);
 
@@ -189,28 +264,31 @@ exports.alignQC = async (req, res) => {
       });
     }
 
+    const orderRecord = await Order.findById(order);
+
     const qc = await QC.create({
-      order,
+      order, 
       item,
       order_meta: {
+        order_id: orderRecord.order_id,
         vendor: orderRecord.vendor,
         brand: orderRecord.brand
       },
-      inspector,
       request_date,
+      last_inspected_date: request_date,
       quantities: {
         client_demand: clientDemand,
-        vendor_provision: vendorProvision,
+        quantity_requested: quantityRequested,
+        vendor_provision: hasVendorProvisionInput ? vendorProvision : 0,
         qc_checked: 0,
         qc_passed: 0,
         qc_rejected: 0,
-        pending: clientDemand - vendorProvision,
+        pending: clientDemand,
       },
       remarks,
       createdBy: req.user._id,
     });
 
-    const orderRecord = await Order.findById(order);
 
     orderRecord.status = "Under Inspection";
     orderRecord.qc_record = qc._id;
@@ -238,273 +316,322 @@ exports.updateQC = async (req, res) => {
       qc_rejected,
       remarks,
       labels,
+      inspector,
       vendor_provision,
       barcode,
       packed_size,
       finishing,
       branding,
-
-      // 🔁 NEW INPUTS
-      LBH_top,
-      LBH_bottom,
-      LBH,
+      last_inspected_date,
+      CBM_top,
+      CBM_bottom,
+      CBM,
     } = req.body;
 
-    const qc = await QC.findById(req.params.id).populate("inspector");
-    if (!qc) {
-      return res.status(404).json({ message: "QC record not found" });
-    }
+      const qc = await QC.findById(req.params.id).populate("inspector");
 
-    const isAdmin = req.user.role === "admin";
+      if (!qc) {
+        return res.status(404).json({ message: "QC record not found" });
+      }
 
-    if (
-      !isAdmin &&
-      qc.inspector._id.toString() !== req.user._id.toString()
-    ) {
-      return res.status(403).json({
-        message: "You are not authorized to update this QC record",
-      });
-    }
+      const isAdmin = req.user.role === "admin";
 
-    /* ────────────────────────
-       📐 LBH → CBM HELPERS
-    ──────────────────────── */
+      const existingInspectorId = qc.inspector?._id
+        ? qc.inspector._id.toString()
+        : (qc.inspector ? qc.inspector.toString() : null);
+      const requestedInspectorId =
+        inspector !== undefined && inspector !== null && String(inspector).trim() !== ""
+          ? String(inspector).trim()
+          : null;
 
-    const isValidLBH = (obj) =>
-      obj &&
-      typeof obj === "object" &&
-      ["l", "b", "h"].every(
-        (k) => typeof obj[k] === "number" && obj[k] > 0
+      const hasStartedInspection =
+        (qc.quantities?.qc_checked || 0) > 0 ||
+        (Array.isArray(qc.inspection_record) && qc.inspection_record.length > 0);
+
+      if (!isAdmin) {
+        const currentUserId = req.user._id.toString();
+        const isAssignedToCurrentUser =
+          existingInspectorId && existingInspectorId === currentUserId;
+        const isClaimingSelf = requestedInspectorId === currentUserId;
+
+        if (!isAssignedToCurrentUser) {
+          if (hasStartedInspection || !isClaimingSelf) {
+            return res.status(403).json({
+              message: "You are not authorized to update this QC record",
+            });
+          }
+        }
+
+        if (requestedInspectorId && requestedInspectorId !== currentUserId) {
+          return res.status(403).json({
+            message: "QC can only assign themselves",
+          });
+        }
+      }
+
+      if (requestedInspectorId) {
+        if (!mongoose.Types.ObjectId.isValid(requestedInspectorId)) {
+          return res.status(400).json({ message: "Invalid inspector id" });
+        }
+        qc.inspector = requestedInspectorId;
+      }
+
+      /* ────────────────────────
+         📐 LBH → CBM HELPERS
+      ──────────────────────── */
+
+      const hasCbmUpdate = CBM !== undefined || CBM_top !== undefined || CBM_bottom !== undefined;
+
+      const normalizeCbmValue = (value, fallbackValue) => {
+        if (value === undefined) return fallbackValue;
+        if (value === null || value === "") return "0";
+        return String(value);
+      };
+
+      if (hasCbmUpdate) {
+        qc.cbm = {
+          top: normalizeCbmValue(CBM_top, qc.cbm?.top ?? "0"),
+          bottom: normalizeCbmValue(CBM_bottom, qc.cbm?.bottom ?? "0"),
+          total: normalizeCbmValue(CBM, qc.cbm?.total ?? "0"),
+        };
+      }
+
+      if (last_inspected_date !== undefined) {
+        qc.last_inspected_date = last_inspected_date;
+      }
+
+      /* ────────────────────────
+         🔢 BARCODE
+      ──────────────────────── */
+
+      if (barcode !== undefined) {
+        if (qc.barcode > 0 && Number(barcode) !== qc.barcode) {
+          return res.status(400).json({ message: "barcode can only be set once" });
+        }
+        qc.barcode = Number(barcode);
+      }
+
+      /* ────────────────────────
+         ✅ BOOLEAN FLAGS
+      ──────────────────────── */
+
+      const setOnceBoolean = (field, value, name) => {
+        if (value === undefined) return;
+        if (typeof value !== "boolean") {
+          throw new Error(`${name} must be boolean`);
+        }
+        if (qc[field] && value === false) {
+          throw new Error(`${name} can only be set once`);
+        }
+        if (!qc[field] && value === true) {
+          qc[field] = true;
+        }
+      };
+
+      setOnceBoolean("packed_size", packed_size, "packed_size");
+      setOnceBoolean("finishing", finishing, "finishing");
+      setOnceBoolean("branding", branding, "branding");
+
+      /* ────────────────────────
+         🔢 QUANTITIES
+      ──────────────────────── */
+
+      const addChecked = Number(qc_checked || 0);
+      const addPassed = Number(qc_passed || 0);
+      const addRejected = Number(qc_rejected || 0);
+      const addProvision = Number(vendor_provision || 0);
+
+      if ([addChecked, addPassed, addRejected, addProvision].some((v) => v < 0 || Number.isNaN(v))) {
+        return res.status(400).json({
+          message: "Quantity values must be valid non-negative numbers",
+        });
+      }
+
+      // If user is updating pass/reject/labels, they must provide checked in same visit
+      if ((addPassed || addRejected || (Array.isArray(labels) && labels.length)) && addChecked <= 0) {
+        return res.status(400).json({
+          message: "qc_checked must be greater than 0 when updating quantities or labels",
+        });
+      }
+
+      const nextVendorProvision = qc.quantities.vendor_provision + addProvision - addRejected;
+
+      const nextChecked = qc.quantities.qc_checked + addChecked;
+      const nextPassed = qc.quantities.qc_passed + addPassed;
+      const nextRejected = qc.quantities.qc_rejected + addRejected;
+
+      if (nextVendorProvision < 0) {
+        return res.status(400).json({ message: "offered quantity cannot be negative" });
+      }
+
+      const quantityRequestedCap = Number(
+        qc.quantities.quantity_requested > 0
+          ? qc.quantities.quantity_requested
+          : (qc.quantities.client_demand ?? 0)
       );
 
-    const cmToCbmString = ({ l, b, h }) => {
-      const cbm = (l * b * h) / 1_000_000;
-      return cbm.toFixed(6).replace(/\.?0+$/, "");
-    };
+      const parsedPendingQuantityLimit = Number(
+        qc.quantities?.pending ??
+          ((qc.quantities?.client_demand || 0) - (qc.quantities?.qc_passed || 0))
+      );
+      const pendingQuantityLimit = Number.isFinite(parsedPendingQuantityLimit)
+        ? Math.max(0, parsedPendingQuantityLimit)
+        : 0;
 
-    const existingCbm = {
-      top: qc.cbm?.top ?? "0",
-      bottom: qc.cbm?.bottom ?? "0",
-      total: qc.cbm?.total ?? "0",
-    };
-
-    const cbmAlreadySet =
-      existingCbm.top !== "0" ||
-      existingCbm.bottom !== "0" ||
-      existingCbm.total !== "0";
-
-    const hasLBHTop = LBH_top !== undefined;
-    const hasLBHBottom = LBH_bottom !== undefined;
-    const hasLBHTotal = LBH !== undefined;
-
-    if (hasLBHTotal && (hasLBHTop || hasLBHBottom)) {
-      return res.status(400).json({
-        message: "Provide either LBH or LBH_top/LBH_bottom, not both",
-      });
-    }
-
-    if (hasLBHTop !== hasLBHBottom) {
-      return res.status(400).json({
-        message: "Both LBH_top and LBH_bottom are required",
-      });
-    }
-
-    let computedTop = "0";
-    let computedBottom = "0";
-    let computedTotal = "0";
-
-    if (hasLBHTotal) {
-      if (!isValidLBH(LBH)) {
-        return res.status(400).json({ message: "Invalid LBH structure" });
-      }
-      computedTotal = cmToCbmString(LBH);
-    }
-
-    if (hasLBHTop && hasLBHBottom) {
-      if (!isValidLBH(LBH_top) || !isValidLBH(LBH_bottom)) {
+      if (hasStartedInspection) {
+        if (addProvision > pendingQuantityLimit) {
+          return res.status(400).json({
+            message: "offered quantity cannot exceed pending quantity",
+          });
+        }
+      } else if (
+        Number.isFinite(quantityRequestedCap) &&
+        quantityRequestedCap >= 0 &&
+        nextVendorProvision > quantityRequestedCap
+      ) {
         return res.status(400).json({
-          message: "Invalid LBH_top or LBH_bottom structure",
+          message: "offered quantity cannot exceed quantity requested",
         });
       }
 
-      computedTop = cmToCbmString(LBH_top);
-      computedBottom = cmToCbmString(LBH_bottom);
-      computedTotal = (
-        Number(computedTop) + Number(computedBottom)
-      )
-        .toFixed(6)
-        .replace(/\.?0+$/, "");
-    }
-
-    if ((hasLBHTotal || hasLBHTop) && cbmAlreadySet && !isAdmin) {
-      const mismatch =
-        computedTop !== existingCbm.top ||
-        computedBottom !== existingCbm.bottom ||
-        computedTotal !== existingCbm.total;
-
-      if (mismatch) {
+      if (nextPassed + nextRejected > nextChecked) {
         return res.status(400).json({
-          message: "CBM can only be set once",
-        });
-      }
-    }
-
-    if (hasLBHTotal || hasLBHTop) {
-      qc.cbm = {
-        top: computedTop,
-        bottom: computedBottom,
-        total: computedTotal,
-      };
-    }
-
-    /* ────────────────────────
-       🔢 BARCODE
-    ──────────────────────── */
-
-    if (barcode !== undefined) {
-      if (qc.barcode > 0 && Number(barcode) !== qc.barcode) {
-        return res
-          .status(400)
-          .json({ message: "barcode can only be set once" });
-      }
-      qc.barcode = Number(barcode);
-    }
-
-    /* ────────────────────────
-       ✅ BOOLEAN FLAGS
-    ──────────────────────── */
-
-    const setOnceBoolean = (field, value, name) => {
-      if (value === undefined) return;
-      if (typeof value !== "boolean") {
-        throw new Error(`${name} must be boolean`);
-      }
-      if (qc[field] && value === false) {
-        throw new Error(`${name} can only be set once`);
-      }
-      if (!qc[field] && value === true) {
-        qc[field] = true;
-      }
-    };
-
-    setOnceBoolean("packed_size", packed_size, "packed_size");
-    setOnceBoolean("finishing", finishing, "finishing");
-    setOnceBoolean("branding", branding, "branding");
-
-    /* ────────────────────────
-       🔢 QUANTITIES
-    ──────────────────────── */
-
-    const addChecked = Number(qc_checked || 0);
-    const addPassed = Number(qc_passed || 0);
-    const addRejected = Number(qc_rejected || 0);
-    const addProvision = Number(vendor_provision || 0);
-
-    if (
-      [addChecked, addPassed, addRejected, addProvision].some(
-        (v) => v < 0 || Number.isNaN(v)
-      )
-    ) {
-      return res.status(400).json({
-        message: "Quantity values must be valid non-negative numbers",
-      });
-    }
-
-    if ((addPassed || addRejected || labels?.length) && addChecked <= 0) {
-      return res.status(400).json({
-        message:
-          "qc_checked must be greater than 0 when updating quantities or labels",
-      });
-    }
-
-    const nextVendorProvision =
-      qc.quantities.vendor_provision + addProvision - addRejected;
-    const nextChecked = qc.quantities.qc_checked + addChecked;
-    const nextPassed = qc.quantities.qc_passed + addPassed;
-    const nextRejected = qc.quantities.qc_rejected + addRejected;
-
-    if (nextVendorProvision < 0) {
-      return res
-        .status(400)
-        .json({ message: "offered quantity cannot be negative" });
-    }
-
-    if (nextPassed + nextRejected > nextChecked) {
-      return res.status(400).json({
-        message: "qc_passed + qc_rejected cannot exceed qc_checked",
-      });
-    }
-
-    qc.quantities.vendor_provision = nextVendorProvision;
-    qc.quantities.qc_checked = nextChecked;
-    qc.quantities.qc_passed = nextPassed;
-    qc.quantities.qc_rejected = nextRejected;
-    qc.quantities.pending =
-      qc.quantities.client_demand - qc.quantities.qc_passed;
-
-    /* ────────────────────────
-       🏷️ LABELS (UNCHANGED LOGIC)
-    ──────────────────────── */
-
-    if (labels !== undefined && Array.isArray(labels) && labels.length > 0) {
-      const Inspector = require("../models/inspector.model");
-      const inspector = await Inspector.findOne({ user: req.user._id });
-
-      if (!inspector) {
-        return res
-          .status(404)
-          .json({ message: "Inspector record not found" });
-      }
-
-      const parsedLabels = labels.map(Number);
-      if (parsedLabels.some(Number.isNaN)) {
-        return res
-          .status(400)
-          .json({ message: "All labels must be numbers" });
-      }
-
-      const hasDualCbm =
-        Number(qc.cbm?.top) > 0 && Number(qc.cbm?.bottom) > 0;
-      const labelMultiplier = hasDualCbm ? 2 : 1;
-
-      const uniqueIncoming = [...new Set(parsedLabels)];
-      const existingSet = new Set((qc.labels || []).map(Number));
-      const incomingNew = uniqueIncoming.filter((label) => !existingSet.has(label));
-
-      if (incomingNew.length > addChecked * labelMultiplier) {
-        return res.status(400).json({
-          message: `labels count cannot exceed ${labelMultiplier}x qc_checked for this update`,
+          message: "qc_passed + qc_rejected cannot exceed qc_checked",
         });
       }
 
-      const totalLabels = existingSet.size + incomingNew.length;
-      const maxTotal = nextChecked * labelMultiplier;
-      if (totalLabels > maxTotal) {
-        return res.status(400).json({
-          message: `total labels cannot exceed ${labelMultiplier}x total qc_checked`,
-        });
+      qc.quantities.vendor_provision = nextVendorProvision;
+      qc.quantities.qc_checked = nextChecked;
+      qc.quantities.qc_passed = nextPassed;
+      qc.quantities.qc_rejected = nextRejected;
+      qc.quantities.pending = qc.quantities.client_demand - qc.quantities.qc_passed;
+
+      /* ────────────────────────
+         🏷️ LABELS (UNCHANGED LOGIC)
+      ──────────────────────── */
+
+      let labelsAddedThisVisit = [];
+      if (labels !== undefined && Array.isArray(labels) && labels.length > 0) {
+        const Inspector = require("../models/inspector.model");
+        const inspector = await Inspector.findOne({ user: req.user._id });
+
+        if (!inspector) {
+          return res.status(404).json({ message: "Inspector record not found" });
+        }
+
+        const parsedLabels = labels.map(Number);
+        if (parsedLabels.some(Number.isNaN)) {
+          return res.status(400).json({ message: "All labels must be numbers" });
+        }
+
+        const hasDualCbm = Number(qc.cbm?.top) > 0 && Number(qc.cbm?.bottom) > 0;
+        const labelMultiplier = hasDualCbm ? 2 : 1;
+
+        const uniqueIncoming = [...new Set(parsedLabels)];
+        const existingSet = new Set((qc.labels || []).map(Number));
+        const incomingNew = uniqueIncoming.filter((label) => !existingSet.has(label));
+
+        if (incomingNew.length > addChecked * labelMultiplier) {
+          return res.status(400).json({
+            message: `labels count cannot exceed ${labelMultiplier}x qc_checked for this update`,
+          });
+        }
+
+        const totalLabels = existingSet.size + incomingNew.length;
+        const maxTotal = nextChecked * labelMultiplier;
+        if (totalLabels > maxTotal) {
+          return res.status(400).json({
+            message: `total labels cannot exceed ${labelMultiplier}x total qc_checked`,
+          });
+        }
+
+        qc.labels = [...new Set([...qc.labels, ...incomingNew])];
+
+        inspector.used_labels = [...new Set([...(inspector.used_labels || []), ...incomingNew])];
+
+        await inspector.save();
+
+        labelsAddedThisVisit = incomingNew;
       }
 
-      qc.labels = [...new Set([...qc.labels, ...incomingNew])];
-      inspector.used_labels = [
-        ...new Set([...inspector.used_labels, ...incomingNew]),
-      ];
+      if (remarks) qc.remarks = remarks;
 
-      await inspector.save();
-    }
+      /* ────────────────────────
+         🧾 CREATE INSPECTION RECORD (NEW)
+         We create a record only when there's a "visit update"
+      ──────────────────────── */
 
-    if (remarks) qc.remarks = remarks;
+      const isVisitUpdate =
+        addChecked > 0 ||
+        addPassed > 0 ||
+        addRejected > 0 ||
+        addProvision > 0 ||
+        (labelsAddedThisVisit && labelsAddedThisVisit.length > 0);
 
-    await qc.save();
+      if (isVisitUpdate) {
+        const vendorRequestedThisVisit = hasStartedInspection
+          ? pendingQuantityLimit
+          : (
+              Number.isFinite(quantityRequestedCap)
+                ? quantityRequestedCap
+                : qc.quantities.client_demand
+            );
 
-    res.json({
-      message: "QC updated successfully",
-      data: qc,
-    });
+        // vendor_offered for the visit: what vendor showed/added in THIS update
+        const vendorOfferedThisVisit = addProvision;
+
+        const inspectionInspectorId = qc.inspector?._id
+          ? qc.inspector._id
+          : qc.inspector;
+        if (!inspectionInspectorId) {
+          return res
+            .status(400)
+            .json({ message: "Inspector is required before updating inspection quantities" });
+        }
+
+        const inspectionDateForRecord =
+          last_inspected_date !== undefined && String(last_inspected_date).trim() !== ""
+            ? String(last_inspected_date).trim()
+            : String(qc.last_inspected_date || qc.request_date || "").trim();
+
+        if (!inspectionDateForRecord) {
+          return res.status(400).json({
+            message: "last_inspected_date is required for inspection records",
+          });
+        }
+
+        const record = await Inspection.create([
+          {
+            qc: qc._id,
+            inspector: inspectionInspectorId,
+            inspection_date: inspectionDateForRecord,
+            checked: addChecked,
+            passed: addPassed,
+            rejected: addRejected,
+            vendor_requested: vendorRequestedThisVisit,
+            vendor_offered: vendorOfferedThisVisit,
+            pending_after: qc.quantities.pending,
+            remarks: remarks || "",
+            createdBy: req.user._id,
+          },
+        ]);
+
+        // push record id into qc
+        qc.inspection_record = qc.inspection_record || [];
+        qc.inspection_record.push(record[0]._id);
+      }
+
+      await qc.save();
+
+      res.json({
+        message: "QC updated successfully",
+        data: qc,
+      });
   } catch (err) {
     res.status(400).json({ message: err.message });
   }
 };
+
 
 
 exports.getQCById = async (req, res) => {
@@ -512,11 +639,17 @@ exports.getQCById = async (req, res) => {
     const qc = await QC.findById(req.params.id)
       .populate("inspector", "name email role")
       .populate("createdBy", "name email role")
-      .populate("order");
+      .populate("order")
+      .populate({
+        path: "inspection_record",
+        options: { sort: { inspection_date: -1, createdAt: -1 } },
+        populate: { path: "inspector", select: "name email role" },
+      });
 
     if (!qc) {
       return res.status(404).json({ message: "QC record not found" });
     }
+
     const qcData = qc.toObject();
     const sortedLabels = normalizeLabels(qcData.labels);
     const rejectedLabels = findRejectedLabels(sortedLabels);

@@ -1,16 +1,22 @@
 import { useEffect, useState } from "react";
 import api from "../api/axios";
+import { getUserFromToken } from "../auth/auth.utils";
 import "../App.css";
 
-
-const createEmptyLBH = () => ({
-  l: "",
-  b: "",
-  h: "",
-});
+const toInputDateValue = (value) => {
+  if (!value) return "";
+  const asString = String(value).trim();
+  if (!asString) return "";
+  if (asString.includes("T")) return asString.slice(0, 10);
+  return asString;
+};
 
 const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
+  const user = getUserFromToken();
+  const currentUserId = user?.id || user?._id || "";
+
   const [form, setForm] = useState({
+    inspector: "",
     qc_checked: "",
     qc_passed: "",
     qc_rejected: "",
@@ -23,30 +29,32 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     labelEnd: "",
     rejectedLabels: "",
     remarks: "",
-    LBH_top: createEmptyLBH(),
-    LBH_bottom: createEmptyLBH(),
-    LBH: createEmptyLBH(),
+    CBM: "",
+    CBM_top: "",
+    CBM_bottom: "",
+    last_inspected_date: "",
   });
+  const [inspectors, setInspectors] = useState([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const hasLBHTotal =
-    form.LBH.l.trim() !== "" ||
-    form.LBH.b.trim() !== "" ||
-    form.LBH.h.trim() !== "";
-  const hasLBHTop =
-    form.LBH_top.l.trim() !== "" ||
-    form.LBH_top.b.trim() !== "" ||
-    form.LBH_top.h.trim() !== "";
-  const hasLBHBottom =
-    form.LBH_bottom.l.trim() !== "" ||
-    form.LBH_bottom.b.trim() !== "" ||
-    form.LBH_bottom.h.trim() !== "";
-  const disableLBHTopBottom = hasLBHTotal;
-  const disableLBHTotal = hasLBHTop || hasLBHBottom;
+
+  useEffect(() => {
+    const fetchInspectors = async () => {
+      try {
+        const res = await api.get("/auth/?role=QC");
+        setInspectors(Array.isArray(res.data) ? res.data : []);
+      } catch (err) {
+        setInspectors([]);
+      }
+    };
+
+    fetchInspectors();
+  }, []);
 
   useEffect(() => {
     if (!qc) return;
     setForm({
+      inspector: qc?.inspector?._id || currentUserId,
       qc_checked: "",
       qc_passed: "",
       qc_rejected: "",
@@ -59,25 +67,19 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       labelEnd: "",
       rejectedLabels: "",
       remarks: qc.remarks ?? "",
-      LBH_top: createEmptyLBH(),
-      LBH_bottom: createEmptyLBH(),
-      LBH: createEmptyLBH(),
+      CBM: qc?.cbm?.total && qc.cbm.total !== "0" ? String(qc.cbm.total) : "",
+      CBM_top: qc?.cbm?.top && qc.cbm.top !== "0" ? String(qc.cbm.top) : "",
+      CBM_bottom:
+        qc?.cbm?.bottom && qc.cbm.bottom !== "0" ? String(qc.cbm.bottom) : "",
+      last_inspected_date: toInputDateValue(qc.last_inspected_date),
     });
-  }, [qc]);
+  }, [qc, currentUserId]);
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
-    setForm((prev) => ({ ...prev, [name]: type === "checkbox" ? checked : value }));
-  };
-
-  const handleLBHChange = (section, field) => (e) => {
-    const { value } = e.target;
     setForm((prev) => ({
       ...prev,
-      [section]: {
-        ...prev[section],
-        [field]: value,
-      },
+      [name]: type === "checkbox" ? checked : value,
     }));
   };
 
@@ -116,7 +118,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
     if (
       [qcChecked, qcPassed, qcRejected, offeredQuantity].some((value) =>
-        Number.isNaN(value)
+        Number.isNaN(value),
       )
     ) {
       setError("QC quantities must be valid numbers.");
@@ -125,7 +127,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
     if (
       [qcChecked, qcPassed, qcRejected, offeredQuantity].some(
-        (value) => value < 0
+        (value) => value < 0,
       )
     ) {
       setError("QC quantities cannot be negative.");
@@ -137,13 +139,15 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       setError("Label range is invalid. Please enter valid start/end values.");
       return;
     }
-    const rejectedLabels = form.rejectedLabels
-      ?.split(",")
-      .map((label) => Number(label.trim()))
-      .filter((label) => !Number.isNaN(label)) || [];
+
+    const rejectedLabels =
+      form.rejectedLabels
+        ?.split(",")
+        .map((label) => Number(label.trim()))
+        .filter((label) => !Number.isNaN(label)) || [];
 
     const filteredLabels = labels.filter(
-      (label) => !rejectedLabels.includes(label)
+      (label) => !rejectedLabels.includes(label),
     );
 
     const hasQuantityUpdate =
@@ -152,6 +156,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       form.qc_rejected !== "" ||
       form.offeredQuantity !== "";
     const hasLabelUpdate = filteredLabels.length > 0;
+    const selectedInspectorId = String(form.inspector || "").trim();
 
     if ((hasQuantityUpdate || hasLabelUpdate) && qcChecked <= 0) {
       setError("QC checked must be greater than 0 for updates.");
@@ -164,55 +169,49 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     }
 
     const barcodeValue = form.barcode.trim();
-    const parseLBHTriplet = (value, label) => {
-      const l = value.l.trim();
-      const b = value.b.trim();
-      const h = value.h.trim();
-      const hasAny = l !== "" || b !== "" || h !== "";
-
-      if (!hasAny) return { value: null, hasValue: false };
-      if (l === "" || b === "" || h === "") {
-        return { error: `${label} requires L, B, and H`, hasValue: true };
+    const parseOptionalCbm = (value, label) => {
+      const raw = value.trim();
+      if (raw === "") return { hasValue: false, value: null };
+      const parsed = Number(raw);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        return {
+          hasValue: true,
+          error: `${label} must be a valid non-negative number`,
+        };
       }
-
-      const lNum = Number(l);
-      const bNum = Number(b);
-      const hNum = Number(h);
-
-      if (
-        [lNum, bNum, hNum].some(
-          (num) => !Number.isFinite(num) || num <= 0,
-        )
-      ) {
-        return { error: `${label} values must be positive numbers`, hasValue: true };
-      }
-
-      return { value: { l: lNum, b: bNum, h: hNum }, hasValue: true };
+      return { hasValue: true, value: String(parsed) };
     };
 
-    const totalLBH = parseLBHTriplet(form.LBH, "LBH");
-    const topLBH = parseLBHTriplet(form.LBH_top, "LBH top");
-    const bottomLBH = parseLBHTriplet(form.LBH_bottom, "LBH bottom");
+    const cbmTotal = parseOptionalCbm(form.CBM, "CBM");
+    const cbmTop = parseOptionalCbm(form.CBM_top, "CBM top");
+    const cbmBottom = parseOptionalCbm(form.CBM_bottom, "CBM bottom");
+    const lastInspectedDateValue = form.last_inspected_date.trim();
 
-    if (totalLBH.hasValue && (topLBH.hasValue || bottomLBH.hasValue)) {
-      setError("Provide either LBH or LBH top/bottom, not both.");
+    if (cbmTotal.error || cbmTop.error || cbmBottom.error) {
+      setError(cbmTotal.error || cbmTop.error || cbmBottom.error);
       return;
     }
 
-    if (topLBH.hasValue !== bottomLBH.hasValue) {
-      setError("Both LBH top and bottom are required.");
+    const isVisitUpdate = hasQuantityUpdate || hasLabelUpdate;
+    if (isVisitUpdate && !selectedInspectorId) {
+      setError("Inspector is required for inspection updates.");
       return;
     }
 
-    if (totalLBH.error || topLBH.error || bottomLBH.error) {
-      setError(totalLBH.error || topLBH.error || bottomLBH.error);
+    if (isVisitUpdate && !lastInspectedDateValue) {
+      setError("Last inspected date is required.");
       return;
     }
 
-    const hasDualLbhForLabels =
-      (topLBH.hasValue && bottomLBH.hasValue) ||
-      (Number(qc?.cbm?.top) > 0 && Number(qc?.cbm?.bottom) > 0);
-    const labelMultiplier = hasDualLbhForLabels ? 2 : 1;
+    const effectiveCbmTop = cbmTop.hasValue
+      ? cbmTop.value
+      : (qc?.cbm?.top ?? "0");
+    const effectiveCbmBottom = cbmBottom.hasValue
+      ? cbmBottom.value
+      : (qc?.cbm?.bottom ?? "0");
+    const hasDualCbmForLabels =
+      Number(effectiveCbmTop) > 0 && Number(effectiveCbmBottom) > 0;
+    const labelMultiplier = hasDualCbmForLabels ? 2 : 1;
 
     if (filteredLabels.length > qcChecked * labelMultiplier && qcChecked > 0) {
       setError(
@@ -223,13 +222,17 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
     const barcodeParsed = barcodeValue === "" ? null : Number(barcodeValue);
 
-    if (barcodeParsed !== null && (!Number.isInteger(barcodeParsed) || barcodeParsed <= 0)) {
+    if (
+      barcodeParsed !== null &&
+      (!Number.isInteger(barcodeParsed) || barcodeParsed <= 0)
+    ) {
       setError("Barcode must be a positive integer.");
       return;
     }
 
     const nextNetOffered =
       (qc.quantities?.vendor_provision || 0) + offeredQuantity - qcRejected;
+
     const totalOfferedNext =
       (qc.quantities?.vendor_provision || 0) +
       (qc.quantities?.qc_rejected || 0) +
@@ -237,11 +240,33 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     const nextChecked = (qc.quantities?.qc_checked || 0) + qcChecked;
     const nextPassed = (qc.quantities?.qc_passed || 0) + qcPassed;
 
-    if (
-      qc.quantities?.client_demand !== undefined &&
-      nextNetOffered > qc.quantities.client_demand
+    const quantityRequestedLimit =
+      qc.quantities?.quantity_requested && qc.quantities.quantity_requested !== 0
+        ? qc.quantities.quantity_requested
+        : qc.quantities?.client_demand;
+
+    const hasStartedInspection =
+      (qc.quantities?.qc_checked || 0) > 0 ||
+      (Array.isArray(qc?.inspection_record) && qc.inspection_record.length > 0);
+
+    const parsedPendingQuantityLimit = Number(
+      qc.quantities?.pending ??
+        ((qc.quantities?.client_demand || 0) - (qc.quantities?.qc_passed || 0)),
+    );
+    const pendingQuantityLimit = Number.isFinite(parsedPendingQuantityLimit)
+      ? Math.max(0, parsedPendingQuantityLimit)
+      : 0;
+
+    if (hasStartedInspection) {
+      if (offeredQuantity > pendingQuantityLimit) {
+        setError("Offered quantity cannot exceed pending quantity.");
+        return;
+      }
+    } else if (
+      quantityRequestedLimit !== undefined &&
+      nextNetOffered > quantityRequestedLimit
     ) {
-      setError("Offered quantity cannot exceed client demand.");
+      setError("Offered quantity cannot exceed quantity requested.");
       return;
     }
 
@@ -270,15 +295,17 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     if (form.qc_checked !== "") payload.qc_checked = qcChecked;
     if (form.qc_passed !== "") payload.qc_passed = qcPassed;
     if (form.qc_rejected !== "") payload.qc_rejected = qcRejected;
-    if (form.offeredQuantity !== "") {
-      payload.vendor_provision = offeredQuantity;
-    }
+    if (form.offeredQuantity !== "") payload.vendor_provision = offeredQuantity;
+    if (selectedInspectorId) payload.inspector = selectedInspectorId;
 
-    if (totalLBH.hasValue && totalLBH.value) payload.LBH = totalLBH.value;
-    if (topLBH.hasValue && bottomLBH.hasValue && topLBH.value && bottomLBH.value) {
-      payload.LBH_top = topLBH.value;
-      payload.LBH_bottom = bottomLBH.value;
-    }
+    if (cbmTotal.hasValue && cbmTotal.value !== null)
+      payload.CBM = cbmTotal.value;
+    if (cbmTop.hasValue && cbmTop.value !== null)
+      payload.CBM_top = cbmTop.value;
+    if (cbmBottom.hasValue && cbmBottom.value !== null)
+      payload.CBM_bottom = cbmBottom.value;
+    if (lastInspectedDateValue) payload.last_inspected_date = lastInspectedDateValue;
+
     if (barcodeParsed !== null) payload.barcode = barcodeParsed;
     if (!qc.packed_size && form.packed_size) payload.packed_size = true;
     if (!qc.finishing && form.finishing) payload.finishing = true;
@@ -302,260 +329,323 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   };
 
   if (!qc) return null;
+  const disableInspectorSelection = !isAdmin && (qc?.quantities?.qc_checked || 0) > 0;
 
   return (
-    <div className="modalOverlay">
-      <div className="modalBox qc-modal">
-        <h3>Update QC Record</h3>
+    <div
+      className="modal d-block om-modal-backdrop"
+      tabIndex="-1"
+      role="dialog"
+    >
+      <div
+        className="modal-dialog modal-dialog-centered modal-xl"
+        role="document"
+      >
+        <div className="modal-content">
+          <div className="modal-header">
+            <h5 className="modal-title">Update QC Record</h5>
+            <button
+              type="button"
+              className="btn-close"
+              onClick={onClose}
+              aria-label="Close"
+            />
+          </div>
 
-        <div className="qc-modal-info">
-          <p>
-            <b>Order ID:</b> {qc.order?.order_id || "N/A"}
-          </p>
-          <p>
-            <b>Item:</b> {qc.item?.item_code || "N/A"}
-          </p>
-          <p>
-            <b>Client Demand:</b> {qc.quantities?.client_demand ?? "N/A"}
-          </p>
-          <p>
-            <b>Vendor Provision:</b> {qc.quantities?.vendor_provision ?? "N/A"}
-          </p>
-        </div>
-
-        <div className="inputContainer qc-modal-grid">
-          <div className="qc-modal-field">
-            <label>LBH Total - L B H</label>
-            <input
-              type="number"
-              value={form.LBH.l}
-              onChange={handleLBHChange("LBH", "l")}
-              min="0"
-              step="any"
-              disabled={disableLBHTotal}
-            />
-            <label>LBH Total - B</label>
-             <input
-              type="number"
-              value={form.LBH.b}
-              onChange={handleLBHChange("LBH", "b")}
-              min="0"
-              step="any"
-              disabled={disableLBHTotal}
-            />
-            <label>LBH Total - H</label>
-            <input
-              type="number"
-              value={form.LBH.h}
-              onChange={handleLBHChange("LBH", "h")}
-              min="0"
-              step="any"
-              disabled={disableLBHTotal}
-            />
-          </div>
-          <div className="qc-modal-field">
-            <label>LBH Top - L</label>
-            <input
-              type="number"
-              value={form.LBH_top.l}
-              onChange={handleLBHChange("LBH_top", "l")}
-              min="0"
-              step="any"
-              disabled={disableLBHTopBottom}
-            />
-            <label>LBH Top - B</label>
-            <input
-              type="number"
-              value={form.LBH_top.b}
-              onChange={handleLBHChange("LBH_top", "b")}
-              min="0"
-              step="any"
-              disabled={disableLBHTopBottom}
-            />
-            <label>LBH Top - H</label>
-            <input
-              type="number"
-              value={form.LBH_top.h}
-              onChange={handleLBHChange("LBH_top", "h")}
-              min="0"
-              step="any"
-              disabled={disableLBHTopBottom}
-            />
-          </div>
-          <div className="qc-modal-field">
-            <label>LBH Bottom - L</label>
-            <input
-              type="number"
-              value={form.LBH_bottom.l}
-              onChange={handleLBHChange("LBH_bottom", "l")}
-              min="0"
-              step="any"
-              disabled={disableLBHTopBottom}
-            />
-            <label>LBH Bottom - B</label>
-            <input
-              type="number"
-              value={form.LBH_bottom.b}
-              onChange={handleLBHChange("LBH_bottom", "b")}
-              min="0"
-              step="any"
-              disabled={disableLBHTopBottom}
-            />
-            <label>LBH Bottom - H</label>
-            <input
-              type="number"
-              value={form.LBH_bottom.h}
-              onChange={handleLBHChange("LBH_bottom", "h")}
-              min="0"
-              step="any"
-              disabled={disableLBHTopBottom}
-            />
-          </div>
-          
-          <div className="qc-modal-field">
-            <label>Barcode</label>
-            <input
-              type="number"
-              name="barcode"
-              value={form.barcode}
-              onChange={handleChange}
-              min="1"
-              step="1"
-              disabled={qc.barcode > 0 && !isAdmin}
-              placeholder={qc.barcode > 0 && !isAdmin ? "Already set" : "Enter barcode"}
-            />
-          </div>
-          <div className="qc-modal-field">
-            <label>QC Checked</label>
-            <input
-              type="number"
-              name="qc_checked"
-              value={form.qc_checked}
-              onChange={handleChange}
-              min="0"
-            />
-          </div>
-          <div className="qc-modal-field">
-            <label>QC Passed</label>
-            <input
-              type="number"
-              name="qc_passed"
-              value={form.qc_passed}
-              onChange={handleChange}
-              min="0"
-            />
-          </div>
-          <div className="qc-modal-field">
-            <label>QC Rejected</label>
-            <input
-              type="number"
-              name="qc_rejected"
-              value={form.qc_rejected}
-              onChange={handleChange}
-              min="0"
-            />
-          </div>
-          <div className="qc-modal-field">
-            <label>Offered Quantity</label>
-            <input
-              type="number"
-              name="offeredQuantity"
-              value={form.offeredQuantity}
-              onChange={handleChange}
-              min="0"
-            />
-          </div>
-          <div className="qc-modal-field qc-modal-checkbox">
-            <label htmlFor="packed_size">Packed Size</label>
-            <div className="qc-modal-check">
-              <input
-                id="packed_size"
-                type="checkbox"
-                name="packed_size"
-                checked={form.packed_size}
-                onChange={handleChange}
-                disabled={qc.packed_size && !isAdmin}
-              />
-              <span>{form.packed_size ? "Yes" : "No"}</span>
+          <div className="modal-body d-grid gap-3">
+            <div className="row g-2">
+              <div className="col-sm-6 col-lg-3">
+                <div className="small text-secondary">Order ID</div>
+                <div className="fw-semibold">{qc.order?.order_id || "N/A"}</div>
+              </div>
+              <div className="col-sm-6 col-lg-3">
+                <div className="small text-secondary">Item</div>
+                <div className="fw-semibold">{qc.item?.item_code || "N/A"}</div>
+              </div>
+              <div className="col-sm-6 col-lg-3">
+                <div className="small text-secondary">Client Demand</div>
+                <div className="fw-semibold">
+                  {qc.quantities?.client_demand ?? "N/A"}
+                </div>
+              </div>
+              <div className="col-sm-6 col-lg-3">
+                <div className="small text-secondary">Quantity Requested</div>
+                <div className="fw-semibold">
+                  {qc.quantities?.quantity_requested ??
+                    qc.quantities?.vendor_provision ??
+                    "N/A"}
+                </div>
+              </div>
+              <div className="col-sm-6 col-lg-3">
+                <div className="small text-secondary">Vendor Provision</div>
+                <div className="fw-semibold">
+                  {qc.quantities?.vendor_provision ?? "N/A"}
+                </div>
+              </div>
             </div>
-          </div>
-          <div className="qc-modal-field qc-modal-checkbox">
-            <label htmlFor="finishing">Finishing</label>
-            <div className="qc-modal-check">
-              <input
-                id="finishing"
-                type="checkbox"
-                name="finishing"
-                checked={form.finishing}
-                onChange={handleChange}
-                disabled={qc.finishing && !isAdmin}
-              />
-              <span>{form.finishing ? "Yes" : "No"}</span>
+
+            <div className="row g-3">
+              <div className="col-md-3">
+                <label className="form-label">QC Inspector</label>
+                <select
+                  className="form-select"
+                  name="inspector"
+                  value={form.inspector}
+                  onChange={handleChange}
+                  disabled={disableInspectorSelection}
+                >
+                  <option value="">Select Inspector</option>
+                  {inspectors.map((qcInspector) => (
+                    <option key={qcInspector._id} value={qcInspector._id}>
+                      {qcInspector.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="col-md-3">
+                <label className="form-label">CBM Total</label>
+                <input
+                  type="number"
+                  className="form-control"
+                  name="CBM"
+                  value={form.CBM}
+                  onChange={handleChange}
+                  min="0"
+                  step="any"
+                />
+              </div>
+
+              <div className="col-md-3">
+                <label className="form-label">CBM Top</label>
+                <input
+                  type="number"
+                  className="form-control"
+                  name="CBM_top"
+                  value={form.CBM_top}
+                  onChange={handleChange}
+                  min="0"
+                  step="any"
+                />
+              </div>
+
+              <div className="col-md-3">
+                <label className="form-label">CBM Bottom</label>
+                <input
+                  type="number"
+                  className="form-control"
+                  name="CBM_bottom"
+                  value={form.CBM_bottom}
+                  onChange={handleChange}
+                  min="0"
+                  step="any"
+                />
+              </div>
+
+              <div className="col-md-3">
+                <label className="form-label">Last Inspected Date</label>
+                <input
+                  type="date"
+                  className="form-control"
+                  name="last_inspected_date"
+                  value={form.last_inspected_date}
+                  onChange={handleChange}
+                />
+              </div>
+
+              <div className="col-md-3">
+                <label className="form-label">Barcode</label>
+                <input
+                  type="number"
+                  className="form-control"
+                  name="barcode"
+                  value={form.barcode}
+                  onChange={handleChange}
+                  min="1"
+                  step="1"
+                  disabled={qc.barcode > 0 && !isAdmin}
+                  placeholder={
+                    qc.barcode > 0 && !isAdmin ? "Already set" : "Enter barcode"
+                  }
+                />
+              </div>
+
+              <div className="col-md-3">
+                <label className="form-label">QC Checked</label>
+                <input
+                  type="number"
+                  className="form-control"
+                  name="qc_checked"
+                  value={form.qc_checked}
+                  onChange={handleChange}
+                  min="0"
+                />
+              </div>
+
+              <div className="col-md-3">
+                <label className="form-label">QC Passed</label>
+                <input
+                  type="number"
+                  className="form-control"
+                  name="qc_passed"
+                  value={form.qc_passed}
+                  onChange={handleChange}
+                  min="0"
+                />
+              </div>
+
+              <div className="col-md-3">
+                <label className="form-label">QC Rejected</label>
+                <input
+                  type="number"
+                  className="form-control"
+                  name="qc_rejected"
+                  value={form.qc_rejected}
+                  onChange={handleChange}
+                  min="0"
+                />
+              </div>
+
+              <div className="col-md-3">
+                <label className="form-label">
+                  Offered Quantity
+                </label>
+                <input
+                  type="number"
+                  className="form-control"
+                  name="offeredQuantity"
+                  value={form.offeredQuantity}
+                  onChange={handleChange}
+                  min="0"
+                />
+              </div>
+
+              <div className="col-md-3">
+                <label className="form-label">Packed Size</label>
+                <div className="form-check border rounded p-2">
+                  <input
+                    id="packed_size"
+                    type="checkbox"
+                    className="form-check-input"
+                    name="packed_size"
+                    checked={form.packed_size}
+                    onChange={handleChange}
+                    disabled={qc.packed_size && !isAdmin}
+                  />
+                  <label
+                    htmlFor="packed_size"
+                    className="form-check-label ms-2"
+                  >
+                    {form.packed_size ? "Yes" : "No"}
+                  </label>
+                </div>
+              </div>
+
+              <div className="col-md-3">
+                <label className="form-label">Finishing</label>
+                <div className="form-check border rounded p-2">
+                  <input
+                    id="finishing"
+                    type="checkbox"
+                    className="form-check-input"
+                    name="finishing"
+                    checked={form.finishing}
+                    onChange={handleChange}
+                    disabled={qc.finishing && !isAdmin}
+                  />
+                  <label htmlFor="finishing" className="form-check-label ms-2">
+                    {form.finishing ? "Yes" : "No"}
+                  </label>
+                </div>
+              </div>
+
+              <div className="col-md-3">
+                <label className="form-label">Branding</label>
+                <div className="form-check border rounded p-2">
+                  <input
+                    id="branding"
+                    type="checkbox"
+                    className="form-check-input"
+                    name="branding"
+                    checked={form.branding}
+                    onChange={handleChange}
+                    disabled={qc.branding && !isAdmin}
+                  />
+                  <label htmlFor="branding" className="form-check-label ms-2">
+                    {form.branding ? "Yes" : "No"}
+                  </label>
+                </div>
+              </div>
+
+              <div className="col-md-4">
+                <label className="form-label">Start of label range</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  name="labelStart"
+                  value={form.labelStart}
+                  onChange={handleChange}
+                  placeholder="Start label"
+                />
+              </div>
+
+              <div className="col-md-4">
+                <label className="form-label">End of label range</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  name="labelEnd"
+                  value={form.labelEnd}
+                  onChange={handleChange}
+                  placeholder="End label"
+                />
+              </div>
+
+              <div className="col-md-4">
+                <label className="form-label">Rejected labels</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  name="rejectedLabels"
+                  value={form.rejectedLabels}
+                  onChange={handleChange}
+                  placeholder="e.g. 101, 102, 103"
+                />
+              </div>
+
+              <div className="col-12">
+                <label className="form-label">Remarks</label>
+                <textarea
+                  className="form-control"
+                  name="remarks"
+                  value={form.remarks}
+                  onChange={handleChange}
+                  rows="3"
+                />
+              </div>
             </div>
-          </div>
-          <div className="qc-modal-field qc-modal-checkbox">
-            <label htmlFor="branding">Branding</label>
-            <div className="qc-modal-check">
-              <input
-                id="branding"
-                type="checkbox"
-                name="branding"
-                checked={form.branding}
-                onChange={handleChange}
-                disabled={qc.branding && !isAdmin}
-              />
-              <span>{form.branding ? "Yes" : "No"}</span>
-            </div>
-          </div>
-          <div className="qc-modal-field">
-            <label>Start of label range</label>
-            <input
-              type="text"
-              name="labelStart"
-              value={form.labelStart}
-              onChange={handleChange}
-              placeholder="Start of the labels range"
-            />
-          </div>
-          <div className="qc-modal-field">
-            <label>End of label range</label>
-            <input
-              type="text"
-              name="labelEnd"
-              value={form.labelEnd}
-              onChange={handleChange}
-              placeholder="End of the labels range"
-            />
-          </div>
-          <div className="qc-modal-field">
-            <label>Rejected labels</label>
-            <input
-              type="text"
-              name="rejectedLabels"
-              value={form.rejectedLabels}
-              onChange={handleChange}
-              placeholder="e.g. 101, 102, 103"
-            />
-          </div>
-        </div>
 
-        <label>Remarks</label>
-        <textarea
-          name="remarks"
-          value={form.remarks}
-          onChange={handleChange}
-          rows="3"
-        />
+            {error && <div className="alert alert-danger mb-0">{error}</div>}
+          </div>
 
-        {error && <div className="modalError">{error}</div>}
-
-        <div className="modalActions">
-          <button onClick={handleSubmit} disabled={saving}>
-            {saving ? "Updating..." : "Update"}
-          </button>
-          <button onClick={onClose} disabled={saving}>
-            Cancel
-          </button>
+          <div className="modal-footer">
+            <button
+              type="button"
+              className="btn btn-outline-secondary"
+              onClick={onClose}
+              disabled={saving}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleSubmit}
+              disabled={saving}
+            >
+              {saving ? "Updating..." : "Update"}
+            </button>
+          </div>
         </div>
       </div>
     </div>

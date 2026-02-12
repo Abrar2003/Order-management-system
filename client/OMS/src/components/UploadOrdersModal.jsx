@@ -17,7 +17,7 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
       setLoading(true);
       setError("");
       await uploadOrders(file);
-      onSuccess(); // refresh orders
+      onSuccess();
       onClose();
     } catch (err) {
       setError(err.response?.data?.message || "Upload failed");
@@ -27,72 +27,37 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
   };
 
   return (
-    <div style={overlayStyle}>
-      <div style={modalStyle}>
-        <h2>Upload Orders</h2>
+    <div className="modal d-block om-modal-backdrop" tabIndex="-1" role="dialog">
+      <div className="modal-dialog modal-dialog-centered" role="document">
+        <div className="modal-content">
+          <div className="modal-header">
+            <h5 className="modal-title">Upload Orders</h5>
+            <button type="button" className="btn-close" onClick={onClose} aria-label="Close" />
+          </div>
 
-        <input
-        className="fileInput"
-          type="file"
-          accept=".xlsx,.xls,.xlsm"
-          onChange={(e) => setFile(e.target.files[0])}
-        />
+          <div className="modal-body d-grid gap-3">
+            <input
+              className="form-control"
+              type="file"
+              accept=".xlsx,.xls,.xlsm"
+              onChange={(e) => setFile(e.target.files[0])}
+            />
 
-        {error && <p style={{ color: "red" }}>{error}</p>}
+            {error && <div className="alert alert-danger py-2 mb-0">{error}</div>}
+          </div>
 
-        <div style={{ marginTop: "20px" }}>
-          <button onClick={onClose} style={cancelBtn}>
-            Cancel
-          </button>
-
-          <button
-            onClick={handleUpload}
-            disabled={loading}
-            style={uploadBtn}
-          >
-            {loading ? "Uploading..." : "Upload"}
-          </button>
+          <div className="modal-footer">
+            <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+              Cancel
+            </button>
+            <button type="button" className="btn btn-primary" onClick={handleUpload} disabled={loading}>
+              {loading ? "Uploading..." : "Upload"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
-};
-
-/* ---------- Styles ---------- */
-
-const overlayStyle = {
-  position: "fixed",
-  inset: 0,
-  backgroundColor: "rgba(0,0,0,0.5)",
-  display: "flex",
-  justifyContent: "center",
-  alignItems: "center",
-  zIndex: 1000,
-};
-
-const modalStyle = {
-  background: "#fff",
-  padding: "24px",
-  borderRadius: "8px",
-  width: "400px",
-};
-
-const uploadBtn = {
-  padding: "8px 16px",
-  backgroundColor: "#2563eb",
-  color: "#fff",
-  border: "none",
-  borderRadius: "4px",
-  cursor: "pointer",
-  marginLeft: "10px",
-};
-
-const cancelBtn = {
-  padding: "8px 16px",
-  backgroundColor: "#9ca3af",
-  border: "none",
-  borderRadius: "4px",
-  cursor: "pointer",
 };
 
 export default UploadOrdersModal;

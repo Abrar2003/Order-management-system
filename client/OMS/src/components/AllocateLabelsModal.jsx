@@ -30,7 +30,7 @@ const AllocateLabelsModal = ({ onClose }) => {
 
   const selectedInspector = useMemo(
     () => inspectors.find((inspector) => inspector._id === selectedInspectorId),
-    [inspectors, selectedInspectorId]
+    [inspectors, selectedInspectorId],
   );
 
   const globalAllocated = useMemo(() => {
@@ -121,24 +121,18 @@ const AllocateLabelsModal = ({ onClose }) => {
     const conflictsUsed = labels.filter((label) => usedSet.has(label));
     const conflictsAllocated = labels.filter((label) => allocatedSet.has(label));
     const conflictsOther = labels.filter(
-      (label) => globalAllocated.has(label) && !allocatedSet.has(label) && !usedSet.has(label)
+      (label) => globalAllocated.has(label) && !allocatedSet.has(label) && !usedSet.has(label),
     );
 
     const nextErrors = [];
     if (conflictsUsed.length) {
-      nextErrors.push(
-        `Used labels cannot be reallocated: ${formatLabelList(conflictsUsed)}`
-      );
+      nextErrors.push(`Used labels cannot be reallocated: ${formatLabelList(conflictsUsed)}`);
     }
     if (conflictsAllocated.length) {
-      nextErrors.push(
-        `Already allocated to this inspector: ${formatLabelList(conflictsAllocated)}`
-      );
+      nextErrors.push(`Already allocated to this inspector: ${formatLabelList(conflictsAllocated)}`);
     }
     if (conflictsOther.length) {
-      nextErrors.push(
-        `Allocated to another inspector: ${formatLabelList(conflictsOther)}`
-      );
+      nextErrors.push(`Allocated to another inspector: ${formatLabelList(conflictsOther)}`);
     }
 
     if (nextErrors.length) {
@@ -148,14 +142,11 @@ const AllocateLabelsModal = ({ onClose }) => {
 
     try {
       setSaving(true);
-      await api.patch(`/inspectors/${selectedInspectorId}/allocate-labels`, {
-        labels,
-      });
+      await api.patch(`/inspectors/${selectedInspectorId}/allocate-labels`, { labels });
       setLabelStart("");
       setLabelEnd("");
       setSelectedInspectorId("");
       setUsage(null);
-      await new Promise((resolve) => setTimeout(resolve, 150));
       setErrors([]);
       onClose();
       alert("Labels allocated successfully.");
@@ -167,88 +158,103 @@ const AllocateLabelsModal = ({ onClose }) => {
   };
 
   return (
-    <div className="modalOverlay">
-      <div className="modalBox qc-modal">
-        <h3>Allocate QC Labels</h3>
+    <div className="modal d-block om-modal-backdrop" tabIndex="-1" role="dialog">
+      <div className="modal-dialog modal-dialog-centered modal-lg" role="document">
+        <div className="modal-content">
+          <div className="modal-header">
+            <h5 className="modal-title">Allocate QC Labels</h5>
+            <button type="button" className="btn-close" onClick={onClose} aria-label="Close" />
+          </div>
 
-        <div className="qc-modal-info">
-          <p>
-            <b>Inspector:</b>{" "}
-            {selectedInspector?.user?.name || "Select an inspector"}
-          </p>
-          <p>
-            <b>Allocated:</b>{" "}
-            {loadingUsage ? "Loading..." : usage?.total_allocated ?? "—"}
-          </p>
-          <p>
-            <b>Used:</b>{" "}
-            {loadingUsage ? "Loading..." : usage?.total_used ?? "—"}
-          </p>
-          <p>
-            <b>Unused:</b>{" "}
-            {loadingUsage ? "Loading..." : usage?.unused_labels?.length ?? "—"}
-          </p>
-        </div>
+          <div className="modal-body d-grid gap-3">
+            <div className="row g-2">
+              <div className="col-sm-6 col-lg-3">
+                <div className="small text-secondary">Inspector</div>
+                <div className="fw-semibold">{selectedInspector?.user?.name || "Select inspector"}</div>
+              </div>
+              <div className="col-sm-6 col-lg-3">
+                <div className="small text-secondary">Allocated</div>
+                <div className="fw-semibold">{loadingUsage ? "Loading..." : usage?.total_allocated ?? "-"}</div>
+              </div>
+              <div className="col-sm-6 col-lg-3">
+                <div className="small text-secondary">Used</div>
+                <div className="fw-semibold">{loadingUsage ? "Loading..." : usage?.total_used ?? "-"}</div>
+              </div>
+              <div className="col-sm-6 col-lg-3">
+                <div className="small text-secondary">Unused</div>
+                <div className="fw-semibold">{loadingUsage ? "Loading..." : usage?.unused_labels?.length ?? "-"}</div>
+              </div>
+            </div>
 
-        <div className="inputContainer qc-modal-grid">
-          <div className="qc-modal-field">
-            <label>QC Inspector</label>
-            <select
-              value={selectedInspectorId}
-              onChange={(e) => setSelectedInspectorId(e.target.value)}
-              disabled={loadingInspectors}
+            <div className="row g-3">
+              <div className="col-md-4">
+                <label className="form-label">QC Inspector</label>
+                <select
+                  className="form-select"
+                  value={selectedInspectorId}
+                  onChange={(e) => setSelectedInspectorId(e.target.value)}
+                  disabled={loadingInspectors}
+                >
+                  <option value="">
+                    {loadingInspectors ? "Loading inspectors..." : "Select Inspector"}
+                  </option>
+                  {inspectors.map((inspector) => (
+                    <option key={inspector._id} value={inspector._id}>
+                      {inspector.user?.name || inspector.user?.email || inspector._id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="col-md-4">
+                <label className="form-label">Start Label</label>
+                <input
+                  type="number"
+                  className="form-control"
+                  value={labelStart}
+                  onChange={(e) => setLabelStart(e.target.value)}
+                  min="1"
+                  placeholder="e.g. 1001"
+                />
+              </div>
+
+              <div className="col-md-4">
+                <label className="form-label">End Label</label>
+                <input
+                  type="number"
+                  className="form-control"
+                  value={labelEnd}
+                  onChange={(e) => setLabelEnd(e.target.value)}
+                  min="1"
+                  placeholder="e.g. 1050"
+                />
+              </div>
+            </div>
+
+            {errors.length > 0 && (
+              <div className="alert alert-danger mb-0">
+                <ul className="mb-0 ps-3">
+                  {errors.map((error) => (
+                    <li key={error}>{error}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+
+          <div className="modal-footer">
+            <button type="button" className="btn btn-outline-secondary" onClick={onClose} disabled={saving}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleAllocate}
+              disabled={saving || loadingInspectors}
             >
-              <option value="">
-                {loadingInspectors ? "Loading inspectors..." : "Select Inspector"}
-              </option>
-              {inspectors.map((inspector) => (
-                <option key={inspector._id} value={inspector._id}>
-                  {inspector.user?.name || inspector.user?.email || inspector._id}
-                </option>
-              ))}
-            </select>
+              {saving ? "Allocating..." : "Allocate"}
+            </button>
           </div>
-
-          <div className="qc-modal-field">
-            <label>Start Label</label>
-            <input
-              type="number"
-              value={labelStart}
-              onChange={(e) => setLabelStart(e.target.value)}
-              min="1"
-              placeholder="e.g. 1001"
-            />
-          </div>
-
-          <div className="qc-modal-field">
-            <label>End Label</label>
-            <input
-              type="number"
-              value={labelEnd}
-              onChange={(e) => setLabelEnd(e.target.value)}
-              min="1"
-              placeholder="e.g. 1050"
-            />
-          </div>
-        </div>
-
-        {errors.length > 0 && (
-          <div className="modalError">
-            <ul className="qc-modal-error-list">
-              {errors.map((error) => (
-                <li key={error}>{error}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        <div className="modalActions">
-          <button onClick={handleAllocate} disabled={saving || loadingInspectors}>
-            {saving ? "Allocating..." : "Allocate"}
-          </button>
-          <button onClick={onClose} disabled={saving}>
-            Cancel
-          </button>
         </div>
       </div>
     </div>

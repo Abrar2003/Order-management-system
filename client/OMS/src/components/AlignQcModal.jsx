@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import axios from "../api/axios";
 import "../App.css";
 
@@ -13,50 +13,33 @@ const AlignQCModal = ({
   order,
   onClose,
   onSuccess,
-  initialInspector = "",
-  initialVendorProvision = "",
+  initialQuantityRequested = "",
   initialRequestDate = "",
 }) => {
-  const [inspectors, setInspectors] = useState([]);
-  const [inspector, setInspector] = useState(
-    initialInspector ? String(initialInspector) : "",
-  );
   const [request_date, setReqDate] = useState(formatDateInput(initialRequestDate));
-  const [vendorProvision, setVendorProvision] = useState(
-    initialVendorProvision !== undefined && initialVendorProvision !== null
-      ? String(initialVendorProvision)
+  const [quantityRequested, setQuantityRequested] = useState(
+    initialQuantityRequested !== undefined && initialQuantityRequested !== null
+      ? String(initialQuantityRequested)
       : "",
   );
-
-  useEffect(() => {
-    const token = localStorage.getItem("token");
-
-    axios
-      .get("/auth/?role=QC", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      })
-      .then((res) => {
-        setInspectors(res.data);
-      });
-  }, []);
-
-  useEffect(() => {
-    setInspector(initialInspector ? String(initialInspector) : "");
-    setReqDate(formatDateInput(initialRequestDate));
-    setVendorProvision(
-      initialVendorProvision !== undefined && initialVendorProvision !== null
-        ? String(initialVendorProvision)
-        : "",
-    );
-  }, [initialInspector, initialRequestDate, initialVendorProvision]);
 
   const handleSubmit = async () => {
     const token = localStorage.getItem("token");
 
-    if (!inspector || !vendorProvision) {
-      alert("All fields are required");
+    if (!request_date || quantityRequested === "") {
+      alert("Request date and quantity requested are required.");
+      return;
+    }
+
+    const requestedNumber = Number(quantityRequested);
+
+    if (Number.isNaN(requestedNumber) || requestedNumber < 0) {
+      alert("Quantity values must be valid non-negative numbers.");
+      return;
+    }
+
+    if (requestedNumber > Number(order.quantity)) {
+      alert("Quantity requested cannot exceed client demand.");
       return;
     }
 
@@ -67,10 +50,9 @@ const AlignQCModal = ({
           order: order._id,
           item: order.item,
           request_date,
-          inspector,
           quantities: {
             client_demand: order.quantity,
-            vendor_provision: Number(vendorProvision),
+            quantity_requested: requestedNumber,
           },
         },
         {
@@ -81,8 +63,6 @@ const AlignQCModal = ({
       );
 
       alert("QC alignment successful");
-      window.location.reload();
-
       onSuccess();
     } catch (err) {
       console.error(err);
@@ -91,53 +71,63 @@ const AlignQCModal = ({
   };
 
   return (
-    <div className="modalOverlay">
-      <div className="modalBox">
-        <h3>Align QC Inspector</h3>
+    <div className="modal d-block om-modal-backdrop" tabIndex="-1" role="dialog">
+      <div className="modal-dialog modal-dialog-centered" role="document">
+        <div className="modal-content">
+          <div className="modal-header">
+            <h5 className="modal-title">Align QC Request</h5>
+            <button type="button" className="btn-close" onClick={onClose} aria-label="Close" />
+          </div>
 
-        <p>
-          <b>Order ID:</b> {order.order_id}
-        </p>
-        <p>
-          <b>Item:</b> {order.item.item_code}
-        </p>
-        <p>
-          <b>Description:</b> {order.item.description}
-        </p>
-        <p>
-          <b>Client Demand:</b> {order.quantity}
-        </p>
+          <div className="modal-body d-grid gap-3">
+            <div className="row g-2">
+              <div className="col-sm-6">
+                <div className="small text-secondary">Order ID</div>
+                <div className="fw-semibold">{order.order_id}</div>
+              </div>
+              <div className="col-sm-6">
+                <div className="small text-secondary">Item</div>
+                <div className="fw-semibold">{order.item.item_code}</div>
+              </div>
+              <div className="col-12">
+                <div className="small text-secondary">Description</div>
+                <div className="fw-semibold">{order.item.description}</div>
+              </div>
+              <div className="col-12">
+                <div className="small text-secondary">Client Demand</div>
+                <div className="fw-semibold">{order.quantity}</div>
+              </div>
+            </div>
 
-        <label>QC Inspector</label>
-        <select
-          value={inspector}
-          onChange={(e) => setInspector(e.target.value)}
-        >
-          <option value="">Select Inspector</option>
-          {inspectors.map((qc) => (
-            <option key={qc._id} value={qc._id}>
-              {qc.name}
-            </option>
-          ))}
-        </select>
-        <label>Request Date</label>
-        <input
-          type="date"
-          value={request_date}
-          onChange={(e) => setReqDate(e.target.value)}
-        />
-        <label>Vendor Provision</label>
-        <input
-          type="number"
-          value={vendorProvision}
-          onChange={(e) => setVendorProvision(e.target.value)}
-        />
+            <div>
+              <label className="form-label">Request Date</label>
+              <input
+                type="date"
+                className="form-control"
+                value={request_date}
+                onChange={(e) => setReqDate(e.target.value)}
+              />
+            </div>
 
-        <div style={{ marginTop: 16 }}>
-          <button onClick={handleSubmit}>Align QC</button>
-          <button onClick={onClose} style={{ marginLeft: 8 }}>
-            Cancel
-          </button>
+            <div>
+              <label className="form-label">Quantity Requested</label>
+              <input
+                type="number"
+                className="form-control"
+                value={quantityRequested}
+                onChange={(e) => setQuantityRequested(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="modal-footer">
+            <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+              Cancel
+            </button>
+            <button type="button" className="btn btn-primary" onClick={handleSubmit}>
+              Align QC
+            </button>
+          </div>
         </div>
       </div>
     </div>

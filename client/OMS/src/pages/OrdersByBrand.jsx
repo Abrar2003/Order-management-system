@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
+import "../App.css";
 
 const OrdersByBrand = () => {
   const { brand, vendor, status } = useParams();
@@ -18,7 +19,6 @@ const OrdersByBrand = () => {
         setError("");
 
         const token = localStorage.getItem("token");
-
         const effectiveStatus = status ?? "all";
 
         const res = await axios.get(
@@ -42,100 +42,71 @@ const OrdersByBrand = () => {
     fetchOrders();
   }, [brand, vendor, status]);
 
-  if (loading) return <p>Loading...</p>;
-  if (error) return <p>{error}</p>;
-
   return (
     <>
       <Navbar />
-      <div className="qc-details-header">
-        <button onClick={() => navigate(-1)} className="backButton">
-          ← Back
-        </button>
-        <h2 className="qc-details-title">Orders by Brand</h2>
-      </div>
-      <div
-        className="orderTableContainer"
-        style={{
-          width: "90%",
-          borderRadius: "8px",
-          padding: "16px",
-          display: "flex",
-          flexDirection: "column",
-          margin: "auto",
-        }}
-      >
-        {loading ? (
-          <div style={{ textAlign: "center", padding: "20px" }}>Loading...</div>
-        ) : (
-          <>
-            <div
-             className="orderDetailsDiv"
-              style={{
-                // backgroundColor: "#f3f4f6",
-                padding: "0.5rem 1rem",
-                borderBottom: "1px solid #e5e7eb",
-                margin: "20px auto",
-                borderRadius: "4px",
-                display: "flex",
-                alignItems: "center",
-                gap: "12px",
-                flexWrap: "wrap",
-                boxShadow: "rgba(0, 0, 0, 0.24) 0px 3px 8px",
-              }}
-            >
-              <span>Brand: {brand}</span>
-              <span>Vendor: {vendor}</span>
-              <span>Status: {status ?? "all"}</span>
-            </div>
 
-            <table className="orderTable">
-              <thead className="tableHead">
-                <tr>
-                  <th>Order ID</th>
-                  {/* <th>Brand</th>
-            <th>Vendor</th> */}
-                  <th>Items</th>
-                  <th>Order Date</th>
-                  <th>ETD</th>
-                </tr>
-              </thead>
-              <div style={{ height: "20px" }}></div>
-              <tbody className="tableBody">
-                {orders.length === 0 && (
-                  <tr>
-                    <td colSpan="9">No orders found</td>
-                  </tr>
-                )}
+      <div className="page-shell py-3">
+        <div className="d-flex justify-content-between align-items-center mb-3">
+          <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => navigate(-1)}>
+            Back
+          </button>
+          <h2 className="h4 mb-0">Orders by Brand</h2>
+          <span className="d-none d-md-inline" />
+        </div>
 
-                {orders.map((order) => (
-                  <tr
-                    key={order._id}
-                    style={{ cursor: "pointer" }}
-                    onClick={() =>
-                      navigate(`/orders?order_id=${order.order_id}`)
-                    }
-                  >
-                    <td>{order.order_id}</td>
-                    {/* <td>{order.brand}</td>
-              <td>{order.vendor}</td> */}
-                    <td>{order.items}</td>
-                    <td>
-                      {order.order_date
-                        ? new Date(order.order_date).toLocaleDateString()
-                        : "N/A"}
-                    </td>
-                    <td>
-                      {order.ETD
-                        ? new Date(order.ETD).toLocaleDateString()
-                        : "N/A"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </>
-        )}
+        {error && <div className="alert alert-danger">{error}</div>}
+
+        <div className="card om-card mb-3">
+          <div className="card-body d-flex flex-wrap gap-2">
+            <span className="om-summary-chip">Brand: {brand}</span>
+            <span className="om-summary-chip">Vendor: {vendor}</span>
+            <span className="om-summary-chip">Status: {status ?? "all"}</span>
+          </div>
+        </div>
+
+        <div className="card om-card">
+          <div className="card-body p-0">
+            {loading ? (
+              <div className="text-center py-4">Loading...</div>
+            ) : (
+              <div className="table-responsive">
+                <table className="table table-striped table-hover align-middle om-table mb-0">
+                  <thead className="table-primary">
+                    <tr>
+                      <th>Order ID</th>
+                      <th>Items</th>
+                      <th>Order Date</th>
+                      <th>ETD</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {orders.length === 0 && (
+                      <tr>
+                        <td colSpan="4" className="text-center py-4">
+                          No orders found
+                        </td>
+                      </tr>
+                    )}
+
+                    {orders.map((order) => (
+                      <tr
+                        key={order._id || order.order_id}
+                        className="table-clickable"
+                        onClick={() => navigate(`/orders?order_id=${order.order_id}`)}
+                      >
+                        <td>{order.order_id}</td>
+                        <td>{order.items}</td>
+                        <td>{order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}</td>
+                        <td>{order.ETD ? new Date(order.ETD).toLocaleDateString() : "N/A"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </>
   );

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
 import { useNavigate } from "react-router-dom";
@@ -13,9 +13,28 @@ const Home = () => {
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(false);
 
-const navigate = useNavigate();
+  const navigate = useNavigate();
 
-  // Fetch brands on component mount
+  const brandLogos = useMemo(() => {
+    const toDataUrl = (logoObj) => {
+      const raw = logoObj?.data?.data || logoObj?.data;
+      if (!raw || !Array.isArray(raw)) return null;
+
+      let binary = "";
+      raw.forEach((byte) => {
+        binary += String.fromCharCode(byte);
+      });
+      const base64 = window.btoa(binary);
+      return `data:image/webp;base64,${base64}`;
+    };
+
+    const map = new Map();
+    brands.forEach((brand) => {
+      map.set(brand._id, toDataUrl(brand.logo));
+    });
+    return map;
+  }, [brands]);
+
   useEffect(() => {
     const fetchBrands = async () => {
       try {
@@ -24,12 +43,12 @@ const navigate = useNavigate();
             Authorization: `Bearer ${token}`,
           },
         });
-        console.log("Fetched brands:", res.data);
+
         if (res.data.data && res.data.data.length > 0) {
           setBrands(res.data.data);
           setSelectedBrand(res.data.data[0].brand);
         }
-      } catch (err) { 
+      } catch (err) {
         console.error("Error fetching brands:", err);
       }
     };
@@ -39,7 +58,6 @@ const navigate = useNavigate();
     }
   }, [token]);
 
-  // Fetch orders for selected brand
   useEffect(() => {
     if (!selectedBrand) return;
     let isMounted = true;
@@ -52,6 +70,7 @@ const navigate = useNavigate();
             Authorization: `Bearer ${token}`,
           },
         });
+
         if (!isMounted) return;
         setVendorSummary(res.data.data);
         setTotalPages(1);
@@ -74,165 +93,120 @@ const navigate = useNavigate();
   return (
     <>
       <Navbar />
-    <div>
 
-      <div style={{ maxWidth: "1280px", margin: "0 auto", padding: "2rem" }}>
-        {/* Brand Navigation Bar */}
-        <div
-          style={{
-              // backgroundColor: "#f3f4f6",
-              padding: "12px 16px",
-              borderBottom: "1px solid #e5e7eb",
-              margin: "20px auto",
-              borderRadius: "4px",
-              display: "flex",
-              alignItems: "center",
-              gap: "12px",
-              flexWrap: "wrap",
-              boxShadow: "rgba(0, 0, 0, 0.24) 0px 3px 8px",
-            }}
-        >
-          <span
-            style={{
-                fontWeight: "600",
-                fontSize: "14px",
-            }}
-            className="brandSpan"
-            >
-            Brands:
-          </span>
-          {brands.map((brand) => {
-              const logoBlob = new Blob([new Uint8Array(brand.logo.data)], {
-                  type: "image/webp",
-                });
-
-                const logoUrl = URL.createObjectURL(logoBlob);
-                
-                return (
-                    <button
-                    key={brand._id}
-                    onClick={() => {
+      <div className="page-shell py-3">
+        <div className="card om-card mb-3">
+          <div className="card-body d-flex flex-wrap gap-2 align-items-center">
+            <span className="fw-semibold me-1">Brands:</span>
+            {brands.map((brand) => (
+              <button
+                key={brand._id}
+                type="button"
+                className={`btn brand-logo-btn ${selectedBrand === brand.name ? "btn-primary" : "btn-outline-secondary"}`}
+                onClick={() => {
                   setSelectedBrand(brand.name);
                   setPage(1);
                 }}
-                style={{
-                    width: "80px",
-                    height: "40px",
-                    display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: "5px",
-                  backgroundColor: "#ffffff",
-                  color: selectedBrand === brand.name ? "#ffffff" : "#374151",
-                  border: "1px solid #d1d5db",
-                  borderRadius: "4px",
-                  cursor: "pointer",
-                  fontSize: "13px",
-                  fontWeight: selectedBrand === brand.name ? "600" : "500",
-                  margin: "auto",
-                }}
-                >
-                <img
-                  src={logoUrl}
-                  alt={brand.name}
-                  style={{ width: "100%", height: "100%", objectFit: "contain" }}
-                  />
+                title={brand.name}
+              >
+                {brandLogos.get(brand._id) ? (
+                  <img src={brandLogos.get(brand._id)} alt={brand.name} className="brand-logo-img" />
+                ) : (
+                  <span className="small fw-semibold">{brand.name}</span>
+                )}
               </button>
-            );
-        })}
+            ))}
+          </div>
         </div>
 
-        {/* Orders Table */}
-        <div
-          className="orderTableContainer"
-          style={{
-              width: "90%",
-              borderRadius: "8px",
-              padding: "16px",
-              display: "flex",
-              flexDirection: "column",
-              margin: "auto",
-            }}
-            >
-          {loading ? (
-            <div style={{ textAlign: "center", padding: "20px" }}>
-              Loading...
-            </div>
-          ) : (
-              <div>
-              <h3 style={{ marginTop: 0, marginBottom: "16px" }}>
-                Orders for <br/> {selectedBrand}
-              </h3>
-              <table className="orderTable">
-                <thead className="tableHead">
-                  <tr>
-                    <th>Vendor</th>
-                    <th>Total Orders</th>
-                    <th>Delayed</th>
-                    <th>Peding</th>
-                    <th>Shipped</th>
-                  </tr>
-                </thead>
-                <div style={{ height: "20px" }}></div>
-                <tbody className="tableBody">
-                  {vendorSummary.map((summary) => (
-                      <>
-                      <tr className="tableRow">
-                        <td>{summary.vendor}</td>
-                        <td style={{ cursor: "pointer" }} onClick={() => {
-                            navigate(`/orders/${selectedBrand}/${summary.vendor}/all`);
-                        }}>{summary.totalOrders}</td>
-                        <td style={{ cursor: "pointer" }} onClick={() => {
-                            navigate(`/orders/${selectedBrand}/${summary.vendor}/delayed`);
-                        }}>{summary.totalDelayedOrders}</td>
-                        <td style={{ cursor: "pointer" }} onClick={() => {
-                            navigate(`/orders/${selectedBrand}/${summary.vendor}/Pending`);
-                        }}>{summary.totalPending}</td>
-                        <td style={{ cursor: "pointer" }} onClick={() => {
-                            navigate(`/orders/${selectedBrand}/${summary.vendor}/Shipped`);
-                        }}>{summary.totalShipped}</td>
-                      </tr>
-                      <div style={{ height: "20px" }}></div>
-                       
-                                          </>
+        <div className="card om-card">
+          <div className="card-body">
+            <h3 className="h5 mb-3">Orders for {selectedBrand}</h3>
 
-))}
-                  {vendorSummary.length === 0 && (
-                      <tr>
-                      <td colSpan="8" style={{ textAlign: "center" }}>
-                        No orders found for {selectedBrand}
-                      </td>
+            {loading ? (
+              <div className="text-center py-4">Loading...</div>
+            ) : (
+              <div className="table-responsive">
+                <table className="table table-striped table-hover align-middle om-table mb-0">
+                  <thead className="table-primary">
+                    <tr>
+                      <th>Vendor</th>
+                      <th>Total Orders</th>
+                      <th>Delayed</th>
+                      <th>Pending</th>
+                      <th>Shipped</th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
+                  </thead>
+                  <tbody>
+                    {vendorSummary.map((summary) => (
+                      <tr key={summary.vendor}>
+                        <td>{summary.vendor}</td>
+                        <td
+                          className="table-clickable"
+                          onClick={() => navigate(`/orders/${selectedBrand}/${summary.vendor}/all`)}
+                        >
+                          {summary.totalOrders}
+                        </td>
+                        <td
+                          className="table-clickable"
+                          onClick={() => navigate(`/orders/${selectedBrand}/${summary.vendor}/delayed`)}
+                        >
+                          {summary.totalDelayedOrders}
+                        </td>
+                        <td
+                          className="table-clickable"
+                          onClick={() => navigate(`/orders/${selectedBrand}/${summary.vendor}/Pending`)}
+                        >
+                          {summary.totalPending}
+                        </td>
+                        <td
+                          className="table-clickable"
+                          onClick={() => navigate(`/orders/${selectedBrand}/${summary.vendor}/Shipped`)}
+                        >
+                          {summary.totalShipped}
+                        </td>
+                      </tr>
+                    ))}
+
+                    {vendorSummary.length === 0 && (
+                      <tr>
+                        <td colSpan="5" className="text-center py-4">
+                          No orders found for {selectedBrand}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Pagination */}
         {vendorSummary.length > 0 && (
-            <div style={{ marginTop: "20px", textAlign: "center" }}>
+          <div className="d-flex justify-content-center align-items-center gap-3 mt-3">
             <button
+              type="button"
+              className="btn btn-outline-secondary btn-sm"
               disabled={page === 1}
               onClick={() => setPage((prev) => prev - 1)}
             >
               Prev
             </button>
-            <span style={{ margin: "0 15px" }}>
+            <span className="small fw-semibold">
               Page {page} of {totalPages}
             </span>
             <button
+              type="button"
+              className="btn btn-outline-secondary btn-sm"
               disabled={page === totalPages}
               onClick={() => setPage((prev) => prev + 1)}
-              >
+            >
               Next
             </button>
           </div>
         )}
       </div>
-    </div>
-        </>
+    </>
   );
 };
 
