@@ -163,6 +163,39 @@
   justify-content: center;
 }
 
+.qc-bool-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.375rem;
+}
+
+.qc-bool-check .qc-bool-check-input {
+  float: none;
+  margin: 0;
+  position: static;
+}
+
+.qc-bool-check .qc-bool-check-label {
+  margin: 0;
+}
+
+.qc-modal-summary-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.qc-modal-summary-item {
+  min-width: 0;
+}
+
+.qc-modal-summary-item .fw-semibold {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .auth-card {
   max-width: 440px;
 }

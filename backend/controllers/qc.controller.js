@@ -253,7 +253,12 @@ exports.alignQC = async (req, res) => {
 
       const orderRecord = await Order.findById(order);
       if (orderRecord) {
-        orderRecord.status = "Under Inspection";
+        const passedQty = Number(existingQC.quantities?.qc_passed || 0);
+        const clientDemandQty = Number(existingQC.quantities?.client_demand || 0);
+        orderRecord.status =
+          clientDemandQty > 0 && passedQty >= clientDemandQty
+            ? "Inspection Done"
+            : "Under Inspection";
         orderRecord.qc_record = existingQC._id;
         await orderRecord.save();
       }
@@ -328,13 +333,22 @@ exports.updateQC = async (req, res) => {
       CBM,
     } = req.body;
 
-      const qc = await QC.findById(req.params.id).populate("inspector");
+      const qc = await QC.findById(req.params.id)
+        .populate("inspector")
+        .populate("order", "status");
 
       if (!qc) {
         return res.status(404).json({ message: "QC record not found" });
       }
 
       const isAdmin = req.user.role === "admin";
+      const isInspectionDone = qc?.order?.status === "Inspection Done";
+
+      if (!isAdmin && isInspectionDone) {
+        return res.status(403).json({
+          message: "Only admin can update this QC record after inspection is done",
+        });
+      }
 
       const existingInspectorId = qc.inspector?._id
         ? qc.inspector._id.toString()
@@ -622,6 +636,19 @@ exports.updateQC = async (req, res) => {
       }
 
       await qc.save();
+
+      const orderId = qc?.order?._id || qc.order;
+      const orderRecord = await Order.findById(orderId);
+      if (orderRecord && orderRecord.status !== "Shipped") {
+        const passedQty = Number(qc.quantities?.qc_passed || 0);
+        const clientDemandQty = Number(qc.quantities?.client_demand || 0);
+
+        orderRecord.status =
+          clientDemandQty > 0 && passedQty >= clientDemandQty
+            ? "Inspection Done"
+            : "Under Inspection";
+        await orderRecord.save();
+      }
 
       res.json({
         message: "QC updated successfully",

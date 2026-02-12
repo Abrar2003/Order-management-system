@@ -60,13 +60,13 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       qc_rejected: "",
       offeredQuantity: "",
       barcode: qc.barcode > 0 ? String(qc.barcode) : "",
-      packed_size: Boolean(qc.packed_size),
-      finishing: Boolean(qc.finishing),
-      branding: Boolean(qc.branding),
+      packed_size: "",
+      finishing: "",
+      branding: "",
       labelStart: "",
       labelEnd: "",
-      rejectedLabels: "",
-      remarks: qc.remarks ?? "",
+      rejectedLabels: "", 
+      remarks: "",
       CBM: qc?.cbm?.total && qc.cbm.total !== "0" ? String(qc.cbm.total) : "",
       CBM_top: qc?.cbm?.top && qc.cbm.top !== "0" ? String(qc.cbm.top) : "",
       CBM_bottom:
@@ -241,7 +241,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     const nextPassed = (qc.quantities?.qc_passed || 0) + qcPassed;
 
     const quantityRequestedLimit =
-      qc.quantities?.quantity_requested && qc.quantities.quantity_requested !== 0
+      qc.quantities?.quantity_requested &&
+      qc.quantities.quantity_requested !== 0
         ? qc.quantities.quantity_requested
         : qc.quantities?.client_demand;
 
@@ -251,7 +252,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
     const parsedPendingQuantityLimit = Number(
       qc.quantities?.pending ??
-        ((qc.quantities?.client_demand || 0) - (qc.quantities?.qc_passed || 0)),
+        (qc.quantities?.client_demand || 0) - (qc.quantities?.qc_passed || 0),
     );
     const pendingQuantityLimit = Number.isFinite(parsedPendingQuantityLimit)
       ? Math.max(0, parsedPendingQuantityLimit)
@@ -304,7 +305,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       payload.CBM_top = cbmTop.value;
     if (cbmBottom.hasValue && cbmBottom.value !== null)
       payload.CBM_bottom = cbmBottom.value;
-    if (lastInspectedDateValue) payload.last_inspected_date = lastInspectedDateValue;
+    if (lastInspectedDateValue)
+      payload.last_inspected_date = lastInspectedDateValue;
 
     if (barcodeParsed !== null) payload.barcode = barcodeParsed;
     if (!qc.packed_size && form.packed_size) payload.packed_size = true;
@@ -329,7 +331,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   };
 
   if (!qc) return null;
-  const disableInspectorSelection = !isAdmin && (qc?.quantities?.qc_checked || 0) > 0;
+  const disableInspectorSelection =
+    !isAdmin && (qc?.quantities?.qc_checked || 0) > 0;
 
   return (
     <div
@@ -352,40 +355,39 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
             />
           </div>
 
-          <div className="modal-body d-grid gap-3">
-            <div className="row g-2">
-              <div className="col-sm-6 col-lg-3">
+          <div style={{ marginBottom: "30px"}} className="modal-body d-grid gap-3">
+            <div className="row g-3 qc-modal-summary-row">
+              <div className="col qc-modal-summary-item">
                 <div className="small text-secondary">Order ID</div>
                 <div className="fw-semibold">{qc.order?.order_id || "N/A"}</div>
               </div>
-              <div className="col-sm-6 col-lg-3">
+              <div className="col qc-modal-summary-item">
                 <div className="small text-secondary">Item</div>
                 <div className="fw-semibold">{qc.item?.item_code || "N/A"}</div>
               </div>
-              <div className="col-sm-6 col-lg-3">
-                <div className="small text-secondary">Client Demand</div>
+              <div className="col qc-modal-summary-item">
+                <div className="small text-secondary">Order Quantity</div>
                 <div className="fw-semibold">
                   {qc.quantities?.client_demand ?? "N/A"}
                 </div>
               </div>
-              <div className="col-sm-6 col-lg-3">
-                <div className="small text-secondary">Quantity Requested</div>
+              <div className="col qc-modal-summary-item">
+                <div className="small text-secondary">Passed</div>
                 <div className="fw-semibold">
-                  {qc.quantities?.quantity_requested ??
-                    qc.quantities?.vendor_provision ??
-                    "N/A"}
+                  {qc.quantities?.qc_passed ?? "N/A"}
                 </div>
               </div>
-              <div className="col-sm-6 col-lg-3">
-                <div className="small text-secondary">Vendor Provision</div>
+
+              <div className="col qc-modal-summary-item">
+                <div className="small text-secondary">Pending</div>
                 <div className="fw-semibold">
-                  {qc.quantities?.vendor_provision ?? "N/A"}
+                  {qc.quantities?.pending ?? "N/A"}
                 </div>
               </div>
             </div>
 
             <div className="row g-3">
-              <div className="col-md-3">
+              <div className="col-md-12">
                 <label className="form-label">QC Inspector</label>
                 <select
                   className="form-select"
@@ -403,7 +405,9 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 </select>
               </div>
 
-              <div className="col-md-3">
+              <div className="col-md-12">{"   "}</div>
+
+              <div className="col-md-4">
                 <label className="form-label">CBM Total</label>
                 <input
                   type="number"
@@ -416,7 +420,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 />
               </div>
 
-              <div className="col-md-3">
+              <div className="col-md-4">
                 <label className="form-label">CBM Top</label>
                 <input
                   type="number"
@@ -429,7 +433,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 />
               </div>
 
-              <div className="col-md-3">
+              <div className="col-md-4">
                 <label className="form-label">CBM Bottom</label>
                 <input
                   type="number"
@@ -442,7 +446,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 />
               </div>
 
-              <div className="col-md-3">
+              <div className="col-md-6">
                 <label className="form-label">Last Inspected Date</label>
                 <input
                   type="date"
@@ -453,7 +457,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 />
               </div>
 
-              <div className="col-md-3">
+              <div className="col-md-6">
                 <label className="form-label">Barcode</label>
                 <input
                   type="number"
@@ -470,8 +474,22 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 />
               </div>
 
+              <div className="col-md-12">{"   "}</div>
+
               <div className="col-md-3">
-                <label className="form-label">QC Checked</label>
+                <label className="form-label">Quantity Offered</label>
+                <input
+                  type="number"
+                  className="form-control"
+                  name="offeredQuantity"
+                  value={form.offeredQuantity}
+                  onChange={handleChange}
+                  min="0"
+                />
+              </div>
+
+              <div className="col-md-3">
+                <label className="form-label">QC Inspected</label>
                 <input
                   type="number"
                   className="form-control"
@@ -506,27 +524,13 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 />
               </div>
 
-              <div className="col-md-3">
-                <label className="form-label">
-                  Offered Quantity
-                </label>
-                <input
-                  type="number"
-                  className="form-control"
-                  name="offeredQuantity"
-                  value={form.offeredQuantity}
-                  onChange={handleChange}
-                  min="0"
-                />
-              </div>
-
-              <div className="col-md-3">
+              <div className="col-md-2">
                 <label className="form-label">Packed Size</label>
-                <div className="form-check border rounded p-2">
+                <div className="form-check border rounded p-2 qc-bool-check">
                   <input
                     id="packed_size"
                     type="checkbox"
-                    className="form-check-input"
+                    className="form-check-input qc-bool-check-input"
                     name="packed_size"
                     checked={form.packed_size}
                     onChange={handleChange}
@@ -534,50 +538,58 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   />
                   <label
                     htmlFor="packed_size"
-                    className="form-check-label ms-2"
+                    className="form-check-label qc-bool-check-label"
                   >
                     {form.packed_size ? "Yes" : "No"}
                   </label>
                 </div>
               </div>
 
-              <div className="col-md-3">
+              
+
+              <div className="col-md-2">
                 <label className="form-label">Finishing</label>
-                <div className="form-check border rounded p-2">
+                <div className="form-check border rounded p-2 qc-bool-check">
                   <input
                     id="finishing"
                     type="checkbox"
-                    className="form-check-input"
+                    className="form-check-input qc-bool-check-input"
                     name="finishing"
                     checked={form.finishing}
                     onChange={handleChange}
                     disabled={qc.finishing && !isAdmin}
                   />
-                  <label htmlFor="finishing" className="form-check-label ms-2">
+                  <label
+                    htmlFor="finishing"
+                    className="form-check-label qc-bool-check-label"
+                  >
                     {form.finishing ? "Yes" : "No"}
                   </label>
                 </div>
               </div>
 
-              <div className="col-md-3">
+              <div className="col-md-2">
                 <label className="form-label">Branding</label>
-                <div className="form-check border rounded p-2">
+                <div className="form-check border rounded p-2 qc-bool-check">
                   <input
                     id="branding"
                     type="checkbox"
-                    className="form-check-input"
+                    className="form-check-input qc-bool-check-input"
                     name="branding"
                     checked={form.branding}
                     onChange={handleChange}
                     disabled={qc.branding && !isAdmin}
                   />
-                  <label htmlFor="branding" className="form-check-label ms-2">
+                  <label
+                    htmlFor="branding"
+                    className="form-check-label qc-bool-check-label"
+                  >
                     {form.branding ? "Yes" : "No"}
                   </label>
                 </div>
               </div>
 
-              <div className="col-md-4">
+              <div className="col-md-2">
                 <label className="form-label">Start of label range</label>
                 <input
                   type="text"
@@ -589,7 +601,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 />
               </div>
 
-              <div className="col-md-4">
+              <div className="col-md-2">
                 <label className="form-label">End of label range</label>
                 <input
                   type="text"
@@ -601,7 +613,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 />
               </div>
 
-              <div className="col-md-4">
+              <div className="col-md-2">
                 <label className="form-label">Rejected labels</label>
                 <input
                   type="text"
@@ -612,6 +624,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   placeholder="e.g. 101, 102, 103"
                 />
               </div>
+
+              <div className="col-md-12">{"   "}</div>
 
               <div className="col-12">
                 <label className="form-label">Remarks</label>

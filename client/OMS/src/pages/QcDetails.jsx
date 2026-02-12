@@ -64,13 +64,17 @@ const QcDetails = () => {
   const requirementsMet = Boolean(qc?.packed_size) && Boolean(qc?.finishing) && Boolean(qc?.branding);
   const hasPendingQuantities = (qc?.quantities?.qc_checked || 0) === 0 || (qc?.quantities?.pending || 0) > 0;
   const qcIsPending = hasPendingQuantities || !requirementsMet;
+  const isInspectionDone = qc?.order?.status === "Inspection Done";
   const assignedInspectorId = qc?.inspector?._id ? String(qc.inspector._id) : "";
   const hasInspectionRecords = Array.isArray(qc?.inspection_record) && qc.inspection_record.length > 0;
   const canClaimInspection =
     user?.role === "QC" && !hasInspectionRecords && (qc?.quantities?.qc_checked || 0) === 0;
   const canUpdateQc =
     isAdmin ||
-    (user?.role === "QC" && qcIsPending && (assignedInspectorId === String(userId) || canClaimInspection));
+    (!isInspectionDone &&
+      user?.role === "QC" &&
+      qcIsPending &&
+      (assignedInspectorId === String(userId) || canClaimInspection));
 
   const sortedLabels = useMemo(() => normalizeLabels(qc?.labels), [qc?.labels]);
   const labelRange = sortedLabels.length
@@ -159,32 +163,15 @@ const QcDetails = () => {
         <div className="card om-card">
           <div className="card-body d-grid gap-4">
             <section>
-              <h3 className="h6 mb-3">{`Order Information | ${qc.order.order_id} | ${qc.order.brand} | ${qc.order.vendor} | ${new Date(qc.request_date).toLocaleDateString()}`}</h3>
+              <h3 className="h6 mb-3">{`Order Information | ${qc.order.order_id} | ${qc.order.brand} | ${qc.order.vendor} | Request Date: ${new Date(qc.request_date).toLocaleDateString()}`}</h3>
               <div className="qc-order-inline-grid">
                 <InfoBox compact label="Item Code" value={qc.item.item_code} />
                 <InfoBox compact label="Description" value={qc.item.description} />
                 <InfoBox compact label="Order Quantity" value={qc.quantities.client_demand} />
-                <InfoBox
-                  compact
-                  label="Quantity Requested"
-                  value={qc.quantities.quantity_requested ?? qc.quantities.vendor_provision}
-                />
-                <InfoBox compact label="Vendor Provision" value={qc.quantities.vendor_provision} />
-                <InfoBox compact label="QC Checked" value={qc.quantities.qc_checked} />
                 <InfoBox compact label="Passed" value={qc.quantities.qc_passed} />
-                <InfoBox compact label="Rejected" value={qc.quantities.qc_rejected} />
                 <InfoBox compact label="Pending" value={qc.quantities.pending} />
               </div>
             </section>
-
-            {/* <section>
-              <h3 className="h6 mb-3">Item Information</h3>
-              <div className="row g-3">
-                <InfoBox label="Item Code" value={qc.item.item_code} />
-                <InfoBox label="Description" value={qc.item.description} />
-                <InfoBox label="Request Date" value={new Date(qc.request_date).toLocaleDateString()} />
-              </div>
-            </section> */}
 
             <section>
               <h3 className="h6 mb-3">Inspection Records</h3>
@@ -197,9 +184,10 @@ const QcDetails = () => {
                         <th>Inspector</th>
                         <th>Requested</th>
                         <th>Offered</th>
-                        <th>Checked</th>
+                        <th>Inspected</th>
                         <th>Passed</th>
                         <th>Rejected</th>
+                        <th>CBM</th>
                         <th>Pending After</th>
                         <th>Remarks</th>
                       </tr>
@@ -214,6 +202,7 @@ const QcDetails = () => {
                           <td>{record?.checked ?? 0}</td>
                           <td>{record?.passed ?? 0}</td>
                           <td>{record?.rejected ?? 0}</td>
+                          <td>{isPositiveCbmValue(cbmData?.total) ? cbmData.total : "Not Set"}</td>
                           <td>{record?.pending_after ?? 0}</td>
                           <td>{record?.remarks || "None"}</td>
                         </tr>
@@ -233,8 +222,11 @@ const QcDetails = () => {
                   {qc.inspector?.name ? `${qc.inspector.name} is aligned` : "QC request aligned"}
                 </div>
               )}
-              {qc.order.status === "Finalized" && (
-                <div className="alert alert-success py-2 mb-0">Finalized</div>
+              {qc.order.status === "Inspection Done" && (
+                <div className="alert alert-success py-2 mb-0">Inspection Done</div>
+              )}
+              {qc.order.status === "Shipped" && (
+                <div className="alert alert-success py-2 mb-0">Shipped</div>
               )}
             </section>
 
@@ -288,6 +280,8 @@ const QcDetails = () => {
                 title={
                   canUpdateQc
                     ? ""
+                    : isInspectionDone
+                      ? "After inspection is done, only admin can update this record."
                     : user?.role === "QC" && assignedInspectorId === String(userId)
                       ? "No pending quantity left to update."
                       : "Only admin or an eligible QC inspector can update this record."
