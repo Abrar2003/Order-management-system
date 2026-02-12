@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
 import { getUserFromToken } from "../auth/auth.utils";
@@ -19,27 +19,30 @@ const Orders = () => {
   const role = user?.role;
   const canManageOrders = ["admin", "manager", "dev", "Dev"].includes(role);
 
-  useEffect(() => {
-    const token = localStorage.getItem("token");
+  const orderId = searchParams.get("order_id");
 
-    axios
-      .get(`/orders/order-by-id/${searchParams.get("order_id")}`, {
+  const fetchOrders = useCallback(async () => {
+    setLoading(true);
+
+    try {
+      const token = localStorage.getItem("token");
+      const res = await axios.get(`/orders/order-by-id/${orderId}`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
-      })
-      .then((res) => {
-        setOrders(res.data);
-        console.log(res.data[0]);
-      })
-      .catch((err) => {
-        console.error(err);
-        setOrders([]);
-      })
-      .finally(() => {
-        setLoading(false);
       });
-  }, [searchParams]);
+      setOrders(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      console.error(err);
+      setOrders([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [orderId]);
+
+  useEffect(() => {
+    fetchOrders();
+  }, [fetchOrders]);
 
   const primaryOrder = orders[0];
 
@@ -100,7 +103,7 @@ const Orders = () => {
                                 className="btn btn-link btn-sm p-0"
                                 onClick={() => navigate("/qc")}
                               >
-                               Inspection Requested / Check updates
+                                Inspection Requested / Check updates
                               </button>
                             ) : (
                               <button
@@ -140,6 +143,7 @@ const Orders = () => {
           onClose={() => setShowAlignModal(false)}
           onSuccess={() => {
             setShowAlignModal(false);
+            fetchOrders();
           }}
         />
       )}

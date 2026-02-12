@@ -9,7 +9,8 @@ const {
   getOrderById,
   getVendorSummaryByBrand,
   getOrdersByBrandAndStatus,
-  getOrderSummary
+  getOrderSummary,
+  finalizeOrder,
 } = require("../controllers/order.controller");
 
 const router = express.Router();
@@ -33,6 +34,14 @@ router.get("/brand/:brand/vendor/:vendor/status/:status", authenticate, getOrder
 
 // get orders with optional filters via query params
 router.get("/filters", authenticate, getOrdersByBrandAndStatus);
+
+// Finalize shipping / add shipment entry
+router.patch(
+  "/finalize-order/:id",
+  authenticate,
+  authorize("admin", "manager", "dev"),
+  finalizeOrder
+);
 
 // Get vendor summary by brand
 router.get("/:brand/vendor-summary", authenticate, getVendorSummaryByBrand);

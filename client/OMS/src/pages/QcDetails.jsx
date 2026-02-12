@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import UpdateQcModal from "../components/UpdateQcModal";
-import AlignQCModal from "../components/AlignQcModal";
+import ShippingModal from "../components/ShippingModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import Barcode from "react-barcode";
 import "../App.css";
@@ -53,13 +53,13 @@ const QcDetails = () => {
   const [qc, setQc] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
-  const [showAlignModal, setShowAlignModal] = useState(false);
+  const [showShippingModal, setShowShippingModal] = useState(false);
 
   const navigate = useNavigate();
   const user = getUserFromToken();
   const userId = user?.id || user?._id;
   const isAdmin = user?.role === "admin";
-  const canRealign = ["admin", "manager"].includes(user?.role);
+  const canFinalizeShipping = ["admin", "manager", "dev", "Dev"].includes(user?.role);
 
   const requirementsMet = Boolean(qc?.packed_size) && Boolean(qc?.finishing) && Boolean(qc?.branding);
   const hasPendingQuantities = (qc?.quantities?.qc_checked || 0) === 0 || (qc?.quantities?.pending || 0) > 0;
@@ -163,7 +163,7 @@ const QcDetails = () => {
         <div className="card om-card">
           <div className="card-body d-grid gap-4">
             <section>
-              <h3 className="h6 mb-3">{`Order Information | ${qc.order.order_id} | ${qc.order.brand} | ${qc.order.vendor} | Request Date: ${new Date(qc.request_date).toLocaleDateString()}`}</h3>
+              <h3 className="h6 mb-3">{`Order Information | ${qc.order.order_id} | ${qc.order.brand} | ${qc.order.vendor} | Request Date: ${new Date(qc.request_date).toLocaleDateString()} | Status: ${qc.order.status}`}</h3>
               <div className="qc-order-inline-grid">
                 <InfoBox compact label="Item Code" value={qc.item.item_code} />
                 <InfoBox compact label="Description" value={qc.item.description} />
@@ -266,9 +266,9 @@ const QcDetails = () => {
             </section>
 
             <div className="d-flex justify-content-end flex-wrap gap-2">
-              {canRealign && (
-                <button type="button" className="btn btn-outline-secondary" onClick={() => setShowAlignModal(true)}>
-                  Re-align QC
+              {canFinalizeShipping && ["Inspection Done", "Partial Shipped"].includes(qc?.order?.status) && (
+                <button type="button" className="btn btn-outline-secondary" onClick={() => setShowShippingModal(true)}>
+                  Finalize Shipping
                 </button>
               )}
 
@@ -306,14 +306,12 @@ const QcDetails = () => {
         />
       )}
 
-      {showAlignModal && (
-        <AlignQCModal
+      {showShippingModal && (
+        <ShippingModal
           order={qc?.order}
-          initialQuantityRequested={qc?.quantities?.quantity_requested}
-          initialRequestDate={qc?.request_date}
-          onClose={() => setShowAlignModal(false)}
+          onClose={() => setShowShippingModal(false)}
           onSuccess={() => {
-            setShowAlignModal(false);
+            setShowShippingModal(false);
             fetchQcDetails();
           }}
         />

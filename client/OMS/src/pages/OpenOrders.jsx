@@ -10,6 +10,50 @@ const defaultFilters = {
   status: "all",
 };
 
+const STATUS_SEQUENCE = [
+  "Pending",
+  "Under Inspection",
+  "Inspection Done",
+  "Partial Shipped",
+  "Shipped",
+];
+
+const normalizeStatus = (value) => {
+  if (!value) return null;
+  const cleaned = String(value).trim().toLowerCase();
+  if (!cleaned) return null;
+
+  if (cleaned === "finalized") return "Inspection Done";
+
+  return (
+    STATUS_SEQUENCE.find((status) => status.toLowerCase() === cleaned) || null
+  );
+};
+
+const getStatus = (order) => {
+  const incomingStatuses = Array.isArray(order?.statuses) && order.statuses.length > 0
+    ? order.statuses
+    : [order?.status];
+
+  const normalizedUniqueStatuses = [
+    ...new Set(incomingStatuses.map(normalizeStatus).filter(Boolean)),
+  ];
+
+  if (normalizedUniqueStatuses.length === 0) return "Pending";
+  if (normalizedUniqueStatuses.length === 1) return normalizedUniqueStatuses[0];
+
+  const indexes = normalizedUniqueStatuses.map((status) =>
+    STATUS_SEQUENCE.indexOf(status),
+  );
+  const validIndexes = indexes.filter((index) => index >= 0);
+
+  if (validIndexes.length === 0) return "Pending";
+
+  // Mixed statuses: show the earliest stage reached by all items.
+  const earliestStageIndex = Math.min(...validIndexes);
+  return STATUS_SEQUENCE[earliestStageIndex];
+};
+
 const OpenOrders = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -196,6 +240,7 @@ const OpenOrders = () => {
                   <option value="Pending">Pending</option>
                   <option value="Under Inspection">Under Inspection</option>
                   <option value="Inspection Done">Inspection Done</option>
+                  <option value="Partial Shipped">Partial Shipped</option>
                   <option value="Shipped">Shipped</option>
                 </select>
               </div>
@@ -229,6 +274,7 @@ const OpenOrders = () => {
                       <th>Order ID</th>
                       <th>Brand</th>
                       <th>Vendor</th>
+                      <th>Status</th>
                       <th>Items</th>
                       <th>Order Date</th>
                       <th>ETD</th>
@@ -237,7 +283,7 @@ const OpenOrders = () => {
                   <tbody>
                     {orders.length === 0 && (
                       <tr>
-                        <td colSpan="6" className="text-center py-4">
+                        <td colSpan="7" className="text-center py-4">
                           No orders found
                         </td>
                       </tr>
@@ -252,6 +298,7 @@ const OpenOrders = () => {
                         <td>{order.order_id}</td>
                         <td>{order.brand}</td>
                         <td>{order.vendor}</td>
+                        <td>{getStatus(order)}</td>
                         <td>{order.items}</td>
                         <td>{order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}</td>
                         <td>{order.ETD ? new Date(order.ETD).toLocaleDateString() : "N/A"}</td>

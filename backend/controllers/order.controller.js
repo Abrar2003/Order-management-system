@@ -322,6 +322,7 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
           vendor: { $first: "$vendor" },
           ETD: { $first: "$ETD" },
           order_date: { $first: "$order_date" },
+          statuses: { $addToSet: "$status" },
         },
       },
 
@@ -335,6 +336,7 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
           vendor: 1,
           ETD: 1,
           order_date: 1,
+          statuses: 1,
         },
       },
 
@@ -457,6 +459,89 @@ exports.getOrderSummary = async (req, res) => {
     console.error("Get Order Summary Error:", error);
     return res.status(500).json({
       message: "Failed to fetch order summary",
+      error: error.message,
+    });
+  }
+};
+
+exports.finalizeOrder = async (req, res) => {
+  try {
+    const { stuffing_date, container, quantity } = req.body;
+
+    const order = await Order.findById(req.params.id);
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    if (!["Inspection Done", "Partial Shipped"].includes(order.status)) {
+      return res.status(400).json({
+        message: "Order can only be shipped after inspection is done",
+      });
+    }
+
+    if (!stuffing_date || container === undefined || quantity === undefined) {
+      return res.status(400).json({
+        message: "stuffing_date, container and quantity are required",
+      });
+    }
+
+    const parsedStuffingDate = new Date(stuffing_date);
+    if (Number.isNaN(parsedStuffingDate.getTime())) {
+      return res.status(400).json({ message: "Invalid stuffing date" });
+    }
+
+    const parsedContainer = String(container).trim();
+    if (!parsedContainer) {
+      return res.status(400).json({
+        message: "container must be a valid non-empty string",
+      });
+    }
+
+    const parsedQuantity = Number(quantity);
+    if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) {
+      return res.status(400).json({
+        message: "quantity must be a valid positive number",
+      });
+    }
+
+    const shippedAlready = (order.shipment || []).reduce(
+      (sum, entry) => sum + Number(entry?.quantity || 0),
+      0
+    );
+
+    const orderQuantity = Number(order.quantity || 0);
+    const remainingQuantity = Math.max(0, orderQuantity - shippedAlready);
+
+    if (parsedQuantity > remainingQuantity) {
+      return res.status(400).json({
+        message: "shipping quantity cannot exceed remaining quantity",
+      });
+    }
+
+    order.shipment = order.shipment || [];
+    order.shipment.push({
+      container: parsedContainer,
+      stuffing_date: parsedStuffingDate,
+      quantity: parsedQuantity,
+    });
+
+    const shippedAfter = shippedAlready + parsedQuantity;
+    order.status = shippedAfter >= orderQuantity ? "Shipped" : "Partial Shipped";
+
+    await order.save();
+
+    return res.status(200).json({
+      message: "Order shipment updated successfully",
+      data: order,
+      shipping_summary: {
+        total_quantity: orderQuantity,
+        shipped_quantity: shippedAfter,
+        remaining_quantity: Math.max(0, orderQuantity - shippedAfter),
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Failed to finalize order shipment",
       error: error.message,
     });
   }

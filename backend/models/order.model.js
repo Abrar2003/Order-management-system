@@ -11,8 +11,15 @@ const Order_Schema = new mongoose.Schema(
     vendor: { type: String, required: true },
     ETD: { type: Date },
     order_date: { type: Date, default: Date.now() },
-    status: { type: String, enum: ["Pending", "Under Inspection", "Inspection Done","Shipped"], default: "Pending" },
+    status: { type: String, enum: ["Pending", "Under Inspection", "Inspection Done", "Partial Shipped", "Shipped"], default: "Pending" },
     quantity: { type: Number, required: true },
+    shipment: [
+      {
+        container: { type: String, trim: true },
+        stuffing_date: { type: Date },
+        quantity: { type: Number }
+      }
+    ],
     qc_record: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "qc",
