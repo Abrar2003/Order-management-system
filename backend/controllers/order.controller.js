@@ -466,7 +466,7 @@ exports.getOrderSummary = async (req, res) => {
 
 exports.finalizeOrder = async (req, res) => {
   try {
-    const { stuffing_date, container, quantity } = req.body;
+    const { stuffing_date, container, quantity, remarks } = req.body;
 
     const order = await Order.findById(req.params.id);
     if (!order) {
@@ -511,6 +511,7 @@ exports.finalizeOrder = async (req, res) => {
 
     const orderQuantity = Number(order.quantity || 0);
     const remainingQuantity = Math.max(0, orderQuantity - shippedAlready);
+    const pending = Math.max(0, remainingQuantity - quantity);
 
     if (parsedQuantity > remainingQuantity) {
       return res.status(400).json({
@@ -523,6 +524,8 @@ exports.finalizeOrder = async (req, res) => {
       container: parsedContainer,
       stuffing_date: parsedStuffingDate,
       quantity: parsedQuantity,
+      pending: pending,
+      remaining_remarks: remarks
     });
 
     const shippedAfter = shippedAlready + parsedQuantity;

@@ -17,7 +17,9 @@ const Order_Schema = new mongoose.Schema(
       {
         container: { type: String, trim: true },
         stuffing_date: { type: Date },
-        quantity: { type: Number }
+        quantity: { type: Number },
+        pending: { type: Number },
+        remaining_remarks: { type: String }
       }
     ],
     qc_record: {

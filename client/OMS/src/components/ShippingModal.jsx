@@ -16,6 +16,7 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
   const [stuffingDate, setStuffingDate] = useState(toDateInputValue(new Date()));
   const [containerNumber, setContainerNumber] = useState("");
   const [shipmentQuantity, setShipmentQuantity] = useState("");
+  const [remarks, setRemarks] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -63,6 +64,7 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
         stuffing_date: stuffingDate,
         container: parsedContainer,
         quantity: parsedQuantity,
+        remarks
       });
 
       onSuccess?.();
@@ -141,6 +143,16 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
                 value={shipmentQuantity}
                 onChange={(e) => setShipmentQuantity(e.target.value)}
                 min="1"
+              />
+            </div>
+
+            <div>
+              <label className="form-label">Remarks</label>
+              <input
+                type="text"
+                className="form-control"
+                value={remarks}
+                onChange={(e) => setRemarks(e.target.value)}
               />
             </div>
 
