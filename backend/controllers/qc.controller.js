@@ -212,12 +212,13 @@ exports.alignQC = async (req, res) => {
 
     const isBackdatedRequest = requestDateDay < todayDay;
 
+    if (isBackdatedRequest && req.user.role !== "admin") {
+      return res.status(403).json({
+        message: "Only admin can align backdated QC requests",
+      });
+    }
+
     if (existingQC) {
-      if (isBackdatedRequest && req.user.role !== "admin") {
-        return res.status(403).json({
-          message: "Only admin can update backdated QC requests",
-        });
-      }
 
       if (clientDemand < existingQC.quantities.qc_passed) {
         return res.status(400).json({
@@ -289,12 +290,6 @@ exports.alignQC = async (req, res) => {
       return res.status(200).json({
         message: "QC re-aligned successfully",
         data: existingQC,
-      });
-    }
-
-    if (isBackdatedRequest) {
-      return res.status(400).json({
-        message: "request date must be a present date or future date",
       });
     }
 
