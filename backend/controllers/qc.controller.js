@@ -191,11 +191,34 @@ exports.alignQC = async (req, res) => {
       });
     }
 
-    if (new Date(request_date) < Date.now()){
-      return res.status(400).json({message: "request date must be a present date or future date"})
+    const requestDateValue = String(request_date || "").trim();
+    if (!requestDateValue) {
+      return res.status(400).json({ message: "request date is required" });
     }
 
+    const parsedRequestDate = /^\d{4}-\d{2}-\d{2}$/.test(requestDateValue)
+      ? new Date(`${requestDateValue}T00:00:00`)
+      : new Date(requestDateValue);
+
+    if (Number.isNaN(parsedRequestDate.getTime())) {
+      return res.status(400).json({ message: "request date must be a valid date" });
+    }
+
+    const requestDateDay = new Date(parsedRequestDate);
+    requestDateDay.setHours(0, 0, 0, 0);
+
+    const todayDay = new Date();
+    todayDay.setHours(0, 0, 0, 0);
+
+    const isBackdatedRequest = requestDateDay < todayDay;
+
     if (existingQC) {
+      if (isBackdatedRequest && req.user.role !== "admin") {
+        return res.status(403).json({
+          message: "Only admin can update backdated QC requests",
+        });
+      }
+
       if (clientDemand < existingQC.quantities.qc_passed) {
         return res.status(400).json({
           message: "client demand cannot be less than already passed quantity",
@@ -235,7 +258,7 @@ exports.alignQC = async (req, res) => {
 
       // const dateOnly = new Date(req.body.request_date)
 
-      existingQC.request_date = request_date;
+      existingQC.request_date = requestDateValue;
       existingQC.item = item;
       existingQC.quantities.client_demand = clientDemand;
       existingQC.quantities.quantity_requested = quantityRequested;
@@ -269,6 +292,12 @@ exports.alignQC = async (req, res) => {
       });
     }
 
+    if (isBackdatedRequest) {
+      return res.status(400).json({
+        message: "request date must be a present date or future date",
+      });
+    }
+
     const orderRecord = await Order.findById(order);
 
     const qc = await QC.create({
@@ -279,8 +308,8 @@ exports.alignQC = async (req, res) => {
         vendor: orderRecord.vendor,
         brand: orderRecord.brand
       },
-      request_date,
-      last_inspected_date: request_date,
+      request_date: requestDateValue,
+      last_inspected_date: requestDateValue,
       quantities: {
         client_demand: clientDemand,
         quantity_requested: quantityRequested,
