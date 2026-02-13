@@ -114,7 +114,7 @@ const Orders = () => {
                                   setShowAlignModal(true);
                                 }}
                               >
-                                Align Inspector
+                                Add Inspection Request
                               </button>
                             )}
                           </td>
