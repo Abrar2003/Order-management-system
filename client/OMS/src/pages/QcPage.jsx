@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import "../App.css";
 
 // small helper: debounce without extra libs
@@ -15,13 +15,15 @@ const useDebouncedValue = (value, delay = 300) => {
 };
 
 const QCPage = () => {
+  const [searchParams] = useSearchParams();
+  const requestedItemCode = String(searchParams.get("item_code") || "").trim();
   const [qcList, setQcList] = useState([]);
   const [inspectors, setInspectors] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [orders, setOrders] = useState([]);
 
   // header filters (excel-like)
-  const [search, setSearch] = useState(""); // item_code search
+  const [search, setSearch] = useState(requestedItemCode); // item_code search
   const [inspector, setInspector] = useState("");
   const [vendor, setVendor] = useState("");
   const [from, setFrom] = useState(""); // YYYY-MM-DD
@@ -86,6 +88,12 @@ const QCPage = () => {
   useEffect(() => {
     fetchInspectors();
   }, [fetchInspectors]);
+
+  useEffect(() => {
+    if (!requestedItemCode) return;
+    setSearch(requestedItemCode);
+    setPage(1);
+  }, [requestedItemCode]);
 
   const handleDetailsClick = (qc) => {
     navigate(`/qc/${qc._id}`);

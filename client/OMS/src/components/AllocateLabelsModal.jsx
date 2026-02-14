@@ -212,7 +212,12 @@ const AllocateLabelsModal = ({ onClose }) => {
                   type="number"
                   className="form-control"
                   value={labelStart}
-                  onChange={(e) => setLabelStart(e.target.value)}
+                  onChange={(e) => {
+                    const nextValue = e.target.value;
+                    if (nextValue === "" || Number(nextValue) >= 0) {
+                      setLabelStart(nextValue);
+                    }
+                  }}
                   min="1"
                   placeholder="e.g. 1001"
                 />
@@ -224,7 +229,12 @@ const AllocateLabelsModal = ({ onClose }) => {
                   type="number"
                   className="form-control"
                   value={labelEnd}
-                  onChange={(e) => setLabelEnd(e.target.value)}
+                  onChange={(e) => {
+                    const nextValue = e.target.value;
+                    if (nextValue === "" || Number(nextValue) >= 0) {
+                      setLabelEnd(nextValue);
+                    }
+                  }}
                   min="1"
                   placeholder="e.g. 1050"
                 />

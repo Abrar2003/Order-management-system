@@ -72,7 +72,7 @@ const qcSchema = new mongoose.Schema(
       },
     ],
     labels: {
-      type: [],
+      type: [{ type: Number, min: 0 }],
       default: [],
       required: true,
     },

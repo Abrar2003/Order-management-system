@@ -34,6 +34,20 @@ const findRejectedLabels = (sortedLabels = []) => {
 const escapeRegex = (value = "") =>
   String(value).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+const toDateInputValue = (value = new Date()) => {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const offsetMs = parsed.getTimezoneOffset() * 60000;
+  return new Date(parsed.getTime() - offsetMs).toISOString().slice(0, 10);
+};
+
+const resolveReportDate = (value) => {
+  const asString = String(value || "").trim();
+  if (!asString) return toDateInputValue(new Date());
+  if (/^\d{4}-\d{2}-\d{2}$/.test(asString)) return asString;
+  return toDateInputValue(asString);
+};
+
 exports.getQCList = async (req, res) => {
 
   await QC.createIndexes();
@@ -142,7 +156,15 @@ exports.getQCList = async (req, res) => {
  */
 exports.alignQC = async (req, res) => {
   try {
-    const { order, item, quantities, remarks, request_date } = req.body;
+    const { order, item, inspector, quantities, remarks, request_date } = req.body;
+
+    const inspectorId = String(inspector || "").trim();
+    if (!inspectorId) {
+      return res.status(400).json({ message: "inspector is required" });
+    }
+    if (!mongoose.Types.ObjectId.isValid(inspectorId)) {
+      return res.status(400).json({ message: "invalid inspector id" });
+    }
 
     const existingQC = await QC.findOne({
       order: order,
@@ -259,6 +281,7 @@ exports.alignQC = async (req, res) => {
 
       // const dateOnly = new Date(req.body.request_date)
 
+      existingQC.inspector = inspectorId;
       existingQC.request_date = requestDateValue;
       existingQC.item = item;
       existingQC.quantities.client_demand = clientDemand;
@@ -298,6 +321,7 @@ exports.alignQC = async (req, res) => {
     const qc = await QC.create({
       order, 
       item,
+      inspector: inspectorId,
       order_meta: {
         order_id: orderRecord.order_id,
         vendor: orderRecord.vendor,
@@ -345,6 +369,7 @@ exports.updateQC = async (req, res) => {
       qc_rejected,
       remarks,
       labels,
+      label_ranges,
       inspector,
       vendor_provision,
       barcode,
@@ -485,8 +510,23 @@ exports.updateQC = async (req, res) => {
         });
       }
 
+      const hasLabelRangePayload =
+        Array.isArray(label_ranges) &&
+        label_ranges.some(
+          (range) =>
+            range &&
+            (String(range.start ?? "").trim() !== "" ||
+              String(range.end ?? "").trim() !== ""),
+        );
+
       // If user is updating pass/reject/labels, they must provide checked in same visit
-      if ((addPassed || addRejected || (Array.isArray(labels) && labels.length)) && addChecked <= 0) {
+      if (
+        (addPassed ||
+          addRejected ||
+          (Array.isArray(labels) && labels.length) ||
+          hasLabelRangePayload) &&
+        addChecked <= 0
+      ) {
         return res.status(400).json({
           message: "qc_checked must be greater than 0 when updating quantities or labels",
         });
@@ -548,24 +588,90 @@ exports.updateQC = async (req, res) => {
          🏷️ LABELS (UNCHANGED LOGIC)
       ──────────────────────── */
 
+      const buildLabelsFromRanges = (ranges = []) => {
+        const normalizedRanges = [];
+        const generatedLabels = [];
+
+        for (let i = 0; i < ranges.length; i++) {
+          const range = ranges[i] || {};
+          const hasStart = String(range.start ?? "").trim() !== "";
+          const hasEnd = String(range.end ?? "").trim() !== "";
+
+          if (!hasStart && !hasEnd) continue;
+          if (!hasStart || !hasEnd) {
+            throw new Error(
+              `Both start and end are required for label range ${i + 1}`,
+            );
+          }
+
+          const start = Number(range.start);
+          const end = Number(range.end);
+          if (!Number.isInteger(start) || !Number.isInteger(end)) {
+            throw new Error(`Label range ${i + 1} must contain integer values`);
+          }
+          if (start < 0 || end < 0) {
+            throw new Error(
+              `Label range ${i + 1} must contain non-negative values`,
+            );
+          }
+          if (start > end) {
+            throw new Error(
+              `Start cannot be greater than end in label range ${i + 1}`,
+            );
+          }
+
+          normalizedRanges.push({ start, end });
+          for (let label = start; label <= end; label++) {
+            generatedLabels.push(label);
+          }
+        }
+
+        return { generatedLabels, normalizedRanges };
+      };
+
       let labelsAddedThisVisit = [];
-      if (labels !== undefined && Array.isArray(labels) && labels.length > 0) {
+      let labelRangesUsedThisVisit = [];
+      const hasLabelsPayload =
+        (Array.isArray(labels) && labels.length > 0) || hasLabelRangePayload;
+
+      if (hasLabelsPayload) {
         const Inspector = require("../models/inspector.model");
-        const inspector = await Inspector.findOne({ user: req.user._id });
+        const inspectionInspectorUserId = qc.inspector?._id
+          ? qc.inspector._id
+          : qc.inspector;
+        const inspector = await Inspector.findOne({ user: inspectionInspectorUserId });
 
         if (!inspector) {
           return res.status(404).json({ message: "Inspector record not found" });
         }
 
-        const parsedLabels = labels.map(Number);
-        if (parsedLabels.some(Number.isNaN)) {
-          return res.status(400).json({ message: "All labels must be numbers" });
+        const directLabels = Array.isArray(labels) ? labels : [];
+        const parsedDirectLabels = directLabels.map(Number);
+        if (
+          parsedDirectLabels.some(
+            (label) => !Number.isInteger(label) || label < 0,
+          )
+        ) {
+          return res.status(400).json({
+            message: "All labels must be non-negative integers",
+          });
+        }
+
+        let generatedFromRanges = [];
+        if (Array.isArray(label_ranges)) {
+          const rangeResult = buildLabelsFromRanges(label_ranges);
+          generatedFromRanges = rangeResult.generatedLabels;
+          labelRangesUsedThisVisit = rangeResult.normalizedRanges;
         }
 
         const hasDualCbm = Number(qc.cbm?.top) > 0 && Number(qc.cbm?.bottom) > 0;
         const labelMultiplier = hasDualCbm ? 2 : 1;
 
-        const uniqueIncoming = [...new Set(parsedLabels)];
+        // If client sends explicit labels, treat them as authoritative
+        // (e.g. after rejected-label filtering). Otherwise derive from ranges.
+        const labelsForUpdate =
+          parsedDirectLabels.length > 0 ? parsedDirectLabels : generatedFromRanges;
+        const uniqueIncoming = [...new Set(labelsForUpdate)];
         const existingSet = new Set((qc.labels || []).map(Number));
         const incomingNew = uniqueIncoming.filter((label) => !existingSet.has(label));
 
@@ -583,9 +689,11 @@ exports.updateQC = async (req, res) => {
           });
         }
 
-        qc.labels = [...new Set([...qc.labels, ...incomingNew])];
+        qc.labels = [...new Set([...(qc.labels || []), ...incomingNew])];
 
-        inspector.used_labels = [...new Set([...(inspector.used_labels || []), ...incomingNew])];
+        inspector.used_labels = [
+          ...new Set([...(inspector.used_labels || []), ...incomingNew]),
+        ];
 
         await inspector.save();
 
@@ -649,6 +757,13 @@ exports.updateQC = async (req, res) => {
             vendor_requested: vendorRequestedThisVisit,
             vendor_offered: vendorOfferedThisVisit,
             pending_after: qc.quantities.pending,
+            cbm: {
+              top: String(qc?.cbm?.top ?? "0"),
+              bottom: String(qc?.cbm?.bottom ?? "0"),
+              total: String(qc?.cbm?.total ?? "0"),
+            },
+            label_ranges: labelRangesUsedThisVisit,
+            labels_added: labelsAddedThisVisit,
             remarks: remarks || "",
             createdBy: req.user._id,
           },
@@ -680,6 +795,170 @@ exports.updateQC = async (req, res) => {
       });
   } catch (err) {
     res.status(400).json({ message: err.message });
+  }
+};
+
+exports.getDailyReport = async (req, res) => {
+  try {
+    const reportDate = resolveReportDate(req.query.date);
+    if (!reportDate) {
+      return res.status(400).json({ message: "Invalid date format" });
+    }
+
+    const [alignedRequestsRaw, inspectionsRaw] = await Promise.all([
+      QC.find({ request_date: reportDate })
+        .select("request_date order_meta item inspector quantities order")
+        .populate("inspector", "name email role")
+        .populate("order", "order_id status quantity brand vendor")
+        .sort({ createdAt: -1 })
+        .lean(),
+      Inspection.find({ inspection_date: reportDate })
+        .select(
+          "inspection_date inspector qc checked passed rejected vendor_requested vendor_offered pending_after cbm remarks createdAt",
+        )
+        .populate("inspector", "name email role")
+        .populate({
+          path: "qc",
+          select: "item order_meta order cbm request_date",
+          populate: { path: "order", select: "order_id status quantity brand vendor" },
+        })
+        .sort({ createdAt: -1 })
+        .lean(),
+    ]);
+
+    const aligned_requests = alignedRequestsRaw.map((qc) => ({
+      qc_id: qc._id,
+      request_date: qc.request_date,
+      order_id: qc?.order_meta?.order_id || qc?.order?.order_id || "N/A",
+      brand: qc?.order_meta?.brand || qc?.order?.brand || "N/A",
+      vendor: qc?.order_meta?.vendor || qc?.order?.vendor || "N/A",
+      item_code: qc?.item?.item_code || "N/A",
+      description: qc?.item?.description || "N/A",
+      inspector: qc?.inspector
+        ? {
+            _id: qc.inspector._id,
+            name: qc.inspector.name,
+            email: qc.inspector.email,
+            role: qc.inspector.role,
+          }
+        : null,
+      quantity_requested: Number(qc?.quantities?.quantity_requested || 0),
+      quantity_inspected: Number(qc?.quantities?.qc_checked || 0),
+      quantity_passed: Number(qc?.quantities?.qc_passed || 0),
+      quantity_pending: Number(qc?.quantities?.pending || 0),
+      order_status: qc?.order?.status || "N/A",
+    }));
+
+    const inspectorMap = new Map();
+    const inspectorCbmKeyMap = new Map();
+    const globalCbmKeys = new Set();
+    let totalInspectedCbm = 0;
+    for (const inspection of inspectionsRaw) {
+      const inspectorId = String(
+        inspection?.inspector?._id || inspection?.inspector || "unassigned",
+      );
+
+      if (!inspectorMap.has(inspectorId)) {
+        inspectorMap.set(inspectorId, {
+          inspector: inspection?.inspector
+            ? {
+                _id: inspection.inspector._id,
+                name: inspection.inspector.name,
+                email: inspection.inspector.email,
+                role: inspection.inspector.role,
+              }
+            : {
+                _id: null,
+                name: "Unassigned",
+                email: "",
+                role: "",
+              },
+          total_inspected_quantity: 0,
+          total_inspected_cbm: 0,
+          inspections_count: 0,
+          inspections: [],
+        });
+      }
+
+      const entry = inspectorMap.get(inspectorId);
+      const inspectedQty = Number(inspection?.checked || 0);
+      const qcRecord = inspection?.qc || {};
+      const cbmSnapshot =
+        inspection?.cbm && typeof inspection.cbm === "object"
+          ? inspection.cbm
+          : (qcRecord?.cbm || {});
+      const cbmTotal = Number(cbmSnapshot?.total || 0);
+      const safeCbmTotal = Number.isFinite(cbmTotal) ? cbmTotal : 0;
+      const orderIdForKey = String(
+        qcRecord?.order_meta?.order_id || qcRecord?.order?.order_id || "",
+      ).trim();
+      const itemCodeForKey = String(qcRecord?.item?.item_code || "").trim();
+      const cbmKey =
+        orderIdForKey && itemCodeForKey
+          ? `${orderIdForKey}__${itemCodeForKey}`
+          : `inspection:${inspection._id}`;
+
+      entry.total_inspected_quantity += inspectedQty;
+      if (!inspectorCbmKeyMap.has(inspectorId)) {
+        inspectorCbmKeyMap.set(inspectorId, new Set());
+      }
+      const inspectorCbmKeys = inspectorCbmKeyMap.get(inspectorId);
+      if (!inspectorCbmKeys.has(cbmKey)) {
+        entry.total_inspected_cbm += safeCbmTotal;
+        inspectorCbmKeys.add(cbmKey);
+      }
+
+      if (!globalCbmKeys.has(cbmKey)) {
+        totalInspectedCbm += safeCbmTotal;
+        globalCbmKeys.add(cbmKey);
+      }
+
+      entry.inspections_count += 1;
+      entry.inspections.push({
+        inspection_id: inspection._id,
+        inspection_date: inspection.inspection_date || null,
+        order_id: qcRecord?.order_meta?.order_id || qcRecord?.order?.order_id || "N/A",
+        item_code: qcRecord?.item?.item_code || "N/A",
+        description: qcRecord?.item?.description || "N/A",
+        inspected_quantity: inspectedQty,
+        passed_quantity: Number(inspection?.passed || 0),
+        rejected_quantity: Number(inspection?.rejected || 0),
+        vendor_requested: Number(inspection?.vendor_requested || 0),
+        vendor_offered: Number(inspection?.vendor_offered || 0),
+        pending_after: Number(inspection?.pending_after || 0),
+        cbm: {
+          top: String(cbmSnapshot?.top ?? "0"),
+          bottom: String(cbmSnapshot?.bottom ?? "0"),
+          total: String(cbmSnapshot?.total ?? "0"),
+        },
+        remarks: inspection?.remarks || "",
+      });
+    }
+
+    const inspector_compiled = Array.from(inspectorMap.values()).sort((a, b) =>
+      String(a?.inspector?.name || "").localeCompare(String(b?.inspector?.name || "")),
+    );
+
+    const totalInspectedQty = inspector_compiled.reduce(
+      (sum, entry) => sum + Number(entry.total_inspected_quantity || 0),
+      0,
+    );
+
+    res.json({
+      date: reportDate,
+      summary: {
+        aligned_requests_count: aligned_requests.length,
+        inspectors_count: inspector_compiled.length,
+        inspections_count: inspectionsRaw.length,
+        total_inspected_quantity: totalInspectedQty,
+        total_inspected_cbm: totalInspectedCbm,
+      },
+      aligned_requests,
+      inspector_compiled,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message });
   }
 };
 

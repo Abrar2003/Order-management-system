@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import axios from "../api/axios";
 import "../App.css";
 
@@ -9,36 +9,76 @@ const formatDateInput = (value) => {
   return date.toISOString().slice(0, 10);
 };
 
+const getTodayDateInput = () => {
+  const today = new Date();
+  const offsetMs = today.getTimezoneOffset() * 60000;
+  return new Date(today.getTime() - offsetMs).toISOString().slice(0, 10);
+};
+
 const AlignQCModal = ({
   order,
   onClose,
   onSuccess,
+  initialInspector = "",
   initialQuantityRequested = "",
   initialRequestDate = "",
 }) => {
-  const [request_date, setReqDate] = useState(formatDateInput(initialRequestDate));
+  const [inspectors, setInspectors] = useState([]);
+  const [inspector, setInspector] = useState(
+    initialInspector ? String(initialInspector) : "",
+  );
+  const [request_date, setReqDate] = useState(
+    formatDateInput(initialRequestDate) || getTodayDateInput(),
+  );
   const [quantityRequested, setQuantityRequested] = useState(
     initialQuantityRequested !== undefined && initialQuantityRequested !== null
       ? String(initialQuantityRequested)
       : "",
   );
 
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+
+    axios
+      .get("/auth/?role=QC", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+      .then((res) => {
+        setInspectors(Array.isArray(res.data) ? res.data : []);
+      })
+      .catch(() => {
+        setInspectors([]);
+      });
+  }, []);
+
+  useEffect(() => {
+    setInspector(initialInspector ? String(initialInspector) : "");
+    setReqDate(formatDateInput(initialRequestDate) || getTodayDateInput());
+    setQuantityRequested(
+      initialQuantityRequested !== undefined && initialQuantityRequested !== null
+        ? String(initialQuantityRequested)
+        : "",
+    );
+  }, [initialInspector, initialRequestDate, initialQuantityRequested]);
+
   const handleSubmit = async () => {
     const token = localStorage.getItem("token");
 
-    if (!request_date || quantityRequested === "") {
-      alert("Request date and quantity requested are required.");
+    if (!inspector || !request_date || quantityRequested === "") {
+      alert("Inspector, request date and quantity requested are required.");
       return;
     }
 
-    const requestedNumber = Number(quantityRequested);
+    const quantityRequestedNumber = Number(quantityRequested);
 
-    if (Number.isNaN(requestedNumber) || requestedNumber < 0) {
+    if (Number.isNaN(quantityRequestedNumber) || quantityRequestedNumber < 0) {
       alert("Quantity values must be valid non-negative numbers.");
       return;
     }
 
-    if (requestedNumber > Number(order.quantity)) {
+    if (quantityRequestedNumber > Number(order.quantity)) {
       alert("Quantity requested cannot exceed client demand.");
       return;
     }
@@ -49,10 +89,11 @@ const AlignQCModal = ({
         {
           order: order._id,
           item: order.item,
+          inspector,
           request_date,
           quantities: {
             client_demand: order.quantity,
-            quantity_requested: requestedNumber,
+            quantity_requested: quantityRequestedNumber,
           },
         },
         {
@@ -100,6 +141,22 @@ const AlignQCModal = ({
             </div>
 
             <div>
+              <label className="form-label">QC Inspector</label>
+              <select
+                className="form-select"
+                value={inspector}
+                onChange={(e) => setInspector(e.target.value)}
+              >
+                <option value="">Select Inspector</option>
+                {inspectors.map((qcInspector) => (
+                  <option key={qcInspector._id} value={qcInspector._id}>
+                    {qcInspector.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
               <label className="form-label">Request Date</label>
               <input
                 type="date"
@@ -115,7 +172,13 @@ const AlignQCModal = ({
                 type="number"
                 className="form-control"
                 value={quantityRequested}
-                onChange={(e) => setQuantityRequested(e.target.value)}
+                onChange={(e) => {
+                  const nextValue = e.target.value;
+                  if (nextValue === "" || Number(nextValue) >= 0) {
+                    setQuantityRequested(nextValue);
+                  }
+                }}
+                min="0"
               />
             </div>
           </div>

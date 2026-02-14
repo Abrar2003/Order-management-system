@@ -120,6 +120,17 @@ const Navbar = () => {
                     </button>
                   </li>
                 )}
+                {canAccessQc && (
+                  <li className="nav-item">
+                    <button
+                      type="button"
+                      className="btn btn-outline-primary btn-sm rounded-pill"
+                      onClick={() => handleNavigate("/daily-reports")}
+                    >
+                      Daily Reports
+                    </button>
+                  </li>
+                )}
               </ul>
 
               <div className="d-flex flex-column flex-lg-row align-items-start align-items-lg-center gap-2 ms-lg-auto">

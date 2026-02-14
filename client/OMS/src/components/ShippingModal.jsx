@@ -141,7 +141,12 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
                 type="number"
                 className="form-control"
                 value={shipmentQuantity}
-                onChange={(e) => setShipmentQuantity(e.target.value)}
+                onChange={(e) => {
+                  const nextValue = e.target.value;
+                  if (nextValue === "" || Number(nextValue) >= 0) {
+                    setShipmentQuantity(nextValue);
+                  }
+                }}
                 min="1"
               />
             </div>

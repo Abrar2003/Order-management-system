@@ -32,6 +32,22 @@ const InspectionSchema = new mongoose.Schema(
     // store the "pending after visit" for easy history display
     pending_after: { type: Number, required: true, min: 0 },
 
+    cbm: {
+      top: { type: String, default: "0" },
+      bottom: { type: String, default: "0" },
+      total: { type: String, default: "0" },
+    },
+
+    // ranges selected during this visit (supports multiple ranges)
+    label_ranges: [
+      {
+        start: { type: Number, min: 0, required: true },
+        end: { type: Number, min: 0, required: true },
+      },
+    ],
+    // final labels added in this visit after filtering/rejection
+    labels_added: [{ type: Number, min: 0 }],
+
     remarks: { type: String, default: "" },
 
     createdBy: {

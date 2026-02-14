@@ -11,9 +11,23 @@ const toInputDateValue = (value) => {
   return asString;
 };
 
+const NON_NEGATIVE_FIELDS = new Set([
+  "qc_checked",
+  "qc_passed",
+  "qc_rejected",
+  "offeredQuantity",
+  "barcode",
+  "CBM",
+  "CBM_top",
+  "CBM_bottom",
+]);
+
+const createEmptyLabelRange = () => ({ start: "", end: "" });
+
 const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const user = getUserFromToken();
   const currentUserId = user?.id || user?._id || "";
+  const isQcUser = user?.role === "QC";
 
   const [form, setForm] = useState({
     inspector: "",
@@ -25,8 +39,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     packed_size: false,
     finishing: false,
     branding: false,
-    labelStart: "",
-    labelEnd: "",
+    labelRanges: [createEmptyLabelRange()],
     rejectedLabels: "",
     remarks: "",
     CBM: "",
@@ -53,8 +66,9 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
   useEffect(() => {
     if (!qc) return;
+    const assignedInspectorId = String(qc?.inspector?._id || qc?.inspector || "");
     setForm({
-      inspector: qc?.inspector?._id || currentUserId,
+      inspector: assignedInspectorId || (isQcUser ? String(currentUserId) : ""),
       qc_checked: "",
       qc_passed: "",
       qc_rejected: "",
@@ -63,8 +77,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       packed_size: "",
       finishing: "",
       branding: "",
-      labelStart: "",
-      labelEnd: "",
+      labelRanges: [createEmptyLabelRange()],
       rejectedLabels: "", 
       remarks: "",
       CBM: qc?.cbm?.total && qc.cbm.total !== "0" ? String(qc.cbm.total) : "",
@@ -73,37 +86,113 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         qc?.cbm?.bottom && qc.cbm.bottom !== "0" ? String(qc.cbm.bottom) : "",
       last_inspected_date: toInputDateValue(qc.last_inspected_date),
     });
-  }, [qc, currentUserId]);
+  }, [qc, currentUserId, isQcUser]);
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
+
+    if (NON_NEGATIVE_FIELDS.has(name) && value !== "") {
+      const parsedValue = Number(value);
+      if (!Number.isFinite(parsedValue) || parsedValue < 0) {
+        return;
+      }
+    }
+
     setForm((prev) => ({
       ...prev,
       [name]: type === "checkbox" ? checked : value,
     }));
   };
 
-  const parseLabels = (start, end) => {
-    if (start === "" && end === "") return [];
-    if (!start || !end) return null;
-
-    const startNum = Number(start);
-    const endNum = Number(end);
-
-    if (Number.isNaN(startNum) || Number.isNaN(endNum)) {
-      return null;
+  const handleLabelRangeChange = (index, field, value) => {
+    if (value !== "") {
+      const parsedValue = Number(value);
+      if (!Number.isFinite(parsedValue) || parsedValue < 0) {
+        return;
+      }
     }
 
-    if (startNum > endNum) {
-      return null;
+    setForm((prev) => ({
+      ...prev,
+      labelRanges: prev.labelRanges.map((range, rangeIndex) =>
+        rangeIndex === index ? { ...range, [field]: value } : range,
+      ),
+    }));
+  };
+
+  const addLabelRange = () => {
+    setForm((prev) => ({
+      ...prev,
+      labelRanges: [...prev.labelRanges, createEmptyLabelRange()],
+    }));
+  };
+
+  const removeLabelRange = (index) => {
+    setForm((prev) => {
+      if (prev.labelRanges.length <= 1) {
+        return { ...prev, labelRanges: [createEmptyLabelRange()] };
+      }
+
+      return {
+        ...prev,
+        labelRanges: prev.labelRanges.filter((_, rangeIndex) => rangeIndex !== index),
+      };
+    });
+  };
+
+  const parseLabelRanges = (ranges = []) => {
+    const enteredRanges = ranges.filter((range) => {
+      const hasStart = String(range?.start ?? "").trim() !== "";
+      const hasEnd = String(range?.end ?? "").trim() !== "";
+      return hasStart || hasEnd;
+    });
+
+    if (enteredRanges.length === 0) {
+      return { ranges: [], labels: [] };
     }
 
     const labels = [];
-    for (let i = startNum; i <= endNum; i++) {
-      labels.push(i);
+    const normalizedRanges = [];
+
+    for (let i = 0; i < enteredRanges.length; i++) {
+      const range = enteredRanges[i];
+      const hasStart = String(range.start ?? "").trim() !== "";
+      const hasEnd = String(range.end ?? "").trim() !== "";
+
+      if (!hasStart || !hasEnd) {
+        return {
+          error: `Both start and end are required for range ${i + 1}.`,
+        };
+      }
+
+      const startNum = Number(range.start);
+      const endNum = Number(range.end);
+
+      if (!Number.isInteger(startNum) || !Number.isInteger(endNum)) {
+        return {
+          error: `Range ${i + 1} must use integer values.`,
+        };
+      }
+
+      if (startNum < 0 || endNum < 0) {
+        return {
+          error: `Range ${i + 1} cannot contain negative values.`,
+        };
+      }
+
+      if (startNum > endNum) {
+        return {
+          error: `Start label cannot be greater than end label in range ${i + 1}.`,
+        };
+      }
+
+      normalizedRanges.push({ start: startNum, end: endNum });
+      for (let label = startNum; label <= endNum; label++) {
+        labels.push(label);
+      }
     }
 
-    return labels;
+    return { ranges: normalizedRanges, labels };
   };
 
   const handleSubmit = async () => {
@@ -134,17 +223,24 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       return;
     }
 
-    const labels = parseLabels(form.labelStart, form.labelEnd);
-    if (labels === null) {
-      setError("Label range is invalid. Please enter valid start/end values.");
+    const parsedLabelRangeData = parseLabelRanges(form.labelRanges);
+    if (parsedLabelRangeData.error) {
+      setError(parsedLabelRangeData.error);
       return;
     }
+    const labels = parsedLabelRangeData.labels;
+    const normalizedLabelRanges = parsedLabelRangeData.ranges;
 
     const rejectedLabels =
       form.rejectedLabels
         ?.split(",")
         .map((label) => Number(label.trim()))
         .filter((label) => !Number.isNaN(label)) || [];
+
+    if (rejectedLabels.some((label) => label < 0)) {
+      setError("Rejected labels cannot contain negative numbers.");
+      return;
+    }
 
     const filteredLabels = labels.filter(
       (label) => !rejectedLabels.includes(label),
@@ -155,8 +251,12 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       form.qc_passed !== "" ||
       form.qc_rejected !== "" ||
       form.offeredQuantity !== "";
-    const hasLabelUpdate = filteredLabels.length > 0;
+    const hasLabelUpdate =
+      filteredLabels.length > 0 || normalizedLabelRanges.length > 0;
     const selectedInspectorId = String(form.inspector || "").trim();
+    const currentInspectorId = String(
+      qc?.inspector?._id || qc?.inspector || "",
+    ).trim();
 
     if ((hasQuantityUpdate || hasLabelUpdate) && qcChecked <= 0) {
       setError("QC checked must be greater than 0 for updates.");
@@ -297,7 +397,9 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     if (form.qc_passed !== "") payload.qc_passed = qcPassed;
     if (form.qc_rejected !== "") payload.qc_rejected = qcRejected;
     if (form.offeredQuantity !== "") payload.vendor_provision = offeredQuantity;
-    if (selectedInspectorId) payload.inspector = selectedInspectorId;
+    if (selectedInspectorId && selectedInspectorId !== currentInspectorId) {
+      payload.inspector = selectedInspectorId;
+    }
 
     if (cbmTotal.hasValue && cbmTotal.value !== null)
       payload.CBM = cbmTotal.value;
@@ -315,6 +417,9 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
     if (filteredLabels.length > 0) {
       payload.labels = filteredLabels;
+    }
+    if (normalizedLabelRanges.length > 0) {
+      payload.label_ranges = normalizedLabelRanges;
     }
 
     try {
@@ -369,6 +474,12 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 <div className="small text-secondary">Order Quantity</div>
                 <div className="fw-semibold">
                   {qc.quantities?.client_demand ?? "N/A"}
+                </div>
+              </div>
+              <div className="col qc-modal-summary-item">
+                <div className="small text-secondary">Requested Quantity</div>
+                <div className="fw-semibold">
+                  {qc.quantities?.quantity_requested ?? "N/A"}
                 </div>
               </div>
               <div className="col qc-modal-summary-item">
@@ -589,31 +700,66 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 </div>
               </div>
 
-              <div className="col-md-2">
-                <label className="form-label">Start of label range</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  name="labelStart"
-                  value={form.labelStart}
-                  onChange={handleChange}
-                  placeholder="Start label"
-                />
+              <div className="col-md-8">
+                <label className="form-label d-block">Label Ranges</label>
+                <div className="d-grid gap-2">
+                  {form.labelRanges.map((range, index) => (
+                    <div
+                      key={`label-range-${index}`}
+                      className="row g-2 align-items-end"
+                    >
+                      <div className="col-sm-5">
+                        <input
+                          type="number"
+                          className="form-control"
+                          value={range.start}
+                          onChange={(e) =>
+                            handleLabelRangeChange(index, "start", e.target.value)
+                          }
+                          min="0"
+                          step="1"
+                          placeholder={`Start label ${index + 1}`}
+                        />
+                      </div>
+                      <div className="col-sm-5">
+                        <input
+                          type="number"
+                          className="form-control"
+                          value={range.end}
+                          onChange={(e) =>
+                            handleLabelRangeChange(index, "end", e.target.value)
+                          }
+                          min="0"
+                          step="1"
+                          placeholder={`End label ${index + 1}`}
+                        />
+                      </div>
+                      <div className="col-sm-2 d-flex gap-2">
+                        <button
+                          type="button"
+                          className="btn btn-outline-secondary btn-sm"
+                          onClick={addLabelRange}
+                          title="Add another range"
+                        >
+                          +
+                        </button>
+                        {form.labelRanges.length > 1 && (
+                          <button
+                            type="button"
+                            className="btn btn-outline-danger btn-sm"
+                            onClick={() => removeLabelRange(index)}
+                            title="Remove this range"
+                          >
+                            -
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
 
-              <div className="col-md-2">
-                <label className="form-label">End of label range</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  name="labelEnd"
-                  value={form.labelEnd}
-                  onChange={handleChange}
-                  placeholder="End label"
-                />
-              </div>
-
-              <div className="col-md-2">
+              <div className="col-md-4">
                 <label className="form-label">Rejected labels</label>
                 <input
                   type="text"

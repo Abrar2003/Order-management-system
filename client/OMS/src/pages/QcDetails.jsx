@@ -103,6 +103,25 @@ const QcDetails = () => {
   const rejectedLabelsText = rejectedLabels.length
     ? rejectedLabels.join(", ")
     : "None";
+  const labelRangesText = useMemo(() => {
+    const ranges = [];
+    const seen = new Set();
+
+    (qc?.inspection_record || []).forEach((record) => {
+      (record?.label_ranges || []).forEach((range) => {
+        const start = Number(range?.start);
+        const end = Number(range?.end);
+        if (!Number.isFinite(start) || !Number.isFinite(end)) return;
+
+        const key = `${start}-${end}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        ranges.push(key);
+      });
+    });
+
+    return ranges.length > 0 ? ranges.join(" | ") : "None";
+  }, [qc?.inspection_record]);
   const barcodeValue = qc?.barcode > 0 ? String(qc.barcode) : "";
 
   const isPositiveCbmValue = (value) => {
@@ -181,7 +200,8 @@ const QcDetails = () => {
         <div className="card om-card">
           <div className="card-body d-grid gap-4">
             <section>
-              <h3 className="h6 mb-3">{`Order Information | ${qc.order.order_id} | ${qc.order.brand} | ${qc.order.vendor} | Request Date: ${new Date(qc.request_date).toLocaleDateString()} | Status: ${qc.order.status}`}</h3>
+              <h3 className="h6 mb-3">{`Order Information | ${qc.order.order_id} | ${qc.order.brand} | ${qc.order.vendor} |  Request Date: ${new Date(qc.request_date).toLocaleDateString()}`}</h3>
+              <h3 className="h6 mb-3">{`Status: ${qc.order.status} | Inspector: ${qc?.inspector?.name}`}</h3>
               <div className="qc-order-inline-grid">
                 <InfoBox compact label="Item Code" value={qc.item.item_code} />
                 <InfoBox
@@ -193,6 +213,11 @@ const QcDetails = () => {
                   compact
                   label="Order Quantity"
                   value={qc.quantities.client_demand}
+                />
+                <InfoBox
+                  compact
+                  label="Requested Quantity"
+                  value={qc.quantities.quantity_requested}
                 />
                 <InfoBox
                   compact
@@ -241,6 +266,7 @@ const QcDetails = () => {
                           <td>{record?.checked ?? 0}</td>
                           <td>{record?.passed ?? 0}</td>
                           <td>{record?.rejected ?? 0}</td>
+                          
                           <td>
                             {isPositiveCbmValue(cbmData?.total)
                               ? cbmData.total
@@ -303,7 +329,7 @@ const QcDetails = () => {
             <section>
               <h3 className="h6 mb-3">QC Notes</h3>
               <div className="row g-3">
-                <InfoBox label="Labels" value={labelRange} />
+                <InfoBox label="Label Ranges" value={labelRangesText} />
                 <InfoBox label="Rejected Labels" value={rejectedLabelsText} />
                 <InfoBox label="Remarks" value={qc.remarks || "None"} />
               </div>

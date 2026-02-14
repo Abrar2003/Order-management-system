@@ -45,6 +45,14 @@ const Orders = () => {
   }, [fetchOrders]);
 
   const primaryOrder = orders[0];
+  const navigateToQcForItem = (itemCode) => {
+    const trimmedItemCode = String(itemCode || "").trim();
+    if (!trimmedItemCode) {
+      navigate("/qc");
+      return;
+    }
+    navigate(`/qc?item_code=${encodeURIComponent(trimmedItemCode)}`);
+  };
 
   return (
     <>
@@ -101,7 +109,9 @@ const Orders = () => {
                               <button
                                 type="button"
                                 className="btn btn-link btn-sm p-0"
-                                onClick={() => navigate("/qc")}
+                                onClick={() =>
+                                  navigateToQcForItem(order?.item?.item_code)
+                                }
                               >
                                 Inspection Requested / Check updates
                               </button>

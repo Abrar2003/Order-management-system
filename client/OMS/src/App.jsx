@@ -17,6 +17,7 @@ import QcDetails from "./pages/QcDetails";
 import OrdersByBrand from "./pages/OrdersByBrand";
 import Signup from "./pages/Signup";
 import OpenOrders from "./pages/OpenOrders";
+import DailyReport from "./pages/DailyReport";
 
 // import Users from "./pages/Users"; // later
 
@@ -53,6 +54,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <OpenOrders />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/daily-reports"
+            element={
+              <ProtectedRoute>
+                <DailyReport />
               </ProtectedRoute>
             }
           />

@@ -30,6 +30,13 @@ router.patch(
 );
 
 router.get(
+  "/daily-report",
+  auth,
+  authorize("admin", "manager", "QC", "Dev"),
+  qcController.getDailyReport
+);
+
+router.get(
   "/:id",
   auth,
   authorize("admin", "manager", "QC", "Dev"),
