@@ -134,8 +134,12 @@ const AlignQCModal = ({
                 <div className="small text-secondary">Description</div>
                 <div className="fw-semibold">{order.item.description}</div>
               </div>
-              <div className="col-12">
-                <div className="small text-secondary">Client Demand</div>
+              <div className="col-6">
+                <div className="small text-secondary">Order Quantity</div>
+                <div className="fw-semibold">{order.quantity}</div>
+              </div>
+              <div className="col-6">
+                <div className="small text-secondary">Open Quantity</div>
                 <div className="fw-semibold">{order.quantity}</div>
               </div>
             </div>

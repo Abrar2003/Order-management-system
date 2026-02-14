@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import "../App.css";
+
+const getBrandName = (brandObj) =>
+  String(brandObj?.name || brandObj?.brand || "").trim();
 
 const Home = () => {
   const token = localStorage.getItem("token");
@@ -14,6 +17,8 @@ const Home = () => {
   const [loading, setLoading] = useState(false);
 
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedBrandParam = String(searchParams.get("brand") || "").trim();
 
   const brandLogos = useMemo(() => {
     const toDataUrl = (logoObj) => {
@@ -46,7 +51,6 @@ const Home = () => {
 
         if (res.data.data && res.data.data.length > 0) {
           setBrands(res.data.data);
-          setSelectedBrand(res.data.data[0].brand);
         }
       } catch (err) {
         console.error("Error fetching brands:", err);
@@ -57,6 +61,30 @@ const Home = () => {
       fetchBrands();
     }
   }, [token]);
+
+  useEffect(() => {
+    if (!Array.isArray(brands) || brands.length === 0) return;
+
+    const availableBrandNames = brands
+      .map((brand) => getBrandName(brand))
+      .filter(Boolean);
+    if (availableBrandNames.length === 0) return;
+
+    const queryBrandIsValid =
+      selectedBrandParam && availableBrandNames.includes(selectedBrandParam);
+    const resolvedBrand = queryBrandIsValid
+      ? selectedBrandParam
+      : availableBrandNames[0];
+
+    if (selectedBrand !== resolvedBrand) {
+      setSelectedBrand(resolvedBrand);
+      setPage(1);
+    }
+
+    if (!queryBrandIsValid && resolvedBrand) {
+      setSearchParams({ brand: resolvedBrand }, { replace: true });
+    }
+  }, [brands, selectedBrandParam, selectedBrand, setSearchParams]);
 
   useEffect(() => {
     if (!selectedBrand) return;
@@ -98,24 +126,28 @@ const Home = () => {
         <div className="card om-card mb-3">
           <div className="card-body d-flex flex-wrap gap-2 align-items-center">
             <span className="fw-semibold me-1">Brands:</span>
-            {brands.map((brand) => (
+            {brands.map((brand) => {
+              const brandName = getBrandName(brand);
+              return (
               <button
                 key={brand._id}
                 type="button"
-                className={`btn brand-logo-btn ${selectedBrand === brand.name ? "btn-primary" : "btn-outline-secondary"}`}
+                className={`btn brand-logo-btn ${selectedBrand === brandName ? "btn-primary" : "btn-outline-secondary"}`}
                 onClick={() => {
-                  setSelectedBrand(brand.name);
+                  setSelectedBrand(brandName);
                   setPage(1);
+                  setSearchParams({ brand: brandName }, { replace: true });
                 }}
-                title={brand.name}
+                title={brandName}
               >
                 {brandLogos.get(brand._id) ? (
-                  <img src={brandLogos.get(brand._id)} alt={brand.name} className="brand-logo-img" />
+                  <img src={brandLogos.get(brand._id)} alt={brandName} className="brand-logo-img" />
                 ) : (
-                  <span className="small fw-semibold">{brand.name}</span>
+                  <span className="small fw-semibold">{brandName}</span>
                 )}
               </button>
-            ))}
+              );
+            })}
           </div>
         </div>
 

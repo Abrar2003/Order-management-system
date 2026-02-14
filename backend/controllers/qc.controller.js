@@ -12,21 +12,6 @@ const normalizeLabels = (labels = []) => {
   return [...new Set(numericLabels)].sort((a, b) => a - b);
 };
 
-const findRejectedLabels = (sortedLabels = []) => {
-  if (sortedLabels.length < 2) return [];
-  const rejected = [];
-  for (let i = 1; i < sortedLabels.length; i++) {
-    const previous = sortedLabels[i - 1];
-    const current = sortedLabels[i];
-    if (current - previous > 1) {
-      for (let missing = previous + 1; missing < current; missing++) {
-        rejected.push(missing);
-      }
-    }
-  }
-  return rejected;
-};
-
 /**
  * GET /qclist
  * Fetch all QC records (pagination optional)
@@ -270,8 +255,7 @@ exports.alignQC = async (req, res) => {
       const totalOffered =
         (hasVendorProvisionInput
           ? vendorProvision
-          : (existingQC.quantities.vendor_provision || 0)) +
-        (existingQC.quantities.qc_rejected || 0);
+          : (existingQC.quantities.vendor_provision || 0));
 
       if ((existingQC.quantities.qc_checked || 0) > totalOffered) {
         return res.status(400).json({
@@ -335,7 +319,6 @@ exports.alignQC = async (req, res) => {
         vendor_provision: hasVendorProvisionInput ? vendorProvision : 0,
         qc_checked: 0,
         qc_passed: 0,
-        qc_rejected: 0,
         pending: clientDemand,
       },
       remarks,
@@ -359,14 +342,13 @@ exports.alignQC = async (req, res) => {
 
 /**
  * PATCH /update-qc/:id
- * QC inspector updates checked / passed / rejected with allocated labels
+ * QC inspector updates checked / passed with allocated labels
  */
 exports.updateQC = async (req, res) => {
   try {
     const {
       qc_checked,
       qc_passed,
-      qc_rejected,
       remarks,
       labels,
       label_ranges,
@@ -501,10 +483,9 @@ exports.updateQC = async (req, res) => {
 
       const addChecked = Number(qc_checked || 0);
       const addPassed = Number(qc_passed || 0);
-      const addRejected = Number(qc_rejected || 0);
       const addProvision = Number(vendor_provision || 0);
 
-      if ([addChecked, addPassed, addRejected, addProvision].some((v) => v < 0 || Number.isNaN(v))) {
+      if ([addChecked, addPassed, addProvision].some((v) => v < 0 || Number.isNaN(v))) {
         return res.status(400).json({
           message: "Quantity values must be valid non-negative numbers",
         });
@@ -519,10 +500,9 @@ exports.updateQC = async (req, res) => {
               String(range.end ?? "").trim() !== ""),
         );
 
-      // If user is updating pass/reject/labels, they must provide checked in same visit
+      // If user is updating passed quantity or labels, they must provide checked in same visit
       if (
         (addPassed ||
-          addRejected ||
           (Array.isArray(labels) && labels.length) ||
           hasLabelRangePayload) &&
         addChecked <= 0
@@ -532,11 +512,10 @@ exports.updateQC = async (req, res) => {
         });
       }
 
-      const nextVendorProvision = qc.quantities.vendor_provision + addProvision - addRejected;
+      const nextVendorProvision = qc.quantities.vendor_provision + addProvision;
 
       const nextChecked = qc.quantities.qc_checked + addChecked;
       const nextPassed = qc.quantities.qc_passed + addPassed;
-      const nextRejected = qc.quantities.qc_rejected + addRejected;
 
       if (nextVendorProvision < 0) {
         return res.status(400).json({ message: "offered quantity cannot be negative" });
@@ -572,16 +551,15 @@ exports.updateQC = async (req, res) => {
         });
       }
 
-      if (nextPassed + nextRejected > nextChecked) {
+      if (nextPassed > nextChecked) {
         return res.status(400).json({
-          message: "qc_passed + qc_rejected cannot exceed qc_checked",
+          message: "qc_passed cannot exceed qc_checked",
         });
       }
 
       qc.quantities.vendor_provision = nextVendorProvision;
       qc.quantities.qc_checked = nextChecked;
       qc.quantities.qc_passed = nextPassed;
-      qc.quantities.qc_rejected = nextRejected;
       qc.quantities.pending = qc.quantities.client_demand - qc.quantities.qc_passed;
 
       /* ────────────────────────
@@ -664,28 +642,18 @@ exports.updateQC = async (req, res) => {
           labelRangesUsedThisVisit = rangeResult.normalizedRanges;
         }
 
-        const hasDualCbm = Number(qc.cbm?.top) > 0 && Number(qc.cbm?.bottom) > 0;
-        const labelMultiplier = hasDualCbm ? 2 : 1;
-
-        // If client sends explicit labels, treat them as authoritative
-        // (e.g. after rejected-label filtering). Otherwise derive from ranges.
+        // If client sends explicit labels, treat them as authoritative.
+        // Otherwise derive from ranges.
         const labelsForUpdate =
           parsedDirectLabels.length > 0 ? parsedDirectLabels : generatedFromRanges;
         const uniqueIncoming = [...new Set(labelsForUpdate)];
         const existingSet = new Set((qc.labels || []).map(Number));
         const incomingNew = uniqueIncoming.filter((label) => !existingSet.has(label));
 
-        if (incomingNew.length > addChecked * labelMultiplier) {
-          return res.status(400).json({
-            message: `labels count cannot exceed ${labelMultiplier}x qc_checked for this update`,
-          });
-        }
-
         const totalLabels = existingSet.size + incomingNew.length;
-        const maxTotal = nextChecked * labelMultiplier;
-        if (totalLabels > maxTotal) {
+        if (totalLabels > nextPassed) {
           return res.status(400).json({
-            message: `total labels cannot exceed ${labelMultiplier}x total qc_checked`,
+            message: "total labels cannot exceed total qc_passed",
           });
         }
 
@@ -710,7 +678,6 @@ exports.updateQC = async (req, res) => {
       const isVisitUpdate =
         addChecked > 0 ||
         addPassed > 0 ||
-        addRejected > 0 ||
         addProvision > 0 ||
         (labelsAddedThisVisit && labelsAddedThisVisit.length > 0);
 
@@ -753,7 +720,6 @@ exports.updateQC = async (req, res) => {
             inspection_date: inspectionDateForRecord,
             checked: addChecked,
             passed: addPassed,
-            rejected: addRejected,
             vendor_requested: vendorRequestedThisVisit,
             vendor_offered: vendorOfferedThisVisit,
             pending_after: qc.quantities.pending,
@@ -814,7 +780,7 @@ exports.getDailyReport = async (req, res) => {
         .lean(),
       Inspection.find({ inspection_date: reportDate })
         .select(
-          "inspection_date inspector qc checked passed rejected vendor_requested vendor_offered pending_after cbm remarks createdAt",
+          "inspection_date inspector qc checked passed vendor_requested vendor_offered pending_after cbm remarks createdAt",
         )
         .populate("inspector", "name email role")
         .populate({
@@ -922,7 +888,6 @@ exports.getDailyReport = async (req, res) => {
         description: qcRecord?.item?.description || "N/A",
         inspected_quantity: inspectedQty,
         passed_quantity: Number(inspection?.passed || 0),
-        rejected_quantity: Number(inspection?.rejected || 0),
         vendor_requested: Number(inspection?.vendor_requested || 0),
         vendor_offered: Number(inspection?.vendor_offered || 0),
         pending_after: Number(inspection?.pending_after || 0),
@@ -982,13 +947,11 @@ exports.getQCById = async (req, res) => {
 
     const qcData = qc.toObject();
     const sortedLabels = normalizeLabels(qcData.labels);
-    const rejectedLabels = findRejectedLabels(sortedLabels);
 
     res.json({
       data: {
         ...qcData,
         labels: sortedLabels,
-        rejected_labels: rejectedLabels,
       },
     });
   } catch (err) {

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import api from "../api/axios";
 import { getUserFromToken } from "../auth/auth.utils";
 import "../App.css";
+import AllocateLabelsModal from "./AllocateLabelsModal";
 
 const toInputDateValue = (value) => {
   if (!value) return "";
@@ -14,7 +15,6 @@ const toInputDateValue = (value) => {
 const NON_NEGATIVE_FIELDS = new Set([
   "qc_checked",
   "qc_passed",
-  "qc_rejected",
   "offeredQuantity",
   "barcode",
   "CBM",
@@ -28,19 +28,19 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const user = getUserFromToken();
   const currentUserId = user?.id || user?._id || "";
   const isQcUser = user?.role === "QC";
+    const canManageLabels = ["admin", "manager"].includes(user?.role);
+
 
   const [form, setForm] = useState({
     inspector: "",
     qc_checked: "",
     qc_passed: "",
-    qc_rejected: "",
     offeredQuantity: "",
     barcode: "",
     packed_size: false,
     finishing: false,
     branding: false,
     labelRanges: [createEmptyLabelRange()],
-    rejectedLabels: "",
     remarks: "",
     CBM: "",
     CBM_top: "",
@@ -50,6 +50,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const [inspectors, setInspectors] = useState([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [showAllocateModal, setShowAllocateModal] = useState(false);
 
   useEffect(() => {
     const fetchInspectors = async () => {
@@ -71,14 +72,12 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       inspector: assignedInspectorId || (isQcUser ? String(currentUserId) : ""),
       qc_checked: "",
       qc_passed: "",
-      qc_rejected: "",
       offeredQuantity: "",
       barcode: qc.barcode > 0 ? String(qc.barcode) : "",
       packed_size: "",
       finishing: "",
       branding: "",
       labelRanges: [createEmptyLabelRange()],
-      rejectedLabels: "", 
       remarks: "",
       CBM: qc?.cbm?.total && qc.cbm.total !== "0" ? String(qc.cbm.total) : "",
       CBM_top: qc?.cbm?.top && qc.cbm.top !== "0" ? String(qc.cbm.top) : "",
@@ -201,12 +200,11 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
     const qcChecked = form.qc_checked === "" ? 0 : Number(form.qc_checked);
     const qcPassed = form.qc_passed === "" ? 0 : Number(form.qc_passed);
-    const qcRejected = form.qc_rejected === "" ? 0 : Number(form.qc_rejected);
     const offeredQuantity =
       form.offeredQuantity === "" ? 0 : Number(form.offeredQuantity);
 
     if (
-      [qcChecked, qcPassed, qcRejected, offeredQuantity].some((value) =>
+      [qcChecked, qcPassed, offeredQuantity].some((value) =>
         Number.isNaN(value),
       )
     ) {
@@ -215,7 +213,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     }
 
     if (
-      [qcChecked, qcPassed, qcRejected, offeredQuantity].some(
+      [qcChecked, qcPassed, offeredQuantity].some(
         (value) => value < 0,
       )
     ) {
@@ -230,29 +228,14 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     }
     const labels = parsedLabelRangeData.labels;
     const normalizedLabelRanges = parsedLabelRangeData.ranges;
-
-    const rejectedLabels =
-      form.rejectedLabels
-        ?.split(",")
-        .map((label) => Number(label.trim()))
-        .filter((label) => !Number.isNaN(label)) || [];
-
-    if (rejectedLabels.some((label) => label < 0)) {
-      setError("Rejected labels cannot contain negative numbers.");
-      return;
-    }
-
-    const filteredLabels = labels.filter(
-      (label) => !rejectedLabels.includes(label),
-    );
+    const labelsForUpdate = [...new Set(labels)];
 
     const hasQuantityUpdate =
       form.qc_checked !== "" ||
       form.qc_passed !== "" ||
-      form.qc_rejected !== "" ||
       form.offeredQuantity !== "";
     const hasLabelUpdate =
-      filteredLabels.length > 0 || normalizedLabelRanges.length > 0;
+      labelsForUpdate.length > 0 || normalizedLabelRanges.length > 0;
     const selectedInspectorId = String(form.inspector || "").trim();
     const currentInspectorId = String(
       qc?.inspector?._id || qc?.inspector || "",
@@ -263,8 +246,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       return;
     }
 
-    if (qcPassed + qcRejected > qcChecked && qcChecked > 0) {
-      setError("Passed + rejected cannot exceed checked quantity.");
+    if (qcPassed > qcChecked && qcChecked > 0) {
+      setError("Passed cannot exceed checked quantity.");
       return;
     }
 
@@ -303,23 +286,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       return;
     }
 
-    const effectiveCbmTop = cbmTop.hasValue
-      ? cbmTop.value
-      : (qc?.cbm?.top ?? "0");
-    const effectiveCbmBottom = cbmBottom.hasValue
-      ? cbmBottom.value
-      : (qc?.cbm?.bottom ?? "0");
-    const hasDualCbmForLabels =
-      Number(effectiveCbmTop) > 0 && Number(effectiveCbmBottom) > 0;
-    const labelMultiplier = hasDualCbmForLabels ? 2 : 1;
-
-    if (filteredLabels.length > qcChecked * labelMultiplier && qcChecked > 0) {
-      setError(
-        `Labels count cannot exceed ${labelMultiplier}x QC checked quantity.`,
-      );
-      return;
-    }
-
     const barcodeParsed = barcodeValue === "" ? null : Number(barcodeValue);
 
     if (
@@ -331,14 +297,21 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     }
 
     const nextNetOffered =
-      (qc.quantities?.vendor_provision || 0) + offeredQuantity - qcRejected;
+      (qc.quantities?.vendor_provision || 0) + offeredQuantity;
 
-    const totalOfferedNext =
-      (qc.quantities?.vendor_provision || 0) +
-      (qc.quantities?.qc_rejected || 0) +
-      offeredQuantity;
+    const totalOfferedNext = nextNetOffered;
     const nextChecked = (qc.quantities?.qc_checked || 0) + qcChecked;
     const nextPassed = (qc.quantities?.qc_passed || 0) + qcPassed;
+    const existingLabelsSet = new Set(
+      (Array.isArray(qc?.labels) ? qc.labels : [])
+        .map((label) => Number(label))
+        .filter((label) => Number.isInteger(label) && label >= 0),
+    );
+    const incomingNewLabels = labelsForUpdate.filter(
+      (label) => !existingLabelsSet.has(label),
+    );
+    const totalLabelsAfterUpdate =
+      existingLabelsSet.size + incomingNewLabels.length;
 
     const quantityRequestedLimit =
       qc.quantities?.quantity_requested &&
@@ -389,13 +362,17 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       return;
     }
 
+    if (totalLabelsAfterUpdate > nextPassed) {
+      setError("Total labels cannot exceed total passed quantity.");
+      return;
+    }
+
     const payload = {
       remarks: form.remarks?.trim() ? form.remarks.trim() : undefined,
     };
 
     if (form.qc_checked !== "") payload.qc_checked = qcChecked;
     if (form.qc_passed !== "") payload.qc_passed = qcPassed;
-    if (form.qc_rejected !== "") payload.qc_rejected = qcRejected;
     if (form.offeredQuantity !== "") payload.vendor_provision = offeredQuantity;
     if (selectedInspectorId && selectedInspectorId !== currentInspectorId) {
       payload.inspector = selectedInspectorId;
@@ -415,8 +392,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     if (!qc.finishing && form.finishing) payload.finishing = true;
     if (!qc.branding && form.branding) payload.branding = true;
 
-    if (filteredLabels.length > 0) {
-      payload.labels = filteredLabels;
+    if (labelsForUpdate.length > 0) {
+      payload.labels = labelsForUpdate;
     }
     if (normalizedLabelRanges.length > 0) {
       payload.label_ranges = normalizedLabelRanges;
@@ -587,7 +564,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
               <div className="col-md-12">{"   "}</div>
 
-              <div className="col-md-3">
+              <div className="col-md-4">
                 <label className="form-label">Quantity Offered</label>
                 <input
                   type="number"
@@ -599,7 +576,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 />
               </div>
 
-              <div className="col-md-3">
+              <div className="col-md-4">
                 <label className="form-label">QC Inspected</label>
                 <input
                   type="number"
@@ -611,25 +588,13 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 />
               </div>
 
-              <div className="col-md-3">
+              <div className="col-md-4">
                 <label className="form-label">QC Passed</label>
                 <input
                   type="number"
                   className="form-control"
                   name="qc_passed"
                   value={form.qc_passed}
-                  onChange={handleChange}
-                  min="0"
-                />
-              </div>
-
-              <div className="col-md-3">
-                <label className="form-label">QC Rejected</label>
-                <input
-                  type="number"
-                  className="form-control"
-                  name="qc_rejected"
-                  value={form.qc_rejected}
                   onChange={handleChange}
                   min="0"
                 />
@@ -700,7 +665,31 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 </div>
               </div>
 
-              <div className="col-md-8">
+              <div className="col-md-6">{canManageLabels && (
+                <>
+                <label
+                    htmlFor="branding"
+                    className="form-label"
+                  >
+                    Allocate Lable
+                  </label>
+                  <div>
+
+                          <button
+                            type="button"
+                            className="btn btn-outline-secondary"
+                            onClick={() => {
+                              setShowAllocateModal(true);
+                              setShowUserMenu(false);
+                            }}
+                            >
+                            Allocate 
+                          </button>
+                              </div>
+                            </>
+                        )}</div>
+
+              <div className="col-md-6">
                 <label className="form-label d-block">Label Ranges</label>
                 <div className="d-grid gap-2">
                   {form.labelRanges.map((range, index) => (
@@ -759,21 +748,9 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 </div>
               </div>
 
-              <div className="col-md-4">
-                <label className="form-label">Rejected labels</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  name="rejectedLabels"
-                  value={form.rejectedLabels}
-                  onChange={handleChange}
-                  placeholder="e.g. 101, 102, 103"
-                />
-              </div>
+              {/* <div className="col-md-12">{"   "}</div> */}
 
-              <div className="col-md-12">{"   "}</div>
-
-              <div className="col-12">
+              <div className="col-6">
                 <label className="form-label">Remarks</label>
                 <textarea
                   className="form-control"
@@ -808,6 +785,13 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
           </div>
         </div>
       </div>
+      {showAllocateModal && (
+              <AllocateLabelsModal
+                onClose={() => {
+                  setShowAllocateModal(false);
+                }}
+              />
+            )}
     </div>
   );
 };

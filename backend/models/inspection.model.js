@@ -27,7 +27,6 @@ const InspectionSchema = new mongoose.Schema(
 
     checked: { type: Number, required: true, min: 0 },
     passed: { type: Number, required: true, min: 0 },
-    rejected: { type: Number, required: true, min: 0 },
 
     // store the "pending after visit" for easy history display
     pending_after: { type: Number, required: true, min: 0 },
@@ -45,7 +44,7 @@ const InspectionSchema = new mongoose.Schema(
         end: { type: Number, min: 0, required: true },
       },
     ],
-    // final labels added in this visit after filtering/rejection
+    // final labels added in this visit
     labels_added: [{ type: Number, min: 0 }],
 
     remarks: { type: String, default: "" },

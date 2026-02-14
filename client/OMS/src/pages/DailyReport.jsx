@@ -236,8 +236,7 @@ const DailyReport = () => {
                           <th>Item</th>
                           <th>Inspected</th>
                           <th>Passed</th>
-                          <th>Rejected</th>
-                            <th>CBM</th>
+                          <th>CBM</th>
                           <th>CBM Total</th>
                           <th>Remarks</th>
                         </tr>
@@ -250,7 +249,6 @@ const DailyReport = () => {
                             <td>{inspection.item_code || "N/A"}</td>
                             <td>{inspection.inspected_quantity ?? 0}</td>
                             <td>{inspection.passed_quantity ?? 0}</td>
-                            <td>{inspection.rejected_quantity ?? 0}</td>
                             <td>{inspection?.cbm?.total || "0"}</td>
                             <td>{inspection?.cbm?.total * inspection?.inspected_quantity || "0"}</td>
                             <td>{inspection?.remarks || "None"}</td>

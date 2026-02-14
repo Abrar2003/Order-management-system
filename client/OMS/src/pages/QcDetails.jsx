@@ -16,21 +16,6 @@ const normalizeLabels = (labels) => {
   return [...new Set(numericLabels)].sort((a, b) => a - b);
 };
 
-const findRejectedLabels = (sortedLabels) => {
-  if (sortedLabels.length < 2) return [];
-  const rejected = [];
-  for (let i = 1; i < sortedLabels.length; i++) {
-    const previous = sortedLabels[i - 1];
-    const current = sortedLabels[i];
-    if (current - previous > 1) {
-      for (let missing = previous + 1; missing < current; missing++) {
-        rejected.push(missing);
-      }
-    }
-  }
-  return rejected;
-};
-
 const formatDateLabel = (value) => {
   if (!value) return "N/A";
   const asString = String(value).trim();
@@ -91,17 +76,6 @@ const QcDetails = () => {
   const sortedLabels = useMemo(() => normalizeLabels(qc?.labels), [qc?.labels]);
   const labelRange = sortedLabels.length
     ? `${sortedLabels[0]} - ${sortedLabels[sortedLabels.length - 1]}`
-    : "None";
-
-  const rejectedLabels = useMemo(() => {
-    if (Array.isArray(qc?.rejected_labels) && qc.rejected_labels.length > 0) {
-      return normalizeLabels(qc.rejected_labels);
-    }
-    return findRejectedLabels(sortedLabels);
-  }, [qc?.rejected_labels, sortedLabels]);
-
-  const rejectedLabelsText = rejectedLabels.length
-    ? rejectedLabels.join(", ")
     : "None";
   const labelRangesText = useMemo(() => {
     const ranges = [];
@@ -246,9 +220,8 @@ const QcDetails = () => {
                         <th>Offered</th>
                         <th>Inspected</th>
                         <th>Passed</th>
-                        <th>Rejected</th>
                         <th>CBM</th>
-                        <th>Pending After</th>
+                        <th>Pending</th>
                         <th>Remarks</th>
                       </tr>
                     </thead>
@@ -265,7 +238,6 @@ const QcDetails = () => {
                           <td>{record?.vendor_offered ?? 0}</td>
                           <td>{record?.checked ?? 0}</td>
                           <td>{record?.passed ?? 0}</td>
-                          <td>{record?.rejected ?? 0}</td>
                           
                           <td>
                             {isPositiveCbmValue(cbmData?.total)
@@ -329,8 +301,8 @@ const QcDetails = () => {
             <section>
               <h3 className="h6 mb-3">QC Notes</h3>
               <div className="row g-3">
+                <InfoBox label="Labels" value={labelRange} />
                 <InfoBox label="Label Ranges" value={labelRangesText} />
-                <InfoBox label="Rejected Labels" value={rejectedLabelsText} />
                 <InfoBox label="Remarks" value={qc.remarks || "None"} />
               </div>
             </section>
