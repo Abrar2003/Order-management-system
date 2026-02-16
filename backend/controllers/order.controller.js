@@ -464,6 +464,64 @@ exports.getOrderSummary = async (req, res) => {
   }
 };
 
+exports.getShipments = async (req, res) => {
+  try {
+    const statusesToInclude = ["Inspection Done", "Partial Shipped", "Shipped"];
+
+    const orders = await Order.find({
+      status: { $in: statusesToInclude },
+    })
+      .select("order_id item status quantity shipment order_date updatedAt")
+      .sort({ order_date: -1, updatedAt: -1, order_id: -1 })
+      .lean();
+
+    const data = orders.map((order) => {
+      const shipmentEntries = Array.isArray(order?.shipment) ? order.shipment : [];
+      const lastShipment =
+        shipmentEntries.length > 0
+          ? shipmentEntries[shipmentEntries.length - 1]
+          : null;
+      const parsedLatestShipmentQuantity = Number(lastShipment?.quantity);
+      const parsedOrderQuantity = Number(order?.quantity);
+      const normalizedOrderQuantity = Number.isFinite(parsedOrderQuantity)
+        ? parsedOrderQuantity
+        : 0;
+
+      return {
+        _id: order?._id || null,
+        order_id: order?.order_id || "",
+        item: {
+          item_code: order?.item?.item_code || "",
+          description: order?.item?.description || "",
+        },
+        item_code: order?.item?.item_code || "",
+        description: order?.item?.description || "",
+        stuffing_date: lastShipment?.stuffing_date || null,
+        container: lastShipment?.container || "",
+        quantity: Number.isFinite(parsedLatestShipmentQuantity)
+          ? parsedLatestShipmentQuantity
+          : normalizedOrderQuantity,
+        order_quantity: normalizedOrderQuantity,
+        shipment: shipmentEntries,
+        status: order?.status || "",
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      count: data.length,
+      data,
+    });
+  } catch (error) {
+    console.error("Get Shipments Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch shipment list",
+      error: error.message,
+    });
+  }
+};
+
 exports.finalizeOrder = async (req, res) => {
   try {
     const { stuffing_date, container, quantity, remarks } = req.body;

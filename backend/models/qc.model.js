@@ -103,6 +103,7 @@ const qcSchema = new mongoose.Schema(
         type: Number,
         default: 0,
       },
+      qc_rejected: { type: Number, default: 0 },
     },
 
     remarks: {

@@ -18,6 +18,7 @@ import OrdersByBrand from "./pages/OrdersByBrand";
 import Signup from "./pages/Signup";
 import OpenOrders from "./pages/OpenOrders";
 import DailyReport from "./pages/DailyReport";
+import Shipments from "./pages/Shipments";
 
 // import Users from "./pages/Users"; // later
 
@@ -63,6 +64,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <DailyReport />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/shipments"
+            element={
+              <ProtectedRoute>
+                <Shipments />
               </ProtectedRoute>
             }
           />

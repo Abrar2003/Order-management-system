@@ -665,7 +665,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 </div>
               </div>
 
-              <div className="col-md-6">{canManageLabels && (
+              <div className="col-md-6 d-flex flex-column">{canManageLabels && (
                 <>
                 <label
                     htmlFor="branding"
@@ -673,7 +673,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   >
                     Allocate Lable
                   </label>
-                  <div>
+                  <div >
 
                           <button
                             type="button"

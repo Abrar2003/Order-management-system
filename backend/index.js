@@ -12,6 +12,11 @@ const userRouter = require("./routers/user.routes");
 const app = express();
 const PORT = process.env.PORT;
 
+const dns = require("dns");
+
+// Force DNS servers for this Node process (bypasses Windows resolver issues)
+dns.setServers(["1.1.1.1", "8.8.8.8"]);
+
 // 🔥 CORS MUST COME FIRST
 app.use(
   cors({

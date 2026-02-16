@@ -14,6 +14,16 @@ const useDebouncedValue = (value, delay = 300) => {
   return debounced;
 };
 
+const formatDateLabel = (value) => {
+  if (!value) return "N/A";
+  const asString = String(value).trim();
+  if (!asString) return "N/A";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(asString)) return asString;
+  const parsed = new Date(asString);
+  if (Number.isNaN(parsed.getTime())) return asString;
+  return parsed.toLocaleDateString();
+};
+
 const QCPage = () => {
   const [searchParams] = useSearchParams();
   const requestedItemCode = String(searchParams.get("item_code") || "").trim();
@@ -355,7 +365,7 @@ const QCPage = () => {
                       </td>
                       <td>{qc?.item?.item_code || "N/A"}</td>
                       <td>{qc?.request_date || "N/A"}</td>
-                      <td>{qc?.last_inspected_date || "N/A"}</td>
+                      <td>{formatDateLabel(qc?.last_inspected_date) || "N/A"}</td>
                       <td>{qc?.quantities?.quantity_requested ?? 0}</td>
                       <td>{qc?.quantities?.vendor_provision ?? 0}</td>
                       <td>{qc?.quantities?.qc_passed ?? 0}</td>

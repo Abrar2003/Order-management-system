@@ -10,6 +10,7 @@ const {
   getVendorSummaryByBrand,
   getOrdersByBrandAndStatus,
   getOrderSummary,
+  getShipments,
   finalizeOrder,
 } = require("../controllers/order.controller");
 
@@ -34,6 +35,14 @@ router.get("/brand/:brand/vendor/:vendor/status/:status", authenticate, getOrder
 
 // get orders with optional filters via query params
 router.get("/filters", authenticate, getOrdersByBrandAndStatus);
+
+// List shipped/partially shipped/inspection-done items with latest shipment details
+router.get(
+  "/shipments",
+  authenticate,
+  authorize("admin", "manager", "QC", "dev", "Dev"),
+  getShipments,
+);
 
 // Finalize shipping / add shipment entry
 router.patch(
