@@ -475,19 +475,14 @@ exports.getShipments = async (req, res) => {
       .sort({ order_date: -1, updatedAt: -1, order_id: -1 })
       .lean();
 
-    const data = orders.map((order) => {
+    const data = orders.flatMap((order) => {
       const shipmentEntries = Array.isArray(order?.shipment) ? order.shipment : [];
-      const lastShipment =
-        shipmentEntries.length > 0
-          ? shipmentEntries[shipmentEntries.length - 1]
-          : null;
-      const parsedLatestShipmentQuantity = Number(lastShipment?.quantity);
       const parsedOrderQuantity = Number(order?.quantity);
       const normalizedOrderQuantity = Number.isFinite(parsedOrderQuantity)
         ? parsedOrderQuantity
         : 0;
 
-      return {
+      const baseRow = {
         _id: order?._id || null,
         order_id: order?.order_id || "",
         vendor: order?.vendor || "",
@@ -497,15 +492,41 @@ exports.getShipments = async (req, res) => {
         },
         item_code: order?.item?.item_code || "",
         description: order?.item?.description || "",
-        stuffing_date: lastShipment?.stuffing_date || null,
-        container: lastShipment?.container || "",
-        quantity: Number.isFinite(parsedLatestShipmentQuantity)
-          ? parsedLatestShipmentQuantity
-          : normalizedOrderQuantity,
         order_quantity: normalizedOrderQuantity,
         shipment: shipmentEntries,
         status: order?.status || "",
       };
+
+      if (shipmentEntries.length === 0) {
+        return [
+          {
+            ...baseRow,
+            shipment_id: null,
+            stuffing_date: null,
+            container: "",
+            quantity: normalizedOrderQuantity,
+            pending: normalizedOrderQuantity,
+            remaining_remarks: "",
+          },
+        ];
+      }
+
+      return shipmentEntries.map((entry, index) => {
+        const parsedShipmentQuantity = Number(entry?.quantity);
+        const parsedPending = Number(entry?.pending);
+
+        return {
+          ...baseRow,
+          shipment_id: entry?._id || `${order?._id || "order"}-${index}`,
+          stuffing_date: entry?.stuffing_date || null,
+          container: entry?.container || "",
+          quantity: Number.isFinite(parsedShipmentQuantity)
+            ? parsedShipmentQuantity
+            : 0,
+          pending: Number.isFinite(parsedPending) ? parsedPending : 0,
+          remaining_remarks: entry?.remaining_remarks || "",
+        };
+      });
     });
 
     return res.status(200).json({

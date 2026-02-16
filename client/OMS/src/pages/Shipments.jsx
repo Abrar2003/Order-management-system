@@ -230,9 +230,12 @@ const Shipments = () => {
                       <th>Item Code</th>
                       <th>Vendor</th>
                       <th>Description</th>
+                      <th>Order Quantity</th>
                       <th>Stuffing Date</th>
                       <th>Container Number</th>
                       <th>Quantity</th>
+                      <th>Pending After</th>
+                      <th>Remarks</th>
                       {canFinalizeShipping && <th>Finalize</th>}
                     </tr>
                   </thead>
@@ -240,7 +243,7 @@ const Shipments = () => {
                     {filteredRows.length === 0 && (
                       <tr>
                         <td
-                          colSpan={canFinalizeShipping ? 8 : 7}
+                          colSpan={canFinalizeShipping ? 11 : 10}
                           className="text-center py-4"
                         >
                           No records found
@@ -249,14 +252,17 @@ const Shipments = () => {
                     )}
 
                     {filteredRows.map((row, index) => (
-                      <tr key={`${row.order_id}-${row.item_code}-${index}`}>
+                      <tr key={row?.shipment_id || `${row.order_id}-${row.item_code}-${index}`}>
                         <td>{row?.order_id || "N/A"}</td>
                         <td>{row?.item_code || "N/A"}</td>
                         <td>{row?.vendor || "N/A"}</td>
                         <td>{row?.description || "N/A"}</td>
+                        <td>{row?.order_quantity || "N/A"}</td>
                         <td>{formatDateLabel(row?.stuffing_date)}</td>
                         <td>{row?.container || "N/A"}</td>
                         <td>{row?.quantity ?? "N/A"}</td>
+                        <td>{row?.pending ?? "N/A"}</td>
+                        <td>{row?.remaining_remarks || "N/A"}</td>
                         {canFinalizeShipping && (
                           <td>
                             {canShowFinalizeAction(row) ? (

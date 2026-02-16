@@ -45,7 +45,7 @@ const QcDetails = () => {
   const navigate = useNavigate();
   const user = getUserFromToken();
   const userId = user?.id || user?._id;
-  const isAdmin = user?.role === "admin";
+  const isAdmin = user?.role === "admin" || user?.role === "manager";
   const canFinalizeShipping = ["admin", "manager", "dev", "Dev"].includes(
     user?.role,
   );
