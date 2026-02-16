@@ -27,6 +27,9 @@ const Shipments = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [orderIdSearch, setOrderIdSearch] = useState("");
+  const [itemCodeSearch, setItemCodeSearch] = useState("");
+  const [vendorFilter, setVendorFilter] = useState("all");
 
   const fetchShipments = useCallback(async () => {
     try {
@@ -47,22 +50,51 @@ const Shipments = () => {
     fetchShipments();
   }, [fetchShipments]);
 
+  const vendorOptions = useMemo(() => {
+    const uniqueVendors = new Set(
+      rows
+        .map((row) => String(row?.vendor || "").trim())
+        .filter((value) => value.length > 0),
+    );
+
+    return [...uniqueVendors].sort((a, b) => a.localeCompare(b));
+  }, [rows]);
+
+  const filteredRows = useMemo(() => {
+    const orderNeedle = orderIdSearch.trim().toLowerCase();
+    const itemNeedle = itemCodeSearch.trim().toLowerCase();
+
+    return rows.filter((row) => {
+      const orderValue = String(row?.order_id || "").toLowerCase();
+      const itemValue = String(
+        row?.item_code || row?.item?.item_code || "",
+      ).toLowerCase();
+      const vendorValue = String(row?.vendor || "").trim();
+
+      const matchesOrder = !orderNeedle || orderValue.includes(orderNeedle);
+      const matchesItem = !itemNeedle || itemValue.includes(itemNeedle);
+      const matchesVendor = vendorFilter === "all" || vendorValue === vendorFilter;
+
+      return matchesOrder && matchesItem && matchesVendor;
+    });
+  }, [rows, orderIdSearch, itemCodeSearch, vendorFilter]);
+
   const summary = useMemo(() => {
     const counts = {
-      total: rows.length,
+      total: filteredRows.length,
       inspectionDone: 0,
       partialShipped: 0,
       shipped: 0,
     };
 
-    rows.forEach((row) => {
+    filteredRows.forEach((row) => {
       if (row?.status === "Inspection Done") counts.inspectionDone += 1;
       if (row?.status === "Partial Shipped") counts.partialShipped += 1;
       if (row?.status === "Shipped") counts.shipped += 1;
     });
 
     return counts;
-  }, [rows]);
+  }, [filteredRows]);
 
   const canShowFinalizeAction = useCallback(
     (row) =>
@@ -112,6 +144,61 @@ const Shipments = () => {
         </div>
 
         <div className="card om-card mb-3">
+          <div className="card-body">
+            <div className="row g-2 align-items-end">
+              <div className="col-md-4">
+                <label className="form-label">Search by Order ID</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={orderIdSearch}
+                  onChange={(e) => setOrderIdSearch(e.target.value)}
+                  placeholder="Enter order ID"
+                />
+              </div>
+              <div className="col-md-4">
+                <label className="form-label">Search by Item Code</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={itemCodeSearch}
+                  onChange={(e) => setItemCodeSearch(e.target.value)}
+                  placeholder="Enter item code"
+                />
+              </div>
+              <div className="col-md-3">
+                <label className="form-label">Filter by Vendor</label>
+                <select
+                  className="form-select"
+                  value={vendorFilter}
+                  onChange={(e) => setVendorFilter(e.target.value)}
+                >
+                  <option value="all">All Vendors</option>
+                  {vendorOptions.map((vendor) => (
+                    <option key={vendor} value={vendor}>
+                      {vendor}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-md-1 d-grid">
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary"
+                  onClick={() => {
+                    setOrderIdSearch("");
+                    setItemCodeSearch("");
+                    setVendorFilter("all");
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="card om-card mb-3">
           <div className="card-body d-flex flex-wrap gap-2">
             <span className="om-summary-chip">Total Items: {summary.total}</span>
             <span className="om-summary-chip">
@@ -141,6 +228,7 @@ const Shipments = () => {
                     <tr>
                       <th>PO</th>
                       <th>Item Code</th>
+                      <th>Vendor</th>
                       <th>Description</th>
                       <th>Stuffing Date</th>
                       <th>Container Number</th>
@@ -149,10 +237,10 @@ const Shipments = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.length === 0 && (
+                    {filteredRows.length === 0 && (
                       <tr>
                         <td
-                          colSpan={canFinalizeShipping ? 7 : 6}
+                          colSpan={canFinalizeShipping ? 8 : 7}
                           className="text-center py-4"
                         >
                           No records found
@@ -160,10 +248,11 @@ const Shipments = () => {
                       </tr>
                     )}
 
-                    {rows.map((row, index) => (
+                    {filteredRows.map((row, index) => (
                       <tr key={`${row.order_id}-${row.item_code}-${index}`}>
                         <td>{row?.order_id || "N/A"}</td>
                         <td>{row?.item_code || "N/A"}</td>
+                        <td>{row?.vendor || "N/A"}</td>
                         <td>{row?.description || "N/A"}</td>
                         <td>{formatDateLabel(row?.stuffing_date)}</td>
                         <td>{row?.container || "N/A"}</td>

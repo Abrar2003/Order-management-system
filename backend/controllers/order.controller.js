@@ -471,7 +471,7 @@ exports.getShipments = async (req, res) => {
     const orders = await Order.find({
       status: { $in: statusesToInclude },
     })
-      .select("order_id item status quantity shipment order_date updatedAt")
+      .select("order_id item vendor status quantity shipment order_date updatedAt")
       .sort({ order_date: -1, updatedAt: -1, order_id: -1 })
       .lean();
 
@@ -490,6 +490,7 @@ exports.getShipments = async (req, res) => {
       return {
         _id: order?._id || null,
         order_id: order?.order_id || "",
+        vendor: order?.vendor || "",
         item: {
           item_code: order?.item?.item_code || "",
           description: order?.item?.description || "",
