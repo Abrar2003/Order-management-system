@@ -31,6 +31,7 @@ const QCPage = () => {
   const [inspectors, setInspectors] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [itemCodes, setItemCodes] = useState([]);
 
   // header filters (excel-like)
   const [search, setSearch] = useState(requestedItemCode); // item_code search
@@ -65,23 +66,13 @@ const QCPage = () => {
       },
     });
 
-    setQcList(res.data.data);
-    setTotalPages(res.data.pagination.totalPages);
+    setQcList(res.data?.data || []);
+    setTotalPages(res.data?.pagination?.totalPages || 1);
 
-    // vendors dropdown: best if backend returns available vendors separately,
-    // but for now (no extra endpoint), take from received data safely:
-    const uniqueVendors = [
-      ...new Set(
-        res.data.data.map((qc) => qc?.order_meta?.vendor).filter(Boolean),
-      ),
-    ];
-    const uniqueOrders = [
-      ...new Set(
-        res.data.data.map((qc) => qc?.order_meta?.order_id).filter(Boolean),
-      ),
-    ];
-    setVendors(uniqueVendors);
-    setOrders(uniqueOrders);
+    const backendFilters = res.data?.filters || {};
+    setVendors(Array.isArray(backendFilters.vendors) ? backendFilters.vendors : []);
+    setOrders(Array.isArray(backendFilters.orders) ? backendFilters.orders : []);
+    setItemCodes(Array.isArray(backendFilters.item_codes) ? backendFilters.item_codes : []);
   }, [token, page, debouncedSearch, inspector, vendor, from, to, sort, order]);
 
   const fetchInspectors = useCallback(async () => {
@@ -220,12 +211,18 @@ const QCPage = () => {
                         type="text"
                         className="form-control form-control-sm"
                         placeholder="Item code"
+                        list="qc-item-code-options"
                         value={search}
                         onChange={(e) => {
                           resetToFirstPage();
                           setSearch(e.target.value);
                         }}
                       />
+                      <datalist id="qc-item-code-options">
+                        {itemCodes.map((itemCode) => (
+                          <option key={itemCode} value={itemCode} />
+                        ))}
+                      </datalist>
                     </th>
 
                     {/* Request date range */}
@@ -400,7 +397,7 @@ const QCPage = () => {
 
                   {qcList.length === 0 && (
                     <tr>
-                      <td colSpan="12" className="text-center py-4">
+                      <td colSpan="13" className="text-center py-4">
                         No QC records found
                       </td>
                     </tr>

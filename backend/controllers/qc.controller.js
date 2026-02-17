@@ -33,6 +33,66 @@ const resolveReportDate = (value) => {
   return toDateInputValue(asString);
 };
 
+const normalizeDistinctValues = (values = []) =>
+  [...new Set(
+    values
+      .map((value) => String(value ?? "").trim())
+      .filter(Boolean),
+  )].sort((a, b) => a.localeCompare(b));
+
+const buildQcListMatch = ({
+  inspector = "",
+  vendor = "",
+  brand = "",
+  order = "",
+  search = "",
+  from = "",
+  to = "",
+  includeVendor = true,
+  includeOrder = true,
+  includeSearch = true,
+} = {}) => {
+  const match = {};
+
+  const inspectorId = String(inspector || "").trim();
+  const vendorValue = String(vendor || "").trim();
+  const brandValue = String(brand || "").trim();
+  const orderValue = String(order || "").trim();
+  const searchValue = String(search || "").trim();
+  const fromDate = String(from || "").trim();
+  const toDate = String(to || "").trim();
+
+  if (inspectorId) {
+    match.inspector = new mongoose.Types.ObjectId(inspectorId);
+  }
+
+  if (includeVendor && vendorValue) {
+    match["order_meta.vendor"] = vendorValue;
+  }
+
+  if (brandValue) {
+    match["order_meta.brand"] = brandValue;
+  }
+
+  if (includeOrder && orderValue) {
+    const q = escapeRegex(orderValue);
+    match["order_meta.order_id"] = { $regex: `^${q}`, $options: "i" };
+  }
+
+  if (includeSearch && searchValue) {
+    const q = escapeRegex(searchValue);
+    match["item.item_code"] = { $regex: q, $options: "i" };
+  }
+
+  if (fromDate || toDate) {
+    match.request_date = {};
+    if (fromDate) match.request_date.$gte = fromDate;
+    if (toDate) match.request_date.$lte = toDate;
+  }
+
+  return match;
+};
+
 exports.getQCList = async (req, res) => {
 
   await QC.createIndexes();
@@ -49,32 +109,25 @@ exports.getQCList = async (req, res) => {
       to = "",
       sort = "-request_date",
     } = req.query;
+    const inspectorId = String(inspector || "").trim();
+
+    if (inspectorId && !mongoose.Types.ObjectId.isValid(inspectorId)) {
+      return res.status(400).json({ message: "Invalid inspector id" });
+    }
 
     const pageNum = Math.max(1, Number(page));
     const limitNum = Math.min(100, Math.max(1, Number(limit)));
     const skip = (pageNum - 1) * limitNum;
-
-    const match = {};
-
-    if (inspector) match.inspector = new mongoose.Types.ObjectId(inspector);
-    if (vendor) match["order_meta.vendor"] = vendor;
-    if (brand) match["order_meta.brand"] = brand;
-
-    if (order && String(order).trim()) {
-      const q = escapeRegex(order);
-      match["order_meta.order_id"] = { $regex: `^${q}`, $options: "i" };
-    }
-
-    if (search && String(search).trim()) {
-      const q = escapeRegex(search);
-      match["item.item_code"] = { $regex: `^${q}`, $options: "i" };
-    }
-
-    if (from || to) {
-      match.request_date = {};
-      if (from) match.request_date.$gte = String(from);
-      if (to) match.request_date.$lte = String(to);
-    }
+    const filterInput = {
+      inspector: inspectorId,
+      vendor,
+      brand,
+      order,
+      search,
+      from,
+      to,
+    };
+    const match = buildQcListMatch(filterInput);
 
     let sortStage = { request_date: -1 };
     if (sort === "request_date") sortStage = { request_date: 1 };
@@ -116,7 +169,21 @@ exports.getQCList = async (req, res) => {
       },
     ];
 
-    const result = await QC.aggregate(pipeline).allowDiskUse(true);
+    const [result, vendorsRaw, ordersRaw, itemCodesRaw] = await Promise.all([
+      QC.aggregate(pipeline).allowDiskUse(true),
+      QC.distinct(
+        "order_meta.vendor",
+        buildQcListMatch({ ...filterInput, includeVendor: false }),
+      ),
+      QC.distinct(
+        "order_meta.order_id",
+        buildQcListMatch({ ...filterInput, includeOrder: false }),
+      ),
+      QC.distinct(
+        "item.item_code",
+        buildQcListMatch({ ...filterInput, includeSearch: false }),
+      ),
+    ]);
 
     const data = result?.[0]?.data || [];
     const totalRecords = result?.[0]?.totalCount?.[0]?.count || 0;
@@ -127,6 +194,11 @@ exports.getQCList = async (req, res) => {
         page: pageNum,
         totalPages: Math.ceil(totalRecords / limitNum) || 1,
         totalRecords,
+      },
+      filters: {
+        vendors: normalizeDistinctValues(vendorsRaw),
+        orders: normalizeDistinctValues(ordersRaw),
+        item_codes: normalizeDistinctValues(itemCodesRaw),
       },
     });
   } catch (err) {
