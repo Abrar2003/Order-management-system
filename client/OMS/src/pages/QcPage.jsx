@@ -164,6 +164,7 @@ const QCPage = () => {
                       {requestDateLabel}
                     </th>
                     <th>Last Inspected Date</th>
+                    <th>Order Quantity</th>
                     <th>Requested</th>
                     <th>Offered</th>
                     <th>QC Passed</th>
@@ -308,6 +309,15 @@ const QCPage = () => {
                         disabled
                       />
                     </th>
+                    {/* CBM filter: keep blank */}
+                    <th>
+                      <input
+                        type="text"
+                        className="form-control form-control-sm"
+                        placeholder="—"
+                        disabled
+                      />
+                    </th>
 
                     {/* Inspector filter */}
                     <th>
@@ -366,6 +376,7 @@ const QCPage = () => {
                       <td>{qc?.item?.item_code || "N/A"}</td>
                       <td>{formatDateLabel(qc?.request_date) || "N/A"}</td>
                       <td>{formatDateLabel(qc?.last_inspected_date) || "N/A"}</td>
+                      <td>{qc?.quantities?.client_demand ?? 0}</td>
                       <td>{qc?.quantities?.quantity_requested ?? 0}</td>
                       <td>{qc?.quantities?.vendor_provision ?? 0}</td>
                       <td>{qc?.quantities?.qc_passed ?? 0}</td>
