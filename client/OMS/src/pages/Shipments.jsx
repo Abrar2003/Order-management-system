@@ -234,7 +234,7 @@ const Shipments = () => {
                       <th>Stuffing Date</th>
                       <th>Container Number</th>
                       <th>Quantity</th>
-                      <th>Pending After</th>
+                      <th>Pending</th>
                       <th>Remarks</th>
                       {canFinalizeShipping && <th>Finalize</th>}
                     </tr>

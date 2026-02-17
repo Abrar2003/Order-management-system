@@ -364,7 +364,7 @@ const QCPage = () => {
                         {qc?.order_meta?.vendor || qc?.order?.vendor || "N/A"}
                       </td>
                       <td>{qc?.item?.item_code || "N/A"}</td>
-                      <td>{qc?.request_date || "N/A"}</td>
+                      <td>{formatDateLabel(qc?.request_date) || "N/A"}</td>
                       <td>{formatDateLabel(qc?.last_inspected_date) || "N/A"}</td>
                       <td>{qc?.quantities?.quantity_requested ?? 0}</td>
                       <td>{qc?.quantities?.vendor_provision ?? 0}</td>
