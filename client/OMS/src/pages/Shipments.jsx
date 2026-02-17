@@ -1,10 +1,21 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import "../App.css";
 import ShippingModal from "../components/ShippingModal";
 import { getUserFromToken } from "../auth/auth.utils";
+
+const useDebouncedValue = (value, delay = 300) => {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+
+  return debounced;
+};
 
 const formatDateLabel = (value) => {
   if (!value) return "N/A";
@@ -14,6 +25,13 @@ const formatDateLabel = (value) => {
   const parsed = new Date(asString);
   if (Number.isNaN(parsed.getTime())) return asString;
   return parsed.toLocaleDateString();
+};
+
+const EMPTY_SUMMARY = {
+  total: 0,
+  inspectionDone: 0,
+  partialShipped: 0,
+  shipped: 0,
 };
 
 const Shipments = () => {
@@ -30,71 +48,59 @@ const Shipments = () => {
   const [orderIdSearch, setOrderIdSearch] = useState("");
   const [itemCodeSearch, setItemCodeSearch] = useState("");
   const [vendorFilter, setVendorFilter] = useState("all");
+  const [summary, setSummary] = useState(EMPTY_SUMMARY);
+  const [filterOptions, setFilterOptions] = useState({
+    vendors: [],
+    order_ids: [],
+    item_codes: [],
+  });
+
+  const debouncedOrderSearch = useDebouncedValue(orderIdSearch, 300);
+  const debouncedItemSearch = useDebouncedValue(itemCodeSearch, 300);
 
   const fetchShipments = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
 
-      const res = await api.get("/orders/shipments");
+      const res = await api.get("/orders/shipments", {
+        params: {
+          order_id: debouncedOrderSearch,
+          item_code: debouncedItemSearch,
+          vendor: vendorFilter,
+        },
+      });
+
       setRows(Array.isArray(res?.data?.data) ? res.data.data : []);
+      setSummary(res?.data?.summary || EMPTY_SUMMARY);
+      setFilterOptions({
+        vendors: Array.isArray(res?.data?.filters?.vendors)
+          ? res.data.filters.vendors
+          : [],
+        order_ids: Array.isArray(res?.data?.filters?.order_ids)
+          ? res.data.filters.order_ids
+          : [],
+        item_codes: Array.isArray(res?.data?.filters?.item_codes)
+          ? res.data.filters.item_codes
+          : [],
+      });
     } catch (err) {
       setError(err?.response?.data?.message || "Failed to load shipments.");
       setRows([]);
+      setSummary(EMPTY_SUMMARY);
+      setFilterOptions({
+        vendors: [],
+        order_ids: [],
+        item_codes: [],
+      });
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [debouncedItemSearch, debouncedOrderSearch, vendorFilter]);
 
   useEffect(() => {
     fetchShipments();
   }, [fetchShipments]);
-
-  const vendorOptions = useMemo(() => {
-    const uniqueVendors = new Set(
-      rows
-        .map((row) => String(row?.vendor || "").trim())
-        .filter((value) => value.length > 0),
-    );
-
-    return [...uniqueVendors].sort((a, b) => a.localeCompare(b));
-  }, [rows]);
-
-  const filteredRows = useMemo(() => {
-    const orderNeedle = orderIdSearch.trim().toLowerCase();
-    const itemNeedle = itemCodeSearch.trim().toLowerCase();
-
-    return rows.filter((row) => {
-      const orderValue = String(row?.order_id || "").toLowerCase();
-      const itemValue = String(
-        row?.item_code || row?.item?.item_code || "",
-      ).toLowerCase();
-      const vendorValue = String(row?.vendor || "").trim();
-
-      const matchesOrder = !orderNeedle || orderValue.includes(orderNeedle);
-      const matchesItem = !itemNeedle || itemValue.includes(itemNeedle);
-      const matchesVendor = vendorFilter === "all" || vendorValue === vendorFilter;
-
-      return matchesOrder && matchesItem && matchesVendor;
-    });
-  }, [rows, orderIdSearch, itemCodeSearch, vendorFilter]);
-
-  const summary = useMemo(() => {
-    const counts = {
-      total: filteredRows.length,
-      inspectionDone: 0,
-      partialShipped: 0,
-      shipped: 0,
-    };
-
-    filteredRows.forEach((row) => {
-      if (row?.status === "Inspection Done") counts.inspectionDone += 1;
-      if (row?.status === "Partial Shipped") counts.partialShipped += 1;
-      if (row?.status === "Shipped") counts.shipped += 1;
-    });
-
-    return counts;
-  }, [filteredRows]);
 
   const canShowFinalizeAction = useCallback(
     (row) =>
@@ -152,9 +158,15 @@ const Shipments = () => {
                   type="text"
                   className="form-control"
                   value={orderIdSearch}
+                  list="shipment-order-options"
                   onChange={(e) => setOrderIdSearch(e.target.value)}
                   placeholder="Enter order ID"
                 />
+                <datalist id="shipment-order-options">
+                  {filterOptions.order_ids.map((orderId) => (
+                    <option key={orderId} value={orderId} />
+                  ))}
+                </datalist>
               </div>
               <div className="col-md-4">
                 <label className="form-label">Search by Item Code</label>
@@ -162,9 +174,15 @@ const Shipments = () => {
                   type="text"
                   className="form-control"
                   value={itemCodeSearch}
+                  list="shipment-item-options"
                   onChange={(e) => setItemCodeSearch(e.target.value)}
                   placeholder="Enter item code"
                 />
+                <datalist id="shipment-item-options">
+                  {filterOptions.item_codes.map((itemCode) => (
+                    <option key={itemCode} value={itemCode} />
+                  ))}
+                </datalist>
               </div>
               <div className="col-md-3">
                 <label className="form-label">Filter by Vendor</label>
@@ -174,7 +192,7 @@ const Shipments = () => {
                   onChange={(e) => setVendorFilter(e.target.value)}
                 >
                   <option value="all">All Vendors</option>
-                  {vendorOptions.map((vendor) => (
+                  {filterOptions.vendors.map((vendor) => (
                     <option key={vendor} value={vendor}>
                       {vendor}
                     </option>
@@ -240,7 +258,7 @@ const Shipments = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredRows.length === 0 && (
+                    {rows.length === 0 && (
                       <tr>
                         <td
                           colSpan={canFinalizeShipping ? 11 : 10}
@@ -251,7 +269,7 @@ const Shipments = () => {
                       </tr>
                     )}
 
-                    {filteredRows.map((row, index) => (
+                    {rows.map((row, index) => (
                       <tr key={row?.shipment_id || `${row.order_id}-${row.item_code}-${index}`}>
                         <td>{row?.order_id || "N/A"}</td>
                         <td>{row?.item_code || "N/A"}</td>

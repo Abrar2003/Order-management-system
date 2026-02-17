@@ -3,6 +3,143 @@ const Order = require("../models/order.model");
 const dateParser = require("../helpers/dateparsser");
 const deleteFile = require("../helpers/fileCleanup");
 
+const ORDER_STATUS_SEQUENCE = [
+  "Pending",
+  "Under Inspection",
+  "Inspection Done",
+  "Partial Shipped",
+  "Shipped",
+];
+
+const SHIPMENT_VISIBLE_STATUSES = [
+  "Inspection Done",
+  "Partial Shipped",
+  "Shipped",
+];
+
+const escapeRegex = (value = "") =>
+  String(value).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const normalizeFilterValue = (value) => {
+  if (value === undefined || value === null) return null;
+  const cleaned = String(value).trim();
+  if (!cleaned) return null;
+  const lowered = cleaned.toLowerCase();
+  if (lowered === "all" || lowered === "undefined" || lowered === "null") {
+    return null;
+  }
+  return cleaned;
+};
+
+const parsePositiveInt = (value, fallback) => {
+  const parsedValue = Number.parseInt(value, 10);
+  if (Number.isNaN(parsedValue) || parsedValue < 1) {
+    return fallback;
+  }
+  return parsedValue;
+};
+
+const normalizeDistinctValues = (values = []) =>
+  [...new Set(
+    values
+      .map((value) => String(value ?? "").trim())
+      .filter(Boolean),
+  )].sort((a, b) => a.localeCompare(b));
+
+const normalizeStatusList = (values = []) => {
+  const normalized = normalizeDistinctValues(values);
+  return normalized.sort((a, b) => {
+    const aIndex = ORDER_STATUS_SEQUENCE.indexOf(a);
+    const bIndex = ORDER_STATUS_SEQUENCE.indexOf(b);
+
+    if (aIndex === -1 && bIndex === -1) return a.localeCompare(b);
+    if (aIndex === -1) return 1;
+    if (bIndex === -1) return -1;
+    return aIndex - bIndex;
+  });
+};
+
+const buildOrderListMatch = ({
+  brand,
+  vendor,
+  status,
+  order,
+  isDelayed = false,
+  includeBrand = true,
+  includeVendor = true,
+  includeStatus = true,
+  includeOrder = true,
+} = {}) => {
+  const match = {};
+  const normalizedBrand = normalizeFilterValue(brand);
+  const normalizedVendor = normalizeFilterValue(vendor);
+  const normalizedStatus = normalizeFilterValue(status);
+  const normalizedOrder = normalizeFilterValue(order);
+
+  if (includeBrand && normalizedBrand) {
+    match.brand = normalizedBrand;
+  }
+
+  if (includeVendor && normalizedVendor) {
+    match.vendor = normalizedVendor;
+  }
+
+  if (includeStatus && normalizedStatus) {
+    const loweredStatus = normalizedStatus.toLowerCase();
+
+    if (loweredStatus === "pending") {
+      match.status = { $ne: "Shipped" };
+    } else if (loweredStatus !== "delayed") {
+      match.status = normalizedStatus;
+    }
+  }
+
+  if (includeOrder && normalizedOrder) {
+    const escaped = escapeRegex(normalizedOrder);
+    match.order_id = { $regex: escaped, $options: "i" };
+  }
+
+  if (isDelayed) {
+    match.ETD = { $lt: new Date() };
+    match.status = { $ne: "Shipped" };
+  }
+
+  return match;
+};
+
+const buildShipmentMatch = ({
+  vendor,
+  orderId,
+  itemCode,
+  includeVendor = true,
+  includeOrderId = true,
+  includeItemCode = true,
+} = {}) => {
+  const match = {
+    status: { $in: SHIPMENT_VISIBLE_STATUSES },
+  };
+
+  const normalizedVendor = normalizeFilterValue(vendor);
+  const normalizedOrderId = normalizeFilterValue(orderId);
+  const normalizedItemCode = normalizeFilterValue(itemCode);
+
+  if (includeVendor && normalizedVendor) {
+    match.vendor = normalizedVendor;
+  }
+
+  if (includeOrderId && normalizedOrderId) {
+    const escaped = escapeRegex(normalizedOrderId);
+    match.order_id = { $regex: escaped, $options: "i" };
+  }
+
+  if (includeItemCode && normalizedItemCode) {
+    const escaped = escapeRegex(normalizedItemCode);
+    match["item.item_code"] = { $regex: escaped, $options: "i" };
+  }
+
+  return match;
+};
+
 // Upload Orders Controller
 exports.uploadOrders = async (req, res) => {
   try {
@@ -359,6 +496,111 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
   }
 };
 
+exports.getOrdersByFiltersDb = async (req, res) => {
+  try {
+    const brand = req.query.brand;
+    const vendor = req.query.vendor;
+    const status = req.query.status;
+    const order = req.query.order ?? req.query.order_id;
+    const isDelayed =
+      String(req.query.isDelayed || "").trim().toLowerCase() === "true";
+
+    const page = parsePositiveInt(req.query.page, 1);
+    const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
+    const skip = (page - 1) * limit;
+
+    const filterInput = {
+      brand,
+      vendor,
+      status,
+      order,
+      isDelayed,
+    };
+
+    const matchStage = buildOrderListMatch(filterInput);
+
+    const [result, vendorsRaw, brandsRaw, statusesRaw, orderIdsRaw] =
+      await Promise.all([
+        Order.aggregate([
+          { $match: matchStage },
+          {
+            $group: {
+              _id: "$order_id",
+              items: { $sum: 1 },
+              brand: { $first: "$brand" },
+              vendor: { $first: "$vendor" },
+              ETD: { $first: "$ETD" },
+              order_date: { $first: "$order_date" },
+              statuses: { $addToSet: "$status" },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              order_id: "$_id",
+              items: 1,
+              brand: 1,
+              vendor: 1,
+              ETD: 1,
+              order_date: 1,
+              statuses: 1,
+            },
+          },
+          { $sort: { order_date: -1, order_id: -1 } },
+          {
+            $facet: {
+              data: [{ $skip: skip }, { $limit: limit }],
+              totalCount: [{ $count: "count" }],
+            },
+          },
+        ]),
+        Order.distinct(
+          "vendor",
+          buildOrderListMatch({ ...filterInput, includeVendor: false }),
+        ),
+        Order.distinct(
+          "brand",
+          buildOrderListMatch({ ...filterInput, includeBrand: false }),
+        ),
+        Order.distinct(
+          "status",
+          buildOrderListMatch({ ...filterInput, includeStatus: false }),
+        ),
+        Order.distinct(
+          "order_id",
+          buildOrderListMatch({ ...filterInput, includeOrder: false }),
+        ),
+      ]);
+
+    const data = result?.[0]?.data || [];
+    const totalRecords = result?.[0]?.totalCount?.[0]?.count || 0;
+
+    return res.status(200).json({
+      success: true,
+      data,
+      pagination: {
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(totalRecords / limit)),
+        totalRecords,
+      },
+      filters: {
+        vendors: normalizeDistinctValues(vendorsRaw),
+        brands: normalizeDistinctValues(brandsRaw),
+        statuses: normalizeStatusList(statusesRaw),
+        order_ids: normalizeDistinctValues(orderIdsRaw),
+      },
+    });
+  } catch (error) {
+    console.error("Get Orders By Filters DB Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch filtered orders",
+      error: error.message,
+    });
+  }
+};
+
 exports.getOrdersByFilters = async (req, res) => {
   try {
     const normalizeFilterValue = (value) => {
@@ -459,6 +701,128 @@ exports.getOrderSummary = async (req, res) => {
     console.error("Get Order Summary Error:", error);
     return res.status(500).json({
       message: "Failed to fetch order summary",
+      error: error.message,
+    });
+  }
+};
+
+exports.getShipmentsDb = async (req, res) => {
+  try {
+    const vendor = req.query.vendor;
+    const orderId = req.query.order_id ?? req.query.order;
+    const itemCode = req.query.item_code;
+
+    const filterInput = {
+      vendor,
+      orderId,
+      itemCode,
+    };
+
+    const [orders, vendorsRaw, orderIdsRaw, itemCodesRaw] = await Promise.all([
+      Order.find(buildShipmentMatch(filterInput))
+        .select("order_id item vendor status quantity shipment order_date updatedAt")
+        .sort({ order_date: -1, updatedAt: -1, order_id: -1 })
+        .lean(),
+      Order.distinct(
+        "vendor",
+        buildShipmentMatch({ ...filterInput, includeVendor: false }),
+      ),
+      Order.distinct(
+        "order_id",
+        buildShipmentMatch({ ...filterInput, includeOrderId: false }),
+      ),
+      Order.distinct(
+        "item.item_code",
+        buildShipmentMatch({ ...filterInput, includeItemCode: false }),
+      ),
+    ]);
+
+    const data = orders.flatMap((order) => {
+      const shipmentEntries = Array.isArray(order?.shipment) ? order.shipment : [];
+      const parsedOrderQuantity = Number(order?.quantity);
+      const normalizedOrderQuantity = Number.isFinite(parsedOrderQuantity)
+        ? parsedOrderQuantity
+        : 0;
+
+      const baseRow = {
+        _id: order?._id || null,
+        order_id: order?.order_id || "",
+        vendor: order?.vendor || "",
+        item: {
+          item_code: order?.item?.item_code || "",
+          description: order?.item?.description || "",
+        },
+        item_code: order?.item?.item_code || "",
+        description: order?.item?.description || "",
+        order_quantity: normalizedOrderQuantity,
+        shipment: shipmentEntries,
+        status: order?.status || "",
+      };
+
+      if (shipmentEntries.length === 0) {
+        return [
+          {
+            ...baseRow,
+            shipment_id: null,
+            stuffing_date: null,
+            container: "",
+            quantity: normalizedOrderQuantity,
+            pending: normalizedOrderQuantity,
+            remaining_remarks: "",
+          },
+        ];
+      }
+
+      return shipmentEntries.map((entry, index) => {
+        const parsedShipmentQuantity = Number(entry?.quantity);
+        const parsedPending = Number(entry?.pending);
+
+        return {
+          ...baseRow,
+          shipment_id: entry?._id || `${order?._id || "order"}-${index}`,
+          stuffing_date: entry?.stuffing_date || null,
+          container: entry?.container || "",
+          quantity: Number.isFinite(parsedShipmentQuantity)
+            ? parsedShipmentQuantity
+            : 0,
+          pending: Number.isFinite(parsedPending) ? parsedPending : 0,
+          remaining_remarks: entry?.remaining_remarks || "",
+        };
+      });
+    });
+
+    const summary = data.reduce(
+      (acc, row) => {
+        acc.total += 1;
+        if (row?.status === "Inspection Done") acc.inspectionDone += 1;
+        if (row?.status === "Partial Shipped") acc.partialShipped += 1;
+        if (row?.status === "Shipped") acc.shipped += 1;
+        return acc;
+      },
+      {
+        total: 0,
+        inspectionDone: 0,
+        partialShipped: 0,
+        shipped: 0,
+      },
+    );
+
+    return res.status(200).json({
+      success: true,
+      count: data.length,
+      data,
+      summary,
+      filters: {
+        vendors: normalizeDistinctValues(vendorsRaw),
+        order_ids: normalizeDistinctValues(orderIdsRaw),
+        item_codes: normalizeDistinctValues(itemCodesRaw),
+      },
+    });
+  } catch (error) {
+    console.error("Get Shipments DB Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch shipment list",
       error: error.message,
     });
   }

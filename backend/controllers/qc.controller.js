@@ -33,6 +33,80 @@ const resolveReportDate = (value) => {
   return toDateInputValue(asString);
 };
 
+const requestDateToDateExpression = {
+  $let: {
+    vars: {
+      rawDate: {
+        $trim: {
+          input: { $toString: { $ifNull: ["$request_date", ""] } },
+        },
+      },
+    },
+    in: {
+      $switch: {
+        branches: [
+          {
+            case: {
+              $regexMatch: {
+                input: "$$rawDate",
+                regex: /^\d{4}-\d{2}-\d{2}$/,
+              },
+            },
+            then: {
+              $dateFromString: {
+                dateString: "$$rawDate",
+                format: "%Y-%m-%d",
+                onError: null,
+                onNull: null,
+              },
+            },
+          },
+          {
+            case: {
+              $regexMatch: {
+                input: "$$rawDate",
+                regex: /^\d{2}\/\d{2}\/\d{4}$/,
+              },
+            },
+            then: {
+              $dateFromString: {
+                dateString: "$$rawDate",
+                format: "%d/%m/%Y",
+                onError: null,
+                onNull: null,
+              },
+            },
+          },
+          {
+            case: {
+              $regexMatch: {
+                input: "$$rawDate",
+                regex: /^\d{2}-\d{2}-\d{4}$/,
+              },
+            },
+            then: {
+              $dateFromString: {
+                dateString: "$$rawDate",
+                format: "%d-%m-%Y",
+                onError: null,
+                onNull: null,
+              },
+            },
+          },
+        ],
+        default: {
+          $convert: {
+            input: "$$rawDate",
+            to: "date",
+            onError: null,
+            onNull: null,
+          },
+        },
+      },
+    },
+  },
+};
+
 const normalizeDistinctValues = (values = []) =>
   [...new Set(
     values
@@ -129,14 +203,21 @@ exports.getQCList = async (req, res) => {
     };
     const match = buildQcListMatch(filterInput);
 
-    let sortStage = { request_date: -1 };
-    if (sort === "request_date") sortStage = { request_date: 1 };
-    if (sort === "-request_date") sortStage = { request_date: -1 };
+    let sortStage = { request_date_sort_key: -1, createdAt: -1 };
+    if (sort === "request_date") sortStage = { request_date_sort_key: 1, createdAt: 1 };
+    if (sort === "-request_date") sortStage = { request_date_sort_key: -1, createdAt: -1 };
     if (sort === "createdAt") sortStage = { createdAt: 1 };
     if (sort === "-createdAt") sortStage = { createdAt: -1 };
 
     const pipeline = [
       { $match: match },
+      {
+        $addFields: {
+          request_date_sort_key: {
+            $ifNull: [requestDateToDateExpression, "$createdAt"],
+          },
+        },
+      },
       { $sort: sortStage },
       {
         $facet: {
@@ -163,6 +244,7 @@ exports.getQCList = async (req, res) => {
               },
             },
             { $unwind: { path: "$order", preserveNullAndEmptyArrays: true } },
+            { $project: { request_date_sort_key: 0 } },
           ],
           totalCount: [{ $count: "count" }],
         },

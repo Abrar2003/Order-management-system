@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
 import { useNavigate } from "react-router-dom";
@@ -8,6 +8,7 @@ const defaultFilters = {
   vendor: "all",
   brand: "all",
   status: "all",
+  order: "",
 };
 
 const STATUS_SEQUENCE = [
@@ -49,7 +50,6 @@ const getStatus = (order) => {
 
   if (validIndexes.length === 0) return "Pending";
 
-  // Mixed statuses: show the earliest stage reached by all items.
   const earliestStageIndex = Math.min(...validIndexes);
   return STATUS_SEQUENCE[earliestStageIndex];
 };
@@ -58,14 +58,27 @@ const OpenOrders = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [totalPages, setTotalPages] = useState(1);
-  const [totalVendors, setTotalVendors] = useState([]);
-  const [totalBrands, setTotalBrands] = useState([]);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
   const [filters, setFilters] = useState(defaultFilters);
+  const [orderSearchInput, setOrderSearchInput] = useState("");
+  const [filterOptions, setFilterOptions] = useState({
+    vendors: [],
+    brands: [],
+    statuses: [],
+    order_ids: [],
+  });
 
   const navigate = useNavigate();
   const token = localStorage.getItem("token");
+
+  const statusOptions = useMemo(
+    () =>
+      Array.isArray(filterOptions.statuses) && filterOptions.statuses.length > 0
+        ? filterOptions.statuses
+        : STATUS_SEQUENCE,
+    [filterOptions.statuses],
+  );
 
   const getOrdersByFilters = useCallback(async () => {
     setLoading(true);
@@ -76,6 +89,7 @@ const OpenOrders = () => {
           vendor: filters.vendor,
           brand: filters.brand,
           status: filters.status,
+          order: filters.order,
           page,
           limit,
         },
@@ -84,73 +98,52 @@ const OpenOrders = () => {
         },
       });
 
-      const incomingOrders = res?.data?.data ?? [];
-
-      if (res?.data?.pagination) {
-        setOrders(incomingOrders);
-        setTotalPages(res.data.pagination.totalPages || 1);
-      } else {
-        const total = incomingOrders.length;
-        const nextTotalPages = Math.max(1, Math.ceil(total / limit));
-        const start = (page - 1) * limit;
-        const end = start + limit;
-        setOrders(incomingOrders.slice(start, end));
-        setTotalPages(nextTotalPages);
-      }
+      setOrders(res?.data?.data || []);
+      setTotalPages(res?.data?.pagination?.totalPages || 1);
+      setFilterOptions({
+        vendors: Array.isArray(res?.data?.filters?.vendors)
+          ? res.data.filters.vendors
+          : [],
+        brands: Array.isArray(res?.data?.filters?.brands)
+          ? res.data.filters.brands
+          : [],
+        statuses: Array.isArray(res?.data?.filters?.statuses)
+          ? res.data.filters.statuses
+          : [],
+        order_ids: Array.isArray(res?.data?.filters?.order_ids)
+          ? res.data.filters.order_ids
+          : [],
+      });
     } catch (err) {
       console.error(err);
       setOrders([]);
       setTotalPages(1);
+      setFilterOptions({
+        vendors: [],
+        brands: [],
+        statuses: [],
+        order_ids: [],
+      });
     } finally {
       setLoading(false);
     }
-  }, [filters.brand, filters.status, filters.vendor, limit, page, token]);
-
-  const getSearchedOrder = useCallback(async (id) => {
-    if (!id) return;
-
-    setLoading(true);
-
-    try {
-      const res = await axios.get(`/orders/order-by-id/${id}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      setOrders(res.data || []);
-      setTotalPages(1);
-      setPage(1);
-    } catch (error) {
-      console.error(error);
-      alert("Error searching the order");
-    } finally {
-      setLoading(false);
-    }
-  }, [token]);
-
-  const getOrderSummary = useCallback(async () => {
-    try {
-      const data = await axios.get("/orders/brands-and-vendors", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      setTotalBrands(data.data.brands || []);
-      setTotalVendors(data.data.vendors || []);
-    } catch (error) {
-      console.error(error.message);
-      alert("Error fetching order summary");
-    }
-  }, [token]);
-
-  useEffect(() => {
-    getOrderSummary();
-  }, [getOrderSummary]);
+  }, [
+    filters.brand,
+    filters.order,
+    filters.status,
+    filters.vendor,
+    limit,
+    page,
+    token,
+  ]);
 
   useEffect(() => {
     getOrdersByFilters();
   }, [getOrdersByFilters]);
+
+  useEffect(() => {
+    setOrderSearchInput(filters.order || "");
+  }, [filters.order]);
 
   const updatePage = (nextPage) => {
     if (nextPage < 1 || nextPage > totalPages) return;
@@ -159,9 +152,11 @@ const OpenOrders = () => {
 
   const handleSearch = (e) => {
     e.preventDefault();
-    const formData = new FormData(e.target);
-    const searchValue = formData.get("search");
-    getSearchedOrder(searchValue);
+    setPage(1);
+    setFilters((prev) => ({
+      ...prev,
+      order: String(orderSearchInput || "").trim(),
+    }));
   };
 
   return (
@@ -179,9 +174,10 @@ const OpenOrders = () => {
 
         <div className="card om-card mb-3">
           <div className="card-body d-flex flex-wrap gap-2">
-            <span className="om-summary-chip">Brand: {filters.brand}</span>
-            <span className="om-summary-chip">Vendor: {filters.vendor}</span>
-            <span className="om-summary-chip">Status: {filters.status}</span>
+            <span className="om-summary-chip">Brand: {filters.brand || "all"}</span>
+            <span className="om-summary-chip">Vendor: {filters.vendor || "all"}</span>
+            <span className="om-summary-chip">Status: {filters.status || "all"}</span>
+            <span className="om-summary-chip">Order: {filters.order || "all"}</span>
           </div>
         </div>
 
@@ -195,11 +191,11 @@ const OpenOrders = () => {
                   value={filters.vendor}
                   onChange={(e) => {
                     setPage(1);
-                    setFilters({ ...filters, vendor: e.target.value });
+                    setFilters((prev) => ({ ...prev, vendor: e.target.value }));
                   }}
                 >
                   <option value="all">Select Vendor</option>
-                  {totalVendors.map((vendor) => (
+                  {filterOptions.vendors.map((vendor) => (
                     <option key={vendor} value={vendor}>
                       {vendor}
                     </option>
@@ -214,11 +210,11 @@ const OpenOrders = () => {
                   value={filters.brand}
                   onChange={(e) => {
                     setPage(1);
-                    setFilters({ ...filters, brand: e.target.value });
+                    setFilters((prev) => ({ ...prev, brand: e.target.value }));
                   }}
                 >
                   <option value="all">Select Brand</option>
-                  {totalBrands.map((brand) => (
+                  {filterOptions.brands.map((brand) => (
                     <option key={brand} value={brand}>
                       {brand}
                     </option>
@@ -233,15 +229,15 @@ const OpenOrders = () => {
                   value={filters.status}
                   onChange={(e) => {
                     setPage(1);
-                    setFilters({ ...filters, status: e.target.value });
+                    setFilters((prev) => ({ ...prev, status: e.target.value }));
                   }}
                 >
                   <option value="all">Select Status</option>
-                  <option value="Pending">Pending</option>
-                  <option value="Under Inspection">Under Inspection</option>
-                  <option value="Inspection Done">Inspection Done</option>
-                  <option value="Partial Shipped">Partial Shipped</option>
-                  <option value="Shipped">Shipped</option>
+                  {statusOptions.map((status) => (
+                    <option key={status} value={status}>
+                      {status}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -249,7 +245,20 @@ const OpenOrders = () => {
                 <form onSubmit={handleSearch} className="row g-2">
                   <div className="col-8">
                     <label className="form-label">Search by Order ID</label>
-                    <input type="text" name="search" className="form-control" placeholder="Order ID" />
+                    <input
+                      type="text"
+                      name="search"
+                      className="form-control"
+                      placeholder="Order ID"
+                      list="open-order-id-options"
+                      value={orderSearchInput}
+                      onChange={(e) => setOrderSearchInput(e.target.value)}
+                    />
+                    <datalist id="open-order-id-options">
+                      {filterOptions.order_ids.map((orderId) => (
+                        <option key={orderId} value={orderId} />
+                      ))}
+                    </datalist>
                   </div>
                   <div className="col-4 d-flex align-items-end">
                     <button type="submit" className="btn btn-primary w-100">

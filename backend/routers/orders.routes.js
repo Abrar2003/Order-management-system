@@ -5,12 +5,12 @@ const authorize = require("../middlewares/authorize.middleware");
 const {
   uploadOrders,
   getOrders,
-  getOrdersByFilters,
+  getOrdersByFiltersDb,
   getOrderById,
   getVendorSummaryByBrand,
   getOrdersByBrandAndStatus,
   getOrderSummary,
-  getShipments,
+  getShipmentsDb,
   finalizeOrder,
 } = require("../controllers/order.controller");
 
@@ -34,14 +34,14 @@ router.get("/brands-and-vendors", authenticate, getOrderSummary)
 router.get("/brand/:brand/vendor/:vendor/status/:status", authenticate, getOrdersByBrandAndStatus);
 
 // get orders with optional filters via query params
-router.get("/filters", authenticate, getOrdersByBrandAndStatus);
+router.get("/filters", authenticate, getOrdersByFiltersDb);
 
 // List shipped/partially shipped/inspection-done items with latest shipment details
 router.get(
   "/shipments",
   authenticate,
   authorize("admin", "manager", "QC", "dev", "Dev"),
-  getShipments,
+  getShipmentsDb,
 );
 
 // Finalize shipping / add shipment entry
