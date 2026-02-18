@@ -27,6 +27,11 @@ const Order_Schema = new mongoose.Schema(
       ref: "qc",
       default: null,
     },
+    gcal: {
+      calendarId: { type: String, default: null },
+      eventId: { type: String, default: null },
+      lastSyncedAt: { type: Date, default: null },
+    },
   },
   { timestamps: true }
 );

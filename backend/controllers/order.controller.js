@@ -2,6 +2,8 @@ const XLSX = require("xlsx");
 const Order = require("../models/order.model");
 const dateParser = require("../helpers/dateparsser");
 const deleteFile = require("../helpers/fileCleanup");
+const { syncOrderGroup } = require("../services/gcalSync");
+
 
 const ORDER_STATUS_SEQUENCE = [
   "Pending",
@@ -18,7 +20,9 @@ const SHIPMENT_VISIBLE_STATUSES = [
 ];
 
 const escapeRegex = (value = "") =>
-  String(value).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  String(value)
+    .trim()
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const normalizeFilterValue = (value) => {
   if (value === undefined || value === null) return null;
@@ -40,11 +44,11 @@ const parsePositiveInt = (value, fallback) => {
 };
 
 const normalizeDistinctValues = (values = []) =>
-  [...new Set(
-    values
-      .map((value) => String(value ?? "").trim())
-      .filter(Boolean),
-  )].sort((a, b) => a.localeCompare(b));
+  [
+    ...new Set(
+      values.map((value) => String(value ?? "").trim()).filter(Boolean),
+    ),
+  ].sort((a, b) => a.localeCompare(b));
 
 const normalizeStatusList = (values = []) => {
   const normalized = normalizeDistinctValues(values);
@@ -165,7 +169,9 @@ exports.uploadOrders = async (req, res) => {
     const orders = sheetData
       .map((row) => {
         const orderId =
-          row.PO !== undefined && row.PO !== null ? String(row.PO).trim() : row.PO;
+          row.PO !== undefined && row.PO !== null
+            ? String(row.PO).trim()
+            : row.PO;
         const itemCode =
           row.item_code !== undefined && row.item_code !== null
             ? String(row.item_code).trim()
@@ -231,6 +237,29 @@ exports.uploadOrders = async (req, res) => {
 
     if (newOrders.length > 0) {
       await Order.insertMany(newOrders);
+    }
+    if (newOrders.length > 0) {
+      await Order.insertMany(newOrders);
+
+      // sync unique groups
+      const groups = new Map();
+      for (const o of newOrders) {
+        const k = `${o.order_id}__${o.brand}__${o.vendor}`;
+        groups.set(k, {
+          order_id: o.order_id,
+          brand: o.brand,
+          vendor: o.vendor,
+        });
+      }
+
+      // run with small concurrency
+      const arr = [...groups.values()];
+      const limit = 5;
+
+      for (let i = 0; i < arr.length; i += limit) {
+        const batch = arr.slice(i, i + limit);
+        await Promise.all(batch.map((g) => syncOrderGroup(g)));
+      }
     }
 
     res.status(201).json({
@@ -442,7 +471,7 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
 
     // 🚨 Delay logic
     if (isDelayed === "true") {
-      matchStage.ETD = { $lt: today };      // ETD passed
+      matchStage.ETD = { $lt: today }; // ETD passed
       matchStage.status = { $ne: "Shipped" }; // not shipped
     }
 
@@ -503,7 +532,9 @@ exports.getOrdersByFiltersDb = async (req, res) => {
     const status = req.query.status;
     const order = req.query.order ?? req.query.order_id;
     const isDelayed =
-      String(req.query.isDelayed || "").trim().toLowerCase() === "true";
+      String(req.query.isDelayed || "")
+        .trim()
+        .toLowerCase() === "true";
 
     const page = parsePositiveInt(req.query.page, 1);
     const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
@@ -720,7 +751,9 @@ exports.getShipmentsDb = async (req, res) => {
 
     const [orders, vendorsRaw, orderIdsRaw, itemCodesRaw] = await Promise.all([
       Order.find(buildShipmentMatch(filterInput))
-        .select("order_id item vendor status quantity shipment order_date updatedAt")
+        .select(
+          "order_id item vendor status quantity shipment order_date updatedAt",
+        )
         .sort({ order_date: -1, updatedAt: -1, order_id: -1 })
         .lean(),
       Order.distinct(
@@ -738,7 +771,9 @@ exports.getShipmentsDb = async (req, res) => {
     ]);
 
     const data = orders.flatMap((order) => {
-      const shipmentEntries = Array.isArray(order?.shipment) ? order.shipment : [];
+      const shipmentEntries = Array.isArray(order?.shipment)
+        ? order.shipment
+        : [];
       const parsedOrderQuantity = Number(order?.quantity);
       const normalizedOrderQuantity = Number.isFinite(parsedOrderQuantity)
         ? parsedOrderQuantity
@@ -835,12 +870,16 @@ exports.getShipments = async (req, res) => {
     const orders = await Order.find({
       status: { $in: statusesToInclude },
     })
-      .select("order_id item vendor status quantity shipment order_date updatedAt")
+      .select(
+        "order_id item vendor status quantity shipment order_date updatedAt",
+      )
       .sort({ order_date: -1, updatedAt: -1, order_id: -1 })
       .lean();
 
     const data = orders.flatMap((order) => {
-      const shipmentEntries = Array.isArray(order?.shipment) ? order.shipment : [];
+      const shipmentEntries = Array.isArray(order?.shipment)
+        ? order.shipment
+        : [];
       const parsedOrderQuantity = Number(order?.quantity);
       const normalizedOrderQuantity = Number.isFinite(parsedOrderQuantity)
         ? parsedOrderQuantity
@@ -950,7 +989,7 @@ exports.finalizeOrder = async (req, res) => {
 
     const shippedAlready = (order.shipment || []).reduce(
       (sum, entry) => sum + Number(entry?.quantity || 0),
-      0
+      0,
     );
 
     const orderQuantity = Number(order.quantity || 0);
@@ -969,11 +1008,12 @@ exports.finalizeOrder = async (req, res) => {
       stuffing_date: parsedStuffingDate,
       quantity: parsedQuantity,
       pending: pending,
-      remaining_remarks: remarks
+      remaining_remarks: remarks,
     });
 
     const shippedAfter = shippedAlready + parsedQuantity;
-    order.status = shippedAfter >= orderQuantity ? "Shipped" : "Partial Shipped";
+    order.status =
+      shippedAfter >= orderQuantity ? "Shipped" : "Partial Shipped";
 
     await order.save();
 

@@ -26,6 +26,26 @@ const formatDateLabel = (value) => {
   return parsed.toLocaleDateString();
 };
 
+const toTimestamp = (value) => {
+  if (!value) return 0;
+  const asString = String(value).trim();
+  if (!asString) return 0;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(asString)) {
+    const parsed = new Date(`${asString}T00:00:00Z`);
+    return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+  }
+
+  if (/^\d{2}[/-]\d{2}[/-]\d{4}$/.test(asString)) {
+    const [day, month, year] = asString.split(/[/-]/).map(Number);
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+  }
+
+  const parsed = new Date(asString);
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+};
+
 const InfoBox = ({ label, value, compact = false }) => (
   <div className={compact ? "qc-info-compact-item" : "col-md-3 col-lg-3"}>
     <div className="qc-info-label">{label}</div>
@@ -115,6 +135,100 @@ const QcDetails = () => {
       total: cbmValue?.total ?? "",
     };
   }, [qc]);
+
+  const requestInspectionTimeline = useMemo(() => {
+    const requestHistory = Array.isArray(qc?.request_history)
+      ? qc.request_history
+      : [];
+    const inspectionHistory = Array.isArray(qc?.inspection_record)
+      ? qc.inspection_record
+      : [];
+
+    const requestSnapshotsAsc = [...requestHistory]
+      .map((request) => {
+        const requestTime = Math.max(
+          toTimestamp(request?.request_date),
+          toTimestamp(request?.createdAt),
+        );
+        return {
+          ...request,
+          __requestTime: requestTime,
+        };
+      })
+      .sort((a, b) => a.__requestTime - b.__requestTime);
+
+    const resolveRequestForInspection = (inspectionDate, createdAt) => {
+      if (requestSnapshotsAsc.length === 0) return null;
+      const inspectionTime = Math.max(
+        toTimestamp(inspectionDate),
+        toTimestamp(createdAt),
+      );
+
+      if (!inspectionTime) {
+        return requestSnapshotsAsc[requestSnapshotsAsc.length - 1];
+      }
+
+      let matched = null;
+      for (const request of requestSnapshotsAsc) {
+        if (request.__requestTime <= inspectionTime) {
+          matched = request;
+        }
+      }
+
+      return matched || requestSnapshotsAsc[0];
+    };
+
+    const requestRows = requestSnapshotsAsc.map((request, index) => ({
+      key: `request-${request?._id || index}`,
+      rowType: "Request",
+      sortTime: request.__requestTime || 0,
+      requestDate: request?.request_date || "",
+      inspectionDate: "",
+      inspectorName: request?.inspector?.name || "N/A",
+      requestedQty: request?.quantity_requested ?? 0,
+      offeredQty: "-",
+      inspectedQty: "-",
+      passedQty: "-",
+      cbmTotal: "-",
+      pendingAfter: "-",
+      remarks: request?.remarks || "QC aligned",
+    }));
+
+    const inspectionRows = inspectionHistory.map((record, index) => {
+      const linkedRequest = resolveRequestForInspection(
+        record?.inspection_date,
+        record?.createdAt,
+      );
+      const inspectionCbm = record?.cbm?.total;
+      const cbmValue = isPositiveCbmValue(inspectionCbm)
+        ? String(inspectionCbm)
+        : "Not Set";
+
+      return {
+        key: `inspection-${record?._id || index}`,
+        rowType: "Inspection",
+        sortTime: Math.max(
+          toTimestamp(record?.inspection_date),
+          toTimestamp(record?.createdAt),
+        ),
+        requestDate: linkedRequest?.request_date || "",
+        inspectionDate: record?.inspection_date || record?.createdAt || "",
+        inspectorName: record?.inspector?.name || "N/A",
+        requestedQty:
+          linkedRequest?.quantity_requested ?? record?.vendor_requested ?? 0,
+        offeredQty: record?.vendor_offered ?? 0,
+        inspectedQty: record?.checked ?? 0,
+        passedQty: record?.passed ?? 0,
+        cbmTotal: cbmValue,
+        pendingAfter: record?.pending_after ?? 0,
+        remarks: record?.remarks || "None",
+      };
+    });
+
+    return [...requestRows, ...inspectionRows].sort(
+      (a, b) => (b.sortTime || 0) - (a.sortTime || 0),
+    );
+  }, [qc?.request_history, qc?.inspection_record]);
 
   const fetchQcDetails = useCallback(async () => {
     try {
@@ -207,14 +321,15 @@ const QcDetails = () => {
             </section>
 
             <section>
-              <h3 className="h6 mb-3">Inspection Records</h3>
-              {Array.isArray(qc.inspection_record) &&
-              qc.inspection_record.length > 0 ? (
+              <h3 className="h6 mb-3">Request And Inspection Records</h3>
+              {requestInspectionTimeline.length > 0 ? (
                 <div className="table-responsive">
                   <table className="table table-sm table-striped align-middle mb-0">
                     <thead>
                       <tr>
-                        <th>Date</th>
+                        <th>Type</th>
+                        <th>Request Date</th>
+                        <th>Inspection Date</th>
                         <th>Inspector</th>
                         <th>Requested</th>
                         <th>Offered</th>
@@ -226,26 +341,19 @@ const QcDetails = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {qc.inspection_record.map((record) => (
-                        <tr key={record._id}>
-                          <td>
-                            {formatDateLabel(
-                              record?.inspection_date || record?.createdAt,
-                            )}
-                          </td>
-                          <td>{record?.inspector?.name || "N/A"}</td>
-                          <td>{record?.vendor_requested ?? 0}</td>
-                          <td>{record?.vendor_offered ?? 0}</td>
-                          <td>{record?.checked ?? 0}</td>
-                          <td>{record?.passed ?? 0}</td>
-                          
-                          <td>
-                            {isPositiveCbmValue(cbmData?.total)
-                              ? cbmData.total
-                              : "Not Set"}
-                          </td>
-                          <td>{record?.pending_after ?? 0}</td>
-                          <td>{record?.remarks || "None"}</td>
+                      {requestInspectionTimeline.map((row) => (
+                        <tr key={row.key}>
+                          <td>{row.rowType}</td>
+                          <td>{formatDateLabel(row.requestDate)}</td>
+                          <td>{formatDateLabel(row.inspectionDate)}</td>
+                          <td>{row.inspectorName}</td>
+                          <td>{row.requestedQty}</td>
+                          <td>{row.offeredQty}</td>
+                          <td>{row.inspectedQty}</td>
+                          <td>{row.passedQty}</td>
+                          <td>{row.cbmTotal}</td>
+                          <td>{row.pendingAfter}</td>
+                          <td>{row.remarks}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -253,7 +361,7 @@ const QcDetails = () => {
                 </div>
               ) : (
                 <div className="text-secondary small">
-                  No inspection records yet.
+                  No request or inspection records yet.
                 </div>
               )}
             </section>

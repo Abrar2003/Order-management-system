@@ -33,12 +33,33 @@ const resolveReportDate = (value) => {
   return toDateInputValue(asString);
 };
 
-const requestDateToDateExpression = {
+const toSortableTimestamp = (value) => {
+  const asString = String(value || "").trim();
+  if (!asString) return 0;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(asString)) {
+    const parsed = new Date(`${asString}T00:00:00Z`);
+    return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+  }
+
+  if (/^\d{2}[/-]\d{2}[/-]\d{4}$/.test(asString)) {
+    const parts = asString.split(/[/-]/);
+    const parsed = new Date(
+      Date.UTC(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0])),
+    );
+    return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+  }
+
+  const parsed = new Date(asString);
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+};
+
+const buildStringDateToDateExpression = (fieldPath) => ({
   $let: {
     vars: {
       rawDate: {
         $trim: {
-          input: { $toString: { $ifNull: ["$request_date", ""] } },
+          input: { $toString: { $ifNull: [fieldPath, ""] } },
         },
       },
     },
@@ -105,7 +126,10 @@ const requestDateToDateExpression = {
       },
     },
   },
-};
+});
+
+const requestDateToDateExpression = buildStringDateToDateExpression("$request_date");
+const inspectionDateToDateExpression = buildStringDateToDateExpression("$inspection_date");
 
 const normalizeDistinctValues = (values = []) =>
   [...new Set(
@@ -244,6 +268,40 @@ exports.getQCList = async (req, res) => {
               },
             },
             { $unwind: { path: "$order", preserveNullAndEmptyArrays: true } },
+            {
+              $lookup: {
+                from: "inspections",
+                let: { qcId: "$_id" },
+                pipeline: [
+                  {
+                    $match: {
+                      $expr: { $eq: ["$qc", "$$qcId"] },
+                    },
+                  },
+                  {
+                    $addFields: {
+                      inspection_date_sort_key: {
+                        $ifNull: [inspectionDateToDateExpression, "$createdAt"],
+                      },
+                    },
+                  },
+                  { $sort: { inspection_date_sort_key: -1, createdAt: -1 } },
+                  { $limit: 1 },
+                  {
+                    $project: {
+                      inspection_date_sort_key: 0,
+                      __v: 0,
+                    },
+                  },
+                ],
+                as: "last_inspection",
+              },
+            },
+            {
+              $addFields: {
+                last_inspection: { $arrayElemAt: ["$last_inspection", 0] },
+              },
+            },
             { $project: { request_date_sort_key: 0 } },
           ],
           totalCount: [{ $count: "count" }],
@@ -387,16 +445,18 @@ exports.alignQC = async (req, res) => {
         });
       }
 
-      if (quantityRequested < existingQC.quantities.qc_passed) {
-        return res.status(400).json({
-          message: "quantity requested cannot be less than already passed quantity",
-        });
-      }
+      const existingPendingRaw = Number(
+        existingQC?.quantities?.pending ??
+          ((existingQC?.quantities?.client_demand || 0) -
+            (existingQC?.quantities?.qc_passed || 0)),
+      );
+      const existingPendingQuantity = Number.isFinite(existingPendingRaw)
+        ? Math.max(0, existingPendingRaw)
+        : 0;
 
-      if (quantityRequested < (existingQC.quantities.vendor_provision || 0)) {
+      if (quantityRequested > existingPendingQuantity) {
         return res.status(400).json({
-          message:
-            "quantity requested cannot be less than already provisioned quantity",
+          message: "quantity requested cannot be greater than pending quantity",
         });
       }
 
@@ -433,6 +493,15 @@ exports.alignQC = async (req, res) => {
       if (remarks !== undefined) {
         existingQC.remarks = remarks;
       }
+
+      existingQC.request_history = existingQC.request_history || [];
+      existingQC.request_history.push({
+        request_date: requestDateValue,
+        quantity_requested: quantityRequested,
+        inspector: inspectorId,
+        remarks: remarks || "",
+        createdBy: req.user._id,
+      });
 
       await existingQC.save();
 
@@ -475,6 +544,15 @@ exports.alignQC = async (req, res) => {
         qc_passed: 0,
         pending: clientDemand,
       },
+      request_history: [
+        {
+          request_date: requestDateValue,
+          quantity_requested: quantityRequested,
+          inspector: inspectorId,
+          remarks: remarks || "",
+          createdBy: req.user._id,
+        },
+      ],
       remarks,
       createdBy: req.user._id,
     });
@@ -1088,6 +1166,8 @@ exports.getQCById = async (req, res) => {
     const qc = await QC.findById(req.params.id)
       .populate("inspector", "name email role")
       .populate("createdBy", "name email role")
+      .populate("request_history.inspector", "name email role")
+      .populate("request_history.createdBy", "name email role")
       .populate("order")
       .populate({
         path: "inspection_record",
@@ -1101,11 +1181,25 @@ exports.getQCById = async (req, res) => {
 
     const qcData = qc.toObject();
     const sortedLabels = normalizeLabels(qcData.labels);
+    const sortedRequestHistory = Array.isArray(qcData.request_history)
+      ? [...qcData.request_history].sort((a, b) => {
+          const aTime = Math.max(
+            toSortableTimestamp(a?.request_date),
+            toSortableTimestamp(a?.createdAt),
+          );
+          const bTime = Math.max(
+            toSortableTimestamp(b?.request_date),
+            toSortableTimestamp(b?.createdAt),
+          );
+          return bTime - aTime;
+        })
+      : [];
 
     res.json({
       data: {
         ...qcData,
         labels: sortedLabels,
+        request_history: sortedRequestHistory,
       },
     });
   } catch (err) {

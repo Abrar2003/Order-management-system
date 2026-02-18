@@ -8,6 +8,7 @@ const qcRouter = require("./routers/qc.routes");
 const brandRouter = require("./routers/brand.route");
 const inspectorRouter = require("./routers/inspector.routes");
 const userRouter = require("./routers/user.routes");
+const googleRoutes = require("./routers/google.routes");
 
 const app = express();
 const PORT = process.env.PORT;
@@ -48,6 +49,7 @@ app.use("/qc", qcRouter);
 app.use("/brands", brandRouter);
 app.use("/inspectors", inspectorRouter);
 app.use("/users", userRouter);
+app.use("/google", googleRouter);
 
 app.get("/", (req, res) => {
   res.send({ message: "Server OK" });

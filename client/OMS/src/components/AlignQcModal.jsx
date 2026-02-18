@@ -22,6 +22,7 @@ const AlignQCModal = ({
   initialInspector = "",
   initialQuantityRequested = "",
   initialRequestDate = "",
+  openQuantity = null,
 }) => {
   const [inspectors, setInspectors] = useState([]);
   const [inspector, setInspector] = useState(
@@ -35,6 +36,14 @@ const AlignQCModal = ({
       ? String(initialQuantityRequested)
       : "",
   );
+
+  const parsedOpenQuantity = Number(openQuantity);
+  const fallbackOpenQuantity = Number(order?.quantity);
+  const effectiveOpenQuantity = Number.isFinite(parsedOpenQuantity)
+    ? parsedOpenQuantity
+    : Number.isFinite(fallbackOpenQuantity)
+      ? fallbackOpenQuantity
+      : 0;
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -78,8 +87,8 @@ const AlignQCModal = ({
       return;
     }
 
-    if (quantityRequestedNumber > Number(order.quantity)) {
-      alert("Quantity requested cannot exceed client demand.");
+    if (quantityRequestedNumber > effectiveOpenQuantity) {
+      alert("Quantity requested cannot exceed pending quantity.");
       return;
     }
 
@@ -140,7 +149,7 @@ const AlignQCModal = ({
               </div>
               <div className="col-6">
                 <div className="small text-secondary">Open Quantity</div>
-                <div className="fw-semibold">{order.quantity}</div>
+                <div className="fw-semibold">{effectiveOpenQuantity}</div>
               </div>
             </div>
 

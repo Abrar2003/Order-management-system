@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import AlignQCModal from "../components/AlignQcModal";
+import { getUserFromToken } from "../auth/auth.utils";
 import "../App.css";
 
 // small helper: debounce without extra libs
@@ -22,6 +24,11 @@ const formatDateLabel = (value) => {
   const parsed = new Date(asString);
   if (Number.isNaN(parsed.getTime())) return asString;
   return parsed.toLocaleDateString();
+};
+
+const toSafeNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 };
 
 const QCPage = () => {
@@ -46,9 +53,14 @@ const QCPage = () => {
 
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [realignContext, setRealignContext] = useState(null);
 
   const token = localStorage.getItem("token");
   const navigate = useNavigate();
+  const currentUser = getUserFromToken();
+  const canRealign = ["admin", "manager"].includes(
+    String(currentUser?.role || "").toLowerCase(),
+  );
 
   const fetchQC = useCallback(async () => {
     const res = await axios.get("/qc/list", {
@@ -100,7 +112,40 @@ const QCPage = () => {
     navigate(`/qc/${qc._id}`);
   };
 
-  // keep filter controls consistent: when filter changes → reset page 1
+  const openRealignModal = (qc) => {
+    const orderId = qc?.order?._id || qc?.order;
+    if (!orderId) {
+      alert("Cannot realign this QC record because order data is missing.");
+      return;
+    }
+
+    const orderForModal = {
+      ...(qc?.order || {}),
+      _id: orderId,
+      order_id: qc?.order_meta?.order_id || qc?.order?.order_id || "",
+      vendor: qc?.order_meta?.vendor || qc?.order?.vendor || "",
+      brand: qc?.order_meta?.brand || qc?.order?.brand || "",
+      item: {
+        item_code: qc?.item?.item_code || qc?.order?.item?.item_code || "",
+        description: qc?.item?.description || qc?.order?.item?.description || "",
+      },
+      quantity: toSafeNumber(
+        qc?.quantities?.client_demand ?? qc?.order?.quantity ?? 0,
+      ),
+    };
+
+    setRealignContext({
+      order: orderForModal,
+      initialInspector: String(qc?.inspector?._id || qc?.inspector || ""),
+      initialQuantityRequested: toSafeNumber(
+        qc?.quantities?.pending ?? orderForModal.quantity,
+      ),
+      initialRequestDate: qc?.request_date || "",
+      openQuantity: toSafeNumber(qc?.quantities?.pending ?? orderForModal.quantity),
+    });
+  };
+
+  // keep filter controls consistent: when filter changes, reset page 1
   const resetToFirstPage = useCallback(() => setPage(1), []);
 
   // optional: click-to-sort for Request Date column (no styling changes)
@@ -113,7 +158,7 @@ const QCPage = () => {
 
   // helpers for rendering date (your qc.request_date is string; keep display unchanged)
   const requestDateLabel = useMemo(() => {
-    return sort === "-request_date" ? "Request Date ↓" : "Request Date ↑";
+    return sort === "-request_date" ? "Request Date (newest)" : "Request Date (oldest)";
   }, [sort]);
 
   return (
@@ -158,16 +203,17 @@ const QCPage = () => {
                     <th>Order Quantity</th>
                     <th>Requested</th>
                     <th>Offered</th>
+                    {/* <th>Last Inspection (O/C/P)</th> */}
                     <th>QC Passed</th>
                     <th>Pending</th>
                     <th>CBM</th>
                     <th>Inspector</th>
-                    <th>Check Details</th>
+                    <th>Actions</th>
                   </tr>
 
                   {/* Excel-like filters row (same table classes) */}
                   <tr>
-                    {/* PO filter (optional) — keep empty to avoid extra backend work */}
+                    {/* PO filter (optional) */}
                     <th>
                       <select
                         className="form-select form-select-sm"
@@ -255,12 +301,20 @@ const QCPage = () => {
                       </div>
                     </th>
 
-                    {/* Numeric columns: keep blank (optional) */}
+                    {/* Non-filtered columns */}
+                    {/* <th>
+                      <input
+                        type="text"
+                        className="form-control form-control-sm"
+                        placeholder="-"
+                        disabled
+                      />
+                    </th> */}
                     <th>
                       <input
                         type="text"
                         className="form-control form-control-sm"
-                        placeholder="—"
+                        placeholder="-"
                         disabled
                       />
                     </th>
@@ -268,7 +322,7 @@ const QCPage = () => {
                       <input
                         type="text"
                         className="form-control form-control-sm"
-                        placeholder="—"
+                        placeholder="-"
                         disabled
                       />
                     </th>
@@ -276,7 +330,7 @@ const QCPage = () => {
                       <input
                         type="text"
                         className="form-control form-control-sm"
-                        placeholder="—"
+                        placeholder="-"
                         disabled
                       />
                     </th>
@@ -284,7 +338,7 @@ const QCPage = () => {
                       <input
                         type="text"
                         className="form-control form-control-sm"
-                        placeholder="—"
+                        placeholder="-"
                         disabled
                       />
                     </th>
@@ -292,26 +346,23 @@ const QCPage = () => {
                       <input
                         type="text"
                         className="form-control form-control-sm"
-                        placeholder="—"
+                        placeholder="-"
                         disabled
                       />
                     </th>
-
-                    {/* CBM filter: keep blank */}
                     <th>
                       <input
                         type="text"
                         className="form-control form-control-sm"
-                        placeholder="—"
+                        placeholder="-"
                         disabled
                       />
                     </th>
-                    {/* CBM filter: keep blank */}
                     <th>
                       <input
                         type="text"
                         className="form-control form-control-sm"
-                        placeholder="—"
+                        placeholder="-"
                         disabled
                       />
                     </th>
@@ -375,29 +426,49 @@ const QCPage = () => {
                       <td>{formatDateLabel(qc?.last_inspected_date) || "N/A"}</td>
                       <td>{qc?.quantities?.client_demand ?? 0}</td>
                       <td>{qc?.quantities?.quantity_requested ?? 0}</td>
-                      <td>{qc?.quantities?.vendor_provision ?? 0}</td>
-                      <td>{qc?.quantities?.qc_passed ?? 0}</td>
+                      <td>{toSafeNumber(qc?.last_inspection?.vendor_offered) ?? 0}</td>
+                      {/* <td>
+                        {qc?.last_inspection
+                          ? `${toSafeNumber(qc.last_inspection.vendor_offered)} / ${toSafeNumber(qc.last_inspection.checked)} / ${toSafeNumber(qc.last_inspection.passed)}`
+                          : "N/A"}
+                      </td> */}
+                      <td>{toSafeNumber(qc?.last_inspection?.passed) ?? 0}</td>
                       <td>{qc?.quantities?.pending ?? 0}</td>
                       <td>{qc?.cbm?.total || "NA"}</td>
                       <td>{qc?.inspector?.name || "N/A"}</td>
                       <td>
-                        <button
-                          type="button"
-                          className="btn btn-outline-secondary btn-sm"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            handleDetailsClick(qc);
-                          }}
-                        >
-                          See Details
-                        </button>
+                        <div className="d-flex flex-column gap-2">
+                          <button
+                            type="button"
+                            className="btn btn-outline-secondary btn-sm"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              handleDetailsClick(qc);
+                            }}
+                          >
+                            See Details
+                          </button>
+                          {canRealign &&
+                            toSafeNumber(qc?.quantities?.pending) > 0 && (
+                              <button
+                                type="button"
+                                className="btn btn-outline-primary btn-sm"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  openRealignModal(qc);
+                                }}
+                              >
+                                Realign QC
+                              </button>
+                            )}
+                        </div>
                       </td>
                     </tr>
                   ))}
 
                   {qcList.length === 0 && (
                     <tr>
-                      <td colSpan="13" className="text-center py-4">
+                      <td colSpan="14" className="text-center py-4">
                         No QC records found
                       </td>
                     </tr>
@@ -429,6 +500,21 @@ const QCPage = () => {
             Next
           </button>
         </div>
+
+        {realignContext && (
+          <AlignQCModal
+            order={realignContext.order}
+            initialInspector={realignContext.initialInspector}
+            initialQuantityRequested={realignContext.initialQuantityRequested}
+            initialRequestDate={realignContext.initialRequestDate}
+            openQuantity={realignContext.openQuantity}
+            onClose={() => setRealignContext(null)}
+            onSuccess={() => {
+              setRealignContext(null);
+              fetchQC();
+            }}
+          />
+        )}
       </div>
     </>
   );

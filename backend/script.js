@@ -1,37 +1,36 @@
-/* scripts/import-qc-inspections.js
+/*
+ * QC import replay script
  *
- * Run:
- *   node scripts/import-qc-inspections.js "./QC REPORTS (1).xlsx"
+ * Usage:
+ *   node backend/script.js
+ *   node backend/script.js "backend/data/qc_reports.xlsx"
  *
- * Requirements:
- *   npm i xlsx mongoose dotenv
- *
- * ENV:
- *   MONGO_URI="your atlas uri"
+ * What this does:
+ * 1) Reads Excel rows.
+ * 2) Finds matching Order records by PO + Item (+ Vendor preference).
+ * 3) Aligns/realigns QC using controller rules (alignQC).
+ * 4) Replays each row as a visit update using controller rules (updateQC).
+ * 5) De-duplicates visits against existing Inspection records and duplicates in file.
  */
 
 const dns = require("dns");
-
-// Force DNS servers for this Node process (bypasses Windows resolver issues)
-dns.setServers(["1.1.1.1", "8.8.8.8"]);
-
-require("dotenv").config();
+const path = require("path");
 const mongoose = require("mongoose");
 const XLSX = require("xlsx");
+require("dotenv").config({ path: path.resolve(__dirname, ".env") });
 
-// ✅ Adjust these paths to your project
-const Order = require("./models/order.model"); // mongoose.model("orders", ...)
-const QC = require("./models/qc.model"); // mongoose.model("qc", ...)
-const Inspection = require("./models/inspection.model"); // mongoose.model("inspections", ...)
-const dateParser = require("./helpers/dateparsser");
+const QC = require("./models/qc.model");
+const Order = require("./models/order.model");
+const Inspection = require("./models/inspection.model");
+const User = require("./models/user.model");
+const qcController = require("./controllers/qc.controller");
 
-// ---- IDs you gave ----
-const ADMIN_CREATED_BY = "699044abd0005a59180304db"; // Abrar admin
-const FALLBACK_QC_USER = "699067156dc68aedb5899de4"; // Old QC (fallback)
+dns.setServers(["1.1.1.1", "8.8.8.8"]);
 
-// QC users map (Excel QC Name -> users._id)
-// Match Excel QC Name to users.name (trimmed). Add aliases if needed.
-const QC_NAME_TO_USER_ID = new Map([
+const ADMIN_CREATED_BY = "699044abd0005a59180304db";
+const FALLBACK_QC_USER = "699067156dc68aedb5899de4";
+
+const STATIC_QC_NAME_TO_USER_ID = new Map([
   ["Ashwini Khandelwal", "6993feed473290fa1cf76b50"],
   ["Dev Sharma", "6993fec9473290fa1cf76b49"],
   ["Dashrath Suthar", "6993ff07473290fa1cf76b57"],
@@ -40,435 +39,657 @@ const QC_NAME_TO_USER_ID = new Map([
   ["Aman Dutt", "6993ff47473290fa1cf76b65"],
 ]);
 
-// ---------- helpers ----------
-const toStr = (v) => (v === null || v === undefined ? "" : String(v)).trim();
-
-const toNum = (v, fallback = 0) => {
-  if (v === null || v === undefined || v === "") return fallback;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : fallback;
+const HEADER_ALIASES = {
+  date: ["Date"],
+  vendor: ["Vendor", "Vendor "],
+  po_number: ["PO Number", "PO"],
+  item_code: ["Item Code", "Item code"],
+  item_name: ["Item name", "Item Name", "Description"],
+  brand_name: ["Brand Name", "Brand"],
+  qty_requested: ["Qty Requested"],
+  qty_offered: ["Qty Offered"],
+  qty_inspected: ["Qty Inspected"],
+  qty_passed: ["Qty Passed"],
+  qc_name: ["QC Name"],
+  cbm: ["CBM", "CBM "],
+  remarks: ["Remarks"],
 };
 
-const excelSerialToDate = (serial) => {
-  // Excel's day 1 = 1900-01-01, but JS epoch conversion typically uses 1899-12-30
-  const excelEpoch = new Date(Date.UTC(1899, 11, 30));
-  return new Date(excelEpoch.getTime() + Number(serial) * 86400000);
+const toStr = (value) =>
+  value === null || value === undefined ? "" : String(value).trim();
+
+const normalizeSpaces = (value) => toStr(value).replace(/\s+/g, " ").trim();
+
+const normalizeKeyToken = (value) => normalizeSpaces(value).toLowerCase();
+
+const toNum = (value, fallback = 0) => {
+  if (value === null || value === undefined || value === "") return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const toDDMMYYYY = (value) => {
-  if (value === null || value === undefined || value === "") return "";
+const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 
-  let d;
-
-  // Case 1: already a Date
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    d = value;
-  }
-  // Case 2: Excel serial like "46067" or 46067
-  else if (
-    typeof value === "number" ||
-    /^\d+(\.\d+)?$/.test(String(value).trim())
-  ) {
-    d = excelSerialToDate(Number(value));
-  }
-  // Case 3: string formats
-  else {
-    const s = String(value).trim();
-
-    // DD/MM/YYYY or DD-MM-YYYY
-    const m1 = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
-    if (m1) {
-      const dd = Number(m1[1]);
-      const mm = Number(m1[2]) - 1;
-      const yyyy = Number(m1[3]);
-      d = new Date(Date.UTC(yyyy, mm, dd));
-    } else {
-      // YYYY-MM-DD etc.
-      const parsed = new Date(s);
-      d = parsed;
-    }
-  }
-
-  if (!d || Number.isNaN(d.getTime())) return "";
-
-  const dd = String(d.getUTCDate()).padStart(2, "0");
-  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const yyyy = d.getUTCFullYear();
-  return `${dd}/${mm}/${yyyy}`;
-};
-
-// const fmtDate = (v) => {
-//   // Excel parsed dates usually arrive as JS Date
-//   if (v instanceof Date && !Number.isNaN(v.getTime())) {
-//     const y = v.getFullYear();
-//     const m = String(v.getMonth() + 1).padStart(2, "0");
-//     const d = String(v.getDate()).padStart(2, "0");
-//     return `${y}-${m}-${d}`;
-//   }
-//   // If already string like 2026-02-14
-//   const s = toStr(v);
-//   if (!s) return "";
-//   // Try normalize DD/MM/YYYY
-//   const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-//   if (m) {
-//     const dd = m[1].padStart(2, "0");
-//     const mm = m[2].padStart(2, "0");
-//     const yyyy = m[3];
-//     return `${yyyy}-${mm}-${dd}`;
-//   }
-//   console.log(s);
-//   return s;
-// };
-
-// Try multiple header spellings (your file has trailing spaces on some)
-const getCell = (row, ...keys) => {
-  for (const k of keys) {
-    if (Object.prototype.hasOwnProperty.call(row, k)) return row[k];
-    // sometimes trimmed
-    const found = Object.keys(row).find((h) => h.trim() === k.trim());
-    if (found) return row[found];
+const pickCell = (row, aliases = []) => {
+  for (const alias of aliases) {
+    if (hasOwn(row, alias)) return row[alias];
+    const exactTrimmed = Object.keys(row).find((k) => k.trim() === alias.trim());
+    if (exactTrimmed) return row[exactTrimmed];
   }
   return undefined;
 };
 
-const orderKeyFromRow = (row) => {
-  const po = toStr(getCell(row, "PO Number", "PO"));
-  const itemCode = toStr(getCell(row, "Item Code", "Item code"));
-  const vendor = toStr(getCell(row, "Vendor")).replace(/\s+/g, " ");
-return `${po}||${vendor}||${itemCode}`;
-
+const normalizeCode = (value) => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    if (Number.isInteger(value)) return String(value);
+    return String(value);
+  }
+  const asString = normalizeSpaces(value);
+  if (!asString) return "";
+  if (/^\d+\.0+$/.test(asString)) return asString.replace(/\.0+$/, "");
+  return asString;
 };
 
-const inspectionUniqKey = ({
+const excelSerialToDate = (serial) => {
+  const epoch = new Date(Date.UTC(1899, 11, 30));
+  return new Date(epoch.getTime() + Number(serial) * 86400000);
+};
+
+const toYmd = (dateValue) => {
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return "";
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(date.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+};
+
+const parseExcelDateToYmd = (value) => {
+  if (value === null || value === undefined || value === "") return "";
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return toYmd(value);
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return toYmd(excelSerialToDate(value));
+  }
+
+  const raw = normalizeSpaces(value);
+  if (!raw) return "";
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+  const ddmmyyyy = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (ddmmyyyy) {
+    const dd = Number(ddmmyyyy[1]);
+    const mm = Number(ddmmyyyy[2]) - 1;
+    const yyyy = Number(ddmmyyyy[3]);
+    return toYmd(new Date(Date.UTC(yyyy, mm, dd)));
+  }
+
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) return toYmd(parsed);
+  return "";
+};
+
+const makeRowKey = (row) =>
+  `${row.poNumber}||${normalizeSpaces(row.vendor)}||${row.itemCode}`;
+
+const makeInspectionSignature = ({
   qcId,
-  date,
-  vendor_requested,
-  vendor_offered,
+  inspectionDate,
+  inspectorId,
+  vendorOffered,
   checked,
   passed,
-}) => {
-  return `${qcId}|${date}|${vendor_requested}|${vendor_offered}|${checked}|${passed}`;
+}) =>
+  [
+    String(qcId),
+    String(inspectionDate || ""),
+    String(inspectorId || ""),
+    Number(vendorOffered || 0),
+    Number(checked || 0),
+    Number(passed || 0),
+  ].join("|");
+
+const createMockRes = () => {
+  let statusCode = 200;
+  let payload;
+  return {
+    get statusCode() {
+      return statusCode;
+    },
+    get payload() {
+      return payload;
+    },
+    status(code) {
+      statusCode = code;
+      return this;
+    },
+    json(body) {
+      payload = body;
+      return this;
+    },
+  };
 };
 
-// ---------- main ----------
+const runController = async (handler, req) => {
+  const res = createMockRes();
+  await handler(req, res);
+  return { statusCode: res.statusCode, body: res.payload };
+};
+
+const clampNonNegative = (value) => {
+  const n = toNum(value, 0);
+  return n < 0 ? 0 : n;
+};
+
+const deriveOrderStatusFromQc = (clientDemand, passedQty) => {
+  const demand = toNum(clientDemand, 0);
+  const passed = toNum(passedQty, 0);
+  return demand > 0 && passed >= demand ? "Inspection Done" : "Under Inspection";
+};
+
+const normalizeParsedRow = (rawRow, index) => {
+  const parsed = {
+    rowIndex: index + 2,
+    date: parseExcelDateToYmd(pickCell(rawRow, HEADER_ALIASES.date)),
+    vendor: normalizeSpaces(pickCell(rawRow, HEADER_ALIASES.vendor)),
+    poNumber: normalizeCode(pickCell(rawRow, HEADER_ALIASES.po_number)),
+    itemCode: normalizeCode(pickCell(rawRow, HEADER_ALIASES.item_code)),
+    itemName: normalizeSpaces(pickCell(rawRow, HEADER_ALIASES.item_name)),
+    brandName: normalizeSpaces(pickCell(rawRow, HEADER_ALIASES.brand_name)),
+    qtyRequested: clampNonNegative(pickCell(rawRow, HEADER_ALIASES.qty_requested)),
+    qtyOffered: clampNonNegative(pickCell(rawRow, HEADER_ALIASES.qty_offered)),
+    qtyInspected: clampNonNegative(pickCell(rawRow, HEADER_ALIASES.qty_inspected)),
+    qtyPassed: clampNonNegative(pickCell(rawRow, HEADER_ALIASES.qty_passed)),
+    qcName: normalizeSpaces(pickCell(rawRow, HEADER_ALIASES.qc_name)),
+    cbmRaw: pickCell(rawRow, HEADER_ALIASES.cbm),
+    remarks: normalizeSpaces(pickCell(rawRow, HEADER_ALIASES.remarks)),
+  };
+
+  parsed.rowKey = makeRowKey(parsed);
+  return parsed;
+};
+
+const normalizeNameKey = (name) => normalizeSpaces(name).toLowerCase();
+
+const resolveOrderForGroup = async (sample) => {
+  const orderId = sample.poNumber;
+  const itemCode = sample.itemCode;
+  const vendorKey = normalizeKeyToken(sample.vendor);
+
+  let candidates = await Order.find({
+    order_id: orderId,
+    "item.item_code": itemCode,
+  }).lean();
+
+  if (!candidates.length) {
+    const byOrder = await Order.find({ order_id: orderId }).lean();
+    candidates = byOrder.filter(
+      (o) => normalizeCode(o?.item?.item_code) === normalizeCode(itemCode),
+    );
+  }
+
+  if (!candidates.length) {
+    return { order: null, reason: "order_not_found" };
+  }
+
+  const vendorMatched = candidates.filter(
+    (o) => normalizeKeyToken(o.vendor) === vendorKey,
+  );
+
+  if (vendorMatched.length === 1) {
+    return { order: vendorMatched[0], reason: null };
+  }
+
+  if (vendorMatched.length > 1) {
+    return { order: vendorMatched[0], reason: "multiple_vendor_matches" };
+  }
+
+  if (candidates.length === 1) {
+    return { order: candidates[0], reason: "vendor_mismatch_fallback" };
+  }
+
+  return { order: candidates[0], reason: "ambiguous_order_match" };
+};
+
+const buildInspectorResolver = async () => {
+  const qcUsers = await User.find({
+    $or: [{ role: "QC" }, { isQC: true }],
+  })
+    .select("_id name role isQC")
+    .lean();
+
+  const dynamicNameMap = new Map();
+  for (const user of qcUsers) {
+    const key = normalizeNameKey(user.name);
+    if (key && !dynamicNameMap.has(key)) {
+      dynamicNameMap.set(key, String(user._id));
+    }
+  }
+
+  const staticNameMap = new Map();
+  for (const [name, id] of STATIC_QC_NAME_TO_USER_ID.entries()) {
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      staticNameMap.set(normalizeNameKey(name), id);
+    }
+  }
+
+  const fallbackByEnv = mongoose.Types.ObjectId.isValid(FALLBACK_QC_USER)
+    ? FALLBACK_QC_USER
+    : null;
+  const fallbackByUsers = qcUsers[0]?._id ? String(qcUsers[0]._id) : null;
+  const fallback = fallbackByEnv || fallbackByUsers || ADMIN_CREATED_BY;
+
+  return (name) => {
+    const key = normalizeNameKey(name);
+    if (key && staticNameMap.has(key)) return staticNameMap.get(key);
+    if (key && dynamicNameMap.has(key)) return dynamicNameMap.get(key);
+    return fallback;
+  };
+};
+
+const loadWorkbookRows = (filePath) => {
+  const workbook = XLSX.readFile(filePath);
+  const sheetName = workbook.SheetNames[0];
+  const sheet = workbook.Sheets[sheetName];
+  const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: null, raw: true });
+  return rawRows.map((row, index) => normalizeParsedRow(row, index));
+};
+
+const groupRows = (parsedRows) => {
+  const groups = new Map();
+  for (const row of parsedRows) {
+    if (!row.poNumber || !row.itemCode || !row.vendor) continue;
+    if (!row.date) continue;
+    if (!groups.has(row.rowKey)) groups.set(row.rowKey, []);
+    groups.get(row.rowKey).push(row);
+  }
+  for (const rows of groups.values()) {
+    rows.sort((a, b) => {
+      if (a.date === b.date) return a.rowIndex - b.rowIndex;
+      return a.date.localeCompare(b.date);
+    });
+  }
+  return groups;
+};
+
+const todayYmd = () => toYmd(new Date());
+
 async function main() {
-  const filePath = process.argv[2] || "./QC REPORTS (1).xlsx";
-  if (!process.env.MONGO_URI) throw new Error("Missing MONGO_URI in .env");
+  const inputPath =
+    process.argv[2] || path.join(__dirname, "data", "qc_reports.xlsx");
+  const excelPath = path.isAbsolute(inputPath)
+    ? inputPath
+    : path.resolve(process.cwd(), inputPath);
 
-  console.log("Reading:", filePath);
+  if (!process.env.MONGO_URI) {
+    throw new Error("Missing MONGO_URI in backend/.env");
+  }
 
-  const wb = XLSX.readFile(filePath);
-  const sheet = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(sheet, { defval: null });
+  const adminUser = {
+    _id: new mongoose.Types.ObjectId(ADMIN_CREATED_BY),
+    role: "admin",
+  };
 
-  console.log("Rows:", rows.length);
+  console.log("Reading workbook:", excelPath);
+  const parsedRows = loadWorkbookRows(excelPath);
+  console.log("Rows loaded:", parsedRows.length);
 
   await mongoose.connect(process.env.MONGO_URI);
   console.log("Connected to MongoDB");
 
-  // 1) Group rows by (PO, Vendor, Item Code)
-  const groups = new Map(); // key -> { rows: [...] }
-  for (const r of rows) {
-    const key = orderKeyFromRow(r);
-    if (!groups.has(key)) groups.set(key, { rows: [] });
-    groups.get(key).rows.push(r);
-  }
+  const resolveInspectorId = await buildInspectorResolver();
+  const groups = groupRows(parsedRows);
+  console.log("Distinct PO+Vendor+Item groups:", groups.size);
 
-  // 2) Resolve Orders + Upsert QC (one per order item)
-  const orderCache = new Map(); // key -> orderDoc
-  const qcCache = new Map(); // key -> qcDoc
-  const unmatched = [];
+  const summary = {
+    groupsTotal: groups.size,
+    groupsMatched: 0,
+    groupsUnmatched: 0,
+    groupsWithWarnings: 0,
+    qcAligned: 0,
+    qcAlignFailed: 0,
+    rowVisitApplied: 0,
+    rowVisitSkippedAsDuplicate: 0,
+    rowVisitFailed: 0,
+    rowMetadataOnlyApplied: 0,
+    rowMetadataOnlyFailed: 0,
+    unmatchedSamples: [],
+    alignErrors: [],
+    visitErrors: [],
+  };
 
-  for (const [key, g] of groups.entries()) {
-    const any = g.rows[0];
+  const groupContexts = [];
 
-    
-    const order_id = toStr(getCell(any, "PO Number", "PO"));
-    const item_code = toStr(getCell(any, "Item Code"));
-    const vendor = toStr(getCell(any, "Vendor")).replace(/\s+/g, " ");
+  for (const [groupKey, rows] of groups.entries()) {
+    const sample = rows[0];
+    const orderResolution = await resolveOrderForGroup(sample);
 
-    // Find matching order doc (orders already exist)
-    const order = await Order.findOne({
-      order_id,
-      vendor,
-      "item.item_code": item_code,
-    }).lean();
-
-    if (!order) {
-      unmatched.push({
-        key,
-        reason: "Order not found",
-        order_id,
-        item_code,
-      });
+    if (!orderResolution.order) {
+      summary.groupsUnmatched += 1;
+      if (summary.unmatchedSamples.length < 20) {
+        summary.unmatchedSamples.push({
+          groupKey,
+          reason: orderResolution.reason,
+          po: sample.poNumber,
+          vendor: sample.vendor,
+          itemCode: sample.itemCode,
+        });
+      }
       continue;
     }
 
-    orderCache.set(key, order);
+    summary.groupsMatched += 1;
+    if (orderResolution.reason) summary.groupsWithWarnings += 1;
 
-    // determine earliest/latest date in this group
-    const dates = g.rows
-      .map((r) => toDDMMYYYY(getCell(r, "Date")))
-      .filter(Boolean)
-      .sort(); // works for YYYY-MM-DD
-    const request_date = dates[0] || "";
-    const last_inspected_date = dates[dates.length - 1] || request_date;
+    const order = orderResolution.order;
+    const firstRow = rows[0];
+    const itemCodeForQc = normalizeCode(order?.item?.item_code || firstRow.itemCode);
+    const existingQc = await QC.findOne({
+      order: order._id,
+      "item.item_code": itemCodeForQc,
+    })
+      .select("quantities.pending quantities.client_demand quantities.qc_passed")
+      .lean();
 
-    // use order brand/desc as canonical (Excel has blanks often)
-    const brand = toStr(order.brand);
-    const description = toStr(order.item?.description || "");
-
-    // quantities from latest row (by date)
-    // pick the row with max date string; fallback first
-    const latestRow =
-      g.rows
-        .map((r) => ({ r, d: toDDMMYYYY(getCell(r, "Date")) || "0000-00-00" }))
-        .sort((a, b) => (a.d < b.d ? 1 : a.d > b.d ? -1 : 0))[0]?.r ||
-      g.rows[0];
-
-    const qtyRequested = toNum(getCell(latestRow, "Qty Requested"), 0);
-    const qtyOffered = toNum(getCell(latestRow, "Qty Offered"), 0);
-    const qtyInspected = toNum(getCell(latestRow, "Qty Inspected"), 0);
-    const qtyPassed = toNum(getCell(latestRow, "Qty Passed"), 0);
-    const cbmTotal = toNum(getCell(latestRow, "CBM"), 0);
-    const latestQcName = toStr(getCell(latestRow, "QC Name")).replace(
-      /\s+/g,
-      " ",
+    const maxRequested = rows.reduce(
+      (max, r) => Math.max(max, clampNonNegative(r.qtyRequested)),
+      0,
     );
-    const latestInspectorId =
-      QC_NAME_TO_USER_ID.get(latestQcName) || FALLBACK_QC_USER;
+    const clientDemand = clampNonNegative(order.quantity);
+    const existingPendingRaw = existingQc
+      ? Number(
+          existingQc?.quantities?.pending ??
+            ((existingQc?.quantities?.client_demand || 0) -
+              (existingQc?.quantities?.qc_passed || 0)),
+        )
+      : null;
+    const existingPending = Number.isFinite(existingPendingRaw)
+      ? Math.max(0, existingPendingRaw)
+      : null;
+    const requestedCap = existingQc ? existingPending : clientDemand;
+    const alignedRequestedRaw = maxRequested > 0 ? maxRequested : requestedCap;
+    const alignedRequested = Math.min(alignedRequestedRaw, requestedCap);
+    const alignDate = firstRow.date || todayYmd();
 
-    // user requirement: pending based on ORDER quantity - passed
-    const pending = Math.max(toNum(order.quantity, 0) - qtyPassed, 0);
-
-    // Upsert QC by order ObjectId (best unique anchor)
-    const qcUpdate = {
-      $setOnInsert: {
-        order: order._id,
-        request_date: dateParser(request_date || fmtDate(new Date())),
-        createdBy: ADMIN_CREATED_BY,
+    const alignPayload = {
+      order: String(order._id),
+      item: {
+        item_code: itemCodeForQc,
+        description:
+          normalizeSpaces(order?.item?.description) ||
+          firstRow.itemName ||
+          "N/A",
       },
-
-      $set: {
-        // ✅ set whole objects ONLY here
-        order_meta: { order_id, vendor, brand },
-        item: {
-          item_code,
-          description: description || toStr(getCell(any, "Item name")),
-        },
-
-        inspector: latestInspectorId,
-
-        // ✅ only here (NOT in $setOnInsert)
-        last_inspected_date: dateParser(
-          last_inspected_date || request_date || fmtDate(new Date()),
-        ),
-
-        // optional defaults (safe to set repeatedly)
-        cbm: { top: "0", bottom: "0", total: cbmTotal },
-        barcode: 0,
-        packed_size: false,
-        finishing: false,
-        branding: false,
-
-        // quantities snapshot
-        "quantities.client_demand": toNum(order.quantity, 0),
-        "quantities.quantity_requested": qtyRequested,
-        "quantities.vendor_provision": qtyOffered,
-        "quantities.qc_checked": qtyInspected,
-        "quantities.qc_passed": qtyPassed,
-        "quantities.pending": pending,
+      inspector: resolveInspectorId(firstRow.qcName),
+      request_date: alignDate,
+      quantities: {
+        client_demand: clientDemand,
+        quantity_requested: alignedRequested,
       },
+      remarks: firstRow.remarks || undefined,
     };
 
-    const qcDoc = await QC.findOneAndUpdate({ order: order._id }, qcUpdate, {
-      upsert: true,
-      new: true,
+    const alignResp = await runController(qcController.alignQC, {
+      body: alignPayload,
+      params: {},
+      query: {},
+      user: adminUser,
     });
 
-    qcCache.set(key, qcDoc);
+    if (alignResp.statusCode >= 400) {
+      summary.qcAlignFailed += 1;
+      if (summary.alignErrors.length < 30) {
+        summary.alignErrors.push({
+          groupKey,
+          status: alignResp.statusCode,
+          message: alignResp.body?.message || "alignQC failed",
+          po: sample.poNumber,
+          itemCode: sample.itemCode,
+        });
+      }
+      continue;
+    }
+
+    summary.qcAligned += 1;
+
+    const qcDoc = await QC.findOne({
+      order: order._id,
+      "item.item_code": alignPayload.item.item_code,
+    })
+      .select("_id inspector")
+      .lean();
+
+    if (!qcDoc?._id) {
+      summary.qcAlignFailed += 1;
+      if (summary.alignErrors.length < 30) {
+        summary.alignErrors.push({
+          groupKey,
+          status: 500,
+          message: "QC record not found after alignQC",
+          po: sample.poNumber,
+          itemCode: sample.itemCode,
+        });
+      }
+      continue;
+    }
+
+    groupContexts.push({
+      groupKey,
+      order,
+      qcId: String(qcDoc._id),
+      rows,
+    });
   }
 
-  console.log("Groups:", groups.size);
-  console.log("Matched orders:", orderCache.size);
-  console.log("QC upserted:", qcCache.size);
-  console.log("Unmatched rows:", unmatched.length);
-
-  // 3) Prefetch existing inspections for de-dupe (so reruns don’t duplicate)
-  const qcIds = [...new Set([...qcCache.values()].map((q) => String(q._id)))];
-  const existing = await Inspection.find(
+  const qcIds = [...new Set(groupContexts.map((g) => g.qcId))];
+  const existingInspections = await Inspection.find(
     { qc: { $in: qcIds } },
     {
       qc: 1,
       inspection_date: 1,
-      vendor_requested: 1,
+      inspector: 1,
       vendor_offered: 1,
       checked: 1,
       passed: 1,
     },
   ).lean();
 
-  const existingKeys = new Set(
-    existing.map((e) =>
-      inspectionUniqKey({
-        qcId: String(e.qc),
-        date: toStr(e.inspection_date),
-        vendor_requested: toNum(e.vendor_requested, 0),
-        vendor_offered: toNum(e.vendor_offered, 0),
-        checked: toNum(e.checked, 0),
-        passed: toNum(e.passed, 0),
+  const existingSignatures = new Set(
+    existingInspections.map((inspection) =>
+      makeInspectionSignature({
+        qcId: inspection.qc,
+        inspectionDate: inspection.inspection_date,
+        inspectorId: inspection.inspector,
+        vendorOffered: inspection.vendor_offered,
+        checked: inspection.checked,
+        passed: inspection.passed,
       }),
     ),
   );
+  const workbookSignatures = new Set();
 
-  // 4) Build inspections to insert + QC/Order updates
-  const inspectionsToInsert = [];
-  const qcUpdateMap = new Map(); // qcId -> { dates:Set, inspIds:[] later, lastDate, latestRowForSnapshot }
-  const orderUpdates = []; // { orderId, qcId }
+  for (const ctx of groupContexts) {
+    for (const row of ctx.rows) {
+      const inspectorId = resolveInspectorId(row.qcName);
+      const offered = clampNonNegative(row.qtyOffered);
+      const checked = clampNonNegative(row.qtyInspected);
+      const passed = clampNonNegative(row.qtyPassed);
+      const hasVisitUpdate = offered > 0 || checked > 0 || passed > 0;
 
-  for (const r of rows) {
-    const key = orderKeyFromRow(r);
-    const order = orderCache.get(key);
-    const qc = qcCache.get(key);
-    if (!order || !qc) continue;
+      const signature = hasVisitUpdate
+        ? makeInspectionSignature({
+            qcId: ctx.qcId,
+            inspectionDate: row.date,
+            inspectorId,
+            vendorOffered: offered,
+            checked,
+            passed,
+          })
+        : null;
 
-    const inspection_date = toDDMMYYYY(getCell(r, "Date"));
-    if (!inspection_date) continue;
+      if (signature && (existingSignatures.has(signature) || workbookSignatures.has(signature))) {
+        summary.rowVisitSkippedAsDuplicate += 1;
+        continue;
+      }
 
-    const qcName = toStr(getCell(r, "QC Name")).replace(/\s+/g, " ");
-    console.log("qc", qcName);
-    const inspectorIdStr = QC_NAME_TO_USER_ID.get(qcName) || FALLBACK_QC_USER;
-    const inspectorId = new mongoose.Types.ObjectId(inspectorIdStr);
-    const vendor_requested = toNum(getCell(r, "Qty Requested"), 0);
-    const vendor_offered = toNum(getCell(r, "Qty Offered"), 0);
-    const checked = toNum(getCell(r, "Qty Inspected"), 0);
-    const passed = toNum(getCell(r, "Qty Passed"), 0);
+      const payload = {
+        inspector: inspectorId,
+        last_inspected_date: row.date,
+      };
 
-    const pending_after = Math.max(toNum(order.quantity, 0) - passed, 0);
+      if (offered > 0) payload.vendor_provision = offered;
+      if (checked > 0) payload.qc_checked = checked;
+      if (passed > 0) payload.qc_passed = passed;
+      if (row.remarks) payload.remarks = row.remarks;
 
-    const cbmTotal = toNum(getCell(r, "CBM", "CBM "), 0);
-    const remarks = toStr(getCell(r, "Remarks"));
+      const parsedCbm = toNum(row.cbmRaw, Number.NaN);
+      if (Number.isFinite(parsedCbm) && parsedCbm >= 0) {
+        payload.CBM = String(parsedCbm);
+      }
 
-    const uniq = inspectionUniqKey({
-      qcId: String(qc._id),
-      date: inspection_date,
-      vendor_requested,
-      vendor_offered,
-      checked,
-      passed,
-    });
+      const updateResp = await runController(qcController.updateQC, {
+        body: payload,
+        params: { id: ctx.qcId },
+        query: {},
+        user: adminUser,
+      });
 
-    if (existingKeys.has(uniq)) continue; // skip duplicates already in DB
+      if (updateResp.statusCode >= 400) {
+        if (hasVisitUpdate) summary.rowVisitFailed += 1;
+        else summary.rowMetadataOnlyFailed += 1;
 
-    existingKeys.add(uniq);
+        if (summary.visitErrors.length < 50) {
+          summary.visitErrors.push({
+            groupKey: ctx.groupKey,
+            rowIndex: row.rowIndex,
+            status: updateResp.statusCode,
+            message: updateResp.body?.message || "updateQC failed",
+            date: row.date,
+            offered,
+            checked,
+            passed,
+          });
+        }
+        continue;
+      }
 
-    inspectionsToInsert.push({
-      qc: qc._id,
-      inspector: inspectorId,
-      inspection_date,
-      vendor_requested,
-      vendor_offered,
-      checked,
-      passed,
-      pending_after,
-      cbm: { top: "0", bottom: "0", total: String(cbmTotal || 0) },
-      label_ranges: [],
-      labels_added: [],
-      remarks: remarks || "",
-      createdBy: ADMIN_CREATED_BY,
-    });
-
-    // Track QC update info
-    const qcId = String(qc._id);
-    if (!qcUpdateMap.has(qcId)) {
-      qcUpdateMap.set(qcId, { dates: new Set(), lastDate: "0000-00-00" });
+      if (hasVisitUpdate) {
+        summary.rowVisitApplied += 1;
+        if (signature) {
+          existingSignatures.add(signature);
+          workbookSignatures.add(signature);
+        }
+      } else {
+        summary.rowMetadataOnlyApplied += 1;
+      }
     }
-    const state = qcUpdateMap.get(qcId);
-    state.dates.add(inspection_date);
-    if (inspection_date > state.lastDate) state.lastDate = inspection_date;
-
-    // order -> qc_record update (do later in bulk)
-    orderUpdates.push({ orderId: String(order._id), qcId });
   }
 
-  console.log("New inspections to insert:", inspectionsToInsert.length);
+  // Final reconciliation pass:
+  // keep order status in sync with QC totals using the same logic as controllers.
+  if (qcIds.length > 0) {
+    const qcSnapshots = await QC.find({ _id: { $in: qcIds } })
+      .select("_id order quantities.client_demand quantities.qc_passed")
+      .lean();
+    const orderIds = [
+      ...new Set(
+        qcSnapshots.map((qc) => String(qc?.order || "")).filter(Boolean),
+      ),
+    ];
+    const orderDocs = await Order.find({ _id: { $in: orderIds } })
+      .select("_id status qc_record")
+      .lean();
+    const orderMap = new Map(orderDocs.map((order) => [String(order._id), order]));
 
-  // 5) Insert inspections
-  let inserted = [];
-  if (inspectionsToInsert.length > 0) {
-    inserted = await Inspection.insertMany(inspectionsToInsert, {
-      ordered: false,
-    });
-  }
+    const orderBulkUpdates = [];
+    for (const qc of qcSnapshots) {
+      const orderId = String(qc?.order || "");
+      if (!orderId) continue;
 
-  console.log("Inserted inspections:", inserted.length);
+      const order = orderMap.get(orderId);
+      if (!order) continue;
 
-  // 6) Build QC bulk updates using inserted inspection IDs
-  const byQc = new Map(); // qcId -> { inspIds:[], dates:[], lastDate }
-  for (const doc of inserted) {
-    const qcId = String(doc.qc);
-    if (!byQc.has(qcId))
-      byQc.set(qcId, { inspIds: [], dates: new Set(), lastDate: "0000-00-00" });
-    const st = byQc.get(qcId);
-    st.inspIds.push(doc._id);
-    st.dates.add(toStr(doc.inspection_date));
-    if (toStr(doc.inspection_date) > st.lastDate)
-      st.lastDate = toStr(doc.inspection_date);
-  }
+      const update = {};
+      if (!order.qc_record || String(order.qc_record) !== String(qc._id)) {
+        update.qc_record = qc._id;
+      }
 
-  const qcBulk = [];
-  for (const [qcId, st] of byQc.entries()) {
-    qcBulk.push({
-      updateOne: {
-        filter: { _id: qcId },
-        update: {
-          $addToSet: {
-            inspection_record: { $each: st.inspIds },
-            inspection_dates: { $each: [...st.dates] },
+      if (order.status !== "Shipped") {
+        const desiredStatus = deriveOrderStatusFromQc(
+          qc?.quantities?.client_demand,
+          qc?.quantities?.qc_passed,
+        );
+        if (order.status !== desiredStatus) {
+          update.status = desiredStatus;
+        }
+      }
+
+      if (Object.keys(update).length > 0) {
+        orderBulkUpdates.push({
+          updateOne: {
+            filter: { _id: orderId },
+            update: { $set: update },
           },
-          $set: { last_inspected_date: st.lastDate },
-        },
-      },
-    });
+        });
+      }
+    }
+
+    if (orderBulkUpdates.length > 0) {
+      const orderBulkResult = await Order.bulkWrite(orderBulkUpdates, {
+        ordered: false,
+      });
+      console.log(
+        "Order reconciliation updates:",
+        orderBulkResult.modifiedCount || 0,
+      );
+    } else {
+      console.log("Order reconciliation updates: 0");
+    }
   }
 
-  if (qcBulk.length > 0) {
-    const res = await QC.bulkWrite(qcBulk, { ordered: false });
-    console.log("QC bulk update:", res.modifiedCount, "modified");
-  } else {
-    console.log("QC bulk update: nothing to update");
+  console.log("\nImport summary");
+  console.log("-------------");
+  console.log("Groups total:", summary.groupsTotal);
+  console.log("Groups matched:", summary.groupsMatched);
+  console.log("Groups unmatched:", summary.groupsUnmatched);
+  console.log("Groups with match warnings:", summary.groupsWithWarnings);
+  console.log("QC aligned:", summary.qcAligned);
+  console.log("QC align failed:", summary.qcAlignFailed);
+  console.log("Visit rows applied:", summary.rowVisitApplied);
+  console.log("Visit rows skipped (duplicate):", summary.rowVisitSkippedAsDuplicate);
+  console.log("Visit rows failed:", summary.rowVisitFailed);
+  console.log("Metadata-only rows applied:", summary.rowMetadataOnlyApplied);
+  console.log("Metadata-only rows failed:", summary.rowMetadataOnlyFailed);
+
+  if (summary.unmatchedSamples.length) {
+    console.log("\nUnmatched samples (up to 20):");
+    console.table(summary.unmatchedSamples);
   }
 
-  // 7) Update Orders.qc_record in bulk (safe)
-  // De-dupe order updates
-  const orderMap = new Map();
-  for (const ou of orderUpdates) orderMap.set(ou.orderId, ou.qcId);
-
-  const orderBulk = [];
-  for (const [orderId, qcId] of orderMap.entries()) {
-    orderBulk.push({
-      updateOne: {
-        filter: { _id: orderId },
-        update: { $set: { qc_record: qcId } },
-      },
-    });
+  if (summary.alignErrors.length) {
+    console.log("\nAlign errors (up to 30):");
+    console.table(summary.alignErrors);
   }
 
-  if (orderBulk.length > 0) {
-    const res = await Order.bulkWrite(orderBulk, { ordered: false });
-    console.log("Orders qc_record updated:", res.modifiedCount, "modified");
-  }
-
-  // 8) Write unmatched log (optional)
-  if (unmatched.length > 0) {
-    console.log("Unmatched examples:", unmatched.slice(0, 5));
+  if (summary.visitErrors.length) {
+    console.log("\nVisit errors (up to 50):");
+    console.table(summary.visitErrors);
   }
 
   await mongoose.disconnect();
-  console.log("Done ✅");
+  console.log("\nDone");
 }
 
-main().catch((e) => {
-  console.error("FAILED:", e);
+main().catch(async (error) => {
+  console.error("FAILED:", error);
+  try {
+    await mongoose.disconnect();
+  } catch (_) {
+    // ignore disconnect errors
+  }
   process.exit(1);
 });

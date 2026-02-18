@@ -8,8 +8,7 @@ import "../App.css";
 
 const Orders = () => {
   const [orders, setOrders] = useState([]);
-  const [showAlignModal, setShowAlignModal] = useState(false);
-  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [alignContext, setAlignContext] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const [searchParams] = useSearchParams();
@@ -18,6 +17,9 @@ const Orders = () => {
   const user = getUserFromToken();
   const role = user?.role;
   const canManageOrders = ["admin", "manager", "dev", "Dev"].includes(role);
+  const canAlignQc = ["admin", "manager"].includes(
+    String(role || "").toLowerCase(),
+  );
 
   const orderId = searchParams.get("order_id");
 
@@ -52,6 +54,24 @@ const Orders = () => {
       return;
     }
     navigate(`/qc?item_code=${encodeURIComponent(trimmedItemCode)}`);
+  };
+
+  const openAlignModal = (order, isRealign = false) => {
+    const qcRecord = order?.qc_record || null;
+    const openQuantity = isRealign
+      ? Number(qcRecord?.quantities?.pending ?? order?.quantity ?? 0)
+      : Number(order?.quantity ?? 0);
+    setAlignContext({
+      order,
+      initialInspector: isRealign
+        ? String(qcRecord?.inspector?._id || qcRecord?.inspector || "")
+        : "",
+      initialQuantityRequested: isRealign
+        ? qcRecord?.quantities?.pending ?? order?.quantity ?? ""
+        : "",
+      initialRequestDate: isRealign ? qcRecord?.request_date || "" : "",
+      openQuantity: Number.isFinite(openQuantity) ? openQuantity : 0,
+    });
   };
 
   return (
@@ -92,6 +112,7 @@ const Orders = () => {
                       <th>Item</th>
                       <th>Description</th>
                       <th>Quantity</th>
+                      <th>Pending</th>
                       <th>Status</th>
                       {canManageOrders && <th>Action</th>}
                     </tr>
@@ -102,31 +123,45 @@ const Orders = () => {
                         <td>{order.item?.item_code}</td>
                         <td>{order.item?.description}</td>
                         <td>{order.quantity}</td>
+                        <td>{order?.qc_record?.quantities?.pending || order?.quantity}</td>
                         <td>{order.status}</td>
                         {canManageOrders && (
                           <td>
-                            {order.qc_record ? (
-                              <button
-                                type="button"
-                                className="btn btn-link btn-sm p-0"
-                                onClick={() =>
-                                  navigateToQcForItem(order?.item?.item_code)
-                                }
-                              >
-                                Inspection Requested / Check updates
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                className="btn btn-outline-secondary btn-sm"
-                                onClick={() => {
-                                  setSelectedOrder(order);
-                                  setShowAlignModal(true);
-                                }}
-                              >
-                                Add Inspection Request
-                              </button>
-                            )}
+                            <div className="d-flex flex-column gap-2">
+                              {order.qc_record ? (
+                                <button
+                                  type="button"
+                                  className="btn btn-link btn-sm p-0 text-start"
+                                  onClick={() =>
+                                    navigateToQcForItem(order?.item?.item_code)
+                                  }
+                                >
+                                  Inspection Requested / Check updates
+                                </button>
+                              ) : (
+                                canAlignQc && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-secondary btn-sm"
+                                    onClick={() => openAlignModal(order, false)}
+                                  >
+                                    Add Inspection Request
+                                  </button>
+                                )
+                              )}
+
+                              {canAlignQc &&
+                                order?.qc_record &&
+                                Number(order?.qc_record?.quantities?.pending || 0) > 0 && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-primary btn-sm"
+                                    onClick={() => openAlignModal(order, true)}
+                                  >
+                                    Realign QC
+                                  </button>
+                                )}
+                            </div>
                           </td>
                         )}
                       </tr>
@@ -147,12 +182,16 @@ const Orders = () => {
         </div>
       </div>
 
-      {showAlignModal && selectedOrder && (
+      {alignContext?.order && (
         <AlignQCModal
-          order={selectedOrder}
-          onClose={() => setShowAlignModal(false)}
+          order={alignContext.order}
+          initialInspector={alignContext.initialInspector}
+          initialQuantityRequested={alignContext.initialQuantityRequested}
+          initialRequestDate={alignContext.initialRequestDate}
+          openQuantity={alignContext.openQuantity}
+          onClose={() => setAlignContext(null)}
           onSuccess={() => {
-            setShowAlignModal(false);
+            setAlignContext(null);
             fetchOrders();
           }}
         />

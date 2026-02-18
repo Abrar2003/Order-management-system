@@ -44,6 +44,25 @@ const qcSchema = new mongoose.Schema(
       default: [],
     },
 
+    request_history: [
+      {
+        request_date: { type: String, required: true },
+        quantity_requested: { type: Number, required: true, min: 0 },
+        inspector: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "users",
+          default: null,
+        },
+        remarks: { type: String, default: "" },
+        createdBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "users",
+          required: true,
+        },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
+
     barcode: {
       type: Number,
       required: true,
