@@ -8,7 +8,7 @@ const qcRouter = require("./routers/qc.routes");
 const brandRouter = require("./routers/brand.route");
 const inspectorRouter = require("./routers/inspector.routes");
 const userRouter = require("./routers/user.routes");
-const googleRoutes = require("./routers/google.routes");
+const googleRouter = require("./routers/google.routes");
 
 const app = express();
 const PORT = process.env.PORT;
