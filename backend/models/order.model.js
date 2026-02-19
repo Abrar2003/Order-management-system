@@ -22,15 +22,16 @@ const Order_Schema = new mongoose.Schema(
         remaining_remarks: { type: String }
       }
     ],
-    qc_record: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "qc",
-      default: null,
-    },
     gcal: {
       calendarId: { type: String, default: null },
       eventId: { type: String, default: null },
       lastSyncedAt: { type: Date, default: null },
+      lastSyncError: { type: String, default: null },
+    },
+    qc_record: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "qc",
+      default: null,
     },
   },
   { timestamps: true }

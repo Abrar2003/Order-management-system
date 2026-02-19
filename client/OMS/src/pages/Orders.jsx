@@ -3,12 +3,14 @@ import axios from "../api/axios";
 import Navbar from "../components/Navbar";
 import { getUserFromToken } from "../auth/auth.utils";
 import AlignQCModal from "../components/AlignQcModal";
+import EditOrderModal from "../components/EditOrderModal";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import "../App.css";
 
 const Orders = () => {
   const [orders, setOrders] = useState([]);
   const [alignContext, setAlignContext] = useState(null);
+  const [editingOrder, setEditingOrder] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const [searchParams] = useSearchParams();
@@ -18,6 +20,9 @@ const Orders = () => {
   const role = user?.role;
   const canManageOrders = ["admin", "manager", "dev", "Dev"].includes(role);
   const canAlignQc = ["admin", "manager"].includes(
+    String(role || "").toLowerCase(),
+  );
+  const canEditOrder = ["admin", "manager"].includes(
     String(role || "").toLowerCase(),
   );
 
@@ -67,8 +72,8 @@ const Orders = () => {
         ? String(qcRecord?.inspector?._id || qcRecord?.inspector || "")
         : "",
       initialQuantityRequested: isRealign
-        ? qcRecord?.quantities?.pending ?? order?.quantity ?? ""
-        : "",
+        ? (qcRecord?.quantities?.pending ?? order.quantity ?? "")
+        : order?.quantity,
       initialRequestDate: isRealign ? qcRecord?.request_date || "" : "",
       openQuantity: Number.isFinite(openQuantity) ? openQuantity : 0,
     });
@@ -128,6 +133,16 @@ const Orders = () => {
                         {canManageOrders && (
                           <td>
                             <div className="d-flex flex-column gap-2">
+                              {canEditOrder && (
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-secondary btn-sm"
+                                  onClick={() => setEditingOrder(order)}
+                                >
+                                  Edit Order
+                                </button>
+                              )}
+
                               {order.qc_record ? (
                                 <button
                                   type="button"
@@ -169,7 +184,7 @@ const Orders = () => {
 
                     {orders.length === 0 && (
                       <tr>
-                        <td colSpan={canManageOrders ? 5 : 4} className="text-center py-4">
+                        <td colSpan={canManageOrders ? 6 : 5} className="text-center py-4">
                           No orders found
                         </td>
                       </tr>
@@ -192,6 +207,17 @@ const Orders = () => {
           onClose={() => setAlignContext(null)}
           onSuccess={() => {
             setAlignContext(null);
+            fetchOrders();
+          }}
+        />
+      )}
+
+      {editingOrder && (
+        <EditOrderModal
+          order={editingOrder}
+          onClose={() => setEditingOrder(null)}
+          onSuccess={() => {
+            setEditingOrder(null);
             fetchOrders();
           }}
         />

@@ -32,6 +32,13 @@ router.get(
   brandController.getAllBrands,
 );
 
+router.get(
+  "/:name/calendar",
+  auth,
+  authorize("admin", "manager", "QC", "dev", "user"),
+  brandController.getBrandCalendar,
+);
+
 router.post(
     "/create-brand",
     // auth,

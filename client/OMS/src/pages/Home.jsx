@@ -15,6 +15,9 @@ const Home = () => {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [calendarLoading, setCalendarLoading] = useState(false);
+  const [calendarEmbedUrl, setCalendarEmbedUrl] = useState("");
+  const [calendarError, setCalendarError] = useState("");
 
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -117,6 +120,54 @@ const Home = () => {
       isMounted = false;
     };
   }, [selectedBrand, page, token]);
+
+  useEffect(() => {
+    if (!token || !selectedBrand) {
+      setCalendarEmbedUrl("");
+      setCalendarError("");
+      return;
+    }
+
+    let isMounted = true;
+
+    const fetchBrandCalendar = async () => {
+      try {
+        setCalendarLoading(true);
+        setCalendarEmbedUrl("");
+        setCalendarError("");
+
+        const response = await axios.get(
+          `/brands/${encodeURIComponent(selectedBrand)}/calendar`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          },
+        );
+
+        if (!isMounted) return;
+        setCalendarEmbedUrl(String(response?.data?.embedUrl || "").trim());
+      } catch (err) {
+        if (!isMounted) return;
+        setCalendarEmbedUrl("");
+        setCalendarError(
+          err?.response?.status === 404
+            ? "Calendar is not configured for this brand."
+            : "Failed to load brand calendar.",
+        );
+      } finally {
+        if (isMounted) {
+          setCalendarLoading(false);
+        }
+      }
+    };
+
+    fetchBrandCalendar();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedBrand, token]);
 
   return (
     <>
@@ -237,6 +288,28 @@ const Home = () => {
             </button>
           </div>
         )}
+
+        <div className="card om-card mt-3">
+          <div className="card-body">
+            <h3 className="h5 mb-3">Calendar for {selectedBrand || "Selected Brand"}</h3>
+            {calendarLoading ? (
+              <div className="text-center py-4">Loading calendar...</div>
+            ) : calendarEmbedUrl ? (
+              <div className="home-calendar-wrapper">
+                <iframe
+                  className="home-calendar-iframe"
+                  title={`calendar-${selectedBrand || "brand"}`}
+                  src={calendarEmbedUrl}
+                  loading="lazy"
+                />
+              </div>
+            ) : (
+              <div className="text-muted small">
+                {calendarError || "Calendar is not configured for this brand."}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </>
   );

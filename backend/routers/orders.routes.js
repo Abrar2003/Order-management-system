@@ -11,7 +11,9 @@ const {
   getOrdersByBrandAndStatus,
   getOrderSummary,
   getShipmentsDb,
+  editOrder,
   finalizeOrder,
+  reSync,
 } = require("../controllers/order.controller");
 
 const router = express.Router();
@@ -46,6 +48,13 @@ router.get(
 
 // Finalize shipping / add shipment entry
 router.patch(
+  "/edit-order/:id",
+  authenticate,
+  authorize("admin", "manager"),
+  editOrder,
+);
+
+router.patch(
   "/finalize-order/:id",
   authenticate,
   authorize("admin", "manager", "dev"),
@@ -57,5 +66,13 @@ router.get("/:brand/vendor-summary", authenticate, getVendorSummaryByBrand);
 
 // Get order by ID   
 router.get("/order-by-id/:id", getOrderById);
+
+// Resync the calendar
+router.post(
+  "/re-sync",
+  // authenticate,
+  // authorize("admin", "manager", "dev", "Dev"),
+  reSync
+);
 
 module.exports = router;

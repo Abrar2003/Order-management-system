@@ -14,3 +14,18 @@ export const uploadOrders = async (file) => {
 
   return res.data;
 };
+
+export const editOrder = async (id, payload) => {
+  if (!id) {
+    throw new Error("Order id is required");
+  }
+
+  const token = localStorage.getItem("token");
+  const res = await axios.patch(`/orders/edit-order/${id}`, payload, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return res.data;
+};

@@ -178,21 +178,21 @@ const QcDetails = () => {
       return matched || requestSnapshotsAsc[0];
     };
 
-    const requestRows = requestSnapshotsAsc.map((request, index) => ({
-      key: `request-${request?._id || index}`,
-      rowType: "Request",
-      sortTime: request.__requestTime || 0,
-      requestDate: request?.request_date || "",
-      inspectionDate: "",
-      inspectorName: request?.inspector?.name || "N/A",
-      requestedQty: request?.quantity_requested ?? 0,
-      offeredQty: "-",
-      inspectedQty: "-",
-      passedQty: "-",
-      cbmTotal: "-",
-      pendingAfter: "-",
-      remarks: request?.remarks || "QC aligned",
-    }));
+    // const requestRows = requestSnapshotsAsc.map((request, index) => ({
+    //   key: `request-${request?._id || index}`,
+    //   rowType: "Request",
+    //   sortTime: request.__requestTime || 0,
+    //   requestDate: request?.request_date || "",
+    //   inspectionDate: "",
+    //   inspectorName: request?.inspector?.name || "N/A",
+    //   requestedQty: request?.quantity_requested ?? 0,
+    //   offeredQty: "-",
+    //   inspectedQty: "-",
+    //   passedQty: "-",
+    //   cbmTotal: "-",
+    //   pendingAfter: "-",
+    //   remarks: request?.remarks || "QC aligned",
+    // }));
 
     const inspectionRows = inspectionHistory.map((record, index) => {
       const linkedRequest = resolveRequestForInspection(
@@ -225,7 +225,7 @@ const QcDetails = () => {
       };
     });
 
-    return [...requestRows, ...inspectionRows].sort(
+    return [ ...inspectionRows].sort(
       (a, b) => (b.sortTime || 0) - (a.sortTime || 0),
     );
   }, [qc?.request_history, qc?.inspection_record]);
@@ -327,7 +327,6 @@ const QcDetails = () => {
                   <table className="table table-sm table-striped align-middle mb-0">
                     <thead>
                       <tr>
-                        <th>Type</th>
                         <th>Request Date</th>
                         <th>Inspection Date</th>
                         <th>Inspector</th>
@@ -343,7 +342,6 @@ const QcDetails = () => {
                     <tbody>
                       {requestInspectionTimeline.map((row) => (
                         <tr key={row.key}>
-                          <td>{row.rowType}</td>
                           <td>{formatDateLabel(row.requestDate)}</td>
                           <td>{formatDateLabel(row.inspectionDate)}</td>
                           <td>{row.inspectorName}</td>

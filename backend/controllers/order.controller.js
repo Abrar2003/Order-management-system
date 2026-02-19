@@ -1,8 +1,13 @@
 const XLSX = require("xlsx");
 const Order = require("../models/order.model");
+const QC = require("../models/qc.model");
+const mongoose = require("mongoose");
 const dateParser = require("../helpers/dateparsser");
 const deleteFile = require("../helpers/fileCleanup");
-const { syncOrderGroup } = require("../services/gcalSync");
+const {
+  syncOrderGroup,
+  purgeOmsEventsForConfiguredBrandCalendars,
+} = require("../services/gcalSync");
 
 
 const ORDER_STATUS_SEQUENCE = [
@@ -42,6 +47,23 @@ const parsePositiveInt = (value, fallback) => {
   }
   return parsedValue;
 };
+
+const withTimeout = (promise, timeoutMs, label = "operation") =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    promise
+      .then((result) => {
+        clearTimeout(timer);
+        resolve(result);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
 
 const normalizeDistinctValues = (values = []) =>
   [
@@ -144,6 +166,87 @@ const buildShipmentMatch = ({
   return match;
 };
 
+const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+
+const parseDateLike = (value) => {
+  const asString = String(value ?? "").trim();
+  if (!asString) return null;
+  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(asString)
+    ? new Date(`${asString}T00:00:00`)
+    : new Date(asString);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+};
+
+const getShipmentQuantityTotal = (shipmentEntries = []) =>
+  (Array.isArray(shipmentEntries) ? shipmentEntries : []).reduce(
+    (sum, entry) => sum + Number(entry?.quantity || 0),
+    0,
+  );
+
+const normalizeShipmentEntries = (shipmentPayload, orderQuantity) => {
+  if (!Array.isArray(shipmentPayload)) {
+    throw new Error("shipment must be an array");
+  }
+
+  let cumulativeShipped = 0;
+  return shipmentPayload.map((entry, index) => {
+    const container = String(entry?.container ?? "").trim();
+    if (!container) {
+      throw new Error(`shipment[${index + 1}] container is required`);
+    }
+
+    const stuffingDate = parseDateLike(entry?.stuffing_date);
+    if (!stuffingDate) {
+      throw new Error(`shipment[${index + 1}] stuffing_date is invalid`);
+    }
+
+    const quantity = Number(entry?.quantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      throw new Error(`shipment[${index + 1}] quantity must be a positive number`);
+    }
+
+    cumulativeShipped += quantity;
+    if (cumulativeShipped > orderQuantity) {
+      throw new Error("total shipment quantity cannot exceed order quantity");
+    }
+
+    const remarks = String(entry?.remaining_remarks ?? "").trim();
+    const pending = Math.max(0, orderQuantity - cumulativeShipped);
+
+    return {
+      container,
+      stuffing_date: stuffingDate,
+      quantity,
+      pending,
+      remaining_remarks: remarks,
+    };
+  });
+};
+
+const computeOrderStatus = ({ orderQuantity, shippedQuantity, qcRecord }) => {
+  if (shippedQuantity >= orderQuantity && orderQuantity > 0) {
+    return "Shipped";
+  }
+
+  if (shippedQuantity > 0) {
+    return "Partial Shipped";
+  }
+
+  if (!qcRecord) {
+    return "Pending";
+  }
+
+  const passedQuantity = Number(qcRecord?.quantities?.qc_passed || 0);
+  const clientDemandQuantity = Number(qcRecord?.quantities?.client_demand || 0);
+
+  if (clientDemandQuantity > 0 && passedQuantity >= clientDemandQuantity) {
+    return "Inspection Done";
+  }
+
+  return "Under Inspection";
+};
+
 // Upload Orders Controller
 exports.uploadOrders = async (req, res) => {
   try {
@@ -237,9 +340,6 @@ exports.uploadOrders = async (req, res) => {
 
     if (newOrders.length > 0) {
       await Order.insertMany(newOrders);
-    }
-    if (newOrders.length > 0) {
-      await Order.insertMany(newOrders);
 
       // sync unique groups
       const groups = new Map();
@@ -258,7 +358,18 @@ exports.uploadOrders = async (req, res) => {
 
       for (let i = 0; i < arr.length; i += limit) {
         const batch = arr.slice(i, i + limit);
-        await Promise.all(batch.map((g) => syncOrderGroup(g)));
+        await Promise.all(
+          batch.map(async (g) => {
+            try {
+              await syncOrderGroup(g);
+            } catch (syncErr) {
+              console.error("Google Calendar sync failed for uploaded group:", {
+                group: g,
+                error: syncErr?.message || String(syncErr),
+              });
+            }
+          }),
+        );
       }
     }
 
@@ -947,6 +1058,185 @@ exports.getShipments = async (req, res) => {
   }
 };
 
+exports.editOrder = async (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid order id" });
+    }
+
+    const order = await Order.findById(id);
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    const payload = req.body || {};
+    const oldGroup = {
+      order_id: order.order_id,
+      brand: order.brand,
+      vendor: order.vendor,
+    };
+
+    const hasBrand = hasOwn(payload, "brand");
+    const hasVendor = hasOwn(payload, "vendor");
+    const hasItemCode = hasOwn(payload, "item_code");
+    const hasDescription = hasOwn(payload, "description");
+    const hasQuantity = hasOwn(payload, "quantity");
+    const hasShipment = hasOwn(payload, "shipment");
+
+    const nextBrand = hasBrand ? String(payload.brand ?? "").trim() : String(order.brand || "").trim();
+    const nextVendor = hasVendor ? String(payload.vendor ?? "").trim() : String(order.vendor || "").trim();
+    const nextItemCode = hasItemCode
+      ? String(payload.item_code ?? "").trim()
+      : String(order?.item?.item_code || "").trim();
+    const nextDescription = hasDescription
+      ? String(payload.description ?? "").trim()
+      : String(order?.item?.description || "").trim();
+    const nextQuantity = hasQuantity ? Number(payload.quantity) : Number(order.quantity || 0);
+
+    if (!nextBrand) {
+      return res.status(400).json({ message: "brand is required" });
+    }
+
+    if (!nextVendor) {
+      return res.status(400).json({ message: "vendor is required" });
+    }
+
+    if (!nextItemCode) {
+      return res.status(400).json({ message: "item_code is required" });
+    }
+
+    if (!Number.isFinite(nextQuantity) || nextQuantity <= 0) {
+      return res.status(400).json({
+        message: "quantity must be a valid positive number",
+      });
+    }
+
+    if (
+      nextItemCode !== String(order?.item?.item_code || "").trim()
+      && (await Order.exists({
+        _id: { $ne: order._id },
+        order_id: order.order_id,
+        "item.item_code": nextItemCode,
+      }))
+    ) {
+      return res.status(400).json({
+        message: "Another item with the same order_id and item_code already exists",
+      });
+    }
+
+    const normalizedShipment = hasShipment
+      ? normalizeShipmentEntries(payload.shipment, nextQuantity)
+      : null;
+    const shipmentToValidate = normalizedShipment || order.shipment || [];
+    const shippedQuantity = getShipmentQuantityTotal(shipmentToValidate);
+
+    if (shippedQuantity > nextQuantity) {
+      return res.status(400).json({
+        message: "shipping quantity cannot exceed order quantity",
+      });
+    }
+
+    let qcRecord = null;
+    if (order.qc_record && mongoose.Types.ObjectId.isValid(order.qc_record)) {
+      qcRecord = await QC.findById(order.qc_record);
+    }
+    if (!qcRecord) {
+      qcRecord = await QC.findOne({ order: order._id });
+    }
+
+    if (qcRecord) {
+      const passedQty = Number(qcRecord?.quantities?.qc_passed || 0);
+
+      if (hasQuantity) {
+        if (nextQuantity <= 0) {
+          return res.status(400).json({
+            message: "quantity cannot be zero",
+          });
+        }
+      }
+
+      qcRecord.item = qcRecord.item || {};
+      qcRecord.order_meta = qcRecord.order_meta || {};
+      qcRecord.quantities = qcRecord.quantities || {};
+
+      qcRecord.item.item_code = nextItemCode;
+      qcRecord.item.description = nextDescription;
+      qcRecord.order_meta.brand = nextBrand;
+      qcRecord.order_meta.vendor = nextVendor;
+
+      if (hasQuantity) {
+        qcRecord.quantities.client_demand = nextQuantity;
+        qcRecord.quantities.pending = math.abs(nextQuantity - passedQty);
+      }
+    }
+
+    order.item = order.item || {};
+    order.brand = nextBrand;
+    order.vendor = nextVendor;
+    order.quantity = nextQuantity;
+    order.item.item_code = nextItemCode;
+    order.item.description = nextDescription;
+    if (normalizedShipment) {
+      order.shipment = normalizedShipment;
+    }
+
+    order.status = computeOrderStatus({
+      orderQuantity: nextQuantity,
+      shippedQuantity,
+      qcRecord,
+    });
+
+    if (qcRecord && !order.qc_record) {
+      order.qc_record = qcRecord._id;
+    }
+
+    await order.save();
+    if (qcRecord) {
+      await qcRecord.save();
+    }
+
+    const newGroup = {
+      order_id: order.order_id,
+      brand: order.brand,
+      vendor: order.vendor,
+    };
+
+    const groupMap = new Map();
+    groupMap.set(`${oldGroup.order_id}__${oldGroup.brand}__${oldGroup.vendor}`, oldGroup);
+    groupMap.set(`${newGroup.order_id}__${newGroup.brand}__${newGroup.vendor}`, newGroup);
+    const groupsToSync = [...groupMap.values()];
+
+    const syncSettled = await Promise.allSettled(
+      groupsToSync.map((group) => syncOrderGroup(group)),
+    );
+
+    const calendar_sync = syncSettled.map((entry, index) => {
+      const group = groupsToSync[index];
+      if (entry.status === "fulfilled") {
+        return { group, ok: true, result: entry.value };
+      }
+      return {
+        group,
+        ok: false,
+        error: entry.reason?.message || String(entry.reason),
+      };
+    });
+
+    return res.status(200).json({
+      message: "Order updated successfully",
+      data: order,
+      calendar_sync,
+    });
+  } catch (error) {
+    console.error("Edit Order Error:", error);
+    return res.status(500).json({
+      message: "Failed to update order",
+      error: error.message,
+    });
+  }
+};
+
 exports.finalizeOrder = async (req, res) => {
   try {
     const { stuffing_date, container, quantity, remarks } = req.body;
@@ -1030,6 +1320,121 @@ exports.finalizeOrder = async (req, res) => {
     return res.status(500).json({
       message: "Failed to finalize order shipment",
       error: error.message,
+    });
+  }
+};
+exports.reSync = async (req, res) => {
+  try {
+    const batchSize = Math.min(20, parsePositiveInt(req.query.batchSize, 5));
+    const timeoutMs = Math.min(1200000, parsePositiveInt(req.query.timeoutMs, 300000));
+
+    const purgeSummary = await withTimeout(
+      purgeOmsEventsForConfiguredBrandCalendars(),
+      timeoutMs,
+      "purge existing OMS calendar events",
+    );
+
+    await Order.updateMany(
+      {},
+      {
+        $set: {
+          "gcal.calendarId": null,
+          "gcal.eventId": null,
+          "gcal.lastSyncedAt": null,
+          "gcal.lastSyncError": null,
+        },
+      },
+    );
+
+    const groups = await Order.aggregate([
+      {
+        $group: {
+          _id: { order_id: "$order_id", brand: "$brand", vendor: "$vendor" },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          order_id: "$_id.order_id",
+          brand: "$_id.brand",
+          vendor: "$_id.vendor",
+        },
+      },
+      { $sort: { order_id: 1, brand: 1, vendor: 1 } },
+    ]);
+
+    if (groups.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: "No order groups found to sync",
+        purge: purgeSummary,
+        groups: 0,
+        processed: 0,
+        successCount: 0,
+        failureCount: 0,
+        results: [],
+      });
+    }
+
+    const results = [];
+    let processed = 0;
+    let successCount = 0;
+    let failureCount = 0;
+
+    for (let i = 0; i < groups.length; i += batchSize) {
+      const batch = groups.slice(i, i + batchSize);
+      const batchResults = await Promise.all(
+        batch.map(async (group) => {
+          try {
+            const syncResult = await withTimeout(
+              syncOrderGroup(group),
+              timeoutMs,
+              `reSync group ${group.order_id}/${group.brand}/${group.vendor}`,
+            );
+            successCount += 1;
+            return { group, ok: true, result: syncResult };
+          } catch (error) {
+            failureCount += 1;
+            const errorMessage = error?.message || String(error);
+            console.error("reSync group failed:", {
+              group,
+              error: errorMessage,
+            });
+            await Order.updateMany(group, {
+              $set: {
+                "gcal.lastSyncedAt": new Date(),
+                "gcal.lastSyncError": errorMessage,
+              },
+            });
+            return { group, ok: false, error: errorMessage };
+          }
+        }),
+      );
+      processed += batch.length;
+      results.push(...batchResults);
+    }
+
+    return res.status(200).json({
+      success: failureCount === 0,
+      message:
+        failureCount === 0
+          ? "Calendar re-sync completed"
+          : "Calendar re-sync completed with some failures",
+      purge: purgeSummary,
+      groups: groups.length,
+      processed,
+      successCount,
+      failureCount,
+      batchSize,
+      timeoutMs,
+      results,
+    });
+  } catch (error) {
+    console.error("reSync failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Calendar re-sync failed",
+      error: error?.message || String(error),
     });
   }
 };

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import "../App.css";
 
 const defaultFilters = {
@@ -18,6 +18,26 @@ const STATUS_SEQUENCE = [
   "Partial Shipped",
   "Shipped",
 ];
+
+const DEFAULT_LIMIT = 20;
+const LIMIT_OPTIONS = [10, 20, 50, 100];
+
+const parsePositiveInt = (value, fallback) => {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return parsed;
+};
+
+const normalizeFilterParam = (value, fallback = "all") => {
+  const cleaned = String(value || "").trim();
+  if (!cleaned) return fallback;
+  return cleaned;
+};
+
+const parseLimit = (value) => {
+  const parsed = parsePositiveInt(value, DEFAULT_LIMIT);
+  return LIMIT_OPTIONS.includes(parsed) ? parsed : DEFAULT_LIMIT;
+};
 
 const normalizeStatus = (value) => {
   if (!value) return null;
@@ -55,13 +75,23 @@ const getStatus = (order) => {
 };
 
 const OpenOrders = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [totalPages, setTotalPages] = useState(1);
-  const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(20);
-  const [filters, setFilters] = useState(defaultFilters);
-  const [orderSearchInput, setOrderSearchInput] = useState("");
+  const [page, setPage] = useState(() =>
+    parsePositiveInt(searchParams.get("page"), 1),
+  );
+  const [limit, setLimit] = useState(() => parseLimit(searchParams.get("limit")));
+  const [filters, setFilters] = useState(() => ({
+    vendor: normalizeFilterParam(searchParams.get("vendor"), "all"),
+    brand: normalizeFilterParam(searchParams.get("brand"), "all"),
+    status: normalizeFilterParam(searchParams.get("status"), "all"),
+    order: String(searchParams.get("order") || "").trim(),
+  }));
+  const [orderSearchInput, setOrderSearchInput] = useState(() =>
+    String(searchParams.get("order") || "").trim(),
+  );
   const [filterOptions, setFilterOptions] = useState({
     vendors: [],
     brands: [],
@@ -142,6 +172,53 @@ const OpenOrders = () => {
   }, [getOrdersByFilters]);
 
   useEffect(() => {
+    const nextFilters = {
+      vendor: normalizeFilterParam(searchParams.get("vendor"), "all"),
+      brand: normalizeFilterParam(searchParams.get("brand"), "all"),
+      status: normalizeFilterParam(searchParams.get("status"), "all"),
+      order: String(searchParams.get("order") || "").trim(),
+    };
+    const nextPage = parsePositiveInt(searchParams.get("page"), 1);
+    const nextLimit = parseLimit(searchParams.get("limit"));
+
+    setFilters((prev) =>
+      prev.vendor === nextFilters.vendor
+      && prev.brand === nextFilters.brand
+      && prev.status === nextFilters.status
+      && prev.order === nextFilters.order
+        ? prev
+        : nextFilters,
+    );
+    setPage((prev) => (prev === nextPage ? prev : nextPage));
+    setLimit((prev) => (prev === nextLimit ? prev : nextLimit));
+  }, [searchParams]);
+
+  useEffect(() => {
+    const next = new URLSearchParams();
+    if (filters.vendor && filters.vendor !== "all") next.set("vendor", filters.vendor);
+    if (filters.brand && filters.brand !== "all") next.set("brand", filters.brand);
+    if (filters.status && filters.status !== "all") next.set("status", filters.status);
+    if (filters.order) next.set("order", filters.order);
+    if (page > 1) next.set("page", String(page));
+    if (limit !== DEFAULT_LIMIT) next.set("limit", String(limit));
+
+    const nextQuery = next.toString();
+    const currentQuery = searchParams.toString();
+    if (nextQuery !== currentQuery) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [
+    filters.brand,
+    filters.order,
+    filters.status,
+    filters.vendor,
+    limit,
+    page,
+    searchParams,
+    setSearchParams,
+  ]);
+
+  useEffect(() => {
     setOrderSearchInput(filters.order || "");
   }, [filters.order]);
 
@@ -150,6 +227,16 @@ const OpenOrders = () => {
     setPage(nextPage);
   };
 
+  const clearFilter = (e) => {
+    e.preventDefault();
+    setFilters({
+    vendors: [],
+    brands: [],
+    statuses: [],
+    order_ids: [],
+  });
+  getOrdersByFilters();
+  }
   const handleSearch = (e) => {
     e.preventDefault();
     setPage(1);
@@ -184,7 +271,7 @@ const OpenOrders = () => {
         <div className="card om-card mb-3">
           <div className="card-body">
             <div className="row g-2 align-items-end">
-              <div className="col-md-3">
+              <div className="col-md-2">
                 <label className="form-label">Vendor</label>
                 <select
                   className="form-select"
@@ -203,7 +290,7 @@ const OpenOrders = () => {
                 </select>
               </div>
 
-              <div className="col-md-3">
+              <div className="col-md-2">
                 <label className="form-label">Brand</label>
                 <select
                   className="form-select"
@@ -241,7 +328,7 @@ const OpenOrders = () => {
                 </select>
               </div>
 
-              <div className="col-md-4">
+              <div className="col-md-6">
                 <form onSubmit={handleSearch} className="row g-2">
                   <div className="col-8">
                     <label className="form-label">Search by Order ID</label>
@@ -260,9 +347,12 @@ const OpenOrders = () => {
                       ))}
                     </datalist>
                   </div>
-                  <div className="col-4 d-flex align-items-end">
+                  <div className="col-3 d-flex align-items-end">
                     <button type="submit" className="btn btn-primary w-100">
                       Search
+                    </button>
+                    <button style={{marginLeft: "5%"}} onClick={clearFilter} className="btn btn-primary w-100">
+                      Clear
                     </button>
                   </div>
                 </form>
