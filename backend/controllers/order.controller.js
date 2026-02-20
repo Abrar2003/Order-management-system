@@ -184,12 +184,11 @@ const getShipmentQuantityTotal = (shipmentEntries = []) =>
     0,
   );
 
-const normalizeShipmentEntries = (shipmentPayload, orderQuantity) => {
+const normalizeShipmentEntries = (shipmentPayload) => {
   if (!Array.isArray(shipmentPayload)) {
     throw new Error("shipment must be an array");
   }
 
-  let cumulativeShipped = 0;
   return shipmentPayload.map((entry, index) => {
     const container = String(entry?.container ?? "").trim();
     if (!container) {
@@ -206,22 +205,45 @@ const normalizeShipmentEntries = (shipmentPayload, orderQuantity) => {
       throw new Error(`shipment[${index + 1}] quantity must be a positive number`);
     }
 
-    cumulativeShipped += quantity;
-    if (cumulativeShipped > orderQuantity) {
-      throw new Error("total shipment quantity cannot exceed order quantity");
-    }
-
     const remarks = String(entry?.remaining_remarks ?? "").trim();
-    const pending = Math.max(0, orderQuantity - cumulativeShipped);
 
     return {
       container,
       stuffing_date: stuffingDate,
       quantity,
-      pending,
       remaining_remarks: remarks,
     };
   });
+};
+
+const fitShipmentEntriesToOrderQuantity = (shipmentEntries = [], orderQuantity = 0) => {
+  const normalizedQuantity = Number(orderQuantity);
+  if (!Number.isFinite(normalizedQuantity) || normalizedQuantity <= 0) return [];
+
+  let cumulativeShipped = 0;
+  const nextEntries = [];
+
+  for (const entry of Array.isArray(shipmentEntries) ? shipmentEntries : []) {
+    if (cumulativeShipped >= normalizedQuantity) break;
+
+    const rawQuantity = Number(entry?.quantity);
+    if (!Number.isFinite(rawQuantity) || rawQuantity <= 0) continue;
+
+    const remaining = Math.max(0, normalizedQuantity - cumulativeShipped);
+    const adjustedQuantity = Math.min(rawQuantity, remaining);
+    if (adjustedQuantity <= 0) continue;
+
+    cumulativeShipped += adjustedQuantity;
+    nextEntries.push({
+      container: String(entry?.container ?? "").trim(),
+      stuffing_date: parseDateLike(entry?.stuffing_date),
+      quantity: adjustedQuantity,
+      pending: Math.max(0, normalizedQuantity - cumulativeShipped),
+      remaining_remarks: String(entry?.remaining_remarks ?? "").trim(),
+    });
+  }
+
+  return nextEntries;
 };
 
 const computeOrderStatus = ({ orderQuantity, shippedQuantity, qcRecord }) => {
@@ -863,7 +885,7 @@ exports.getShipmentsDb = async (req, res) => {
     const [orders, vendorsRaw, orderIdsRaw, itemCodesRaw] = await Promise.all([
       Order.find(buildShipmentMatch(filterInput))
         .select(
-          "order_id item vendor status quantity shipment order_date updatedAt",
+          "order_id item brand vendor status quantity shipment order_date updatedAt",
         )
         .sort({ order_date: -1, updatedAt: -1, order_id: -1 })
         .lean(),
@@ -893,6 +915,7 @@ exports.getShipmentsDb = async (req, res) => {
       const baseRow = {
         _id: order?._id || null,
         order_id: order?.order_id || "",
+        brand: order?.brand || "",
         vendor: order?.vendor || "",
         item: {
           item_code: order?.item?.item_code || "",
@@ -982,7 +1005,7 @@ exports.getShipments = async (req, res) => {
       status: { $in: statusesToInclude },
     })
       .select(
-        "order_id item vendor status quantity shipment order_date updatedAt",
+        "order_id item brand vendor status quantity shipment order_date updatedAt",
       )
       .sort({ order_date: -1, updatedAt: -1, order_id: -1 })
       .lean();
@@ -999,6 +1022,7 @@ exports.getShipments = async (req, res) => {
       const baseRow = {
         _id: order?._id || null,
         order_id: order?.order_id || "",
+        brand: order?.brand || "",
         vendor: order?.vendor || "",
         item: {
           item_code: order?.item?.item_code || "",
@@ -1083,6 +1107,14 @@ exports.editOrder = async (req, res) => {
     const hasDescription = hasOwn(payload, "description");
     const hasQuantity = hasOwn(payload, "quantity");
     const hasShipment = hasOwn(payload, "shipment");
+    const requesterRole = String(req.user?.role || "").trim().toLowerCase();
+    const isRequesterAdmin = requesterRole === "admin";
+
+    if ((hasQuantity || hasShipment) && !isRequesterAdmin) {
+      return res.status(403).json({
+        message: "Only admin can edit shipping details or final quantity",
+      });
+    }
 
     const nextBrand = hasBrand ? String(payload.brand ?? "").trim() : String(order.brand || "").trim();
     const nextVendor = hasVendor ? String(payload.vendor ?? "").trim() : String(order.vendor || "").trim();
@@ -1125,17 +1157,17 @@ exports.editOrder = async (req, res) => {
       });
     }
 
-    const normalizedShipment = hasShipment
-      ? normalizeShipmentEntries(payload.shipment, nextQuantity)
-      : null;
-    const shipmentToValidate = normalizedShipment || order.shipment || [];
-    const shippedQuantity = getShipmentQuantityTotal(shipmentToValidate);
-
-    if (shippedQuantity > nextQuantity) {
-      return res.status(400).json({
-        message: "shipping quantity cannot exceed order quantity",
-      });
+    const shouldRebuildShipment = hasShipment || hasQuantity;
+    let adjustedShipment = Array.isArray(order.shipment) ? order.shipment : [];
+    if (shouldRebuildShipment) {
+      const shipmentSource = hasShipment ? payload.shipment : order.shipment || [];
+      const normalizedShipmentSource = normalizeShipmentEntries(shipmentSource);
+      adjustedShipment = fitShipmentEntriesToOrderQuantity(
+        normalizedShipmentSource,
+        nextQuantity,
+      );
     }
+    const shippedQuantity = getShipmentQuantityTotal(adjustedShipment);
 
     let qcRecord = null;
     if (order.qc_record && mongoose.Types.ObjectId.isValid(order.qc_record)) {
@@ -1146,16 +1178,6 @@ exports.editOrder = async (req, res) => {
     }
 
     if (qcRecord) {
-      const passedQty = Number(qcRecord?.quantities?.qc_passed || 0);
-
-      if (hasQuantity) {
-        if (nextQuantity <= 0) {
-          return res.status(400).json({
-            message: "quantity cannot be zero",
-          });
-        }
-      }
-
       qcRecord.item = qcRecord.item || {};
       qcRecord.order_meta = qcRecord.order_meta || {};
       qcRecord.quantities = qcRecord.quantities || {};
@@ -1166,8 +1188,25 @@ exports.editOrder = async (req, res) => {
       qcRecord.order_meta.vendor = nextVendor;
 
       if (hasQuantity) {
+        const clampToDemand = (value) => {
+          const parsed = Number(value || 0);
+          if (!Number.isFinite(parsed) || parsed < 0) return 0;
+          return Math.min(parsed, nextQuantity);
+        };
+
+        const nextPassed = clampToDemand(qcRecord.quantities.qc_passed);
+        const nextCheckedRaw = clampToDemand(qcRecord.quantities.qc_checked);
+        const nextChecked = Math.max(nextPassed, nextCheckedRaw);
+        const nextRequested = clampToDemand(qcRecord.quantities.quantity_requested);
+        const nextProvision = clampToDemand(qcRecord.quantities.vendor_provision);
+
         qcRecord.quantities.client_demand = nextQuantity;
-        qcRecord.quantities.pending = math.abs(nextQuantity - passedQty);
+        qcRecord.quantities.qc_passed = nextPassed;
+        qcRecord.quantities.qc_checked = nextChecked;
+        qcRecord.quantities.quantity_requested = nextRequested;
+        qcRecord.quantities.vendor_provision = nextProvision;
+        qcRecord.quantities.pending = Math.max(0, nextQuantity - nextPassed);
+        qcRecord.quantities.qc_rejected = Math.max(0, nextChecked - nextPassed);
       }
     }
 
@@ -1177,8 +1216,8 @@ exports.editOrder = async (req, res) => {
     order.quantity = nextQuantity;
     order.item.item_code = nextItemCode;
     order.item.description = nextDescription;
-    if (normalizedShipment) {
-      order.shipment = normalizedShipment;
+    if (shouldRebuildShipment) {
+      order.shipment = adjustedShipment;
     }
 
     order.status = computeOrderStatus({
@@ -1246,9 +1285,9 @@ exports.finalizeOrder = async (req, res) => {
       return res.status(404).json({ message: "Order not found" });
     }
 
-    if (!["Inspection Done", "Partial Shipped"].includes(order.status)) {
+    if (order.status === "Shipped") {
       return res.status(400).json({
-        message: "Order can only be shipped after inspection is done",
+        message: "Order is already fully shipped",
       });
     }
 
@@ -1277,6 +1316,12 @@ exports.finalizeOrder = async (req, res) => {
       });
     }
 
+    const qcRecord = order?.qc_record
+      ? await QC.findById(order.qc_record).select("quantities.qc_passed")
+      : await QC.findOne({ order: order._id }).select("quantities.qc_passed");
+
+    const passedQuantity = Number(qcRecord?.quantities?.qc_passed || 0);
+
     const shippedAlready = (order.shipment || []).reduce(
       (sum, entry) => sum + Number(entry?.quantity || 0),
       0,
@@ -1284,11 +1329,24 @@ exports.finalizeOrder = async (req, res) => {
 
     const orderQuantity = Number(order.quantity || 0);
     const remainingQuantity = Math.max(0, orderQuantity - shippedAlready);
-    const pending = Math.max(0, remainingQuantity - quantity);
+    const pending = Math.max(0, remainingQuantity - parsedQuantity);
 
     if (parsedQuantity > remainingQuantity) {
       return res.status(400).json({
         message: "shipping quantity cannot exceed remaining quantity",
+      });
+    }
+
+    const shippableFromPassed = Math.max(0, passedQuantity - shippedAlready);
+    if (shippableFromPassed <= 0) {
+      return res.status(400).json({
+        message: "No qc passed quantity is available for shipment",
+      });
+    }
+
+    if (parsedQuantity > shippableFromPassed) {
+      return res.status(400).json({
+        message: "shipping quantity cannot exceed available qc passed quantity",
       });
     }
 
@@ -1297,7 +1355,7 @@ exports.finalizeOrder = async (req, res) => {
       container: parsedContainer,
       stuffing_date: parsedStuffingDate,
       quantity: parsedQuantity,
-      pending: pending,
+      pending,
       remaining_remarks: remarks,
     });
 

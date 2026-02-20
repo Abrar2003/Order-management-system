@@ -136,6 +136,17 @@ const Navbar = () => {
                     <button
                       type="button"
                       className="btn btn-outline-primary btn-sm rounded-pill"
+                      onClick={() => handleNavigate("/container")}
+                    >
+                      Bulk Shipping
+                    </button>
+                  </li>
+                )}
+                {canAccessQc && (
+                  <li className="nav-item">
+                    <button
+                      type="button"
+                      className="btn btn-outline-primary btn-sm rounded-pill"
                       onClick={() => handleNavigate("/daily-reports")}
                     >
                       Daily Reports

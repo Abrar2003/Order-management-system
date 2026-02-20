@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import "../App.css";
 import ShippingModal from "../components/ShippingModal";
+import EditOrderModal from "../components/EditOrderModal";
 import { getUserFromToken } from "../auth/auth.utils";
 
 const useDebouncedValue = (value, delay = 300) => {
@@ -37,6 +38,7 @@ const EMPTY_SUMMARY = {
 const Shipments = () => {
   const navigate = useNavigate();
   const user = getUserFromToken();
+  const isAdmin = String(user?.role || "").toLowerCase() === "admin";
   const canFinalizeShipping = ["admin", "manager", "dev", "Dev"].includes(
     user?.role,
   );
@@ -45,9 +47,11 @@ const Shipments = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [editingOrder, setEditingOrder] = useState(null);
   const [orderIdSearch, setOrderIdSearch] = useState("");
   const [itemCodeSearch, setItemCodeSearch] = useState("");
   const [vendorFilter, setVendorFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [summary, setSummary] = useState(EMPTY_SUMMARY);
   const [filterOptions, setFilterOptions] = useState({
     vendors: [],
@@ -102,11 +106,23 @@ const Shipments = () => {
     fetchShipments();
   }, [fetchShipments]);
 
+  const filteredRows = useMemo(() => {
+    if (statusFilter === "all") return rows;
+    return rows.filter((row) => String(row?.status || "").trim() === statusFilter);
+  }, [rows, statusFilter]);
+
   const canShowFinalizeAction = useCallback(
     (row) =>
       canFinalizeShipping &&
       ["Inspection Done", "Partial Shipped"].includes(row?.status),
     [canFinalizeShipping],
+  );
+
+  const canShowEditAction = useCallback(
+    (row) =>
+      isAdmin &&
+      ["Partial Shipped", "Shipped"].includes(String(row?.status || "").trim()),
+    [isAdmin],
   );
 
   const handleOpenShippingModal = useCallback((row) => {
@@ -123,6 +139,24 @@ const Shipments = () => {
     };
 
     setSelectedOrder(normalizedOrder);
+  }, []);
+
+  const handleOpenEditModal = useCallback((row) => {
+    const normalizedOrder = {
+      _id: row?._id,
+      order_id: row?.order_id || "",
+      brand: row?.brand || "",
+      vendor: row?.vendor || "",
+      item: {
+        item_code: row?.item?.item_code || row?.item_code || "",
+        description: row?.item?.description || row?.description || "",
+      },
+      quantity: Number(row?.order_quantity || 0),
+      shipment: Array.isArray(row?.shipment) ? row.shipment : [],
+      status: row?.status || "",
+    };
+
+    setEditingOrder(normalizedOrder);
   }, []);
 
   return (
@@ -207,6 +241,7 @@ const Shipments = () => {
                     setOrderIdSearch("");
                     setItemCodeSearch("");
                     setVendorFilter("all");
+                    setStatusFilter("all");
                   }}
                 >
                   Clear
@@ -218,14 +253,37 @@ const Shipments = () => {
 
         <div className="card om-card mb-3">
           <div className="card-body d-flex flex-wrap gap-2">
-            <span className="om-summary-chip">Total Items: {summary.total}</span>
-            <span className="om-summary-chip">
+            <button
+              type="button"
+              className={`btn btn-sm ${statusFilter === "all" ? "btn-primary" : "btn-outline-secondary"}`}
+              onClick={() => setStatusFilter("all")}
+            >
+              Total Items: {summary.total}
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${statusFilter === "Inspection Done" ? "btn-primary" : "btn-outline-secondary"}`}
+              onClick={() => setStatusFilter("Inspection Done")}
+            >
               Inspection Done: {summary.inspectionDone}
-            </span>
-            <span className="om-summary-chip">
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${statusFilter === "Partial Shipped" ? "btn-primary" : "btn-outline-secondary"}`}
+              onClick={() => setStatusFilter("Partial Shipped")}
+            >
               Partial Shipped: {summary.partialShipped}
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${statusFilter === "Shipped" ? "btn-primary" : "btn-outline-secondary"}`}
+              onClick={() => setStatusFilter("Shipped")}
+            >
+              Shipped: {summary.shipped}
+            </button>
+            <span className="om-summary-chip">
+              Showing: {statusFilter === "all" ? "All" : statusFilter}
             </span>
-            <span className="om-summary-chip">Shipped: {summary.shipped}</span>
           </div>
         </div>
 
@@ -255,13 +313,16 @@ const Shipments = () => {
                       <th>Pending</th>
                       <th>Remarks</th>
                       {canFinalizeShipping && <th>Finalize</th>}
+                      {isAdmin && <th>Edit</th>}
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.length === 0 && (
+                    {filteredRows.length === 0 && (
                       <tr>
                         <td
-                          colSpan={canFinalizeShipping ? 11 : 10}
+                          colSpan={
+                            (canFinalizeShipping ? 11 : 10) + (isAdmin ? 1 : 0)
+                          }
                           className="text-center py-4"
                         >
                           No records found
@@ -269,7 +330,7 @@ const Shipments = () => {
                       </tr>
                     )}
 
-                    {rows.map((row, index) => (
+                    {filteredRows.map((row, index) => (
                       <tr key={row?.shipment_id || `${row.order_id}-${row.item_code}-${index}`}>
                         <td>{row?.order_id || "N/A"}</td>
                         <td>{row?.item_code || "N/A"}</td>
@@ -296,6 +357,21 @@ const Shipments = () => {
                             )}
                           </td>
                         )}
+                        {isAdmin && (
+                          <td>
+                            {canShowEditAction(row) ? (
+                              <button
+                                type="button"
+                                className="btn btn-outline-primary btn-sm"
+                                onClick={() => handleOpenEditModal(row)}
+                              >
+                                Edit Shipping
+                              </button>
+                            ) : (
+                              <span className="text-secondary small">N/A</span>
+                            )}
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -311,6 +387,16 @@ const Shipments = () => {
           onClose={() => setSelectedOrder(null)}
           onSuccess={() => {
             setSelectedOrder(null);
+            fetchShipments();
+          }}
+        />
+      )}
+      {editingOrder && (
+        <EditOrderModal
+          order={editingOrder}
+          onClose={() => setEditingOrder(null)}
+          onSuccess={() => {
+            setEditingOrder(null);
             fetchShipments();
           }}
         />

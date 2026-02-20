@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { editOrder } from "../services/orders.service";
+import { getUserFromToken } from "../auth/auth.utils";
 import "../App.css";
 
 const toDateInputValue = (value) => {
@@ -27,7 +28,45 @@ const createEmptyShipmentRow = () => ({
   remaining_remarks: "",
 });
 
+const toSafeNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const buildAdjustedShipmentPreview = (shipmentRows, targetQuantity) => {
+  const normalizedTarget = Number(targetQuantity);
+  if (!Number.isFinite(normalizedTarget) || normalizedTarget <= 0) return [];
+
+  let cumulative = 0;
+  const adjustedRows = [];
+
+  for (const row of Array.isArray(shipmentRows) ? shipmentRows : []) {
+    if (cumulative >= normalizedTarget) break;
+
+    const rawQty = Number(row?.quantity);
+    if (!Number.isFinite(rawQty) || rawQty <= 0) continue;
+
+    const remaining = Math.max(0, normalizedTarget - cumulative);
+    const adjustedQty = Math.min(rawQty, remaining);
+    if (adjustedQty <= 0) continue;
+
+    cumulative += adjustedQty;
+    adjustedRows.push({
+      container: String(row?.container || "").trim(),
+      stuffing_date: toDateInputValue(row?.stuffing_date),
+      quantity: adjustedQty,
+      pending: Math.max(0, normalizedTarget - cumulative),
+      remaining_remarks: String(row?.remaining_remarks || "").trim(),
+    });
+  }
+
+  return adjustedRows;
+};
+
 const EditOrderModal = ({ order, onClose, onSuccess }) => {
+  const user = getUserFromToken();
+  const isAdmin = String(user?.role || "").toLowerCase() === "admin";
+
   const [form, setForm] = useState({
     brand: String(order?.brand ?? ""),
     vendor: String(order?.vendor ?? ""),
@@ -39,8 +78,8 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const orderQuantity = Number(form.quantity);
-  const totalShipped = useMemo(
+  const targetQuantity = Number(form.quantity);
+  const inputTotalShipped = useMemo(
     () =>
       (form.shipment || []).reduce((sum, entry) => {
         const quantity = Number(entry?.quantity);
@@ -48,8 +87,21 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
       }, 0),
     [form.shipment],
   );
-  const remainingQuantity = Number.isFinite(orderQuantity)
-    ? Math.max(0, orderQuantity - totalShipped)
+
+  const adjustedShipmentPreview = useMemo(
+    () => buildAdjustedShipmentPreview(form.shipment, targetQuantity),
+    [form.shipment, targetQuantity],
+  );
+  const adjustedShippedTotal = useMemo(
+    () =>
+      adjustedShipmentPreview.reduce(
+        (sum, entry) => sum + toSafeNumber(entry?.quantity),
+        0,
+      ),
+    [adjustedShipmentPreview],
+  );
+  const adjustedRemaining = Number.isFinite(targetQuantity)
+    ? Math.max(0, targetQuantity - adjustedShippedTotal)
     : 0;
 
   const updateShipmentRow = (index, field, value) => {
@@ -64,6 +116,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
   };
 
   const removeShipmentRow = (index) => {
+    if (!isAdmin) return;
     setForm((prev) => ({
       ...prev,
       shipment: prev.shipment.filter((_, i) => i !== index),
@@ -71,6 +124,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
   };
 
   const addShipmentRow = () => {
+    if (!isAdmin) return;
     setForm((prev) => ({
       ...prev,
       shipment: [...prev.shipment, createEmptyShipmentRow()],
@@ -81,35 +135,67 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
     const brand = String(form.brand || "").trim();
     const vendor = String(form.vendor || "").trim();
     const itemCode = String(form.item_code || "").trim();
-    const quantity = Number(form.quantity);
 
     if (!brand) return "brand is required";
     if (!vendor) return "vendor is required";
     if (!itemCode) return "item_code is required";
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      return "quantity must be a valid positive number";
-    }
 
-    let cumulative = 0;
-    for (let i = 0; i < form.shipment.length; i += 1) {
-      const row = form.shipment[i] || {};
-      const container = String(row.container || "").trim();
-      const stuffingDate = toDateInputValue(row.stuffing_date);
-      const shipmentQty = Number(row.quantity);
-
-      if (!container) return `shipment row ${i + 1}: container is required`;
-      if (!stuffingDate) return `shipment row ${i + 1}: stuffing date is invalid`;
-      if (!Number.isFinite(shipmentQty) || shipmentQty <= 0) {
-        return `shipment row ${i + 1}: quantity must be a positive number`;
+    if (isAdmin) {
+      const quantity = Number(form.quantity);
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        return "quantity must be a valid positive number";
       }
 
-      cumulative += shipmentQty;
-      if (cumulative > quantity) {
-        return "total shipment quantity cannot exceed order quantity";
+      for (let i = 0; i < form.shipment.length; i += 1) {
+        const row = form.shipment[i] || {};
+        const container = String(row.container || "").trim();
+        const stuffingDate = toDateInputValue(row.stuffing_date);
+        const shipmentQty = Number(row.quantity);
+
+        if (!container) return `shipment row ${i + 1}: container is required`;
+        if (!stuffingDate) {
+          return `shipment row ${i + 1}: stuffing date is invalid`;
+        }
+        if (!Number.isFinite(shipmentQty) || shipmentQty <= 0) {
+          return `shipment row ${i + 1}: quantity must be a positive number`;
+        }
       }
     }
 
     return null;
+  };
+
+  const buildConfirmationMessage = (payload) => {
+    const lines = [
+      "Confirm these changes:",
+      `Order ID: ${order?.order_id || "N/A"}`,
+      `Item Code: ${payload.item_code}`,
+      `Description: ${payload.description || "N/A"}`,
+      `Brand: ${payload.brand}`,
+      `Vendor: ${payload.vendor}`,
+    ];
+
+    if (isAdmin) {
+      lines.push(
+        `Order Quantity: ${toSafeNumber(order?.quantity)} -> ${payload.quantity}`,
+      );
+      lines.push(`Input Shipment Total: ${inputTotalShipped}`);
+      lines.push(`Adjusted Shipment Total: ${adjustedShippedTotal}`);
+      lines.push(`Adjusted Remaining: ${adjustedRemaining}`);
+      lines.push("Adjusted Shipment Rows:");
+
+      if (adjustedShipmentPreview.length === 0) {
+        lines.push("0) None");
+      } else {
+        adjustedShipmentPreview.forEach((entry, idx) => {
+          lines.push(
+            `${idx + 1}) ${entry.container} | ${entry.stuffing_date} | qty ${entry.quantity} | pending ${entry.pending} | remarks ${entry.remaining_remarks || "-"}`,
+          );
+        });
+      }
+    }
+
+    return lines.join("\n");
   };
 
   const handleSubmit = async () => {
@@ -123,16 +209,24 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
     const payload = {
       brand: String(form.brand || "").trim(),
       vendor: String(form.vendor || "").trim(),
-      quantity: Number(form.quantity),
       item_code: String(form.item_code || "").trim(),
       description: String(form.description ?? "").trim(),
-      shipment: form.shipment.map((entry) => ({
+    };
+
+    if (isAdmin) {
+      payload.quantity = Number(form.quantity);
+      payload.shipment = form.shipment.map((entry) => ({
         container: String(entry?.container || "").trim(),
         stuffing_date: toDateInputValue(entry?.stuffing_date),
         quantity: Number(entry?.quantity),
         remaining_remarks: String(entry?.remaining_remarks ?? "").trim(),
-      })),
-    };
+      }));
+    }
+
+    const confirmMessage = buildConfirmationMessage(payload);
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
 
     try {
       setSaving(true);
@@ -184,8 +278,14 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                   className="form-control"
                   min="1"
                   value={form.quantity}
+                  disabled={!isAdmin}
                   onChange={(e) => setForm((prev) => ({ ...prev, quantity: e.target.value }))}
                 />
+                {!isAdmin && (
+                  <div className="small text-secondary mt-1">
+                    Only admin can edit quantity or shipping details.
+                  </div>
+                )}
               </div>
               <div className="col-md-4">
                 <label className="form-label">Item Code</label>
@@ -209,9 +309,11 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
 
             <div className="d-flex justify-content-between align-items-center">
               <h6 className="mb-0">Shipment Rows</h6>
-              <button type="button" className="btn btn-outline-secondary btn-sm" onClick={addShipmentRow}>
-                Add Row
-              </button>
+              {isAdmin && (
+                <button type="button" className="btn btn-outline-secondary btn-sm" onClick={addShipmentRow}>
+                  Add Row
+                </button>
+              )}
             </div>
 
             <div className="table-responsive">
@@ -240,6 +342,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                           type="text"
                           className="form-control form-control-sm"
                           value={entry.container}
+                          disabled={!isAdmin}
                           onChange={(e) =>
                             updateShipmentRow(index, "container", e.target.value)
                           }
@@ -250,6 +353,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                           type="date"
                           className="form-control form-control-sm"
                           value={entry.stuffing_date}
+                          disabled={!isAdmin}
                           onChange={(e) =>
                             updateShipmentRow(index, "stuffing_date", e.target.value)
                           }
@@ -261,6 +365,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                           min="1"
                           className="form-control form-control-sm"
                           value={entry.quantity}
+                          disabled={!isAdmin}
                           onChange={(e) =>
                             updateShipmentRow(index, "quantity", e.target.value)
                           }
@@ -271,19 +376,24 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                           type="text"
                           className="form-control form-control-sm"
                           value={entry.remaining_remarks}
+                          disabled={!isAdmin}
                           onChange={(e) =>
                             updateShipmentRow(index, "remaining_remarks", e.target.value)
                           }
                         />
                       </td>
                       <td>
-                        <button
-                          type="button"
-                          className="btn btn-outline-danger btn-sm"
-                          onClick={() => removeShipmentRow(index)}
-                        >
-                          Remove
-                        </button>
+                        {isAdmin ? (
+                          <button
+                            type="button"
+                            className="btn btn-outline-danger btn-sm"
+                            onClick={() => removeShipmentRow(index)}
+                          >
+                            Remove
+                          </button>
+                        ) : (
+                          <span className="text-secondary small">N/A</span>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -292,9 +402,25 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
             </div>
 
             <div className="d-flex flex-wrap gap-2">
-              <span className="om-summary-chip">Total shipped: {totalShipped}</span>
-              <span className="om-summary-chip">Remaining: {remainingQuantity}</span>
+              <span className="om-summary-chip">Input shipped: {inputTotalShipped}</span>
+              {isAdmin && (
+                <>
+                  <span className="om-summary-chip">
+                    Adjusted shipped: {adjustedShippedTotal}
+                  </span>
+                  <span className="om-summary-chip">
+                    Adjusted remaining: {adjustedRemaining}
+                  </span>
+                </>
+              )}
             </div>
+
+            {isAdmin && (
+              <div className="small text-secondary">
+                Any positive quantity is allowed. On save, shipment rows and QC
+                quantities are auto-adjusted to match the final quantity.
+              </div>
+            )}
 
             {error && <div className="alert alert-danger mb-0">{error}</div>}
           </div>
