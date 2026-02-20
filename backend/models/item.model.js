@@ -1,0 +1,58 @@
+const mongoose = require("mongoose");
+
+const itemSchema = new mongoose.Schema(
+  {
+    code: {
+      type: String,
+      required: true,
+      unique: true,
+      index: true,
+      trim: true,
+    },
+    name: { type: String, default: "", trim: true },
+    description: { type: String, default: "", trim: true },
+    brands: { type: [String], default: [] },
+    vendors: { type: [String], default: [] },
+    weight: {
+      net: { type: Number, default: 0, min: 0 },
+      gross: { type: Number, default: 0, min: 0 },
+    },
+    cbm: {
+      total: { type: String, default: "0", trim: true },
+    },
+    item_LBH: {
+      L: { type: Number, default: 0, min: 0 },
+      B: { type: Number, default: 0, min: 0 },
+      H: { type: Number, default: 0, min: 0 },
+    },
+    box_LBH: {
+      L: { type: Number, default: 0, min: 0 },
+      B: { type: Number, default: 0, min: 0 },
+      H: { type: Number, default: 0, min: 0 },
+    },
+    qc: {
+      packed_size: { type: Boolean, default: false },
+      finishing: { type: Boolean, default: false },
+      branding: { type: Boolean, default: false },
+      barcode: { type: Number, default: 0, min: 0 },
+      last_inspected_date: { type: String, default: "", trim: true },
+      quantities: {
+        checked: { type: Number, default: 0, min: 0 },
+        passed: { type: Number, default: 0, min: 0 },
+        pending: { type: Number, default: 0, min: 0 },
+      },
+    },
+    source: {
+      from_orders: { type: Boolean, default: false },
+      from_qc: { type: Boolean, default: false },
+    },
+  },
+  { timestamps: true },
+);
+
+itemSchema.index({ name: 1 });
+itemSchema.index({ description: 1 });
+itemSchema.index({ brands: 1 });
+itemSchema.index({ vendors: 1 });
+
+module.exports = mongoose.model("items", itemSchema);

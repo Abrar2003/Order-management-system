@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { logout, getToken, getUserFromToken } from "../auth/auth.service";
 import "../App.css";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import UploadOrdersModal from "./UploadOrdersModal";
 import AllocateLabelsModal from "./AllocateLabelsModal";
 
@@ -11,9 +11,8 @@ const Navbar = () => {
   const role = user?.role;
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showAllocateModal, setShowAllocateModal] = useState(false);
-  const [showUserMenu, setShowUserMenu] = useState(false);
-  const [showMobileMenu, setShowMobileMenu] = useState(false);
-  const userMenuRef = useRef(null);
+  const [showMainMenu, setShowMainMenu] = useState(false);
+  const mainMenuRef = useRef(null);
 
   const getInitialTheme = () => {
     const stored = localStorage.getItem("theme");
@@ -32,6 +31,27 @@ const Navbar = () => {
 
   const navigate = useNavigate();
 
+  const routeLinks = useMemo(() => {
+    const links = [{ label: "Home", path: "/" }];
+
+    if (canAccessQc) {
+      links.push(
+        { label: "QC", path: "/qc" },
+        { label: "Open Orders", path: "/open-orders" },
+        { label: "Shipments", path: "/shipments" },
+        { label: "Bulk Shipping", path: "/container" },
+        { label: "Items", path: "/items" },
+        { label: "Daily Reports", path: "/daily-reports" },
+      );
+    }
+
+    if (canManageOrders) {
+      links.push({ label: "Upload Logs", path: "/upload-logs" });
+    }
+
+    return links;
+  }, [canAccessQc, canManageOrders]);
+
   const handleLogout = () => {
     logout();
     navigate("/signin");
@@ -39,8 +59,7 @@ const Navbar = () => {
 
   const handleNavigate = (path) => {
     navigate(path);
-    setShowMobileMenu(false);
-    setShowUserMenu(false);
+    setShowMainMenu(false);
   };
 
   useEffect(() => {
@@ -54,8 +73,8 @@ const Navbar = () => {
 
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (userMenuRef.current && !userMenuRef.current.contains(event.target)) {
-        setShowUserMenu(false);
+      if (mainMenuRef.current && !mainMenuRef.current.contains(event.target)) {
+        setShowMainMenu(false);
       }
     };
 
@@ -76,105 +95,70 @@ const Navbar = () => {
   return (
     <>
       <div className="page-shell pt-3">
-        <nav className="navbar navbar-expand-lg bg-body-tertiary rounded-4 px-3 py-2 om-navbar om-card">
-          <div className="container-fluid px-0">
-            <button
-              type="button"
-              className="om-nav-brand h5 mb-0 me-3"
-              onClick={() => handleNavigate("/")}
-            >
-              Order Management System
-            </button>
+        <div className="om-navbar-stack">
+          <nav className="navbar bg-body-tertiary rounded-4 px-3 py-2 om-navbar om-card">
+            <div className="container-fluid px-0 d-flex align-items-center gap-2">
+              <button
+                type="button"
+                className="om-nav-brand h5 mb-0 me-2"
+                onClick={() => handleNavigate("/")}
+              >
+                Order Management System
+              </button>
 
-            <button
-              className="navbar-toggler"
-              type="button"
-              aria-label="Toggle navigation"
-              aria-expanded={showMobileMenu}
-              onClick={() => setShowMobileMenu((prev) => !prev)}
-            >
-              <span className="navbar-toggler-icon" />
-            </button>
-
-            <div className={`collapse navbar-collapse ${showMobileMenu ? "show" : ""}`}>
-              <ul className="navbar-nav me-auto mb-2 mb-lg-0 gap-lg-2">
-                {canAccessQc && (
-                  <li className="nav-item">
-                    <button
-                      type="button"
-                      className="btn btn-outline-primary btn-sm rounded-pill"
-                      onClick={() => handleNavigate("/qc")}
-                    >
-                      QC
-                    </button>
-                  </li>
-                )}
-                {canAccessQc && (
-                  <li className="nav-item">
-                    <button
-                      type="button"
-                      className="btn btn-outline-primary btn-sm rounded-pill"
-                      onClick={() => handleNavigate("/open-orders")}
-                    >
-                      Open Orders
-                    </button>
-                  </li>
-                )}
-                {canAccessQc && (
-                  <li className="nav-item">
-                    <button
-                      type="button"
-                      className="btn btn-outline-primary btn-sm rounded-pill"
-                      onClick={() => handleNavigate("/shipments")}
-                    >
-                      Shipments
-                    </button>
-                  </li>
-                )}
-                {canAccessQc && (
-                  <li className="nav-item">
-                    <button
-                      type="button"
-                      className="btn btn-outline-primary btn-sm rounded-pill"
-                      onClick={() => handleNavigate("/container")}
-                    >
-                      Bulk Shipping
-                    </button>
-                  </li>
-                )}
-                {canAccessQc && (
-                  <li className="nav-item">
-                    <button
-                      type="button"
-                      className="btn btn-outline-primary btn-sm rounded-pill"
-                      onClick={() => handleNavigate("/daily-reports")}
-                    >
-                      Daily Reports
-                    </button>
-                  </li>
-                )}
-              </ul>
-
-              <div className="d-flex flex-column flex-lg-row align-items-start align-items-lg-center gap-2 ms-lg-auto">
-                <div className="position-relative" ref={userMenuRef}>
+              <div className="d-flex align-items-center gap-2 ms-auto">
+                <div className="position-relative" ref={mainMenuRef}>
                   <button
                     type="button"
-                    className="btn btn-outline-secondary btn-sm rounded-pill"
-                    onClick={() => setShowUserMenu((prev) => !prev)}
+                    className="btn btn-outline-primary btn-sm rounded-pill om-hamburger-btn"
+                    aria-expanded={showMainMenu}
+                    onClick={() => setShowMainMenu((prev) => !prev)}
+                    title="Menu"
                   >
-                    {user?.name || "User"} ({role})
+                    <span aria-hidden="true">&#9776;</span>
+                    <span>Menu</span>
                   </button>
 
-                  {showUserMenu && (
-                    <div className="card om-user-dropdown shadow-sm">
+                  {showMainMenu && (
+                    <div className="card om-main-menu-dropdown shadow-sm">
                       <div className="list-group list-group-flush">
+                        <div className="list-group-item text-secondary small">
+                          {user?.name || "User"} ({role || "N/A"})
+                        </div>
+
+                        {routeLinks.map((link) => (
+                          <button
+                            key={link.path}
+                            type="button"
+                            className="list-group-item list-group-item-action text-start"
+                            onClick={() => handleNavigate(link.path)}
+                          >
+                            {link.label}
+                          </button>
+                        ))}
+
+                        <button
+                          type="button"
+                          className="list-group-item list-group-item-action text-start"
+                          onClick={() => {
+                            toggleTheme();
+                            setShowMainMenu(false);
+                          }}
+                        >
+                          {theme === "system"
+                            ? "Theme: System"
+                            : theme === "dark"
+                              ? "Theme: Dark"
+                              : "Theme: Light"}
+                        </button>
+
                         {canManageLabels && (
                           <button
                             type="button"
                             className="list-group-item list-group-item-action text-start"
                             onClick={() => {
                               setShowAllocateModal(true);
-                              setShowUserMenu(false);
+                              setShowMainMenu(false);
                             }}
                           >
                             Allocate Labels
@@ -197,7 +181,7 @@ const Navbar = () => {
                             className="list-group-item list-group-item-action text-start"
                             onClick={() => {
                               setShowUploadModal(true);
-                              setShowUserMenu(false);
+                              setShowMainMenu(false);
                             }}
                           >
                             Update Orders
@@ -215,23 +199,10 @@ const Navbar = () => {
                     </div>
                   )}
                 </div>
-
-                <button
-                  type="button"
-                  className="btn btn-outline-primary btn-sm rounded-pill"
-                  onClick={toggleTheme}
-                  title="Toggle theme"
-                >
-                  {theme === "system"
-                    ? "Theme: System"
-                    : theme === "dark"
-                      ? "Theme: Dark"
-                      : "Theme: Light"}
-                </button>
               </div>
             </div>
-          </div>
-        </nav>
+          </nav>
+        </div>
       </div>
 
       {showUploadModal && (

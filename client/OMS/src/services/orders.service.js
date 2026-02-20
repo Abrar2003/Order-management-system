@@ -15,6 +15,18 @@ export const uploadOrders = async (file) => {
   return res.data;
 };
 
+export const getUploadLogs = async (params = {}) => {
+  const token = localStorage.getItem("token");
+  const res = await axios.get("/orders/upload-logs", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    params,
+  });
+
+  return res.data;
+};
+
 export const editOrder = async (id, payload) => {
   if (!id) {
     throw new Error("Order id is required");

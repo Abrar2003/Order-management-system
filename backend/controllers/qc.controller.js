@@ -3,6 +3,7 @@ const Inspection = require("../models/inspection.model");
 
 const Order = require("../models/order.model")
 const mongoose = require("mongoose");
+const { upsertItemFromQc } = require("../services/itemSync");
 
 const normalizeLabels = (labels = []) => {
   if (!Array.isArray(labels)) return [];
@@ -517,6 +518,15 @@ exports.alignQC = async (req, res) => {
         await orderRecord.save();
       }
 
+      try {
+        await upsertItemFromQc(existingQC);
+      } catch (itemSyncError) {
+        console.error("Item sync after QC re-align failed:", {
+          qcId: existingQC?._id,
+          error: itemSyncError?.message || String(itemSyncError),
+        });
+      }
+
       return res.status(200).json({
         message: "QC re-aligned successfully",
         data: existingQC,
@@ -562,6 +572,15 @@ exports.alignQC = async (req, res) => {
     orderRecord.qc_record = qc._id;
 
     await orderRecord.save();
+
+    try {
+      await upsertItemFromQc(qc);
+    } catch (itemSyncError) {
+      console.error("Item sync after QC align failed:", {
+        qcId: qc?._id,
+        error: itemSyncError?.message || String(itemSyncError),
+      });
+    }
 
     res.status(201).json({
       message: "QC aligned successfully",
@@ -985,6 +1004,15 @@ exports.updateQC = async (req, res) => {
             ? "Inspection Done"
             : "Under Inspection";
         await orderRecord.save();
+      }
+
+      try {
+        await upsertItemFromQc(qc);
+      } catch (itemSyncError) {
+        console.error("Item sync after QC update failed:", {
+          qcId: qc?._id,
+          error: itemSyncError?.message || String(itemSyncError),
+        });
       }
 
       res.json({

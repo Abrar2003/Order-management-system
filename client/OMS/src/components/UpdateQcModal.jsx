@@ -671,10 +671,9 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     htmlFor="branding"
                     className="form-label"
                   >
-                    Allocate Lable
+                    Allocate Label
                   </label>
-                  <div >
-
+                  <div>
                           <button
                             type="button"
                             className="btn btn-outline-secondary"

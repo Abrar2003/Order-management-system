@@ -4,6 +4,7 @@ const authenticate = require("../middlewares/auth.middleware");
 const authorize = require("../middlewares/authorize.middleware");
 const {
   uploadOrders,
+  getUploadLogs,
   getOrders,
   getOrdersByFiltersDb,
   getOrderById,
@@ -21,9 +22,15 @@ const router = express.Router();
 router.post(
   "/upload-orders",
   authenticate,
-  authorize("admin", "manager", "dev"),
+  authorize("admin", "manager", "dev", "Dev"),
   upload.single("file"),
   uploadOrders,
+);
+router.get(
+  "/upload-logs",
+  authenticate,
+  authorize("admin", "manager", "dev", "Dev"),
+  getUploadLogs,
 );
 
 // List orders (pagination + sorting)

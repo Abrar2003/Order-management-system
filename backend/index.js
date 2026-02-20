@@ -9,6 +9,7 @@ const brandRouter = require("./routers/brand.route");
 const inspectorRouter = require("./routers/inspector.routes");
 const userRouter = require("./routers/user.routes");
 const googleRouter = require("./routers/google.routes");
+const itemRouter = require("./routers/items.routes");
 
 const app = express();
 const PORT = process.env.PORT;
@@ -50,6 +51,7 @@ app.use("/brands", brandRouter);
 app.use("/inspectors", inspectorRouter);
 app.use("/users", userRouter);
 app.use("/google", googleRouter);
+app.use("/items", itemRouter);
 
 app.get("/", (req, res) => {
   res.send({ message: "Server OK" });

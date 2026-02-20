@@ -1,6 +1,7 @@
 const XLSX = require("xlsx");
 const Order = require("../models/order.model");
 const QC = require("../models/qc.model");
+const UploadLog = require("../models/uploadLog.model");
 const mongoose = require("mongoose");
 const dateParser = require("../helpers/dateparsser");
 const deleteFile = require("../helpers/fileCleanup");
@@ -8,6 +9,10 @@ const {
   syncOrderGroup,
   purgeOmsEventsForConfiguredBrandCalendars,
 } = require("../services/gcalSync");
+const {
+  upsertItemsFromOrders,
+  upsertItemFromOrder,
+} = require("../services/itemSync");
 
 
 const ORDER_STATUS_SEQUENCE = [
@@ -271,6 +276,27 @@ const computeOrderStatus = ({ orderQuantity, shippedQuantity, qcRecord }) => {
 
 // Upload Orders Controller
 exports.uploadOrders = async (req, res) => {
+  const uploadedById = req.user?._id && mongoose.Types.ObjectId.isValid(req.user._id)
+    ? req.user._id
+    : null;
+  const uploadMeta = {
+    uploaded_by: uploadedById,
+    uploaded_by_name: String(
+      req.user?.name || req.user?.username || req.user?.email || "",
+    ).trim(),
+    source_filename: String(req.file?.originalname || "").trim(),
+    source_size_bytes: Number(req.file?.size || 0),
+  };
+
+  let totalRowsReceived = 0;
+  let totalRowsUnique = 0;
+  let totalDistinctOrdersUploaded = 0;
+  let insertedCount = 0;
+  let duplicateEntries = [];
+  let uploadedVendors = [];
+  let vendorSummaries = [];
+  let conflicts = [];
+
   try {
     if (!req.file) {
       return res.status(400).json({ message: "No file uploaded" });
@@ -280,6 +306,8 @@ exports.uploadOrders = async (req, res) => {
     const workbook = XLSX.readFile(req.file.path);
     const sheetName = workbook.SheetNames[0];
     const sheetData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+    totalRowsReceived = Array.isArray(sheetData) ? sheetData.length : 0;
+
     const normalizeValue = (value) => {
       if (value === undefined || value === null) return "";
       return String(value).trim();
@@ -287,20 +315,37 @@ exports.uploadOrders = async (req, res) => {
     const normalizeKey = (orderId, itemCode) =>
       `${normalizeValue(orderId)}__${normalizeValue(itemCode)}`;
 
-    const duplicateEntries = [];
+    duplicateEntries = [];
     const seenKeys = new Set();
 
     // Transform rows to Order schema (dedupe within file)
     const orders = sheetData
       .map((row) => {
-        const orderId =
-          row.PO !== undefined && row.PO !== null
-            ? String(row.PO).trim()
-            : row.PO;
-        const itemCode =
-          row.item_code !== undefined && row.item_code !== null
-            ? String(row.item_code).trim()
-            : row.item_code;
+        const orderId = normalizeValue(row.PO);
+        const itemCode = normalizeValue(row.item_code);
+        const brand = normalizeValue(row.brand);
+        const vendor = normalizeValue(row.vendor);
+        const description = normalizeValue(row.description);
+        const quantity = Number(row.quantity);
+
+        if (!orderId || !itemCode || !brand || !vendor) {
+          duplicateEntries.push({
+            order_id: orderId,
+            item_code: itemCode,
+            reason: "missing_required_fields",
+          });
+          return null;
+        }
+
+        if (!Number.isFinite(quantity) || quantity <= 0) {
+          duplicateEntries.push({
+            order_id: orderId,
+            item_code: itemCode,
+            reason: "invalid_quantity",
+          });
+          return null;
+        }
+
         const key = normalizeKey(orderId, itemCode);
 
         if (seenKeys.has(key)) {
@@ -318,17 +363,111 @@ exports.uploadOrders = async (req, res) => {
           order_id: orderId,
           item: {
             item_code: itemCode,
-            description: row.description,
+            description,
           },
-          brand: row.brand,
-          vendor: row.vendor,
+          brand,
+          vendor,
           ETD: dateParser(row.ETD),
           order_date: dateParser(row.order_date),
           status: "Pending",
-          quantity: row.quantity,
+          quantity,
         };
       })
       .filter(Boolean);
+
+    totalRowsUnique = orders.length;
+    totalDistinctOrdersUploaded = normalizeDistinctValues(
+      orders.map((order) => order.order_id),
+    ).length;
+
+    const vendorOrderSetMap = new Map();
+    const vendorOrderItemCountMap = new Map();
+
+    for (const order of orders) {
+      const vendor = normalizeValue(order.vendor);
+      const orderId = normalizeValue(order.order_id);
+      if (!vendor || !orderId) continue;
+
+      if (!vendorOrderSetMap.has(vendor)) {
+        vendorOrderSetMap.set(vendor, new Set());
+      }
+      vendorOrderSetMap.get(vendor).add(orderId);
+
+      if (!vendorOrderItemCountMap.has(vendor)) {
+        vendorOrderItemCountMap.set(vendor, new Map());
+      }
+      const vendorOrderCountMap = vendorOrderItemCountMap.get(vendor);
+      vendorOrderCountMap.set(orderId, Number(vendorOrderCountMap.get(orderId) || 0) + 1);
+    }
+
+    uploadedVendors = [...vendorOrderSetMap.keys()].sort((a, b) => a.localeCompare(b));
+
+    const openOrders = uploadedVendors.length > 0
+      ? await Order.find({
+        vendor: { $in: uploadedVendors },
+        status: { $ne: "Shipped" },
+      })
+        .select("vendor order_id")
+        .lean()
+      : [];
+
+    const openVendorOrderSetMap = new Map();
+    for (const openOrder of openOrders) {
+      const vendor = normalizeValue(openOrder?.vendor);
+      const orderId = normalizeValue(openOrder?.order_id);
+      if (!vendor || !orderId) continue;
+
+      if (!openVendorOrderSetMap.has(vendor)) {
+        openVendorOrderSetMap.set(vendor, new Set());
+      }
+      openVendorOrderSetMap.get(vendor).add(orderId);
+    }
+
+    conflicts = [];
+    vendorSummaries = uploadedVendors.map((vendor) => {
+      const uploadedOrderSet = vendorOrderSetMap.get(vendor) || new Set();
+      const uploadedOrderIds = [...uploadedOrderSet].sort((a, b) => a.localeCompare(b));
+      const perOrderCounts = vendorOrderItemCountMap.get(vendor) || new Map();
+
+      const itemsPerOrder = uploadedOrderIds.map((orderId) => ({
+        order_id: orderId,
+        items_count: Number(perOrderCounts.get(orderId) || 0),
+      }));
+
+      const uploadedItemsCount = itemsPerOrder.reduce(
+        (sum, entry) => sum + Number(entry?.items_count || 0),
+        0,
+      );
+
+      const openOrderSet = openVendorOrderSetMap.get(vendor) || new Set();
+      const missingOpenOrderIds = [...openOrderSet]
+        .filter((orderId) => !uploadedOrderSet.has(orderId))
+        .sort((a, b) => a.localeCompare(b));
+
+      const remark = missingOpenOrderIds.length > 0
+        ? `You were uploading orders for vendor ${vendor}; these open orders are missing in this upload: ${missingOpenOrderIds.join(", ")}.`
+        : "";
+
+      missingOpenOrderIds.forEach((orderId) => {
+        conflicts.push({
+          type: "OPEN_ORDER_MISSING_IN_UPLOAD",
+          vendor,
+          order_id: orderId,
+          message: `Vendor ${vendor} has open order ${orderId} in system but it was not present in the current upload.`,
+        });
+      });
+
+      return {
+        vendor,
+        uploaded_order_ids: uploadedOrderIds,
+        uploaded_orders_count: uploadedOrderIds.length,
+        uploaded_items_count: uploadedItemsCount,
+        items_per_order: itemsPerOrder,
+        missing_open_order_ids: missingOpenOrderIds,
+        missing_open_orders_count: missingOpenOrderIds.length,
+        remark,
+      };
+    });
 
     let newOrders = orders;
 
@@ -360,8 +499,18 @@ exports.uploadOrders = async (req, res) => {
       });
     }
 
+    insertedCount = newOrders.length;
+
     if (newOrders.length > 0) {
       await Order.insertMany(newOrders);
+
+      try {
+        await upsertItemsFromOrders(newOrders);
+      } catch (itemSyncError) {
+        console.error("Item sync after upload failed:", {
+          error: itemSyncError?.message || String(itemSyncError),
+        });
+      }
 
       // sync unique groups
       const groups = new Map();
@@ -395,6 +544,31 @@ exports.uploadOrders = async (req, res) => {
       }
     }
 
+    const remarks = [
+      ...vendorSummaries.map((entry) => String(entry?.remark || "").trim()).filter(Boolean),
+    ];
+
+    if (duplicateEntries.length > 0) {
+      remarks.push(
+        `${duplicateEntries.length} row(s) were skipped due to duplicates, missing fields, or invalid quantity.`,
+      );
+    }
+
+    const uploadLog = await UploadLog.create({
+      ...uploadMeta,
+      total_rows_received: totalRowsReceived,
+      total_rows_unique: totalRowsUnique,
+      inserted_item_rows: insertedCount,
+      duplicate_count: duplicateEntries.length,
+      duplicate_entries: duplicateEntries,
+      uploaded_vendors: uploadedVendors,
+      total_distinct_orders_uploaded: totalDistinctOrdersUploaded,
+      vendor_summaries: vendorSummaries,
+      conflicts,
+      remarks,
+      status: conflicts.length > 0 ? "success_with_conflicts" : "success",
+    });
+
     res.status(201).json({
       message:
         duplicateEntries.length > 0 && newOrders.length > 0
@@ -405,9 +579,35 @@ exports.uploadOrders = async (req, res) => {
       inserted_count: newOrders.length,
       duplicate_count: duplicateEntries.length,
       duplicate_entries: duplicateEntries,
+      total_distinct_orders_uploaded: totalDistinctOrdersUploaded,
+      vendor_summaries: vendorSummaries,
+      conflicts,
+      upload_log_id: uploadLog?._id || null,
     });
   } catch (error) {
     console.error(error);
+
+    try {
+      await UploadLog.create({
+        ...uploadMeta,
+        total_rows_received: totalRowsReceived,
+        total_rows_unique: totalRowsUnique,
+        inserted_item_rows: insertedCount,
+        duplicate_count: duplicateEntries.length,
+        duplicate_entries: duplicateEntries,
+        uploaded_vendors: uploadedVendors,
+        total_distinct_orders_uploaded: totalDistinctOrdersUploaded,
+        vendor_summaries: vendorSummaries,
+        conflicts,
+        status: "failed",
+        error_message: error?.message || String(error),
+      });
+    } catch (uploadLogError) {
+      console.error("Upload log save failed:", {
+        error: uploadLogError?.message || String(uploadLogError),
+      });
+    }
+
     res.status(500).json({
       message: "Upload failed",
       error: error.message,
@@ -415,6 +615,111 @@ exports.uploadOrders = async (req, res) => {
   } finally {
     // Cleanup uploaded file
     deleteFile(req.file?.path);
+  }
+};
+
+exports.getUploadLogs = async (req, res) => {
+  try {
+    const page = parsePositiveInt(req.query.page, 1);
+    const limit = Math.min(100, parsePositiveInt(req.query.limit, 20));
+    const skip = (page - 1) * limit;
+
+    const vendor = normalizeFilterValue(req.query.vendor);
+    const status = normalizeFilterValue(req.query.status);
+    const orderId = normalizeFilterValue(req.query.order_id ?? req.query.orderId);
+
+    const match = {};
+
+    if (vendor) {
+      match.uploaded_vendors = vendor;
+    }
+
+    if (status) {
+      match.status = status;
+    }
+
+    if (orderId) {
+      const escaped = escapeRegex(orderId);
+      match.$or = [
+        {
+          "vendor_summaries.uploaded_order_ids": {
+            $regex: escaped,
+            $options: "i",
+          },
+        },
+        {
+          "vendor_summaries.items_per_order.order_id": {
+            $regex: escaped,
+            $options: "i",
+          },
+        },
+        {
+          "conflicts.order_id": {
+            $regex: escaped,
+            $options: "i",
+          },
+        },
+      ];
+    }
+
+    const [logs, totalRecords, vendorsRaw, statusesRaw, statusCountsRaw] =
+      await Promise.all([
+        UploadLog.find(match)
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limit)
+          .lean(),
+        UploadLog.countDocuments(match),
+        UploadLog.distinct("uploaded_vendors"),
+        UploadLog.distinct("status"),
+        UploadLog.aggregate([
+          { $match: match },
+          {
+            $group: {
+              _id: "$status",
+              count: { $sum: 1 },
+            },
+          },
+        ]),
+      ]);
+
+    const summary = {
+      total: totalRecords,
+      success: 0,
+      success_with_conflicts: 0,
+      failed: 0,
+    };
+
+    statusCountsRaw.forEach((entry) => {
+      const key = String(entry?._id || "").trim();
+      if (!key) return;
+      if (Object.prototype.hasOwnProperty.call(summary, key)) {
+        summary[key] = Number(entry?.count || 0);
+      }
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: logs,
+      pagination: {
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(totalRecords / limit)),
+        totalRecords,
+      },
+      filters: {
+        vendors: normalizeDistinctValues(vendorsRaw),
+        statuses: normalizeDistinctValues(statusesRaw),
+      },
+      summary,
+    });
+  } catch (error) {
+    console.error("Get Upload Logs Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch upload logs",
+      error: error?.message || String(error),
+    });
   }
 };
 
@@ -1233,6 +1538,16 @@ exports.editOrder = async (req, res) => {
     await order.save();
     if (qcRecord) {
       await qcRecord.save();
+    }
+
+    try {
+      await upsertItemFromOrder(order);
+    } catch (itemSyncError) {
+      console.error("Item sync after order edit failed:", {
+        orderId: order.order_id,
+        itemCode: order?.item?.item_code,
+        error: itemSyncError?.message || String(itemSyncError),
+      });
     }
 
     const newGroup = {

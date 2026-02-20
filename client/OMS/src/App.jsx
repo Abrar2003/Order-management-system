@@ -20,6 +20,8 @@ import OpenOrders from "./pages/OpenOrders";
 import DailyReport from "./pages/DailyReport";
 import Shipments from "./pages/Shipments";
 import Container from "./pages/Container";
+import Items from "./pages/Items";
+import UploadLogs from "./pages/UploadLogs";
 
 // import Users from "./pages/Users"; // later
 
@@ -83,6 +85,24 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <Container />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/items"
+            element={
+              <ProtectedRoute>
+                <Items />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/upload-logs"
+            element={
+              <ProtectedRoute>
+                <UploadLogs />
               </ProtectedRoute>
             }
           />
