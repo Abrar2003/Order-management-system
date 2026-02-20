@@ -77,6 +77,21 @@ const normalizeDistinctValues = (values = []) =>
     ),
   ].sort((a, b) => a.localeCompare(b));
 
+const normalizeLooseString = (value) => String(value ?? "").trim();
+
+const normalizeVendorKey = (value) => normalizeLooseString(value).toLowerCase();
+
+const normalizeOrderKey = (value) => {
+  const normalized = normalizeLooseString(value);
+  if (!normalized) return "";
+
+  if (/^\d+\.0+$/.test(normalized)) {
+    return normalized.replace(/\.0+$/, "");
+  }
+
+  return normalized.toUpperCase();
+};
+
 const normalizeStatusList = (values = []) => {
   const normalized = normalizeDistinctValues(values);
   return normalized.sort((a, b) => {
@@ -308,12 +323,9 @@ exports.uploadOrders = async (req, res) => {
     const sheetData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
     totalRowsReceived = Array.isArray(sheetData) ? sheetData.length : 0;
 
-    const normalizeValue = (value) => {
-      if (value === undefined || value === null) return "";
-      return String(value).trim();
-    };
+    const normalizeValue = (value) => normalizeLooseString(value);
     const normalizeKey = (orderId, itemCode) =>
-      `${normalizeValue(orderId)}__${normalizeValue(itemCode)}`;
+      `${normalizeOrderKey(orderId)}__${normalizeValue(itemCode).toUpperCase()}`;
 
     duplicateEntries = [];
     const seenKeys = new Set();
@@ -376,98 +388,120 @@ exports.uploadOrders = async (req, res) => {
       .filter(Boolean);
 
     totalRowsUnique = orders.length;
-    totalDistinctOrdersUploaded = normalizeDistinctValues(
-      orders.map((order) => order.order_id),
-    ).length;
+    totalDistinctOrdersUploaded = new Set(
+      orders.map((order) => normalizeOrderKey(order.order_id)).filter(Boolean),
+    ).size;
 
-    const vendorOrderSetMap = new Map();
-    const vendorOrderItemCountMap = new Map();
+    const vendorUploadMap = new Map();
 
     for (const order of orders) {
       const vendor = normalizeValue(order.vendor);
+      const vendorKey = normalizeVendorKey(vendor);
       const orderId = normalizeValue(order.order_id);
-      if (!vendor || !orderId) continue;
+      const orderKey = normalizeOrderKey(orderId);
 
-      if (!vendorOrderSetMap.has(vendor)) {
-        vendorOrderSetMap.set(vendor, new Set());
-      }
-      vendorOrderSetMap.get(vendor).add(orderId);
+      if (!vendorKey || !orderKey) continue;
 
-      if (!vendorOrderItemCountMap.has(vendor)) {
-        vendorOrderItemCountMap.set(vendor, new Map());
+      if (!vendorUploadMap.has(vendorKey)) {
+        vendorUploadMap.set(vendorKey, {
+          vendor_key: vendorKey,
+          vendor,
+          uploaded_order_ids: new Set(),
+          uploaded_order_keys: new Set(),
+          items_per_order_count: new Map(),
+        });
       }
-      const vendorOrderCountMap = vendorOrderItemCountMap.get(vendor);
-      vendorOrderCountMap.set(orderId, Number(vendorOrderCountMap.get(orderId) || 0) + 1);
+
+      const vendorBucket = vendorUploadMap.get(vendorKey);
+      vendorBucket.uploaded_order_ids.add(orderId);
+      vendorBucket.uploaded_order_keys.add(orderKey);
+      vendorBucket.items_per_order_count.set(
+        orderId,
+        Number(vendorBucket.items_per_order_count.get(orderId) || 0) + 1,
+      );
     }
 
-    uploadedVendors = [...vendorOrderSetMap.keys()].sort((a, b) => a.localeCompare(b));
+    uploadedVendors = [...vendorUploadMap.values()]
+      .map((entry) => entry.vendor)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
 
     const openOrders = uploadedVendors.length > 0
       ? await Order.find({
-        vendor: { $in: uploadedVendors },
         status: { $ne: "Shipped" },
       })
         .select("vendor order_id")
         .lean()
       : [];
 
-    const openVendorOrderSetMap = new Map();
+    const openVendorOrderMap = new Map();
     for (const openOrder of openOrders) {
       const vendor = normalizeValue(openOrder?.vendor);
+      const vendorKey = normalizeVendorKey(vendor);
       const orderId = normalizeValue(openOrder?.order_id);
-      if (!vendor || !orderId) continue;
+      const orderKey = normalizeOrderKey(orderId);
 
-      if (!openVendorOrderSetMap.has(vendor)) {
-        openVendorOrderSetMap.set(vendor, new Set());
+      if (!vendorKey || !orderKey || !vendorUploadMap.has(vendorKey)) continue;
+
+      if (!openVendorOrderMap.has(vendorKey)) {
+        openVendorOrderMap.set(vendorKey, new Map());
       }
-      openVendorOrderSetMap.get(vendor).add(orderId);
+
+      const orderMap = openVendorOrderMap.get(vendorKey);
+      if (!orderMap.has(orderKey)) {
+        orderMap.set(orderKey, orderId);
+      }
     }
 
     conflicts = [];
-    vendorSummaries = uploadedVendors.map((vendor) => {
-      const uploadedOrderSet = vendorOrderSetMap.get(vendor) || new Set();
-      const uploadedOrderIds = [...uploadedOrderSet].sort((a, b) => a.localeCompare(b));
-      const perOrderCounts = vendorOrderItemCountMap.get(vendor) || new Map();
+    vendorSummaries = [...vendorUploadMap.values()]
+      .sort((a, b) => a.vendor.localeCompare(b.vendor))
+      .map((vendorEntry) => {
+        const uploadedOrderIds = [...vendorEntry.uploaded_order_ids].sort((a, b) =>
+          a.localeCompare(b),
+        );
+        const perOrderCounts = vendorEntry.items_per_order_count;
 
-      const itemsPerOrder = uploadedOrderIds.map((orderId) => ({
-        order_id: orderId,
-        items_count: Number(perOrderCounts.get(orderId) || 0),
-      }));
-
-      const uploadedItemsCount = itemsPerOrder.reduce(
-        (sum, entry) => sum + Number(entry?.items_count || 0),
-        0,
-      );
-
-      const openOrderSet = openVendorOrderSetMap.get(vendor) || new Set();
-      const missingOpenOrderIds = [...openOrderSet]
-        .filter((orderId) => !uploadedOrderSet.has(orderId))
-        .sort((a, b) => a.localeCompare(b));
-
-      const remark = missingOpenOrderIds.length > 0
-        ? `You were uploading orders for vendor ${vendor}; these open orders are missing in this upload: ${missingOpenOrderIds.join(", ")}.`
-        : "";
-
-      missingOpenOrderIds.forEach((orderId) => {
-        conflicts.push({
-          type: "OPEN_ORDER_MISSING_IN_UPLOAD",
-          vendor,
+        const itemsPerOrder = uploadedOrderIds.map((orderId) => ({
           order_id: orderId,
-          message: `Vendor ${vendor} has open order ${orderId} in system but it was not present in the current upload.`,
-        });
-      });
+          items_count: Number(perOrderCounts.get(orderId) || 0),
+        }));
 
-      return {
-        vendor,
-        uploaded_order_ids: uploadedOrderIds,
-        uploaded_orders_count: uploadedOrderIds.length,
-        uploaded_items_count: uploadedItemsCount,
-        items_per_order: itemsPerOrder,
-        missing_open_order_ids: missingOpenOrderIds,
-        missing_open_orders_count: missingOpenOrderIds.length,
-        remark,
-      };
-    });
+        const uploadedItemsCount = itemsPerOrder.reduce(
+          (sum, entry) => sum + Number(entry?.items_count || 0),
+          0,
+        );
+
+        const openOrderMap = openVendorOrderMap.get(vendorEntry.vendor_key) || new Map();
+        const missingOpenOrderIds = [...openOrderMap.entries()]
+          .filter(([orderKey]) => !vendorEntry.uploaded_order_keys.has(orderKey))
+          .map(([, orderId]) => orderId)
+          .sort((a, b) => a.localeCompare(b));
+
+        const remark = missingOpenOrderIds.length > 0
+          ? `You were uploading orders for vendor ${vendorEntry.vendor}; these open orders are missing in this upload: ${missingOpenOrderIds.join(", ")}.`
+          : "";
+
+        missingOpenOrderIds.forEach((orderId) => {
+          conflicts.push({
+            type: "OPEN_ORDER_MISSING_IN_UPLOAD",
+            vendor: vendorEntry.vendor,
+            order_id: orderId,
+            message: `Vendor ${vendorEntry.vendor} has open order ${orderId} in system but it was not present in the current upload.`,
+          });
+        });
+
+        return {
+          vendor: vendorEntry.vendor,
+          uploaded_order_ids: uploadedOrderIds,
+          uploaded_orders_count: uploadedOrderIds.length,
+          uploaded_items_count: uploadedItemsCount,
+          items_per_order: itemsPerOrder,
+          missing_open_order_ids: missingOpenOrderIds,
+          missing_open_orders_count: missingOpenOrderIds.length,
+          remark,
+        };
+      });
 
     let newOrders = orders;
 
@@ -547,10 +581,19 @@ exports.uploadOrders = async (req, res) => {
     const remarks = [
       ...vendorSummaries.map((entry) => String(entry?.remark || "").trim()).filter(Boolean),
     ];
+    const missingOpenOrderIds = normalizeDistinctValues(
+      conflicts.map((entry) => String(entry?.order_id || "").trim()),
+    );
 
     if (duplicateEntries.length > 0) {
       remarks.push(
         `${duplicateEntries.length} row(s) were skipped due to duplicates, missing fields, or invalid quantity.`,
+      );
+    }
+
+    if (missingOpenOrderIds.length > 0) {
+      remarks.push(
+        `Open orders missing in this upload: ${missingOpenOrderIds.join(", ")}.`,
       );
     }
 
@@ -569,18 +612,30 @@ exports.uploadOrders = async (req, res) => {
       status: conflicts.length > 0 ? "success_with_conflicts" : "success",
     });
 
+    const hasConflicts = conflicts.length > 0;
+    const hasDuplicates = duplicateEntries.length > 0;
+    const hasInsertions = newOrders.length > 0;
+
+    let responseMessage = "No new orders to upload";
+    if (hasInsertions) {
+      responseMessage = hasDuplicates
+        ? "Orders uploaded with duplicates skipped"
+        : "Orders uploaded successfully";
+    }
+    if (hasConflicts) {
+      responseMessage = `${responseMessage}. Open-order conflicts were detected for this upload.`;
+    }
+
     res.status(201).json({
-      message:
-        duplicateEntries.length > 0 && newOrders.length > 0
-          ? "Orders uploaded with duplicates skipped"
-          : newOrders.length > 0
-            ? "Orders uploaded successfully"
-            : "No new orders to upload",
+      message: responseMessage,
       inserted_count: newOrders.length,
       duplicate_count: duplicateEntries.length,
       duplicate_entries: duplicateEntries,
       total_distinct_orders_uploaded: totalDistinctOrdersUploaded,
       vendor_summaries: vendorSummaries,
+      conflict_count: conflicts.length,
+      missing_open_orders_count: missingOpenOrderIds.length,
+      missing_open_order_ids: missingOpenOrderIds,
       conflicts,
       upload_log_id: uploadLog?._id || null,
     });

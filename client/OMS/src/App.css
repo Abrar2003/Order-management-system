@@ -85,6 +85,10 @@
   white-space: normal;
 }
 
+.om-menu-mobile-only {
+  display: block;
+}
+
 .om-summary-chip {
   display: inline-flex;
   align-items: center;
@@ -262,5 +266,11 @@
 
   .home-calendar-iframe {
     height: 420px;
+  }
+}
+
+@media (min-width: 992px) {
+  .om-menu-mobile-only {
+    display: none;
   }
 }

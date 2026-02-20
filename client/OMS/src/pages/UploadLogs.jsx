@@ -281,21 +281,22 @@ const UploadLogs = () => {
                                 </div>
 
                                 <div>
-                                  <strong>Orders/Items by Vendor:</strong>
+                                  <strong>Missing Open Orders by Vendor:</strong>
                                   {vendorSummaries.length === 0 && <div>N/A</div>}
                                   {vendorSummaries.map((entry) => (
                                     <div key={`${log?._id || "log"}-${entry?.vendor || "vendor"}`}>
                                       <div>
-                                        {entry?.vendor || "N/A"} | Orders:{" "}
+                                        {entry?.vendor || "N/A"} | Uploaded Orders:{" "}
                                         {Number(entry?.uploaded_orders_count || 0)} | Items:{" "}
-                                        {Number(entry?.uploaded_items_count || 0)}
+                                        {Number(entry?.uploaded_items_count || 0)} | Missing Open:{" "}
+                                        {Number(entry?.missing_open_orders_count || 0)}
                                       </div>
                                       <div>
-                                        {Array.isArray(entry?.items_per_order) && entry.items_per_order.length > 0
-                                          ? entry.items_per_order
-                                            .map((item) => `${item?.order_id || "N/A"}: ${Number(item?.items_count || 0)}`)
+                                        {Array.isArray(entry?.missing_open_order_ids) && entry.missing_open_order_ids.length > 0
+                                          ? entry.missing_open_order_ids
+                                            .map((orderId) => String(orderId || "").trim())
                                             .join(", ")
-                                          : "No order detail"}
+                                          : "No missing open orders"}
                                       </div>
                                       {entry?.remark && <div>{entry.remark}</div>}
                                     </div>
@@ -305,7 +306,11 @@ const UploadLogs = () => {
                                 <div>
                                   <strong>Conflicts:</strong>{" "}
                                   {conflicts.length > 0
-                                    ? conflicts.map((entry) => entry?.message || "").filter(Boolean).join(" | ")
+                                    ? conflicts.map((entry) => 
+                                      <>
+                                      {entry.message} <br/>
+                                      </>
+                                    )
                                     : "None"}
                                 </div>
                               </div>

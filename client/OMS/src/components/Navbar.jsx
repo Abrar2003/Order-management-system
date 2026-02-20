@@ -31,8 +31,8 @@ const Navbar = () => {
 
   const navigate = useNavigate();
 
-  const routeLinks = useMemo(() => {
-    const links = [{ label: "Home", path: "/" }];
+  const primaryRouteLinks = useMemo(() => {
+    const links = [];
 
     if (canAccessQc) {
       links.push(
@@ -40,9 +40,18 @@ const Navbar = () => {
         { label: "Open Orders", path: "/open-orders" },
         { label: "Shipments", path: "/shipments" },
         { label: "Bulk Shipping", path: "/container" },
-        { label: "Items", path: "/items" },
         { label: "Daily Reports", path: "/daily-reports" },
       );
+    }
+
+    return links;
+  }, [canAccessQc]);
+
+  const secondaryRouteLinks = useMemo(() => {
+    const links = [{ label: "Home", path: "/" }];
+
+    if (canAccessQc) {
+      links.push({ label: "Items", path: "/items" });
     }
 
     if (canManageOrders) {
@@ -126,11 +135,22 @@ const Navbar = () => {
                           {user?.name || "User"} ({role || "N/A"})
                         </div>
 
-                        {routeLinks.map((link) => (
+                        {secondaryRouteLinks.map((link) => (
                           <button
                             key={link.path}
                             type="button"
                             className="list-group-item list-group-item-action text-start"
+                            onClick={() => handleNavigate(link.path)}
+                          >
+                            {link.label}
+                          </button>
+                        ))}
+
+                        {primaryRouteLinks.map((link) => (
+                          <button
+                            key={`mobile-${link.path}`}
+                            type="button"
+                            className="list-group-item list-group-item-action text-start om-menu-mobile-only"
                             onClick={() => handleNavigate(link.path)}
                           >
                             {link.label}
@@ -202,6 +222,21 @@ const Navbar = () => {
               </div>
             </div>
           </nav>
+
+          {primaryRouteLinks.length > 0 && (
+            <div className="om-route-bar rounded-4 px-2 py-2 d-none d-lg-flex flex-wrap gap-2 mt-2">
+              {primaryRouteLinks.map((link) => (
+                <button
+                  key={link.path}
+                  type="button"
+                  className="btn btn-outline-primary btn-sm rounded-pill"
+                  onClick={() => handleNavigate(link.path)}
+                >
+                  {link.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
