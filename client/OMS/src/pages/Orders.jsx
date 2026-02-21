@@ -5,6 +5,7 @@ import { getUserFromToken } from "../auth/auth.utils";
 import AlignQCModal from "../components/AlignQcModal";
 import EditOrderModal from "../components/EditOrderModal";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { formatDateDDMMYYYY } from "../utils/date";
 import "../App.css";
 
 const Orders = () => {
@@ -99,9 +100,9 @@ const Orders = () => {
             <span className="om-summary-chip">Vendor: {primaryOrder?.vendor ?? "N/A"}</span>
             <span className="om-summary-chip">Status: {primaryOrder?.status ?? "N/A"}</span>
             <span className="om-summary-chip">
-              Order Date: {primaryOrder?.order_date ? new Date(primaryOrder.order_date).toLocaleDateString() : "N/A"}
+              Order Date: {formatDateDDMMYYYY(primaryOrder?.order_date)}
             </span>
-            <span className="om-summary-chip">ETD: {primaryOrder?.ETD ? new Date(primaryOrder.ETD).toLocaleDateString() : "N/A"}</span>
+            <span className="om-summary-chip">ETD: {formatDateDDMMYYYY(primaryOrder?.ETD)}</span>
           </div>
         </div>
 

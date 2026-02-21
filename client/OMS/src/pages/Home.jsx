@@ -2,18 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { formatDateDDMMYYYY } from "../utils/date";
 import "../App.css";
 
 const getBrandName = (brandObj) =>
   String(brandObj?.name || brandObj?.brand || "").trim();
 const getBrandKey = (value) => String(value || "").trim().toLowerCase();
-
-const formatDateLabel = (value) => {
-  if (!value) return "N/A";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "N/A";
-  return parsed.toLocaleDateString();
-};
 
 const Home = () => {
   const token = localStorage.getItem("token");
@@ -401,7 +395,7 @@ const Home = () => {
                             )}
                           </td>
                           <td>{order?.order_id || "N/A"}</td>
-                          <td>{formatDateLabel(order?.ETD)}</td>
+                          <td>{formatDateDDMMYYYY(order?.ETD)}</td>
                           <td>{Number(order?.itemCount || 0)}</td>
                           <td>{order?.status || "N/A"}</td>
                           <td>{Number(order?.inspectionDoneCount || 0)}</td>

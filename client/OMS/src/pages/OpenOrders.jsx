@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { formatDateDDMMYYYY } from "../utils/date";
 import "../App.css";
 
 const defaultFilters = {
@@ -399,8 +400,8 @@ const OpenOrders = () => {
                         <td>{order.vendor}</td>
                         <td>{getStatus(order)}</td>
                         <td>{order.items}</td>
-                        <td>{order.order_date ? new Date(order.order_date).toLocaleDateString() : "N/A"}</td>
-                        <td>{order.ETD ? new Date(order.ETD).toLocaleDateString() : "N/A"}</td>
+                        <td>{formatDateDDMMYYYY(order.order_date)}</td>
+                        <td>{formatDateDDMMYYYY(order.ETD)}</td>
                       </tr>
                     ))}
                   </tbody>

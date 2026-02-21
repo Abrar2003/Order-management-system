@@ -4,6 +4,7 @@ import Navbar from "../components/Navbar";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import AlignQCModal from "../components/AlignQcModal";
 import { getUserFromToken } from "../auth/auth.utils";
+import { formatDateDDMMYYYY } from "../utils/date";
 import "../App.css";
 
 // small helper: debounce without extra libs
@@ -14,16 +15,6 @@ const useDebouncedValue = (value, delay = 300) => {
     return () => clearTimeout(t);
   }, [value, delay]);
   return debounced;
-};
-
-const formatDateLabel = (value) => {
-  if (!value) return "N/A";
-  const asString = String(value).trim();
-  if (!asString) return "N/A";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(asString)) return asString;
-  const parsed = new Date(asString);
-  if (Number.isNaN(parsed.getTime())) return asString;
-  return parsed.toLocaleDateString();
 };
 
 const toSafeNumber = (value) => {
@@ -422,8 +413,8 @@ const QCPage = () => {
                         {qc?.order_meta?.vendor || qc?.order?.vendor || "N/A"}
                       </td>
                       <td>{qc?.item?.item_code || "N/A"}</td>
-                      <td>{formatDateLabel(qc?.request_date) || "N/A"}</td>
-                      <td>{formatDateLabel(qc?.last_inspected_date) || "N/A"}</td>
+                      <td>{formatDateDDMMYYYY(qc?.request_date)}</td>
+                      <td>{formatDateDDMMYYYY(qc?.last_inspected_date)}</td>
                       <td>{qc?.quantities?.client_demand ?? 0}</td>
                       <td>{qc?.quantities?.quantity_requested ?? 0}</td>
                       <td>{toSafeNumber(qc?.last_inspection?.vendor_offered) ?? 0}</td>

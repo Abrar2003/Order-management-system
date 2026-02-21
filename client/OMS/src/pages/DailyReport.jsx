@@ -2,22 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import { formatDateDDMMYYYY } from "../utils/date";
 import "../App.css";
 
 const getTodayDateInput = () => {
   const today = new Date();
   const offsetMs = today.getTimezoneOffset() * 60000;
   return new Date(today.getTime() - offsetMs).toISOString().slice(0, 10);
-};
-
-const formatDateLabel = (value) => {
-  if (!value) return "N/A";
-  const asString = String(value).trim();
-  if (!asString) return "N/A";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(asString)) return asString;
-  const parsed = new Date(asString);
-  if (Number.isNaN(parsed.getTime())) return asString;
-  return parsed.toLocaleDateString();
 };
 
 const formatCbm = (value) => {
@@ -133,7 +124,7 @@ const DailyReport = () => {
             >
               {loading ? "Loading..." : "Refresh"}
             </button>
-            <span className="om-summary-chip">Date: {formatDateLabel(report?.date)}</span>
+            <span className="om-summary-chip">Date: {formatDateDDMMYYYY(report?.date)}</span>
             <span className="om-summary-chip">
               Aligned Requests: {summary.aligned_requests_count ?? 0}
             </span>
@@ -188,7 +179,7 @@ const DailyReport = () => {
 
                   {report.aligned_requests.map((request) => (
                     <tr key={request.qc_id}>
-                      <td>{formatDateLabel(request.request_date)}</td>
+                      <td>{formatDateDDMMYYYY(request.request_date)}</td>
                       <td>{request.order_id || "N/A"}</td>
                       <td>{request.item_code || "N/A"}</td>
                       <td>{request.vendor || "N/A"}</td>
@@ -244,7 +235,7 @@ const DailyReport = () => {
                       <tbody>
                         {(entry?.inspections || []).map((inspection) => (
                           <tr key={inspection.inspection_id}>
-                            <td>{formatDateLabel(inspection.inspection_date)}</td>
+                            <td>{formatDateDDMMYYYY(inspection.inspection_date)}</td>
                             <td>{inspection.order_id || "N/A"}</td>
                             <td>{inspection.item_code || "N/A"}</td>
                             <td>{inspection.inspected_quantity ?? 0}</td>

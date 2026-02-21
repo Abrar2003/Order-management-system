@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import { getUploadLogs } from "../services/orders.service";
+import { formatDateDDMMYYYY } from "../utils/date";
 import "../App.css";
 
 const DEFAULT_LIMIT = 20;
@@ -15,13 +16,6 @@ const useDebouncedValue = (value, delay = 300) => {
   }, [value, delay]);
 
   return debounced;
-};
-
-const formatDateTime = (value) => {
-  if (!value) return "N/A";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return String(value);
-  return parsed.toLocaleString();
 };
 
 const STATUS_LABELS = {
@@ -262,7 +256,7 @@ const UploadLogs = () => {
 
                       return (
                         <tr key={log?._id || `${log?.createdAt || ""}-${status}`}>
-                          <td>{formatDateTime(log?.createdAt)}</td>
+                          <td>{formatDateDDMMYYYY(log?.createdAt)}</td>
                           <td>{log?.uploaded_by_name || "N/A"}</td>
                           <td>{log?.source_filename || "N/A"}</td>
                           <td>{vendors.length > 0 ? vendors.join(", ") : "N/A"}</td>

@@ -6,6 +6,7 @@ import "../App.css";
 import ShippingModal from "../components/ShippingModal";
 import EditOrderModal from "../components/EditOrderModal";
 import { getUserFromToken } from "../auth/auth.utils";
+import { formatDateDDMMYYYY } from "../utils/date";
 
 const useDebouncedValue = (value, delay = 300) => {
   const [debounced, setDebounced] = useState(value);
@@ -16,16 +17,6 @@ const useDebouncedValue = (value, delay = 300) => {
   }, [value, delay]);
 
   return debounced;
-};
-
-const formatDateLabel = (value) => {
-  if (!value) return "N/A";
-  const asString = String(value).trim();
-  if (!asString) return "N/A";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(asString)) return asString;
-  const parsed = new Date(asString);
-  if (Number.isNaN(parsed.getTime())) return asString;
-  return parsed.toLocaleDateString();
 };
 
 const EMPTY_SUMMARY = {
@@ -337,7 +328,7 @@ const Shipments = () => {
                         <td>{row?.vendor || "N/A"}</td>
                         <td>{row?.description || "N/A"}</td>
                         <td>{row?.order_quantity || "N/A"}</td>
-                        <td>{formatDateLabel(row?.stuffing_date)}</td>
+                        <td>{formatDateDDMMYYYY(row?.stuffing_date)}</td>
                         <td>{row?.container || "N/A"}</td>
                         <td>{row?.quantity ?? "N/A"}</td>
                         <td>{row?.pending ?? "N/A"}</td>

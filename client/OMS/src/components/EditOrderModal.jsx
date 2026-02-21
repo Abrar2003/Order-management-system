@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { editOrder } from "../services/orders.service";
 import { getUserFromToken } from "../auth/auth.utils";
+import { formatDateDDMMYYYY } from "../utils/date";
 import "../App.css";
 
 const toDateInputValue = (value) => {
@@ -189,7 +190,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
       } else {
         adjustedShipmentPreview.forEach((entry, idx) => {
           lines.push(
-            `${idx + 1}) ${entry.container} | ${entry.stuffing_date} | qty ${entry.quantity} | pending ${entry.pending} | remarks ${entry.remaining_remarks || "-"}`,
+            `${idx + 1}) ${entry.container} | ${formatDateDDMMYYYY(entry.stuffing_date, "-")} | qty ${entry.quantity} | pending ${entry.pending} | remarks ${entry.remaining_remarks || "-"}`,
           );
         });
       }

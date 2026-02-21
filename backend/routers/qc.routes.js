@@ -36,6 +36,13 @@ router.get(
   qcController.getDailyReport
 );
 
+router.delete(
+  "/:id/inspection-record/:recordId",
+  auth,
+  authorize("admin"),
+  qcController.deleteInspectionRecord,
+);
+
 router.get(
   "/:id",
   auth,

@@ -5,6 +5,7 @@ import Navbar from "../components/Navbar";
 import UpdateQcModal from "../components/UpdateQcModal";
 import ShippingModal from "../components/ShippingModal";
 import { getUserFromToken } from "../auth/auth.utils";
+import { formatDateDDMMYYYY } from "../utils/date";
 import Barcode from "react-barcode";
 import "../App.css";
 
@@ -14,16 +15,6 @@ const normalizeLabels = (labels) => {
     .map((label) => Number(label))
     .filter((label) => Number.isFinite(label));
   return [...new Set(numericLabels)].sort((a, b) => a - b);
-};
-
-const formatDateLabel = (value) => {
-  if (!value) return "N/A";
-  const asString = String(value).trim();
-  if (!asString) return "N/A";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(asString)) return asString;
-  const parsed = new Date(asString);
-  if (Number.isNaN(parsed.getTime())) return asString;
-  return parsed.toLocaleDateString();
 };
 
 const toTimestamp = (value) => {
@@ -61,11 +52,13 @@ const QcDetails = () => {
   const [loading, setLoading] = useState(true);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [showShippingModal, setShowShippingModal] = useState(false);
+  const [deletingInspectionId, setDeletingInspectionId] = useState("");
 
   const navigate = useNavigate();
   const user = getUserFromToken();
   const userId = user?.id || user?._id;
   const isAdmin = user?.role === "admin" || user?.role === "manager";
+  const isOnlyAdmin = String(user?.role || "").toLowerCase() === "admin";
   const canFinalizeShipping = ["admin", "manager", "dev", "Dev"].includes(
     user?.role,
   );
@@ -206,6 +199,7 @@ const QcDetails = () => {
 
       return {
         key: `inspection-${record?._id || index}`,
+        recordId: record?._id || null,
         rowType: "Inspection",
         sortTime: Math.max(
           toTimestamp(record?.inspection_date),
@@ -245,6 +239,36 @@ const QcDetails = () => {
       setLoading(false);
     }
   }, [id]);
+
+  const handleDeleteInspectionRecord = useCallback(
+    async (recordId) => {
+      if (!isOnlyAdmin || !recordId) return;
+
+      const confirmed = window.confirm(
+        "Are you sure you want to delete this inspection record?",
+      );
+      if (!confirmed) return;
+
+      try {
+        setDeletingInspectionId(String(recordId));
+        await api.delete(`/qc/${id}/inspection-record/${recordId}`, {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("token")}`,
+          },
+        });
+        await fetchQcDetails();
+      } catch (err) {
+        console.error(err);
+        alert(
+          err?.response?.data?.message
+            || "Failed to delete inspection record.",
+        );
+      } finally {
+        setDeletingInspectionId("");
+      }
+    },
+    [fetchQcDetails, id, isOnlyAdmin],
+  );
 
   useEffect(() => {
     fetchQcDetails();
@@ -288,7 +312,7 @@ const QcDetails = () => {
         <div className="card om-card">
           <div className="card-body d-grid gap-4">
             <section>
-              <h3 className="h6 mb-3">{`Order Information | ${qc.order.order_id} | ${qc.order.brand} | ${qc.order.vendor} |  Request Date: ${new Date(qc.request_date).toLocaleDateString()}`}</h3>
+              <h3 className="h6 mb-3">{`Order Information | ${qc.order.order_id} | ${qc.order.brand} | ${qc.order.vendor} |  Request Date: ${formatDateDDMMYYYY(qc.request_date)}`}</h3>
               <h3 className="h6 mb-3">{`Status: ${qc.order.status} | Inspector: ${qc?.inspector?.name}`}</h3>
               <div className="qc-order-inline-grid">
                 <InfoBox compact label="Item Code" value={qc.item.item_code} />
@@ -337,13 +361,14 @@ const QcDetails = () => {
                         <th>CBM</th>
                         <th>Pending</th>
                         <th>Remarks</th>
+                        {isOnlyAdmin && <th>Action</th>}
                       </tr>
                     </thead>
                     <tbody>
                       {requestInspectionTimeline.map((row) => (
                         <tr key={row.key}>
-                          <td>{formatDateLabel(row.requestDate)}</td>
-                          <td>{formatDateLabel(row.inspectionDate)}</td>
+                          <td>{formatDateDDMMYYYY(row.requestDate)}</td>
+                          <td>{formatDateDDMMYYYY(row.inspectionDate)}</td>
                           <td>{row.inspectorName}</td>
                           <td>{row.requestedQty}</td>
                           <td>{row.offeredQty}</td>
@@ -352,6 +377,24 @@ const QcDetails = () => {
                           <td>{row.cbmTotal}</td>
                           <td>{row.pendingAfter}</td>
                           <td>{row.remarks}</td>
+                          {isOnlyAdmin && (
+                            <td>
+                              {row.rowType === "Inspection" && row.recordId ? (
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-danger btn-sm"
+                                  disabled={deletingInspectionId === String(row.recordId)}
+                                  onClick={() => handleDeleteInspectionRecord(row.recordId)}
+                                >
+                                  {deletingInspectionId === String(row.recordId)
+                                    ? "Deleting..."
+                                    : "Delete"}
+                                </button>
+                              ) : (
+                                <span className="text-secondary small">N/A</span>
+                              )}
+                            </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>
@@ -388,7 +431,7 @@ const QcDetails = () => {
                       {qc.order.shipment.map((record) => (
                         <tr key={record._id}>
                           <td>
-                            {formatDateLabel(
+                            {formatDateDDMMYYYY(
                               record?.stuffing_date || record?.createdAt,
                             )}
                           </td>
@@ -416,20 +459,6 @@ const QcDetails = () => {
             <section>
               <h3 className="h6 mb-3">QC Attributes</h3>
               <div className="row g-3 mb-3">
-                <InfoBox
-                  label="CBM Top"
-                  value={
-                    isPositiveCbmValue(cbmData.top) ? cbmData.top : "Not Set"
-                  }
-                />
-                <InfoBox
-                  label="CBM Bottom"
-                  value={
-                    isPositiveCbmValue(cbmData.bottom)
-                      ? cbmData.bottom
-                      : "Not Set"
-                  }
-                />
                 <InfoBox
                   label="CBM Total"
                   value={

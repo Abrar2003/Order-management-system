@@ -1,5 +1,6 @@
 const QC = require("../models/qc.model");
 const Inspection = require("../models/inspection.model");
+const Inspector = require("../models/inspector.model");
 
 const Order = require("../models/order.model")
 const mongoose = require("mongoose");
@@ -864,7 +865,6 @@ exports.updateQC = async (req, res) => {
         (Array.isArray(labels) && labels.length > 0) || hasLabelRangePayload;
 
       if (hasLabelsPayload) {
-        const Inspector = require("../models/inspector.model");
         const inspectionInspectorUserId = qc.inspector?._id
           ? qc.inspector._id
           : qc.inspector;
@@ -1232,5 +1232,148 @@ exports.getQCById = async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
+  }
+};
+
+exports.deleteInspectionRecord = async (req, res) => {
+  try {
+    const qcId = String(req.params.id || "").trim();
+    const recordId = String(req.params.recordId || "").trim();
+
+    if (!mongoose.Types.ObjectId.isValid(qcId)) {
+      return res.status(400).json({ message: "Invalid QC id" });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(recordId)) {
+      return res.status(400).json({ message: "Invalid inspection record id" });
+    }
+
+    const qc = await QC.findById(qcId);
+    if (!qc) {
+      return res.status(404).json({ message: "QC record not found" });
+    }
+
+    const inspection = await Inspection.findOne({
+      _id: recordId,
+      qc: qc._id,
+    });
+    if (!inspection) {
+      return res.status(404).json({ message: "Inspection record not found" });
+    }
+
+    qc.inspection_record = (Array.isArray(qc.inspection_record) ? qc.inspection_record : [])
+      .filter((entryId) => String(entryId) !== String(inspection._id));
+
+    const currentChecked = Number(qc?.quantities?.qc_checked || 0);
+    const currentPassed = Number(qc?.quantities?.qc_passed || 0);
+    const currentProvision = Number(qc?.quantities?.vendor_provision || 0);
+    const currentClientDemand = Number(qc?.quantities?.client_demand || 0);
+
+    const removedChecked = Number(inspection?.checked || 0);
+    const removedPassed = Number(inspection?.passed || 0);
+    const removedProvision = Number(inspection?.vendor_offered || 0);
+
+    qc.quantities.qc_checked = Math.max(0, currentChecked - removedChecked);
+    qc.quantities.qc_passed = Math.max(0, currentPassed - removedPassed);
+    qc.quantities.vendor_provision = Math.max(
+      0,
+      currentProvision - removedProvision,
+    );
+    qc.quantities.pending = Math.max(0, currentClientDemand - qc.quantities.qc_passed);
+
+    const remainingInspections = await Inspection.find({
+      qc: qc._id,
+      _id: { $ne: inspection._id },
+    })
+      .select("inspection_date createdAt labels_added")
+      .lean();
+
+    const recalculatedLabels = normalizeLabels(
+      remainingInspections.flatMap((entry) =>
+        Array.isArray(entry?.labels_added) ? entry.labels_added : [],
+      ),
+    );
+    qc.labels = recalculatedLabels;
+
+    if (remainingInspections.length > 0) {
+      const latestRecord = [...remainingInspections].sort((a, b) => {
+        const aTime = Math.max(
+          toSortableTimestamp(a?.inspection_date),
+          toSortableTimestamp(a?.createdAt),
+        );
+        const bTime = Math.max(
+          toSortableTimestamp(b?.inspection_date),
+          toSortableTimestamp(b?.createdAt),
+        );
+        return bTime - aTime;
+      })[0];
+
+      qc.last_inspected_date = String(
+        latestRecord?.inspection_date
+          || toDateInputValue(latestRecord?.createdAt)
+          || qc.request_date
+          || qc.last_inspected_date
+          || "",
+      );
+    } else {
+      qc.last_inspected_date = String(qc.request_date || qc.last_inspected_date || "");
+    }
+
+    await qc.save();
+    await Inspection.deleteOne({ _id: inspection._id });
+
+    const inspectorDoc = await Inspector.findOne({ user: inspection.inspector });
+    if (inspectorDoc) {
+      const stillUsedRecords = await Inspection.find({ inspector: inspection.inspector })
+        .select("labels_added")
+        .lean();
+
+      const stillUsedLabels = new Set(
+        stillUsedRecords.flatMap((entry) =>
+          (Array.isArray(entry?.labels_added) ? entry.labels_added : [])
+            .map((label) => Number(label))
+            .filter((label) => Number.isFinite(label)),
+        ),
+      );
+
+      const nextUsedLabels = normalizeLabels(
+        (Array.isArray(inspectorDoc.used_labels) ? inspectorDoc.used_labels : [])
+          .map((label) => Number(label))
+          .filter((label) => Number.isFinite(label) && stillUsedLabels.has(label)),
+      );
+
+      inspectorDoc.used_labels = nextUsedLabels;
+      await inspectorDoc.save();
+    }
+
+    const orderId = qc?.order?._id || qc.order;
+    const orderRecord = await Order.findById(orderId);
+    if (orderRecord && orderRecord.status !== "Shipped") {
+      const passedQty = Number(qc.quantities?.qc_passed || 0);
+      const clientDemandQty = Number(qc.quantities?.client_demand || 0);
+
+      orderRecord.status =
+        clientDemandQty > 0 && passedQty >= clientDemandQty
+          ? "Inspection Done"
+          : "Under Inspection";
+      await orderRecord.save();
+    }
+
+    try {
+      await upsertItemFromQc(qc);
+    } catch (itemSyncError) {
+      console.error("Item sync after inspection deletion failed:", {
+        qcId: qc?._id,
+        error: itemSyncError?.message || String(itemSyncError),
+      });
+    }
+
+    return res.status(200).json({
+      message: "Inspection record deleted successfully",
+      data: qc,
+    });
+  } catch (err) {
+    console.error("Delete Inspection Record Error:", err);
+    return res.status(500).json({ message: err.message });
   }
 };

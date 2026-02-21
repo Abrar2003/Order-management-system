@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import { getUserFromToken } from "../auth/auth.utils";
+import { formatDateDDMMYYYY } from "../utils/date";
 import "../App.css";
 
 const DEFAULT_LIMIT = 20;
@@ -16,13 +17,6 @@ const useDebouncedValue = (value, delay = 300) => {
   }, [value, delay]);
 
   return debounced;
-};
-
-const formatDateLabel = (value) => {
-  if (!value) return "N/A";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return String(value);
-  return parsed.toLocaleString();
 };
 
 const formatLbh = (value) => {
@@ -301,7 +295,7 @@ const Items = () => {
                         </td>
                         <td>{formatLbh(item?.item_LBH)}</td>
                         <td>{formatLbh(item?.box_LBH)}</td>
-                        <td>{item?.qc?.last_inspected_date || "N/A"}</td>
+                        <td>{formatDateDDMMYYYY(item?.qc?.last_inspected_date)}</td>
                         {/* <td>
                           {item?.source?.from_orders ? "Orders" : ""}
                           {item?.source?.from_orders && item?.source?.from_qc ? " + " : ""}
