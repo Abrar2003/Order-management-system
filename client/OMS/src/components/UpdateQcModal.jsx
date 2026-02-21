@@ -321,7 +321,18 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
     const hasStartedInspection =
       (qc.quantities?.qc_checked || 0) > 0 ||
-      (Array.isArray(qc?.inspection_record) && qc.inspection_record.length > 0);
+      Number(qc?.quantities?.qc_passed || 0) > 0 ||
+      Number(qc?.quantities?.vendor_provision || 0) > 0 ||
+      (Array.isArray(qc?.inspection_record) &&
+        qc.inspection_record.some((record) => {
+          const checked = Number(record?.checked || 0);
+          const passed = Number(record?.passed || 0);
+          const offered = Number(record?.vendor_offered || 0);
+          const labelsAdded = Array.isArray(record?.labels_added)
+            ? record.labels_added.length
+            : 0;
+          return checked > 0 || passed > 0 || offered > 0 || labelsAdded > 0;
+        }));
 
     const parsedPendingQuantityLimit = Number(
       qc.quantities?.pending ??

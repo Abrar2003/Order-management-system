@@ -14,6 +14,163 @@ const normalizeLabels = (labels = []) => {
   return [...new Set(numericLabels)].sort((a, b) => a - b);
 };
 
+const toNonNegativeNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return parsed;
+};
+
+const resolveLatestRequestEntry = (requestHistory = []) => {
+  if (!Array.isArray(requestHistory) || requestHistory.length === 0) return null;
+  return requestHistory[requestHistory.length - 1] || null;
+};
+
+const upsertInspectionRecordForRequest = async ({
+  qcDoc,
+  inspectorId,
+  requestDate,
+  requestHistoryId = null,
+  requestedQuantity = 0,
+  inspectionDate = "",
+  remarks = "",
+  createdBy,
+  addChecked = 0,
+  addPassed = 0,
+  addProvision = 0,
+  appendLabelRanges = [],
+  appendLabels = [],
+  replaceCbmSnapshot = false,
+  allowRequestedDateFallback = true,
+}) => {
+  if (!qcDoc?._id) return null;
+
+  const resolvedInspectorId = String(inspectorId || "").trim();
+  const resolvedRequestDate = String(requestDate || "").trim();
+  const resolvedInspectionDate = String(inspectionDate || resolvedRequestDate).trim();
+
+  if (!resolvedInspectorId || !resolvedRequestDate || !resolvedInspectionDate || !createdBy) {
+    return null;
+  }
+
+  let inspectionRecord = null;
+  if (requestHistoryId && mongoose.Types.ObjectId.isValid(requestHistoryId)) {
+    inspectionRecord = await Inspection.findOne({
+      qc: qcDoc._id,
+      request_history_id: requestHistoryId,
+    }).sort({ createdAt: -1 });
+  }
+
+  if (!inspectionRecord && allowRequestedDateFallback) {
+    inspectionRecord = await Inspection.findOne({
+      qc: qcDoc._id,
+      requested_date: resolvedRequestDate,
+    }).sort({ createdAt: -1 });
+  }
+
+  const requestedQty = toNonNegativeNumber(requestedQuantity, 0);
+  const pendingAfter = toNonNegativeNumber(
+    qcDoc?.quantities?.pending ??
+      ((qcDoc?.quantities?.client_demand || 0) - (qcDoc?.quantities?.qc_passed || 0)),
+    0,
+  );
+  const labelRangesToAppend = Array.isArray(appendLabelRanges) ? appendLabelRanges : [];
+  const labelsToAppend = normalizeLabels(appendLabels);
+
+  if (!inspectionRecord) {
+    inspectionRecord = await Inspection.create({
+      qc: qcDoc._id,
+      inspector: resolvedInspectorId,
+      inspection_date: resolvedInspectionDate,
+      request_history_id: requestHistoryId || null,
+      requested_date: resolvedRequestDate,
+      checked: toNonNegativeNumber(addChecked, 0),
+      passed: toNonNegativeNumber(addPassed, 0),
+      vendor_requested: requestedQty,
+      vendor_offered: toNonNegativeNumber(addProvision, 0),
+      pending_after: pendingAfter,
+      cbm: {
+        top: String(qcDoc?.cbm?.top ?? "0"),
+        bottom: String(qcDoc?.cbm?.bottom ?? "0"),
+        total: String(qcDoc?.cbm?.total ?? "0"),
+      },
+      label_ranges: labelRangesToAppend,
+      labels_added: labelsToAppend,
+      remarks: String(remarks || "").trim(),
+      createdBy,
+    });
+
+    qcDoc.inspection_record = qcDoc.inspection_record || [];
+    if (!qcDoc.inspection_record.some((entry) => String(entry) === String(inspectionRecord._id))) {
+      qcDoc.inspection_record.push(inspectionRecord._id);
+    }
+
+    return inspectionRecord;
+  }
+
+  inspectionRecord.inspector = resolvedInspectorId;
+  inspectionRecord.requested_date = resolvedRequestDate;
+  inspectionRecord.request_history_id = requestHistoryId || inspectionRecord.request_history_id || null;
+  inspectionRecord.inspection_date = resolvedInspectionDate;
+  inspectionRecord.vendor_requested = requestedQty;
+
+  const nextChecked =
+    toNonNegativeNumber(inspectionRecord.checked, 0) + toNonNegativeNumber(addChecked, 0);
+  const nextPassed =
+    toNonNegativeNumber(inspectionRecord.passed, 0) + toNonNegativeNumber(addPassed, 0);
+  const nextOffered =
+    toNonNegativeNumber(inspectionRecord.vendor_offered, 0) + toNonNegativeNumber(addProvision, 0);
+
+  inspectionRecord.checked = nextChecked;
+  inspectionRecord.passed = nextPassed;
+  inspectionRecord.vendor_offered = nextOffered;
+  inspectionRecord.pending_after = pendingAfter;
+
+  if (replaceCbmSnapshot) {
+    inspectionRecord.cbm = {
+      top: String(qcDoc?.cbm?.top ?? "0"),
+      bottom: String(qcDoc?.cbm?.bottom ?? "0"),
+      total: String(qcDoc?.cbm?.total ?? "0"),
+    };
+  }
+
+  if (labelRangesToAppend.length > 0) {
+    const existingRanges = Array.isArray(inspectionRecord.label_ranges)
+      ? inspectionRecord.label_ranges
+      : [];
+    const rangeKeys = new Set(
+      existingRanges.map((range) => `${Number(range?.start)}-${Number(range?.end)}`),
+    );
+    for (const range of labelRangesToAppend) {
+      const start = Number(range?.start);
+      const end = Number(range?.end);
+      if (!Number.isInteger(start) || !Number.isInteger(end)) continue;
+      const key = `${start}-${end}`;
+      if (rangeKeys.has(key)) continue;
+      existingRanges.push({ start, end });
+      rangeKeys.add(key);
+    }
+    inspectionRecord.label_ranges = existingRanges;
+  }
+
+  if (labelsToAppend.length > 0) {
+    const existingLabels = normalizeLabels(inspectionRecord.labels_added || []);
+    inspectionRecord.labels_added = normalizeLabels([...existingLabels, ...labelsToAppend]);
+  }
+
+  if (String(remarks || "").trim()) {
+    inspectionRecord.remarks = String(remarks || "").trim();
+  }
+
+  await inspectionRecord.save();
+
+  qcDoc.inspection_record = qcDoc.inspection_record || [];
+  if (!qcDoc.inspection_record.some((entry) => String(entry) === String(inspectionRecord._id))) {
+    qcDoc.inspection_record.push(inspectionRecord._id);
+  }
+
+  return inspectionRecord;
+};
+
 /**
  * GET /qclist
  * Fetch all QC records (pagination optional)
@@ -497,12 +654,32 @@ exports.alignQC = async (req, res) => {
       }
 
       existingQC.request_history = existingQC.request_history || [];
-      existingQC.request_history.push({
+      const requestHistoryEntry = {
         request_date: requestDateValue,
         quantity_requested: quantityRequested,
         inspector: inspectorId,
+        status: "open",
         remarks: remarks || "",
         createdBy: req.user._id,
+      };
+      existingQC.request_history.push(requestHistoryEntry);
+
+      await upsertInspectionRecordForRequest({
+        qcDoc: existingQC,
+        inspectorId,
+        requestDate: requestDateValue,
+        requestHistoryId: resolveLatestRequestEntry(existingQC.request_history)?._id || null,
+        requestedQuantity: quantityRequested,
+        inspectionDate: requestDateValue,
+        remarks: remarks || "",
+        createdBy: req.user._id,
+        addChecked: 0,
+        addPassed: 0,
+        addProvision: 0,
+        appendLabelRanges: [],
+        appendLabels: [],
+        replaceCbmSnapshot: true,
+        allowRequestedDateFallback: false,
       });
 
       await existingQC.save();
@@ -536,6 +713,15 @@ exports.alignQC = async (req, res) => {
 
     const orderRecord = await Order.findById(order);
 
+    const requestHistoryEntry = {
+      request_date: requestDateValue,
+      quantity_requested: quantityRequested,
+      inspector: inspectorId,
+      status: "open",
+      remarks: remarks || "",
+      createdBy: req.user._id,
+    };
+
     const qc = await QC.create({
       order, 
       item,
@@ -556,22 +742,35 @@ exports.alignQC = async (req, res) => {
         pending: clientDemand,
       },
       request_history: [
-        {
-          request_date: requestDateValue,
-          quantity_requested: quantityRequested,
-          inspector: inspectorId,
-          remarks: remarks || "",
-          createdBy: req.user._id,
-        },
+        requestHistoryEntry,
       ],
       remarks,
       createdBy: req.user._id,
+    });
+
+    await upsertInspectionRecordForRequest({
+      qcDoc: qc,
+      inspectorId,
+      requestDate: requestDateValue,
+      requestHistoryId: resolveLatestRequestEntry(qc.request_history)?._id || null,
+      requestedQuantity: quantityRequested,
+      inspectionDate: requestDateValue,
+      remarks: remarks || "",
+      createdBy: req.user._id,
+      addChecked: 0,
+      addPassed: 0,
+      addProvision: 0,
+      appendLabelRanges: [],
+      appendLabels: [],
+      replaceCbmSnapshot: true,
+      allowRequestedDateFallback: false,
     });
 
 
     orderRecord.status = "Under Inspection";
     orderRecord.qc_record = qc._id;
 
+    await qc.save();
     await orderRecord.save();
 
     try {
@@ -642,8 +841,10 @@ exports.updateQC = async (req, res) => {
           : null;
 
       const hasStartedInspection =
-        (qc.quantities?.qc_checked || 0) > 0 ||
-        (Array.isArray(qc.inspection_record) && qc.inspection_record.length > 0);
+        Number(qc.quantities?.qc_checked || 0) > 0 ||
+        Number(qc.quantities?.qc_passed || 0) > 0 ||
+        Number(qc.quantities?.vendor_provision || 0) > 0 ||
+        normalizeLabels(qc.labels).length > 0;
 
       if (!isAdmin) {
         const currentUserId = req.user._id.toString();
@@ -932,18 +1133,13 @@ exports.updateQC = async (req, res) => {
         addProvision > 0 ||
         (labelsAddedThisVisit && labelsAddedThisVisit.length > 0);
 
-      if (isVisitUpdate) {
-        const vendorRequestedThisVisit = hasStartedInspection
-          ? pendingQuantityLimit
-          : (
-              Number.isFinite(quantityRequestedCap)
-                ? quantityRequestedCap
-                : qc.quantities.client_demand
-            );
+      const shouldUpdateInspectionRecord =
+        isVisitUpdate ||
+        hasCbmUpdate ||
+        (last_inspected_date !== undefined && String(last_inspected_date).trim() !== "") ||
+        String(remarks || "").trim() !== "";
 
-        // vendor_offered for the visit: what vendor showed/added in THIS update
-        const vendorOfferedThisVisit = addProvision;
-
+      if (shouldUpdateInspectionRecord) {
         const inspectionInspectorId = qc.inspector?._id
           ? qc.inspector._id
           : qc.inspector;
@@ -964,31 +1160,36 @@ exports.updateQC = async (req, res) => {
           });
         }
 
-        const record = await Inspection.create([
-          {
-            qc: qc._id,
-            inspector: inspectionInspectorId,
-            inspection_date: inspectionDateForRecord,
-            checked: addChecked,
-            passed: addPassed,
-            vendor_requested: vendorRequestedThisVisit,
-            vendor_offered: vendorOfferedThisVisit,
-            pending_after: qc.quantities.pending,
-            cbm: {
-              top: String(qc?.cbm?.top ?? "0"),
-              bottom: String(qc?.cbm?.bottom ?? "0"),
-              total: String(qc?.cbm?.total ?? "0"),
-            },
-            label_ranges: labelRangesUsedThisVisit,
-            labels_added: labelsAddedThisVisit,
-            remarks: remarks || "",
-            createdBy: req.user._id,
-          },
-        ]);
+        const latestRequestEntry = resolveLatestRequestEntry(qc.request_history);
+        const requestedDateForRecord = String(
+          latestRequestEntry?.request_date || qc.request_date || inspectionDateForRecord,
+        ).trim();
 
-        // push record id into qc
-        qc.inspection_record = qc.inspection_record || [];
-        qc.inspection_record.push(record[0]._id);
+        const requestedQuantityForRecord =
+          latestRequestEntry?.quantity_requested !== undefined
+            ? Number(latestRequestEntry.quantity_requested)
+            : quantityRequestedCap;
+
+        const inspectionRecord = await upsertInspectionRecordForRequest({
+          qcDoc: qc,
+          inspectorId: inspectionInspectorId,
+          requestDate: requestedDateForRecord,
+          requestHistoryId: latestRequestEntry?._id || null,
+          requestedQuantity: requestedQuantityForRecord,
+          inspectionDate: inspectionDateForRecord,
+          remarks: remarks || "",
+          createdBy: req.user._id,
+          addChecked: isVisitUpdate ? addChecked : 0,
+          addPassed: isVisitUpdate ? addPassed : 0,
+          addProvision: isVisitUpdate ? addProvision : 0,
+          appendLabelRanges: isVisitUpdate ? labelRangesUsedThisVisit : [],
+          appendLabels: isVisitUpdate ? labelsAddedThisVisit : [],
+          replaceCbmSnapshot: hasCbmUpdate || isVisitUpdate,
+        });
+
+        if (latestRequestEntry && inspectionRecord && isVisitUpdate) {
+          latestRequestEntry.status = "inspected";
+        }
       }
 
       await qc.save();
@@ -1030,6 +1231,13 @@ exports.getDailyReport = async (req, res) => {
     if (!reportDate) {
       return res.status(400).json({ message: "Invalid date format" });
     }
+    const [reportYear, reportMonth, reportDay] = String(reportDate)
+      .split("-");
+    const inspectionDateVariants = [
+      reportDate,
+      `${reportDay}/${reportMonth}/${reportYear}`,
+      `${reportDay}-${reportMonth}-${reportYear}`,
+    ];
 
     const [alignedRequestsRaw, inspectionsRaw] = await Promise.all([
       QC.find({ request_date: reportDate })
@@ -1038,7 +1246,7 @@ exports.getDailyReport = async (req, res) => {
         .populate("order", "order_id status quantity brand vendor")
         .sort({ createdAt: -1 })
         .lean(),
-      Inspection.find({ inspection_date: reportDate })
+      Inspection.find({ inspection_date: { $in: inspectionDateVariants } })
         .select(
           "inspection_date inspector qc checked passed vendor_requested vendor_offered pending_after cbm remarks createdAt",
         )
@@ -1222,16 +1430,309 @@ exports.getQCById = async (req, res) => {
           return bTime - aTime;
         })
       : [];
+    const sortedInspectionRecords = Array.isArray(qcData.inspection_record)
+      ? [...qcData.inspection_record].sort((a, b) => {
+          const aTime =
+            toSortableTimestamp(a?.inspection_date) || toSortableTimestamp(a?.createdAt);
+          const bTime =
+            toSortableTimestamp(b?.inspection_date) || toSortableTimestamp(b?.createdAt);
+          return bTime - aTime;
+        })
+      : [];
 
     res.json({
       data: {
         ...qcData,
         labels: sortedLabels,
         request_history: sortedRequestHistory,
+        inspection_record: sortedInspectionRecords,
       },
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
+  }
+};
+
+exports.editInspectionRecords = async (req, res) => {
+  try {
+    const qcId = String(req.params.id || "").trim();
+    const payloadRecords = Array.isArray(req.body?.records) ? req.body.records : [];
+
+    if (!mongoose.Types.ObjectId.isValid(qcId)) {
+      return res.status(400).json({ message: "Invalid QC id" });
+    }
+
+    if (payloadRecords.length === 0) {
+      return res.status(400).json({ message: "At least one inspection row is required" });
+    }
+
+    const qc = await QC.findById(qcId);
+    if (!qc) {
+      return res.status(404).json({ message: "QC record not found" });
+    }
+
+    const inspectionDocs = await Inspection.find({ qc: qc._id });
+    if (inspectionDocs.length === 0) {
+      return res.status(404).json({ message: "No inspection records found for this QC record" });
+    }
+
+    const inspectionMap = new Map(
+      inspectionDocs.map((doc) => [String(doc._id), doc]),
+    );
+    const touchedInspectors = new Set();
+
+    const parseRequiredDate = (value, fieldName) => {
+      const normalized = String(value || "").trim();
+      if (!normalized) {
+        throw new Error(`${fieldName} is required`);
+      }
+      const parsed = /^\d{4}-\d{2}-\d{2}$/.test(normalized)
+        ? new Date(`${normalized}T00:00:00`)
+        : new Date(normalized);
+      if (Number.isNaN(parsed.getTime())) {
+        throw new Error(`${fieldName} must be a valid date`);
+      }
+      return /^\d{4}-\d{2}-\d{2}$/.test(normalized)
+        ? normalized
+        : toDateInputValue(parsed);
+    };
+
+    const parseRequiredInspector = (value) => {
+      const inspectorId = String(value || "").trim();
+      if (!inspectorId) {
+        throw new Error("Inspector is required");
+      }
+      if (!mongoose.Types.ObjectId.isValid(inspectorId)) {
+        throw new Error("Inspector id is invalid");
+      }
+      return inspectorId;
+    };
+
+    const parseNonNegativeField = (value, fieldName) => {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        throw new Error(`${fieldName} must be a valid non-negative number`);
+      }
+      return parsed;
+    };
+
+    for (const row of payloadRecords) {
+      const recordId = String(row?._id || row?.id || "").trim();
+      if (!recordId || !mongoose.Types.ObjectId.isValid(recordId)) {
+        throw new Error("Invalid inspection record id in payload");
+      }
+
+      const record = inspectionMap.get(recordId);
+      if (!record) {
+        throw new Error(`Inspection record ${recordId} does not belong to this QC`);
+      }
+
+      const requestedDate = parseRequiredDate(
+        row?.requested_date ?? row?.request_date ?? record.requested_date,
+        "Requested date",
+      );
+      const inspectionDate = parseRequiredDate(
+        row?.inspection_date ?? record.inspection_date,
+        "Inspection date",
+      );
+      const inspectorId = parseRequiredInspector(
+        row?.inspector ?? row?.inspector_id ?? record.inspector,
+      );
+
+      const vendorRequested = parseNonNegativeField(
+        row?.vendor_requested ?? record.vendor_requested,
+        "Vendor requested",
+      );
+      const vendorOffered = parseNonNegativeField(
+        row?.vendor_offered ?? record.vendor_offered,
+        "Vendor offered",
+      );
+      const checked = parseNonNegativeField(
+        row?.checked ?? record.checked,
+        "Checked quantity",
+      );
+      const passed = parseNonNegativeField(
+        row?.passed ?? record.passed,
+        "Passed quantity",
+      );
+      const pendingAfter = parseNonNegativeField(
+        row?.pending_after ?? record.pending_after,
+        "Pending after",
+      );
+
+      if (passed > checked) {
+        throw new Error("Passed quantity cannot exceed checked quantity");
+      }
+
+      const cbmInput =
+        row?.cbm && typeof row.cbm === "object" ? row.cbm : null;
+      const cbmTop = cbmInput?.top !== undefined
+        ? String(cbmInput.top ?? "0")
+        : String(record?.cbm?.top ?? "0");
+      const cbmBottom = cbmInput?.bottom !== undefined
+        ? String(cbmInput.bottom ?? "0")
+        : String(record?.cbm?.bottom ?? "0");
+      const cbmTotal = cbmInput?.total !== undefined
+        ? String(cbmInput.total ?? "0")
+        : String(record?.cbm?.total ?? "0");
+
+      const remarks = row?.remarks !== undefined
+        ? String(row.remarks || "")
+        : String(record?.remarks || "");
+
+      touchedInspectors.add(String(record.inspector || ""));
+      touchedInspectors.add(inspectorId);
+
+      record.requested_date = requestedDate;
+      record.inspection_date = inspectionDate;
+      record.inspector = inspectorId;
+      record.vendor_requested = vendorRequested;
+      record.vendor_offered = vendorOffered;
+      record.checked = checked;
+      record.passed = passed;
+      record.pending_after = pendingAfter;
+      record.cbm = {
+        top: cbmTop,
+        bottom: cbmBottom,
+        total: cbmTotal,
+      };
+      record.remarks = remarks;
+    }
+
+    await Promise.all(inspectionDocs.map((doc) => doc.save()));
+
+    const refreshedInspections = await Inspection.find({ qc: qc._id })
+      .select(
+        "inspection_date requested_date request_history_id inspector checked passed vendor_offered labels_added label_ranges createdAt",
+      )
+      .lean();
+
+    const totalChecked = refreshedInspections.reduce(
+      (sum, record) => sum + toNonNegativeNumber(record?.checked, 0),
+      0,
+    );
+    const totalPassed = refreshedInspections.reduce(
+      (sum, record) => sum + toNonNegativeNumber(record?.passed, 0),
+      0,
+    );
+    const totalVendorOffered = refreshedInspections.reduce(
+      (sum, record) => sum + toNonNegativeNumber(record?.vendor_offered, 0),
+      0,
+    );
+    const mergedLabels = normalizeLabels(
+      refreshedInspections.flatMap((record) =>
+        Array.isArray(record?.labels_added) ? record.labels_added : [],
+      ),
+    );
+
+    const clientDemandQty = toNonNegativeNumber(qc?.quantities?.client_demand, 0);
+    qc.quantities.qc_checked = totalChecked;
+    qc.quantities.qc_passed = totalPassed;
+    qc.quantities.vendor_provision = totalVendorOffered;
+    qc.quantities.pending = Math.max(0, clientDemandQty - totalPassed);
+    qc.quantities.qc_rejected = Math.max(0, totalChecked - totalPassed);
+    qc.labels = mergedLabels;
+
+    if (Array.isArray(qc.request_history)) {
+      const inspectionStatusByRequestId = new Map();
+      for (const record of refreshedInspections) {
+        const requestHistoryId = String(record?.request_history_id || "").trim();
+        if (!requestHistoryId) continue;
+        const hasActivity =
+          toNonNegativeNumber(record?.checked, 0) > 0
+          || toNonNegativeNumber(record?.passed, 0) > 0
+          || toNonNegativeNumber(record?.vendor_offered, 0) > 0
+          || (Array.isArray(record?.labels_added) && record.labels_added.length > 0)
+          || (Array.isArray(record?.label_ranges) && record.label_ranges.length > 0);
+
+        if (!inspectionStatusByRequestId.has(requestHistoryId)) {
+          inspectionStatusByRequestId.set(requestHistoryId, hasActivity);
+        } else if (hasActivity) {
+          inspectionStatusByRequestId.set(requestHistoryId, true);
+        }
+      }
+
+      for (const entry of qc.request_history) {
+        const requestId = String(entry?._id || "").trim();
+        if (!requestId) continue;
+        entry.status = inspectionStatusByRequestId.get(requestId)
+          ? "inspected"
+          : "open";
+      }
+    }
+
+    if (refreshedInspections.length > 0) {
+      const latestRecord = [...refreshedInspections].sort((a, b) => {
+        const aTime = Math.max(
+          toSortableTimestamp(a?.inspection_date),
+          toSortableTimestamp(a?.createdAt),
+        );
+        const bTime = Math.max(
+          toSortableTimestamp(b?.inspection_date),
+          toSortableTimestamp(b?.createdAt),
+        );
+        return bTime - aTime;
+      })[0];
+
+      qc.last_inspected_date = String(
+        latestRecord?.inspection_date
+          || toDateInputValue(latestRecord?.createdAt)
+          || qc.request_date
+          || qc.last_inspected_date
+          || "",
+      );
+    } else {
+      qc.last_inspected_date = String(qc.request_date || qc.last_inspected_date || "");
+    }
+
+    await qc.save();
+
+    const orderId = qc?.order?._id || qc.order;
+    const orderRecord = await Order.findById(orderId);
+    if (orderRecord && orderRecord.status !== "Shipped") {
+      orderRecord.status =
+        clientDemandQty > 0 && totalPassed >= clientDemandQty
+          ? "Inspection Done"
+          : "Under Inspection";
+      await orderRecord.save();
+    }
+
+    const inspectorIdsToRecalculate = [...touchedInspectors]
+      .map((value) => String(value || "").trim())
+      .filter((value) => mongoose.Types.ObjectId.isValid(value));
+
+    for (const inspectorUserId of inspectorIdsToRecalculate) {
+      const inspectorDoc = await Inspector.findOne({ user: inspectorUserId });
+      if (!inspectorDoc) continue;
+
+      const labelUsageRecords = await Inspection.find({ inspector: inspectorUserId })
+        .select("labels_added")
+        .lean();
+
+      inspectorDoc.used_labels = normalizeLabels(
+        labelUsageRecords.flatMap((entry) =>
+          Array.isArray(entry?.labels_added) ? entry.labels_added : [],
+        ),
+      );
+      await inspectorDoc.save();
+    }
+
+    try {
+      await upsertItemFromQc(qc);
+    } catch (itemSyncError) {
+      console.error("Item sync after inspection edit failed:", {
+        qcId: qc?._id,
+        error: itemSyncError?.message || String(itemSyncError),
+      });
+    }
+
+    return res.status(200).json({
+      message: "Inspection records updated successfully",
+      data: qc,
+    });
+  } catch (err) {
+    console.error("Edit Inspection Records Error:", err);
+    return res.status(400).json({ message: err.message || "Failed to edit inspection records" });
   }
 };
 

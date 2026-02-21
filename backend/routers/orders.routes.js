@@ -35,13 +35,22 @@ router.get(
 );
 
 // List orders (pagination + sorting)
-router.get("/", authenticate, authorize("admin", "manager", "QC", "dev"), getOrders);
+router.get(
+  "/",
+  authenticate,
+  authorize("admin", "manager", "QC", "dev"),
+  getOrders,
+);
 
 // List order's brands and vendors
-router.get("/brands-and-vendors", authenticate, getOrderSummary)
+router.get("/brands-and-vendors", authenticate, getOrderSummary);
 
 //get orders by brand and status
-router.get("/brand/:brand/vendor/:vendor/status/:status", authenticate, getOrdersByBrandAndStatus);
+router.get(
+  "/brand/:brand/vendor/:vendor/status/:status",
+  authenticate,
+  getOrdersByBrandAndStatus,
+);
 
 // get orders with optional filters via query params
 router.get("/filters", authenticate, getOrdersByFiltersDb);
@@ -66,7 +75,7 @@ router.patch(
   "/finalize-order/:id",
   authenticate,
   authorize("admin", "manager", "dev"),
-  finalizeOrder
+  finalizeOrder,
 );
 
 router.get("/today-etd-orders", authenticate, getTodayEtdOrdersByBrand);
@@ -75,13 +84,10 @@ router.get("/today-etd-orders", authenticate, getTodayEtdOrdersByBrand);
 router.get("/:brand/vendor-summary", authenticate, getVendorSummaryByBrand);
 router.get("/:brand/today-etd-orders", authenticate, getTodayEtdOrdersByBrand);
 
-// Get order by ID   
+// Get order by ID
 router.get("/order-by-id/:id", getOrderById);
 
 // Resync the calendar
-router.post(
-  "/re-sync",
-  reSync
-);
+router.post("/re-sync", reSync);
 
 module.exports = router;

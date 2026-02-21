@@ -129,7 +129,7 @@ const Orders = () => {
                         <td>{order.item?.item_code}</td>
                         <td>{order.item?.description}</td>
                         <td>{order.quantity}</td>
-                        <td>{order?.qc_record?.quantities?.pending ?? order?.quantity}</td>
+                        <td>{order?.qc_record?.quantities?.pending ?? order.qc_record ? order.qc_record?.quantities?.pending : 0}</td>
                         <td>{order.status}</td>
                         {canManageOrders && (
                           <td>

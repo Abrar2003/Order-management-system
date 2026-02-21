@@ -8,6 +8,10 @@ import "../App.css";
 const getBrandName = (brandObj) =>
   String(brandObj?.name || brandObj?.brand || "").trim();
 const getBrandKey = (value) => String(value || "").trim().toLowerCase();
+const toNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
 
 const Home = () => {
   const token = localStorage.getItem("token");
@@ -56,6 +60,50 @@ const Home = () => {
       brandLogosByName: logoByName,
     };
   }, [brands]);
+
+  const vendorTotals = useMemo(
+    () =>
+      vendorSummary.reduce(
+        (acc, summary) => {
+          acc.totalOrders += toNumber(summary?.totalOrders);
+          acc.totalPending += toNumber(summary?.totalPending);
+          acc.totalOnTime += toNumber(summary?.totalOnTime);
+          acc.totalDelayedOrders += toNumber(summary?.totalDelayedOrders);
+          acc.totalShipped += toNumber(summary?.totalShipped);
+          return acc;
+        },
+        {
+          totalOrders: 0,
+          totalPending: 0,
+          totalOnTime: 0,
+          totalDelayedOrders: 0,
+          totalShipped: 0,
+        },
+      ),
+    [vendorSummary],
+  );
+
+  const todayEtdTotals = useMemo(
+    () =>
+      todayEtdOrders.reduce(
+        (acc, order) => {
+          acc.itemCount += toNumber(order?.itemCount);
+          acc.shippedCount += toNumber(order?.shippedCount);
+          acc.inspectionDoneCount += toNumber(order?.inspectionDoneCount);
+          acc.pendingCount += toNumber(order?.pendingCount);
+          acc.underInspectionCount += toNumber(order?.underInspectionCount);
+          return acc;
+        },
+        {
+          itemCount: 0,
+          shippedCount: 0,
+          inspectionDoneCount: 0,
+          pendingCount: 0,
+          underInspectionCount: 0,
+        },
+      ),
+    [todayEtdOrders],
+  );
 
   useEffect(() => {
     const fetchBrands = async () => {
@@ -275,9 +323,10 @@ const Home = () => {
                     <tr>
                       <th>Vendor</th>
                       <th>Total Orders</th>
-                      <th>Delayed</th>
                       <th>Pending</th>
                       <th>On Time</th>
+                      <th>Delayed</th>
+                      <th>Shipped</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -292,12 +341,6 @@ const Home = () => {
                         </td>
                         <td
                           className="table-clickable"
-                          onClick={() => navigate(`/orders/${selectedBrand}/${summary.vendor}/delayed`)}
-                        >
-                          {summary.totalDelayedOrders}
-                        </td>
-                        <td
-                          className="table-clickable"
                           onClick={() => navigate(`/orders/${selectedBrand}/${summary.vendor}/Pending`)}
                         >
                           {summary.totalPending}
@@ -308,17 +351,41 @@ const Home = () => {
                         >
                           {summary.totalOnTime ?? 0}
                         </td>
+                        <td
+                          className="table-clickable"
+                          onClick={() => navigate(`/orders/${selectedBrand}/${summary.vendor}/delayed`)}
+                        >
+                          {summary.totalDelayedOrders}
+                        </td>
+                        <td
+                          className="table-clickable"
+                          onClick={() => navigate(`/orders/${selectedBrand}/${summary.vendor}/Shipped`)}
+                        >
+                          {summary.totalShipped ?? 0}
+                        </td>
                       </tr>
                     ))}
 
                     {vendorSummary.length === 0 && (
                       <tr>
-                        <td colSpan="5" className="text-center py-4">
+                        <td colSpan="6" className="text-center py-4">
                           No orders found for {selectedBrand}
                         </td>
                       </tr>
                     )}
                   </tbody>
+                  {vendorSummary.length > 0 && (
+                    <tfoot>
+                      <tr className="table-light fw-semibold">
+                        <td>Total</td>
+                        <td>{vendorTotals.totalOrders}</td>
+                        <td>{vendorTotals.totalPending}</td>
+                        <td>{vendorTotals.totalOnTime}</td>
+                        <td>{vendorTotals.totalDelayedOrders}</td>
+                        <td>{vendorTotals.totalShipped}</td>
+                      </tr>
+                    </tfoot>
+                  )}
                 </table>
               </div>
             )}
@@ -367,6 +434,7 @@ const Home = () => {
                       <th>ETD</th>
                       <th>Item Count</th>
                       <th>Status</th>
+                      <th>Shipped</th>
                       <th>Inspection Done</th>
                       <th>Pending</th>
                       <th>Under Inspection</th>
@@ -398,6 +466,7 @@ const Home = () => {
                           <td>{formatDateDDMMYYYY(order?.ETD)}</td>
                           <td>{Number(order?.itemCount || 0)}</td>
                           <td>{order?.status || "N/A"}</td>
+                          <td>{Number(order?.shippedCount || 0)}</td>
                           <td>{Number(order?.inspectionDoneCount || 0)}</td>
                           <td>{Number(order?.pendingCount || 0)}</td>
                           <td>{Number(order?.underInspectionCount || 0)}</td>
@@ -407,12 +476,27 @@ const Home = () => {
 
                     {todayEtdOrders.length === 0 && (
                       <tr>
-                        <td colSpan="8" className="text-center py-4">
+                        <td colSpan="9" className="text-center py-4">
                           {todayEtdError || "No orders found with today's ETD."}
                         </td>
                       </tr>
                     )}
                   </tbody>
+                  {todayEtdOrders.length > 0 && (
+                    <tfoot>
+                      <tr className="table-light fw-semibold">
+                        <td>Total</td>
+                        <td>{todayEtdOrders.length} Orders</td>
+                        <td>-</td>
+                        <td>{todayEtdTotals.itemCount}</td>
+                        <td>-</td>
+                        <td>{todayEtdTotals.shippedCount}</td>
+                        <td>{todayEtdTotals.inspectionDoneCount}</td>
+                        <td>{todayEtdTotals.pendingCount}</td>
+                        <td>{todayEtdTotals.underInspectionCount}</td>
+                      </tr>
+                    </tfoot>
+                  )}
                 </table>
               </div>
             )}

@@ -4,6 +4,7 @@ import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import UpdateQcModal from "../components/UpdateQcModal";
 import ShippingModal from "../components/ShippingModal";
+import EditInspectionRecordsModal from "../components/EditInspectionRecordsModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import { formatDateDDMMYYYY } from "../utils/date";
 import Barcode from "react-barcode";
@@ -52,6 +53,7 @@ const QcDetails = () => {
   const [loading, setLoading] = useState(true);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [showShippingModal, setShowShippingModal] = useState(false);
+  const [showEditInspectionModal, setShowEditInspectionModal] = useState(false);
   const [deletingInspectionId, setDeletingInspectionId] = useState("");
 
   const navigate = useNavigate();
@@ -73,11 +75,19 @@ const QcDetails = () => {
   const assignedInspectorId = qc?.inspector?._id
     ? String(qc.inspector._id)
     : "";
-  const hasInspectionRecords =
-    Array.isArray(qc?.inspection_record) && qc.inspection_record.length > 0;
+  const hasActiveInspectionRecords = Array.isArray(qc?.inspection_record)
+    && qc.inspection_record.some((record) => {
+      const checked = Number(record?.checked || 0);
+      const passed = Number(record?.passed || 0);
+      const offered = Number(record?.vendor_offered || 0);
+      const labelsAdded = Array.isArray(record?.labels_added)
+        ? record.labels_added.length
+        : 0;
+      return checked > 0 || passed > 0 || offered > 0 || labelsAdded > 0;
+    });
   const canClaimInspection =
     user?.role === "QC" &&
-    !hasInspectionRecords &&
+    !hasActiveInspectionRecords &&
     (qc?.quantities?.qc_checked || 0) === 0;
   const canUpdateQc =
     isAdmin ||
@@ -201,15 +211,14 @@ const QcDetails = () => {
         key: `inspection-${record?._id || index}`,
         recordId: record?._id || null,
         rowType: "Inspection",
-        sortTime: Math.max(
-          toTimestamp(record?.inspection_date),
+        sortTime:
+          toTimestamp(record?.inspection_date) ||
           toTimestamp(record?.createdAt),
-        ),
-        requestDate: linkedRequest?.request_date || "",
+        requestDate: record?.requested_date || linkedRequest?.request_date || "",
         inspectionDate: record?.inspection_date || record?.createdAt || "",
         inspectorName: record?.inspector?.name || "N/A",
-        requestedQty:
-          linkedRequest?.quantity_requested ?? record?.vendor_requested ?? 0,
+        requestedQty:record?.vendor_requested ??
+          linkedRequest?.quantity_requested ??  0,
         offeredQty: record?.vendor_offered ?? 0,
         inspectedQty: record?.checked ?? 0,
         passedQty: record?.passed ?? 0,
@@ -328,11 +337,6 @@ const QcDetails = () => {
                 />
                 <InfoBox
                   compact
-                  label="Requested Quantity"
-                  value={qc.quantities.quantity_requested}
-                />
-                <InfoBox
-                  compact
                   label="Passed"
                   value={qc.quantities.qc_passed}
                 />
@@ -345,7 +349,19 @@ const QcDetails = () => {
             </section>
 
             <section>
-              <h3 className="h6 mb-3">Request And Inspection Records</h3>
+              <div className="d-flex justify-content-between align-items-center mb-3">
+                <h3 className="h6 mb-0">Request And Inspection Records</h3>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    className="btn btn-outline-primary btn-sm"
+                    onClick={() => setShowEditInspectionModal(true)}
+                    disabled={!Array.isArray(qc?.inspection_record) || qc.inspection_record.length === 0}
+                  >
+                    Edit Records
+                  </button>
+                )}
+              </div>
               {requestInspectionTimeline.length > 0 ? (
                 <div className="table-responsive">
                   <table className="table table-sm table-striped align-middle mb-0">
@@ -550,6 +566,17 @@ const QcDetails = () => {
           onClose={() => setShowShippingModal(false)}
           onSuccess={() => {
             setShowShippingModal(false);
+            fetchQcDetails();
+          }}
+        />
+      )}
+
+      {showEditInspectionModal && (
+        <EditInspectionRecordsModal
+          qc={qc}
+          onClose={() => setShowEditInspectionModal(false)}
+          onSuccess={() => {
+            setShowEditInspectionModal(false);
             fetchQcDetails();
           }}
         />

@@ -1059,6 +1059,11 @@ exports.getTodayEtdOrdersByBrand = async (req, res) => {
               $cond: [{ $eq: ["$status", "Inspection Done"] }, 1, 0],
             },
           },
+          shippedCount: {
+            $sum: {
+              $cond: [{ $eq: ["$status", "Shipped"] }, 1, 0],
+            },
+          },
           minStatusRank: { $min: "$statusRank" },
           latestUpdatedAt: { $max: "$updatedAt" },
         },
@@ -1088,6 +1093,7 @@ exports.getTodayEtdOrdersByBrand = async (req, res) => {
           itemCount: 1,
           status: 1,
           inspectionDoneCount: 1,
+          shippedCount: 1,
           pendingCount: 1,
           underInspectionCount: 1,
           latestUpdatedAt: 1,
@@ -2151,4 +2157,3 @@ exports.reSync = async (req, res) => {
     });
   }
 };
-

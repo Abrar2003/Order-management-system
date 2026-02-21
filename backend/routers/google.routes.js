@@ -2,6 +2,10 @@ const express = require("express");
 const { google } = require("googleapis");
 
 const router = express.Router();
+const OAUTH_SCOPES = [
+  "https://www.googleapis.com/auth/calendar",
+  "https://www.googleapis.com/auth/spreadsheets",
+];
 
 function getOAuthClient() {
   return new google.auth.OAuth2(
@@ -18,7 +22,8 @@ router.get("/auth", (req, res) => {
   const url = oauth2Client.generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
-    scope: ["https://www.googleapis.com/auth/calendar"],
+    include_granted_scopes: true,
+    scope: OAUTH_SCOPES,
   });
 
   res.redirect(url);

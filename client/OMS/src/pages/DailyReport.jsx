@@ -126,19 +126,19 @@ const DailyReport = () => {
             </button>
             <span className="om-summary-chip">Date: {formatDateDDMMYYYY(report?.date)}</span>
             <span className="om-summary-chip">
-              Aligned Requests: {summary.aligned_requests_count ?? 0}
+              Aligned Requests: {summary?.aligned_requests_count ?? 0}
             </span>
             <span className="om-summary-chip">
-              Inspectors: {summary.inspectors_count ?? 0}
+              Inspectors: {summary?.inspectors_count ?? 0}
             </span>
             <span className="om-summary-chip">
-              Inspections: {summary.inspections_count ?? 0}
+              Inspections: {summary?.inspections_count ?? 0}
             </span>
             <span className="om-summary-chip">
-              Total Inspected Qty: {summary.total_inspected_quantity ?? 0}
+              Total Inspected Qty: {summary?.total_inspected_quantity ?? 0}
             </span>
             <span className="om-summary-chip">
-              Total CBM: {formatCbm(summary.total_inspected_cbm * summary.total_inspected_quantity ?? 0)}
+              Total CBM: {formatCbm(summary?.total_inspected_cbm * summary?.total_inspected_quantity)}
             </span>
           </div>
         </div>
@@ -178,7 +178,7 @@ const DailyReport = () => {
                   )}
 
                   {report.aligned_requests.map((request) => (
-                    <tr key={request.qc_id}>
+                    <tr key={request.qc_id} style={{ cursor: "pointer"}} onClick={ () => navigate(`/qc/${request.qc_id}`)}>
                       <td>{formatDateDDMMYYYY(request.request_date)}</td>
                       <td>{request.order_id || "N/A"}</td>
                       <td>{request.item_code || "N/A"}</td>

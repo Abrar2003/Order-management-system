@@ -51,8 +51,9 @@ const qcSchema = new mongoose.Schema(
         inspector: {
           type: mongoose.Schema.Types.ObjectId,
           ref: "users",
-          default: null,
+          default: null
         },
+        status: { type: String, enum: [ "open", "inspected" ], required: true, default: "open" },
         remarks: { type: String, default: "" },
         createdBy: {
           type: mongoose.Schema.Types.ObjectId,

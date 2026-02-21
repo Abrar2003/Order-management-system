@@ -335,7 +335,7 @@ const Container = () => {
           >
             Back
           </button>
-          <h2 className="h4 mb-0">Container</h2>
+          <h2 className="h4 mb-0">Bulk Shipping</h2>
           <button
             type="button"
             className="btn btn-outline-secondary btn-sm"

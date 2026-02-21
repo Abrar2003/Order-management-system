@@ -21,6 +21,17 @@ const InspectionSchema = new mongoose.Schema(
       required: true,
     },
 
+    request_history_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+      index: true,
+    },
+
+    requested_date: {
+      type: String,
+      required: true,
+    },
+
     // snapshot for that visit
     vendor_requested: { type: Number, required: true, min: 0 },
     vendor_offered: { type: Number, required: true, min: 0 },
@@ -63,6 +74,7 @@ InspectionSchema.index({ qc: 1, createdAt: -1 });
 
 // Inspector performance analytics
 InspectionSchema.index({ inspector: 1, createdAt: -1 });
+InspectionSchema.index({ qc: 1, request_history_id: 1, createdAt: -1 });
 
 // Optional: prevent duplicate “same visit” accidental double-submit
 // qcInspectionSchema.index({ qc: 1, inspector: 1, createdAt: 1 });

@@ -1,0 +1,1870 @@
+{
+    "success": false,
+    "message": "Calendar re-sync completed with some failures",
+    "purge": {
+        "calendars": 3,
+        "deleted": 54,
+        "tracked": {
+            "trackedCount": 226,
+            "deleted": 50
+        },
+        "results": [
+            {
+                "calendarId": "c643c48541317bd026b706d1bb8dac57b53b89e6d67e44f218dd0902fcbff836@group.calendar.google.com",
+                "deleted": 2,
+                "scanned": 2
+            },
+            {
+                "calendarId": "fecd917ea7cdedf49b42fce6e073a2f9b77af00fe6f80f33425411e24ed6d65e@group.calendar.google.com",
+                "deleted": 0,
+                "scanned": 0
+            },
+            {
+                "calendarId": "1c9b5227c411df6032c291e5632252847ea9f75b3b36ab9be86ecf3b5f0f2232@group.calendar.google.com",
+                "deleted": 2,
+                "scanned": 2
+            }
+        ]
+    },
+    "groups": 153,
+    "processed": 153,
+    "successCount": 152,
+    "failureCount": 1,
+    "batchSize": 5,
+    "timeoutMs": 300000,
+    "results": [
+        {
+            "group": {
+                "order_id": "20250480",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "6gq0j2s9jdu2vka5d3v4jgppco"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250485",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "11cmgq76qras60bjpjev1emec4"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250486",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "2fjh1kuur5s6vub9hu3k4mljk4"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250486",
+                "brand": "Eleonora",
+                "vendor": "Boranada"
+            },
+            "ok": false,
+            "error": "No Google Calendar ID configured for brand \"Eleonora\""
+        },
+        {
+            "group": {
+                "order_id": "20250487",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "lcsanhb3u3n2h2b5mpcfaid4rg"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250488",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "8ti7akdp28p7om5ru6p39m3phc"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250490",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "ialk1700javo3qun9c95ij2mlg"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250491",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "auvol0jd3ghlcveags3n2se338"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250514",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "ldr1gg61007qvs3luj17hl70oc"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250524",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "ridr0f99ddl19jqe6bhn3783uc"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250541",
+                "brand": "Elenora",
+                "vendor": "Nodi Export"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "45jnuidl1c6fivk23kt1g8mdjg"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250544",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "fgcbrt55f8a042dioarre1am7c"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250556",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "g0ifo58eop343skrle8bqrol6c"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250557",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "p6590ii7njnpn4607oeni8jhls"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250563",
+                "brand": "Elenora",
+                "vendor": "Jodhana"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "vi1tgd26ulv2kivqjoj562af6g"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250564",
+                "brand": "Elenora",
+                "vendor": "Jodhana"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "7m3he4egb39l6k37uo46ee1o7o"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250567",
+                "brand": "Elenora",
+                "vendor": "Suraj International"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "8joev4t9qdo0gar9nkftfvlccs"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250571",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "bp232r1ndpoov97tubq6r9j1sc"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250572",
+                "brand": "Elenora",
+                "vendor": "Jodhana"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "e9inp7gacbs78jpvhjars7rc2s"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250576",
+                "brand": "Elenora",
+                "vendor": "Thar Decor"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "lckjk0ss8ltsj5kkqirfkmq26o"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250582",
+                "brand": "Elenora",
+                "vendor": "Jodhana"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "8d05edc8bo6okva14s7u4p0f3s"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250583",
+                "brand": "Elenora",
+                "vendor": "Jodhana"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "p2r6ajbenac6iodvkit4h51iao"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250584",
+                "brand": "Elenora",
+                "vendor": "Jodhana"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "nc7kn3el0n11caac27ssbb9144"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250589",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "8dqbgu8loj0bdd37ghtmeujiq4"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250592",
+                "brand": "Elenora",
+                "vendor": "Jodhana"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "9ifvb5v1smdq62cb48li26l7mo"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250601",
+                "brand": "Elenora",
+                "vendor": "Jodhana"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "ieo8d1h8ocssbe25me2gvf70t8"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250603",
+                "brand": "Elenora",
+                "vendor": "Jodhana"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "p97gj6gb5eq2gcmj6v4qhtk00g"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250604",
+                "brand": "Elenora",
+                "vendor": "Jodhana"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "09vhf5kb0sk70qf5tuenu357o0"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250608",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "7hla8gc24vqjohohfdm3h1mc2o"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250609",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "1vsjomfau5hufhdraodhgbiljk"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250611",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "lv59prc4lj6ojhgc5snk2229e0"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250613",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "ukkhacbk3i6ueibckaqt975jdo"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250614",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "6erfesubmtg7c6k8lp4qspfuvc"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250615",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "mms0r6k9dcegguabvuhv4to1sg"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250617",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "1p6bukpbnfbrgd9k6hfeir1e50"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250618",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "kbh09gggp37dau9vqhhbi53km8"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250619",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "ldh679gah97mcc1ihsdqchlta4"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250621",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "r8jaajus2ka65lspsvk73qtic0"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250624",
+                "brand": "Elenora",
+                "vendor": "Jodhana"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "kfsmqr9oebpdnkk5t7rd0lbsfk"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250643",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "8oi5r51jnjd5ha8sq80pd87smk"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250644",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "gnpe52n98u076ouot050injoek"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250645",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "f6idksa18cpcfj0qr25ui9i2js"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250646",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "ohhpothhm0um3g0hfl5fdmru88"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250647",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "kit1cbaevnsqgd2hqopl96p9sg"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250648",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "fu4gi1hiiql659396cert5qlq8"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250649",
+                "brand": "Elenora",
+                "vendor": "Jodhana"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "6526fgapt7d5tmve9k20asf6qc"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250650",
+                "brand": "Elenora",
+                "vendor": "Jodhana"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "n54er6cas3hb3blak8ogvk2llk"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20250651",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "tvsg67kac74hu1p1lqr5j40qd8"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20260002",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "3f5e4sbjgp8prof6k0oipp4r7c"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20260004",
+                "brand": "Elenora",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "gb56mfe0goc7shtvhq7bnvmae4"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20260006",
+                "brand": "Elenora",
+                "vendor": "Jodhana"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "893uuu82i0hovcja3o0tmnn1o0"
+            }
+        },
+        {
+            "group": {
+                "order_id": "20260021",
+                "brand": "Elenora",
+                "vendor": "Jodhana"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "sr0j0scqcmco7fv5g3ag484pvc"
+            }
+        },
+        {
+            "group": {
+                "order_id": "76638",
+                "brand": "Giga",
+                "vendor": "Shivam"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "8pe364qqmuq4g2o0em9sfcvtdk"
+            }
+        },
+        {
+            "group": {
+                "order_id": "78544",
+                "brand": "Giga",
+                "vendor": "Shivam"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "4j25on5l7s6ljkt8s7ul20nnc0"
+            }
+        },
+        {
+            "group": {
+                "order_id": "79847",
+                "brand": "Giga",
+                "vendor": "Shivam"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "kak7k7e2dc2b8ld539pea6adi0"
+            }
+        },
+        {
+            "group": {
+                "order_id": "80843",
+                "brand": "Giga",
+                "vendor": "Shivam"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "psitbgant4m751bliqeni30540"
+            }
+        },
+        {
+            "group": {
+                "order_id": "81269",
+                "brand": "Giga",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "o5gnuf3o608os2fgnd4mpe85k4"
+            }
+        },
+        {
+            "group": {
+                "order_id": "81783",
+                "brand": "Giga",
+                "vendor": "Shivam"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "kjc3pp37lusupb4g5tn44g1hso"
+            }
+        },
+        {
+            "group": {
+                "order_id": "82585",
+                "brand": "Giga",
+                "vendor": "Shivam"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "cf5qmjnllr5c9fski53md5f22s"
+            }
+        },
+        {
+            "group": {
+                "order_id": "82925",
+                "brand": "Giga",
+                "vendor": "Shivam"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "foumop54622bftg8s0mf8ecbcg"
+            }
+        },
+        {
+            "group": {
+                "order_id": "83548",
+                "brand": "Giga",
+                "vendor": "Shivam"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "1n64vuaahu9jtojhr705hvclfs"
+            }
+        },
+        {
+            "group": {
+                "order_id": "83557",
+                "brand": "Giga",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "ncl4m7kt1ebfhmi72n308fhcag"
+            }
+        },
+        {
+            "group": {
+                "order_id": "84026",
+                "brand": "Giga",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "vkt6quqj9ofmi7jv7qr6mjf0n8"
+            }
+        },
+        {
+            "group": {
+                "order_id": "84913",
+                "brand": "Giga",
+                "vendor": "Shivam"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "rupt61htl13p5fg3omeihccamk"
+            }
+        },
+        {
+            "group": {
+                "order_id": "85488",
+                "brand": "Giga",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "iaovg59pcpan0k8d57i1kdipl0"
+            }
+        },
+        {
+            "group": {
+                "order_id": "85823",
+                "brand": "Giga",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "itc5kvi0ob00s49rb94o99d22s"
+            }
+        },
+        {
+            "group": {
+                "order_id": "87113",
+                "brand": "Giga",
+                "vendor": "Thar Decor"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "9t78vs8e4iulpi43k4ruk4dgfo"
+            }
+        },
+        {
+            "group": {
+                "order_id": "87335",
+                "brand": "Giga",
+                "vendor": "Shivam"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "nl4cjs2n0hdpks5l0jskti5ggg"
+            }
+        },
+        {
+            "group": {
+                "order_id": "87339",
+                "brand": "Giga",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "qthdog0fi4vc7fd5s2sg16rv2s"
+            }
+        },
+        {
+            "group": {
+                "order_id": "87934",
+                "brand": "Giga",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "d9nk14ove1cua82hcf182qhf7g"
+            }
+        },
+        {
+            "group": {
+                "order_id": "88807",
+                "brand": "Giga",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "lrca0q3qtbdh2kncit1vns86go"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250305",
+                "brand": "By Boo",
+                "vendor": "Rugs Creations"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "c9m3lpmsfai915cthjm548dkhc"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250318",
+                "brand": "By Boo",
+                "vendor": "Rugs Creations"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "c2rkvq514mmmhcn5naiqt41ki0"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250341",
+                "brand": "By Boo",
+                "vendor": "Rugs Creations"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "m60ju3gfrisd6r1b2dei6c0mok"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250351",
+                "brand": "By Boo",
+                "vendor": "Rugs Creations"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "uba2151vsv4g8ctnveij7sie38"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250366",
+                "brand": "By Boo",
+                "vendor": "Anand Enterprises"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "ekqqi355apbkddfi0vp7hpog9g"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250369",
+                "brand": "By Boo",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "6u57ssruo6fj0j1qapkrdmgcb8"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250372",
+                "brand": "By Boo",
+                "vendor": "Rugs Creations"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "om55jpen6ci9q6rjkd7o0p7obg"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250373",
+                "brand": "By Boo",
+                "vendor": "GMB"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "cecbgims755io36bgrg1gij0p4"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250383",
+                "brand": "By Boo",
+                "vendor": "Singhania"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "u08p85s5rgtaejrq3ihuegtk30"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250396",
+                "brand": "By Boo",
+                "vendor": "Inmark"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "fjl4032p3cq4toq4rgm4e8cr8c"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250402",
+                "brand": "By Boo",
+                "vendor": "This and That"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "srkuitgm5reqcecmrb1hj2ndm4"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250412",
+                "brand": "By Boo",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "tfaguks1hlgdelsd4m03sda9t8"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250413",
+                "brand": "By Boo",
+                "vendor": "Cross Country"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "5csdctram95cudacuq59qpgi48"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250414",
+                "brand": "By Boo",
+                "vendor": "East Coast"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "q6u98efl5og8df9mkea5eo6b1o"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250417",
+                "brand": "By Boo",
+                "vendor": "Singhania"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "pusj6uoen7r3tj94rdhj3sru7o"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250422",
+                "brand": "By Boo",
+                "vendor": "Rugs Creations"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "4ka98gvht4dvm4cg01mqpkujak"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250427",
+                "brand": "By Boo",
+                "vendor": "Jodhana"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "22ie1pokn7m77g3di06ca1io0k"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250429",
+                "brand": "By Boo",
+                "vendor": "J S International"
+            },
+            "ok": true,
+            "result": {
+                "action": "not_found",
+                "reason": "no_etd"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250430",
+                "brand": "By Boo",
+                "vendor": "Metal"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "s9adt6arshpatvgfbp513eu914"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250431",
+                "brand": "By Boo",
+                "vendor": "Anand Enterprises"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "4ofpc1p53tmuns70laaovesgds"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250434",
+                "brand": "By Boo",
+                "vendor": "Anand Enterprises"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "gcu2otk47jmg0qlkhnbougit1s"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250436",
+                "brand": "By Boo",
+                "vendor": "MR Impex"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "mm8hkh0r0to63flseoausm877k"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250448",
+                "brand": "By Boo",
+                "vendor": "GMB"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "q4d81veouv53elkqg9407j8qo4"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250451",
+                "brand": "By Boo",
+                "vendor": "GMB"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "i8r5fq3m9r8af0ga5bgkb2402s"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250456",
+                "brand": "By Boo",
+                "vendor": "H R Designs"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "gsgqs42hukebmm4ge5u5ovnb00"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250457",
+                "brand": "By Boo",
+                "vendor": "Fische"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "no545dak3bhphmqmusn69tsho4"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250459",
+                "brand": "By Boo",
+                "vendor": "Vallabh"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "nq59pp44f5eh0p33rng91u6i1k"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250462",
+                "brand": "By Boo",
+                "vendor": "Suraj International"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "rp6i4enj1u64tdep55skbf0i3s"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250463",
+                "brand": "By Boo",
+                "vendor": "This and That"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "v9a4eg9levt60jv547fj4kc6k8"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250464",
+                "brand": "By Boo",
+                "vendor": "Singhania"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "6j9aevuvjgk0trodt8p0g1tnb0"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250473",
+                "brand": "By Boo",
+                "vendor": "Suraj International"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "vtu4q9ebb993evosbmgr97mhg0"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250474",
+                "brand": "By Boo",
+                "vendor": "Suraj International"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "gq7pu6grplqhs2s8f2eglb9ajg"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250476",
+                "brand": "By Boo",
+                "vendor": "Anand Enterprises"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "olktnt6fv88hb4dqpfvlibvrsg"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250478",
+                "brand": "By Boo",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "h1a8n0o8oqonm487vg9e81pt1k"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250479",
+                "brand": "By Boo",
+                "vendor": "East Coast"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "riujfdluf238rrus2dishbsrt4"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250482",
+                "brand": "By Boo",
+                "vendor": "Rugs Creations"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "8via0bit82meb5hqqr4v7bs8ss"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250485",
+                "brand": "By Boo",
+                "vendor": "Inmark"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "0jq541064fi6faqv277colqt58"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250487",
+                "brand": "By Boo",
+                "vendor": "GMB"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "24pu48m7thapsiabg72grqli4o"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250491",
+                "brand": "By Boo",
+                "vendor": "Metal"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "82h92vitt27jdcq8djsbpmooh4"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250494",
+                "brand": "By Boo",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "76u766b07qed8hnobhakommhfs"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250495",
+                "brand": "By Boo",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "mkfajrp0earq9ld0q3u53n5vm8"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250498",
+                "brand": "By Boo",
+                "vendor": "Royal Arts and Export"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "44kuu80r067fdjgfrsgm3dbv3k"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250499",
+                "brand": "By Boo",
+                "vendor": "Royal Arts and Export"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "3jf946vfebmp0un44pfprnpgto"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250501",
+                "brand": "By Boo",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "o039umvsgqh3o6241k57io1kl4"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250502",
+                "brand": "By Boo",
+                "vendor": "Cross Country"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "870qck0lf1eg12d9nhlfjdvkas"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250504",
+                "brand": "By Boo",
+                "vendor": "Rugs Creations"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "irvc4hjb5aoiodajqsffeb4mlo"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250505",
+                "brand": "By Boo",
+                "vendor": "GMB"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "b9qlin1usas7hdglh4hl6suidc"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250512",
+                "brand": "By Boo",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "j3un4nj25kaqjv1kngkg0aeskk"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250514",
+                "brand": "By Boo",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "1as7kmoe6rl9mu9rut0eth8j94"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250520",
+                "brand": "By Boo",
+                "vendor": "Cross Country"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "4m9egqil2btrtf99ajgk94smks"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250524",
+                "brand": "By Boo",
+                "vendor": "Rugs Creations"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "hi5s5q5oto1v73t0phc9rh5f2k"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250525",
+                "brand": "By Boo",
+                "vendor": "GMB"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "lr3v6qr5fvubv2u2g2j1mc97p8"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250528",
+                "brand": "By Boo",
+                "vendor": "Lumi Art Manufacturer & Exporter"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "a52nr2sp0flj4efpolc38vmjd8"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250530",
+                "brand": "By Boo",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "ctl9cc7t91imp2p8ph537m3kc8"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89250531",
+                "brand": "By Boo",
+                "vendor": "Singhania"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "njj2ulqdujrkv9fi3o5u1l1cu4"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89260001",
+                "brand": "By Boo",
+                "vendor": "Anand Enterprises"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "kbhtfc043i2c7ee8bbrg5bjr0c"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89260002",
+                "brand": "By Boo",
+                "vendor": "Rugs Creations"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "q7ejur8b29kc7fo156v566rug4"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89260003",
+                "brand": "By Boo",
+                "vendor": "GMB"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "701q23h4to45prikd41quc3g38"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89260010",
+                "brand": "By Boo",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "quect7ndo1738homuaqktoag34"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89260033",
+                "brand": "By Boo",
+                "vendor": "The Empyrean"
+            },
+            "ok": true,
+            "result": {
+                "action": "not_found",
+                "reason": "no_etd"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89260044",
+                "brand": "By Boo",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "ka090t0rv6fpc63hoa2j4uop24"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89260045",
+                "brand": "By Boo",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "ne73knuvdomi0ka62vghuvclqc"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89260065",
+                "brand": "By Boo",
+                "vendor": "Inmark"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "t3efac4aeb3huvi5f0h555sl48"
+            }
+        },
+        {
+            "group": {
+                "order_id": "89658",
+                "brand": "Giga",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "3u1ah9uttbact1ptblf1dfqd1c"
+            }
+        },
+        {
+            "group": {
+                "order_id": "90272",
+                "brand": "Giga",
+                "vendor": "Shivam"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "iudkdpk7mpdk7v2ov1uabql1b8"
+            }
+        },
+        {
+            "group": {
+                "order_id": "91252",
+                "brand": "Giga",
+                "vendor": "Shivam"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "935f3k2ifo8ept8mbfraagi3m8"
+            }
+        },
+        {
+            "group": {
+                "order_id": "91253",
+                "brand": "Giga",
+                "vendor": "Shivam"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "ol6ponu9ts7qaov4gd91hdo38k"
+            }
+        },
+        {
+            "group": {
+                "order_id": "91254",
+                "brand": "Giga",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "4f69iqcpda9d2nh66eujbda46s"
+            }
+        },
+        {
+            "group": {
+                "order_id": "92563",
+                "brand": "Giga",
+                "vendor": "Jodhana"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "h3clkvj1drmpur7avb0fo69uqo"
+            }
+        },
+        {
+            "group": {
+                "order_id": "92704",
+                "brand": "Giga",
+                "vendor": "Thar Decor"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "fui4on0bi12ooq3igm57tm16cc"
+            }
+        },
+        {
+            "group": {
+                "order_id": "93028",
+                "brand": "Giga",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "njo771l4nusf60pjjut6le4qck"
+            }
+        },
+        {
+            "group": {
+                "order_id": "93029",
+                "brand": "Giga",
+                "vendor": "Shivam"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "54c1umqet0v5r7cfr7bgeck32g"
+            }
+        },
+        {
+            "group": {
+                "order_id": "93186",
+                "brand": "Giga",
+                "vendor": "Shivam"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "defjbu6a4vap5c7upbjsltgk98"
+            }
+        },
+        {
+            "group": {
+                "order_id": "94256",
+                "brand": "Giga",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "lpb0nomnh112g39od0b8c36ht8"
+            }
+        },
+        {
+            "group": {
+                "order_id": "94344",
+                "brand": "Giga",
+                "vendor": "Lumi Art Manufacturer & Exporter"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "ena4q6nt927gakee2k923bqs6s"
+            }
+        },
+        {
+            "group": {
+                "order_id": "94496",
+                "brand": "Giga",
+                "vendor": "Shivam"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "rkt3cjslo4rsak6hah1qieep0k"
+            }
+        },
+        {
+            "group": {
+                "order_id": "95102",
+                "brand": "Giga",
+                "vendor": "Jodhana"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "i5pob7f2p0hh9684k5nqtnenqk"
+            }
+        },
+        {
+            "group": {
+                "order_id": "95365",
+                "brand": "Giga",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "mj4nvpvlc1bmg7dmdn00t1bho4"
+            }
+        },
+        {
+            "group": {
+                "order_id": "95369",
+                "brand": "Giga",
+                "vendor": "Shivam"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "kgd93ain02nv8mu9cakrpkoll4"
+            }
+        },
+        {
+            "group": {
+                "order_id": "95370",
+                "brand": "Giga",
+                "vendor": "Shivam"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "hub3bh0nraqehb3vsa4en6itgc"
+            }
+        },
+        {
+            "group": {
+                "order_id": "96184",
+                "brand": "Giga",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "i41bdngb6ov6h2kksg85pbfsug"
+            }
+        },
+        {
+            "group": {
+                "order_id": "96185",
+                "brand": "Giga",
+                "vendor": "Boronada"
+            },
+            "ok": true,
+            "result": {
+                "action": "created",
+                "eventId": "qojqmo64t5kvv8em290ar7q9so"
+            }
+        }
+    ]
+}
