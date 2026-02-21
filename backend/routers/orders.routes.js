@@ -9,6 +9,7 @@ const {
   getOrdersByFiltersDb,
   getOrderById,
   getVendorSummaryByBrand,
+  getTodayEtdOrdersByBrand,
   getOrdersByBrandAndStatus,
   getOrderSummary,
   getShipmentsDb,
@@ -68,8 +69,11 @@ router.patch(
   finalizeOrder
 );
 
+router.get("/today-etd-orders", authenticate, getTodayEtdOrdersByBrand);
+
 // Get vendor summary by brand
 router.get("/:brand/vendor-summary", authenticate, getVendorSummaryByBrand);
+router.get("/:brand/today-etd-orders", authenticate, getTodayEtdOrdersByBrand);
 
 // Get order by ID   
 router.get("/order-by-id/:id", getOrderById);
@@ -77,8 +81,6 @@ router.get("/order-by-id/:id", getOrderById);
 // Resync the calendar
 router.post(
   "/re-sync",
-  // authenticate,
-  // authorize("admin", "manager", "dev", "Dev"),
   reSync
 );
 

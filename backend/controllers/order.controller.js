@@ -838,69 +838,145 @@ exports.getVendorSummaryByBrand = async (req, res) => {
   try {
     const { brand } = req.params;
     const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
     const result = await Order.aggregate([
-      // 1️⃣ Filter by brand
       {
         $match: { brand },
       },
-
-      // 2️⃣ Group by vendor
+      {
+        $addFields: {
+          lastShipmentDate: {
+            $ifNull: [
+              {
+                $max: {
+                  $map: {
+                    input: { $ifNull: ["$shipment", []] },
+                    as: "entry",
+                    in: "$$entry.stuffing_date",
+                  },
+                },
+              },
+              "$updatedAt",
+            ],
+          },
+        },
+      },
+      {
+        $addFields: {
+          etdDayKey: {
+            $cond: [
+              { $ifNull: ["$ETD", false] },
+              {
+                $dateToString: {
+                  format: "%Y-%m-%d",
+                  date: "$ETD",
+                },
+              },
+              null,
+            ],
+          },
+          shippedDayKey: {
+            $cond: [
+              { $ifNull: ["$lastShipmentDate", false] },
+              {
+                $dateToString: {
+                  format: "%Y-%m-%d",
+                  date: "$lastShipmentDate",
+                },
+              },
+              null,
+            ],
+          },
+        },
+      },
       {
         $group: {
-          _id: "$vendor",
-
-          // DISTINCT order IDs
-          orders: {
-            $addToSet: "$order_id",
+          _id: {
+            vendor: "$vendor",
+            order_id: "$order_id",
           },
-
-          // DISTINCT delayed order IDs
-          delayedOrders: {
-            $addToSet: {
-              $cond: [
-                {
-                  $and: [
-                    { $lt: ["$ETD", today] },
-                    { $ne: ["$status", "Finalized"] },
-                  ],
-                },
-                "$order_id",
-                "$$REMOVE",
-              ],
+          vendor: { $first: "$vendor" },
+          order_id: { $first: "$order_id" },
+          etd: { $min: "$ETD" },
+          etdDayKey: { $min: "$etdDayKey" },
+          maxShippedDayKey: {
+            $max: {
+              $cond: [{ $eq: ["$status", "Shipped"] }, "$shippedDayKey", null],
             },
           },
-
-          pendingOrders: {
-            $addToSet: {
-              $cond: [{ $ne: ["$status", "Shipped"] }, "$order_id", "$$REMOVE"],
-            },
-          },
-
-          shippedOrders: {
-            $addToSet: {
-              $cond: [{ $eq: ["$status", "Shipped"] }, "$order_id", "$$REMOVE"],
+          hasNonShippedItem: {
+            $max: {
+              $cond: [{ $ne: ["$status", "Shipped"] }, 1, 0],
             },
           },
         },
       },
-      // 3️⃣ Shape final response
+      {
+        $addFields: {
+          isShippedOrder: {
+            $eq: ["$hasNonShippedItem", 0],
+          },
+          isDelayedOrder: {
+            $and: [
+              { $ne: ["$hasNonShippedItem", 0] },
+              { $lt: ["$etd", today] },
+            ],
+          },
+          isPendingOrder: {
+            $ne: ["$hasNonShippedItem", 0],
+          },
+          isOnTimeOrder: {
+            $and: [
+              { $eq: ["$hasNonShippedItem", 0] },
+              { $ne: ["$maxShippedDayKey", null] },
+              { $ne: ["$etdDayKey", null] },
+              { $lte: ["$maxShippedDayKey", "$etdDayKey"] },
+            ],
+          },
+        },
+      },
+      {
+        $group: {
+          _id: "$vendor",
+          orders: {
+            $addToSet: "$order_id",
+          },
+          delayedOrders: {
+            $addToSet: {
+              $cond: ["$isDelayedOrder", "$order_id", "$$REMOVE"],
+            },
+          },
+          pendingOrders: {
+            $addToSet: {
+              $cond: ["$isPendingOrder", "$order_id", "$$REMOVE"],
+            },
+          },
+          shippedOrders: {
+            $addToSet: {
+              $cond: ["$isShippedOrder", "$order_id", "$$REMOVE"],
+            },
+          },
+          onTimeOrders: {
+            $addToSet: {
+              $cond: ["$isOnTimeOrder", "$order_id", "$$REMOVE"],
+            },
+          },
+        },
+      },
       {
         $project: {
           _id: 0,
           vendor: "$_id",
           orders: 1,
           delayedOrders: 1,
-
-          // Optional counts
           totalOrders: { $size: "$orders" },
           totalDelayedOrders: { $size: "$delayedOrders" },
           totalPending: { $size: "$pendingOrders" },
           totalShipped: { $size: "$shippedOrders" },
+          totalOnTime: { $size: "$onTimeOrders" },
         },
       },
-
-      // 4️⃣ Optional sort
       {
         $sort: { totalDelayedOrders: -1 },
       },
@@ -918,6 +994,125 @@ exports.getVendorSummaryByBrand = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+};
+exports.getTodayEtdOrdersByBrand = async (req, res) => {
+  try {
+    const brand = normalizeFilterValue(req.params.brand ?? req.query.brand);
+
+    const dayStart = new Date();
+    dayStart.setHours(0, 0, 0, 0);
+
+    const dayEnd = new Date(dayStart);
+    dayEnd.setDate(dayEnd.getDate() + 1);
+
+    const matchStage = {
+      ETD: {
+        $gte: dayStart,
+        $lt: dayEnd,
+      },
+    };
+
+    if (brand) {
+      matchStage.brand = brand;
+    }
+
+    const data = await Order.aggregate([
+      {
+        $match: matchStage,
+      },
+      {
+        $addFields: {
+          statusRank: {
+            $switch: {
+              branches: [
+                { case: { $eq: ["$status", "Pending"] }, then: 0 },
+                { case: { $eq: ["$status", "Under Inspection"] }, then: 1 },
+                { case: { $eq: ["$status", "Inspection Done"] }, then: 2 },
+                { case: { $eq: ["$status", "Partial Shipped"] }, then: 3 },
+                { case: { $eq: ["$status", "Shipped"] }, then: 4 },
+              ],
+              default: 99,
+            },
+          },
+        },
+      },
+      {
+        $group: {
+          _id: "$order_id",
+          order_id: { $first: "$order_id" },
+          brand: { $first: "$brand" },
+          ETD: { $first: "$ETD" },
+          itemCount: { $sum: 1 },
+          pendingCount: {
+            $sum: {
+              $cond: [{ $eq: ["$status", "Pending"] }, 1, 0],
+            },
+          },
+          underInspectionCount: {
+            $sum: {
+              $cond: [{ $eq: ["$status", "Under Inspection"] }, 1, 0],
+            },
+          },
+          inspectionDoneCount: {
+            $sum: {
+              $cond: [{ $eq: ["$status", "Inspection Done"] }, 1, 0],
+            },
+          },
+          minStatusRank: { $min: "$statusRank" },
+          latestUpdatedAt: { $max: "$updatedAt" },
+        },
+      },
+      {
+        $addFields: {
+          status: {
+            $switch: {
+              branches: [
+                { case: { $eq: ["$minStatusRank", 0] }, then: "Pending" },
+                { case: { $eq: ["$minStatusRank", 1] }, then: "Under Inspection" },
+                { case: { $eq: ["$minStatusRank", 2] }, then: "Inspection Done" },
+                { case: { $eq: ["$minStatusRank", 3] }, then: "Partial Shipped" },
+                { case: { $eq: ["$minStatusRank", 4] }, then: "Shipped" },
+              ],
+              default: "Pending",
+            },
+          },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          order_id: 1,
+          brand: 1,
+          ETD: 1,
+          itemCount: 1,
+          status: 1,
+          inspectionDoneCount: 1,
+          pendingCount: 1,
+          underInspectionCount: 1,
+          latestUpdatedAt: 1,
+        },
+      },
+      {
+        $sort: {
+          latestUpdatedAt: -1,
+          order_id: 1,
+        },
+      },
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      count: data.length,
+      data,
+    });
+  } catch (error) {
+    console.error("Get Today ETD Orders By Brand Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch today's ETD orders list",
+      error: error.message,
+    });
   }
 };
 
@@ -940,8 +1135,14 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
     const { isDelayed } = req.query;
 
     const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
-    // base match filter
+    const normalizedStatus = String(status || "").trim().toLowerCase();
+    const isOnTimeStatus =
+      normalizedStatus === "on-time"
+      || normalizedStatus === "on time"
+      || normalizedStatus === "ontime";
+
     const matchStage = {};
 
     if (brand) {
@@ -952,56 +1153,140 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
       matchStage.vendor = vendor;
     }
 
-    // status logic
     if (status) {
-      if (status.toLowerCase() === "pending") {
-        // Pending = anything NOT shipped
+      if (normalizedStatus === "pending") {
         matchStage.status = { $ne: "Shipped" };
-      } else {
+      } else if (!isOnTimeStatus) {
         matchStage.status = status;
       }
     }
 
-    // 🚨 Delay logic
     if (isDelayed === "true") {
-      matchStage.ETD = { $lt: today }; // ETD passed
-      matchStage.status = { $ne: "Shipped" }; // not shipped
+      matchStage.ETD = { $lt: today };
+      matchStage.status = { $ne: "Shipped" };
     }
 
-    const orders = await Order.aggregate([
-      // 1️⃣ Filter
-      { $match: matchStage },
+    const aggregationPipeline = [{ $match: matchStage }];
 
-      // 2️⃣ Group by order_id
-      {
-        $group: {
-          _id: "$order_id",
-          items: { $sum: 1 },
-          brand: { $first: "$brand" },
-          vendor: { $first: "$vendor" },
-          ETD: { $first: "$ETD" },
-          order_date: { $first: "$order_date" },
-          statuses: { $addToSet: "$status" },
+    if (isOnTimeStatus) {
+      aggregationPipeline.push(
+        {
+          $addFields: {
+            lastShipmentDate: {
+              $ifNull: [
+                {
+                  $max: {
+                    $map: {
+                      input: { $ifNull: ["$shipment", []] },
+                      as: "entry",
+                      in: "$$entry.stuffing_date",
+                    },
+                  },
+                },
+                "$updatedAt",
+              ],
+            },
+          },
         },
-      },
-
-      // 3️⃣ Shape output
-      {
-        $project: {
-          _id: 0,
-          order_id: "$_id",
-          items: 1,
-          brand: 1,
-          vendor: 1,
-          ETD: 1,
-          order_date: 1,
-          statuses: 1,
+        {
+          $addFields: {
+            etdDayKey: {
+              $cond: [
+                { $ifNull: ["$ETD", false] },
+                { $dateToString: { format: "%Y-%m-%d", date: "$ETD" } },
+                null,
+              ],
+            },
+            shippedDayKey: {
+              $cond: [
+                { $ifNull: ["$lastShipmentDate", false] },
+                {
+                  $dateToString: {
+                    format: "%Y-%m-%d",
+                    date: "$lastShipmentDate",
+                  },
+                },
+                null,
+              ],
+            },
+          },
         },
-      },
+        {
+          $group: {
+            _id: "$order_id",
+            items: { $sum: 1 },
+            brand: { $first: "$brand" },
+            vendor: { $first: "$vendor" },
+            ETD: { $min: "$ETD" },
+            etdDayKey: { $min: "$etdDayKey" },
+            maxShippedDayKey: {
+              $max: {
+                $cond: [{ $eq: ["$status", "Shipped"] }, "$shippedDayKey", null],
+              },
+            },
+            hasNonShippedItem: {
+              $max: {
+                $cond: [{ $ne: ["$status", "Shipped"] }, 1, 0],
+              },
+            },
+            order_date: { $first: "$order_date" },
+            statuses: { $addToSet: "$status" },
+          },
+        },
+        {
+          $match: {
+            hasNonShippedItem: 0,
+            etdDayKey: { $ne: null },
+            maxShippedDayKey: { $ne: null },
+            $expr: {
+              $lte: ["$maxShippedDayKey", "$etdDayKey"],
+            },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            order_id: "$_id",
+            items: 1,
+            brand: 1,
+            vendor: 1,
+            ETD: 1,
+            order_date: 1,
+            statuses: 1,
+          },
+        },
+        { $sort: { order_date: -1 } },
+      );
+    } else {
+      aggregationPipeline.push(
+        {
+          $group: {
+            _id: "$order_id",
+            items: { $sum: 1 },
+            brand: { $first: "$brand" },
+            vendor: { $first: "$vendor" },
+            ETD: { $first: "$ETD" },
+            order_date: { $first: "$order_date" },
+            statuses: { $addToSet: "$status" },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            order_id: "$_id",
+            items: 1,
+            brand: 1,
+            vendor: 1,
+            ETD: 1,
+            order_date: 1,
+            statuses: 1,
+          },
+        },
+        { $sort: { order_date: -1 } },
+      );
+    }
 
-      // 4️⃣ Sort latest first
-      { $sort: { order_date: -1 } },
-    ]);
+    const orders = await Order.aggregate(aggregationPipeline);
 
     return res.status(200).json({
       success: true,
@@ -1866,3 +2151,4 @@ exports.reSync = async (req, res) => {
     });
   }
 };
+

@@ -6,12 +6,23 @@ import "../App.css";
 
 const getBrandName = (brandObj) =>
   String(brandObj?.name || brandObj?.brand || "").trim();
+const getBrandKey = (value) => String(value || "").trim().toLowerCase();
+
+const formatDateLabel = (value) => {
+  if (!value) return "N/A";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "N/A";
+  return parsed.toLocaleDateString();
+};
 
 const Home = () => {
   const token = localStorage.getItem("token");
   const [brands, setBrands] = useState([]);
   const [selectedBrand, setSelectedBrand] = useState(null);
   const [vendorSummary, setVendorSummary] = useState([]);
+  const [todayEtdOrders, setTodayEtdOrders] = useState([]);
+  const [todayEtdLoading, setTodayEtdLoading] = useState(false);
+  const [todayEtdError, setTodayEtdError] = useState("");
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -23,7 +34,7 @@ const Home = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedBrandParam = String(searchParams.get("brand") || "").trim();
 
-  const brandLogos = useMemo(() => {
+  const { brandLogosById, brandLogosByName } = useMemo(() => {
     const toDataUrl = (logoObj) => {
       const raw = logoObj?.data?.data || logoObj?.data;
       if (!raw || !Array.isArray(raw)) return null;
@@ -36,11 +47,20 @@ const Home = () => {
       return `data:image/webp;base64,${base64}`;
     };
 
-    const map = new Map();
+    const logoById = new Map();
+    const logoByName = new Map();
     brands.forEach((brand) => {
-      map.set(brand._id, toDataUrl(brand.logo));
+      const logoUrl = toDataUrl(brand.logo);
+      const brandName = getBrandName(brand);
+      logoById.set(brand._id, logoUrl);
+      if (brandName) {
+        logoByName.set(getBrandKey(brandName), logoUrl);
+      }
     });
-    return map;
+    return {
+      brandLogosById: logoById,
+      brandLogosByName: logoByName,
+    };
   }, [brands]);
 
   useEffect(() => {
@@ -169,6 +189,52 @@ const Home = () => {
     };
   }, [selectedBrand, token]);
 
+  useEffect(() => {
+    if (!token) {
+      setTodayEtdOrders([]);
+      setTodayEtdError("");
+      return;
+    }
+
+    let isMounted = true;
+
+    const fetchTodayEtdOrders = async () => {
+      try {
+        setTodayEtdLoading(true);
+        setTodayEtdError("");
+
+        const response = await axios.get(
+          "/orders/today-etd-orders",
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          },
+        );
+
+        if (!isMounted) return;
+        setTodayEtdOrders(
+          Array.isArray(response?.data?.data) ? response.data.data : [],
+        );
+      } catch (err) {
+        if (!isMounted) return;
+        console.error("Error fetching today's ETD orders:", err);
+        setTodayEtdOrders([]);
+        setTodayEtdError("Failed to load today's ETD orders.");
+      } finally {
+        if (isMounted) {
+          setTodayEtdLoading(false);
+        }
+      }
+    };
+
+    fetchTodayEtdOrders();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [token]);
+
   return (
     <>
       <Navbar />
@@ -191,8 +257,8 @@ const Home = () => {
                 }}
                 title={brandName}
               >
-                {brandLogos.get(brand._id) ? (
-                  <img src={brandLogos.get(brand._id)} alt={brandName} className="brand-logo-img" />
+                {brandLogosById.get(brand._id) ? (
+                  <img src={brandLogosById.get(brand._id)} alt={brandName} className="brand-logo-img" />
                 ) : (
                   <span className="small fw-semibold">{brandName}</span>
                 )}
@@ -217,7 +283,7 @@ const Home = () => {
                       <th>Total Orders</th>
                       <th>Delayed</th>
                       <th>Pending</th>
-                      <th>Shipped</th>
+                      <th>On Time</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -244,9 +310,9 @@ const Home = () => {
                         </td>
                         <td
                           className="table-clickable"
-                          onClick={() => navigate(`/orders/${selectedBrand}/${summary.vendor}/Shipped`)}
+                          onClick={() => navigate(`/orders/${selectedBrand}/${summary.vendor}/on-time`)}
                         >
-                          {summary.totalShipped}
+                          {summary.totalOnTime ?? 0}
                         </td>
                       </tr>
                     ))}
@@ -288,6 +354,76 @@ const Home = () => {
             </button>
           </div>
         )}
+
+        <div className="card om-card mt-3">
+          <div className="card-body p-0">
+            <h3 className="h5 m-3">
+              Orders With Today&apos;s ETD
+            </h3>
+
+            {todayEtdLoading ? (
+              <div className="text-center py-4">Loading...</div>
+            ) : (
+              <div className="table-responsive">
+                <table className="table table-striped table-hover align-middle om-table mb-0">
+                  <thead className="table-primary">
+                    <tr>
+                      <th>Brand</th>
+                      <th>Order Number</th>
+                      <th>ETD</th>
+                      <th>Item Count</th>
+                      <th>Status</th>
+                      <th>Inspection Done</th>
+                      <th>Pending</th>
+                      <th>Under Inspection</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {todayEtdOrders.map((order) => {
+                      const brandLogo = brandLogosByName.get(getBrandKey(order?.brand));
+                      return (
+                        <tr
+                          key={`${order?.order_id || "order"}-${order?.ETD || ""}`}
+                          className="table-clickable"
+                          onClick={() =>
+                            navigate(`/orders?order_id=${encodeURIComponent(order?.order_id || "")}`)
+                          }
+                        >
+                          <td>
+                            {brandLogo ? (
+                              <img
+                                src={brandLogo}
+                                alt={order?.brand || selectedBrand || "brand"}
+                                className="home-order-brand-logo"
+                              />
+                            ) : (
+                              <span className="small fw-semibold">{order?.brand || "N/A"}</span>
+                            )}
+                          </td>
+                          <td>{order?.order_id || "N/A"}</td>
+                          <td>{formatDateLabel(order?.ETD)}</td>
+                          <td>{Number(order?.itemCount || 0)}</td>
+                          <td>{order?.status || "N/A"}</td>
+                          <td>{Number(order?.inspectionDoneCount || 0)}</td>
+                          <td>{Number(order?.pendingCount || 0)}</td>
+                          <td>{Number(order?.underInspectionCount || 0)}</td>
+                        </tr>
+                      );
+                    })}
+
+                    {todayEtdOrders.length === 0 && (
+                      <tr>
+                        <td colSpan="8" className="text-center py-4">
+                          {todayEtdError || "No orders found with today's ETD."}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
 
         <div className="card om-card mt-3">
           <div className="card-body">

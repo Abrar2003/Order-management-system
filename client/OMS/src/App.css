@@ -126,6 +126,12 @@
   object-fit: contain;
 }
 
+.home-order-brand-logo {
+  width: 3rem;
+  height: 1.75rem;
+  object-fit: contain;
+}
+
 .home-calendar-wrapper {
   position: relative;
   width: 100%;
