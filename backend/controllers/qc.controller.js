@@ -2,6 +2,7 @@ const QC = require("../models/qc.model");
 const Inspection = require("../models/inspection.model");
 const Inspector = require("../models/inspector.model");
 const Item = require("../models/item.model");
+const XLSX = require("xlsx");
 
 const Order = require("../models/order.model")
 const mongoose = require("mongoose");
@@ -23,6 +24,22 @@ const toNonNegativeNumber = (value, fallback = 0) => {
 
 const normalizeText = (value) => String(value ?? "").trim();
 const pad2 = (value) => String(value).padStart(2, "0");
+const QC_REQUEST_TYPES = Object.freeze({
+  FULL: "FULL",
+  AQL: "AQL",
+});
+const normalizeQcRequestType = (value) => {
+  const normalized = String(value || "")
+    .trim()
+    .toUpperCase();
+  if (normalized === QC_REQUEST_TYPES.AQL) return QC_REQUEST_TYPES.AQL;
+  return QC_REQUEST_TYPES.FULL;
+};
+const computeAqlSampleQuantity = (quantity) => {
+  const safeQuantity = toNonNegativeNumber(quantity, 0);
+  if (safeQuantity <= 0) return 0;
+  return Math.max(1, Math.ceil(safeQuantity * 0.1));
+};
 
 const parseDateFromPartsToIso = (year, month, day) => {
   if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
@@ -101,6 +118,21 @@ const toISODateString = (value) => {
     parsed.getUTCMonth() + 1,
     parsed.getUTCDate(),
   );
+};
+
+const formatDateDDMMYYYY = (value, fallback = "") => {
+  const isoDate = toISODateString(value);
+  if (!isoDate) return fallback;
+  const [year, month, day] = isoDate.split("-");
+  return `${day}/${month}/${year}`;
+};
+
+const formatLbh = (dimensions = {}) => {
+  const L = toNonNegativeNumber(dimensions?.L, 0);
+  const B = toNonNegativeNumber(dimensions?.B, 0);
+  const H = toNonNegativeNumber(dimensions?.H, 0);
+  if (L === 0 && B === 0 && H === 0) return "";
+  return `${L} x ${B} x ${H}`;
 };
 
 const normalizeItemCodeKey = (value) => normalizeText(value).toLowerCase();
@@ -529,6 +561,79 @@ const buildQcListMatch = ({
   return match;
 };
 
+const resolveQcListSortConfig = ({
+  sortToken = "",
+  sortByInput = "",
+  sortOrderInput = "",
+} = {}) => {
+  const normalizedSortToken = String(sortToken || "").trim();
+  const rawSortBy = String(sortByInput || "").trim();
+  const sortTokenDirection = normalizedSortToken.startsWith("-")
+    ? "desc"
+    : normalizedSortToken.startsWith("+")
+      ? "asc"
+      : null;
+  const normalizedSortKey = String(
+    rawSortBy || normalizedSortToken.replace(/^[+-]/, "") || "request_date",
+  )
+    .trim()
+    .replace(/[^a-zA-Z0-9_]/g, "")
+    .toLowerCase();
+  const sortAliases = {
+    po: "order_id",
+    order: "order_id",
+    orderid: "order_id",
+    order_id: "order_id",
+    date: "request_date",
+    requestdate: "request_date",
+    request_date: "request_date",
+    createdat: "createdAt",
+    created_at: "createdAt",
+  };
+  const sortBy = sortAliases[normalizedSortKey] || "request_date";
+  const explicitSortOrder = String(sortOrderInput || "")
+    .trim()
+    .toLowerCase();
+  let sortOrder = sortBy === "order_id" ? "asc" : "desc";
+  if (sortTokenDirection) {
+    sortOrder = sortTokenDirection;
+  }
+  if (explicitSortOrder === "asc" || explicitSortOrder === "desc") {
+    sortOrder = explicitSortOrder;
+  }
+
+  const sortDirection = sortOrder === "asc" ? 1 : -1;
+  let sortStage = {
+    request_date_sort_key: -1,
+    "order_meta.order_id": 1,
+    createdAt: -1,
+  };
+  if (sortBy === "request_date") {
+    sortStage = {
+      request_date_sort_key: sortDirection,
+      "order_meta.order_id": 1,
+      createdAt: -1,
+    };
+  } else if (sortBy === "order_id") {
+    sortStage = {
+      "order_meta.order_id": sortDirection,
+      request_date_sort_key: -1,
+      createdAt: -1,
+    };
+  } else if (sortBy === "createdAt") {
+    sortStage = {
+      createdAt: sortDirection,
+      "order_meta.order_id": 1,
+    };
+  }
+
+  return {
+    sortBy,
+    sortOrder,
+    sortStage,
+  };
+};
+
 exports.getQCList = async (req, res) => {
 
   await QC.createIndexes();
@@ -554,44 +659,11 @@ exports.getQCList = async (req, res) => {
     const pageNum = Math.max(1, Number(page));
     const limitNum = Math.min(100, Math.max(1, Number(limit)));
     const skip = (pageNum - 1) * limitNum;
-    const normalizedSortToken = String(sort || "").trim();
-    const rawSortBy = String(req.query.sort_by ?? req.query.sortBy ?? "").trim();
-    const sortTokenDirection = normalizedSortToken.startsWith("-")
-      ? "desc"
-      : normalizedSortToken.startsWith("+")
-        ? "asc"
-        : null;
-    const normalizedSortKey = String(
-      rawSortBy || normalizedSortToken.replace(/^[+-]/, "") || "request_date",
-    )
-      .trim()
-      .replace(/[^a-zA-Z0-9_]/g, "")
-      .toLowerCase();
-    const sortAliases = {
-      po: "order_id",
-      order: "order_id",
-      orderid: "order_id",
-      order_id: "order_id",
-      date: "request_date",
-      requestdate: "request_date",
-      request_date: "request_date",
-      createdat: "createdAt",
-      created_at: "createdAt",
-    };
-    const sortBy = sortAliases[normalizedSortKey] || "request_date";
-    const explicitSortOrder = String(
-      req.query.sort_order ?? req.query.sortOrder ?? "",
-    )
-      .trim()
-      .toLowerCase();
-    let sortOrder = sortBy === "order_id" ? "asc" : "desc";
-    if (sortTokenDirection) {
-      sortOrder = sortTokenDirection;
-    }
-    if (explicitSortOrder === "asc" || explicitSortOrder === "desc") {
-      sortOrder = explicitSortOrder;
-    }
-    const sortDirection = sortOrder === "asc" ? 1 : -1;
+    const { sortBy, sortOrder, sortStage } = resolveQcListSortConfig({
+      sortToken: sort,
+      sortByInput: req.query.sort_by ?? req.query.sortBy ?? "",
+      sortOrderInput: req.query.sort_order ?? req.query.sortOrder ?? "",
+    });
     const filterInput = {
       inspector: inspectorId,
       vendor,
@@ -602,30 +674,6 @@ exports.getQCList = async (req, res) => {
       to,
     };
     const match = buildQcListMatch(filterInput);
-
-    let sortStage = {
-      request_date_sort_key: -1,
-      "order_meta.order_id": 1,
-      createdAt: -1,
-    };
-    if (sortBy === "request_date") {
-      sortStage = {
-        request_date_sort_key: sortDirection,
-        "order_meta.order_id": 1,
-        createdAt: -1,
-      };
-    } else if (sortBy === "order_id") {
-      sortStage = {
-        "order_meta.order_id": sortDirection,
-        request_date_sort_key: -1,
-        createdAt: -1,
-      };
-    } else if (sortBy === "createdAt") {
-      sortStage = {
-        createdAt: sortDirection,
-        "order_meta.order_id": 1,
-      };
-    }
 
     const pipeline = [
       { $match: match },
@@ -745,13 +793,394 @@ exports.getQCList = async (req, res) => {
   }
 };
 
+exports.exportQCList = async (req, res) => {
+  await QC.createIndexes();
+  try {
+    const {
+      search = "",
+      inspector = "",
+      vendor = "",
+      brand = "",
+      order = "",
+      from = "",
+      to = "",
+      sort = "-request_date",
+      format = "xlsx",
+    } = req.query;
+    const exportFormat = String(format || "").trim().toLowerCase() === "csv"
+      ? "csv"
+      : "xlsx";
+
+    const inspectorId = String(inspector || "").trim();
+    if (inspectorId && !mongoose.Types.ObjectId.isValid(inspectorId)) {
+      return res.status(400).json({ message: "Invalid inspector id" });
+    }
+
+    const filterInput = {
+      inspector: inspectorId,
+      vendor,
+      brand,
+      order,
+      search,
+      from,
+      to,
+    };
+    const match = buildQcListMatch(filterInput);
+    const { sortStage } = resolveQcListSortConfig({
+      sortToken: sort,
+      sortByInput: req.query.sort_by ?? req.query.sortBy ?? "",
+      sortOrderInput: req.query.sort_order ?? req.query.sortOrder ?? "",
+    });
+
+    const pipeline = [
+      { $match: match },
+      {
+        $addFields: {
+          request_date_sort_key: {
+            $ifNull: [requestDateToDateExpression, "$createdAt"],
+          },
+        },
+      },
+      { $sort: sortStage },
+      {
+        $lookup: {
+          from: "users",
+          localField: "inspector",
+          foreignField: "_id",
+          as: "inspector",
+        },
+      },
+      { $unwind: { path: "$inspector", preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: "users",
+          localField: "createdBy",
+          foreignField: "_id",
+          as: "createdByUser",
+        },
+      },
+      { $unwind: { path: "$createdByUser", preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: "orders",
+          localField: "order",
+          foreignField: "_id",
+          as: "order",
+        },
+      },
+      { $unwind: { path: "$order", preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          request_date_sort_key: 0,
+          inspection_record: 0,
+          __v: 0,
+          "order.__v": 0,
+          "inspector.password": 0,
+          "createdByUser.password": 0,
+        },
+      },
+    ];
+
+    const qcRows = await QC.aggregate(pipeline).allowDiskUse(true);
+    const itemCodeKeys = [
+      ...new Set(
+        qcRows
+          .map((entry) =>
+            normalizeItemCodeKey(
+              entry?.item?.item_code || entry?.order?.item?.item_code || "",
+            ),
+          )
+          .filter(Boolean),
+      ),
+    ];
+    const itemMasterMap = new Map();
+    if (itemCodeKeys.length > 0) {
+      const matchedItems = await Item.aggregate([
+        {
+          $addFields: {
+            __code_key: {
+              $toLower: {
+                $trim: {
+                  input: { $toString: { $ifNull: ["$code", ""] } },
+                },
+              },
+            },
+          },
+        },
+        { $match: { __code_key: { $in: itemCodeKeys } } },
+        {
+          $project: {
+            __code_key: 1,
+            code: 1,
+            name: 1,
+            description: 1,
+            brands: 1,
+            vendors: 1,
+            weight: 1,
+            cbm: 1,
+            item_LBH: 1,
+            box_LBH: 1,
+          },
+        },
+      ]).allowDiskUse(true);
+
+      for (const itemDoc of matchedItems) {
+        const key = normalizeItemCodeKey(itemDoc?.__code_key);
+        if (key && !itemMasterMap.has(key)) {
+          itemMasterMap.set(key, itemDoc);
+        }
+      }
+    }
+
+    const columns = [
+      { key: "po", header: "PO" },
+      { key: "brand", header: "Brand" },
+      { key: "vendor", header: "Vendor" },
+      { key: "qc_request_type", header: "QC Request Type" },
+      { key: "item_code", header: "QC Item Code" },
+      { key: "description", header: "QC Item Description" },
+      { key: "order_item_code", header: "Order Item Code" },
+      { key: "order_item_description", header: "Order Item Description" },
+      { key: "item_master_code", header: "Item Master Code" },
+      { key: "item_master_name", header: "Item Master Name" },
+      { key: "item_master_description", header: "Item Master Description" },
+      { key: "item_master_brands", header: "Item Master Brands" },
+      { key: "item_master_vendors", header: "Item Master Vendors" },
+      { key: "item_master_weight_net", header: "Item Weight Net" },
+      { key: "item_master_weight_gross", header: "Item Weight Gross" },
+      { key: "item_master_cbm_total", header: "Item Master CBM Total" },
+      { key: "item_master_item_lbh", header: "Item Master Item LBH" },
+      { key: "item_master_box_lbh", header: "Item Master Box LBH" },
+      { key: "request_date", header: "Request Date" },
+      { key: "last_inspected_date", header: "Last Inspected Date" },
+      { key: "order_date", header: "Order Date" },
+      { key: "etd", header: "ETD" },
+      { key: "order_status", header: "Order Status" },
+      { key: "order_quantity", header: "Order Quantity" },
+      { key: "quantity_requested", header: "Quantity Requested" },
+      { key: "vendor_provision", header: "Vendor Provision" },
+      { key: "qc_checked", header: "QC Checked" },
+      { key: "qc_passed", header: "QC Passed" },
+      { key: "pending", header: "Pending" },
+      { key: "qc_rejected", header: "QC Rejected" },
+      { key: "cbm_top", header: "CBM Top" },
+      { key: "cbm_bottom", header: "CBM Bottom" },
+      { key: "cbm_total", header: "CBM Total" },
+      { key: "barcode", header: "Barcode" },
+      { key: "packed_size", header: "Packed Size" },
+      { key: "finishing", header: "Finishing" },
+      { key: "branding", header: "Branding" },
+      { key: "labels", header: "Labels" },
+      { key: "inspector_name", header: "Inspector Name" },
+      { key: "inspector_email", header: "Inspector Email" },
+      { key: "created_by", header: "Created By" },
+      { key: "created_at", header: "Created At" },
+      { key: "updated_at", header: "Updated At" },
+      { key: "remarks", header: "QC Remarks" },
+      { key: "request_history_count", header: "Request History Count" },
+      { key: "shipment_count", header: "Shipment Count" },
+      { key: "shipped_quantity", header: "Shipped Quantity" },
+      { key: "shipment_containers", header: "Shipment Containers" },
+      { key: "shipment_dates", header: "Shipment Dates" },
+      { key: "shipment_quantities", header: "Shipment Quantities" },
+      { key: "shipment_pending", header: "Shipment Pending" },
+      { key: "shipment_remarks", header: "Shipment Remarks" },
+      { key: "shipment_rows", header: "Shipment Rows (Date/Container/Qty/Pending/Remarks)" },
+    ];
+
+    const exportRows = qcRows.map((entry) => {
+      const qcItemCode = normalizeText(entry?.item?.item_code || "");
+      const qcItemDescription = normalizeText(entry?.item?.description || "");
+      const orderItemCode = normalizeText(entry?.order?.item?.item_code || "");
+      const orderItemDescription = normalizeText(entry?.order?.item?.description || "");
+      const itemMaster = itemMasterMap.get(
+        normalizeItemCodeKey(qcItemCode || orderItemCode),
+      );
+      const shipmentEntries = Array.isArray(entry?.order?.shipment)
+        ? entry.order.shipment
+        : [];
+      const shippedQuantity = shipmentEntries.reduce(
+        (sum, shipment) => sum + toNonNegativeNumber(shipment?.quantity, 0),
+        0,
+      );
+      const shipmentContainers = shipmentEntries.map((shipment) =>
+        normalizeText(shipment?.container || ""),
+      );
+      const shipmentDates = shipmentEntries.map((shipment) =>
+        formatDateDDMMYYYY(shipment?.stuffing_date, ""),
+      );
+      const shipmentQuantities = shipmentEntries.map((shipment) =>
+        String(toNonNegativeNumber(shipment?.quantity, 0)),
+      );
+      const shipmentPending = shipmentEntries.map((shipment) =>
+        String(toNonNegativeNumber(shipment?.pending, 0)),
+      );
+      const shipmentRemarks = shipmentEntries.map((shipment) =>
+        normalizeText(shipment?.remaining_remarks || ""),
+      );
+      const shipmentRowsText = shipmentEntries.map((shipment) =>
+        [
+          formatDateDDMMYYYY(shipment?.stuffing_date, ""),
+          normalizeText(shipment?.container || ""),
+          toNonNegativeNumber(shipment?.quantity, 0),
+          toNonNegativeNumber(shipment?.pending, 0),
+          normalizeText(shipment?.remaining_remarks || ""),
+        ].join(" / "),
+      );
+      const sortedLabels = normalizeLabels(entry?.labels);
+      const labelsText = sortedLabels.length > 0 ? sortedLabels.join(", ") : "";
+      const inspectorName = normalizeText(entry?.inspector?.name || "");
+      const inspectorEmail = normalizeText(entry?.inspector?.email || "");
+      const createdByName =
+        normalizeText(entry?.createdByUser?.name)
+        || normalizeText(entry?.createdByUser?.email)
+        || "";
+
+      return {
+        po: normalizeText(entry?.order_meta?.order_id || entry?.order?.order_id || ""),
+        brand: normalizeText(entry?.order_meta?.brand || entry?.order?.brand || ""),
+        vendor: normalizeText(entry?.order_meta?.vendor || entry?.order?.vendor || ""),
+        qc_request_type: normalizeQcRequestType(entry?.request_type),
+        item_code: qcItemCode,
+        description: qcItemDescription,
+        order_item_code: orderItemCode,
+        order_item_description: orderItemDescription,
+        item_master_code: normalizeText(itemMaster?.code || ""),
+        item_master_name: normalizeText(itemMaster?.name || ""),
+        item_master_description: normalizeText(itemMaster?.description || ""),
+        item_master_brands: Array.isArray(itemMaster?.brands)
+          ? itemMaster.brands.map((brandValue) => normalizeText(brandValue)).filter(Boolean).join(" | ")
+          : "",
+        item_master_vendors: Array.isArray(itemMaster?.vendors)
+          ? itemMaster.vendors.map((vendorValue) => normalizeText(vendorValue)).filter(Boolean).join(" | ")
+          : "",
+        item_master_weight_net: toNonNegativeNumber(itemMaster?.weight?.net, 0),
+        item_master_weight_gross: toNonNegativeNumber(itemMaster?.weight?.gross, 0),
+        item_master_cbm_total: normalizeText(itemMaster?.cbm?.total || ""),
+        item_master_item_lbh: formatLbh(itemMaster?.item_LBH),
+        item_master_box_lbh: formatLbh(itemMaster?.box_LBH),
+        request_date: formatDateDDMMYYYY(entry?.request_date, ""),
+        last_inspected_date: formatDateDDMMYYYY(entry?.last_inspected_date, ""),
+        order_date: formatDateDDMMYYYY(entry?.order?.order_date, ""),
+        etd: formatDateDDMMYYYY(entry?.order?.ETD, ""),
+        order_status: normalizeText(entry?.order?.status || ""),
+        order_quantity: toNonNegativeNumber(entry?.order?.quantity, 0),
+        quantity_requested: toNonNegativeNumber(entry?.quantities?.quantity_requested, 0),
+        vendor_provision: toNonNegativeNumber(entry?.quantities?.vendor_provision, 0),
+        qc_checked: toNonNegativeNumber(entry?.quantities?.qc_checked, 0),
+        qc_passed: toNonNegativeNumber(entry?.quantities?.qc_passed, 0),
+        pending: toNonNegativeNumber(entry?.quantities?.pending, 0),
+        qc_rejected: toNonNegativeNumber(entry?.quantities?.qc_rejected, 0),
+        cbm_top: normalizeText(entry?.cbm?.top || "0"),
+        cbm_bottom: normalizeText(entry?.cbm?.bottom || "0"),
+        cbm_total: normalizeText(entry?.cbm?.total || "0"),
+        barcode: toNonNegativeNumber(entry?.barcode, 0),
+        packed_size: entry?.packed_size ? "Yes" : "No",
+        finishing: entry?.finishing ? "Yes" : "No",
+        branding: entry?.branding ? "Yes" : "No",
+        labels: labelsText,
+        inspector_name: inspectorName,
+        inspector_email: inspectorEmail,
+        created_by: createdByName,
+        created_at: formatDateDDMMYYYY(entry?.createdAt, ""),
+        updated_at: formatDateDDMMYYYY(entry?.updatedAt, ""),
+        remarks: normalizeText(entry?.remarks || ""),
+        request_history_count: Array.isArray(entry?.request_history)
+          ? entry.request_history.length
+          : 0,
+        shipment_count: shipmentEntries.length,
+        shipped_quantity: shippedQuantity,
+        shipment_containers: shipmentContainers.join(" | "),
+        shipment_dates: shipmentDates.join(" | "),
+        shipment_quantities: shipmentQuantities.join(" | "),
+        shipment_pending: shipmentPending.join(" | "),
+        shipment_remarks: shipmentRemarks.join(" | "),
+        shipment_rows: shipmentRowsText.join(" | "),
+      };
+    });
+
+    const headerRow = columns.map((column) => column.header);
+    const dataRows = exportRows.map((row) =>
+      columns.map((column) => row[column.key] ?? ""),
+    );
+    const fileDate = toISODateString(new Date()) || "export";
+    const baseFileName = `qc-records-${fileDate}`;
+
+    if (exportFormat === "csv") {
+      const escapeCsvValue = (value) => {
+        const normalized = String(value ?? "")
+          .replace(/\r\n/g, "\n")
+          .replace(/\r/g, "\n");
+        if (/["\n,]/.test(normalized)) {
+          return `"${normalized.replace(/"/g, "\"\"")}"`;
+        }
+        return normalized;
+      };
+
+      const csvLines = [headerRow, ...dataRows].map((row) =>
+        row.map((cell) => escapeCsvValue(cell)).join(","),
+      );
+      const csvContent = `\uFEFF${csvLines.join("\r\n")}`;
+      const fileName = `${baseFileName}.csv`;
+
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${fileName}"`,
+      );
+      return res.status(200).send(csvContent);
+    }
+
+    const worksheet = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
+    worksheet["!cols"] = columns.map((column, columnIndex) => {
+      const maxDataLength = Math.max(
+        ...dataRows.map((row) => String(row[columnIndex] ?? "").length),
+        column.header.length,
+      );
+      return { wch: Math.min(50, Math.max(12, maxDataLength + 2)) };
+    });
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "QC Records");
+    const fileBuffer = XLSX.write(workbook, {
+      type: "buffer",
+      bookType: "xlsx",
+    });
+    const fileName = `${baseFileName}.xlsx`;
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${fileName}"`,
+    );
+    return res.status(200).send(fileBuffer);
+  } catch (err) {
+    console.error("QC Export Error:", err);
+    return res.status(500).json({
+      message: "Failed to export QC records",
+      error: err.message,
+    });
+  }
+};
+
 /**
  * POST /align-qc
  * Manager/Admin aligns QC + vendor provision
  */
 exports.alignQC = async (req, res) => {
   try {
-    const { order, item, inspector, quantities, remarks, request_date } = req.body;
+    const {
+      order,
+      item,
+      inspector,
+      quantities,
+      remarks,
+      request_date,
+      request_type,
+    } = req.body;
 
     const inspectorId = String(inspector || "").trim();
     if (!inspectorId) {
@@ -767,8 +1196,11 @@ exports.alignQC = async (req, res) => {
     });
 
     const clientDemand = Number(quantities?.client_demand);
-    const quantityRequested = Number(
+    const quantityRequestedInput = Number(
       quantities?.quantity_requested ?? quantities?.vendor_provision
+    );
+    const normalizedRequestType = normalizeQcRequestType(
+      request_type ?? quantities?.request_type,
     );
     const hasVendorProvisionInput =
       quantities?.vendor_provision !== undefined &&
@@ -779,10 +1211,15 @@ exports.alignQC = async (req, res) => {
         ? 0
         : Number(quantities?.vendor_provision);
 
+    const quantityRequested =
+      normalizedRequestType === QC_REQUEST_TYPES.AQL
+        ? computeAqlSampleQuantity(clientDemand)
+        : quantityRequestedInput;
+
     if (
       Number.isNaN(clientDemand) ||
-      Number.isNaN(quantityRequested) ||
-      Number.isNaN(vendorProvision)
+      Number.isNaN(vendorProvision) ||
+      (normalizedRequestType === QC_REQUEST_TYPES.FULL && Number.isNaN(quantityRequestedInput))
     ) {
       return res.status(400).json({
         message:
@@ -790,7 +1227,11 @@ exports.alignQC = async (req, res) => {
       });
     }
 
-    if (clientDemand < 0 || quantityRequested < 0 || vendorProvision < 0) {
+    if (
+      clientDemand < 0 ||
+      vendorProvision < 0 ||
+      (normalizedRequestType === QC_REQUEST_TYPES.FULL && quantityRequestedInput < 0)
+    ) {
       return res.status(400).json({
         message: "Quantity values must be valid non-negative numbers",
       });
@@ -888,6 +1329,7 @@ exports.alignQC = async (req, res) => {
       // const dateOnly = new Date(req.body.request_date)
 
       existingQC.inspector = inspectorId;
+      existingQC.request_type = normalizedRequestType;
       existingQC.request_date = requestDateValue;
       existingQC.item = item;
       existingQC.quantities.client_demand = clientDemand;
@@ -914,6 +1356,7 @@ exports.alignQC = async (req, res) => {
       existingQC.request_history = existingQC.request_history || [];
       const requestHistoryEntry = {
         request_date: requestDateValue,
+        request_type: normalizedRequestType,
         quantity_requested: quantityRequested,
         inspector: inspectorId,
         status: "open",
@@ -973,6 +1416,7 @@ exports.alignQC = async (req, res) => {
 
     const requestHistoryEntry = {
       request_date: requestDateValue,
+      request_type: normalizedRequestType,
       quantity_requested: quantityRequested,
       inspector: inspectorId,
       status: "open",
@@ -984,6 +1428,7 @@ exports.alignQC = async (req, res) => {
       order, 
       item,
       inspector: inspectorId,
+      request_type: normalizedRequestType,
       order_meta: {
         order_id: orderRecord.order_id,
         vendor: orderRecord.vendor,
@@ -1241,6 +1686,13 @@ exports.updateQC = async (req, res) => {
       const addChecked = Number(qc_checked || 0);
       const addPassed = Number(qc_passed || 0);
       const addProvision = Number(vendor_provision || 0);
+      const requestType = normalizeQcRequestType(qc?.request_type);
+      const isAqlRequest = requestType === QC_REQUEST_TYPES.AQL;
+      const clientDemandQuantity = toNonNegativeNumber(
+        qc?.quantities?.client_demand,
+        0,
+      );
+      const aqlSampleQuantity = computeAqlSampleQuantity(clientDemandQuantity);
 
       if ([addChecked, addPassed, addProvision].some((v) => v < 0 || Number.isNaN(v))) {
         return res.status(400).json({
@@ -1256,6 +1708,8 @@ exports.updateQC = async (req, res) => {
             (String(range.start ?? "").trim() !== "" ||
               String(range.end ?? "").trim() !== ""),
         );
+      const hasLabelsPayload =
+        (Array.isArray(labels) && labels.length > 0) || hasLabelRangePayload;
 
       // If user is updating passed quantity or labels, they must provide checked in same visit
       if (
@@ -1269,13 +1723,35 @@ exports.updateQC = async (req, res) => {
         });
       }
 
+      if (isAqlRequest && addChecked > aqlSampleQuantity) {
+        return res.status(400).json({
+          message: `AQL checked quantity cannot exceed 10% sample (${aqlSampleQuantity})`,
+        });
+      }
+
+      if (isAqlRequest && addPassed > addChecked) {
+        return res.status(400).json({
+          message: "For AQL, passed quantity cannot exceed checked quantity",
+        });
+      }
+
       const nextVendorProvision = qc.quantities.vendor_provision + addProvision;
 
       const nextChecked = qc.quantities.qc_checked + addChecked;
-      const nextPassed = qc.quantities.qc_passed + addPassed;
+      const nextPassedInput = qc.quantities.qc_passed + addPassed;
+      const shouldAutoPassAql = isAqlRequest && addChecked > 0;
+      const nextPassed = shouldAutoPassAql
+        ? clientDemandQuantity
+        : nextPassedInput;
 
       if (nextVendorProvision < 0) {
         return res.status(400).json({ message: "offered quantity cannot be negative" });
+      }
+
+      if (isAqlRequest && nextChecked > aqlSampleQuantity) {
+        return res.status(400).json({
+          message: `AQL checked quantity cannot exceed 10% sample (${aqlSampleQuantity})`,
+        });
       }
 
       const quantityRequestedCap = Number(
@@ -1308,7 +1784,7 @@ exports.updateQC = async (req, res) => {
         });
       }
 
-      if (nextPassed > nextChecked) {
+      if (!isAqlRequest && nextPassed > nextChecked) {
         return res.status(400).json({
           message: "qc_passed cannot exceed qc_checked",
         });
@@ -1378,9 +1854,6 @@ exports.updateQC = async (req, res) => {
 
       let labelsAddedThisVisit = [];
       let labelRangesUsedThisVisit = [];
-      const hasLabelsPayload =
-        (Array.isArray(labels) && labels.length > 0) || hasLabelRangePayload;
-
       if (hasLabelsPayload) {
         const inspectionInspectorUserId = qc.inspector?._id
           ? qc.inspector._id
@@ -1450,6 +1923,13 @@ exports.updateQC = async (req, res) => {
         addPassed > 0 ||
         addProvision > 0 ||
         (labelsAddedThisVisit && labelsAddedThisVisit.length > 0);
+      const addPassedForInspectionRecord =
+        shouldAutoPassAql
+          ? Math.max(
+              0,
+              Math.min(addChecked, addPassed > 0 ? addPassed : addChecked),
+            )
+          : addPassed;
 
       const shouldUpdateInspectionRecord =
         isVisitUpdate ||
@@ -1505,7 +1985,7 @@ exports.updateQC = async (req, res) => {
           remarks: remarks || "",
           createdBy: req.user._id,
           addChecked: isVisitUpdate ? addChecked : 0,
-          addPassed: isVisitUpdate ? addPassed : 0,
+          addPassed: isVisitUpdate ? addPassedForInspectionRecord : 0,
           addProvision: isVisitUpdate ? addProvision : 0,
           appendLabelRanges: isVisitUpdate ? labelRangesUsedThisVisit : [],
           appendLabels: isVisitUpdate ? labelsAddedThisVisit : [],

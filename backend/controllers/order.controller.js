@@ -256,6 +256,20 @@ const parseDateLike = (value) => {
   return parsed;
 };
 
+const formatDateDDMMYYYY = (value, fallback = "") => {
+  if (value === undefined || value === null || value === "") return fallback;
+
+  const parsed = value instanceof Date ? value : parseDateLike(value);
+  if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) {
+    return fallback;
+  }
+
+  const day = String(parsed.getUTCDate()).padStart(2, "0");
+  const month = String(parsed.getUTCMonth() + 1).padStart(2, "0");
+  const year = String(parsed.getUTCFullYear());
+  return `${day}/${month}/${year}`;
+};
+
 const resolveClientDayRange = (dateValue, tzOffsetValue) => {
   const dateText = String(dateValue ?? "").trim();
   if (!dateText) return null;
@@ -381,6 +395,336 @@ const computeOrderStatus = ({ orderQuantity, shippedQuantity, qcRecord }) => {
   }
 
   return "Under Inspection";
+};
+
+const resolveShipmentSortConfig = ({
+  sortToken = "",
+  sortByInput = "",
+  sortOrderInput = "",
+} = {}) => {
+  const sortAliases = {
+    po: "order_id",
+    order: "order_id",
+    orderid: "order_id",
+    order_id: "order_id",
+    item: "item_code",
+    itemcode: "item_code",
+    item_code: "item_code",
+    vendor: "vendor",
+    brand: "brand",
+    status: "status",
+    stuffingdate: "stuffing_date",
+    stuffing_date: "stuffing_date",
+    container: "container",
+    containernumber: "container",
+    container_number: "container",
+    quantity: "quantity",
+    pending: "pending",
+    orderquantity: "order_quantity",
+    order_quantity: "order_quantity",
+  };
+
+  const allowedSortFields = new Set([
+    "order_id",
+    "item_code",
+    "vendor",
+    "brand",
+    "status",
+    "order_quantity",
+    "stuffing_date",
+    "container",
+    "quantity",
+    "pending",
+  ]);
+
+  const normalizedSortToken = normalizeFilterValue(sortToken);
+  const rawSortBy = normalizeFilterValue(sortByInput);
+  const sortTokenDirection = String(normalizedSortToken || "").startsWith("-")
+    ? "desc"
+    : String(normalizedSortToken || "").startsWith("+")
+      ? "asc"
+      : null;
+
+  const normalizedSortKey = String(
+    rawSortBy
+      || String(normalizedSortToken || "").replace(/^[+-]/, "")
+      || "stuffing_date",
+  )
+    .trim()
+    .replace(/[^a-zA-Z0-9_]/g, "")
+    .toLowerCase();
+
+  const sortBy = allowedSortFields.has(sortAliases[normalizedSortKey])
+    ? sortAliases[normalizedSortKey]
+    : "stuffing_date";
+
+  const explicitSortOrder = String(sortOrderInput || "")
+    .trim()
+    .toLowerCase();
+
+  let sortOrder = "asc";
+  if (sortBy === "stuffing_date") {
+    sortOrder = "desc";
+  }
+  if (sortTokenDirection) {
+    sortOrder = sortTokenDirection;
+  }
+  if (explicitSortOrder === "asc" || explicitSortOrder === "desc") {
+    sortOrder = explicitSortOrder;
+  }
+
+  const sortDirection = sortOrder === "asc" ? 1 : -1;
+
+  return {
+    sortBy,
+    sortOrder,
+    sortDirection,
+  };
+};
+
+const mapOrdersToShipmentRows = (orders = []) =>
+  orders.flatMap((order) => {
+    const shipmentEntries = Array.isArray(order?.shipment)
+      ? order.shipment
+      : [];
+    const parsedOrderQuantity = Number(order?.quantity);
+    const normalizedOrderQuantity = Number.isFinite(parsedOrderQuantity)
+      ? parsedOrderQuantity
+      : 0;
+
+    const baseRow = {
+      _id: order?._id || null,
+      order_id: order?.order_id || "",
+      brand: order?.brand || "",
+      vendor: order?.vendor || "",
+      ETD: order?.ETD || null,
+      order_date: order?.order_date || null,
+      updatedAt: order?.updatedAt || null,
+      item: {
+        item_code: order?.item?.item_code || "",
+        description: order?.item?.description || "",
+      },
+      item_code: order?.item?.item_code || "",
+      description: order?.item?.description || "",
+      order_quantity: normalizedOrderQuantity,
+      shipment: shipmentEntries,
+      status: order?.status || "",
+    };
+
+    if (shipmentEntries.length === 0) {
+      return [
+        {
+          ...baseRow,
+          shipment_id: null,
+          stuffing_date: null,
+          container: "",
+          quantity: normalizedOrderQuantity,
+          pending: normalizedOrderQuantity,
+          remaining_remarks: "",
+        },
+      ];
+    }
+
+    return shipmentEntries.map((entry, index) => {
+      const parsedShipmentQuantity = Number(entry?.quantity);
+      const parsedPending = Number(entry?.pending);
+
+      return {
+        ...baseRow,
+        shipment_id: entry?._id || `${order?._id || "order"}-${index}`,
+        stuffing_date: entry?.stuffing_date || null,
+        container: entry?.container || "",
+        quantity: Number.isFinite(parsedShipmentQuantity)
+          ? parsedShipmentQuantity
+          : 0,
+        pending: Number.isFinite(parsedPending) ? parsedPending : 0,
+        remaining_remarks: entry?.remaining_remarks || "",
+      };
+    });
+  });
+
+const toShipmentTimestamp = (value) => {
+  if (!value) return 0;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+};
+
+const toShipmentNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const compareShipmentValues = (aValue, bValue) => {
+  const aIsNumber = typeof aValue === "number";
+  const bIsNumber = typeof bValue === "number";
+  if (aIsNumber && bIsNumber) return aValue - bValue;
+  return String(aValue).localeCompare(String(bValue));
+};
+
+const getShipmentSortValue = (row, sortBy) => {
+  switch (sortBy) {
+    case "order_id":
+      return String(row?.order_id || "");
+    case "item_code":
+      return String(row?.item_code || "");
+    case "vendor":
+      return String(row?.vendor || "");
+    case "brand":
+      return String(row?.brand || "");
+    case "status": {
+      const statusIndex = ORDER_STATUS_SEQUENCE.indexOf(
+        String(row?.status || ""),
+      );
+      return statusIndex === -1 ? ORDER_STATUS_SEQUENCE.length : statusIndex;
+    }
+    case "order_quantity":
+      return toShipmentNumber(row?.order_quantity);
+    case "stuffing_date":
+      return toShipmentTimestamp(row?.stuffing_date);
+    case "container":
+      return String(row?.container || "");
+    case "quantity":
+      return toShipmentNumber(row?.quantity);
+    case "pending":
+      return toShipmentNumber(row?.pending);
+    default:
+      return toShipmentTimestamp(row?.stuffing_date);
+  }
+};
+
+const getShipmentDataset = async ({
+  vendor,
+  orderId,
+  itemCode,
+  container,
+  statusFilter,
+  sortToken,
+  sortByInput,
+  sortOrderInput,
+} = {}) => {
+  const { sortBy, sortOrder, sortDirection } = resolveShipmentSortConfig({
+    sortToken,
+    sortByInput,
+    sortOrderInput,
+  });
+
+  const filterInput = {
+    vendor,
+    orderId,
+    itemCode,
+    container,
+  };
+
+  const [orders, vendorsRaw, orderIdsRaw, containersRaw, itemCodesRaw] =
+    await Promise.all([
+      Order.find(buildShipmentMatch(filterInput))
+        .select(
+          "order_id item brand vendor ETD status quantity shipment order_date updatedAt",
+        )
+        .sort({ order_date: -1, updatedAt: -1, order_id: -1 })
+        .lean(),
+      Order.distinct(
+        "vendor",
+        buildShipmentMatch({
+          ...filterInput,
+          includeVendor: false,
+          includeContainer: false,
+          includeStatus: false,
+        }),
+      ),
+      Order.distinct(
+        "order_id",
+        buildShipmentMatch({
+          ...filterInput,
+          includeOrderId: false,
+          includeContainer: false,
+          includeStatus: false,
+        }),
+      ),
+      Order.distinct(
+        "shipment.container",
+        buildShipmentMatch({
+          ...filterInput,
+          includeContainer: false,
+          includeStatus: false,
+        }),
+      ),
+      Order.distinct(
+        "item.item_code",
+        buildShipmentMatch({
+          ...filterInput,
+          includeItemCode: false,
+          includeContainer: false,
+          includeStatus: false,
+        }),
+      ),
+    ]);
+
+  const rows = mapOrdersToShipmentRows(orders);
+
+  const normalizedContainer = normalizeFilterValue(container);
+  const containerNeedle = normalizedContainer
+    ? normalizedContainer.toLowerCase()
+    : null;
+
+  const containerFilteredRows = containerNeedle
+    ? rows.filter((row) =>
+        String(row?.container || "").toLowerCase().includes(containerNeedle),
+      )
+    : rows;
+
+  const summary = containerFilteredRows.reduce(
+    (acc, row) => {
+      acc.total += 1;
+      if (row?.status === "Inspection Done") acc.inspectionDone += 1;
+      if (row?.status === "Partial Shipped") acc.partialShipped += 1;
+      if (row?.status === "Shipped") acc.shipped += 1;
+      return acc;
+    },
+    {
+      total: 0,
+      inspectionDone: 0,
+      partialShipped: 0,
+      shipped: 0,
+    },
+  );
+
+  const statusScopedRows =
+    statusFilter && SHIPMENT_VISIBLE_STATUSES.includes(statusFilter)
+      ? containerFilteredRows.filter((row) => row?.status === statusFilter)
+      : containerFilteredRows;
+
+  const sortedRows = [...statusScopedRows].sort((a, b) => {
+    const primaryComparison = compareShipmentValues(
+      getShipmentSortValue(a, sortBy),
+      getShipmentSortValue(b, sortBy),
+    );
+    if (primaryComparison !== 0) {
+      return primaryComparison * sortDirection;
+    }
+
+    const orderCompare = String(a?.order_id || "").localeCompare(
+      String(b?.order_id || ""),
+    );
+    if (orderCompare !== 0) return orderCompare;
+
+    return String(a?.item_code || "").localeCompare(String(b?.item_code || ""));
+  });
+
+  return {
+    rows: sortedRows,
+    summary,
+    sort: {
+      sort_by: sortBy,
+      sort_order: sortOrder,
+    },
+    filters: {
+      vendors: normalizeDistinctValues(vendorsRaw),
+      order_ids: normalizeDistinctValues(orderIdsRaw),
+      containers: normalizeDistinctValues(containersRaw),
+      item_codes: normalizeDistinctValues(itemCodesRaw),
+    },
+  };
 };
 
 // Upload Orders Controller
@@ -1740,292 +2084,21 @@ exports.getShipmentsDb = async (req, res) => {
     const statusFilter = normalizeFilterValue(req.query.status);
     const page = parsePositiveInt(req.query.page, 1);
     const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
-
-    const sortAliases = {
-      po: "order_id",
-      order: "order_id",
-      orderid: "order_id",
-      order_id: "order_id",
-      item: "item_code",
-      itemcode: "item_code",
-      item_code: "item_code",
-      vendor: "vendor",
-      brand: "brand",
-      status: "status",
-      stuffingdate: "stuffing_date",
-      stuffing_date: "stuffing_date",
-      container: "container",
-      containernumber: "container",
-      container_number: "container",
-      quantity: "quantity",
-      pending: "pending",
-      orderquantity: "order_quantity",
-      order_quantity: "order_quantity",
-    };
-
-    const allowedSortFields = new Set([
-      "order_id",
-      "item_code",
-      "vendor",
-      "brand",
-      "status",
-      "order_quantity",
-      "stuffing_date",
-      "container",
-      "quantity",
-      "pending",
-    ]);
-
-    const normalizedSortToken = normalizeFilterValue(req.query.sort);
-    const rawSortBy = normalizeFilterValue(
-      req.query.sort_by ?? req.query.sortBy,
-    );
-    const sortTokenDirection = String(normalizedSortToken || "").startsWith("-")
-      ? "desc"
-      : String(normalizedSortToken || "").startsWith("+")
-        ? "asc"
-        : null;
-
-    const normalizedSortKey = String(
-      rawSortBy
-      || String(normalizedSortToken || "").replace(/^[+-]/, "")
-      || "stuffing_date",
-    )
-      .trim()
-      .replace(/[^a-zA-Z0-9_]/g, "")
-      .toLowerCase();
-
-    const sortBy = allowedSortFields.has(sortAliases[normalizedSortKey])
-      ? sortAliases[normalizedSortKey]
-      : "stuffing_date";
-
-    const explicitSortOrder = String(
-      req.query.sort_order ?? req.query.sortOrder ?? "",
-    )
-      .trim()
-      .toLowerCase();
-
-    let sortOrder = "asc";
-    if (sortBy === "stuffing_date") {
-      sortOrder = "desc";
-    }
-    if (sortTokenDirection) {
-      sortOrder = sortTokenDirection;
-    }
-    if (explicitSortOrder === "asc" || explicitSortOrder === "desc") {
-      sortOrder = explicitSortOrder;
-    }
-
-    const sortDirection = sortOrder === "asc" ? 1 : -1;
-
-    const filterInput = {
+    const shipmentData = await getShipmentDataset({
       vendor,
       orderId,
       itemCode,
       container,
-    };
-
-    const [orders, vendorsRaw, orderIdsRaw, containersRaw, itemCodesRaw] = await Promise.all([
-      Order.find(buildShipmentMatch(filterInput))
-        .select(
-          "order_id item brand vendor status quantity shipment order_date updatedAt",
-        )
-        .sort({ order_date: -1, updatedAt: -1, order_id: -1 })
-        .lean(),
-      Order.distinct(
-        "vendor",
-        buildShipmentMatch({
-          ...filterInput,
-          includeVendor: false,
-          includeContainer: false,
-          includeStatus: false,
-        }),
-      ),
-      Order.distinct(
-        "order_id",
-        buildShipmentMatch({
-          ...filterInput,
-          includeOrderId: false,
-          includeContainer: false,
-          includeStatus: false,
-        }),
-      ),
-      Order.distinct(
-        "shipment.container",
-        buildShipmentMatch({
-          ...filterInput,
-          includeContainer: false,
-          includeStatus: false,
-        }),
-      ),
-      Order.distinct(
-        "item.item_code",
-        buildShipmentMatch({
-          ...filterInput,
-          includeItemCode: false,
-          includeContainer: false,
-          includeStatus: false,
-        }),
-      ),
-    ]);
-
-    const data = orders.flatMap((order) => {
-      const shipmentEntries = Array.isArray(order?.shipment)
-        ? order.shipment
-        : [];
-      const parsedOrderQuantity = Number(order?.quantity);
-      const normalizedOrderQuantity = Number.isFinite(parsedOrderQuantity)
-        ? parsedOrderQuantity
-        : 0;
-
-      const baseRow = {
-        _id: order?._id || null,
-        order_id: order?.order_id || "",
-        brand: order?.brand || "",
-        vendor: order?.vendor || "",
-        item: {
-          item_code: order?.item?.item_code || "",
-          description: order?.item?.description || "",
-        },
-        item_code: order?.item?.item_code || "",
-        description: order?.item?.description || "",
-        order_quantity: normalizedOrderQuantity,
-        shipment: shipmentEntries,
-        status: order?.status || "",
-      };
-
-      if (shipmentEntries.length === 0) {
-        return [
-          {
-            ...baseRow,
-            shipment_id: null,
-            stuffing_date: null,
-            container: "",
-            quantity: normalizedOrderQuantity,
-            pending: normalizedOrderQuantity,
-            remaining_remarks: "",
-          },
-        ];
-      }
-
-      return shipmentEntries.map((entry, index) => {
-        const parsedShipmentQuantity = Number(entry?.quantity);
-        const parsedPending = Number(entry?.pending);
-
-        return {
-          ...baseRow,
-          shipment_id: entry?._id || `${order?._id || "order"}-${index}`,
-          stuffing_date: entry?.stuffing_date || null,
-          container: entry?.container || "",
-          quantity: Number.isFinite(parsedShipmentQuantity)
-            ? parsedShipmentQuantity
-            : 0,
-          pending: Number.isFinite(parsedPending) ? parsedPending : 0,
-          remaining_remarks: entry?.remaining_remarks || "",
-        };
-      });
+      statusFilter,
+      sortToken: req.query.sort,
+      sortByInput: req.query.sort_by ?? req.query.sortBy,
+      sortOrderInput: req.query.sort_order ?? req.query.sortOrder,
     });
-
-    const normalizedContainer = normalizeFilterValue(container);
-    const containerNeedle = normalizedContainer
-      ? normalizedContainer.toLowerCase()
-      : null;
-
-    const containerFilteredData = containerNeedle
-      ? data.filter((row) =>
-          String(row?.container || "").toLowerCase().includes(containerNeedle),
-        )
-      : data;
-
-    const summary = containerFilteredData.reduce(
-      (acc, row) => {
-        acc.total += 1;
-        if (row?.status === "Inspection Done") acc.inspectionDone += 1;
-        if (row?.status === "Partial Shipped") acc.partialShipped += 1;
-        if (row?.status === "Shipped") acc.shipped += 1;
-        return acc;
-      },
-      {
-        total: 0,
-        inspectionDone: 0,
-        partialShipped: 0,
-        shipped: 0,
-      },
-    );
-
-    const statusScopedData =
-      statusFilter && SHIPMENT_VISIBLE_STATUSES.includes(statusFilter)
-        ? containerFilteredData.filter((row) => row?.status === statusFilter)
-        : containerFilteredData;
-
-    const toTimestamp = (value) => {
-      if (!value) return 0;
-      const parsed = new Date(value);
-      return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
-    };
-
-    const toNumber = (value) => {
-      const parsed = Number(value);
-      return Number.isFinite(parsed) ? parsed : 0;
-    };
-
-    const compareValues = (aValue, bValue) => {
-      const aIsNumber = typeof aValue === "number";
-      const bIsNumber = typeof bValue === "number";
-      if (aIsNumber && bIsNumber) return aValue - bValue;
-      return String(aValue).localeCompare(String(bValue));
-    };
-
-    const getSortValue = (row) => {
-      switch (sortBy) {
-        case "order_id":
-          return String(row?.order_id || "");
-        case "item_code":
-          return String(row?.item_code || "");
-        case "vendor":
-          return String(row?.vendor || "");
-        case "brand":
-          return String(row?.brand || "");
-        case "status": {
-          const statusIndex = ORDER_STATUS_SEQUENCE.indexOf(
-            String(row?.status || ""),
-          );
-          return statusIndex === -1 ? ORDER_STATUS_SEQUENCE.length : statusIndex;
-        }
-        case "order_quantity":
-          return toNumber(row?.order_quantity);
-        case "stuffing_date":
-          return toTimestamp(row?.stuffing_date);
-        case "container":
-          return String(row?.container || "");
-        case "quantity":
-          return toNumber(row?.quantity);
-        case "pending":
-          return toNumber(row?.pending);
-        default:
-          return toTimestamp(row?.stuffing_date);
-      }
-    };
-
-    const sortedData = [...statusScopedData].sort((a, b) => {
-      const primaryComparison = compareValues(getSortValue(a), getSortValue(b));
-      if (primaryComparison !== 0) {
-        return primaryComparison * sortDirection;
-      }
-
-      const orderCompare = String(a?.order_id || "").localeCompare(
-        String(b?.order_id || ""),
-      );
-      if (orderCompare !== 0) return orderCompare;
-
-      return String(a?.item_code || "").localeCompare(String(b?.item_code || ""));
-    });
-
-    const totalRecords = sortedData.length;
+    const totalRecords = shipmentData.rows.length;
     const totalPages = Math.max(1, Math.ceil(totalRecords / limit));
     const safePage = Math.min(page, totalPages);
     const skip = (safePage - 1) * limit;
-    const paginatedData = sortedData.slice(skip, skip + limit);
+    const paginatedData = shipmentData.rows.slice(skip, skip + limit);
 
     return res.status(200).json({
       success: true,
@@ -2039,23 +2112,140 @@ exports.getShipmentsDb = async (req, res) => {
         totalPages,
         totalRecords,
       },
-      sort: {
-        sort_by: sortBy,
-        sort_order: sortOrder,
-      },
-      summary,
-      filters: {
-        vendors: normalizeDistinctValues(vendorsRaw),
-        order_ids: normalizeDistinctValues(orderIdsRaw),
-        containers: normalizeDistinctValues(containersRaw),
-        item_codes: normalizeDistinctValues(itemCodesRaw),
-      },
+      sort: shipmentData.sort,
+      summary: shipmentData.summary,
+      filters: shipmentData.filters,
     });
   } catch (error) {
     console.error("Get Shipments DB Error:", error);
     return res.status(500).json({
       success: false,
       message: "Failed to fetch shipment list",
+      error: error.message,
+    });
+  }
+};
+
+exports.exportShipmentsDb = async (req, res) => {
+  try {
+    const vendor = req.query.vendor;
+    const orderId = req.query.order_id ?? req.query.order;
+    const itemCode = req.query.item_code;
+    const container = req.query.container ?? req.query.container_number;
+    const statusFilter = normalizeFilterValue(req.query.status);
+    const exportFormat = String(req.query.format || "").trim().toLowerCase() === "csv"
+      ? "csv"
+      : "xlsx";
+
+    const shipmentData = await getShipmentDataset({
+      vendor,
+      orderId,
+      itemCode,
+      container,
+      statusFilter,
+      sortToken: req.query.sort,
+      sortByInput: req.query.sort_by ?? req.query.sortBy,
+      sortOrderInput: req.query.sort_order ?? req.query.sortOrder,
+    });
+
+    const columns = [
+      { key: "order_id", header: "PO" },
+      { key: "brand", header: "Brand" },
+      { key: "vendor", header: "Vendor" },
+      { key: "item_code", header: "Item Code" },
+      { key: "description", header: "Description" },
+      { key: "status", header: "Status" },
+      { key: "order_quantity", header: "Order Quantity" },
+      { key: "order_date", header: "Order Date" },
+      { key: "etd", header: "ETD" },
+      { key: "stuffing_date", header: "Stuffing Date" },
+      { key: "container", header: "Container Number" },
+      { key: "quantity", header: "Shipment Quantity" },
+      { key: "pending", header: "Pending" },
+      { key: "remaining_remarks", header: "Remarks" },
+    ];
+
+    const exportRows = shipmentData.rows.map((row) => ({
+      order_id: String(row?.order_id || "").trim(),
+      brand: String(row?.brand || "").trim(),
+      vendor: String(row?.vendor || "").trim(),
+      item_code: String(row?.item_code || "").trim(),
+      description: String(row?.description || "").trim(),
+      status: String(row?.status || "").trim(),
+      order_quantity: Number(row?.order_quantity || 0),
+      order_date: formatDateDDMMYYYY(row?.order_date, ""),
+      etd: formatDateDDMMYYYY(row?.ETD, ""),
+      stuffing_date: formatDateDDMMYYYY(row?.stuffing_date, ""),
+      container: String(row?.container || "").trim(),
+      quantity: Number(row?.quantity || 0),
+      pending: Number(row?.pending || 0),
+      remaining_remarks: String(row?.remaining_remarks || "").trim(),
+    }));
+
+    const headerRow = columns.map((column) => column.header);
+    const dataRows = exportRows.map((row) =>
+      columns.map((column) => row[column.key] ?? ""),
+    );
+
+    const fileDate = new Date().toISOString().slice(0, 10);
+    const baseFileName = `shipments-${fileDate}`;
+
+    if (exportFormat === "csv") {
+      const escapeCsvValue = (value) => {
+        const normalized = String(value ?? "")
+          .replace(/\r\n/g, "\n")
+          .replace(/\r/g, "\n");
+        if (/["\n,]/.test(normalized)) {
+          return `"${normalized.replace(/"/g, "\"\"")}"`;
+        }
+        return normalized;
+      };
+
+      const csvLines = [headerRow, ...dataRows].map((row) =>
+        row.map((cell) => escapeCsvValue(cell)).join(","),
+      );
+      const csvContent = `\uFEFF${csvLines.join("\r\n")}`;
+      const fileName = `${baseFileName}.csv`;
+
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${fileName}"`,
+      );
+      return res.status(200).send(csvContent);
+    }
+
+    const worksheet = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
+    worksheet["!cols"] = columns.map((column, columnIndex) => {
+      const maxDataLength = Math.max(
+        ...dataRows.map((row) => String(row[columnIndex] ?? "").length),
+        column.header.length,
+      );
+      return { wch: Math.min(50, Math.max(12, maxDataLength + 2)) };
+    });
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Shipments");
+    const fileBuffer = XLSX.write(workbook, {
+      type: "buffer",
+      bookType: "xlsx",
+    });
+    const fileName = `${baseFileName}.xlsx`;
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${fileName}"`,
+    );
+    return res.status(200).send(fileBuffer);
+  } catch (error) {
+    console.error("Export Shipments DB Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to export shipment list",
       error: error.message,
     });
   }

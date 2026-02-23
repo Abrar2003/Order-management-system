@@ -110,7 +110,7 @@ const OrdersByBrand = () => {
                         </button>
                       </th>
                       <th>Items</th>
-                      <th>Total Status</th>
+                      <th>Status</th>
                       <th>
                         <button
                           type="button"

@@ -97,6 +97,7 @@ const QCPage = () => {
   );
   const [totalPages, setTotalPages] = useState(1);
   const [realignContext, setRealignContext] = useState(null);
+  const [exporting, setExporting] = useState(false);
 
   const token = localStorage.getItem("token");
   const navigate = useNavigate();
@@ -231,6 +232,7 @@ const QCPage = () => {
         qc?.quantities?.pending ?? orderForModal.quantity,
       ),
       initialRequestDate: qc?.request_date || "",
+      initialRequestType: String(qc?.request_type || "FULL"),
       openQuantity: toSafeNumber(qc?.quantities?.pending ?? orderForModal.quantity),
     });
   };
@@ -253,6 +255,70 @@ const QCPage = () => {
     return sortOrder === "asc" ? " (asc)" : " (desc)";
   };
 
+  const handleExport = useCallback(async (format = "xlsx") => {
+    try {
+      setExporting(true);
+      const fromIso = toISODateString(from);
+      const toIso = toISODateString(to);
+      const response = await axios.get("/qc/export", {
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: "blob",
+        params: {
+          order,
+          search: debouncedSearch,
+          inspector,
+          vendor,
+          from: fromIso || "",
+          to: toIso || "",
+          sort_by: sortBy,
+          sort_order: sortOrder,
+          format,
+        },
+      });
+
+      const disposition = String(response?.headers?.["content-disposition"] || "");
+      const match = disposition.match(/filename\*?=(?:UTF-8''|\"?)([^\";]+)/i);
+      const fallbackName = `qc-records-${new Date().toISOString().slice(0, 10)}.${format === "csv" ? "csv" : "xlsx"}`;
+      const fileName = match?.[1]
+        ? decodeURIComponent(match[1].trim())
+        : fallbackName;
+
+      const blob = new Blob(
+        [response.data],
+        {
+          type:
+            response?.headers?.["content-type"]
+            || (format === "csv"
+              ? "text/csv; charset=utf-8"
+              : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        },
+      );
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      alert(`Failed to export QC records as ${String(format).toUpperCase()}.`);
+    } finally {
+      setExporting(false);
+    }
+  }, [
+    from,
+    debouncedSearch,
+    inspector,
+    order,
+    sortBy,
+    sortOrder,
+    to,
+    token,
+    vendor,
+  ]);
+
   return (
     <>
       <Navbar />
@@ -267,7 +333,24 @@ const QCPage = () => {
             Back
           </button>
           <h2 className="h4 mb-0">QC Records</h2>
-          <span className="d-none d-md-inline" />
+          <div className="d-flex gap-2">
+            <button
+              type="button"
+              className="btn btn-outline-primary btn-sm"
+              onClick={() => handleExport("xlsx")}
+              disabled={exporting}
+            >
+              {exporting ? "Exporting..." : "Export XLSX"}
+            </button>
+            <button
+              type="button"
+              className="btn btn-outline-secondary btn-sm"
+              onClick={() => handleExport("csv")}
+              disabled={exporting}
+            >
+              {exporting ? "Exporting..." : "Export CSV"}
+            </button>
+          </div>
         </div>
 
         {/* Removed the separate filter card UI? You asked filters in table head.
@@ -607,6 +690,7 @@ const QCPage = () => {
             initialInspector={realignContext.initialInspector}
             initialQuantityRequested={realignContext.initialQuantityRequested}
             initialRequestDate={realignContext.initialRequestDate}
+            initialRequestType={realignContext.initialRequestType}
             openQuantity={realignContext.openQuantity}
             onClose={() => setRealignContext(null)}
             onSuccess={() => {

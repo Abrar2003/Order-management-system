@@ -48,6 +48,17 @@ const InfoBox = ({ label, value, compact = false }) => (
   </div>
 );
 
+const isShipmentEditableStatus = (statusValue) => {
+  const normalized = String(statusValue || "")
+    .trim()
+    .toLowerCase();
+  return (
+    normalized === "partial shipped"
+    || normalized === "partially shipped"
+    || normalized === "shipped"
+  );
+};
+
 const QcDetails = () => {
   const { id } = useParams();
   const [qc, setQc] = useState(null);
@@ -71,7 +82,7 @@ const QcDetails = () => {
     Array.isArray(qc?.order?.shipment) && qc.order.shipment.length > 0;
   const canShowEditShippingButton =
     isAdmin &&
-    (hasShippingRecords || String(qc?.order?.status || "").trim() === "Partial Shipped");
+    (hasShippingRecords || isShipmentEditableStatus(qc?.order?.status));
 
   const requirementsMet =
     Boolean(qc?.packed_size) && Boolean(qc?.finishing) && Boolean(qc?.branding);

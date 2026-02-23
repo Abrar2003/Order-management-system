@@ -8,6 +8,15 @@ import {
 } from "../utils/date";
 import "../App.css";
 
+const normalizeRequestType = (value) =>
+  String(value || "").trim().toUpperCase() === "AQL" ? "AQL" : "FULL";
+
+const computeAqlSampleQuantity = (quantity) => {
+  const parsedQuantity = Number(quantity);
+  if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) return 0;
+  return Math.max(1, Math.ceil(parsedQuantity * 0.1));
+};
+
 const AlignQCModal = ({
   order,
   onClose,
@@ -15,11 +24,15 @@ const AlignQCModal = ({
   initialInspector = "",
   initialQuantityRequested = "",
   initialRequestDate = "",
+  initialRequestType = "FULL",
   openQuantity = null,
 }) => {
   const [inspectors, setInspectors] = useState([]);
   const [inspector, setInspector] = useState(
     initialInspector ? String(initialInspector) : "",
+  );
+  const [requestType, setRequestType] = useState(
+    normalizeRequestType(initialRequestType),
   );
   const [request_date, setReqDate] = useState(
     toDDMMYYYYInputValue(initialRequestDate, "") || getTodayDDMMYYYY(),
@@ -37,6 +50,11 @@ const AlignQCModal = ({
     : Number.isFinite(fallbackOpenQuantity)
       ? fallbackOpenQuantity
       : 0;
+  const aqlSampleQuantity = computeAqlSampleQuantity(effectiveOpenQuantity);
+  const effectiveQuantityRequested =
+    requestType === "AQL"
+      ? String(aqlSampleQuantity)
+      : quantityRequested;
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -57,19 +75,29 @@ const AlignQCModal = ({
 
   useEffect(() => {
     setInspector(initialInspector ? String(initialInspector) : "");
+    setRequestType(normalizeRequestType(initialRequestType));
     setReqDate(toDDMMYYYYInputValue(initialRequestDate, "") || getTodayDDMMYYYY());
     setQuantityRequested(
       initialQuantityRequested !== undefined && initialQuantityRequested !== null
         ? String(initialQuantityRequested)
         : "",
     );
-  }, [initialInspector, initialRequestDate, initialQuantityRequested]);
+  }, [
+    initialInspector,
+    initialRequestDate,
+    initialQuantityRequested,
+    initialRequestType,
+  ]);
 
   const handleSubmit = async () => {
     const token = localStorage.getItem("token");
     const requestDateIso = toISODateString(request_date);
 
-    if (!inspector || !request_date || quantityRequested === "") {
+    if (
+      !inspector ||
+      !request_date ||
+      (requestType === "FULL" && quantityRequested === "")
+    ) {
       alert("Inspector, request date and quantity requested are required.");
       return;
     }
@@ -78,10 +106,17 @@ const AlignQCModal = ({
       return;
     }
 
-    const quantityRequestedNumber = Number(quantityRequested);
+    const quantityRequestedNumber =
+      requestType === "AQL"
+        ? aqlSampleQuantity
+        : Number(quantityRequested);
 
     if (Number.isNaN(quantityRequestedNumber) || quantityRequestedNumber < 0) {
       alert("Quantity values must be valid non-negative numbers.");
+      return;
+    }
+    if (requestType === "AQL" && quantityRequestedNumber <= 0) {
+      alert("AQL sample quantity is invalid for this order.");
       return;
     }
 
@@ -97,6 +132,7 @@ const AlignQCModal = ({
           order: order._id,
           item: order.item,
           inspector,
+          request_type: requestType,
           request_date: requestDateIso,
           quantities: {
             client_demand: order.quantity,
@@ -168,6 +204,38 @@ const AlignQCModal = ({
             </div>
 
             <div>
+              <label className="form-label d-block mb-2">QC Request Type</label>
+              <div className="d-flex gap-3">
+                <div className="form-check">
+                  <input
+                    id="qc-request-type-full"
+                    className="form-check-input"
+                    type="radio"
+                    name="qc-request-type"
+                    checked={requestType === "FULL"}
+                    onChange={() => setRequestType("FULL")}
+                  />
+                  <label className="form-check-label" htmlFor="qc-request-type-full">
+                    FULL
+                  </label>
+                </div>
+                <div className="form-check">
+                  <input
+                    id="qc-request-type-aql"
+                    className="form-check-input"
+                    type="radio"
+                    name="qc-request-type"
+                    checked={requestType === "AQL"}
+                    onChange={() => setRequestType("AQL")}
+                  />
+                  <label className="form-check-label" htmlFor="qc-request-type-aql">
+                    AQL
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div>
               <label className="form-label">Request Date</label>
               <input
                 type="date"
@@ -183,7 +251,7 @@ const AlignQCModal = ({
               <input
                 type="number"
                 className="form-control"
-                value={quantityRequested}
+                value={effectiveQuantityRequested}
                 onChange={(e) => {
                   const nextValue = e.target.value;
                   if (nextValue === "" || Number(nextValue) >= 0) {
@@ -191,7 +259,13 @@ const AlignQCModal = ({
                   }
                 }}
                 min="0"
+                disabled={requestType === "AQL"}
               />
+              {requestType === "AQL" && (
+                <div className="small text-secondary mt-1">
+                  AQL request uses 10% sample ({aqlSampleQuantity}) and backend auto-handles pass logic.
+                </div>
+              )}
             </div>
           </div>
 

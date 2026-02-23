@@ -28,6 +28,17 @@ const EMPTY_SUMMARY = {
 
 const DEFAULT_LIMIT = 20;
 
+const isShipmentEditableStatus = (statusValue) => {
+  const normalized = String(statusValue || "")
+    .trim()
+    .toLowerCase();
+  return (
+    normalized === "partial shipped"
+    || normalized === "partially shipped"
+    || normalized === "shipped"
+  );
+};
+
 const Shipments = () => {
   const navigate = useNavigate();
   const user = getUserFromToken();
@@ -52,6 +63,7 @@ const Shipments = () => {
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
   const [summary, setSummary] = useState(EMPTY_SUMMARY);
+  const [exporting, setExporting] = useState(false);
   const [filterOptions, setFilterOptions] = useState({
     vendors: [],
     order_ids: [],
@@ -155,7 +167,7 @@ const Shipments = () => {
   const canShowEditAction = useCallback(
     (row) =>
       isAdmin &&
-      ["Partial Shipped", "Shipped"].includes(String(row?.status || "").trim()),
+      isShipmentEditableStatus(row?.status),
     [isAdmin],
   );
 
@@ -193,6 +205,62 @@ const Shipments = () => {
     setEditingOrder(normalizedOrder);
   }, []);
 
+  const handleExport = useCallback(async (format = "xlsx") => {
+    try {
+      setExporting(true);
+      const response = await api.get("/orders/shipments/export", {
+        responseType: "blob",
+        params: {
+          order_id: debouncedOrderSearch,
+          container: debouncedContainerSearch,
+          vendor: vendorFilter,
+          status: statusFilter,
+          sort_by: sortBy,
+          sort_order: sortOrder,
+          format,
+        },
+      });
+
+      const disposition = String(response?.headers?.["content-disposition"] || "");
+      const match = disposition.match(/filename\*?=(?:UTF-8''|\"?)([^\";]+)/i);
+      const fallbackName = `shipments-${new Date().toISOString().slice(0, 10)}.${format === "csv" ? "csv" : "xlsx"}`;
+      const fileName = match?.[1]
+        ? decodeURIComponent(match[1].trim())
+        : fallbackName;
+
+      const blob = new Blob(
+        [response.data],
+        {
+          type:
+            response?.headers?.["content-type"]
+            || (format === "csv"
+              ? "text/csv; charset=utf-8"
+              : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        },
+      );
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      alert(`Failed to export shipment records as ${String(format).toUpperCase()}.`);
+    } finally {
+      setExporting(false);
+    }
+  }, [
+    debouncedContainerSearch,
+    debouncedOrderSearch,
+    sortBy,
+    sortOrder,
+    statusFilter,
+    vendorFilter,
+  ]);
+
   return (
     <>
       <Navbar />
@@ -207,14 +275,32 @@ const Shipments = () => {
             Back
           </button>
           <h2 className="h4 mb-0">Shipments</h2>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={fetchShipments}
-            disabled={loading}
-          >
-            {loading ? "Loading..." : "Refresh"}
-          </button>
+          <div className="d-flex gap-2">
+            <button
+              type="button"
+              className="btn btn-outline-primary btn-sm"
+              onClick={() => handleExport("xlsx")}
+              disabled={exporting}
+            >
+              {exporting ? "Exporting..." : "Export XLSX"}
+            </button>
+            <button
+              type="button"
+              className="btn btn-outline-secondary btn-sm"
+              onClick={() => handleExport("csv")}
+              disabled={exporting}
+            >
+              {exporting ? "Exporting..." : "Export CSV"}
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={fetchShipments}
+              disabled={loading}
+            >
+              {loading ? "Loading..." : "Refresh"}
+            </button>
+          </div>
         </div>
 
         <div className="card om-card mb-3">

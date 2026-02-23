@@ -43,6 +43,13 @@ router.get(
   qcController.getDailyReport
 );
 
+router.get(
+  "/export",
+  auth,
+  authorize("admin", "manager", "QC", "Dev"),
+  qcController.exportQCList,
+);
+
 router.patch(
   "/:id/inspection-records",
   auth,

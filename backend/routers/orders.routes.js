@@ -13,6 +13,7 @@ const {
   getOrdersByBrandAndStatus,
   getOrderSummary,
   getShipmentsDb,
+  exportShipmentsDb,
   editOrder,
   finalizeOrder,
   reSync,
@@ -56,6 +57,13 @@ router.get(
 router.get("/filters", authenticate, getOrdersByFiltersDb);
 
 // List shipped/partially shipped/inspection-done items with latest shipment details
+router.get(
+  "/shipments/export",
+  authenticate,
+  authorize("admin", "manager", "QC", "dev", "Dev"),
+  exportShipmentsDb,
+);
+
 router.get(
   "/shipments",
   authenticate,

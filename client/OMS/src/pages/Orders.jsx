@@ -76,6 +76,9 @@ const Orders = () => {
         ? (qcRecord?.quantities?.pending ?? order.quantity ?? "")
         : order?.quantity,
       initialRequestDate: isRealign ? qcRecord?.request_date || "" : "",
+      initialRequestType: isRealign
+        ? String(qcRecord?.request_type || "FULL")
+        : "FULL",
       openQuantity: Number.isFinite(openQuantity) ? openQuantity : 0,
     });
   };
@@ -204,6 +207,7 @@ const Orders = () => {
           initialInspector={alignContext.initialInspector}
           initialQuantityRequested={alignContext.initialQuantityRequested}
           initialRequestDate={alignContext.initialRequestDate}
+          initialRequestType={alignContext.initialRequestType}
           openQuantity={alignContext.openQuantity}
           onClose={() => setAlignContext(null)}
           onSuccess={() => {

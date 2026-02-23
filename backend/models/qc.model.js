@@ -17,6 +17,12 @@ const qcSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    request_type: {
+      type: String,
+      enum: ["FULL", "AQL"],
+      default: "FULL",
+      required: true,
+    },
     last_inspected_date: {
       type: String,
       required: true,
@@ -47,6 +53,12 @@ const qcSchema = new mongoose.Schema(
     request_history: [
       {
         request_date: { type: String, required: true },
+        request_type: {
+          type: String,
+          enum: ["FULL", "AQL"],
+          default: "FULL",
+          required: true,
+        },
         quantity_requested: { type: Number, required: true, min: 0 },
         inspector: {
           type: mongoose.Schema.Types.ObjectId,
