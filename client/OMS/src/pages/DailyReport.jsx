@@ -2,14 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
-import { formatDateDDMMYYYY } from "../utils/date";
+import {
+  formatDateDDMMYYYY,
+  getTodayDDMMYYYY,
+  isValidDDMMYYYY,
+  toDDMMYYYYInputValue,
+  toISODateString,
+} from "../utils/date";
 import "../App.css";
-
-const getTodayDateInput = () => {
-  const today = new Date();
-  const offsetMs = today.getTimezoneOffset() * 60000;
-  return new Date(today.getTime() - offsetMs).toISOString().slice(0, 10);
-};
 
 const formatCbm = (value) => {
   const parsed = Number(value);
@@ -19,7 +19,7 @@ const formatCbm = (value) => {
 
 const DailyReport = () => {
   const navigate = useNavigate();
-  const [selectedDate, setSelectedDate] = useState(getTodayDateInput());
+  const [selectedDate, setSelectedDate] = useState(getTodayDDMMYYYY());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [alignedSortBy, setAlignedSortBy] = useState("request_date");
@@ -27,7 +27,7 @@ const DailyReport = () => {
   const [inspectionSortBy, setInspectionSortBy] = useState("inspection_date");
   const [inspectionSortOrder, setInspectionSortOrder] = useState("desc");
   const [report, setReport] = useState({
-    date: getTodayDateInput(),
+    date: getTodayDDMMYYYY(),
     summary: {
       aligned_requests_count: 0,
       inspectors_count: 0,
@@ -71,10 +71,20 @@ const DailyReport = () => {
     try {
       setLoading(true);
       setError("");
+      const reportDateIso = toISODateString(selectedDate);
+      if (!reportDateIso || !isValidDDMMYYYY(selectedDate)) {
+        setError("Report date must be in DD/MM/YYYY format.");
+        setReport((prev) => ({
+          ...prev,
+          aligned_requests: [],
+          inspector_compiled: [],
+        }));
+        return;
+      }
 
       const res = await api.get("/qc/daily-report", {
         params: {
-          date: selectedDate,
+          date: reportDateIso,
           aligned_sort_by: alignedSortBy,
           aligned_sort_order: alignedSortOrder,
           inspection_sort_by: inspectionSortBy,
@@ -83,7 +93,7 @@ const DailyReport = () => {
       });
 
       setReport({
-        date: res?.data?.date || selectedDate,
+        date: toDDMMYYYYInputValue(res?.data?.date || selectedDate, selectedDate),
         summary: res?.data?.summary || {
           aligned_requests_count: 0,
           inspectors_count: 0,
@@ -154,10 +164,11 @@ const DailyReport = () => {
             <div>
               <label className="form-label mb-1">Report Date</label>
               <input
-                type="date"
+                type="text"
                 className="form-control"
                 value={selectedDate}
                 onChange={(e) => setSelectedDate(e.target.value)}
+                placeholder="DD/MM/YYYY"
               />
             </div>
             <button

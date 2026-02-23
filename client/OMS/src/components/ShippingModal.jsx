@@ -1,19 +1,17 @@
 import { useMemo, useState } from "react";
 import axios from "../api/axios";
+import {
+  getTodayDDMMYYYY,
+  isValidDDMMYYYY,
+  toDDMMYYYYInputValue,
+  toISODateString,
+} from "../utils/date";
 import "../App.css";
 
-const toDateInputValue = (value) => {
-  if (!value) return "";
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return value;
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "";
-  return parsed.toISOString().slice(0, 10);
-};
-
 const ShippingModal = ({ order, onClose, onSuccess }) => {
-  const [stuffingDate, setStuffingDate] = useState(toDateInputValue(new Date()));
+  const [stuffingDate, setStuffingDate] = useState(
+    toDDMMYYYYInputValue(new Date(), "") || getTodayDDMMYYYY(),
+  );
   const [containerNumber, setContainerNumber] = useState("");
   const [shipmentQuantity, setShipmentQuantity] = useState("");
   const [remarks, setRemarks] = useState("");
@@ -34,9 +32,14 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
 
   const handleSubmit = async () => {
     setError("");
+    const stuffingDateIso = toISODateString(stuffingDate);
 
     if (!stuffingDate || containerNumber === "" || shipmentQuantity === "") {
       setError("Stuffing date, container number and quantity are required.");
+      return;
+    }
+    if (!isValidDDMMYYYY(stuffingDate) || !stuffingDateIso) {
+      setError("Stuffing date must be in DD/MM/YYYY format.");
       return;
     }
 
@@ -61,7 +64,7 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
     try {
       setSaving(true);
       await axios.patch(`/orders/finalize-order/${order._id}`, {
-        stuffing_date: stuffingDate,
+        stuffing_date: stuffingDateIso,
         container: parsedContainer,
         quantity: parsedQuantity,
         remarks
@@ -128,10 +131,11 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
             <div>
               <label className="form-label">Stuffing Date</label>
               <input
-                type="date"
+                type="text"
                 className="form-control"
                 value={stuffingDate}
                 onChange={(e) => setStuffingDate(e.target.value)}
+                placeholder="DD/MM/YYYY"
               />
             </div>
 

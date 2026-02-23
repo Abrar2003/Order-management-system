@@ -1,19 +1,12 @@
 import { useEffect, useState } from "react";
 import axios from "../api/axios";
+import {
+  getTodayDDMMYYYY,
+  isValidDDMMYYYY,
+  toDDMMYYYYInputValue,
+  toISODateString,
+} from "../utils/date";
 import "../App.css";
-
-const formatDateInput = (value) => {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toISOString().slice(0, 10);
-};
-
-const getTodayDateInput = () => {
-  const today = new Date();
-  const offsetMs = today.getTimezoneOffset() * 60000;
-  return new Date(today.getTime() - offsetMs).toISOString().slice(0, 10);
-};
 
 const AlignQCModal = ({
   order,
@@ -29,7 +22,7 @@ const AlignQCModal = ({
     initialInspector ? String(initialInspector) : "",
   );
   const [request_date, setReqDate] = useState(
-    formatDateInput(initialRequestDate) || getTodayDateInput(),
+    toDDMMYYYYInputValue(initialRequestDate, "") || getTodayDDMMYYYY(),
   );
   const [quantityRequested, setQuantityRequested] = useState(
     initialQuantityRequested !== undefined && initialQuantityRequested !== null
@@ -64,7 +57,7 @@ const AlignQCModal = ({
 
   useEffect(() => {
     setInspector(initialInspector ? String(initialInspector) : "");
-    setReqDate(formatDateInput(initialRequestDate) || getTodayDateInput());
+    setReqDate(toDDMMYYYYInputValue(initialRequestDate, "") || getTodayDDMMYYYY());
     setQuantityRequested(
       initialQuantityRequested !== undefined && initialQuantityRequested !== null
         ? String(initialQuantityRequested)
@@ -74,9 +67,14 @@ const AlignQCModal = ({
 
   const handleSubmit = async () => {
     const token = localStorage.getItem("token");
+    const requestDateIso = toISODateString(request_date);
 
     if (!inspector || !request_date || quantityRequested === "") {
       alert("Inspector, request date and quantity requested are required.");
+      return;
+    }
+    if (!isValidDDMMYYYY(request_date) || !requestDateIso) {
+      alert("Request date must be in DD/MM/YYYY format.");
       return;
     }
 
@@ -99,7 +97,7 @@ const AlignQCModal = ({
           order: order._id,
           item: order.item,
           inspector,
-          request_date,
+          request_date: requestDateIso,
           quantities: {
             client_demand: order.quantity,
             quantity_requested: quantityRequestedNumber,
@@ -172,10 +170,11 @@ const AlignQCModal = ({
             <div>
               <label className="form-label">Request Date</label>
               <input
-                type="date"
+                type="text"
                 className="form-control"
                 value={request_date}
                 onChange={(e) => setReqDate(e.target.value)}
+                placeholder="DD/MM/YYYY"
               />
             </div>
 

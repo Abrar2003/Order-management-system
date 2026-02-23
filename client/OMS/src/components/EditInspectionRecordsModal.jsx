@@ -1,16 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
+import {
+  isValidDDMMYYYY,
+  toDDMMYYYYInputValue,
+  toISODateString,
+} from "../utils/date";
 import "../App.css";
-
-const toDateInputValue = (value) => {
-  if (!value) return "";
-  const asString = String(value).trim();
-  if (!asString) return "";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(asString)) return asString;
-  const parsed = new Date(asString);
-  if (Number.isNaN(parsed.getTime())) return "";
-  return parsed.toISOString().slice(0, 10);
-};
 
 const toSafeNumberString = (value) => {
   const parsed = Number(value);
@@ -20,13 +15,9 @@ const toSafeNumberString = (value) => {
 
 const toTimestamp = (value) => {
   if (!value) return 0;
-  const asString = String(value).trim();
-  if (!asString) return 0;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(asString)) {
-    const parsed = new Date(`${asString}T00:00:00Z`);
-    return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
-  }
-  const parsed = new Date(asString);
+  const isoDate = toISODateString(value);
+  if (!isoDate) return 0;
+  const parsed = new Date(`${isoDate}T00:00:00Z`);
   return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
 };
 
@@ -39,9 +30,10 @@ const buildInitialRows = (qc) =>
     })
     .map((record) => ({
       _id: String(record?._id || ""),
-      requested_date: toDateInputValue(record?.requested_date || qc?.request_date),
-      inspection_date: toDateInputValue(
+      requested_date: toDDMMYYYYInputValue(record?.requested_date || qc?.request_date, ""),
+      inspection_date: toDDMMYYYYInputValue(
         record?.inspection_date || qc?.last_inspected_date || qc?.request_date,
+        "",
       ),
       inspector: String(record?.inspector?._id || record?.inspector || ""),
       vendor_requested: toSafeNumberString(record?.vendor_requested),
@@ -128,13 +120,15 @@ const EditInspectionRecordsModal = ({ qc, onClose, onSuccess }) => {
         }
 
         const requestedDate = String(row.requested_date || "").trim();
-        if (!requestedDate) {
-          throw new Error(`Row ${rowIndex + 1}: requested date is required`);
+        const requestedDateIso = toISODateString(requestedDate);
+        if (!requestedDateIso || !isValidDDMMYYYY(requestedDate)) {
+          throw new Error(`Row ${rowIndex + 1}: requested date must be in DD/MM/YYYY format`);
         }
 
         const inspectionDate = String(row.inspection_date || "").trim();
-        if (!inspectionDate) {
-          throw new Error(`Row ${rowIndex + 1}: inspection date is required`);
+        const inspectionDateIso = toISODateString(inspectionDate);
+        if (!inspectionDateIso || !isValidDDMMYYYY(inspectionDate)) {
+          throw new Error(`Row ${rowIndex + 1}: inspection date must be in DD/MM/YYYY format`);
         }
 
         const inspector = String(row.inspector || "").trim();
@@ -166,8 +160,8 @@ const EditInspectionRecordsModal = ({ qc, onClose, onSuccess }) => {
 
         return {
           _id: row._id,
-          requested_date: requestedDate,
-          inspection_date: inspectionDate,
+          requested_date: requestedDateIso,
+          inspection_date: inspectionDateIso,
           inspector,
           vendor_requested: vendorRequested,
           vendor_offered: vendorOffered,
@@ -230,18 +224,20 @@ const EditInspectionRecordsModal = ({ qc, onClose, onSuccess }) => {
                     <tr key={row._id || `inspection-row-${index}`}>
                       <td>
                         <input
-                          type="date"
+                          type="text"
                           className="form-control form-control-sm"
                           value={row.requested_date}
                           onChange={(e) => updateRow(index, "requested_date", e.target.value)}
+                          placeholder="DD/MM/YYYY"
                         />
                       </td>
                       <td>
                         <input
-                          type="date"
+                          type="text"
                           className="form-control form-control-sm"
                           value={row.inspection_date}
                           onChange={(e) => updateRow(index, "inspection_date", e.target.value)}
+                          placeholder="DD/MM/YYYY"
                         />
                       </td>
                       <td>

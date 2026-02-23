@@ -85,6 +85,17 @@ const Home = () => {
     [vendorSummary],
   );
 
+  const sortedVendorSummary = useMemo(
+    () =>
+      [...vendorSummary].sort((a, b) =>
+        String(a?.vendor || "").localeCompare(String(b?.vendor || ""), undefined, {
+          sensitivity: "base",
+          numeric: true,
+        }),
+      ),
+    [vendorSummary],
+  );
+
   const todayEtdTotals = useMemo(
     () =>
       todayEtdOrders.reduce(
@@ -260,6 +271,11 @@ const Home = () => {
       try {
         setTodayEtdLoading(true);
         setTodayEtdError("");
+        const now = new Date();
+        const offsetMs = now.getTimezoneOffset() * 60000;
+        const todayLocalIso = new Date(now.getTime() - offsetMs)
+          .toISOString()
+          .slice(0, 10);
 
         const response = await axios.get(
           "/orders/today-etd-orders",
@@ -267,6 +283,8 @@ const Home = () => {
             params: {
               sort_by: todayEtdSortBy,
               sort_order: todayEtdSortOrder,
+              date: todayLocalIso,
+              tz_offset_minutes: now.getTimezoneOffset(),
             },
             headers: {
               Authorization: `Bearer ${token}`,
@@ -350,7 +368,7 @@ const Home = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {vendorSummary.map((summary) => (
+                    {sortedVendorSummary.map((summary) => (
                       <tr key={summary.vendor}>
                         <td>{summary.vendor}</td>
                         <td

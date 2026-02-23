@@ -19,11 +19,11 @@ const mongoose = require("mongoose");
 const XLSX = require("xlsx");
 require("dotenv").config({ path: path.resolve(__dirname, ".env") });
 
-const QC = require("./models/qc.model");
-const Order = require("./models/order.model");
-const Inspection = require("./models/inspection.model");
-const User = require("./models/user.model");
-const qcController = require("./controllers/qc.controller");
+const QC = require("../models/qc.model");
+const Order = require("../models/order.model");
+const Inspection = require("../models/inspection.model");
+const User = require("../models/user.model");
+const qcController = require("../controllers/qc.controller");
 
 dns.setServers(["1.1.1.1", "8.8.8.8"]);
 

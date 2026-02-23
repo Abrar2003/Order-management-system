@@ -3,13 +3,12 @@ import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import { getUserFromToken } from "../auth/auth.utils";
+import {
+  getTodayDDMMYYYY,
+  isValidDDMMYYYY,
+  toISODateString,
+} from "../utils/date";
 import "../App.css";
-
-const getTodayDateInput = () => {
-  const today = new Date();
-  const offsetMs = today.getTimezoneOffset() * 60000;
-  return new Date(today.getTime() - offsetMs).toISOString().slice(0, 10);
-};
 
 const toSafeNumber = (value) => {
   const parsed = Number(value);
@@ -33,7 +32,7 @@ const Container = () => {
   );
 
   const [containerNumber, setContainerNumber] = useState("");
-  const [shippingDate, setShippingDate] = useState(getTodayDateInput());
+  const [shippingDate, setShippingDate] = useState(getTodayDDMMYYYY());
   const [vendor, setVendor] = useState("");
   const [vendors, setVendors] = useState([]);
   const [rows, setRows] = useState([]);
@@ -257,6 +256,11 @@ const Container = () => {
       setError("Shipping date is required.");
       return;
     }
+    const shippingDateIso = toISODateString(shippingDate);
+    if (!shippingDateIso || !isValidDDMMYYYY(shippingDate)) {
+      setError("Shipping date must be in DD/MM/YYYY format.");
+      return;
+    }
 
     if (!vendor) {
       setError("Please select a vendor.");
@@ -284,7 +288,7 @@ const Container = () => {
       const results = await Promise.allSettled(
         selectedRows.map((row) =>
           api.patch(`/orders/finalize-order/${row.orderDocumentId}`, {
-            stuffing_date: shippingDate,
+            stuffing_date: shippingDateIso,
             container,
             quantity: row.quantity,
             remarks: "Bulk container shipment",
@@ -370,10 +374,11 @@ const Container = () => {
               <div className="col-md-3">
                 <label className="form-label">Shipping Date</label>
                 <input
-                  type="date"
+                  type="text"
                   className="form-control"
                   value={shippingDate}
                   onChange={(e) => setShippingDate(e.target.value)}
+                  placeholder="DD/MM/YYYY"
                 />
               </div>
 

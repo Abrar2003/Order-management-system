@@ -1,16 +1,13 @@
 import { useEffect, useState } from "react";
 import api from "../api/axios";
 import { getUserFromToken } from "../auth/auth.utils";
+import {
+  isValidDDMMYYYY,
+  toDDMMYYYYInputValue,
+  toISODateString,
+} from "../utils/date";
 import "../App.css";
 import AllocateLabelsModal from "./AllocateLabelsModal";
-
-const toInputDateValue = (value) => {
-  if (!value) return "";
-  const asString = String(value).trim();
-  if (!asString) return "";
-  if (asString.includes("T")) return asString.slice(0, 10);
-  return asString;
-};
 
 const NON_NEGATIVE_FIELDS = new Set([
   "qc_checked",
@@ -68,6 +65,14 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   useEffect(() => {
     if (!qc) return;
     const assignedInspectorId = String(qc?.inspector?._id || qc?.inspector || "");
+    const initialCbmTop =
+      qc?.cbm?.top && qc.cbm.top !== "0" ? String(qc.cbm.top) : "";
+    const initialCbmBottom =
+      qc?.cbm?.bottom && qc.cbm.bottom !== "0" ? String(qc.cbm.bottom) : "";
+    const initialCbmTotal =
+      qc?.cbm?.total && qc.cbm.total !== "0" ? String(qc.cbm.total) : "";
+    const hasTopOrBottomCbm = initialCbmTop !== "" || initialCbmBottom !== "";
+
     setForm({
       inspector: assignedInspectorId || (isQcUser ? String(currentUserId) : ""),
       qc_checked: "",
@@ -79,11 +84,10 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       branding: "",
       labelRanges: [createEmptyLabelRange()],
       remarks: "",
-      CBM: qc?.cbm?.total && qc.cbm.total !== "0" ? String(qc.cbm.total) : "",
-      CBM_top: qc?.cbm?.top && qc.cbm.top !== "0" ? String(qc.cbm.top) : "",
-      CBM_bottom:
-        qc?.cbm?.bottom && qc.cbm.bottom !== "0" ? String(qc.cbm.bottom) : "",
-      last_inspected_date: toInputDateValue(qc.last_inspected_date),
+      CBM: hasTopOrBottomCbm ? "" : initialCbmTotal,
+      CBM_top: initialCbmTop,
+      CBM_bottom: initialCbmBottom,
+      last_inspected_date: toDDMMYYYYInputValue(qc.last_inspected_date, ""),
     });
   }, [qc, currentUserId, isQcUser]);
 
@@ -97,10 +101,32 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       }
     }
 
-    setForm((prev) => ({
-      ...prev,
-      [name]: type === "checkbox" ? checked : value,
-    }));
+    setForm((prev) => {
+      const nextValue = type === "checkbox" ? checked : value;
+
+      if (name === "CBM") {
+        const hasTotalValue = String(nextValue).trim() !== "";
+        return {
+          ...prev,
+          CBM: nextValue,
+          ...(hasTotalValue ? { CBM_top: "", CBM_bottom: "" } : {}),
+        };
+      }
+
+      if (name === "CBM_top" || name === "CBM_bottom") {
+        const hasSegmentValue = String(nextValue).trim() !== "";
+        return {
+          ...prev,
+          [name]: nextValue,
+          ...(hasSegmentValue ? { CBM: "" } : {}),
+        };
+      }
+
+      return {
+        ...prev,
+        [name]: nextValue,
+      };
+    });
   };
 
   const handleLabelRangeChange = (index, field, value) => {
@@ -269,11 +295,20 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     const cbmTop = parseOptionalCbm(form.CBM_top, "CBM top");
     const cbmBottom = parseOptionalCbm(form.CBM_bottom, "CBM bottom");
     const lastInspectedDateValue = form.last_inspected_date.trim();
+    const lastInspectedDateIso = toISODateString(lastInspectedDateValue);
 
     if (cbmTotal.error || cbmTop.error || cbmBottom.error) {
       setError(cbmTotal.error || cbmTop.error || cbmBottom.error);
       return;
     }
+    if (lastInspectedDateValue && (!isValidDDMMYYYY(lastInspectedDateValue) || !lastInspectedDateIso)) {
+      setError("Last inspected date must be in DD/MM/YYYY format.");
+      return;
+    }
+
+    const hasCbmTopValue = String(form.CBM_top || "").trim() !== "";
+    const hasCbmBottomValue = String(form.CBM_bottom || "").trim() !== "";
+    const hasTopBottomCbm = hasCbmTopValue && hasCbmBottomValue;
 
     const isVisitUpdate = hasQuantityUpdate || hasLabelUpdate;
     if (isVisitUpdate && !selectedInspectorId) {
@@ -373,8 +408,25 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       return;
     }
 
-    if (totalLabelsAfterUpdate > nextPassed) {
-      setError("Total labels cannot exceed total passed quantity.");
+    const orderQuantity = Number(
+      qc?.quantities?.client_demand ?? qc?.order?.quantity ?? 0,
+    );
+    const safeOrderQuantity = Number.isFinite(orderQuantity)
+      ? Math.max(0, orderQuantity)
+      : 0;
+    const fallbackLabelLimit = Math.max(0, nextPassed);
+    const baseLabelLimit =
+      safeOrderQuantity > 0 ? safeOrderQuantity : fallbackLabelLimit;
+    const maxLabelsAllowed = hasTopBottomCbm
+      ? baseLabelLimit * 2
+      : baseLabelLimit;
+
+    if (totalLabelsAfterUpdate > maxLabelsAllowed) {
+      setError(
+        hasTopBottomCbm
+          ? "Total labels cannot exceed double order quantity when CBM top and bottom are set."
+          : "Total labels cannot exceed order quantity.",
+      );
       return;
     }
 
@@ -389,14 +441,23 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       payload.inspector = selectedInspectorId;
     }
 
-    if (cbmTotal.hasValue && cbmTotal.value !== null)
-      payload.CBM = cbmTotal.value;
-    if (cbmTop.hasValue && cbmTop.value !== null)
-      payload.CBM_top = cbmTop.value;
-    if (cbmBottom.hasValue && cbmBottom.value !== null)
-      payload.CBM_bottom = cbmBottom.value;
+    const hasTotalCbmInput = String(form.CBM || "").trim() !== "";
+    const hasTopOrBottomInput =
+      String(form.CBM_top || "").trim() !== "" ||
+      String(form.CBM_bottom || "").trim() !== "";
+
+    if (hasTotalCbmInput) {
+      payload.CBM = cbmTotal.value ?? "0";
+      payload.CBM_top = "0";
+      payload.CBM_bottom = "0";
+    } else if (hasTopOrBottomInput) {
+      payload.CBM = "0";
+      payload.CBM_top = cbmTop.hasValue && cbmTop.value !== null ? cbmTop.value : "0";
+      payload.CBM_bottom =
+        cbmBottom.hasValue && cbmBottom.value !== null ? cbmBottom.value : "0";
+    }
     if (lastInspectedDateValue)
-      payload.last_inspected_date = lastInspectedDateValue;
+      payload.last_inspected_date = lastInspectedDateIso;
 
     if (barcodeParsed !== null) payload.barcode = barcodeParsed;
     if (!qc.packed_size && form.packed_size) payload.packed_size = true;
@@ -426,6 +487,12 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   if (!qc) return null;
   const disableInspectorSelection =
     !isAdmin && (qc?.quantities?.qc_checked || 0) > 0;
+  const hasTotalCbmInput = String(form.CBM || "").trim() !== "";
+  const hasTopOrBottomCbmInput =
+    String(form.CBM_top || "").trim() !== "" ||
+    String(form.CBM_bottom || "").trim() !== "";
+  const disableCbmTotal = hasTopOrBottomCbmInput;
+  const disableCbmTopBottom = hasTotalCbmInput;
 
   return (
     <div
@@ -516,6 +583,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   onChange={handleChange}
                   min="0"
                   step="any"
+                  disabled={disableCbmTotal}
                 />
               </div>
 
@@ -529,6 +597,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   onChange={handleChange}
                   min="0"
                   step="any"
+                  disabled={disableCbmTopBottom}
                 />
               </div>
 
@@ -542,17 +611,19 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   onChange={handleChange}
                   min="0"
                   step="any"
+                  disabled={disableCbmTopBottom}
                 />
               </div>
 
               <div className="col-md-6">
                 <label className="form-label">Last Inspected Date</label>
                 <input
-                  type="date"
+                  type="text"
                   className="form-control"
                   name="last_inspected_date"
                   value={form.last_inspected_date}
                   onChange={handleChange}
+                  placeholder="DD/MM/YYYY"
                 />
               </div>
 
@@ -690,7 +761,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                             className="btn btn-outline-secondary"
                             onClick={() => {
                               setShowAllocateModal(true);
-                              setShowUserMenu(false);
                             }}
                             >
                             Allocate 

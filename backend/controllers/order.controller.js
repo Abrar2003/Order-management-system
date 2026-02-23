@@ -210,11 +210,86 @@ const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 const parseDateLike = (value) => {
   const asString = String(value ?? "").trim();
   if (!asString) return null;
-  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(asString)
-    ? new Date(`${asString}T00:00:00Z`)
-    : new Date(asString);
+
+  const parseFromParts = (year, month, day) => {
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    if (Number.isNaN(parsed.getTime())) return null;
+    if (
+      parsed.getUTCFullYear() !== year
+      || parsed.getUTCMonth() + 1 !== month
+      || parsed.getUTCDate() !== day
+    ) {
+      return null;
+    }
+    return parsed;
+  };
+
+  const ymd = asString.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|T)/);
+  if (ymd) {
+    return parseFromParts(Number(ymd[1]), Number(ymd[2]), Number(ymd[3]));
+  }
+
+  const dmySlash = asString.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (dmySlash) {
+    return parseFromParts(
+      Number(dmySlash[3]),
+      Number(dmySlash[2]),
+      Number(dmySlash[1]),
+    );
+  }
+
+  const dmyDash = asString.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (dmyDash) {
+    return parseFromParts(
+      Number(dmyDash[3]),
+      Number(dmyDash[2]),
+      Number(dmyDash[1]),
+    );
+  }
+
+  const shouldTryNativeParse =
+    /[a-zA-Z]/.test(asString) || asString.includes(",") || asString.includes(" ");
+  if (!shouldTryNativeParse) return null;
+
+  const parsed = new Date(asString);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed;
+};
+
+const resolveClientDayRange = (dateValue, tzOffsetValue) => {
+  const dateText = String(dateValue ?? "").trim();
+  if (!dateText) return null;
+
+  const match = dateText.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+
+  const utcMidnightMs = Date.UTC(year, month - 1, day);
+  const validationDate = new Date(utcMidnightMs);
+  if (
+    validationDate.getUTCFullYear() !== year
+    || validationDate.getUTCMonth() + 1 !== month
+    || validationDate.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  const parsedOffset = Number.parseInt(String(tzOffsetValue ?? ""), 10);
+  const fallbackOffset = new Date().getTimezoneOffset();
+  const safeOffsetMinutes = Number.isFinite(parsedOffset)
+    ? Math.max(-840, Math.min(840, parsedOffset))
+    : fallbackOffset;
+
+  const dayStartMs = utcMidnightMs + safeOffsetMinutes * 60 * 1000;
+  const dayEndMs = dayStartMs + 24 * 60 * 60 * 1000;
+
+  return {
+    dayStart: new Date(dayStartMs),
+    dayEnd: new Date(dayEndMs),
+  };
 };
 
 const getShipmentQuantityTotal = (shipmentEntries = []) =>
@@ -946,12 +1021,7 @@ exports.getVendorSummaryByBrand = async (req, res) => {
             $ne: ["$hasNonShippedItem", 0],
           },
           isOnTimeOrder: {
-            $and: [
-              { $eq: ["$hasNonShippedItem", 0] },
-              { $ne: ["$maxShippedDayKey", null] },
-              { $ne: ["$etdDayKey", null] },
-              { $lte: ["$maxShippedDayKey", "$etdDayKey"] },
-            ],
+            $and: [{ $ne: ["$etd", null] }, { $gte: ["$etd", today] }],
           },
         },
       },
@@ -1065,11 +1135,21 @@ exports.getTodayEtdOrdersByBrand = async (req, res) => {
       latestUpdatedAt: -1,
     };
 
-    const dayStart = new Date();
-    dayStart.setHours(0, 0, 0, 0);
-
-    const dayEnd = new Date(dayStart);
-    dayEnd.setDate(dayEnd.getDate() + 1);
+    const clientDayRange = resolveClientDayRange(
+      req.query.date,
+      req.query.tz_offset_minutes ?? req.query.tzOffset ?? req.query.tz_offset,
+    );
+    let dayStart;
+    let dayEnd;
+    if (clientDayRange) {
+      dayStart = clientDayRange.dayStart;
+      dayEnd = clientDayRange.dayEnd;
+    } else {
+      dayStart = new Date();
+      dayStart.setHours(0, 0, 0, 0);
+      dayEnd = new Date(dayStart);
+      dayEnd.setDate(dayEnd.getDate() + 1);
+    }
 
     const matchStage = {
       ETD: {
@@ -1291,76 +1371,19 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
     if (isOnTimeStatus) {
       aggregationPipeline.push(
         {
-          $addFields: {
-            lastShipmentDate: {
-              $ifNull: [
-                {
-                  $max: {
-                    $map: {
-                      input: { $ifNull: ["$shipment", []] },
-                      as: "entry",
-                      in: "$$entry.stuffing_date",
-                    },
-                  },
-                },
-                "$updatedAt",
-              ],
-            },
-          },
-        },
-        {
-          $addFields: {
-            etdDayKey: {
-              $cond: [
-                { $ifNull: ["$ETD", false] },
-                { $dateToString: { format: "%Y-%m-%d", date: "$ETD" } },
-                null,
-              ],
-            },
-            shippedDayKey: {
-              $cond: [
-                { $ifNull: ["$lastShipmentDate", false] },
-                {
-                  $dateToString: {
-                    format: "%Y-%m-%d",
-                    date: "$lastShipmentDate",
-                  },
-                },
-                null,
-              ],
-            },
-          },
-        },
-        {
           $group: {
             _id: "$order_id",
             items: { $sum: 1 },
             brand: { $first: "$brand" },
             vendor: { $first: "$vendor" },
             ETD: { $min: "$ETD" },
-            etdDayKey: { $min: "$etdDayKey" },
-            maxShippedDayKey: {
-              $max: {
-                $cond: [{ $eq: ["$status", "Shipped"] }, "$shippedDayKey", null],
-              },
-            },
-            hasNonShippedItem: {
-              $max: {
-                $cond: [{ $ne: ["$status", "Shipped"] }, 1, 0],
-              },
-            },
             order_date: { $first: "$order_date" },
             statuses: { $addToSet: "$status" },
           },
         },
         {
           $match: {
-            hasNonShippedItem: 0,
-            etdDayKey: { $ne: null },
-            maxShippedDayKey: { $ne: null },
-            $expr: {
-              $lte: ["$maxShippedDayKey", "$etdDayKey"],
-            },
+            ETD: { $ne: null, $gte: today },
           },
         },
         {

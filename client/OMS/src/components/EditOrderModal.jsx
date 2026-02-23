@@ -1,30 +1,26 @@
 import { useMemo, useState } from "react";
 import { editOrder } from "../services/orders.service";
 import { getUserFromToken } from "../auth/auth.utils";
-import { formatDateDDMMYYYY } from "../utils/date";
+import {
+  formatDateDDMMYYYY,
+  getTodayDDMMYYYY,
+  isValidDDMMYYYY,
+  toDDMMYYYYInputValue,
+  toISODateString,
+} from "../utils/date";
 import "../App.css";
-
-const toDateInputValue = (value) => {
-  if (!value) return "";
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return value;
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "";
-  return parsed.toISOString().slice(0, 10);
-};
 
 const makeInitialShipmentRows = (shipment = []) =>
   (Array.isArray(shipment) ? shipment : []).map((entry) => ({
     container: String(entry?.container ?? ""),
-    stuffing_date: toDateInputValue(entry?.stuffing_date),
+    stuffing_date: toDDMMYYYYInputValue(entry?.stuffing_date, ""),
     quantity: String(entry?.quantity ?? ""),
     remaining_remarks: String(entry?.remaining_remarks ?? ""),
   }));
 
 const createEmptyShipmentRow = () => ({
   container: "",
-  stuffing_date: toDateInputValue(new Date()),
+  stuffing_date: getTodayDDMMYYYY(),
   quantity: "",
   remaining_remarks: "",
 });
@@ -54,7 +50,7 @@ const buildAdjustedShipmentPreview = (shipmentRows, targetQuantity) => {
     cumulative += adjustedQty;
     adjustedRows.push({
       container: String(row?.container || "").trim(),
-      stuffing_date: toDateInputValue(row?.stuffing_date),
+      stuffing_date: toDDMMYYYYInputValue(row?.stuffing_date, ""),
       quantity: adjustedQty,
       pending: Math.max(0, normalizedTarget - cumulative),
       remaining_remarks: String(row?.remaining_remarks || "").trim(),
@@ -150,12 +146,13 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
       for (let i = 0; i < form.shipment.length; i += 1) {
         const row = form.shipment[i] || {};
         const container = String(row.container || "").trim();
-        const stuffingDate = toDateInputValue(row.stuffing_date);
+        const stuffingDate = String(row.stuffing_date || "").trim();
+        const stuffingDateIso = toISODateString(stuffingDate);
         const shipmentQty = Number(row.quantity);
 
         if (!container) return `shipment row ${i + 1}: container is required`;
-        if (!stuffingDate) {
-          return `shipment row ${i + 1}: stuffing date is invalid`;
+        if (!stuffingDateIso || !isValidDDMMYYYY(stuffingDate)) {
+          return `shipment row ${i + 1}: stuffing date must be in DD/MM/YYYY format`;
         }
         if (!Number.isFinite(shipmentQty) || shipmentQty <= 0) {
           return `shipment row ${i + 1}: quantity must be a positive number`;
@@ -218,7 +215,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
       payload.quantity = Number(form.quantity);
       payload.shipment = form.shipment.map((entry) => ({
         container: String(entry?.container || "").trim(),
-        stuffing_date: toDateInputValue(entry?.stuffing_date),
+        stuffing_date: toISODateString(entry?.stuffing_date),
         quantity: Number(entry?.quantity),
         remaining_remarks: String(entry?.remaining_remarks ?? "").trim(),
       }));
@@ -351,13 +348,14 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                       </td>
                       <td>
                         <input
-                          type="date"
+                          type="text"
                           className="form-control form-control-sm"
                           value={entry.stuffing_date}
                           disabled={!isAdmin}
                           onChange={(e) =>
                             updateShipmentRow(index, "stuffing_date", e.target.value)
                           }
+                          placeholder="DD/MM/YYYY"
                         />
                       </td>
                       <td>

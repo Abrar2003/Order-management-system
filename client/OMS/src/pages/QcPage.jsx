@@ -4,7 +4,11 @@ import Navbar from "../components/Navbar";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import AlignQCModal from "../components/AlignQcModal";
 import { getUserFromToken } from "../auth/auth.utils";
-import { formatDateDDMMYYYY } from "../utils/date";
+import {
+  formatDateDDMMYYYY,
+  toDDMMYYYYInputValue,
+  toISODateString,
+} from "../utils/date";
 import "../App.css";
 
 // small helper: debounce without extra libs
@@ -70,8 +74,18 @@ const QCPage = () => {
     normalizeQueryText(searchParams.get("inspector")),
   );
   const [vendor, setVendor] = useState(normalizeQueryText(searchParams.get("vendor")));
-  const [from, setFrom] = useState(normalizeQueryText(searchParams.get("from"))); // YYYY-MM-DD
-  const [to, setTo] = useState(normalizeQueryText(searchParams.get("to"))); // YYYY-MM-DD
+  const [from, setFrom] = useState(
+    toDDMMYYYYInputValue(
+      normalizeQueryText(searchParams.get("from")),
+      normalizeQueryText(searchParams.get("from")),
+    ),
+  );
+  const [to, setTo] = useState(
+    toDDMMYYYYInputValue(
+      normalizeQueryText(searchParams.get("to")),
+      normalizeQueryText(searchParams.get("to")),
+    ),
+  );
   const [sortBy, setSortBy] = useState(initialSortBy);
   const [sortOrder, setSortOrder] = useState(initialSortOrder);
   const [order, setOrder] = useState(normalizeQueryText(searchParams.get("order")));
@@ -92,6 +106,9 @@ const QCPage = () => {
   );
 
   const fetchQC = useCallback(async () => {
+    const fromIso = toISODateString(from);
+    const toIso = toISODateString(to);
+
     const res = await axios.get("/qc/list", {
       headers: { Authorization: `Bearer ${token}` },
       params: {
@@ -101,8 +118,8 @@ const QCPage = () => {
         search: debouncedSearch, // item_code
         inspector,
         vendor,
-        from,
-        to,
+        from: fromIso || "",
+        to: toIso || "",
         sort_by: sortBy,
         sort_order: sortOrder,
       },
@@ -364,25 +381,27 @@ const QCPage = () => {
                         <div className="d-flex gap-1">
                           <label>From</label>
                           <input
-                            type="date"
+                            type="text"
                             className="form-control form-control-sm"
                             value={from}
                             onChange={(e) => {
                               resetToFirstPage();
                               setFrom(e.target.value);
                             }}
+                            placeholder="DD/MM/YYYY"
                           />
                         </div>
                         <div className="d-flex gap-1">
                           <label>To</label>
                           <input
-                            type="date"
+                            type="text"
                             className="form-control form-control-sm"
                             value={to}
                             onChange={(e) => {
                               resetToFirstPage();
                               setTo(e.target.value);
                             }}
+                            placeholder="DD/MM/YYYY"
                           />
                         </div>
                       </div>

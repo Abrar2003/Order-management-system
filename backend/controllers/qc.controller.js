@@ -22,6 +22,86 @@ const toNonNegativeNumber = (value, fallback = 0) => {
 };
 
 const normalizeText = (value) => String(value ?? "").trim();
+const pad2 = (value) => String(value).padStart(2, "0");
+
+const parseDateFromPartsToIso = (year, month, day) => {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return "";
+  }
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (Number.isNaN(parsed.getTime())) return "";
+  if (
+    parsed.getUTCFullYear() !== year
+    || parsed.getUTCMonth() + 1 !== month
+    || parsed.getUTCDate() !== day
+  ) {
+    return "";
+  }
+  return `${year}-${pad2(month)}-${pad2(day)}`;
+};
+
+const toISODateString = (value) => {
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return "";
+    return parseDateFromPartsToIso(
+      value.getUTCFullYear(),
+      value.getUTCMonth() + 1,
+      value.getUTCDate(),
+    );
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const parsedValue = new Date(value);
+    if (Number.isNaN(parsedValue.getTime())) return "";
+    return parseDateFromPartsToIso(
+      parsedValue.getUTCFullYear(),
+      parsedValue.getUTCMonth() + 1,
+      parsedValue.getUTCDate(),
+    );
+  }
+
+  const asString = normalizeText(value);
+  if (!asString) return "";
+
+  const ymdWithOptionalTime = asString.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|T)/);
+  if (ymdWithOptionalTime) {
+    return parseDateFromPartsToIso(
+      Number(ymdWithOptionalTime[1]),
+      Number(ymdWithOptionalTime[2]),
+      Number(ymdWithOptionalTime[3]),
+    );
+  }
+
+  const dmySlash = asString.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (dmySlash) {
+    return parseDateFromPartsToIso(
+      Number(dmySlash[3]),
+      Number(dmySlash[2]),
+      Number(dmySlash[1]),
+    );
+  }
+
+  const dmyDash = asString.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (dmyDash) {
+    return parseDateFromPartsToIso(
+      Number(dmyDash[3]),
+      Number(dmyDash[2]),
+      Number(dmyDash[1]),
+    );
+  }
+
+  const shouldTryNativeParse =
+    /[a-zA-Z]/.test(asString) || asString.includes(",") || asString.includes(" ");
+  if (!shouldTryNativeParse) return "";
+
+  const parsed = new Date(asString);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parseDateFromPartsToIso(
+    parsed.getUTCFullYear(),
+    parsed.getUTCMonth() + 1,
+    parsed.getUTCDate(),
+  );
+};
 
 const normalizeItemCodeKey = (value) => normalizeText(value).toLowerCase();
 
@@ -278,16 +358,17 @@ const escapeRegex = (value = "") =>
 
 const toDateInputValue = (value = new Date()) => {
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return null;
-  const offsetMs = parsed.getTimezoneOffset() * 60000;
-  return new Date(parsed.getTime() - offsetMs).toISOString().slice(0, 10);
+  if (!Number.isNaN(parsed.getTime())) {
+    const offsetMs = parsed.getTimezoneOffset() * 60000;
+    return new Date(parsed.getTime() - offsetMs).toISOString().slice(0, 10);
+  }
+  return toISODateString(value) || null;
 };
 
 const resolveReportDate = (value) => {
   const asString = String(value || "").trim();
   if (!asString) return toDateInputValue(new Date());
-  if (/^\d{4}-\d{2}-\d{2}$/.test(asString)) return asString;
-  return toDateInputValue(asString);
+  return toISODateString(asString) || null;
 };
 
 const toSortableTimestamp = (value) => {
@@ -414,8 +495,8 @@ const buildQcListMatch = ({
   const brandValue = String(brand || "").trim();
   const orderValue = String(order || "").trim();
   const searchValue = String(search || "").trim();
-  const fromDate = String(from || "").trim();
-  const toDate = String(to || "").trim();
+  const fromDate = toISODateString(from);
+  const toDate = toISODateString(to);
 
   if (inspectorId) {
     match.inspector = new mongoose.Types.ObjectId(inspectorId);
@@ -727,14 +808,12 @@ exports.alignQC = async (req, res) => {
       });
     }
 
-    const requestDateValue = String(request_date || "").trim();
+    const requestDateValue = toISODateString(request_date);
     if (!requestDateValue) {
       return res.status(400).json({ message: "request date is required" });
     }
 
-    const parsedRequestDate = /^\d{4}-\d{2}-\d{2}$/.test(requestDateValue)
-      ? new Date(`${requestDateValue}T00:00:00`)
-      : new Date(requestDateValue);
+    const parsedRequestDate = new Date(`${requestDateValue}T00:00:00Z`);
 
     if (Number.isNaN(parsedRequestDate.getTime())) {
       return res.status(400).json({ message: "request date must be a valid date" });
@@ -1068,22 +1147,59 @@ exports.updateQC = async (req, res) => {
 
       const hasCbmUpdate = CBM !== undefined || CBM_top !== undefined || CBM_bottom !== undefined;
 
-      const normalizeCbmValue = (value, fallbackValue) => {
-        if (value === undefined) return fallbackValue;
-        if (value === null || value === "") return "0";
-        return String(value);
+      const parseCbmField = (value, fieldName) => {
+        if (value === undefined) return { hasInput: false, value: null };
+        if (value === null || String(value).trim() === "") {
+          return { hasInput: true, value: 0 };
+        }
+
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed) || parsed < 0) {
+          throw new Error(`${fieldName} must be a valid non-negative number`);
+        }
+        return { hasInput: true, value: parsed };
       };
 
+      const parsedCbmTotal = parseCbmField(CBM, "CBM");
+      const parsedCbmTop = parseCbmField(CBM_top, "CBM top");
+      const parsedCbmBottom = parseCbmField(CBM_bottom, "CBM bottom");
+
       if (hasCbmUpdate) {
+        const existingTotal = toNonNegativeNumber(qc?.cbm?.total, 0);
+        const existingTop = toNonNegativeNumber(qc?.cbm?.top, 0);
+        const existingBottom = toNonNegativeNumber(qc?.cbm?.bottom, 0);
+
+        let nextTotal = parsedCbmTotal.hasInput ? parsedCbmTotal.value : existingTotal;
+        let nextTop = parsedCbmTop.hasInput ? parsedCbmTop.value : existingTop;
+        let nextBottom = parsedCbmBottom.hasInput ? parsedCbmBottom.value : existingBottom;
+
+        const hasUpdatedTotal = parsedCbmTotal.hasInput && parsedCbmTotal.value > 0;
+        const hasUpdatedTopOrBottom =
+          (parsedCbmTop.hasInput && parsedCbmTop.value > 0) ||
+          (parsedCbmBottom.hasInput && parsedCbmBottom.value > 0);
+
+        if (hasUpdatedTotal) {
+          nextTop = 0;
+          nextBottom = 0;
+        } else if (hasUpdatedTopOrBottom) {
+          nextTotal = 0;
+        }
+
         qc.cbm = {
-          top: normalizeCbmValue(CBM_top, qc.cbm?.top ?? "0"),
-          bottom: normalizeCbmValue(CBM_bottom, qc.cbm?.bottom ?? "0"),
-          total: normalizeCbmValue(CBM, qc.cbm?.total ?? "0"),
+          top: String(nextTop),
+          bottom: String(nextBottom),
+          total: String(nextTotal),
         };
       }
 
       if (last_inspected_date !== undefined) {
-        qc.last_inspected_date = last_inspected_date;
+        const normalizedLastInspectedDate = toISODateString(last_inspected_date);
+        if (!normalizedLastInspectedDate) {
+          return res.status(400).json({
+            message: "last_inspected_date must be a valid date in DD/MM/YYYY or YYYY-MM-DD format",
+          });
+        }
+        qc.last_inspected_date = normalizedLastInspectedDate;
       }
 
       /* ────────────────────────
@@ -1198,6 +1314,18 @@ exports.updateQC = async (req, res) => {
         });
       }
 
+      const orderQuantityForLabels = toNonNegativeNumber(
+        qc?.quantities?.client_demand,
+        0,
+      );
+      const fallbackLabelLimit = Math.max(0, nextPassed);
+      const baseLabelLimit =
+        orderQuantityForLabels > 0 ? orderQuantityForLabels : fallbackLabelLimit;
+      const cbmTopValue = toNonNegativeNumber(qc?.cbm?.top, 0);
+      const cbmBottomValue = toNonNegativeNumber(qc?.cbm?.bottom, 0);
+      const hasTopBottomCbm = cbmTopValue > 0 && cbmBottomValue > 0;
+      const maxLabelsAllowed = hasTopBottomCbm ? baseLabelLimit * 2 : baseLabelLimit;
+
       qc.quantities.vendor_provision = nextVendorProvision;
       qc.quantities.qc_checked = nextChecked;
       qc.quantities.qc_passed = nextPassed;
@@ -1291,9 +1419,11 @@ exports.updateQC = async (req, res) => {
         const incomingNew = uniqueIncoming.filter((label) => !existingSet.has(label));
 
         const totalLabels = existingSet.size + incomingNew.length;
-        if (totalLabels > nextPassed) {
+        if (totalLabels > maxLabelsAllowed) {
           return res.status(400).json({
-            message: "total labels cannot exceed total qc_passed",
+            message: hasTopBottomCbm
+              ? "total labels cannot exceed double order quantity when cbm top and bottom are set"
+              : "total labels cannot exceed order quantity",
           });
         }
 
@@ -1337,10 +1467,11 @@ exports.updateQC = async (req, res) => {
             .json({ message: "Inspector is required before updating inspection quantities" });
         }
 
-        const inspectionDateForRecord =
+        const inspectionDateForRecordRaw =
           last_inspected_date !== undefined && String(last_inspected_date).trim() !== ""
             ? String(last_inspected_date).trim()
             : String(qc.last_inspected_date || qc.request_date || "").trim();
+        const inspectionDateForRecord = toISODateString(inspectionDateForRecordRaw);
 
         if (!inspectionDateForRecord) {
           return res.status(400).json({
@@ -1349,9 +1480,15 @@ exports.updateQC = async (req, res) => {
         }
 
         const latestRequestEntry = resolveLatestRequestEntry(qc.request_history);
-        const requestedDateForRecord = String(
+        const requestedDateForRecordRaw = String(
           latestRequestEntry?.request_date || qc.request_date || inspectionDateForRecord,
         ).trim();
+        const requestedDateForRecord = toISODateString(requestedDateForRecordRaw);
+        if (!requestedDateForRecord) {
+          return res.status(400).json({
+            message: "request_date is invalid for inspection records",
+          });
+        }
 
         const requestedQuantityForRecord =
           latestRequestEntry?.quantity_requested !== undefined
@@ -1895,19 +2032,15 @@ exports.editInspectionRecords = async (req, res) => {
     const touchedInspectors = new Set();
 
     const parseRequiredDate = (value, fieldName) => {
-      const normalized = String(value || "").trim();
-      if (!normalized) {
+      const rawValue = String(value || "").trim();
+      if (!rawValue) {
         throw new Error(`${fieldName} is required`);
       }
-      const parsed = /^\d{4}-\d{2}-\d{2}$/.test(normalized)
-        ? new Date(`${normalized}T00:00:00`)
-        : new Date(normalized);
-      if (Number.isNaN(parsed.getTime())) {
+      const normalizedIso = toISODateString(rawValue);
+      if (!normalizedIso) {
         throw new Error(`${fieldName} must be a valid date`);
       }
-      return /^\d{4}-\d{2}-\d{2}$/.test(normalized)
-        ? normalized
-        : toDateInputValue(parsed);
+      return normalizedIso;
     };
 
     const parseRequiredInspector = (value) => {
