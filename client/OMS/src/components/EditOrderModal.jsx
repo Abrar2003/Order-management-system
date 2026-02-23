@@ -348,14 +348,18 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                       </td>
                       <td>
                         <input
-                          type="text"
+                          type="date"
+                          lang="en-GB"
                           className="form-control form-control-sm"
-                          value={entry.stuffing_date}
+                          value={toISODateString(entry.stuffing_date)}
                           disabled={!isAdmin}
                           onChange={(e) =>
-                            updateShipmentRow(index, "stuffing_date", e.target.value)
+                            updateShipmentRow(
+                              index,
+                              "stuffing_date",
+                              toDDMMYYYYInputValue(e.target.value, ""),
+                            )
                           }
-                          placeholder="DD/MM/YYYY"
                         />
                       </td>
                       <td>

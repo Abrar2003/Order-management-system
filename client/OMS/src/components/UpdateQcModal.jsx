@@ -618,12 +618,17 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
               <div className="col-md-6">
                 <label className="form-label">Last Inspected Date</label>
                 <input
-                  type="text"
+                  type="date"
+                  lang="en-GB"
                   className="form-control"
                   name="last_inspected_date"
-                  value={form.last_inspected_date}
-                  onChange={handleChange}
-                  placeholder="DD/MM/YYYY"
+                  value={toISODateString(form.last_inspected_date)}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      last_inspected_date: toDDMMYYYYInputValue(e.target.value, ""),
+                    }))
+                  }
                 />
               </div>
 

@@ -170,11 +170,11 @@ const AlignQCModal = ({
             <div>
               <label className="form-label">Request Date</label>
               <input
-                type="text"
+                type="date"
+                lang="en-GB"
                 className="form-control"
-                value={request_date}
-                onChange={(e) => setReqDate(e.target.value)}
-                placeholder="DD/MM/YYYY"
+                value={toISODateString(request_date)}
+                onChange={(e) => setReqDate(toDDMMYYYYInputValue(e.target.value, ""))}
               />
             </div>
 

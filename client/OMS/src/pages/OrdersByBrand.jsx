@@ -51,7 +51,7 @@ const OrdersByBrand = () => {
             },
           },
         );
-
+        console.log("orders",res.data.data[0]);
         setOrders(res.data.data);
       } catch (err) {
         console.error(err);
@@ -110,6 +110,7 @@ const OrdersByBrand = () => {
                         </button>
                       </th>
                       <th>Items</th>
+                      <th>Total Status</th>
                       <th>
                         <button
                           type="button"
@@ -147,6 +148,7 @@ const OrdersByBrand = () => {
                       >
                         <td>{order.order_id}</td>
                         <td>{order.items}</td>
+                        <td>{order?.totalStatus || "N/A"}</td>
                         <td>{formatDateDDMMYYYY(order.order_date)}</td>
                         <td>{formatDateDDMMYYYY(order.ETD)}</td>
                       </tr>

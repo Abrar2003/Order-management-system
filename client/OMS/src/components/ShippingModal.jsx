@@ -131,11 +131,13 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
             <div>
               <label className="form-label">Stuffing Date</label>
               <input
-                type="text"
+                type="date"
+                lang="en-GB"
                 className="form-control"
-                value={stuffingDate}
-                onChange={(e) => setStuffingDate(e.target.value)}
-                placeholder="DD/MM/YYYY"
+                value={toISODateString(stuffingDate)}
+                onChange={(e) =>
+                  setStuffingDate(toDDMMYYYYInputValue(e.target.value, ""))
+                }
               />
             </div>
 

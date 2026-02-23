@@ -6,6 +6,7 @@ import { getUserFromToken } from "../auth/auth.utils";
 import {
   getTodayDDMMYYYY,
   isValidDDMMYYYY,
+  toDDMMYYYYInputValue,
   toISODateString,
 } from "../utils/date";
 import "../App.css";
@@ -374,11 +375,13 @@ const Container = () => {
               <div className="col-md-3">
                 <label className="form-label">Shipping Date</label>
                 <input
-                  type="text"
+                  type="date"
+                  lang="en-GB"
                   className="form-control"
-                  value={shippingDate}
-                  onChange={(e) => setShippingDate(e.target.value)}
-                  placeholder="DD/MM/YYYY"
+                  value={toISODateString(shippingDate)}
+                  onChange={(e) =>
+                    setShippingDate(toDDMMYYYYInputValue(e.target.value, ""))
+                  }
                 />
               </div>
 

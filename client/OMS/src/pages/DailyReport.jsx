@@ -164,11 +164,13 @@ const DailyReport = () => {
             <div>
               <label className="form-label mb-1">Report Date</label>
               <input
-                type="text"
+                type="date"
+                lang="en-GB"
                 className="form-control"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                placeholder="DD/MM/YYYY"
+                value={toISODateString(selectedDate)}
+                onChange={(e) =>
+                  setSelectedDate(toDDMMYYYYInputValue(e.target.value, ""))
+                }
               />
             </div>
             <button

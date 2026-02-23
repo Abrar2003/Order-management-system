@@ -1366,68 +1366,87 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
       matchStage.status = { $ne: "Shipped" };
     }
 
-    const aggregationPipeline = [{ $match: matchStage }];
-
-    if (isOnTimeStatus) {
-      aggregationPipeline.push(
-        {
-          $group: {
-            _id: "$order_id",
-            items: { $sum: 1 },
-            brand: { $first: "$brand" },
-            vendor: { $first: "$vendor" },
-            ETD: { $min: "$ETD" },
-            order_date: { $first: "$order_date" },
-            statuses: { $addToSet: "$status" },
+    const aggregationPipeline = [
+      { $match: matchStage },
+      {
+        $group: {
+          _id: "$order_id",
+          items: { $sum: 1 },
+          brand: { $first: "$brand" },
+          vendor: { $first: "$vendor" },
+          ETD: { $min: "$ETD" },
+          order_date: { $first: "$order_date" },
+          statuses: { $addToSet: "$status" },
+        },
+      },
+      ...(isOnTimeStatus
+        ? [
+            {
+              $match: {
+                ETD: { $ne: null, $gte: today },
+              },
+            },
+          ]
+        : []),
+      {
+        $addFields: {
+          hasPendingStatus: { $in: ["Pending", "$statuses"] },
+          uniqueStatusCount: { $size: "$statuses" },
+          firstStatus: { $arrayElemAt: ["$statuses", 0] },
+          maxStatusRank: {
+            $max: {
+              $map: {
+                input: "$statuses",
+                as: "statusValue",
+                in: {
+                  $switch: {
+                    branches: [
+                      { case: { $eq: ["$$statusValue", "Pending"] }, then: 0 },
+                      { case: { $eq: ["$$statusValue", "Under Inspection"] }, then: 1 },
+                      { case: { $eq: ["$$statusValue", "Inspection Done"] }, then: 2 },
+                      { case: { $eq: ["$$statusValue", "Partial Shipped"] }, then: 3 },
+                      { case: { $eq: ["$$statusValue", "Shipped"] }, then: 4 },
+                    ],
+                    default: -1,
+                  },
+                },
+              },
+            },
           },
         },
-        {
-          $match: {
-            ETD: { $ne: null, $gte: today },
+      },
+      {
+        $addFields: {
+          totalStatus: {
+            $switch: {
+              branches: [
+                { case: "$hasPendingStatus", then: "Pending" },
+                { case: { $eq: ["$uniqueStatusCount", 1] }, then: "$firstStatus" },
+                { case: { $eq: ["$maxStatusRank", 4] }, then: "Shipped" },
+                { case: { $eq: ["$maxStatusRank", 3] }, then: "Partial Shipped" },
+                { case: { $eq: ["$maxStatusRank", 2] }, then: "Inspection Done" },
+                { case: { $eq: ["$maxStatusRank", 1] }, then: "Under Inspection" },
+              ],
+              default: "Pending",
+            },
           },
         },
-        {
-          $project: {
-            _id: 0,
-            order_id: "$_id",
-            items: 1,
-            brand: 1,
-            vendor: 1,
-            ETD: 1,
-            order_date: 1,
-            statuses: 1,
-          },
+      },
+      {
+        $project: {
+          _id: 0,
+          order_id: "$_id",
+          items: 1,
+          brand: 1,
+          vendor: 1,
+          ETD: 1,
+          order_date: 1,
+          statuses: 1,
+          totalStatus: 1,
         },
-        { $sort: sortStage },
-      );
-    } else {
-      aggregationPipeline.push(
-        {
-          $group: {
-            _id: "$order_id",
-            items: { $sum: 1 },
-            brand: { $first: "$brand" },
-            vendor: { $first: "$vendor" },
-            ETD: { $first: "$ETD" },
-            order_date: { $first: "$order_date" },
-            statuses: { $addToSet: "$status" },
-          },
-        },
-        {
-          $project: {
-            _id: 0,
-            order_id: "$_id",
-            items: 1,
-            brand: 1,
-            vendor: 1,
-            ETD: 1,
-            order_date: 1,
-            statuses: 1,
-          },
-        },
-        { $sort: sortStage },
-      );
-    }
+      },
+      { $sort: sortStage },
+    ];
 
     const orders = await Order.aggregate(aggregationPipeline);
 

@@ -224,20 +224,32 @@ const EditInspectionRecordsModal = ({ qc, onClose, onSuccess }) => {
                     <tr key={row._id || `inspection-row-${index}`}>
                       <td>
                         <input
-                          type="text"
+                          type="date"
+                          lang="en-GB"
                           className="form-control form-control-sm"
-                          value={row.requested_date}
-                          onChange={(e) => updateRow(index, "requested_date", e.target.value)}
-                          placeholder="DD/MM/YYYY"
+                          value={toISODateString(row.requested_date)}
+                          onChange={(e) =>
+                            updateRow(
+                              index,
+                              "requested_date",
+                              toDDMMYYYYInputValue(e.target.value, ""),
+                            )
+                          }
                         />
                       </td>
                       <td>
                         <input
-                          type="text"
+                          type="date"
+                          lang="en-GB"
                           className="form-control form-control-sm"
-                          value={row.inspection_date}
-                          onChange={(e) => updateRow(index, "inspection_date", e.target.value)}
-                          placeholder="DD/MM/YYYY"
+                          value={toISODateString(row.inspection_date)}
+                          onChange={(e) =>
+                            updateRow(
+                              index,
+                              "inspection_date",
+                              toDDMMYYYYInputValue(e.target.value, ""),
+                            )
+                          }
                         />
                       </td>
                       <td>

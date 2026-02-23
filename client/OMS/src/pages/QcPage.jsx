@@ -381,27 +381,27 @@ const QCPage = () => {
                         <div className="d-flex gap-1">
                           <label>From</label>
                           <input
-                            type="text"
+                            type="date"
+                            lang="en-GB"
                             className="form-control form-control-sm"
-                            value={from}
+                            value={toISODateString(from)}
                             onChange={(e) => {
                               resetToFirstPage();
-                              setFrom(e.target.value);
+                              setFrom(toDDMMYYYYInputValue(e.target.value, ""));
                             }}
-                            placeholder="DD/MM/YYYY"
                           />
                         </div>
                         <div className="d-flex gap-1">
                           <label>To</label>
                           <input
-                            type="text"
+                            type="date"
+                            lang="en-GB"
                             className="form-control form-control-sm"
-                            value={to}
+                            value={toISODateString(to)}
                             onChange={(e) => {
                               resetToFirstPage();
-                              setTo(e.target.value);
+                              setTo(toDDMMYYYYInputValue(e.target.value, ""));
                             }}
-                            placeholder="DD/MM/YYYY"
                           />
                         </div>
                       </div>
