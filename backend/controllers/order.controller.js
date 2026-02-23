@@ -211,7 +211,7 @@ const parseDateLike = (value) => {
   const asString = String(value ?? "").trim();
   if (!asString) return null;
   const parsed = /^\d{4}-\d{2}-\d{2}$/.test(asString)
-    ? new Date(`${asString}T00:00:00`)
+    ? new Date(`${asString}T00:00:00Z`)
     : new Date(asString);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed;
@@ -2329,8 +2329,8 @@ exports.finalizeOrder = async (req, res) => {
       });
     }
 
-    const parsedStuffingDate = new Date(stuffing_date);
-    if (Number.isNaN(parsedStuffingDate.getTime())) {
+    const parsedStuffingDate = parseDateLike(stuffing_date);
+    if (!parsedStuffingDate) {
       return res.status(400).json({ message: "Invalid stuffing date" });
     }
 

@@ -286,9 +286,10 @@ const QCPage = () => {
                     </th>
                     <th>Last Inspected Date</th>
                     <th>Order Quantity</th>
-                    <th>Requested</th>
-                    <th>Offered</th>
+                    {/* <th>Requested</th>
+                    <th>Offered</th> */}
                     {/* <th>Last Inspection (O/C/P)</th> */}
+                    <th>Status</th>
                     <th>QC Passed</th>
                     <th>Pending</th>
                     <th>CBM</th>
@@ -359,7 +360,7 @@ const QCPage = () => {
 
                     {/* Request date range */}
                     <th>
-                      <div className="d-flex flex-column gap-1">
+                      <div className="d-flex flex-column gap-1 justify-right" style={{width: "60%"}} >
                         <div className="d-flex gap-1">
                           <label>From</label>
                           <input
@@ -396,14 +397,6 @@ const QCPage = () => {
                         disabled
                       />
                     </th> */}
-                    <th>
-                      <input
-                        type="text"
-                        className="form-control form-control-sm"
-                        placeholder="-"
-                        disabled
-                      />
-                    </th>
                     <th>
                       <input
                         type="text"
@@ -512,13 +505,14 @@ const QCPage = () => {
                       <td>{formatDateDDMMYYYY(qc?.request_date)}</td>
                       <td>{formatDateDDMMYYYY(qc?.last_inspected_date)}</td>
                       <td>{qc?.quantities?.client_demand ?? 0}</td>
-                      <td>{qc?.quantities?.quantity_requested ?? 0}</td>
-                      <td>{toSafeNumber(qc?.last_inspection?.vendor_offered) ?? 0}</td>
+                      {/* <td>{qc?.quantities?.quantity_requested ?? 0}</td>
+                      <td>{toSafeNumber(qc?.last_inspection?.vendor_offered) ?? 0}</td> */}
                       {/* <td>
                         {qc?.last_inspection
                           ? `${toSafeNumber(qc.last_inspection.vendor_offered)} / ${toSafeNumber(qc.last_inspection.checked)} / ${toSafeNumber(qc.last_inspection.passed)}`
                           : "N/A"}
                       </td> */}
+                      <td>{qc?.order?.status}</td>
                       <td>{toSafeNumber(qc?.last_inspection?.passed) ?? 0}</td>
                       <td>{qc?.quantities?.pending ?? 0}</td>
                       <td>{qc?.cbm?.total || "NA"}</td>

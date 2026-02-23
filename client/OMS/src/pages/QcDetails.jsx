@@ -4,6 +4,7 @@ import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import UpdateQcModal from "../components/UpdateQcModal";
 import ShippingModal from "../components/ShippingModal";
+import EditOrderModal from "../components/EditOrderModal";
 import EditInspectionRecordsModal from "../components/EditInspectionRecordsModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import { formatDateDDMMYYYY } from "../utils/date";
@@ -53,6 +54,7 @@ const QcDetails = () => {
   const [loading, setLoading] = useState(true);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [showShippingModal, setShowShippingModal] = useState(false);
+  const [showEditShippingModal, setShowEditShippingModal] = useState(false);
   const [showEditInspectionModal, setShowEditInspectionModal] = useState(false);
   const [deletingInspectionId, setDeletingInspectionId] = useState("");
 
@@ -65,6 +67,11 @@ const QcDetails = () => {
   const canFinalizeShipping = ["admin", "manager", "dev", "Dev"].includes(
     user?.role,
   );
+  const hasShippingRecords =
+    Array.isArray(qc?.order?.shipment) && qc.order.shipment.length > 0;
+  const canShowEditShippingButton =
+    isAdmin &&
+    (hasShippingRecords || String(qc?.order?.status || "").trim() === "Partial Shipped");
 
   const requirementsMet =
     Boolean(qc?.packed_size) && Boolean(qc?.finishing) && Boolean(qc?.branding);
@@ -427,8 +434,19 @@ const QcDetails = () => {
 
 
             <section>
-              <h3 className="h6 mb-3">Shipping Details</h3>
-              {qc.order.shipment.length === 0 ? (
+              <div className="d-flex justify-content-between align-items-center mb-3">
+                <h3 className="h6 mb-0">Shipping Details</h3>
+                {canShowEditShippingButton && (
+                  <button
+                    type="button"
+                    className="btn btn-outline-primary btn-sm"
+                    onClick={() => setShowEditShippingModal(true)}
+                  >
+                    Edit Shipping
+                  </button>
+                )}
+              </div>
+              {!hasShippingRecords ? (
                 <div className="alert alert-success py-2 mb-0">
                   Shipping Pending
                 </div>
@@ -567,6 +585,17 @@ const QcDetails = () => {
           onClose={() => setShowShippingModal(false)}
           onSuccess={() => {
             setShowShippingModal(false);
+            fetchQcDetails();
+          }}
+        />
+      )}
+
+      {showEditShippingModal && canShowEditShippingButton && (
+        <EditOrderModal
+          order={qc?.order}
+          onClose={() => setShowEditShippingModal(false)}
+          onSuccess={() => {
+            setShowEditShippingModal(false);
             fetchQcDetails();
           }}
         />
