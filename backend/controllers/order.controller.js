@@ -157,9 +157,13 @@ const buildShipmentMatch = ({
   vendor,
   orderId,
   itemCode,
+  container,
+  status,
   includeVendor = true,
   includeOrderId = true,
   includeItemCode = true,
+  includeContainer = true,
+  includeStatus = true,
 } = {}) => {
   const match = {
     status: { $in: SHIPMENT_VISIBLE_STATUSES },
@@ -168,6 +172,8 @@ const buildShipmentMatch = ({
   const normalizedVendor = normalizeFilterValue(vendor);
   const normalizedOrderId = normalizeFilterValue(orderId);
   const normalizedItemCode = normalizeFilterValue(itemCode);
+  const normalizedContainer = normalizeFilterValue(container);
+  const normalizedStatus = normalizeFilterValue(status);
 
   if (includeVendor && normalizedVendor) {
     match.vendor = normalizedVendor;
@@ -181,6 +187,19 @@ const buildShipmentMatch = ({
   if (includeItemCode && normalizedItemCode) {
     const escaped = escapeRegex(normalizedItemCode);
     match["item.item_code"] = { $regex: escaped, $options: "i" };
+  }
+
+  if (includeContainer && normalizedContainer) {
+    const escaped = escapeRegex(normalizedContainer);
+    match["shipment.container"] = { $regex: escaped, $options: "i" };
+  }
+
+  if (
+    includeStatus
+    && normalizedStatus
+    && SHIPMENT_VISIBLE_STATUSES.includes(normalizedStatus)
+  ) {
+    match.status = normalizedStatus;
   }
 
   return match;
@@ -999,6 +1018,52 @@ exports.getVendorSummaryByBrand = async (req, res) => {
 exports.getTodayEtdOrdersByBrand = async (req, res) => {
   try {
     const brand = normalizeFilterValue(req.params.brand ?? req.query.brand);
+    const normalizedSortToken = normalizeFilterValue(req.query.sort);
+    const rawSortBy = normalizeFilterValue(
+      req.query.sort_by ?? req.query.sortBy,
+    );
+    const sortTokenDirection = String(normalizedSortToken || "").startsWith("-")
+      ? "desc"
+      : String(normalizedSortToken || "").startsWith("+")
+        ? "asc"
+        : null;
+    const normalizedSortKey = String(
+      rawSortBy
+      || String(normalizedSortToken || "").replace(/^[+-]/, "")
+      || "ETD",
+    )
+      .trim()
+      .replace(/[^a-zA-Z0-9_]/g, "")
+      .toLowerCase();
+    const sortAliases = {
+      po: "order_id",
+      order: "order_id",
+      orderid: "order_id",
+      order_id: "order_id",
+      etd: "ETD",
+      date: "ETD",
+    };
+    const sortBy = sortAliases[normalizedSortKey] || "ETD";
+
+    const explicitSortOrder = String(
+      req.query.sort_order ?? req.query.sortOrder ?? "",
+    )
+      .trim()
+      .toLowerCase();
+
+    let sortOrder = sortBy === "order_id" ? "asc" : "desc";
+    if (sortTokenDirection) {
+      sortOrder = sortTokenDirection;
+    }
+    if (explicitSortOrder === "asc" || explicitSortOrder === "desc") {
+      sortOrder = explicitSortOrder;
+    }
+    const sortDirection = sortOrder === "asc" ? 1 : -1;
+    const sortStage = {
+      [sortBy]: sortDirection,
+      ...(sortBy !== "order_id" ? { order_id: 1 } : {}),
+      latestUpdatedAt: -1,
+    };
 
     const dayStart = new Date();
     dayStart.setHours(0, 0, 0, 0);
@@ -1101,8 +1166,7 @@ exports.getTodayEtdOrdersByBrand = async (req, res) => {
       },
       {
         $sort: {
-          latestUpdatedAt: -1,
-          order_id: 1,
+          ...sortStage,
         },
       },
     ]);
@@ -1111,6 +1175,10 @@ exports.getTodayEtdOrdersByBrand = async (req, res) => {
       success: true,
       count: data.length,
       data,
+      sort: {
+        sort_by: sortBy,
+        sort_order: sortOrder,
+      },
     });
   } catch (error) {
     console.error("Get Today ETD Orders By Brand Error:", error);
@@ -1139,6 +1207,52 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
     const vendor = normalizeFilterValue(req.query.vendor ?? req.params.vendor);
     const status = normalizeFilterValue(req.query.status ?? req.params.status);
     const { isDelayed } = req.query;
+    const normalizedSortToken = normalizeFilterValue(req.query.sort);
+    const rawSortBy = normalizeFilterValue(
+      req.query.sort_by ?? req.query.sortBy,
+    );
+    const sortTokenDirection = String(normalizedSortToken || "").startsWith("-")
+      ? "desc"
+      : String(normalizedSortToken || "").startsWith("+")
+        ? "asc"
+        : null;
+    const normalizedSortKey = String(
+      rawSortBy
+      || String(normalizedSortToken || "").replace(/^[+-]/, "")
+      || "order_date",
+    )
+      .trim()
+      .replace(/[^a-zA-Z0-9_]/g, "")
+      .toLowerCase();
+    const sortAliases = {
+      po: "order_id",
+      order: "order_id",
+      orderid: "order_id",
+      order_id: "order_id",
+      orderdate: "order_date",
+      order_date: "order_date",
+      etd: "ETD",
+      date: "order_date",
+    };
+    const sortBy = sortAliases[normalizedSortKey] || "order_date";
+    const explicitSortOrder = String(
+      req.query.sort_order ?? req.query.sortOrder ?? "",
+    )
+      .trim()
+      .toLowerCase();
+    let sortOrder = sortBy === "order_id" ? "asc" : "desc";
+    if (sortTokenDirection) {
+      sortOrder = sortTokenDirection;
+    }
+    if (explicitSortOrder === "asc" || explicitSortOrder === "desc") {
+      sortOrder = explicitSortOrder;
+    }
+    const sortDirection = sortOrder === "asc" ? 1 : -1;
+    const sortStage = {
+      [sortBy]: sortDirection,
+      ...(sortBy !== "order_date" ? { order_date: -1 } : {}),
+      ...(sortBy !== "order_id" ? { order_id: 1 } : {}),
+    };
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -1261,7 +1375,7 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
             statuses: 1,
           },
         },
-        { $sort: { order_date: -1 } },
+        { $sort: sortStage },
       );
     } else {
       aggregationPipeline.push(
@@ -1288,7 +1402,7 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
             statuses: 1,
           },
         },
-        { $sort: { order_date: -1 } },
+        { $sort: sortStage },
       );
     }
 
@@ -1298,6 +1412,10 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
       success: true,
       count: orders.length,
       data: orders,
+      sort: {
+        sort_by: sortBy,
+        sort_order: sortOrder,
+      },
     });
   } catch (error) {
     console.error("Get Orders Error:", error);
@@ -1323,6 +1441,52 @@ exports.getOrdersByFiltersDb = async (req, res) => {
     const page = parsePositiveInt(req.query.page, 1);
     const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
     const skip = (page - 1) * limit;
+    const normalizedSortToken = normalizeFilterValue(req.query.sort);
+    const rawSortBy = normalizeFilterValue(
+      req.query.sort_by ?? req.query.sortBy,
+    );
+    const sortTokenDirection = String(normalizedSortToken || "").startsWith("-")
+      ? "desc"
+      : String(normalizedSortToken || "").startsWith("+")
+        ? "asc"
+        : null;
+    const normalizedSortKey = String(
+      rawSortBy
+      || String(normalizedSortToken || "").replace(/^[+-]/, "")
+      || "order_date",
+    )
+      .trim()
+      .replace(/[^a-zA-Z0-9_]/g, "")
+      .toLowerCase();
+    const sortAliases = {
+      po: "order_id",
+      order: "order_id",
+      orderid: "order_id",
+      order_id: "order_id",
+      orderdate: "order_date",
+      order_date: "order_date",
+      etd: "ETD",
+      date: "order_date",
+    };
+    const sortBy = sortAliases[normalizedSortKey] || "order_date";
+    const explicitSortOrder = String(
+      req.query.sort_order ?? req.query.sortOrder ?? "",
+    )
+      .trim()
+      .toLowerCase();
+    let sortOrder = sortBy === "order_id" ? "asc" : "desc";
+    if (sortTokenDirection) {
+      sortOrder = sortTokenDirection;
+    }
+    if (explicitSortOrder === "asc" || explicitSortOrder === "desc") {
+      sortOrder = explicitSortOrder;
+    }
+    const sortDirection = sortOrder === "asc" ? 1 : -1;
+    const sortStage = {
+      [sortBy]: sortDirection,
+      ...(sortBy !== "order_date" ? { order_date: -1 } : {}),
+      ...(sortBy !== "order_id" ? { order_id: 1 } : {}),
+    };
 
     const filterInput = {
       brand,
@@ -1361,7 +1525,7 @@ exports.getOrdersByFiltersDb = async (req, res) => {
               statuses: 1,
             },
           },
-          { $sort: { order_date: -1, order_id: -1 } },
+          { $sort: sortStage },
           {
             $facet: {
               data: [{ $skip: skip }, { $limit: limit }],
@@ -1398,6 +1562,10 @@ exports.getOrdersByFiltersDb = async (req, res) => {
         limit,
         totalPages: Math.max(1, Math.ceil(totalRecords / limit)),
         totalRecords,
+      },
+      sort: {
+        sort_by: sortBy,
+        sort_order: sortOrder,
       },
       filters: {
         vendors: normalizeDistinctValues(vendorsRaw),
@@ -1526,14 +1694,96 @@ exports.getShipmentsDb = async (req, res) => {
     const vendor = req.query.vendor;
     const orderId = req.query.order_id ?? req.query.order;
     const itemCode = req.query.item_code;
+    const container = req.query.container ?? req.query.container_number;
+    const statusFilter = normalizeFilterValue(req.query.status);
+    const page = parsePositiveInt(req.query.page, 1);
+    const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
+
+    const sortAliases = {
+      po: "order_id",
+      order: "order_id",
+      orderid: "order_id",
+      order_id: "order_id",
+      item: "item_code",
+      itemcode: "item_code",
+      item_code: "item_code",
+      vendor: "vendor",
+      brand: "brand",
+      status: "status",
+      stuffingdate: "stuffing_date",
+      stuffing_date: "stuffing_date",
+      container: "container",
+      containernumber: "container",
+      container_number: "container",
+      quantity: "quantity",
+      pending: "pending",
+      orderquantity: "order_quantity",
+      order_quantity: "order_quantity",
+    };
+
+    const allowedSortFields = new Set([
+      "order_id",
+      "item_code",
+      "vendor",
+      "brand",
+      "status",
+      "order_quantity",
+      "stuffing_date",
+      "container",
+      "quantity",
+      "pending",
+    ]);
+
+    const normalizedSortToken = normalizeFilterValue(req.query.sort);
+    const rawSortBy = normalizeFilterValue(
+      req.query.sort_by ?? req.query.sortBy,
+    );
+    const sortTokenDirection = String(normalizedSortToken || "").startsWith("-")
+      ? "desc"
+      : String(normalizedSortToken || "").startsWith("+")
+        ? "asc"
+        : null;
+
+    const normalizedSortKey = String(
+      rawSortBy
+      || String(normalizedSortToken || "").replace(/^[+-]/, "")
+      || "stuffing_date",
+    )
+      .trim()
+      .replace(/[^a-zA-Z0-9_]/g, "")
+      .toLowerCase();
+
+    const sortBy = allowedSortFields.has(sortAliases[normalizedSortKey])
+      ? sortAliases[normalizedSortKey]
+      : "stuffing_date";
+
+    const explicitSortOrder = String(
+      req.query.sort_order ?? req.query.sortOrder ?? "",
+    )
+      .trim()
+      .toLowerCase();
+
+    let sortOrder = "asc";
+    if (sortBy === "stuffing_date") {
+      sortOrder = "desc";
+    }
+    if (sortTokenDirection) {
+      sortOrder = sortTokenDirection;
+    }
+    if (explicitSortOrder === "asc" || explicitSortOrder === "desc") {
+      sortOrder = explicitSortOrder;
+    }
+
+    const sortDirection = sortOrder === "asc" ? 1 : -1;
 
     const filterInput = {
       vendor,
       orderId,
       itemCode,
+      container,
     };
 
-    const [orders, vendorsRaw, orderIdsRaw, itemCodesRaw] = await Promise.all([
+    const [orders, vendorsRaw, orderIdsRaw, containersRaw, itemCodesRaw] = await Promise.all([
       Order.find(buildShipmentMatch(filterInput))
         .select(
           "order_id item brand vendor status quantity shipment order_date updatedAt",
@@ -1542,15 +1792,38 @@ exports.getShipmentsDb = async (req, res) => {
         .lean(),
       Order.distinct(
         "vendor",
-        buildShipmentMatch({ ...filterInput, includeVendor: false }),
+        buildShipmentMatch({
+          ...filterInput,
+          includeVendor: false,
+          includeContainer: false,
+          includeStatus: false,
+        }),
       ),
       Order.distinct(
         "order_id",
-        buildShipmentMatch({ ...filterInput, includeOrderId: false }),
+        buildShipmentMatch({
+          ...filterInput,
+          includeOrderId: false,
+          includeContainer: false,
+          includeStatus: false,
+        }),
+      ),
+      Order.distinct(
+        "shipment.container",
+        buildShipmentMatch({
+          ...filterInput,
+          includeContainer: false,
+          includeStatus: false,
+        }),
       ),
       Order.distinct(
         "item.item_code",
-        buildShipmentMatch({ ...filterInput, includeItemCode: false }),
+        buildShipmentMatch({
+          ...filterInput,
+          includeItemCode: false,
+          includeContainer: false,
+          includeStatus: false,
+        }),
       ),
     ]);
 
@@ -1611,7 +1884,18 @@ exports.getShipmentsDb = async (req, res) => {
       });
     });
 
-    const summary = data.reduce(
+    const normalizedContainer = normalizeFilterValue(container);
+    const containerNeedle = normalizedContainer
+      ? normalizedContainer.toLowerCase()
+      : null;
+
+    const containerFilteredData = containerNeedle
+      ? data.filter((row) =>
+          String(row?.container || "").toLowerCase().includes(containerNeedle),
+        )
+      : data;
+
+    const summary = containerFilteredData.reduce(
       (acc, row) => {
         acc.total += 1;
         if (row?.status === "Inspection Done") acc.inspectionDone += 1;
@@ -1627,14 +1911,101 @@ exports.getShipmentsDb = async (req, res) => {
       },
     );
 
+    const statusScopedData =
+      statusFilter && SHIPMENT_VISIBLE_STATUSES.includes(statusFilter)
+        ? containerFilteredData.filter((row) => row?.status === statusFilter)
+        : containerFilteredData;
+
+    const toTimestamp = (value) => {
+      if (!value) return 0;
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+    };
+
+    const toNumber = (value) => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    const compareValues = (aValue, bValue) => {
+      const aIsNumber = typeof aValue === "number";
+      const bIsNumber = typeof bValue === "number";
+      if (aIsNumber && bIsNumber) return aValue - bValue;
+      return String(aValue).localeCompare(String(bValue));
+    };
+
+    const getSortValue = (row) => {
+      switch (sortBy) {
+        case "order_id":
+          return String(row?.order_id || "");
+        case "item_code":
+          return String(row?.item_code || "");
+        case "vendor":
+          return String(row?.vendor || "");
+        case "brand":
+          return String(row?.brand || "");
+        case "status": {
+          const statusIndex = ORDER_STATUS_SEQUENCE.indexOf(
+            String(row?.status || ""),
+          );
+          return statusIndex === -1 ? ORDER_STATUS_SEQUENCE.length : statusIndex;
+        }
+        case "order_quantity":
+          return toNumber(row?.order_quantity);
+        case "stuffing_date":
+          return toTimestamp(row?.stuffing_date);
+        case "container":
+          return String(row?.container || "");
+        case "quantity":
+          return toNumber(row?.quantity);
+        case "pending":
+          return toNumber(row?.pending);
+        default:
+          return toTimestamp(row?.stuffing_date);
+      }
+    };
+
+    const sortedData = [...statusScopedData].sort((a, b) => {
+      const primaryComparison = compareValues(getSortValue(a), getSortValue(b));
+      if (primaryComparison !== 0) {
+        return primaryComparison * sortDirection;
+      }
+
+      const orderCompare = String(a?.order_id || "").localeCompare(
+        String(b?.order_id || ""),
+      );
+      if (orderCompare !== 0) return orderCompare;
+
+      return String(a?.item_code || "").localeCompare(String(b?.item_code || ""));
+    });
+
+    const totalRecords = sortedData.length;
+    const totalPages = Math.max(1, Math.ceil(totalRecords / limit));
+    const safePage = Math.min(page, totalPages);
+    const skip = (safePage - 1) * limit;
+    const paginatedData = sortedData.slice(skip, skip + limit);
+
     return res.status(200).json({
       success: true,
-      count: data.length,
-      data,
+      count: totalRecords,
+      page_count: paginatedData.length,
+      total_count: totalRecords,
+      data: paginatedData,
+      pagination: {
+        page: safePage,
+        limit,
+        totalPages,
+        totalRecords,
+      },
+      sort: {
+        sort_by: sortBy,
+        sort_order: sortOrder,
+      },
       summary,
       filters: {
         vendors: normalizeDistinctValues(vendorsRaw),
         order_ids: normalizeDistinctValues(orderIdsRaw),
+        containers: normalizeDistinctValues(containersRaw),
         item_codes: normalizeDistinctValues(itemCodesRaw),
       },
     });

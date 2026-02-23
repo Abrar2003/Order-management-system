@@ -22,6 +22,10 @@ const DailyReport = () => {
   const [selectedDate, setSelectedDate] = useState(getTodayDateInput());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [alignedSortBy, setAlignedSortBy] = useState("request_date");
+  const [alignedSortOrder, setAlignedSortOrder] = useState("desc");
+  const [inspectionSortBy, setInspectionSortBy] = useState("inspection_date");
+  const [inspectionSortOrder, setInspectionSortOrder] = useState("desc");
   const [report, setReport] = useState({
     date: getTodayDateInput(),
     summary: {
@@ -35,13 +39,47 @@ const DailyReport = () => {
     inspector_compiled: [],
   });
 
+  const handleAlignedSort = (column, defaultDirection = "asc") => {
+    if (alignedSortBy === column) {
+      setAlignedSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setAlignedSortBy(column);
+    setAlignedSortOrder(defaultDirection);
+  };
+
+  const alignedSortIndicator = (column) => {
+    if (alignedSortBy !== column) return "";
+    return alignedSortOrder === "asc" ? " (asc)" : " (desc)";
+  };
+
+  const handleInspectionSort = (column, defaultDirection = "asc") => {
+    if (inspectionSortBy === column) {
+      setInspectionSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setInspectionSortBy(column);
+    setInspectionSortOrder(defaultDirection);
+  };
+
+  const inspectionSortIndicator = (column) => {
+    if (inspectionSortBy !== column) return "";
+    return inspectionSortOrder === "asc" ? " (asc)" : " (desc)";
+  };
+
   const fetchDailyReport = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
 
       const res = await api.get("/qc/daily-report", {
-        params: { date: selectedDate },
+        params: {
+          date: selectedDate,
+          aligned_sort_by: alignedSortBy,
+          aligned_sort_order: alignedSortOrder,
+          inspection_sort_by: inspectionSortBy,
+          inspection_sort_order: inspectionSortOrder,
+        },
       });
 
       setReport({
@@ -70,7 +108,13 @@ const DailyReport = () => {
     } finally {
       setLoading(false);
     }
-  }, [selectedDate]);
+  }, [
+    selectedDate,
+    alignedSortBy,
+    alignedSortOrder,
+    inspectionSortBy,
+    inspectionSortOrder,
+  ]);
 
   useEffect(() => {
     fetchDailyReport();
@@ -158,8 +202,24 @@ const DailyReport = () => {
               <table className="table table-sm table-striped align-middle mb-0">
                 <thead>
                   <tr>
-                    <th>Request Date</th>
-                    <th>Order ID</th>
+                    <th>
+                      <button
+                        type="button"
+                        className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                        onClick={() => handleAlignedSort("request_date", "desc")}
+                      >
+                        Request Date{alignedSortIndicator("request_date")}
+                      </button>
+                    </th>
+                    <th>
+                      <button
+                        type="button"
+                        className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                        onClick={() => handleAlignedSort("order_id", "asc")}
+                      >
+                        Order ID{alignedSortIndicator("order_id")}
+                      </button>
+                    </th>
                     <th>Item</th>
                     <th>Vendor</th>
                     <th>Brand</th>
@@ -171,7 +231,7 @@ const DailyReport = () => {
                 <tbody>
                   {report.aligned_requests.length === 0 && (
                     <tr>
-                      <td colSpan="11" className="text-center py-3">
+                      <td colSpan="8" className="text-center py-3">
                         No aligned requests found for this date.
                       </td>
                     </tr>
@@ -222,8 +282,24 @@ const DailyReport = () => {
                     <table className="table table-sm table-striped align-middle mb-0">
                       <thead>
                         <tr>
-                          <th>Date</th>
-                          <th>Order ID</th>
+                          <th>
+                            <button
+                              type="button"
+                              className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                              onClick={() => handleInspectionSort("inspection_date", "desc")}
+                            >
+                              Date{inspectionSortIndicator("inspection_date")}
+                            </button>
+                          </th>
+                          <th>
+                            <button
+                              type="button"
+                              className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                              onClick={() => handleInspectionSort("order_id", "asc")}
+                            >
+                              Order ID{inspectionSortIndicator("order_id")}
+                            </button>
+                          </th>
                           <th>Item</th>
                           <th>Inspected</th>
                           <th>Passed</th>

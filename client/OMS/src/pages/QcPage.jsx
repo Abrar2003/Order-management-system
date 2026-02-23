@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -22,9 +22,42 @@ const toSafeNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const DEFAULT_SORT_BY = "request_date";
+const DEFAULT_PAGE = 1;
+
+const parsePositiveInt = (value, fallback = 1) => {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return parsed;
+};
+
+const normalizeQueryText = (value) => String(value || "").trim();
+
+const parseSortBy = (value) => {
+  const normalized = normalizeQueryText(value).toLowerCase();
+  if (normalized === "order_id") return "order_id";
+  if (normalized === "request_date") return "request_date";
+  if (normalized === "createdat" || normalized === "created_at") return "createdAt";
+  return DEFAULT_SORT_BY;
+};
+
+const parseSortOrder = (value, sortBy = DEFAULT_SORT_BY) => {
+  const normalized = normalizeQueryText(value).toLowerCase();
+  if (normalized === "asc" || normalized === "desc") return normalized;
+  return sortBy === "order_id" ? "asc" : "desc";
+};
+
 const QCPage = () => {
-  const [searchParams] = useSearchParams();
-  const requestedItemCode = String(searchParams.get("item_code") || "").trim();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedItemCode = normalizeQueryText(searchParams.get("item_code"));
+  const initialSearch = normalizeQueryText(searchParams.get("search")) || requestedItemCode;
+  const initialSortBy = parseSortBy(
+    searchParams.get("sort_by") ?? searchParams.get("sort"),
+  );
+  const initialSortOrder = parseSortOrder(
+    searchParams.get("sort_order"),
+    initialSortBy,
+  );
   const [qcList, setQcList] = useState([]);
   const [inspectors, setInspectors] = useState([]);
   const [vendors, setVendors] = useState([]);
@@ -32,17 +65,22 @@ const QCPage = () => {
   const [itemCodes, setItemCodes] = useState([]);
 
   // header filters (excel-like)
-  const [search, setSearch] = useState(requestedItemCode); // item_code search
-  const [inspector, setInspector] = useState("");
-  const [vendor, setVendor] = useState("");
-  const [from, setFrom] = useState(""); // YYYY-MM-DD
-  const [to, setTo] = useState(""); // YYYY-MM-DD
-  const [sort, setSort] = useState("-request_date"); // default
-  const [order, setOrder] = useState("");
+  const [search, setSearch] = useState(initialSearch); // item_code search
+  const [inspector, setInspector] = useState(
+    normalizeQueryText(searchParams.get("inspector")),
+  );
+  const [vendor, setVendor] = useState(normalizeQueryText(searchParams.get("vendor")));
+  const [from, setFrom] = useState(normalizeQueryText(searchParams.get("from"))); // YYYY-MM-DD
+  const [to, setTo] = useState(normalizeQueryText(searchParams.get("to"))); // YYYY-MM-DD
+  const [sortBy, setSortBy] = useState(initialSortBy);
+  const [sortOrder, setSortOrder] = useState(initialSortOrder);
+  const [order, setOrder] = useState(normalizeQueryText(searchParams.get("order")));
 
   const debouncedSearch = useDebouncedValue(search, 300);
 
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(() =>
+    parsePositiveInt(searchParams.get("page"), DEFAULT_PAGE),
+  );
   const [totalPages, setTotalPages] = useState(1);
   const [realignContext, setRealignContext] = useState(null);
 
@@ -65,7 +103,8 @@ const QCPage = () => {
         vendor,
         from,
         to,
-        sort,
+        sort_by: sortBy,
+        sort_order: sortOrder,
       },
     });
 
@@ -76,7 +115,18 @@ const QCPage = () => {
     setVendors(Array.isArray(backendFilters.vendors) ? backendFilters.vendors : []);
     setOrders(Array.isArray(backendFilters.orders) ? backendFilters.orders : []);
     setItemCodes(Array.isArray(backendFilters.item_codes) ? backendFilters.item_codes : []);
-  }, [token, page, debouncedSearch, inspector, vendor, from, to, sort, order]);
+  }, [
+    token,
+    page,
+    debouncedSearch,
+    inspector,
+    vendor,
+    from,
+    to,
+    sortBy,
+    sortOrder,
+    order,
+  ]);
 
   const fetchInspectors = useCallback(async () => {
     const res = await axios.get("/auth/?role=QC", {
@@ -95,12 +145,44 @@ const QCPage = () => {
 
   useEffect(() => {
     if (!requestedItemCode) return;
-    setSearch(requestedItemCode);
-    setPage(1);
+    setSearch((prev) => (prev === requestedItemCode ? prev : requestedItemCode));
+    setPage(DEFAULT_PAGE);
   }, [requestedItemCode]);
 
+  useEffect(() => {
+    const next = new URLSearchParams();
+    if (normalizeQueryText(search)) next.set("search", normalizeQueryText(search));
+    if (normalizeQueryText(order)) next.set("order", normalizeQueryText(order));
+    if (normalizeQueryText(inspector)) next.set("inspector", normalizeQueryText(inspector));
+    if (normalizeQueryText(vendor)) next.set("vendor", normalizeQueryText(vendor));
+    if (normalizeQueryText(from)) next.set("from", normalizeQueryText(from));
+    if (normalizeQueryText(to)) next.set("to", normalizeQueryText(to));
+    if (page > DEFAULT_PAGE) next.set("page", String(page));
+    if (sortBy !== DEFAULT_SORT_BY) next.set("sort_by", sortBy);
+    if (sortOrder !== parseSortOrder("", sortBy)) next.set("sort_order", sortOrder);
+
+    const nextQuery = next.toString();
+    const currentQuery = searchParams.toString();
+    if (nextQuery !== currentQuery) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [
+    search,
+    order,
+    inspector,
+    vendor,
+    from,
+    to,
+    page,
+    sortBy,
+    sortOrder,
+    searchParams,
+    setSearchParams,
+  ]);
+
   const handleDetailsClick = (qc) => {
-    navigate(`/qc/${qc._id}`);
+    const currentQuery = searchParams.toString();
+    navigate(currentQuery ? `/qc/${qc._id}?${currentQuery}` : `/qc/${qc._id}`);
   };
 
   const openRealignModal = (qc) => {
@@ -139,18 +221,20 @@ const QCPage = () => {
   // keep filter controls consistent: when filter changes, reset page 1
   const resetToFirstPage = useCallback(() => setPage(1), []);
 
-  // optional: click-to-sort for Request Date column (no styling changes)
-  const toggleRequestDateSort = () => {
+  const handleSortColumn = (column, defaultDirection = "asc") => {
     resetToFirstPage();
-    setSort((prev) =>
-      prev === "-request_date" ? "request_date" : "-request_date",
-    );
+    if (sortBy === column) {
+      setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortBy(column);
+    setSortOrder(defaultDirection);
   };
 
-  // helpers for rendering date (your qc.request_date is string; keep display unchanged)
-  const requestDateLabel = useMemo(() => {
-    return sort === "-request_date" ? "Request Date (newest)" : "Request Date (oldest)";
-  }, [sort]);
+  const sortIndicator = (column) => {
+    if (sortBy !== column) return "";
+    return sortOrder === "asc" ? " (asc)" : " (desc)";
+  };
 
   return (
     <>
@@ -180,15 +264,25 @@ const QCPage = () => {
                 <thead className="table-primary">
                   {/* Column titles */}
                   <tr>
-                    <th>PO</th>
+                    <th>
+                      <button
+                        type="button"
+                        className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                        onClick={() => handleSortColumn("order_id", "asc")}
+                      >
+                        PO{sortIndicator("order_id")}
+                      </button>
+                    </th>
                     <th>Vendor</th>
                     <th>Item</th>
-                    <th
-                      style={{ cursor: "pointer" }}
-                      onClick={toggleRequestDateSort}
-                      title="Click to sort"
-                    >
-                      {requestDateLabel}
+                    <th>
+                      <button
+                        type="button"
+                        className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                        onClick={() => handleSortColumn("request_date", "desc")}
+                      >
+                        Request Date{sortIndicator("request_date")}
+                      </button>
                     </th>
                     <th>Last Inspected Date</th>
                     <th>Order Quantity</th>
@@ -204,23 +298,24 @@ const QCPage = () => {
 
                   {/* Excel-like filters row (same table classes) */}
                   <tr>
-                    {/* PO filter (optional) */}
+                    {/* PO search (item-like input + suggestions) */}
                     <th>
-                      <select
-                        className="form-select form-select-sm"
+                      <input
+                        type="text"
+                        className="form-control form-control-sm"
+                        placeholder="PO"
+                        list="qc-po-options"
                         value={order}
                         onChange={(e) => {
                           resetToFirstPage();
                           setOrder(e.target.value);
                         }}
-                      >
-                        <option value="">All</option>
+                      />
+                      <datalist id="qc-po-options">
                         {orders.map((o) => (
-                          <option key={o} value={o}>
-                            {o}
-                          </option>
+                          <option key={o} value={o} />
                         ))}
-                      </select>
+                      </datalist>
                     </th>
 
                     {/* Vendor filter */}
@@ -389,7 +484,8 @@ const QCPage = () => {
                           setOrder("");
                           setFrom("");
                           setTo("");
-                          setSort("-request_date");
+                          setSortBy("request_date");
+                          setSortOrder("desc");
                           setPage(1);
                         }}
                       >

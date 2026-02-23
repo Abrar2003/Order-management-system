@@ -1,6 +1,7 @@
 const QC = require("../models/qc.model");
 const Inspection = require("../models/inspection.model");
 const Inspector = require("../models/inspector.model");
+const Item = require("../models/item.model");
 
 const Order = require("../models/order.model")
 const mongoose = require("mongoose");
@@ -18,6 +19,103 @@ const toNonNegativeNumber = (value, fallback = 0) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) return fallback;
   return parsed;
+};
+
+const normalizeText = (value) => String(value ?? "").trim();
+
+const normalizeItemCodeKey = (value) => normalizeText(value).toLowerCase();
+
+const hasMeaningfulItemQcDetails = (itemDoc) => {
+  if (!itemDoc || typeof itemDoc !== "object") return false;
+
+  const itemDescription = normalizeText(itemDoc?.description || itemDoc?.name || "");
+  const cbmTotal = normalizeText(itemDoc?.cbm?.total || "");
+  const itemQc = itemDoc?.qc || {};
+  const barcode = Number(itemQc?.barcode || 0);
+  const lastInspectedDate = normalizeText(itemQc?.last_inspected_date || "");
+
+  return Boolean(
+    itemDescription
+      || (cbmTotal && cbmTotal !== "0")
+      || barcode > 0
+      || itemQc?.packed_size === true
+      || itemQc?.finishing === true
+      || itemQc?.branding === true
+      || lastInspectedDate,
+  );
+};
+
+const buildQcItemDetailsPatch = ({
+  qcSnapshot,
+  itemDoc,
+  onlyUpdatedItems = true,
+} = {}) => {
+  if (!qcSnapshot || !itemDoc) {
+    return { set: null, reason: "missing_qc_or_item" };
+  }
+
+  if (onlyUpdatedItems && !hasMeaningfulItemQcDetails(itemDoc)) {
+    return { set: null, reason: "item_details_not_updated" };
+  }
+
+  const set = {};
+  const itemDescription = normalizeText(itemDoc?.description || itemDoc?.name || "");
+  const itemCode = normalizeText(itemDoc?.code || qcSnapshot?.item?.item_code || "");
+  const cbmTotal = normalizeText(itemDoc?.cbm?.total || "");
+  const itemQc = itemDoc?.qc || {};
+  const barcode = Math.max(0, Number(itemQc?.barcode || 0));
+  const lastInspectedDate = normalizeText(itemQc?.last_inspected_date || "");
+
+  if (itemDescription && normalizeText(qcSnapshot?.item?.description) !== itemDescription) {
+    set["item.description"] = itemDescription;
+  }
+
+  if (itemCode && normalizeText(qcSnapshot?.item?.item_code) !== itemCode) {
+    set["item.item_code"] = itemCode;
+  }
+
+  if (cbmTotal && cbmTotal !== "0" && normalizeText(qcSnapshot?.cbm?.total) !== cbmTotal) {
+    set["cbm.total"] = cbmTotal;
+  }
+
+  if (barcode > 0 && Number(qcSnapshot?.barcode || 0) !== barcode) {
+    set.barcode = barcode;
+  }
+
+  if (itemQc?.packed_size === true && qcSnapshot?.packed_size !== true) {
+    set.packed_size = true;
+  }
+
+  if (itemQc?.finishing === true && qcSnapshot?.finishing !== true) {
+    set.finishing = true;
+  }
+
+  if (itemQc?.branding === true && qcSnapshot?.branding !== true) {
+    set.branding = true;
+  }
+
+  if (
+    lastInspectedDate
+    && normalizeText(qcSnapshot?.last_inspected_date) !== lastInspectedDate
+  ) {
+    set.last_inspected_date = lastInspectedDate;
+  }
+
+  if (Object.keys(set).length === 0) {
+    return { set: null, reason: "no_changes" };
+  }
+
+  return { set, reason: "updated" };
+};
+
+const applyQcItemDetailsPatch = (qcDoc, patch = {}) => {
+  if (!qcDoc || typeof qcDoc.set !== "function" || !patch || typeof patch !== "object") {
+    return;
+  }
+
+  for (const [path, value] of Object.entries(patch)) {
+    qcDoc.set(path, value);
+  }
 };
 
 const resolveLatestRequestEntry = (requestHistory = []) => {
@@ -375,6 +473,44 @@ exports.getQCList = async (req, res) => {
     const pageNum = Math.max(1, Number(page));
     const limitNum = Math.min(100, Math.max(1, Number(limit)));
     const skip = (pageNum - 1) * limitNum;
+    const normalizedSortToken = String(sort || "").trim();
+    const rawSortBy = String(req.query.sort_by ?? req.query.sortBy ?? "").trim();
+    const sortTokenDirection = normalizedSortToken.startsWith("-")
+      ? "desc"
+      : normalizedSortToken.startsWith("+")
+        ? "asc"
+        : null;
+    const normalizedSortKey = String(
+      rawSortBy || normalizedSortToken.replace(/^[+-]/, "") || "request_date",
+    )
+      .trim()
+      .replace(/[^a-zA-Z0-9_]/g, "")
+      .toLowerCase();
+    const sortAliases = {
+      po: "order_id",
+      order: "order_id",
+      orderid: "order_id",
+      order_id: "order_id",
+      date: "request_date",
+      requestdate: "request_date",
+      request_date: "request_date",
+      createdat: "createdAt",
+      created_at: "createdAt",
+    };
+    const sortBy = sortAliases[normalizedSortKey] || "request_date";
+    const explicitSortOrder = String(
+      req.query.sort_order ?? req.query.sortOrder ?? "",
+    )
+      .trim()
+      .toLowerCase();
+    let sortOrder = sortBy === "order_id" ? "asc" : "desc";
+    if (sortTokenDirection) {
+      sortOrder = sortTokenDirection;
+    }
+    if (explicitSortOrder === "asc" || explicitSortOrder === "desc") {
+      sortOrder = explicitSortOrder;
+    }
+    const sortDirection = sortOrder === "asc" ? 1 : -1;
     const filterInput = {
       inspector: inspectorId,
       vendor,
@@ -386,11 +522,29 @@ exports.getQCList = async (req, res) => {
     };
     const match = buildQcListMatch(filterInput);
 
-    let sortStage = { request_date_sort_key: -1, createdAt: -1 };
-    if (sort === "request_date") sortStage = { request_date_sort_key: 1, createdAt: 1 };
-    if (sort === "-request_date") sortStage = { request_date_sort_key: -1, createdAt: -1 };
-    if (sort === "createdAt") sortStage = { createdAt: 1 };
-    if (sort === "-createdAt") sortStage = { createdAt: -1 };
+    let sortStage = {
+      request_date_sort_key: -1,
+      "order_meta.order_id": 1,
+      createdAt: -1,
+    };
+    if (sortBy === "request_date") {
+      sortStage = {
+        request_date_sort_key: sortDirection,
+        "order_meta.order_id": 1,
+        createdAt: -1,
+      };
+    } else if (sortBy === "order_id") {
+      sortStage = {
+        "order_meta.order_id": sortDirection,
+        request_date_sort_key: -1,
+        createdAt: -1,
+      };
+    } else if (sortBy === "createdAt") {
+      sortStage = {
+        createdAt: sortDirection,
+        "order_meta.order_id": 1,
+      };
+    }
 
     const pipeline = [
       { $match: match },
@@ -494,6 +648,10 @@ exports.getQCList = async (req, res) => {
         totalPages: Math.ceil(totalRecords / limitNum) || 1,
         totalRecords,
       },
+      sort: {
+        sort_by: sortBy,
+        sort_order: sortOrder,
+      },
       filters: {
         vendors: normalizeDistinctValues(vendorsRaw),
         orders: normalizeDistinctValues(ordersRaw),
@@ -596,6 +754,18 @@ exports.alignQC = async (req, res) => {
       });
     }
 
+    const normalizedItemCode = normalizeText(item?.item_code || "");
+    const matchedItem = normalizedItemCode
+      ? await Item.findOne({
+          code: {
+            $regex: `^${escapeRegex(normalizedItemCode)}$`,
+            $options: "i",
+          },
+        })
+          .select("code name description cbm qc")
+          .lean()
+      : null;
+
     if (existingQC) {
 
       if (clientDemand < existingQC.quantities.qc_passed) {
@@ -651,6 +821,15 @@ exports.alignQC = async (req, res) => {
 
       if (remarks !== undefined) {
         existingQC.remarks = remarks;
+      }
+
+      const existingPatchResult = buildQcItemDetailsPatch({
+        qcSnapshot: existingQC,
+        itemDoc: matchedItem,
+        onlyUpdatedItems: true,
+      });
+      if (existingPatchResult?.set) {
+        applyQcItemDetailsPatch(existingQC, existingPatchResult.set);
       }
 
       existingQC.request_history = existingQC.request_history || [];
@@ -747,6 +926,15 @@ exports.alignQC = async (req, res) => {
       remarks,
       createdBy: req.user._id,
     });
+
+    const createPatchResult = buildQcItemDetailsPatch({
+      qcSnapshot: qc,
+      itemDoc: matchedItem,
+      onlyUpdatedItems: true,
+    });
+    if (createPatchResult?.set) {
+      applyQcItemDetailsPatch(qc, createPatchResult.set);
+    }
 
     await upsertInspectionRecordForRequest({
       qcDoc: qc,
@@ -1225,12 +1413,220 @@ exports.updateQC = async (req, res) => {
   }
 };
 
+exports.syncQcDetailsFromItems = async (req, res) => {
+  try {
+    const onlyUpdatedItems =
+      String(
+        req.query.only_updated_items ?? req.body?.only_updated_items ?? "true",
+      )
+        .trim()
+        .toLowerCase() !== "false";
+
+    const [items, qcs] = await Promise.all([
+      Item.find({ code: { $exists: true, $ne: "" } })
+        .select("code name description cbm qc")
+        .lean(),
+      QC.find({ "item.item_code": { $exists: true, $ne: "" } })
+        .select(
+          "_id item cbm barcode packed_size finishing branding last_inspected_date",
+        )
+        .lean(),
+    ]);
+
+    const itemMap = new Map();
+    for (const itemDoc of items) {
+      const key = normalizeItemCodeKey(itemDoc?.code || "");
+      if (!key || itemMap.has(key)) continue;
+      itemMap.set(key, itemDoc);
+    }
+
+    const summary = {
+      processed: 0,
+      matched_items: 0,
+      updated: 0,
+      unchanged: 0,
+      skipped_missing_item: 0,
+      skipped_item_details_not_updated: 0,
+      only_updated_items: onlyUpdatedItems,
+    };
+
+    const bulkOps = [];
+
+    for (const qcRow of qcs) {
+      summary.processed += 1;
+
+      const itemCodeKey = normalizeItemCodeKey(qcRow?.item?.item_code || "");
+      if (!itemCodeKey || !itemMap.has(itemCodeKey)) {
+        summary.skipped_missing_item += 1;
+        continue;
+      }
+
+      const itemDoc = itemMap.get(itemCodeKey);
+      summary.matched_items += 1;
+
+      const patchResult = buildQcItemDetailsPatch({
+        qcSnapshot: qcRow,
+        itemDoc,
+        onlyUpdatedItems,
+      });
+
+      if (!patchResult?.set) {
+        if (patchResult?.reason === "item_details_not_updated") {
+          summary.skipped_item_details_not_updated += 1;
+        } else {
+          summary.unchanged += 1;
+        }
+        continue;
+      }
+
+      bulkOps.push({
+        updateOne: {
+          filter: { _id: qcRow._id },
+          update: { $set: patchResult.set },
+        },
+      });
+      summary.updated += 1;
+    }
+
+    if (bulkOps.length > 0) {
+      await QC.bulkWrite(bulkOps, { ordered: false });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "QC details synced successfully from items",
+      summary,
+    });
+  } catch (err) {
+    console.error("Sync QC Details From Items Error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to sync QC details from items",
+      error: err?.message || String(err),
+    });
+  }
+};
+
 exports.getDailyReport = async (req, res) => {
   try {
     const reportDate = resolveReportDate(req.query.date);
     if (!reportDate) {
       return res.status(400).json({ message: "Invalid date format" });
     }
+    const normalizeSortKey = (value = "") =>
+      String(value)
+        .trim()
+        .replace(/[^a-zA-Z0-9_]/g, "")
+        .toLowerCase();
+    const resolveSortOrder = ({
+      token = "",
+      explicitOrder = "",
+      defaultOrder = "desc",
+    }) => {
+      const trimmedToken = String(token || "").trim();
+      const tokenDirection = trimmedToken.startsWith("-")
+        ? "desc"
+        : trimmedToken.startsWith("+")
+          ? "asc"
+          : null;
+      const normalizedExplicit = String(explicitOrder || "").trim().toLowerCase();
+      if (normalizedExplicit === "asc" || normalizedExplicit === "desc") {
+        return normalizedExplicit;
+      }
+      return tokenDirection || defaultOrder;
+    };
+
+    const rawAlignedSortToken = String(req.query.aligned_sort || "").trim();
+    const rawAlignedSortBy = String(
+      req.query.aligned_sort_by ?? req.query.alignedSortBy ?? "",
+    ).trim();
+    const alignedSortAliases = {
+      po: "order_id",
+      order: "order_id",
+      orderid: "order_id",
+      order_id: "order_id",
+      date: "request_date",
+      requestdate: "request_date",
+      request_date: "request_date",
+    };
+    const alignedSortBy =
+      alignedSortAliases[
+        normalizeSortKey(
+          rawAlignedSortBy || rawAlignedSortToken.replace(/^[+-]/, ""),
+        )
+      ] || "request_date";
+    const alignedSortOrder = resolveSortOrder({
+      token: rawAlignedSortToken,
+      explicitOrder: req.query.aligned_sort_order ?? req.query.alignedSortOrder,
+      defaultOrder: alignedSortBy === "order_id" ? "asc" : "desc",
+    });
+    const alignedSortDirection = alignedSortOrder === "asc" ? 1 : -1;
+
+    const rawInspectionSortToken = String(req.query.inspection_sort || "").trim();
+    const rawInspectionSortBy = String(
+      req.query.inspection_sort_by ?? req.query.inspectionSortBy ?? "",
+    ).trim();
+    const inspectionSortAliases = {
+      po: "order_id",
+      order: "order_id",
+      orderid: "order_id",
+      order_id: "order_id",
+      date: "inspection_date",
+      inspectiondate: "inspection_date",
+      inspection_date: "inspection_date",
+    };
+    const inspectionSortBy =
+      inspectionSortAliases[
+        normalizeSortKey(
+          rawInspectionSortBy || rawInspectionSortToken.replace(/^[+-]/, ""),
+        )
+      ] || "inspection_date";
+    const inspectionSortOrder = resolveSortOrder({
+      token: rawInspectionSortToken,
+      explicitOrder:
+        req.query.inspection_sort_order ?? req.query.inspectionSortOrder,
+      defaultOrder: inspectionSortBy === "order_id" ? "asc" : "desc",
+    });
+    const inspectionSortDirection = inspectionSortOrder === "asc" ? 1 : -1;
+
+    const compareText = (aValue, bValue) =>
+      String(aValue || "").localeCompare(String(bValue || ""));
+    const compareAlignedRows = (a, b) => {
+      const primary =
+        alignedSortBy === "order_id"
+          ? compareText(a?.order_id, b?.order_id)
+          : toSortableTimestamp(a?.request_date) - toSortableTimestamp(b?.request_date);
+      if (primary !== 0) return primary * alignedSortDirection;
+
+      const secondary =
+        alignedSortBy === "order_id"
+          ? toSortableTimestamp(a?.request_date) - toSortableTimestamp(b?.request_date)
+          : compareText(a?.order_id, b?.order_id);
+      if (secondary !== 0) {
+        return alignedSortBy === "order_id" ? secondary * -1 : secondary;
+      }
+      return compareText(a?.item_code, b?.item_code);
+    };
+
+    const compareInspectionRows = (a, b) => {
+      const primary =
+        inspectionSortBy === "order_id"
+          ? compareText(a?.order_id, b?.order_id)
+          : toSortableTimestamp(a?.inspection_date)
+            - toSortableTimestamp(b?.inspection_date);
+      if (primary !== 0) return primary * inspectionSortDirection;
+
+      const secondary =
+        inspectionSortBy === "order_id"
+          ? toSortableTimestamp(a?.inspection_date)
+            - toSortableTimestamp(b?.inspection_date)
+          : compareText(a?.order_id, b?.order_id);
+      if (secondary !== 0) {
+        return inspectionSortBy === "order_id" ? secondary * -1 : secondary;
+      }
+      return compareText(a?.item_code, b?.item_code);
+    };
+
     const [reportYear, reportMonth, reportDay] = String(reportDate)
       .split("-");
     const inspectionDateVariants = [
@@ -1282,6 +1678,7 @@ exports.getDailyReport = async (req, res) => {
       quantity_pending: Number(qc?.quantities?.pending || 0),
       order_status: qc?.order?.status || "N/A",
     }));
+    const sortedAlignedRequests = [...aligned_requests].sort(compareAlignedRows);
 
     const inspectorMap = new Map();
     const inspectorCbmKeyMap = new Map();
@@ -1368,6 +1765,12 @@ exports.getDailyReport = async (req, res) => {
       });
     }
 
+    for (const inspectorEntry of inspectorMap.values()) {
+      inspectorEntry.inspections = Array.isArray(inspectorEntry.inspections)
+        ? [...inspectorEntry.inspections].sort(compareInspectionRows)
+        : [];
+    }
+
     const inspector_compiled = Array.from(inspectorMap.values()).sort((a, b) =>
       String(a?.inspector?.name || "").localeCompare(String(b?.inspector?.name || "")),
     );
@@ -1380,14 +1783,24 @@ exports.getDailyReport = async (req, res) => {
     res.json({
       date: reportDate,
       summary: {
-        aligned_requests_count: aligned_requests.length,
+        aligned_requests_count: sortedAlignedRequests.length,
         inspectors_count: inspector_compiled.length,
         inspections_count: inspectionsRaw.length,
         total_inspected_quantity: totalInspectedQty,
         total_inspected_cbm: totalInspectedCbm,
       },
-      aligned_requests,
+      aligned_requests: sortedAlignedRequests,
       inspector_compiled,
+      sort: {
+        aligned: {
+          sort_by: alignedSortBy,
+          sort_order: alignedSortOrder,
+        },
+        inspection: {
+          sort_by: inspectionSortBy,
+          sort_order: inspectionSortOrder,
+        },
+      },
     });
   } catch (err) {
     console.error(err);

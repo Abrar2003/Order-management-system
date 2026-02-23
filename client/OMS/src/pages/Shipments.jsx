@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
@@ -26,6 +26,8 @@ const EMPTY_SUMMARY = {
   shipped: 0,
 };
 
+const DEFAULT_LIMIT = 20;
+
 const Shipments = () => {
   const navigate = useNavigate();
   const user = getUserFromToken();
@@ -40,18 +42,24 @@ const Shipments = () => {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [editingOrder, setEditingOrder] = useState(null);
   const [orderIdSearch, setOrderIdSearch] = useState("");
-  const [itemCodeSearch, setItemCodeSearch] = useState("");
+  const [containerSearch, setContainerSearch] = useState("");
   const [vendorFilter, setVendorFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("stuffing_date");
+  const [sortOrder, setSortOrder] = useState("desc");
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(DEFAULT_LIMIT);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalRecords, setTotalRecords] = useState(0);
   const [summary, setSummary] = useState(EMPTY_SUMMARY);
   const [filterOptions, setFilterOptions] = useState({
     vendors: [],
     order_ids: [],
-    item_codes: [],
+    containers: [],
   });
 
   const debouncedOrderSearch = useDebouncedValue(orderIdSearch, 300);
-  const debouncedItemSearch = useDebouncedValue(itemCodeSearch, 300);
+  const debouncedContainerSearch = useDebouncedValue(containerSearch, 300);
 
   const fetchShipments = useCallback(async () => {
     try {
@@ -61,13 +69,21 @@ const Shipments = () => {
       const res = await api.get("/orders/shipments", {
         params: {
           order_id: debouncedOrderSearch,
-          item_code: debouncedItemSearch,
+          container: debouncedContainerSearch,
           vendor: vendorFilter,
+          status: statusFilter,
+          page,
+          limit,
+          sort_by: sortBy,
+          sort_order: sortOrder,
         },
       });
 
       setRows(Array.isArray(res?.data?.data) ? res.data.data : []);
       setSummary(res?.data?.summary || EMPTY_SUMMARY);
+      setPage(Math.max(1, Number(res?.data?.pagination?.page || 1)));
+      setTotalPages(Math.max(1, Number(res?.data?.pagination?.totalPages || 1)));
+      setTotalRecords(Number(res?.data?.pagination?.totalRecords || 0));
       setFilterOptions({
         vendors: Array.isArray(res?.data?.filters?.vendors)
           ? res.data.filters.vendors
@@ -75,32 +91,59 @@ const Shipments = () => {
         order_ids: Array.isArray(res?.data?.filters?.order_ids)
           ? res.data.filters.order_ids
           : [],
-        item_codes: Array.isArray(res?.data?.filters?.item_codes)
-          ? res.data.filters.item_codes
+        containers: Array.isArray(res?.data?.filters?.containers)
+          ? res.data.filters.containers
           : [],
       });
     } catch (err) {
       setError(err?.response?.data?.message || "Failed to load shipments.");
       setRows([]);
       setSummary(EMPTY_SUMMARY);
+      setTotalPages(1);
+      setTotalRecords(0);
       setFilterOptions({
         vendors: [],
         order_ids: [],
-        item_codes: [],
+        containers: [],
       });
     } finally {
       setLoading(false);
     }
-  }, [debouncedItemSearch, debouncedOrderSearch, vendorFilter]);
+  }, [
+    debouncedContainerSearch,
+    debouncedOrderSearch,
+    limit,
+    page,
+    sortBy,
+    sortOrder,
+    statusFilter,
+    vendorFilter,
+  ]);
 
   useEffect(() => {
     fetchShipments();
   }, [fetchShipments]);
 
-  const filteredRows = useMemo(() => {
-    if (statusFilter === "all") return rows;
-    return rows.filter((row) => String(row?.status || "").trim() === statusFilter);
-  }, [rows, statusFilter]);
+  const handleSortColumn = useCallback(
+    (column, defaultDirection = "asc") => {
+      setPage(1);
+      if (sortBy === column) {
+        setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+        return;
+      }
+      setSortBy(column);
+      setSortOrder(defaultDirection);
+    },
+    [sortBy],
+  );
+
+  const sortIndicator = useCallback(
+    (column) => {
+      if (sortBy !== column) return "";
+      return sortOrder === "asc" ? " (asc)" : " (desc)";
+    },
+    [sortBy, sortOrder],
+  );
 
   const canShowFinalizeAction = useCallback(
     (row) =>
@@ -184,7 +227,10 @@ const Shipments = () => {
                   className="form-control"
                   value={orderIdSearch}
                   list="shipment-order-options"
-                  onChange={(e) => setOrderIdSearch(e.target.value)}
+                  onChange={(e) => {
+                    setOrderIdSearch(e.target.value);
+                    setPage(1);
+                  }}
                   placeholder="Enter order ID"
                 />
                 <datalist id="shipment-order-options">
@@ -194,18 +240,21 @@ const Shipments = () => {
                 </datalist>
               </div>
               <div className="col-md-4">
-                <label className="form-label">Search by Item Code</label>
+                <label className="form-label">Search by Container Number</label>
                 <input
                   type="text"
                   className="form-control"
-                  value={itemCodeSearch}
-                  list="shipment-item-options"
-                  onChange={(e) => setItemCodeSearch(e.target.value)}
-                  placeholder="Enter item code"
+                  value={containerSearch}
+                  list="shipment-container-options"
+                  onChange={(e) => {
+                    setContainerSearch(e.target.value);
+                    setPage(1);
+                  }}
+                  placeholder="Enter container number"
                 />
-                <datalist id="shipment-item-options">
-                  {filterOptions.item_codes.map((itemCode) => (
-                    <option key={itemCode} value={itemCode} />
+                <datalist id="shipment-container-options">
+                  {filterOptions.containers.map((containerValue) => (
+                    <option key={containerValue} value={containerValue} />
                   ))}
                 </datalist>
               </div>
@@ -214,7 +263,10 @@ const Shipments = () => {
                 <select
                   className="form-select"
                   value={vendorFilter}
-                  onChange={(e) => setVendorFilter(e.target.value)}
+                  onChange={(e) => {
+                    setVendorFilter(e.target.value);
+                    setPage(1);
+                  }}
                 >
                   <option value="all">All Vendors</option>
                   {filterOptions.vendors.map((vendor) => (
@@ -230,9 +282,12 @@ const Shipments = () => {
                   className="btn btn-outline-secondary"
                   onClick={() => {
                     setOrderIdSearch("");
-                    setItemCodeSearch("");
+                    setContainerSearch("");
                     setVendorFilter("all");
                     setStatusFilter("all");
+                    setSortBy("stuffing_date");
+                    setSortOrder("desc");
+                    setPage(1);
                   }}
                 >
                   Clear
@@ -247,34 +302,47 @@ const Shipments = () => {
             <button
               type="button"
               className={`btn btn-sm ${statusFilter === "all" ? "btn-primary" : "btn-outline-secondary"}`}
-              onClick={() => setStatusFilter("all")}
+              onClick={() => {
+                setStatusFilter("all");
+                setPage(1);
+              }}
             >
               Total Items: {summary.total}
             </button>
             <button
               type="button"
               className={`btn btn-sm ${statusFilter === "Inspection Done" ? "btn-primary" : "btn-outline-secondary"}`}
-              onClick={() => setStatusFilter("Inspection Done")}
+              onClick={() => {
+                setStatusFilter("Inspection Done");
+                setPage(1);
+              }}
             >
               Inspection Done: {summary.inspectionDone}
             </button>
             <button
               type="button"
               className={`btn btn-sm ${statusFilter === "Partial Shipped" ? "btn-primary" : "btn-outline-secondary"}`}
-              onClick={() => setStatusFilter("Partial Shipped")}
+              onClick={() => {
+                setStatusFilter("Partial Shipped");
+                setPage(1);
+              }}
             >
               Partial Shipped: {summary.partialShipped}
             </button>
             <button
               type="button"
               className={`btn btn-sm ${statusFilter === "Shipped" ? "btn-primary" : "btn-outline-secondary"}`}
-              onClick={() => setStatusFilter("Shipped")}
+              onClick={() => {
+                setStatusFilter("Shipped");
+                setPage(1);
+              }}
             >
               Shipped: {summary.shipped}
             </button>
             <span className="om-summary-chip">
               Showing: {statusFilter === "all" ? "All" : statusFilter}
             </span>
+            <span className="om-summary-chip">Total Records: {totalRecords}</span>
           </div>
         </div>
 
@@ -293,22 +361,86 @@ const Shipments = () => {
                 <table className="table table-striped table-hover align-middle om-table mb-0">
                   <thead className="table-primary">
                     <tr>
-                      <th>PO</th>
-                      <th>Item Code</th>
-                      <th>Vendor</th>
+                      <th>
+                        <button
+                          type="button"
+                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                          onClick={() => handleSortColumn("order_id", "asc")}
+                        >
+                          PO{sortIndicator("order_id")}
+                        </button>
+                      </th>
+                      <th>
+                        <button
+                          type="button"
+                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                          onClick={() => handleSortColumn("item_code", "asc")}
+                        >
+                          Item Code{sortIndicator("item_code")}
+                        </button>
+                      </th>
+                      <th>
+                        <button
+                          type="button"
+                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                          onClick={() => handleSortColumn("vendor", "asc")}
+                        >
+                          Vendor{sortIndicator("vendor")}
+                        </button>
+                      </th>
                       <th>Description</th>
-                      <th>Order Quantity</th>
-                      <th>Stuffing Date</th>
-                      <th>Container Number</th>
-                      <th>Quantity</th>
-                      <th>Pending</th>
+                      <th>
+                        <button
+                          type="button"
+                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                          onClick={() => handleSortColumn("order_quantity", "desc")}
+                        >
+                          Order Quantity{sortIndicator("order_quantity")}
+                        </button>
+                      </th>
+                      <th>
+                        <button
+                          type="button"
+                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                          onClick={() => handleSortColumn("stuffing_date", "desc")}
+                        >
+                          Stuffing Date{sortIndicator("stuffing_date")}
+                        </button>
+                      </th>
+                      <th>
+                        <button
+                          type="button"
+                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                          onClick={() => handleSortColumn("container", "asc")}
+                        >
+                          Container Number{sortIndicator("container")}
+                        </button>
+                      </th>
+                      <th>
+                        <button
+                          type="button"
+                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                          onClick={() => handleSortColumn("quantity", "desc")}
+                        >
+                          Quantity{sortIndicator("quantity")}
+                        </button>
+                      </th>
+                      <th>
+                        <button
+                          type="button"
+                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                          onClick={() => handleSortColumn("pending", "desc")}
+                        >
+                          Pending{sortIndicator("pending")}
+                        </button>
+                      </th>
                       <th>Remarks</th>
                       {canFinalizeShipping && <th>Finalize</th>}
                       {isAdmin && <th>Edit</th>}
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredRows.length === 0 && (
+                    {rows.length === 0 && (
                       <tr>
                         <td
                           colSpan={
@@ -321,7 +453,7 @@ const Shipments = () => {
                       </tr>
                     )}
 
-                    {filteredRows.map((row, index) => (
+                    {rows.map((row, index) => (
                       <tr key={row?.shipment_id || `${row.order_id}-${row.item_code}-${index}`}>
                         <td>{row?.order_id || "N/A"}</td>
                         <td>{row?.item_code || "N/A"}</td>
@@ -369,6 +501,47 @@ const Shipments = () => {
                 </table>
               </div>
             )}
+          </div>
+        </div>
+
+        <div className="d-flex justify-content-center align-items-center gap-3 mt-3">
+          <button
+            type="button"
+            className="btn btn-outline-secondary btn-sm"
+            disabled={page <= 1 || loading}
+            onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+          >
+            Prev
+          </button>
+          <span className="small fw-semibold">
+            Page {page} of {totalPages}
+          </span>
+          <button
+            type="button"
+            className="btn btn-outline-secondary btn-sm"
+            disabled={page >= totalPages || loading}
+            onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+          >
+            Next
+          </button>
+        </div>
+
+        <div className="d-flex justify-content-end mt-3">
+          <div className="input-group om-limit-control">
+            <span className="input-group-text">Limit</span>
+            <select
+              className="form-select"
+              value={limit}
+              onChange={(e) => {
+                setPage(1);
+                setLimit(Number(e.target.value));
+              }}
+            >
+              <option value={10}>10</option>
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
           </div>
         </div>
       </div>

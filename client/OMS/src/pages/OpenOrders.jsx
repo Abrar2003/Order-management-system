@@ -22,6 +22,7 @@ const STATUS_SEQUENCE = [
 
 const DEFAULT_LIMIT = 20;
 const LIMIT_OPTIONS = [10, 20, 50, 100];
+const DEFAULT_SORT_BY = "order_date";
 
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(value, 10);
@@ -38,6 +39,21 @@ const normalizeFilterParam = (value, fallback = "all") => {
 const parseLimit = (value) => {
   const parsed = parsePositiveInt(value, DEFAULT_LIMIT);
   return LIMIT_OPTIONS.includes(parsed) ? parsed : DEFAULT_LIMIT;
+};
+
+const parseSortBy = (value) => {
+  const normalized = String(value || "").trim();
+  const lowered = normalized.toLowerCase();
+  if (lowered === "order_id") return "order_id";
+  if (lowered === "order_date") return "order_date";
+  if (lowered === "etd") return "ETD";
+  return DEFAULT_SORT_BY;
+};
+
+const parseSortOrder = (value, sortBy) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "asc" || normalized === "desc") return normalized;
+  return sortBy === "order_id" ? "asc" : "desc";
 };
 
 const normalizeStatus = (value) => {
@@ -77,6 +93,11 @@ const getStatus = (order) => {
 
 const OpenOrders = () => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const initialSortBy = parseSortBy(searchParams.get("sort_by"));
+  const initialSortOrder = parseSortOrder(
+    searchParams.get("sort_order"),
+    initialSortBy,
+  );
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [totalPages, setTotalPages] = useState(1);
@@ -84,6 +105,8 @@ const OpenOrders = () => {
     parsePositiveInt(searchParams.get("page"), 1),
   );
   const [limit, setLimit] = useState(() => parseLimit(searchParams.get("limit")));
+  const [sortBy, setSortBy] = useState(initialSortBy);
+  const [sortOrder, setSortOrder] = useState(initialSortOrder);
   const [filters, setFilters] = useState(() => ({
     vendor: normalizeFilterParam(searchParams.get("vendor"), "all"),
     brand: normalizeFilterParam(searchParams.get("brand"), "all"),
@@ -123,6 +146,8 @@ const OpenOrders = () => {
           order: filters.order,
           page,
           limit,
+          sort_by: sortBy,
+          sort_order: sortOrder,
         },
         headers: {
           Authorization: `Bearer ${token}`,
@@ -165,6 +190,8 @@ const OpenOrders = () => {
     filters.vendor,
     limit,
     page,
+    sortBy,
+    sortOrder,
     token,
   ]);
 
@@ -181,6 +208,11 @@ const OpenOrders = () => {
     };
     const nextPage = parsePositiveInt(searchParams.get("page"), 1);
     const nextLimit = parseLimit(searchParams.get("limit"));
+    const nextSortBy = parseSortBy(searchParams.get("sort_by"));
+    const nextSortOrder = parseSortOrder(
+      searchParams.get("sort_order"),
+      nextSortBy,
+    );
 
     setFilters((prev) =>
       prev.vendor === nextFilters.vendor
@@ -192,6 +224,8 @@ const OpenOrders = () => {
     );
     setPage((prev) => (prev === nextPage ? prev : nextPage));
     setLimit((prev) => (prev === nextLimit ? prev : nextLimit));
+    setSortBy((prev) => (prev === nextSortBy ? prev : nextSortBy));
+    setSortOrder((prev) => (prev === nextSortOrder ? prev : nextSortOrder));
   }, [searchParams]);
 
   useEffect(() => {
@@ -202,6 +236,10 @@ const OpenOrders = () => {
     if (filters.order) next.set("order", filters.order);
     if (page > 1) next.set("page", String(page));
     if (limit !== DEFAULT_LIMIT) next.set("limit", String(limit));
+    if (sortBy !== DEFAULT_SORT_BY) next.set("sort_by", sortBy);
+    if (sortOrder !== parseSortOrder("", sortBy)) {
+      next.set("sort_order", sortOrder);
+    }
 
     const nextQuery = next.toString();
     const currentQuery = searchParams.toString();
@@ -215,6 +253,8 @@ const OpenOrders = () => {
     filters.vendor,
     limit,
     page,
+    sortBy,
+    sortOrder,
     searchParams,
     setSearchParams,
   ]);
@@ -228,16 +268,30 @@ const OpenOrders = () => {
     setPage(nextPage);
   };
 
+  const handleSortColumn = (column, defaultDirection = "asc") => {
+    setPage(1);
+    if (sortBy === column) {
+      setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortBy(column);
+    setSortOrder(defaultDirection);
+  };
+
+  const sortIndicator = (column) => {
+    if (sortBy !== column) return "";
+    return sortOrder === "asc" ? " (asc)" : " (desc)";
+  };
+
   const clearFilter = (e) => {
     e.preventDefault();
-    setFilters({
-    vendors: [],
-    brands: [],
-    statuses: [],
-    order_ids: [],
-  });
-  getOrdersByFilters();
-  }
+    setPage(1);
+    setSortBy(DEFAULT_SORT_BY);
+    setSortOrder("desc");
+    setOrderSearchInput("");
+    setFilters(defaultFilters);
+  };
+
   const handleSearch = (e) => {
     e.preventDefault();
     setPage(1);
@@ -371,13 +425,37 @@ const OpenOrders = () => {
                 <table className="table table-striped table-hover align-middle om-table mb-0">
                   <thead className="table-primary">
                     <tr>
-                      <th>Order ID</th>
+                      <th>
+                        <button
+                          type="button"
+                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                          onClick={() => handleSortColumn("order_id", "asc")}
+                        >
+                          Order ID{sortIndicator("order_id")}
+                        </button>
+                      </th>
                       <th>Brand</th>
                       <th>Vendor</th>
                       <th>Status</th>
                       <th>Items</th>
-                      <th>Order Date</th>
-                      <th>ETD</th>
+                      <th>
+                        <button
+                          type="button"
+                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                          onClick={() => handleSortColumn("order_date", "desc")}
+                        >
+                          Order Date{sortIndicator("order_date")}
+                        </button>
+                      </th>
+                      <th>
+                        <button
+                          type="button"
+                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                          onClick={() => handleSortColumn("ETD", "desc")}
+                        >
+                          ETD{sortIndicator("ETD")}
+                        </button>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>

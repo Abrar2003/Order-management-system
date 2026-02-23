@@ -21,6 +21,8 @@ const Home = () => {
   const [todayEtdOrders, setTodayEtdOrders] = useState([]);
   const [todayEtdLoading, setTodayEtdLoading] = useState(false);
   const [todayEtdError, setTodayEtdError] = useState("");
+  const [todayEtdSortBy, setTodayEtdSortBy] = useState("ETD");
+  const [todayEtdSortOrder, setTodayEtdSortOrder] = useState("desc");
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -104,6 +106,20 @@ const Home = () => {
       ),
     [todayEtdOrders],
   );
+
+  const handleTodayEtdSort = (column, defaultDirection = "asc") => {
+    if (todayEtdSortBy === column) {
+      setTodayEtdSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setTodayEtdSortBy(column);
+    setTodayEtdSortOrder(defaultDirection);
+  };
+
+  const todayEtdSortIndicator = (column) => {
+    if (todayEtdSortBy !== column) return "";
+    return todayEtdSortOrder === "asc" ? " (asc)" : " (desc)";
+  };
 
   useEffect(() => {
     const fetchBrands = async () => {
@@ -248,6 +264,10 @@ const Home = () => {
         const response = await axios.get(
           "/orders/today-etd-orders",
           {
+            params: {
+              sort_by: todayEtdSortBy,
+              sort_order: todayEtdSortOrder,
+            },
             headers: {
               Authorization: `Bearer ${token}`,
             },
@@ -275,7 +295,7 @@ const Home = () => {
     return () => {
       isMounted = false;
     };
-  }, [token]);
+  }, [token, todayEtdSortBy, todayEtdSortOrder]);
 
   return (
     <>
@@ -430,8 +450,24 @@ const Home = () => {
                   <thead className="table-primary">
                     <tr>
                       <th>Brand</th>
-                      <th>Order Number</th>
-                      <th>ETD</th>
+                      <th>
+                        <button
+                          type="button"
+                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                          onClick={() => handleTodayEtdSort("order_id", "asc")}
+                        >
+                          Order Number{todayEtdSortIndicator("order_id")}
+                        </button>
+                      </th>
+                      <th>
+                        <button
+                          type="button"
+                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                          onClick={() => handleTodayEtdSort("ETD", "desc")}
+                        >
+                          ETD{todayEtdSortIndicator("ETD")}
+                        </button>
+                      </th>
                       <th>Item Count</th>
                       <th>Status</th>
                       <th>Shipped</th>

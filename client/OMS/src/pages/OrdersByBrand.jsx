@@ -12,6 +12,22 @@ const OrdersByBrand = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [sortBy, setSortBy] = useState("order_date");
+  const [sortOrder, setSortOrder] = useState("desc");
+
+  const handleSortColumn = (column, defaultDirection = "asc") => {
+    if (sortBy === column) {
+      setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortBy(column);
+    setSortOrder(defaultDirection);
+  };
+
+  const sortIndicator = (column) => {
+    if (sortBy !== column) return "";
+    return sortOrder === "asc" ? " (asc)" : " (desc)";
+  };
 
   useEffect(() => {
     const fetchOrders = async () => {
@@ -23,8 +39,13 @@ const OrdersByBrand = () => {
         const effectiveStatus = status ?? "all";
 
         const res = await axios.get(
-          `/orders/brand/${brand}/vendor/${vendor}/status/${effectiveStatus}?isDelayed=${effectiveStatus === "delayed" ? "true" : "false"}`,
+          `/orders/brand/${brand}/vendor/${vendor}/status/${effectiveStatus}`,
           {
+            params: {
+              isDelayed: effectiveStatus === "delayed" ? "true" : "false",
+              sort_by: sortBy,
+              sort_order: sortOrder,
+            },
             headers: {
               Authorization: `Bearer ${token}`,
             },
@@ -41,7 +62,7 @@ const OrdersByBrand = () => {
     };
 
     fetchOrders();
-  }, [brand, vendor, status]);
+  }, [brand, vendor, status, sortBy, sortOrder]);
 
   return (
     <>
@@ -79,10 +100,34 @@ const OrdersByBrand = () => {
                 <table className="table table-striped table-hover align-middle om-table mb-0">
                   <thead className="table-primary">
                     <tr>
-                      <th>Order ID</th>
+                      <th>
+                        <button
+                          type="button"
+                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                          onClick={() => handleSortColumn("order_id", "asc")}
+                        >
+                          Order ID{sortIndicator("order_id")}
+                        </button>
+                      </th>
                       <th>Items</th>
-                      <th>Order Date</th>
-                      <th>ETD</th>
+                      <th>
+                        <button
+                          type="button"
+                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                          onClick={() => handleSortColumn("order_date", "desc")}
+                        >
+                          Order Date{sortIndicator("order_date")}
+                        </button>
+                      </th>
+                      <th>
+                        <button
+                          type="button"
+                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                          onClick={() => handleSortColumn("ETD", "desc")}
+                        >
+                          ETD{sortIndicator("ETD")}
+                        </button>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>

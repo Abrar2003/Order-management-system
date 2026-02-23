@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import UpdateQcModal from "../components/UpdateQcModal";
@@ -57,6 +57,7 @@ const QcDetails = () => {
   const [deletingInspectionId, setDeletingInspectionId] = useState("");
 
   const navigate = useNavigate();
+  const location = useLocation();
   const user = getUserFromToken();
   const userId = user?.id || user?._id;
   const isAdmin = user?.role === "admin" || user?.role === "manager";
@@ -310,7 +311,7 @@ const QcDetails = () => {
           <button
             type="button"
             className="btn btn-outline-secondary btn-sm"
-            onClick={() => navigate("/qc")}
+            onClick={() => navigate(`/qc${location.search || ""}`)}
           >
             Back
           </button>

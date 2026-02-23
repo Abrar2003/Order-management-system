@@ -29,6 +29,13 @@ router.patch(
   qcController.updateQC
 );
 
+router.post(
+  "/sync-item-details",
+  auth,
+  authorize("admin", "manager", "dev", "Dev"),
+  qcController.syncQcDetailsFromItems,
+);
+
 router.get(
   "/daily-report",
   auth,
