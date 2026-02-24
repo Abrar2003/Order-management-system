@@ -116,6 +116,18 @@ const QcDetails = () => {
       (assignedInspectorId === String(userId) || canClaimInspection));
 
   const sortedLabels = useMemo(() => normalizeLabels(qc?.labels), [qc?.labels]);
+  const backTarget = useMemo(() => {
+    const fromQcList = String(location.state?.fromQcList || "").trim();
+    if (
+      fromQcList &&
+      fromQcList.startsWith("/qc") &&
+      !fromQcList.startsWith("/qc/")
+    ) {
+      return fromQcList;
+    }
+    return "/qc";
+  }, [location.state]);
+
   const labelRange = sortedLabels.length
     ? `${sortedLabels[0]} - ${sortedLabels[sortedLabels.length - 1]}`
     : "None";
@@ -329,7 +341,7 @@ const QcDetails = () => {
           <button
             type="button"
             className="btn btn-outline-secondary btn-sm"
-            onClick={() => navigate(`/qc${location.search || ""}`)}
+            onClick={() => navigate(backTarget)}
           >
             Back
           </button>

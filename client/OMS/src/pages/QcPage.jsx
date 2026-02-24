@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import AlignQCModal from "../components/AlignQcModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import {
@@ -101,6 +101,7 @@ const QCPage = () => {
 
   const token = localStorage.getItem("token");
   const navigate = useNavigate();
+  const location = useLocation();
   const currentUser = getUserFromToken();
   const canRealign = ["admin", "manager"].includes(
     String(currentUser?.role || "").toLowerCase(),
@@ -199,8 +200,13 @@ const QCPage = () => {
   ]);
 
   const handleDetailsClick = (qc) => {
-    const currentQuery = searchParams.toString();
-    navigate(currentQuery ? `/qc/${qc._id}?${currentQuery}` : `/qc/${qc._id}`);
+    const qcId = String(qc?._id || "").trim();
+    if (!qcId) return;
+
+    const fromQcList = `${location.pathname}${location.search || ""}`;
+    navigate(`/qc/${encodeURIComponent(qcId)}`, {
+      state: { fromQcList },
+    });
   };
 
   const openRealignModal = (qc) => {
