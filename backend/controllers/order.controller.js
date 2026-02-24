@@ -1668,6 +1668,15 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
       normalizedStatus === "on-time"
       || normalizedStatus === "on time"
       || normalizedStatus === "ontime";
+    const isDelayedStatus = normalizedStatus === "delayed";
+    const isDelayedFilter =
+      String(isDelayed || "")
+        .trim()
+        .toLowerCase() === "true" || isDelayedStatus;
+    const exactOrderStatus =
+      ORDER_STATUS_SEQUENCE.find(
+        (statusValue) => statusValue.toLowerCase() === normalizedStatus,
+      ) || null;
 
     const matchStage = {};
 
@@ -1679,17 +1688,23 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
       matchStage.vendor = vendor;
     }
 
-    if (status) {
-      if (normalizedStatus === "pending") {
-        matchStage.status = { $nin: ["Partial Shipped", "Shipped"] };
-      } else if (!isOnTimeStatus) {
-        matchStage.status = status;
-      }
+    const postGroupMatch = {};
+    if (normalizedStatus === "pending") {
+      postGroupMatch.totalStatus = {
+        $in: ["Pending", "Under Inspection", "Inspection Done"],
+      };
+    } else if (exactOrderStatus) {
+      postGroupMatch.totalStatus = exactOrderStatus;
     }
 
-    if (isDelayed === "true") {
-      matchStage.ETD = { $lt: today };
-      matchStage.status = { $ne: "Shipped" };
+    if (isOnTimeStatus) {
+      postGroupMatch.ETD = { $ne: null, $gte: today };
+      postGroupMatch.totalStatus = { $ne: "Shipped" };
+    }
+
+    if (isDelayedFilter) {
+      postGroupMatch.ETD = { $ne: null, $lt: today };
+      postGroupMatch.totalStatus = { $ne: "Shipped" };
     }
 
     const aggregationPipeline = [
@@ -1705,17 +1720,12 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
           statuses: { $addToSet: "$status" },
         },
       },
-      ...(isOnTimeStatus
-        ? [
-            {
-              $match: {
-                ETD: { $ne: null, $gte: today },
-              },
-            },
-          ]
-        : []),
       {
         $addFields: {
+          hasPendingStatus: { $in: ["Pending", "$statuses"] },
+          hasUnderInspectionStatus: { $in: ["Under Inspection", "$statuses"] },
+          hasInspectionDoneStatus: { $in: ["Inspection Done", "$statuses"] },
+          hasPartialShippedStatus: { $in: ["Partial Shipped", "$statuses"] },
           minStatusRank: {
             $min: {
               $map: {
@@ -1743,6 +1753,17 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
           totalStatus: {
             $switch: {
               branches: [
+                {
+                  case: {
+                    $and: [
+                      "$hasPartialShippedStatus",
+                      "$hasInspectionDoneStatus",
+                      { $not: ["$hasPendingStatus"] },
+                      { $not: ["$hasUnderInspectionStatus"] },
+                    ],
+                  },
+                  then: "Partial Shipped",
+                },
                 { case: { $eq: ["$minStatusRank", 0] }, then: "Pending" },
                 { case: { $eq: ["$minStatusRank", 1] }, then: "Under Inspection" },
                 { case: { $eq: ["$minStatusRank", 2] }, then: "Inspection Done" },
@@ -1754,6 +1775,9 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
           },
         },
       },
+      ...(Object.keys(postGroupMatch).length > 0
+        ? [{ $match: postGroupMatch }]
+        : []),
       {
         $project: {
           _id: 0,
