@@ -618,7 +618,7 @@ async function main() {
         update.qc_record = qc._id;
       }
 
-      if (order.status !== "Shipped") {
+      if (order.status !== "Shipped" && order.status !== "Cancelled") {
         const desiredStatus = deriveOrderStatusFromQc(
           qc?.quantities?.client_demand,
           qc?.quantities?.qc_passed,

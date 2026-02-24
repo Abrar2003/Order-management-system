@@ -11,7 +11,18 @@ const Order_Schema = new mongoose.Schema(
     vendor: { type: String, required: true },
     ETD: { type: Date },
     order_date: { type: Date, default: Date.now() },
-    status: { type: String, enum: ["Pending", "Under Inspection", "Inspection Done", "Partial Shipped", "Shipped"], default: "Pending" },
+    status: {
+      type: String,
+      enum: [
+        "Pending",
+        "Under Inspection",
+        "Inspection Done",
+        "Partial Shipped",
+        "Shipped",
+        "Cancelled",
+      ],
+      default: "Pending",
+    },
     quantity: { type: Number, required: true },
     shipment: [
       {
@@ -32,6 +43,17 @@ const Order_Schema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "qc",
       default: null,
+    },
+    archived: { type: Boolean, default: false, index: true },
+    archived_remark: { type: String, default: "" },
+    archived_at: { type: Date, default: null },
+    archived_by: {
+      user: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "users",
+        default: null,
+      },
+      name: { type: String, default: "" },
     },
   },
   { timestamps: true }

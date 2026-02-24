@@ -652,9 +652,7 @@ async function main() {
     : pickDefaultPdfFile();
   const sheetName =
     args.sheetName || process.env.GOOGLE_SHEETS_SHEET_NAME || process.env.GOOGLE_SHEET_NAME || "Sheet1";
-  const spreadsheetId =
-    args.spreadsheetId ||
-    process.env.GOOGLE_SHEETS_SPREADSHEET_ID
+  const spreadsheetId = process.env.GOOGLE_SPREADSHEET_ID
 
   const rows = extractTableRowsFromPdf(filePath);
   const uniqueOrders = new Set(rows.map((row) => row.orderNumber).filter(Boolean));

@@ -41,3 +41,56 @@ export const editOrder = async (id, payload) => {
 
   return res.data;
 };
+
+export const archiveOrder = async (id, remark) => {
+  if (!id) {
+    throw new Error("Order id is required");
+  }
+
+  const normalizedRemark = String(remark || "").trim();
+  if (!normalizedRemark) {
+    throw new Error("Archive remark is required");
+  }
+
+  const token = localStorage.getItem("token");
+  const res = await axios.patch(
+    `/orders/archive-order/${id}`,
+    { remark: normalizedRemark },
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  return res.data;
+};
+
+export const getArchivedOrders = async (params = {}) => {
+  const token = localStorage.getItem("token");
+  const res = await axios.get("/orders/archived", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    params,
+  });
+
+  return res.data;
+};
+
+export const syncZeroQuantityOrdersArchive = async (remark = "") => {
+  const token = localStorage.getItem("token");
+  const payload = {};
+  const normalizedRemark = String(remark || "").trim();
+  if (normalizedRemark) {
+    payload.remark = normalizedRemark;
+  }
+
+  const res = await axios.post("/orders/sync-zero-quantity-archive", payload, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return res.data;
+};

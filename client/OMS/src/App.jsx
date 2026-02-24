@@ -22,6 +22,7 @@ import Shipments from "./pages/Shipments";
 import Container from "./pages/Container";
 import Items from "./pages/Items";
 import UploadLogs from "./pages/UploadLogs";
+import ArchivedOrders from "./pages/ArchivedOrders";
 
 // import Users from "./pages/Users"; // later
 
@@ -103,6 +104,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <UploadLogs />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/archived-orders"
+            element={
+              <ProtectedRoute>
+                <ArchivedOrders />
               </ProtectedRoute>
             }
           />

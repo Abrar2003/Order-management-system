@@ -364,6 +364,7 @@ const Home = () => {
                       <th>Pending</th>
                       <th>On Time</th>
                       <th>Delayed</th>
+                      <th>Partial Shipped</th>
                       <th>Shipped</th>
                     </tr>
                   </thead>
@@ -397,6 +398,12 @@ const Home = () => {
                         </td>
                         <td
                           className="table-clickable"
+                          onClick={() => navigate(`/orders/${selectedBrand}/${summary.vendor}/partial-shipped`)}
+                        >
+                          {summary.totalPartialShipped}
+                        </td>
+                        <td
+                          className="table-clickable"
                           onClick={() => navigate(`/orders/${selectedBrand}/${summary.vendor}/Shipped`)}
                         >
                           {summary.totalShipped ?? 0}
@@ -420,6 +427,7 @@ const Home = () => {
                         <td>{vendorTotals.totalPending}</td>
                         <td>{vendorTotals.totalOnTime}</td>
                         <td>{vendorTotals.totalDelayedOrders}</td>
+                        <td>{vendorTotals.totalPartialShipped}</td>
                         <td>{vendorTotals.totalShipped}</td>
                       </tr>
                     </tfoot>

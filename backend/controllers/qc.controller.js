@@ -28,6 +28,7 @@ const QC_REQUEST_TYPES = Object.freeze({
   FULL: "FULL",
   AQL: "AQL",
 });
+const CLOSED_ORDER_STATUSES = ["Shipped", "Cancelled"];
 const normalizeQcRequestType = (value) => {
   const normalized = String(value || "")
     .trim()
@@ -1194,6 +1195,13 @@ exports.alignQC = async (req, res) => {
       order: order,
       "item.item_code": item.item_code,
     });
+    const orderRecord = await Order.findById(order);
+    if (!orderRecord) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+    if (CLOSED_ORDER_STATUSES.includes(String(orderRecord.status || ""))) {
+      return res.status(400).json({ message: "Order is already closed" });
+    }
 
     const clientDemand = Number(quantities?.client_demand);
     const quantityRequestedInput = Number(
@@ -1385,7 +1393,6 @@ exports.alignQC = async (req, res) => {
 
       await existingQC.save();
 
-      const orderRecord = await Order.findById(order);
       if (orderRecord) {
         const passedQty = Number(existingQC.quantities?.qc_passed || 0);
         const clientDemandQty = Number(existingQC.quantities?.client_demand || 0);
@@ -1411,8 +1418,6 @@ exports.alignQC = async (req, res) => {
         data: existingQC,
       });
     }
-
-    const orderRecord = await Order.findById(order);
 
     const requestHistoryEntry = {
       request_date: requestDateValue,
@@ -2001,7 +2006,7 @@ exports.updateQC = async (req, res) => {
 
       const orderId = qc?.order?._id || qc.order;
       const orderRecord = await Order.findById(orderId);
-      if (orderRecord && orderRecord.status !== "Shipped") {
+      if (orderRecord && !CLOSED_ORDER_STATUSES.includes(orderRecord.status)) {
         const passedQty = Number(qc.quantities?.qc_passed || 0);
         const clientDemandQty = Number(qc.quantities?.client_demand || 0);
 
@@ -2715,7 +2720,7 @@ exports.editInspectionRecords = async (req, res) => {
 
     const orderId = qc?.order?._id || qc.order;
     const orderRecord = await Order.findById(orderId);
-    if (orderRecord && orderRecord.status !== "Shipped") {
+    if (orderRecord && !CLOSED_ORDER_STATUSES.includes(orderRecord.status)) {
       orderRecord.status =
         clientDemandQty > 0 && totalPassed >= clientDemandQty
           ? "Inspection Done"
@@ -2875,7 +2880,7 @@ exports.deleteInspectionRecord = async (req, res) => {
 
     const orderId = qc?.order?._id || qc.order;
     const orderRecord = await Order.findById(orderId);
-    if (orderRecord && orderRecord.status !== "Shipped") {
+    if (orderRecord && !CLOSED_ORDER_STATUSES.includes(orderRecord.status)) {
       const passedQty = Number(qc.quantities?.qc_passed || 0);
       const clientDemandQty = Number(qc.quantities?.client_demand || 0);
 

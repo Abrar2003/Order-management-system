@@ -139,8 +139,8 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
 
     if (isAdmin) {
       const quantity = Number(form.quantity);
-      if (!Number.isFinite(quantity) || quantity <= 0) {
-        return "quantity must be a valid positive number";
+      if (!Number.isFinite(quantity) || quantity < 0) {
+        return "quantity must be a valid non-negative number";
       }
 
       for (let i = 0; i < form.shipment.length; i += 1) {
@@ -177,6 +177,9 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
       lines.push(
         `Order Quantity: ${toSafeNumber(order?.quantity)} -> ${payload.quantity}`,
       );
+      if (payload.quantity === 0) {
+        lines.push("This will archive the order because final quantity is 0.");
+      }
       lines.push(`Input Shipment Total: ${inputTotalShipped}`);
       lines.push(`Adjusted Shipment Total: ${adjustedShippedTotal}`);
       lines.push(`Adjusted Remaining: ${adjustedRemaining}`);
@@ -219,6 +222,19 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
         quantity: Number(entry?.quantity),
         remaining_remarks: String(entry?.remaining_remarks ?? "").trim(),
       }));
+
+      if (payload.quantity === 0) {
+        const archiveRemark = window.prompt(
+          "Quantity is 0. Enter archive remark to remove this order:",
+          "",
+        );
+        const normalizedArchiveRemark = String(archiveRemark || "").trim();
+        if (!normalizedArchiveRemark) {
+          setError("archive remark is required when quantity is 0");
+          return;
+        }
+        payload.archive_remark = normalizedArchiveRemark;
+      }
     }
 
     const confirmMessage = buildConfirmationMessage(payload);
@@ -274,7 +290,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                 <input
                   type="number"
                   className="form-control"
-                  min="1"
+                  min="0"
                   value={form.quantity}
                   disabled={!isAdmin}
                   onChange={(e) => setForm((prev) => ({ ...prev, quantity: e.target.value }))}
@@ -420,8 +436,9 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
 
             {isAdmin && (
               <div className="small text-secondary">
-                Any positive quantity is allowed. On save, shipment rows and QC
-                quantities are auto-adjusted to match the final quantity.
+                Any non-negative quantity is allowed. Setting quantity to 0 will
+                archive this order. On save, shipment rows and QC quantities are
+                auto-adjusted to match the final quantity.
               </div>
             )}
 

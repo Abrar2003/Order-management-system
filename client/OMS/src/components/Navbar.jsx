@@ -58,8 +58,12 @@ const Navbar = () => {
       links.push({ label: "Upload Logs", path: "/upload-logs" });
     }
 
+    if (canCreateUsers) {
+      links.push({ label: "Archived Orders", path: "/archived-orders" });
+    }
+
     return links;
-  }, [canAccessQc, canManageOrders]);
+  }, [canAccessQc, canManageOrders, canCreateUsers]);
 
   const handleLogout = () => {
     logout();

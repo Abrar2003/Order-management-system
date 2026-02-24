@@ -15,6 +15,9 @@ const {
   getShipmentsDb,
   exportShipmentsDb,
   editOrder,
+  archiveOrder,
+  getArchivedOrders,
+  syncZeroQuantityOrdersArchive,
   finalizeOrder,
   reSync,
 } = require("../controllers/order.controller");
@@ -80,6 +83,27 @@ router.patch(
 );
 
 router.patch(
+  "/archive-order/:id",
+  authenticate,
+  authorize("admin"),
+  archiveOrder,
+);
+
+router.get(
+  "/archived",
+  authenticate,
+  authorize("admin"),
+  getArchivedOrders,
+);
+
+router.post(
+  "/sync-zero-quantity-archive",
+  authenticate,
+  authorize("admin"),
+  syncZeroQuantityOrdersArchive,
+);
+
+router.patch(
   "/finalize-order/:id",
   authenticate,
   authorize("admin", "manager", "dev"),
@@ -93,7 +117,7 @@ router.get("/:brand/vendor-summary", authenticate, getVendorSummaryByBrand);
 router.get("/:brand/today-etd-orders", authenticate, getTodayEtdOrdersByBrand);
 
 // Get order by ID
-router.get("/order-by-id/:id", getOrderById);
+router.get("/order-by-id/:id", authenticate, getOrderById);
 
 // Resync the calendar
 router.post("/re-sync", reSync);

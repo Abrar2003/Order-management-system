@@ -4,6 +4,8 @@ import Navbar from "../components/Navbar";
 import { getUserFromToken } from "../auth/auth.utils";
 import AlignQCModal from "../components/AlignQcModal";
 import EditOrderModal from "../components/EditOrderModal";
+import ArchiveOrderModal from "../components/ArchiveOrderModal";
+import { archiveOrder } from "../services/orders.service";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatDateDDMMYYYY } from "../utils/date";
 import "../App.css";
@@ -12,6 +14,9 @@ const Orders = () => {
   const [orders, setOrders] = useState([]);
   const [alignContext, setAlignContext] = useState(null);
   const [editingOrder, setEditingOrder] = useState(null);
+  const [archiveTarget, setArchiveTarget] = useState(null);
+  const [archiving, setArchiving] = useState(false);
+  const [archiveError, setArchiveError] = useState("");
   const [loading, setLoading] = useState(true);
 
   const [searchParams] = useSearchParams();
@@ -26,6 +31,7 @@ const Orders = () => {
   const canEditOrder = ["admin", "manager"].includes(
     String(role || "").toLowerCase(),
   );
+  const canArchiveOrder = String(role || "").toLowerCase() === "admin";
 
   const orderId = searchParams.get("order_id");
 
@@ -81,6 +87,22 @@ const Orders = () => {
         : "FULL",
       openQuantity: Number.isFinite(openQuantity) ? openQuantity : 0,
     });
+  };
+
+  const handleArchiveConfirm = async (remark) => {
+    if (!archiveTarget?._id) return;
+
+    try {
+      setArchiving(true);
+      setArchiveError("");
+      await archiveOrder(archiveTarget._id, remark);
+      setArchiveTarget(null);
+      await fetchOrders();
+    } catch (err) {
+      setArchiveError(err?.response?.data?.message || "Failed to archive order.");
+    } finally {
+      setArchiving(false);
+    }
   };
 
   return (
@@ -144,6 +166,18 @@ const Orders = () => {
                                   onClick={() => setEditingOrder(order)}
                                 >
                                   Edit Order
+                                </button>
+                              )}
+                              {canArchiveOrder && (
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-danger btn-sm"
+                                  onClick={() => {
+                                    setArchiveError("");
+                                    setArchiveTarget(order);
+                                  }}
+                                >
+                                  Delete Order
                                 </button>
                               )}
 
@@ -225,6 +259,20 @@ const Orders = () => {
             setEditingOrder(null);
             fetchOrders();
           }}
+        />
+      )}
+
+      {archiveTarget && (
+        <ArchiveOrderModal
+          order={archiveTarget}
+          saving={archiving}
+          error={archiveError}
+          onClose={() => {
+            if (archiving) return;
+            setArchiveTarget(null);
+            setArchiveError("");
+          }}
+          onConfirm={handleArchiveConfirm}
         />
       )}
     </>

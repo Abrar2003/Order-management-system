@@ -105,6 +105,16 @@ const normalizeStatusList = (values = []) => {
   });
 };
 
+const ACTIVE_ORDER_MATCH = {
+  $and: [
+    { archived: { $ne: true } },
+    { status: { $ne: "Cancelled" } },
+  ],
+};
+
+const buildArchivedByName = (user) =>
+  String(user?.name || user?.username || user?.email || "").trim();
+
 const buildOrderListMatch = ({
   brand,
   vendor,
@@ -116,7 +126,7 @@ const buildOrderListMatch = ({
   includeStatus = true,
   includeOrder = true,
 } = {}) => {
-  const match = {};
+  const match = { ...ACTIVE_ORDER_MATCH };
   const normalizedBrand = normalizeFilterValue(brand);
   const normalizedVendor = normalizeFilterValue(vendor);
   const normalizedStatus = normalizeFilterValue(status);
@@ -147,7 +157,7 @@ const buildOrderListMatch = ({
 
   if (isDelayed) {
     match.ETD = { $lt: new Date() };
-    match.status = { $ne: "Shipped" };
+    match.status = { $nin: ["Shipped"] };
   }
 
   return match;
@@ -166,6 +176,7 @@ const buildShipmentMatch = ({
   includeStatus = true,
 } = {}) => {
   const match = {
+    ...ACTIVE_ORDER_MATCH,
     status: { $in: SHIPMENT_VISIBLE_STATUSES },
   };
 
@@ -375,6 +386,10 @@ const fitShipmentEntriesToOrderQuantity = (shipmentEntries = [], orderQuantity =
 };
 
 const computeOrderStatus = ({ orderQuantity, shippedQuantity, qcRecord }) => {
+  if (orderQuantity <= 0) {
+    return "Cancelled";
+  }
+
   if (shippedQuantity >= orderQuantity && orderQuantity > 0) {
     return "Shipped";
   }
@@ -866,7 +881,8 @@ exports.uploadOrders = async (req, res) => {
 
     const openOrders = uploadedVendors.length > 0
       ? await Order.find({
-        status: { $ne: "Shipped" },
+        ...ACTIVE_ORDER_MATCH,
+        status: { $nin: ["Shipped"] },
       })
         .select("vendor order_id")
         .lean()
@@ -945,6 +961,7 @@ exports.uploadOrders = async (req, res) => {
 
     if (orders.length > 0) {
       const existing = await Order.find({
+        ...ACTIVE_ORDER_MATCH,
         $or: orders.map((order) => ({
           order_id: order.order_id,
           "item.item_code": order.item.item_code,
@@ -1222,8 +1239,12 @@ exports.getOrders = async (req, res) => {
     const { page = 1, limit = 20, brand } = req.query;
 
     const skip = (page - 1) * limit;
+    const match = { ...ACTIVE_ORDER_MATCH };
+    if (brand) {
+      match.brand = brand;
+    }
 
-    const orders = await Order.find(brand ? { brand } : {})
+    const orders = await Order.find(match)
       .populate({
         path: "qc_record",
         populate: {
@@ -1235,7 +1256,7 @@ exports.getOrders = async (req, res) => {
       .skip(skip)
       .limit(Number(limit));
 
-    const total = await Order.countDocuments();
+    const total = await Order.countDocuments(match);
 
     res.json({
       data: orders,
@@ -1254,7 +1275,10 @@ exports.getOrders = async (req, res) => {
 // Get Order by ID
 exports.getOrderById = async (req, res) => {
   try {
-    const order = await Order.find({ order_id: req.params.id }).populate({
+    const order = await Order.find({
+      ...ACTIVE_ORDER_MATCH,
+      order_id: req.params.id,
+    }).populate({
       path: "qc_record",
       populate: {
         path: "inspector",
@@ -1280,7 +1304,10 @@ exports.getVendorSummaryByBrand = async (req, res) => {
 
     const result = await Order.aggregate([
       {
-        $match: { brand },
+        $match: {
+          ...ACTIVE_ORDER_MATCH,
+          brand,
+        },
       },
       {
         $addFields: {
@@ -1318,7 +1345,7 @@ exports.getVendorSummaryByBrand = async (req, res) => {
           isShippedOrder: {
             $eq: ["$minStatusRank", 4],
           },
-          isActiveOrder: { $ne: ["$minStatusRank", 4] },
+          isActiveOrder: { $not: [{ $in: ["$minStatusRank", [4]] }] },
         },
       },
       {
@@ -1472,6 +1499,7 @@ exports.getTodayEtdOrdersByBrand = async (req, res) => {
     }
 
     const matchStage = {
+      ...ACTIVE_ORDER_MATCH,
       ETD: {
         $gte: dayStart,
         $lt: dayEnd,
@@ -1678,7 +1706,7 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
         (statusValue) => statusValue.toLowerCase() === normalizedStatus,
       ) || null;
 
-    const matchStage = {};
+    const matchStage = { ...ACTIVE_ORDER_MATCH };
 
     if (brand) {
       matchStage.brand = brand;
@@ -1699,12 +1727,12 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
 
     if (isOnTimeStatus) {
       postGroupMatch.ETD = { $ne: null, $gte: today };
-      postGroupMatch.totalStatus = { $ne: "Shipped" };
+      postGroupMatch.totalStatus = { $nin: ["Shipped"] };
     }
 
     if (isDelayedFilter) {
       postGroupMatch.ETD = { $ne: null, $lt: today };
-      postGroupMatch.totalStatus = { $ne: "Shipped" };
+      postGroupMatch.totalStatus = { $nin: ["Shipped"] };
     }
 
     const aggregationPipeline = [
@@ -2001,7 +2029,7 @@ exports.getOrdersByFilters = async (req, res) => {
     const limit = parsePositiveInt(req.query.limit, 20);
     const skip = (page - 1) * limit;
 
-    const matchStage = {};
+    const matchStage = { ...ACTIVE_ORDER_MATCH };
 
     if (vendor) {
       matchStage.vendor = vendor;
@@ -2053,8 +2081,8 @@ exports.getOrdersByFilters = async (req, res) => {
 exports.getOrderSummary = async (req, res) => {
   try {
     const [vendors, brands] = await Promise.all([
-      Order.distinct("vendor"),
-      Order.distinct("brand"),
+      Order.distinct("vendor", ACTIVE_ORDER_MATCH),
+      Order.distinct("brand", ACTIVE_ORDER_MATCH),
     ]);
 
     const normalizeList = (values) =>
@@ -2258,6 +2286,7 @@ exports.getShipments = async (req, res) => {
     const statusesToInclude = ["Inspection Done", "Partial Shipped", "Shipped"];
 
     const orders = await Order.find({
+      ...ACTIVE_ORDER_MATCH,
       status: { $in: statusesToInclude },
     })
       .select(
@@ -2345,7 +2374,7 @@ exports.editOrder = async (req, res) => {
       return res.status(400).json({ message: "Invalid order id" });
     }
 
-    const order = await Order.findById(id);
+    const order = await Order.findOne({ _id: id, ...ACTIVE_ORDER_MATCH });
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
     }
@@ -2365,6 +2394,9 @@ exports.editOrder = async (req, res) => {
     const hasShipment = hasOwn(payload, "shipment");
     const requesterRole = String(req.user?.role || "").trim().toLowerCase();
     const isRequesterAdmin = requesterRole === "admin";
+    const archiveRemarkInput = String(
+      payload.archive_remark ?? payload.archiveRemark ?? "",
+    ).trim();
 
     if ((hasQuantity || hasShipment) && !isRequesterAdmin) {
       return res.status(403).json({
@@ -2394,9 +2426,9 @@ exports.editOrder = async (req, res) => {
       return res.status(400).json({ message: "item_code is required" });
     }
 
-    if (!Number.isFinite(nextQuantity) || nextQuantity <= 0) {
+    if (!Number.isFinite(nextQuantity) || nextQuantity < 0) {
       return res.status(400).json({
-        message: "quantity must be a valid positive number",
+        message: "quantity must be a valid non-negative number",
       });
     }
 
@@ -2404,12 +2436,59 @@ exports.editOrder = async (req, res) => {
       nextItemCode !== String(order?.item?.item_code || "").trim()
       && (await Order.exists({
         _id: { $ne: order._id },
+        ...ACTIVE_ORDER_MATCH,
         order_id: order.order_id,
         "item.item_code": nextItemCode,
       }))
     ) {
       return res.status(400).json({
         message: "Another item with the same order_id and item_code already exists",
+      });
+    }
+
+    if (nextQuantity === 0) {
+      if (!isRequesterAdmin) {
+        return res.status(403).json({
+          message: "Only admin can archive an order by setting quantity to 0",
+        });
+      }
+
+      if (!archiveRemarkInput) {
+        return res.status(400).json({
+          message: "archive remark is required when quantity is 0",
+        });
+      }
+
+      order.item = order.item || {};
+      order.brand = nextBrand;
+      order.vendor = nextVendor;
+      order.item.item_code = nextItemCode;
+      order.item.description = nextDescription;
+      order.quantity = 0;
+      order.shipment = [];
+      order.status = "Cancelled";
+      order.archived = true;
+      order.archived_remark = archiveRemarkInput;
+      order.archived_at = new Date();
+      order.archived_by = {
+        user: req.user?._id || null,
+        name: buildArchivedByName(req.user),
+      };
+      await order.save();
+
+      try {
+        await syncOrderGroup(oldGroup);
+      } catch (syncErr) {
+        console.error("Google Calendar sync failed after archiving via edit:", {
+          group: oldGroup,
+          error: syncErr?.message || String(syncErr),
+        });
+      }
+
+      return res.status(200).json({
+        message: "Order archived successfully",
+        archived: true,
+        data: order,
       });
     }
 
@@ -2542,18 +2621,259 @@ exports.editOrder = async (req, res) => {
   }
 };
 
+exports.archiveOrder = async (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid order id" });
+    }
+
+    const remark = String(
+      req.body?.remark ?? req.body?.archive_remark ?? req.body?.archiveRemark ?? "",
+    ).trim();
+    if (!remark) {
+      return res.status(400).json({ message: "archive remark is required" });
+    }
+
+    const order = await Order.findOne({ _id: id, ...ACTIVE_ORDER_MATCH });
+    if (!order) {
+      return res.status(404).json({ message: "Order not found or already archived" });
+    }
+
+    const group = {
+      order_id: order.order_id,
+      brand: order.brand,
+      vendor: order.vendor,
+    };
+
+    order.archived = true;
+    order.status = "Cancelled";
+    order.archived_remark = remark;
+    order.archived_at = new Date();
+    order.archived_by = {
+      user: req.user?._id || null,
+      name: buildArchivedByName(req.user),
+    };
+
+    await order.save();
+
+    try {
+      await syncOrderGroup(group);
+    } catch (syncErr) {
+      console.error("Google Calendar sync failed after archiving order:", {
+        group,
+        error: syncErr?.message || String(syncErr),
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Order archived successfully",
+      data: order,
+    });
+  } catch (error) {
+    console.error("Archive Order Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to archive order",
+      error: error.message,
+    });
+  }
+};
+
+exports.getArchivedOrders = async (req, res) => {
+  try {
+    const page = parsePositiveInt(req.query.page, 1);
+    const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
+    const skip = (page - 1) * limit;
+
+    const vendor = normalizeFilterValue(req.query.vendor);
+    const brand = normalizeFilterValue(req.query.brand);
+    const orderId = normalizeFilterValue(req.query.order_id ?? req.query.order);
+
+    const match = { archived: true };
+    if (vendor) {
+      match.vendor = vendor;
+    }
+    if (brand) {
+      match.brand = brand;
+    }
+    if (orderId) {
+      const escaped = escapeRegex(orderId);
+      match.order_id = { $regex: escaped, $options: "i" };
+    }
+
+    const [rows, totalRecords, vendorsRaw, brandsRaw] = await Promise.all([
+      Order.find(match)
+        .select(
+          "order_id item brand vendor quantity archived archived_remark archived_at archived_by updatedAt",
+        )
+        .sort({ archived_at: -1, updatedAt: -1, order_id: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Order.countDocuments(match),
+      Order.distinct("vendor", { archived: true }),
+      Order.distinct("brand", { archived: true }),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      data: rows,
+      pagination: {
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(totalRecords / limit)),
+        totalRecords,
+      },
+      filters: {
+        vendors: normalizeDistinctValues(vendorsRaw),
+        brands: normalizeDistinctValues(brandsRaw),
+      },
+    });
+  } catch (error) {
+    console.error("Get Archived Orders Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch archived orders",
+      error: error.message,
+    });
+  }
+};
+
+exports.syncZeroQuantityOrdersArchive = async (req, res) => {
+  try {
+    const remarkInput = String(
+      req.body?.remark ?? req.query?.remark ?? "",
+    ).trim();
+    const remark = remarkInput || "Auto-archived by sync route: quantity <= 0";
+    const actorName = buildArchivedByName(req.user) || "System";
+    const now = new Date();
+
+    const archiveFilter = {
+      quantity: { $lte: 0 },
+      archived: { $ne: true },
+    };
+
+    const candidates = await Order.find(archiveFilter)
+      .select("_id order_id brand vendor")
+      .lean();
+
+    if (candidates.length === 0) {
+      const [remarkBackfillResult, statusBackfillResult] = await Promise.all([
+        Order.updateMany(
+          {
+            quantity: { $lte: 0 },
+            archived: true,
+            $or: [
+              { archived_remark: { $exists: false } },
+              { archived_remark: null },
+              { archived_remark: "" },
+            ],
+          },
+          {
+            $set: {
+              archived_remark: remark,
+            },
+          },
+        ),
+        Order.updateMany(
+          {
+            quantity: { $lte: 0 },
+            archived: true,
+            status: { $ne: "Cancelled" },
+          },
+          {
+            $set: {
+              status: "Cancelled",
+            },
+          },
+        ),
+      ]);
+
+      return res.status(200).json({
+        success: true,
+        message: "No active zero-quantity orders found to archive",
+        archived_count: 0,
+        remark_backfilled_count: Number(remarkBackfillResult?.modifiedCount || 0),
+        status_backfilled_count: Number(statusBackfillResult?.modifiedCount || 0),
+        calendar_sync: [],
+      });
+    }
+
+    const candidateIds = candidates.map((entry) => entry._id);
+    const archiveResult = await Order.updateMany(
+      { _id: { $in: candidateIds } },
+      {
+        $set: {
+          archived: true,
+          status: "Cancelled",
+          archived_remark: remark,
+          archived_at: now,
+          archived_by: {
+            user: req.user?._id || null,
+            name: actorName,
+          },
+        },
+      },
+    );
+
+    const groupMap = new Map();
+    for (const order of candidates) {
+      const key = `${order.order_id}__${order.brand}__${order.vendor}`;
+      if (!groupMap.has(key)) {
+        groupMap.set(key, {
+          order_id: order.order_id,
+          brand: order.brand,
+          vendor: order.vendor,
+        });
+      }
+    }
+    const groupsToSync = [...groupMap.values()];
+    const syncSettled = await Promise.allSettled(
+      groupsToSync.map((group) => syncOrderGroup(group)),
+    );
+    const calendar_sync = syncSettled.map((entry, index) => {
+      const group = groupsToSync[index];
+      if (entry.status === "fulfilled") {
+        return { group, ok: true, result: entry.value };
+      }
+      return {
+        group,
+        ok: false,
+        error: entry.reason?.message || String(entry.reason),
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Zero-quantity orders archived successfully",
+      archived_count: Number(archiveResult?.modifiedCount || 0),
+      remark,
+      calendar_sync,
+    });
+  } catch (error) {
+    console.error("Sync Zero Quantity Archive Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to sync zero-quantity archived orders",
+      error: error.message,
+    });
+  }
+};
+
 exports.finalizeOrder = async (req, res) => {
   try {
     const { stuffing_date, container, quantity, remarks } = req.body;
 
-    const order = await Order.findById(req.params.id);
+    const order = await Order.findOne({ _id: req.params.id, ...ACTIVE_ORDER_MATCH });
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
     }
 
-    if (order.status === "Shipped") {
+    if (order.status === "Shipped" || order.status === "Cancelled") {
       return res.status(400).json({
-        message: "Order is already fully shipped",
+        message: "Order is already closed",
       });
     }
 
@@ -2659,7 +2979,7 @@ exports.reSync = async (req, res) => {
     );
 
     await Order.updateMany(
-      {},
+      ACTIVE_ORDER_MATCH,
       {
         $set: {
           "gcal.calendarId": null,
@@ -2671,6 +2991,9 @@ exports.reSync = async (req, res) => {
     );
 
     const groups = await Order.aggregate([
+      {
+        $match: ACTIVE_ORDER_MATCH,
+      },
       {
         $group: {
           _id: { order_id: "$order_id", brand: "$brand", vendor: "$vendor" },
@@ -2724,7 +3047,7 @@ exports.reSync = async (req, res) => {
               group,
               error: errorMessage,
             });
-            await Order.updateMany(group, {
+            await Order.updateMany({ ...group, ...ACTIVE_ORDER_MATCH }, {
               $set: {
                 "gcal.lastSyncedAt": new Date(),
                 "gcal.lastSyncError": errorMessage,
