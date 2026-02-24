@@ -134,7 +134,7 @@ const buildOrderListMatch = ({
     const loweredStatus = normalizedStatus.toLowerCase();
 
     if (loweredStatus === "pending") {
-      match.status = { $ne: "Shipped" };
+      match.status = { $nin: ["Partial Shipped", "Shipped"] };
     } else if (loweredStatus !== "delayed") {
       match.status = normalizedStatus;
     }
@@ -1284,47 +1284,17 @@ exports.getVendorSummaryByBrand = async (req, res) => {
       },
       {
         $addFields: {
-          lastShipmentDate: {
-            $ifNull: [
-              {
-                $max: {
-                  $map: {
-                    input: { $ifNull: ["$shipment", []] },
-                    as: "entry",
-                    in: "$$entry.stuffing_date",
-                  },
-                },
-              },
-              "$updatedAt",
-            ],
-          },
-        },
-      },
-      {
-        $addFields: {
-          etdDayKey: {
-            $cond: [
-              { $ifNull: ["$ETD", false] },
-              {
-                $dateToString: {
-                  format: "%Y-%m-%d",
-                  date: "$ETD",
-                },
-              },
-              null,
-            ],
-          },
-          shippedDayKey: {
-            $cond: [
-              { $ifNull: ["$lastShipmentDate", false] },
-              {
-                $dateToString: {
-                  format: "%Y-%m-%d",
-                  date: "$lastShipmentDate",
-                },
-              },
-              null,
-            ],
+          statusRank: {
+            $switch: {
+              branches: [
+                { case: { $eq: ["$status", "Pending"] }, then: 0 },
+                { case: { $eq: ["$status", "Under Inspection"] }, then: 1 },
+                { case: { $eq: ["$status", "Inspection Done"] }, then: 2 },
+                { case: { $eq: ["$status", "Partial Shipped"] }, then: 3 },
+                { case: { $eq: ["$status", "Shipped"] }, then: 4 },
+              ],
+              default: 99,
+            },
           },
         },
       },
@@ -1337,35 +1307,35 @@ exports.getVendorSummaryByBrand = async (req, res) => {
           vendor: { $first: "$vendor" },
           order_id: { $first: "$order_id" },
           etd: { $min: "$ETD" },
-          etdDayKey: { $min: "$etdDayKey" },
-          maxShippedDayKey: {
-            $max: {
-              $cond: [{ $eq: ["$status", "Shipped"] }, "$shippedDayKey", null],
-            },
-          },
-          hasNonShippedItem: {
-            $max: {
-              $cond: [{ $ne: ["$status", "Shipped"] }, 1, 0],
-            },
-          },
+          minStatusRank: { $min: "$statusRank" },
         },
       },
       {
         $addFields: {
+          // "Pending" bucket on Home combines pre-shipment states.
+          isPendingOrder: { $in: ["$minStatusRank", [0, 1, 2]] },
+          isPartialShippedOrder: { $eq: ["$minStatusRank", 3] },
           isShippedOrder: {
-            $eq: ["$hasNonShippedItem", 0],
+            $eq: ["$minStatusRank", 4],
           },
+          isActiveOrder: { $ne: ["$minStatusRank", 4] },
+        },
+      },
+      {
+        $addFields: {
           isDelayedOrder: {
             $and: [
-              { $ne: ["$hasNonShippedItem", 0] },
+              "$isActiveOrder",
+              { $ne: ["$etd", null] },
               { $lt: ["$etd", today] },
             ],
           },
-          isPendingOrder: {
-            $ne: ["$hasNonShippedItem", 0],
-          },
           isOnTimeOrder: {
-            $and: [{ $ne: ["$etd", null] }, { $gte: ["$etd", today] }],
+            $and: [
+              "$isActiveOrder",
+              { $ne: ["$etd", null] },
+              { $gte: ["$etd", today] },
+            ],
           },
         },
       },
@@ -1383,6 +1353,11 @@ exports.getVendorSummaryByBrand = async (req, res) => {
           pendingOrders: {
             $addToSet: {
               $cond: ["$isPendingOrder", "$order_id", "$$REMOVE"],
+            },
+          },
+          partialShippedOrders: {
+            $addToSet: {
+              $cond: ["$isPartialShippedOrder", "$order_id", "$$REMOVE"],
             },
           },
           shippedOrders: {
@@ -1406,12 +1381,13 @@ exports.getVendorSummaryByBrand = async (req, res) => {
           totalOrders: { $size: "$orders" },
           totalDelayedOrders: { $size: "$delayedOrders" },
           totalPending: { $size: "$pendingOrders" },
+          totalPartialShipped: { $size: "$partialShippedOrders" },
           totalShipped: { $size: "$shippedOrders" },
           totalOnTime: { $size: "$onTimeOrders" },
         },
       },
       {
-        $sort: { totalDelayedOrders: -1 },
+        $sort: { totalDelayedOrders: -1, vendor: 1 },
       },
     ]);
 
@@ -1548,6 +1524,11 @@ exports.getTodayEtdOrdersByBrand = async (req, res) => {
               $cond: [{ $eq: ["$status", "Inspection Done"] }, 1, 0],
             },
           },
+          partialShippedCount: {
+            $sum: {
+              $cond: [{ $eq: ["$status", "Partial Shipped"] }, 1, 0],
+            },
+          },
           shippedCount: {
             $sum: {
               $cond: [{ $eq: ["$status", "Shipped"] }, 1, 0],
@@ -1582,6 +1563,7 @@ exports.getTodayEtdOrdersByBrand = async (req, res) => {
           itemCount: 1,
           status: 1,
           inspectionDoneCount: 1,
+          partialShippedCount: 1,
           shippedCount: 1,
           pendingCount: 1,
           underInspectionCount: 1,
@@ -1699,7 +1681,7 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
 
     if (status) {
       if (normalizedStatus === "pending") {
-        matchStage.status = { $ne: "Shipped" };
+        matchStage.status = { $nin: ["Partial Shipped", "Shipped"] };
       } else if (!isOnTimeStatus) {
         matchStage.status = status;
       }
@@ -1734,11 +1716,8 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
         : []),
       {
         $addFields: {
-          hasPendingStatus: { $in: ["Pending", "$statuses"] },
-          uniqueStatusCount: { $size: "$statuses" },
-          firstStatus: { $arrayElemAt: ["$statuses", 0] },
-          maxStatusRank: {
-            $max: {
+          minStatusRank: {
+            $min: {
               $map: {
                 input: "$statuses",
                 as: "statusValue",
@@ -1751,7 +1730,7 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
                       { case: { $eq: ["$$statusValue", "Partial Shipped"] }, then: 3 },
                       { case: { $eq: ["$$statusValue", "Shipped"] }, then: 4 },
                     ],
-                    default: -1,
+                    default: 99,
                   },
                 },
               },
@@ -1764,12 +1743,11 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
           totalStatus: {
             $switch: {
               branches: [
-                { case: "$hasPendingStatus", then: "Pending" },
-                { case: { $eq: ["$uniqueStatusCount", 1] }, then: "$firstStatus" },
-                { case: { $eq: ["$maxStatusRank", 4] }, then: "Shipped" },
-                { case: { $eq: ["$maxStatusRank", 3] }, then: "Partial Shipped" },
-                { case: { $eq: ["$maxStatusRank", 2] }, then: "Inspection Done" },
-                { case: { $eq: ["$maxStatusRank", 1] }, then: "Under Inspection" },
+                { case: { $eq: ["$minStatusRank", 0] }, then: "Pending" },
+                { case: { $eq: ["$minStatusRank", 1] }, then: "Under Inspection" },
+                { case: { $eq: ["$minStatusRank", 2] }, then: "Inspection Done" },
+                { case: { $eq: ["$minStatusRank", 3] }, then: "Partial Shipped" },
+                { case: { $eq: ["$minStatusRank", 4] }, then: "Shipped" },
               ],
               default: "Pending",
             },
