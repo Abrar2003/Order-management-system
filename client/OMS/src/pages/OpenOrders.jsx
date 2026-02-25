@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
+import OrderExportModal from "../components/OrderExportModal";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatDateDDMMYYYY } from "../utils/date";
 import "../App.css";
@@ -122,6 +123,7 @@ const OpenOrders = () => {
     statuses: [],
     order_ids: [],
   });
+  const [showExportModal, setShowExportModal] = useState(false);
 
   const navigate = useNavigate();
   const token = localStorage.getItem("token");
@@ -311,7 +313,13 @@ const OpenOrders = () => {
             Back
           </button>
           <h2 className="h4 mb-0">Open Orders</h2>
-          <span className="d-none d-md-inline" />
+          <button
+            type="button"
+            className="btn btn-outline-primary btn-sm"
+            onClick={() => setShowExportModal(true)}
+          >
+            Export Orders
+          </button>
         </div>
 
         <div className="card om-card mb-3">
@@ -525,6 +533,15 @@ const OpenOrders = () => {
           </div>
         </div>
       </div>
+
+      {showExportModal && (
+        <OrderExportModal
+          onClose={() => setShowExportModal(false)}
+          filterOptions={filterOptions}
+          statusOptions={statusOptions}
+          defaultFilters={filters}
+        />
+      )}
     </>
   );
 };

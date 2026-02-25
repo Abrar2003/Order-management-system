@@ -28,6 +28,7 @@ const SHIPMENT_VISIBLE_STATUSES = [
   "Partial Shipped",
   "Shipped",
 ];
+const INVALID_DATE_RANGE = Symbol("invalid-date-range");
 
 const escapeRegex = (value = "") =>
   String(value)
@@ -315,6 +316,69 @@ const resolveClientDayRange = (dateValue, tzOffsetValue) => {
     dayStart: new Date(dayStartMs),
     dayEnd: new Date(dayEndMs),
   };
+};
+
+const resolveDateFilterBounds = (dateValue, tzOffsetValue) => {
+  const normalizedDate = normalizeFilterValue(dateValue);
+  if (!normalizedDate) return null;
+
+  const clientDayRange = resolveClientDayRange(normalizedDate, tzOffsetValue);
+  if (clientDayRange) return clientDayRange;
+
+  const parsedDate = parseDateLike(normalizedDate);
+  if (!(parsedDate instanceof Date) || Number.isNaN(parsedDate.getTime())) {
+    return INVALID_DATE_RANGE;
+  }
+
+  const dayStart = new Date(
+    Date.UTC(
+      parsedDate.getUTCFullYear(),
+      parsedDate.getUTCMonth(),
+      parsedDate.getUTCDate(),
+    ),
+  );
+  const dayEnd = new Date(dayStart);
+  dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
+
+  return { dayStart, dayEnd };
+};
+
+const buildDateRangeQuery = ({
+  fromValue,
+  toValue,
+  tzOffsetValue,
+  label,
+} = {}) => {
+  const hasFrom = normalizeFilterValue(fromValue) !== null;
+  const hasTo = normalizeFilterValue(toValue) !== null;
+
+  const fromBounds = hasFrom
+    ? resolveDateFilterBounds(fromValue, tzOffsetValue)
+    : null;
+  if (fromBounds === INVALID_DATE_RANGE) {
+    return { error: `${label} from date is invalid` };
+  }
+
+  const toBounds = hasTo
+    ? resolveDateFilterBounds(toValue, tzOffsetValue)
+    : null;
+  if (toBounds === INVALID_DATE_RANGE) {
+    return { error: `${label} to date is invalid` };
+  }
+
+  if (fromBounds && toBounds && fromBounds.dayStart >= toBounds.dayEnd) {
+    return { error: `${label} from date must be before or equal to to date` };
+  }
+
+  const range = {};
+  if (fromBounds) {
+    range.$gte = fromBounds.dayStart;
+  }
+  if (toBounds) {
+    range.$lt = toBounds.dayEnd;
+  }
+
+  return Object.keys(range).length > 0 ? { range } : { range: null };
 };
 
 const getShipmentQuantityTotal = (shipmentEntries = []) =>
@@ -1125,6 +1189,331 @@ exports.uploadOrders = async (req, res) => {
   } finally {
     // Cleanup uploaded file
     deleteFile(req.file?.path);
+  }
+};
+
+exports.createOrdersManually = async (req, res) => {
+  const uploadedById = req.user?._id && mongoose.Types.ObjectId.isValid(req.user._id)
+    ? req.user._id
+    : null;
+  const uploadMeta = {
+    uploaded_by: uploadedById,
+    uploaded_by_name: String(
+      req.user?.name || req.user?.username || req.user?.email || "",
+    ).trim(),
+    source_filename: "manual_entry",
+    source_size_bytes: 0,
+  };
+
+  let totalRowsReceived = 0;
+  let totalRowsUnique = 0;
+  let totalDistinctOrdersUploaded = 0;
+  let insertedCount = 0;
+  let duplicateEntries = [];
+  let uploadedVendors = [];
+  let vendorSummaries = [];
+
+  try {
+    const rows = Array.isArray(req.body?.orders) ? req.body.orders : [];
+    if (!rows.length) {
+      return res.status(400).json({ message: "orders array is required" });
+    }
+
+    totalRowsReceived = rows.length;
+
+    const normalizeValue = (value) => normalizeLooseString(value);
+    const normalizeKey = (orderId, itemCode) =>
+      `${normalizeOrderKey(orderId)}__${normalizeValue(itemCode).toUpperCase()}`;
+    const isProvided = (value) =>
+      !(
+        value === undefined
+        || value === null
+        || (typeof value === "string" && value.trim() === "")
+      );
+
+    duplicateEntries = [];
+    const seenKeys = new Set();
+
+    const orders = rows
+      .map((row) => {
+        const orderId = normalizeValue(row?.order_id ?? row?.orderId ?? row?.PO);
+        const itemCode = normalizeValue(row?.item_code ?? row?.itemCode);
+        const brand = normalizeValue(row?.brand);
+        const vendor = normalizeValue(row?.vendor);
+        const description = normalizeValue(row?.description);
+        const quantity = Number(row?.quantity);
+
+        if (!orderId || !itemCode || !brand || !vendor) {
+          duplicateEntries.push({
+            order_id: orderId,
+            item_code: itemCode,
+            reason: "missing_required_fields",
+          });
+          return null;
+        }
+
+        if (!Number.isFinite(quantity) || quantity <= 0) {
+          duplicateEntries.push({
+            order_id: orderId,
+            item_code: itemCode,
+            reason: "invalid_quantity",
+          });
+          return null;
+        }
+
+        const parsedEtd = isProvided(row?.ETD ?? row?.etd)
+          ? parseDateLike(row?.ETD ?? row?.etd)
+          : null;
+        if (isProvided(row?.ETD ?? row?.etd) && !parsedEtd) {
+          duplicateEntries.push({
+            order_id: orderId,
+            item_code: itemCode,
+            reason: "invalid_etd",
+          });
+          return null;
+        }
+
+        const parsedOrderDate = isProvided(row?.order_date ?? row?.orderDate)
+          ? parseDateLike(row?.order_date ?? row?.orderDate)
+          : null;
+        if (isProvided(row?.order_date ?? row?.orderDate) && !parsedOrderDate) {
+          duplicateEntries.push({
+            order_id: orderId,
+            item_code: itemCode,
+            reason: "invalid_order_date",
+          });
+          return null;
+        }
+
+        const key = normalizeKey(orderId, itemCode);
+        if (seenKeys.has(key)) {
+          duplicateEntries.push({
+            order_id: orderId,
+            item_code: itemCode,
+            reason: "duplicate_in_payload",
+          });
+          return null;
+        }
+
+        seenKeys.add(key);
+
+        return {
+          order_id: orderId,
+          item: {
+            item_code: itemCode,
+            description,
+          },
+          brand,
+          vendor,
+          ETD: parsedEtd || undefined,
+          order_date: parsedOrderDate || undefined,
+          status: "Pending",
+          quantity,
+        };
+      })
+      .filter(Boolean);
+
+    totalRowsUnique = orders.length;
+    totalDistinctOrdersUploaded = new Set(
+      orders.map((order) => normalizeOrderKey(order.order_id)).filter(Boolean),
+    ).size;
+
+    const vendorUploadMap = new Map();
+    for (const order of orders) {
+      const vendor = normalizeValue(order.vendor);
+      const vendorKey = normalizeVendorKey(vendor);
+      const orderId = normalizeValue(order.order_id);
+      const orderKey = normalizeOrderKey(orderId);
+
+      if (!vendorKey || !orderKey) continue;
+
+      if (!vendorUploadMap.has(vendorKey)) {
+        vendorUploadMap.set(vendorKey, {
+          vendor,
+          uploaded_order_ids: new Set(),
+          items_per_order_count: new Map(),
+        });
+      }
+
+      const vendorBucket = vendorUploadMap.get(vendorKey);
+      vendorBucket.uploaded_order_ids.add(orderId);
+      vendorBucket.items_per_order_count.set(
+        orderId,
+        Number(vendorBucket.items_per_order_count.get(orderId) || 0) + 1,
+      );
+    }
+
+    uploadedVendors = [...vendorUploadMap.values()]
+      .map((entry) => entry.vendor)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+
+    vendorSummaries = [...vendorUploadMap.values()]
+      .sort((a, b) => a.vendor.localeCompare(b.vendor))
+      .map((vendorEntry) => {
+        const uploadedOrderIds = [...vendorEntry.uploaded_order_ids].sort((a, b) =>
+          a.localeCompare(b),
+        );
+        const itemsPerOrder = uploadedOrderIds.map((orderId) => ({
+          order_id: orderId,
+          items_count: Number(vendorEntry.items_per_order_count.get(orderId) || 0),
+        }));
+
+        return {
+          vendor: vendorEntry.vendor,
+          uploaded_order_ids: uploadedOrderIds,
+          uploaded_orders_count: uploadedOrderIds.length,
+          uploaded_items_count: itemsPerOrder.reduce(
+            (sum, entry) => sum + Number(entry?.items_count || 0),
+            0,
+          ),
+          items_per_order: itemsPerOrder,
+          missing_open_order_ids: [],
+          missing_open_orders_count: 0,
+          remark: "",
+        };
+      });
+
+    let newOrders = orders;
+    if (orders.length > 0) {
+      const existing = await Order.find({
+        ...ACTIVE_ORDER_MATCH,
+        $or: orders.map((order) => ({
+          order_id: order.order_id,
+          "item.item_code": order.item.item_code,
+        })),
+      }).select("order_id item.item_code");
+
+      const existingKeys = new Set(
+        existing.map((order) =>
+          normalizeKey(order.order_id, order.item.item_code),
+        ),
+      );
+
+      newOrders = orders.filter((order) => {
+        const key = normalizeKey(order.order_id, order.item.item_code);
+        if (existingKeys.has(key)) {
+          duplicateEntries.push({
+            order_id: order.order_id,
+            item_code: order.item.item_code,
+            reason: "already_exists",
+          });
+          return false;
+        }
+        return true;
+      });
+    }
+
+    insertedCount = newOrders.length;
+
+    if (newOrders.length > 0) {
+      await Order.insertMany(newOrders);
+
+      try {
+        await upsertItemsFromOrders(newOrders);
+      } catch (itemSyncError) {
+        console.error("Item sync after manual add failed:", {
+          error: itemSyncError?.message || String(itemSyncError),
+        });
+      }
+
+      const groups = new Map();
+      for (const order of newOrders) {
+        const key = `${order.order_id}__${order.brand}__${order.vendor}`;
+        groups.set(key, {
+          order_id: order.order_id,
+          brand: order.brand,
+          vendor: order.vendor,
+        });
+      }
+
+      const uniqueGroups = [...groups.values()];
+      const concurrency = 5;
+      for (let i = 0; i < uniqueGroups.length; i += concurrency) {
+        const batch = uniqueGroups.slice(i, i + concurrency);
+        await Promise.all(
+          batch.map(async (group) => {
+            try {
+              await syncOrderGroup(group);
+            } catch (syncErr) {
+              console.error("Google Calendar sync failed for manual order group:", {
+                group,
+                error: syncErr?.message || String(syncErr),
+              });
+            }
+          }),
+        );
+      }
+    }
+
+    const remarks = [];
+    if (duplicateEntries.length > 0) {
+      remarks.push(
+        `${duplicateEntries.length} row(s) were skipped due to duplicates, missing fields, invalid quantity, or invalid dates.`,
+      );
+    }
+
+    const uploadLog = await UploadLog.create({
+      ...uploadMeta,
+      total_rows_received: totalRowsReceived,
+      total_rows_unique: totalRowsUnique,
+      inserted_item_rows: insertedCount,
+      duplicate_count: duplicateEntries.length,
+      duplicate_entries: duplicateEntries,
+      uploaded_vendors: uploadedVendors,
+      total_distinct_orders_uploaded: totalDistinctOrdersUploaded,
+      vendor_summaries: vendorSummaries,
+      conflicts: [],
+      remarks,
+      status: "success",
+    });
+
+    const hasInsertions = newOrders.length > 0;
+    const hasDuplicates = duplicateEntries.length > 0;
+    const responseMessage = hasInsertions
+      ? hasDuplicates
+        ? "Orders added with duplicates skipped"
+        : "Orders added successfully"
+      : "No new orders to add";
+
+    return res.status(hasInsertions ? 201 : 200).json({
+      message: responseMessage,
+      inserted_count: insertedCount,
+      duplicate_count: duplicateEntries.length,
+      duplicate_entries: duplicateEntries,
+      total_distinct_orders_uploaded: totalDistinctOrdersUploaded,
+      vendor_summaries: vendorSummaries,
+      upload_log_id: uploadLog?._id || null,
+    });
+  } catch (error) {
+    console.error("Manual order add failed:", error);
+
+    try {
+      await UploadLog.create({
+        ...uploadMeta,
+        total_rows_received: totalRowsReceived,
+        total_rows_unique: totalRowsUnique,
+        inserted_item_rows: insertedCount,
+        duplicate_count: duplicateEntries.length,
+        duplicate_entries: duplicateEntries,
+        uploaded_vendors: uploadedVendors,
+        total_distinct_orders_uploaded: totalDistinctOrdersUploaded,
+        vendor_summaries: vendorSummaries,
+        conflicts: [],
+        remarks: [],
+        status: "failed",
+        error_message: error?.message || String(error),
+      });
+    } catch (uploadLogError) {
+      console.error("Manual upload log save failed:", {
+        error: uploadLogError?.message || String(uploadLogError),
+      });
+    }
+
+    return res.status(500).json({
+      message: "Manual order add failed",
+      error: error.message,
+    });
   }
 };
 
@@ -1995,6 +2384,384 @@ exports.getOrdersByFiltersDb = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch filtered orders",
+      error: error.message,
+    });
+  }
+};
+
+exports.exportOrdersDb = async (req, res) => {
+  try {
+    const brand = req.query.brand;
+    const vendor = req.query.vendor;
+    const status = req.query.status;
+    const order = req.query.order ?? req.query.order_id;
+    const orderDateFrom = req.query.order_date_from ?? req.query.orderDateFrom;
+    const orderDateTo = req.query.order_date_to ?? req.query.orderDateTo;
+    const etdFrom = req.query.etd_from ?? req.query.etdFrom;
+    const etdTo = req.query.etd_to ?? req.query.etdTo;
+    const tzOffsetValue =
+      req.query.tz_offset_minutes ?? req.query.tzOffset ?? req.query.tz_offset;
+    const exportFormat =
+      String(req.query.format || "").trim().toLowerCase() === "csv"
+        ? "csv"
+        : "xlsx";
+
+    const normalizedSortToken = normalizeFilterValue(req.query.sort);
+    const rawSortBy = normalizeFilterValue(
+      req.query.sort_by ?? req.query.sortBy,
+    );
+    const sortTokenDirection = String(normalizedSortToken || "").startsWith("-")
+      ? "desc"
+      : String(normalizedSortToken || "").startsWith("+")
+        ? "asc"
+        : null;
+    const normalizedSortKey = String(
+      rawSortBy
+      || String(normalizedSortToken || "").replace(/^[+-]/, "")
+      || "order_date",
+    )
+      .trim()
+      .replace(/[^a-zA-Z0-9_]/g, "")
+      .toLowerCase();
+    const sortAliases = {
+      po: "order_id",
+      order: "order_id",
+      orderid: "order_id",
+      order_id: "order_id",
+      orderdate: "order_date",
+      order_date: "order_date",
+      etd: "ETD",
+      date: "order_date",
+    };
+    const sortBy = sortAliases[normalizedSortKey] || "order_date";
+    const explicitSortOrder = String(
+      req.query.sort_order ?? req.query.sortOrder ?? "",
+    )
+      .trim()
+      .toLowerCase();
+    let sortOrder = sortBy === "order_id" ? "asc" : "desc";
+    if (sortTokenDirection) {
+      sortOrder = sortTokenDirection;
+    }
+    if (explicitSortOrder === "asc" || explicitSortOrder === "desc") {
+      sortOrder = explicitSortOrder;
+    }
+    const sortDirection = sortOrder === "asc" ? 1 : -1;
+    const sortStage = {
+      [sortBy]: sortDirection,
+      ...(sortBy !== "order_date" ? { order_date: -1 } : {}),
+      ...(sortBy !== "order_id" ? { order_id: 1 } : {}),
+    };
+
+    const matchStage = buildOrderListMatch({
+      brand,
+      vendor,
+      status,
+      order,
+    });
+
+    const orderDateRangeQuery = buildDateRangeQuery({
+      fromValue: orderDateFrom,
+      toValue: orderDateTo,
+      tzOffsetValue,
+      label: "Order date",
+    });
+    if (orderDateRangeQuery.error) {
+      return res.status(400).json({
+        success: false,
+        message: orderDateRangeQuery.error,
+      });
+    }
+    if (orderDateRangeQuery.range) {
+      matchStage.order_date = orderDateRangeQuery.range;
+    }
+
+    const etdRangeQuery = buildDateRangeQuery({
+      fromValue: etdFrom,
+      toValue: etdTo,
+      tzOffsetValue,
+      label: "ETD",
+    });
+    if (etdRangeQuery.error) {
+      return res.status(400).json({
+        success: false,
+        message: etdRangeQuery.error,
+      });
+    }
+    if (etdRangeQuery.range) {
+      matchStage.ETD = etdRangeQuery.range;
+    }
+
+    const orders = await Order.find(matchStage)
+      .select(
+        "order_id brand vendor ETD order_date status quantity item shipment qc_record",
+      )
+      .populate({
+        path: "qc_record",
+        select:
+          "request_date request_type last_inspected_date item inspector cbm inspection_dates request_history inspection_record labels quantities remarks",
+        populate: {
+          path: "inspector",
+          select: "name email role",
+        },
+      })
+      .sort(sortStage)
+      .lean();
+
+    const toSafeNumber = (value) => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    const normalizeText = (value) => String(value ?? "").trim();
+
+    const resolveInspectorLabel = (inspectorValue) => {
+      if (!inspectorValue) return "";
+      if (typeof inspectorValue === "string") return inspectorValue.trim();
+      return normalizeText(
+        inspectorValue?.name || inspectorValue?.email || inspectorValue?._id,
+      );
+    };
+
+    const stringifyList = (values = []) =>
+      (Array.isArray(values) ? values : [])
+        .map((value) => normalizeText(value))
+        .filter(Boolean)
+        .join(" | ");
+
+    const stringifyRequestHistory = (history = []) =>
+      (Array.isArray(history) ? history : [])
+        .map((entry) => {
+          const requestDate = normalizeText(entry?.request_date);
+          const requestType = normalizeText(entry?.request_type);
+          const quantityRequested = toSafeNumber(entry?.quantity_requested);
+          const statusText = normalizeText(entry?.status);
+          return [requestDate, requestType, `qty ${quantityRequested}`, statusText]
+            .filter(Boolean)
+            .join(" / ");
+        })
+        .filter(Boolean)
+        .join(" | ");
+
+    const columns = [
+      { key: "order_id", header: "Order ID" },
+      { key: "brand", header: "Brand" },
+      { key: "vendor", header: "Vendor" },
+      { key: "status", header: "Order Status" },
+      { key: "order_quantity", header: "Order Quantity" },
+      { key: "order_date", header: "Order Date" },
+      { key: "etd", header: "ETD" },
+      { key: "item_code", header: "Item Code" },
+      { key: "item_description", header: "Item Description" },
+      { key: "qc_item_code", header: "QC Item Code" },
+      { key: "qc_item_description", header: "QC Item Description" },
+      { key: "qc_available", header: "QC Available" },
+      { key: "qc_request_date", header: "QC Request Date" },
+      { key: "qc_request_type", header: "QC Request Type" },
+      { key: "qc_last_inspected_date", header: "QC Last Inspected Date" },
+      { key: "qc_inspector", header: "QC Inspector" },
+      { key: "qc_client_demand", header: "QC Client Demand" },
+      { key: "qc_quantity_requested", header: "QC Quantity Requested" },
+      { key: "qc_vendor_provision", header: "QC Vendor Provision" },
+      { key: "qc_checked", header: "QC Checked" },
+      { key: "qc_passed", header: "QC Passed" },
+      { key: "qc_pending", header: "QC Pending" },
+      { key: "qc_rejected", header: "QC Rejected" },
+      { key: "qc_labels", header: "QC Labels" },
+      { key: "qc_inspection_dates", header: "QC Inspection Dates" },
+      { key: "qc_request_history", header: "QC Request History" },
+      { key: "qc_inspection_records_count", header: "QC Inspection Records Count" },
+      { key: "qc_cbm_top", header: "QC CBM Top" },
+      { key: "qc_cbm_bottom", header: "QC CBM Bottom" },
+      { key: "qc_cbm_total", header: "QC CBM Total" },
+      { key: "qc_remarks", header: "QC Remarks" },
+      { key: "shipment_count", header: "Shipment Count" },
+      { key: "total_shipped_quantity", header: "Total Shipped Quantity" },
+      { key: "shipping_pending_quantity", header: "Shipping Pending Quantity" },
+      { key: "shipment_index", header: "Shipment Index" },
+      { key: "shipment_stuffing_date", header: "Shipment Stuffing Date" },
+      { key: "shipment_container", header: "Shipment Container" },
+      { key: "shipment_quantity", header: "Shipment Quantity" },
+      { key: "shipment_pending", header: "Shipment Pending" },
+      { key: "shipment_remarks", header: "Shipment Remarks" },
+    ];
+
+    const exportRows = orders.flatMap((orderEntry) => {
+      const orderQuantity = Math.max(0, toSafeNumber(orderEntry?.quantity));
+      const shipmentEntries = Array.isArray(orderEntry?.shipment)
+        ? orderEntry.shipment
+        : [];
+      const totalShippedQuantity = shipmentEntries.reduce(
+        (sum, shipmentEntry) =>
+          sum + Math.max(0, toSafeNumber(shipmentEntry?.quantity)),
+        0,
+      );
+      const shippingPendingQuantity = Math.max(
+        0,
+        orderQuantity - totalShippedQuantity,
+      );
+      const qcRecord = orderEntry?.qc_record || null;
+      const hasQcRecord = Boolean(qcRecord);
+      const qcQuantities = qcRecord?.quantities || {};
+      const inspectionDates = stringifyList(qcRecord?.inspection_dates);
+      const requestHistory = stringifyRequestHistory(qcRecord?.request_history);
+      const qcLabels = (Array.isArray(qcRecord?.labels) ? qcRecord.labels : [])
+        .map((labelValue) => Number(labelValue))
+        .filter((labelValue) => Number.isFinite(labelValue))
+        .join(", ");
+
+      const baseRow = {
+        order_id: normalizeText(orderEntry?.order_id),
+        brand: normalizeText(orderEntry?.brand),
+        vendor: normalizeText(orderEntry?.vendor),
+        status: normalizeText(orderEntry?.status),
+        order_quantity: orderQuantity,
+        order_date: formatDateDDMMYYYY(orderEntry?.order_date, ""),
+        etd: formatDateDDMMYYYY(orderEntry?.ETD, ""),
+        item_code: normalizeText(orderEntry?.item?.item_code),
+        item_description: normalizeText(orderEntry?.item?.description),
+        qc_item_code: normalizeText(qcRecord?.item?.item_code),
+        qc_item_description: normalizeText(qcRecord?.item?.description),
+        qc_available: hasQcRecord ? "Yes" : "No",
+        qc_request_date: normalizeText(qcRecord?.request_date),
+        qc_request_type: normalizeText(qcRecord?.request_type),
+        qc_last_inspected_date: normalizeText(qcRecord?.last_inspected_date),
+        qc_inspector: resolveInspectorLabel(qcRecord?.inspector),
+        qc_client_demand: hasQcRecord
+          ? toSafeNumber(qcQuantities?.client_demand)
+          : "",
+        qc_quantity_requested: hasQcRecord
+          ? toSafeNumber(qcQuantities?.quantity_requested)
+          : "",
+        qc_vendor_provision: hasQcRecord
+          ? toSafeNumber(qcQuantities?.vendor_provision)
+          : "",
+        qc_checked: hasQcRecord ? toSafeNumber(qcQuantities?.qc_checked) : "",
+        qc_passed: hasQcRecord ? toSafeNumber(qcQuantities?.qc_passed) : "",
+        qc_pending: hasQcRecord ? toSafeNumber(qcQuantities?.pending) : "",
+        qc_rejected: hasQcRecord ? toSafeNumber(qcQuantities?.qc_rejected) : "",
+        qc_labels: qcLabels,
+        qc_inspection_dates: inspectionDates,
+        qc_request_history: requestHistory,
+        qc_inspection_records_count: hasQcRecord
+          ? Array.isArray(qcRecord?.inspection_record)
+            ? qcRecord.inspection_record.length
+            : 0
+          : "",
+        qc_cbm_top: normalizeText(qcRecord?.cbm?.top),
+        qc_cbm_bottom: normalizeText(qcRecord?.cbm?.bottom),
+        qc_cbm_total: normalizeText(qcRecord?.cbm?.total),
+        qc_remarks: normalizeText(qcRecord?.remarks),
+        shipment_count: shipmentEntries.length,
+        total_shipped_quantity: totalShippedQuantity,
+        shipping_pending_quantity: shippingPendingQuantity,
+      };
+
+      if (shipmentEntries.length === 0) {
+        return [
+          {
+            ...baseRow,
+            shipment_index: "",
+            shipment_stuffing_date: "",
+            shipment_container: "",
+            shipment_quantity: 0,
+            shipment_pending: shippingPendingQuantity,
+            shipment_remarks: "",
+          },
+        ];
+      }
+
+      let cumulativeShipped = 0;
+      return shipmentEntries.map((shipmentEntry, shipmentIndex) => {
+        const shipmentQuantity = Math.max(
+          0,
+          toSafeNumber(shipmentEntry?.quantity),
+        );
+        cumulativeShipped += shipmentQuantity;
+        const pendingValue = toSafeNumber(shipmentEntry?.pending);
+        const pendingFromOrder = Math.max(0, orderQuantity - cumulativeShipped);
+
+        return {
+          ...baseRow,
+          shipment_index: shipmentIndex + 1,
+          shipment_stuffing_date: formatDateDDMMYYYY(
+            shipmentEntry?.stuffing_date,
+            "",
+          ),
+          shipment_container: normalizeText(shipmentEntry?.container),
+          shipment_quantity: shipmentQuantity,
+          shipment_pending: Number.isFinite(Number(shipmentEntry?.pending))
+            ? pendingValue
+            : pendingFromOrder,
+          shipment_remarks: normalizeText(shipmentEntry?.remaining_remarks),
+        };
+      });
+    });
+
+    const headerRow = columns.map((column) => column.header);
+    const dataRows = exportRows.map((row) =>
+      columns.map((column) => row[column.key] ?? ""),
+    );
+
+    const fileDate = new Date().toISOString().slice(0, 10);
+    const baseFileName = `orders-${fileDate}`;
+
+    if (exportFormat === "csv") {
+      const escapeCsvValue = (value) => {
+        const normalized = String(value ?? "")
+          .replace(/\r\n/g, "\n")
+          .replace(/\r/g, "\n");
+        if (/["\n,]/.test(normalized)) {
+          return `"${normalized.replace(/"/g, "\"\"")}"`;
+        }
+        return normalized;
+      };
+
+      const csvLines = [headerRow, ...dataRows].map((row) =>
+        row.map((cell) => escapeCsvValue(cell)).join(","),
+      );
+      const csvContent = `\uFEFF${csvLines.join("\r\n")}`;
+      const fileName = `${baseFileName}.csv`;
+
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${fileName}"`,
+      );
+      return res.status(200).send(csvContent);
+    }
+
+    const worksheet = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
+    worksheet["!cols"] = columns.map((column, columnIndex) => {
+      const maxDataLength = Math.max(
+        ...dataRows.map((row) => String(row[columnIndex] ?? "").length),
+        column.header.length,
+      );
+      return { wch: Math.min(50, Math.max(12, maxDataLength + 2)) };
+    });
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Orders Details");
+    const fileBuffer = XLSX.write(workbook, {
+      type: "buffer",
+      bookType: "xlsx",
+    });
+    const fileName = `${baseFileName}.xlsx`;
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${fileName}"`,
+    );
+    return res.status(200).send(fileBuffer);
+  } catch (error) {
+    console.error("Export Orders DB Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to export orders",
       error: error.message,
     });
   }

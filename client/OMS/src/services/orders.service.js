@@ -15,6 +15,22 @@ export const uploadOrders = async (file) => {
   return res.data;
 };
 
+export const createManualOrders = async (orders = []) => {
+  const token = localStorage.getItem("token");
+
+  const res = await axios.post(
+    "/orders/manual-orders",
+    { orders },
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  return res.data;
+};
+
 export const getUploadLogs = async (params = {}) => {
   const token = localStorage.getItem("token");
   const res = await axios.get("/orders/upload-logs", {
@@ -25,6 +41,20 @@ export const getUploadLogs = async (params = {}) => {
   });
 
   return res.data;
+};
+
+export const exportOrders = async (params = {}, format = "xlsx") => {
+  const token = localStorage.getItem("token");
+  return axios.get("/orders/export", {
+    responseType: "blob",
+    params: {
+      ...params,
+      format: String(format || "").trim().toLowerCase() === "csv" ? "csv" : "xlsx",
+    },
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
 };
 
 export const editOrder = async (id, payload) => {

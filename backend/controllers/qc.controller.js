@@ -29,6 +29,27 @@ const QC_REQUEST_TYPES = Object.freeze({
   AQL: "AQL",
 });
 const CLOSED_ORDER_STATUSES = ["Shipped", "Cancelled"];
+const ACTIVE_ORDER_MATCH = {
+  archived: { $ne: true },
+  status: { $ne: "Cancelled" },
+};
+const buildActiveOrderLookupStage = (asField = "order") => ({
+  $lookup: {
+    from: "orders",
+    let: { orderId: "$order" },
+    pipeline: [
+      {
+        $match: {
+          $expr: { $eq: ["$_id", "$$orderId"] },
+        },
+      },
+      {
+        $match: ACTIVE_ORDER_MATCH,
+      },
+    ],
+    as: asField,
+  },
+});
 const normalizeQcRequestType = (value) => {
   const normalized = String(value || "")
     .trim()
@@ -678,6 +699,8 @@ exports.getQCList = async (req, res) => {
 
     const pipeline = [
       { $match: match },
+      buildActiveOrderLookupStage("order"),
+      { $unwind: { path: "$order", preserveNullAndEmptyArrays: false } },
       {
         $addFields: {
           request_date_sort_key: {
@@ -701,16 +724,6 @@ exports.getQCList = async (req, res) => {
               },
             },
             { $unwind: { path: "$inspector", preserveNullAndEmptyArrays: true } },
-
-            {
-              $lookup: {
-                from: "orders",
-                localField: "order",
-                foreignField: "_id",
-                as: "order",
-              },
-            },
-            { $unwind: { path: "$order", preserveNullAndEmptyArrays: true } },
             {
               $lookup: {
                 from: "inspections",
@@ -754,18 +767,27 @@ exports.getQCList = async (req, res) => {
 
     const [result, vendorsRaw, ordersRaw, itemCodesRaw] = await Promise.all([
       QC.aggregate(pipeline).allowDiskUse(true),
-      QC.distinct(
-        "order_meta.vendor",
-        buildQcListMatch({ ...filterInput, includeVendor: false }),
-      ),
-      QC.distinct(
-        "order_meta.order_id",
-        buildQcListMatch({ ...filterInput, includeOrder: false }),
-      ),
-      QC.distinct(
-        "item.item_code",
-        buildQcListMatch({ ...filterInput, includeSearch: false }),
-      ),
+      QC.aggregate([
+        { $match: buildQcListMatch({ ...filterInput, includeVendor: false }) },
+        buildActiveOrderLookupStage("order"),
+        { $unwind: { path: "$order", preserveNullAndEmptyArrays: false } },
+        { $group: { _id: "$order_meta.vendor" } },
+        { $project: { _id: 0, value: "$_id" } },
+      ]).allowDiskUse(true),
+      QC.aggregate([
+        { $match: buildQcListMatch({ ...filterInput, includeOrder: false }) },
+        buildActiveOrderLookupStage("order"),
+        { $unwind: { path: "$order", preserveNullAndEmptyArrays: false } },
+        { $group: { _id: "$order_meta.order_id" } },
+        { $project: { _id: 0, value: "$_id" } },
+      ]).allowDiskUse(true),
+      QC.aggregate([
+        { $match: buildQcListMatch({ ...filterInput, includeSearch: false }) },
+        buildActiveOrderLookupStage("order"),
+        { $unwind: { path: "$order", preserveNullAndEmptyArrays: false } },
+        { $group: { _id: "$item.item_code" } },
+        { $project: { _id: 0, value: "$_id" } },
+      ]).allowDiskUse(true),
     ]);
 
     const data = result?.[0]?.data || [];
@@ -783,9 +805,9 @@ exports.getQCList = async (req, res) => {
         sort_order: sortOrder,
       },
       filters: {
-        vendors: normalizeDistinctValues(vendorsRaw),
-        orders: normalizeDistinctValues(ordersRaw),
-        item_codes: normalizeDistinctValues(itemCodesRaw),
+        vendors: normalizeDistinctValues(vendorsRaw.map((entry) => entry?.value)),
+        orders: normalizeDistinctValues(ordersRaw.map((entry) => entry?.value)),
+        item_codes: normalizeDistinctValues(itemCodesRaw.map((entry) => entry?.value)),
       },
     });
   } catch (err) {
@@ -861,15 +883,8 @@ exports.exportQCList = async (req, res) => {
         },
       },
       { $unwind: { path: "$createdByUser", preserveNullAndEmptyArrays: true } },
-      {
-        $lookup: {
-          from: "orders",
-          localField: "order",
-          foreignField: "_id",
-          as: "order",
-        },
-      },
-      { $unwind: { path: "$order", preserveNullAndEmptyArrays: true } },
+      buildActiveOrderLookupStage("order"),
+      { $unwind: { path: "$order", preserveNullAndEmptyArrays: false } },
       {
         $project: {
           request_date_sort_key: 0,
@@ -2261,7 +2276,11 @@ exports.getDailyReport = async (req, res) => {
       QC.find({ request_date: reportDate })
         .select("request_date order_meta item inspector quantities order")
         .populate("inspector", "name email role")
-        .populate("order", "order_id status quantity brand vendor")
+        .populate({
+          path: "order",
+          select: "order_id status quantity brand vendor archived",
+          match: ACTIVE_ORDER_MATCH,
+        })
         .sort({ createdAt: -1 })
         .lean(),
       Inspection.find({ inspection_date: { $in: inspectionDateVariants } })
@@ -2272,13 +2291,20 @@ exports.getDailyReport = async (req, res) => {
         .populate({
           path: "qc",
           select: "item order_meta order cbm request_date",
-          populate: { path: "order", select: "order_id status quantity brand vendor" },
+          populate: {
+            path: "order",
+            select: "order_id status quantity brand vendor archived",
+            match: ACTIVE_ORDER_MATCH,
+          },
         })
         .sort({ createdAt: -1 })
         .lean(),
     ]);
 
-    const aligned_requests = alignedRequestsRaw.map((qc) => ({
+    const alignedRequests = alignedRequestsRaw.filter((qc) => qc?.order);
+    const inspections = inspectionsRaw.filter((inspection) => inspection?.qc?.order);
+
+    const aligned_requests = alignedRequests.map((qc) => ({
       qc_id: qc._id,
       request_date: qc.request_date,
       order_id: qc?.order_meta?.order_id || qc?.order?.order_id || "N/A",
@@ -2306,7 +2332,7 @@ exports.getDailyReport = async (req, res) => {
     const inspectorCbmKeyMap = new Map();
     const globalCbmKeys = new Set();
     let totalInspectedCbm = 0;
-    for (const inspection of inspectionsRaw) {
+    for (const inspection of inspections) {
       const inspectorId = String(
         inspection?.inspector?._id || inspection?.inspector || "unassigned",
       );
@@ -2407,7 +2433,7 @@ exports.getDailyReport = async (req, res) => {
       summary: {
         aligned_requests_count: sortedAlignedRequests.length,
         inspectors_count: inspector_compiled.length,
-        inspections_count: inspectionsRaw.length,
+        inspections_count: inspections.length,
         total_inspected_quantity: totalInspectedQty,
         total_inspected_cbm: totalInspectedCbm,
       },
@@ -2439,14 +2465,17 @@ exports.getQCById = async (req, res) => {
       .populate("createdBy", "name email role")
       .populate("request_history.inspector", "name email role")
       .populate("request_history.createdBy", "name email role")
-      .populate("order")
+      .populate({
+        path: "order",
+        match: ACTIVE_ORDER_MATCH,
+      })
       .populate({
         path: "inspection_record",
         options: { sort: { inspection_date: -1, createdAt: -1 } },
         populate: { path: "inspector", select: "name email role" },
       });
 
-    if (!qc) {
+    if (!qc || !qc.order) {
       return res.status(404).json({ message: "QC record not found" });
     }
 

@@ -4,6 +4,7 @@ const authenticate = require("../middlewares/auth.middleware");
 const authorize = require("../middlewares/authorize.middleware");
 const {
   uploadOrders,
+  createOrdersManually,
   getUploadLogs,
   getOrders,
   getOrdersByFiltersDb,
@@ -14,6 +15,7 @@ const {
   getOrderSummary,
   getShipmentsDb,
   exportShipmentsDb,
+  exportOrdersDb,
   editOrder,
   archiveOrder,
   getArchivedOrders,
@@ -30,6 +32,13 @@ router.post(
   authorize("admin", "manager", "dev", "Dev"),
   upload.single("file"),
   uploadOrders,
+);
+
+router.post(
+  "/manual-orders",
+  authenticate,
+  authorize("admin", "manager", "dev", "Dev"),
+  createOrdersManually,
 );
 router.get(
   "/upload-logs",
@@ -58,6 +67,7 @@ router.get(
 
 // get orders with optional filters via query params
 router.get("/filters", authenticate, getOrdersByFiltersDb);
+router.get("/export", authenticate, exportOrdersDb);
 
 // List shipped/partially shipped/inspection-done items with latest shipment details
 router.get(
