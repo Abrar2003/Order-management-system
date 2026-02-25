@@ -10,6 +10,34 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatDateDDMMYYYY } from "../utils/date";
 import "../App.css";
 
+const toSafeNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const getShippingPendingQuantity = (order) => {
+  const totalQuantity = Math.max(0, toSafeNumber(order?.quantity));
+  const shippedQuantity = (Array.isArray(order?.shipment) ? order.shipment : []).reduce(
+    (sum, shipmentEntry) => sum + Math.max(0, toSafeNumber(shipmentEntry?.quantity)),
+    0,
+  );
+
+  return Math.max(0, totalQuantity - shippedQuantity);
+};
+
+const getPendingDisplayQuantity = (order) => {
+  const normalizedStatus = String(order?.status || "").trim().toLowerCase();
+  if (normalizedStatus === "partial shipped") {
+    return getShippingPendingQuantity(order);
+  }
+
+  if (order?.qc_record) {
+    return toSafeNumber(order?.qc_record?.quantities?.pending);
+  }
+
+  return Math.max(0, toSafeNumber(order?.quantity));
+};
+
 const Orders = () => {
   const [orders, setOrders] = useState([]);
   const [alignContext, setAlignContext] = useState(null);
@@ -154,7 +182,7 @@ const Orders = () => {
                         <td>{order.item?.item_code}</td>
                         <td>{order.item?.description}</td>
                         <td>{order.quantity}</td>
-                        <td>{order?.qc_record?.quantities?.pending ?? order.qc_record ? order.qc_record?.quantities?.pending : order.quantity}</td>
+                        <td>{getPendingDisplayQuantity(order)}</td>
                         <td>{order.status}</td>
                         {canManageOrders && (
                           <td>

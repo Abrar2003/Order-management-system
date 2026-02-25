@@ -72,6 +72,7 @@ const Home = () => {
           acc.totalOnTime += toNumber(summary?.totalOnTime);
           acc.totalDelayedOrders += toNumber(summary?.totalDelayedOrders);
           acc.totalShipped += toNumber(summary?.totalShipped);
+          acc.totalPartialShipped += toNumber(summary?.totalPartialShipped);
           return acc;
         },
         {
@@ -79,6 +80,7 @@ const Home = () => {
           totalPending: 0,
           totalOnTime: 0,
           totalDelayedOrders: 0,
+          totalPartialShipped: 0,
           totalShipped: 0,
         },
       ),
@@ -398,9 +400,9 @@ const Home = () => {
                         </td>
                         <td
                           className="table-clickable"
-                          onClick={() => navigate(`/orders/${selectedBrand}/${summary.vendor}/partial-shipped`)}
+                          onClick={() => navigate(`/orders/${selectedBrand}/${summary.vendor}/Partial Shipped`)}
                         >
-                          {summary.totalPartialShipped}
+                          {summary.totalPartialShipped ?? 0}
                         </td>
                         <td
                           className="table-clickable"
@@ -413,7 +415,7 @@ const Home = () => {
 
                     {vendorSummary.length === 0 && (
                       <tr>
-                        <td colSpan="6" className="text-center py-4">
+                        <td colSpan="7" className="text-center py-4">
                           No orders found for {selectedBrand}
                         </td>
                       </tr>

@@ -1719,7 +1719,7 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
     const postGroupMatch = {};
     if (normalizedStatus === "pending") {
       postGroupMatch.totalStatus = {
-        $in: ["Pending", "Under Inspection", "Inspection Done"],
+        $in: ["Pending", "Under Inspection", "Inspection Done", "Partial Shipped"],
       };
     } else if (exactOrderStatus) {
       postGroupMatch.totalStatus = exactOrderStatus;
