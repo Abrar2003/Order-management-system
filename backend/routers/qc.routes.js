@@ -25,7 +25,7 @@ router.post(
 router.patch(
   "/update-qc/:id",
   auth,
-  authorize("QC", "admin"),
+  authorize("QC", "admin", "manager"),
   qcController.updateQC
 );
 

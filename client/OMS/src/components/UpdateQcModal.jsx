@@ -21,11 +21,28 @@ const NON_NEGATIVE_FIELDS = new Set([
 
 const createEmptyLabelRange = () => ({ start: "", end: "" });
 
+const toLocalIsoDate = (dateValue) => {
+  const date = dateValue instanceof Date ? dateValue : new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const user = getUserFromToken();
   const currentUserId = user?.id || user?._id || "";
+  const normalizedRole = String(user?.role || "").trim().toLowerCase();
   const isQcUser = user?.role === "QC";
-    const canManageLabels = ["admin", "manager"].includes(user?.role);
+  const canManageLabels = ["admin", "manager"].includes(user?.role);
+  const isManager = normalizedRole === "manager";
+  const todayIso = toLocalIsoDate(new Date());
+  const managerMinAllowedDateIso = (() => {
+    const minDate = new Date();
+    minDate.setDate(minDate.getDate() - 2);
+    return toLocalIsoDate(minDate);
+  })();
 
 
   const [form, setForm] = useState({
@@ -303,6 +320,17 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     }
     if (lastInspectedDateValue && (!isValidDDMMYYYY(lastInspectedDateValue) || !lastInspectedDateIso)) {
       setError("Last inspected date must be in DD/MM/YYYY format.");
+      return;
+    }
+    if (
+      isManager &&
+      lastInspectedDateIso &&
+      (
+        lastInspectedDateIso < managerMinAllowedDateIso
+        || lastInspectedDateIso > todayIso
+      )
+    ) {
+      setError("Manager can update QC only for today and previous 2 days.");
       return;
     }
 
@@ -623,6 +651,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   className="form-control"
                   name="last_inspected_date"
                   value={toISODateString(form.last_inspected_date)}
+                  min={isManager ? managerMinAllowedDateIso : undefined}
+                  max={isManager ? todayIso : undefined}
                   onChange={(e) =>
                     setForm((prev) => ({
                       ...prev,

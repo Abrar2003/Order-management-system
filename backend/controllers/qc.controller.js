@@ -29,6 +29,7 @@ const QC_REQUEST_TYPES = Object.freeze({
   AQL: "AQL",
 });
 const CLOSED_ORDER_STATUSES = ["Shipped", "Cancelled"];
+const MANAGER_BACKDATED_UPDATE_DAYS = 2;
 const ACTIVE_ORDER_MATCH = {
   archived: { $ne: true },
   status: { $ne: "Cancelled" },
@@ -140,6 +141,34 @@ const toISODateString = (value) => {
     parsed.getUTCMonth() + 1,
     parsed.getUTCDate(),
   );
+};
+
+const parseIsoDateToUtcDate = (isoDate) => {
+  const normalized = toISODateString(isoDate);
+  if (!normalized) return null;
+  const [year, month, day] = normalized.split("-").map(Number);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return null;
+  }
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+};
+
+const isIsoDateWithinPastDaysInclusive = (isoDate, daysBack = 0) => {
+  const target = parseIsoDateToUtcDate(isoDate);
+  if (!target) return false;
+
+  const now = new Date();
+  const todayUtc = new Date(Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+  ));
+  const minAllowedUtc = new Date(todayUtc);
+  minAllowedUtc.setUTCDate(minAllowedUtc.getUTCDate() - Math.max(0, Number(daysBack) || 0));
+
+  return target >= minAllowedUtc && target <= todayUtc;
 };
 
 const formatDateDDMMYYYY = (value, fallback = "") => {
@@ -1555,12 +1584,15 @@ exports.updateQC = async (req, res) => {
         return res.status(404).json({ message: "QC record not found" });
       }
 
-      const isAdmin = req.user.role === "admin";
+      const normalizedRole = String(req.user?.role || "").trim().toLowerCase();
+      const isAdmin = normalizedRole === "admin";
+      const isManager = normalizedRole === "manager";
+      const hasElevatedAccess = isAdmin || isManager;
       const isInspectionDone = qc?.order?.status === "Inspection Done";
 
-      if (!isAdmin && isInspectionDone) {
+      if (!hasElevatedAccess && isInspectionDone) {
         return res.status(403).json({
-          message: "Only admin can update this QC record after inspection is done",
+          message: "Only admin or manager can update this QC record after inspection is done",
         });
       }
 
@@ -1578,7 +1610,7 @@ exports.updateQC = async (req, res) => {
         Number(qc.quantities?.vendor_provision || 0) > 0 ||
         normalizeLabels(qc.labels).length > 0;
 
-      if (!isAdmin) {
+      if (!hasElevatedAccess) {
         const currentUserId = req.user._id.toString();
         const isAssignedToCurrentUser =
           existingInspectorId && existingInspectorId === currentUserId;
@@ -1662,6 +1694,17 @@ exports.updateQC = async (req, res) => {
         if (!normalizedLastInspectedDate) {
           return res.status(400).json({
             message: "last_inspected_date must be a valid date in DD/MM/YYYY or YYYY-MM-DD format",
+          });
+        }
+        if (
+          isManager &&
+          !isIsoDateWithinPastDaysInclusive(
+            normalizedLastInspectedDate,
+            MANAGER_BACKDATED_UPDATE_DAYS,
+          )
+        ) {
+          return res.status(403).json({
+            message: "Manager can update QC only for today and previous 2 days",
           });
         }
         qc.last_inspected_date = normalizedLastInspectedDate;
@@ -1976,6 +2019,17 @@ exports.updateQC = async (req, res) => {
         if (!inspectionDateForRecord) {
           return res.status(400).json({
             message: "last_inspected_date is required for inspection records",
+          });
+        }
+        if (
+          isManager &&
+          !isIsoDateWithinPastDaysInclusive(
+            inspectionDateForRecord,
+            MANAGER_BACKDATED_UPDATE_DAYS,
+          )
+        ) {
+          return res.status(403).json({
+            message: "Manager can update QC only for today and previous 2 days",
           });
         }
 
