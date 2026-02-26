@@ -6,6 +6,7 @@ import {
   toDDMMYYYYInputValue,
   toISODateString,
 } from "../utils/date";
+import { getUserFromToken } from "../auth/auth.utils";
 import "../App.css";
 
 const normalizeRequestType = (value) =>
@@ -15,6 +16,15 @@ const computeAqlSampleQuantity = (quantity) => {
   const parsedQuantity = Number(quantity);
   if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) return 0;
   return Math.max(1, Math.ceil(parsedQuantity * 0.1));
+};
+
+const toLocalIsoDate = (dateValue) => {
+  const date = dateValue instanceof Date ? dateValue : new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 };
 
 const AlignQCModal = ({
@@ -27,6 +37,15 @@ const AlignQCModal = ({
   initialRequestType = "FULL",
   openQuantity = null,
 }) => {
+  const user = getUserFromToken();
+  const normalizedRole = String(user?.role || "").trim().toLowerCase();
+  const isManager = normalizedRole === "manager";
+  const todayIso = toLocalIsoDate(new Date());
+  const managerMinAllowedDateIso = (() => {
+    const minDate = new Date();
+    minDate.setDate(minDate.getDate() - 2);
+    return toLocalIsoDate(minDate);
+  })();
   const [inspectors, setInspectors] = useState([]);
   const [inspector, setInspector] = useState(
     initialInspector ? String(initialInspector) : "",
@@ -103,6 +122,16 @@ const AlignQCModal = ({
     }
     if (!isValidDDMMYYYY(request_date) || !requestDateIso) {
       alert("Request date must be in DD/MM/YYYY format.");
+      return;
+    }
+    if (
+      isManager &&
+      (
+        requestDateIso < managerMinAllowedDateIso
+        || requestDateIso > todayIso
+      )
+    ) {
+      alert("Manager can align QC only for today and previous 2 days.");
       return;
     }
 
@@ -242,6 +271,8 @@ const AlignQCModal = ({
                 lang="en-GB"
                 className="form-control"
                 value={toISODateString(request_date)}
+                min={isManager ? managerMinAllowedDateIso : undefined}
+                max={isManager ? todayIso : undefined}
                 onChange={(e) => setReqDate(toDDMMYYYYInputValue(e.target.value, ""))}
               />
             </div>

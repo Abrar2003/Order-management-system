@@ -29,7 +29,7 @@ const QC_REQUEST_TYPES = Object.freeze({
   AQL: "AQL",
 });
 const CLOSED_ORDER_STATUSES = ["Shipped", "Cancelled"];
-const MANAGER_BACKDATED_UPDATE_DAYS = 2;
+const MANAGER_ALLOWED_PAST_DAYS = 2;
 const ACTIVE_ORDER_MATCH = {
   archived: { $ne: true },
   status: { $ne: "Cancelled" },
@@ -1312,17 +1312,25 @@ exports.alignQC = async (req, res) => {
       return res.status(400).json({ message: "request date must be a valid date" });
     }
 
-    const requestDateDay = new Date(parsedRequestDate);
-    requestDateDay.setHours(0, 0, 0, 0);
+    const normalizedRole = String(req.user?.role || "").trim().toLowerCase();
+    const isAdmin = normalizedRole === "admin";
+    const isManager = normalizedRole === "manager";
 
-    const todayDay = new Date();
-    todayDay.setHours(0, 0, 0, 0);
-
-    const isBackdatedRequest = requestDateDay < todayDay;
-
-    if (isBackdatedRequest && req.user.role !== "admin") {
+    if (
+      isManager &&
+      !isIsoDateWithinPastDaysInclusive(
+        requestDateValue,
+        MANAGER_ALLOWED_PAST_DAYS,
+      )
+    ) {
       return res.status(403).json({
-        message: "Only admin can align backdated QC requests",
+        message: "Manager can align QC only for today and previous 2 days",
+      });
+    }
+
+    if (!isAdmin && !isManager) {
+      return res.status(403).json({
+        message: "You are not authorized to align QC requests",
       });
     }
 
@@ -1700,7 +1708,7 @@ exports.updateQC = async (req, res) => {
           isManager &&
           !isIsoDateWithinPastDaysInclusive(
             normalizedLastInspectedDate,
-            MANAGER_BACKDATED_UPDATE_DAYS,
+            MANAGER_ALLOWED_PAST_DAYS,
           )
         ) {
           return res.status(403).json({
@@ -2025,7 +2033,7 @@ exports.updateQC = async (req, res) => {
           isManager &&
           !isIsoDateWithinPastDaysInclusive(
             inspectionDateForRecord,
-            MANAGER_BACKDATED_UPDATE_DAYS,
+            MANAGER_ALLOWED_PAST_DAYS,
           )
         ) {
           return res.status(403).json({
