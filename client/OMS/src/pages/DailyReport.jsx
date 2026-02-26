@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import {
@@ -9,7 +9,33 @@ import {
   toDDMMYYYYInputValue,
   toISODateString,
 } from "../utils/date";
+import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import "../App.css";
+
+const DEFAULT_ALIGNED_SORT_BY = "request_date";
+const DEFAULT_INSPECTION_SORT_BY = "inspection_date";
+
+const normalizeQueryText = (value) => String(value || "").trim();
+
+const parseAlignedSortBy = (value) => {
+  const normalized = normalizeQueryText(value).toLowerCase();
+  if (normalized === "order_id") return "order_id";
+  if (normalized === "request_date") return "request_date";
+  return DEFAULT_ALIGNED_SORT_BY;
+};
+
+const parseInspectionSortBy = (value) => {
+  const normalized = normalizeQueryText(value).toLowerCase();
+  if (normalized === "order_id") return "order_id";
+  if (normalized === "inspection_date") return "inspection_date";
+  return DEFAULT_INSPECTION_SORT_BY;
+};
+
+const parseSortOrder = (value, sortBy) => {
+  const normalized = normalizeQueryText(value).toLowerCase();
+  if (normalized === "asc" || normalized === "desc") return normalized;
+  return sortBy === "order_id" ? "asc" : "desc";
+};
 
 const formatCbm = (value) => {
   const parsed = Number(value);
@@ -19,13 +45,34 @@ const formatCbm = (value) => {
 
 const DailyReport = () => {
   const navigate = useNavigate();
-  const [selectedDate, setSelectedDate] = useState(getTodayDDMMYYYY());
+  const [searchParams, setSearchParams] = useSearchParams();
+  useRememberSearchParams(searchParams, setSearchParams, "daily-report");
+  const initialSelectedDate = toDDMMYYYYInputValue(
+    normalizeQueryText(searchParams.get("date")),
+    getTodayDDMMYYYY(),
+  );
+  const initialAlignedSortBy = parseAlignedSortBy(
+    searchParams.get("aligned_sort_by"),
+  );
+  const initialAlignedSortOrder = parseSortOrder(
+    searchParams.get("aligned_sort_order"),
+    initialAlignedSortBy,
+  );
+  const initialInspectionSortBy = parseInspectionSortBy(
+    searchParams.get("inspection_sort_by"),
+  );
+  const initialInspectionSortOrder = parseSortOrder(
+    searchParams.get("inspection_sort_order"),
+    initialInspectionSortBy,
+  );
+
+  const [selectedDate, setSelectedDate] = useState(initialSelectedDate);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [alignedSortBy, setAlignedSortBy] = useState("request_date");
-  const [alignedSortOrder, setAlignedSortOrder] = useState("desc");
-  const [inspectionSortBy, setInspectionSortBy] = useState("inspection_date");
-  const [inspectionSortOrder, setInspectionSortOrder] = useState("desc");
+  const [alignedSortBy, setAlignedSortBy] = useState(initialAlignedSortBy);
+  const [alignedSortOrder, setAlignedSortOrder] = useState(initialAlignedSortOrder);
+  const [inspectionSortBy, setInspectionSortBy] = useState(initialInspectionSortBy);
+  const [inspectionSortOrder, setInspectionSortOrder] = useState(initialInspectionSortOrder);
   const [report, setReport] = useState({
     date: getTodayDDMMYYYY(),
     summary: {
@@ -129,6 +176,68 @@ const DailyReport = () => {
   useEffect(() => {
     fetchDailyReport();
   }, [fetchDailyReport]);
+
+  useEffect(() => {
+    const nextSelectedDate = toDDMMYYYYInputValue(
+      normalizeQueryText(searchParams.get("date")),
+      getTodayDDMMYYYY(),
+    );
+    const nextAlignedSortBy = parseAlignedSortBy(
+      searchParams.get("aligned_sort_by"),
+    );
+    const nextAlignedSortOrder = parseSortOrder(
+      searchParams.get("aligned_sort_order"),
+      nextAlignedSortBy,
+    );
+    const nextInspectionSortBy = parseInspectionSortBy(
+      searchParams.get("inspection_sort_by"),
+    );
+    const nextInspectionSortOrder = parseSortOrder(
+      searchParams.get("inspection_sort_order"),
+      nextInspectionSortBy,
+    );
+
+    setSelectedDate((prev) => (prev === nextSelectedDate ? prev : nextSelectedDate));
+    setAlignedSortBy((prev) => (prev === nextAlignedSortBy ? prev : nextAlignedSortBy));
+    setAlignedSortOrder((prev) => (prev === nextAlignedSortOrder ? prev : nextAlignedSortOrder));
+    setInspectionSortBy((prev) => (prev === nextInspectionSortBy ? prev : nextInspectionSortBy));
+    setInspectionSortOrder((prev) => (
+      prev === nextInspectionSortOrder ? prev : nextInspectionSortOrder
+    ));
+  }, [searchParams]);
+
+  useEffect(() => {
+    const next = new URLSearchParams();
+    const dateValue = normalizeQueryText(selectedDate);
+
+    if (dateValue) next.set("date", dateValue);
+    if (alignedSortBy !== DEFAULT_ALIGNED_SORT_BY) {
+      next.set("aligned_sort_by", alignedSortBy);
+    }
+    if (alignedSortOrder !== parseSortOrder("", alignedSortBy)) {
+      next.set("aligned_sort_order", alignedSortOrder);
+    }
+    if (inspectionSortBy !== DEFAULT_INSPECTION_SORT_BY) {
+      next.set("inspection_sort_by", inspectionSortBy);
+    }
+    if (inspectionSortOrder !== parseSortOrder("", inspectionSortBy)) {
+      next.set("inspection_sort_order", inspectionSortOrder);
+    }
+
+    const nextQuery = next.toString();
+    const currentQuery = searchParams.toString();
+    if (nextQuery !== currentQuery) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [
+    alignedSortBy,
+    alignedSortOrder,
+    inspectionSortBy,
+    inspectionSortOrder,
+    searchParams,
+    selectedDate,
+    setSearchParams,
+  ]);
 
   const summary = useMemo(
     () =>

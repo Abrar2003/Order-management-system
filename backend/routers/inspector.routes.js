@@ -15,6 +15,12 @@ router.use(authorize("manager", "admin"));
 router.get("/", inspectorController.getAllInspectors);
 
 /**
+ * POST /inspectors/sync
+ * Sync missing inspector records for QC users
+ */
+router.post("/sync", inspectorController.syncInspectors);
+
+/**
  * GET /inspectors/:id
  * Get inspector details by ID
  */

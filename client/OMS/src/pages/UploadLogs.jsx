@@ -1,11 +1,32 @@
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import { getUploadLogs } from "../services/orders.service";
 import { formatDateDDMMYYYY } from "../utils/date";
+import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import "../App.css";
 
 const DEFAULT_LIMIT = 20;
+const LIMIT_OPTIONS = [10, 20, 50, 100];
+
+const parsePositiveInt = (value, fallback = 1) => {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return parsed;
+};
+
+const parseLimit = (value) => {
+  const parsed = parsePositiveInt(value, DEFAULT_LIMIT);
+  return LIMIT_OPTIONS.includes(parsed) ? parsed : DEFAULT_LIMIT;
+};
+
+const normalizeFilterParam = (value, fallback = "all") => {
+  const cleaned = String(value || "").trim();
+  if (!cleaned) return fallback;
+  return cleaned;
+};
+
+const normalizeSearchParam = (value) => String(value || "").trim();
 
 const useDebouncedValue = (value, delay = 300) => {
   const [debounced, setDebounced] = useState(value);
@@ -26,16 +47,26 @@ const STATUS_LABELS = {
 
 const UploadLogs = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  useRememberSearchParams(searchParams, setSearchParams, "upload-logs");
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const [vendorFilter, setVendorFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [orderIdInput, setOrderIdInput] = useState("");
-  const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(DEFAULT_LIMIT);
+  const [vendorFilter, setVendorFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("vendor"), "all"),
+  );
+  const [statusFilter, setStatusFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("status"), "all"),
+  );
+  const [orderIdInput, setOrderIdInput] = useState(() =>
+    normalizeSearchParam(searchParams.get("order_id")),
+  );
+  const [page, setPage] = useState(() =>
+    parsePositiveInt(searchParams.get("page"), 1),
+  );
+  const [limit, setLimit] = useState(() => parseLimit(searchParams.get("limit")));
 
   const [filters, setFilters] = useState({
     vendors: [],
@@ -108,6 +139,45 @@ const UploadLogs = () => {
   useEffect(() => {
     fetchLogs();
   }, [fetchLogs]);
+
+  useEffect(() => {
+    const nextVendorFilter = normalizeFilterParam(searchParams.get("vendor"), "all");
+    const nextStatusFilter = normalizeFilterParam(searchParams.get("status"), "all");
+    const nextOrderIdInput = normalizeSearchParam(searchParams.get("order_id"));
+    const nextPage = parsePositiveInt(searchParams.get("page"), 1);
+    const nextLimit = parseLimit(searchParams.get("limit"));
+
+    setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
+    setStatusFilter((prev) => (prev === nextStatusFilter ? prev : nextStatusFilter));
+    setOrderIdInput((prev) => (prev === nextOrderIdInput ? prev : nextOrderIdInput));
+    setPage((prev) => (prev === nextPage ? prev : nextPage));
+    setLimit((prev) => (prev === nextLimit ? prev : nextLimit));
+  }, [searchParams]);
+
+  useEffect(() => {
+    const next = new URLSearchParams();
+    const orderIdValue = normalizeSearchParam(orderIdInput);
+
+    if (orderIdValue) next.set("order_id", orderIdValue);
+    if (vendorFilter && vendorFilter !== "all") next.set("vendor", vendorFilter);
+    if (statusFilter && statusFilter !== "all") next.set("status", statusFilter);
+    if (page > 1) next.set("page", String(page));
+    if (limit !== DEFAULT_LIMIT) next.set("limit", String(limit));
+
+    const nextQuery = next.toString();
+    const currentQuery = searchParams.toString();
+    if (nextQuery !== currentQuery) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [
+    limit,
+    orderIdInput,
+    page,
+    searchParams,
+    setSearchParams,
+    statusFilter,
+    vendorFilter,
+  ]);
 
   return (
     <>

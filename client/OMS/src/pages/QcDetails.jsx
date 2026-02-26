@@ -128,6 +128,22 @@ const QcDetails = () => {
     }
     return "/qc";
   }, [location.state]);
+  const hasQcListBackState = useMemo(() => {
+    const fromQcList = String(location.state?.fromQcList || "").trim();
+    return (
+      Boolean(fromQcList) &&
+      fromQcList.startsWith("/qc") &&
+      !fromQcList.startsWith("/qc/")
+    );
+  }, [location.state]);
+
+  const handleBackNavigation = useCallback(() => {
+    if (hasQcListBackState) {
+      navigate(-1);
+      return;
+    }
+    navigate(backTarget, { replace: true });
+  }, [backTarget, hasQcListBackState, navigate]);
 
   const labelRange = sortedLabels.length
     ? `${sortedLabels[0]} - ${sortedLabels[sortedLabels.length - 1]}`
@@ -342,7 +358,7 @@ const QcDetails = () => {
           <button
             type="button"
             className="btn btn-outline-secondary btn-sm"
-            onClick={() => navigate(backTarget)}
+            onClick={handleBackNavigation}
           >
             Back
           </button>

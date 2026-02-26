@@ -3,7 +3,23 @@ import axios from "../api/axios";
 import Navbar from "../components/Navbar";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatDateDDMMYYYY } from "../utils/date";
+import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import "../App.css";
+
+const DEFAULT_TODAY_ETD_SORT_BY = "ETD";
+
+const parseTodayEtdSortBy = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "order_id") return "order_id";
+  if (normalized === "etd") return "ETD";
+  return DEFAULT_TODAY_ETD_SORT_BY;
+};
+
+const parseTodayEtdSortOrder = (value, sortBy = DEFAULT_TODAY_ETD_SORT_BY) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "asc" || normalized === "desc") return normalized;
+  return sortBy === "order_id" ? "asc" : "desc";
+};
 
 const getBrandName = (brandObj) =>
   String(brandObj?.name || brandObj?.brand || "").trim();
@@ -16,23 +32,42 @@ const toNumber = (value) => {
 const Home = () => {
   const token = localStorage.getItem("token");
   const [brands, setBrands] = useState([]);
-  const [selectedBrand, setSelectedBrand] = useState(null);
   const [vendorSummary, setVendorSummary] = useState([]);
   const [todayEtdOrders, setTodayEtdOrders] = useState([]);
   const [todayEtdLoading, setTodayEtdLoading] = useState(false);
   const [todayEtdError, setTodayEtdError] = useState("");
-  const [todayEtdSortBy, setTodayEtdSortBy] = useState("ETD");
-  const [todayEtdSortOrder, setTodayEtdSortOrder] = useState("desc");
+  const [searchParams, setSearchParams] = useSearchParams();
+  useRememberSearchParams(searchParams, setSearchParams, "home");
+  const initialTodayEtdSortBy = parseTodayEtdSortBy(
+    searchParams.get("today_sort_by"),
+  );
+  const initialTodayEtdSortOrder = parseTodayEtdSortOrder(
+    searchParams.get("today_sort_order"),
+    initialTodayEtdSortBy,
+  );
+  const [todayEtdSortBy, setTodayEtdSortBy] = useState(initialTodayEtdSortBy);
+  const [todayEtdSortOrder, setTodayEtdSortOrder] = useState(initialTodayEtdSortOrder);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(false);
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [calendarEmbedUrl, setCalendarEmbedUrl] = useState("");
   const [calendarError, setCalendarError] = useState("");
+  const [syncedQuery, setSyncedQuery] = useState(null);
 
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
   const selectedBrandParam = String(searchParams.get("brand") || "").trim();
+  const selectedBrand = useMemo(() => {
+    const availableBrandNames = brands
+      .map((brand) => getBrandName(brand))
+      .filter(Boolean);
+    if (availableBrandNames.length === 0) return "";
+
+    if (selectedBrandParam && availableBrandNames.includes(selectedBrandParam)) {
+      return selectedBrandParam;
+    }
+    return availableBrandNames[0];
+  }, [brands, selectedBrandParam]);
 
   const { brandLogosById, brandLogosByName } = useMemo(() => {
     const toDataUrl = (logoObj) => {
@@ -157,28 +192,46 @@ const Home = () => {
   }, [token]);
 
   useEffect(() => {
-    if (!Array.isArray(brands) || brands.length === 0) return;
+    const nextTodayEtdSortBy = parseTodayEtdSortBy(searchParams.get("today_sort_by"));
+    const nextTodayEtdSortOrder = parseTodayEtdSortOrder(
+      searchParams.get("today_sort_order"),
+      nextTodayEtdSortBy,
+    );
+    const currentQuery = searchParams.toString();
 
-    const availableBrandNames = brands
-      .map((brand) => getBrandName(brand))
-      .filter(Boolean);
-    if (availableBrandNames.length === 0) return;
+    setTodayEtdSortBy((prev) => (prev === nextTodayEtdSortBy ? prev : nextTodayEtdSortBy));
+    setTodayEtdSortOrder((prev) => (
+      prev === nextTodayEtdSortOrder ? prev : nextTodayEtdSortOrder
+    ));
+    setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
+  }, [searchParams]);
 
-    const queryBrandIsValid =
-      selectedBrandParam && availableBrandNames.includes(selectedBrandParam);
-    const resolvedBrand = queryBrandIsValid
-      ? selectedBrandParam
-      : availableBrandNames[0];
+  useEffect(() => {
+    if (!selectedBrand) return;
+    const currentQuery = searchParams.toString();
+    if (syncedQuery !== currentQuery) return;
 
-    if (selectedBrand !== resolvedBrand) {
-      setSelectedBrand(resolvedBrand);
-      setPage(1);
+    const next = new URLSearchParams();
+    if (selectedBrand) next.set("brand", selectedBrand);
+    if (todayEtdSortBy !== DEFAULT_TODAY_ETD_SORT_BY) {
+      next.set("today_sort_by", todayEtdSortBy);
+    }
+    if (todayEtdSortOrder !== parseTodayEtdSortOrder("", todayEtdSortBy)) {
+      next.set("today_sort_order", todayEtdSortOrder);
     }
 
-    if (!queryBrandIsValid && resolvedBrand) {
-      setSearchParams({ brand: resolvedBrand }, { replace: true });
+    const nextQuery = next.toString();
+    if (nextQuery !== currentQuery) {
+      setSearchParams(next, { replace: true });
     }
-  }, [brands, selectedBrandParam, selectedBrand, setSearchParams]);
+  }, [
+    searchParams,
+    selectedBrand,
+    setSearchParams,
+    todayEtdSortBy,
+    todayEtdSortOrder,
+    syncedQuery,
+  ]);
 
   useEffect(() => {
     if (!selectedBrand) return;
@@ -333,9 +386,12 @@ const Home = () => {
                 type="button"
                 className={`btn brand-logo-btn ${selectedBrand === brandName ? "btn-primary" : "btn-outline-secondary"}`}
                 onClick={() => {
-                  setSelectedBrand(brandName);
                   setPage(1);
-                  setSearchParams({ brand: brandName }, { replace: true });
+                  const next = new URLSearchParams(searchParams);
+                  next.set("brand", brandName);
+                  if (next.toString() !== searchParams.toString()) {
+                    setSearchParams(next, { replace: true });
+                  }
                 }}
                 title={brandName}
               >

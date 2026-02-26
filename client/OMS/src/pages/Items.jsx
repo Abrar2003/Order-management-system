@@ -1,12 +1,33 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import { getUserFromToken } from "../auth/auth.utils";
 import { formatDateDDMMYYYY } from "../utils/date";
+import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import "../App.css";
 
 const DEFAULT_LIMIT = 20;
+const LIMIT_OPTIONS = [10, 20, 50, 100];
+
+const parsePositiveInt = (value, fallback = 1) => {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return parsed;
+};
+
+const parseLimit = (value) => {
+  const parsed = parsePositiveInt(value, DEFAULT_LIMIT);
+  return LIMIT_OPTIONS.includes(parsed) ? parsed : DEFAULT_LIMIT;
+};
+
+const normalizeFilterParam = (value, fallback = "all") => {
+  const cleaned = String(value || "").trim();
+  if (!cleaned) return fallback;
+  return cleaned;
+};
+
+const normalizeSearchParam = (value) => String(value || "").trim();
 
 const useDebouncedValue = (value, delay = 300) => {
   const [debounced, setDebounced] = useState(value);
@@ -28,6 +49,8 @@ const formatLbh = (value) => {
 
 const Items = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  useRememberSearchParams(searchParams, setSearchParams, "items");
   const user = getUserFromToken();
   const normalizedRole = String(user?.role || "").trim().toLowerCase();
   const canSyncItems = ["admin", "manager", "dev"].includes(normalizedRole);
@@ -37,11 +60,19 @@ const Items = () => {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [searchInput, setSearchInput] = useState("");
-  const [brandFilter, setBrandFilter] = useState("all");
-  const [vendorFilter, setVendorFilter] = useState("all");
-  const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(DEFAULT_LIMIT);
+  const [searchInput, setSearchInput] = useState(() =>
+    normalizeSearchParam(searchParams.get("search")),
+  );
+  const [brandFilter, setBrandFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("brand"), "all"),
+  );
+  const [vendorFilter, setVendorFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("vendor"), "all"),
+  );
+  const [page, setPage] = useState(() =>
+    parsePositiveInt(searchParams.get("page"), 1),
+  );
+  const [limit, setLimit] = useState(() => parseLimit(searchParams.get("limit")));
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
   const [filters, setFilters] = useState({
@@ -99,6 +130,45 @@ const Items = () => {
   useEffect(() => {
     fetchItems();
   }, [fetchItems]);
+
+  useEffect(() => {
+    const nextSearchInput = normalizeSearchParam(searchParams.get("search"));
+    const nextBrandFilter = normalizeFilterParam(searchParams.get("brand"), "all");
+    const nextVendorFilter = normalizeFilterParam(searchParams.get("vendor"), "all");
+    const nextPage = parsePositiveInt(searchParams.get("page"), 1);
+    const nextLimit = parseLimit(searchParams.get("limit"));
+
+    setSearchInput((prev) => (prev === nextSearchInput ? prev : nextSearchInput));
+    setBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
+    setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
+    setPage((prev) => (prev === nextPage ? prev : nextPage));
+    setLimit((prev) => (prev === nextLimit ? prev : nextLimit));
+  }, [searchParams]);
+
+  useEffect(() => {
+    const next = new URLSearchParams();
+    const searchValue = normalizeSearchParam(searchInput);
+
+    if (searchValue) next.set("search", searchValue);
+    if (brandFilter && brandFilter !== "all") next.set("brand", brandFilter);
+    if (vendorFilter && vendorFilter !== "all") next.set("vendor", vendorFilter);
+    if (page > 1) next.set("page", String(page));
+    if (limit !== DEFAULT_LIMIT) next.set("limit", String(limit));
+
+    const nextQuery = next.toString();
+    const currentQuery = searchParams.toString();
+    if (nextQuery !== currentQuery) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [
+    brandFilter,
+    limit,
+    page,
+    searchInput,
+    searchParams,
+    setSearchParams,
+    vendorFilter,
+  ]);
 
   const handleSync = async () => {
     try {

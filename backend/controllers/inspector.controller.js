@@ -1,6 +1,105 @@
 const Inspector = require("../models/inspector.model");
 const User = require("../models/user.model");
-const mongoose = require("mongoose");
+const parsePositiveInteger = (value, fallback) => {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return parsed;
+};
+
+const QC_USER_FILTER = {
+  $and: [
+    { role: { $regex: "^qc$", $options: "i" } },
+    {
+      $or: [
+        { isQC: true },
+        { is_qc: true },
+      ],
+    },
+  ],
+};
+
+const buildQcUserFilter = ({ search = "" } = {}) => {
+  if (!search) return QC_USER_FILTER;
+  return {
+    $and: [
+      QC_USER_FILTER,
+      {
+        $or: [
+          { name: { $regex: search, $options: "i" } },
+          { email: { $regex: search, $options: "i" } },
+        ],
+      },
+    ],
+  };
+};
+
+const ensureInspectorRecordsForQcUsers = async ({ search = "" } = {}) => {
+  const userFilter = buildQcUserFilter({ search });
+  const qcUsers = await User.find(userFilter).select("_id").lean();
+  const userIds = qcUsers.map((user) => user._id);
+
+  if (!userIds.length) {
+    return {
+      userIds: [],
+      eligibleQcUsers: 0,
+      createdInspectors: 0,
+    };
+  }
+
+  const existingInspectorUserIds = await Inspector.distinct("user", {
+    user: { $in: userIds },
+  });
+
+  await Inspector.bulkWrite(
+    userIds.map((userId) => ({
+      updateOne: {
+        filter: { user: userId },
+        update: {
+          $setOnInsert: {
+            user: userId,
+            assignedOrders: [],
+            alloted_labels: [],
+            used_labels: [],
+          },
+        },
+        upsert: true,
+      },
+    })),
+    { ordered: false },
+  );
+
+  const inspectors = await Inspector.find({ user: { $in: userIds } })
+    .select("_id user")
+    .lean();
+
+  if (inspectors.length > 0) {
+    await User.bulkWrite(
+      inspectors.map((inspector) => ({
+        updateOne: {
+          filter: { _id: inspector.user },
+          update: {
+            $set: {
+              inspector_id: inspector._id,
+              isQC: true,
+            },
+          },
+        },
+      })),
+      { ordered: false },
+    );
+  }
+
+  const createdInspectors = Math.max(
+    0,
+    inspectors.length - existingInspectorUserIds.length,
+  );
+
+  return {
+    userIds,
+    eligibleQcUsers: userIds.length,
+    createdInspectors,
+  };
+};
 
 /**
  * GET /inspectors
@@ -9,49 +108,61 @@ const mongoose = require("mongoose");
  */
 exports.getAllInspectors = async (req, res) => {
   try {
-    const { page = 1, limit = 20, search = "" } = req.query;
+    const page = parsePositiveInteger(req.query.page, 1);
+    const limit = parsePositiveInteger(req.query.limit, 20);
+    const search = String(req.query.search || "").trim();
     const skip = (page - 1) * limit;
 
-    const matchStage = {};
+    const syncResult = await ensureInspectorRecordsForQcUsers({ search });
+    const { userIds } = syncResult;
 
-    // 🔍 Search by inspector name or email
-    if (search) {
-      matchStage.$or = [
-        { "user.name": { $regex: search, $options: "i" } },
-        { "user.email": { $regex: search, $options: "i" } },
-      ];
-    }
+    const inspectors = userIds.length
+      ? await Inspector.find({ user: { $in: userIds } })
+          .populate("user", "name email role")
+          .sort({ createdAt: -1 })
+          .lean()
+      : [];
 
-    const pipeline = [
-      {
-        $lookup: {
-          from: "users",
-          localField: "user",
-          foreignField: "_id",
-          as: "user",
-        },
-      },
-      { $unwind: "$user" },
-      { $match: matchStage },
-      { $sort: { createdAt: -1 } },
-      { $skip: skip },
-      { $limit: Number(limit) },
-    ];
+    const inspectorByUser = new Map();
+    inspectors.forEach((inspector) => {
+      const userId = String(inspector?.user?._id || inspector?.user || "");
+      if (!userId || inspectorByUser.has(userId)) return;
+      inspectorByUser.set(userId, inspector);
+    });
 
-    const data = await Inspector.aggregate(pipeline);
-
-    const countPipeline = pipeline.filter(
-      (stage) => !stage.$skip && !stage.$limit && !stage.$sort
-    );
-
-    const totalRecords = (await Inspector.aggregate(countPipeline)).length;
+    const mergedInspectors = Array.from(inspectorByUser.values());
+    const totalRecords = mergedInspectors.length;
+    const data = mergedInspectors.slice(skip, skip + limit);
 
     res.json({
       data,
       pagination: {
-        page: Number(page),
-        totalPages: Math.ceil(totalRecords / limit),
+        page,
+        totalPages: totalRecords > 0 ? Math.ceil(totalRecords / limit) : 0,
         totalRecords,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+/**
+ * POST /inspectors/sync
+ * Create missing inspector records for QC users.
+ * Only accessible to Manager and Admin
+ */
+exports.syncInspectors = async (req, res) => {
+  try {
+    const search = String(req.query.search || "").trim();
+    const syncResult = await ensureInspectorRecordsForQcUsers({ search });
+
+    res.json({
+      message: "Inspector sync completed successfully",
+      data: {
+        eligible_qc_users: syncResult.eligibleQcUsers,
+        created_missing_inspectors: syncResult.createdInspectors,
       },
     });
   } catch (err) {
@@ -266,3 +377,4 @@ exports.getLabelUsageStats = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+

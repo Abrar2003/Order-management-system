@@ -1,19 +1,43 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
 import { formatDateDDMMYYYY } from "../utils/date";
+import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import "../App.css";
+
+const DEFAULT_SORT_BY = "order_date";
+
+const parseSortBy = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "order_id") return "order_id";
+  if (normalized === "order_date") return "order_date";
+  if (normalized === "etd") return "ETD";
+  return DEFAULT_SORT_BY;
+};
+
+const parseSortOrder = (value, sortBy = DEFAULT_SORT_BY) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "asc" || normalized === "desc") return normalized;
+  return sortBy === "order_id" ? "asc" : "desc";
+};
 
 const OrdersByBrand = () => {
   const { brand, vendor, status } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  useRememberSearchParams(searchParams, setSearchParams, "orders-by-brand");
+  const initialSortBy = parseSortBy(searchParams.get("sort_by"));
+  const initialSortOrder = parseSortOrder(
+    searchParams.get("sort_order"),
+    initialSortBy,
+  );
 
   const navigate = useNavigate();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [sortBy, setSortBy] = useState("order_date");
-  const [sortOrder, setSortOrder] = useState("desc");
+  const [sortBy, setSortBy] = useState(initialSortBy);
+  const [sortOrder, setSortOrder] = useState(initialSortOrder);
 
   const handleSortColumn = (column, defaultDirection = "asc") => {
     if (sortBy === column) {
@@ -62,6 +86,31 @@ const OrdersByBrand = () => {
 
     fetchOrders();
   }, [brand, vendor, status, sortBy, sortOrder]);
+
+  useEffect(() => {
+    const nextSortBy = parseSortBy(searchParams.get("sort_by"));
+    const nextSortOrder = parseSortOrder(
+      searchParams.get("sort_order"),
+      nextSortBy,
+    );
+
+    setSortBy((prev) => (prev === nextSortBy ? prev : nextSortBy));
+    setSortOrder((prev) => (prev === nextSortOrder ? prev : nextSortOrder));
+  }, [searchParams]);
+
+  useEffect(() => {
+    const next = new URLSearchParams();
+    if (sortBy !== DEFAULT_SORT_BY) next.set("sort_by", sortBy);
+    if (sortOrder !== parseSortOrder("", sortBy)) {
+      next.set("sort_order", sortOrder);
+    }
+
+    const nextQuery = next.toString();
+    const currentQuery = searchParams.toString();
+    if (nextQuery !== currentQuery) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams, sortBy, sortOrder]);
 
   return (
     <>

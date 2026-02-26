@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import "../App.css";
@@ -7,6 +7,7 @@ import ShippingModal from "../components/ShippingModal";
 import EditOrderModal from "../components/EditOrderModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import { formatDateDDMMYYYY } from "../utils/date";
+import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 
 const useDebouncedValue = (value, delay = 300) => {
   const [debounced, setDebounced] = useState(value);
@@ -27,6 +28,48 @@ const EMPTY_SUMMARY = {
 };
 
 const DEFAULT_LIMIT = 20;
+const LIMIT_OPTIONS = [10, 20, 50, 100];
+const DEFAULT_SORT_BY = "stuffing_date";
+
+const parsePositiveInt = (value, fallback = 1) => {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return parsed;
+};
+
+const parseLimit = (value) => {
+  const parsed = parsePositiveInt(value, DEFAULT_LIMIT);
+  return LIMIT_OPTIONS.includes(parsed) ? parsed : DEFAULT_LIMIT;
+};
+
+const normalizeFilterParam = (value, fallback = "all") => {
+  const cleaned = String(value || "").trim();
+  if (!cleaned) return fallback;
+  return cleaned;
+};
+
+const normalizeSearchParam = (value) => String(value || "").trim();
+
+const parseSortBy = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  const allowed = new Set([
+    "order_id",
+    "item_code",
+    "vendor",
+    "order_quantity",
+    "stuffing_date",
+    "container",
+    "quantity",
+    "pending",
+  ]);
+  return allowed.has(normalized) ? normalized : DEFAULT_SORT_BY;
+};
+
+const parseSortOrder = (value, sortBy = DEFAULT_SORT_BY) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "asc" || normalized === "desc") return normalized;
+  return sortBy === DEFAULT_SORT_BY ? "desc" : "asc";
+};
 
 const isShipmentEditableStatus = (statusValue) => {
   const normalized = String(statusValue || "")
@@ -41,6 +84,13 @@ const isShipmentEditableStatus = (statusValue) => {
 
 const Shipments = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  useRememberSearchParams(searchParams, setSearchParams, "shipments");
+  const initialSortBy = parseSortBy(searchParams.get("sort_by"));
+  const initialSortOrder = parseSortOrder(
+    searchParams.get("sort_order"),
+    initialSortBy,
+  );
   const user = getUserFromToken();
   const normalizedRole = String(user?.role || "").trim().toLowerCase();
   const isAdmin = normalizedRole === "admin";
@@ -53,14 +103,24 @@ const Shipments = () => {
   const [error, setError] = useState("");
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [editingOrder, setEditingOrder] = useState(null);
-  const [orderIdSearch, setOrderIdSearch] = useState("");
-  const [containerSearch, setContainerSearch] = useState("");
-  const [vendorFilter, setVendorFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [sortBy, setSortBy] = useState("stuffing_date");
-  const [sortOrder, setSortOrder] = useState("desc");
-  const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(DEFAULT_LIMIT);
+  const [orderIdSearch, setOrderIdSearch] = useState(() =>
+    normalizeSearchParam(searchParams.get("order_id")),
+  );
+  const [containerSearch, setContainerSearch] = useState(() =>
+    normalizeSearchParam(searchParams.get("container")),
+  );
+  const [vendorFilter, setVendorFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("vendor"), "all"),
+  );
+  const [statusFilter, setStatusFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("status"), "all"),
+  );
+  const [sortBy, setSortBy] = useState(initialSortBy);
+  const [sortOrder, setSortOrder] = useState(initialSortOrder);
+  const [page, setPage] = useState(() =>
+    parsePositiveInt(searchParams.get("page"), 1),
+  );
+  const [limit, setLimit] = useState(() => parseLimit(searchParams.get("limit")));
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
   const [summary, setSummary] = useState(EMPTY_SUMMARY);
@@ -136,6 +196,63 @@ const Shipments = () => {
   useEffect(() => {
     fetchShipments();
   }, [fetchShipments]);
+
+  useEffect(() => {
+    const nextOrderIdSearch = normalizeSearchParam(searchParams.get("order_id"));
+    const nextContainerSearch = normalizeSearchParam(searchParams.get("container"));
+    const nextVendorFilter = normalizeFilterParam(searchParams.get("vendor"), "all");
+    const nextStatusFilter = normalizeFilterParam(searchParams.get("status"), "all");
+    const nextSortBy = parseSortBy(searchParams.get("sort_by"));
+    const nextSortOrder = parseSortOrder(
+      searchParams.get("sort_order"),
+      nextSortBy,
+    );
+    const nextPage = parsePositiveInt(searchParams.get("page"), 1);
+    const nextLimit = parseLimit(searchParams.get("limit"));
+
+    setOrderIdSearch((prev) => (prev === nextOrderIdSearch ? prev : nextOrderIdSearch));
+    setContainerSearch((prev) => (prev === nextContainerSearch ? prev : nextContainerSearch));
+    setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
+    setStatusFilter((prev) => (prev === nextStatusFilter ? prev : nextStatusFilter));
+    setSortBy((prev) => (prev === nextSortBy ? prev : nextSortBy));
+    setSortOrder((prev) => (prev === nextSortOrder ? prev : nextSortOrder));
+    setPage((prev) => (prev === nextPage ? prev : nextPage));
+    setLimit((prev) => (prev === nextLimit ? prev : nextLimit));
+  }, [searchParams]);
+
+  useEffect(() => {
+    const next = new URLSearchParams();
+    const orderIdValue = normalizeSearchParam(orderIdSearch);
+    const containerValue = normalizeSearchParam(containerSearch);
+
+    if (orderIdValue) next.set("order_id", orderIdValue);
+    if (containerValue) next.set("container", containerValue);
+    if (vendorFilter && vendorFilter !== "all") next.set("vendor", vendorFilter);
+    if (statusFilter && statusFilter !== "all") next.set("status", statusFilter);
+    if (page > 1) next.set("page", String(page));
+    if (limit !== DEFAULT_LIMIT) next.set("limit", String(limit));
+    if (sortBy !== DEFAULT_SORT_BY) next.set("sort_by", sortBy);
+    if (sortOrder !== parseSortOrder("", sortBy)) {
+      next.set("sort_order", sortOrder);
+    }
+
+    const nextQuery = next.toString();
+    const currentQuery = searchParams.toString();
+    if (nextQuery !== currentQuery) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [
+    containerSearch,
+    limit,
+    orderIdSearch,
+    page,
+    searchParams,
+    setSearchParams,
+    sortBy,
+    sortOrder,
+    statusFilter,
+    vendorFilter,
+  ]);
 
   const handleSortColumn = useCallback(
     (column, defaultDirection = "asc") => {
@@ -372,8 +489,8 @@ const Shipments = () => {
                     setContainerSearch("");
                     setVendorFilter("all");
                     setStatusFilter("all");
-                    setSortBy("stuffing_date");
-                    setSortOrder("desc");
+                    setSortBy(DEFAULT_SORT_BY);
+                    setSortOrder(parseSortOrder("", DEFAULT_SORT_BY));
                     setPage(1);
                   }}
                 >

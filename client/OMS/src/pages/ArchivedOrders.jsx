@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import { getUserFromToken } from "../auth/auth.service";
 import {
@@ -7,9 +7,28 @@ import {
   syncZeroQuantityOrdersArchive,
 } from "../services/orders.service";
 import { formatDateDDMMYYYY } from "../utils/date";
+import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import "../App.css";
 
+const DEFAULT_LIMIT = 20;
+const LIMIT_OPTIONS = [10, 20, 50, 100];
+
+const parsePositiveInt = (value, fallback = 1) => {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return parsed;
+};
+
+const parseLimit = (value) => {
+  const parsed = parsePositiveInt(value, DEFAULT_LIMIT);
+  return LIMIT_OPTIONS.includes(parsed) ? parsed : DEFAULT_LIMIT;
+};
+
+const normalizeSearchParam = (value) => String(value || "").trim();
+
 const ArchivedOrders = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  useRememberSearchParams(searchParams, setSearchParams, "archived-orders");
   const user = getUserFromToken();
   const isAdmin = String(user?.role || "").toLowerCase() === "admin";
 
@@ -17,17 +36,17 @@ const ArchivedOrders = () => {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
-  const [filters, setFilters] = useState({
-    order_id: "",
-    vendor: "",
-    brand: "",
-  });
-  const [pagination, setPagination] = useState({
-    page: 1,
-    limit: 20,
+  const [filters, setFilters] = useState(() => ({
+    order_id: normalizeSearchParam(searchParams.get("order_id")),
+    vendor: normalizeSearchParam(searchParams.get("vendor")),
+    brand: normalizeSearchParam(searchParams.get("brand")),
+  }));
+  const [pagination, setPagination] = useState(() => ({
+    page: parsePositiveInt(searchParams.get("page"), 1),
+    limit: parseLimit(searchParams.get("limit")),
     totalPages: 1,
     totalRecords: 0,
-  });
+  }));
 
   const canGoPrev = pagination.page > 1;
   const canGoNext = pagination.page < pagination.totalPages;
@@ -71,6 +90,50 @@ const ArchivedOrders = () => {
     if (!isAdmin) return;
     fetchArchivedOrders();
   }, [fetchArchivedOrders, isAdmin]);
+
+  useEffect(() => {
+    const nextFilters = {
+      order_id: normalizeSearchParam(searchParams.get("order_id")),
+      vendor: normalizeSearchParam(searchParams.get("vendor")),
+      brand: normalizeSearchParam(searchParams.get("brand")),
+    };
+    const nextPage = parsePositiveInt(searchParams.get("page"), 1);
+    const nextLimit = parseLimit(searchParams.get("limit"));
+
+    setFilters((prev) =>
+      prev.order_id === nextFilters.order_id
+      && prev.vendor === nextFilters.vendor
+      && prev.brand === nextFilters.brand
+        ? prev
+        : nextFilters,
+    );
+    setPagination((prev) => ({
+      ...prev,
+      page: prev.page === nextPage ? prev.page : nextPage,
+      limit: prev.limit === nextLimit ? prev.limit : nextLimit,
+    }));
+  }, [searchParams]);
+
+  useEffect(() => {
+    const next = new URLSearchParams();
+    const orderId = normalizeSearchParam(filters.order_id);
+    const vendor = normalizeSearchParam(filters.vendor);
+    const brand = normalizeSearchParam(filters.brand);
+
+    if (orderId) next.set("order_id", orderId);
+    if (vendor) next.set("vendor", vendor);
+    if (brand) next.set("brand", brand);
+    if (pagination.page > 1) next.set("page", String(pagination.page));
+    if (pagination.limit !== DEFAULT_LIMIT) {
+      next.set("limit", String(pagination.limit));
+    }
+
+    const nextQuery = next.toString();
+    const currentQuery = searchParams.toString();
+    if (nextQuery !== currentQuery) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [filters.brand, filters.order_id, filters.vendor, pagination.limit, pagination.page, searchParams, setSearchParams]);
 
   const handleSyncZeroQuantity = async () => {
     const remark = window.prompt(

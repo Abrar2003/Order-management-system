@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import { getUserFromToken } from "../auth/auth.utils";
@@ -9,6 +9,7 @@ import {
   toDDMMYYYYInputValue,
   toISODateString,
 } from "../utils/date";
+import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import "../App.css";
 
 const toSafeNumber = (value) => {
@@ -25,21 +26,41 @@ const getShippedQuantity = (shipmentEntries) =>
 const toErrorMessage = (err, fallback) =>
   err?.response?.data?.message || err?.message || fallback;
 
+const normalizeSearchParam = (value) => String(value || "").trim();
+
+const normalizeFilterParam = (value, fallback = "all") => {
+  const cleaned = String(value || "").trim();
+  if (!cleaned) return fallback;
+  return cleaned;
+};
+
 const Container = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  useRememberSearchParams(searchParams, setSearchParams, "bulk-shipping");
   const user = getUserFromToken();
   const normalizedRole = String(user?.role || "").trim().toLowerCase();
   const canFinalizeShipping = ["admin", "manager", "dev"].includes(
     normalizedRole,
   );
 
-  const [containerNumber, setContainerNumber] = useState("");
-  const [shippingDate, setShippingDate] = useState(getTodayDDMMYYYY());
-  const [vendor, setVendor] = useState("");
+  const [containerNumber, setContainerNumber] = useState(() =>
+    normalizeSearchParam(searchParams.get("container_number")),
+  );
+  const [shippingDate, setShippingDate] = useState(() =>
+    toDDMMYYYYInputValue(searchParams.get("shipping_date"), getTodayDDMMYYYY()),
+  );
+  const [vendor, setVendor] = useState(() =>
+    normalizeSearchParam(searchParams.get("vendor")),
+  );
   const [vendors, setVendors] = useState([]);
   const [rows, setRows] = useState([]);
-  const [orderIdFilter, setOrderIdFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [orderIdFilter, setOrderIdFilter] = useState(() =>
+    normalizeSearchParam(searchParams.get("order_id")),
+  );
+  const [statusFilter, setStatusFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("status"), "all"),
+  );
   const [loadingVendors, setLoadingVendors] = useState(true);
   const [loadingRows, setLoadingRows] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -156,6 +177,53 @@ const Container = () => {
   useEffect(() => {
     fetchVendorRows(vendor);
   }, [vendor, fetchVendorRows]);
+
+  useEffect(() => {
+    const nextContainerNumber = normalizeSearchParam(
+      searchParams.get("container_number"),
+    );
+    const nextShippingDate = toDDMMYYYYInputValue(
+      searchParams.get("shipping_date"),
+      getTodayDDMMYYYY(),
+    );
+    const nextVendor = normalizeSearchParam(searchParams.get("vendor"));
+    const nextOrderIdFilter = normalizeSearchParam(searchParams.get("order_id"));
+    const nextStatusFilter = normalizeFilterParam(searchParams.get("status"), "all");
+
+    setContainerNumber((prev) => (prev === nextContainerNumber ? prev : nextContainerNumber));
+    setShippingDate((prev) => (prev === nextShippingDate ? prev : nextShippingDate));
+    setVendor((prev) => (prev === nextVendor ? prev : nextVendor));
+    setOrderIdFilter((prev) => (prev === nextOrderIdFilter ? prev : nextOrderIdFilter));
+    setStatusFilter((prev) => (prev === nextStatusFilter ? prev : nextStatusFilter));
+  }, [searchParams]);
+
+  useEffect(() => {
+    const next = new URLSearchParams();
+    const containerValue = normalizeSearchParam(containerNumber);
+    const vendorValue = normalizeSearchParam(vendor);
+    const orderIdValue = normalizeSearchParam(orderIdFilter);
+    const shippingDateIso = toISODateString(shippingDate);
+
+    if (containerValue) next.set("container_number", containerValue);
+    if (shippingDateIso) next.set("shipping_date", shippingDateIso);
+    if (vendorValue) next.set("vendor", vendorValue);
+    if (orderIdValue) next.set("order_id", orderIdValue);
+    if (statusFilter && statusFilter !== "all") next.set("status", statusFilter);
+
+    const nextQuery = next.toString();
+    const currentQuery = searchParams.toString();
+    if (nextQuery !== currentQuery) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [
+    containerNumber,
+    orderIdFilter,
+    searchParams,
+    setSearchParams,
+    shippingDate,
+    statusFilter,
+    vendor,
+  ]);
 
   const orderIdOptions = useMemo(
     () =>

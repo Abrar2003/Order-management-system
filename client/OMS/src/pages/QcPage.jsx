@@ -4,6 +4,7 @@ import Navbar from "../components/Navbar";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import AlignQCModal from "../components/AlignQcModal";
 import { getUserFromToken } from "../auth/auth.utils";
+import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import {
   formatDateDDMMYYYY,
   toDDMMYYYYInputValue,
@@ -53,6 +54,7 @@ const parseSortOrder = (value, sortBy = DEFAULT_SORT_BY) => {
 
 const QCPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
+  useRememberSearchParams(searchParams, setSearchParams, "qc-list");
   const requestedItemCode = normalizeQueryText(searchParams.get("item_code"));
   const initialSearch = normalizeQueryText(searchParams.get("search")) || requestedItemCode;
   const initialSortBy = parseSortBy(
@@ -98,6 +100,7 @@ const QCPage = () => {
   const [totalPages, setTotalPages] = useState(1);
   const [realignContext, setRealignContext] = useState(null);
   const [exporting, setExporting] = useState(false);
+  const [syncedQuery, setSyncedQuery] = useState(null);
 
   const token = localStorage.getItem("token");
   const navigate = useNavigate();
@@ -163,12 +166,41 @@ const QCPage = () => {
   }, [fetchInspectors]);
 
   useEffect(() => {
-    if (!requestedItemCode) return;
-    setSearch((prev) => (prev === requestedItemCode ? prev : requestedItemCode));
-    setPage(DEFAULT_PAGE);
-  }, [requestedItemCode]);
+    const nextRequestedItemCode = normalizeQueryText(searchParams.get("item_code"));
+    const nextSearch = normalizeQueryText(searchParams.get("search")) || nextRequestedItemCode;
+    const nextInspector = normalizeQueryText(searchParams.get("inspector"));
+    const nextVendor = normalizeQueryText(searchParams.get("vendor"));
+    const nextFromRaw = normalizeQueryText(searchParams.get("from"));
+    const nextToRaw = normalizeQueryText(searchParams.get("to"));
+    const nextFrom = toDDMMYYYYInputValue(nextFromRaw, nextFromRaw);
+    const nextTo = toDDMMYYYYInputValue(nextToRaw, nextToRaw);
+    const nextSortBy = parseSortBy(
+      searchParams.get("sort_by") ?? searchParams.get("sort"),
+    );
+    const nextSortOrder = parseSortOrder(
+      searchParams.get("sort_order"),
+      nextSortBy,
+    );
+    const nextOrder = normalizeQueryText(searchParams.get("order"));
+    const nextPage = parsePositiveInt(searchParams.get("page"), DEFAULT_PAGE);
+    const currentQuery = searchParams.toString();
+
+    setSearch((prev) => (prev === nextSearch ? prev : nextSearch));
+    setInspector((prev) => (prev === nextInspector ? prev : nextInspector));
+    setVendor((prev) => (prev === nextVendor ? prev : nextVendor));
+    setFrom((prev) => (prev === nextFrom ? prev : nextFrom));
+    setTo((prev) => (prev === nextTo ? prev : nextTo));
+    setSortBy((prev) => (prev === nextSortBy ? prev : nextSortBy));
+    setSortOrder((prev) => (prev === nextSortOrder ? prev : nextSortOrder));
+    setOrder((prev) => (prev === nextOrder ? prev : nextOrder));
+    setPage((prev) => (prev === nextPage ? prev : nextPage));
+    setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
+  }, [searchParams]);
 
   useEffect(() => {
+    const currentQuery = searchParams.toString();
+    if (syncedQuery !== currentQuery) return;
+
     const next = new URLSearchParams();
     if (normalizeQueryText(search)) next.set("search", normalizeQueryText(search));
     if (normalizeQueryText(order)) next.set("order", normalizeQueryText(order));
@@ -181,7 +213,6 @@ const QCPage = () => {
     if (sortOrder !== parseSortOrder("", sortBy)) next.set("sort_order", sortOrder);
 
     const nextQuery = next.toString();
-    const currentQuery = searchParams.toString();
     if (nextQuery !== currentQuery) {
       setSearchParams(next, { replace: true });
     }
@@ -195,6 +226,7 @@ const QCPage = () => {
     page,
     sortBy,
     sortOrder,
+    syncedQuery,
     searchParams,
     setSearchParams,
   ]);

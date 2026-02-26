@@ -4,6 +4,7 @@ import Navbar from "../components/Navbar";
 import OrderExportModal from "../components/OrderExportModal";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatDateDDMMYYYY } from "../utils/date";
+import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import "../App.css";
 
 const defaultFilters = {
@@ -94,6 +95,7 @@ const getStatus = (order) => {
 
 const OpenOrders = () => {
   const [searchParams, setSearchParams] = useSearchParams();
+  useRememberSearchParams(searchParams, setSearchParams, "open-orders");
   const initialSortBy = parseSortBy(searchParams.get("sort_by"));
   const initialSortOrder = parseSortOrder(
     searchParams.get("sort_order"),
