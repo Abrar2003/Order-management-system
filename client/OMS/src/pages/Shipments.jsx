@@ -106,6 +106,9 @@ const Shipments = () => {
   const [orderIdSearch, setOrderIdSearch] = useState(() =>
     normalizeSearchParam(searchParams.get("order_id")),
   );
+  const [itemCodeSearch, setItemCodeSearch] = useState(() =>
+    normalizeSearchParam(searchParams.get("item_code")),
+  );
   const [containerSearch, setContainerSearch] = useState(() =>
     normalizeSearchParam(searchParams.get("container")),
   );
@@ -129,9 +132,11 @@ const Shipments = () => {
     vendors: [],
     order_ids: [],
     containers: [],
+    item_codes: [],
   });
 
   const debouncedOrderSearch = useDebouncedValue(orderIdSearch, 300);
+  const debouncedItemCodeSearch = useDebouncedValue(itemCodeSearch, 300);
   const debouncedContainerSearch = useDebouncedValue(containerSearch, 300);
 
   const fetchShipments = useCallback(async () => {
@@ -142,6 +147,7 @@ const Shipments = () => {
       const res = await api.get("/orders/shipments", {
         params: {
           order_id: debouncedOrderSearch,
+          item_code: debouncedItemCodeSearch,
           container: debouncedContainerSearch,
           vendor: vendorFilter,
           status: statusFilter,
@@ -167,6 +173,9 @@ const Shipments = () => {
         containers: Array.isArray(res?.data?.filters?.containers)
           ? res.data.filters.containers
           : [],
+        item_codes: Array.isArray(res?.data?.filters?.item_codes)
+          ? res.data.filters.item_codes
+          : [],
       });
     } catch (err) {
       setError(err?.response?.data?.message || "Failed to load shipments.");
@@ -178,12 +187,14 @@ const Shipments = () => {
         vendors: [],
         order_ids: [],
         containers: [],
+        item_codes: [],
       });
     } finally {
       setLoading(false);
     }
   }, [
     debouncedContainerSearch,
+    debouncedItemCodeSearch,
     debouncedOrderSearch,
     limit,
     page,
@@ -199,6 +210,7 @@ const Shipments = () => {
 
   useEffect(() => {
     const nextOrderIdSearch = normalizeSearchParam(searchParams.get("order_id"));
+    const nextItemCodeSearch = normalizeSearchParam(searchParams.get("item_code"));
     const nextContainerSearch = normalizeSearchParam(searchParams.get("container"));
     const nextVendorFilter = normalizeFilterParam(searchParams.get("vendor"), "all");
     const nextStatusFilter = normalizeFilterParam(searchParams.get("status"), "all");
@@ -211,6 +223,7 @@ const Shipments = () => {
     const nextLimit = parseLimit(searchParams.get("limit"));
 
     setOrderIdSearch((prev) => (prev === nextOrderIdSearch ? prev : nextOrderIdSearch));
+    setItemCodeSearch((prev) => (prev === nextItemCodeSearch ? prev : nextItemCodeSearch));
     setContainerSearch((prev) => (prev === nextContainerSearch ? prev : nextContainerSearch));
     setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
     setStatusFilter((prev) => (prev === nextStatusFilter ? prev : nextStatusFilter));
@@ -223,9 +236,11 @@ const Shipments = () => {
   useEffect(() => {
     const next = new URLSearchParams();
     const orderIdValue = normalizeSearchParam(orderIdSearch);
+    const itemCodeValue = normalizeSearchParam(itemCodeSearch);
     const containerValue = normalizeSearchParam(containerSearch);
 
     if (orderIdValue) next.set("order_id", orderIdValue);
+    if (itemCodeValue) next.set("item_code", itemCodeValue);
     if (containerValue) next.set("container", containerValue);
     if (vendorFilter && vendorFilter !== "all") next.set("vendor", vendorFilter);
     if (statusFilter && statusFilter !== "all") next.set("status", statusFilter);
@@ -243,6 +258,7 @@ const Shipments = () => {
     }
   }, [
     containerSearch,
+    itemCodeSearch,
     limit,
     orderIdSearch,
     page,
@@ -330,6 +346,7 @@ const Shipments = () => {
         responseType: "blob",
         params: {
           order_id: debouncedOrderSearch,
+          item_code: debouncedItemCodeSearch,
           container: debouncedContainerSearch,
           vendor: vendorFilter,
           status: statusFilter,
@@ -372,6 +389,7 @@ const Shipments = () => {
     }
   }, [
     debouncedContainerSearch,
+    debouncedItemCodeSearch,
     debouncedOrderSearch,
     sortBy,
     sortOrder,
@@ -424,7 +442,7 @@ const Shipments = () => {
         <div className="card om-card mb-3">
           <div className="card-body">
             <div className="row g-2 align-items-end">
-              <div className="col-md-4">
+              <div className="col-md-3">
                 <label className="form-label">Search by Order ID</label>
                 <input
                   type="text"
@@ -443,7 +461,26 @@ const Shipments = () => {
                   ))}
                 </datalist>
               </div>
-              <div className="col-md-4">
+              <div className="col-md-3">
+                <label className="form-label">Search by Item Code</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={itemCodeSearch}
+                  list="shipment-item-code-options"
+                  onChange={(e) => {
+                    setItemCodeSearch(e.target.value);
+                    setPage(1);
+                  }}
+                  placeholder="Enter item code"
+                />
+                <datalist id="shipment-item-code-options">
+                  {filterOptions.item_codes.map((itemCode) => (
+                    <option key={itemCode} value={itemCode} />
+                  ))}
+                </datalist>
+              </div>
+              <div className="col-md-3">
                 <label className="form-label">Search by Container Number</label>
                 <input
                   type="text"
@@ -462,7 +499,7 @@ const Shipments = () => {
                   ))}
                 </datalist>
               </div>
-              <div className="col-md-3">
+              <div className="col-md-2">
                 <label className="form-label">Filter by Vendor</label>
                 <select
                   className="form-select"
@@ -486,6 +523,7 @@ const Shipments = () => {
                   className="btn btn-outline-secondary"
                   onClick={() => {
                     setOrderIdSearch("");
+                    setItemCodeSearch("");
                     setContainerSearch("");
                     setVendorFilter("all");
                     setStatusFilter("all");
