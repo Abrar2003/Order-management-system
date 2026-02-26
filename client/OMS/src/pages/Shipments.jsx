@@ -8,6 +8,7 @@ import EditOrderModal from "../components/EditOrderModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
+import { areSearchParamsEquivalent } from "../utils/searchParams";
 
 const useDebouncedValue = (value, delay = 300) => {
   const [debounced, setDebounced] = useState(value);
@@ -128,6 +129,7 @@ const Shipments = () => {
   const [totalRecords, setTotalRecords] = useState(0);
   const [summary, setSummary] = useState(EMPTY_SUMMARY);
   const [exporting, setExporting] = useState(false);
+  const [syncedQuery, setSyncedQuery] = useState(null);
   const [filterOptions, setFilterOptions] = useState({
     vendors: [],
     order_ids: [],
@@ -209,6 +211,7 @@ const Shipments = () => {
   }, [fetchShipments]);
 
   useEffect(() => {
+    const currentQuery = searchParams.toString();
     const nextOrderIdSearch = normalizeSearchParam(searchParams.get("order_id"));
     const nextItemCodeSearch = normalizeSearchParam(searchParams.get("item_code"));
     const nextContainerSearch = normalizeSearchParam(searchParams.get("container"));
@@ -231,9 +234,13 @@ const Shipments = () => {
     setSortOrder((prev) => (prev === nextSortOrder ? prev : nextSortOrder));
     setPage((prev) => (prev === nextPage ? prev : nextPage));
     setLimit((prev) => (prev === nextLimit ? prev : nextLimit));
+    setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
   }, [searchParams]);
 
   useEffect(() => {
+    const currentQuery = searchParams.toString();
+    if (syncedQuery !== currentQuery) return;
+
     const next = new URLSearchParams();
     const orderIdValue = normalizeSearchParam(orderIdSearch);
     const itemCodeValue = normalizeSearchParam(itemCodeSearch);
@@ -251,9 +258,7 @@ const Shipments = () => {
       next.set("sort_order", sortOrder);
     }
 
-    const nextQuery = next.toString();
-    const currentQuery = searchParams.toString();
-    if (nextQuery !== currentQuery) {
+    if (!areSearchParamsEquivalent(next, searchParams)) {
       setSearchParams(next, { replace: true });
     }
   }, [
@@ -267,6 +272,7 @@ const Shipments = () => {
     sortBy,
     sortOrder,
     statusFilter,
+    syncedQuery,
     vendorFilter,
   ]);
 

@@ -8,6 +8,7 @@ import {
 } from "../services/orders.service";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
+import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
 
 const DEFAULT_LIMIT = 20;
@@ -128,9 +129,7 @@ const ArchivedOrders = () => {
       next.set("limit", String(pagination.limit));
     }
 
-    const nextQuery = next.toString();
-    const currentQuery = searchParams.toString();
-    if (nextQuery !== currentQuery) {
+    if (!areSearchParamsEquivalent(next, searchParams)) {
       setSearchParams(next, { replace: true });
     }
   }, [filters.brand, filters.order_id, filters.vendor, pagination.limit, pagination.page, searchParams, setSearchParams]);

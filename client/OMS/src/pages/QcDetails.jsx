@@ -82,7 +82,7 @@ const QcDetails = () => {
   const hasShippingRecords =
     Array.isArray(qc?.order?.shipment) && qc.order.shipment.length > 0;
   const canShowEditShippingButton =
-    isAdmin &&
+    isOnlyAdmin &&
     (hasShippingRecords || isShipmentEditableStatus(qc?.order?.status));
 
   const requirementsMet =

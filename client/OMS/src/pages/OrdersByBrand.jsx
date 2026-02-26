@@ -4,6 +4,7 @@ import axios from "../api/axios";
 import Navbar from "../components/Navbar";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
+import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
 
 const DEFAULT_SORT_BY = "order_date";
@@ -105,9 +106,7 @@ const OrdersByBrand = () => {
       next.set("sort_order", sortOrder);
     }
 
-    const nextQuery = next.toString();
-    const currentQuery = searchParams.toString();
-    if (nextQuery !== currentQuery) {
+    if (!areSearchParamsEquivalent(next, searchParams)) {
       setSearchParams(next, { replace: true });
     }
   }, [searchParams, setSearchParams, sortBy, sortOrder]);

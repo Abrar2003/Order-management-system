@@ -5,6 +5,7 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import AlignQCModal from "../components/AlignQcModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
+import { areSearchParamsEquivalent } from "../utils/searchParams";
 import {
   formatDateDDMMYYYY,
   toDDMMYYYYInputValue,
@@ -212,8 +213,7 @@ const QCPage = () => {
     if (sortBy !== DEFAULT_SORT_BY) next.set("sort_by", sortBy);
     if (sortOrder !== parseSortOrder("", sortBy)) next.set("sort_order", sortOrder);
 
-    const nextQuery = next.toString();
-    if (nextQuery !== currentQuery) {
+    if (!areSearchParamsEquivalent(next, searchParams)) {
       setSearchParams(next, { replace: true });
     }
   }, [

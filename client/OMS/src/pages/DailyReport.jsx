@@ -10,6 +10,7 @@ import {
   toISODateString,
 } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
+import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
 
 const DEFAULT_ALIGNED_SORT_BY = "request_date";
@@ -224,9 +225,7 @@ const DailyReport = () => {
       next.set("inspection_sort_order", inspectionSortOrder);
     }
 
-    const nextQuery = next.toString();
-    const currentQuery = searchParams.toString();
-    if (nextQuery !== currentQuery) {
+    if (!areSearchParamsEquivalent(next, searchParams)) {
       setSearchParams(next, { replace: true });
     }
   }, [

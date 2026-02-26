@@ -10,6 +10,7 @@ import {
   toISODateString,
 } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
+import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
 
 const toSafeNumber = (value) => {
@@ -210,9 +211,7 @@ const Container = () => {
     if (orderIdValue) next.set("order_id", orderIdValue);
     if (statusFilter && statusFilter !== "all") next.set("status", statusFilter);
 
-    const nextQuery = next.toString();
-    const currentQuery = searchParams.toString();
-    if (nextQuery !== currentQuery) {
+    if (!areSearchParamsEquivalent(next, searchParams)) {
       setSearchParams(next, { replace: true });
     }
   }, [

@@ -4,6 +4,7 @@ import Navbar from "../components/Navbar";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
+import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
 
 const DEFAULT_TODAY_ETD_SORT_BY = "ETD";
@@ -220,8 +221,7 @@ const Home = () => {
       next.set("today_sort_order", todayEtdSortOrder);
     }
 
-    const nextQuery = next.toString();
-    if (nextQuery !== currentQuery) {
+    if (!areSearchParamsEquivalent(next, searchParams)) {
       setSearchParams(next, { replace: true });
     }
   }, [
@@ -389,7 +389,7 @@ const Home = () => {
                   setPage(1);
                   const next = new URLSearchParams(searchParams);
                   next.set("brand", brandName);
-                  if (next.toString() !== searchParams.toString()) {
+                  if (!areSearchParamsEquivalent(next, searchParams)) {
                     setSearchParams(next, { replace: true });
                   }
                 }}

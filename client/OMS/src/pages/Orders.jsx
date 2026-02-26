@@ -60,9 +60,7 @@ const Orders = () => {
   const canAlignQc = ["admin", "manager"].includes(
     normalizedRole,
   );
-  const canEditOrder = ["admin", "manager"].includes(
-    normalizedRole,
-  );
+  const canEditOrder = normalizedRole === "admin";
   const canArchiveOrder = normalizedRole === "admin";
 
   const orderId = searchParams.get("order_id");

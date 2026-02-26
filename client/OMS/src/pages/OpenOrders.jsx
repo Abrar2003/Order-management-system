@@ -5,6 +5,7 @@ import OrderExportModal from "../components/OrderExportModal";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
+import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
 
 const defaultFilters = {
@@ -126,6 +127,7 @@ const OpenOrders = () => {
     order_ids: [],
   });
   const [showExportModal, setShowExportModal] = useState(false);
+  const [syncedQuery, setSyncedQuery] = useState(null);
 
   const navigate = useNavigate();
   const token = localStorage.getItem("token");
@@ -204,6 +206,7 @@ const OpenOrders = () => {
   }, [getOrdersByFilters]);
 
   useEffect(() => {
+    const currentQuery = searchParams.toString();
     const nextFilters = {
       vendor: normalizeFilterParam(searchParams.get("vendor"), "all"),
       brand: normalizeFilterParam(searchParams.get("brand"), "all"),
@@ -230,9 +233,13 @@ const OpenOrders = () => {
     setLimit((prev) => (prev === nextLimit ? prev : nextLimit));
     setSortBy((prev) => (prev === nextSortBy ? prev : nextSortBy));
     setSortOrder((prev) => (prev === nextSortOrder ? prev : nextSortOrder));
+    setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
   }, [searchParams]);
 
   useEffect(() => {
+    const currentQuery = searchParams.toString();
+    if (syncedQuery !== currentQuery) return;
+
     const next = new URLSearchParams();
     if (filters.vendor && filters.vendor !== "all") next.set("vendor", filters.vendor);
     if (filters.brand && filters.brand !== "all") next.set("brand", filters.brand);
@@ -245,9 +252,7 @@ const OpenOrders = () => {
       next.set("sort_order", sortOrder);
     }
 
-    const nextQuery = next.toString();
-    const currentQuery = searchParams.toString();
-    if (nextQuery !== currentQuery) {
+    if (!areSearchParamsEquivalent(next, searchParams)) {
       setSearchParams(next, { replace: true });
     }
   }, [
@@ -261,6 +266,7 @@ const OpenOrders = () => {
     sortOrder,
     searchParams,
     setSearchParams,
+    syncedQuery,
   ]);
 
   useEffect(() => {

@@ -88,7 +88,7 @@ router.get(
 router.patch(
   "/edit-order/:id",
   authenticate,
-  authorize("admin", "manager"),
+  authorize("admin"),
   editOrder,
 );
 
