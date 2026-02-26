@@ -41,8 +41,8 @@ router.get(
 
 router.post(
     "/create-brand",
-    // auth,
-    // authorize("admin", "manager", "QC", "dev"),
+    auth,
+    authorize("admin", "manager", "dev"),
     upload.single("logo"),
     brandController.createBrand
 )

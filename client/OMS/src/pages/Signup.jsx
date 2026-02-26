@@ -9,7 +9,7 @@ const Signup = () => {
   const user = getUserFromToken();
   const isAdmin = user?.role === "admin";
   const navigate = useNavigate();
-  const roles = useMemo(() => ["admin", "manager", "QC", "Dev", "user"], []);
+  const roles = useMemo(() => ["admin", "manager", "QC", "dev", "user"], []);
 
   const [form, setForm] = useState({
     username: "",

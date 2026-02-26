@@ -11,14 +11,14 @@ const router = express.Router();
 router.get(
   "/",
   auth,
-  authorize("admin", "manager", "QC", "dev", "Dev"),
+  authorize("admin", "manager", "QC", "dev"),
   getItems,
 );
 
 router.post(
   "/sync",
   auth,
-  authorize("admin", "manager", "dev", "Dev"),
+  authorize("admin", "manager", "dev"),
   syncItemsFromOrders,
 );
 

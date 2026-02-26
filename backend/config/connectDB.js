@@ -1,13 +1,24 @@
 const mongoose = require("mongoose");
 
 const connectDB = async () => {
-  const MONGO_URI = process.env.MONGO_URI
-  try {
-    const conn = await mongoose.connect(MONGO_URI);
-    console.log(`Connected to mongodb ${conn.connection.host}`);
-  } catch (err) {
-    console.log("Error in mongoDB", err);
+  const mongoUri = String(process.env.MONGO_URI || "").trim();
+  if (!mongoUri) {
+    throw new Error("MONGO_URI is not configured");
   }
+
+  const selectionTimeout = Number.parseInt(
+    String(process.env.MONGO_SERVER_SELECTION_TIMEOUT_MS || "10000"),
+    10,
+  );
+
+  const conn = await mongoose.connect(mongoUri, {
+    serverSelectionTimeoutMS: Number.isFinite(selectionTimeout)
+      ? selectionTimeout
+      : 10000,
+  });
+
+  console.log(`Connected to MongoDB: ${conn.connection.host}`);
+  return conn;
 };
 
 module.exports = connectDB;

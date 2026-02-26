@@ -28,8 +28,9 @@ const toErrorMessage = (err, fallback) =>
 const Container = () => {
   const navigate = useNavigate();
   const user = getUserFromToken();
-  const canFinalizeShipping = ["admin", "manager", "dev", "Dev"].includes(
-    user?.role,
+  const normalizedRole = String(user?.role || "").trim().toLowerCase();
+  const canFinalizeShipping = ["admin", "manager", "dev"].includes(
+    normalizedRole,
   );
 
   const [containerNumber, setContainerNumber] = useState("");

@@ -2,6 +2,22 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const User = require("../models/user.model");
 
+const normalizeRole = (value) => {
+  const normalizedRole = String(value || "").trim();
+  if (!normalizedRole) return normalizedRole;
+
+  const canonicalRoles = {
+    admin: "admin",
+    manager: "manager",
+    qc: "QC",
+    dev: "dev",
+    user: "user",
+  };
+
+  const byLowerCase = canonicalRoles[normalizedRole.toLowerCase()];
+  return byLowerCase || normalizedRole;
+};
+
 /**
  * SIGN UP
  */
@@ -61,10 +77,12 @@ const signin = async (req, res) => {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
+    const normalizedRole = normalizeRole(user.role);
+
     const token = jwt.sign(
       {
         id: user._id,
-        role: user.role,
+        role: normalizedRole,
         email: user.email,
         name: user.name,
       },
@@ -77,7 +95,7 @@ const signin = async (req, res) => {
       user: {
         id: user._id,
         username: user.username,
-        role: user.role,
+        role: normalizedRole,
         name: user.name,
       },
     });
@@ -92,12 +110,24 @@ const getUsers = async (req, res) => {
     const { role } = req.query;
 
     const filter = {};
-    if (role) filter.role = role;
+    if (role) {
+      const normalizedRole = normalizeRole(role);
+      filter.role = normalizedRole === "dev"
+        ? { $regex: "^dev$", $options: "i" }
+        : normalizedRole;
+    }
 
     const users = await User.find(filter)
+      .lean()
       .select("_id name role email") // never send password
       .sort({ name: 1 });
-    res.json(users);
+
+    res.json(
+      users.map((user) => ({
+        ...user,
+        role: normalizeRole(user.role),
+      })),
+    );
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

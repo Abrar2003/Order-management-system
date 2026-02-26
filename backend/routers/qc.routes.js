@@ -9,7 +9,7 @@ const qcController = require("../controllers/qc.controller");
 router.get(
   "/list",
   auth,
-  authorize("admin", "manager", "QC", "Dev"),
+  authorize("admin", "manager", "QC", "dev"),
   qcController.getQCList
 );
 
@@ -32,21 +32,21 @@ router.patch(
 router.post(
   "/sync-item-details",
   auth,
-  authorize("admin", "manager", "dev", "Dev"),
+  authorize("admin", "manager", "dev"),
   qcController.syncQcDetailsFromItems,
 );
 
 router.get(
   "/daily-report",
   auth,
-  authorize("admin", "manager", "QC", "Dev"),
+  authorize("admin", "manager", "QC", "dev"),
   qcController.getDailyReport
 );
 
 router.get(
   "/export",
   auth,
-  authorize("admin", "manager", "QC", "Dev"),
+  authorize("admin", "manager", "QC", "dev"),
   qcController.exportQCList,
 );
 
@@ -67,7 +67,7 @@ router.delete(
 router.get(
   "/:id",
   auth,
-  authorize("admin", "manager", "QC", "Dev"),
+  authorize("admin", "manager", "QC", "dev"),
   qcController.getQCById
 );
 

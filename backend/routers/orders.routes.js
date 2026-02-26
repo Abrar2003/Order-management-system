@@ -29,7 +29,7 @@ const router = express.Router();
 router.post(
   "/upload-orders",
   authenticate,
-  authorize("admin", "manager", "dev", "Dev"),
+  authorize("admin", "manager", "dev"),
   upload.single("file"),
   uploadOrders,
 );
@@ -37,13 +37,13 @@ router.post(
 router.post(
   "/manual-orders",
   authenticate,
-  authorize("admin", "manager", "dev", "Dev"),
+  authorize("admin", "manager", "dev"),
   createOrdersManually,
 );
 router.get(
   "/upload-logs",
   authenticate,
-  authorize("admin", "manager", "dev", "Dev"),
+  authorize("admin", "manager", "dev"),
   getUploadLogs,
 );
 
@@ -73,14 +73,14 @@ router.get("/export", authenticate, exportOrdersDb);
 router.get(
   "/shipments/export",
   authenticate,
-  authorize("admin", "manager", "QC", "dev", "Dev"),
+  authorize("admin", "manager", "QC", "dev"),
   exportShipmentsDb,
 );
 
 router.get(
   "/shipments",
   authenticate,
-  authorize("admin", "manager", "QC", "dev", "Dev"),
+  authorize("admin", "manager", "QC", "dev"),
   getShipmentsDb,
 );
 
@@ -130,6 +130,11 @@ router.get("/:brand/today-etd-orders", authenticate, getTodayEtdOrdersByBrand);
 router.get("/order-by-id/:id", authenticate, getOrderById);
 
 // Resync the calendar
-router.post("/re-sync", reSync);
+router.post(
+  "/re-sync",
+  authenticate,
+  authorize("admin", "manager", "dev"),
+  reSync,
+);
 
 module.exports = router;

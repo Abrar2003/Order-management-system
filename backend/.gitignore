@@ -24,3 +24,5 @@ dist-ssr
 *.sw?
 .env
 *data
+uploads/*
+!uploads/.gitkeep

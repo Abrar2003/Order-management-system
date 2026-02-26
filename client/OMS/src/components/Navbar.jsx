@@ -9,6 +9,7 @@ const Navbar = () => {
   const token = getToken();
   const user = getUserFromToken();
   const role = user?.role;
+  const normalizedRole = String(role || "").trim().toLowerCase();
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showAllocateModal, setShowAllocateModal] = useState(false);
   const [showMainMenu, setShowMainMenu] = useState(false);
@@ -24,10 +25,10 @@ const Navbar = () => {
 
   const [theme, setTheme] = useState(getInitialTheme);
 
-  const canAccessQc = ["QC", "admin", "manager", "dev", "Dev"].includes(role);
-  const canManageOrders = ["admin", "manager", "dev", "Dev"].includes(role);
-  const canManageLabels = ["admin", "manager"].includes(role);
-  const canCreateUsers = role === "admin";
+  const canAccessQc = ["qc", "admin", "manager", "dev"].includes(normalizedRole);
+  const canManageOrders = ["admin", "manager", "dev"].includes(normalizedRole);
+  const canManageLabels = ["admin", "manager"].includes(normalizedRole);
+  const canCreateUsers = normalizedRole === "admin";
 
   const navigate = useNavigate();
 

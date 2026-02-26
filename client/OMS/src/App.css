@@ -110,6 +110,31 @@
   vertical-align: middle;
 }
 
+.orders-action-col {
+  width: 30%;
+  min-width: 320px;
+}
+
+.orders-action-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.orders-action-main-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.5rem;
+}
+
+.orders-action-main-row.with-delete {
+  grid-template-columns: 5fr 1fr;
+}
+
+.orders-action-main-row .btn {
+  width: 100%;
+}
+
 .table-clickable {
   cursor: pointer;
 }

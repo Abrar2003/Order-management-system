@@ -1,10 +1,10 @@
 import axios from "axios";
 
 const instance = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL,
+  baseURL: import.meta.env.VITE_API_BASE_URL || "/api",
 });
 
-// Add request interceptor to include token in headers
+// Add request interceptor to include token in headers.
 instance.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("token");
@@ -13,24 +13,20 @@ instance.interceptors.request.use(
     }
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error),
 );
 
-// Add response interceptor to handle 401 errors
+// Add response interceptor to handle 401 errors.
 instance.interceptors.response.use(
-  res => res,
-  err => {
+  (res) => res,
+  (err) => {
     if (err.response?.status === 401) {
-      console.warn("Unauthorized – token expired or invalid");
-      // Clear token on 401
+      console.warn("Unauthorized - token expired or invalid");
       localStorage.removeItem("token");
-      // Redirect to signin
       window.location.href = "/signin";
     }
     return Promise.reject(err);
-  }
+  },
 );
 
 export default instance;

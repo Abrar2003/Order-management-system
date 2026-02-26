@@ -29,7 +29,8 @@ const formatLbh = (value) => {
 const Items = () => {
   const navigate = useNavigate();
   const user = getUserFromToken();
-  const canSyncItems = ["admin", "manager", "dev", "Dev"].includes(user?.role);
+  const normalizedRole = String(user?.role || "").trim().toLowerCase();
+  const canSyncItems = ["admin", "manager", "dev"].includes(normalizedRole);
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);

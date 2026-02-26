@@ -42,9 +42,10 @@ const isShipmentEditableStatus = (statusValue) => {
 const Shipments = () => {
   const navigate = useNavigate();
   const user = getUserFromToken();
-  const isAdmin = String(user?.role || "").toLowerCase() === "admin";
-  const canFinalizeShipping = ["admin", "manager", "dev", "Dev"].includes(
-    user?.role,
+  const normalizedRole = String(user?.role || "").trim().toLowerCase();
+  const isAdmin = normalizedRole === "admin";
+  const canFinalizeShipping = ["admin", "manager", "dev"].includes(
+    normalizedRole,
   );
 
   const [rows, setRows] = useState([]);

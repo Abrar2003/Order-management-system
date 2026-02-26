@@ -72,11 +72,12 @@ const QcDetails = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const user = getUserFromToken();
+  const normalizedRole = String(user?.role || "").trim().toLowerCase();
   const userId = user?.id || user?._id;
-  const isAdmin = user?.role === "admin" || user?.role === "manager";
-  const isOnlyAdmin = String(user?.role || "").toLowerCase() === "admin";
-  const canFinalizeShipping = ["admin", "manager", "dev", "Dev"].includes(
-    user?.role,
+  const isAdmin = normalizedRole === "admin" || normalizedRole === "manager";
+  const isOnlyAdmin = normalizedRole === "admin";
+  const canFinalizeShipping = ["admin", "manager", "dev"].includes(
+    normalizedRole,
   );
   const hasShippingRecords =
     Array.isArray(qc?.order?.shipment) && qc.order.shipment.length > 0;
@@ -105,13 +106,13 @@ const QcDetails = () => {
       return checked > 0 || passed > 0 || offered > 0 || labelsAdded > 0;
     });
   const canClaimInspection =
-    user?.role === "QC" &&
+    normalizedRole === "qc" &&
     !hasActiveInspectionRecords &&
     (qc?.quantities?.qc_checked || 0) === 0;
   const canUpdateQc =
     isAdmin ||
     (!isInspectionDone &&
-      user?.role === "QC" &&
+      normalizedRole === "qc" &&
       qcIsPending &&
       (assignedInspectorId === String(userId) || canClaimInspection));
 
@@ -577,7 +578,7 @@ const QcDetails = () => {
                     ? ""
                     : isInspectionDone
                       ? "After inspection is done, only admin can update this record."
-                      : user?.role === "QC" &&
+                      : normalizedRole === "qc" &&
                           assignedInspectorId === String(userId)
                         ? "No pending quantity left to update."
                         : "Only admin or an eligible QC inspector can update this record."

@@ -15,27 +15,30 @@ const toSafeNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const getShippingPendingQuantity = (order) => {
-  const totalQuantity = Math.max(0, toSafeNumber(order?.quantity));
-  const shippedQuantity = (Array.isArray(order?.shipment) ? order.shipment : []).reduce(
+const getShippedQuantity = (order) =>
+  (Array.isArray(order?.shipment) ? order.shipment : []).reduce(
     (sum, shipmentEntry) => sum + Math.max(0, toSafeNumber(shipmentEntry?.quantity)),
     0,
   );
 
-  return Math.max(0, totalQuantity - shippedQuantity);
+const getInspectionDoneQuantity = (order) =>
+  Math.max(0, toSafeNumber(order?.qc_record?.quantities?.qc_passed));
+
+const getOpenInspectionQuantity = (order) => {
+  const hasQcRecord = Boolean(order?.qc_record);
+  if (hasQcRecord) {
+    return Math.max(0, toSafeNumber(order?.qc_record?.quantities?.pending));
+  }
+
+  const totalQuantity = Math.max(0, toSafeNumber(order?.quantity));
+  const inspectionDoneQuantity = getInspectionDoneQuantity(order);
+  return Math.max(0, totalQuantity - inspectionDoneQuantity);
 };
 
 const getPendingDisplayQuantity = (order) => {
-  const normalizedStatus = String(order?.status || "").trim().toLowerCase();
-  if (normalizedStatus === "partial shipped") {
-    return getShippingPendingQuantity(order);
-  }
-
-  if (order?.qc_record) {
-    return toSafeNumber(order?.qc_record?.quantities?.pending);
-  }
-
-  return Math.max(0, toSafeNumber(order?.quantity));
+  const inspectionDoneQuantity = getInspectionDoneQuantity(order);
+  const shippedQuantity = getShippedQuantity(order);
+  return Math.max(0, inspectionDoneQuantity - shippedQuantity);
 };
 
 const Orders = () => {
@@ -52,14 +55,15 @@ const Orders = () => {
 
   const user = getUserFromToken();
   const role = user?.role;
-  const canManageOrders = ["admin", "manager", "dev", "Dev"].includes(role);
+  const normalizedRole = String(role || "").trim().toLowerCase();
+  const canManageOrders = ["admin", "manager", "dev"].includes(normalizedRole);
   const canAlignQc = ["admin", "manager"].includes(
-    String(role || "").toLowerCase(),
+    normalizedRole,
   );
   const canEditOrder = ["admin", "manager"].includes(
-    String(role || "").toLowerCase(),
+    normalizedRole,
   );
-  const canArchiveOrder = String(role || "").toLowerCase() === "admin";
+  const canArchiveOrder = normalizedRole === "admin";
 
   const orderId = searchParams.get("order_id");
 
@@ -171,9 +175,10 @@ const Orders = () => {
                       <th>Item</th>
                       <th>Description</th>
                       <th>Quantity</th>
+                      <th>Open Quantity</th>
                       <th>Pending</th>
                       <th>Status</th>
-                      {canManageOrders && <th>Action</th>}
+                      {canManageOrders && <th className="orders-action-col">Action</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -182,31 +187,39 @@ const Orders = () => {
                         <td>{order.item?.item_code}</td>
                         <td>{order.item?.description}</td>
                         <td>{order.quantity}</td>
+                        <td>{getOpenInspectionQuantity(order)}</td>
                         <td>{getPendingDisplayQuantity(order)}</td>
                         <td>{order.status}</td>
                         {canManageOrders && (
-                          <td>
-                            <div className="d-flex flex-column gap-2">
-                              {canEditOrder && (
-                                <button
-                                  type="button"
-                                  className="btn btn-outline-secondary btn-sm"
-                                  onClick={() => setEditingOrder(order)}
+                          <td className="orders-action-col">
+                            <div className="orders-action-stack">
+                              {(canEditOrder || canArchiveOrder) && (
+                                <div
+                                  className={`orders-action-main-row ${canEditOrder && canArchiveOrder ? "with-delete" : ""}`}
                                 >
-                                  Edit Order
-                                </button>
-                              )}
-                              {canArchiveOrder && (
-                                <button
-                                  type="button"
-                                  className="btn btn-outline-danger btn-sm"
-                                  onClick={() => {
-                                    setArchiveError("");
-                                    setArchiveTarget(order);
-                                  }}
-                                >
-                                  Archive Order
-                                </button>
+                                  {canEditOrder && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-outline-secondary btn-sm"
+                                      onClick={() => setEditingOrder(order)}
+                                    >
+                                      Edit Order
+                                    </button>
+                                  )}
+                                  {canArchiveOrder && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-outline-secondary btn-sm"
+                                      onClick={() => {
+                                        setArchiveError("");
+                                        setArchiveTarget(order);
+                                      }}
+                                      
+                                    >
+                                      <img style={{width: "80%"}} src="../../public/archive.png" alt="" />
+                                    </button>
+                                  )}
+                                </div>
                               )}
 
                               {order.qc_record ? (
@@ -250,7 +263,7 @@ const Orders = () => {
 
                     {orders.length === 0 && (
                       <tr>
-                        <td colSpan={canManageOrders ? 6 : 5} className="text-center py-4">
+                        <td colSpan={canManageOrders ? 7 : 6} className="text-center py-4">
                           No orders found
                         </td>
                       </tr>
