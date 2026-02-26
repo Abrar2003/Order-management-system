@@ -133,8 +133,75 @@ const getUsers = async (req, res) => {
   }
 };
 
+/**
+ * PATCH /auth/change-password
+ * Update own password after verifying current password.
+ */
+const changePassword = async (req, res) => {
+  try {
+    const currentPassword = String(
+      req.body?.current_password ?? req.body?.currentPassword ?? "",
+    );
+    const newPassword = String(
+      req.body?.new_password ?? req.body?.newPassword ?? "",
+    );
+    const confirmPassword = String(
+      req.body?.confirm_password ?? req.body?.confirmPassword ?? "",
+    );
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      return res.status(400).json({
+        message: "Current password, new password, and confirm password are required",
+      });
+    }
+
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ message: "New passwords do not match" });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        message: "New password must be at least 6 characters",
+      });
+    }
+
+    const userId = req.user?._id || req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const user = await User.findById(userId).select("password");
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const isCurrentPasswordValid = await bcrypt.compare(
+      currentPassword,
+      user.password,
+    );
+    if (!isCurrentPasswordValid) {
+      return res.status(401).json({ message: "Current password is incorrect" });
+    }
+
+    const isSameAsOldPassword = await bcrypt.compare(newPassword, user.password);
+    if (isSameAsOldPassword) {
+      return res.status(400).json({
+        message: "New password must be different from current password",
+      });
+    }
+
+    user.password = await bcrypt.hash(newPassword, 10);
+    await user.save();
+
+    return res.status(200).json({ message: "Password updated successfully" });
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
+};
+
 module.exports = {
   signup,
   signin,
   getUsers,
+  changePassword,
 };

@@ -51,7 +51,6 @@ const OrdersByBrand = () => {
             },
           },
         );
-        console.log("orders",res.data.data[0]);
         setOrders(res.data.data);
       } catch (err) {
         console.error(err);

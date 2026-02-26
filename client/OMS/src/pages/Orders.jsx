@@ -216,7 +216,11 @@ const Orders = () => {
                                       }}
                                       
                                     >
-                                      <img style={{width: "80%"}} src="../../public/archive.png" alt="" />
+                                      <img
+                                        style={{ width: "80%" }}
+                                        src={`${import.meta.env.BASE_URL}archive.png`}
+                                        alt="Delete"
+                                      />
                                     </button>
                                   )}
                                 </div>

@@ -17,6 +17,11 @@ export const signin = async (credentials) => {
   return res.data;
 };
 
+export const changePassword = async (payload) => {
+  const res = await axios.patch("/auth/change-password", payload);
+  return res.data;
+};
+
 /**
  * Get token from localStorage
  */

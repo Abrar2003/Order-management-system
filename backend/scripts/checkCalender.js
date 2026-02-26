@@ -18,8 +18,7 @@ async function getAccessToken() {
 }
 
 const main = async() => {
-  const token = await getAccessToken();
-  console.log(token);
+  await getAccessToken();
 }
 
 main();
