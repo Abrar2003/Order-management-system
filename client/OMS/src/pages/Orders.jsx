@@ -174,7 +174,7 @@ const Orders = () => {
                       <th>Description</th>
                       <th>Quantity</th>
                       <th>Open Quantity</th>
-                      <th>Pending</th>
+                      <th>Packed</th>
                       <th>Status</th>
                       {canManageOrders && <th className="orders-action-col">Action</th>}
                     </tr>
