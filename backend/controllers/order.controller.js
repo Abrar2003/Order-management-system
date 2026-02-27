@@ -1,6 +1,7 @@
 const XLSX = require("xlsx");
 const Order = require("../models/order.model");
 const QC = require("../models/qc.model");
+const Item = require("../models/item.model");
 const UploadLog = require("../models/uploadLog.model");
 const mongoose = require("mongoose");
 const dateParser = require("../helpers/dateparsser");
@@ -1233,15 +1234,54 @@ exports.createOrdersManually = async (req, res) => {
 
     duplicateEntries = [];
     const seenKeys = new Set();
+    const draftRows = rows.map((row) => ({
+      orderId: normalizeValue(row?.order_id ?? row?.orderId ?? row?.PO),
+      itemCode: normalizeValue(row?.item_code ?? row?.itemCode),
+      brand: normalizeValue(row?.brand),
+      vendor: normalizeValue(row?.vendor),
+      description: normalizeValue(row?.description),
+      quantity: Number(row?.quantity),
+      etdInput: row?.ETD ?? row?.etd,
+      orderDateInput: row?.order_date ?? row?.orderDate,
+    }));
 
-    const orders = rows
-      .map((row) => {
-        const orderId = normalizeValue(row?.order_id ?? row?.orderId ?? row?.PO);
-        const itemCode = normalizeValue(row?.item_code ?? row?.itemCode);
-        const brand = normalizeValue(row?.brand);
-        const vendor = normalizeValue(row?.vendor);
-        const description = normalizeValue(row?.description);
-        const quantity = Number(row?.quantity);
+    const uniqueItemCodes = [
+      ...new Set(draftRows.map((row) => normalizeValue(row?.itemCode)).filter(Boolean)),
+    ];
+
+    let itemDescriptionsByCodeKey = new Map();
+    if (uniqueItemCodes.length > 0) {
+      const itemDocs = await Item.find({
+        $or: uniqueItemCodes.map((itemCode) => ({
+          code: {
+            $regex: `^${escapeRegex(itemCode)}$`,
+            $options: "i",
+          },
+        })),
+      })
+        .select("code description name")
+        .lean();
+
+      itemDescriptionsByCodeKey = new Map(
+        itemDocs.map((itemDoc) => [
+          normalizeLooseString(itemDoc?.code).toLowerCase(),
+          normalizeLooseString(itemDoc?.description || itemDoc?.name || ""),
+        ]),
+      );
+    }
+
+    const orders = draftRows
+      .map((draftRow) => {
+        const orderId = draftRow.orderId;
+        const itemCode = draftRow.itemCode;
+        const brand = draftRow.brand;
+        const vendor = draftRow.vendor;
+        const description = draftRow.description;
+        const quantity = draftRow.quantity;
+        const existingDescription = normalizeLooseString(
+          itemDescriptionsByCodeKey.get(normalizeLooseString(itemCode).toLowerCase()) || "",
+        );
+        const resolvedDescription = existingDescription || description;
 
         if (!orderId || !itemCode || !brand || !vendor) {
           duplicateEntries.push({
@@ -1261,10 +1301,19 @@ exports.createOrdersManually = async (req, res) => {
           return null;
         }
 
-        const parsedEtd = isProvided(row?.ETD ?? row?.etd)
-          ? parseDateLike(row?.ETD ?? row?.etd)
+        if (!resolvedDescription) {
+          duplicateEntries.push({
+            order_id: orderId,
+            item_code: itemCode,
+            reason: "description_required_for_new_item",
+          });
+          return null;
+        }
+
+        const parsedEtd = isProvided(draftRow.etdInput)
+          ? parseDateLike(draftRow.etdInput)
           : null;
-        if (isProvided(row?.ETD ?? row?.etd) && !parsedEtd) {
+        if (isProvided(draftRow.etdInput) && !parsedEtd) {
           duplicateEntries.push({
             order_id: orderId,
             item_code: itemCode,
@@ -1273,10 +1322,10 @@ exports.createOrdersManually = async (req, res) => {
           return null;
         }
 
-        const parsedOrderDate = isProvided(row?.order_date ?? row?.orderDate)
-          ? parseDateLike(row?.order_date ?? row?.orderDate)
+        const parsedOrderDate = isProvided(draftRow.orderDateInput)
+          ? parseDateLike(draftRow.orderDateInput)
           : null;
-        if (isProvided(row?.order_date ?? row?.orderDate) && !parsedOrderDate) {
+        if (isProvided(draftRow.orderDateInput) && !parsedOrderDate) {
           duplicateEntries.push({
             order_id: orderId,
             item_code: itemCode,
@@ -1301,7 +1350,7 @@ exports.createOrdersManually = async (req, res) => {
           order_id: orderId,
           item: {
             item_code: itemCode,
-            description,
+            description: resolvedDescription,
           },
           brand,
           vendor,
@@ -1449,7 +1498,7 @@ exports.createOrdersManually = async (req, res) => {
     const remarks = [];
     if (duplicateEntries.length > 0) {
       remarks.push(
-        `${duplicateEntries.length} row(s) were skipped due to duplicates, missing fields, invalid quantity, or invalid dates.`,
+        `${duplicateEntries.length} row(s) were skipped due to duplicates, missing fields, missing description for new item codes, invalid quantity, or invalid dates.`,
       );
     }
 
