@@ -131,6 +131,10 @@
   grid-template-columns: 5fr 1fr;
 }
 
+.orders-action-main-row.equal-three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .orders-action-main-row .btn {
   width: 100%;
 }

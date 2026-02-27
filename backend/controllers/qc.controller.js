@@ -21,6 +21,12 @@ const toNonNegativeNumber = (value, fallback = 0) => {
   if (!Number.isFinite(parsed) || parsed < 0) return fallback;
   return parsed;
 };
+const toNormalizedCbmString = (value) => {
+  const safe = toNonNegativeNumber(value, 0);
+  if (safe <= 0) return "0";
+  const fixed = safe.toFixed(6);
+  return fixed.replace(/\.?0+$/, "") || "0";
+};
 
 const normalizeText = (value) => String(value ?? "").trim();
 const pad2 = (value) => String(value).padStart(2, "0");
@@ -1680,22 +1686,15 @@ exports.updateQC = async (req, res) => {
         let nextTop = parsedCbmTop.hasInput ? parsedCbmTop.value : existingTop;
         let nextBottom = parsedCbmBottom.hasInput ? parsedCbmBottom.value : existingBottom;
 
-        const hasUpdatedTotal = parsedCbmTotal.hasInput && parsedCbmTotal.value > 0;
-        const hasUpdatedTopOrBottom =
-          (parsedCbmTop.hasInput && parsedCbmTop.value > 0) ||
-          (parsedCbmBottom.hasInput && parsedCbmBottom.value > 0);
-
-        if (hasUpdatedTotal) {
-          nextTop = 0;
-          nextBottom = 0;
-        } else if (hasUpdatedTopOrBottom) {
-          nextTotal = 0;
+        const hasTopAndBottom = nextTop > 0 && nextBottom > 0;
+        if (hasTopAndBottom) {
+          nextTotal = nextTop + nextBottom;
         }
 
         qc.cbm = {
-          top: String(nextTop),
-          bottom: String(nextBottom),
-          total: String(nextTotal),
+          top: toNormalizedCbmString(nextTop),
+          bottom: toNormalizedCbmString(nextBottom),
+          total: toNormalizedCbmString(nextTotal),
         };
       }
 

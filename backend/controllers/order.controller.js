@@ -2055,6 +2055,8 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
       orderdate: "order_date",
       order_date: "order_date",
       etd: "ETD",
+      revisedetd: "revised_ETD",
+      revised_etd: "revised_ETD",
       date: "order_date",
     };
     const sortBy = sortAliases[normalizedSortKey] || "order_date";
@@ -2133,6 +2135,7 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
           brand: { $first: "$brand" },
           vendor: { $first: "$vendor" },
           ETD: { $min: "$ETD" },
+          revised_ETD: { $min: "$revised_ETD" },
           order_date: { $first: "$order_date" },
           statuses: { $addToSet: "$status" },
         },
@@ -2203,6 +2206,7 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
           brand: 1,
           vendor: 1,
           ETD: 1,
+          revised_ETD: 1,
           order_date: 1,
           statuses: 1,
           totalStatus: 1,
@@ -3159,6 +3163,10 @@ exports.editOrder = async (req, res) => {
     const hasDescription = hasOwn(payload, "description");
     const hasQuantity = hasOwn(payload, "quantity");
     const hasShipment = hasOwn(payload, "shipment");
+    const hasRevisedEtd =
+      hasOwn(payload, "revised_ETD")
+      || hasOwn(payload, "revised_etd")
+      || hasOwn(payload, "revisedEtd");
     const requesterRole = String(req.user?.role || "").trim().toLowerCase();
     const isRequesterAdmin = requesterRole === "admin";
     const archiveRemarkInput = String(
@@ -3180,6 +3188,11 @@ exports.editOrder = async (req, res) => {
       ? String(payload.description ?? "").trim()
       : String(order?.item?.description || "").trim();
     const nextQuantity = hasQuantity ? Number(payload.quantity) : Number(order.quantity || 0);
+    const rawRevisedEtd = hasOwn(payload, "revised_ETD")
+      ? payload.revised_ETD
+      : (hasOwn(payload, "revised_etd")
+        ? payload.revised_etd
+        : payload.revisedEtd);
 
     if (!nextBrand) {
       return res.status(400).json({ message: "brand is required" });
@@ -3197,6 +3210,22 @@ exports.editOrder = async (req, res) => {
       return res.status(400).json({
         message: "quantity must be a valid non-negative number",
       });
+    }
+
+    let nextRevisedEtd = order.revised_ETD || null;
+    if (hasRevisedEtd) {
+      const revisedEtdInput = String(rawRevisedEtd ?? "").trim();
+      if (!revisedEtdInput) {
+        nextRevisedEtd = null;
+      } else {
+        const parsedRevisedEtd = parseDateLike(revisedEtdInput);
+        if (!parsedRevisedEtd) {
+          return res.status(400).json({
+            message: "revised_ETD must be a valid date",
+          });
+        }
+        nextRevisedEtd = parsedRevisedEtd;
+      }
     }
 
     if (
@@ -3318,6 +3347,7 @@ exports.editOrder = async (req, res) => {
     order.quantity = nextQuantity;
     order.item.item_code = nextItemCode;
     order.item.description = nextDescription;
+    order.revised_ETD = nextRevisedEtd;
     if (shouldRebuildShipment) {
       order.shipment = adjustedShipment;
     }

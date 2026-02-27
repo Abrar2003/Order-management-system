@@ -5,6 +5,7 @@ import { getUserFromToken } from "../auth/auth.utils";
 import AlignQCModal from "../components/AlignQcModal";
 import EditOrderModal from "../components/EditOrderModal";
 import ArchiveOrderModal from "../components/ArchiveOrderModal";
+import RevisedEtdModal from "../components/RevisedEtdModal";
 import { archiveOrder } from "../services/orders.service";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatDateDDMMYYYY } from "../utils/date";
@@ -45,6 +46,7 @@ const Orders = () => {
   const [orders, setOrders] = useState([]);
   const [alignContext, setAlignContext] = useState(null);
   const [editingOrder, setEditingOrder] = useState(null);
+  const [revisedEtdTarget, setRevisedEtdTarget] = useState(null);
   const [archiveTarget, setArchiveTarget] = useState(null);
   const [archiving, setArchiving] = useState(false);
   const [archiveError, setArchiveError] = useState("");
@@ -176,6 +178,7 @@ const Orders = () => {
                       <th>Open Quantity</th>
                       <th>Packed</th>
                       <th>Status</th>
+                      <th>Revised ETD</th>
                       {canManageOrders && <th className="orders-action-col">Action</th>}
                     </tr>
                   </thead>
@@ -188,13 +191,12 @@ const Orders = () => {
                         <td>{getOpenInspectionQuantity(order)}</td>
                         <td>{getPendingDisplayQuantity(order)}</td>
                         <td>{order.status}</td>
+                        <td>{formatDateDDMMYYYY(order?.revised_ETD)}</td>
                         {canManageOrders && (
                           <td className="orders-action-col">
                             <div className="orders-action-stack">
                               {(canEditOrder || canArchiveOrder) && (
-                                <div
-                                  className={`orders-action-main-row ${canEditOrder && canArchiveOrder ? "with-delete" : ""}`}
-                                >
+                                <div className="orders-action-main-row equal-three">
                                   {canEditOrder && (
                                     <button
                                       type="button"
@@ -202,6 +204,15 @@ const Orders = () => {
                                       onClick={() => setEditingOrder(order)}
                                     >
                                       Edit Order
+                                    </button>
+                                  )}
+                                  {canEditOrder && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-outline-secondary btn-sm"
+                                      onClick={() => setRevisedEtdTarget(order)}
+                                    >
+                                      Revised ETD
                                     </button>
                                   )}
                                   {canArchiveOrder && (
@@ -212,13 +223,8 @@ const Orders = () => {
                                         setArchiveError("");
                                         setArchiveTarget(order);
                                       }}
-                                      
                                     >
-                                      <img
-                                        style={{ width: "80%" }}
-                                        src={`${import.meta.env.BASE_URL}archive.png`}
-                                        alt="Delete"
-                                      />
+                                      Archive
                                     </button>
                                   )}
                                 </div>
@@ -265,7 +271,7 @@ const Orders = () => {
 
                     {orders.length === 0 && (
                       <tr>
-                        <td colSpan={canManageOrders ? 7 : 6} className="text-center py-4">
+                        <td colSpan={canManageOrders ? 8 : 7} className="text-center py-4">
                           No orders found
                         </td>
                       </tr>
@@ -300,6 +306,17 @@ const Orders = () => {
           onClose={() => setEditingOrder(null)}
           onSuccess={() => {
             setEditingOrder(null);
+            fetchOrders();
+          }}
+        />
+      )}
+
+      {revisedEtdTarget && (
+        <RevisedEtdModal
+          order={revisedEtdTarget}
+          onClose={() => setRevisedEtdTarget(null)}
+          onSuccess={() => {
+            setRevisedEtdTarget(null);
             fetchOrders();
           }}
         />

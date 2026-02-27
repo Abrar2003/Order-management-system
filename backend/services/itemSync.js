@@ -19,6 +19,15 @@ const toDecimalString = (value, precision = 6) => {
   return fixed.replace(/\.?0+$/, "") || "0";
 };
 
+const resolveCbmTotal = (top, bottom, fallbackTotal) => {
+  const topValue = Math.max(0, toSafeNumber(top, 0));
+  const bottomValue = Math.max(0, toSafeNumber(bottom, 0));
+  if (topValue > 0 && bottomValue > 0) {
+    return toDecimalString(topValue + bottomValue, 6);
+  }
+  return normalizeCbmText(fallbackTotal);
+};
+
 const calculateCbmFromBoxSize = (box = {}) => {
   const length = Math.max(0, toSafeNumber(box?.L, 0));
   const breadth = Math.max(0, toSafeNumber(box?.B, 0));
@@ -150,7 +159,9 @@ const applyQcSnapshot = (item, qcLike) => {
   const nextBottom = normalizeCbmText(
     qcLike?.cbm?.bottom ?? currentCbm.inspected_bottom ?? currentCbm.bottom ?? "0",
   );
-  const nextTotal = normalizeCbmText(
+  const nextTotal = resolveCbmTotal(
+    nextTop,
+    nextBottom,
     qcLike?.cbm?.total ?? currentCbm.inspected_total ?? currentCbm.total ?? "0",
   );
 
@@ -298,6 +309,72 @@ const upsertItemsFromQcs = async (qcs = []) => {
   };
 };
 
+const syncQCCbmTotalsFromTopBottom = async () => {
+  const qcs = await QC.find({
+    cbm: { $exists: true, $ne: null },
+  })
+    .select("_id cbm")
+    .lean();
+
+  let processed = 0;
+  let updated = 0;
+  let skipped = 0;
+  const bulkOps = [];
+
+  for (const qcRow of qcs) {
+    processed += 1;
+
+    const top = Math.max(0, toSafeNumber(qcRow?.cbm?.top, 0));
+    const bottom = Math.max(0, toSafeNumber(qcRow?.cbm?.bottom, 0));
+    const hasTopAndBottom = top > 0 && bottom > 0;
+    if (!hasTopAndBottom) {
+      skipped += 1;
+      continue;
+    }
+
+    const nextTop = toDecimalString(top, 6);
+    const nextBottom = toDecimalString(bottom, 6);
+    const nextTotal = toDecimalString(top + bottom, 6);
+
+    const currentTop = normalizeCbmText(qcRow?.cbm?.top ?? "0");
+    const currentBottom = normalizeCbmText(qcRow?.cbm?.bottom ?? "0");
+    const currentTotal = normalizeCbmText(qcRow?.cbm?.total ?? "0");
+
+    if (
+      currentTop === nextTop
+      && currentBottom === nextBottom
+      && currentTotal === nextTotal
+    ) {
+      skipped += 1;
+      continue;
+    }
+
+    bulkOps.push({
+      updateOne: {
+        filter: { _id: qcRow._id },
+        update: {
+          $set: {
+            "cbm.top": nextTop,
+            "cbm.bottom": nextBottom,
+            "cbm.total": nextTotal,
+          },
+        },
+      },
+    });
+    updated += 1;
+  }
+
+  if (bulkOps.length > 0) {
+    await QC.bulkWrite(bulkOps, { ordered: false });
+  }
+
+  return {
+    processed,
+    updated,
+    skipped,
+  };
+};
+
 const syncDerivedFieldsForExistingItems = async () => {
   let processed = 0;
   let updated = 0;
@@ -324,6 +401,7 @@ const syncDerivedFieldsForExistingItems = async () => {
 };
 
 const syncAllItemsFromOrdersAndQc = async () => {
+  const qcCbmSync = await syncQCCbmTotalsFromTopBottom();
   const [orders, qcs] = await Promise.all([
     Order.find({ "item.item_code": { $exists: true, $ne: "" } })
       .select("item brand vendor")
@@ -343,6 +421,7 @@ const syncAllItemsFromOrdersAndQc = async () => {
 
   return {
     total_items: totalItems,
+    qc_cbm_sync: qcCbmSync,
     order_sync: orderSync,
     qc_sync: qcSync,
     derived_sync: derivedSync,
@@ -354,5 +433,6 @@ module.exports = {
   upsertItemsFromOrders,
   upsertItemFromQc,
   upsertItemsFromQcs,
+  syncQCCbmTotalsFromTopBottom,
   syncAllItemsFromOrdersAndQc,
 };

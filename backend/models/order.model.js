@@ -10,6 +10,7 @@ const Order_Schema = new mongoose.Schema(
     brand: { type: String, required: true },
     vendor: { type: String, required: true },
     ETD: { type: Date },
+    revised_ETD: { type: Date },
     order_date: { type: Date, default: Date.now() },
     status: {
       type: String,

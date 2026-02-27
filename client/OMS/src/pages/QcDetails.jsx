@@ -529,7 +529,7 @@ const QcDetails = () => {
 
             <section>
               <h3 className="h6 mb-3">Item Master Details</h3>
-              <div className="row g-3">
+              <div className="row g-3">  
                 <InfoBox label="Net Weight" value={itemMasterDetails.weightNet} />
                 <InfoBox
                   label="Gross Weight"

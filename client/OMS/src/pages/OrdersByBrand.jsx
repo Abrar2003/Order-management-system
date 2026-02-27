@@ -176,12 +176,13 @@ const OrdersByBrand = () => {
                           ETD{sortIndicator("ETD")}
                         </button>
                       </th>
+                      <th>Revised ETD</th>
                     </tr>
                   </thead>
                   <tbody>
                     {orders.length === 0 && (
                       <tr>
-                        <td colSpan="4" className="text-center py-4">
+                        <td colSpan="6" className="text-center py-4">
                           No orders found
                         </td>
                       </tr>
@@ -198,6 +199,7 @@ const OrdersByBrand = () => {
                         <td>{order?.totalStatus || "N/A"}</td>
                         <td>{formatDateDDMMYYYY(order.order_date)}</td>
                         <td>{formatDateDDMMYYYY(order.ETD)}</td>
+                        <td>{formatDateDDMMYYYY(order.revised_ETD)}</td>
                       </tr>
                     ))}
                   </tbody>
