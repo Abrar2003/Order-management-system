@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
@@ -9,6 +9,8 @@ import EditInspectionRecordsModal from "../components/EditInspectionRecordsModal
 import { getUserFromToken } from "../auth/auth.utils";
 import { formatDateDDMMYYYY } from "../utils/date";
 import Barcode from "react-barcode";
+import html2canvas from "html2canvas";
+import { jsPDF } from "jspdf";
 import "../App.css";
 
 const normalizeLabels = (labels) => {
@@ -37,6 +39,24 @@ const toTimestamp = (value) => {
 
   const parsed = new Date(asString);
   return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+};
+
+const formatLbhValue = (value) => {
+  const length = Number(value?.L || 0);
+  const breadth = Number(value?.B || 0);
+  const height = Number(value?.H || 0);
+  const safeLength = Number.isFinite(length) ? length : 0;
+  const safeBreadth = Number.isFinite(breadth) ? breadth : 0;
+  const safeHeight = Number.isFinite(height) ? height : 0;
+  if (safeLength <= 0 && safeBreadth <= 0 && safeHeight <= 0) {
+    return "Not Set";
+  }
+  return `${safeLength} x ${safeBreadth} x ${safeHeight}`;
+};
+
+const isPositiveCbmValue = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0;
 };
 
 const InfoBox = ({ label, value, compact = false }) => (
@@ -68,6 +88,8 @@ const QcDetails = () => {
   const [showEditShippingModal, setShowEditShippingModal] = useState(false);
   const [showEditInspectionModal, setShowEditInspectionModal] = useState(false);
   const [deletingInspectionId, setDeletingInspectionId] = useState("");
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const qcDetailsRef = useRef(null);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -169,11 +191,6 @@ const QcDetails = () => {
   }, [qc?.inspection_record]);
   const barcodeValue = qc?.barcode > 0 ? String(qc.barcode) : "";
 
-  const isPositiveCbmValue = (value) => {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) && parsed > 0;
-  };
-
   const cbmData = useMemo(() => {
     if (!qc) return { top: "", bottom: "", total: "" };
     const cbmValue = qc.cbm;
@@ -184,6 +201,34 @@ const QcDetails = () => {
       top: cbmValue?.top ?? "",
       bottom: cbmValue?.bottom ?? "",
       total: cbmValue?.total ?? "",
+    };
+  }, [qc]);
+  const itemMasterDetails = useMemo(() => {
+    const itemMaster = qc?.item_master || {};
+    const fallbackBrand = Array.isArray(itemMaster?.brands)
+      ? itemMaster.brands.find((brand) => String(brand || "").trim())
+      : "";
+    const brandName = String(itemMaster?.brand_name || fallbackBrand || "").trim();
+    const inspectedCbm = String(
+      itemMaster?.cbm?.inspected_total ?? itemMaster?.cbm?.total ?? "0",
+    ).trim();
+    const calculatedCbm = String(
+      itemMaster?.cbm?.calculated_total ?? "0",
+    ).trim();
+    const netWeight = Number(itemMaster?.weight?.net ?? 0);
+    const grossWeight = Number(itemMaster?.weight?.gross ?? 0);
+
+    return {
+      code: String(itemMaster?.code || qc?.item?.item_code || "N/A").trim() || "N/A",
+      description:
+        String(itemMaster?.description || itemMaster?.name || "N/A").trim() || "N/A",
+      brandName: brandName || "N/A",
+      weightNet: Number.isFinite(netWeight) ? netWeight : 0,
+      weightGross: Number.isFinite(grossWeight) ? grossWeight : 0,
+      itemLbh: formatLbhValue(itemMaster?.item_LBH),
+      boxLbh: formatLbhValue(itemMaster?.box_LBH),
+      inspectedCbm: isPositiveCbmValue(inspectedCbm) ? inspectedCbm : "Not Set",
+      calculatedCbm: isPositiveCbmValue(calculatedCbm) ? calculatedCbm : "Not Set",
     };
   }, [qc]);
 
@@ -297,6 +342,85 @@ const QcDetails = () => {
     }
   }, [id]);
 
+  const handleExportPdf = useCallback(async () => {
+    if (!qcDetailsRef.current || exportingPdf) return;
+
+    try {
+      setExportingPdf(true);
+      const target = qcDetailsRef.current;
+      const canvas = await html2canvas(target, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        windowWidth: Math.max(target.scrollWidth, target.clientWidth),
+        windowHeight: Math.max(target.scrollHeight, target.clientHeight),
+        scrollX: 0,
+        scrollY: -window.scrollY,
+        onclone: (clonedDoc) => {
+          const clonedRoot = clonedDoc.querySelector("[data-qc-pdf-root='true']");
+          if (!clonedRoot) return;
+          clonedRoot.querySelectorAll("button, .btn").forEach((node) => {
+            node.style.display = "none";
+          });
+        },
+      });
+
+      const imageData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF({
+        orientation: "portrait",
+        unit: "pt",
+        format: "a4",
+      });
+
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 18;
+      const printableWidth = pageWidth - margin * 2;
+      const printableHeight = pageHeight - margin * 2;
+      const imageHeight = (canvas.height * printableWidth) / canvas.width;
+
+      let heightLeft = imageHeight;
+      let yPosition = margin;
+
+      pdf.addImage(
+        imageData,
+        "PNG",
+        margin,
+        yPosition,
+        printableWidth,
+        imageHeight,
+        undefined,
+        "FAST",
+      );
+
+      heightLeft -= printableHeight;
+      while (heightLeft > 0) {
+        pdf.addPage();
+        yPosition = margin - (imageHeight - heightLeft);
+        pdf.addImage(
+          imageData,
+          "PNG",
+          margin,
+          yPosition,
+          printableWidth,
+          imageHeight,
+          undefined,
+          "FAST",
+        );
+        heightLeft -= printableHeight;
+      }
+
+      const orderId = String(qc?.order?.order_id || id || "qc").trim() || "qc";
+      const safeOrderId = orderId.replace(/[^a-zA-Z0-9_-]/g, "_");
+      pdf.save(`qc-details-${safeOrderId}.pdf`);
+    } catch (error) {
+      console.error("Export QC PDF Error:", error);
+      alert("Failed to export QC details as PDF.");
+    } finally {
+      setExportingPdf(false);
+    }
+  }, [exportingPdf, id, qc?.order?.order_id]);
+
   const handleDeleteInspectionRecord = useCallback(
     async (recordId) => {
       if (!isOnlyAdmin || !recordId) return;
@@ -353,7 +477,7 @@ const QcDetails = () => {
     <>
       <Navbar />
 
-      <div className="page-shell py-3">
+      <div className="page-shell py-3" ref={qcDetailsRef} data-qc-pdf-root="true">
         <div className="d-flex justify-content-between align-items-center mb-3">
           <button
             type="button"
@@ -363,7 +487,14 @@ const QcDetails = () => {
             Back
           </button>
           <h2 className="h4 mb-0">QC Details</h2>
-          <span className="d-none d-md-inline" />
+          <button
+            type="button"
+            className="btn btn-outline-primary btn-sm"
+            onClick={handleExportPdf}
+            disabled={exportingPdf}
+          >
+            {exportingPdf ? "Exporting..." : "Export PDF"}
+          </button>
         </div>
 
         <div className="card om-card">
@@ -392,6 +523,27 @@ const QcDetails = () => {
                   compact
                   label="Pending"
                   value={qc.quantities.pending}
+                />
+              </div>
+            </section>
+
+            <section>
+              <h3 className="h6 mb-3">Item Master Details</h3>
+              <div className="row g-3">
+                <InfoBox label="Net Weight" value={itemMasterDetails.weightNet} />
+                <InfoBox
+                  label="Gross Weight"
+                  value={itemMasterDetails.weightGross}
+                />
+                <InfoBox label="Item LBH" value={itemMasterDetails.itemLbh} />
+                <InfoBox label="Box LBH" value={itemMasterDetails.boxLbh} />
+                <InfoBox
+                  label="Inspected CBM"
+                  value={itemMasterDetails.inspectedCbm}
+                />
+                <InfoBox
+                  label="Calculated CBM"
+                  value={itemMasterDetails.calculatedCbm}
                 />
               </div>
             </section>

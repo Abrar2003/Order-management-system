@@ -30,29 +30,39 @@ const normalizeDistinctValues = (values = []) =>
   )].sort((a, b) => a.localeCompare(b));
 
 const buildItemMatch = ({ search, brand, vendor } = {}) => {
-  const match = {};
+  const conditions = [];
   const normalizedSearch = normalizeFilterValue(search);
   const normalizedBrand = normalizeFilterValue(brand);
   const normalizedVendor = normalizeFilterValue(vendor);
 
   if (normalizedSearch) {
     const escaped = escapeRegex(normalizedSearch);
-    match.$or = [
-      { code: { $regex: escaped, $options: "i" } },
-      { name: { $regex: escaped, $options: "i" } },
-      { description: { $regex: escaped, $options: "i" } },
-    ];
+    conditions.push({
+      $or: [
+        { code: { $regex: escaped, $options: "i" } },
+        { name: { $regex: escaped, $options: "i" } },
+        { description: { $regex: escaped, $options: "i" } },
+        { brand_name: { $regex: escaped, $options: "i" } },
+      ],
+    });
   }
 
   if (normalizedBrand) {
-    match.brands = normalizedBrand;
+    conditions.push({
+      $or: [
+        { brands: normalizedBrand },
+        { brand_name: normalizedBrand },
+      ],
+    });
   }
 
   if (normalizedVendor) {
-    match.vendors = normalizedVendor;
+    conditions.push({ vendors: normalizedVendor });
   }
 
-  return match;
+  if (conditions.length === 0) return {};
+  if (conditions.length === 1) return conditions[0];
+  return { $and: conditions };
 };
 
 exports.getItems = async (req, res) => {
@@ -66,7 +76,7 @@ exports.getItems = async (req, res) => {
 
     const match = buildItemMatch({ search, brand, vendor });
 
-    const [items, totalRecords, brandsRaw, vendorsRaw, codesRaw] =
+    const [items, totalRecords, brandsRaw, brandNamesRaw, vendorsRaw, codesRaw] =
       await Promise.all([
         Item.find(match)
           .sort({ updatedAt: -1, code: 1 })
@@ -75,6 +85,7 @@ exports.getItems = async (req, res) => {
           .lean(),
         Item.countDocuments(match),
         Item.distinct("brands", buildItemMatch({ search, vendor })),
+        Item.distinct("brand_name", buildItemMatch({ search, vendor })),
         Item.distinct("vendors", buildItemMatch({ search, brand })),
         Item.distinct("code", buildItemMatch({ brand, vendor })),
       ]);
@@ -89,7 +100,7 @@ exports.getItems = async (req, res) => {
         totalRecords,
       },
       filters: {
-        brands: normalizeDistinctValues(brandsRaw),
+        brands: normalizeDistinctValues([...(brandsRaw || []), ...(brandNamesRaw || [])]),
         vendors: normalizeDistinctValues(vendorsRaw),
         item_codes: normalizeDistinctValues(codesRaw),
       },

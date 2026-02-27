@@ -187,12 +187,14 @@ const formatLbh = (dimensions = {}) => {
 };
 
 const normalizeItemCodeKey = (value) => normalizeText(value).toLowerCase();
+const getItemInspectedCbmTotal = (itemDoc = {}) =>
+  normalizeText(itemDoc?.cbm?.inspected_total ?? itemDoc?.cbm?.total ?? "");
 
 const hasMeaningfulItemQcDetails = (itemDoc) => {
   if (!itemDoc || typeof itemDoc !== "object") return false;
 
   const itemDescription = normalizeText(itemDoc?.description || itemDoc?.name || "");
-  const cbmTotal = normalizeText(itemDoc?.cbm?.total || "");
+  const cbmTotal = getItemInspectedCbmTotal(itemDoc);
   const itemQc = itemDoc?.qc || {};
   const barcode = Number(itemQc?.barcode || 0);
   const lastInspectedDate = normalizeText(itemQc?.last_inspected_date || "");
@@ -224,7 +226,7 @@ const buildQcItemDetailsPatch = ({
   const set = {};
   const itemDescription = normalizeText(itemDoc?.description || itemDoc?.name || "");
   const itemCode = normalizeText(itemDoc?.code || qcSnapshot?.item?.item_code || "");
-  const cbmTotal = normalizeText(itemDoc?.cbm?.total || "");
+  const cbmTotal = getItemInspectedCbmTotal(itemDoc);
   const itemQc = itemDoc?.qc || {};
   const barcode = Math.max(0, Number(itemQc?.barcode || 0));
   const lastInspectedDate = normalizeText(itemQc?.last_inspected_date || "");
@@ -1101,7 +1103,7 @@ exports.exportQCList = async (req, res) => {
           : "",
         item_master_weight_net: toNonNegativeNumber(itemMaster?.weight?.net, 0),
         item_master_weight_gross: toNonNegativeNumber(itemMaster?.weight?.gross, 0),
-        item_master_cbm_total: normalizeText(itemMaster?.cbm?.total || ""),
+        item_master_cbm_total: getItemInspectedCbmTotal(itemMaster),
         item_master_item_lbh: formatLbh(itemMaster?.item_LBH),
         item_master_box_lbh: formatLbh(itemMaster?.box_LBH),
         request_date: formatDateDDMMYYYY(entry?.request_date, ""),
@@ -2542,6 +2544,21 @@ exports.getQCById = async (req, res) => {
     }
 
     const qcData = qc.toObject();
+    const itemCode = normalizeText(
+      qcData?.item?.item_code || qcData?.order?.item?.item_code || "",
+    );
+    const itemMaster = itemCode
+      ? await Item.findOne({
+          code: {
+            $regex: `^${escapeRegex(itemCode)}$`,
+            $options: "i",
+          },
+        })
+          .select(
+            "code name description brand_name brands vendors weight cbm item_LBH box_LBH",
+          )
+          .lean()
+      : null;
     const sortedLabels = normalizeLabels(qcData.labels);
     const sortedRequestHistory = Array.isArray(qcData.request_history)
       ? [...qcData.request_history].sort((a, b) => {
@@ -2569,6 +2586,7 @@ exports.getQCById = async (req, res) => {
     res.json({
       data: {
         ...qcData,
+        item_master: itemMaster || null,
         labels: sortedLabels,
         request_history: sortedRequestHistory,
         inspection_record: sortedInspectionRecords,

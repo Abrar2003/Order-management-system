@@ -11,6 +11,7 @@ const itemSchema = new mongoose.Schema(
     },
     name: { type: String, default: "", trim: true },
     description: { type: String, default: "", trim: true },
+    brand_name: { type: String, default: "", trim: true },
     brands: { type: [String], default: [] },
     vendors: { type: [String], default: [] },
     weight: {
@@ -18,7 +19,13 @@ const itemSchema = new mongoose.Schema(
       gross: { type: Number, default: 0, min: 0 },
     },
     cbm: {
+      top: { type: String, default: "0", trim: true },
+      bottom: { type: String, default: "0", trim: true },
       total: { type: String, default: "0", trim: true },
+      inspected_top: { type: String, default: "0", trim: true },
+      inspected_bottom: { type: String, default: "0", trim: true },
+      inspected_total: { type: String, default: "0", trim: true },
+      calculated_total: { type: String, default: "0", trim: true },
     },
     item_LBH: {
       L: { type: Number, default: 0, min: 0 },
@@ -52,6 +59,7 @@ const itemSchema = new mongoose.Schema(
 
 itemSchema.index({ name: 1 });
 itemSchema.index({ description: 1 });
+itemSchema.index({ brand_name: 1 });
 itemSchema.index({ brands: 1 });
 itemSchema.index({ vendors: 1 });
 

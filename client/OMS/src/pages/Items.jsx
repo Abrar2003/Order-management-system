@@ -3,7 +3,6 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import { getUserFromToken } from "../auth/auth.utils";
-import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
@@ -45,7 +44,10 @@ const formatLbh = (value) => {
   const l = Number(value?.L || 0);
   const b = Number(value?.B || 0);
   const h = Number(value?.H || 0);
-  return <>{l} || {b} || {h}</>;
+  const safeL = Number.isFinite(l) ? l : 0;
+  const safeB = Number.isFinite(b) ? b : 0;
+  const safeH = Number.isFinite(h) ? h : 0;
+  return `${safeL} x ${safeB} x ${safeH}`;
 };
 
 const Items = () => {
@@ -181,9 +183,10 @@ const Items = () => {
       const orderUpdated = Number(res?.data?.summary?.order_sync?.updated || 0);
       const qcCreated = Number(res?.data?.summary?.qc_sync?.created || 0);
       const qcUpdated = Number(res?.data?.summary?.qc_sync?.updated || 0);
+      const derivedUpdated = Number(res?.data?.summary?.derived_sync?.updated || 0);
 
       setSuccess(
-        `Item sync complete. Total Items: ${totalItems}. Orders created/updated: ${orderCreated}/${orderUpdated}. QC created/updated: ${qcCreated}/${qcUpdated}.`,
+        `Item sync complete. Total Items: ${totalItems}. Orders created/updated: ${orderCreated}/${orderUpdated}. QC created/updated: ${qcCreated}/${qcUpdated}. Derived fields updated: ${derivedUpdated}.`,
       );
       await fetchItems();
     } catch (err) {
@@ -334,12 +337,13 @@ const Items = () => {
                     <tr>
                       <th>Item Code</th>
                       <th>Name</th>
+                      <th>Brand Name</th>
                       <th>Weight Net</th>
                       <th>Weight Gross</th>
-                      <th>CBM</th>
+                      <th>Inspected CBM</th>
+                      <th>Calculated CBM</th>
                       <th>Item LBH</th>
-                      <th>Box LBH</th> 
-                      <th>Last Inspected</th>
+                      <th>Box LBH</th>
                       {/* <th>Source</th> */}
                       {/* <th>Updated At</th> */}
                     </tr>
@@ -356,16 +360,22 @@ const Items = () => {
                       <tr key={item?._id || item?.code}>
                         <td>{item?.code || "N/A"}</td>
                         <td>{item?.name || "N/A"}</td>
+                        <td>
+                          {item?.brand_name
+                            || (Array.isArray(item?.brands) && item.brands.length > 0
+                              ? item.brands[0]
+                              : "N/A")}
+                        </td>
                         {/* <td>{Array.isArray(item?.brands) && item.brands.length > 0 ? item.brands.join(", ") : "N/A"}</td>
                         <td>{Array.isArray(item?.vendors) && item.vendors.length > 0 ? item.vendors.join(", ") : "N/A"}</td> */}
                         <td>{item?.weight?.net ?? 0}</td>
                         <td>{item?.weight?.gross ?? 0}</td>
                         <td>
-                          {(item?.cbm?.total ?? "0")}
+                          {item?.cbm?.inspected_total ?? item?.cbm?.total ?? "0"}
                         </td>
+                        <td>{item?.cbm?.calculated_total ?? "0"}</td>
                         <td>{formatLbh(item?.item_LBH)}</td>
                         <td>{formatLbh(item?.box_LBH)}</td>
-                        <td>{formatDateDDMMYYYY(item?.qc?.last_inspected_date)}</td>
                         {/* <td>
                           {item?.source?.from_orders ? "Orders" : ""}
                           {item?.source?.from_orders && item?.source?.from_qc ? " + " : ""}
