@@ -1862,13 +1862,8 @@ exports.updateQC = async (req, res) => {
         });
       }
 
-      const orderQuantityForLabels = toNonNegativeNumber(
-        qc?.quantities?.client_demand,
-        0,
-      );
-      const fallbackLabelLimit = Math.max(0, nextPassed);
-      const baseLabelLimit =
-        orderQuantityForLabels > 0 ? orderQuantityForLabels : fallbackLabelLimit;
+      const inspectedQuantityForLabels = Math.max(0, nextChecked);
+      const baseLabelLimit = inspectedQuantityForLabels;
       const cbmTopValue = toNonNegativeNumber(qc?.cbm?.top, 0);
       const cbmBottomValue = toNonNegativeNumber(qc?.cbm?.bottom, 0);
       const hasTopBottomCbm = cbmTopValue > 0 && cbmBottomValue > 0;
@@ -1960,15 +1955,35 @@ exports.updateQC = async (req, res) => {
         const labelsForUpdate =
           parsedDirectLabels.length > 0 ? parsedDirectLabels : generatedFromRanges;
         const uniqueIncoming = [...new Set(labelsForUpdate)];
-        const existingSet = new Set((qc.labels || []).map(Number));
+        const existingSet = new Set(normalizeLabels(qc.labels || []));
         const incomingNew = uniqueIncoming.filter((label) => !existingSet.has(label));
+        const allocatedSet = new Set(normalizeLabels(inspector.alloted_labels || []));
+        const usedSet = new Set(normalizeLabels(inspector.used_labels || []));
+
+        const unallocatedIncoming = incomingNew.filter(
+          (label) => !allocatedSet.has(label),
+        );
+        if (unallocatedIncoming.length > 0) {
+          const preview = unallocatedIncoming.slice(0, 10).join(", ");
+          return res.status(400).json({
+            message: `Only allocated labels are accepted. Unallocated labels: ${preview}${unallocatedIncoming.length > 10 ? "..." : ""}`,
+          });
+        }
+
+        const alreadyUsedIncoming = incomingNew.filter((label) => usedSet.has(label));
+        if (alreadyUsedIncoming.length > 0) {
+          const preview = alreadyUsedIncoming.slice(0, 10).join(", ");
+          return res.status(400).json({
+            message: `Some labels are already used and cannot be reused: ${preview}${alreadyUsedIncoming.length > 10 ? "..." : ""}`,
+          });
+        }
 
         const totalLabels = existingSet.size + incomingNew.length;
         if (totalLabels > maxLabelsAllowed) {
           return res.status(400).json({
             message: hasTopBottomCbm
-              ? "total labels cannot exceed double order quantity when cbm top and bottom are set"
-              : "total labels cannot exceed order quantity",
+              ? `Total labels cannot exceed double inspected quantity (${maxLabelsAllowed}) when CBM top and bottom are set`
+              : `Total labels cannot exceed inspected quantity (${maxLabelsAllowed})`,
           });
         }
 

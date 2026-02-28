@@ -17,6 +17,39 @@ npm install
 npm run dev
 ```
 
+Environment files:
+- `backend/.env.development` for local development
+- `backend/.env.testing` for testing
+
+How backend env loading works:
+- If `NODE_ENV` is set, it loads files in this order (later overrides earlier):
+- `.env`
+- `.env.local` (skipped for testing env)
+- `.env.<NODE_ENV>`
+- `.env.<NODE_ENV>.local`
+- If `NODE_ENV` is not set, only `.env` and `.env.local` are loaded.
+
+Examples:
+
+PowerShell (Windows):
+```powershell
+cd backend
+$env:NODE_ENV='development'; npm run dev
+$env:NODE_ENV='testing'; npm run dev
+```
+
+Bash (Linux/macOS):
+```bash
+cd backend
+NODE_ENV=development npm run dev
+NODE_ENV=testing npm run dev
+```
+
+Optional local override (recommended):
+- Create `backend/.env.development.local` for machine-specific secrets.
+- Create `backend/.env.testing.local` for test-only overrides.
+- These local override files are ignored by git.
+
 ### Frontend
 
 ```bash

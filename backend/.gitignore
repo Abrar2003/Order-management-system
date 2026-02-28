@@ -23,6 +23,11 @@ dist-ssr
 *.sln
 *.sw?
 .env
+.env.local
+.env.development
+.env.testing
+.env.development.local
+.env.testing.local
 *data
 uploads/*
 !uploads/.gitkeep

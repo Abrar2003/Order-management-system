@@ -1,4 +1,9 @@
-require("dotenv").config();
+const path = require("path");
+const { loadEnvFiles } = require("../config/loadEnv");
+
+loadEnvFiles({
+  cwd: path.resolve(__dirname, ".."),
+});
 
 const requiredVars = [
   "PORT",

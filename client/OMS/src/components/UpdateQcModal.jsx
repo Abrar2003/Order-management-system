@@ -436,15 +436,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       return;
     }
 
-    const orderQuantity = Number(
-      qc?.quantities?.client_demand ?? qc?.order?.quantity ?? 0,
-    );
-    const safeOrderQuantity = Number.isFinite(orderQuantity)
-      ? Math.max(0, orderQuantity)
-      : 0;
-    const fallbackLabelLimit = Math.max(0, nextPassed);
-    const baseLabelLimit =
-      safeOrderQuantity > 0 ? safeOrderQuantity : fallbackLabelLimit;
+    const baseLabelLimit = Math.max(0, nextChecked);
     const maxLabelsAllowed = hasTopBottomCbm
       ? baseLabelLimit * 2
       : baseLabelLimit;
@@ -452,8 +444,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     if (totalLabelsAfterUpdate > maxLabelsAllowed) {
       setError(
         hasTopBottomCbm
-          ? "Total labels cannot exceed double order quantity when CBM top and bottom are set."
-          : "Total labels cannot exceed order quantity.",
+          ? `Total labels cannot exceed double inspected quantity (${maxLabelsAllowed}) when CBM top and bottom are set.`
+          : `Total labels cannot exceed inspected quantity (${maxLabelsAllowed}).`,
       );
       return;
     }
