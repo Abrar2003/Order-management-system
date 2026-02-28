@@ -31,6 +31,42 @@ export const createManualOrders = async (orders = []) => {
   return res.data;
 };
 
+export const rectifyPdfOrders = async ({
+  file,
+  brand,
+  vendor,
+  applyChanges = true,
+} = {}) => {
+  if (!file) {
+    throw new Error("PDF file is required");
+  }
+
+  const normalizedBrand = String(brand || "").trim();
+  const normalizedVendor = String(vendor || "").trim();
+
+  if (!normalizedBrand) {
+    throw new Error("Brand is required");
+  }
+  if (!normalizedVendor) {
+    throw new Error("Vendor is required");
+  }
+
+  const token = localStorage.getItem("token");
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("brand", normalizedBrand);
+  formData.append("vendor", normalizedVendor);
+  formData.append("apply_changes", applyChanges ? "true" : "false");
+
+  const res = await axios.post("/orders/rectify-pdf", formData, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return res.data;
+};
+
 export const getUploadLogs = async (params = {}) => {
   const token = localStorage.getItem("token");
   const res = await axios.get("/orders/upload-logs", {

@@ -284,6 +284,21 @@
   max-width: 160px;
 }
 
+.open-orders-filter-row .form-label {
+  margin-bottom: 0.3rem;
+  white-space: nowrap;
+}
+
+.open-orders-filter-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.open-orders-filter-actions .btn {
+  flex: 1 1 0;
+  white-space: nowrap;
+}
+
 @media (max-width: 991.98px) {
   .om-navbar-stack {
     top: 0;
@@ -301,6 +316,10 @@
 
   .home-calendar-iframe {
     height: 420px;
+  }
+
+  .open-orders-filter-actions {
+    width: 100%;
   }
 }
 

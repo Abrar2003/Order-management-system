@@ -11,6 +11,7 @@ const UploadedOrderSummarySchema = new mongoose.Schema(
 
 const VendorUploadSummarySchema = new mongoose.Schema(
   {
+    brand: { type: String, required: true, trim: true },
     vendor: { type: String, required: true, trim: true },
     uploaded_order_ids: { type: [String], default: [] },
     uploaded_orders_count: { type: Number, default: 0, min: 0 },
@@ -39,6 +40,7 @@ const UploadConflictSchema = new mongoose.Schema(
       default: "OPEN_ORDER_MISSING_IN_UPLOAD",
       enum: ["OPEN_ORDER_MISSING_IN_UPLOAD"],
     },
+    brand: { type: String, required: true, trim: true },
     vendor: { type: String, required: true, trim: true },
     order_id: { type: String, required: true, trim: true },
     message: { type: String, required: true, trim: true },
@@ -63,6 +65,7 @@ const UploadLogSchema = new mongoose.Schema(
     duplicate_count: { type: Number, default: 0, min: 0 },
     duplicate_entries: { type: [DuplicateEntrySchema], default: [] },
 
+    uploaded_brands: { type: [String], default: [] },
     uploaded_vendors: { type: [String], default: [] },
     total_distinct_orders_uploaded: { type: Number, default: 0, min: 0 },
 
@@ -82,8 +85,10 @@ const UploadLogSchema = new mongoose.Schema(
 
 UploadLogSchema.index({ createdAt: -1 });
 UploadLogSchema.index({ uploaded_by: 1, createdAt: -1 });
+UploadLogSchema.index({ uploaded_brands: 1, createdAt: -1 });
 UploadLogSchema.index({ uploaded_vendors: 1, createdAt: -1 });
+UploadLogSchema.index({ "vendor_summaries.brand": 1, createdAt: -1 });
 UploadLogSchema.index({ "vendor_summaries.vendor": 1, createdAt: -1 });
-UploadLogSchema.index({ "conflicts.vendor": 1, "conflicts.order_id": 1 });
+UploadLogSchema.index({ "conflicts.brand": 1, "conflicts.vendor": 1, "conflicts.order_id": 1 });
 
 module.exports = mongoose.model("upload_logs", UploadLogSchema);

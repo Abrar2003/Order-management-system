@@ -3,6 +3,7 @@ import { logout, getToken, getUserFromToken } from "../auth/auth.service";
 import "../App.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import UploadOrdersModal from "./UploadOrdersModal";
+import RectifyPdfModal from "./RectifyPdfModal";
 import AllocateLabelsModal from "./AllocateLabelsModal";
 import ChangePasswordModal from "./ChangePasswordModal";
 
@@ -12,6 +13,7 @@ const Navbar = () => {
   const role = user?.role;
   const normalizedRole = String(role || "").trim().toLowerCase();
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showRectifyPdfModal, setShowRectifyPdfModal] = useState(false);
   const [showAllocateModal, setShowAllocateModal] = useState(false);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [showMainMenu, setShowMainMenu] = useState(false);
@@ -226,6 +228,19 @@ const Navbar = () => {
                           </button>
                         )}
 
+                        {canManageOrders && (
+                          <button
+                            type="button"
+                            className="list-group-item list-group-item-action text-start"
+                            onClick={() => {
+                              setShowRectifyPdfModal(true);
+                              setShowMainMenu(false);
+                            }}
+                          >
+                            Rectify PDF
+                          </button>
+                        )}
+
                         <button
                           type="button"
                           className="list-group-item list-group-item-action text-start text-danger"
@@ -264,6 +279,13 @@ const Navbar = () => {
           onSuccess={() => {
             setShowUploadModal(false);
           }}
+        />
+      )}
+
+      {showRectifyPdfModal && (
+        <RectifyPdfModal
+          onClose={() => setShowRectifyPdfModal(false)}
+          onSuccess={() => {}}
         />
       )}
 

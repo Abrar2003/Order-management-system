@@ -5,6 +5,7 @@ const authorize = require("../middlewares/authorize.middleware");
 const {
   uploadOrders,
   createOrdersManually,
+  rectifyPdfOrders,
   getUploadLogs,
   getOrders,
   getOrdersByFiltersDb,
@@ -40,6 +41,15 @@ router.post(
   authorize("admin", "manager", "dev"),
   createOrdersManually,
 );
+
+router.post(
+  "/rectify-pdf",
+  authenticate,
+  authorize("admin", "manager", "dev"),
+  upload.single("file"),
+  rectifyPdfOrders,
+);
+
 router.get(
   "/upload-logs",
   authenticate,

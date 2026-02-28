@@ -23,6 +23,7 @@ import Container from "./pages/Container";
 import Items from "./pages/Items";
 import UploadLogs from "./pages/UploadLogs";
 import ArchivedOrders from "./pages/ArchivedOrders";
+import InspectionReport from "./pages/inspection_report";
 
 // import Users from "./pages/Users"; // later
 
@@ -131,6 +132,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <QcDetails />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/qc/:id/inspection-report"
+            element={
+              <ProtectedRoute>
+                <InspectionReport />
               </ProtectedRoute>
             }
           />

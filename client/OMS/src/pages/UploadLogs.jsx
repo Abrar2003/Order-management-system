@@ -58,6 +58,9 @@ const UploadLogs = () => {
   const [vendorFilter, setVendorFilter] = useState(() =>
     normalizeFilterParam(searchParams.get("vendor"), "all"),
   );
+  const [brandFilter, setBrandFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("brand"), "all"),
+  );
   const [statusFilter, setStatusFilter] = useState(() =>
     normalizeFilterParam(searchParams.get("status"), "all"),
   );
@@ -70,6 +73,7 @@ const UploadLogs = () => {
   const [limit, setLimit] = useState(() => parseLimit(searchParams.get("limit")));
 
   const [filters, setFilters] = useState({
+    brands: [],
     vendors: [],
     statuses: [],
   });
@@ -97,6 +101,7 @@ const UploadLogs = () => {
       const res = await getUploadLogs({
         page,
         limit,
+        brand: brandFilter,
         vendor: vendorFilter,
         status: statusFilter,
         order_id: debouncedOrderId,
@@ -104,6 +109,7 @@ const UploadLogs = () => {
 
       setRows(Array.isArray(res?.data) ? res.data : []);
       setFilters({
+        brands: Array.isArray(res?.filters?.brands) ? res.filters.brands : [],
         vendors: Array.isArray(res?.filters?.vendors) ? res.filters.vendors : [],
         statuses: Array.isArray(res?.filters?.statuses) ? res.filters.statuses : [],
       });
@@ -135,19 +141,21 @@ const UploadLogs = () => {
     } finally {
       setLoading(false);
     }
-  }, [debouncedOrderId, limit, page, statusFilter, vendorFilter]);
+  }, [brandFilter, debouncedOrderId, limit, page, statusFilter, vendorFilter]);
 
   useEffect(() => {
     fetchLogs();
   }, [fetchLogs]);
 
   useEffect(() => {
+    const nextBrandFilter = normalizeFilterParam(searchParams.get("brand"), "all");
     const nextVendorFilter = normalizeFilterParam(searchParams.get("vendor"), "all");
     const nextStatusFilter = normalizeFilterParam(searchParams.get("status"), "all");
     const nextOrderIdInput = normalizeSearchParam(searchParams.get("order_id"));
     const nextPage = parsePositiveInt(searchParams.get("page"), 1);
     const nextLimit = parseLimit(searchParams.get("limit"));
 
+    setBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
     setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
     setStatusFilter((prev) => (prev === nextStatusFilter ? prev : nextStatusFilter));
     setOrderIdInput((prev) => (prev === nextOrderIdInput ? prev : nextOrderIdInput));
@@ -160,6 +168,7 @@ const UploadLogs = () => {
     const orderIdValue = normalizeSearchParam(orderIdInput);
 
     if (orderIdValue) next.set("order_id", orderIdValue);
+    if (brandFilter && brandFilter !== "all") next.set("brand", brandFilter);
     if (vendorFilter && vendorFilter !== "all") next.set("vendor", vendorFilter);
     if (statusFilter && statusFilter !== "all") next.set("status", statusFilter);
     if (page > 1) next.set("page", String(page));
@@ -170,6 +179,7 @@ const UploadLogs = () => {
     }
   }, [
     limit,
+    brandFilter,
     orderIdInput,
     page,
     searchParams,
@@ -211,7 +221,25 @@ const UploadLogs = () => {
                   }}
                 />
               </div>
-              <div className="col-md-3">
+              <div className="col-md-2">
+                <label className="form-label">Brand</label>
+                <select
+                  className="form-select"
+                  value={brandFilter}
+                  onChange={(e) => {
+                    setPage(1);
+                    setBrandFilter(e.target.value);
+                  }}
+                >
+                  <option value="all">All Brands</option>
+                  {filters.brands.map((brand) => (
+                    <option key={brand} value={brand}>
+                      {brand}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-md-2">
                 <label className="form-label">Vendor</label>
                 <select
                   className="form-select"
@@ -229,7 +257,7 @@ const UploadLogs = () => {
                   ))}
                 </select>
               </div>
-              <div className="col-md-3">
+              <div className="col-md-2">
                 <label className="form-label">Status</label>
                 <select
                   className="form-select"
@@ -253,6 +281,7 @@ const UploadLogs = () => {
                   className="btn btn-outline-secondary"
                   onClick={() => {
                     setPage(1);
+                    setBrandFilter("all");
                     setVendorFilter("all");
                     setStatusFilter("all");
                     setOrderIdInput("");
@@ -344,12 +373,14 @@ const UploadLogs = () => {
                                 </div>
 
                                 <div>
-                                  <strong>Missing Open Orders by Vendor:</strong>
+                                  <strong>Missing Open Orders by Brand + Vendor:</strong>
                                   {vendorSummaries.length === 0 && <div>N/A</div>}
                                   {vendorSummaries.map((entry) => (
-                                    <div key={`${log?._id || "log"}-${entry?.vendor || "vendor"}`}>
+                                    <div
+                                      key={`${log?._id || "log"}-${entry?.brand || "brand"}-${entry?.vendor || "vendor"}`}
+                                    >
                                       <div>
-                                        {entry?.vendor || "N/A"} | Uploaded Orders:{" "}
+                                        {entry?.brand || "N/A"} / {entry?.vendor || "N/A"} | Uploaded Orders:{" "}
                                         {Number(entry?.uploaded_orders_count || 0)} | Items:{" "}
                                         {Number(entry?.uploaded_items_count || 0)} | Missing Open:{" "}
                                         {Number(entry?.missing_open_orders_count || 0)}
@@ -369,11 +400,13 @@ const UploadLogs = () => {
                                 <div>
                                   <strong>Conflicts:</strong>{" "}
                                   {conflicts.length > 0
-                                    ? conflicts.map((entry) => 
-                                      <>
-                                      {entry.message} <br/>
-                                      </>
-                                    )
+                                    ? conflicts.map((entry, index) => (
+                                      <div
+                                        key={`${log?._id || "log"}-${entry?.brand || "brand"}-${entry?.vendor || "vendor"}-${entry?.order_id || "order"}-${index}`}
+                                      >
+                                        {entry.message}
+                                      </div>
+                                    ))
                                     : "None"}
                                 </div>
                               </div>

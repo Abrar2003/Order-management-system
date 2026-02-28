@@ -48,19 +48,39 @@ const applyDerivedItemFields = (item, { preferredBrand = "" } = {}) => {
   let changed = false;
 
   const normalizedPreferredBrand = normalizeText(preferredBrand);
+  const currentBrand = normalizeText(item?.brand || "");
   const currentBrandName = normalizeText(item?.brand_name || "");
+  const brandFallback = normalizeText(
+    Array.isArray(item?.brands) && item.brands.length > 0
+      ? item.brands[item.brands.length - 1]
+      : "",
+  );
 
-  if (normalizedPreferredBrand && currentBrandName !== normalizedPreferredBrand) {
-    item.brand_name = normalizedPreferredBrand;
-    changed = true;
-  } else if (!currentBrandName) {
-    const brandFallback = normalizeText(
-      Array.isArray(item?.brands) && item.brands.length > 0
-        ? item.brands[item.brands.length - 1]
-        : "",
-    );
-    if (brandFallback) {
-      item.brand_name = brandFallback;
+  const resolvedPrimaryBrand = normalizeText(
+    normalizedPreferredBrand || currentBrand || currentBrandName || brandFallback,
+  );
+
+  if (resolvedPrimaryBrand) {
+    if (currentBrand !== resolvedPrimaryBrand) {
+      item.brand = resolvedPrimaryBrand;
+      changed = true;
+    }
+    if (currentBrandName !== resolvedPrimaryBrand) {
+      item.brand_name = resolvedPrimaryBrand;
+      changed = true;
+    }
+
+    const currentBrands = Array.isArray(item?.brands) ? item.brands : [];
+    if (!currentBrands.includes(resolvedPrimaryBrand)) {
+      item.brands = normalizeUniqueList([...currentBrands, resolvedPrimaryBrand]);
+      changed = true;
+    }
+  } else {
+    if (currentBrand && !currentBrandName) {
+      item.brand_name = currentBrand;
+      changed = true;
+    } else if (!currentBrand && currentBrandName) {
+      item.brand = currentBrandName;
       changed = true;
     }
   }

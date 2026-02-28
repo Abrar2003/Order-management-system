@@ -1,4 +1,5 @@
 const XLSX = require("xlsx");
+const fs = require("fs");
 const Order = require("../models/order.model");
 const QC = require("../models/qc.model");
 const Item = require("../models/item.model");
@@ -14,6 +15,9 @@ const {
   upsertItemsFromOrders,
   upsertItemFromOrder,
 } = require("../services/itemSync");
+const {
+  extractTableRowsFromPdfBuffer,
+} = require("../services/pdfRectifyParser.service");
 
 
 const ORDER_STATUS_SEQUENCE = [
@@ -81,7 +85,12 @@ const normalizeDistinctValues = (values = []) =>
 
 const normalizeLooseString = (value) => String(value ?? "").trim();
 
+const normalizeBrandKey = (value) => normalizeLooseString(value).toLowerCase();
+
 const normalizeVendorKey = (value) => normalizeLooseString(value).toLowerCase();
+
+const normalizeBrandVendorKey = (brand, vendor) =>
+  `${normalizeBrandKey(brand)}__${normalizeVendorKey(vendor)}`;
 
 const normalizeOrderKey = (value) => {
   const normalized = normalizeLooseString(value);
@@ -122,17 +131,20 @@ const buildOrderListMatch = ({
   vendor,
   status,
   order,
+  itemCode,
   isDelayed = false,
   includeBrand = true,
   includeVendor = true,
   includeStatus = true,
   includeOrder = true,
+  includeItemCode = true,
 } = {}) => {
   const match = { ...ACTIVE_ORDER_MATCH };
   const normalizedBrand = normalizeFilterValue(brand);
   const normalizedVendor = normalizeFilterValue(vendor);
   const normalizedStatus = normalizeFilterValue(status);
   const normalizedOrder = normalizeFilterValue(order);
+  const normalizedItemCode = normalizeFilterValue(itemCode);
 
   if (includeBrand && normalizedBrand) {
     match.brand = normalizedBrand;
@@ -155,6 +167,11 @@ const buildOrderListMatch = ({
   if (includeOrder && normalizedOrder) {
     const escaped = escapeRegex(normalizedOrder);
     match.order_id = { $regex: escaped, $options: "i" };
+  }
+
+  if (includeItemCode && normalizedItemCode) {
+    const escaped = escapeRegex(normalizedItemCode);
+    match["item.item_code"] = { $regex: escaped, $options: "i" };
   }
 
   if (isDelayed) {
@@ -281,6 +298,325 @@ const formatDateDDMMYYYY = (value, fallback = "") => {
   const month = String(parsed.getUTCMonth() + 1).padStart(2, "0");
   const year = String(parsed.getUTCFullYear());
   return `${day}/${month}/${year}`;
+};
+
+const parseQuantityLike = (value) => {
+  if (value === undefined || value === null) return null;
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  const normalized = String(value).replace(/,/g, "").trim();
+  if (!normalized) return null;
+  const parsedNumeric = Number(normalized);
+  if (Number.isFinite(parsedNumeric)) return parsedNumeric;
+
+  const match = normalized.match(/-?\d+(?:\.\d+)?/);
+  if (!match) return null;
+  const parsedFromMatch = Number(match[0]);
+  return Number.isFinite(parsedFromMatch) ? parsedFromMatch : null;
+};
+
+const normalizeRectifyText = (value) => normalizeLooseString(value);
+
+const pickRectifyItemCode = (row = {}) =>
+  normalizeRectifyText(row?.ourItemCode || row?.yourItemCode || "");
+
+const toDateDayKey = (value) => {
+  const formatted = formatDateDDMMYYYY(value, "");
+  return formatted || "";
+};
+
+const normalizeRectifiedPdfRow = (row = {}, { brand, vendor } = {}) => {
+  const orderId = normalizeRectifyText(row?.orderNumber || row?.order_id || "");
+  const itemCode = pickRectifyItemCode(row);
+  const description = normalizeRectifyText(row?.description || "");
+  const quantity = parseQuantityLike(row?.quantity);
+  const etd = parseDateLike(row?.etd || row?.ETD || "");
+  const orderDate = parseDateLike(row?.orderDate || row?.order_date || "");
+
+  return {
+    order_id: orderId,
+    item_code: itemCode,
+    description,
+    brand: normalizeRectifyText(brand),
+    vendor: normalizeRectifyText(vendor),
+    quantity: Number.isFinite(quantity) ? quantity : null,
+    ETD: etd || null,
+    order_date: orderDate || null,
+    source: {
+      refer: normalizeRectifyText(row?.refer || ""),
+      raw_quantity: normalizeRectifyText(row?.quantity || ""),
+    },
+  };
+};
+
+const normalizeOrderComparisonValue = (value) =>
+  normalizeRectifyText(value).toLowerCase();
+
+const getRectifiedChangedFields = (incomingRow, existingOrder) => {
+  const changedFields = [];
+
+  if (
+    normalizeOrderComparisonValue(incomingRow?.brand)
+    !== normalizeOrderComparisonValue(existingOrder?.brand)
+  ) {
+    changedFields.push("brand");
+  }
+
+  if (
+    normalizeOrderComparisonValue(incomingRow?.vendor)
+    !== normalizeOrderComparisonValue(existingOrder?.vendor)
+  ) {
+    changedFields.push("vendor");
+  }
+
+  if (
+    normalizeOrderComparisonValue(incomingRow?.description)
+    !== normalizeOrderComparisonValue(existingOrder?.item?.description)
+  ) {
+    changedFields.push("description");
+  }
+
+  const incomingQuantity = Number(incomingRow?.quantity);
+  const existingQuantity = Number(existingOrder?.quantity);
+  if (
+    Number.isFinite(incomingQuantity)
+    && Number.isFinite(existingQuantity)
+    && incomingQuantity !== existingQuantity
+  ) {
+    changedFields.push("quantity");
+  }
+
+  if (toDateDayKey(incomingRow?.ETD) !== toDateDayKey(existingOrder?.ETD)) {
+    changedFields.push("ETD");
+  }
+
+  if (
+    toDateDayKey(incomingRow?.order_date)
+    !== toDateDayKey(existingOrder?.order_date)
+  ) {
+    changedFields.push("order_date");
+  }
+
+  return changedFields;
+};
+
+const formatDateForUploadSheet = (value) => formatDateDDMMYYYY(value, "");
+
+const buildRectifyWorkbookBuffer = (rows = []) => {
+  const workbookRows = (Array.isArray(rows) ? rows : []).map((entry) => ({
+    PO: entry?.order_id || "",
+    item_code: entry?.item_code || "",
+    description: entry?.description || "",
+    brand: entry?.brand || "",
+    vendor: entry?.vendor || "",
+    quantity: Number(entry?.quantity || 0),
+    ETD: formatDateForUploadSheet(entry?.ETD),
+    order_date: formatDateForUploadSheet(entry?.order_date),
+    change_type: entry?.change_type || "",
+    changed_fields: Array.isArray(entry?.changed_fields)
+      ? entry.changed_fields.join(", ")
+      : "",
+    source_refer: entry?.source?.refer || "",
+    source_quantity_text: entry?.source?.raw_quantity || "",
+  }));
+
+  const sheet = XLSX.utils.json_to_sheet(workbookRows, {
+    header: [
+      "PO",
+      "item_code",
+      "description",
+      "brand",
+      "vendor",
+      "quantity",
+      "ETD",
+      "order_date",
+      "change_type",
+      "changed_fields",
+      "source_refer",
+      "source_quantity_text",
+    ],
+  });
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Rectified Orders");
+
+  return XLSX.write(workbook, { bookType: "xlsx", type: "buffer" });
+};
+
+const parseBooleanInput = (value, fallback = false) => {
+  if (value === undefined || value === null || value === "") return fallback;
+  return ["1", "true", "yes", "y", "on"].includes(
+    String(value).trim().toLowerCase(),
+  );
+};
+
+const applyRectifiedOrderRows = async ({
+  rows = [],
+  existingByKey = new Map(),
+} = {}) => {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  if (safeRows.length === 0) {
+    return {
+      inserted_count: 0,
+      updated_count: 0,
+      quantity_skipped_count: 0,
+      warnings: [],
+    };
+  }
+
+  const rowsToInsert = [];
+  const rowsToUpdate = [];
+  const warnings = [];
+
+  for (const row of safeRows) {
+    const key = `${normalizeOrderKey(row?.order_id)}__${normalizeRectifyText(
+      row?.item_code,
+    ).toUpperCase()}`;
+    const existing = existingByKey.get(key);
+    if (!existing) {
+      rowsToInsert.push(row);
+    } else {
+      rowsToUpdate.push({
+        row,
+        existingId: existing?._id || null,
+      });
+    }
+  }
+
+  let insertedCount = 0;
+  let updatedCount = 0;
+  let quantitySkippedCount = 0;
+  const groupsToSync = new Map();
+
+  if (rowsToInsert.length > 0) {
+    const docsToInsert = rowsToInsert.map((row) => ({
+      order_id: row.order_id,
+      item: {
+        item_code: row.item_code,
+        description: row.description,
+      },
+      brand: row.brand,
+      vendor: row.vendor,
+      ETD: row.ETD || undefined,
+      order_date: row.order_date || undefined,
+      status: "Pending",
+      quantity: Number(row.quantity),
+    }));
+
+    const insertedDocs = await Order.insertMany(docsToInsert);
+    insertedCount = insertedDocs.length;
+
+    try {
+      await upsertItemsFromOrders(insertedDocs);
+    } catch (itemSyncError) {
+      console.error("Item sync after rectify insert failed:", {
+        error: itemSyncError?.message || String(itemSyncError),
+      });
+    }
+
+    for (const doc of insertedDocs) {
+      const key = `${doc.order_id}__${doc.brand}__${doc.vendor}`;
+      groupsToSync.set(key, {
+        order_id: doc.order_id,
+        brand: doc.brand,
+        vendor: doc.vendor,
+      });
+    }
+  }
+
+  for (const entry of rowsToUpdate) {
+    if (!entry?.existingId || !mongoose.Types.ObjectId.isValid(entry.existingId)) {
+      continue;
+    }
+
+    const orderDoc = await Order.findById(entry.existingId);
+    if (!orderDoc) continue;
+
+    const oldGroup = {
+      order_id: orderDoc.order_id,
+      brand: orderDoc.brand,
+      vendor: orderDoc.vendor,
+    };
+
+    orderDoc.item = orderDoc.item || {};
+    orderDoc.brand = entry.row.brand;
+    orderDoc.vendor = entry.row.vendor;
+    orderDoc.item.item_code = entry.row.item_code;
+    orderDoc.item.description = entry.row.description;
+    orderDoc.ETD = entry.row.ETD || null;
+    if (entry.row.order_date) {
+      orderDoc.order_date = entry.row.order_date;
+    }
+
+    const nextQuantity = Number(entry.row.quantity);
+    const currentQuantity = Number(orderDoc.quantity);
+    if (Number.isFinite(nextQuantity) && Number.isFinite(currentQuantity) && nextQuantity !== currentQuantity) {
+      const hasShipment = Array.isArray(orderDoc.shipment) && orderDoc.shipment.length > 0;
+      const hasQcRecord = Boolean(orderDoc.qc_record);
+      if (hasShipment || hasQcRecord) {
+        quantitySkippedCount += 1;
+        warnings.push(
+          `Quantity update skipped for ${orderDoc.order_id}/${orderDoc.item.item_code} because shipment or QC exists.`,
+        );
+      } else {
+        orderDoc.quantity = nextQuantity;
+      }
+    }
+
+    await orderDoc.save();
+    updatedCount += 1;
+
+    try {
+      await upsertItemFromOrder(orderDoc);
+    } catch (itemSyncError) {
+      console.error("Item sync after rectify update failed:", {
+        orderId: orderDoc.order_id,
+        itemCode: orderDoc?.item?.item_code,
+        error: itemSyncError?.message || String(itemSyncError),
+      });
+    }
+
+    const newGroup = {
+      order_id: orderDoc.order_id,
+      brand: orderDoc.brand,
+      vendor: orderDoc.vendor,
+    };
+
+    groupsToSync.set(
+      `${oldGroup.order_id}__${oldGroup.brand}__${oldGroup.vendor}`,
+      oldGroup,
+    );
+    groupsToSync.set(
+      `${newGroup.order_id}__${newGroup.brand}__${newGroup.vendor}`,
+      newGroup,
+    );
+  }
+
+  const uniqueGroupsToSync = [...groupsToSync.values()];
+  const syncBatchSize = 5;
+  for (let i = 0; i < uniqueGroupsToSync.length; i += syncBatchSize) {
+    const batch = uniqueGroupsToSync.slice(i, i + syncBatchSize);
+    await Promise.all(
+      batch.map(async (group) => {
+        try {
+          await syncOrderGroup(group);
+        } catch (syncErr) {
+          console.error("Google Calendar sync failed for rectify group:", {
+            group,
+            error: syncErr?.message || String(syncErr),
+          });
+        }
+      }),
+    );
+  }
+
+  return {
+    inserted_count: insertedCount,
+    updated_count: updatedCount,
+    quantity_skipped_count: quantitySkippedCount,
+    warnings,
+  };
 };
 
 const resolveClientDayRange = (dateValue, tzOffsetValue) => {
@@ -826,6 +1162,7 @@ exports.uploadOrders = async (req, res) => {
   let totalDistinctOrdersUploaded = 0;
   let insertedCount = 0;
   let duplicateEntries = [];
+  let uploadedBrands = [];
   let uploadedVendors = [];
   let vendorSummaries = [];
   let conflicts = [];
@@ -910,18 +1247,24 @@ exports.uploadOrders = async (req, res) => {
       orders.map((order) => normalizeOrderKey(order.order_id)).filter(Boolean),
     ).size;
 
-    const vendorUploadMap = new Map();
+    const brandVendorUploadMap = new Map();
 
     for (const order of orders) {
+      const brand = normalizeValue(order.brand);
+      const brandKey = normalizeBrandKey(brand);
       const vendor = normalizeValue(order.vendor);
       const vendorKey = normalizeVendorKey(vendor);
+      const brandVendorKey = normalizeBrandVendorKey(brand, vendor);
       const orderId = normalizeValue(order.order_id);
       const orderKey = normalizeOrderKey(orderId);
 
-      if (!vendorKey || !orderKey) continue;
+      if (!brandKey || !vendorKey || !orderKey) continue;
 
-      if (!vendorUploadMap.has(vendorKey)) {
-        vendorUploadMap.set(vendorKey, {
+      if (!brandVendorUploadMap.has(brandVendorKey)) {
+        brandVendorUploadMap.set(brandVendorKey, {
+          brand_vendor_key: brandVendorKey,
+          brand_key: brandKey,
+          brand,
           vendor_key: vendorKey,
           vendor,
           uploaded_order_ids: new Set(),
@@ -930,51 +1273,81 @@ exports.uploadOrders = async (req, res) => {
         });
       }
 
-      const vendorBucket = vendorUploadMap.get(vendorKey);
-      vendorBucket.uploaded_order_ids.add(orderId);
-      vendorBucket.uploaded_order_keys.add(orderKey);
-      vendorBucket.items_per_order_count.set(
+      const brandVendorBucket = brandVendorUploadMap.get(brandVendorKey);
+      brandVendorBucket.uploaded_order_ids.add(orderId);
+      brandVendorBucket.uploaded_order_keys.add(orderKey);
+      brandVendorBucket.items_per_order_count.set(
         orderId,
-        Number(vendorBucket.items_per_order_count.get(orderId) || 0) + 1,
+        Number(brandVendorBucket.items_per_order_count.get(orderId) || 0) + 1,
       );
     }
 
-    uploadedVendors = [...vendorUploadMap.values()]
+    uploadedBrands = [...brandVendorUploadMap.values()]
+      .map((entry) => entry.brand)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+    uploadedBrands = normalizeDistinctValues(uploadedBrands);
+
+    uploadedVendors = [...brandVendorUploadMap.values()]
       .map((entry) => entry.vendor)
       .filter(Boolean)
       .sort((a, b) => a.localeCompare(b));
+    uploadedVendors = normalizeDistinctValues(uploadedVendors);
 
-    const openOrders = uploadedVendors.length > 0
+    const uploadedBrandVendorPairs = [...brandVendorUploadMap.values()].map((entry) => ({
+      brand: entry.brand,
+      vendor: entry.vendor,
+    }));
+
+    const openOrders = uploadedBrandVendorPairs.length > 0
       ? await Order.find({
         ...ACTIVE_ORDER_MATCH,
         status: { $nin: ["Shipped"] },
+        $or: uploadedBrandVendorPairs.map((entry) => ({
+          brand: entry.brand,
+          vendor: entry.vendor,
+        })),
       })
-        .select("vendor order_id")
+        .select("brand vendor order_id")
         .lean()
       : [];
 
-    const openVendorOrderMap = new Map();
+    const openBrandVendorOrderMap = new Map();
     for (const openOrder of openOrders) {
+      const brand = normalizeValue(openOrder?.brand);
+      const brandKey = normalizeBrandKey(brand);
       const vendor = normalizeValue(openOrder?.vendor);
       const vendorKey = normalizeVendorKey(vendor);
+      const brandVendorKey = normalizeBrandVendorKey(brand, vendor);
       const orderId = normalizeValue(openOrder?.order_id);
       const orderKey = normalizeOrderKey(orderId);
 
-      if (!vendorKey || !orderKey || !vendorUploadMap.has(vendorKey)) continue;
-
-      if (!openVendorOrderMap.has(vendorKey)) {
-        openVendorOrderMap.set(vendorKey, new Map());
+      if (
+        !brandKey
+        || !vendorKey
+        || !orderKey
+        || !brandVendorUploadMap.has(brandVendorKey)
+      ) {
+        continue;
       }
 
-      const orderMap = openVendorOrderMap.get(vendorKey);
+      if (!openBrandVendorOrderMap.has(brandVendorKey)) {
+        openBrandVendorOrderMap.set(brandVendorKey, new Map());
+      }
+
+      const orderMap = openBrandVendorOrderMap.get(brandVendorKey);
       if (!orderMap.has(orderKey)) {
         orderMap.set(orderKey, orderId);
       }
     }
 
     conflicts = [];
-    vendorSummaries = [...vendorUploadMap.values()]
-      .sort((a, b) => a.vendor.localeCompare(b.vendor))
+    vendorSummaries = [...brandVendorUploadMap.values()]
+      .sort((a, b) => {
+        const brandCompare = a.brand.localeCompare(b.brand);
+        if (brandCompare !== 0) return brandCompare;
+        return a.vendor.localeCompare(b.vendor);
+      })
       .map((vendorEntry) => {
         const uploadedOrderIds = [...vendorEntry.uploaded_order_ids].sort((a, b) =>
           a.localeCompare(b),
@@ -991,26 +1364,29 @@ exports.uploadOrders = async (req, res) => {
           0,
         );
 
-        const openOrderMap = openVendorOrderMap.get(vendorEntry.vendor_key) || new Map();
+        const openOrderMap =
+          openBrandVendorOrderMap.get(vendorEntry.brand_vendor_key) || new Map();
         const missingOpenOrderIds = [...openOrderMap.entries()]
           .filter(([orderKey]) => !vendorEntry.uploaded_order_keys.has(orderKey))
           .map(([, orderId]) => orderId)
           .sort((a, b) => a.localeCompare(b));
 
         const remark = missingOpenOrderIds.length > 0
-          ? `You were uploading orders for vendor ${vendorEntry.vendor}; these open orders are missing in this upload: ${missingOpenOrderIds.join(", ")}.`
+          ? `You were uploading orders for brand ${vendorEntry.brand} and vendor ${vendorEntry.vendor}; these open orders are missing in this upload: ${missingOpenOrderIds.join(", ")}.`
           : "";
 
         missingOpenOrderIds.forEach((orderId) => {
           conflicts.push({
             type: "OPEN_ORDER_MISSING_IN_UPLOAD",
+            brand: vendorEntry.brand,
             vendor: vendorEntry.vendor,
             order_id: orderId,
-            message: `Vendor ${vendorEntry.vendor} has open order ${orderId} in system but it was not present in the current upload.`,
+            message: `Brand ${vendorEntry.brand} / Vendor ${vendorEntry.vendor} has open order ${orderId} in system but it was not present in the current upload.`,
           });
         });
 
         return {
+          brand: vendorEntry.brand,
           vendor: vendorEntry.vendor,
           uploaded_order_ids: uploadedOrderIds,
           uploaded_orders_count: uploadedOrderIds.length,
@@ -1124,6 +1500,7 @@ exports.uploadOrders = async (req, res) => {
       inserted_item_rows: insertedCount,
       duplicate_count: duplicateEntries.length,
       duplicate_entries: duplicateEntries,
+      uploaded_brands: uploadedBrands,
       uploaded_vendors: uploadedVendors,
       total_distinct_orders_uploaded: totalDistinctOrdersUploaded,
       vendor_summaries: vendorSummaries,
@@ -1170,6 +1547,7 @@ exports.uploadOrders = async (req, res) => {
         inserted_item_rows: insertedCount,
         duplicate_count: duplicateEntries.length,
         duplicate_entries: duplicateEntries,
+        uploaded_brands: uploadedBrands,
         uploaded_vendors: uploadedVendors,
         total_distinct_orders_uploaded: totalDistinctOrdersUploaded,
         vendor_summaries: vendorSummaries,
@@ -1211,6 +1589,7 @@ exports.createOrdersManually = async (req, res) => {
   let totalDistinctOrdersUploaded = 0;
   let insertedCount = 0;
   let duplicateEntries = [];
+  let uploadedBrands = [];
   let uploadedVendors = [];
   let vendorSummaries = [];
 
@@ -1249,7 +1628,7 @@ exports.createOrdersManually = async (req, res) => {
       ...new Set(draftRows.map((row) => normalizeValue(row?.itemCode)).filter(Boolean)),
     ];
 
-    let itemDescriptionsByCodeKey = new Map();
+    let itemDetailsByCodeKey = new Map();
     if (uniqueItemCodes.length > 0) {
       const itemDocs = await Item.find({
         $or: uniqueItemCodes.map((itemCode) => ({
@@ -1259,14 +1638,34 @@ exports.createOrdersManually = async (req, res) => {
           },
         })),
       })
-        .select("code description name")
+        .select("code description name brand brand_name brands vendors")
         .lean();
 
-      itemDescriptionsByCodeKey = new Map(
-        itemDocs.map((itemDoc) => [
-          normalizeLooseString(itemDoc?.code).toLowerCase(),
-          normalizeLooseString(itemDoc?.description || itemDoc?.name || ""),
-        ]),
+      itemDetailsByCodeKey = new Map(
+        itemDocs.map((itemDoc) => {
+          const normalizedCodeKey = normalizeLooseString(itemDoc?.code).toLowerCase();
+          const normalizedDescription = normalizeLooseString(
+            itemDoc?.description || itemDoc?.name || "",
+          );
+          const normalizedBrand = normalizeLooseString(
+            itemDoc?.brand
+            || itemDoc?.brand_name
+            || (Array.isArray(itemDoc?.brands) ? itemDoc.brands[0] : "")
+            || "",
+          );
+          const normalizedVendors = normalizeDistinctValues(
+            Array.isArray(itemDoc?.vendors) ? itemDoc.vendors : [],
+          );
+
+          return [
+            normalizedCodeKey,
+            {
+              description: normalizedDescription,
+              brand: normalizedBrand,
+              vendors: normalizedVendors,
+            },
+          ];
+        }),
       );
     }
 
@@ -1278,12 +1677,22 @@ exports.createOrdersManually = async (req, res) => {
         const vendor = draftRow.vendor;
         const description = draftRow.description;
         const quantity = draftRow.quantity;
+        const existingItemDetails =
+          itemDetailsByCodeKey.get(normalizeLooseString(itemCode).toLowerCase()) || null;
         const existingDescription = normalizeLooseString(
-          itemDescriptionsByCodeKey.get(normalizeLooseString(itemCode).toLowerCase()) || "",
+          existingItemDetails?.description || "",
         );
+        const existingBrand = normalizeLooseString(existingItemDetails?.brand || "");
+        const existingVendor = normalizeLooseString(
+          Array.isArray(existingItemDetails?.vendors) && existingItemDetails.vendors.length > 0
+            ? existingItemDetails.vendors[0]
+            : "",
+        );
+        const resolvedBrand = brand || existingBrand;
+        const resolvedVendor = vendor || existingVendor;
         const resolvedDescription = existingDescription || description;
 
-        if (!orderId || !itemCode || !brand || !vendor) {
+        if (!orderId || !itemCode || !resolvedBrand || !resolvedVendor) {
           duplicateEntries.push({
             order_id: orderId,
             item_code: itemCode,
@@ -1352,8 +1761,8 @@ exports.createOrdersManually = async (req, res) => {
             item_code: itemCode,
             description: resolvedDescription,
           },
-          brand,
-          vendor,
+          brand: resolvedBrand,
+          vendor: resolvedVendor,
           ETD: parsedEtd || undefined,
           order_date: parsedOrderDate || undefined,
           status: "Pending",
@@ -1367,49 +1776,68 @@ exports.createOrdersManually = async (req, res) => {
       orders.map((order) => normalizeOrderKey(order.order_id)).filter(Boolean),
     ).size;
 
-    const vendorUploadMap = new Map();
+    const brandVendorUploadMap = new Map();
     for (const order of orders) {
+      const brand = normalizeValue(order.brand);
+      const brandKey = normalizeBrandKey(brand);
       const vendor = normalizeValue(order.vendor);
       const vendorKey = normalizeVendorKey(vendor);
+      const brandVendorKey = normalizeBrandVendorKey(brand, vendor);
       const orderId = normalizeValue(order.order_id);
       const orderKey = normalizeOrderKey(orderId);
 
-      if (!vendorKey || !orderKey) continue;
+      if (!brandKey || !vendorKey || !orderKey) continue;
 
-      if (!vendorUploadMap.has(vendorKey)) {
-        vendorUploadMap.set(vendorKey, {
+      if (!brandVendorUploadMap.has(brandVendorKey)) {
+        brandVendorUploadMap.set(brandVendorKey, {
+          brand_vendor_key: brandVendorKey,
+          brand_key: brandKey,
+          brand,
+          vendor_key: vendorKey,
           vendor,
           uploaded_order_ids: new Set(),
           items_per_order_count: new Map(),
         });
       }
 
-      const vendorBucket = vendorUploadMap.get(vendorKey);
-      vendorBucket.uploaded_order_ids.add(orderId);
-      vendorBucket.items_per_order_count.set(
+      const brandVendorBucket = brandVendorUploadMap.get(brandVendorKey);
+      brandVendorBucket.uploaded_order_ids.add(orderId);
+      brandVendorBucket.items_per_order_count.set(
         orderId,
-        Number(vendorBucket.items_per_order_count.get(orderId) || 0) + 1,
+        Number(brandVendorBucket.items_per_order_count.get(orderId) || 0) + 1,
       );
     }
 
-    uploadedVendors = [...vendorUploadMap.values()]
+    uploadedBrands = [...brandVendorUploadMap.values()]
+      .map((entry) => entry.brand)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+    uploadedBrands = normalizeDistinctValues(uploadedBrands);
+
+    uploadedVendors = [...brandVendorUploadMap.values()]
       .map((entry) => entry.vendor)
       .filter(Boolean)
       .sort((a, b) => a.localeCompare(b));
+    uploadedVendors = normalizeDistinctValues(uploadedVendors);
 
-    vendorSummaries = [...vendorUploadMap.values()]
-      .sort((a, b) => a.vendor.localeCompare(b.vendor))
-      .map((vendorEntry) => {
-        const uploadedOrderIds = [...vendorEntry.uploaded_order_ids].sort((a, b) =>
+    vendorSummaries = [...brandVendorUploadMap.values()]
+      .sort((a, b) => {
+        const brandCompare = a.brand.localeCompare(b.brand);
+        if (brandCompare !== 0) return brandCompare;
+        return a.vendor.localeCompare(b.vendor);
+      })
+      .map((brandVendorEntry) => {
+        const uploadedOrderIds = [...brandVendorEntry.uploaded_order_ids].sort((a, b) =>
           a.localeCompare(b),
         );
         const itemsPerOrder = uploadedOrderIds.map((orderId) => ({
           order_id: orderId,
-          items_count: Number(vendorEntry.items_per_order_count.get(orderId) || 0),
+          items_count: Number(brandVendorEntry.items_per_order_count.get(orderId) || 0),
         }));
 
         return {
-          vendor: vendorEntry.vendor,
+          brand: brandVendorEntry.brand,
+          vendor: brandVendorEntry.vendor,
           uploaded_order_ids: uploadedOrderIds,
           uploaded_orders_count: uploadedOrderIds.length,
           uploaded_items_count: itemsPerOrder.reduce(
@@ -1509,6 +1937,7 @@ exports.createOrdersManually = async (req, res) => {
       inserted_item_rows: insertedCount,
       duplicate_count: duplicateEntries.length,
       duplicate_entries: duplicateEntries,
+      uploaded_brands: uploadedBrands,
       uploaded_vendors: uploadedVendors,
       total_distinct_orders_uploaded: totalDistinctOrdersUploaded,
       vendor_summaries: vendorSummaries,
@@ -1545,6 +1974,7 @@ exports.createOrdersManually = async (req, res) => {
         inserted_item_rows: insertedCount,
         duplicate_count: duplicateEntries.length,
         duplicate_entries: duplicateEntries,
+        uploaded_brands: uploadedBrands,
         uploaded_vendors: uploadedVendors,
         total_distinct_orders_uploaded: totalDistinctOrdersUploaded,
         vendor_summaries: vendorSummaries,
@@ -1566,17 +1996,216 @@ exports.createOrdersManually = async (req, res) => {
   }
 };
 
+exports.rectifyPdfOrders = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "PDF file is required" });
+    }
+
+    const brand = normalizeRectifyText(req.body?.brand);
+    const vendor = normalizeRectifyText(req.body?.vendor);
+    const shouldApplyChanges = parseBooleanInput(req.body?.apply_changes, true);
+
+    if (!brand) {
+      return res.status(400).json({ message: "brand is required" });
+    }
+    if (!vendor) {
+      return res.status(400).json({ message: "vendor is required" });
+    }
+
+    const isPdfFile =
+      String(req.file?.mimetype || "").toLowerCase().includes("pdf")
+      || String(req.file?.originalname || "").toLowerCase().endsWith(".pdf");
+    if (!isPdfFile) {
+      return res.status(400).json({ message: "Only PDF files are supported" });
+    }
+
+    const pdfBuffer = fs.readFileSync(req.file.path);
+    const extractedRows = extractTableRowsFromPdfBuffer(pdfBuffer);
+
+    const makeRectifyKey = (orderId, itemCode) =>
+      `${normalizeOrderKey(orderId)}__${normalizeRectifyText(itemCode).toUpperCase()}`;
+
+    const invalidEntries = [];
+    const dedupedRows = [];
+    const seenPdfKeys = new Set();
+    let duplicateInPdfCount = 0;
+
+    for (let index = 0; index < extractedRows.length; index += 1) {
+      const normalizedRow = normalizeRectifiedPdfRow(extractedRows[index], {
+        brand,
+        vendor,
+      });
+
+      if (!normalizedRow.order_id || !normalizedRow.item_code) {
+        invalidEntries.push({
+          row_index: index + 1,
+          reason: "missing_order_or_item_code",
+          source: extractedRows[index],
+        });
+        continue;
+      }
+
+      if (!normalizedRow.description) {
+        invalidEntries.push({
+          row_index: index + 1,
+          reason: "missing_description",
+          source: extractedRows[index],
+        });
+        continue;
+      }
+
+      if (!Number.isFinite(Number(normalizedRow.quantity)) || Number(normalizedRow.quantity) <= 0) {
+        invalidEntries.push({
+          row_index: index + 1,
+          reason: "invalid_quantity",
+          source: extractedRows[index],
+        });
+        continue;
+      }
+
+      const key = makeRectifyKey(normalizedRow.order_id, normalizedRow.item_code);
+      if (seenPdfKeys.has(key)) {
+        duplicateInPdfCount += 1;
+        continue;
+      }
+      seenPdfKeys.add(key);
+      dedupedRows.push(normalizedRow);
+    }
+
+    const existingOrders = dedupedRows.length > 0
+      ? await Order.find({
+        ...ACTIVE_ORDER_MATCH,
+        $or: dedupedRows.map((row) => ({
+          order_id: row.order_id,
+          "item.item_code": row.item_code,
+        })),
+      })
+        .select(
+          "_id order_id item brand vendor quantity ETD order_date shipment qc_record",
+        )
+        .sort({ updatedAt: -1, createdAt: -1 })
+        .lean()
+      : [];
+
+    const existingByKey = new Map();
+    for (const existingOrder of existingOrders) {
+      const key = makeRectifyKey(
+        existingOrder?.order_id,
+        existingOrder?.item?.item_code,
+      );
+      if (!existingByKey.has(key)) {
+        existingByKey.set(key, existingOrder);
+      }
+    }
+
+    const changedRows = [];
+    let unchangedCount = 0;
+    let newCount = 0;
+    let modifiedCount = 0;
+
+    for (const row of dedupedRows) {
+      const key = makeRectifyKey(row.order_id, row.item_code);
+      const existing = existingByKey.get(key);
+
+      if (!existing) {
+        newCount += 1;
+        changedRows.push({
+          ...row,
+          change_type: "new",
+          changed_fields: ["new_order"],
+          existing_order_id: null,
+        });
+        continue;
+      }
+
+      const changedFields = getRectifiedChangedFields(row, existing);
+      if (changedFields.length === 0) {
+        unchangedCount += 1;
+        continue;
+      }
+
+      modifiedCount += 1;
+      changedRows.push({
+        ...row,
+        change_type: "modified",
+        changed_fields: changedFields,
+        existing_order_id: String(existing._id || ""),
+      });
+    }
+
+    const workbookBuffer = buildRectifyWorkbookBuffer(changedRows);
+    const outputFileName = `rectified-orders-${Date.now()}.xlsx`;
+
+    let applySummary = {
+      inserted_count: 0,
+      updated_count: 0,
+      quantity_skipped_count: 0,
+      warnings: [],
+    };
+
+    if (shouldApplyChanges && changedRows.length > 0) {
+      applySummary = await applyRectifiedOrderRows({
+        rows: changedRows,
+        existingByKey,
+      });
+    }
+
+    const message = changedRows.length === 0
+      ? "No new or modified entries found in this PDF"
+      : shouldApplyChanges
+        ? "PDF rectified, changed entries exported, and DB updates processed"
+        : "PDF rectified and changed entries exported";
+
+    return res.status(200).json({
+      success: true,
+      message,
+      summary: {
+        extracted_rows: extractedRows.length,
+        valid_rows: dedupedRows.length,
+        invalid_rows: invalidEntries.length,
+        duplicate_keys_in_pdf: duplicateInPdfCount,
+        unchanged_rows: unchangedCount,
+        changed_rows: changedRows.length,
+        new_rows: newCount,
+        modified_rows: modifiedCount,
+      },
+      apply: {
+        applied: shouldApplyChanges,
+        ...applySummary,
+      },
+      file_name: outputFileName,
+      file_base64: workbookBuffer.toString("base64"),
+      invalid_entries: invalidEntries.slice(0, 100),
+    });
+  } catch (error) {
+    console.error("Rectify PDF Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to rectify PDF",
+      error: error?.message || String(error),
+    });
+  } finally {
+    deleteFile(req.file?.path);
+  }
+};
+
 exports.getUploadLogs = async (req, res) => {
   try {
     const page = parsePositiveInt(req.query.page, 1);
     const limit = Math.min(100, parsePositiveInt(req.query.limit, 20));
     const skip = (page - 1) * limit;
 
+    const brand = normalizeFilterValue(req.query.brand);
     const vendor = normalizeFilterValue(req.query.vendor);
     const status = normalizeFilterValue(req.query.status);
     const orderId = normalizeFilterValue(req.query.order_id ?? req.query.orderId);
 
     const match = {};
+
+    if (brand) {
+      match.uploaded_brands = brand;
+    }
 
     if (vendor) {
       match.uploaded_vendors = vendor;
@@ -1610,7 +2239,7 @@ exports.getUploadLogs = async (req, res) => {
       ];
     }
 
-    const [logs, totalRecords, vendorsRaw, statusesRaw, statusCountsRaw] =
+    const [logs, totalRecords, brandsRaw, vendorsRaw, statusesRaw, statusCountsRaw] =
       await Promise.all([
         UploadLog.find(match)
           .sort({ createdAt: -1 })
@@ -1618,6 +2247,7 @@ exports.getUploadLogs = async (req, res) => {
           .limit(limit)
           .lean(),
         UploadLog.countDocuments(match),
+        UploadLog.distinct("uploaded_brands"),
         UploadLog.distinct("uploaded_vendors"),
         UploadLog.distinct("status"),
         UploadLog.aggregate([
@@ -1656,6 +2286,7 @@ exports.getUploadLogs = async (req, res) => {
         totalRecords,
       },
       filters: {
+        brands: normalizeDistinctValues(brandsRaw),
         vendors: normalizeDistinctValues(vendorsRaw),
         statuses: normalizeDistinctValues(statusesRaw),
       },
@@ -2291,6 +2922,7 @@ exports.getOrdersByFiltersDb = async (req, res) => {
     const vendor = req.query.vendor;
     const status = req.query.status;
     const order = req.query.order ?? req.query.order_id;
+    const itemCode = req.query.item_code ?? req.query.itemCode;
     const isDelayed =
       String(req.query.isDelayed || "")
         .trim()
@@ -2351,12 +2983,13 @@ exports.getOrdersByFiltersDb = async (req, res) => {
       vendor,
       status,
       order,
+      itemCode,
       isDelayed,
     };
 
     const matchStage = buildOrderListMatch(filterInput);
 
-    const [result, vendorsRaw, brandsRaw, statusesRaw, orderIdsRaw] =
+    const [result, vendorsRaw, brandsRaw, statusesRaw, orderIdsRaw, itemCodesRaw] =
       await Promise.all([
         Order.aggregate([
           { $match: matchStage },
@@ -2407,6 +3040,10 @@ exports.getOrdersByFiltersDb = async (req, res) => {
           "order_id",
           buildOrderListMatch({ ...filterInput, includeOrder: false }),
         ),
+        Order.distinct(
+          "item.item_code",
+          buildOrderListMatch({ ...filterInput, includeItemCode: false }),
+        ),
       ]);
 
     const data = result?.[0]?.data || [];
@@ -2430,6 +3067,7 @@ exports.getOrdersByFiltersDb = async (req, res) => {
         brands: normalizeDistinctValues(brandsRaw),
         statuses: normalizeStatusList(statusesRaw),
         order_ids: normalizeDistinctValues(orderIdsRaw),
+        item_codes: normalizeDistinctValues(itemCodesRaw),
       },
     });
   } catch (error) {

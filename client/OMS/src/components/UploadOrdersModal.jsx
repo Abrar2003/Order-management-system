@@ -26,14 +26,38 @@ const sortUniqueStrings = (values = []) =>
 const getItemMasterDescription = (itemDoc = {}) =>
   toTrimmedString(itemDoc?.description || itemDoc?.name || "");
 
-const buildItemMeta = ({ itemCode = "", existingDescription = "" } = {}) => {
+const getItemMasterBrand = (itemDoc = {}) =>
+  toTrimmedString(
+    itemDoc?.brand
+    || itemDoc?.brand_name
+    || (Array.isArray(itemDoc?.brands) && itemDoc.brands.length > 0 ? itemDoc.brands[0] : ""),
+  );
+
+const getItemMasterVendors = (itemDoc = {}) =>
+  sortUniqueStrings(Array.isArray(itemDoc?.vendors) ? itemDoc.vendors : []);
+
+const getItemPreferredVendor = (itemDoc = {}) => {
+  const vendors = getItemMasterVendors(itemDoc);
+  return vendors.length > 0 ? vendors[0] : "";
+};
+
+const buildItemMeta = ({
+  itemCode = "",
+  existingDescription = "",
+  existingBrand = "",
+  existingVendor = "",
+} = {}) => {
   const normalizedCode = toTrimmedString(itemCode);
   const normalizedDescription = toTrimmedString(existingDescription);
+  const normalizedBrand = toTrimmedString(existingBrand);
+  const normalizedVendor = toTrimmedString(existingVendor);
 
   return {
     hasExistingDescription: Boolean(normalizedDescription),
     requiresDescription: Boolean(normalizedCode) && !normalizedDescription,
     autoDescription: normalizedDescription,
+    autoBrand: normalizedBrand,
+    autoVendor: normalizedVendor,
   };
 };
 
@@ -73,41 +97,26 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
       try {
         setLoadingReferenceData(true);
 
-        const [brandsRes, orderFiltersRes, itemsRes] = await Promise.all([
-          api.get("/brands/"),
-          api.get("/orders/filters", {
-            params: {
-              page: 1,
-              limit: 1,
-            },
-          }),
-          api.get("/items", {
-            params: {
-              page: 1,
-              limit: 1,
-            },
-          }),
-        ]);
+        const itemsRes = await api.get("/items", {
+          params: {
+            page: 1,
+            limit: 1,
+          },
+        });
 
         if (cancelled) return;
 
-        const nextBrandOptions = sortUniqueStrings([
-          ...(Array.isArray(brandsRes?.data?.data)
-            ? brandsRes.data.data.map((brandDoc) => brandDoc?.name)
-            : []),
-          ...(Array.isArray(orderFiltersRes?.data?.filters?.brands)
-            ? orderFiltersRes.data.filters.brands
-            : []),
-        ]);
+        const nextBrandOptions = sortUniqueStrings(
+          Array.isArray(itemsRes?.data?.filters?.brands)
+            ? itemsRes.data.filters.brands
+            : [],
+        );
 
-        const nextVendorOptions = sortUniqueStrings([
-          ...(Array.isArray(orderFiltersRes?.data?.filters?.vendors)
-            ? orderFiltersRes.data.filters.vendors
-            : []),
-          ...(Array.isArray(itemsRes?.data?.filters?.vendors)
+        const nextVendorOptions = sortUniqueStrings(
+          Array.isArray(itemsRes?.data?.filters?.vendors)
             ? itemsRes.data.filters.vendors
-            : []),
-        ]);
+            : [],
+        );
 
         const nextItemCodeOptions = sortUniqueStrings(
           Array.isArray(itemsRes?.data?.filters?.item_codes)
@@ -168,14 +177,24 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
 
             const previousMeta = itemMetaByRow[rowId] || buildItemMeta({ itemCode: row.item_code });
             const previousAutoDescription = toTrimmedString(previousMeta?.autoDescription);
+            const previousAutoBrand = toTrimmedString(previousMeta?.autoBrand);
+            const previousAutoVendor = toTrimmedString(previousMeta?.autoVendor);
             const currentDescription = toTrimmedString(row.description);
+            const currentBrand = toTrimmedString(row.brand);
+            const currentVendor = toTrimmedString(row.vendor);
             const shouldClearDescription =
               Boolean(previousAutoDescription) && currentDescription === previousAutoDescription;
+            const shouldClearBrand =
+              Boolean(previousAutoBrand) && currentBrand === previousAutoBrand;
+            const shouldClearVendor =
+              Boolean(previousAutoVendor) && currentVendor === previousAutoVendor;
 
             return {
               ...row,
               item_code: value,
               description: shouldClearDescription ? "" : row.description,
+              brand: shouldClearBrand ? "" : row.brand,
+              vendor: shouldClearVendor ? "" : row.vendor,
             };
           })(),
       ),
@@ -233,6 +252,9 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
       ? {
         code: toTrimmedString(exactMatch.code),
         description: getItemMasterDescription(exactMatch),
+        brand: getItemMasterBrand(exactMatch),
+        vendors: getItemMasterVendors(exactMatch),
+        vendor: getItemPreferredVendor(exactMatch),
       }
       : null;
 
@@ -257,24 +279,34 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
         }
 
         let existingDescription = "";
+        let existingBrand = "";
+        let existingVendor = "";
         try {
           const matchedItem = await lookupItemByCode(itemCode);
           existingDescription = toTrimmedString(matchedItem?.description);
+          existingBrand = toTrimmedString(matchedItem?.brand);
+          existingVendor = toTrimmedString(matchedItem?.vendor);
         } catch (lookupError) {
           console.error("Item lookup failed:", lookupError);
         }
 
         const fallbackDescription = toTrimmedString(row?.description);
+        const fallbackBrand = toTrimmedString(row?.brand);
+        const fallbackVendor = toTrimmedString(row?.vendor);
 
         return {
           row: {
             ...row,
             item_code: itemCode,
             description: existingDescription || fallbackDescription,
+            brand: fallbackBrand || existingBrand,
+            vendor: fallbackVendor || existingVendor,
           },
           meta: buildItemMeta({
             itemCode,
             existingDescription,
+            existingBrand,
+            existingVendor,
           }),
         };
       }),
@@ -318,6 +350,8 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
           ...row,
           item_code: resolvedRow.item_code,
           description: resolvedRow.description,
+          brand: resolvedRow.brand,
+          vendor: resolvedRow.vendor,
         };
       }),
     );
@@ -451,8 +485,8 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
               <div className="d-grid gap-2">
                 <div className="d-flex justify-content-between align-items-center">
                   <small className="text-muted">
-                    Add one or more order rows manually. Existing item codes auto-fill description.
-                    New item codes require description.
+                    Add one or more order rows manually. Existing item codes auto-fill description
+                    and may auto-fill brand/vendor. New item codes require description.
                   </small>
                   <button
                     type="button"

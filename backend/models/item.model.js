@@ -11,6 +11,7 @@ const itemSchema = new mongoose.Schema(
     },
     name: { type: String, default: "", trim: true },
     description: { type: String, default: "", trim: true },
+    brand: { type: String, default: "", trim: true },
     brand_name: { type: String, default: "", trim: true },
     brands: { type: [String], default: [] },
     vendors: { type: [String], default: [] },
@@ -59,6 +60,7 @@ const itemSchema = new mongoose.Schema(
 
 itemSchema.index({ name: 1 });
 itemSchema.index({ description: 1 });
+itemSchema.index({ brand: 1 });
 itemSchema.index({ brand_name: 1 });
 itemSchema.index({ brands: 1 });
 itemSchema.index({ vendors: 1 });

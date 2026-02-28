@@ -13,6 +13,7 @@ const defaultFilters = {
   brand: "all",
   status: "all",
   order: "",
+  item_code: "",
 };
 
 const STATUS_SEQUENCE = [
@@ -116,15 +117,20 @@ const OpenOrders = () => {
     brand: normalizeFilterParam(searchParams.get("brand"), "all"),
     status: normalizeFilterParam(searchParams.get("status"), "all"),
     order: String(searchParams.get("order") || "").trim(),
+    item_code: String(searchParams.get("item_code") || "").trim(),
   }));
   const [orderSearchInput, setOrderSearchInput] = useState(() =>
     String(searchParams.get("order") || "").trim(),
+  );
+  const [itemCodeSearchInput, setItemCodeSearchInput] = useState(() =>
+    String(searchParams.get("item_code") || "").trim(),
   );
   const [filterOptions, setFilterOptions] = useState({
     vendors: [],
     brands: [],
     statuses: [],
     order_ids: [],
+    item_codes: [],
   });
   const [showExportModal, setShowExportModal] = useState(false);
   const [syncedQuery, setSyncedQuery] = useState(null);
@@ -150,6 +156,7 @@ const OpenOrders = () => {
           brand: filters.brand,
           status: filters.status,
           order: filters.order,
+          item_code: filters.item_code,
           page,
           limit,
           sort_by: sortBy,
@@ -175,6 +182,9 @@ const OpenOrders = () => {
         order_ids: Array.isArray(res?.data?.filters?.order_ids)
           ? res.data.filters.order_ids
           : [],
+        item_codes: Array.isArray(res?.data?.filters?.item_codes)
+          ? res.data.filters.item_codes
+          : [],
       });
     } catch (err) {
       console.error(err);
@@ -185,6 +195,7 @@ const OpenOrders = () => {
         brands: [],
         statuses: [],
         order_ids: [],
+        item_codes: [],
       });
     } finally {
       setLoading(false);
@@ -192,6 +203,7 @@ const OpenOrders = () => {
   }, [
     filters.brand,
     filters.order,
+    filters.item_code,
     filters.status,
     filters.vendor,
     limit,
@@ -212,6 +224,7 @@ const OpenOrders = () => {
       brand: normalizeFilterParam(searchParams.get("brand"), "all"),
       status: normalizeFilterParam(searchParams.get("status"), "all"),
       order: String(searchParams.get("order") || "").trim(),
+      item_code: String(searchParams.get("item_code") || "").trim(),
     };
     const nextPage = parsePositiveInt(searchParams.get("page"), 1);
     const nextLimit = parseLimit(searchParams.get("limit"));
@@ -226,6 +239,7 @@ const OpenOrders = () => {
       && prev.brand === nextFilters.brand
       && prev.status === nextFilters.status
       && prev.order === nextFilters.order
+      && prev.item_code === nextFilters.item_code
         ? prev
         : nextFilters,
     );
@@ -245,6 +259,7 @@ const OpenOrders = () => {
     if (filters.brand && filters.brand !== "all") next.set("brand", filters.brand);
     if (filters.status && filters.status !== "all") next.set("status", filters.status);
     if (filters.order) next.set("order", filters.order);
+    if (filters.item_code) next.set("item_code", filters.item_code);
     if (page > 1) next.set("page", String(page));
     if (limit !== DEFAULT_LIMIT) next.set("limit", String(limit));
     if (sortBy !== DEFAULT_SORT_BY) next.set("sort_by", sortBy);
@@ -258,6 +273,7 @@ const OpenOrders = () => {
   }, [
     filters.brand,
     filters.order,
+    filters.item_code,
     filters.status,
     filters.vendor,
     limit,
@@ -271,7 +287,8 @@ const OpenOrders = () => {
 
   useEffect(() => {
     setOrderSearchInput(filters.order || "");
-  }, [filters.order]);
+    setItemCodeSearchInput(filters.item_code || "");
+  }, [filters.item_code, filters.order]);
 
   const updatePage = (nextPage) => {
     if (nextPage < 1 || nextPage > totalPages) return;
@@ -299,6 +316,7 @@ const OpenOrders = () => {
     setSortBy(DEFAULT_SORT_BY);
     setSortOrder("desc");
     setOrderSearchInput("");
+    setItemCodeSearchInput("");
     setFilters(defaultFilters);
   };
 
@@ -308,6 +326,7 @@ const OpenOrders = () => {
     setFilters((prev) => ({
       ...prev,
       order: String(orderSearchInput || "").trim(),
+      item_code: String(itemCodeSearchInput || "").trim(),
     }));
   };
 
@@ -336,13 +355,14 @@ const OpenOrders = () => {
             <span className="om-summary-chip">Vendor: {filters.vendor || "all"}</span>
             <span className="om-summary-chip">Status: {filters.status || "all"}</span>
             <span className="om-summary-chip">Order: {filters.order || "all"}</span>
+            <span className="om-summary-chip">Item: {filters.item_code || "all"}</span>
           </div>
         </div>
 
         <div className="card om-card mb-3">
           <div className="card-body">
-            <div className="row g-2 align-items-end">
-              <div className="col-md-2">
+            <form onSubmit={handleSearch} className="row g-2 align-items-end open-orders-filter-row">
+              <div className="col-xl-2 col-lg-2 col-md-4">
                 <label className="form-label">Vendor</label>
                 <select
                   className="form-select"
@@ -361,7 +381,7 @@ const OpenOrders = () => {
                 </select>
               </div>
 
-              <div className="col-md-2">
+              <div className="col-xl-2 col-lg-2 col-md-4">
                 <label className="form-label">Brand</label>
                 <select
                   className="form-select"
@@ -380,7 +400,7 @@ const OpenOrders = () => {
                 </select>
               </div>
 
-              <div className="col-md-2">
+              <div className="col-xl-2 col-lg-2 col-md-4">
                 <label className="form-label">Status</label>
                 <select
                   className="form-select"
@@ -399,36 +419,57 @@ const OpenOrders = () => {
                 </select>
               </div>
 
-              <div className="col-md-6">
-                <form onSubmit={handleSearch} className="row g-2">
-                  <div className="col-8">
-                    <label className="form-label">Search by Order ID</label>
-                    <input
-                      type="text"
-                      name="search"
-                      className="form-control"
-                      placeholder="Order ID"
-                      list="open-order-id-options"
-                      value={orderSearchInput}
-                      onChange={(e) => setOrderSearchInput(e.target.value)}
-                    />
-                    <datalist id="open-order-id-options">
-                      {filterOptions.order_ids.map((orderId) => (
-                        <option key={orderId} value={orderId} />
-                      ))}
-                    </datalist>
-                  </div>
-                  <div className="col-3 d-flex align-items-end">
-                    <button type="submit" className="btn btn-primary w-100">
-                      Search
-                    </button>
-                    <button style={{marginLeft: "5%"}} onClick={clearFilter} className="btn btn-primary w-100">
-                      Clear
-                    </button>
-                  </div>
-                </form>
+              <div className="col-xl-2 col-lg-2 col-md-6">
+                <label className="form-label">Order ID</label>
+                <input
+                  type="text"
+                  name="search"
+                  className="form-control"
+                  placeholder="Order ID"
+                  list="open-order-id-options"
+                  value={orderSearchInput}
+                  onChange={(e) => setOrderSearchInput(e.target.value)}
+                />
+                <datalist id="open-order-id-options">
+                  {filterOptions.order_ids.map((orderId) => (
+                    <option key={orderId} value={orderId} />
+                  ))}
+                </datalist>
               </div>
-            </div>
+
+              <div className="col-xl-2 col-lg-2 col-md-6">
+                <label className="form-label">Item Code</label>
+                <input
+                  type="text"
+                  name="item_code"
+                  className="form-control"
+                  placeholder="Item Code"
+                  list="open-item-code-options"
+                  value={itemCodeSearchInput}
+                  onChange={(e) => setItemCodeSearchInput(e.target.value)}
+                />
+                <datalist id="open-item-code-options">
+                  {filterOptions.item_codes.map((itemCode) => (
+                    <option key={itemCode} value={itemCode} />
+                  ))}
+                </datalist>
+              </div>
+
+              <div className="col-xl-2 col-lg-2 col-md-12">
+                <div className="open-orders-filter-actions">
+                  <button type="submit" className="btn btn-primary">
+                    Search
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearFilter}
+                    className="btn btn-outline-secondary"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+            </form>
           </div>
         </div>
 

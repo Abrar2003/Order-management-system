@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
@@ -9,8 +9,6 @@ import EditInspectionRecordsModal from "../components/EditInspectionRecordsModal
 import { getUserFromToken } from "../auth/auth.utils";
 import { formatDateDDMMYYYY } from "../utils/date";
 import Barcode from "react-barcode";
-import html2canvas from "html2canvas";
-import { jsPDF } from "jspdf";
 import "../App.css";
 
 const normalizeLabels = (labels) => {
@@ -88,8 +86,6 @@ const QcDetails = () => {
   const [showEditShippingModal, setShowEditShippingModal] = useState(false);
   const [showEditInspectionModal, setShowEditInspectionModal] = useState(false);
   const [deletingInspectionId, setDeletingInspectionId] = useState("");
-  const [exportingPdf, setExportingPdf] = useState(false);
-  const qcDetailsRef = useRef(null);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -342,85 +338,6 @@ const QcDetails = () => {
     }
   }, [id]);
 
-  const handleExportPdf = useCallback(async () => {
-    if (!qcDetailsRef.current || exportingPdf) return;
-
-    try {
-      setExportingPdf(true);
-      const target = qcDetailsRef.current;
-      const canvas = await html2canvas(target, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: "#ffffff",
-        windowWidth: Math.max(target.scrollWidth, target.clientWidth),
-        windowHeight: Math.max(target.scrollHeight, target.clientHeight),
-        scrollX: 0,
-        scrollY: -window.scrollY,
-        onclone: (clonedDoc) => {
-          const clonedRoot = clonedDoc.querySelector("[data-qc-pdf-root='true']");
-          if (!clonedRoot) return;
-          clonedRoot.querySelectorAll("button, .btn").forEach((node) => {
-            node.style.display = "none";
-          });
-        },
-      });
-
-      const imageData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF({
-        orientation: "portrait",
-        unit: "pt",
-        format: "a4",
-      });
-
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const margin = 18;
-      const printableWidth = pageWidth - margin * 2;
-      const printableHeight = pageHeight - margin * 2;
-      const imageHeight = (canvas.height * printableWidth) / canvas.width;
-
-      let heightLeft = imageHeight;
-      let yPosition = margin;
-
-      pdf.addImage(
-        imageData,
-        "PNG",
-        margin,
-        yPosition,
-        printableWidth,
-        imageHeight,
-        undefined,
-        "FAST",
-      );
-
-      heightLeft -= printableHeight;
-      while (heightLeft > 0) {
-        pdf.addPage();
-        yPosition = margin - (imageHeight - heightLeft);
-        pdf.addImage(
-          imageData,
-          "PNG",
-          margin,
-          yPosition,
-          printableWidth,
-          imageHeight,
-          undefined,
-          "FAST",
-        );
-        heightLeft -= printableHeight;
-      }
-
-      const orderId = String(qc?.order?.order_id || id || "qc").trim() || "qc";
-      const safeOrderId = orderId.replace(/[^a-zA-Z0-9_-]/g, "_");
-      pdf.save(`qc-details-${safeOrderId}.pdf`);
-    } catch (error) {
-      console.error("Export QC PDF Error:", error);
-      alert("Failed to export QC details as PDF.");
-    } finally {
-      setExportingPdf(false);
-    }
-  }, [exportingPdf, id, qc?.order?.order_id]);
-
   const handleDeleteInspectionRecord = useCallback(
     async (recordId) => {
       if (!isOnlyAdmin || !recordId) return;
@@ -477,7 +394,7 @@ const QcDetails = () => {
     <>
       <Navbar />
 
-      <div className="page-shell py-3" ref={qcDetailsRef} data-qc-pdf-root="true">
+      <div className="page-shell py-3">
         <div className="d-flex justify-content-between align-items-center mb-3">
           <button
             type="button"
@@ -490,10 +407,13 @@ const QcDetails = () => {
           <button
             type="button"
             className="btn btn-outline-primary btn-sm"
-            onClick={handleExportPdf}
-            disabled={exportingPdf}
+            onClick={() =>
+              navigate(`/qc/${encodeURIComponent(id)}/inspection-report`, {
+                state: { fromQcDetails: location.pathname + location.search },
+              })
+            }
           >
-            {exportingPdf ? "Exporting..." : "Export PDF"}
+            Export PDF
           </button>
         </div>
 
