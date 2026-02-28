@@ -28,6 +28,56 @@ const toSafeNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const getPendingAlignmentInfo = (qc = {}) => {
+  const pendingQty = Math.max(
+    0,
+    toSafeNumber(
+      qc?.quantities?.pending ??
+        (toSafeNumber(qc?.quantities?.client_demand)
+          - toSafeNumber(qc?.quantities?.qc_passed)),
+    ),
+  );
+  const requestedQty = Math.max(0, toSafeNumber(qc?.quantities?.quantity_requested));
+  const hasRequestHistory =
+    Array.isArray(qc?.request_history) && qc.request_history.length > 0;
+  const hasRequest = hasRequestHistory || requestedQty > 0;
+  const isAligned = hasRequest && (pendingQty <= 0 || requestedQty >= pendingQty);
+
+  if (!hasRequest) {
+    return {
+      pendingQty,
+      requestedQty,
+      isAligned: false,
+      tooltip: "QC request is not aligned yet.",
+    };
+  }
+
+  if (pendingQty <= 0) {
+    return {
+      pendingQty,
+      requestedQty,
+      isAligned: true,
+      tooltip: "No pending quantity.",
+    };
+  }
+
+  if (isAligned) {
+    return {
+      pendingQty,
+      requestedQty,
+      isAligned: true,
+      tooltip: `QC aligned for pending quantity (requested ${requestedQty}, pending ${pendingQty}).`,
+    };
+  }
+
+  return {
+    pendingQty,
+    requestedQty,
+    isAligned: false,
+    tooltip: `QC is not aligned for pending quantity (requested ${requestedQty}, pending ${pendingQty}).`,
+  };
+};
+
 const DEFAULT_SORT_BY = "request_date";
 const DEFAULT_PAGE = 1;
 
@@ -629,7 +679,10 @@ const QCPage = () => {
                 </thead>
 
                 <tbody>
-                  {qcList.map((qc) => (
+                  {qcList.map((qc) => {
+                    const pendingAlignmentInfo = getPendingAlignmentInfo(qc);
+
+                    return (
                     <tr key={qc._id}>
                       {/* Prefer order.order_id if you populate order.
                           Vendor should come from order_meta now */}
@@ -654,7 +707,17 @@ const QCPage = () => {
                       </td> */}
                       <td>{qc?.order?.status}</td>
                       <td>{toSafeNumber(qc?.last_inspection?.passed) ?? 0}</td>
-                      <td>{qc?.quantities?.pending ?? 0}</td>
+                      <td title={pendingAlignmentInfo.tooltip}>
+                        <span
+                          className={
+                            pendingAlignmentInfo.isAligned
+                              ? ""
+                              : "text-danger fw-semibold"
+                          }
+                        >
+                          {pendingAlignmentInfo.pendingQty}
+                        </span>
+                      </td>
                       <td>{qc?.cbm?.total || "NA"}</td>
                       <td>{qc?.inspector?.name || "N/A"}</td>
                       <td>
@@ -685,7 +748,8 @@ const QCPage = () => {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
 
                   {qcList.length === 0 && (
                     <tr>

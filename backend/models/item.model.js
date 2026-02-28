@@ -15,7 +15,11 @@ const itemSchema = new mongoose.Schema(
     brand_name: { type: String, default: "", trim: true },
     brands: { type: [String], default: [] },
     vendors: { type: [String], default: [] },
-    weight: {
+    inspected_weight: {
+      net: { type: Number, default: 0, min: 0 },
+      gross: { type: Number, default: 0, min: 0 },
+    },
+    pis_weight: {
       net: { type: Number, default: 0, min: 0 },
       gross: { type: Number, default: 0, min: 0 },
     },
@@ -26,14 +30,26 @@ const itemSchema = new mongoose.Schema(
       inspected_top: { type: String, default: "0", trim: true },
       inspected_bottom: { type: String, default: "0", trim: true },
       inspected_total: { type: String, default: "0", trim: true },
+      calculated_inspected_total: { type: String, default: "0", trim: true },
+      calculated_pis_total: { type: String, default: "0", trim: true },
       calculated_total: { type: String, default: "0", trim: true },
     },
-    item_LBH: {
+    inspected_item_LBH: {
       L: { type: Number, default: 0, min: 0 },
       B: { type: Number, default: 0, min: 0 },
       H: { type: Number, default: 0, min: 0 },
     },
-    box_LBH: {
+    inspected_box_LBH: {
+      L: { type: Number, default: 0, min: 0 },
+      B: { type: Number, default: 0, min: 0 },
+      H: { type: Number, default: 0, min: 0 },
+    },
+    pis_item_LBH: {
+      L: { type: Number, default: 0, min: 0 },
+      B: { type: Number, default: 0, min: 0 },
+      H: { type: Number, default: 0, min: 0 },
+    },
+    pis_box_LBH: {
       L: { type: Number, default: 0, min: 0 },
       B: { type: Number, default: 0, min: 0 },
       H: { type: Number, default: 0, min: 0 },

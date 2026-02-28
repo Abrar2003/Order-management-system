@@ -195,6 +195,20 @@ const formatLbh = (dimensions = {}) => {
 const normalizeItemCodeKey = (value) => normalizeText(value).toLowerCase();
 const getItemInspectedCbmTotal = (itemDoc = {}) =>
   normalizeText(itemDoc?.cbm?.inspected_total ?? itemDoc?.cbm?.total ?? "");
+const getItemWeightNet = (itemDoc = {}) =>
+  toNonNegativeNumber(
+    itemDoc?.inspected_weight?.net ?? itemDoc?.pis_weight?.net ?? itemDoc?.weight?.net,
+    0,
+  );
+const getItemWeightGross = (itemDoc = {}) =>
+  toNonNegativeNumber(
+    itemDoc?.inspected_weight?.gross ?? itemDoc?.pis_weight?.gross ?? itemDoc?.weight?.gross,
+    0,
+  );
+const getItemItemLbh = (itemDoc = {}) =>
+  itemDoc?.inspected_item_LBH || itemDoc?.pis_item_LBH || itemDoc?.item_LBH || {};
+const getItemBoxLbh = (itemDoc = {}) =>
+  itemDoc?.inspected_box_LBH || itemDoc?.pis_box_LBH || itemDoc?.box_LBH || {};
 
 const hasMeaningfulItemQcDetails = (itemDoc) => {
   if (!itemDoc || typeof itemDoc !== "object") return false;
@@ -602,6 +616,16 @@ const resolveOrderStatusFromSet = (statuses = []) => {
   if (indexes.length === 0) return normalizedStatuses[0];
   const earliestIndex = Math.min(...indexes);
   return ORDER_STATUS_SEQUENCE[earliestIndex] || normalizedStatuses[0];
+};
+
+const normalizeOptionalReportFilter = (value) => {
+  const normalized = normalizeText(value);
+  if (!normalized) return "";
+  const lowered = normalized.toLowerCase();
+  if (lowered === "all" || lowered === "undefined" || lowered === "null") {
+    return "";
+  }
+  return normalized;
 };
 
 const buildStringDateToDateExpression = (fieldPath) => ({
@@ -1090,9 +1114,15 @@ exports.exportQCList = async (req, res) => {
             description: 1,
             brands: 1,
             vendors: 1,
+            inspected_weight: 1,
+            pis_weight: 1,
             weight: 1,
             cbm: 1,
+            inspected_item_LBH: 1,
+            pis_item_LBH: 1,
             item_LBH: 1,
+            inspected_box_LBH: 1,
+            pis_box_LBH: 1,
             box_LBH: 1,
           },
         },
@@ -1228,11 +1258,11 @@ exports.exportQCList = async (req, res) => {
         item_master_vendors: Array.isArray(itemMaster?.vendors)
           ? itemMaster.vendors.map((vendorValue) => normalizeText(vendorValue)).filter(Boolean).join(" | ")
           : "",
-        item_master_weight_net: toNonNegativeNumber(itemMaster?.weight?.net, 0),
-        item_master_weight_gross: toNonNegativeNumber(itemMaster?.weight?.gross, 0),
+        item_master_weight_net: getItemWeightNet(itemMaster),
+        item_master_weight_gross: getItemWeightGross(itemMaster),
         item_master_cbm_total: getItemInspectedCbmTotal(itemMaster),
-        item_master_item_lbh: formatLbh(itemMaster?.item_LBH),
-        item_master_box_lbh: formatLbh(itemMaster?.box_LBH),
+        item_master_item_lbh: formatLbh(getItemItemLbh(itemMaster)),
+        item_master_box_lbh: formatLbh(getItemBoxLbh(itemMaster)),
         request_date: formatDateDDMMYYYY(entry?.request_date, ""),
         last_inspected_date: formatDateDDMMYYYY(entry?.last_inspected_date, ""),
         order_date: formatDateDDMMYYYY(entry?.order?.order_date, ""),
@@ -1746,6 +1776,37 @@ exports.updateQC = async (req, res) => {
         Number(qc.quantities?.qc_passed || 0) > 0 ||
         Number(qc.quantities?.vendor_provision || 0) > 0 ||
         normalizeLabels(qc.labels).length > 0;
+
+      const pendingQuantity = Math.max(
+        0,
+        toNonNegativeNumber(
+          qc?.quantities?.pending ??
+            ((qc?.quantities?.client_demand || 0) - (qc?.quantities?.qc_passed || 0)),
+          0,
+        ),
+      );
+      const latestRequestEntry = resolveLatestRequestEntry(qc?.request_history || []);
+      const latestRequestedQuantity =
+        latestRequestEntry?.quantity_requested !== undefined
+          ? toNonNegativeNumber(latestRequestEntry.quantity_requested, 0)
+          : toNonNegativeNumber(qc?.quantities?.quantity_requested, 0);
+      const hasQcRequest =
+        (Array.isArray(qc?.request_history) && qc.request_history.length > 0) ||
+        latestRequestedQuantity > 0;
+
+      if (!hasQcRequest) {
+        return res.status(400).json({
+          message: "QC is not requested yet. Align QC request before updating.",
+        });
+      }
+
+      const isAlignedForPendingQuantity =
+        pendingQuantity <= 0 || latestRequestedQuantity >= pendingQuantity;
+      if (!isAlignedForPendingQuantity) {
+        return res.status(400).json({
+          message: `QC is not aligned for pending quantity (${pendingQuantity}). Requested quantity is ${latestRequestedQuantity}. Please realign QC first.`,
+        });
+      }
 
       if (!hasElevatedAccess) {
         const currentUserId = req.user._id.toString();
@@ -2590,6 +2651,8 @@ exports.getInspectorReports = async (req, res) => {
 
 exports.getVendorReports = async (req, res) => {
   try {
+    const selectedBrand = normalizeOptionalReportFilter(req.query.brand);
+    const selectedVendor = normalizeOptionalReportFilter(req.query.vendor);
     const timelineRange = resolveTimelineRange({
       timeline: req.query.timeline,
       customDays: req.query.custom_days ?? req.query.customDays,
@@ -2600,13 +2663,9 @@ exports.getVendorReports = async (req, res) => {
 
     const orderRows = await Order.find({
       ...ACTIVE_ORDER_MATCH,
-      order_date: {
-        $gte: timelineRange.from_date_utc,
-        $lt: timelineRange.to_date_exclusive_utc,
-      },
     })
       .select(
-        "order_id brand vendor status order_date ETD revised_ETD quantity item shipment",
+        "order_id brand vendor status order_date ETD quantity item shipment",
       )
       .lean();
 
@@ -2627,7 +2686,7 @@ exports.getVendorReports = async (req, res) => {
           item_codes: new Set(),
           quantity_total: 0,
           order_date_utc: null,
-          planned_etd_utc: null,
+          etd_utc: null,
           latest_shipment_utc: null,
         });
       }
@@ -2653,12 +2712,12 @@ exports.getVendorReports = async (req, res) => {
         entry.order_date_utc = orderDateUtc;
       }
 
-      const plannedEtdUtc = toUtcDateOnly(row?.revised_ETD || row?.ETD);
+      const plannedEtdUtc = toUtcDateOnly(row?.ETD);
       if (
         plannedEtdUtc
-        && (!entry.planned_etd_utc || plannedEtdUtc.getTime() > entry.planned_etd_utc.getTime())
+        && (!entry.etd_utc || plannedEtdUtc.getTime() > entry.etd_utc.getTime())
       ) {
-        entry.planned_etd_utc = plannedEtdUtc;
+        entry.etd_utc = plannedEtdUtc;
       }
 
       for (const shipment of Array.isArray(row?.shipment) ? row.shipment : []) {
@@ -2674,29 +2733,77 @@ exports.getVendorReports = async (req, res) => {
     }
 
     const todayUtc = toUtcDayStart(new Date());
+    const timelineOrders = [...orderGroupMap.values()].filter((entry) => {
+      if (!entry?.order_date_utc) return false;
+      return (
+        entry.order_date_utc.getTime() >= timelineRange.from_date_utc.getTime()
+        && entry.order_date_utc.getTime() < timelineRange.to_date_exclusive_utc.getTime()
+      );
+    });
+    const brandOptionsBase = selectedVendor
+      ? timelineOrders.filter((entry) => entry.vendor === selectedVendor)
+      : timelineOrders;
+    const vendorOptionsBase = selectedBrand
+      ? timelineOrders.filter((entry) => entry.brand === selectedBrand)
+      : timelineOrders;
+    const brandOptions = normalizeDistinctValues(
+      brandOptionsBase.map((entry) => entry?.brand || ""),
+    );
+    const vendorOptions = normalizeDistinctValues(
+      vendorOptionsBase.map((entry) => entry?.vendor || ""),
+    );
+
+    const filteredOrders = timelineOrders.filter((entry) => {
+      if (selectedBrand && entry?.brand !== selectedBrand) return false;
+      if (selectedVendor && entry?.vendor !== selectedVendor) return false;
+      return true;
+    });
+
     const vendorMap = new Map();
     let delayedOrdersCount = 0;
     let ordersWithEtdCount = 0;
-    let totalDelayDaysAllOrders = 0;
     let totalDelayDaysDelayedOnly = 0;
 
-    for (const orderEntry of orderGroupMap.values()) {
+    for (const orderEntry of filteredOrders) {
       const status = resolveOrderStatusFromSet([...orderEntry.statuses]);
-      const plannedEtdUtc = orderEntry.planned_etd_utc;
-      const actualReferenceUtc = orderEntry.latest_shipment_utc || todayUtc;
+      const plannedEtdUtc = orderEntry.etd_utc;
+      const hasPlannedEtd = Boolean(plannedEtdUtc);
+      const hasShippedStatus = String(status || "").trim() === "Shipped";
+      const actualShippedDateUtc = orderEntry.latest_shipment_utc;
+      const hasEtdCrossed = Boolean(
+        hasPlannedEtd
+          && todayUtc
+          && plannedEtdUtc.getTime() < todayUtc.getTime(),
+      );
 
-      let delayDays = null;
-      if (plannedEtdUtc && actualReferenceUtc) {
-        const rawDelay = Math.floor(
-          (actualReferenceUtc.getTime() - plannedEtdUtc.getTime()) / MS_PER_DAY,
-        );
-        delayDays = Math.max(0, rawDelay);
+      let delayDays = 0;
+      let isDelayed = false;
+      let delayReference = hasShippedStatus ? "latest_shipment_date" : "today";
+
+      if (hasPlannedEtd && hasShippedStatus) {
+        if (actualShippedDateUtc && actualShippedDateUtc.getTime() > plannedEtdUtc.getTime()) {
+          isDelayed = true;
+          delayReference = "latest_shipment_date";
+        }
+      } else if (hasPlannedEtd && hasEtdCrossed) {
+        isDelayed = true;
+        delayReference = "today";
       }
 
-      const isDelayed = Number.isFinite(delayDays) && delayDays > 0;
-      if (Number.isFinite(delayDays)) {
+      if (isDelayed) {
+        const delayEndDate = hasShippedStatus
+          ? actualShippedDateUtc
+          : todayUtc;
+        if (delayEndDate) {
+          const rawDelay = Math.floor(
+            (delayEndDate.getTime() - plannedEtdUtc.getTime()) / MS_PER_DAY,
+          );
+          delayDays = Math.max(0, rawDelay);
+        }
+      }
+
+      if (hasPlannedEtd) {
         ordersWithEtdCount += 1;
-        totalDelayDaysAllOrders += delayDays;
       }
       if (isDelayed) {
         delayedOrdersCount += 1;
@@ -2711,7 +2818,6 @@ exports.getVendorReports = async (req, res) => {
           delayed_orders_count: 0,
           orders_with_etd_count: 0,
           total_delay_days: 0,
-          total_delay_days_delayed_only: 0,
           brands: new Set(),
           orders: [],
         });
@@ -2721,13 +2827,10 @@ exports.getVendorReports = async (req, res) => {
       vendorEntry.orders_count += 1;
       if (isDelayed) {
         vendorEntry.delayed_orders_count += 1;
-      }
-      if (Number.isFinite(delayDays)) {
-        vendorEntry.orders_with_etd_count += 1;
         vendorEntry.total_delay_days += delayDays;
       }
-      if (isDelayed) {
-        vendorEntry.total_delay_days_delayed_only += delayDays;
+      if (hasPlannedEtd) {
+        vendorEntry.orders_with_etd_count += 1;
       }
 
       vendorEntry.brands.add(orderEntry.brand);
@@ -2737,12 +2840,12 @@ exports.getVendorReports = async (req, res) => {
         vendor: orderEntry.vendor,
         status,
         order_date: orderEntry.order_date_utc ? toISODateString(orderEntry.order_date_utc) : "",
-        planned_etd: plannedEtdUtc ? toISODateString(plannedEtdUtc) : "",
+        etd: plannedEtdUtc ? toISODateString(plannedEtdUtc) : "",
         latest_shipment_date: orderEntry.latest_shipment_utc
           ? toISODateString(orderEntry.latest_shipment_utc)
           : "",
-        delay_days: Number.isFinite(delayDays) ? delayDays : null,
-        delay_reference: orderEntry.latest_shipment_utc ? "latest_shipment_date" : "today",
+        delay_days: delayDays,
+        delay_reference: delayReference,
         item_count: orderEntry.item_codes.size,
         quantity_total: orderEntry.quantity_total,
       });
@@ -2756,14 +2859,8 @@ exports.getVendorReports = async (req, res) => {
         delayed_orders_count: entry.delayed_orders_count,
         orders_with_etd_count: entry.orders_with_etd_count,
         total_delay_days: entry.total_delay_days,
-        average_delay_days: entry.orders_with_etd_count > 0
-          ? toRoundedNumber(entry.total_delay_days / entry.orders_with_etd_count, 2)
-          : 0,
-        average_delay_days_delayed_only: entry.delayed_orders_count > 0
-          ? toRoundedNumber(
-              entry.total_delay_days_delayed_only / entry.delayed_orders_count,
-              2,
-            )
+        average_delay_days: entry.delayed_orders_count > 0
+          ? toRoundedNumber(entry.total_delay_days / entry.delayed_orders_count, 2)
           : 0,
         orders: [...entry.orders].sort((a, b) => {
           const aDelay = Number.isFinite(a?.delay_days) ? a.delay_days : -1;
@@ -2784,17 +2881,18 @@ exports.getVendorReports = async (req, res) => {
         custom_days: timelineRange.timeline === "custom" ? timelineRange.days : null,
         from_date: timelineRange.from_date_iso,
         to_date: timelineRange.to_date_iso,
+        brand: selectedBrand,
+        vendor: selectedVendor,
+        brand_options: brandOptions,
+        vendor_options: vendorOptions,
       },
       summary: {
         vendors_count: vendors.length,
-        orders_count: orderGroupMap.size,
+        orders_count: filteredOrders.length,
         delayed_orders_count: delayedOrdersCount,
         orders_with_etd_count: ordersWithEtdCount,
-        total_delay_days: totalDelayDaysAllOrders,
-        average_delay_days: ordersWithEtdCount > 0
-          ? toRoundedNumber(totalDelayDaysAllOrders / ordersWithEtdCount, 2)
-          : 0,
-        average_delay_days_delayed_only: delayedOrdersCount > 0
+        total_delay_days: totalDelayDaysDelayedOnly,
+        average_delay_days: delayedOrdersCount > 0
           ? toRoundedNumber(totalDelayDaysDelayedOnly / delayedOrdersCount, 2)
           : 0,
       },
@@ -3153,7 +3251,7 @@ exports.getQCById = async (req, res) => {
           },
         })
           .select(
-            "code name description brand_name brands vendors weight cbm item_LBH box_LBH",
+            "code name description brand_name brands vendors inspected_weight pis_weight weight cbm inspected_item_LBH pis_item_LBH item_LBH inspected_box_LBH pis_box_LBH box_LBH",
           )
           .lean()
       : null;

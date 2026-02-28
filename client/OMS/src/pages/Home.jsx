@@ -534,6 +534,7 @@ const Home = () => {
                   <thead className="table-primary">
                     <tr>
                       <th>Brand</th>
+                      <th>Vendor</th>
                       <th>
                         <button
                           type="button"
@@ -582,6 +583,7 @@ const Home = () => {
                               <span className="small fw-semibold">{order?.brand || "N/A"}</span>
                             )}
                           </td>
+                          <td>{order?.vendor || "N/A"}</td>
                           <td>{order?.order_id || "N/A"}</td>
                           <td>{formatDateDDMMYYYY(order?.ETD)}</td>
                           <td>{Number(order?.itemCount || 0)}</td>
@@ -596,7 +598,7 @@ const Home = () => {
 
                     {todayEtdOrders.length === 0 && (
                       <tr>
-                        <td colSpan="9" className="text-center py-4">
+                        <td colSpan="10" className="text-center py-4">
                           {todayEtdError || "No orders found with today's ETD."}
                         </td>
                       </tr>
@@ -606,6 +608,7 @@ const Home = () => {
                     <tfoot>
                       <tr className="table-light fw-semibold">
                         <td>Total</td>
+                        <td>-</td>
                         <td>{todayEtdOrders.length} Orders</td>
                         <td>-</td>
                         <td>{todayEtdTotals.itemCount}</td>

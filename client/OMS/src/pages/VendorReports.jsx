@@ -9,6 +9,7 @@ import "../App.css";
 
 const DEFAULT_TIMELINE = "1m";
 const DEFAULT_CUSTOM_DAYS = 30;
+const DEFAULT_ENTITY_FILTER = "all";
 
 const normalizeTimeline = (value) => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -25,10 +26,24 @@ const parseCustomDays = (value) => {
   return Math.min(parsed, 3650);
 };
 
+const normalizeEntityFilter = (value) => {
+  const normalized = String(value || "").trim();
+  if (!normalized) return DEFAULT_ENTITY_FILTER;
+  const lowered = normalized.toLowerCase();
+  if (lowered === "all" || lowered === "undefined" || lowered === "null") {
+    return DEFAULT_ENTITY_FILTER;
+  }
+  return normalized;
+};
+
 const defaultReport = {
   filters: {
     timeline: DEFAULT_TIMELINE,
     custom_days: null,
+    brand: "",
+    vendor: "",
+    brand_options: [],
+    vendor_options: [],
     from_date: "",
     to_date: "",
   },
@@ -39,7 +54,6 @@ const defaultReport = {
     orders_with_etd_count: 0,
     total_delay_days: 0,
     average_delay_days: 0,
-    average_delay_days_delayed_only: 0,
   },
   vendors: [],
 };
@@ -55,6 +69,12 @@ const VendorReports = () => {
   const [customDays, setCustomDays] = useState(() =>
     parseCustomDays(searchParams.get("custom_days")),
   );
+  const [brandFilter, setBrandFilter] = useState(() =>
+    normalizeEntityFilter(searchParams.get("brand")),
+  );
+  const [vendorFilter, setVendorFilter] = useState(() =>
+    normalizeEntityFilter(searchParams.get("vendor")),
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [report, setReport] = useState(defaultReport);
@@ -68,12 +88,21 @@ const VendorReports = () => {
       if (timeline === "custom") {
         params.custom_days = customDays;
       }
+      if (brandFilter !== DEFAULT_ENTITY_FILTER) {
+        params.brand = brandFilter;
+      }
+      if (vendorFilter !== DEFAULT_ENTITY_FILTER) {
+        params.vendor = vendorFilter;
+      }
 
       const response = await api.get("/qc/reports/vendors", { params });
       const responseData = response?.data || {};
 
       setReport({
-        filters: responseData?.filters || defaultReport.filters,
+        filters: {
+          ...defaultReport.filters,
+          ...(responseData?.filters || {}),
+        },
         summary: responseData?.summary || defaultReport.summary,
         vendors: Array.isArray(responseData?.vendors) ? responseData.vendors : [],
       });
@@ -83,7 +112,7 @@ const VendorReports = () => {
     } finally {
       setLoading(false);
     }
-  }, [customDays, timeline]);
+  }, [brandFilter, customDays, timeline, vendorFilter]);
 
   useEffect(() => {
     fetchReports();
@@ -92,9 +121,13 @@ const VendorReports = () => {
   useEffect(() => {
     const nextTimeline = normalizeTimeline(searchParams.get("timeline"));
     const nextCustomDays = parseCustomDays(searchParams.get("custom_days"));
+    const nextBrandFilter = normalizeEntityFilter(searchParams.get("brand"));
+    const nextVendorFilter = normalizeEntityFilter(searchParams.get("vendor"));
 
     setTimeline((prev) => (prev === nextTimeline ? prev : nextTimeline));
     setCustomDays((prev) => (prev === nextCustomDays ? prev : nextCustomDays));
+    setBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
+    setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
   }, [searchParams]);
 
   useEffect(() => {
@@ -105,10 +138,16 @@ const VendorReports = () => {
     if (timeline === "custom") {
       next.set("custom_days", String(customDays));
     }
+    if (brandFilter !== DEFAULT_ENTITY_FILTER) {
+      next.set("brand", brandFilter);
+    }
+    if (vendorFilter !== DEFAULT_ENTITY_FILTER) {
+      next.set("vendor", vendorFilter);
+    }
     if (!areSearchParamsEquivalent(next, searchParams)) {
       setSearchParams(next, { replace: true });
     }
-  }, [customDays, searchParams, setSearchParams, timeline]);
+  }, [brandFilter, customDays, searchParams, setSearchParams, timeline, vendorFilter]);
 
   const summary = useMemo(
     () => report?.summary || defaultReport.summary,
@@ -167,6 +206,38 @@ const VendorReports = () => {
               </div>
             )}
 
+            <div>
+              <label className="form-label mb-1">Brand</label>
+              <select
+                className="form-select"
+                value={brandFilter}
+                onChange={(e) => setBrandFilter(normalizeEntityFilter(e.target.value))}
+              >
+                <option value={DEFAULT_ENTITY_FILTER}>All Brands</option>
+                {(Array.isArray(filters.brand_options) ? filters.brand_options : []).map((brand) => (
+                  <option key={brand} value={brand}>
+                    {brand}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="form-label mb-1">Vendor</label>
+              <select
+                className="form-select"
+                value={vendorFilter}
+                onChange={(e) => setVendorFilter(normalizeEntityFilter(e.target.value))}
+              >
+                <option value={DEFAULT_ENTITY_FILTER}>All Vendors</option>
+                {(Array.isArray(filters.vendor_options) ? filters.vendor_options : []).map((vendor) => (
+                  <option key={vendor} value={vendor}>
+                    {vendor}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <button
               type="button"
               className="btn btn-primary btn-sm"
@@ -184,6 +255,12 @@ const VendorReports = () => {
               Range: {formatDateDDMMYYYY(filters.from_date)} - {formatDateDDMMYYYY(filters.to_date)}
             </span>
             <span className="om-summary-chip">
+              Brand: {brandFilter === DEFAULT_ENTITY_FILTER ? "all" : brandFilter}
+            </span>
+            <span className="om-summary-chip">
+              Vendor: {vendorFilter === DEFAULT_ENTITY_FILTER ? "all" : vendorFilter}
+            </span>
+            <span className="om-summary-chip">
               Vendors: {summary.vendors_count ?? 0}
             </span>
             <span className="om-summary-chip">
@@ -194,9 +271,6 @@ const VendorReports = () => {
             </span>
             <span className="om-summary-chip">
               Avg Delay: {summary.average_delay_days ?? 0} days
-            </span>
-            <span className="om-summary-chip">
-              Avg Delay (Delayed Only): {summary.average_delay_days_delayed_only ?? 0} days
             </span>
           </div>
         </div>
@@ -232,9 +306,6 @@ const VendorReports = () => {
                     <span className="om-summary-chip">
                       Avg Delay: {vendorEntry.average_delay_days ?? 0} days
                     </span>
-                    <span className="om-summary-chip">
-                      Avg Delay (Delayed): {vendorEntry.average_delay_days_delayed_only ?? 0} days
-                    </span>
                   </div>
 
                   <div className="table-responsive">
@@ -245,7 +316,7 @@ const VendorReports = () => {
                           <th>Brand</th>
                           <th>Status</th>
                           <th>Order Date</th>
-                          <th>Planned ETD</th>
+                          <th>ETD</th>
                           <th>Latest Shipment</th>
                           <th>Delay (Days)</th>
                           <th>Item Count</th>
@@ -266,7 +337,7 @@ const VendorReports = () => {
                             <td>{orderRow.brand || "N/A"}</td>
                             <td>{orderRow.status || "N/A"}</td>
                             <td>{formatDateDDMMYYYY(orderRow.order_date)}</td>
-                            <td>{formatDateDDMMYYYY(orderRow.planned_etd)}</td>
+                            <td>{formatDateDDMMYYYY(orderRow.etd)}</td>
                             <td>{formatDateDDMMYYYY(orderRow.latest_shipment_date)}</td>
                             <td>
                               {Number.isFinite(orderRow.delay_days)

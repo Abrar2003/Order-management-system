@@ -57,6 +57,70 @@ const isPositiveCbmValue = (value) => {
   return Number.isFinite(parsed) && parsed > 0;
 };
 
+const toSafeNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return parsed;
+};
+
+const getQcPendingAlignmentInfo = (qc = {}) => {
+  const pendingQty = Math.max(
+    0,
+    toSafeNumber(
+      qc?.quantities?.pending ??
+        ((toSafeNumber(qc?.quantities?.client_demand, 0))
+          - (toSafeNumber(qc?.quantities?.qc_passed, 0))),
+      0,
+    ),
+  );
+  const requestedQty = Math.max(
+    0,
+    toSafeNumber(qc?.quantities?.quantity_requested, 0),
+  );
+  const hasRequestHistory =
+    Array.isArray(qc?.request_history) && qc.request_history.length > 0;
+  const hasRequest = hasRequestHistory || requestedQty > 0;
+  const isAligned = hasRequest && (pendingQty <= 0 || requestedQty >= pendingQty);
+
+  if (!hasRequest) {
+    return {
+      hasRequest,
+      isAligned,
+      pendingQty,
+      requestedQty,
+      tooltip: "QC request is not aligned yet.",
+    };
+  }
+
+  if (pendingQty <= 0) {
+    return {
+      hasRequest,
+      isAligned,
+      pendingQty,
+      requestedQty,
+      tooltip: "No pending quantity.",
+    };
+  }
+
+  if (isAligned) {
+    return {
+      hasRequest,
+      isAligned,
+      pendingQty,
+      requestedQty,
+      tooltip: `QC aligned for pending quantity (requested ${requestedQty}, pending ${pendingQty}).`,
+    };
+  }
+
+  return {
+    hasRequest,
+    isAligned,
+    pendingQty,
+    requestedQty,
+    tooltip: `QC is not aligned for pending quantity (requested ${requestedQty}, pending ${pendingQty}).`,
+  };
+};
+
 const InfoBox = ({ label, value, compact = false }) => (
   <div className={compact ? "qc-info-compact-item" : "col-md-3 col-lg-3"}>
     <div className="qc-info-label">{label}</div>
@@ -127,12 +191,20 @@ const QcDetails = () => {
     normalizedRole === "qc" &&
     !hasActiveInspectionRecords &&
     (qc?.quantities?.qc_checked || 0) === 0;
-  const canUpdateQc =
+  const pendingAlignmentInfo = useMemo(
+    () => getQcPendingAlignmentInfo(qc),
+    [qc],
+  );
+  const canUpdateQcByRole =
     isAdmin ||
     (!isInspectionDone &&
       normalizedRole === "qc" &&
       qcIsPending &&
       (assignedInspectorId === String(userId) || canClaimInspection));
+  const canUpdateQc =
+    canUpdateQcByRole &&
+    pendingAlignmentInfo.hasRequest &&
+    pendingAlignmentInfo.isAligned;
 
   const sortedLabels = useMemo(() => normalizeLabels(qc?.labels), [qc?.labels]);
   const backTarget = useMemo(() => {
@@ -208,11 +280,23 @@ const QcDetails = () => {
     const inspectedCbm = String(
       itemMaster?.cbm?.inspected_total ?? itemMaster?.cbm?.total ?? "0",
     ).trim();
-    const calculatedCbm = String(
-      itemMaster?.cbm?.calculated_total ?? "0",
+    const calculatedInspectedCbm = String(
+      itemMaster?.cbm?.calculated_inspected_total ?? itemMaster?.cbm?.calculated_total ?? "0",
     ).trim();
-    const netWeight = Number(itemMaster?.weight?.net ?? 0);
-    const grossWeight = Number(itemMaster?.weight?.gross ?? 0);
+    const calculatedPisCbm = String(
+      itemMaster?.cbm?.calculated_pis_total ?? "0",
+    ).trim();
+    const netWeight = Number(
+      itemMaster?.inspected_weight?.net ?? itemMaster?.pis_weight?.net ?? itemMaster?.weight?.net ?? 0,
+    );
+    const grossWeight = Number(
+      itemMaster?.inspected_weight?.gross
+      ?? itemMaster?.pis_weight?.gross
+      ?? itemMaster?.weight?.gross
+      ?? 0,
+    );
+    const itemLbhSource = itemMaster?.inspected_item_LBH || itemMaster?.pis_item_LBH || itemMaster?.item_LBH;
+    const boxLbhSource = itemMaster?.inspected_box_LBH || itemMaster?.pis_box_LBH || itemMaster?.box_LBH;
 
     return {
       code: String(itemMaster?.code || qc?.item?.item_code || "N/A").trim() || "N/A",
@@ -221,10 +305,15 @@ const QcDetails = () => {
       brandName: brandName || "N/A",
       weightNet: Number.isFinite(netWeight) ? netWeight : 0,
       weightGross: Number.isFinite(grossWeight) ? grossWeight : 0,
-      itemLbh: formatLbhValue(itemMaster?.item_LBH),
-      boxLbh: formatLbhValue(itemMaster?.box_LBH),
+      itemLbh: formatLbhValue(itemLbhSource),
+      boxLbh: formatLbhValue(boxLbhSource),
       inspectedCbm: isPositiveCbmValue(inspectedCbm) ? inspectedCbm : "Not Set",
-      calculatedCbm: isPositiveCbmValue(calculatedCbm) ? calculatedCbm : "Not Set",
+      calculatedInspectedCbm: isPositiveCbmValue(calculatedInspectedCbm)
+        ? calculatedInspectedCbm
+        : "Not Set",
+      calculatedPisCbm: isPositiveCbmValue(calculatedPisCbm)
+        ? calculatedPisCbm
+        : "Not Set",
     };
   }, [qc]);
 
@@ -462,8 +551,12 @@ const QcDetails = () => {
                   value={itemMasterDetails.inspectedCbm}
                 />
                 <InfoBox
-                  label="Calculated CBM"
-                  value={itemMasterDetails.calculatedCbm}
+                  label="Calculated Inspected CBM"
+                  value={itemMasterDetails.calculatedInspectedCbm}
+                />
+                <InfoBox
+                  label="Calculated PIS CBM"
+                  value={itemMasterDetails.calculatedPisCbm}
                 />
               </div>
             </section>
@@ -664,7 +757,11 @@ const QcDetails = () => {
                 title={
                   canUpdateQc
                     ? ""
-                    : isInspectionDone
+                    : !pendingAlignmentInfo.hasRequest
+                      ? "QC is not requested yet. Align QC request before updating."
+                      : !pendingAlignmentInfo.isAligned
+                        ? pendingAlignmentInfo.tooltip
+                        : isInspectionDone
                       ? "After inspection is done, only admin can update this record."
                       : normalizedRole === "qc" &&
                           assignedInspectorId === String(userId)

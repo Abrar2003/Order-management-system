@@ -85,13 +85,35 @@ const applyDerivedItemFields = (item, { preferredBrand = "" } = {}) => {
     }
   }
 
-  const nextCalculatedTotal = calculateCbmFromBoxSize(item?.box_LBH);
+  const nextCalculatedInspectedTotal = calculateCbmFromBoxSize(
+    item?.inspected_box_LBH || item?.box_LBH,
+  );
+  const nextCalculatedPisTotal = calculateCbmFromBoxSize(
+    item?.pis_box_LBH || item?.box_LBH,
+  );
+  const currentCalculatedInspectedTotal = normalizeCbmText(
+    item?.cbm?.calculated_inspected_total ?? item?.cbm?.calculated_total ?? "0",
+  );
+  const currentCalculatedPisTotal = normalizeCbmText(
+    item?.cbm?.calculated_pis_total ?? "0",
+  );
   const currentCalculatedTotal = normalizeCbmText(item?.cbm?.calculated_total ?? "0");
+  const hasCalculatedInspectedTotal = hasOwn(item?.cbm || {}, "calculated_inspected_total");
+  const hasCalculatedPisTotal = hasOwn(item?.cbm || {}, "calculated_pis_total");
   const hasCalculatedTotal = hasOwn(item?.cbm || {}, "calculated_total");
-  if (!hasCalculatedTotal || currentCalculatedTotal !== nextCalculatedTotal) {
+  if (
+    !hasCalculatedInspectedTotal
+    || currentCalculatedInspectedTotal !== nextCalculatedInspectedTotal
+    || !hasCalculatedPisTotal
+    || currentCalculatedPisTotal !== nextCalculatedPisTotal
+    || !hasCalculatedTotal
+    || currentCalculatedTotal !== nextCalculatedInspectedTotal
+  ) {
     item.cbm = {
       ...(item.cbm || {}),
-      calculated_total: nextCalculatedTotal,
+      calculated_inspected_total: nextCalculatedInspectedTotal,
+      calculated_pis_total: nextCalculatedPisTotal,
+      calculated_total: nextCalculatedInspectedTotal,
     };
     changed = true;
   }

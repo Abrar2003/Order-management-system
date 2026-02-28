@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import EditItemModal from "../components/EditItemModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -50,15 +51,38 @@ const formatLbh = (value) => {
   return `${safeL} x ${safeB} x ${safeH}`;
 };
 
+const getInspectedWeight = (item, key) => {
+  const value = item?.inspected_weight?.[key] ?? item?.weight?.[key] ?? 0;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const getPisWeight = (item, key) => {
+  const value = item?.pis_weight?.[key] ?? 0;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const getInspectedItemLbh = (item) => item?.inspected_item_LBH || item?.item_LBH || {};
+const getInspectedBoxLbh = (item) => item?.inspected_box_LBH || item?.box_LBH || {};
+const getPisItemLbh = (item) => item?.pis_item_LBH || {};
+const getPisBoxLbh = (item) => item?.pis_box_LBH || {};
+const getCalculatedInspectedCbm = (item) =>
+  item?.cbm?.calculated_inspected_total ?? item?.cbm?.calculated_total ?? "0";
+const getCalculatedPisCbm = (item) => item?.cbm?.calculated_pis_total ?? "0";
+
 const Items = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "items");
   const user = getUserFromToken();
   const normalizedRole = String(user?.role || "").trim().toLowerCase();
   const canSyncItems = ["admin", "manager", "dev"].includes(normalizedRole);
+  const canEditItems = ["admin", "manager", "dev"].includes(normalizedRole);
 
   const [rows, setRows] = useState([]);
+  const [selectedItem, setSelectedItem] = useState(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
@@ -202,6 +226,22 @@ const Items = () => {
     [filters.item_codes],
   );
 
+  const navigateToItemOrdersHistory = useCallback(
+    (item) => {
+      const itemCode = String(item?.code || "").trim();
+      if (!itemCode) return;
+      navigate(
+        `/items/${encodeURIComponent(itemCode)}/orders-history`,
+        {
+          state: {
+            fromItems: `${location.pathname}${location.search}`,
+          },
+        },
+      );
+    },
+    [location.pathname, location.search, navigate],
+  );
+
   return (
     <>
       <Navbar />
@@ -339,12 +379,12 @@ const Items = () => {
                       <th>Item Code</th>
                       <th>Name</th>
                       <th>Brand Name</th>
-                      <th>Weight Net</th>
-                      <th>Weight Gross</th>
-                      <th>Inspected CBM</th>
-                      <th>Calculated CBM</th>
+                      <th>Net Weight</th>
+                      <th>Gross Weight</th>
+                      <th>CBM</th>
                       <th>Item LBH</th>
                       <th>Box LBH</th>
+                      {canEditItems && <th>Action</th>}
                       {/* <th>Source</th> */}
                       {/* <th>Updated At</th> */}
                     </tr>
@@ -352,14 +392,26 @@ const Items = () => {
                   <tbody>
                     {rows.length === 0 && (
                       <tr>
-                        <td colSpan="20" className="text-center py-4">
+                        <td colSpan={canEditItems ? "15" : "14"} className="text-center py-4">
                           No items found
                         </td>
                       </tr>
                     )}
                     {rows.map((item) => (
                       <tr key={item?._id || item?.code}>
-                        <td>{item?.code || "N/A"}</td>
+                        <td>
+                          {item?.code ? (
+                            <button
+                              type="button"
+                              className="btn btn-link btn-sm p-0 text-start"
+                              onClick={() => navigateToItemOrdersHistory(item)}
+                            >
+                              {item.code}
+                            </button>
+                          ) : (
+                            "N/A"
+                          )}
+                        </td>
                         <td>{item?.name || "N/A"}</td>
                         <td>
                           {item?.brand_name
@@ -369,14 +421,24 @@ const Items = () => {
                         </td>
                         {/* <td>{Array.isArray(item?.brands) && item.brands.length > 0 ? item.brands.join(", ") : "N/A"}</td>
                         <td>{Array.isArray(item?.vendors) && item.vendors.length > 0 ? item.vendors.join(", ") : "N/A"}</td> */}
-                        <td>{item?.weight?.net ?? 0}</td>
-                        <td>{item?.weight?.gross ?? 0}</td>
+                        <td>{getInspectedWeight(item, "net")}</td>
+                        <td>{getInspectedWeight(item, "gross")}</td>
                         <td>
                           {item?.cbm?.inspected_total ?? item?.cbm?.total ?? "0"}
                         </td>
-                        <td>{item?.cbm?.calculated_total ?? "0"}</td>
-                        <td>{formatLbh(item?.item_LBH)}</td>
-                        <td>{formatLbh(item?.box_LBH)}</td>
+                        <td>{formatLbh(getInspectedItemLbh(item))}</td>
+                        <td>{formatLbh(getInspectedBoxLbh(item))}</td>
+                        {canEditItems && (
+                          <td>
+                            <button
+                              type="button"
+                              className="btn btn-outline-primary btn-sm"
+                              onClick={() => setSelectedItem(item)}
+                            >
+                              Edit
+                            </button>
+                          </td>
+                        )}
                         {/* <td>
                           {item?.source?.from_orders ? "Orders" : ""}
                           {item?.source?.from_orders && item?.source?.from_qc ? " + " : ""}
@@ -434,6 +496,17 @@ const Items = () => {
           </div>
         </div>
       </div>
+
+      {selectedItem && canEditItems && (
+        <EditItemModal
+          item={selectedItem}
+          onClose={() => setSelectedItem(null)}
+          onUpdated={() => {
+            setSelectedItem(null);
+            fetchItems();
+          }}
+        />
+      )}
     </>
   );
 };

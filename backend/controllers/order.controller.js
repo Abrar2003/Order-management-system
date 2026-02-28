@@ -2604,6 +2604,7 @@ exports.getTodayEtdOrdersByBrand = async (req, res) => {
           _id: "$order_id",
           order_id: { $first: "$order_id" },
           brand: { $first: "$brand" },
+          vendor: { $first: "$vendor" },
           ETD: { $first: "$ETD" },
           itemCount: { $sum: 1 },
           pendingCount: {
@@ -2656,6 +2657,7 @@ exports.getTodayEtdOrdersByBrand = async (req, res) => {
           _id: 0,
           order_id: 1,
           brand: 1,
+          vendor: 1,
           ETD: 1,
           itemCount: 1,
           status: 1,

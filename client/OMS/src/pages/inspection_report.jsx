@@ -107,16 +107,43 @@ const InspectionReport = () => {
 
   const itemMasterSummary = useMemo(() => {
     const itemMaster = qc?.item_master || {};
-    const netWeight = Number(itemMaster?.weight?.net ?? 0);
-    const grossWeight = Number(itemMaster?.weight?.gross ?? 0);
-    const packedSize = formatLbhValue(itemMaster?.box_LBH || itemMaster?.item_LBH);
+    const netWeight = Number(
+      itemMaster?.inspected_weight?.net ?? itemMaster?.pis_weight?.net ?? itemMaster?.weight?.net ?? 0,
+    );
+    const grossWeight = Number(
+      itemMaster?.inspected_weight?.gross
+      ?? itemMaster?.pis_weight?.gross
+      ?? itemMaster?.weight?.gross
+      ?? 0,
+    );
+    const packedSize = formatLbhValue(
+      itemMaster?.inspected_box_LBH
+      || itemMaster?.pis_box_LBH
+      || itemMaster?.inspected_item_LBH
+      || itemMaster?.pis_item_LBH
+      || itemMaster?.box_LBH
+      || itemMaster?.item_LBH,
+    );
     const inspectedCbmRaw =
       itemMaster?.cbm?.inspected_total ??
       itemMaster?.cbm?.total ??
       qc?.cbm?.total ??
       "0";
+    const calculatedInspectedCbmRaw =
+      itemMaster?.cbm?.calculated_inspected_total ??
+      itemMaster?.cbm?.calculated_total ??
+      "0";
+    const calculatedPisCbmRaw =
+      itemMaster?.cbm?.calculated_pis_total ??
+      "0";
     const inspectedCbm = isPositiveCbmValue(inspectedCbmRaw)
       ? String(inspectedCbmRaw).trim()
+      : "Not Set";
+    const calculatedInspectedCbm = isPositiveCbmValue(calculatedInspectedCbmRaw)
+      ? String(calculatedInspectedCbmRaw).trim()
+      : "Not Set";
+    const calculatedPisCbm = isPositiveCbmValue(calculatedPisCbmRaw)
+      ? String(calculatedPisCbmRaw).trim()
       : "Not Set";
     const barcodeValue =
       Number(qc?.barcode || 0) > 0 ? String(qc.barcode).trim() : "Not Set";
@@ -124,6 +151,8 @@ const InspectionReport = () => {
     return {
       packedSize,
       inspectedCbm,
+      calculatedInspectedCbm,
+      calculatedPisCbm,
       netWeight: Number.isFinite(netWeight) ? netWeight : 0,
       grossWeight: Number.isFinite(grossWeight) ? grossWeight : 0,
       barcodeValue,
@@ -353,6 +382,14 @@ const InspectionReport = () => {
                 <li className="list-group-item inspection-report-meta-row">
                   <div className="inspection-report-meta-label">Inspected CBM</div>
                   <div className="inspection-report-meta-value">{itemMasterSummary.inspectedCbm}</div>
+                </li>
+                <li className="list-group-item inspection-report-meta-row">
+                  <div className="inspection-report-meta-label">Calculated Inspected CBM</div>
+                  <div className="inspection-report-meta-value">{itemMasterSummary.calculatedInspectedCbm}</div>
+                </li>
+                <li className="list-group-item inspection-report-meta-row">
+                  <div className="inspection-report-meta-label">Calculated PIS CBM</div>
+                  <div className="inspection-report-meta-value">{itemMasterSummary.calculatedPisCbm}</div>
                 </li>
                 <li className="list-group-item inspection-report-meta-row">
                   <div className="inspection-report-meta-label">Packed Size (L x B x H)</div>

@@ -21,6 +21,7 @@ import DailyReport from "./pages/DailyReport";
 import Shipments from "./pages/Shipments";
 import Container from "./pages/Container";
 import Items from "./pages/Items";
+import ItemOrdersHistory from "./pages/ItemOrdersHistory";
 import UploadLogs from "./pages/UploadLogs";
 import ArchivedOrders from "./pages/ArchivedOrders";
 import InspectionReport from "./pages/inspection_report";
@@ -116,6 +117,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <Items />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/items/:itemCode/orders-history"
+            element={
+              <ProtectedRoute>
+                <ItemOrdersHistory />
               </ProtectedRoute>
             }
           />
