@@ -329,17 +329,35 @@ const InspectionReport = () => {
             <section>
               <h3 className="h6 mb-3">Order Summary</h3>
               <div className="inspection-report-summary-block">
-                <div className="inspection-report-summary-line">
-                  <span><strong>Brand:</strong> {orderInfo.brand}</span>
-                  <span><strong>Vendor:</strong> {orderInfo.vendor}</span>
+                <div className="inspection-report-summary-line inspection-report-summary-line-two">
+                  <div className="inspection-report-summary-field">
+                    <div className="inspection-report-summary-label">Brand</div>
+                    <div className="inspection-report-summary-value">{orderInfo.brand}</div>
+                  </div>
+                  <div className="inspection-report-summary-field">
+                    <div className="inspection-report-summary-label">Vendor</div>
+                    <div className="inspection-report-summary-value">{orderInfo.vendor}</div>
+                  </div>
                 </div>
-                <div className="inspection-report-summary-line">
-                  <span><strong>Order ID:</strong> {orderInfo.orderId}</span>
-                  <span><strong>Item Code:</strong> {orderInfo.itemCode}</span>
-                  <span><strong>Description:</strong> {orderInfo.itemDescription}</span>
+                <div className="inspection-report-summary-line inspection-report-summary-line-three">
+                  <div className="inspection-report-summary-field">
+                    <div className="inspection-report-summary-label">Order ID</div>
+                    <div className="inspection-report-summary-value">{orderInfo.orderId}</div>
+                  </div>
+                  <div className="inspection-report-summary-field">
+                    <div className="inspection-report-summary-label">Item Code</div>
+                    <div className="inspection-report-summary-value">{orderInfo.itemCode}</div>
+                  </div>
+                  <div className="inspection-report-summary-field">
+                    <div className="inspection-report-summary-label">Description</div>
+                    <div className="inspection-report-summary-value">{orderInfo.itemDescription}</div>
+                  </div>
                 </div>
-                <div className="inspection-report-summary-line">
-                  <span><strong>Request Date:</strong> {orderInfo.requestDate}</span>
+                <div className="inspection-report-summary-line inspection-report-summary-line-one">
+                  <div className="inspection-report-summary-field">
+                    <div className="inspection-report-summary-label">Request Date</div>
+                    <div className="inspection-report-summary-value">{orderInfo.requestDate}</div>
+                  </div>
                 </div>
               </div>
             </section>
@@ -348,7 +366,7 @@ const InspectionReport = () => {
               <h3 className="h6 mb-3">Inspection Records</h3>
               {inspectionRows.length > 0 ? (
                 <div className="table-responsive">
-                  <table className="table table-sm table-striped align-middle mb-0">
+                  <table className="table table-sm table-striped table-bordered align-middle mb-0 inspection-report-table-dark">
                     <thead>
                       <tr>
                         <th>Request Date</th>
@@ -387,7 +405,7 @@ const InspectionReport = () => {
             <section>
               <h3 className="h6 mb-3">Product Packing Details</h3>
               <div className="table-responsive mb-3">
-                <table className="table table-sm table-striped table-bordered align-middle mb-0 inspection-report-packing-table">
+                <table className="table table-sm table-striped table-bordered align-middle mb-0 inspection-report-packing-table inspection-report-table-dark">
                   <thead>
                     <tr>
                       <th>Attribute</th>
