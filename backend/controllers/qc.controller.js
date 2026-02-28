@@ -483,6 +483,127 @@ const toSortableTimestamp = (value) => {
   return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
 };
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const REPORT_TIMELINE_DAYS = Object.freeze({
+  "1m": 30,
+  "3m": 90,
+  "6m": 180,
+});
+
+const toUtcDayStart = (value = new Date()) => {
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return new Date(Date.UTC(
+    parsed.getUTCFullYear(),
+    parsed.getUTCMonth(),
+    parsed.getUTCDate(),
+  ));
+};
+
+const addUtcDays = (date, days = 0) => {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+  const cloned = new Date(date);
+  cloned.setUTCDate(cloned.getUTCDate() + Number(days || 0));
+  return cloned;
+};
+
+const parseCustomDaysInput = (value, fallback = 30) => {
+  const parsed = Number.parseInt(String(value ?? "").trim(), 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return Math.min(parsed, 3650);
+};
+
+const resolveTimelineRange = ({
+  timeline = "1m",
+  customDays = "",
+} = {}) => {
+  const normalizedTimelineInput = String(timeline || "").trim().toLowerCase();
+  const timelineKey = Object.prototype.hasOwnProperty.call(
+    REPORT_TIMELINE_DAYS,
+    normalizedTimelineInput,
+  )
+    ? normalizedTimelineInput
+    : (normalizedTimelineInput === "custom" ? "custom" : "1m");
+
+  const days =
+    timelineKey === "custom"
+      ? parseCustomDaysInput(customDays, 30)
+      : REPORT_TIMELINE_DAYS[timelineKey];
+
+  const todayStart = toUtcDayStart(new Date());
+  if (!todayStart) return null;
+
+  const fromDateUtc = addUtcDays(todayStart, -(Math.max(1, days) - 1));
+  const toDateExclusiveUtc = addUtcDays(todayStart, 1);
+  if (!fromDateUtc || !toDateExclusiveUtc) return null;
+
+  const toDateInclusiveUtc = addUtcDays(toDateExclusiveUtc, -1);
+  if (!toDateInclusiveUtc) return null;
+
+  return {
+    timeline: timelineKey,
+    days,
+    from_date_iso: toISODateString(fromDateUtc),
+    to_date_iso: toISODateString(toDateInclusiveUtc),
+    from_date_utc: fromDateUtc,
+    to_date_exclusive_utc: toDateExclusiveUtc,
+  };
+};
+
+const toUtcDateOnly = (value) => {
+  if (!value) return null;
+  const asIso = toISODateString(value);
+  if (asIso) {
+    return parseIsoDateToUtcDate(asIso);
+  }
+
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return toUtcDayStart(parsed);
+};
+
+const getWeekStartIsoDate = (value) => {
+  const dayStart = toUtcDateOnly(value);
+  if (!dayStart) return "";
+
+  const dayOfWeek = dayStart.getUTCDay();
+  const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  const monday = addUtcDays(dayStart, diffToMonday);
+  return monday ? toISODateString(monday) : "";
+};
+
+const toRoundedNumber = (value, decimals = 3) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  const precision = 10 ** Math.max(0, Number(decimals) || 0);
+  return Math.round(numeric * precision) / precision;
+};
+
+const resolveOrderStatusFromSet = (statuses = []) => {
+  const ORDER_STATUS_SEQUENCE = [
+    "Pending",
+    "Under Inspection",
+    "Inspection Done",
+    "Partial Shipped",
+    "Shipped",
+  ];
+  const normalizedStatuses = [...new Set(
+    (Array.isArray(statuses) ? statuses : [])
+      .map((status) => String(status || "").trim())
+      .filter(Boolean),
+  )];
+
+  if (normalizedStatuses.length === 0) return "Pending";
+  if (normalizedStatuses.length === 1) return normalizedStatuses[0];
+
+  const indexes = normalizedStatuses
+    .map((status) => ORDER_STATUS_SEQUENCE.indexOf(status))
+    .filter((index) => index >= 0);
+  if (indexes.length === 0) return normalizedStatuses[0];
+  const earliestIndex = Math.min(...indexes);
+  return ORDER_STATUS_SEQUENCE[earliestIndex] || normalizedStatuses[0];
+};
+
 const buildStringDateToDateExpression = (fieldPath) => ({
   $let: {
     vars: {
@@ -2219,6 +2340,469 @@ exports.syncQcDetailsFromItems = async (req, res) => {
       message: "Failed to sync QC details from items",
       error: err?.message || String(err),
     });
+  }
+};
+
+exports.getInspectorReports = async (req, res) => {
+  try {
+    const timelineRange = resolveTimelineRange({
+      timeline: req.query.timeline,
+      customDays: req.query.custom_days ?? req.query.customDays,
+    });
+    if (!timelineRange) {
+      return res.status(400).json({ message: "Invalid timeline filters" });
+    }
+
+    const inspectionsRaw = await Inspection.find({
+      createdAt: {
+        $gte: timelineRange.from_date_utc,
+        $lt: timelineRange.to_date_exclusive_utc,
+      },
+    })
+      .select("inspector inspection_date createdAt checked passed cbm qc")
+      .populate("inspector", "name email")
+      .populate({
+        path: "qc",
+        select: "order_meta item order",
+        populate: {
+          path: "order",
+          select: "order_id brand vendor status archived",
+          match: ACTIVE_ORDER_MATCH,
+        },
+      })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const inspections = inspectionsRaw.filter((entry) => entry?.qc?.order);
+    const inspectorMap = new Map();
+    const dailyTotalsMap = new Map();
+    const weeklyTotalsMap = new Map();
+
+    const upsertBucket = (bucketMap, key, seedFactory) => {
+      const normalizedKey = String(key || "").trim();
+      if (!normalizedKey) return null;
+      if (!bucketMap.has(normalizedKey)) {
+        bucketMap.set(normalizedKey, seedFactory(normalizedKey));
+      }
+      return bucketMap.get(normalizedKey);
+    };
+
+    let totalChecked = 0;
+    let totalPassed = 0;
+    let totalInspectedCbm = 0;
+
+    for (const inspection of inspections) {
+      const inspectedQty = toNonNegativeNumber(inspection?.checked, 0);
+      const passedQty = toNonNegativeNumber(inspection?.passed, 0);
+      const cbmPerUnit = toNonNegativeNumber(inspection?.cbm?.total, 0);
+      const inspectedCbm = cbmPerUnit * inspectedQty;
+      const inspectionDateIso =
+        toISODateString(inspection?.inspection_date)
+        || toISODateString(inspection?.createdAt)
+        || "";
+      const weekStartIso = getWeekStartIsoDate(inspectionDateIso || inspection?.createdAt);
+      const inspectorId = String(inspection?.inspector?._id || inspection?.inspector || "unassigned");
+      const orderId = String(
+        inspection?.qc?.order_meta?.order_id
+          || inspection?.qc?.order?.order_id
+          || "",
+      ).trim();
+
+      const inspectorEntry = upsertBucket(
+        inspectorMap,
+        inspectorId,
+        () => ({
+          inspector: inspection?.inspector
+            ? {
+                _id: inspection.inspector._id,
+                name: inspection.inspector.name || "Unknown",
+                email: inspection.inspector.email || "",
+              }
+            : {
+                _id: null,
+                name: "Unassigned",
+                email: "",
+              },
+          total_inspections: 0,
+          total_checked: 0,
+          total_passed: 0,
+          total_inspected_cbm: 0,
+          order_keys: new Set(),
+          daily: new Map(),
+          weekly: new Map(),
+        }),
+      );
+      if (!inspectorEntry) continue;
+
+      inspectorEntry.total_inspections += 1;
+      inspectorEntry.total_checked += inspectedQty;
+      inspectorEntry.total_passed += passedQty;
+      inspectorEntry.total_inspected_cbm += inspectedCbm;
+      if (orderId) {
+        inspectorEntry.order_keys.add(orderId);
+      }
+
+      totalChecked += inspectedQty;
+      totalPassed += passedQty;
+      totalInspectedCbm += inspectedCbm;
+
+      if (inspectionDateIso) {
+        const dailyBucket = upsertBucket(
+          inspectorEntry.daily,
+          inspectionDateIso,
+          (bucketKey) => ({
+            date: bucketKey,
+            checked_quantity: 0,
+            passed_quantity: 0,
+            inspections_count: 0,
+            inspected_cbm: 0,
+          }),
+        );
+        if (dailyBucket) {
+          dailyBucket.checked_quantity += inspectedQty;
+          dailyBucket.passed_quantity += passedQty;
+          dailyBucket.inspections_count += 1;
+          dailyBucket.inspected_cbm += inspectedCbm;
+        }
+
+        const globalDaily = upsertBucket(
+          dailyTotalsMap,
+          inspectionDateIso,
+          (bucketKey) => ({
+            date: bucketKey,
+            checked_quantity: 0,
+            passed_quantity: 0,
+            inspections_count: 0,
+            inspected_cbm: 0,
+          }),
+        );
+        if (globalDaily) {
+          globalDaily.checked_quantity += inspectedQty;
+          globalDaily.passed_quantity += passedQty;
+          globalDaily.inspections_count += 1;
+          globalDaily.inspected_cbm += inspectedCbm;
+        }
+      }
+
+      if (weekStartIso) {
+        const weeklyBucket = upsertBucket(
+          inspectorEntry.weekly,
+          weekStartIso,
+          (bucketKey) => ({
+            week_start: bucketKey,
+            checked_quantity: 0,
+            passed_quantity: 0,
+            inspections_count: 0,
+            inspected_cbm: 0,
+          }),
+        );
+        if (weeklyBucket) {
+          weeklyBucket.checked_quantity += inspectedQty;
+          weeklyBucket.passed_quantity += passedQty;
+          weeklyBucket.inspections_count += 1;
+          weeklyBucket.inspected_cbm += inspectedCbm;
+        }
+
+        const globalWeekly = upsertBucket(
+          weeklyTotalsMap,
+          weekStartIso,
+          (bucketKey) => ({
+            week_start: bucketKey,
+            checked_quantity: 0,
+            passed_quantity: 0,
+            inspections_count: 0,
+            inspected_cbm: 0,
+          }),
+        );
+        if (globalWeekly) {
+          globalWeekly.checked_quantity += inspectedQty;
+          globalWeekly.passed_quantity += passedQty;
+          globalWeekly.inspections_count += 1;
+          globalWeekly.inspected_cbm += inspectedCbm;
+        }
+      }
+    }
+
+    const sortByDateDesc = (a, b, key) =>
+      (toSortableTimestamp(b?.[key]) - toSortableTimestamp(a?.[key]));
+
+    const inspectors = Array.from(inspectorMap.values())
+      .map((entry) => ({
+        inspector: entry.inspector,
+        total_inspections: entry.total_inspections,
+        total_checked: entry.total_checked,
+        total_passed: entry.total_passed,
+        total_inspected_cbm: toRoundedNumber(entry.total_inspected_cbm, 3),
+        orders_touched: entry.order_keys.size,
+        daily: Array.from(entry.daily.values())
+          .map((bucket) => ({
+            ...bucket,
+            inspected_cbm: toRoundedNumber(bucket.inspected_cbm, 3),
+          }))
+          .sort((a, b) => sortByDateDesc(a, b, "date")),
+        weekly: Array.from(entry.weekly.values())
+          .map((bucket) => ({
+            ...bucket,
+            inspected_cbm: toRoundedNumber(bucket.inspected_cbm, 3),
+          }))
+          .sort((a, b) => sortByDateDesc(a, b, "week_start")),
+      }))
+      .sort((a, b) =>
+        String(a?.inspector?.name || "").localeCompare(String(b?.inspector?.name || "")),
+      );
+
+    const daily_totals = Array.from(dailyTotalsMap.values())
+      .map((bucket) => ({
+        ...bucket,
+        inspected_cbm: toRoundedNumber(bucket.inspected_cbm, 3),
+      }))
+      .sort((a, b) => sortByDateDesc(a, b, "date"));
+    const weekly_totals = Array.from(weeklyTotalsMap.values())
+      .map((bucket) => ({
+        ...bucket,
+        inspected_cbm: toRoundedNumber(bucket.inspected_cbm, 3),
+      }))
+      .sort((a, b) => sortByDateDesc(a, b, "week_start"));
+
+    return res.status(200).json({
+      filters: {
+        timeline: timelineRange.timeline,
+        custom_days: timelineRange.timeline === "custom" ? timelineRange.days : null,
+        from_date: timelineRange.from_date_iso,
+        to_date: timelineRange.to_date_iso,
+      },
+      summary: {
+        inspectors_count: inspectors.length,
+        inspections_count: inspections.length,
+        total_checked: totalChecked,
+        total_passed: totalPassed,
+        total_inspected_cbm: toRoundedNumber(totalInspectedCbm, 3),
+      },
+      inspectors,
+      daily_totals,
+      weekly_totals,
+    });
+  } catch (err) {
+    console.error("Inspector Reports Error:", err);
+    return res.status(500).json({ message: err.message || "Failed to fetch inspector reports" });
+  }
+};
+
+exports.getVendorReports = async (req, res) => {
+  try {
+    const timelineRange = resolveTimelineRange({
+      timeline: req.query.timeline,
+      customDays: req.query.custom_days ?? req.query.customDays,
+    });
+    if (!timelineRange) {
+      return res.status(400).json({ message: "Invalid timeline filters" });
+    }
+
+    const orderRows = await Order.find({
+      ...ACTIVE_ORDER_MATCH,
+      order_date: {
+        $gte: timelineRange.from_date_utc,
+        $lt: timelineRange.to_date_exclusive_utc,
+      },
+    })
+      .select(
+        "order_id brand vendor status order_date ETD revised_ETD quantity item shipment",
+      )
+      .lean();
+
+    const orderGroupMap = new Map();
+
+    for (const row of orderRows) {
+      const orderId = String(row?.order_id || "").trim() || "N/A";
+      const vendor = String(row?.vendor || "").trim() || "N/A";
+      const brand = String(row?.brand || "").trim() || "N/A";
+      const key = `${vendor.toLowerCase()}__${brand.toLowerCase()}__${orderId.toLowerCase()}`;
+
+      if (!orderGroupMap.has(key)) {
+        orderGroupMap.set(key, {
+          order_id: orderId,
+          vendor,
+          brand,
+          statuses: new Set(),
+          item_codes: new Set(),
+          quantity_total: 0,
+          order_date_utc: null,
+          planned_etd_utc: null,
+          latest_shipment_utc: null,
+        });
+      }
+
+      const entry = orderGroupMap.get(key);
+      const statusValue = String(row?.status || "").trim();
+      if (statusValue) {
+        entry.statuses.add(statusValue);
+      }
+
+      const itemCode = String(row?.item?.item_code || "").trim();
+      if (itemCode) {
+        entry.item_codes.add(itemCode);
+      }
+
+      entry.quantity_total += toNonNegativeNumber(row?.quantity, 0);
+
+      const orderDateUtc = toUtcDateOnly(row?.order_date);
+      if (
+        orderDateUtc
+        && (!entry.order_date_utc || orderDateUtc.getTime() < entry.order_date_utc.getTime())
+      ) {
+        entry.order_date_utc = orderDateUtc;
+      }
+
+      const plannedEtdUtc = toUtcDateOnly(row?.revised_ETD || row?.ETD);
+      if (
+        plannedEtdUtc
+        && (!entry.planned_etd_utc || plannedEtdUtc.getTime() > entry.planned_etd_utc.getTime())
+      ) {
+        entry.planned_etd_utc = plannedEtdUtc;
+      }
+
+      for (const shipment of Array.isArray(row?.shipment) ? row.shipment : []) {
+        const shipmentDateUtc = toUtcDateOnly(shipment?.stuffing_date);
+        if (
+          shipmentDateUtc
+          && (!entry.latest_shipment_utc
+            || shipmentDateUtc.getTime() > entry.latest_shipment_utc.getTime())
+        ) {
+          entry.latest_shipment_utc = shipmentDateUtc;
+        }
+      }
+    }
+
+    const todayUtc = toUtcDayStart(new Date());
+    const vendorMap = new Map();
+    let delayedOrdersCount = 0;
+    let ordersWithEtdCount = 0;
+    let totalDelayDaysAllOrders = 0;
+    let totalDelayDaysDelayedOnly = 0;
+
+    for (const orderEntry of orderGroupMap.values()) {
+      const status = resolveOrderStatusFromSet([...orderEntry.statuses]);
+      const plannedEtdUtc = orderEntry.planned_etd_utc;
+      const actualReferenceUtc = orderEntry.latest_shipment_utc || todayUtc;
+
+      let delayDays = null;
+      if (plannedEtdUtc && actualReferenceUtc) {
+        const rawDelay = Math.floor(
+          (actualReferenceUtc.getTime() - plannedEtdUtc.getTime()) / MS_PER_DAY,
+        );
+        delayDays = Math.max(0, rawDelay);
+      }
+
+      const isDelayed = Number.isFinite(delayDays) && delayDays > 0;
+      if (Number.isFinite(delayDays)) {
+        ordersWithEtdCount += 1;
+        totalDelayDaysAllOrders += delayDays;
+      }
+      if (isDelayed) {
+        delayedOrdersCount += 1;
+        totalDelayDaysDelayedOnly += delayDays;
+      }
+
+      const vendorKey = String(orderEntry.vendor || "").toLowerCase();
+      if (!vendorMap.has(vendorKey)) {
+        vendorMap.set(vendorKey, {
+          vendor: orderEntry.vendor,
+          orders_count: 0,
+          delayed_orders_count: 0,
+          orders_with_etd_count: 0,
+          total_delay_days: 0,
+          total_delay_days_delayed_only: 0,
+          brands: new Set(),
+          orders: [],
+        });
+      }
+
+      const vendorEntry = vendorMap.get(vendorKey);
+      vendorEntry.orders_count += 1;
+      if (isDelayed) {
+        vendorEntry.delayed_orders_count += 1;
+      }
+      if (Number.isFinite(delayDays)) {
+        vendorEntry.orders_with_etd_count += 1;
+        vendorEntry.total_delay_days += delayDays;
+      }
+      if (isDelayed) {
+        vendorEntry.total_delay_days_delayed_only += delayDays;
+      }
+
+      vendorEntry.brands.add(orderEntry.brand);
+      vendorEntry.orders.push({
+        order_id: orderEntry.order_id,
+        brand: orderEntry.brand,
+        vendor: orderEntry.vendor,
+        status,
+        order_date: orderEntry.order_date_utc ? toISODateString(orderEntry.order_date_utc) : "",
+        planned_etd: plannedEtdUtc ? toISODateString(plannedEtdUtc) : "",
+        latest_shipment_date: orderEntry.latest_shipment_utc
+          ? toISODateString(orderEntry.latest_shipment_utc)
+          : "",
+        delay_days: Number.isFinite(delayDays) ? delayDays : null,
+        delay_reference: orderEntry.latest_shipment_utc ? "latest_shipment_date" : "today",
+        item_count: orderEntry.item_codes.size,
+        quantity_total: orderEntry.quantity_total,
+      });
+    }
+
+    const vendors = Array.from(vendorMap.values())
+      .map((entry) => ({
+        vendor: entry.vendor,
+        brands: [...entry.brands].sort((a, b) => String(a || "").localeCompare(String(b || ""))),
+        orders_count: entry.orders_count,
+        delayed_orders_count: entry.delayed_orders_count,
+        orders_with_etd_count: entry.orders_with_etd_count,
+        total_delay_days: entry.total_delay_days,
+        average_delay_days: entry.orders_with_etd_count > 0
+          ? toRoundedNumber(entry.total_delay_days / entry.orders_with_etd_count, 2)
+          : 0,
+        average_delay_days_delayed_only: entry.delayed_orders_count > 0
+          ? toRoundedNumber(
+              entry.total_delay_days_delayed_only / entry.delayed_orders_count,
+              2,
+            )
+          : 0,
+        orders: [...entry.orders].sort((a, b) => {
+          const aDelay = Number.isFinite(a?.delay_days) ? a.delay_days : -1;
+          const bDelay = Number.isFinite(b?.delay_days) ? b.delay_days : -1;
+          if (aDelay !== bDelay) return bDelay - aDelay;
+          return toSortableTimestamp(b?.order_date) - toSortableTimestamp(a?.order_date);
+        }),
+      }))
+      .sort((a, b) => {
+        const avgDiff = Number(b?.average_delay_days || 0) - Number(a?.average_delay_days || 0);
+        if (avgDiff !== 0) return avgDiff;
+        return String(a?.vendor || "").localeCompare(String(b?.vendor || ""));
+      });
+
+    return res.status(200).json({
+      filters: {
+        timeline: timelineRange.timeline,
+        custom_days: timelineRange.timeline === "custom" ? timelineRange.days : null,
+        from_date: timelineRange.from_date_iso,
+        to_date: timelineRange.to_date_iso,
+      },
+      summary: {
+        vendors_count: vendors.length,
+        orders_count: orderGroupMap.size,
+        delayed_orders_count: delayedOrdersCount,
+        orders_with_etd_count: ordersWithEtdCount,
+        total_delay_days: totalDelayDaysAllOrders,
+        average_delay_days: ordersWithEtdCount > 0
+          ? toRoundedNumber(totalDelayDaysAllOrders / ordersWithEtdCount, 2)
+          : 0,
+        average_delay_days_delayed_only: delayedOrdersCount > 0
+          ? toRoundedNumber(totalDelayDaysDelayedOnly / delayedOrdersCount, 2)
+          : 0,
+      },
+      vendors,
+    });
+  } catch (err) {
+    console.error("Vendor Reports Error:", err);
+    return res.status(500).json({ message: err.message || "Failed to fetch vendor reports" });
   }
 };
 

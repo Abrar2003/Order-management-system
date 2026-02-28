@@ -24,6 +24,8 @@ import Items from "./pages/Items";
 import UploadLogs from "./pages/UploadLogs";
 import ArchivedOrders from "./pages/ArchivedOrders";
 import InspectionReport from "./pages/inspection_report";
+import InspectorReports from "./pages/InspectorReports";
+import VendorReports from "./pages/VendorReports";
 
 // import Users from "./pages/Users"; // later
 
@@ -69,6 +71,24 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <DailyReport />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/reports/inspectors"
+            element={
+              <ProtectedRoute>
+                <InspectorReports />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/reports/vendors"
+            element={
+              <ProtectedRoute>
+                <VendorReports />
               </ProtectedRoute>
             }
           />

@@ -17,6 +17,7 @@ const Navbar = () => {
   const [showAllocateModal, setShowAllocateModal] = useState(false);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [showMainMenu, setShowMainMenu] = useState(false);
+  const [showReportsMenu, setShowReportsMenu] = useState(false);
   const mainMenuRef = useRef(null);
 
   const getInitialTheme = () => {
@@ -70,6 +71,14 @@ const Navbar = () => {
     return links;
   }, [canAccessQc, canManageOrders, canCreateUsers]);
 
+  const reportRouteLinks = useMemo(() => {
+    if (!canAccessQc) return [];
+    return [
+      { label: "Inspector Reports", path: "/reports/inspectors" },
+      { label: "Vendor Reports", path: "/reports/vendors" },
+    ];
+  }, [canAccessQc]);
+
   const handleLogout = () => {
     logout();
     navigate("/signin");
@@ -78,6 +87,7 @@ const Navbar = () => {
   const handleNavigate = (path) => {
     navigate(path);
     setShowMainMenu(false);
+    setShowReportsMenu(false);
   };
 
   useEffect(() => {
@@ -93,6 +103,7 @@ const Navbar = () => {
     const handleClickOutside = (event) => {
       if (mainMenuRef.current && !mainMenuRef.current.contains(event.target)) {
         setShowMainMenu(false);
+        setShowReportsMenu(false);
       }
     };
 
@@ -154,6 +165,32 @@ const Navbar = () => {
                             {link.label}
                           </button>
                         ))}
+
+                        {reportRouteLinks.length > 0 && (
+                          <>
+                            <button
+                              type="button"
+                              className="list-group-item list-group-item-action text-start d-flex justify-content-between align-items-center"
+                              aria-expanded={showReportsMenu}
+                              onClick={() => setShowReportsMenu((prev) => !prev)}
+                            >
+                              <span>Reports</span>
+                              <span className="small text-secondary">
+                                {showReportsMenu ? "Hide" : "Show"}
+                              </span>
+                            </button>
+                            {showReportsMenu && reportRouteLinks.map((link) => (
+                              <button
+                                key={link.path}
+                                type="button"
+                                className="list-group-item list-group-item-action text-start ps-4"
+                                onClick={() => handleNavigate(link.path)}
+                              >
+                                {link.label}
+                              </button>
+                            ))}
+                          </>
+                        )}
 
                         {primaryRouteLinks.map((link) => (
                           <button

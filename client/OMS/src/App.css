@@ -243,6 +243,25 @@
   justify-content: center;
 }
 
+.inspection-report-meta-row {
+  display: flex;
+  align-items: start;
+}
+
+.inspection-report-meta-label {
+  width: 240px;
+  min-width: 240px;
+  text-align: left;
+  font-weight: 600;
+}
+
+.inspection-report-meta-value {
+  width: calc(100% - 240px);
+  text-align: left;
+  min-width: 0;
+  word-break: break-word;
+}
+
 .qc-bool-check {
   display: flex;
   align-items: center;
@@ -321,10 +340,39 @@
   .open-orders-filter-actions {
     width: 100%;
   }
+
+  .inspection-report-meta-row {
+    display: flex;
+  }
+
+  .inspection-report-meta-label {
+    width: 180px;
+    min-width: 180px;
+  }
+
+  .inspection-report-meta-value {
+    width: calc(100% - 180px);
+  }
 }
 
 @media (min-width: 992px) {
   .om-menu-mobile-only {
     display: none;
+  }
+
+  .border-end-lg {
+    border-right: 1px solid var(--bs-border-color);
+  }
+}
+
+@media (max-width: 575.98px) {
+  .inspection-report-meta-row {
+    display: block;
+  }
+
+  .inspection-report-meta-label,
+  .inspection-report-meta-value {
+    width: 100%;
+    min-width: 0;
   }
 }

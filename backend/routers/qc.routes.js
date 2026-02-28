@@ -44,6 +44,20 @@ router.get(
 );
 
 router.get(
+  "/reports/inspectors",
+  auth,
+  authorize("admin", "manager", "QC", "dev"),
+  qcController.getInspectorReports,
+);
+
+router.get(
+  "/reports/vendors",
+  auth,
+  authorize("admin", "manager", "QC", "dev"),
+  qcController.getVendorReports,
+);
+
+router.get(
   "/export",
   auth,
   authorize("admin", "manager", "QC", "dev"),

@@ -279,30 +279,30 @@ const InspectionReport = () => {
           <div className="card-body d-grid gap-4">
             <section>
               <h3 className="h6 mb-3">Order Summary</h3>
-              <ul className="list-group">
-                <li className="list-group-item d-flex justify-content-left gap-4">
-                  <span className="fw-semibold">Brand</span>
-                  <span>{orderInfo.brand}</span>
+              <ul className="list-group inspection-report-meta-list">
+                <li className="list-group-item inspection-report-meta-row">
+                  <div className="inspection-report-meta-label">Brand</div>
+                  <div className="inspection-report-meta-value">{orderInfo.brand}</div>
                 </li>
-                <li className="list-group-item d-flex justify-content-left gap-4">
-                  <span className="fw-semibold">Vendor</span>
-                  <span>{orderInfo.vendor}</span>
+                <li className="list-group-item inspection-report-meta-row">
+                  <div className="inspection-report-meta-label">Vendor</div>
+                  <div className="inspection-report-meta-value">{orderInfo.vendor}</div>
                 </li>
-                <li className="list-group-item d-flex justify-content-left gap-4">
-                  <span className="fw-semibold">Order ID</span>
-                  <span>{orderInfo.orderId}</span>
+                <li className="list-group-item inspection-report-meta-row">
+                  <div className="inspection-report-meta-label">Order ID</div>
+                  <div className="inspection-report-meta-value">{orderInfo.orderId}</div>
                 </li>
-                <li className="list-group-item d-flex justify-content-left gap-4">
-                  <span className="fw-semibold">Item Code</span>
-                  <span>{orderInfo.itemCode}</span>
+                <li className="list-group-item inspection-report-meta-row">
+                  <div className="inspection-report-meta-label">Item Code</div>
+                  <div className="inspection-report-meta-value">{orderInfo.itemCode}</div>
                 </li>
-                <li className="list-group-item">
-                  <span className="fw-semibold me-2">Description:</span>
-                  <span>{orderInfo.itemDescription}</span>
+                <li className="list-group-item inspection-report-meta-row">
+                  <div className="inspection-report-meta-label">Description</div>
+                  <div className="inspection-report-meta-value">{orderInfo.itemDescription}</div>
                 </li>
-                <li className="list-group-item d-flex justify-content-left gap-4">
-                  <span className="fw-semibold">Request Date</span>
-                  <span>{orderInfo.requestDate}</span>
+                <li className="list-group-item inspection-report-meta-row">
+                  <div className="inspection-report-meta-label">Request Date</div>
+                  <div className="inspection-report-meta-value">{orderInfo.requestDate}</div>
                 </li>
               </ul>
             </section>
@@ -349,35 +349,35 @@ const InspectionReport = () => {
 
             <section>
               <h3 className="h6 mb-3">Product Packing Details</h3>
-              <ul className="list-group mb-3">
-                <li className="list-group-item d-flex justify-content-left gap-4">
-                  <span className="fw-semibold">Inspected CBM</span>
-                  <span>{itemMasterSummary.inspectedCbm}</span>
+              <ul className="list-group mb-3 inspection-report-meta-list">
+                <li className="list-group-item inspection-report-meta-row">
+                  <div className="inspection-report-meta-label">Inspected CBM</div>
+                  <div className="inspection-report-meta-value">{itemMasterSummary.inspectedCbm}</div>
                 </li>
-                <li className="list-group-item d-flex justify-content-left gap-4">
-                  <span className="fw-semibold">Packed Size (L x B x H)</span>
-                  <span>{itemMasterSummary.packedSize}</span>
+                <li className="list-group-item inspection-report-meta-row">
+                  <div className="inspection-report-meta-label">Packed Size (L x B x H)</div>
+                  <div className="inspection-report-meta-value">{itemMasterSummary.packedSize}</div>
                 </li>
                 {itemMasterSummary.checkpoints.map((checkpoint) => (
                   <li
                     key={checkpoint.label}
-                    className="list-group-item d-flex justify-content-left gap-4"
+                    className="list-group-item inspection-report-meta-row"
                   >
-                    <span className="fw-semibold">{checkpoint.label}</span>
-                    <span>{checkpoint.value}</span>
+                    <div className="inspection-report-meta-label">{checkpoint.label}</div>
+                    <div className="inspection-report-meta-value">{checkpoint.value}</div>
                   </li>
                 ))}
-                <li className="list-group-item d-flex justify-content-left gap-4">
-                  <span className="fw-semibold">Net Weight</span>
-                  <span>{itemMasterSummary.netWeight}</span>
+                <li className="list-group-item inspection-report-meta-row">
+                  <div className="inspection-report-meta-label">Net Weight</div>
+                  <div className="inspection-report-meta-value">{itemMasterSummary.netWeight}</div>
                 </li>
-                <li className="list-group-item d-flex justify-content-left gap-4">
-                  <span className="fw-semibold">Gross Weight</span>
-                  <span>{itemMasterSummary.grossWeight}</span>
+                <li className="list-group-item inspection-report-meta-row">
+                  <div className="inspection-report-meta-label">Gross Weight</div>
+                  <div className="inspection-report-meta-value">{itemMasterSummary.grossWeight}</div>
                 </li>
-                <li className="list-group-item d-flex justify-content-left gap-4">
-                  <span className="fw-semibold">Barcode</span>
-                  <span>{itemMasterSummary.barcodeValue}</span>
+                <li className="list-group-item inspection-report-meta-row">
+                  <div className="inspection-report-meta-label">Barcode</div>
+                  <div className="inspection-report-meta-value">{itemMasterSummary.barcodeValue}</div>
                 </li>
               </ul>
 
