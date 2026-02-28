@@ -262,6 +262,53 @@
   word-break: break-word;
 }
 
+.inspection-report-summary-block {
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.5rem;
+  background: var(--bs-body-bg);
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.inspection-report-summary-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.5rem;
+}
+
+.inspection-report-packing-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.inspection-report-packing-table th,
+.inspection-report-packing-table td {
+  width: 33.3333%;
+  vertical-align: top;
+  word-break: break-word;
+}
+
+.inspection-report-checks-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  align-items: center;
+}
+
+.inspection-report-barcode-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  text-align: center;
+}
+
+.inspection-report-barcode-value {
+  font-size: 0.95rem;
+}
+
 .qc-bool-check {
   display: flex;
   align-items: center;
@@ -374,5 +421,16 @@
   .inspection-report-meta-value {
     width: 100%;
     min-width: 0;
+  }
+
+  .inspection-report-summary-line {
+    gap: 0.35rem;
+    flex-direction: column;
+  }
+
+  .inspection-report-checks-line {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.35rem;
   }
 }

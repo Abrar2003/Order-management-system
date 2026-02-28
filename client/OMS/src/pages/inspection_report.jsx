@@ -53,6 +53,11 @@ const isPositiveCbmValue = (value) => {
   return Number.isFinite(parsed) && parsed > 0;
 };
 
+const toDisplayNumber = (value, fallback = "Not Set") => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
 const InspectionReport = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -107,27 +112,31 @@ const InspectionReport = () => {
 
   const itemMasterSummary = useMemo(() => {
     const itemMaster = qc?.item_master || {};
-    const netWeight = Number(
-      itemMaster?.inspected_weight?.net ?? itemMaster?.pis_weight?.net ?? itemMaster?.weight?.net ?? 0,
+    const pisItemLbh = formatLbhValue(itemMaster?.pis_item_LBH || itemMaster?.item_LBH);
+    const checkedItemLbh = formatLbhValue(
+      itemMaster?.inspected_item_LBH || itemMaster?.item_LBH,
     );
-    const grossWeight = Number(
-      itemMaster?.inspected_weight?.gross
-      ?? itemMaster?.pis_weight?.gross
-      ?? itemMaster?.weight?.gross
-      ?? 0,
+    const pisBoxLbh = formatLbhValue(itemMaster?.pis_box_LBH || itemMaster?.box_LBH);
+    const checkedBoxLbh = formatLbhValue(
+      itemMaster?.inspected_box_LBH || itemMaster?.box_LBH,
     );
-    const packedSize = formatLbhValue(
-      itemMaster?.inspected_box_LBH
-      || itemMaster?.pis_box_LBH
-      || itemMaster?.inspected_item_LBH
-      || itemMaster?.pis_item_LBH
-      || itemMaster?.box_LBH
-      || itemMaster?.item_LBH,
+    const pisNetWeight = toDisplayNumber(itemMaster?.pis_weight?.net ?? itemMaster?.weight?.net);
+    const checkedNetWeight = toDisplayNumber(
+      itemMaster?.inspected_weight?.net ?? itemMaster?.weight?.net,
+    );
+    const pisGrossWeight = toDisplayNumber(
+      itemMaster?.pis_weight?.gross ?? itemMaster?.weight?.gross,
+    );
+    const checkedGrossWeight = toDisplayNumber(
+      itemMaster?.inspected_weight?.gross ?? itemMaster?.weight?.gross,
     );
     const inspectedCbmRaw =
       itemMaster?.cbm?.inspected_total ??
       itemMaster?.cbm?.total ??
       qc?.cbm?.total ??
+      "0";
+    const pisCbmRaw =
+      itemMaster?.cbm?.total ??
       "0";
     const calculatedInspectedCbmRaw =
       itemMaster?.cbm?.calculated_inspected_total ??
@@ -139,6 +148,9 @@ const InspectionReport = () => {
     const inspectedCbm = isPositiveCbmValue(inspectedCbmRaw)
       ? String(inspectedCbmRaw).trim()
       : "Not Set";
+    const pisCbm = isPositiveCbmValue(pisCbmRaw)
+      ? String(pisCbmRaw).trim()
+      : "Not Set";
     const calculatedInspectedCbm = isPositiveCbmValue(calculatedInspectedCbmRaw)
       ? String(calculatedInspectedCbmRaw).trim()
       : "Not Set";
@@ -148,19 +160,27 @@ const InspectionReport = () => {
     const barcodeValue =
       Number(qc?.barcode || 0) > 0 ? String(qc.barcode).trim() : "Not Set";
 
+    const rows = [
+      { attribute: "Item Size (L x B x H)", pis: pisItemLbh, checked: checkedItemLbh },
+      { attribute: "Box Size (L x B x H)", pis: pisBoxLbh, checked: checkedBoxLbh },
+      { attribute: "Net Weight", pis: pisNetWeight, checked: checkedNetWeight },
+      { attribute: "Gross Weight", pis: pisGrossWeight, checked: checkedGrossWeight },
+      { attribute: "CBM", pis: pisCbm, checked: inspectedCbm },
+      {
+        attribute: "Calculated CBM (LBH)",
+        pis: calculatedPisCbm,
+        checked: calculatedInspectedCbm,
+      },
+    ];
+
     return {
-      packedSize,
-      inspectedCbm,
-      calculatedInspectedCbm,
-      calculatedPisCbm,
-      netWeight: Number.isFinite(netWeight) ? netWeight : 0,
-      grossWeight: Number.isFinite(grossWeight) ? grossWeight : 0,
       barcodeValue,
-      checkpoints: [
-        { label: "Packed Size Check", value: qc?.packed_size ? "Yes" : "No" },
-        { label: "Finishing Check", value: qc?.finishing ? "Yes" : "No" },
-        { label: "Branding Check", value: qc?.branding ? "Yes" : "No" },
-      ],
+      checks: {
+        packedSize: qc?.packed_size ? "Yes" : "No",
+        finishing: qc?.finishing ? "Yes" : "No",
+        branding: qc?.branding ? "Yes" : "No",
+      },
+      rows,
     };
   }, [qc]);
 
@@ -308,32 +328,20 @@ const InspectionReport = () => {
           <div className="card-body d-grid gap-4">
             <section>
               <h3 className="h6 mb-3">Order Summary</h3>
-              <ul className="list-group inspection-report-meta-list">
-                <li className="list-group-item inspection-report-meta-row">
-                  <div className="inspection-report-meta-label">Brand</div>
-                  <div className="inspection-report-meta-value">{orderInfo.brand}</div>
-                </li>
-                <li className="list-group-item inspection-report-meta-row">
-                  <div className="inspection-report-meta-label">Vendor</div>
-                  <div className="inspection-report-meta-value">{orderInfo.vendor}</div>
-                </li>
-                <li className="list-group-item inspection-report-meta-row">
-                  <div className="inspection-report-meta-label">Order ID</div>
-                  <div className="inspection-report-meta-value">{orderInfo.orderId}</div>
-                </li>
-                <li className="list-group-item inspection-report-meta-row">
-                  <div className="inspection-report-meta-label">Item Code</div>
-                  <div className="inspection-report-meta-value">{orderInfo.itemCode}</div>
-                </li>
-                <li className="list-group-item inspection-report-meta-row">
-                  <div className="inspection-report-meta-label">Description</div>
-                  <div className="inspection-report-meta-value">{orderInfo.itemDescription}</div>
-                </li>
-                <li className="list-group-item inspection-report-meta-row">
-                  <div className="inspection-report-meta-label">Request Date</div>
-                  <div className="inspection-report-meta-value">{orderInfo.requestDate}</div>
-                </li>
-              </ul>
+              <div className="inspection-report-summary-block">
+                <div className="inspection-report-summary-line">
+                  <span><strong>Brand:</strong> {orderInfo.brand}</span>
+                  <span><strong>Vendor:</strong> {orderInfo.vendor}</span>
+                </div>
+                <div className="inspection-report-summary-line">
+                  <span><strong>Order ID:</strong> {orderInfo.orderId}</span>
+                  <span><strong>Item Code:</strong> {orderInfo.itemCode}</span>
+                  <span><strong>Description:</strong> {orderInfo.itemDescription}</span>
+                </div>
+                <div className="inspection-report-summary-line">
+                  <span><strong>Request Date:</strong> {orderInfo.requestDate}</span>
+                </div>
+              </div>
             </section>
 
             <section>
@@ -378,51 +386,49 @@ const InspectionReport = () => {
 
             <section>
               <h3 className="h6 mb-3">Product Packing Details</h3>
-              <ul className="list-group mb-3 inspection-report-meta-list">
-                <li className="list-group-item inspection-report-meta-row">
-                  <div className="inspection-report-meta-label">Inspected CBM</div>
-                  <div className="inspection-report-meta-value">{itemMasterSummary.inspectedCbm}</div>
-                </li>
-                <li className="list-group-item inspection-report-meta-row">
-                  <div className="inspection-report-meta-label">Calculated Inspected CBM</div>
-                  <div className="inspection-report-meta-value">{itemMasterSummary.calculatedInspectedCbm}</div>
-                </li>
-                <li className="list-group-item inspection-report-meta-row">
-                  <div className="inspection-report-meta-label">Calculated PIS CBM</div>
-                  <div className="inspection-report-meta-value">{itemMasterSummary.calculatedPisCbm}</div>
-                </li>
-                <li className="list-group-item inspection-report-meta-row">
-                  <div className="inspection-report-meta-label">Packed Size (L x B x H)</div>
-                  <div className="inspection-report-meta-value">{itemMasterSummary.packedSize}</div>
-                </li>
-                {itemMasterSummary.checkpoints.map((checkpoint) => (
-                  <li
-                    key={checkpoint.label}
-                    className="list-group-item inspection-report-meta-row"
-                  >
-                    <div className="inspection-report-meta-label">{checkpoint.label}</div>
-                    <div className="inspection-report-meta-value">{checkpoint.value}</div>
-                  </li>
-                ))}
-                <li className="list-group-item inspection-report-meta-row">
-                  <div className="inspection-report-meta-label">Net Weight</div>
-                  <div className="inspection-report-meta-value">{itemMasterSummary.netWeight}</div>
-                </li>
-                <li className="list-group-item inspection-report-meta-row">
-                  <div className="inspection-report-meta-label">Gross Weight</div>
-                  <div className="inspection-report-meta-value">{itemMasterSummary.grossWeight}</div>
-                </li>
-                <li className="list-group-item inspection-report-meta-row">
-                  <div className="inspection-report-meta-label">Barcode</div>
-                  <div className="inspection-report-meta-value">{itemMasterSummary.barcodeValue}</div>
-                </li>
-              </ul>
+              <div className="table-responsive mb-3">
+                <table className="table table-sm table-striped table-bordered align-middle mb-0 inspection-report-packing-table">
+                  <thead>
+                    <tr>
+                      <th>Attribute</th>
+                      <th>PIS</th>
+                      <th>Checked</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {itemMasterSummary.rows.map((row) => (
+                      <tr key={row.attribute}>
+                        <td>{row.attribute}</td>
+                        <td>{row.pis}</td>
+                        <td>{row.checked}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
-              {itemMasterSummary.barcodeValue !== "Not Set" && (
-                <div className="qc-barcode-wrapper">
-                  <Barcode value={itemMasterSummary.barcodeValue} />
+              <div className="inspection-report-checks-line mb-3">
+                <span>
+                  <strong>Packed Size Check:</strong> {itemMasterSummary.checks.packedSize}
+                </span>
+                <span>
+                  <strong>Finishing Check:</strong> {itemMasterSummary.checks.finishing}
+                </span>
+                <span>
+                  <strong>Branding Check:</strong> {itemMasterSummary.checks.branding}
+                </span>
+              </div>
+
+              <div className="inspection-report-barcode-stack">
+                <div className="inspection-report-barcode-value">
+                  <strong>Barcode Value:</strong> {itemMasterSummary.barcodeValue}
                 </div>
-              )}
+                {itemMasterSummary.barcodeValue !== "Not Set" && (
+                  <div className="qc-barcode-wrapper">
+                    <Barcode value={itemMasterSummary.barcodeValue} />
+                  </div>
+                )}
+              </div>
             </section>
           </div>
         </div>
