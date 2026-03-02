@@ -707,13 +707,18 @@ const QCPage = () => {
                       </td> */}
                       <td>{qc?.order?.status}</td>
                       <td>{toSafeNumber(qc?.last_inspection?.passed) ?? 0}</td>
-                      <td title={pendingAlignmentInfo.tooltip}>
+                      <td>
                         <span
-                          className={
+                          className={[
+                            "om-table-tooltip-trigger",
                             pendingAlignmentInfo.isAligned
                               ? ""
-                              : "text-danger fw-semibold"
-                          }
+                              : "text-danger fw-semibold",
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}
+                          data-tooltip={pendingAlignmentInfo.tooltip}
+                          tabIndex={0}
                         >
                           {pendingAlignmentInfo.pendingQty}
                         </span>

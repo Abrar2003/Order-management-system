@@ -402,6 +402,60 @@
   white-space: nowrap;
 }
 
+.om-table-tooltip-trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: help;
+}
+
+.om-table-tooltip-trigger::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 0.5rem);
+  transform: translateX(-50%);
+  min-width: 14rem;
+  max-width: 22rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 0.4rem;
+  background: var(--bs-primary-bg-subtle);
+  color: var(--bs-emphasis-color);
+  font-size: 0.75rem;
+  line-height: 1.2;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 0.25rem 0.75rem rgba(15, 23, 42, 0.18);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 1080;
+}
+
+.om-table-tooltip-trigger::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 0.125rem);
+  transform: translateX(-50%);
+  border-left: 0.3rem solid transparent;
+  border-right: 0.3rem solid transparent;
+  border-top: 0.35rem solid var(--bs-primary-bg-subtle);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 1080;
+}
+
+.om-table-tooltip-trigger:hover::after,
+.om-table-tooltip-trigger:hover::before,
+.om-table-tooltip-trigger:focus-visible::after,
+.om-table-tooltip-trigger:focus-visible::before {
+  opacity: 1;
+  visibility: visible;
+}
+
 @media (max-width: 991.98px) {
   .om-navbar-stack {
     top: 0;
