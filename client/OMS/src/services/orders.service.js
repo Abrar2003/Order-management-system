@@ -67,6 +67,37 @@ export const rectifyPdfOrders = async ({
   return res.data;
 };
 
+export const applyRectifiedRows = async ({
+  rows = [],
+  brand,
+  vendor,
+  sourceFileName = "",
+} = {}) => {
+  const selectedRows = Array.isArray(rows) ? rows : [];
+  if (selectedRows.length === 0) {
+    throw new Error("At least one row is required");
+  }
+
+  const token = localStorage.getItem("token");
+  const res = await axios.post(
+    "/orders/rectify-pdf",
+    {
+      brand: String(brand || "").trim(),
+      vendor: String(vendor || "").trim(),
+      apply_changes: true,
+      selected_rows: selectedRows,
+      source_filename: String(sourceFileName || "").trim(),
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  return res.data;
+};
+
 export const getUploadLogs = async (params = {}) => {
   const token = localStorage.getItem("token");
   const res = await axios.get("/orders/upload-logs", {

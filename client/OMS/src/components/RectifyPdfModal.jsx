@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { rectifyPdfOrders } from "../services/orders.service";
+import { useMemo, useState } from "react";
+import { applyRectifiedRows, rectifyPdfOrders } from "../services/orders.service";
+import { formatDateDDMMYYYY } from "../utils/date";
 import "../App.css";
 
 const decodeBase64ToBlob = (base64String, mimeType) => {
@@ -27,12 +28,37 @@ const RectifyPdfModal = ({ onClose, onSuccess }) => {
   const [file, setFile] = useState(null);
   const [brand, setBrand] = useState("");
   const [vendor, setVendor] = useState("");
-  const [applyChanges, setApplyChanges] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
+  const [previewRows, setPreviewRows] = useState([]);
+  const [checkedRows, setCheckedRows] = useState({});
 
-  const handleSubmit = async () => {
+  const toDateText = (value) => {
+    const formatted = formatDateDDMMYYYY(value, "");
+    return formatted || "-";
+  };
+
+  const selectableRows = useMemo(
+    () =>
+      previewRows.filter(
+        (row) => ["new", "modified"].includes(String(row?.change_type || "").toLowerCase()),
+      ),
+    [previewRows],
+  );
+
+  const selectedCount = selectableRows.filter((row) => checkedRows[row.row_id]).length;
+  const allSelected = selectableRows.length > 0 && selectedCount === selectableRows.length;
+
+  const toggleAllRows = (checked) => {
+    const nextState = {};
+    selectableRows.forEach((row) => {
+      nextState[row.row_id] = checked;
+    });
+    setCheckedRows(nextState);
+  };
+
+  const handlePreview = async () => {
     if (!file) {
       setError("Please select a PDF file.");
       return;
@@ -50,12 +76,14 @@ const RectifyPdfModal = ({ onClose, onSuccess }) => {
       setLoading(true);
       setError("");
       setResult(null);
+      setPreviewRows([]);
+      setCheckedRows({});
 
       const response = await rectifyPdfOrders({
         file,
         brand,
         vendor,
-        applyChanges,
+        applyChanges: false,
       });
 
       const fileBase64 = String(response?.file_base64 || "");
@@ -67,10 +95,67 @@ const RectifyPdfModal = ({ onClose, onSuccess }) => {
         triggerFileDownload(blob, response?.file_name || "rectified-orders.xlsx");
       }
 
+      const incomingRows = Array.isArray(response?.changed_rows_data)
+        ? response.changed_rows_data
+        : [];
+      const normalizedRows = incomingRows.map((row, index) => {
+        const fallbackId = `${String(row?.order_id || "").trim()}__${String(row?.item_code || "").trim()}__${index}`;
+        return {
+          ...row,
+          row_id: String(row?.row_id || fallbackId),
+          changed_fields: Array.isArray(row?.changed_fields)
+            ? row.changed_fields
+            : String(row?.changed_fields || "")
+              .split(",")
+              .map((entry) => entry.trim())
+              .filter(Boolean),
+        };
+      });
+
+      const nextCheckedRows = {};
+      normalizedRows.forEach((row) => {
+        const changeType = String(row?.change_type || "").toLowerCase();
+        if (changeType === "new" || changeType === "modified") {
+          nextCheckedRows[row.row_id] = true;
+        }
+      });
+
+      setPreviewRows(normalizedRows);
+      setCheckedRows(nextCheckedRows);
       setResult(response);
-      onSuccess?.(response);
     } catch (err) {
       setError(err?.response?.data?.message || err?.message || "Failed to rectify PDF.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleApplyChecked = async () => {
+    const rowsToApply = selectableRows.filter((row) => checkedRows[row.row_id]);
+    if (rowsToApply.length === 0) {
+      setError("Please check at least one row to update.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError("");
+      const response = await applyRectifiedRows({
+        rows: rowsToApply,
+        brand,
+        vendor,
+        sourceFileName: file?.name || "",
+      });
+
+      setResult((prev) => ({
+        ...(prev || {}),
+        message: response?.message || "Checked rows updated in DB",
+        apply: response?.apply || null,
+        upload_log_id: response?.upload_log_id || null,
+      }));
+      onSuccess?.(response);
+    } catch (err) {
+      setError(err?.response?.data?.message || err?.message || "Failed to update checked rows.");
     } finally {
       setLoading(false);
     }
@@ -81,7 +166,7 @@ const RectifyPdfModal = ({ onClose, onSuccess }) => {
 
   return (
     <div className="modal d-block om-modal-backdrop" tabIndex="-1" role="dialog">
-      <div className="modal-dialog modal-dialog-centered modal-lg" role="document">
+      <div className="modal-dialog modal-dialog-centered modal-xl" role="document">
         <div className="modal-content">
           <div className="modal-header">
             <h5 className="modal-title">Rectify PDF</h5>
@@ -128,21 +213,6 @@ const RectifyPdfModal = ({ onClose, onSuccess }) => {
                   placeholder="e.g. Lumi Art"
                 />
               </div>
-              <div className="col-md-12">
-                <div className="form-check">
-                  <input
-                    id="rectify-apply-changes"
-                    type="checkbox"
-                    className="form-check-input"
-                    checked={applyChanges}
-                    onChange={(e) => setApplyChanges(Boolean(e.target.checked))}
-                    disabled={loading}
-                  />
-                  <label className="form-check-label" htmlFor="rectify-apply-changes">
-                    Apply changed entries directly to DB (new + modified rows)
-                  </label>
-                </div>
-              </div>
             </div>
 
             {summary && (
@@ -173,6 +243,80 @@ const RectifyPdfModal = ({ onClose, onSuccess }) => {
               </div>
             )}
 
+            {previewRows.length > 0 && (
+              <div className="card">
+                <div className="card-header d-flex justify-content-between align-items-center">
+                  <strong>New/Modified Entries</strong>
+                  <span className="small text-muted">
+                    Selected: {selectedCount} / {selectableRows.length}
+                  </span>
+                </div>
+                <div className="card-body p-0">
+                  <div className="table-responsive" style={{ maxHeight: "320px" }}>
+                    <table className="table table-sm table-hover align-middle mb-0">
+                      <thead className="table-light">
+                        <tr>
+                          <th style={{ width: "42px" }}>
+                            <input
+                              type="checkbox"
+                              className="form-check-input"
+                              checked={allSelected}
+                              onChange={(e) => toggleAllRows(Boolean(e.target.checked))}
+                              disabled={loading || selectableRows.length === 0}
+                            />
+                          </th>
+                          <th>Type</th>
+                          <th>Order ID</th>
+                          <th>Item</th>
+                          <th>Description</th>
+                          <th>Qty</th>
+                          <th>ETD</th>
+                          <th>Order Date</th>
+                          <th>Changed Fields</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {previewRows.map((row) => {
+                          const rowType = String(row?.change_type || "").toLowerCase();
+                          const isSelectable = rowType === "new" || rowType === "modified";
+                          return (
+                            <tr key={row.row_id}>
+                              <td>
+                                <input
+                                  type="checkbox"
+                                  className="form-check-input"
+                                  checked={Boolean(checkedRows[row.row_id])}
+                                  disabled={!isSelectable || loading}
+                                  onChange={(e) =>
+                                    setCheckedRows((prev) => ({
+                                      ...prev,
+                                      [row.row_id]: Boolean(e.target.checked),
+                                    }))
+                                  }
+                                />
+                              </td>
+                              <td>{row.change_type || "-"}</td>
+                              <td>{row.order_id || "-"}</td>
+                              <td>{row.item_code || "-"}</td>
+                              <td>{row.description || "-"}</td>
+                              <td>{Number(row.quantity || 0)}</td>
+                              <td>{toDateText(row.ETD)}</td>
+                              <td>{toDateText(row.order_date)}</td>
+                              <td>
+                                {Array.isArray(row.changed_fields) && row.changed_fields.length > 0
+                                  ? row.changed_fields.join(", ")
+                                  : "-"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {error && <div className="alert alert-danger py-2 mb-0">{error}</div>}
             {result?.message && !error && (
               <div className="alert alert-success py-2 mb-0">{result.message}</div>
@@ -191,10 +335,18 @@ const RectifyPdfModal = ({ onClose, onSuccess }) => {
             <button
               type="button"
               className="btn btn-primary"
-              onClick={handleSubmit}
+              onClick={handlePreview}
               disabled={loading}
             >
-              {loading ? "Processing..." : "Rectify PDF"}
+              {loading ? "Processing..." : "Extract & Preview"}
+            </button>
+            <button
+              type="button"
+              className="btn btn-success"
+              onClick={handleApplyChecked}
+              disabled={loading || selectedCount === 0}
+            >
+              {loading ? "Updating..." : "Update Checked in DB"}
             </button>
           </div>
         </div>
