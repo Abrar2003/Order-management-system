@@ -338,8 +338,17 @@ const addDaysToUtcDate = (value, daysToAdd = 0) => {
 const deriveRectifyDefaultEtd = (orderDateValue) =>
   addDaysToUtcDate(orderDateValue, RECTIFY_DEFAULT_ETD_OFFSET_DAYS);
 
+const pickRectifyOrderId = (row = {}) =>
+  normalizeRectifyText(row?.orderNumber || row?.order_id || row?.PO || "");
+
 const pickRectifyItemCode = (row = {}) =>
-  normalizeRectifyText(row?.ourItemCode || row?.yourItemCode || "");
+  normalizeRectifyText(
+    row?.item_code
+    || row?.itemCode
+    || row?.ourItemCode
+    || row?.yourItemCode
+    || "",
+  );
 
 const toDateDayKey = (value) => {
   const formatted = formatDateDDMMYYYY(value, "");
@@ -347,7 +356,7 @@ const toDateDayKey = (value) => {
 };
 
 const normalizeRectifiedPdfRow = (row = {}, { brand, vendor } = {}) => {
-  const orderId = normalizeRectifyText(row?.orderNumber || row?.order_id || "");
+  const orderId = pickRectifyOrderId(row);
   const itemCode = pickRectifyItemCode(row);
   const description = normalizeRectifyText(row?.description || "");
   const quantity = parseQuantityLike(row?.quantity);
@@ -360,8 +369,8 @@ const normalizeRectifiedPdfRow = (row = {}, { brand, vendor } = {}) => {
     order_id: orderId,
     item_code: itemCode,
     description,
-    brand: normalizeRectifyText(brand),
-    vendor: normalizeRectifyText(vendor),
+    brand: normalizeRectifyText(brand || row?.brand || ""),
+    vendor: normalizeRectifyText(vendor || row?.vendor || ""),
     quantity: Number.isFinite(quantity) ? quantity : null,
     ETD: normalizedEtd || null,
     order_date: normalizedOrderDate,
@@ -4956,6 +4965,7 @@ exports.finalizeOrder = async (req, res) => {
       },
     });
   } catch (error) {
+    
     return res.status(500).json({
       message: "Failed to finalize order shipment",
       error: error.message,
@@ -5072,11 +5082,19 @@ exports.reSync = async (req, res) => {
       results,
     });
   } catch (error) {
-    console.error("reSync failed:", error);
+    const getErrInfo = (error) => ({
+  message: error?.message,
+  code: error?.code,
+  status: error?.response?.status,
+  data: error?.response?.data,
+  errors: error?.errors,
+  stack: error?.stack,
+});
+    console.error("reSync failed:", getErrInfo(error));
     return res.status(500).json({
       success: false,
       message: "Calendar re-sync failed",
-      error: error?.message || String(error),
+      error: getErrInfo(error),
     });
   }
 };
