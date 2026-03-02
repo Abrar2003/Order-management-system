@@ -144,8 +144,14 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     const itemMaster = qc?.item_master || {};
     const inspectedItemLbh = itemMaster?.inspected_item_LBH || itemMaster?.item_LBH || {};
     const inspectedBoxLbh = itemMaster?.inspected_box_LBH || itemMaster?.box_LBH || {};
-    const inspectedTopLbh = itemMaster?.inspected_top_LBH || {};
-    const inspectedBottomLbh = itemMaster?.inspected_bottom_LBH || {};
+    const inspectedTopLbh =
+      itemMaster?.inspected_box_top_LBH
+      || itemMaster?.inspected_top_LBH
+      || {};
+    const inspectedBottomLbh =
+      itemMaster?.inspected_box_bottom_LBH
+      || itemMaster?.inspected_bottom_LBH
+      || {};
     const inspectedItemTopLbh = itemMaster?.inspected_item_top_LBH || {};
     const inspectedItemBottomLbh = itemMaster?.inspected_item_bottom_LBH || {};
     const strictInspectedItemLbh = toStrictLbhInputGroup(inspectedItemLbh);
@@ -439,7 +445,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       return;
     }
 
-    const inspectedTopLbh = parseLbhGroup("Inspected Top LBH", {
+    const inspectedTopLbh = parseLbhGroup("Inspected Box Top LBH", {
       L: form.inspected_top_L,
       B: form.inspected_top_B,
       H: form.inspected_top_H,
@@ -449,7 +455,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       return;
     }
 
-    const inspectedBottomLbh = parseLbhGroup("Inspected Bottom LBH", {
+    const inspectedBottomLbh = parseLbhGroup("Inspected Box Bottom LBH", {
       L: form.inspected_bottom_L,
       B: form.inspected_bottom_B,
       H: form.inspected_bottom_H,
@@ -707,9 +713,11 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       payload.inspected_box_LBH = inspectedBoxLbh.value;
     }
     if (inspectedTopLbh.hasAnyInput && inspectedTopLbh.value) {
+      payload.inspected_box_top_LBH = inspectedTopLbh.value;
       payload.inspected_top_LBH = inspectedTopLbh.value;
     }
     if (inspectedBottomLbh.hasAnyInput && inspectedBottomLbh.value) {
+      payload.inspected_box_bottom_LBH = inspectedBottomLbh.value;
       payload.inspected_bottom_LBH = inspectedBottomLbh.value;
     }
     if (inspectedItemTopLbh.hasAnyInput && inspectedItemTopLbh.value) {

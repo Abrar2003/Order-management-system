@@ -133,8 +133,14 @@ const InspectionReport = () => {
     const pisPackedSize = formatLbhValue(
       itemMaster?.pis_box_LBH || itemMaster?.pis_item_LBH || itemMaster?.box_LBH || itemMaster?.item_LBH,
     );
-    const inspectedTopLbh = itemMaster?.inspected_top_LBH || {};
-    const inspectedBottomLbh = itemMaster?.inspected_bottom_LBH || {};
+    const inspectedTopLbh =
+      itemMaster?.inspected_box_top_LBH
+      || itemMaster?.inspected_top_LBH
+      || {};
+    const inspectedBottomLbh =
+      itemMaster?.inspected_box_bottom_LBH
+      || itemMaster?.inspected_bottom_LBH
+      || {};
     const checkedTopSize = formatLbhValue(inspectedTopLbh);
     const checkedBottomSize = formatLbhValue(inspectedBottomLbh);
     const showTopSize = checkedTopSize !== "Not Set";

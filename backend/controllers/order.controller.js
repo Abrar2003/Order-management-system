@@ -33,6 +33,7 @@ const SHIPMENT_VISIBLE_STATUSES = [
   "Partial Shipped",
   "Shipped",
 ];
+const RECTIFY_DEFAULT_ETD_OFFSET_DAYS = 60;
 const INVALID_DATE_RANGE = Symbol("invalid-date-range");
 
 const escapeRegex = (value = "") =>
@@ -319,6 +320,24 @@ const parseQuantityLike = (value) => {
 
 const normalizeRectifyText = (value) => normalizeLooseString(value);
 
+const addDaysToUtcDate = (value, daysToAdd = 0) => {
+  const parsed = value instanceof Date ? value : parseDateLike(value);
+  if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) return null;
+
+  const nextDate = new Date(
+    Date.UTC(
+      parsed.getUTCFullYear(),
+      parsed.getUTCMonth(),
+      parsed.getUTCDate(),
+    ),
+  );
+  nextDate.setUTCDate(nextDate.getUTCDate() + Number(daysToAdd || 0));
+  return nextDate;
+};
+
+const deriveRectifyDefaultEtd = (orderDateValue) =>
+  addDaysToUtcDate(orderDateValue, RECTIFY_DEFAULT_ETD_OFFSET_DAYS);
+
 const pickRectifyItemCode = (row = {}) =>
   normalizeRectifyText(row?.ourItemCode || row?.yourItemCode || "");
 
@@ -334,6 +353,8 @@ const normalizeRectifiedPdfRow = (row = {}, { brand, vendor } = {}) => {
   const quantity = parseQuantityLike(row?.quantity);
   const etd = parseDateLike(row?.etd || row?.ETD || "");
   const orderDate = parseDateLike(row?.orderDate || row?.order_date || "");
+  const normalizedOrderDate = orderDate || null;
+  const normalizedEtd = etd || deriveRectifyDefaultEtd(normalizedOrderDate);
 
   return {
     order_id: orderId,
@@ -342,13 +363,44 @@ const normalizeRectifiedPdfRow = (row = {}, { brand, vendor } = {}) => {
     brand: normalizeRectifyText(brand),
     vendor: normalizeRectifyText(vendor),
     quantity: Number.isFinite(quantity) ? quantity : null,
-    ETD: etd || null,
-    order_date: orderDate || null,
+    ETD: normalizedEtd || null,
+    order_date: normalizedOrderDate,
     source: {
       refer: normalizeRectifyText(row?.refer || ""),
       raw_quantity: normalizeRectifyText(row?.quantity || ""),
     },
   };
+};
+
+const computeRectifyOpenQuantity = (orderEntry = {}) => {
+  const orderQuantity = Math.max(
+    0,
+    Number(parseQuantityLike(orderEntry?.quantity) || 0),
+  );
+  const shippedQuantity = Math.max(
+    0,
+    (Array.isArray(orderEntry?.shipment) ? orderEntry.shipment : []).reduce(
+      (sum, shipmentEntry) =>
+        sum + Math.max(0, Number(parseQuantityLike(shipmentEntry?.quantity) || 0)),
+      0,
+    ),
+  );
+  const unshippedQuantity = Math.max(0, orderQuantity - shippedQuantity);
+
+  const inspectionPendingQuantity = Math.max(
+    0,
+    Number(parseQuantityLike(orderEntry?.qc_record?.quantities?.pending) || 0),
+  );
+  const boundedInspectionPending = Math.min(
+    unshippedQuantity,
+    inspectionPendingQuantity,
+  );
+  const pendingShipmentQuantity = Math.max(
+    0,
+    unshippedQuantity - boundedInspectionPending,
+  );
+
+  return pendingShipmentQuantity + boundedInspectionPending;
 };
 
 const normalizeOrderComparisonValue = (value) =>
@@ -415,6 +467,7 @@ const buildRectifyWorkbookBuffer = (rows = []) => {
     ETD: formatDateForUploadSheet(entry?.ETD),
     order_date: formatDateForUploadSheet(entry?.order_date),
     change_type: entry?.change_type || "",
+    changedType: entry?.change_type || "",
     changed_fields: Array.isArray(entry?.changed_fields)
       ? entry.changed_fields.join(", ")
       : "",
@@ -433,6 +486,7 @@ const buildRectifyWorkbookBuffer = (rows = []) => {
       "ETD",
       "order_date",
       "change_type",
+      "changedType",
       "changed_fields",
       "source_refer",
       "source_quantity_text",
@@ -2005,6 +2059,9 @@ exports.rectifyPdfOrders = async (req, res) => {
     const brand = normalizeRectifyText(req.body?.brand);
     const vendor = normalizeRectifyText(req.body?.vendor);
     const shouldApplyChanges = parseBooleanInput(req.body?.apply_changes, true);
+    const uploadedById = req.user?._id && mongoose.Types.ObjectId.isValid(req.user._id)
+      ? req.user._id
+      : null;
 
     if (!brand) {
       return res.status(400).json({ message: "brand is required" });
@@ -2029,6 +2086,7 @@ exports.rectifyPdfOrders = async (req, res) => {
     const invalidEntries = [];
     const dedupedRows = [];
     const seenPdfKeys = new Set();
+    const presentPdfKeys = new Set();
     let duplicateInPdfCount = 0;
 
     for (let index = 0; index < extractedRows.length; index += 1) {
@@ -2045,6 +2103,9 @@ exports.rectifyPdfOrders = async (req, res) => {
         });
         continue;
       }
+
+      const key = makeRectifyKey(normalizedRow.order_id, normalizedRow.item_code);
+      presentPdfKeys.add(key);
 
       if (!normalizedRow.description) {
         invalidEntries.push({
@@ -2063,8 +2124,6 @@ exports.rectifyPdfOrders = async (req, res) => {
         });
         continue;
       }
-
-      const key = makeRectifyKey(normalizedRow.order_id, normalizedRow.item_code);
       if (seenPdfKeys.has(key)) {
         duplicateInPdfCount += 1;
         continue;
@@ -2103,6 +2162,7 @@ exports.rectifyPdfOrders = async (req, res) => {
     let unchangedCount = 0;
     let newCount = 0;
     let modifiedCount = 0;
+    let closedCount = 0;
 
     for (const row of dedupedRows) {
       const key = makeRectifyKey(row.order_id, row.item_code);
@@ -2134,21 +2194,186 @@ exports.rectifyPdfOrders = async (req, res) => {
       });
     }
 
+    const openOrdersForBrandVendor = await Order.find({
+      ...ACTIVE_ORDER_MATCH,
+      brand,
+      vendor,
+      status: { $nin: ["Shipped"] },
+    })
+      .select(
+        "_id order_id item brand vendor quantity ETD order_date shipment qc_record",
+      )
+      .populate({
+        path: "qc_record",
+        select: "quantities",
+      })
+      .sort({ updatedAt: -1, createdAt: -1 })
+      .lean();
+
+    const openOrdersByKey = new Map();
+    for (const openOrder of openOrdersForBrandVendor) {
+      const orderId = normalizeOrderKey(openOrder?.order_id);
+      const itemCode = normalizeRectifyText(openOrder?.item?.item_code);
+      if (!orderId || !itemCode) continue;
+
+      const key = makeRectifyKey(orderId, itemCode);
+      if (!openOrdersByKey.has(key)) {
+        openOrdersByKey.set(key, openOrder);
+      }
+    }
+
+    for (const [openKey, openOrder] of openOrdersByKey.entries()) {
+      if (presentPdfKeys.has(openKey)) continue;
+
+      const openQuantity = computeRectifyOpenQuantity(openOrder);
+      if (!Number.isFinite(openQuantity) || openQuantity <= 0) continue;
+
+      closedCount += 1;
+      changedRows.push({
+        order_id: normalizeOrderKey(openOrder?.order_id),
+        item_code: normalizeRectifyText(openOrder?.item?.item_code),
+        description: normalizeRectifyText(openOrder?.item?.description),
+        brand: normalizeRectifyText(openOrder?.brand),
+        vendor: normalizeRectifyText(openOrder?.vendor),
+        quantity: openQuantity,
+        ETD: openOrder?.ETD || deriveRectifyDefaultEtd(openOrder?.order_date) || null,
+        order_date: openOrder?.order_date || null,
+        change_type: "closed",
+        changed_fields: ["missing_in_pdf"],
+        existing_order_id: String(openOrder?._id || ""),
+        source: {
+          refer: "",
+          raw_quantity: "",
+        },
+      });
+    }
+
     const workbookBuffer = buildRectifyWorkbookBuffer(changedRows);
-    const outputFileName = `rectified-orders-${Date.now()}.xlsx`;
+    const sanitizeFileNamePart = (value) =>
+      String(value || "")
+        .replace(/[<>:"/\\|?*\x00-\x1F]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    const safeBrandForFile = sanitizeFileNamePart(brand) || "Brand";
+    const safeVendorForFile = sanitizeFileNamePart(vendor) || "Vendor";
+    const outputFileName = `${safeBrandForFile} + ${safeVendorForFile}_rectified.xlsx`;
 
     let applySummary = {
       inserted_count: 0,
       updated_count: 0,
       quantity_skipped_count: 0,
+      skipped_closed_count: 0,
       warnings: [],
     };
 
-    if (shouldApplyChanges && changedRows.length > 0) {
+    const rowsEligibleForApply = changedRows.filter(
+      (row) => row?.change_type !== "closed",
+    );
+    applySummary.skipped_closed_count = changedRows.length - rowsEligibleForApply.length;
+
+    if (shouldApplyChanges && rowsEligibleForApply.length > 0) {
       applySummary = await applyRectifiedOrderRows({
-        rows: changedRows,
+        rows: rowsEligibleForApply,
         existingByKey,
       });
+      applySummary.skipped_closed_count = changedRows.length - rowsEligibleForApply.length;
+    }
+
+    let uploadLogId = null;
+    const appliedDbChangeCount = Number(applySummary?.inserted_count || 0)
+      + Number(applySummary?.updated_count || 0);
+    if (shouldApplyChanges && appliedDbChangeCount > 0) {
+      const rowsByOrder = new Map();
+      for (const row of rowsEligibleForApply) {
+        const orderId = normalizeOrderKey(row?.order_id);
+        if (!orderId) continue;
+        rowsByOrder.set(orderId, Number(rowsByOrder.get(orderId) || 0) + 1);
+      }
+
+      const uploadedOrderIds = [...rowsByOrder.keys()].sort((a, b) => a.localeCompare(b));
+      const missingOpenOrderIds = normalizeDistinctValues(
+        changedRows
+          .filter((row) => row?.change_type === "closed")
+          .map((row) => normalizeOrderKey(row?.order_id))
+          .filter(Boolean),
+      );
+
+      const itemsPerOrder = uploadedOrderIds.map((orderId) => ({
+        order_id: orderId,
+        items_count: Number(rowsByOrder.get(orderId) || 0),
+      }));
+
+      const remarks = [
+        `Rectify PDF DB apply: inserted ${Number(applySummary?.inserted_count || 0)}, updated ${Number(applySummary?.updated_count || 0)}.`,
+      ];
+      if (Number(applySummary?.quantity_skipped_count || 0) > 0) {
+        remarks.push(
+          `Quantity updates skipped: ${Number(applySummary.quantity_skipped_count || 0)}.`,
+        );
+      }
+      if (Number(closedCount || 0) > 0) {
+        remarks.push(
+          `Missing open rows in PDF exported as closed (not applied): ${Number(closedCount || 0)}.`,
+        );
+      }
+      if (Array.isArray(applySummary?.warnings) && applySummary.warnings.length > 0) {
+        remarks.push(...applySummary.warnings.map((warning) => String(warning || "").trim()).filter(Boolean));
+      }
+
+      const conflicts = missingOpenOrderIds.map((orderId) => ({
+        type: "OPEN_ORDER_MISSING_IN_UPLOAD",
+        brand,
+        vendor,
+        order_id: orderId,
+        message: `Brand ${brand} / Vendor ${vendor} has open order ${orderId} in system but it was not present in the rectify PDF.`,
+      }));
+
+      try {
+        const uploadLog = await UploadLog.create({
+          uploaded_by: uploadedById,
+          uploaded_by_name: String(
+            req.user?.name || req.user?.username || req.user?.email || "",
+          ).trim(),
+          source_filename: String(req.file?.originalname || "rectify_pdf").trim(),
+          source_size_bytes: Number(req.file?.size || 0),
+          total_rows_received: extractedRows.length,
+          total_rows_unique: dedupedRows.length,
+          inserted_item_rows: appliedDbChangeCount,
+          duplicate_count: invalidEntries.length + duplicateInPdfCount,
+          duplicate_entries: invalidEntries.map((entry) => ({
+            order_id: normalizeOrderKey(entry?.source?.orderNumber || entry?.source?.order_id || ""),
+            item_code: pickRectifyItemCode(entry?.source || {}),
+            reason: String(entry?.reason || "invalid_row").trim(),
+          })),
+          uploaded_brands: [brand],
+          uploaded_vendors: [vendor],
+          total_distinct_orders_uploaded: uploadedOrderIds.length,
+          vendor_summaries: [
+            {
+              brand,
+              vendor,
+              uploaded_order_ids: uploadedOrderIds,
+              uploaded_orders_count: uploadedOrderIds.length,
+              uploaded_items_count: rowsEligibleForApply.length,
+              items_per_order: itemsPerOrder,
+              missing_open_order_ids: missingOpenOrderIds,
+              missing_open_orders_count: missingOpenOrderIds.length,
+              remark:
+                missingOpenOrderIds.length > 0
+                  ? "Open orders missing in PDF were exported as closed rows."
+                  : "",
+            },
+          ],
+          conflicts,
+          remarks,
+          status: conflicts.length > 0 ? "success_with_conflicts" : "success",
+        });
+        uploadLogId = uploadLog?._id || null;
+      } catch (uploadLogError) {
+        console.error("Rectify upload log save failed:", {
+          error: uploadLogError?.message || String(uploadLogError),
+        });
+      }
     }
 
     const message = changedRows.length === 0
@@ -2169,11 +2394,13 @@ exports.rectifyPdfOrders = async (req, res) => {
         changed_rows: changedRows.length,
         new_rows: newCount,
         modified_rows: modifiedCount,
+        closed_rows: closedCount,
       },
       apply: {
         applied: shouldApplyChanges,
         ...applySummary,
       },
+      upload_log_id: uploadLogId,
       file_name: outputFileName,
       file_base64: workbookBuffer.toString("base64"),
       invalid_entries: invalidEntries.slice(0, 100),

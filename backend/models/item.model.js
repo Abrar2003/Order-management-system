@@ -57,6 +57,16 @@ const itemSchema = new mongoose.Schema(
       B: { type: Number, default: 0, min: 0 },
       H: { type: Number, default: 0, min: 0 },
     },
+    inspected_box_top_LBH: {
+      L: { type: Number, default: 0, min: 0 },
+      B: { type: Number, default: 0, min: 0 },
+      H: { type: Number, default: 0, min: 0 },
+    },
+    inspected_box_bottom_LBH: {
+      L: { type: Number, default: 0, min: 0 },
+      B: { type: Number, default: 0, min: 0 },
+      H: { type: Number, default: 0, min: 0 },
+    },
     inspected_top_LBH: {
       L: { type: Number, default: 0, min: 0 },
       B: { type: Number, default: 0, min: 0 },
@@ -72,7 +82,27 @@ const itemSchema = new mongoose.Schema(
       B: { type: Number, default: 0, min: 0 },
       H: { type: Number, default: 0, min: 0 },
     },
+    pis_item_top_LBH: {
+      L: { type: Number, default: 0, min: 0 },
+      B: { type: Number, default: 0, min: 0 },
+      H: { type: Number, default: 0, min: 0 },
+    },
+    pis_item_bottom_LBH: {
+      L: { type: Number, default: 0, min: 0 },
+      B: { type: Number, default: 0, min: 0 },
+      H: { type: Number, default: 0, min: 0 },
+    },
     pis_box_LBH: {
+      L: { type: Number, default: 0, min: 0 },
+      B: { type: Number, default: 0, min: 0 },
+      H: { type: Number, default: 0, min: 0 },
+    },
+    pis_box_top_LBH: {
+      L: { type: Number, default: 0, min: 0 },
+      B: { type: Number, default: 0, min: 0 },
+      H: { type: Number, default: 0, min: 0 },
+    },
+    pis_box_bottom_LBH: {
       L: { type: Number, default: 0, min: 0 },
       B: { type: Number, default: 0, min: 0 },
       H: { type: Number, default: 0, min: 0 },

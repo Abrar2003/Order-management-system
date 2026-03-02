@@ -1146,11 +1146,17 @@ exports.exportQCList = async (req, res) => {
             inspected_item_top_LBH: 1,
             inspected_item_bottom_LBH: 1,
             pis_item_LBH: 1,
+            pis_item_top_LBH: 1,
+            pis_item_bottom_LBH: 1,
             item_LBH: 1,
             inspected_box_LBH: 1,
+            inspected_box_top_LBH: 1,
+            inspected_box_bottom_LBH: 1,
             inspected_top_LBH: 1,
             inspected_bottom_LBH: 1,
             pis_box_LBH: 1,
+            pis_box_top_LBH: 1,
+            pis_box_bottom_LBH: 1,
             box_LBH: 1,
           },
         },
@@ -1773,6 +1779,8 @@ exports.updateQC = async (req, res) => {
       inspected_item_top_LBH,
       inspected_item_bottom_LBH,
       inspected_box_LBH,
+      inspected_box_top_LBH,
+      inspected_box_bottom_LBH,
       inspected_top_LBH,
       inspected_bottom_LBH,
     } = req.body;
@@ -1934,12 +1942,12 @@ exports.updateQC = async (req, res) => {
         "inspected_box_LBH",
       );
       const nextInspectedTopLbh = parseLbhPayload(
-        inspected_top_LBH,
-        "inspected_top_LBH",
+        inspected_box_top_LBH !== undefined ? inspected_box_top_LBH : inspected_top_LBH,
+        "inspected_box_top_LBH",
       );
       const nextInspectedBottomLbh = parseLbhPayload(
-        inspected_bottom_LBH,
-        "inspected_bottom_LBH",
+        inspected_box_bottom_LBH !== undefined ? inspected_box_bottom_LBH : inspected_bottom_LBH,
+        "inspected_box_bottom_LBH",
       );
       const hasInspectedLbhUpdate = Boolean(
         nextInspectedItemLbh
@@ -1989,9 +1997,11 @@ exports.updateQC = async (req, res) => {
         || itemDocForInspectedLbhUpdate?.box_LBH
         || {};
       const effectiveInspectedTopLbh = nextInspectedTopLbh
+        || itemDocForInspectedLbhUpdate?.inspected_box_top_LBH
         || itemDocForInspectedLbhUpdate?.inspected_top_LBH
         || {};
       const effectiveInspectedBottomLbh = nextInspectedBottomLbh
+        || itemDocForInspectedLbhUpdate?.inspected_box_bottom_LBH
         || itemDocForInspectedLbhUpdate?.inspected_bottom_LBH
         || {};
       const cbmLockedByLbh =
@@ -2450,18 +2460,20 @@ exports.updateQC = async (req, res) => {
         }
 
         if (nextInspectedTopLbh) {
+          itemDoc.inspected_box_top_LBH = nextInspectedTopLbh;
           itemDoc.inspected_top_LBH = nextInspectedTopLbh;
         }
 
         if (nextInspectedBottomLbh) {
+          itemDoc.inspected_box_bottom_LBH = nextInspectedBottomLbh;
           itemDoc.inspected_bottom_LBH = nextInspectedBottomLbh;
         }
 
         const calculatedInspectedTopCbm = calculateCbmFromLbh(
-          itemDoc?.inspected_top_LBH || {},
+          itemDoc?.inspected_box_top_LBH || itemDoc?.inspected_top_LBH || {},
         );
         const calculatedInspectedBottomCbm = calculateCbmFromLbh(
-          itemDoc?.inspected_bottom_LBH || {},
+          itemDoc?.inspected_box_bottom_LBH || itemDoc?.inspected_bottom_LBH || {},
         );
         const hasTopAndBottomInspectedCbm =
           toNonNegativeNumber(calculatedInspectedTopCbm, 0) > 0
@@ -3476,7 +3488,7 @@ exports.getQCById = async (req, res) => {
           },
         })
           .select(
-            "code name description brand_name brands vendors inspected_weight pis_weight weight cbm inspected_item_LBH inspected_item_top_LBH inspected_item_bottom_LBH pis_item_LBH item_LBH inspected_box_LBH inspected_top_LBH inspected_bottom_LBH pis_box_LBH box_LBH",
+            "code name description brand_name brands vendors inspected_weight pis_weight weight cbm inspected_item_LBH inspected_item_top_LBH inspected_item_bottom_LBH pis_item_LBH pis_item_top_LBH pis_item_bottom_LBH item_LBH inspected_box_LBH inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_box_LBH pis_box_top_LBH pis_box_bottom_LBH box_LBH",
           )
           .lean()
       : null;

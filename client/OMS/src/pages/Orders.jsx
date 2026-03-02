@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
 import { getUserFromToken } from "../auth/auth.utils";
@@ -51,6 +51,7 @@ const Orders = () => {
   const [archiving, setArchiving] = useState(false);
   const [archiveError, setArchiveError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [itemCodeSortOrder, setItemCodeSortOrder] = useState("asc");
 
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -90,7 +91,22 @@ const Orders = () => {
     fetchOrders();
   }, [fetchOrders]);
 
+  const sortedOrders = useMemo(() => {
+    const direction = itemCodeSortOrder === "asc" ? 1 : -1;
+    return [...orders].sort((a, b) => {
+      const left = String(a?.item?.item_code || "");
+      const right = String(b?.item?.item_code || "");
+      const comparison = left.localeCompare(right, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+      if (comparison !== 0) return comparison * direction;
+      return String(a?._id || "").localeCompare(String(b?._id || ""));
+    });
+  }, [itemCodeSortOrder, orders]);
+
   const primaryOrder = orders[0];
+  const itemSortIndicator = itemCodeSortOrder === "asc" ? " (asc)" : " (desc)";
   const navigateToQcForItem = (itemCode) => {
     const trimmedItemCode = String(itemCode || "").trim();
     if (!trimmedItemCode) {
@@ -172,7 +188,19 @@ const Orders = () => {
                 <table className="table table-striped table-hover align-middle om-table mb-0">
                   <thead className="table-primary">
                     <tr>
-                      <th>Item</th>
+                      <th>
+                        <button
+                          type="button"
+                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                          onClick={() =>
+                            setItemCodeSortOrder((prev) =>
+                              prev === "asc" ? "desc" : "asc",
+                            )
+                          }
+                        >
+                          Item{itemSortIndicator}
+                        </button>
+                      </th>
                       <th>Description</th>
                       <th>Quantity</th>
                       <th>Open Quantity</th>
@@ -183,7 +211,7 @@ const Orders = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {orders.map((order) => (
+                    {sortedOrders.map((order) => (
                       <tr key={order._id}>
                         <td>{order.item?.item_code}</td>
                         <td>{order.item?.description}</td>

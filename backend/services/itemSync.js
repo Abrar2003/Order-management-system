@@ -99,8 +99,12 @@ const applyDerivedItemFields = (item, { preferredBrand = "" } = {}) => {
     }
   }
 
-  const nextInspectedTop = calculateCbmFromBoxSize(item?.inspected_top_LBH);
-  const nextInspectedBottom = calculateCbmFromBoxSize(item?.inspected_bottom_LBH);
+  const nextInspectedTop = calculateCbmFromBoxSize(
+    item?.inspected_box_top_LBH || item?.inspected_top_LBH,
+  );
+  const nextInspectedBottom = calculateCbmFromBoxSize(
+    item?.inspected_box_bottom_LBH || item?.inspected_bottom_LBH,
+  );
   const hasSplitInspectedCbm =
     Math.max(0, toSafeNumber(nextInspectedTop, 0)) > 0
     && Math.max(0, toSafeNumber(nextInspectedBottom, 0)) > 0;
@@ -111,9 +115,18 @@ const applyDerivedItemFields = (item, { preferredBrand = "" } = {}) => {
         6,
       )
     : calculateCbmFromBoxSize(item?.inspected_box_LBH || item?.box_LBH);
-  const nextCalculatedPisTotal = calculateCbmFromBoxSize(
-    item?.pis_box_LBH || item?.box_LBH,
-  );
+  const nextPisTop = calculateCbmFromBoxSize(item?.pis_box_top_LBH);
+  const nextPisBottom = calculateCbmFromBoxSize(item?.pis_box_bottom_LBH);
+  const hasSplitPisCbm =
+    Math.max(0, toSafeNumber(nextPisTop, 0)) > 0
+    && Math.max(0, toSafeNumber(nextPisBottom, 0)) > 0;
+  const nextCalculatedPisTotal = hasSplitPisCbm
+    ? toDecimalString(
+        Math.max(0, toSafeNumber(nextPisTop, 0))
+        + Math.max(0, toSafeNumber(nextPisBottom, 0)),
+        6,
+      )
+    : calculateCbmFromBoxSize(item?.pis_box_LBH || item?.box_LBH);
   const currentCalculatedInspectedTotal = normalizeCbmText(
     item?.cbm?.calculated_inspected_total ?? item?.cbm?.calculated_total ?? "0",
   );

@@ -156,12 +156,16 @@ const RectifyPdfModal = ({ onClose, onSuccess }) => {
                   <div className="small">Changed: {Number(summary.changed_rows || 0)}</div>
                   <div className="small">New: {Number(summary.new_rows || 0)}</div>
                   <div className="small">Modified: {Number(summary.modified_rows || 0)}</div>
+                  <div className="small">Closed (missing in PDF): {Number(summary.closed_rows || 0)}</div>
                   {apply?.applied && (
                     <>
                       <div className="small mt-2">Inserted: {Number(apply.inserted_count || 0)}</div>
                       <div className="small">Updated: {Number(apply.updated_count || 0)}</div>
                       <div className="small">
                         Quantity skipped: {Number(apply.quantity_skipped_count || 0)}
+                      </div>
+                      <div className="small">
+                        Closed rows skipped in apply: {Number(apply.skipped_closed_count || 0)}
                       </div>
                     </>
                   )}
@@ -200,4 +204,3 @@ const RectifyPdfModal = ({ onClose, onSuccess }) => {
 };
 
 export default RectifyPdfModal;
-

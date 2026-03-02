@@ -81,17 +81,35 @@ const calculateCbmFromLbh = (box = {}) => {
 };
 
 const applyCalculatedCbmTotals = (item, setPath) => {
+  const inspectedTopCbm = calculateCbmFromLbh(
+    item?.inspected_box_top_LBH || item?.inspected_top_LBH || {},
+  );
+  const inspectedBottomCbm = calculateCbmFromLbh(
+    item?.inspected_box_bottom_LBH || item?.inspected_bottom_LBH || {},
+  );
+  const hasSplitInspected =
+    Number(inspectedTopCbm) > 0 && Number(inspectedBottomCbm) > 0;
   const calculatedFromInspected = calculateCbmFromLbh(
     item?.inspected_box_LBH || item?.box_LBH || {},
   );
+  const inspectedTotal = hasSplitInspected
+    ? toNormalizedDecimalText(Number(inspectedTopCbm) + Number(inspectedBottomCbm), "cbm.inspected_total")
+    : calculatedFromInspected;
+
+  const pisTopCbm = calculateCbmFromLbh(item?.pis_box_top_LBH || {});
+  const pisBottomCbm = calculateCbmFromLbh(item?.pis_box_bottom_LBH || {});
+  const hasSplitPis = Number(pisTopCbm) > 0 && Number(pisBottomCbm) > 0;
   const calculatedFromPis = calculateCbmFromLbh(
     item?.pis_box_LBH || item?.box_LBH || {},
   );
+  const pisTotal = hasSplitPis
+    ? toNormalizedDecimalText(Number(pisTopCbm) + Number(pisBottomCbm), "cbm.calculated_pis_total")
+    : calculatedFromPis;
 
-  setPath("cbm.inspected_total", calculatedFromInspected);
-  setPath("cbm.calculated_inspected_total", calculatedFromInspected);
-  setPath("cbm.calculated_pis_total", calculatedFromPis);
-  setPath("cbm.calculated_total", calculatedFromInspected);
+  setPath("cbm.inspected_total", inspectedTotal);
+  setPath("cbm.calculated_inspected_total", inspectedTotal);
+  setPath("cbm.calculated_pis_total", pisTotal);
+  setPath("cbm.calculated_total", inspectedTotal);
 };
 
 const normalizeDistinctValues = (values = []) =>
@@ -410,7 +428,11 @@ exports.updateItem = async (req, res) => {
       "vendors",
       "pis_weight",
       "pis_item_LBH",
+      "pis_item_top_LBH",
+      "pis_item_bottom_LBH",
       "pis_box_LBH",
+      "pis_box_top_LBH",
+      "pis_box_bottom_LBH",
     ];
     const touchedLockedFields = lockedFields.filter((field) => hasOwn(payload, field));
     if (touchedLockedFields.length > 0) {
@@ -671,6 +693,48 @@ exports.updateItemPis = async (req, res) => {
       }
     }
 
+    if (payload?.pis_item_top_LBH && typeof payload.pis_item_top_LBH === "object") {
+      if (hasOwn(payload.pis_item_top_LBH, "L")) {
+        setPath(
+          "pis_item_top_LBH.L",
+          toNonNegativeNumber(payload.pis_item_top_LBH.L, "pis_item_top_LBH.L"),
+        );
+      }
+      if (hasOwn(payload.pis_item_top_LBH, "B")) {
+        setPath(
+          "pis_item_top_LBH.B",
+          toNonNegativeNumber(payload.pis_item_top_LBH.B, "pis_item_top_LBH.B"),
+        );
+      }
+      if (hasOwn(payload.pis_item_top_LBH, "H")) {
+        setPath(
+          "pis_item_top_LBH.H",
+          toNonNegativeNumber(payload.pis_item_top_LBH.H, "pis_item_top_LBH.H"),
+        );
+      }
+    }
+
+    if (payload?.pis_item_bottom_LBH && typeof payload.pis_item_bottom_LBH === "object") {
+      if (hasOwn(payload.pis_item_bottom_LBH, "L")) {
+        setPath(
+          "pis_item_bottom_LBH.L",
+          toNonNegativeNumber(payload.pis_item_bottom_LBH.L, "pis_item_bottom_LBH.L"),
+        );
+      }
+      if (hasOwn(payload.pis_item_bottom_LBH, "B")) {
+        setPath(
+          "pis_item_bottom_LBH.B",
+          toNonNegativeNumber(payload.pis_item_bottom_LBH.B, "pis_item_bottom_LBH.B"),
+        );
+      }
+      if (hasOwn(payload.pis_item_bottom_LBH, "H")) {
+        setPath(
+          "pis_item_bottom_LBH.H",
+          toNonNegativeNumber(payload.pis_item_bottom_LBH.H, "pis_item_bottom_LBH.H"),
+        );
+      }
+    }
+
     if (payload?.pis_box_LBH && typeof payload.pis_box_LBH === "object") {
       if (hasOwn(payload.pis_box_LBH, "L")) {
         setPath(
@@ -688,6 +752,48 @@ exports.updateItemPis = async (req, res) => {
         setPath(
           "pis_box_LBH.H",
           toNonNegativeNumber(payload.pis_box_LBH.H, "pis_box_LBH.H"),
+        );
+      }
+    }
+
+    if (payload?.pis_box_top_LBH && typeof payload.pis_box_top_LBH === "object") {
+      if (hasOwn(payload.pis_box_top_LBH, "L")) {
+        setPath(
+          "pis_box_top_LBH.L",
+          toNonNegativeNumber(payload.pis_box_top_LBH.L, "pis_box_top_LBH.L"),
+        );
+      }
+      if (hasOwn(payload.pis_box_top_LBH, "B")) {
+        setPath(
+          "pis_box_top_LBH.B",
+          toNonNegativeNumber(payload.pis_box_top_LBH.B, "pis_box_top_LBH.B"),
+        );
+      }
+      if (hasOwn(payload.pis_box_top_LBH, "H")) {
+        setPath(
+          "pis_box_top_LBH.H",
+          toNonNegativeNumber(payload.pis_box_top_LBH.H, "pis_box_top_LBH.H"),
+        );
+      }
+    }
+
+    if (payload?.pis_box_bottom_LBH && typeof payload.pis_box_bottom_LBH === "object") {
+      if (hasOwn(payload.pis_box_bottom_LBH, "L")) {
+        setPath(
+          "pis_box_bottom_LBH.L",
+          toNonNegativeNumber(payload.pis_box_bottom_LBH.L, "pis_box_bottom_LBH.L"),
+        );
+      }
+      if (hasOwn(payload.pis_box_bottom_LBH, "B")) {
+        setPath(
+          "pis_box_bottom_LBH.B",
+          toNonNegativeNumber(payload.pis_box_bottom_LBH.B, "pis_box_bottom_LBH.B"),
+        );
+      }
+      if (hasOwn(payload.pis_box_bottom_LBH, "H")) {
+        setPath(
+          "pis_box_bottom_LBH.H",
+          toNonNegativeNumber(payload.pis_box_bottom_LBH.H, "pis_box_bottom_LBH.H"),
         );
       }
     }
