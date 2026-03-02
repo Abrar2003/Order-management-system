@@ -17,6 +17,8 @@ const NON_NEGATIVE_FIELDS = new Set([
   "CBM",
   "CBM_top",
   "CBM_bottom",
+  "inspected_weight_net",
+  "inspected_weight_gross",
   "inspected_item_L",
   "inspected_item_B",
   "inspected_item_H",
@@ -46,6 +48,10 @@ const toDimensionInputValue = (value) => {
 
 const hasAnyLbhInput = (values = []) =>
   values.some((value) => String(value ?? "").trim() !== "");
+const hasCompletePositiveLbh = (dimensions = {}) =>
+  Number(dimensions?.L || 0) > 0 &&
+  Number(dimensions?.B || 0) > 0 &&
+  Number(dimensions?.H || 0) > 0;
 
 const toStrictLbhInputGroup = (dimensions = {}) => {
   const L = toDimensionInputValue(dimensions?.L);
@@ -93,6 +99,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     CBM: "",
     CBM_top: "",
     CBM_bottom: "",
+    inspected_weight_net: "",
+    inspected_weight_gross: "",
     inspected_item_L: "",
     inspected_item_B: "",
     inspected_item_H: "",
@@ -154,6 +162,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       || {};
     const inspectedItemTopLbh = itemMaster?.inspected_item_top_LBH || {};
     const inspectedItemBottomLbh = itemMaster?.inspected_item_bottom_LBH || {};
+    const inspectedWeight = itemMaster?.inspected_weight || {};
     const strictInspectedItemLbh = toStrictLbhInputGroup(inspectedItemLbh);
     const strictInspectedBoxLbh = toStrictLbhInputGroup(inspectedBoxLbh);
     const strictInspectedTopLbh = toStrictLbhInputGroup(inspectedTopLbh);
@@ -175,6 +184,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       CBM: hasTopOrBottomCbm ? "" : initialCbmTotal,
       CBM_top: initialCbmTop,
       CBM_bottom: initialCbmBottom,
+      inspected_weight_net: toDimensionInputValue(inspectedWeight?.net),
+      inspected_weight_gross: toDimensionInputValue(inspectedWeight?.gross),
       inspected_item_L: strictInspectedItemLbh.L,
       inspected_item_B: strictInspectedItemLbh.B,
       inspected_item_H: strictInspectedItemLbh.H,
@@ -400,6 +411,32 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       return;
     }
 
+    const existingItemMaster = qc?.item_master || {};
+    const lockInspectedItemLbh = hasCompletePositiveLbh(
+      existingItemMaster?.inspected_item_LBH,
+    );
+    const lockInspectedBoxLbh = hasCompletePositiveLbh(
+      existingItemMaster?.inspected_box_LBH,
+    );
+    const lockInspectedBoxTopLbh = hasCompletePositiveLbh(
+      existingItemMaster?.inspected_box_top_LBH
+      || existingItemMaster?.inspected_top_LBH,
+    );
+    const lockInspectedBoxBottomLbh = hasCompletePositiveLbh(
+      existingItemMaster?.inspected_box_bottom_LBH
+      || existingItemMaster?.inspected_bottom_LBH,
+    );
+    const lockInspectedItemTopLbh = hasCompletePositiveLbh(
+      existingItemMaster?.inspected_item_top_LBH,
+    );
+    const lockInspectedItemBottomLbh = hasCompletePositiveLbh(
+      existingItemMaster?.inspected_item_bottom_LBH,
+    );
+    const lockInspectedNetWeight =
+      Number(existingItemMaster?.inspected_weight?.net || 0) > 0;
+    const lockInspectedGrossWeight =
+      Number(existingItemMaster?.inspected_weight?.gross || 0) > 0;
+
     const parseLbhGroup = (groupName, values) => {
       const entries = Object.entries(values);
       const parsed = {};
@@ -485,6 +522,34 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       return;
     }
 
+    const parseWeightInput = (fieldLabel, rawValue) => {
+      const normalized = String(rawValue ?? "").trim();
+      if (!normalized) return { hasAnyInput: false, value: null };
+      const parsed = Number(normalized);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        return { error: `${fieldLabel} must be greater than 0.` };
+      }
+      return { hasAnyInput: true, value: parsed };
+    };
+
+    const inspectedNetWeight = parseWeightInput(
+      "Inspected Net Weight",
+      form.inspected_weight_net,
+    );
+    if (inspectedNetWeight.error) {
+      setError(inspectedNetWeight.error);
+      return;
+    }
+
+    const inspectedGrossWeight = parseWeightInput(
+      "Inspected Gross Weight",
+      form.inspected_weight_gross,
+    );
+    if (inspectedGrossWeight.error) {
+      setError(inspectedGrossWeight.error);
+      return;
+    }
+
     const cbmLockedByLbh = hasAnyLbhInput([
       form.inspected_item_L,
       form.inspected_item_B,
@@ -547,10 +612,14 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       return;
     }
 
+    const hasTotalCbmValue = String(form.CBM || "").trim() !== "";
     const hasCbmTopValue = String(form.CBM_top || "").trim() !== "";
     const hasCbmBottomValue = String(form.CBM_bottom || "").trim() !== "";
-    const hasTopBottomLbh = inspectedTopLbh.hasAnyInput && inspectedBottomLbh.hasAnyInput;
-    const hasTopBottomCbm = (hasCbmTopValue && hasCbmBottomValue) || hasTopBottomLbh;
+    const hasTopBottomLbh =
+      (inspectedTopLbh.hasAnyInput && inspectedBottomLbh.hasAnyInput)
+      || (inspectedItemTopLbh.hasAnyInput && inspectedItemBottomLbh.hasAnyInput);
+    const hasSplitTopBottomForLabels =
+      !hasTotalCbmValue && ((hasCbmTopValue && hasCbmBottomValue) || hasTopBottomLbh);
 
     const isVisitUpdate = hasQuantityUpdate || hasLabelUpdate;
     if (isVisitUpdate && !selectedInspectorId) {
@@ -651,14 +720,14 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     }
 
     const baseLabelLimit = Math.max(0, nextChecked);
-    const maxLabelsAllowed = hasTopBottomCbm
+    const maxLabelsAllowed = hasSplitTopBottomForLabels
       ? baseLabelLimit * 2
       : baseLabelLimit;
 
     if (totalLabelsAfterUpdate > maxLabelsAllowed) {
       setError(
-        hasTopBottomCbm
-          ? `Total labels cannot exceed double inspected quantity (${maxLabelsAllowed}) when CBM top and bottom are set.`
+        hasSplitTopBottomForLabels
+          ? `Total labels cannot exceed double inspected quantity (${maxLabelsAllowed}) when top and bottom CBM/LBH are set.`
           : `Total labels cannot exceed inspected quantity (${maxLabelsAllowed}).`,
       );
       return;
@@ -706,25 +775,57 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     if (normalizedLabelRanges.length > 0) {
       payload.label_ranges = normalizedLabelRanges;
     }
-    if (inspectedItemLbh.hasAnyInput && inspectedItemLbh.value) {
+    if (!lockInspectedItemLbh && inspectedItemLbh.hasAnyInput && inspectedItemLbh.value) {
       payload.inspected_item_LBH = inspectedItemLbh.value;
     }
-    if (inspectedBoxLbh.hasAnyInput && inspectedBoxLbh.value) {
+    if (!lockInspectedBoxLbh && inspectedBoxLbh.hasAnyInput && inspectedBoxLbh.value) {
       payload.inspected_box_LBH = inspectedBoxLbh.value;
     }
-    if (inspectedTopLbh.hasAnyInput && inspectedTopLbh.value) {
+    if (!lockInspectedBoxTopLbh && inspectedTopLbh.hasAnyInput && inspectedTopLbh.value) {
       payload.inspected_box_top_LBH = inspectedTopLbh.value;
       payload.inspected_top_LBH = inspectedTopLbh.value;
     }
-    if (inspectedBottomLbh.hasAnyInput && inspectedBottomLbh.value) {
+    if (
+      !lockInspectedBoxBottomLbh &&
+      inspectedBottomLbh.hasAnyInput &&
+      inspectedBottomLbh.value
+    ) {
       payload.inspected_box_bottom_LBH = inspectedBottomLbh.value;
       payload.inspected_bottom_LBH = inspectedBottomLbh.value;
     }
-    if (inspectedItemTopLbh.hasAnyInput && inspectedItemTopLbh.value) {
+    if (
+      !lockInspectedItemTopLbh &&
+      inspectedItemTopLbh.hasAnyInput &&
+      inspectedItemTopLbh.value
+    ) {
       payload.inspected_item_top_LBH = inspectedItemTopLbh.value;
     }
-    if (inspectedItemBottomLbh.hasAnyInput && inspectedItemBottomLbh.value) {
+    if (
+      !lockInspectedItemBottomLbh &&
+      inspectedItemBottomLbh.hasAnyInput &&
+      inspectedItemBottomLbh.value
+    ) {
       payload.inspected_item_bottom_LBH = inspectedItemBottomLbh.value;
+    }
+    if (
+      (!lockInspectedNetWeight && inspectedNetWeight.hasAnyInput) ||
+      (!lockInspectedGrossWeight && inspectedGrossWeight.hasAnyInput)
+    ) {
+      payload.inspected_weight = {};
+      if (
+        !lockInspectedNetWeight &&
+        inspectedNetWeight.hasAnyInput &&
+        inspectedNetWeight.value !== null
+      ) {
+        payload.inspected_weight.net = inspectedNetWeight.value;
+      }
+      if (
+        !lockInspectedGrossWeight &&
+        inspectedGrossWeight.hasAnyInput &&
+        inspectedGrossWeight.value !== null
+      ) {
+        payload.inspected_weight.gross = inspectedGrossWeight.value;
+      }
     }
 
     try {
@@ -747,6 +848,38 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const hasTopOrBottomCbmInput =
     String(form.CBM_top || "").trim() !== "" ||
     String(form.CBM_bottom || "").trim() !== "";
+  const existingItemMaster = qc?.item_master || {};
+  const lockInspectedItemLbh = hasCompletePositiveLbh(
+    existingItemMaster?.inspected_item_LBH,
+  );
+  const lockInspectedBoxLbh = hasCompletePositiveLbh(
+    existingItemMaster?.inspected_box_LBH,
+  );
+  const lockInspectedBoxTopLbh = hasCompletePositiveLbh(
+    existingItemMaster?.inspected_box_top_LBH || existingItemMaster?.inspected_top_LBH,
+  );
+  const lockInspectedBoxBottomLbh = hasCompletePositiveLbh(
+    existingItemMaster?.inspected_box_bottom_LBH || existingItemMaster?.inspected_bottom_LBH,
+  );
+  const lockInspectedItemTopLbh = hasCompletePositiveLbh(
+    existingItemMaster?.inspected_item_top_LBH,
+  );
+  const lockInspectedItemBottomLbh = hasCompletePositiveLbh(
+    existingItemMaster?.inspected_item_bottom_LBH,
+  );
+  const existingInspectedWeight = existingItemMaster?.inspected_weight || {};
+  const lockInspectedNetWeight =
+    Number(existingInspectedWeight?.net || 0) > 0;
+  const lockInspectedGrossWeight =
+    Number(existingInspectedWeight?.gross || 0) > 0;
+  const hasAnyLockedInspectedLbh = (
+    lockInspectedItemLbh ||
+    lockInspectedBoxLbh ||
+    lockInspectedBoxTopLbh ||
+    lockInspectedBoxBottomLbh ||
+    lockInspectedItemTopLbh ||
+    lockInspectedItemBottomLbh
+  );
   const cbmLockedByLbh = hasAnyLbhInput([
     form.inspected_item_L,
     form.inspected_item_B,
@@ -849,6 +982,46 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
               <div className="col-md-12">{"   "}</div>
 
+              <div className="col-md-6">
+                <label className="form-label">Inspected Net Weight</label>
+                <input
+                  type="number"
+                  className="form-control"
+                  name="inspected_weight_net"
+                  value={form.inspected_weight_net}
+                  onChange={handleChange}
+                  min="0"
+                  step="any"
+                  disabled={lockInspectedNetWeight}
+                  placeholder={lockInspectedNetWeight ? "Locked" : "Enter net weight"}
+                />
+              </div>
+
+              <div className="col-md-6">
+                <label className="form-label">Inspected Gross Weight</label>
+                <input
+                  type="number"
+                  className="form-control"
+                  name="inspected_weight_gross"
+                  value={form.inspected_weight_gross}
+                  onChange={handleChange}
+                  min="0"
+                  step="any"
+                  disabled={lockInspectedGrossWeight}
+                  placeholder={lockInspectedGrossWeight ? "Locked" : "Enter gross weight"}
+                />
+              </div>
+
+              {(lockInspectedNetWeight || lockInspectedGrossWeight) && (
+                <div className="col-12">
+                  <div className="small text-secondary">
+                    Inspected weight fields are locked after first update.
+                  </div>
+                </div>
+              )}
+
+              <div className="col-md-12">{"   "}</div>
+
               <div className="col-md-4">
                 <label className="form-label">CBM Total</label>
                 <input
@@ -902,6 +1075,13 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
               <div className="col-12">
                 <h6 className="mb-0">Inspected LBH (cm)</h6>
               </div>
+              {hasAnyLockedInspectedLbh && (
+                <div className="col-12">
+                  <div className="small text-secondary">
+                    Inspected LBH fields are locked after first update.
+                  </div>
+                </div>
+              )}
 
               <div className="col-md-5">
                 <label className="form-label">Inspected Item LBH (L/B/H)</label>
@@ -915,6 +1095,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     min="0"
                     step="any"
                     placeholder="L"
+                    disabled={lockInspectedItemLbh}
                   />
                   <input
                     type="number"
@@ -925,6 +1106,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     min="0"
                     step="any"
                     placeholder="B"
+                    disabled={lockInspectedItemLbh}
                   />
                   <input
                     type="number"
@@ -935,6 +1117,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     min="0"
                     step="any"
                     placeholder="H"
+                    disabled={lockInspectedItemLbh}
                   />
                 </div>
               </div>
@@ -951,6 +1134,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     min="0"
                     step="any"
                     placeholder="L"
+                    disabled={lockInspectedBoxLbh}
                   />
                   <input
                     type="number"
@@ -961,6 +1145,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     min="0"
                     step="any"
                     placeholder="B"
+                    disabled={lockInspectedBoxLbh}
                   />
                   <input
                     type="number"
@@ -971,6 +1156,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     min="0"
                     step="any"
                     placeholder="H"
+                    disabled={lockInspectedBoxLbh}
                   />
                 </div>
               </div>
@@ -986,6 +1172,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     min="0"
                     step="any"
                     placeholder="L"
+                    disabled={lockInspectedItemTopLbh}
                   />
                   <input
                     type="number"
@@ -996,6 +1183,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     min="0"
                     step="any"
                     placeholder="B"
+                    disabled={lockInspectedItemTopLbh}
                   />
                   <input
                     type="number"
@@ -1006,6 +1194,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     min="0"
                     step="any"
                     placeholder="H"
+                    disabled={lockInspectedItemTopLbh}
                   />
                 </div>
               </div>
@@ -1022,6 +1211,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     min="0"
                     step="any"
                     placeholder="L"
+                    disabled={lockInspectedBoxTopLbh}
                   />
                   <input
                     type="number"
@@ -1032,6 +1222,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     min="0"
                     step="any"
                     placeholder="B"
+                    disabled={lockInspectedBoxTopLbh}
                   />
                   <input
                     type="number"
@@ -1042,6 +1233,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     min="0"
                     step="any"
                     placeholder="H"
+                    disabled={lockInspectedBoxTopLbh}
                   />
                 </div>
               </div>
@@ -1057,6 +1249,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     min="0"
                     step="any"
                     placeholder="L"
+                    disabled={lockInspectedItemBottomLbh}
                   />
                   <input
                     type="number"
@@ -1067,6 +1260,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     min="0"
                     step="any"
                     placeholder="B"
+                    disabled={lockInspectedItemBottomLbh}
                   />
                   <input
                     type="number"
@@ -1077,6 +1271,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     min="0"
                     step="any"
                     placeholder="H"
+                    disabled={lockInspectedItemBottomLbh}
                   />
                 </div>
               </div>
@@ -1095,6 +1290,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     min="0"
                     step="any"
                     placeholder="L"
+                    disabled={lockInspectedBoxBottomLbh}
                   />
                   <input
                     type="number"
@@ -1105,6 +1301,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     min="0"
                     step="any"
                     placeholder="B"
+                    disabled={lockInspectedBoxBottomLbh}
                   />
                   <input
                     type="number"
@@ -1115,6 +1312,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     min="0"
                     step="any"
                     placeholder="H"
+                    disabled={lockInspectedBoxBottomLbh}
                   />
                 </div>
               </div>

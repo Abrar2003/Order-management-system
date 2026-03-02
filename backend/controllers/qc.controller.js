@@ -1783,6 +1783,7 @@ exports.updateQC = async (req, res) => {
       inspected_box_bottom_LBH,
       inspected_top_LBH,
       inspected_bottom_LBH,
+      inspected_weight,
     } = req.body;
 
       const qc = await QC.findById(req.params.id)
@@ -1924,6 +1925,25 @@ exports.updateQC = async (req, res) => {
 
         return { L, B, H };
       };
+      const parseInspectedWeightPayloadField = (value, fieldName) => {
+        if (value === undefined) return { hasInput: false, value: null };
+        const normalized = String(value ?? "").trim();
+        if (!normalized) {
+          throw new Error(`${fieldName} must be greater than 0`);
+        }
+
+        const parsed = toNonNegativeNumber(normalized, NaN);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+          throw new Error(`${fieldName} must be greater than 0`);
+        }
+        return { hasInput: true, value: parsed };
+      };
+      const isSameLbhValue = (left = {}, right = {}) =>
+        toNonNegativeNumber(left?.L, 0) === toNonNegativeNumber(right?.L, 0)
+        && toNonNegativeNumber(left?.B, 0) === toNonNegativeNumber(right?.B, 0)
+        && toNonNegativeNumber(left?.H, 0) === toNonNegativeNumber(right?.H, 0);
+      const hasSameNumericValue = (left, right) =>
+        Math.abs(toNonNegativeNumber(left, 0) - toNonNegativeNumber(right, 0)) < 0.000001;
 
       const nextInspectedItemLbh = parseLbhPayload(
         inspected_item_LBH,
@@ -1957,12 +1977,35 @@ exports.updateQC = async (req, res) => {
         || nextInspectedTopLbh
         || nextInspectedBottomLbh,
       );
-      const itemCodeForInspectedLbhUpdate = (hasInspectedLbhUpdate || hasCbmUpdate)
+
+      if (
+        inspected_weight !== undefined
+        && (inspected_weight === null
+          || typeof inspected_weight !== "object"
+          || Array.isArray(inspected_weight))
+      ) {
+        return res.status(400).json({
+          message: "inspected_weight must be an object with net and/or gross",
+        });
+      }
+      const parsedInspectedWeightNet = parseInspectedWeightPayloadField(
+        inspected_weight?.net,
+        "inspected_weight.net",
+      );
+      const parsedInspectedWeightGross = parseInspectedWeightPayloadField(
+        inspected_weight?.gross,
+        "inspected_weight.gross",
+      );
+      const hasInspectedWeightUpdate =
+        parsedInspectedWeightNet.hasInput || parsedInspectedWeightGross.hasInput;
+
+      const hasItemMasterUpdate = hasInspectedLbhUpdate || hasInspectedWeightUpdate;
+      const itemCodeForInspectedLbhUpdate = (hasItemMasterUpdate || hasCbmUpdate)
         ? normalizeText(qc?.item?.item_code || "")
         : "";
-      if ((hasInspectedLbhUpdate || hasCbmUpdate) && !itemCodeForInspectedLbhUpdate) {
+      if ((hasItemMasterUpdate || hasCbmUpdate) && !itemCodeForInspectedLbhUpdate) {
         return res.status(400).json({
-          message: "Item code is required to update inspected LBH or CBM fields",
+          message: "Item code is required to update inspected LBH/weight or CBM fields",
         });
       }
 
@@ -1976,10 +2019,79 @@ exports.updateQC = async (req, res) => {
         });
       }
 
-      if (hasInspectedLbhUpdate && !itemDocForInspectedLbhUpdate) {
+      if (hasItemMasterUpdate && !itemDocForInspectedLbhUpdate) {
         return res.status(404).json({
           message: "Item master record not found for this item code",
         });
+      }
+
+      if (hasInspectedLbhUpdate) {
+        const assertWriteOnceLbh = (incomingValue, existingValue, fieldName) => {
+          if (!incomingValue) return;
+          if (hasCompletePositiveLbh(existingValue) && !isSameLbhValue(existingValue, incomingValue)) {
+            throw new Error(`${fieldName} can only be set once`);
+          }
+        };
+
+        assertWriteOnceLbh(
+          nextInspectedItemLbh,
+          itemDocForInspectedLbhUpdate?.inspected_item_LBH,
+          "inspected_item_LBH",
+        );
+        assertWriteOnceLbh(
+          nextInspectedItemTopLbh,
+          itemDocForInspectedLbhUpdate?.inspected_item_top_LBH,
+          "inspected_item_top_LBH",
+        );
+        assertWriteOnceLbh(
+          nextInspectedItemBottomLbh,
+          itemDocForInspectedLbhUpdate?.inspected_item_bottom_LBH,
+          "inspected_item_bottom_LBH",
+        );
+        assertWriteOnceLbh(
+          nextInspectedBoxLbh,
+          itemDocForInspectedLbhUpdate?.inspected_box_LBH,
+          "inspected_box_LBH",
+        );
+        assertWriteOnceLbh(
+          nextInspectedTopLbh,
+          itemDocForInspectedLbhUpdate?.inspected_box_top_LBH
+            || itemDocForInspectedLbhUpdate?.inspected_top_LBH,
+          "inspected_box_top_LBH",
+        );
+        assertWriteOnceLbh(
+          nextInspectedBottomLbh,
+          itemDocForInspectedLbhUpdate?.inspected_box_bottom_LBH
+            || itemDocForInspectedLbhUpdate?.inspected_bottom_LBH,
+          "inspected_box_bottom_LBH",
+        );
+      }
+
+      if (hasInspectedWeightUpdate) {
+        const existingInspectedNetWeight = toNonNegativeNumber(
+          itemDocForInspectedLbhUpdate?.inspected_weight?.net,
+          0,
+        );
+        const existingInspectedGrossWeight = toNonNegativeNumber(
+          itemDocForInspectedLbhUpdate?.inspected_weight?.gross,
+          0,
+        );
+
+        if (
+          parsedInspectedWeightNet.hasInput
+          && existingInspectedNetWeight > 0
+          && !hasSameNumericValue(existingInspectedNetWeight, parsedInspectedWeightNet.value)
+        ) {
+          throw new Error("inspected_weight.net can only be set once");
+        }
+
+        if (
+          parsedInspectedWeightGross.hasInput
+          && existingInspectedGrossWeight > 0
+          && !hasSameNumericValue(existingInspectedGrossWeight, parsedInspectedWeightGross.value)
+        ) {
+          throw new Error("inspected_weight.gross can only be set once");
+        }
       }
 
       const effectiveInspectedItemLbh = nextInspectedItemLbh
@@ -2207,9 +2319,14 @@ exports.updateQC = async (req, res) => {
       const baseLabelLimit = inspectedQuantityForLabels;
       const cbmTopValue = toNonNegativeNumber(qc?.cbm?.top, 0);
       const cbmBottomValue = toNonNegativeNumber(qc?.cbm?.bottom, 0);
-      const hasTopBottomLbhForLabels =
+      const hasTopBottomBoxLbhForLabels =
         hasCompletePositiveLbh(effectiveInspectedTopLbh)
         && hasCompletePositiveLbh(effectiveInspectedBottomLbh);
+      const hasTopBottomItemLbhForLabels =
+        hasCompletePositiveLbh(effectiveInspectedItemTopLbh)
+        && hasCompletePositiveLbh(effectiveInspectedItemBottomLbh);
+      const hasTopBottomLbhForLabels =
+        hasTopBottomBoxLbhForLabels || hasTopBottomItemLbhForLabels;
       const hasTopBottomCbm =
         (cbmTopValue > 0 && cbmBottomValue > 0) || hasTopBottomLbhForLabels;
       const maxLabelsAllowed = hasTopBottomCbm ? baseLabelLimit * 2 : baseLabelLimit;
@@ -2440,78 +2557,130 @@ exports.updateQC = async (req, res) => {
         }
       }
 
-      if (hasInspectedLbhUpdate) {
+      if (hasItemMasterUpdate) {
         const itemDoc = itemDocForInspectedLbhUpdate;
-
-        if (nextInspectedItemLbh) {
-          itemDoc.inspected_item_LBH = nextInspectedItemLbh;
-        }
-
-        if (nextInspectedItemTopLbh) {
-          itemDoc.inspected_item_top_LBH = nextInspectedItemTopLbh;
-        }
-
-        if (nextInspectedItemBottomLbh) {
-          itemDoc.inspected_item_bottom_LBH = nextInspectedItemBottomLbh;
-        }
-
-        if (nextInspectedBoxLbh) {
-          itemDoc.inspected_box_LBH = nextInspectedBoxLbh;
-        }
-
-        if (nextInspectedTopLbh) {
-          itemDoc.inspected_box_top_LBH = nextInspectedTopLbh;
-          itemDoc.inspected_top_LBH = nextInspectedTopLbh;
-        }
-
-        if (nextInspectedBottomLbh) {
-          itemDoc.inspected_box_bottom_LBH = nextInspectedBottomLbh;
-          itemDoc.inspected_bottom_LBH = nextInspectedBottomLbh;
-        }
-
-        const calculatedInspectedTopCbm = calculateCbmFromLbh(
-          itemDoc?.inspected_box_top_LBH || itemDoc?.inspected_top_LBH || {},
-        );
-        const calculatedInspectedBottomCbm = calculateCbmFromLbh(
-          itemDoc?.inspected_box_bottom_LBH || itemDoc?.inspected_bottom_LBH || {},
-        );
-        const hasTopAndBottomInspectedCbm =
-          toNonNegativeNumber(calculatedInspectedTopCbm, 0) > 0
-          && toNonNegativeNumber(calculatedInspectedBottomCbm, 0) > 0;
-
-        const calculatedInspectedCbmFromBox = calculateCbmFromLbh(
-          itemDoc?.inspected_box_LBH || itemDoc?.box_LBH || {},
-        );
-        const calculatedInspectedCbm = hasTopAndBottomInspectedCbm
-          ? toNormalizedCbmString(
-              toNonNegativeNumber(calculatedInspectedTopCbm, 0)
-              + toNonNegativeNumber(calculatedInspectedBottomCbm, 0),
-            )
-          : calculatedInspectedCbmFromBox;
-        const calculatedPisCbm = calculateCbmFromLbh(
-          itemDoc?.pis_box_LBH || itemDoc?.box_LBH || {},
-        );
-
-        itemDoc.cbm = {
-          ...(itemDoc.cbm || {}),
-          inspected_top: calculatedInspectedTopCbm,
-          inspected_bottom: calculatedInspectedBottomCbm,
-          inspected_total: calculatedInspectedCbm,
-          calculated_inspected_total: calculatedInspectedCbm,
-          calculated_pis_total: calculatedPisCbm,
-          calculated_total: calculatedInspectedCbm,
+        let hasItemDocChanges = false;
+        const setLbhPath = (path, value) => {
+          if (!value) return false;
+          const nextValue = {
+            L: toNonNegativeNumber(value?.L, 0),
+            B: toNonNegativeNumber(value?.B, 0),
+            H: toNonNegativeNumber(value?.H, 0),
+          };
+          const existingValue = itemDoc.get(path);
+          if (isSameLbhValue(existingValue, nextValue)) return false;
+          itemDoc.set(path, nextValue);
+          itemDoc.markModified(path);
+          return true;
         };
 
-        if (nextInspectedBoxLbh || nextInspectedTopLbh || nextInspectedBottomLbh) {
-          qc.cbm = {
-            ...(qc.cbm || {}),
-            top: calculatedInspectedTopCbm,
-            bottom: calculatedInspectedBottomCbm,
-            total: calculatedInspectedCbm,
-          };
+        if (hasInspectedLbhUpdate) {
+          hasItemDocChanges =
+            setLbhPath("inspected_item_LBH", nextInspectedItemLbh) || hasItemDocChanges;
+          hasItemDocChanges =
+            setLbhPath("inspected_item_top_LBH", nextInspectedItemTopLbh) || hasItemDocChanges;
+          hasItemDocChanges =
+            setLbhPath("inspected_item_bottom_LBH", nextInspectedItemBottomLbh)
+            || hasItemDocChanges;
+          hasItemDocChanges =
+            setLbhPath("inspected_box_LBH", nextInspectedBoxLbh) || hasItemDocChanges;
+
+          if (setLbhPath("inspected_box_top_LBH", nextInspectedTopLbh)) {
+            hasItemDocChanges = true;
+            setLbhPath("inspected_top_LBH", nextInspectedTopLbh);
+          }
+
+          if (setLbhPath("inspected_box_bottom_LBH", nextInspectedBottomLbh)) {
+            hasItemDocChanges = true;
+            setLbhPath("inspected_bottom_LBH", nextInspectedBottomLbh);
+          }
         }
 
-        await itemDoc.save();
+        if (hasInspectedWeightUpdate) {
+          const nextInspectedWeight = {
+            net: parsedInspectedWeightNet.hasInput
+              ? parsedInspectedWeightNet.value
+              : toNonNegativeNumber(itemDoc?.inspected_weight?.net, 0),
+            gross: parsedInspectedWeightGross.hasInput
+              ? parsedInspectedWeightGross.value
+              : toNonNegativeNumber(itemDoc?.inspected_weight?.gross, 0),
+          };
+          const existingInspectedWeight = {
+            net: toNonNegativeNumber(itemDoc?.inspected_weight?.net, 0),
+            gross: toNonNegativeNumber(itemDoc?.inspected_weight?.gross, 0),
+          };
+          if (
+            !hasSameNumericValue(existingInspectedWeight.net, nextInspectedWeight.net)
+            || !hasSameNumericValue(existingInspectedWeight.gross, nextInspectedWeight.gross)
+          ) {
+            itemDoc.set("inspected_weight", nextInspectedWeight);
+            itemDoc.markModified("inspected_weight");
+            hasItemDocChanges = true;
+          }
+        }
+
+        if (hasInspectedLbhUpdate) {
+          const calculatedInspectedTopCbm = calculateCbmFromLbh(
+            itemDoc?.inspected_box_top_LBH
+            || itemDoc?.inspected_top_LBH
+            || itemDoc?.inspected_item_top_LBH
+            || {},
+          );
+          const calculatedInspectedBottomCbm = calculateCbmFromLbh(
+            itemDoc?.inspected_box_bottom_LBH
+            || itemDoc?.inspected_bottom_LBH
+            || itemDoc?.inspected_item_bottom_LBH
+            || {},
+          );
+          const hasTopAndBottomInspectedCbm =
+            toNonNegativeNumber(calculatedInspectedTopCbm, 0) > 0
+            && toNonNegativeNumber(calculatedInspectedBottomCbm, 0) > 0;
+
+          const calculatedInspectedCbmFromBox = calculateCbmFromLbh(
+            itemDoc?.inspected_box_LBH
+            || itemDoc?.box_LBH
+            || itemDoc?.inspected_item_LBH
+            || itemDoc?.item_LBH
+            || {},
+          );
+          const calculatedInspectedCbm = hasTopAndBottomInspectedCbm
+            ? toNormalizedCbmString(
+                toNonNegativeNumber(calculatedInspectedTopCbm, 0)
+                + toNonNegativeNumber(calculatedInspectedBottomCbm, 0),
+              )
+            : calculatedInspectedCbmFromBox;
+          const calculatedPisCbm = calculateCbmFromLbh(
+            itemDoc?.pis_box_LBH
+            || itemDoc?.box_LBH
+            || itemDoc?.pis_item_LBH
+            || itemDoc?.item_LBH
+            || {},
+          );
+
+          itemDoc.cbm = {
+            ...(itemDoc.cbm || {}),
+            inspected_top: calculatedInspectedTopCbm,
+            inspected_bottom: calculatedInspectedBottomCbm,
+            inspected_total: calculatedInspectedCbm,
+            calculated_inspected_total: calculatedInspectedCbm,
+            calculated_pis_total: calculatedPisCbm,
+            calculated_total: calculatedInspectedCbm,
+          };
+          hasItemDocChanges = true;
+
+          if (nextInspectedBoxLbh || nextInspectedTopLbh || nextInspectedBottomLbh) {
+            qc.cbm = {
+              ...(qc.cbm || {}),
+              top: calculatedInspectedTopCbm,
+              bottom: calculatedInspectedBottomCbm,
+              total: calculatedInspectedCbm,
+            };
+          }
+        }
+
+        if (hasItemDocChanges) {
+          await itemDoc.save();
+        }
       }
 
       await qc.save();

@@ -82,25 +82,34 @@ const calculateCbmFromLbh = (box = {}) => {
 
 const applyCalculatedCbmTotals = (item, setPath) => {
   const inspectedTopCbm = calculateCbmFromLbh(
-    item?.inspected_box_top_LBH || item?.inspected_top_LBH || {},
+    item?.inspected_box_top_LBH
+    || item?.inspected_top_LBH
+    || item?.inspected_item_top_LBH
+    || {},
   );
   const inspectedBottomCbm = calculateCbmFromLbh(
-    item?.inspected_box_bottom_LBH || item?.inspected_bottom_LBH || {},
+    item?.inspected_box_bottom_LBH
+    || item?.inspected_bottom_LBH
+    || item?.inspected_item_bottom_LBH
+    || {},
   );
   const hasSplitInspected =
     Number(inspectedTopCbm) > 0 && Number(inspectedBottomCbm) > 0;
   const calculatedFromInspected = calculateCbmFromLbh(
-    item?.inspected_box_LBH || item?.box_LBH || {},
+    item?.inspected_box_LBH
+    || item?.box_LBH
+    || item?.inspected_item_LBH
+    || {},
   );
   const inspectedTotal = hasSplitInspected
     ? toNormalizedDecimalText(Number(inspectedTopCbm) + Number(inspectedBottomCbm), "cbm.inspected_total")
     : calculatedFromInspected;
 
-  const pisTopCbm = calculateCbmFromLbh(item?.pis_box_top_LBH || {});
-  const pisBottomCbm = calculateCbmFromLbh(item?.pis_box_bottom_LBH || {});
+  const pisTopCbm = calculateCbmFromLbh(item?.pis_box_top_LBH || item?.pis_item_top_LBH || {});
+  const pisBottomCbm = calculateCbmFromLbh(item?.pis_box_bottom_LBH || item?.pis_item_bottom_LBH || {});
   const hasSplitPis = Number(pisTopCbm) > 0 && Number(pisBottomCbm) > 0;
   const calculatedFromPis = calculateCbmFromLbh(
-    item?.pis_box_LBH || item?.box_LBH || {},
+    item?.pis_box_LBH || item?.box_LBH || item?.pis_item_LBH || {},
   );
   const pisTotal = hasSplitPis
     ? toNormalizedDecimalText(Number(pisTopCbm) + Number(pisBottomCbm), "cbm.calculated_pis_total")
