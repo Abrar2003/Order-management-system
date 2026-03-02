@@ -1,8 +1,10 @@
+import { useLayoutEffect } from "react";
 import {
   BrowserRouter as Router,
   Routes,
   Route,
   Navigate,
+  useLocation,
 } from "react-router-dom";
 
 import "./App.css";
@@ -27,13 +29,59 @@ import ArchivedOrders from "./pages/ArchivedOrders";
 import InspectionReport from "./pages/inspection_report";
 import InspectorReports from "./pages/InspectorReports";
 import VendorReports from "./pages/VendorReports";
+import PIS from "./pages/PIS";
 
 // import Users from "./pages/Users"; // later
+const clearStaleUiOverlays = () => {
+  document.body.classList.remove("modal-open");
+  document.body.style.removeProperty("overflow");
+  document.body.style.removeProperty("padding-right");
+
+  document
+    .querySelectorAll(".modal-backdrop, .offcanvas-backdrop")
+    .forEach((node) => node.remove());
+
+  // Defensive cleanup for stale custom modal roots left in DOM.
+  document.querySelectorAll(".om-modal-backdrop").forEach((node) => {
+    if (node instanceof HTMLElement) {
+      node.remove();
+    }
+  });
+
+  document.querySelectorAll(".modal.show, .offcanvas.show").forEach((node) => {
+    node.classList.remove("show");
+    if (node instanceof HTMLElement) {
+      node.style.display = "none";
+    }
+  });
+};
+
+const RouteUiCleanup = () => {
+  const location = useLocation();
+
+  useLayoutEffect(() => {
+    clearStaleUiOverlays();
+
+    // Some overlays are injected asynchronously by bootstrap plugins.
+    const t1 = window.setTimeout(clearStaleUiOverlays, 0);
+    const t2 = window.setTimeout(clearStaleUiOverlays, 250);
+    const t3 = window.setTimeout(clearStaleUiOverlays, 750);
+
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+      window.clearTimeout(t3);
+    };
+  }, [location.pathname, location.search]);
+
+  return null;
+};
 
 const App = () => {
   return (
     <div className="app-shell">
       <Router>
+        <RouteUiCleanup />
         <Routes>
           {/* Public */}
           <Route path="/signin" element={<SignIn />} />
@@ -126,6 +174,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <ItemOrdersHistory />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/pis"
+            element={
+              <ProtectedRoute>
+                <PIS />
               </ProtectedRoute>
             }
           />

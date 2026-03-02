@@ -51,8 +51,12 @@ const Navbar = () => {
       );
     }
 
+    if (canManageOrders) {
+      links.push({ label: "PIS", path: "/pis" });
+    }
+
     return links;
-  }, [canAccessQc]);
+  }, [canAccessQc, canManageOrders]);
 
   const secondaryRouteLinks = useMemo(() => {
     const links = [{ label: "Home", path: "/" }];
@@ -62,6 +66,7 @@ const Navbar = () => {
     }
 
     if (canManageOrders) {
+      links.push({ label: "PIS", path: "/pis" });
       links.push({ label: "Upload Logs", path: "/upload-logs" });
     }
 

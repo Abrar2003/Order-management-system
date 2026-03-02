@@ -27,6 +27,9 @@ const itemSchema = new mongoose.Schema(
       top: { type: String, default: "0", trim: true },
       bottom: { type: String, default: "0", trim: true },
       total: { type: String, default: "0", trim: true },
+      qc_top: { type: String, default: "0", trim: true },
+      qc_bottom: { type: String, default: "0", trim: true },
+      qc_total: { type: String, default: "0", trim: true },
       inspected_top: { type: String, default: "0", trim: true },
       inspected_bottom: { type: String, default: "0", trim: true },
       inspected_total: { type: String, default: "0", trim: true },
@@ -39,7 +42,27 @@ const itemSchema = new mongoose.Schema(
       B: { type: Number, default: 0, min: 0 },
       H: { type: Number, default: 0, min: 0 },
     },
+    inspected_item_top_LBH: {
+      L: { type: Number, default: 0, min: 0 },
+      B: { type: Number, default: 0, min: 0 },
+      H: { type: Number, default: 0, min: 0 },
+    },
+    inspected_item_bottom_LBH: {
+      L: { type: Number, default: 0, min: 0 },
+      B: { type: Number, default: 0, min: 0 },
+      H: { type: Number, default: 0, min: 0 },
+    },
     inspected_box_LBH: {
+      L: { type: Number, default: 0, min: 0 },
+      B: { type: Number, default: 0, min: 0 },
+      H: { type: Number, default: 0, min: 0 },
+    },
+    inspected_top_LBH: {
+      L: { type: Number, default: 0, min: 0 },
+      B: { type: Number, default: 0, min: 0 },
+      H: { type: Number, default: 0, min: 0 },
+    },
+    inspected_bottom_LBH: {
       L: { type: Number, default: 0, min: 0 },
       B: { type: Number, default: 0, min: 0 },
       H: { type: Number, default: 0, min: 0 },

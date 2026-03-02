@@ -24,7 +24,14 @@ const SignIn = () => {
         throw new Error("Token missing");
       }
 
-      navigate("/");
+      document.body.classList.remove("modal-open");
+      document.body.style.removeProperty("overflow");
+      document.body.style.removeProperty("padding-right");
+      document
+        .querySelectorAll(".modal-backdrop, .offcanvas-backdrop, .om-modal-backdrop")
+        .forEach((node) => node.remove());
+
+      navigate("/", { replace: true });
     } catch (err) {
       console.error(err);
       setError("Invalid credentials");

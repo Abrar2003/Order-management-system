@@ -80,6 +80,20 @@ const calculateCbmFromLbh = (box = {}) => {
   return fixed.replace(/\.?0+$/, "") || "0";
 };
 
+const applyCalculatedCbmTotals = (item, setPath) => {
+  const calculatedFromInspected = calculateCbmFromLbh(
+    item?.inspected_box_LBH || item?.box_LBH || {},
+  );
+  const calculatedFromPis = calculateCbmFromLbh(
+    item?.pis_box_LBH || item?.box_LBH || {},
+  );
+
+  setPath("cbm.inspected_total", calculatedFromInspected);
+  setPath("cbm.calculated_inspected_total", calculatedFromInspected);
+  setPath("cbm.calculated_pis_total", calculatedFromPis);
+  setPath("cbm.calculated_total", calculatedFromInspected);
+};
+
 const normalizeDistinctValues = (values = []) =>
   [...new Set(
     (Array.isArray(values) ? values : [])
@@ -570,15 +584,7 @@ exports.updateItem = async (req, res) => {
     }
 
     if (touched) {
-      const calculatedFromInspected = calculateCbmFromLbh(
-        item?.inspected_box_LBH || item?.box_LBH || {},
-      );
-      const calculatedFromPis = calculateCbmFromLbh(
-        item?.pis_box_LBH || item?.box_LBH || {},
-      );
-      setPath("cbm.calculated_inspected_total", calculatedFromInspected);
-      setPath("cbm.calculated_pis_total", calculatedFromPis);
-      setPath("cbm.calculated_total", calculatedFromInspected);
+      applyCalculatedCbmTotals(item, setPath);
     }
 
     if (!touched) {
@@ -600,6 +606,112 @@ exports.updateItem = async (req, res) => {
     return res.status(400).json({
       success: false,
       message: error.message || "Failed to update item",
+    });
+  }
+};
+
+exports.updateItemPis = async (req, res) => {
+  try {
+    const itemId = String(req.params.id || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(itemId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid item id",
+      });
+    }
+
+    const payload = req.body && typeof req.body === "object" ? req.body : {};
+    const item = await Item.findById(itemId);
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: "Item not found",
+      });
+    }
+
+    let touched = false;
+    const setPath = (path, value) => {
+      item.set(path, value);
+      touched = true;
+    };
+
+    if (payload?.pis_weight && typeof payload.pis_weight === "object") {
+      if (hasOwn(payload.pis_weight, "net")) {
+        setPath(
+          "pis_weight.net",
+          toNonNegativeNumber(payload.pis_weight.net, "pis_weight.net"),
+        );
+      }
+      if (hasOwn(payload.pis_weight, "gross")) {
+        setPath(
+          "pis_weight.gross",
+          toNonNegativeNumber(payload.pis_weight.gross, "pis_weight.gross"),
+        );
+      }
+    }
+
+    if (payload?.pis_item_LBH && typeof payload.pis_item_LBH === "object") {
+      if (hasOwn(payload.pis_item_LBH, "L")) {
+        setPath(
+          "pis_item_LBH.L",
+          toNonNegativeNumber(payload.pis_item_LBH.L, "pis_item_LBH.L"),
+        );
+      }
+      if (hasOwn(payload.pis_item_LBH, "B")) {
+        setPath(
+          "pis_item_LBH.B",
+          toNonNegativeNumber(payload.pis_item_LBH.B, "pis_item_LBH.B"),
+        );
+      }
+      if (hasOwn(payload.pis_item_LBH, "H")) {
+        setPath(
+          "pis_item_LBH.H",
+          toNonNegativeNumber(payload.pis_item_LBH.H, "pis_item_LBH.H"),
+        );
+      }
+    }
+
+    if (payload?.pis_box_LBH && typeof payload.pis_box_LBH === "object") {
+      if (hasOwn(payload.pis_box_LBH, "L")) {
+        setPath(
+          "pis_box_LBH.L",
+          toNonNegativeNumber(payload.pis_box_LBH.L, "pis_box_LBH.L"),
+        );
+      }
+      if (hasOwn(payload.pis_box_LBH, "B")) {
+        setPath(
+          "pis_box_LBH.B",
+          toNonNegativeNumber(payload.pis_box_LBH.B, "pis_box_LBH.B"),
+        );
+      }
+      if (hasOwn(payload.pis_box_LBH, "H")) {
+        setPath(
+          "pis_box_LBH.H",
+          toNonNegativeNumber(payload.pis_box_LBH.H, "pis_box_LBH.H"),
+        );
+      }
+    }
+
+    if (!touched) {
+      return res.status(400).json({
+        success: false,
+        message: "No PIS fields provided",
+      });
+    }
+
+    applyCalculatedCbmTotals(item, setPath);
+    await item.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "PIS values updated successfully",
+      data: item.toObject(),
+    });
+  } catch (error) {
+    console.error("Update Item PIS Error:", error);
+    return res.status(400).json({
+      success: false,
+      message: error.message || "Failed to update PIS values",
     });
   }
 };

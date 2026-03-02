@@ -43,6 +43,20 @@ const formatLbhValue = (value) => {
   return `${safeLength} x ${safeBreadth} x ${safeHeight}`;
 };
 
+const hasCompletePositiveLbh = (value = {}) => {
+  const length = Number(value?.L || 0);
+  const breadth = Number(value?.B || 0);
+  const height = Number(value?.H || 0);
+  return (
+    Number.isFinite(length)
+    && Number.isFinite(breadth)
+    && Number.isFinite(height)
+    && length > 0
+    && breadth > 0
+    && height > 0
+  );
+};
+
 const toDisplayValue = (value, fallback = "N/A") => {
   const normalized = String(value ?? "").trim();
   return normalized || fallback;
@@ -116,10 +130,24 @@ const InspectionReport = () => {
     const checkedItemLbh = formatLbhValue(
       itemMaster?.inspected_item_LBH || itemMaster?.item_LBH,
     );
-    const pisBoxLbh = formatLbhValue(itemMaster?.pis_box_LBH || itemMaster?.box_LBH);
-    const checkedBoxLbh = formatLbhValue(
-      itemMaster?.inspected_box_LBH || itemMaster?.box_LBH,
+    const pisPackedSize = formatLbhValue(
+      itemMaster?.pis_box_LBH || itemMaster?.pis_item_LBH || itemMaster?.box_LBH || itemMaster?.item_LBH,
     );
+    const inspectedTopLbh = itemMaster?.inspected_top_LBH || {};
+    const inspectedBottomLbh = itemMaster?.inspected_bottom_LBH || {};
+    const checkedTopSize = formatLbhValue(inspectedTopLbh);
+    const checkedBottomSize = formatLbhValue(inspectedBottomLbh);
+    const showTopSize = checkedTopSize !== "Not Set";
+    const showBottomSize = checkedBottomSize !== "Not Set";
+    const checkedPackedSize = hasCompletePositiveLbh(inspectedTopLbh)
+      && hasCompletePositiveLbh(inspectedBottomLbh)
+      ? `Top: ${formatLbhValue(inspectedTopLbh)} | Bottom: ${formatLbhValue(inspectedBottomLbh)}`
+      : formatLbhValue(
+          itemMaster?.inspected_box_LBH
+          || itemMaster?.inspected_item_LBH
+          || itemMaster?.box_LBH
+          || itemMaster?.item_LBH,
+        );
     const pisNetWeight = toDisplayNumber(itemMaster?.pis_weight?.net ?? itemMaster?.weight?.net);
     const checkedNetWeight = toDisplayNumber(
       itemMaster?.inspected_weight?.net ?? itemMaster?.weight?.net,
@@ -130,56 +158,79 @@ const InspectionReport = () => {
     const checkedGrossWeight = toDisplayNumber(
       itemMaster?.inspected_weight?.gross ?? itemMaster?.weight?.gross,
     );
-    const inspectedCbmRaw =
-      itemMaster?.cbm?.inspected_total ??
-      itemMaster?.cbm?.total ??
-      qc?.cbm?.total ??
-      "0";
-    const pisCbmRaw =
-      itemMaster?.cbm?.total ??
-      "0";
     const calculatedInspectedCbmRaw =
       itemMaster?.cbm?.calculated_inspected_total ??
       itemMaster?.cbm?.calculated_total ??
+      itemMaster?.cbm?.qc_total ??
+      qc?.cbm?.total ??
       "0";
     const calculatedPisCbmRaw =
       itemMaster?.cbm?.calculated_pis_total ??
       "0";
-    const inspectedCbm = isPositiveCbmValue(inspectedCbmRaw)
-      ? String(inspectedCbmRaw).trim()
-      : "Not Set";
-    const pisCbm = isPositiveCbmValue(pisCbmRaw)
-      ? String(pisCbmRaw).trim()
-      : "Not Set";
+    const pisCbmTopRaw =
+      itemMaster?.cbm?.top ??
+      "0";
+    const pisCbmBottomRaw =
+      itemMaster?.cbm?.bottom ??
+      "0";
+    const checkedCbmTopRaw =
+      itemMaster?.cbm?.inspected_top ??
+      itemMaster?.cbm?.qc_top ??
+      qc?.cbm?.top ??
+      "0";
+    const checkedCbmBottomRaw =
+      itemMaster?.cbm?.inspected_bottom ??
+      itemMaster?.cbm?.qc_bottom ??
+      qc?.cbm?.bottom ??
+      "0";
     const calculatedInspectedCbm = isPositiveCbmValue(calculatedInspectedCbmRaw)
       ? String(calculatedInspectedCbmRaw).trim()
       : "Not Set";
     const calculatedPisCbm = isPositiveCbmValue(calculatedPisCbmRaw)
       ? String(calculatedPisCbmRaw).trim()
       : "Not Set";
+    const pisCbmTop = isPositiveCbmValue(pisCbmTopRaw)
+      ? String(pisCbmTopRaw).trim()
+      : "Not Set";
+    const pisCbmBottom = isPositiveCbmValue(pisCbmBottomRaw)
+      ? String(pisCbmBottomRaw).trim()
+      : "Not Set";
+    const checkedCbmTop = isPositiveCbmValue(checkedCbmTopRaw)
+      ? String(checkedCbmTopRaw).trim()
+      : "Not Set";
+    const checkedCbmBottom = isPositiveCbmValue(checkedCbmBottomRaw)
+      ? String(checkedCbmBottomRaw).trim()
+      : "Not Set";
+    const showCbmTop = pisCbmTop !== "Not Set" || checkedCbmTop !== "Not Set";
+    const showCbmBottom = pisCbmBottom !== "Not Set" || checkedCbmBottom !== "Not Set";
+    const checkedCbmTotal = calculatedInspectedCbm !== "Not Set"
+      ? calculatedInspectedCbm
+      : (isPositiveCbmValue(itemMaster?.cbm?.inspected_total)
+          ? String(itemMaster?.cbm?.inspected_total).trim()
+          : (isPositiveCbmValue(itemMaster?.cbm?.total)
+              ? String(itemMaster?.cbm?.total).trim()
+              : "Not Set"));
     const barcodeValue =
       Number(qc?.barcode || 0) > 0 ? String(qc.barcode).trim() : "Not Set";
 
     const rows = [
       { attribute: "Item Size (L x B x H)", pis: pisItemLbh, checked: checkedItemLbh },
-      { attribute: "Box Size (L x B x H)", pis: pisBoxLbh, checked: checkedBoxLbh },
+      { attribute: "Packed Size (L x B x H)", pis: pisPackedSize, checked: checkedPackedSize },
+      ...(showTopSize ? [{ attribute: "Top Size (L x B x H)", pis: "Not Set", checked: checkedTopSize }] : []),
+      ...(showBottomSize ? [{ attribute: "Bottom Size (L x B x H)", pis: "Not Set", checked: checkedBottomSize }] : []),
       { attribute: "Net Weight", pis: pisNetWeight, checked: checkedNetWeight },
       { attribute: "Gross Weight", pis: pisGrossWeight, checked: checkedGrossWeight },
-      { attribute: "CBM", pis: pisCbm, checked: inspectedCbm },
-      {
-        attribute: "Calculated CBM (LBH)",
-        pis: calculatedPisCbm,
-        checked: calculatedInspectedCbm,
-      },
+      ...(showCbmTop ? [{ attribute: "CBM Top", pis: pisCbmTop, checked: checkedCbmTop }] : []),
+      ...(showCbmBottom ? [{ attribute: "CBM Bottom", pis: pisCbmBottom, checked: checkedCbmBottom }] : []),
+      { attribute: "CBM", pis: calculatedPisCbm, checked: checkedCbmTotal },
+      { attribute: "Packed Size Check", pis: "N/A", checked: qc?.packed_size ? "Yes" : "No" },
+      { attribute: "Finishing Check", pis: "N/A", checked: qc?.finishing ? "Yes" : "No" },
+      { attribute: "Branding Check", pis: "N/A", checked: qc?.branding ? "Yes" : "No" },
+      { attribute: "Barcode", pis: "N/A", checked: barcodeValue },
     ];
 
     return {
       barcodeValue,
-      checks: {
-        packedSize: qc?.packed_size ? "Yes" : "No",
-        finishing: qc?.finishing ? "Yes" : "No",
-        branding: qc?.branding ? "Yes" : "No",
-      },
       rows,
     };
   }, [qc]);
@@ -329,36 +380,18 @@ const InspectionReport = () => {
             <section>
               <h3 className="h6 mb-3">Order Summary</h3>
               <div className="inspection-report-summary-block">
-                <div className="inspection-report-summary-line inspection-report-summary-line-two">
-                  <div className="inspection-report-summary-field">
-                    <div className="inspection-report-summary-label">Brand</div>
-                    <div className="inspection-report-summary-value">{orderInfo.brand}</div>
-                  </div>
-                  <div className="inspection-report-summary-field">
-                    <div className="inspection-report-summary-label">Vendor</div>
-                    <div className="inspection-report-summary-value">{orderInfo.vendor}</div>
-                  </div>
+                <div className="inspection-report-summary-line">
+                  <span><strong>Brand:</strong> {orderInfo.brand}</span>
+                  <span><strong>Vendor:</strong> {orderInfo.vendor}</span>
                 </div>
-                <div className="inspection-report-summary-line inspection-report-summary-line-three">
-                  <div className="inspection-report-summary-field">
-                    <div className="inspection-report-summary-label">Order ID</div>
-                    <div className="inspection-report-summary-value">{orderInfo.orderId}</div>
-                  </div>
-                  <div className="inspection-report-summary-field">
-                    <div className="inspection-report-summary-label">Item Code</div>
-                    <div className="inspection-report-summary-value">{orderInfo.itemCode}</div>
-                  </div>
-                  <div className="inspection-report-summary-field">
-                    <div className="inspection-report-summary-label">Description</div>
-                    <div className="inspection-report-summary-value">{orderInfo.itemDescription}</div>
-                  </div>
+                <div className="inspection-report-summary-line">
+                  <span><strong>Order ID:</strong> {orderInfo.orderId}</span>
+                  <span><strong>Item Code:</strong> {orderInfo.itemCode}</span>
+                  <span><strong>Description:</strong> {orderInfo.itemDescription}</span>
                 </div>
-                <div className="inspection-report-summary-line inspection-report-summary-line-one">
-                  <div className="inspection-report-summary-field">
-                    <div className="inspection-report-summary-label">Request Date</div>
-                    <div className="inspection-report-summary-value">{orderInfo.requestDate}</div>
-                  </div>
-                </div>
+                <div className="inspection-report-summary-line">
+                  <span><strong>Request Date:</strong> {orderInfo.requestDate}</span>
+                </div> 
               </div>
             </section>
 
@@ -366,7 +399,7 @@ const InspectionReport = () => {
               <h3 className="h6 mb-3">Inspection Records</h3>
               {inspectionRows.length > 0 ? (
                 <div className="table-responsive">
-                  <table className="table table-sm table-striped table-bordered align-middle mb-0 inspection-report-table-dark">
+                  <table className="table table-sm table-striped align-middle mb-0">
                     <thead>
                       <tr>
                         <th>Request Date</th>
@@ -405,7 +438,7 @@ const InspectionReport = () => {
             <section>
               <h3 className="h6 mb-3">Product Packing Details</h3>
               <div className="table-responsive mb-3">
-                <table className="table table-sm table-striped table-bordered align-middle mb-0 inspection-report-packing-table inspection-report-table-dark">
+                <table className="table table-sm table-striped table-bordered align-middle mb-0 inspection-report-packing-table">
                   <thead>
                     <tr>
                       <th>Attribute</th>
@@ -425,28 +458,11 @@ const InspectionReport = () => {
                 </table>
               </div>
 
-              <div className="inspection-report-checks-line mb-3">
-                <span>
-                  <strong>Packed Size Check:</strong> {itemMasterSummary.checks.packedSize}
-                </span>
-                <span>
-                  <strong>Finishing Check:</strong> {itemMasterSummary.checks.finishing}
-                </span>
-                <span>
-                  <strong>Branding Check:</strong> {itemMasterSummary.checks.branding}
-                </span>
-              </div>
-
-              <div className="inspection-report-barcode-stack">
-                <div className="inspection-report-barcode-value">
-                  <strong>Barcode Value:</strong> {itemMasterSummary.barcodeValue}
+              {itemMasterSummary.barcodeValue !== "Not Set" && (
+                <div className="qc-barcode-wrapper">
+                  <Barcode value={itemMasterSummary.barcodeValue} />
                 </div>
-                {itemMasterSummary.barcodeValue !== "Not Set" && (
-                  <div className="qc-barcode-wrapper">
-                    <Barcode value={itemMasterSummary.barcodeValue} />
-                  </div>
-                )}
-              </div>
+              )}
             </section>
           </div>
         </div>

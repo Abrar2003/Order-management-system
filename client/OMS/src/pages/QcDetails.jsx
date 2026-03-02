@@ -278,10 +278,19 @@ const QcDetails = () => {
       : "";
     const brandName = String(itemMaster?.brand_name || fallbackBrand || "").trim();
     const inspectedCbm = String(
-      itemMaster?.cbm?.inspected_total ?? itemMaster?.cbm?.total ?? "0",
+      itemMaster?.cbm?.calculated_inspected_total
+      ?? itemMaster?.cbm?.inspected_total
+      ?? itemMaster?.cbm?.calculated_total
+      ?? itemMaster?.cbm?.qc_total
+      ?? qc?.cbm?.total
+      ?? "0",
     ).trim();
     const calculatedInspectedCbm = String(
-      itemMaster?.cbm?.calculated_inspected_total ?? itemMaster?.cbm?.calculated_total ?? "0",
+      itemMaster?.cbm?.calculated_inspected_total
+      ?? itemMaster?.cbm?.calculated_total
+      ?? itemMaster?.cbm?.qc_total
+      ?? qc?.cbm?.total
+      ?? "0",
     ).trim();
     const calculatedPisCbm = String(
       itemMaster?.cbm?.calculated_pis_total ?? "0",
@@ -541,7 +550,7 @@ const QcDetails = () => {
               <div className="row g-3">  
                 <InfoBox label="Net Weight" value={itemMasterDetails.weightNet} />
                 <InfoBox
-                  label="Weight Gross"
+                  label="Gross Weight"
                   value={itemMasterDetails.weightGross}
                 />
                 <InfoBox label="Item LBH" value={itemMasterDetails.itemLbh} />

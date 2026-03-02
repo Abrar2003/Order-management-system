@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
-import EditItemModal from "../components/EditItemModal";
+import EditPisModal from "../components/EditPisModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -51,11 +51,15 @@ const formatLbh = (value) => {
   return `${safeL} x ${safeB} x ${safeH}`;
 };
 
-const getInspectedWeight = (item, key) => {
-  const value = item?.inspected_weight?.[key] ?? item?.weight?.[key] ?? 0;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-};
+const getBrand = (item) =>
+  item?.brand_name
+  || item?.brand
+  || (Array.isArray(item?.brands) && item.brands.length > 0 ? item.brands[0] : "N/A");
+
+const getVendors = (item) =>
+  Array.isArray(item?.vendors) && item.vendors.length > 0
+    ? item.vendors.join(", ")
+    : "N/A";
 
 const getPisWeight = (item, key) => {
   const value = item?.pis_weight?.[key] ?? 0;
@@ -63,35 +67,17 @@ const getPisWeight = (item, key) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const getInspectedItemLbh = (item) => item?.inspected_item_LBH || item?.item_LBH || {};
-const getInspectedBoxLbh = (item) => item?.inspected_box_LBH || item?.box_LBH || {};
-const getPisItemLbh = (item) => item?.pis_item_LBH || {};
-const getPisBoxLbh = (item) => item?.pis_box_LBH || {};
-const getCalculatedInspectedCbm = (item) =>
-  item?.cbm?.calculated_inspected_total
-  ?? item?.cbm?.inspected_total
-  ?? item?.cbm?.calculated_total
-  ?? item?.cbm?.qc_total
-  ?? item?.cbm?.total
-  ?? "0";
-const getCalculatedPisCbm = (item) => item?.cbm?.calculated_pis_total ?? "0";
-
-const Items = () => {
-  const navigate = useNavigate();
-  const location = useLocation();
+const PIS = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  useRememberSearchParams(searchParams, setSearchParams, "items");
+  useRememberSearchParams(searchParams, setSearchParams, "pis");
   const user = getUserFromToken();
   const normalizedRole = String(user?.role || "").trim().toLowerCase();
-  const canSyncItems = ["admin", "manager", "dev"].includes(normalizedRole);
-  const canEditItems = ["admin", "manager", "dev"].includes(normalizedRole);
+  const canEditPis = ["admin", "manager", "dev"].includes(normalizedRole);
 
   const [rows, setRows] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
   const [searchInput, setSearchInput] = useState(() =>
     normalizeSearchParam(searchParams.get("search")),
   );
@@ -200,80 +186,31 @@ const Items = () => {
     vendorFilter,
   ]);
 
-  const handleSync = async () => {
-    try {
-      setSyncing(true);
-      setError("");
-      setSuccess("");
-
-      const res = await api.post("/items/sync");
-      const totalItems = Number(res?.data?.summary?.total_items || 0);
-      const orderCreated = Number(res?.data?.summary?.order_sync?.created || 0);
-      const orderUpdated = Number(res?.data?.summary?.order_sync?.updated || 0);
-      const qcCreated = Number(res?.data?.summary?.qc_sync?.created || 0);
-      const qcUpdated = Number(res?.data?.summary?.qc_sync?.updated || 0);
-      const qcCbmUpdated = Number(res?.data?.summary?.qc_cbm_sync?.updated || 0);
-      const derivedUpdated = Number(res?.data?.summary?.derived_sync?.updated || 0);
-
-      setSuccess(
-        `Item sync complete. Total Items: ${totalItems}. QC CBM totals updated: ${qcCbmUpdated}. Orders created/updated: ${orderCreated}/${orderUpdated}. QC created/updated: ${qcCreated}/${qcUpdated}. Derived fields updated: ${derivedUpdated}.`,
-      );
-      await fetchItems();
-    } catch (err) {
-      setError(err?.response?.data?.message || "Failed to sync items.");
-    } finally {
-      setSyncing(false);
-    }
-  };
-
   const itemCodeOptions = useMemo(
     () => (Array.isArray(filters.item_codes) ? filters.item_codes : []),
     [filters.item_codes],
   );
 
-  const navigateToItemOrdersHistory = useCallback(
-    (item) => {
-      const itemCode = String(item?.code || "").trim();
-      if (!itemCode) return;
-      navigate(
-        `/items/${encodeURIComponent(itemCode)}/orders-history`,
-        {
-          state: {
-            fromItems: `${location.pathname}${location.search}`,
-          },
-        },
-      );
-    },
-    [location.pathname, location.search, navigate],
-  );
-
   return (
     <>
       <Navbar />
-
       <div className="page-shell py-3">
         <div className="d-flex justify-content-between align-items-center mb-3">
+          <h2 className="h4 mb-0">PIS</h2>
           <button
             type="button"
-            className="btn btn-outline-secondary btn-sm"
-            onClick={() => navigate(-1)}
+            className="btn btn-outline-primary btn-sm"
+            onClick={() => alert("PIS file upload will be added in a later update.")}
           >
-            Back
+            Upload PIS File
           </button>
-          <h2 className="h4 mb-0">Items</h2>
-          {canSyncItems ? (
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              disabled={syncing}
-              onClick={handleSync}
-            >
-              {syncing ? "Syncing..." : "Sync Items"}
-            </button>
-          ) : (
-            <span className="d-none d-md-inline" />
-          )}
         </div>
+
+        {!canEditPis && (
+          <div className="alert alert-warning" role="alert">
+            You do not have access to update PIS values.
+          </div>
+        )}
 
         <div className="card om-card mb-3">
           <div className="card-body">
@@ -284,14 +221,14 @@ const Items = () => {
                   type="text"
                   className="form-control"
                   value={searchInput}
-                  list="item-code-options"
+                  list="pis-item-code-options"
                   placeholder="Search items"
                   onChange={(e) => {
                     setPage(1);
                     setSearchInput(e.target.value);
                   }}
                 />
-                <datalist id="item-code-options">
+                <datalist id="pis-item-code-options">
                   {itemCodeOptions.map((code) => (
                     <option key={code} value={code} />
                   ))}
@@ -342,7 +279,6 @@ const Items = () => {
                     setSearchInput("");
                     setBrandFilter("all");
                     setVendorFilter("all");
-                    setSuccess("");
                   }}
                 >
                   Clear
@@ -366,12 +302,6 @@ const Items = () => {
           </div>
         )}
 
-        {success && (
-          <div className="alert alert-success mb-3" role="alert">
-            {success}
-          </div>
-        )}
-
         <div className="card om-card">
           <div className="card-body p-0">
             {loading ? (
@@ -382,80 +312,46 @@ const Items = () => {
                   <thead className="table-primary">
                     <tr>
                       <th>Item Code</th>
-                      <th>Name</th>
-                      <th>Brand Name</th>
-                      <th>Net Weight</th>
-                      <th>Gross Weight</th>
-                      <th>CBM</th>
-                      <th>Item LBH</th>
-                      <th>Box LBH</th>
-                      {canEditItems && <th>Action</th>}
-                      {/* <th>Source</th> */}
-                      {/* <th>Updated At</th> */}
+                      <th>Description</th>
+                      <th>Brand</th>
+                      <th>Vendors</th>
+                      <th>PIS Net</th>
+                      <th>PIS Gross</th>
+                      <th>PIS Item LBH</th>
+                      <th>PIS Box LBH</th>
+                      <th>PIS CBM</th>
+                      <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {rows.length === 0 && (
                       <tr>
-                        <td colSpan={canEditItems ? "15" : "14"} className="text-center py-4">
+                        <td colSpan="10" className="text-center py-4">
                           No items found
                         </td>
                       </tr>
                     )}
                     {rows.map((item) => (
                       <tr key={item?._id || item?.code}>
+                        <td>{item?.code || "N/A"}</td>
+                        <td>{item?.description || item?.name || "N/A"}</td>
+                        <td>{getBrand(item) || "N/A"}</td>
+                        <td>{getVendors(item)}</td>
+                        <td>{getPisWeight(item, "net")}</td>
+                        <td>{getPisWeight(item, "gross")}</td>
+                        <td>{formatLbh(item?.pis_item_LBH || {})}</td>
+                        <td>{formatLbh(item?.pis_box_LBH || {})}</td>
+                        <td>{item?.cbm?.calculated_pis_total ?? "0"}</td>
                         <td>
-                          {item?.code ? (
-                            <button
-                              type="button"
-                              className="btn btn-link btn-sm p-0 text-start"
-                              onClick={() => navigateToItemOrdersHistory(item)}
-                            >
-                              {item.code}
-                            </button>
-                          ) : (
-                            "N/A"
-                          )}
+                          <button
+                            type="button"
+                            className="btn btn-outline-primary btn-sm"
+                            disabled={!canEditPis}
+                            onClick={() => setSelectedItem(item)}
+                          >
+                            Update PIS
+                          </button>
                         </td>
-                        <td>{item?.name || "N/A"}</td>
-                        <td>
-                          {item?.brand_name
-                            || (Array.isArray(item?.brands) && item.brands.length > 0
-                              ? item.brands[0]
-                              : "N/A")}
-                        </td>
-                        {/* <td>{Array.isArray(item?.brands) && item.brands.length > 0 ? item.brands.join(", ") : "N/A"}</td>
-                        <td>{Array.isArray(item?.vendors) && item.vendors.length > 0 ? item.vendors.join(", ") : "N/A"}</td> */}
-                        <td>{getInspectedWeight(item, "net")}</td>
-                        <td>{getInspectedWeight(item, "gross")}</td>
-                        <td>
-                          {item?.cbm?.calculated_inspected_total
-                            ?? item?.cbm?.inspected_total
-                            ?? item?.cbm?.calculated_total
-                            ?? item?.cbm?.qc_total
-                            ?? item?.cbm?.total
-                            ?? "0"}
-                        </td>
-                        <td>{formatLbh(getInspectedItemLbh(item))}</td>
-                        <td>{formatLbh(getInspectedBoxLbh(item))}</td>
-                        {canEditItems && (
-                          <td>
-                            <button
-                              type="button"
-                              className="btn btn-outline-primary btn-sm"
-                              onClick={() => setSelectedItem(item)}
-                            >
-                              Edit
-                            </button>
-                          </td>
-                        )}
-                        {/* <td>
-                          {item?.source?.from_orders ? "Orders" : ""}
-                          {item?.source?.from_orders && item?.source?.from_qc ? " + " : ""}
-                          {item?.source?.from_qc ? "QC" : ""}
-                          {!item?.source?.from_orders && !item?.source?.from_qc ? "N/A" : ""}
-                        </td> */}
-                        {/* <td>{formatDateLabel(item?.updatedAt)}</td> */}
                       </tr>
                     ))}
                   </tbody>
@@ -507,8 +403,8 @@ const Items = () => {
         </div>
       </div>
 
-      {selectedItem && canEditItems && (
-        <EditItemModal
+      {selectedItem && canEditPis && (
+        <EditPisModal
           item={selectedItem}
           onClose={() => setSelectedItem(null)}
           onUpdated={() => {
@@ -521,4 +417,5 @@ const Items = () => {
   );
 };
 
-export default Items;
+export default PIS;
+

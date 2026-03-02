@@ -12,6 +12,6 @@ router.use(authorize("admin"));
  * POST /users
  * Create a user (Admin/Manager)
  */
-router.post("/", userController.createUser);
+router.post("/", userController.createUser); 
 
 module.exports = router;

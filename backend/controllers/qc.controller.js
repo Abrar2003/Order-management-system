@@ -192,9 +192,33 @@ const formatLbh = (dimensions = {}) => {
   return `${L} x ${B} x ${H}`;
 };
 
+const calculateCbmFromLbh = (dimensions = {}) => {
+  const L = toNonNegativeNumber(dimensions?.L, 0);
+  const B = toNonNegativeNumber(dimensions?.B, 0);
+  const H = toNonNegativeNumber(dimensions?.H, 0);
+  if (L <= 0 || B <= 0 || H <= 0) return "0";
+
+  const cubicMeters = (L * B * H) / 1000000;
+  return toNormalizedCbmString(cubicMeters);
+};
+
+const hasCompletePositiveLbh = (dimensions = {}) => {
+  const L = toNonNegativeNumber(dimensions?.L, 0);
+  const B = toNonNegativeNumber(dimensions?.B, 0);
+  const H = toNonNegativeNumber(dimensions?.H, 0);
+  return L > 0 && B > 0 && H > 0;
+};
+
 const normalizeItemCodeKey = (value) => normalizeText(value).toLowerCase();
 const getItemInspectedCbmTotal = (itemDoc = {}) =>
-  normalizeText(itemDoc?.cbm?.inspected_total ?? itemDoc?.cbm?.total ?? "");
+  normalizeText(
+    itemDoc?.cbm?.calculated_inspected_total
+      ?? itemDoc?.cbm?.inspected_total
+      ?? itemDoc?.cbm?.calculated_total
+      ?? itemDoc?.cbm?.qc_total
+      ?? itemDoc?.cbm?.total
+      ?? "",
+  );
 const getItemWeightNet = (itemDoc = {}) =>
   toNonNegativeNumber(
     itemDoc?.inspected_weight?.net ?? itemDoc?.pis_weight?.net ?? itemDoc?.weight?.net,
@@ -1119,9 +1143,13 @@ exports.exportQCList = async (req, res) => {
             weight: 1,
             cbm: 1,
             inspected_item_LBH: 1,
+            inspected_item_top_LBH: 1,
+            inspected_item_bottom_LBH: 1,
             pis_item_LBH: 1,
             item_LBH: 1,
             inspected_box_LBH: 1,
+            inspected_top_LBH: 1,
+            inspected_bottom_LBH: 1,
             pis_box_LBH: 1,
             box_LBH: 1,
           },
@@ -1741,6 +1769,12 @@ exports.updateQC = async (req, res) => {
       CBM_top,
       CBM_bottom,
       CBM,
+      inspected_item_LBH,
+      inspected_item_top_LBH,
+      inspected_item_bottom_LBH,
+      inspected_box_LBH,
+      inspected_top_LBH,
+      inspected_bottom_LBH,
     } = req.body;
 
       const qc = await QC.findById(req.params.id)
@@ -1858,6 +1892,121 @@ exports.updateQC = async (req, res) => {
       const parsedCbmTotal = parseCbmField(CBM, "CBM");
       const parsedCbmTop = parseCbmField(CBM_top, "CBM top");
       const parsedCbmBottom = parseCbmField(CBM_bottom, "CBM bottom");
+
+      const parseLbhPayload = (value, fieldName) => {
+        if (value === undefined) return null;
+        if (value === null || typeof value !== "object" || Array.isArray(value)) {
+          throw new Error(`${fieldName} must be an object with L, B and H`);
+        }
+
+        const hasAnyInput =
+          value.L !== undefined || value.B !== undefined || value.H !== undefined;
+        if (!hasAnyInput) return null;
+
+        if (value.L === undefined || value.B === undefined || value.H === undefined) {
+          throw new Error(`${fieldName} must include L, B and H`);
+        }
+
+        const L = toNonNegativeNumber(value.L, NaN);
+        const B = toNonNegativeNumber(value.B, NaN);
+        const H = toNonNegativeNumber(value.H, NaN);
+        if (!Number.isFinite(L) || !Number.isFinite(B) || !Number.isFinite(H) || L <= 0 || B <= 0 || H <= 0) {
+          throw new Error(`${fieldName} values must be valid numbers greater than 0`);
+        }
+
+        return { L, B, H };
+      };
+
+      const nextInspectedItemLbh = parseLbhPayload(
+        inspected_item_LBH,
+        "inspected_item_LBH",
+      );
+      const nextInspectedItemTopLbh = parseLbhPayload(
+        inspected_item_top_LBH,
+        "inspected_item_top_LBH",
+      );
+      const nextInspectedItemBottomLbh = parseLbhPayload(
+        inspected_item_bottom_LBH,
+        "inspected_item_bottom_LBH",
+      );
+      const nextInspectedBoxLbh = parseLbhPayload(
+        inspected_box_LBH,
+        "inspected_box_LBH",
+      );
+      const nextInspectedTopLbh = parseLbhPayload(
+        inspected_top_LBH,
+        "inspected_top_LBH",
+      );
+      const nextInspectedBottomLbh = parseLbhPayload(
+        inspected_bottom_LBH,
+        "inspected_bottom_LBH",
+      );
+      const hasInspectedLbhUpdate = Boolean(
+        nextInspectedItemLbh
+        || nextInspectedItemTopLbh
+        || nextInspectedItemBottomLbh
+        || nextInspectedBoxLbh
+        || nextInspectedTopLbh
+        || nextInspectedBottomLbh,
+      );
+      const itemCodeForInspectedLbhUpdate = (hasInspectedLbhUpdate || hasCbmUpdate)
+        ? normalizeText(qc?.item?.item_code || "")
+        : "";
+      if ((hasInspectedLbhUpdate || hasCbmUpdate) && !itemCodeForInspectedLbhUpdate) {
+        return res.status(400).json({
+          message: "Item code is required to update inspected LBH or CBM fields",
+        });
+      }
+
+      let itemDocForInspectedLbhUpdate = null;
+      if (itemCodeForInspectedLbhUpdate) {
+        itemDocForInspectedLbhUpdate = await Item.findOne({
+          code: {
+            $regex: `^${escapeRegex(itemCodeForInspectedLbhUpdate)}$`,
+            $options: "i",
+          },
+        });
+      }
+
+      if (hasInspectedLbhUpdate && !itemDocForInspectedLbhUpdate) {
+        return res.status(404).json({
+          message: "Item master record not found for this item code",
+        });
+      }
+
+      const effectiveInspectedItemLbh = nextInspectedItemLbh
+        || itemDocForInspectedLbhUpdate?.inspected_item_LBH
+        || itemDocForInspectedLbhUpdate?.item_LBH
+        || {};
+      const effectiveInspectedItemTopLbh = nextInspectedItemTopLbh
+        || itemDocForInspectedLbhUpdate?.inspected_item_top_LBH
+        || {};
+      const effectiveInspectedItemBottomLbh = nextInspectedItemBottomLbh
+        || itemDocForInspectedLbhUpdate?.inspected_item_bottom_LBH
+        || {};
+      const effectiveInspectedBoxLbh = nextInspectedBoxLbh
+        || itemDocForInspectedLbhUpdate?.inspected_box_LBH
+        || itemDocForInspectedLbhUpdate?.box_LBH
+        || {};
+      const effectiveInspectedTopLbh = nextInspectedTopLbh
+        || itemDocForInspectedLbhUpdate?.inspected_top_LBH
+        || {};
+      const effectiveInspectedBottomLbh = nextInspectedBottomLbh
+        || itemDocForInspectedLbhUpdate?.inspected_bottom_LBH
+        || {};
+      const cbmLockedByLbh =
+        hasCompletePositiveLbh(effectiveInspectedItemLbh)
+        || hasCompletePositiveLbh(effectiveInspectedItemTopLbh)
+        || hasCompletePositiveLbh(effectiveInspectedItemBottomLbh)
+        || hasCompletePositiveLbh(effectiveInspectedBoxLbh)
+        || hasCompletePositiveLbh(effectiveInspectedTopLbh)
+        || hasCompletePositiveLbh(effectiveInspectedBottomLbh);
+
+      if (hasCbmUpdate && cbmLockedByLbh) {
+        return res.status(400).json({
+          message: "CBM fields are locked because inspected LBH is present. Update LBH instead.",
+        });
+      }
 
       if (hasCbmUpdate) {
         const existingTotal = toNonNegativeNumber(qc?.cbm?.total, 0);
@@ -2048,7 +2197,11 @@ exports.updateQC = async (req, res) => {
       const baseLabelLimit = inspectedQuantityForLabels;
       const cbmTopValue = toNonNegativeNumber(qc?.cbm?.top, 0);
       const cbmBottomValue = toNonNegativeNumber(qc?.cbm?.bottom, 0);
-      const hasTopBottomCbm = cbmTopValue > 0 && cbmBottomValue > 0;
+      const hasTopBottomLbhForLabels =
+        hasCompletePositiveLbh(effectiveInspectedTopLbh)
+        && hasCompletePositiveLbh(effectiveInspectedBottomLbh);
+      const hasTopBottomCbm =
+        (cbmTopValue > 0 && cbmBottomValue > 0) || hasTopBottomLbhForLabels;
       const maxLabelsAllowed = hasTopBottomCbm ? baseLabelLimit * 2 : baseLabelLimit;
 
       qc.quantities.vendor_provision = nextVendorProvision;
@@ -2275,6 +2428,78 @@ exports.updateQC = async (req, res) => {
         if (latestRequestEntry && inspectionRecord && isVisitUpdate) {
           latestRequestEntry.status = "inspected";
         }
+      }
+
+      if (hasInspectedLbhUpdate) {
+        const itemDoc = itemDocForInspectedLbhUpdate;
+
+        if (nextInspectedItemLbh) {
+          itemDoc.inspected_item_LBH = nextInspectedItemLbh;
+        }
+
+        if (nextInspectedItemTopLbh) {
+          itemDoc.inspected_item_top_LBH = nextInspectedItemTopLbh;
+        }
+
+        if (nextInspectedItemBottomLbh) {
+          itemDoc.inspected_item_bottom_LBH = nextInspectedItemBottomLbh;
+        }
+
+        if (nextInspectedBoxLbh) {
+          itemDoc.inspected_box_LBH = nextInspectedBoxLbh;
+        }
+
+        if (nextInspectedTopLbh) {
+          itemDoc.inspected_top_LBH = nextInspectedTopLbh;
+        }
+
+        if (nextInspectedBottomLbh) {
+          itemDoc.inspected_bottom_LBH = nextInspectedBottomLbh;
+        }
+
+        const calculatedInspectedTopCbm = calculateCbmFromLbh(
+          itemDoc?.inspected_top_LBH || {},
+        );
+        const calculatedInspectedBottomCbm = calculateCbmFromLbh(
+          itemDoc?.inspected_bottom_LBH || {},
+        );
+        const hasTopAndBottomInspectedCbm =
+          toNonNegativeNumber(calculatedInspectedTopCbm, 0) > 0
+          && toNonNegativeNumber(calculatedInspectedBottomCbm, 0) > 0;
+
+        const calculatedInspectedCbmFromBox = calculateCbmFromLbh(
+          itemDoc?.inspected_box_LBH || itemDoc?.box_LBH || {},
+        );
+        const calculatedInspectedCbm = hasTopAndBottomInspectedCbm
+          ? toNormalizedCbmString(
+              toNonNegativeNumber(calculatedInspectedTopCbm, 0)
+              + toNonNegativeNumber(calculatedInspectedBottomCbm, 0),
+            )
+          : calculatedInspectedCbmFromBox;
+        const calculatedPisCbm = calculateCbmFromLbh(
+          itemDoc?.pis_box_LBH || itemDoc?.box_LBH || {},
+        );
+
+        itemDoc.cbm = {
+          ...(itemDoc.cbm || {}),
+          inspected_top: calculatedInspectedTopCbm,
+          inspected_bottom: calculatedInspectedBottomCbm,
+          inspected_total: calculatedInspectedCbm,
+          calculated_inspected_total: calculatedInspectedCbm,
+          calculated_pis_total: calculatedPisCbm,
+          calculated_total: calculatedInspectedCbm,
+        };
+
+        if (nextInspectedBoxLbh || nextInspectedTopLbh || nextInspectedBottomLbh) {
+          qc.cbm = {
+            ...(qc.cbm || {}),
+            top: calculatedInspectedTopCbm,
+            bottom: calculatedInspectedBottomCbm,
+            total: calculatedInspectedCbm,
+          };
+        }
+
+        await itemDoc.save();
       }
 
       await qc.save();
@@ -3251,7 +3476,7 @@ exports.getQCById = async (req, res) => {
           },
         })
           .select(
-            "code name description brand_name brands vendors inspected_weight pis_weight weight cbm inspected_item_LBH pis_item_LBH item_LBH inspected_box_LBH pis_box_LBH box_LBH",
+            "code name description brand_name brands vendors inspected_weight pis_weight weight cbm inspected_item_LBH inspected_item_top_LBH inspected_item_bottom_LBH pis_item_LBH item_LBH inspected_box_LBH inspected_top_LBH inspected_bottom_LBH pis_box_LBH box_LBH",
           )
           .lean()
       : null;

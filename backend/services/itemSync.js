@@ -44,6 +44,20 @@ const normalizeUniqueList = (values = []) =>
     .filter(Boolean))]
     .sort((a, b) => a.localeCompare(b));
 
+const toDateSortTime = (value) => {
+  if (!value) return 0;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+};
+
+const getQcSnapshotSortTime = (qcLike = {}) =>
+  Math.max(
+    toDateSortTime(qcLike?.updatedAt),
+    toDateSortTime(qcLike?.last_inspected_date),
+    toDateSortTime(qcLike?.request_date),
+    toDateSortTime(qcLike?.createdAt),
+  );
+
 const applyDerivedItemFields = (item, { preferredBrand = "" } = {}) => {
   let changed = false;
 
@@ -85,9 +99,18 @@ const applyDerivedItemFields = (item, { preferredBrand = "" } = {}) => {
     }
   }
 
-  const nextCalculatedInspectedTotal = calculateCbmFromBoxSize(
-    item?.inspected_box_LBH || item?.box_LBH,
-  );
+  const nextInspectedTop = calculateCbmFromBoxSize(item?.inspected_top_LBH);
+  const nextInspectedBottom = calculateCbmFromBoxSize(item?.inspected_bottom_LBH);
+  const hasSplitInspectedCbm =
+    Math.max(0, toSafeNumber(nextInspectedTop, 0)) > 0
+    && Math.max(0, toSafeNumber(nextInspectedBottom, 0)) > 0;
+  const nextCalculatedInspectedTotal = hasSplitInspectedCbm
+    ? toDecimalString(
+        Math.max(0, toSafeNumber(nextInspectedTop, 0))
+        + Math.max(0, toSafeNumber(nextInspectedBottom, 0)),
+        6,
+      )
+    : calculateCbmFromBoxSize(item?.inspected_box_LBH || item?.box_LBH);
   const nextCalculatedPisTotal = calculateCbmFromBoxSize(
     item?.pis_box_LBH || item?.box_LBH,
   );
@@ -97,20 +120,35 @@ const applyDerivedItemFields = (item, { preferredBrand = "" } = {}) => {
   const currentCalculatedPisTotal = normalizeCbmText(
     item?.cbm?.calculated_pis_total ?? "0",
   );
+  const currentInspectedTop = normalizeCbmText(item?.cbm?.inspected_top ?? "0");
+  const currentInspectedBottom = normalizeCbmText(item?.cbm?.inspected_bottom ?? "0");
   const currentCalculatedTotal = normalizeCbmText(item?.cbm?.calculated_total ?? "0");
+  const currentInspectedTotal = normalizeCbmText(item?.cbm?.inspected_total ?? "0");
+  const hasInspectedTop = hasOwn(item?.cbm || {}, "inspected_top");
+  const hasInspectedBottom = hasOwn(item?.cbm || {}, "inspected_bottom");
   const hasCalculatedInspectedTotal = hasOwn(item?.cbm || {}, "calculated_inspected_total");
   const hasCalculatedPisTotal = hasOwn(item?.cbm || {}, "calculated_pis_total");
   const hasCalculatedTotal = hasOwn(item?.cbm || {}, "calculated_total");
+  const hasInspectedTotal = hasOwn(item?.cbm || {}, "inspected_total");
   if (
-    !hasCalculatedInspectedTotal
+    !hasInspectedTop
+    || currentInspectedTop !== nextInspectedTop
+    || !hasInspectedBottom
+    || currentInspectedBottom !== nextInspectedBottom
+    || !hasCalculatedInspectedTotal
     || currentCalculatedInspectedTotal !== nextCalculatedInspectedTotal
     || !hasCalculatedPisTotal
     || currentCalculatedPisTotal !== nextCalculatedPisTotal
     || !hasCalculatedTotal
     || currentCalculatedTotal !== nextCalculatedInspectedTotal
+    || !hasInspectedTotal
+    || currentInspectedTotal !== nextCalculatedInspectedTotal
   ) {
     item.cbm = {
       ...(item.cbm || {}),
+      inspected_top: nextInspectedTop,
+      inspected_bottom: nextInspectedBottom,
+      inspected_total: nextCalculatedInspectedTotal,
       calculated_inspected_total: nextCalculatedInspectedTotal,
       calculated_pis_total: nextCalculatedPisTotal,
       calculated_total: nextCalculatedInspectedTotal,
@@ -130,12 +168,12 @@ const applyOrderSnapshot = (item, orderLike) => {
   const brand = normalizeText(orderLike?.brand ?? "");
   const vendor = normalizeText(orderLike?.vendor ?? "");
 
-  if (description && item.name !== description) {
+  if (item.name !== description) {
     item.name = description;
     changed = true;
   }
 
-  if (description && item.description !== description) {
+  if (item.description !== description) {
     item.description = description;
     changed = true;
   }
@@ -195,34 +233,28 @@ const applyQcSnapshot = (item, qcLike) => {
   }
 
   const currentCbm = item.cbm || {};
-  const nextTop = normalizeCbmText(
-    qcLike?.cbm?.top ?? currentCbm.inspected_top ?? currentCbm.top ?? "0",
+  const nextQcTop = normalizeCbmText(
+    qcLike?.cbm?.top ?? currentCbm.qc_top ?? "0",
   );
-  const nextBottom = normalizeCbmText(
-    qcLike?.cbm?.bottom ?? currentCbm.inspected_bottom ?? currentCbm.bottom ?? "0",
+  const nextQcBottom = normalizeCbmText(
+    qcLike?.cbm?.bottom ?? currentCbm.qc_bottom ?? "0",
   );
-  const nextTotal = resolveCbmTotal(
-    nextTop,
-    nextBottom,
-    qcLike?.cbm?.total ?? currentCbm.inspected_total ?? currentCbm.total ?? "0",
+  const nextQcTotal = resolveCbmTotal(
+    nextQcTop,
+    nextQcBottom,
+    qcLike?.cbm?.total ?? currentCbm.qc_total ?? "0",
   );
 
   if (
-    normalizeCbmText(currentCbm.top ?? "0") !== nextTop
-    || normalizeCbmText(currentCbm.bottom ?? "0") !== nextBottom
-    || normalizeCbmText(currentCbm.total ?? "0") !== nextTotal
-    || normalizeCbmText(currentCbm.inspected_top ?? "0") !== nextTop
-    || normalizeCbmText(currentCbm.inspected_bottom ?? "0") !== nextBottom
-    || normalizeCbmText(currentCbm.inspected_total ?? "0") !== nextTotal
+    normalizeCbmText(currentCbm.qc_top ?? "0") !== nextQcTop
+    || normalizeCbmText(currentCbm.qc_bottom ?? "0") !== nextQcBottom
+    || normalizeCbmText(currentCbm.qc_total ?? "0") !== nextQcTotal
   ) {
     item.cbm = {
       ...currentCbm,
-      top: nextTop,
-      bottom: nextBottom,
-      total: nextTotal,
-      inspected_top: nextTop,
-      inspected_bottom: nextBottom,
-      inspected_total: nextTotal,
+      qc_top: nextQcTop,
+      qc_bottom: nextQcBottom,
+      qc_total: nextQcTotal,
     };
     changed = true;
   }
@@ -332,11 +364,28 @@ const upsertItemFromQc = async (qcLike) => {
 };
 
 const upsertItemsFromQcs = async (qcs = []) => {
+  const latestQcByCode = new Map();
+
+  for (const qc of Array.isArray(qcs) ? qcs : []) {
+    const code = normalizeText(qc?.item?.item_code ?? "");
+    const codeKey = code.toLowerCase();
+    if (!codeKey) continue;
+
+    const nextSortTime = getQcSnapshotSortTime(qc);
+    const existingEntry = latestQcByCode.get(codeKey);
+    const existingSortTime = existingEntry ? getQcSnapshotSortTime(existingEntry) : -1;
+
+    if (!existingEntry || nextSortTime >= existingSortTime) {
+      latestQcByCode.set(codeKey, qc);
+    }
+  }
+
+  const latestQcs = Array.from(latestQcByCode.values());
   let created = 0;
   let updated = 0;
   let skipped = 0;
 
-  for (const qc of Array.isArray(qcs) ? qcs : []) {
+  for (const qc of latestQcs) {
     const result = await upsertItemFromQc(qc);
     created += result.created;
     updated += result.updated;
@@ -344,7 +393,8 @@ const upsertItemsFromQcs = async (qcs = []) => {
   }
 
   return {
-    processed: (Array.isArray(qcs) ? qcs : []).length,
+    processed: latestQcs.length,
+    source_records: (Array.isArray(qcs) ? qcs : []).length,
     created,
     updated,
     skipped,
@@ -450,7 +500,7 @@ const syncAllItemsFromOrdersAndQc = async () => {
       .lean(),
     QC.find({ "item.item_code": { $exists: true, $ne: "" } })
       .select(
-        "item order_meta cbm packed_size finishing branding barcode last_inspected_date quantities",
+        "item order_meta cbm packed_size finishing branding barcode last_inspected_date request_date quantities createdAt updatedAt",
       )
       .lean(),
   ]);

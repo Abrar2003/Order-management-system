@@ -17,9 +17,43 @@ const NON_NEGATIVE_FIELDS = new Set([
   "CBM",
   "CBM_top",
   "CBM_bottom",
+  "inspected_item_L",
+  "inspected_item_B",
+  "inspected_item_H",
+  "inspected_box_L",
+  "inspected_box_B",
+  "inspected_box_H",
+  "inspected_top_L",
+  "inspected_top_B",
+  "inspected_top_H",
+  "inspected_bottom_L",
+  "inspected_bottom_B",
+  "inspected_bottom_H",
+  "inspected_item_top_L",
+  "inspected_item_top_B",
+  "inspected_item_top_H",
+  "inspected_item_bottom_L",
+  "inspected_item_bottom_B",
+  "inspected_item_bottom_H",
 ]);
 
 const createEmptyLabelRange = () => ({ start: "", end: "" });
+const toDimensionInputValue = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return "";
+  return String(parsed);
+};
+
+const hasAnyLbhInput = (values = []) =>
+  values.some((value) => String(value ?? "").trim() !== "");
+
+const toStrictLbhInputGroup = (dimensions = {}) => {
+  const L = toDimensionInputValue(dimensions?.L);
+  const B = toDimensionInputValue(dimensions?.B);
+  const H = toDimensionInputValue(dimensions?.H);
+  if (L && B && H) return { L, B, H };
+  return { L: "", B: "", H: "" };
+};
 
 const toLocalIsoDate = (dateValue) => {
   const date = dateValue instanceof Date ? dateValue : new Date(dateValue);
@@ -59,6 +93,24 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     CBM: "",
     CBM_top: "",
     CBM_bottom: "",
+    inspected_item_L: "",
+    inspected_item_B: "",
+    inspected_item_H: "",
+    inspected_box_L: "",
+    inspected_box_B: "",
+    inspected_box_H: "",
+    inspected_top_L: "",
+    inspected_top_B: "",
+    inspected_top_H: "",
+    inspected_bottom_L: "",
+    inspected_bottom_B: "",
+    inspected_bottom_H: "",
+    inspected_item_top_L: "",
+    inspected_item_top_B: "",
+    inspected_item_top_H: "",
+    inspected_item_bottom_L: "",
+    inspected_item_bottom_B: "",
+    inspected_item_bottom_H: "",
     last_inspected_date: "",
   });
   const [inspectors, setInspectors] = useState([]);
@@ -89,6 +141,19 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     const initialCbmTotal =
       qc?.cbm?.total && qc.cbm.total !== "0" ? String(qc.cbm.total) : "";
     const hasTopOrBottomCbm = initialCbmTop !== "" || initialCbmBottom !== "";
+    const itemMaster = qc?.item_master || {};
+    const inspectedItemLbh = itemMaster?.inspected_item_LBH || itemMaster?.item_LBH || {};
+    const inspectedBoxLbh = itemMaster?.inspected_box_LBH || itemMaster?.box_LBH || {};
+    const inspectedTopLbh = itemMaster?.inspected_top_LBH || {};
+    const inspectedBottomLbh = itemMaster?.inspected_bottom_LBH || {};
+    const inspectedItemTopLbh = itemMaster?.inspected_item_top_LBH || {};
+    const inspectedItemBottomLbh = itemMaster?.inspected_item_bottom_LBH || {};
+    const strictInspectedItemLbh = toStrictLbhInputGroup(inspectedItemLbh);
+    const strictInspectedBoxLbh = toStrictLbhInputGroup(inspectedBoxLbh);
+    const strictInspectedTopLbh = toStrictLbhInputGroup(inspectedTopLbh);
+    const strictInspectedBottomLbh = toStrictLbhInputGroup(inspectedBottomLbh);
+    const strictInspectedItemTopLbh = toStrictLbhInputGroup(inspectedItemTopLbh);
+    const strictInspectedItemBottomLbh = toStrictLbhInputGroup(inspectedItemBottomLbh);
 
     setForm({
       inspector: assignedInspectorId || (isQcUser ? String(currentUserId) : ""),
@@ -104,6 +169,24 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       CBM: hasTopOrBottomCbm ? "" : initialCbmTotal,
       CBM_top: initialCbmTop,
       CBM_bottom: initialCbmBottom,
+      inspected_item_L: strictInspectedItemLbh.L,
+      inspected_item_B: strictInspectedItemLbh.B,
+      inspected_item_H: strictInspectedItemLbh.H,
+      inspected_box_L: strictInspectedBoxLbh.L,
+      inspected_box_B: strictInspectedBoxLbh.B,
+      inspected_box_H: strictInspectedBoxLbh.H,
+      inspected_top_L: strictInspectedTopLbh.L,
+      inspected_top_B: strictInspectedTopLbh.B,
+      inspected_top_H: strictInspectedTopLbh.H,
+      inspected_bottom_L: strictInspectedBottomLbh.L,
+      inspected_bottom_B: strictInspectedBottomLbh.B,
+      inspected_bottom_H: strictInspectedBottomLbh.H,
+      inspected_item_top_L: strictInspectedItemTopLbh.L,
+      inspected_item_top_B: strictInspectedItemTopLbh.B,
+      inspected_item_top_H: strictInspectedItemTopLbh.H,
+      inspected_item_bottom_L: strictInspectedItemBottomLbh.L,
+      inspected_item_bottom_B: strictInspectedItemBottomLbh.B,
+      inspected_item_bottom_H: strictInspectedItemBottomLbh.H,
       last_inspected_date: toDDMMYYYYInputValue(qc.last_inspected_date, ""),
     });
   }, [qc, currentUserId, isQcUser]);
@@ -136,6 +219,23 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
           ...prev,
           [name]: nextValue,
           ...(hasSegmentValue ? { CBM: "" } : {}),
+        };
+      }
+
+      if (
+        name.startsWith("inspected_item_")
+        || name.startsWith("inspected_box_")
+        || name.startsWith("inspected_top_")
+        || name.startsWith("inspected_bottom_")
+        || name.startsWith("inspected_item_top_")
+        || name.startsWith("inspected_item_bottom_")
+      ) {
+        return {
+          ...prev,
+          [name]: nextValue,
+          CBM: "",
+          CBM_top: "",
+          CBM_bottom: "",
         };
       }
 
@@ -294,8 +394,115 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       return;
     }
 
+    const parseLbhGroup = (groupName, values) => {
+      const entries = Object.entries(values);
+      const parsed = {};
+      const hasAnyInput = entries.some(([, rawValue]) => String(rawValue ?? "").trim() !== "");
+
+      if (!hasAnyInput) return { hasAnyInput: false, value: null };
+
+      const hasAllInputs = entries.every(([, rawValue]) => String(rawValue ?? "").trim() !== "");
+      if (!hasAllInputs) {
+        return { error: `${groupName} requires L, B and H values.` };
+      }
+
+      for (const [key, rawValue] of entries) {
+        const normalized = String(rawValue ?? "").trim();
+        const numeric = Number(normalized);
+        if (!Number.isFinite(numeric) || numeric <= 0) {
+          return { error: `${groupName} ${key} must be greater than 0.` };
+        }
+
+        parsed[key] = numeric;
+      }
+
+      return { hasAnyInput: true, value: parsed };
+    };
+
+    const inspectedItemLbh = parseLbhGroup("Inspected Item LBH", {
+      L: form.inspected_item_L,
+      B: form.inspected_item_B,
+      H: form.inspected_item_H,
+    });
+    if (inspectedItemLbh.error) {
+      setError(inspectedItemLbh.error);
+      return;
+    }
+
+    const inspectedBoxLbh = parseLbhGroup("Inspected Box LBH", {
+      L: form.inspected_box_L,
+      B: form.inspected_box_B,
+      H: form.inspected_box_H,
+    });
+    if (inspectedBoxLbh.error) {
+      setError(inspectedBoxLbh.error);
+      return;
+    }
+
+    const inspectedTopLbh = parseLbhGroup("Inspected Top LBH", {
+      L: form.inspected_top_L,
+      B: form.inspected_top_B,
+      H: form.inspected_top_H,
+    });
+    if (inspectedTopLbh.error) {
+      setError(inspectedTopLbh.error);
+      return;
+    }
+
+    const inspectedBottomLbh = parseLbhGroup("Inspected Bottom LBH", {
+      L: form.inspected_bottom_L,
+      B: form.inspected_bottom_B,
+      H: form.inspected_bottom_H,
+    });
+    if (inspectedBottomLbh.error) {
+      setError(inspectedBottomLbh.error);
+      return;
+    }
+
+    const inspectedItemTopLbh = parseLbhGroup("Inspected Item Top LBH", {
+      L: form.inspected_item_top_L,
+      B: form.inspected_item_top_B,
+      H: form.inspected_item_top_H,
+    });
+    if (inspectedItemTopLbh.error) {
+      setError(inspectedItemTopLbh.error);
+      return;
+    }
+
+    const inspectedItemBottomLbh = parseLbhGroup("Inspected Item Bottom LBH", {
+      L: form.inspected_item_bottom_L,
+      B: form.inspected_item_bottom_B,
+      H: form.inspected_item_bottom_H,
+    });
+    if (inspectedItemBottomLbh.error) {
+      setError(inspectedItemBottomLbh.error);
+      return;
+    }
+
+    const cbmLockedByLbh = hasAnyLbhInput([
+      form.inspected_item_L,
+      form.inspected_item_B,
+      form.inspected_item_H,
+      form.inspected_box_L,
+      form.inspected_box_B,
+      form.inspected_box_H,
+      form.inspected_top_L,
+      form.inspected_top_B,
+      form.inspected_top_H,
+      form.inspected_bottom_L,
+      form.inspected_bottom_B,
+      form.inspected_bottom_H,
+      form.inspected_item_top_L,
+      form.inspected_item_top_B,
+      form.inspected_item_top_H,
+      form.inspected_item_bottom_L,
+      form.inspected_item_bottom_B,
+      form.inspected_item_bottom_H,
+    ]);
+
     const barcodeValue = form.barcode.trim();
     const parseOptionalCbm = (value, label) => {
+      if (cbmLockedByLbh) return { hasValue: false, value: null };
       const raw = value.trim();
       if (raw === "") return { hasValue: false, value: null };
       const parsed = Number(raw);
@@ -336,7 +543,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
     const hasCbmTopValue = String(form.CBM_top || "").trim() !== "";
     const hasCbmBottomValue = String(form.CBM_bottom || "").trim() !== "";
-    const hasTopBottomCbm = hasCbmTopValue && hasCbmBottomValue;
+    const hasTopBottomLbh = inspectedTopLbh.hasAnyInput && inspectedBottomLbh.hasAnyInput;
+    const hasTopBottomCbm = (hasCbmTopValue && hasCbmBottomValue) || hasTopBottomLbh;
 
     const isVisitUpdate = hasQuantityUpdate || hasLabelUpdate;
     if (isVisitUpdate && !selectedInspectorId) {
@@ -466,15 +674,17 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       String(form.CBM_top || "").trim() !== "" ||
       String(form.CBM_bottom || "").trim() !== "";
 
-    if (hasTotalCbmInput) {
-      payload.CBM = cbmTotal.value ?? "0";
-      payload.CBM_top = "0";
-      payload.CBM_bottom = "0";
-    } else if (hasTopOrBottomInput) {
-      payload.CBM = "0";
-      payload.CBM_top = cbmTop.hasValue && cbmTop.value !== null ? cbmTop.value : "0";
-      payload.CBM_bottom =
-        cbmBottom.hasValue && cbmBottom.value !== null ? cbmBottom.value : "0";
+    if (!cbmLockedByLbh) {
+      if (hasTotalCbmInput) {
+        payload.CBM = cbmTotal.value ?? "0";
+        payload.CBM_top = "0";
+        payload.CBM_bottom = "0";
+      } else if (hasTopOrBottomInput) {
+        payload.CBM = "0";
+        payload.CBM_top = cbmTop.hasValue && cbmTop.value !== null ? cbmTop.value : "0";
+        payload.CBM_bottom =
+          cbmBottom.hasValue && cbmBottom.value !== null ? cbmBottom.value : "0";
+      }
     }
     if (lastInspectedDateValue)
       payload.last_inspected_date = lastInspectedDateIso;
@@ -489,6 +699,24 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     }
     if (normalizedLabelRanges.length > 0) {
       payload.label_ranges = normalizedLabelRanges;
+    }
+    if (inspectedItemLbh.hasAnyInput && inspectedItemLbh.value) {
+      payload.inspected_item_LBH = inspectedItemLbh.value;
+    }
+    if (inspectedBoxLbh.hasAnyInput && inspectedBoxLbh.value) {
+      payload.inspected_box_LBH = inspectedBoxLbh.value;
+    }
+    if (inspectedTopLbh.hasAnyInput && inspectedTopLbh.value) {
+      payload.inspected_top_LBH = inspectedTopLbh.value;
+    }
+    if (inspectedBottomLbh.hasAnyInput && inspectedBottomLbh.value) {
+      payload.inspected_bottom_LBH = inspectedBottomLbh.value;
+    }
+    if (inspectedItemTopLbh.hasAnyInput && inspectedItemTopLbh.value) {
+      payload.inspected_item_top_LBH = inspectedItemTopLbh.value;
+    }
+    if (inspectedItemBottomLbh.hasAnyInput && inspectedItemBottomLbh.value) {
+      payload.inspected_item_bottom_LBH = inspectedItemBottomLbh.value;
     }
 
     try {
@@ -511,8 +739,28 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const hasTopOrBottomCbmInput =
     String(form.CBM_top || "").trim() !== "" ||
     String(form.CBM_bottom || "").trim() !== "";
-  const disableCbmTotal = hasTopOrBottomCbmInput;
-  const disableCbmTopBottom = hasTotalCbmInput;
+  const cbmLockedByLbh = hasAnyLbhInput([
+    form.inspected_item_L,
+    form.inspected_item_B,
+    form.inspected_item_H,
+    form.inspected_box_L,
+    form.inspected_box_B,
+    form.inspected_box_H,
+    form.inspected_top_L,
+    form.inspected_top_B,
+    form.inspected_top_H,
+    form.inspected_bottom_L,
+    form.inspected_bottom_B,
+    form.inspected_bottom_H,
+    form.inspected_item_top_L,
+    form.inspected_item_top_B,
+    form.inspected_item_top_H,
+    form.inspected_item_bottom_L,
+    form.inspected_item_bottom_B,
+    form.inspected_item_bottom_H,
+  ]);
+  const disableCbmTotal = hasTopOrBottomCbmInput || cbmLockedByLbh;
+  const disableCbmTopBottom = hasTotalCbmInput || cbmLockedByLbh;
 
   return (
     <div
@@ -633,6 +881,234 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   step="any"
                   disabled={disableCbmTopBottom}
                 />
+              </div>
+
+              {cbmLockedByLbh && (
+                <div className="col-12">
+                  <div className="small text-secondary">
+                    CBM fields are locked because inspected LBH is present. Update LBH to recalculate CBM.
+                  </div>
+                </div>
+              )}
+
+              <div className="col-12">
+                <h6 className="mb-0">Inspected LBH (cm)</h6>
+              </div>
+
+              <div className="col-md-5">
+                <label className="form-label">Inspected Item LBH (L/B/H)</label>
+                <div className="input-group">
+                  <input
+                    type="number"
+                    className="form-control"
+                    name="inspected_item_L"
+                    value={form.inspected_item_L}
+                    onChange={handleChange}
+                    min="0"
+                    step="any"
+                    placeholder="L"
+                  />
+                  <input
+                    type="number"
+                    className="form-control"
+                    name="inspected_item_B"
+                    value={form.inspected_item_B}
+                    onChange={handleChange}
+                    min="0"
+                    step="any"
+                    placeholder="B"
+                  />
+                  <input
+                    type="number"
+                    className="form-control"
+                    name="inspected_item_H"
+                    value={form.inspected_item_H}
+                    onChange={handleChange}
+                    min="0"
+                    step="any"
+                    placeholder="H"
+                  />
+                </div>
+              </div>
+<div className="col-md-2">{"   "}</div>
+              <div className="col-md-5">
+                <label className="form-label">Inspected Box LBH (L/B/H)</label>
+                <div className="input-group">
+                  <input
+                    type="number"
+                    className="form-control"
+                    name="inspected_box_L"
+                    value={form.inspected_box_L}
+                    onChange={handleChange}
+                    min="0"
+                    step="any"
+                    placeholder="L"
+                  />
+                  <input
+                    type="number"
+                    className="form-control"
+                    name="inspected_box_B"
+                    value={form.inspected_box_B}
+                    onChange={handleChange}
+                    min="0"
+                    step="any"
+                    placeholder="B"
+                  />
+                  <input
+                    type="number"
+                    className="form-control"
+                    name="inspected_box_H"
+                    value={form.inspected_box_H}
+                    onChange={handleChange}
+                    min="0"
+                    step="any"
+                    placeholder="H"
+                  />
+                </div>
+              </div>
+              <div className="col-md-5">
+                <label className="form-label">Inspected Item Top LBH (L/B/H)</label>
+                <div className="input-group">
+                  <input
+                    type="number"
+                    className="form-control"
+                    name="inspected_item_top_L"
+                    value={form.inspected_item_top_L}
+                    onChange={handleChange}
+                    min="0"
+                    step="any"
+                    placeholder="L"
+                  />
+                  <input
+                    type="number"
+                    className="form-control"
+                    name="inspected_item_top_B"
+                    value={form.inspected_item_top_B}
+                    onChange={handleChange}
+                    min="0"
+                    step="any"
+                    placeholder="B"
+                  />
+                  <input
+                    type="number"
+                    className="form-control"
+                    name="inspected_item_top_H"
+                    value={form.inspected_item_top_H}
+                    onChange={handleChange}
+                    min="0"
+                    step="any"
+                    placeholder="H"
+                  />
+                </div>
+              </div>
+<div className="col-md-2">{"   "}</div>
+              <div className="col-md-5">
+                <label className="form-label">Inspected Box Top LBH (L/B/H)</label>
+                <div className="input-group">
+                  <input
+                    type="number"
+                    className="form-control"
+                    name="inspected_top_L"
+                    value={form.inspected_top_L}
+                    onChange={handleChange}
+                    min="0"
+                    step="any"
+                    placeholder="L"
+                  />
+                  <input
+                    type="number"
+                    className="form-control"
+                    name="inspected_top_B"
+                    value={form.inspected_top_B}
+                    onChange={handleChange}
+                    min="0"
+                    step="any"
+                    placeholder="B"
+                  />
+                  <input
+                    type="number"
+                    className="form-control"
+                    name="inspected_top_H"
+                    value={form.inspected_top_H}
+                    onChange={handleChange}
+                    min="0"
+                    step="any"
+                    placeholder="H"
+                  />
+                </div>
+              </div>
+              <div className="col-md-5">
+                <label className="form-label">Inspected Item Bottom LBH (L/B/H)</label>
+                <div className="input-group">
+                  <input
+                    type="number"
+                    className="form-control"
+                    name="inspected_item_bottom_L"
+                    value={form.inspected_item_bottom_L}
+                    onChange={handleChange}
+                    min="0"
+                    step="any"
+                    placeholder="L"
+                  />
+                  <input
+                    type="number"
+                    className="form-control"
+                    name="inspected_item_bottom_B"
+                    value={form.inspected_item_bottom_B}
+                    onChange={handleChange}
+                    min="0"
+                    step="any"
+                    placeholder="B"
+                  />
+                  <input
+                    type="number"
+                    className="form-control"
+                    name="inspected_item_bottom_H"
+                    value={form.inspected_item_bottom_H}
+                    onChange={handleChange}
+                    min="0"
+                    step="any"
+                    placeholder="H"
+                  />
+                </div>
+              </div>
+
+<div className="col-md-2">{"   "}</div>
+
+              <div className="col-md-5">
+                <label className="form-label">Inspected Box Bottom LBH (L/B/H)</label>
+                <div className="input-group">
+                  <input
+                    type="number"
+                    className="form-control"
+                    name="inspected_bottom_L"
+                    value={form.inspected_bottom_L}
+                    onChange={handleChange}
+                    min="0"
+                    step="any"
+                    placeholder="L"
+                  />
+                  <input
+                    type="number"
+                    className="form-control"
+                    name="inspected_bottom_B"
+                    value={form.inspected_bottom_B}
+                    onChange={handleChange}
+                    min="0"
+                    step="any"
+                    placeholder="B"
+                  />
+                  <input
+                    type="number"
+                    className="form-control"
+                    name="inspected_bottom_H"
+                    value={form.inspected_bottom_H}
+                    onChange={handleChange}
+                    min="0"
+                    step="any"
+                    placeholder="H"
+                  />
+                </div>
               </div>
 
               <div className="col-md-6">

@@ -6,6 +6,7 @@ const {
   getItemOrdersHistory,
   syncItemsFromOrders,
   updateItem,
+  updateItemPis,
 } = require("../controllers/item.controller");
 
 const router = express.Router();
@@ -36,6 +37,13 @@ router.patch(
   auth,
   authorize("admin", "manager", "dev"),
   updateItem,
+);
+
+router.patch(
+  "/:id/pis",
+  auth,
+  authorize("admin", "manager", "dev"),
+  updateItemPis,
 );
 
 module.exports = router;
