@@ -62,6 +62,20 @@ const toDisplayValue = (value, fallback = "N/A") => {
   return normalized || fallback;
 };
 
+const getBrandKey = (value) => String(value || "").trim().toLowerCase();
+
+const toBrandLogoDataUrl = (logoObj) => {
+  const raw = logoObj?.data?.data || logoObj?.data;
+  if (!Array.isArray(raw) || raw.length === 0) return "";
+
+  let binary = "";
+  raw.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+
+  return `data:image/webp;base64,${window.btoa(binary)}`;
+};
+
 const isPositiveCbmValue = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0;
@@ -72,6 +86,11 @@ const toDisplayNumber = (value, fallback = "Not Set") => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const toComparableValue = (value) =>
+  String(value ?? "")
+    .trim()
+    .toLowerCase();
+
 const InspectionReport = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -81,6 +100,7 @@ const InspectionReport = () => {
   const [qc, setQc] = useState(null);
   const [loading, setLoading] = useState(true);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [brandLogoSrc, setBrandLogoSrc] = useState("");
 
   const backTarget = useMemo(() => {
     const fromQcDetails = String(location.state?.fromQcDetails || "").trim();
@@ -123,6 +143,24 @@ const InspectionReport = () => {
       }))
       .sort((a, b) => (b.sortTime || 0) - (a.sortTime || 0));
   }, [qc?.inspection_record, qc?.request_date]);
+
+  const inspectionRemarkRows = useMemo(
+    () =>
+      inspectionRows.filter((row) => {
+        const remark = String(row?.remarks || "").trim();
+        return remark && remark.toLowerCase() !== "none";
+      }),
+    [inspectionRows],
+  );
+
+  const sortedLabels = useMemo(() => {
+    const labels = Array.isArray(qc?.labels) ? qc.labels : [];
+    return [...new Set(
+      labels
+        .map((label) => Number(label))
+        .filter((label) => Number.isFinite(label)),
+    )].sort((a, b) => a - b);
+  }, [qc?.labels]);
 
   const itemMasterSummary = useMemo(() => {
     const itemMaster = qc?.item_master || {};
@@ -229,9 +267,6 @@ const InspectionReport = () => {
       ...(showCbmTop ? [{ attribute: "CBM Top", pis: pisCbmTop, checked: checkedCbmTop }] : []),
       ...(showCbmBottom ? [{ attribute: "CBM Bottom", pis: pisCbmBottom, checked: checkedCbmBottom }] : []),
       { attribute: "CBM", pis: calculatedPisCbm, checked: checkedCbmTotal },
-      { attribute: "Packed Size Check", pis: "N/A", checked: qc?.packed_size ? "Yes" : "No" },
-      { attribute: "Finishing Check", pis: "N/A", checked: qc?.finishing ? "Yes" : "No" },
-      { attribute: "Branding Check", pis: "N/A", checked: qc?.branding ? "Yes" : "No" },
       { attribute: "Barcode", pis: "N/A", checked: barcodeValue },
     ];
 
@@ -240,6 +275,21 @@ const InspectionReport = () => {
       rows,
     };
   }, [qc]);
+
+  const differenceLogs = useMemo(() => {
+    const rows = Array.isArray(itemMasterSummary?.rows) ? itemMasterSummary.rows : [];
+    const logs = rows
+      .filter((row) => {
+        const pis = String(row?.pis ?? "").trim();
+        const checked = String(row?.checked ?? "").trim();
+        if (!pis || !checked) return false;
+        if (pis.toLowerCase() === "n/a" || checked.toLowerCase() === "n/a") return false;
+        return toComparableValue(pis) !== toComparableValue(checked);
+      })
+      .map((row) => `${row.attribute}: PIS ${row.pis} | Checked ${row.checked}`);
+
+    return logs;
+  }, [itemMasterSummary?.rows]);
 
   const fetchQcDetails = useCallback(async () => {
     try {
@@ -258,6 +308,39 @@ const InspectionReport = () => {
       setLoading(false);
     }
   }, [id]);
+
+  useEffect(() => {
+    const brandName = String(qc?.order?.brand || "").trim();
+    if (!brandName) {
+      setBrandLogoSrc("");
+      return;
+    }
+
+    let isMounted = true;
+
+    const fetchBrandDetails = async () => {
+      try {
+        const response = await api.get("/brands/");
+        if (!isMounted) return;
+
+        const brands = Array.isArray(response?.data?.data) ? response.data.data : [];
+        const matchedBrand = brands.find(
+          (brand) => getBrandKey(brand?.name) === getBrandKey(brandName),
+        );
+        setBrandLogoSrc(toBrandLogoDataUrl(matchedBrand?.logo));
+      } catch (error) {
+        if (isMounted) {
+          setBrandLogoSrc("");
+        }
+      }
+    };
+
+    fetchBrandDetails();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [qc?.order?.brand]);
 
   const handleConfirmAndExport = useCallback(async () => {
     if (!reportRef.current || exportingPdf || !qc) return;
@@ -386,18 +469,41 @@ const InspectionReport = () => {
             <section>
               <h3 className="h6 mb-3">QC Report</h3>
               <div className="inspection-report-summary-block">
-                <div className="inspection-report-summary-line">
-                  <span><strong>Brand:</strong> {orderInfo.brand}</span>
-                  <span><strong>Vendor:</strong> {orderInfo.vendor}</span>
+                <div className="inspection-report-summary-column inspection-report-summary-primary">
+                  <div className="inspection-report-summary-line">
+                    <span><strong>Brand:</strong> {orderInfo.brand}</span>
+                    <span><strong>Vendor:</strong> {orderInfo.vendor}</span>
+                  </div>
+                  <div className="inspection-report-summary-line">
+                    <span><strong>Order ID:</strong> {orderInfo.orderId}</span>
+                    <span><strong>Item Code:</strong> {orderInfo.itemCode}</span>
+                    <span><strong>Description:</strong> {orderInfo.itemDescription}</span>
+                  </div>
+                  <div className="inspection-report-summary-line">
+                    <span><strong>Request Date:</strong> {orderInfo.requestDate}</span>
+                  </div>
                 </div>
-                <div className="inspection-report-summary-line">
-                  <span><strong>Order ID:</strong> {orderInfo.orderId}</span>
-                  <span><strong>Item Code:</strong> {orderInfo.itemCode}</span>
-                  <span><strong>Description:</strong> {orderInfo.itemDescription}</span>
+                <div className="inspection-report-summary-column inspection-report-summary-media">
+                  <div className="inspection-report-media-title">Brand Logo</div>
+                  <div className="inspection-report-brand-panel">
+                    {brandLogoSrc ? (
+                      <img
+                        src={brandLogoSrc}
+                        alt={`${orderInfo.brand} logo`}
+                        className="inspection-report-brand-logo"
+                      />
+                    ) : (
+                      <div className="inspection-report-media-empty">
+                        Brand logo not available
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="inspection-report-summary-line">
-                  <span><strong>Request Date:</strong> {orderInfo.requestDate}</span>
-                </div> 
+                <div className="inspection-report-summary-column inspection-report-summary-media">
+                  <div className="inspection-report-image-skeleton">
+                    <span>Product Image not available yet</span>
+                  </div>
+                </div>
               </div>
             </section>
 
@@ -416,7 +522,6 @@ const InspectionReport = () => {
                         <th>Inspected</th>
                         <th>Passed</th>
                         <th>Pending</th>
-                        <th>Remarks</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -430,7 +535,6 @@ const InspectionReport = () => {
                           <td>{row.inspectedQty}</td>
                           <td>{row.passedQty}</td>
                           <td>{row.pendingAfter}</td>
-                          <td>{row.remarks}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -470,6 +574,71 @@ const InspectionReport = () => {
                 </div>
               )}
             </section>
+            <section>
+              <h3 className="h6 mb-3">Difference Logs (PIS vs Checked)</h3>
+              {differenceLogs.length > 0 ? (
+                <ul className="inspection-report-diff-logs">
+                  {differenceLogs.map((log, index) => (
+                    <li key={`diff-log-${index}`}>{log}</li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="text-secondary small">No differences found between PIS and Checked values.</div>
+              )}
+            </section>
+
+            <section>
+              <details className="inspection-report-collapsible">
+                <summary className="inspection-report-collapsible-summary">
+                  Labels And Remarks
+                </summary>
+                <div className="inspection-report-collapsible-body">
+                  <div className="mb-3">
+                    <div className="fw-semibold mb-2">Labels</div>
+                    {sortedLabels.length > 0 ? (
+                      <div className="inspection-report-label-list">
+                        {sortedLabels.map((label) => (
+                          <span key={`label-${label}`} className="inspection-report-label-chip">
+                            {label}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-secondary small">No labels added.</div>
+                    )}
+                  </div>
+                  <div>
+                    <div className="fw-semibold mb-2">Inspection Remarks</div>
+                    {inspectionRemarkRows.length > 0 ? (
+                      <div className="table-responsive">
+                        <table className="table table-sm table-striped align-middle mb-0">
+                          <thead>
+                            <tr>
+                              <th>Inspection Date</th>
+                              <th>Inspector</th>
+                              <th>Remark</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {inspectionRemarkRows.map((row) => (
+                              <tr key={`remark-${row.key}`}>
+                                <td>{formatDateDDMMYYYY(row.inspectionDate)}</td>
+                                <td>{row.inspectorName}</td>
+                                <td>{row.remarks}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="text-secondary small">No inspection remarks found.</div>
+                    )}
+                  </div>
+
+                </div>
+              </details>
+            </section>
+
           </div>
         </div>
       </div>

@@ -267,8 +267,91 @@
   border-radius: 0.5rem;
   background: var(--bs-body-bg);
   padding: 0.75rem;
+  display: flex;
+  gap: 2rem;
+  align-items: stretch;
+  min-height: 220px;
+}
+
+.inspection-report-summary-column {
+  min-width: 0;
+}
+
+.inspection-report-summary-primary {
+  flex: 1 1 0;
   display: grid;
   gap: 0.5rem;
+}
+
+.inspection-report-summary-media {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.inspection-report-media-title {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.inspection-report-brand-panel {
+  flex: 1;
+  min-height: 0;
+  border: 1px solid #495057;
+  border-radius: 0.5rem;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem;
+}
+
+.inspection-report-brand-logo {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.inspection-report-media-empty {
+  color: #6c757d;
+  text-align: center;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.inspection-report-image-skeleton {
+  flex: 1;
+  min-height: 0;
+  border: 1px solid #495057;
+  border-radius: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0.75rem;
+  color: #495057;
+  font-weight: 600;
+  background: linear-gradient(
+    110deg,
+    #f1f3f5 20%,
+    #e9ecef 40%,
+    #f1f3f5 60%
+  );
+  background-size: 200% 100%;
+  animation: inspectionReportSkeletonPulse 1.6s linear infinite;
+}
+
+@keyframes inspectionReportSkeletonPulse {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
 }
 
 .inspection-report-summary-line {
@@ -318,6 +401,48 @@
   width: 33.3333%;
   vertical-align: top;
   word-break: break-word;
+}
+
+.inspection-report-diff-logs {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.inspection-report-collapsible {
+  border: 1px solid #495057;
+  border-radius: 0.5rem;
+  background: var(--bs-body-bg);
+}
+
+.inspection-report-collapsible-summary {
+  cursor: pointer;
+  font-weight: 700;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid #495057;
+  user-select: none;
+}
+
+.inspection-report-collapsible-body {
+  padding: 0.75rem;
+}
+
+.inspection-report-label-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.inspection-report-label-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #495057;
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.8rem;
+  background: var(--bs-tertiary-bg);
 }
 
 .inspection-report-table-dark,
@@ -517,6 +642,15 @@
   .inspection-report-summary-line {
     gap: 0.5rem;
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .inspection-report-summary-block {
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .inspection-report-summary-media {
+    min-height: 140px;
   }
 
   .inspection-report-summary-field {

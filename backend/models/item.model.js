@@ -123,6 +123,10 @@ const itemSchema = new mongoose.Schema(
       from_orders: { type: Boolean, default: false },
       from_qc: { type: Boolean, default: false },
     },
+    image: {
+      link: { type: String, default: "", trim: true },
+      public_id: { type: String, default: "", trim: true },
+    }
   },
   { timestamps: true },
 );
