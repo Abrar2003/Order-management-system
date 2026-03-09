@@ -71,6 +71,7 @@ const UploadLogs = () => {
     parsePositiveInt(searchParams.get("page"), 1),
   );
   const [limit, setLimit] = useState(() => parseLimit(searchParams.get("limit")));
+  const [syncedQuery, setSyncedQuery] = useState(null);
 
   const [filters, setFilters] = useState({
     brands: [],
@@ -148,6 +149,9 @@ const UploadLogs = () => {
   }, [fetchLogs]);
 
   useEffect(() => {
+    const currentQuery = searchParams.toString();
+    if (syncedQuery === currentQuery) return;
+
     const nextBrandFilter = normalizeFilterParam(searchParams.get("brand"), "all");
     const nextVendorFilter = normalizeFilterParam(searchParams.get("vendor"), "all");
     const nextStatusFilter = normalizeFilterParam(searchParams.get("status"), "all");
@@ -161,9 +165,13 @@ const UploadLogs = () => {
     setOrderIdInput((prev) => (prev === nextOrderIdInput ? prev : nextOrderIdInput));
     setPage((prev) => (prev === nextPage ? prev : nextPage));
     setLimit((prev) => (prev === nextLimit ? prev : nextLimit));
-  }, [searchParams]);
+    setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
+  }, [searchParams, syncedQuery]);
 
   useEffect(() => {
+    const currentQuery = searchParams.toString();
+    if (syncedQuery !== currentQuery) return;
+
     const next = new URLSearchParams();
     const orderIdValue = normalizeSearchParam(orderIdInput);
 
@@ -185,6 +193,7 @@ const UploadLogs = () => {
     searchParams,
     setSearchParams,
     statusFilter,
+    syncedQuery,
     vendorFilter,
   ]);
 

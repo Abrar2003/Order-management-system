@@ -1806,9 +1806,6 @@ exports.updateQC = async (req, res) => {
         });
       }
 
-      const existingInspectorId = qc.inspector?._id
-        ? qc.inspector._id.toString()
-        : (qc.inspector ? qc.inspector.toString() : null);
       const requestedInspectorId =
         inspector !== undefined && inspector !== null && String(inspector).trim() !== ""
           ? String(inspector).trim()
@@ -1820,14 +1817,6 @@ exports.updateQC = async (req, res) => {
         Number(qc.quantities?.vendor_provision || 0) > 0 ||
         normalizeLabels(qc.labels).length > 0;
 
-      const pendingQuantity = Math.max(
-        0,
-        toNonNegativeNumber(
-          qc?.quantities?.pending ??
-            ((qc?.quantities?.client_demand || 0) - (qc?.quantities?.qc_passed || 0)),
-          0,
-        ),
-      );
       const latestRequestEntry = resolveLatestRequestEntry(qc?.request_history || []);
       const latestRequestedQuantity =
         latestRequestEntry?.quantity_requested !== undefined
@@ -1843,32 +1832,20 @@ exports.updateQC = async (req, res) => {
         });
       }
 
-      const isAlignedForPendingQuantity =
-        pendingQuantity <= 0 || latestRequestedQuantity >= pendingQuantity;
-      if (!isAlignedForPendingQuantity) {
-        return res.status(400).json({
-          message: `QC is not aligned for pending quantity (${pendingQuantity}). Requested quantity is ${latestRequestedQuantity}. Please realign QC first.`,
-        });
-      }
-
       if (!hasElevatedAccess) {
-        const currentUserId = req.user._id.toString();
-        const isAssignedToCurrentUser =
-          existingInspectorId && existingInspectorId === currentUserId;
-        const isClaimingSelf = requestedInspectorId === currentUserId;
-
-        if (!isAssignedToCurrentUser) {
-          if (hasStartedInspection || !isClaimingSelf) {
-            return res.status(403).json({
-              message: "You are not authorized to update this QC record",
-            });
-          }
+        const currentUserId = String(req.user?._id || req.user?.id || "").trim();
+        if (!currentUserId) {
+          return res.status(401).json({ message: "Unauthorized" });
         }
 
         if (requestedInspectorId && requestedInspectorId !== currentUserId) {
           return res.status(403).json({
             message: "QC can only assign themselves",
           });
+        }
+
+        if (!requestedInspectorId && !qc.inspector) {
+          qc.inspector = currentUserId;
         }
       }
 

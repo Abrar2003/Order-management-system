@@ -78,6 +78,7 @@ const VendorReports = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [report, setReport] = useState(defaultReport);
+  const [syncedQuery, setSyncedQuery] = useState(null);
 
   const fetchReports = useCallback(async () => {
     try {
@@ -119,6 +120,9 @@ const VendorReports = () => {
   }, [fetchReports]);
 
   useEffect(() => {
+    const currentQuery = searchParams.toString();
+    if (syncedQuery === currentQuery) return;
+
     const nextTimeline = normalizeTimeline(searchParams.get("timeline"));
     const nextCustomDays = parseCustomDays(searchParams.get("custom_days"));
     const nextBrandFilter = normalizeEntityFilter(searchParams.get("brand"));
@@ -128,9 +132,13 @@ const VendorReports = () => {
     setCustomDays((prev) => (prev === nextCustomDays ? prev : nextCustomDays));
     setBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
     setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
-  }, [searchParams]);
+    setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
+  }, [searchParams, syncedQuery]);
 
   useEffect(() => {
+    const currentQuery = searchParams.toString();
+    if (syncedQuery !== currentQuery) return;
+
     const next = new URLSearchParams();
     if (timeline !== DEFAULT_TIMELINE) {
       next.set("timeline", timeline);
@@ -147,7 +155,7 @@ const VendorReports = () => {
     if (!areSearchParamsEquivalent(next, searchParams)) {
       setSearchParams(next, { replace: true });
     }
-  }, [brandFilter, customDays, searchParams, setSearchParams, timeline, vendorFilter]);
+  }, [brandFilter, customDays, searchParams, setSearchParams, syncedQuery, timeline, vendorFilter]);
 
   const summary = useMemo(
     () => report?.summary || defaultReport.summary,

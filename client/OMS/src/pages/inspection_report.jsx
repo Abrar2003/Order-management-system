@@ -384,7 +384,7 @@ const InspectionReport = () => {
         <div className="card om-card" ref={reportRef}>
           <div className="card-body d-grid gap-4">
             <section>
-              <h3 className="h6 mb-3">Order Summary</h3>
+              <h3 className="h6 mb-3">QC Report</h3>
               <div className="inspection-report-summary-block">
                 <div className="inspection-report-summary-line">
                   <span><strong>Brand:</strong> {orderInfo.brand}</span>

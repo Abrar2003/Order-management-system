@@ -74,6 +74,7 @@ const DailyReport = () => {
   const [alignedSortOrder, setAlignedSortOrder] = useState(initialAlignedSortOrder);
   const [inspectionSortBy, setInspectionSortBy] = useState(initialInspectionSortBy);
   const [inspectionSortOrder, setInspectionSortOrder] = useState(initialInspectionSortOrder);
+  const [syncedQuery, setSyncedQuery] = useState(null);
   const [report, setReport] = useState({
     date: getTodayDDMMYYYY(),
     summary: {
@@ -179,6 +180,9 @@ const DailyReport = () => {
   }, [fetchDailyReport]);
 
   useEffect(() => {
+    const currentQuery = searchParams.toString();
+    if (syncedQuery === currentQuery) return;
+
     const nextSelectedDate = toDDMMYYYYInputValue(
       normalizeQueryText(searchParams.get("date")),
       getTodayDDMMYYYY(),
@@ -205,9 +209,13 @@ const DailyReport = () => {
     setInspectionSortOrder((prev) => (
       prev === nextInspectionSortOrder ? prev : nextInspectionSortOrder
     ));
-  }, [searchParams]);
+    setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
+  }, [searchParams, syncedQuery]);
 
   useEffect(() => {
+    const currentQuery = searchParams.toString();
+    if (syncedQuery !== currentQuery) return;
+
     const next = new URLSearchParams();
     const dateValue = normalizeQueryText(selectedDate);
 
@@ -236,6 +244,7 @@ const DailyReport = () => {
     searchParams,
     selectedDate,
     setSearchParams,
+    syncedQuery,
   ]);
 
   const summary = useMemo(

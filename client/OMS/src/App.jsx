@@ -32,45 +32,67 @@ import VendorReports from "./pages/VendorReports";
 import PIS from "./pages/PIS";
 
 // import Users from "./pages/Users"; // later
-const clearStaleUiOverlays = () => {
+const clearStaleUiOverlays = ({ removeCustomModalRoots = false } = {}) => {
   document.body.classList.remove("modal-open");
   document.body.style.removeProperty("overflow");
   document.body.style.removeProperty("padding-right");
+  document.documentElement.style.removeProperty("overflow");
 
   document
     .querySelectorAll(".modal-backdrop, .offcanvas-backdrop")
     .forEach((node) => node.remove());
 
-  // Defensive cleanup for stale custom modal roots left in DOM.
-  document.querySelectorAll(".om-modal-backdrop").forEach((node) => {
-    if (node instanceof HTMLElement) {
-      node.remove();
-    }
-  });
+  if (removeCustomModalRoots) {
+    document.querySelectorAll(".om-modal-backdrop").forEach((node) => {
+      if (node instanceof HTMLElement) {
+        node.remove();
+      }
+    });
+  }
 
   document.querySelectorAll(".modal.show, .offcanvas.show").forEach((node) => {
     node.classList.remove("show");
     if (node instanceof HTMLElement) {
       node.style.display = "none";
+      node.setAttribute("aria-hidden", "true");
     }
   });
+
+  document
+    .querySelectorAll(".modal[style*='display: block'], .offcanvas[style*='visibility: visible']")
+    .forEach((node) => {
+      if (node instanceof HTMLElement) {
+        node.style.display = "none";
+        node.classList.remove("show");
+        node.setAttribute("aria-hidden", "true");
+      }
+    });
 };
 
 const RouteUiCleanup = () => {
   const location = useLocation();
 
   useLayoutEffect(() => {
-    clearStaleUiOverlays();
+    const shouldClearCustomModalRoots =
+      location.pathname === "/signin" || location.pathname === "/";
+    const runCleanup = () =>
+      clearStaleUiOverlays({ removeCustomModalRoots: shouldClearCustomModalRoots });
+
+    runCleanup();
 
     // Some overlays are injected asynchronously by bootstrap plugins.
-    const t1 = window.setTimeout(clearStaleUiOverlays, 0);
-    const t2 = window.setTimeout(clearStaleUiOverlays, 250);
-    const t3 = window.setTimeout(clearStaleUiOverlays, 750);
+    const t1 = window.setTimeout(runCleanup, 0);
+    const t2 = window.setTimeout(runCleanup, 250);
+    const t3 = window.setTimeout(runCleanup, 750);
+    const t4 = window.setTimeout(runCleanup, 1500);
+    const t5 = window.setTimeout(runCleanup, 3000);
 
     return () => {
       window.clearTimeout(t1);
       window.clearTimeout(t2);
       window.clearTimeout(t3);
+      window.clearTimeout(t4);
+      window.clearTimeout(t5);
     };
   }, [location.pathname, location.search]);
 

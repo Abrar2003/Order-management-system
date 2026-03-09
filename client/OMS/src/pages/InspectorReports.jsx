@@ -67,6 +67,7 @@ const InspectorReports = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [report, setReport] = useState(defaultReport);
+  const [syncedQuery, setSyncedQuery] = useState(null);
 
   const fetchReports = useCallback(async () => {
     try {
@@ -107,14 +108,21 @@ const InspectorReports = () => {
   }, [fetchReports]);
 
   useEffect(() => {
+    const currentQuery = searchParams.toString();
+    if (syncedQuery === currentQuery) return;
+
     const nextTimeline = normalizeTimeline(searchParams.get("timeline"));
     const nextCustomDays = parseCustomDays(searchParams.get("custom_days"));
 
     setTimeline((prev) => (prev === nextTimeline ? prev : nextTimeline));
     setCustomDays((prev) => (prev === nextCustomDays ? prev : nextCustomDays));
-  }, [searchParams]);
+    setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
+  }, [searchParams, syncedQuery]);
 
   useEffect(() => {
+    const currentQuery = searchParams.toString();
+    if (syncedQuery !== currentQuery) return;
+
     const next = new URLSearchParams();
     if (timeline !== DEFAULT_TIMELINE) {
       next.set("timeline", timeline);
@@ -125,7 +133,7 @@ const InspectorReports = () => {
     if (!areSearchParamsEquivalent(next, searchParams)) {
       setSearchParams(next, { replace: true });
     }
-  }, [customDays, searchParams, setSearchParams, timeline]);
+  }, [customDays, searchParams, setSearchParams, syncedQuery, timeline]);
 
   const summary = useMemo(
     () => report?.summary || defaultReport.summary,

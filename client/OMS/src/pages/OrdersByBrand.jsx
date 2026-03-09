@@ -39,6 +39,7 @@ const OrdersByBrand = () => {
   const [error, setError] = useState("");
   const [sortBy, setSortBy] = useState(initialSortBy);
   const [sortOrder, setSortOrder] = useState(initialSortOrder);
+  const [syncedQuery, setSyncedQuery] = useState(null);
 
   const handleSortColumn = (column, defaultDirection = "asc") => {
     if (sortBy === column) {
@@ -89,6 +90,9 @@ const OrdersByBrand = () => {
   }, [brand, vendor, status, sortBy, sortOrder]);
 
   useEffect(() => {
+    const currentQuery = searchParams.toString();
+    if (syncedQuery === currentQuery) return;
+
     const nextSortBy = parseSortBy(searchParams.get("sort_by"));
     const nextSortOrder = parseSortOrder(
       searchParams.get("sort_order"),
@@ -97,9 +101,13 @@ const OrdersByBrand = () => {
 
     setSortBy((prev) => (prev === nextSortBy ? prev : nextSortBy));
     setSortOrder((prev) => (prev === nextSortOrder ? prev : nextSortOrder));
-  }, [searchParams]);
+    setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
+  }, [searchParams, syncedQuery]);
 
   useEffect(() => {
+    const currentQuery = searchParams.toString();
+    if (syncedQuery !== currentQuery) return;
+
     const next = new URLSearchParams();
     if (sortBy !== DEFAULT_SORT_BY) next.set("sort_by", sortBy);
     if (sortOrder !== parseSortOrder("", sortBy)) {
@@ -109,7 +117,7 @@ const OrdersByBrand = () => {
     if (!areSearchParamsEquivalent(next, searchParams)) {
       setSearchParams(next, { replace: true });
     }
-  }, [searchParams, setSearchParams, sortBy, sortOrder]);
+  }, [searchParams, setSearchParams, sortBy, sortOrder, syncedQuery]);
 
   return (
     <>

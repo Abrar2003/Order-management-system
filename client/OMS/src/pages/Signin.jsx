@@ -1,13 +1,39 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { signin } from "../auth/auth.service";
 import { useNavigate } from "react-router-dom";
 import "../App.css";
+
+const clearSigninOverlays = () => {
+  document.body.classList.remove("modal-open");
+  document.body.style.removeProperty("overflow");
+  document.body.style.removeProperty("padding-right");
+  document.documentElement.style.removeProperty("overflow");
+  document
+    .querySelectorAll(
+      ".modal-backdrop, .offcanvas-backdrop, .om-modal-backdrop, .modal.show, .offcanvas.show",
+    )
+    .forEach((node) => {
+      if (node instanceof HTMLElement) {
+        node.remove();
+      }
+    });
+};
 
 const SignIn = () => {
   const [form, setForm] = useState({ username: "", password: "" });
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    clearSigninOverlays();
+    const t1 = window.setTimeout(clearSigninOverlays, 0);
+    const t2 = window.setTimeout(clearSigninOverlays, 250);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, []);
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -24,14 +50,15 @@ const SignIn = () => {
         throw new Error("Token missing");
       }
 
-      document.body.classList.remove("modal-open");
-      document.body.style.removeProperty("overflow");
-      document.body.style.removeProperty("padding-right");
-      document
-        .querySelectorAll(".modal-backdrop, .offcanvas-backdrop, .om-modal-backdrop")
-        .forEach((node) => node.remove());
+      clearSigninOverlays();
+      const cleanupTimers = [0, 80, 250, 600, 1200].map((delay) =>
+        window.setTimeout(clearSigninOverlays, delay),
+      );
 
       navigate("/", { replace: true });
+      window.setTimeout(() => {
+        cleanupTimers.forEach((timerId) => window.clearTimeout(timerId));
+      }, 2000);
     } catch (err) {
       console.error(err);
       setError("Invalid credentials");

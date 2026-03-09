@@ -112,6 +112,7 @@ const Items = () => {
     vendors: [],
     item_codes: [],
   });
+  const [syncedQuery, setSyncedQuery] = useState(null);
 
   const debouncedSearch = useDebouncedValue(searchInput, 300);
 
@@ -164,6 +165,9 @@ const Items = () => {
   }, [fetchItems]);
 
   useEffect(() => {
+    const currentQuery = searchParams.toString();
+    if (syncedQuery === currentQuery) return;
+
     const nextSearchInput = normalizeSearchParam(searchParams.get("search"));
     const nextBrandFilter = normalizeFilterParam(searchParams.get("brand"), "all");
     const nextVendorFilter = normalizeFilterParam(searchParams.get("vendor"), "all");
@@ -175,9 +179,13 @@ const Items = () => {
     setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
     setPage((prev) => (prev === nextPage ? prev : nextPage));
     setLimit((prev) => (prev === nextLimit ? prev : nextLimit));
-  }, [searchParams]);
+    setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
+  }, [searchParams, syncedQuery]);
 
   useEffect(() => {
+    const currentQuery = searchParams.toString();
+    if (syncedQuery !== currentQuery) return;
+
     const next = new URLSearchParams();
     const searchValue = normalizeSearchParam(searchInput);
 
@@ -197,6 +205,7 @@ const Items = () => {
     searchInput,
     searchParams,
     setSearchParams,
+    syncedQuery,
     vendorFilter,
   ]);
 

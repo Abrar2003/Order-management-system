@@ -74,7 +74,7 @@ const getPendingAlignmentInfo = (qc = {}) => {
     pendingQty,
     requestedQty,
     isAligned: false,
-    tooltip: `QC is not aligned for pending quantity (requested ${requestedQty}, pending ${pendingQty}).`,
+    tooltip: `QC request is partial (requested ${requestedQty}, pending ${pendingQty}). Update is allowed; realign if needed.`,
   };
 };
 

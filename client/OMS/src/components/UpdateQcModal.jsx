@@ -142,6 +142,9 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   useEffect(() => {
     if (!qc) return;
     const assignedInspectorId = String(qc?.inspector?._id || qc?.inspector || "");
+    const defaultInspectorId = isQcUser
+      ? String(currentUserId || assignedInspectorId || "")
+      : assignedInspectorId;
     const initialCbmTop =
       qc?.cbm?.top && qc.cbm.top !== "0" ? String(qc.cbm.top) : "";
     const initialCbmBottom =
@@ -171,7 +174,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     const strictInspectedItemBottomLbh = toStrictLbhInputGroup(inspectedItemBottomLbh);
 
     setForm({
-      inspector: assignedInspectorId || (isQcUser ? String(currentUserId) : ""),
+      inspector: defaultInspectorId,
       qc_checked: "",
       qc_passed: "",
       offeredQuantity: "",

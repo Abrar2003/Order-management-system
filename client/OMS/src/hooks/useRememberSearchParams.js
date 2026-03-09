@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useMemo, useRef } from "react";
+import { areSearchParamsEquivalent } from "../utils/searchParams";
 
 export const useRememberSearchParams = (
   searchParams,
@@ -6,28 +7,36 @@ export const useRememberSearchParams = (
   storageKey,
 ) => {
   const hasInitialized = useRef(false);
+  const restoreAttempts = useRef(0);
+  const normalizedStorageKey = useMemo(
+    () => String(storageKey || "").trim(),
+    [storageKey],
+  );
+  const currentQuery = searchParams.toString();
 
-  useEffect(() => {
-    const key = `page-query:${String(storageKey || "").trim()}`;
-    const currentQuery = searchParams.toString();
+  useLayoutEffect(() => {
+    if (!normalizedStorageKey) return;
+    const key = `page-query:${normalizedStorageKey}`;
+    const savedQuery = String(sessionStorage.getItem(key) || "").trim();
 
     if (!hasInitialized.current) {
-      hasInitialized.current = true;
-
-      if (!currentQuery) {
-        const savedQuery = sessionStorage.getItem(key);
-        if (savedQuery) {
+      if (!currentQuery && savedQuery) {
+        if (restoreAttempts.current < 5 && !areSearchParamsEquivalent(savedQuery, currentQuery)) {
+          restoreAttempts.current += 1;
           setSearchParams(new URLSearchParams(savedQuery), { replace: true });
           return;
         }
       }
+
+      hasInitialized.current = true;
     }
 
     if (currentQuery) {
-      sessionStorage.setItem(key, currentQuery);
+      if (!areSearchParamsEquivalent(savedQuery, currentQuery)) {
+        sessionStorage.setItem(key, currentQuery);
+      }
     } else {
       sessionStorage.removeItem(key);
     }
-  }, [searchParams, setSearchParams, storageKey]);
+  }, [currentQuery, normalizedStorageKey, setSearchParams]);
 };
-

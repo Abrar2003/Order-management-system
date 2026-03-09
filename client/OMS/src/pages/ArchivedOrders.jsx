@@ -48,6 +48,7 @@ const ArchivedOrders = () => {
     totalPages: 1,
     totalRecords: 0,
   }));
+  const [syncedQuery, setSyncedQuery] = useState(null);
 
   const canGoPrev = pagination.page > 1;
   const canGoNext = pagination.page < pagination.totalPages;
@@ -93,6 +94,9 @@ const ArchivedOrders = () => {
   }, [fetchArchivedOrders, isAdmin]);
 
   useEffect(() => {
+    const currentQuery = searchParams.toString();
+    if (syncedQuery === currentQuery) return;
+
     const nextFilters = {
       order_id: normalizeSearchParam(searchParams.get("order_id")),
       vendor: normalizeSearchParam(searchParams.get("vendor")),
@@ -113,9 +117,13 @@ const ArchivedOrders = () => {
       page: prev.page === nextPage ? prev.page : nextPage,
       limit: prev.limit === nextLimit ? prev.limit : nextLimit,
     }));
-  }, [searchParams]);
+    setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
+  }, [searchParams, syncedQuery]);
 
   useEffect(() => {
+    const currentQuery = searchParams.toString();
+    if (syncedQuery !== currentQuery) return;
+
     const next = new URLSearchParams();
     const orderId = normalizeSearchParam(filters.order_id);
     const vendor = normalizeSearchParam(filters.vendor);
@@ -132,7 +140,7 @@ const ArchivedOrders = () => {
     if (!areSearchParamsEquivalent(next, searchParams)) {
       setSearchParams(next, { replace: true });
     }
-  }, [filters.brand, filters.order_id, filters.vendor, pagination.limit, pagination.page, searchParams, setSearchParams]);
+  }, [filters.brand, filters.order_id, filters.vendor, pagination.limit, pagination.page, searchParams, setSearchParams, syncedQuery]);
 
   const handleSyncZeroQuantity = async () => {
     const remark = window.prompt(

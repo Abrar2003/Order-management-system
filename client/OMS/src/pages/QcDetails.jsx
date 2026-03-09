@@ -117,7 +117,7 @@ const getQcPendingAlignmentInfo = (qc = {}) => {
     isAligned,
     pendingQty,
     requestedQty,
-    tooltip: `QC is not aligned for pending quantity (requested ${requestedQty}, pending ${pendingQty}).`,
+    tooltip: `QC request is partial (requested ${requestedQty}, pending ${pendingQty}). Update is allowed; realign if needed.`,
   };
 };
 
@@ -155,7 +155,6 @@ const QcDetails = () => {
   const location = useLocation();
   const user = getUserFromToken();
   const normalizedRole = String(user?.role || "").trim().toLowerCase();
-  const userId = user?.id || user?._id;
   const isAdmin = normalizedRole === "admin" || normalizedRole === "manager";
   const isOnlyAdmin = normalizedRole === "admin";
   const canFinalizeShipping = ["admin", "manager", "dev"].includes(
@@ -174,23 +173,6 @@ const QcDetails = () => {
     (qc?.quantities?.pending || 0) > 0;
   const qcIsPending = hasPendingQuantities || !requirementsMet;
   const isInspectionDone = qc?.order?.status === "Inspection Done";
-  const assignedInspectorId = qc?.inspector?._id
-    ? String(qc.inspector._id)
-    : "";
-  const hasActiveInspectionRecords = Array.isArray(qc?.inspection_record)
-    && qc.inspection_record.some((record) => {
-      const checked = Number(record?.checked || 0);
-      const passed = Number(record?.passed || 0);
-      const offered = Number(record?.vendor_offered || 0);
-      const labelsAdded = Array.isArray(record?.labels_added)
-        ? record.labels_added.length
-        : 0;
-      return checked > 0 || passed > 0 || offered > 0 || labelsAdded > 0;
-    });
-  const canClaimInspection =
-    normalizedRole === "qc" &&
-    !hasActiveInspectionRecords &&
-    (qc?.quantities?.qc_checked || 0) === 0;
   const pendingAlignmentInfo = useMemo(
     () => getQcPendingAlignmentInfo(qc),
     [qc],
@@ -199,12 +181,10 @@ const QcDetails = () => {
     isAdmin ||
     (!isInspectionDone &&
       normalizedRole === "qc" &&
-      qcIsPending &&
-      (assignedInspectorId === String(userId) || canClaimInspection));
+      qcIsPending);
   const canUpdateQc =
     canUpdateQcByRole &&
-    pendingAlignmentInfo.hasRequest &&
-    pendingAlignmentInfo.isAligned;
+    pendingAlignmentInfo.hasRequest;
 
   const sortedLabels = useMemo(() => normalizeLabels(qc?.labels), [qc?.labels]);
   const backTarget = useMemo(() => {
@@ -764,18 +744,15 @@ const QcDetails = () => {
                 onClick={() => setShowUpdateModal(true)}
                 disabled={!canUpdateQc}
                 title={
-                  canUpdateQc
-                    ? ""
-                    : !pendingAlignmentInfo.hasRequest
+                  !canUpdateQc
+                    ? !pendingAlignmentInfo.hasRequest
                       ? "QC is not requested yet. Align QC request before updating."
-                      : !pendingAlignmentInfo.isAligned
-                        ? pendingAlignmentInfo.tooltip
-                        : isInspectionDone
+                      : isInspectionDone
                       ? "After inspection is done, only admin can update this record."
-                      : normalizedRole === "qc" &&
-                          assignedInspectorId === String(userId)
+                      : normalizedRole === "qc" && !qcIsPending
                         ? "No pending quantity left to update."
-                        : "Only admin or an eligible QC inspector can update this record."
+                        : "Only admin, manager, or QC can update this record."
+                    : ""
                 }
               >
                 Update QC Record

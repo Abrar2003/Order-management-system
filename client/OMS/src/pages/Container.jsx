@@ -67,6 +67,7 @@ const Container = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [syncedQuery, setSyncedQuery] = useState(null);
 
   const fetchVendors = useCallback(async () => {
     try {
@@ -180,6 +181,9 @@ const Container = () => {
   }, [vendor, fetchVendorRows]);
 
   useEffect(() => {
+    const currentQuery = searchParams.toString();
+    if (syncedQuery === currentQuery) return;
+
     const nextContainerNumber = normalizeSearchParam(
       searchParams.get("container_number"),
     );
@@ -196,9 +200,13 @@ const Container = () => {
     setVendor((prev) => (prev === nextVendor ? prev : nextVendor));
     setOrderIdFilter((prev) => (prev === nextOrderIdFilter ? prev : nextOrderIdFilter));
     setStatusFilter((prev) => (prev === nextStatusFilter ? prev : nextStatusFilter));
-  }, [searchParams]);
+    setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
+  }, [searchParams, syncedQuery]);
 
   useEffect(() => {
+    const currentQuery = searchParams.toString();
+    if (syncedQuery !== currentQuery) return;
+
     const next = new URLSearchParams();
     const containerValue = normalizeSearchParam(containerNumber);
     const vendorValue = normalizeSearchParam(vendor);
@@ -221,6 +229,7 @@ const Container = () => {
     setSearchParams,
     shippingDate,
     statusFilter,
+    syncedQuery,
     vendor,
   ]);
 
