@@ -70,11 +70,29 @@ const toLocalIsoDate = (dateValue) => {
   return `${year}-${month}-${day}`;
 };
 
+const getUtcDayOffsetFromToday = (isoDateValue) => {
+  const normalizedIso = toISODateString(isoDateValue);
+  if (!normalizedIso) return null;
+  const [year, month, day] = normalizedIso.split("-").map(Number);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return null;
+  }
+  const targetUtc = Date.UTC(year, month - 1, day);
+  const now = new Date();
+  const todayUtc = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+  );
+  const oneDayMs = 24 * 60 * 60 * 1000;
+  return Math.round((todayUtc - targetUtc) / oneDayMs);
+};
+
 const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const user = getUserFromToken();
   const currentUserId = user?.id || user?._id || "";
   const normalizedRole = String(user?.role || "").trim().toLowerCase();
-  const isQcUser = user?.role === "QC";
+  const isQcUser = normalizedRole === "qc";
   const canManageLabels = ["admin", "manager"].includes(user?.role);
   const isManager = normalizedRole === "manager";
   const todayIso = toLocalIsoDate(new Date());
@@ -613,6 +631,35 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     ) {
       setError("Manager can update QC only for today and previous 2 days.");
       return;
+    }
+    if (isQcUser && lastInspectedDateIso) {
+      const qcDateOffset = getUtcDayOffsetFromToday(lastInspectedDateIso);
+      if (qcDateOffset === null || qcDateOffset < 0 || qcDateOffset > 1) {
+        setError("QC can update only for today and previous 1 day.");
+        return;
+      }
+      if (qcDateOffset === 1) {
+        const hasUsedOneDayBackdatedUpdate = Array.isArray(qc?.inspection_record)
+          && qc.inspection_record.some((record) => {
+            const recordDate = toISODateString(record?.inspection_date || record?.createdAt || "");
+            if (!recordDate || recordDate !== lastInspectedDateIso) return false;
+            const recordInspectorId = String(record?.inspector?._id || record?.inspector || "").trim();
+            if (!recordInspectorId || recordInspectorId !== String(currentUserId || "").trim()) {
+              return false;
+            }
+            const checked = Number(record?.checked || 0);
+            const passed = Number(record?.passed || 0);
+            const offered = Number(record?.vendor_offered || 0);
+            const labelsAddedCount = Array.isArray(record?.labels_added)
+              ? record.labels_added.length
+              : 0;
+            return checked > 0 || passed > 0 || offered > 0 || labelsAddedCount > 0;
+          });
+        if (hasUsedOneDayBackdatedUpdate) {
+          setError("QC can update a 1-day backdated entry only once.");
+          return;
+        }
+      }
     }
 
     const hasTotalCbmValue = String(form.CBM || "").trim() !== "";

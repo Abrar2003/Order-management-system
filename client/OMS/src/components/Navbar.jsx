@@ -31,6 +31,7 @@ const Navbar = () => {
   const [theme, setTheme] = useState(getInitialTheme);
 
   const canAccessQc = ["qc", "admin", "manager", "dev"].includes(normalizedRole);
+  const isQcOnlyRole = normalizedRole === "qc";
   const canManageOrders = ["admin", "manager", "dev"].includes(normalizedRole);
   const canManageLabels = ["admin", "manager"].includes(normalizedRole);
   const canCreateUsers = normalizedRole === "admin";
@@ -38,6 +39,10 @@ const Navbar = () => {
   const navigate = useNavigate();
 
   const primaryRouteLinks = useMemo(() => {
+    if (isQcOnlyRole) {
+      return [{ label: "QC", path: "/qc" }];
+    }
+
     const links = [];
 
     if (canAccessQc) {
@@ -56,9 +61,13 @@ const Navbar = () => {
     }
 
     return links;
-  }, [canAccessQc, canManageOrders]);
+  }, [canAccessQc, canManageOrders, isQcOnlyRole]);
 
   const secondaryRouteLinks = useMemo(() => {
+    if (isQcOnlyRole) {
+      return [];
+    }
+
     const links = [{ label: "Home", path: "/" }];
 
     if (canAccessQc) {
@@ -75,15 +84,15 @@ const Navbar = () => {
     }
 
     return links;
-  }, [canAccessQc, canManageOrders, canCreateUsers]);
+  }, [canAccessQc, canManageOrders, canCreateUsers, isQcOnlyRole]);
 
   const reportRouteLinks = useMemo(() => {
-    if (!canAccessQc) return [];
+    if (!canAccessQc || isQcOnlyRole) return [];
     return [
       { label: "Inspector Reports", path: "/reports/inspectors" },
       { label: "Vendor Reports", path: "/reports/vendors" },
     ];
-  }, [canAccessQc]);
+  }, [canAccessQc, isQcOnlyRole]);
 
   const handleLogout = () => {
     logout();

@@ -7,7 +7,7 @@ import ShippingModal from "../components/ShippingModal";
 import EditOrderModal from "../components/EditOrderModal";
 import EditInspectionRecordsModal from "../components/EditInspectionRecordsModal";
 import { getUserFromToken } from "../auth/auth.utils";
-import { formatDateDDMMYYYY } from "../utils/date";
+import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { formatPositiveCbm } from "../utils/cbm";
 import Barcode from "react-barcode";
 import "../App.css";
@@ -57,6 +57,24 @@ const toSafeNumber = (value, fallback = 0) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return parsed;
+};
+
+const getUtcDayOffsetFromToday = (value) => {
+  const isoDate = toISODateString(value);
+  if (!isoDate) return null;
+  const [year, month, day] = isoDate.split("-").map(Number);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return null;
+  }
+  const targetUtc = Date.UTC(year, month - 1, day);
+  const now = new Date();
+  const todayUtc = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+  );
+  const oneDayMs = 24 * 60 * 60 * 1000;
+  return Math.round((todayUtc - targetUtc) / oneDayMs);
 };
 
 const getQcPendingAlignmentInfo = (qc = {}) => {
@@ -151,6 +169,8 @@ const QcDetails = () => {
   const location = useLocation();
   const user = getUserFromToken();
   const normalizedRole = String(user?.role || "").trim().toLowerCase();
+  const currentUserId = String(user?.id || user?._id || "").trim();
+  const isQcUser = normalizedRole === "qc";
   const isAdmin = normalizedRole === "admin" || normalizedRole === "manager";
   const isOnlyAdmin = normalizedRole === "admin";
   const canFinalizeShipping = ["admin", "manager", "dev"].includes(
@@ -178,9 +198,46 @@ const QcDetails = () => {
     (!isInspectionDone &&
       normalizedRole === "qc" &&
       qcIsPending);
+  const alignedInspectorId = String(qc?.inspector?._id || qc?.inspector || "").trim();
+  const isQcAlignedRecord = !isQcUser || (
+    Boolean(currentUserId) &&
+    Boolean(alignedInspectorId) &&
+    alignedInspectorId === currentUserId
+  );
+  const inspectionDateForPermission = toISODateString(
+    qc?.last_inspected_date || qc?.request_date || "",
+  );
+  const inspectionDateOffsetDays = getUtcDayOffsetFromToday(inspectionDateForPermission);
+  const isQcInspectionDateAllowed = !isQcUser
+    || (
+      inspectionDateOffsetDays !== null
+      && inspectionDateOffsetDays >= 0
+      && inspectionDateOffsetDays <= 1
+    );
+  const isOneDayBackdatedForQc = isQcUser && inspectionDateOffsetDays === 1;
+  const hasUsedOneDayBackdatedUpdate = Boolean(
+    isOneDayBackdatedForQc
+    && Array.isArray(qc?.inspection_record)
+    && qc.inspection_record.some((record) => {
+      const recordDate = toISODateString(record?.inspection_date || record?.createdAt || "");
+      if (!recordDate || recordDate !== inspectionDateForPermission) return false;
+      const recordInspectorId = String(record?.inspector?._id || record?.inspector || "").trim();
+      if (!recordInspectorId || recordInspectorId !== currentUserId) return false;
+      const checked = Number(record?.checked || 0);
+      const passed = Number(record?.passed || 0);
+      const offered = Number(record?.vendor_offered || 0);
+      const labelsAddedCount = Array.isArray(record?.labels_added)
+        ? record.labels_added.length
+        : 0;
+      return checked > 0 || passed > 0 || offered > 0 || labelsAddedCount > 0;
+    })
+  );
   const canUpdateQc =
     canUpdateQcByRole &&
-    pendingAlignmentInfo.hasRequest;
+    pendingAlignmentInfo.hasRequest &&
+    isQcAlignedRecord &&
+    isQcInspectionDateAllowed &&
+    !hasUsedOneDayBackdatedUpdate;
 
   const sortedLabels = useMemo(() => normalizeLabels(qc?.labels), [qc?.labels]);
   const backTarget = useMemo(() => {
@@ -727,6 +784,12 @@ const QcDetails = () => {
                   !canUpdateQc
                     ? !pendingAlignmentInfo.hasRequest
                       ? "QC is not requested yet. Align QC request before updating."
+                      : !isQcAlignedRecord
+                      ? "QC can update only records aligned to them."
+                      : !isQcInspectionDateAllowed
+                      ? "QC can update only for today and previous 1 day."
+                      : hasUsedOneDayBackdatedUpdate
+                      ? "QC can update a 1-day backdated entry only once."
                       : isInspectionDone
                       ? "After inspection is done, only admin can update this record."
                       : normalizedRole === "qc" && !qcIsPending

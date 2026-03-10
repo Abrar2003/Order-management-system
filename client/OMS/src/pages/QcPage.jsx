@@ -158,9 +158,13 @@ const QCPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const currentUser = getUserFromToken();
+  const normalizedRole = String(currentUser?.role || "").trim().toLowerCase();
+  const isQcUser = normalizedRole === "qc";
   const canRealign = ["admin", "manager"].includes(
-    String(currentUser?.role || "").toLowerCase(),
+    normalizedRole,
   );
+  const canUseInspectorFilter = !isQcUser;
+  const canExportQcList = ["admin", "manager", "dev"].includes(normalizedRole);
 
   const fetchQC = useCallback(async () => {
     const fromIso = toISODateString(from);
@@ -173,7 +177,7 @@ const QCPage = () => {
         page,
         limit: 20,
         search: debouncedSearch, // item_code
-        inspector,
+        inspector: canUseInspectorFilter ? inspector : "",
         vendor,
         from: fromIso || "",
         to: toIso || "",
@@ -200,14 +204,23 @@ const QCPage = () => {
     sortBy,
     sortOrder,
     order,
+    canUseInspectorFilter,
   ]);
 
   const fetchInspectors = useCallback(async () => {
-    const res = await axios.get("/auth/?role=QC", {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    setInspectors(res.data);
-  }, [token]);
+    if (!canUseInspectorFilter) {
+      setInspectors([]);
+      return;
+    }
+    try {
+      const res = await axios.get("/auth/?role=QC", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setInspectors(Array.isArray(res?.data) ? res.data : []);
+    } catch {
+      setInspectors([]);
+    }
+  }, [canUseInspectorFilter, token]);
 
   useEffect(() => {
     fetchQC();
@@ -220,7 +233,9 @@ const QCPage = () => {
   useEffect(() => {
     const nextRequestedItemCode = normalizeQueryText(searchParams.get("item_code"));
     const nextSearch = normalizeQueryText(searchParams.get("search")) || nextRequestedItemCode;
-    const nextInspector = normalizeQueryText(searchParams.get("inspector"));
+    const nextInspector = canUseInspectorFilter
+      ? normalizeQueryText(searchParams.get("inspector"))
+      : "";
     const nextVendor = normalizeQueryText(searchParams.get("vendor"));
     const nextFromRaw = normalizeQueryText(searchParams.get("from"));
     const nextToRaw = normalizeQueryText(searchParams.get("to"));
@@ -247,7 +262,7 @@ const QCPage = () => {
     setOrder((prev) => (prev === nextOrder ? prev : nextOrder));
     setPage((prev) => (prev === nextPage ? prev : nextPage));
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
-  }, [searchParams]);
+  }, [canUseInspectorFilter, searchParams]);
 
   useEffect(() => {
     const currentQuery = searchParams.toString();
@@ -256,7 +271,9 @@ const QCPage = () => {
     const next = new URLSearchParams();
     if (normalizeQueryText(search)) next.set("search", normalizeQueryText(search));
     if (normalizeQueryText(order)) next.set("order", normalizeQueryText(order));
-    if (normalizeQueryText(inspector)) next.set("inspector", normalizeQueryText(inspector));
+    if (canUseInspectorFilter && normalizeQueryText(inspector)) {
+      next.set("inspector", normalizeQueryText(inspector));
+    }
     if (normalizeQueryText(vendor)) next.set("vendor", normalizeQueryText(vendor));
     if (normalizeQueryText(from)) next.set("from", normalizeQueryText(from));
     if (normalizeQueryText(to)) next.set("to", normalizeQueryText(to));
@@ -280,6 +297,7 @@ const QCPage = () => {
     syncedQuery,
     searchParams,
     setSearchParams,
+    canUseInspectorFilter,
   ]);
 
   const handleDetailsClick = (qc) => {
@@ -422,24 +440,28 @@ const QCPage = () => {
             Back
           </button>
           <h2 className="h4 mb-0">QC Records</h2>
-          <div className="d-flex gap-2">
-            <button
-              type="button"
-              className="btn btn-outline-primary btn-sm"
-              onClick={() => handleExport("xlsx")}
-              disabled={exporting}
-            >
-              {exporting ? "Exporting..." : "Export XLSX"}
-            </button>
-            <button
-              type="button"
-              className="btn btn-outline-secondary btn-sm"
-              onClick={() => handleExport("csv")}
-              disabled={exporting}
-            >
-              {exporting ? "Exporting..." : "Export CSV"}
-            </button>
-          </div>
+          {canExportQcList ? (
+            <div className="d-flex gap-2">
+              <button
+                type="button"
+                className="btn btn-outline-primary btn-sm"
+                onClick={() => handleExport("xlsx")}
+                disabled={exporting}
+              >
+                {exporting ? "Exporting..." : "Export XLSX"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline-secondary btn-sm"
+                onClick={() => handleExport("csv")}
+                disabled={exporting}
+              >
+                {exporting ? "Exporting..." : "Export CSV"}
+              </button>
+            </div>
+          ) : (
+            <span className="d-none d-md-inline" />
+          )}
         </div>
 
         {/* Removed the separate filter card UI? You asked filters in table head.
@@ -639,21 +661,31 @@ const QCPage = () => {
 
                     {/* Inspector filter */}
                     <th>
-                      <select
-                        className="form-select form-select-sm"
-                        value={inspector}
-                        onChange={(e) => {
-                          resetToFirstPage();
-                          setInspector(e.target.value);
-                        }}
-                      >
-                        <option value="">All</option>
-                        {inspectors.map((qc) => (
-                          <option key={qc._id} value={qc._id}>
-                            {qc.name}
-                          </option>
-                        ))}
-                      </select>
+                      {canUseInspectorFilter ? (
+                        <select
+                          className="form-select form-select-sm"
+                          value={inspector}
+                          onChange={(e) => {
+                            resetToFirstPage();
+                            setInspector(e.target.value);
+                          }}
+                        >
+                          <option value="">All</option>
+                          {inspectors.map((qc) => (
+                            <option key={qc._id} value={qc._id}>
+                              {qc.name}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          className="form-control form-control-sm"
+                          value="Self"
+                          disabled
+                          readOnly
+                        />
+                      )}
                     </th>
 
                     {/* Clear filters button area */}

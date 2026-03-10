@@ -39,28 +39,28 @@ router.post(
 router.get(
   "/daily-report",
   auth,
-  authorize("admin", "manager", "QC", "dev"),
+  authorize("admin", "manager", "dev"),
   qcController.getDailyReport
 );
 
 router.get(
   "/reports/inspectors",
   auth,
-  authorize("admin", "manager", "QC", "dev"),
+  authorize("admin", "manager", "dev"),
   qcController.getInspectorReports,
 );
 
 router.get(
   "/reports/vendors",
   auth,
-  authorize("admin", "manager", "QC", "dev"),
+  authorize("admin", "manager", "dev"),
   qcController.getVendorReports,
 );
 
 router.get(
   "/export",
   auth,
-  authorize("admin", "manager", "QC", "dev"),
+  authorize("admin", "manager", "dev"),
   qcController.exportQCList,
 );
 

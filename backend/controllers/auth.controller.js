@@ -120,7 +120,7 @@ const getUsers = async (req, res) => {
 
     const users = await User.find(filter)
       .lean()
-      .select("_id name role email") // never send password
+      .select("_id name role email username") // never send password
       .sort({ name: 1 });
 
     res.json(

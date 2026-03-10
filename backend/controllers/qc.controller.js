@@ -36,6 +36,7 @@ const QC_REQUEST_TYPES = Object.freeze({
 });
 const CLOSED_ORDER_STATUSES = ["Shipped", "Cancelled"];
 const MANAGER_ALLOWED_PAST_DAYS = 2;
+const QC_ALLOWED_PAST_DAYS = 1;
 const ACTIVE_ORDER_MATCH = {
   archived: { $ne: true },
   status: { $ne: "Cancelled" },
@@ -175,6 +176,23 @@ const isIsoDateWithinPastDaysInclusive = (isoDate, daysBack = 0) => {
   minAllowedUtc.setUTCDate(minAllowedUtc.getUTCDate() - Math.max(0, Number(daysBack) || 0));
 
   return target >= minAllowedUtc && target <= todayUtc;
+};
+
+const isIsoDateExactlyDaysBack = (isoDate, daysBack = 0) => {
+  const target = parseIsoDateToUtcDate(isoDate);
+  if (!target) return false;
+
+  const now = new Date();
+  const todayUtc = new Date(Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+  ));
+  const offsetDays = Number(daysBack) || 0;
+  const expectedUtc = new Date(todayUtc);
+  expectedUtc.setUTCDate(expectedUtc.getUTCDate() - offsetDays);
+
+  return target.getTime() === expectedUtc.getTime();
 };
 
 const formatDateDDMMYYYY = (value, fallback = "") => {
@@ -878,10 +896,18 @@ exports.getQCList = async (req, res) => {
       to = "",
       sort = "-request_date",
     } = req.query;
-    const inspectorId = String(inspector || "").trim();
+    const requestedInspectorId = String(inspector || "").trim();
+    const normalizedRole = String(req.user?.role || "").trim().toLowerCase();
+    const isQcUser = normalizedRole === "qc";
+    const currentUserId = String(req.user?._id || req.user?.id || "").trim();
+    const inspectorId = isQcUser ? currentUserId : requestedInspectorId;
 
     if (inspectorId && !mongoose.Types.ObjectId.isValid(inspectorId)) {
       return res.status(400).json({ message: "Invalid inspector id" });
+    }
+
+    if (isQcUser && !inspectorId) {
+      return res.status(401).json({ message: "Unauthorized" });
     }
 
     const pageNum = Math.max(1, Number(page));
@@ -1797,7 +1823,9 @@ exports.updateQC = async (req, res) => {
       const normalizedRole = String(req.user?.role || "").trim().toLowerCase();
       const isAdmin = normalizedRole === "admin";
       const isManager = normalizedRole === "manager";
+      const isQcUser = normalizedRole === "qc";
       const hasElevatedAccess = isAdmin || isManager;
+      const currentUserId = String(req.user?._id || req.user?.id || "").trim();
       const isInspectionDone = qc?.order?.status === "Inspection Done";
 
       if (!hasElevatedAccess && isInspectionDone) {
@@ -1832,20 +1860,67 @@ exports.updateQC = async (req, res) => {
         });
       }
 
+      const inspectionDateForPermissionRaw =
+        last_inspected_date !== undefined && String(last_inspected_date).trim() !== ""
+          ? String(last_inspected_date).trim()
+          : String(qc?.last_inspected_date || qc?.request_date || "").trim();
+      const inspectionDateForPermission = toISODateString(inspectionDateForPermissionRaw);
+
       if (!hasElevatedAccess) {
-        const currentUserId = String(req.user?._id || req.user?.id || "").trim();
+        if (!inspectionDateForPermission) {
+          return res.status(400).json({
+            message: "last_inspected_date must be a valid date in DD/MM/YYYY or YYYY-MM-DD format",
+          });
+        }
+        if (!isIsoDateWithinPastDaysInclusive(inspectionDateForPermission, QC_ALLOWED_PAST_DAYS)) {
+          return res.status(403).json({
+            message: "QC can update only for today and previous 1 day",
+          });
+        }
+
+        const isOneDayBackdatedEntry = isIsoDateExactlyDaysBack(
+          inspectionDateForPermission,
+          1,
+        );
+        if (isQcUser && isOneDayBackdatedEntry) {
+          if (!mongoose.Types.ObjectId.isValid(currentUserId)) {
+            return res.status(401).json({ message: "Unauthorized" });
+          }
+          const existingOneDayBackdatedUpdate = await Inspection.exists({
+            qc: qc._id,
+            inspector: new mongoose.Types.ObjectId(currentUserId),
+            inspection_date: inspectionDateForPermission,
+            $or: [
+              { checked: { $gt: 0 } },
+              { passed: { $gt: 0 } },
+              { vendor_offered: { $gt: 0 } },
+              { "labels_added.0": { $exists: true } },
+            ],
+          });
+          if (existingOneDayBackdatedUpdate) {
+            return res.status(403).json({
+              message: "QC can update a 1-day backdated entry only once",
+            });
+          }
+        }
+      }
+
+      if (!hasElevatedAccess) {
         if (!currentUserId) {
           return res.status(401).json({ message: "Unauthorized" });
+        }
+
+        const alignedInspectorId = String(qc?.inspector?._id || qc?.inspector || "").trim();
+        if (!alignedInspectorId || alignedInspectorId !== currentUserId) {
+          return res.status(403).json({
+            message: "QC can update only records aligned to them",
+          });
         }
 
         if (requestedInspectorId && requestedInspectorId !== currentUserId) {
           return res.status(403).json({
             message: "QC can only assign themselves",
           });
-        }
-
-        if (!requestedInspectorId && !qc.inspector) {
-          qc.inspector = currentUserId;
         }
       }
 
@@ -3620,6 +3695,18 @@ exports.getQCById = async (req, res) => {
 
     if (!qc || !qc.order) {
       return res.status(404).json({ message: "QC record not found" });
+    }
+
+    const normalizedRole = String(req.user?.role || "").trim().toLowerCase();
+    const isQcUser = normalizedRole === "qc";
+    if (isQcUser) {
+      const currentUserId = String(req.user?._id || req.user?.id || "").trim();
+      const alignedInspectorId = String(qc?.inspector?._id || qc?.inspector || "").trim();
+      if (!currentUserId || !alignedInspectorId || alignedInspectorId !== currentUserId) {
+        return res.status(403).json({
+          message: "QC can only view records aligned to them",
+        });
+      }
     }
 
     const qcData = qc.toObject();
