@@ -159,6 +159,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const barcodeVideoRef = useRef(null);
   const barcodeStreamRef = useRef(null);
   const barcodeDetectorRef = useRef(null);
+  const barcodeReaderRef = useRef(null);
+  const barcodeReaderControlsRef = useRef(null);
   const lockBarcodeField = qc?.barcode > 0 && !isAdmin;
 
   useEffect(() => {
@@ -271,28 +273,168 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         animationFrameId = null;
       }
 
+      if (barcodeReaderControlsRef.current?.stop) {
+        try {
+          barcodeReaderControlsRef.current.stop();
+        } catch {
+          // No-op
+        }
+      }
+      barcodeReaderControlsRef.current = null;
+
+      if (barcodeReaderRef.current?.reset) {
+        try {
+          barcodeReaderRef.current.reset();
+        } catch {
+          // No-op
+        }
+      }
+      barcodeReaderRef.current = null;
+
       if (barcodeStreamRef.current) {
         barcodeStreamRef.current.getTracks().forEach((track) => track.stop());
         barcodeStreamRef.current = null;
       }
 
       if (barcodeVideoRef.current) {
+        const attachedStream = barcodeVideoRef.current.srcObject;
+        if (attachedStream && typeof attachedStream.getTracks === "function") {
+          attachedStream.getTracks().forEach((track) => track.stop());
+        }
         barcodeVideoRef.current.srcObject = null;
       }
 
       barcodeDetectorRef.current = null;
     };
 
-    const startScanner = async () => {
+    const applyDetectedBarcode = (rawValue) => {
+      const parsedNumericBarcode = String(rawValue || "").trim().replace(/\D/g, "");
+      if (!parsedNumericBarcode) return false;
+
+      setForm((prev) => ({
+        ...prev,
+        barcode: parsedNumericBarcode,
+      }));
+      setBarcodeScannerStatus(`Scanned: ${parsedNumericBarcode}`);
+      setBarcodeScannerOpen(false);
+      return true;
+    };
+
+    const startNativeScanner = async () => {
+      if (!BarcodeDetectorApi) {
+        throw new Error("BarcodeDetector not available");
+      }
       setBarcodeScannerError("");
       setBarcodeScannerStatus("Starting camera...");
 
-      if (!BarcodeDetectorApi) {
-        setBarcodeScannerError("Barcode scanner is not supported in this browser.");
-        setBarcodeScannerStatus("");
+      if (typeof BarcodeDetectorApi.getSupportedFormats === "function") {
+        const supportedFormats = await BarcodeDetectorApi.getSupportedFormats();
+        const usableFormats = PREFERRED_BARCODE_FORMATS.filter((format) =>
+          supportedFormats.includes(format),
+        );
+        barcodeDetectorRef.current = usableFormats.length
+          ? new BarcodeDetectorApi({ formats: usableFormats })
+          : new BarcodeDetectorApi();
+      } else {
+        barcodeDetectorRef.current = new BarcodeDetectorApi();
+      }
+
+      const stream = await mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } },
+        audio: false,
+      });
+
+      if (cancelled) {
+        stream.getTracks().forEach((track) => track.stop());
         return;
       }
 
+      barcodeStreamRef.current = stream;
+
+      const videoElement = barcodeVideoRef.current;
+      if (!videoElement) {
+        throw new Error("Unable to start scanner preview.");
+      }
+
+      videoElement.srcObject = stream;
+      await videoElement.play();
+      setBarcodeScannerStatus("Scanning...");
+
+      const scanFrame = async () => {
+        if (cancelled) return;
+
+        const detector = barcodeDetectorRef.current;
+        const activeVideo = barcodeVideoRef.current;
+        if (!detector || !activeVideo) {
+          animationFrameId = globalThis.requestAnimationFrame(scanFrame);
+          return;
+        }
+
+        try {
+          const codes = await detector.detect(activeVideo);
+          const rawValue = String(codes?.[0]?.rawValue || "").trim();
+          if (applyDetectedBarcode(rawValue)) {
+            return;
+          }
+        } catch {
+          // Keep scanning frames; transient camera decode errors are expected.
+        }
+
+        animationFrameId = globalThis.requestAnimationFrame(scanFrame);
+      };
+
+      animationFrameId = globalThis.requestAnimationFrame(scanFrame);
+    };
+
+    const startZxingScanner = async () => {
+      setBarcodeScannerError("");
+      setBarcodeScannerStatus("Starting camera...");
+
+      const { BrowserMultiFormatReader } = await import("@zxing/browser");
+
+      if (cancelled) return;
+
+      const videoElement = barcodeVideoRef.current;
+      if (!videoElement) {
+        throw new Error("Unable to start scanner preview.");
+      }
+
+      const reader = new BrowserMultiFormatReader();
+      barcodeReaderRef.current = reader;
+
+      setBarcodeScannerStatus("Scanning...");
+
+      const controls = await reader.decodeFromConstraints(
+        {
+          video: {
+            facingMode: { ideal: "environment" },
+          },
+          audio: false,
+        },
+        videoElement,
+        (result, decodeError) => {
+          if (cancelled) return;
+
+          if (result) {
+            const rawValue =
+              typeof result.getText === "function"
+                ? result.getText()
+                : String(result?.text || "");
+            if (applyDetectedBarcode(rawValue)) {
+              return;
+            }
+          }
+
+          if (decodeError && decodeError?.name !== "NotFoundException") {
+            setBarcodeScannerStatus("Scanning...");
+          }
+        },
+      );
+
+      barcodeReaderControlsRef.current = controls;
+    };
+
+    const startScanner = async () => {
       if (!mediaDevices?.getUserMedia) {
         setBarcodeScannerError("Camera access is not available in this browser.");
         setBarcodeScannerStatus("");
@@ -300,79 +442,21 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       }
 
       try {
-        if (typeof BarcodeDetectorApi.getSupportedFormats === "function") {
-          const supportedFormats = await BarcodeDetectorApi.getSupportedFormats();
-          const usableFormats = PREFERRED_BARCODE_FORMATS.filter((format) =>
-            supportedFormats.includes(format),
-          );
-          barcodeDetectorRef.current = usableFormats.length
-            ? new BarcodeDetectorApi({ formats: usableFormats })
-            : new BarcodeDetectorApi();
-        } else {
-          barcodeDetectorRef.current = new BarcodeDetectorApi();
-        }
-
-        const stream = await mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "environment" } },
-          audio: false,
-        });
-
-        if (cancelled) {
-          stream.getTracks().forEach((track) => track.stop());
+        if (BarcodeDetectorApi) {
+          await startNativeScanner();
           return;
         }
+      } catch {
+        // Fall through to ZXing fallback.
+      }
 
-        barcodeStreamRef.current = stream;
-
-        const videoElement = barcodeVideoRef.current;
-        if (!videoElement) {
-          setBarcodeScannerError("Unable to start scanner preview.");
-          setBarcodeScannerStatus("");
-          stopScannerResources();
-          return;
-        }
-
-        videoElement.srcObject = stream;
-        await videoElement.play();
-        setBarcodeScannerStatus("Scanning...");
-
-        const scanFrame = async () => {
-          if (cancelled) return;
-
-          const detector = barcodeDetectorRef.current;
-          const activeVideo = barcodeVideoRef.current;
-          if (!detector || !activeVideo) {
-            animationFrameId = globalThis.requestAnimationFrame(scanFrame);
-            return;
-          }
-
-          try {
-            const codes = await detector.detect(activeVideo);
-            const rawValue = String(codes?.[0]?.rawValue || "").trim();
-            const parsedNumericBarcode = rawValue.replace(/\D/g, "");
-
-            if (parsedNumericBarcode) {
-              setForm((prev) => ({
-                ...prev,
-                barcode: parsedNumericBarcode,
-              }));
-              setBarcodeScannerStatus(`Scanned: ${parsedNumericBarcode}`);
-              setBarcodeScannerOpen(false);
-              return;
-            }
-          } catch {
-            // Keep scanning frames; transient camera decode errors are expected.
-          }
-
-          animationFrameId = globalThis.requestAnimationFrame(scanFrame);
-        };
-
-        animationFrameId = globalThis.requestAnimationFrame(scanFrame);
+      try {
+        await startZxingScanner();
       } catch (scannerError) {
         setBarcodeScannerError(
           scannerError?.message
             ? `Unable to start scanner: ${scannerError.message}`
-            : "Unable to start scanner. Please allow camera access and retry.",
+            : "Unable to start scanner. Please allow camera access and retry. Use HTTPS/localhost.",
         );
         setBarcodeScannerStatus("");
       }
