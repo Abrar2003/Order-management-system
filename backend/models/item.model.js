@@ -107,6 +107,7 @@ const itemSchema = new mongoose.Schema(
       B: { type: Number, default: 0, min: 0 },
       H: { type: Number, default: 0, min: 0 },
     },
+    pis_barcode: { type: String, default: "", trim: true },
     qc: {
       packed_size: { type: Boolean, default: false },
       finishing: { type: Boolean, default: false },

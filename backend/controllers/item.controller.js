@@ -435,6 +435,7 @@ exports.updateItem = async (req, res) => {
       "brand_name",
       "brands",
       "vendors",
+      "pis_barcode",
       "pis_weight",
       "pis_item_LBH",
       "pis_item_top_LBH",
@@ -681,13 +682,8 @@ exports.updateItemPis = async (req, res) => {
       }
     }
 
-    if (payload?.qc && typeof payload.qc === "object") {
-      if (hasOwn(payload.qc, "barcode")) {
-        setPath(
-          "qc.barcode",
-          toNonNegativeNumber(payload.qc.barcode, "qc.barcode"),
-        );
-      }
+    if (hasOwn(payload, "pis_barcode")) {
+      setPath("pis_barcode", normalizeTextField(payload.pis_barcode));
     }
 
     if (payload?.pis_item_LBH && typeof payload.pis_item_LBH === "object") {

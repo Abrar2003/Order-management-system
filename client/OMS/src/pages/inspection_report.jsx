@@ -281,8 +281,23 @@ const InspectionReport = () => {
     const checkedCbmTotal = calculatedInspectedCbm !== "Not Set"
       ? calculatedInspectedCbm
       : (inspectedTotalCbm !== "Not Set" ? inspectedTotalCbm : baseTotalCbm);
-    const barcodeValue =
-      Number(qc?.barcode || 0) > 0 ? String(qc.barcode).trim() : "Not Set";
+    const inspectedBarcodeRaw =
+      Number(qc?.barcode || 0) > 0 ? String(qc.barcode).trim() : "";
+    const pisBarcodeRaw = String(
+      itemMaster?.pis_barcode
+      || (
+        Number(itemMaster?.qc?.barcode || 0) > 0
+          ? String(itemMaster.qc.barcode).trim()
+          : ""
+      )
+      || "",
+    ).trim();
+    const pisBarcodeValue = pisBarcodeRaw || "Not Set";
+    const inspectedBarcodeValue = inspectedBarcodeRaw || "Not Set";
+    const barcodeMismatch =
+      toComparableValue(pisBarcodeValue) !== toComparableValue(inspectedBarcodeValue);
+    const unifiedBarcodeValue =
+      pisBarcodeValue !== "Not Set" ? pisBarcodeValue : inspectedBarcodeValue;
 
     const rows = [
       { attribute: "Item Size (L x B x H)", pis: pisItemLbh, checked: checkedItemLbh },
@@ -294,11 +309,14 @@ const InspectionReport = () => {
       ...(showCbmTop ? [{ attribute: "CBM Top", pis: pisCbmTop, checked: checkedCbmTop }] : []),
       ...(showCbmBottom ? [{ attribute: "CBM Bottom", pis: pisCbmBottom, checked: checkedCbmBottom }] : []),
       { attribute: "CBM", pis: calculatedPisCbm, checked: checkedCbmTotal },
-      { attribute: "Barcode", pis: "N/A", checked: barcodeValue },
+      { attribute: "Barcode", pis: pisBarcodeValue, checked: inspectedBarcodeValue },
     ];
 
     return {
-      barcodeValue,
+      pisBarcodeValue,
+      inspectedBarcodeValue,
+      barcodeMismatch,
+      unifiedBarcodeValue,
       rows,
     };
   }, [qc]);
@@ -657,11 +675,52 @@ const InspectionReport = () => {
                 </table>
               </div>
 
-              {itemMasterSummary.barcodeValue !== "Not Set" && (
-                <div className="qc-barcode-wrapper">
-                  <Barcode value={itemMasterSummary.barcodeValue} />
+              {itemMasterSummary.barcodeMismatch ? (
+                <div className="row g-3 mt-1">
+                  <div className="col-md-6">
+                    <div className="fw-semibold mb-1">
+                      PIS Barcode: {itemMasterSummary.pisBarcodeValue}
+                    </div>
+                    {itemMasterSummary.pisBarcodeValue !== "Not Set" ? (
+                      <div className="qc-barcode-wrapper">
+                        <Barcode value={itemMasterSummary.pisBarcodeValue} />
+                      </div>
+                    ) : (
+                      <div className="text-secondary small">Not Set</div>
+                    )}
+                  </div>
+                  <div className="col-md-6">
+                    <div className="fw-semibold mb-1">
+                      QC Barcode: {itemMasterSummary.inspectedBarcodeValue}
+                    </div>
+                    {itemMasterSummary.inspectedBarcodeValue !== "Not Set" ? (
+                      <div className="qc-barcode-wrapper">
+                        <Barcode value={itemMasterSummary.inspectedBarcodeValue} />
+                      </div>
+                    ) : (
+                      <div className="text-secondary small">Not Set</div>
+                    )}
+                  </div>
                 </div>
-              )} 
+              ) : (
+                <div className="mt-2">
+                  <div className="fw-semibold mb-1">
+                    Barcode (PIS/QC): {itemMasterSummary.unifiedBarcodeValue}
+                  </div>
+                  {itemMasterSummary.unifiedBarcodeValue !== "Not Set" ? (
+                    <div className="qc-barcode-wrapper">
+                      <Barcode value={itemMasterSummary.unifiedBarcodeValue} />
+                    </div>
+                  ) : (
+                    <div className="text-secondary small">Not Set</div>
+                  )}
+                </div>
+              )}
+              {itemMasterSummary.barcodeMismatch && (
+                <div className="alert alert-warning py-2 mb-0 mt-3">
+                  Barcode mismatch detected between PIS barcode and QC barcode.
+                </div>
+              )}
             </section>
             <section>
               <h3 className="h6 mb-3">Difference Logs (PIS vs Inspected)</h3>
