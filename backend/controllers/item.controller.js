@@ -681,6 +681,15 @@ exports.updateItemPis = async (req, res) => {
       }
     }
 
+    if (payload?.qc && typeof payload.qc === "object") {
+      if (hasOwn(payload.qc, "barcode")) {
+        setPath(
+          "qc.barcode",
+          toNonNegativeNumber(payload.qc.barcode, "qc.barcode"),
+        );
+      }
+    }
+
     if (payload?.pis_item_LBH && typeof payload.pis_item_LBH === "object") {
       if (hasOwn(payload.pis_item_LBH, "L")) {
         setPath(

@@ -47,6 +47,7 @@ const getVendorsLabel = (item = {}) =>
     : "N/A";
 
 const buildInitialForm = (item = {}) => ({
+  barcode: toNumberString(item?.qc?.barcode, "0"),
   pis_weight: {
     net: toNumberString(item?.pis_weight?.net, "0"),
     gross: toNumberString(item?.pis_weight?.gross, "0"),
@@ -100,6 +101,9 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
       setError("");
 
       const payload = {
+        qc: {
+          barcode: parseNonNegativeNumber(form.barcode, "Barcode"),
+        },
         pis_weight: {
           net: parseNonNegativeNumber(form.pis_weight.net, "PIS Weight Net"),
           gross: parseNonNegativeNumber(form.pis_weight.gross, "PIS Weight Gross"),
@@ -160,6 +164,21 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
               <div className="col-12">
                 <label className="form-label">Description (Read Only)</label>
                 <input type="text" className="form-control" value={itemDescription} disabled />
+              </div>
+            </div>
+
+            <div className="row g-2">
+              <div className="col-md-6">
+                <label className="form-label">Barcode</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  className="form-control"
+                  value={form.barcode}
+                  onChange={(e) => updateField("barcode", e.target.value)}
+                  disabled={saving}
+                />
               </div>
             </div>
 
