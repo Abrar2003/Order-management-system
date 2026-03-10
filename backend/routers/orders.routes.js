@@ -7,6 +7,7 @@ const {
   createOrdersManually,
   rectifyPdfOrders,
   getUploadLogs,
+  getOrderEditLogs,
   getOrders,
   getOrdersByFiltersDb,
   getOrderById,
@@ -55,6 +56,13 @@ router.get(
   authenticate,
   authorize("admin", "manager", "dev"),
   getUploadLogs,
+);
+
+router.get(
+  "/edit-logs",
+  authenticate,
+  authorize("admin", "manager", "dev"),
+  getOrderEditLogs,
 );
 
 // List orders (pagination + sorting)

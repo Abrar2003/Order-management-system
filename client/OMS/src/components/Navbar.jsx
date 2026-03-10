@@ -77,6 +77,7 @@ const Navbar = () => {
     if (canManageOrders) {
       links.push({ label: "PIS", path: "/pis" });
       links.push({ label: "Upload Logs", path: "/upload-logs" });
+      links.push({ label: "Order Edit Logs", path: "/order-edit-logs" });
     }
 
     if (canCreateUsers) {

@@ -110,6 +110,18 @@ export const getUploadLogs = async (params = {}) => {
   return res.data;
 };
 
+export const getOrderEditLogs = async (params = {}) => {
+  const token = localStorage.getItem("token");
+  const res = await axios.get("/orders/edit-logs", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    params,
+  });
+
+  return res.data;
+};
+
 export const exportOrders = async (params = {}, format = "xlsx") => {
   const token = localStorage.getItem("token");
   return axios.get("/orders/export", {

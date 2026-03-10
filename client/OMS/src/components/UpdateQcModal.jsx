@@ -100,7 +100,7 @@ const PREFERRED_BARCODE_FORMATS = [
 
 const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const user = getUserFromToken();
-  const currentUserId = user?.id || user?._id || "";
+  const currentUserId = String(user?.id || user?._id || "").trim();
   const normalizedRole = String(user?.role || "").trim().toLowerCase();
   const isQcUser = normalizedRole === "qc";
   const canManageLabels = ["admin", "manager"].includes(user?.role);
@@ -184,9 +184,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   useEffect(() => {
     if (!qc) return;
     const assignedInspectorId = String(qc?.inspector?._id || qc?.inspector || "");
-    const defaultInspectorId = isQcUser
-      ? String(currentUserId || assignedInspectorId || "")
-      : assignedInspectorId;
+    const defaultInspectorId = assignedInspectorId;
     const initialCbmTop =
       qc?.cbm?.top && qc.cbm.top !== "0" ? String(qc.cbm.top) : "";
     const initialCbmBottom =
@@ -251,7 +249,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       inspected_item_bottom_H: strictInspectedItemBottomLbh.H,
       last_inspected_date: toDDMMYYYYInputValue(qc.last_inspected_date, ""),
     });
-  }, [qc, currentUserId, isQcUser]);
+  }, [qc]);
 
   useEffect(() => {
     if (lockBarcodeField && barcodeScannerOpen) {
@@ -1133,8 +1131,18 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   };
 
   if (!qc) return null;
+  const requestedInspectorId = String(qc?.inspector?._id || qc?.inspector || "").trim();
+  const requestedInspectorName = String(
+    qc?.inspector?.name
+      || (
+        requestedInspectorId
+        && requestedInspectorId === currentUserId
+        && user?.name
+      )
+      || "",
+  ).trim();
   const disableInspectorSelection =
-    !isAdmin && (qc?.quantities?.qc_checked || 0) > 0;
+    isQcUser || (!isAdmin && (qc?.quantities?.qc_checked || 0) > 0);
   const hasTotalCbmInput = String(form.CBM || "").trim() !== "";
   const hasTopOrBottomCbmInput =
     String(form.CBM_top || "").trim() !== "" ||
@@ -1255,20 +1263,30 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
             <div className="row g-3">
               <div className="col-md-12">
                 <label className="form-label">QC Inspector</label>
-                <select
-                  className="form-select"
-                  name="inspector"
-                  value={form.inspector}
-                  onChange={handleChange}
-                  disabled={disableInspectorSelection}
-                >
-                  <option value="">Select Inspector</option>
-                  {inspectors.map((qcInspector) => (
-                    <option key={qcInspector._id} value={qcInspector._id}>
-                      {qcInspector.name}
-                    </option>
-                  ))}
-                </select>
+                {isQcUser ? (
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={requestedInspectorName || "N/A"}
+                    disabled
+                    readOnly
+                  />
+                ) : (
+                  <select
+                    className="form-select"
+                    name="inspector"
+                    value={form.inspector}
+                    onChange={handleChange}
+                    disabled={disableInspectorSelection}
+                  >
+                    <option value="">Select Inspector</option>
+                    {inspectors.map((qcInspector) => (
+                      <option key={qcInspector._id} value={qcInspector._id}>
+                        {qcInspector.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               <div className="col-md-12">{"   "}</div>

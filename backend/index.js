@@ -2,9 +2,14 @@ const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
 const dns = require("dns");
-const { loadEnvFiles } = require("./config/loadEnv");
+const dotenv = require("dotenv");
 
-loadEnvFiles({ cwd: __dirname });
+dotenv.config({
+  path: process.env.NODE_ENV === "production"
+    ? ".env.production"
+    : ".env.development",
+});
+
 
 const connectDB = require("./config/connectDB");
 const orderRouter = require("./routers/orders.routes");

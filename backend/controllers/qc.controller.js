@@ -1917,9 +1917,9 @@ exports.updateQC = async (req, res) => {
           });
         }
 
-        if (requestedInspectorId && requestedInspectorId !== currentUserId) {
+        if (requestedInspectorId && requestedInspectorId !== alignedInspectorId) {
           return res.status(403).json({
-            message: "QC can only assign themselves",
+            message: "QC cannot change the requested inspector",
           });
         }
       }

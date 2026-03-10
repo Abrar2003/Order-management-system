@@ -191,8 +191,11 @@ const changePassword = async (req, res) => {
       });
     }
 
-    user.password = await bcrypt.hash(newPassword, 10);
-    await user.save();
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { password: hashedPassword } },
+    );
 
     return res.status(200).json({ message: "Password updated successfully" });
   } catch (err) {
@@ -254,8 +257,11 @@ const forceChangeUserPassword = async (req, res) => {
       });
     }
 
-    targetUser.password = await bcrypt.hash(newPassword, 10);
-    await targetUser.save();
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await User.updateOne(
+      { _id: targetUser._id },
+      { $set: { password: hashedPassword } },
+    );
 
     return res.status(200).json({
       message: "Password force changed successfully",

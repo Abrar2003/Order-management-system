@@ -4,6 +4,7 @@ const Order = require("../models/order.model");
 const QC = require("../models/qc.model");
 const Item = require("../models/item.model");
 const UploadLog = require("../models/uploadLog.model");
+const OrderEditLog = require("../models/orderEditLog.model");
 const mongoose = require("mongoose");
 const dateParser = require("../helpers/dateparsser");
 const deleteFile = require("../helpers/fileCleanup");
@@ -700,6 +701,130 @@ const createRectifyUploadLog = async ({
       error: uploadLogError?.message || String(uploadLogError),
     });
     return null;
+  }
+};
+
+const formatShipmentEntriesForUploadLog = (shipmentEntries = []) => {
+  const rows = Array.isArray(shipmentEntries) ? shipmentEntries : [];
+  if (rows.length === 0) return "None";
+
+  return rows
+    .map((entry, index) => {
+      const stuffingDate = formatDateDDMMYYYY(entry?.stuffing_date, "Not Set");
+      const container = String(entry?.container || "").trim() || "N/A";
+      const quantity = Number(entry?.quantity || 0);
+      const pending = Number(entry?.pending || 0);
+      const remarks = String(entry?.remaining_remarks || "").trim() || "None";
+      return `${index + 1}) ${stuffingDate} | ${container} | qty ${Number.isFinite(quantity) ? quantity : 0} | pending ${Number.isFinite(pending) ? pending : 0} | remarks: ${remarks}`;
+    })
+    .join(" || ");
+};
+
+const buildOrderEditLogSnapshot = (orderEntry = {}) => ({
+  order_id: normalizeLooseString(orderEntry?.order_id),
+  brand: normalizeLooseString(orderEntry?.brand),
+  vendor: normalizeLooseString(orderEntry?.vendor),
+  item_code: normalizeLooseString(orderEntry?.item?.item_code),
+  description: normalizeLooseString(orderEntry?.item?.description),
+  quantity: String(Number(orderEntry?.quantity || 0)),
+  revised_ETD: formatDateDDMMYYYY(orderEntry?.revised_ETD, "Not Set"),
+  status: normalizeLooseString(orderEntry?.status) || "Not Set",
+  archived: Boolean(orderEntry?.archived) ? "Yes" : "No",
+  archived_remark: normalizeLooseString(orderEntry?.archived_remark) || "Not Set",
+  shipment: formatShipmentEntriesForUploadLog(orderEntry?.shipment),
+});
+
+const buildOrderEditChanges = (beforeSnapshot = {}, afterSnapshot = {}) => {
+  const fields = [
+    { key: "brand", label: "Brand" },
+    { key: "vendor", label: "Vendor" },
+    { key: "item_code", label: "Item Code" },
+    { key: "description", label: "Description" },
+    { key: "quantity", label: "Quantity" },
+    { key: "revised_ETD", label: "Revised ETD" },
+    { key: "shipment", label: "Shipment" },
+    { key: "status", label: "Status" },
+    { key: "archived", label: "Archived" },
+    { key: "archived_remark", label: "Archived Remark" },
+  ];
+
+  const toDisplayText = (value) => {
+    const normalized = String(value ?? "").trim();
+    return normalized || "Not Set";
+  };
+
+  return fields.reduce((changes, { key, label }) => {
+    const beforeValue = toDisplayText(beforeSnapshot?.[key]);
+    const afterValue = toDisplayText(afterSnapshot?.[key]);
+    if (beforeValue === afterValue) return changes;
+    changes.push({
+      field: label,
+      before: beforeValue,
+      after: afterValue,
+    });
+    return changes;
+  }, []);
+};
+
+const createOrderEditLog = async ({
+  reqUser = null,
+  operationType = "order_edit",
+  beforeSnapshot = {},
+  afterSnapshot = {},
+  calendarSyncResults = [],
+  extraRemarks = [],
+} = {}) => {
+  const orderId = normalizeLooseString(afterSnapshot?.order_id || beforeSnapshot?.order_id);
+  const brand = normalizeLooseString(afterSnapshot?.brand || beforeSnapshot?.brand);
+  const vendor = normalizeLooseString(afterSnapshot?.vendor || beforeSnapshot?.vendor);
+  const itemCode = normalizeLooseString(afterSnapshot?.item_code || beforeSnapshot?.item_code);
+  const editDetails = buildOrderEditChanges(beforeSnapshot, afterSnapshot);
+
+  const calendarFailures = (Array.isArray(calendarSyncResults) ? calendarSyncResults : []).filter(
+    (entry) => entry && entry.ok === false,
+  );
+
+  const remarks = [
+    editDetails.length > 0
+      ? `Edited fields: ${editDetails.map((entry) => entry.field).join(", ")}.`
+      : "No net changes detected in editable fields.",
+    ...(Array.isArray(extraRemarks) ? extraRemarks : [])
+      .map((entry) => String(entry || "").trim())
+      .filter(Boolean),
+  ];
+
+  if (calendarFailures.length > 0) {
+    remarks.push(`Calendar sync failed for ${calendarFailures.length} group(s).`);
+  }
+
+  const uploadedById = reqUser?._id && mongoose.Types.ObjectId.isValid(reqUser._id)
+    ? reqUser._id
+    : null;
+
+  try {
+    await OrderEditLog.create({
+      edited_by: uploadedById,
+      edited_by_name: String(
+        reqUser?.name || reqUser?.username || reqUser?.email || "",
+      ).trim(),
+      order_id: orderId || "UNKNOWN",
+      brand,
+      vendor,
+      item_code: itemCode,
+      operation_type:
+        String(operationType || "").trim().toLowerCase() === "order_edit_archive"
+          ? "order_edit_archive"
+          : "order_edit",
+      changed_fields_count: editDetails.length,
+      changed_fields: editDetails.map((entry) => entry.field),
+      changes: editDetails,
+      remarks,
+    });
+  } catch (orderEditLogError) {
+    console.error("Order edit log save failed:", {
+      order_id: orderId,
+      error: orderEditLogError?.message || String(orderEditLogError),
+    });
   }
 };
 
@@ -2719,7 +2844,9 @@ exports.getUploadLogs = async (req, res) => {
     const status = normalizeFilterValue(req.query.status);
     const orderId = normalizeFilterValue(req.query.order_id ?? req.query.orderId);
 
-    const match = {};
+    const match = {
+      source_filename: { $nin: ["order_edit", "order_edit_archive"] },
+    };
 
     if (brand) {
       match.uploaded_brands = brand;
@@ -2815,6 +2942,92 @@ exports.getUploadLogs = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch upload logs",
+      error: error?.message || String(error),
+    });
+  }
+};
+
+exports.getOrderEditLogs = async (req, res) => {
+  try {
+    const page = parsePositiveInt(req.query.page, 1);
+    const limit = Math.min(100, parsePositiveInt(req.query.limit, 20));
+    const skip = (page - 1) * limit;
+
+    const brand = normalizeFilterValue(req.query.brand);
+    const vendor = normalizeFilterValue(req.query.vendor);
+    const orderId = normalizeFilterValue(req.query.order_id ?? req.query.orderId);
+    const operationType = normalizeFilterValue(
+      req.query.operation_type ?? req.query.operationType,
+    );
+
+    const match = {};
+
+    if (brand) {
+      match.brand = brand;
+    }
+
+    if (vendor) {
+      match.vendor = vendor;
+    }
+
+    if (orderId) {
+      const escaped = escapeRegex(orderId);
+      match.order_id = { $regex: escaped, $options: "i" };
+    }
+
+    if (operationType && ["order_edit", "order_edit_archive"].includes(operationType)) {
+      match.operation_type = operationType;
+    }
+
+    const [logs, totalRecords, brandsRaw, vendorsRaw, operationsRaw, totalsRaw] =
+      await Promise.all([
+        OrderEditLog.find(match)
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limit)
+          .lean(),
+        OrderEditLog.countDocuments(match),
+        OrderEditLog.distinct("brand", match),
+        OrderEditLog.distinct("vendor", match),
+        OrderEditLog.distinct("operation_type", match),
+        OrderEditLog.aggregate([
+          { $match: match },
+          {
+            $group: {
+              _id: null,
+              total_logs: { $sum: 1 },
+              total_field_changes: { $sum: "$changed_fields_count" },
+            },
+          },
+        ]),
+      ]);
+
+    const totals = Array.isArray(totalsRaw) && totalsRaw.length > 0 ? totalsRaw[0] : null;
+
+    return res.status(200).json({
+      success: true,
+      data: logs,
+      pagination: {
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(totalRecords / limit)),
+        totalRecords,
+      },
+      filters: {
+        brands: normalizeDistinctValues(brandsRaw),
+        vendors: normalizeDistinctValues(vendorsRaw),
+        operation_types: normalizeDistinctValues(operationsRaw),
+      },
+      summary: {
+        total_logs: Number(totals?.total_logs || 0),
+        total_field_changes: Number(totals?.total_field_changes || 0),
+      },
+    });
+  } catch (error) {
+    console.error("Get Order Edit Logs Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch order edit logs",
       error: error?.message || String(error),
     });
   }
@@ -4374,11 +4587,21 @@ exports.editOrder = async (req, res) => {
       hasOwn(payload, "revised_ETD")
       || hasOwn(payload, "revised_etd")
       || hasOwn(payload, "revisedEtd");
+    const requestedEditFields = [
+      hasBrand ? "brand" : "",
+      hasVendor ? "vendor" : "",
+      hasItemCode ? "item_code" : "",
+      hasDescription ? "description" : "",
+      hasQuantity ? "quantity" : "",
+      hasShipment ? "shipment" : "",
+      hasRevisedEtd ? "revised_ETD" : "",
+    ].filter(Boolean);
     const requesterRole = String(req.user?.role || "").trim().toLowerCase();
     const isRequesterAdmin = requesterRole === "admin";
     const archiveRemarkInput = String(
       payload.archive_remark ?? payload.archiveRemark ?? "",
     ).trim();
+    const beforeEditSnapshot = buildOrderEditLogSnapshot(order);
 
     if ((hasQuantity || hasShipment) && !isRequesterAdmin) {
       return res.status(403).json({
@@ -4479,14 +4702,39 @@ exports.editOrder = async (req, res) => {
       };
       await order.save();
 
+      const archiveCalendarSync = [];
       try {
-        await syncOrderGroup(oldGroup);
+        const syncResult = await syncOrderGroup(oldGroup);
+        archiveCalendarSync.push({
+          group: oldGroup,
+          ok: true,
+          result: syncResult,
+        });
       } catch (syncErr) {
+        archiveCalendarSync.push({
+          group: oldGroup,
+          ok: false,
+          error: syncErr?.message || String(syncErr),
+        });
         console.error("Google Calendar sync failed after archiving via edit:", {
           group: oldGroup,
           error: syncErr?.message || String(syncErr),
         });
       }
+
+      await createOrderEditLog({
+        reqUser: req.user,
+        operationType: "order_edit_archive",
+        beforeSnapshot: beforeEditSnapshot,
+        afterSnapshot: buildOrderEditLogSnapshot(order),
+        calendarSyncResults: archiveCalendarSync,
+        extraRemarks: [
+          "Order archived through edit-order route (quantity set to 0).",
+          requestedEditFields.length > 0
+            ? `Requested fields: ${requestedEditFields.join(", ")}.`
+            : "",
+        ],
+      });
 
       return res.status(200).json({
         message: "Order archived successfully",
@@ -4609,6 +4857,17 @@ exports.editOrder = async (req, res) => {
         ok: false,
         error: entry.reason?.message || String(entry.reason),
       };
+    });
+
+    await createOrderEditLog({
+      reqUser: req.user,
+      operationType: "order_edit",
+      beforeSnapshot: beforeEditSnapshot,
+      afterSnapshot: buildOrderEditLogSnapshot(order),
+      calendarSyncResults: calendar_sync,
+      extraRemarks: requestedEditFields.length > 0
+        ? [`Requested fields: ${requestedEditFields.join(", ")}.`]
+        : [],
     });
 
     return res.status(200).json({
