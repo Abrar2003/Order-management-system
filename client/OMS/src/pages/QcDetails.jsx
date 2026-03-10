@@ -182,12 +182,6 @@ const QcDetails = () => {
     isOnlyAdmin &&
     (hasShippingRecords || isShipmentEditableStatus(qc?.order?.status));
 
-  const requirementsMet =
-    Boolean(qc?.packed_size) && Boolean(qc?.finishing) && Boolean(qc?.branding);
-  const hasPendingQuantities =
-    (qc?.quantities?.qc_checked || 0) === 0 ||
-    (qc?.quantities?.pending || 0) > 0;
-  const qcIsPending = hasPendingQuantities || !requirementsMet;
   const isInspectionDone = qc?.order?.status === "Inspection Done";
   const pendingAlignmentInfo = useMemo(
     () => getQcPendingAlignmentInfo(qc),
@@ -196,8 +190,7 @@ const QcDetails = () => {
   const canUpdateQcByRole =
     isAdmin ||
     (!isInspectionDone &&
-      normalizedRole === "qc" &&
-      qcIsPending);
+      normalizedRole === "qc");
   const alignedInspectorId = String(qc?.inspector?._id || qc?.inspector || "").trim();
   const isQcAlignedRecord = !isQcUser || (
     Boolean(currentUserId) &&
@@ -235,9 +228,7 @@ const QcDetails = () => {
   const canUpdateQc =
     canUpdateQcByRole &&
     pendingAlignmentInfo.hasRequest &&
-    isQcAlignedRecord &&
-    isQcInspectionDateAllowed &&
-    !hasUsedOneDayBackdatedUpdate;
+    isQcAlignedRecord;
 
   const sortedLabels = useMemo(() => normalizeLabels(qc?.labels), [qc?.labels]);
   const backTarget = useMemo(() => {
@@ -786,15 +777,13 @@ const QcDetails = () => {
                       ? "QC is not requested yet. Align QC request before updating."
                       : !isQcAlignedRecord
                       ? "QC can update only records aligned to them."
-                      : !isQcInspectionDateAllowed
-                      ? "QC can update only for today and previous 1 day."
-                      : hasUsedOneDayBackdatedUpdate
-                      ? "QC can update a 1-day backdated entry only once."
                       : isInspectionDone
                       ? "After inspection is done, only admin can update this record."
-                      : normalizedRole === "qc" && !qcIsPending
-                        ? "No pending quantity left to update."
-                        : "Only admin, manager, or QC can update this record."
+                      : !isQcInspectionDateAllowed
+                      ? "QC date rule will be validated while submitting."
+                      : hasUsedOneDayBackdatedUpdate
+                      ? "Backdated one-time rule will be validated while submitting."
+                      : "Only admin, manager, or aligned QC can update this record."
                     : ""
                 }
               >

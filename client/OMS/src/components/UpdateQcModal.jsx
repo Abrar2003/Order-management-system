@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import api from "../api/axios";
 import { getUserFromToken } from "../auth/auth.utils";
 import {
@@ -88,6 +88,16 @@ const getUtcDayOffsetFromToday = (isoDateValue) => {
   return Math.round((todayUtc - targetUtc) / oneDayMs);
 };
 
+const PREFERRED_BARCODE_FORMATS = [
+  "code_128",
+  "ean_13",
+  "ean_8",
+  "upc_a",
+  "upc_e",
+  "itf",
+  "codabar",
+];
+
 const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const user = getUserFromToken();
   const currentUserId = user?.id || user?._id || "";
@@ -143,8 +153,20 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [showAllocateModal, setShowAllocateModal] = useState(false);
+  const [barcodeScannerOpen, setBarcodeScannerOpen] = useState(false);
+  const [barcodeScannerError, setBarcodeScannerError] = useState("");
+  const [barcodeScannerStatus, setBarcodeScannerStatus] = useState("");
+  const barcodeVideoRef = useRef(null);
+  const barcodeStreamRef = useRef(null);
+  const barcodeDetectorRef = useRef(null);
+  const lockBarcodeField = qc?.barcode > 0 && !isAdmin;
 
   useEffect(() => {
+    if (isQcUser) {
+      setInspectors([]);
+      return;
+    }
+
     const fetchInspectors = async () => {
       try {
         const res = await api.get("/auth/?role=QC");
@@ -155,7 +177,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     };
 
     fetchInspectors();
-  }, []);
+  }, [isQcUser]);
 
   useEffect(() => {
     if (!qc) return;
@@ -228,6 +250,141 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       last_inspected_date: toDDMMYYYYInputValue(qc.last_inspected_date, ""),
     });
   }, [qc, currentUserId, isQcUser]);
+
+  useEffect(() => {
+    if (lockBarcodeField && barcodeScannerOpen) {
+      setBarcodeScannerOpen(false);
+    }
+  }, [lockBarcodeField, barcodeScannerOpen]);
+
+  useEffect(() => {
+    if (!barcodeScannerOpen) return undefined;
+
+    const BarcodeDetectorApi = globalThis?.BarcodeDetector;
+    const mediaDevices = globalThis?.navigator?.mediaDevices;
+    let animationFrameId = null;
+    let cancelled = false;
+
+    const stopScannerResources = () => {
+      if (animationFrameId) {
+        globalThis.cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+
+      if (barcodeStreamRef.current) {
+        barcodeStreamRef.current.getTracks().forEach((track) => track.stop());
+        barcodeStreamRef.current = null;
+      }
+
+      if (barcodeVideoRef.current) {
+        barcodeVideoRef.current.srcObject = null;
+      }
+
+      barcodeDetectorRef.current = null;
+    };
+
+    const startScanner = async () => {
+      setBarcodeScannerError("");
+      setBarcodeScannerStatus("Starting camera...");
+
+      if (!BarcodeDetectorApi) {
+        setBarcodeScannerError("Barcode scanner is not supported in this browser.");
+        setBarcodeScannerStatus("");
+        return;
+      }
+
+      if (!mediaDevices?.getUserMedia) {
+        setBarcodeScannerError("Camera access is not available in this browser.");
+        setBarcodeScannerStatus("");
+        return;
+      }
+
+      try {
+        if (typeof BarcodeDetectorApi.getSupportedFormats === "function") {
+          const supportedFormats = await BarcodeDetectorApi.getSupportedFormats();
+          const usableFormats = PREFERRED_BARCODE_FORMATS.filter((format) =>
+            supportedFormats.includes(format),
+          );
+          barcodeDetectorRef.current = usableFormats.length
+            ? new BarcodeDetectorApi({ formats: usableFormats })
+            : new BarcodeDetectorApi();
+        } else {
+          barcodeDetectorRef.current = new BarcodeDetectorApi();
+        }
+
+        const stream = await mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" } },
+          audio: false,
+        });
+
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        barcodeStreamRef.current = stream;
+
+        const videoElement = barcodeVideoRef.current;
+        if (!videoElement) {
+          setBarcodeScannerError("Unable to start scanner preview.");
+          setBarcodeScannerStatus("");
+          stopScannerResources();
+          return;
+        }
+
+        videoElement.srcObject = stream;
+        await videoElement.play();
+        setBarcodeScannerStatus("Scanning...");
+
+        const scanFrame = async () => {
+          if (cancelled) return;
+
+          const detector = barcodeDetectorRef.current;
+          const activeVideo = barcodeVideoRef.current;
+          if (!detector || !activeVideo) {
+            animationFrameId = globalThis.requestAnimationFrame(scanFrame);
+            return;
+          }
+
+          try {
+            const codes = await detector.detect(activeVideo);
+            const rawValue = String(codes?.[0]?.rawValue || "").trim();
+            const parsedNumericBarcode = rawValue.replace(/\D/g, "");
+
+            if (parsedNumericBarcode) {
+              setForm((prev) => ({
+                ...prev,
+                barcode: parsedNumericBarcode,
+              }));
+              setBarcodeScannerStatus(`Scanned: ${parsedNumericBarcode}`);
+              setBarcodeScannerOpen(false);
+              return;
+            }
+          } catch {
+            // Keep scanning frames; transient camera decode errors are expected.
+          }
+
+          animationFrameId = globalThis.requestAnimationFrame(scanFrame);
+        };
+
+        animationFrameId = globalThis.requestAnimationFrame(scanFrame);
+      } catch (scannerError) {
+        setBarcodeScannerError(
+          scannerError?.message
+            ? `Unable to start scanner: ${scannerError.message}`
+            : "Unable to start scanner. Please allow camera access and retry.",
+        );
+        setBarcodeScannerStatus("");
+      }
+    };
+
+    startScanner();
+
+    return () => {
+      cancelled = true;
+      stopScannerResources();
+    };
+  }, [barcodeScannerOpen]);
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -1388,19 +1545,51 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
               <div className="col-md-6">
                 <label className="form-label">Barcode</label>
-                <input
-                  type="number"
-                  className="form-control"
-                  name="barcode"
-                  value={form.barcode}
-                  onChange={handleChange}
-                  min="1"
-                  step="1"
-                  disabled={qc.barcode > 0 && !isAdmin}
-                  placeholder={
-                    qc.barcode > 0 && !isAdmin ? "Already set" : "Enter barcode"
-                  }
-                />
+                <div className="input-group">
+                  <input
+                    type="number"
+                    className="form-control"
+                    name="barcode"
+                    value={form.barcode}
+                    onChange={handleChange}
+                    min="1"
+                    step="1"
+                    disabled={lockBarcodeField}
+                    placeholder={
+                      lockBarcodeField ? "Already set" : "Enter barcode"
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-outline-secondary"
+                    onClick={() => {
+                      setBarcodeScannerError("");
+                      setBarcodeScannerStatus("");
+                      setBarcodeScannerOpen((prev) => !prev);
+                    }}
+                    disabled={lockBarcodeField}
+                  >
+                    {barcodeScannerOpen ? "Stop Scan" : "Scan"}
+                  </button>
+                </div>
+                {barcodeScannerOpen && (
+                  <div className="border rounded p-2 mt-2">
+                    <video
+                      ref={barcodeVideoRef}
+                      autoPlay
+                      muted
+                      playsInline
+                      className="w-100 rounded"
+                      style={{ maxHeight: "240px", objectFit: "cover", background: "#111827" }}
+                    />
+                    {barcodeScannerStatus && (
+                      <div className="small text-muted mt-2">{barcodeScannerStatus}</div>
+                    )}
+                    {barcodeScannerError && (
+                      <div className="small text-danger mt-1">{barcodeScannerError}</div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="col-md-12">{"   "}</div>
