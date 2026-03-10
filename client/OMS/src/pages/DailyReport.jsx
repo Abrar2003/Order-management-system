@@ -9,6 +9,7 @@ import {
   toDDMMYYYYInputValue,
   toISODateString,
 } from "../utils/date";
+import { formatCbm } from "../utils/cbm";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
@@ -36,12 +37,6 @@ const parseSortOrder = (value, sortBy) => {
   const normalized = normalizeQueryText(value).toLowerCase();
   if (normalized === "asc" || normalized === "desc") return normalized;
   return sortBy === "order_id" ? "asc" : "desc";
-};
-
-const formatCbm = (value) => {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return "0";
-  return parsed.toLocaleString(undefined, { maximumFractionDigits: 3 });
 };
 
 const DailyReport = () => {
@@ -446,8 +441,8 @@ const DailyReport = () => {
                             <td>{inspection.item_code || "N/A"}</td>
                             <td>{inspection.inspected_quantity ?? 0}</td>
                             <td>{inspection.passed_quantity ?? 0}</td>
-                            <td>{inspection?.cbm?.total || "0"}</td>
-                            <td>{inspection?.cbm?.total * inspection?.inspected_quantity || "0"}</td>
+                            <td>{formatCbm(inspection?.cbm?.total)}</td>
+                            <td>{formatCbm((inspection?.cbm?.total || 0) * (inspection?.inspected_quantity || 0))}</td>
                             <td>{inspection?.remarks || "None"}</td>
                           </tr>
                         ))}

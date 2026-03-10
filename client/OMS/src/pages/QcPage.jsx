@@ -11,6 +11,7 @@ import {
   toDDMMYYYYInputValue,
   toISODateString,
 } from "../utils/date";
+import { formatPositiveCbm } from "../utils/cbm";
 import "../App.css";
 
 // small helper: debounce without extra libs
@@ -723,7 +724,7 @@ const QCPage = () => {
                           {pendingAlignmentInfo.pendingQty}
                         </span>
                       </td>
-                      <td>{qc?.cbm?.total || "NA"}</td>
+                      <td>{formatPositiveCbm(qc?.cbm?.total, "NA")}</td>
                       <td>{qc?.inspector?.name || "N/A"}</td>
                       <td>
                         <div className="d-flex flex-column gap-2">

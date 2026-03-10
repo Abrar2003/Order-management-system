@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import { formatDateDDMMYYYY } from "../utils/date";
+import { formatCbm } from "../utils/cbm";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
@@ -23,15 +24,6 @@ const parseCustomDays = (value) => {
   const parsed = Number.parseInt(String(value ?? "").trim(), 10);
   if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_CUSTOM_DAYS;
   return Math.min(parsed, 3650);
-};
-
-const formatCbm = (value) => {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return "0";
-  return parsed.toLocaleString(undefined, {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 3,
-  });
 };
 
 const defaultReport = {

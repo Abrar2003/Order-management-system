@@ -34,9 +34,8 @@ const user_Schema = new mongoose.Schema({
 
 }, { timestamps: true });
 
-user_Schema.pre("validate", function normalizeUserRole(next) {
+user_Schema.pre("validate", function normalizeUserRole() {
     this.role = normalizeRole(this.role);
-    next();
 });
 
 module.exports = mongoose.model("users", user_Schema);

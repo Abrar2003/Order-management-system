@@ -1,5 +1,6 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
 const User = require("../models/user.model");
 
 const normalizeRole = (value) => {
@@ -199,9 +200,81 @@ const changePassword = async (req, res) => {
   }
 };
 
+/**
+ * PATCH /auth/force-change-password
+ * Force change password of another user (except admin targets).
+ */
+const forceChangeUserPassword = async (req, res) => {
+  try {
+    const targetUserId = String(
+      req.body?.user_id ?? req.body?.userId ?? "",
+    ).trim();
+    const newPassword = String(
+      req.body?.new_password ?? req.body?.newPassword ?? "",
+    );
+    const confirmPassword = String(
+      req.body?.confirm_password ?? req.body?.confirmPassword ?? "",
+    );
+
+    if (!targetUserId || !newPassword || !confirmPassword) {
+      return res.status(400).json({
+        message: "user_id, new_password, and confirm_password are required",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
+      return res.status(400).json({ message: "Invalid user_id" });
+    }
+
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ message: "New passwords do not match" });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        message: "New password must be at least 6 characters",
+      });
+    }
+
+    const targetUser = await User.findById(targetUserId).select("password role name email");
+    if (!targetUser) {
+      return res.status(404).json({ message: "Target user not found" });
+    }
+
+    if (String(targetUser.role || "").trim().toLowerCase() === "admin") {
+      return res.status(403).json({
+        message: "Admin passwords cannot be force changed by this route",
+      });
+    }
+
+    const isSameAsOldPassword = await bcrypt.compare(newPassword, targetUser.password);
+    if (isSameAsOldPassword) {
+      return res.status(400).json({
+        message: "New password must be different from current password",
+      });
+    }
+
+    targetUser.password = await bcrypt.hash(newPassword, 10);
+    await targetUser.save();
+
+    return res.status(200).json({
+      message: "Password force changed successfully",
+      data: {
+        id: targetUser._id,
+        name: targetUser.name,
+        email: targetUser.email,
+        role: targetUser.role,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
+};
+
 module.exports = {
   signup,
   signin,
   getUsers,
   changePassword,
+  forceChangeUserPassword,
 };

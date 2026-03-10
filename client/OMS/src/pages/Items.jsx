@@ -5,6 +5,7 @@ import Navbar from "../components/Navbar";
 import EditItemModal from "../components/EditItemModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
+import { formatCbm } from "../utils/cbm";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
 
@@ -74,7 +75,6 @@ const getCalculatedInspectedCbm = (item) =>
   ?? item?.cbm?.qc_total
   ?? item?.cbm?.total
   ?? "0";
-const getCalculatedPisCbm = (item) => item?.cbm?.calculated_pis_total ?? "0";
 
 const Items = () => {
   const navigate = useNavigate();
@@ -437,14 +437,7 @@ const Items = () => {
                         <td>{Array.isArray(item?.vendors) && item.vendors.length > 0 ? item.vendors.join(", ") : "N/A"}</td> */}
                         <td>{getInspectedWeight(item, "net")}</td>
                         <td>{getInspectedWeight(item, "gross")}</td>
-                        <td>
-                          {item?.cbm?.calculated_inspected_total
-                            ?? item?.cbm?.inspected_total
-                            ?? item?.cbm?.calculated_total
-                            ?? item?.cbm?.qc_total
-                            ?? item?.cbm?.total
-                            ?? "0"}
-                        </td>
+                        <td>{formatCbm(getCalculatedInspectedCbm(item))}</td>
                         <td>{formatLbh(getInspectedItemLbh(item))}</td>
                         <td>{formatLbh(getInspectedBoxLbh(item))}</td>
                         {canEditItems && (

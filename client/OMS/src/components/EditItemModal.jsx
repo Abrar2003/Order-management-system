@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import api from "../api/axios";
+import { formatCbm } from "../utils/cbm";
 import "../App.css";
 
 const toText = (value, fallback = "") => String(value ?? fallback).trim();
@@ -15,13 +16,12 @@ const calculateCbmFromLbh = (box = {}) => {
   const height = Number(box?.H || 0);
 
   if (!Number.isFinite(length) || !Number.isFinite(breadth) || !Number.isFinite(height)) {
-    return "0";
+    return "0.000";
   }
-  if (length <= 0 || breadth <= 0 || height <= 0) return "0";
+  if (length <= 0 || breadth <= 0 || height <= 0) return "0.000";
 
   const cubicMeters = (length * breadth * height) / 1000000;
-  const fixed = cubicMeters.toFixed(6);
-  return fixed.replace(/\.?0+$/, "") || "0";
+  return formatCbm(cubicMeters);
 };
 
 const getBrandLabel = (item = {}) =>

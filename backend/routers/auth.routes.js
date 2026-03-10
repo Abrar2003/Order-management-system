@@ -4,6 +4,7 @@ const {
   signin,
   getUsers,
   changePassword,
+  forceChangeUserPassword,
 } = require("../controllers/auth.controller");
 const auth = require("../middlewares/auth.middleware");
 const authorize = require("../middlewares/authorize.middleware");
@@ -13,6 +14,12 @@ const router = express.Router();
 router.post("/signup", signup);
 router.post("/signin", signin);
 router.patch("/change-password", auth, changePassword);
+router.patch(
+  "/force-change-password",
+  auth,
+  authorize("admin", "manager", "dev"),
+  forceChangeUserPassword,
+);
 router.get(
   "/",
   auth,

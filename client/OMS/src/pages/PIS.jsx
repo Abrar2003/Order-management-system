@@ -5,6 +5,7 @@ import Navbar from "../components/Navbar";
 import EditPisModal from "../components/EditPisModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
+import { formatCbm } from "../utils/cbm";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
 
@@ -350,7 +351,7 @@ const PIS = () => {
                         <td>{getPisWeight(item, "gross")}</td>
                         <td>{formatLbh(item?.pis_item_LBH || {})}</td>
                         <td>{formatLbh(item?.pis_box_LBH || {})}</td>
-                        <td>{item?.cbm?.calculated_pis_total ?? "0"}</td>
+                        <td>{formatCbm(item?.cbm?.calculated_pis_total)}</td>
                         <td>
                           <button
                             type="button"

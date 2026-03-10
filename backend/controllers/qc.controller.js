@@ -4013,9 +4013,11 @@ exports.deleteInspectionRecord = async (req, res) => {
         Array.isArray(entry?.labels_added) ? entry.labels_added : [],
       ),
     );
-    qc.labels = recalculatedLabels;
+    const shouldDeleteQcRecord = remainingInspections.length === 0;
 
-    if (remainingInspections.length > 0) {
+    if (!shouldDeleteQcRecord) {
+      qc.labels = recalculatedLabels;
+
       const latestRecord = [...remainingInspections].sort((a, b) => {
         const aTime = Math.max(
           toSortableTimestamp(a?.inspection_date),
@@ -4035,11 +4037,10 @@ exports.deleteInspectionRecord = async (req, res) => {
           || qc.last_inspected_date
           || "",
       );
-    } else {
-      qc.last_inspected_date = String(qc.request_date || qc.last_inspected_date || "");
+
+      await qc.save();
     }
 
-    await qc.save();
     await Inspection.deleteOne({ _id: inspection._id });
 
     const inspectorDoc = await Inspector.findOne({ user: inspection.inspector });
@@ -4068,6 +4069,23 @@ exports.deleteInspectionRecord = async (req, res) => {
 
     const orderId = qc?.order?._id || qc.order;
     const orderRecord = await Order.findById(orderId);
+
+    if (shouldDeleteQcRecord) {
+      if (orderRecord) {
+        orderRecord.qc_record = null;
+        orderRecord.status = "Pending";
+        await orderRecord.save();
+      }
+
+      await QC.deleteOne({ _id: qc._id });
+
+      return res.status(200).json({
+        message: "Last inspection record deleted. QC record removed and order moved to Pending.",
+        qc_deleted: true,
+        data: null,
+      });
+    }
+
     if (orderRecord && !CLOSED_ORDER_STATUSES.includes(orderRecord.status)) {
       const passedQty = Number(qc.quantities?.qc_passed || 0);
       const clientDemandQty = Number(qc.quantities?.client_demand || 0);

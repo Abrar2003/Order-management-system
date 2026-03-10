@@ -6,6 +6,7 @@ import { jsPDF } from "jspdf";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import { formatDateDDMMYYYY } from "../utils/date";
+import { formatPositiveCbm } from "../utils/cbm";
 import "../App.css";
 
 const toTimestamp = (value) => {
@@ -76,11 +77,6 @@ const toBrandLogoDataUrl = (logoObj) => {
   return `data:image/webp;base64,${window.btoa(binary)}`;
 };
 
-const isPositiveCbmValue = (value) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0;
-};
-
 const toDisplayNumber = (value, fallback = "Not Set") => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -90,6 +86,30 @@ const toComparableValue = (value) =>
   String(value ?? "")
     .trim()
     .toLowerCase();
+
+const LBH_REGEX = /^(-?\d+(?:\.\d+)?)\s*x\s*(-?\d+(?:\.\d+)?)\s*x\s*(-?\d+(?:\.\d+)?)$/i;
+
+const parseLbhString = (value) => {
+  const normalized = String(value ?? "").trim();
+  const match = normalized.match(LBH_REGEX);
+  if (!match) return null;
+
+  const length = Number(match[1]);
+  const breadth = Number(match[2]);
+  const height = Number(match[3]);
+  if (!Number.isFinite(length) || !Number.isFinite(breadth) || !Number.isFinite(height)) {
+    return null;
+  }
+
+  return { L: length, B: breadth, H: height };
+};
+
+const formatDifferenceNumber = (value) => {
+  const numeric = Math.abs(Number(value));
+  if (!Number.isFinite(numeric)) return "0";
+  if (Number.isInteger(numeric)) return String(numeric);
+  return numeric.toFixed(2).replace(/\.?0+$/, "");
+};
 
 const InspectionReport = () => {
   const { id } = useParams();
@@ -111,11 +131,15 @@ const InspectionReport = () => {
   }, [id, location.state]);
 
   const orderInfo = useMemo(() => {
+    const orderQuantity = Number(qc?.order?.quantity ?? qc?.quantities?.client_demand ?? 0);
     return {
       orderId: toDisplayValue(qc?.order?.order_id),
       brand: toDisplayValue(qc?.order?.brand),
       vendor: toDisplayValue(qc?.order?.vendor),
       requestDate: formatDateDDMMYYYY(qc?.request_date),
+      requestType: toDisplayValue(qc?.request_type, "N/A"),
+      orderQuantity: Number.isFinite(orderQuantity) ? String(orderQuantity) : "0",
+      status: toDisplayValue(qc?.order?.status),
       itemCode: toDisplayValue(qc?.item?.item_code),
       itemDescription: toDisplayValue(qc?.item?.description),
     };
@@ -153,14 +177,31 @@ const InspectionReport = () => {
     [inspectionRows],
   );
 
-  const sortedLabels = useMemo(() => {
-    const labels = Array.isArray(qc?.labels) ? qc.labels : [];
-    return [...new Set(
-      labels
-        .map((label) => Number(label))
-        .filter((label) => Number.isFinite(label)),
-    )].sort((a, b) => a - b);
-  }, [qc?.labels]);
+  const labelRanges = useMemo(() => {
+    const ranges = [];
+    const seen = new Set();
+    const inspectionRecords = Array.isArray(qc?.inspection_record) ? qc.inspection_record : [];
+
+    inspectionRecords.forEach((record) => {
+      const recordRanges = Array.isArray(record?.label_ranges) ? record.label_ranges : [];
+      recordRanges.forEach((range) => {
+        const start = Number(range?.start);
+        const end = Number(range?.end);
+        if (!Number.isFinite(start) || !Number.isFinite(end)) return;
+        const normalizedStart = Math.min(start, end);
+        const normalizedEnd = Math.max(start, end);
+        const key = `${normalizedStart}-${normalizedEnd}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        ranges.push({ start: normalizedStart, end: normalizedEnd });
+      });
+    });
+
+    return ranges.sort((a, b) => {
+      if (a.start !== b.start) return a.start - b.start;
+      return a.end - b.end;
+    });
+  }, [qc?.inspection_record]);
 
   const itemMasterSummary = useMemo(() => {
     const itemMaster = qc?.item_master || {};
@@ -227,33 +268,19 @@ const InspectionReport = () => {
       itemMaster?.cbm?.qc_bottom ??
       qc?.cbm?.bottom ??
       "0";
-    const calculatedInspectedCbm = isPositiveCbmValue(calculatedInspectedCbmRaw)
-      ? String(calculatedInspectedCbmRaw).trim()
-      : "Not Set";
-    const calculatedPisCbm = isPositiveCbmValue(calculatedPisCbmRaw)
-      ? String(calculatedPisCbmRaw).trim()
-      : "Not Set";
-    const pisCbmTop = isPositiveCbmValue(pisCbmTopRaw)
-      ? String(pisCbmTopRaw).trim()
-      : "Not Set";
-    const pisCbmBottom = isPositiveCbmValue(pisCbmBottomRaw)
-      ? String(pisCbmBottomRaw).trim()
-      : "Not Set";
-    const checkedCbmTop = isPositiveCbmValue(checkedCbmTopRaw)
-      ? String(checkedCbmTopRaw).trim()
-      : "Not Set";
-    const checkedCbmBottom = isPositiveCbmValue(checkedCbmBottomRaw)
-      ? String(checkedCbmBottomRaw).trim()
-      : "Not Set";
+    const calculatedInspectedCbm = formatPositiveCbm(calculatedInspectedCbmRaw, "Not Set");
+    const calculatedPisCbm = formatPositiveCbm(calculatedPisCbmRaw, "Not Set");
+    const pisCbmTop = formatPositiveCbm(pisCbmTopRaw, "Not Set");
+    const pisCbmBottom = formatPositiveCbm(pisCbmBottomRaw, "Not Set");
+    const checkedCbmTop = formatPositiveCbm(checkedCbmTopRaw, "Not Set");
+    const checkedCbmBottom = formatPositiveCbm(checkedCbmBottomRaw, "Not Set");
     const showCbmTop = pisCbmTop !== "Not Set" || checkedCbmTop !== "Not Set";
     const showCbmBottom = pisCbmBottom !== "Not Set" || checkedCbmBottom !== "Not Set";
+    const inspectedTotalCbm = formatPositiveCbm(itemMaster?.cbm?.inspected_total, "Not Set");
+    const baseTotalCbm = formatPositiveCbm(itemMaster?.cbm?.total, "Not Set");
     const checkedCbmTotal = calculatedInspectedCbm !== "Not Set"
       ? calculatedInspectedCbm
-      : (isPositiveCbmValue(itemMaster?.cbm?.inspected_total)
-          ? String(itemMaster?.cbm?.inspected_total).trim()
-          : (isPositiveCbmValue(itemMaster?.cbm?.total)
-              ? String(itemMaster?.cbm?.total).trim()
-              : "Not Set"));
+      : (inspectedTotalCbm !== "Not Set" ? inspectedTotalCbm : baseTotalCbm);
     const barcodeValue =
       Number(qc?.barcode || 0) > 0 ? String(qc.barcode).trim() : "Not Set";
 
@@ -278,15 +305,70 @@ const InspectionReport = () => {
 
   const differenceLogs = useMemo(() => {
     const rows = Array.isArray(itemMasterSummary?.rows) ? itemMasterSummary.rows : [];
-    const logs = rows
-      .filter((row) => {
-        const pis = String(row?.pis ?? "").trim();
-        const checked = String(row?.checked ?? "").trim();
-        if (!pis || !checked) return false;
-        if (pis.toLowerCase() === "n/a" || checked.toLowerCase() === "n/a") return false;
-        return toComparableValue(pis) !== toComparableValue(checked);
-      })
-      .map((row) => `${row.attribute}: PIS ${row.pis} | Checked ${row.checked}`);
+    const logs = [];
+    const dimensionNames = {
+      L: "length",
+      B: "breadth",
+      H: "height",
+    };
+
+    rows.forEach((row) => {
+      const attribute = String(row?.attribute || "").trim();
+      const pisValue = String(row?.pis ?? "").trim();
+      const checkedValue = String(row?.checked ?? "").trim();
+      const normalizedPis = toComparableValue(pisValue);
+      const normalizedChecked = toComparableValue(checkedValue);
+
+      if (!attribute || !pisValue || !checkedValue) return;
+      if (normalizedPis === normalizedChecked) return;
+
+      const isMissingPis = normalizedPis === "not set" || normalizedPis === "n/a";
+      const isMissingChecked = normalizedChecked === "not set" || normalizedChecked === "n/a";
+
+      if (isMissingPis && !isMissingChecked) {
+        logs.push(`For ${attribute}, inspected value is ${checkedValue} while PIS value is not set.`);
+        return;
+      }
+      if (!isMissingPis && isMissingChecked) {
+        logs.push(`For ${attribute}, PIS value is ${pisValue} while inspected value is not set.`);
+        return;
+      }
+      if (isMissingPis && isMissingChecked) return;
+
+      const parsedPisLbh = parseLbhString(pisValue);
+      const parsedCheckedLbh = parseLbhString(checkedValue);
+      if (parsedPisLbh && parsedCheckedLbh) {
+        let hasDimensionDifference = false;
+        (["L", "B", "H"]).forEach((axis) => {
+          const pisAxisValue = Number(parsedPisLbh[axis]);
+          const checkedAxisValue = Number(parsedCheckedLbh[axis]);
+          const delta = checkedAxisValue - pisAxisValue;
+          if (!Number.isFinite(delta) || Math.abs(delta) < 0.0001) return;
+          hasDimensionDifference = true;
+          const direction = delta > 0 ? "greater" : "smaller";
+          logs.push(
+            `For ${attribute}, inspected ${dimensionNames[axis]} is ${formatDifferenceNumber(delta)} cm ${direction} than PIS size.`,
+          );
+        });
+
+        if (hasDimensionDifference) return;
+      }
+
+      const pisNumeric = Number(pisValue);
+      const checkedNumeric = Number(checkedValue);
+      if (Number.isFinite(pisNumeric) && Number.isFinite(checkedNumeric)) {
+        const delta = checkedNumeric - pisNumeric;
+        if (Math.abs(delta) >= 0.0001) {
+          const direction = delta > 0 ? "greater" : "smaller";
+          logs.push(
+            `For ${attribute}, inspected value is ${formatDifferenceNumber(delta)} ${direction} than PIS value.`,
+          );
+        }
+        return;
+      }
+
+      logs.push(`For ${attribute}, inspected value is ${checkedValue} while PIS value is ${pisValue}.`);
+    });
 
     return logs;
   }, [itemMasterSummary?.rows]);
@@ -467,7 +549,10 @@ const InspectionReport = () => {
         <div className="card om-card" ref={reportRef}>
           <div className="card-body d-grid gap-4">
             <section>
-              <h3 className="h6 mb-3">QC Report</h3>
+                <div className="d-flex justify-center align-center text-center mb-4">
+                     <h3 className="h3 m-auto">QC Report</h3>
+                </div>
+             
               <div className="inspection-report-summary-block">
                 <div className="inspection-report-summary-column inspection-report-summary-primary">
                   <div className="inspection-report-summary-line">
@@ -482,9 +567,13 @@ const InspectionReport = () => {
                   <div className="inspection-report-summary-line">
                     <span><strong>Request Date:</strong> {orderInfo.requestDate}</span>
                   </div>
+                  <div className="inspection-report-summary-line">
+                    <span><strong>Request Type:</strong> {orderInfo.requestType}</span>
+                    <span><strong>Order Quantity:</strong> {orderInfo.orderQuantity}</span>
+                    <span><strong>Status:</strong> {orderInfo.status}</span>
+                  </div>
                 </div>
                 <div className="inspection-report-summary-column inspection-report-summary-media">
-                  <div className="inspection-report-media-title">Brand Logo</div>
                   <div className="inspection-report-brand-panel">
                     {brandLogoSrc ? (
                       <img
@@ -553,7 +642,7 @@ const InspectionReport = () => {
                     <tr>
                       <th>Attribute</th>
                       <th>PIS</th>
-                      <th>Checked</th>
+                      <th>Inspected</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -572,10 +661,10 @@ const InspectionReport = () => {
                 <div className="qc-barcode-wrapper">
                   <Barcode value={itemMasterSummary.barcodeValue} />
                 </div>
-              )}
+              )} 
             </section>
             <section>
-              <h3 className="h6 mb-3">Difference Logs (PIS vs Checked)</h3>
+              <h3 className="h6 mb-3">Difference Logs (PIS vs Inspected)</h3>
               {differenceLogs.length > 0 ? (
                 <ul className="inspection-report-diff-logs">
                   {differenceLogs.map((log, index) => (
@@ -583,60 +672,59 @@ const InspectionReport = () => {
                   ))}
                 </ul>
               ) : (
-                <div className="text-secondary small">No differences found between PIS and Checked values.</div>
+                <div className="text-secondary small">No differences found between PIS and inspected values.</div>
               )}
             </section>
 
             <section>
-              <details className="inspection-report-collapsible">
-                <summary className="inspection-report-collapsible-summary">
-                  Labels And Remarks
-                </summary>
-                <div className="inspection-report-collapsible-body">
-                  <div className="mb-3">
-                    <div className="fw-semibold mb-2">Labels</div>
-                    {sortedLabels.length > 0 ? (
-                      <div className="inspection-report-label-list">
-                        {sortedLabels.map((label) => (
-                          <span key={`label-${label}`} className="inspection-report-label-chip">
-                            {label}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-secondary small">No labels added.</div>
-                    )}
-                  </div>
-                  <div>
-                    <div className="fw-semibold mb-2">Inspection Remarks</div>
-                    {inspectionRemarkRows.length > 0 ? (
-                      <div className="table-responsive">
-                        <table className="table table-sm table-striped align-middle mb-0">
-                          <thead>
-                            <tr>
-                              <th>Inspection Date</th>
-                              <th>Inspector</th>
-                              <th>Remark</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {inspectionRemarkRows.map((row) => (
-                              <tr key={`remark-${row.key}`}>
-                                <td>{formatDateDDMMYYYY(row.inspectionDate)}</td>
-                                <td>{row.inspectorName}</td>
-                                <td>{row.remarks}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    ) : (
-                      <div className="text-secondary small">No inspection remarks found.</div>
-                    )}
-                  </div>
-
+              <h3 className="h6 mb-3">Label Ranges And Remarks</h3>
+              <div className="inspection-report-notes-block">
+                <div className="mb-3">
+                  <div className="fw-semibold mb-2">Label Ranges</div>
+                  {labelRanges.length > 0 ? (
+                    <div className="inspection-report-label-list">
+                      {labelRanges.map((range, index) => (
+                        <span
+                          key={`label-range-${range.start}-${range.end}-${index}`}
+                          className="inspection-report-label-chip"
+                        >
+                          {range.start} - {range.end}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-secondary small">No label ranges added.</div>
+                  )}
                 </div>
-              </details>
+
+                <div>
+                  <div className="fw-semibold mb-2">Inspection Remarks</div>
+                  {inspectionRemarkRows.length > 0 ? (
+                    <div className="table-responsive">
+                      <table className="table table-sm table-striped align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>Inspection Date</th>
+                            <th>Inspector</th>
+                            <th>Remark</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {inspectionRemarkRows.map((row) => (
+                            <tr key={`remark-${row.key}`}>
+                              <td>{formatDateDDMMYYYY(row.inspectionDate)}</td>
+                              <td>{row.inspectorName}</td>
+                              <td>{row.remarks}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="text-secondary small">No inspection remarks found.</div>
+                  )}
+                </div>
+              </div>
             </section>
 
           </div>

@@ -8,6 +8,7 @@ import EditOrderModal from "../components/EditOrderModal";
 import EditInspectionRecordsModal from "../components/EditInspectionRecordsModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import { formatDateDDMMYYYY } from "../utils/date";
+import { formatPositiveCbm } from "../utils/cbm";
 import Barcode from "react-barcode";
 import "../App.css";
 
@@ -50,11 +51,6 @@ const formatLbhValue = (value) => {
     return "Not Set";
   }
   return `${safeLength} x ${safeBreadth} x ${safeHeight}`;
-};
-
-const isPositiveCbmValue = (value) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0;
 };
 
 const toSafeNumber = (value, fallback = 0) => {
@@ -257,35 +253,26 @@ const QcDetails = () => {
       ? itemMaster.brands.find((brand) => String(brand || "").trim())
       : "";
     const brandName = String(itemMaster?.brand_name || fallbackBrand || "").trim();
-    const inspectedCbm = String(
-      itemMaster?.cbm?.calculated_inspected_total
-      ?? itemMaster?.cbm?.inspected_total
-      ?? itemMaster?.cbm?.calculated_total
-      ?? itemMaster?.cbm?.qc_total
-      ?? qc?.cbm?.total
-      ?? "0",
-    ).trim();
-    const calculatedInspectedCbm = String(
-      itemMaster?.cbm?.calculated_inspected_total
-      ?? itemMaster?.cbm?.calculated_total
-      ?? itemMaster?.cbm?.qc_total
-      ?? qc?.cbm?.total
+    const pisCbm = String(
+      itemMaster?.cbm?.total
+      ?? itemMaster?.cbm?.calculated_pis_total
       ?? "0",
     ).trim();
     const calculatedPisCbm = String(
-      itemMaster?.cbm?.calculated_pis_total ?? "0",
+      itemMaster?.cbm?.calculated_pis_total
+      ?? itemMaster?.cbm?.total
+      ?? "0",
     ).trim();
     const netWeight = Number(
-      itemMaster?.inspected_weight?.net ?? itemMaster?.pis_weight?.net ?? itemMaster?.weight?.net ?? 0,
+      itemMaster?.pis_weight?.net ?? itemMaster?.weight?.net ?? 0,
     );
     const grossWeight = Number(
-      itemMaster?.inspected_weight?.gross
-      ?? itemMaster?.pis_weight?.gross
+      itemMaster?.pis_weight?.gross
       ?? itemMaster?.weight?.gross
       ?? 0,
     );
-    const itemLbhSource = itemMaster?.inspected_item_LBH || itemMaster?.pis_item_LBH || itemMaster?.item_LBH;
-    const boxLbhSource = itemMaster?.inspected_box_LBH || itemMaster?.pis_box_LBH || itemMaster?.box_LBH;
+    const itemLbhSource = itemMaster?.pis_item_LBH || itemMaster?.item_LBH;
+    const boxLbhSource = itemMaster?.pis_box_LBH || itemMaster?.box_LBH;
 
     return {
       code: String(itemMaster?.code || qc?.item?.item_code || "N/A").trim() || "N/A",
@@ -296,13 +283,8 @@ const QcDetails = () => {
       weightGross: Number.isFinite(grossWeight) ? grossWeight : 0,
       itemLbh: formatLbhValue(itemLbhSource),
       boxLbh: formatLbhValue(boxLbhSource),
-      inspectedCbm: isPositiveCbmValue(inspectedCbm) ? inspectedCbm : "Not Set",
-      calculatedInspectedCbm: isPositiveCbmValue(calculatedInspectedCbm)
-        ? calculatedInspectedCbm
-        : "Not Set",
-      calculatedPisCbm: isPositiveCbmValue(calculatedPisCbm)
-        ? calculatedPisCbm
-        : "Not Set",
+      pisCbm: formatPositiveCbm(pisCbm, "Not Set"),
+      calculatedPisCbm: formatPositiveCbm(calculatedPisCbm, "Not Set"),
     };
   }, [qc]);
 
@@ -370,9 +352,7 @@ const QcDetails = () => {
         record?.createdAt,
       );
       const inspectionCbm = record?.cbm?.total;
-      const cbmValue = isPositiveCbmValue(inspectionCbm)
-        ? String(inspectionCbm)
-        : "Not Set";
+      const cbmValue = formatPositiveCbm(inspectionCbm, "Not Set");
 
       return {
         key: `inspection-${record?._id || index}`,
@@ -427,11 +407,19 @@ const QcDetails = () => {
 
       try {
         setDeletingInspectionId(String(recordId));
-        await api.delete(`/qc/${id}/inspection-record/${recordId}`, {
+        const response = await api.delete(`/qc/${id}/inspection-record/${recordId}`, {
           headers: {
             Authorization: `Bearer ${localStorage.getItem("token")}`,
           },
         });
+        if (response?.data?.qc_deleted) {
+          alert(
+            response?.data?.message
+            || "Last inspection record deleted. QC record removed and order moved to Pending.",
+          );
+          handleBackNavigation();
+          return;
+        }
         await fetchQcDetails();
       } catch (err) {
         console.error(err);
@@ -443,7 +431,7 @@ const QcDetails = () => {
         setDeletingInspectionId("");
       }
     },
-    [fetchQcDetails, id, isOnlyAdmin],
+    [fetchQcDetails, handleBackNavigation, id, isOnlyAdmin],
   );
 
   useEffect(() => {
@@ -536,12 +524,8 @@ const QcDetails = () => {
                 <InfoBox label="Item LBH" value={itemMasterDetails.itemLbh} />
                 <InfoBox label="Box LBH" value={itemMasterDetails.boxLbh} />
                 <InfoBox
-                  label="Inspected CBM"
-                  value={itemMasterDetails.inspectedCbm}
-                />
-                <InfoBox
-                  label="Calculated Inspected CBM"
-                  value={itemMasterDetails.calculatedInspectedCbm}
+                  label="PIS CBM"
+                  value={itemMasterDetails.pisCbm}
                 />
                 <InfoBox
                   label="Calculated PIS CBM"
@@ -690,11 +674,7 @@ const QcDetails = () => {
               <div className="row g-3 mb-3">
                 <InfoBox
                   label="CBM Total"
-                  value={
-                    isPositiveCbmValue(cbmData.total)
-                      ? cbmData.total
-                      : "Not Set"
-                  }
+                  value={formatPositiveCbm(cbmData.total, "Not Set")}
                 />
                 <InfoBox
                   label="Packed Size"
