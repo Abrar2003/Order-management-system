@@ -2229,7 +2229,7 @@ exports.updateQC = async (req, res) => {
       ──────────────────────── */
 
       if (barcode !== undefined) {
-        if (qc.barcode > 0 && Number(barcode) !== qc.barcode) {
+        if (!isAdmin && qc.barcode > 0 && Number(barcode) !== qc.barcode) {
           return res.status(400).json({ message: "barcode can only be set once" });
         }
         qc.barcode = Number(barcode);
