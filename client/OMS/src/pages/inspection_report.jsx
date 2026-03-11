@@ -215,15 +215,13 @@ const InspectionReport = () => {
     const inspectedTopLbh =
       itemMaster?.inspected_box_top_LBH
       || itemMaster?.inspected_top_LBH
+      || itemMaster?.inspected_item_top_LBH
       || {};
     const inspectedBottomLbh =
       itemMaster?.inspected_box_bottom_LBH
       || itemMaster?.inspected_bottom_LBH
+      || itemMaster?.inspected_item_bottom_LBH
       || {};
-    const checkedTopSize = formatLbhValue(inspectedTopLbh);
-    const checkedBottomSize = formatLbhValue(inspectedBottomLbh);
-    const showTopSize = checkedTopSize !== "Not Set";
-    const showBottomSize = checkedBottomSize !== "Not Set";
     const checkedPackedSize = hasCompletePositiveLbh(inspectedTopLbh)
       && hasCompletePositiveLbh(inspectedBottomLbh)
       ? `Top: ${formatLbhValue(inspectedTopLbh)} | Bottom: ${formatLbhValue(inspectedBottomLbh)}`
@@ -302,8 +300,6 @@ const InspectionReport = () => {
     const rows = [
       { attribute: "Item Size (L x B x H)", pis: pisItemLbh, checked: checkedItemLbh },
       { attribute: "Packed Size (L x B x H)", pis: pisPackedSize, checked: checkedPackedSize },
-      ...(showTopSize ? [{ attribute: "Top Size (L x B x H)", pis: "Not Set", checked: checkedTopSize }] : []),
-      ...(showBottomSize ? [{ attribute: "Bottom Size (L x B x H)", pis: "Not Set", checked: checkedBottomSize }] : []),
       { attribute: "Net Weight", pis: pisNetWeight, checked: checkedNetWeight },
       { attribute: "Gross Weight", pis: pisGrossWeight, checked: checkedGrossWeight },
       ...(showCbmTop ? [{ attribute: "CBM Top", pis: pisCbmTop, checked: checkedCbmTop }] : []),

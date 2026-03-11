@@ -6,6 +6,7 @@ import UploadOrdersModal from "./UploadOrdersModal";
 import RectifyPdfModal from "./RectifyPdfModal";
 import AllocateLabelsModal from "./AllocateLabelsModal";
 import ChangePasswordModal from "./ChangePasswordModal";
+import CheckLabelsModal from "./CheckLabelsModal";
 
 const Navbar = () => {
   const token = getToken();
@@ -15,6 +16,7 @@ const Navbar = () => {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showRectifyPdfModal, setShowRectifyPdfModal] = useState(false);
   const [showAllocateModal, setShowAllocateModal] = useState(false);
+  const [showCheckLabelsModal, setShowCheckLabelsModal] = useState(false);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [showMainMenu, setShowMainMenu] = useState(false);
   const [showReportsMenu, setShowReportsMenu] = useState(false);
@@ -250,6 +252,19 @@ const Navbar = () => {
                             type="button"
                             className="list-group-item list-group-item-action text-start"
                             onClick={() => {
+                              setShowCheckLabelsModal(true);
+                              setShowMainMenu(false);
+                            }}
+                          >
+                            Check Labels
+                          </button>
+                        )}
+
+                        {canManageLabels && (
+                          <button
+                            type="button"
+                            className="list-group-item list-group-item-action text-start"
+                            onClick={() => {
                               setShowAllocateModal(true);
                               setShowMainMenu(false);
                             }}
@@ -346,6 +361,14 @@ const Navbar = () => {
         <AllocateLabelsModal
           onClose={() => {
             setShowAllocateModal(false);
+          }}
+        />
+      )}
+
+      {showCheckLabelsModal && (
+        <CheckLabelsModal
+          onClose={() => {
+            setShowCheckLabelsModal(false);
           }}
         />
       )}
