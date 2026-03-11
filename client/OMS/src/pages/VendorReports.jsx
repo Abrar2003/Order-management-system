@@ -167,6 +167,13 @@ const VendorReports = () => {
     [report?.filters],
   );
 
+  const handleOpenShipmentOrder = useCallback((orderId) => {
+    const normalizedOrderId = String(orderId || "").trim();
+    if (!normalizedOrderId) return;
+
+    navigate(`/shipments?order_id=${encodeURIComponent(normalizedOrderId)}`);
+  }, [navigate]);
+
   return (
     <>
       <Navbar />
@@ -341,7 +348,19 @@ const VendorReports = () => {
                         )}
                         {(Array.isArray(vendorEntry.orders) ? vendorEntry.orders : []).map((orderRow) => (
                           <tr key={`${vendorEntry.vendor}-${orderRow.order_id}-${orderRow.brand}`}>
-                            <td>{orderRow.order_id || "N/A"}</td>
+                            <td>
+                              {orderRow.order_id ? (
+                                <button
+                                  type="button"
+                                  className="btn btn-link p-0 align-baseline text-decoration-none"
+                                  onClick={() => handleOpenShipmentOrder(orderRow.order_id)}
+                                >
+                                  {orderRow.order_id}
+                                </button>
+                              ) : (
+                                "N/A"
+                              )}
+                            </td>
                             <td>{orderRow.brand || "N/A"}</td>
                             <td>{orderRow.status || "N/A"}</td>
                             <td>{formatDateDDMMYYYY(orderRow.order_date)}</td>
