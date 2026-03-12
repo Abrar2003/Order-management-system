@@ -1520,6 +1520,187 @@ const getShipmentDataset = async ({
   };
 };
 
+const makeUploadOrderKey = (orderId, itemCode) =>
+  `${normalizeOrderKey(orderId)}__${normalizeLooseString(itemCode).toUpperCase()}`;
+
+const buildUploadOrderRowId = (row = {}, index = 0) => {
+  const baseKey = makeUploadOrderKey(
+    row?.PO ?? row?.order_id ?? row?.orderId,
+    row?.item_code ?? row?.itemCode,
+  );
+  return baseKey ? `${baseKey}__${index}` : `upload_row__${index}`;
+};
+
+const normalizeUploadedSelectionRow = (row = {}, index = 0) => {
+  const quantityRaw = row?.quantity;
+  const parsedQuantity = Number(quantityRaw);
+
+  return {
+    row_id: String(row?.row_id || buildUploadOrderRowId(row, index)),
+    order_id: normalizeLooseString(row?.PO ?? row?.order_id ?? row?.orderId),
+    item_code: normalizeLooseString(row?.item_code ?? row?.itemCode),
+    description: normalizeLooseString(row?.description),
+    brand: normalizeLooseString(row?.brand),
+    vendor: normalizeLooseString(row?.vendor),
+    quantity: Number.isFinite(parsedQuantity) ? parsedQuantity : quantityRaw ?? "",
+    ETD: dateParser(row?.ETD ?? row?.etd),
+    order_date: dateParser(row?.order_date ?? row?.orderDate),
+    change_type: "",
+    reason: "",
+  };
+};
+
+const buildUploadedOrderDocument = (row = {}) => ({
+  order_id: row.order_id,
+  item: {
+    item_code: row.item_code,
+    description: row.description,
+  },
+  brand: row.brand,
+  vendor: row.vendor,
+  ETD: row.ETD || undefined,
+  order_date: row.order_date || undefined,
+  status: "Pending",
+  quantity: Number(row.quantity),
+});
+
+const buildUploadPreviewSummary = ({
+  previewRows = [],
+  totalRowsReceived = 0,
+  totalRowsUnique = 0,
+} = {}) => {
+  const rows = Array.isArray(previewRows) ? previewRows : [];
+  const countByType = (type) =>
+    rows.filter((row) => String(row?.change_type || "").trim().toLowerCase() === type).length;
+
+  return {
+    extracted_rows: totalRowsReceived,
+    valid_unique_rows: totalRowsUnique,
+    selectable_rows: countByType("new"),
+    invalid_rows: countByType("missing_required_fields") + countByType("invalid_quantity"),
+    duplicate_in_file_rows: countByType("duplicate_in_file"),
+    already_exists_rows: countByType("already_exists"),
+  };
+};
+
+const prepareUploadOrdersFromRows = async (rowsInput = []) => {
+  const sourceRows = Array.isArray(rowsInput) ? rowsInput : [];
+  const totalRowsReceived = sourceRows.length;
+  const duplicateEntries = [];
+  const seenKeys = new Set();
+
+  const previewRows = sourceRows.map((row, index) =>
+    normalizeUploadedSelectionRow(row, index),
+  );
+
+  const candidateRows = [];
+
+  for (const previewRow of previewRows) {
+    const orderId = previewRow.order_id;
+    const itemCode = previewRow.item_code;
+    const brand = previewRow.brand;
+    const vendor = previewRow.vendor;
+    const quantity = Number(previewRow.quantity);
+
+    if (!orderId || !itemCode || !brand || !vendor) {
+      previewRow.change_type = "missing_required_fields";
+      previewRow.reason = "missing_required_fields";
+      duplicateEntries.push({
+        order_id: orderId,
+        item_code: itemCode,
+        reason: "missing_required_fields",
+      });
+      continue;
+    }
+
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      previewRow.change_type = "invalid_quantity";
+      previewRow.reason = "invalid_quantity";
+      duplicateEntries.push({
+        order_id: orderId,
+        item_code: itemCode,
+        reason: "invalid_quantity",
+      });
+      continue;
+    }
+
+    const key = makeUploadOrderKey(orderId, itemCode);
+    if (seenKeys.has(key)) {
+      previewRow.change_type = "duplicate_in_file";
+      previewRow.reason = "duplicate_in_file";
+      duplicateEntries.push({
+        order_id: orderId,
+        item_code: itemCode,
+        reason: "duplicate_in_file",
+      });
+      continue;
+    }
+
+    seenKeys.add(key);
+    previewRow.change_type = "new";
+    previewRow.reason = "";
+    candidateRows.push(previewRow);
+  }
+
+  const totalRowsUnique = candidateRows.length;
+  const totalDistinctOrdersUploaded = new Set(
+    candidateRows.map((row) => normalizeOrderKey(row.order_id)).filter(Boolean),
+  ).size;
+
+  let existingKeys = new Set();
+  if (candidateRows.length > 0) {
+    const existingOrders = await Order.find({
+      ...ACTIVE_ORDER_MATCH,
+      $or: candidateRows.map((row) => ({
+        order_id: row.order_id,
+        "item.item_code": row.item_code,
+      })),
+    })
+      .select("order_id item.item_code")
+      .lean();
+
+    existingKeys = new Set(
+      existingOrders.map((order) =>
+        makeUploadOrderKey(order?.order_id, order?.item?.item_code),
+      ),
+    );
+  }
+
+  const orders = candidateRows.map((row) => buildUploadedOrderDocument(row));
+  const newOrders = [];
+
+  for (const previewRow of candidateRows) {
+    const key = makeUploadOrderKey(previewRow.order_id, previewRow.item_code);
+    if (existingKeys.has(key)) {
+      previewRow.change_type = "already_exists";
+      previewRow.reason = "already_exists";
+      duplicateEntries.push({
+        order_id: previewRow.order_id,
+        item_code: previewRow.item_code,
+        reason: "already_exists",
+      });
+      continue;
+    }
+
+    newOrders.push(buildUploadedOrderDocument(previewRow));
+  }
+
+  return {
+    previewRows,
+    orders,
+    newOrders,
+    duplicateEntries,
+    totalRowsReceived,
+    totalRowsUnique,
+    totalDistinctOrdersUploaded,
+    summary: buildUploadPreviewSummary({
+      previewRows,
+      totalRowsReceived,
+      totalRowsUnique,
+    }),
+  };
+};
+
 // Upload Orders Controller
 exports.uploadOrders = async (req, res) => {
   const uploadedById = req.user?._id && mongoose.Types.ObjectId.isValid(req.user._id)
@@ -1530,8 +1711,10 @@ exports.uploadOrders = async (req, res) => {
     uploaded_by_name: String(
       req.user?.name || req.user?.username || req.user?.email || "",
     ).trim(),
-    source_filename: String(req.file?.originalname || "").trim(),
-    source_size_bytes: Number(req.file?.size || 0),
+    source_filename: String(
+      req.file?.originalname || req.body?.source_filename || "",
+    ).trim(),
+    source_size_bytes: Number(req.file?.size || req.body?.source_size_bytes || 0),
   };
 
   let totalRowsReceived = 0;
@@ -1545,84 +1728,58 @@ exports.uploadOrders = async (req, res) => {
   let conflicts = [];
 
   try {
-    if (!req.file) {
-      return res.status(400).json({ message: "No file uploaded" });
+    const shouldPreviewOnly = parseBooleanInput(req.body?.preview_only, false);
+
+    let selectedRowsPayload = null;
+    if (Array.isArray(req.body?.selected_rows)) {
+      selectedRowsPayload = req.body.selected_rows;
+    } else {
+      const selectedRowsRaw = String(req.body?.selected_rows || "").trim();
+      if (selectedRowsRaw) {
+        try {
+          const parsed = JSON.parse(selectedRowsRaw);
+          if (Array.isArray(parsed)) {
+            selectedRowsPayload = parsed;
+          } else {
+            return res.status(400).json({ message: "selected_rows must be an array" });
+          }
+        } catch {
+          return res.status(400).json({ message: "selected_rows must be valid JSON array" });
+        }
+      }
     }
 
-    // Read Excel file
-    const workbook = XLSX.readFile(req.file.path);
-    const sheetName = workbook.SheetNames[0];
-    const sheetData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
-    totalRowsReceived = Array.isArray(sheetData) ? sheetData.length : 0;
+    let sourceRows = [];
+    if (Array.isArray(selectedRowsPayload) && selectedRowsPayload.length > 0) {
+      sourceRows = selectedRowsPayload;
+    } else {
+      if (!req.file) {
+        return res.status(400).json({ message: "No file uploaded" });
+      }
+
+      const workbook = XLSX.readFile(req.file.path);
+      const sheetName = workbook.SheetNames[0];
+      sourceRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+    }
+
+    const preparedUpload = await prepareUploadOrdersFromRows(sourceRows);
+    const orders = preparedUpload.orders;
+    let newOrders = preparedUpload.newOrders;
+
+    totalRowsReceived = preparedUpload.totalRowsReceived;
+    totalRowsUnique = preparedUpload.totalRowsUnique;
+    totalDistinctOrdersUploaded = preparedUpload.totalDistinctOrdersUploaded;
+    duplicateEntries = preparedUpload.duplicateEntries;
+
+    if (shouldPreviewOnly) {
+      return res.status(200).json({
+        message: "Upload preview ready",
+        summary: preparedUpload.summary,
+        preview_rows: preparedUpload.previewRows,
+      });
+    }
 
     const normalizeValue = (value) => normalizeLooseString(value);
-    const normalizeKey = (orderId, itemCode) =>
-      `${normalizeOrderKey(orderId)}__${normalizeValue(itemCode).toUpperCase()}`;
-
-    duplicateEntries = [];
-    const seenKeys = new Set();
-
-    // Transform rows to Order schema (dedupe within file)
-    const orders = sheetData
-      .map((row) => {
-        const orderId = normalizeValue(row.PO);
-        const itemCode = normalizeValue(row.item_code);
-        const brand = normalizeValue(row.brand);
-        const vendor = normalizeValue(row.vendor);
-        const description = normalizeValue(row.description);
-        const quantity = Number(row.quantity);
-
-        if (!orderId || !itemCode || !brand || !vendor) {
-          duplicateEntries.push({
-            order_id: orderId,
-            item_code: itemCode,
-            reason: "missing_required_fields",
-          });
-          return null;
-        }
-
-        if (!Number.isFinite(quantity) || quantity <= 0) {
-          duplicateEntries.push({
-            order_id: orderId,
-            item_code: itemCode,
-            reason: "invalid_quantity",
-          });
-          return null;
-        }
-
-        const key = normalizeKey(orderId, itemCode);
-
-        if (seenKeys.has(key)) {
-          duplicateEntries.push({
-            order_id: orderId,
-            item_code: itemCode,
-            reason: "duplicate_in_file",
-          });
-          return null;
-        }
-
-        seenKeys.add(key);
-
-        return {
-          order_id: orderId,
-          item: {
-            item_code: itemCode,
-            description,
-          },
-          brand,
-          vendor,
-          ETD: dateParser(row.ETD),
-          order_date: dateParser(row.order_date),
-          status: "Pending",
-          quantity,
-        };
-      })
-      .filter(Boolean);
-
-    totalRowsUnique = orders.length;
-    totalDistinctOrdersUploaded = new Set(
-      orders.map((order) => normalizeOrderKey(order.order_id)).filter(Boolean),
-    ).size;
 
     const brandVendorUploadMap = new Map();
 
@@ -1774,37 +1931,6 @@ exports.uploadOrders = async (req, res) => {
           remark,
         };
       });
-
-    let newOrders = orders;
-
-    if (orders.length > 0) {
-      const existing = await Order.find({
-        ...ACTIVE_ORDER_MATCH,
-        $or: orders.map((order) => ({
-          order_id: order.order_id,
-          "item.item_code": order.item.item_code,
-        })),
-      }).select("order_id item.item_code");
-
-      const existingKeys = new Set(
-        existing.map((order) =>
-          normalizeKey(order.order_id, order.item.item_code),
-        ),
-      );
-
-      newOrders = orders.filter((order) => {
-        const key = normalizeKey(order.order_id, order.item.item_code);
-        if (existingKeys.has(key)) {
-          duplicateEntries.push({
-            order_id: order.order_id,
-            item_code: order.item.item_code,
-            reason: "already_exists",
-          });
-          return false;
-        }
-        return true;
-      });
-    }
 
     insertedCount = newOrders.length;
 

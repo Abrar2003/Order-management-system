@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import api from "../api/axios";
-import { createManualOrders, uploadOrders } from "../services/orders.service";
+import {
+  applyUploadedRows,
+  createManualOrders,
+  previewUploadOrders,
+} from "../services/orders.service";
+import { formatDateDDMMYYYY } from "../utils/date";
 import "../App.css";
 
 const createEmptyManualRow = (id) => ({
@@ -61,6 +66,17 @@ const buildItemMeta = ({
   };
 };
 
+const formatUploadChangeType = (value) => {
+  const normalized = toTrimmedString(value).replace(/_/g, " ");
+  if (!normalized) return "-";
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+};
+
+const toUploadDateText = (value) => {
+  const formatted = formatDateDDMMYYYY(value, "");
+  return formatted || "-";
+};
+
 const UploadOrdersModal = ({ onClose, onSuccess }) => {
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -73,7 +89,24 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
   const [vendorOptions, setVendorOptions] = useState([]);
   const [itemCodeOptions, setItemCodeOptions] = useState([]);
   const [itemMetaByRow, setItemMetaByRow] = useState({});
+  const [uploadPreviewSummary, setUploadPreviewSummary] = useState(null);
+  const [uploadPreviewRows, setUploadPreviewRows] = useState([]);
+  const [checkedUploadRows, setCheckedUploadRows] = useState({});
   const itemLookupCacheRef = useRef(new Map());
+
+  const selectableUploadRows = useMemo(
+    () =>
+      uploadPreviewRows.filter(
+        (row) => String(row?.change_type || "").trim().toLowerCase() === "new",
+      ),
+    [uploadPreviewRows],
+  );
+  const selectedUploadCount = selectableUploadRows.filter(
+    (row) => checkedUploadRows[row.row_id],
+  ).length;
+  const allUploadRowsSelected =
+    selectableUploadRows.length > 0
+    && selectedUploadCount === selectableUploadRows.length;
 
   const mergedBrandOptions = useMemo(
     () => sortUniqueStrings([...brandOptions, ...manualRows.map((row) => row?.brand)]),
@@ -143,7 +176,21 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
     };
   }, [mode]);
 
-  const handleUpload = async () => {
+  const resetUploadPreview = () => {
+    setUploadPreviewSummary(null);
+    setUploadPreviewRows([]);
+    setCheckedUploadRows({});
+  };
+
+  const toggleAllUploadRows = (checked) => {
+    const nextState = {};
+    selectableUploadRows.forEach((row) => {
+      nextState[row.row_id] = checked;
+    });
+    setCheckedUploadRows(nextState);
+  };
+
+  const handleUploadPreview = async () => {
     if (!file) {
       setError("Please select an Excel file");
       return;
@@ -152,11 +199,57 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
     try {
       setLoading(true);
       setError("");
-      await uploadOrders(file);
-      onSuccess();
-      onClose();
+      resetUploadPreview();
+
+      const response = await previewUploadOrders(file);
+      const incomingRows = Array.isArray(response?.preview_rows)
+        ? response.preview_rows
+        : [];
+      const normalizedRows = incomingRows.map((row, index) => {
+        const fallbackId =
+          `${toTrimmedString(row?.order_id)}__${toTrimmedString(row?.item_code)}__${index}`;
+        return {
+          ...row,
+          row_id: toTrimmedString(row?.row_id) || fallbackId,
+          change_type: toTrimmedString(row?.change_type).toLowerCase(),
+        };
+      });
+
+      const nextCheckedRows = {};
+      normalizedRows.forEach((row) => {
+        if (row.change_type === "new") {
+          nextCheckedRows[row.row_id] = true;
+        }
+      });
+
+      setUploadPreviewSummary(response?.summary || null);
+      setUploadPreviewRows(normalizedRows);
+      setCheckedUploadRows(nextCheckedRows);
     } catch (err) {
-      setError(err.response?.data?.message || "Upload failed");
+      setError(err.response?.data?.message || "Failed to preview upload rows");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleApplyCheckedUploadRows = async () => {
+    const rowsToApply = selectableUploadRows.filter((row) => checkedUploadRows[row.row_id]);
+    if (rowsToApply.length === 0) {
+      setError("Please check at least one row to update.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError("");
+      await applyUploadedRows({
+        rows: rowsToApply,
+        sourceFileName: file?.name || "",
+      });
+      onSuccess?.();
+      onClose?.();
+    } catch (err) {
+      setError(err.response?.data?.message || err?.message || "Failed to update checked rows.");
     } finally {
       setLoading(false);
     }
@@ -433,14 +526,6 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
     }
   };
 
-  const handleSubmit = () => {
-    if (mode === "manual") {
-      handleManualAdd();
-      return;
-    }
-    handleUpload();
-  };
-
   return (
     <div className="modal d-block om-modal-backdrop" tabIndex="-1" role="dialog">
       <div className="modal-dialog modal-dialog-centered modal-xl" role="document">
@@ -475,12 +560,103 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
             </div>
 
             {mode === "upload" ? (
-              <input
-                className="form-control"
-                type="file"
-                accept=".xlsx,.xls,.xlsm"
-                onChange={(e) => setFile(e.target.files[0])}
-              />
+              <div className="d-grid gap-3">
+                <input
+                  className="form-control"
+                  type="file"
+                  accept=".xlsx,.xls,.xlsm"
+                  onChange={(e) => {
+                    setFile(e.target.files?.[0] || null);
+                    setError("");
+                    resetUploadPreview();
+                  }}
+                />
+
+                {uploadPreviewSummary && (
+                  <div className="card">
+                    <div className="card-body d-grid gap-1">
+                      <div className="small">Extracted: {Number(uploadPreviewSummary.extracted_rows || 0)}</div>
+                      <div className="small">Valid Unique: {Number(uploadPreviewSummary.valid_unique_rows || 0)}</div>
+                      <div className="small">Selectable New Rows: {Number(uploadPreviewSummary.selectable_rows || 0)}</div>
+                      <div className="small">Invalid: {Number(uploadPreviewSummary.invalid_rows || 0)}</div>
+                      <div className="small">Duplicate In File: {Number(uploadPreviewSummary.duplicate_in_file_rows || 0)}</div>
+                      <div className="small">Already Exists: {Number(uploadPreviewSummary.already_exists_rows || 0)}</div>
+                    </div>
+                  </div>
+                )}
+
+                {uploadPreviewRows.length > 0 && (
+                  <div className="card">
+                    <div className="card-header d-flex justify-content-between align-items-center">
+                      <strong>Upload Preview</strong>
+                      <span className="small text-muted">
+                        Selected: {selectedUploadCount} / {selectableUploadRows.length}
+                      </span>
+                    </div>
+                    <div className="card-body p-0">
+                      <div className="table-responsive" style={{ maxHeight: "320px" }}>
+                        <table className="table table-sm table-hover align-middle mb-0">
+                          <thead className="table-light">
+                            <tr>
+                              <th style={{ width: "42px" }}>
+                                <input
+                                  type="checkbox"
+                                  className="form-check-input"
+                                  checked={allUploadRowsSelected}
+                                  onChange={(e) => toggleAllUploadRows(Boolean(e.target.checked))}
+                                  disabled={loading || selectableUploadRows.length === 0}
+                                />
+                              </th>
+                              <th>Type</th>
+                              <th>Order ID</th>
+                              <th>Item</th>
+                              <th>Description</th>
+                              <th>Brand</th>
+                              <th>Vendor</th>
+                              <th>Qty</th>
+                              <th>ETD</th>
+                              <th>Order Date</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {uploadPreviewRows.map((row) => {
+                              const isSelectable =
+                                String(row?.change_type || "").trim().toLowerCase() === "new";
+                              return (
+                                <tr key={row.row_id}>
+                                  <td>
+                                    <input
+                                      type="checkbox"
+                                      className="form-check-input"
+                                      checked={Boolean(checkedUploadRows[row.row_id])}
+                                      disabled={!isSelectable || loading}
+                                      onChange={(e) =>
+                                        setCheckedUploadRows((prev) => ({
+                                          ...prev,
+                                          [row.row_id]: Boolean(e.target.checked),
+                                        }))
+                                      }
+                                    />
+                                  </td>
+                                  <td>{formatUploadChangeType(row.change_type)}</td>
+                                  <td>{row.order_id || "-"}</td>
+                                  <td>{row.item_code || "-"}</td>
+                                  <td>{row.description || "-"}</td>
+                                  <td>{row.brand || "-"}</td>
+                                  <td>{row.vendor || "-"}</td>
+                                  <td>{row.quantity || "-"}</td>
+                                  <td>{toUploadDateText(row.ETD)}</td>
+                                  <td>{toUploadDateText(row.order_date)}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="d-grid gap-2">
                 <div className="d-flex justify-content-between align-items-center">
@@ -655,9 +831,30 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
             <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
               Cancel
             </button>
-            <button type="button" className="btn btn-primary" onClick={handleSubmit} disabled={loading}>
-              {loading ? (mode === "manual" ? "Saving..." : "Uploading...") : mode === "manual" ? "Save Orders" : "Upload"}
-            </button>
+            {mode === "manual" ? (
+              <button type="button" className="btn btn-primary" onClick={handleManualAdd} disabled={loading}>
+                {loading ? "Saving..." : "Save Orders"}
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleUploadPreview}
+                  disabled={loading}
+                >
+                  {loading ? "Processing..." : "Extract & Preview"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-success"
+                  onClick={handleApplyCheckedUploadRows}
+                  disabled={loading || selectedUploadCount === 0}
+                >
+                  {loading ? "Updating..." : "Update Checked in DB"}
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>

@@ -107,13 +107,20 @@ const Orders = () => {
 
   const primaryOrder = orders[0];
   const itemSortIndicator = itemCodeSortOrder === "asc" ? " (asc)" : " (desc)";
-  const navigateToQcForItem = (itemCode) => {
+  const navigateToQcForItem = (orderId, itemCode) => {
+    const trimmedOrderId = String(orderId || "").trim();
     const trimmedItemCode = String(itemCode || "").trim();
-    if (!trimmedItemCode) {
+    if (!trimmedOrderId && !trimmedItemCode) {
       navigate("/qc");
       return;
     }
-    navigate(`/qc?item_code=${encodeURIComponent(trimmedItemCode)}`);
+
+    const nextParams = new URLSearchParams();
+    if (trimmedOrderId) nextParams.set("order", trimmedOrderId);
+    if (trimmedItemCode) nextParams.set("item_code", trimmedItemCode);
+
+    const nextQuery = nextParams.toString();
+    navigate(nextQuery ? `/qc?${nextQuery}` : "/qc");
   };
 
   const openAlignModal = (order, isRealign = false) => {
@@ -263,7 +270,7 @@ const Orders = () => {
                                   type="button"
                                   className="btn btn-link btn-sm p-0 text-start"
                                   onClick={() =>
-                                    navigateToQcForItem(order?.item?.item_code)
+                                    navigateToQcForItem(order?.order_id, order?.item?.item_code)
                                   }
                                 >
                                   Inspection Requested / Check updates

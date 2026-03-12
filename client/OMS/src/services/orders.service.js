@@ -15,6 +15,48 @@ export const uploadOrders = async (file) => {
   return res.data;
 };
 
+export const previewUploadOrders = async (file) => {
+  const token = localStorage.getItem("token");
+
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("preview_only", "true");
+
+  const res = await axios.post("/orders/upload-orders", formData, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return res.data;
+};
+
+export const applyUploadedRows = async ({
+  rows = [],
+  sourceFileName = "",
+} = {}) => {
+  const selectedRows = Array.isArray(rows) ? rows : [];
+  if (selectedRows.length === 0) {
+    throw new Error("At least one row is required");
+  }
+
+  const token = localStorage.getItem("token");
+  const res = await axios.post(
+    "/orders/upload-orders",
+    {
+      selected_rows: selectedRows,
+      source_filename: String(sourceFileName || "").trim(),
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  return res.data;
+};
+
 export const createManualOrders = async (orders = []) => {
   const token = localStorage.getItem("token");
 
