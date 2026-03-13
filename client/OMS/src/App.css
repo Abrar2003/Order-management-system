@@ -511,6 +511,46 @@
   text-overflow: ellipsis;
 }
 
+.weekly-summary-export-surface {
+  background: #ffffff;
+  color: #111827;
+}
+
+.weekly-summary-export-surface .card,
+.weekly-summary-export-surface .table,
+.weekly-summary-export-surface .table > :not(caption) > * > * {
+  color: inherit;
+}
+
+.weekly-summary-vendor-header {
+  background: linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%);
+}
+
+.weekly-summary-brand-panel {
+  min-width: 10rem;
+  min-height: 4rem;
+  border-radius: 0.5rem;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 0.75rem;
+}
+
+.weekly-summary-brand-logo {
+  width: auto;
+  height: auto;
+  max-width: 9rem;
+  max-height: 3.5rem;
+  object-fit: contain;
+}
+
+.weekly-summary-packed-row > * {
+  background: #ecfdf3 !important;
+  color: #166534;
+  font-weight: 600;
+}
+
 .auth-card {
   max-width: 440px;
 }

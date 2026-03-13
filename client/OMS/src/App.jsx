@@ -31,6 +31,8 @@ import InspectionReport from "./pages/inspection_report";
 import InspectorReports from "./pages/InspectorReports";
 import VendorReports from "./pages/VendorReports";
 import PIS from "./pages/PIS";
+import WeeklySummary from "./pages/WeeklySummary";
+import DailySummary from "./pages/DailySummary";
 
 // import Users from "./pages/Users"; // later
 const clearStaleUiOverlays = ({ removeCustomModalRoots = false } = {}) => {
@@ -161,6 +163,24 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <VendorReports />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/summary/weekly"
+            element={
+              <ProtectedRoute>
+                <WeeklySummary />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/summary/daily"
+            element={
+              <ProtectedRoute>
+                <DailySummary />
               </ProtectedRoute>
             }
           />

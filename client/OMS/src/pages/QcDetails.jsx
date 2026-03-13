@@ -6,6 +6,7 @@ import UpdateQcModal from "../components/UpdateQcModal";
 import ShippingModal from "../components/ShippingModal";
 import EditOrderModal from "../components/EditOrderModal";
 import EditInspectionRecordsModal from "../components/EditInspectionRecordsModal";
+import GoodsNotReadyModal from "../components/GoodsNotReadyModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { formatPositiveCbm } from "../utils/cbm";
@@ -163,6 +164,7 @@ const QcDetails = () => {
   const [showShippingModal, setShowShippingModal] = useState(false);
   const [showEditShippingModal, setShowEditShippingModal] = useState(false);
   const [showEditInspectionModal, setShowEditInspectionModal] = useState(false);
+  const [showGoodsNotReadyModal, setShowGoodsNotReadyModal] = useState(false);
   const [deletingInspectionId, setDeletingInspectionId] = useState("");
 
   const navigate = useNavigate();
@@ -768,6 +770,30 @@ const QcDetails = () => {
 
               <button
                 type="button"
+                className="btn btn-outline-danger"
+                onClick={() => setShowGoodsNotReadyModal(true)}
+                disabled={!canUpdateQc}
+                title={
+                  !canUpdateQc
+                    ? !pendingAlignmentInfo.hasRequest
+                      ? "QC is not requested yet. Align QC request before updating."
+                      : !isQcAlignedRecord
+                      ? "QC can update only records aligned to them."
+                      : isInspectionDone
+                      ? "After inspection is done, only admin can update this record."
+                      : !isQcInspectionDateAllowed
+                      ? "QC date rule will be validated while submitting."
+                      : hasUsedOneDayBackdatedUpdate
+                      ? "Backdated one-time rule will be validated while submitting."
+                      : "Only admin, manager, or aligned QC can update this record."
+                    : ""
+                }
+              >
+                Goods Not Ready
+              </button>
+
+              <button
+                type="button"
                 className="btn btn-primary"
                 onClick={() => setShowUpdateModal(true)}
                 disabled={!canUpdateQc}
@@ -834,6 +860,17 @@ const QcDetails = () => {
           onClose={() => setShowEditInspectionModal(false)}
           onSuccess={() => {
             setShowEditInspectionModal(false);
+            fetchQcDetails();
+          }}
+        />
+      )}
+
+      {showGoodsNotReadyModal && (
+        <GoodsNotReadyModal
+          qc={qc}
+          onClose={() => setShowGoodsNotReadyModal(false)}
+          onSuccess={() => {
+            setShowGoodsNotReadyModal(false);
             fetchQcDetails();
           }}
         />

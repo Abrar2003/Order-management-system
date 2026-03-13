@@ -366,6 +366,7 @@ const upsertInspectionRecordForRequest = async ({
   appendLabels = [],
   replaceCbmSnapshot = false,
   allowRequestedDateFallback = true,
+  goodsNotReady = null,
 }) => {
   if (!qcDoc?._id) return null;
 
@@ -400,6 +401,13 @@ const upsertInspectionRecordForRequest = async ({
   );
   const labelRangesToAppend = Array.isArray(appendLabelRanges) ? appendLabelRanges : [];
   const labelsToAppend = normalizeLabels(appendLabels);
+  const normalizedGoodsNotReady =
+    goodsNotReady && typeof goodsNotReady === "object"
+      ? {
+          ready: Boolean(goodsNotReady.ready),
+          reason: String(goodsNotReady.reason || "").trim(),
+        }
+      : null;
 
   if (!inspectionRecord) {
     inspectionRecord = await Inspection.create({
@@ -420,6 +428,9 @@ const upsertInspectionRecordForRequest = async ({
       },
       label_ranges: labelRangesToAppend,
       labels_added: labelsToAppend,
+      ...(normalizedGoodsNotReady
+        ? { goods_not_ready: normalizedGoodsNotReady }
+        : {}),
       remarks: String(remarks || "").trim(),
       createdBy,
     });
@@ -480,6 +491,10 @@ const upsertInspectionRecordForRequest = async ({
   if (labelsToAppend.length > 0) {
     const existingLabels = normalizeLabels(inspectionRecord.labels_added || []);
     inspectionRecord.labels_added = normalizeLabels([...existingLabels, ...labelsToAppend]);
+  }
+
+  if (normalizedGoodsNotReady) {
+    inspectionRecord.goods_not_ready = normalizedGoodsNotReady;
   }
 
   if (String(remarks || "").trim()) {
@@ -628,6 +643,27 @@ const getWeekStartIsoDate = (value) => {
   return monday ? toISODateString(monday) : "";
 };
 
+const getPreviousUtcWeekRange = (referenceDate = new Date()) => {
+  const todayStart = toUtcDayStart(referenceDate);
+  if (!todayStart) return null;
+
+  const yesterdayUtc = addUtcDays(todayStart, -1);
+  const startUtc = addUtcDays(yesterdayUtc, -7);
+  const toDateExclusiveUtc = addUtcDays(yesterdayUtc, 1);
+
+  if (!yesterdayUtc || !startUtc || !toDateExclusiveUtc) {
+    return null;
+  }
+
+  return {
+    label: "Yesterday - 7 days to Yesterday",
+    from_date_utc: startUtc,
+    to_date_exclusive_utc: toDateExclusiveUtc,
+    from_date_iso: toISODateString(startUtc),
+    to_date_iso: toISODateString(yesterdayUtc),
+  };
+};
+
 const toRoundedNumber = (value, decimals = 3) => {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 0;
@@ -746,6 +782,7 @@ const buildStringDateToDateExpression = (fieldPath) => ({
 
 const requestDateToDateExpression = buildStringDateToDateExpression("$request_date");
 const inspectionDateToDateExpression = buildStringDateToDateExpression("$inspection_date");
+const lastInspectedDateToDateExpression = buildStringDateToDateExpression("$last_inspected_date");
 
 const normalizeDistinctValues = (values = []) =>
   [...new Set(
@@ -3359,6 +3396,275 @@ exports.getVendorReports = async (req, res) => {
   } catch (err) {
     console.error("Vendor Reports Error:", err);
     return res.status(500).json({ message: err.message || "Failed to fetch vendor reports" });
+  }
+};
+
+exports.getWeeklyOrderSummary = async (req, res) => {
+  try {
+    const selectedBrand = normalizeOptionalReportFilter(req.query.brand);
+    const weekRange = getPreviousUtcWeekRange(new Date());
+    if (!weekRange) {
+      return res.status(500).json({ message: "Failed to resolve last week range" });
+    }
+
+    const weeklyRows = await QC.aggregate([
+      {
+        $addFields: {
+          request_date_value: requestDateToDateExpression,
+          last_inspected_date_value: lastInspectedDateToDateExpression,
+        },
+      },
+      {
+        $match: {
+          $or: [
+            {
+              request_date_value: {
+                $gte: weekRange.from_date_utc,
+                $lt: weekRange.to_date_exclusive_utc,
+              },
+            },
+            {
+              last_inspected_date_value: {
+                $gte: weekRange.from_date_utc,
+                $lt: weekRange.to_date_exclusive_utc,
+              },
+            },
+          ],
+        },
+      },
+      buildActiveOrderLookupStage("order_doc"),
+      { $unwind: "$order_doc" },
+      {
+        $project: {
+          _id: 0,
+          order_meta: 1,
+          item: {
+            item_code: "$item.item_code",
+          },
+          quantities: {
+            client_demand: "$quantities.client_demand",
+            qc_passed: "$quantities.qc_passed",
+            pending: "$quantities.pending",
+          },
+          order_doc: {
+            order_id: "$order_doc.order_id",
+            vendor: "$order_doc.vendor",
+            brand: "$order_doc.brand",
+            quantity: "$order_doc.quantity",
+          },
+        },
+      },
+    ]);
+
+    const normalizedRows = weeklyRows.map((row) => ({
+      order_id: normalizeText(row?.order_meta?.order_id || row?.order_doc?.order_id || "") || "N/A",
+      vendor: normalizeText(row?.order_meta?.vendor || row?.order_doc?.vendor || "") || "N/A",
+      brand: normalizeText(row?.order_meta?.brand || row?.order_doc?.brand || "") || "N/A",
+      item_code: normalizeText(row?.item?.item_code || "") || "N/A",
+      total_order_quantity: toNonNegativeNumber(
+        row?.quantities?.client_demand ?? row?.order_doc?.quantity,
+        0,
+      ),
+      quantity_passed: toNonNegativeNumber(row?.quantities?.qc_passed, 0),
+      pending: toNonNegativeNumber(row?.quantities?.pending, 0),
+    }));
+
+    const brandOptions = normalizeDistinctValues(
+      normalizedRows.map((row) => row?.brand || ""),
+    );
+
+    const filteredRows = selectedBrand
+      ? normalizedRows.filter((row) => row.brand === selectedBrand)
+      : normalizedRows;
+
+    const vendorMap = new Map();
+
+    for (const row of filteredRows) {
+      const vendorKey = String(row.vendor || "").toLowerCase();
+      if (!vendorMap.has(vendorKey)) {
+        vendorMap.set(vendorKey, {
+          vendor: row.vendor,
+          items: [],
+        });
+      }
+
+      const vendorEntry = vendorMap.get(vendorKey);
+      vendorEntry.items.push({
+        order_id: row.order_id,
+        item_code: row.item_code,
+        total_order_quantity: row.total_order_quantity,
+        quantity_passed: row.quantity_passed,
+        pending: row.pending,
+      });
+    }
+
+    const vendors = Array.from(vendorMap.values())
+      .map((entry) => {
+        const items = [...entry.items].sort((left, right) => {
+          const orderCompare = String(left?.order_id || "").localeCompare(String(right?.order_id || ""));
+          if (orderCompare !== 0) return orderCompare;
+          return String(left?.item_code || "").localeCompare(String(right?.item_code || ""));
+        });
+
+        return {
+          vendor: entry.vendor,
+          items,
+        };
+      })
+      .sort((left, right) => String(left?.vendor || "").localeCompare(String(right?.vendor || "")));
+
+    return res.status(200).json({
+      filters: {
+        period: "rolling_week_until_yesterday",
+        period_label: weekRange.label,
+        from_date: weekRange.from_date_iso,
+        to_date: weekRange.to_date_iso,
+        brand: selectedBrand,
+        brand_options: brandOptions,
+      },
+      vendors,
+    });
+  } catch (err) {
+    console.error("Weekly Order Summary Error:", err);
+    return res.status(500).json({ message: err.message || "Failed to fetch weekly order summary" });
+  }
+};
+
+exports.markGoodsNotReady = async (req, res) => {
+  try {
+    const reason = String(req.body?.reason || "").trim();
+    if (!reason) {
+      return res.status(400).json({ message: "Reason is required" });
+    }
+
+    const qc = await QC.findById(req.params.id)
+      .populate("inspector")
+      .populate("order", "status");
+
+    if (!qc) {
+      return res.status(404).json({ message: "QC record not found" });
+    }
+
+    const normalizedRole = String(req.user?.role || "").trim().toLowerCase();
+    const isAdmin = normalizedRole === "admin";
+    const isManager = normalizedRole === "manager";
+    const hasElevatedAccess = isAdmin || isManager;
+    const currentUserId = String(req.user?._id || req.user?.id || "").trim();
+    const isInspectionDone = qc?.order?.status === "Inspection Done";
+
+    if (!hasElevatedAccess && isInspectionDone) {
+      return res.status(403).json({
+        message: "Only admin or manager can update this QC record after inspection is done",
+      });
+    }
+
+    const latestRequestEntry = resolveLatestRequestEntry(qc?.request_history || []);
+    const latestRequestedQuantity =
+      latestRequestEntry?.quantity_requested !== undefined
+        ? toNonNegativeNumber(latestRequestEntry.quantity_requested, 0)
+        : toNonNegativeNumber(qc?.quantities?.quantity_requested, 0);
+    const hasQcRequest =
+      (Array.isArray(qc?.request_history) && qc.request_history.length > 0) ||
+      latestRequestedQuantity > 0;
+
+    if (!hasQcRequest) {
+      return res.status(400).json({
+        message: "QC is not requested yet. Align QC request before updating.",
+      });
+    }
+
+    if (!hasElevatedAccess) {
+      if (!currentUserId) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      const alignedInspectorId = String(qc?.inspector?._id || qc?.inspector || "").trim();
+      if (!alignedInspectorId || alignedInspectorId !== currentUserId) {
+        return res.status(403).json({
+          message: "QC can update only records aligned to them",
+        });
+      }
+    }
+
+    const inspectionInspectorId = qc?.inspector?._id
+      ? qc.inspector._id
+      : qc.inspector;
+    if (!inspectionInspectorId) {
+      return res.status(400).json({
+        message: "Inspector is required before marking goods not ready",
+      });
+    }
+
+    const inspectionDate = toISODateString(new Date());
+    if (!inspectionDate) {
+      return res.status(500).json({ message: "Failed to resolve inspection date" });
+    }
+
+    const requestedDateForRecordRaw = String(
+      latestRequestEntry?.request_date || qc.request_date || inspectionDate,
+    ).trim();
+    const requestedDateForRecord = toISODateString(requestedDateForRecordRaw);
+    if (!requestedDateForRecord) {
+      return res.status(400).json({
+        message: "request_date is invalid for inspection records",
+      });
+    }
+
+    const requestedQuantityForRecord =
+      latestRequestEntry?.quantity_requested !== undefined
+        ? Number(latestRequestEntry.quantity_requested)
+        : Number(
+            qc?.quantities?.quantity_requested > 0
+              ? qc.quantities.quantity_requested
+              : (qc?.quantities?.client_demand ?? 0),
+          );
+
+    qc.last_inspected_date = inspectionDate;
+    qc.remarks = reason;
+
+    const inspectionRecord = await upsertInspectionRecordForRequest({
+      qcDoc: qc,
+      inspectorId: inspectionInspectorId,
+      requestDate: requestedDateForRecord,
+      requestHistoryId: latestRequestEntry?._id || null,
+      requestedQuantity: requestedQuantityForRecord,
+      inspectionDate,
+      remarks: reason,
+      createdBy: req.user._id,
+      addChecked: 0,
+      addPassed: 0,
+      addProvision: 0,
+      appendLabelRanges: [],
+      appendLabels: [],
+      replaceCbmSnapshot: false,
+      goodsNotReady: {
+        ready: true,
+        reason,
+      },
+    });
+
+    if (latestRequestEntry && inspectionRecord) {
+      latestRequestEntry.status = "inspected";
+    }
+
+    await qc.save();
+
+    try {
+      await upsertItemFromQc(qc);
+    } catch (itemSyncError) {
+      console.error("Item sync after goods-not-ready update failed:", {
+        qcId: qc?._id,
+        error: itemSyncError?.message || String(itemSyncError),
+      });
+    }
+
+    return res.status(200).json({
+      message: "Goods marked as not ready",
+      data: qc,
+    });
+  } catch (err) {
+    console.error("Goods Not Ready Error:", err);
+    return res.status(400).json({ message: err.message || "Failed to mark goods not ready" });
   }
 };
 

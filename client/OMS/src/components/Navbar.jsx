@@ -20,6 +20,7 @@ const Navbar = () => {
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [showMainMenu, setShowMainMenu] = useState(false);
   const [showReportsMenu, setShowReportsMenu] = useState(false);
+  const [showSummaryMenu, setShowSummaryMenu] = useState(false);
   const mainMenuRef = useRef(null);
 
   const getInitialTheme = () => {
@@ -97,6 +98,14 @@ const Navbar = () => {
     ];
   }, [canAccessQc, isQcOnlyRole]);
 
+  const summaryRouteLinks = useMemo(() => {
+    if (!canAccessQc || isQcOnlyRole) return [];
+    return [
+      { label: "Weekly Summary", path: "/summary/weekly" },
+      { label: "Daily Summary", path: "/summary/daily" },
+    ];
+  }, [canAccessQc, isQcOnlyRole]);
+
   const handleLogout = () => {
     logout();
     navigate("/signin");
@@ -106,6 +115,7 @@ const Navbar = () => {
     navigate(path);
     setShowMainMenu(false);
     setShowReportsMenu(false);
+    setShowSummaryMenu(false);
   };
 
   useEffect(() => {
@@ -122,6 +132,7 @@ const Navbar = () => {
       if (mainMenuRef.current && !mainMenuRef.current.contains(event.target)) {
         setShowMainMenu(false);
         setShowReportsMenu(false);
+        setShowSummaryMenu(false);
       }
     };
 
@@ -190,7 +201,10 @@ const Navbar = () => {
                               type="button"
                               className="list-group-item list-group-item-action text-start d-flex justify-content-between align-items-center"
                               aria-expanded={showReportsMenu}
-                              onClick={() => setShowReportsMenu((prev) => !prev)}
+                              onClick={() => {
+                                setShowReportsMenu((prev) => !prev);
+                                setShowSummaryMenu(false);
+                              }}
                             >
                               <span>Reports</span>
                               <span className="small text-secondary">
@@ -198,6 +212,35 @@ const Navbar = () => {
                               </span>
                             </button>
                             {showReportsMenu && reportRouteLinks.map((link) => (
+                              <button
+                                key={link.path}
+                                type="button"
+                                className="list-group-item list-group-item-action text-start ps-4"
+                                onClick={() => handleNavigate(link.path)}
+                              >
+                                {link.label}
+                              </button>
+                            ))}
+                          </>
+                        )}
+
+                        {summaryRouteLinks.length > 0 && (
+                          <>
+                            <button
+                              type="button"
+                              className="list-group-item list-group-item-action text-start d-flex justify-content-between align-items-center"
+                              aria-expanded={showSummaryMenu}
+                              onClick={() => {
+                                setShowSummaryMenu((prev) => !prev);
+                                setShowReportsMenu(false);
+                              }}
+                            >
+                              <span>Summary</span>
+                              <span className="small text-secondary">
+                                {showSummaryMenu ? "Hide" : "Show"}
+                              </span>
+                            </button>
+                            {showSummaryMenu && summaryRouteLinks.map((link) => (
                               <button
                                 key={link.path}
                                 type="button"
@@ -227,6 +270,8 @@ const Navbar = () => {
                           onClick={() => {
                             toggleTheme();
                             setShowMainMenu(false);
+                            setShowReportsMenu(false);
+                            setShowSummaryMenu(false);
                           }}
                         >
                           {theme === "system"

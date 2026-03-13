@@ -81,6 +81,7 @@ const getPendingAlignmentInfo = (qc = {}) => {
 
 const DEFAULT_SORT_BY = "request_date";
 const DEFAULT_PAGE = 1;
+const TABLE_COLUMN_COUNT = 12;
 
 const parsePositiveInt = (value, fallback = 1) => {
   const parsed = Number.parseInt(value, 10);
@@ -152,6 +153,7 @@ const QCPage = () => {
   const [totalPages, setTotalPages] = useState(1);
   const [realignContext, setRealignContext] = useState(null);
   const [exporting, setExporting] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [syncedQuery, setSyncedQuery] = useState(null);
 
   const token = localStorage.getItem("token");
@@ -170,29 +172,42 @@ const QCPage = () => {
     const fromIso = toISODateString(from);
     const toIso = toISODateString(to);
 
-    const res = await axios.get("/qc/list", {
-      headers: { Authorization: `Bearer ${token}` },
-      params: {
-        order,
-        page,
-        limit: 20,
-        search: debouncedSearch, // item_code
-        inspector: canUseInspectorFilter ? inspector : "",
-        vendor,
-        from: fromIso || "",
-        to: toIso || "",
-        sort_by: sortBy,
-        sort_order: sortOrder,
-      },
-    });
+    setLoading(true);
 
-    setQcList(res.data?.data || []);
-    setTotalPages(res.data?.pagination?.totalPages || 1);
+    try {
+      const res = await axios.get("/qc/list", {
+        headers: { Authorization: `Bearer ${token}` },
+        params: {
+          order,
+          page,
+          limit: 20,
+          search: debouncedSearch, // item_code
+          inspector: canUseInspectorFilter ? inspector : "",
+          vendor,
+          from: fromIso || "",
+          to: toIso || "",
+          sort_by: sortBy,
+          sort_order: sortOrder,
+        },
+      });
 
-    const backendFilters = res.data?.filters || {};
-    setVendors(Array.isArray(backendFilters.vendors) ? backendFilters.vendors : []);
-    setOrders(Array.isArray(backendFilters.orders) ? backendFilters.orders : []);
-    setItemCodes(Array.isArray(backendFilters.item_codes) ? backendFilters.item_codes : []);
+      setQcList(res.data?.data || []);
+      setTotalPages(res.data?.pagination?.totalPages || 1);
+
+      const backendFilters = res.data?.filters || {};
+      setVendors(Array.isArray(backendFilters.vendors) ? backendFilters.vendors : []);
+      setOrders(Array.isArray(backendFilters.orders) ? backendFilters.orders : []);
+      setItemCodes(Array.isArray(backendFilters.item_codes) ? backendFilters.item_codes : []);
+    } catch (err) {
+      console.error(err);
+      setQcList([]);
+      setTotalPages(1);
+      setVendors([]);
+      setOrders([]);
+      setItemCodes([]);
+    } finally {
+      setLoading(false);
+    }
   }, [
     token,
     page,
@@ -712,86 +727,94 @@ const QCPage = () => {
                 </thead>
 
                 <tbody>
-                  {qcList.map((qc) => {
-                    const pendingAlignmentInfo = getPendingAlignmentInfo(qc);
-
-                    return (
-                    <tr key={qc._id}>
-                      {/* Prefer order.order_id if you populate order.
-                          Vendor should come from order_meta now */}
-                      <td>
-                        {qc?.order_meta?.order_id ||
-                          qc?.order?.order_id ||
-                          "N/A"}
-                      </td>
-                      <td>
-                        {qc?.order_meta?.vendor || qc?.order?.vendor || "N/A"}
-                      </td>
-                      <td>{qc?.item?.item_code || "N/A"}</td>
-                      <td>{formatDateDDMMYYYY(qc?.request_date)}</td>
-                      <td>{formatDateDDMMYYYY(qc?.last_inspected_date)}</td>
-                      <td>{qc?.quantities?.client_demand ?? 0}</td>
-                      {/* <td>{qc?.quantities?.quantity_requested ?? 0}</td>
-                      <td>{toSafeNumber(qc?.last_inspection?.vendor_offered) ?? 0}</td> */}
-                      {/* <td>
-                        {qc?.last_inspection
-                          ? `${toSafeNumber(qc.last_inspection.vendor_offered)} / ${toSafeNumber(qc.last_inspection.checked)} / ${toSafeNumber(qc.last_inspection.passed)}`
-                          : "N/A"}
-                      </td> */}
-                      <td>{qc?.order?.status}</td>
-                      <td>{toSafeNumber(qc?.last_inspection?.passed) ?? 0}</td>
-                      <td>
-                        <span
-                          className={[
-                            "om-table-tooltip-trigger",
-                            pendingAlignmentInfo.isAligned
-                              ? ""
-                              : "text-danger fw-semibold",
-                          ]
-                            .filter(Boolean)
-                            .join(" ")}
-                          data-tooltip={pendingAlignmentInfo.tooltip}
-                          tabIndex={0}
-                        >
-                          {pendingAlignmentInfo.pendingQty}
-                        </span>
-                      </td>
-                      <td>{formatPositiveCbm(qc?.cbm?.total, "NA")}</td>
-                      <td>{qc?.inspector?.name || "N/A"}</td>
-                      <td>
-                        <div className="d-flex flex-column gap-2">
-                          <button
-                            type="button"
-                            className="btn btn-outline-secondary btn-sm"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              handleDetailsClick(qc);
-                            }}
-                          >
-                            See Details
-                          </button>
-                          {canRealign &&
-                            toSafeNumber(qc?.quantities?.pending) > 0 && (
-                              <button
-                                type="button"
-                                className="btn btn-outline-primary btn-sm"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  openRealignModal(qc);
-                                }}
-                              >
-                                Realign QC
-                              </button>
-                            )}
-                        </div>
+                  {loading ? (
+                    <tr>
+                      <td colSpan={TABLE_COLUMN_COUNT} className="text-center py-4">
+                        Loading...
                       </td>
                     </tr>
-                    );
-                  })}
+                  ) : (
+                    qcList.map((qc) => {
+                      const pendingAlignmentInfo = getPendingAlignmentInfo(qc);
 
-                  {qcList.length === 0 && (
+                      return (
+                        <tr key={qc._id}>
+                          {/* Prefer order.order_id if you populate order.
+                              Vendor should come from order_meta now */}
+                          <td>
+                            {qc?.order_meta?.order_id ||
+                              qc?.order?.order_id ||
+                              "N/A"}
+                          </td>
+                          <td>
+                            {qc?.order_meta?.vendor || qc?.order?.vendor || "N/A"}
+                          </td>
+                          <td>{qc?.item?.item_code || "N/A"}</td>
+                          <td>{formatDateDDMMYYYY(qc?.request_date)}</td>
+                          <td>{formatDateDDMMYYYY(qc?.last_inspected_date)}</td>
+                          <td>{qc?.quantities?.client_demand ?? 0}</td>
+                          {/* <td>{qc?.quantities?.quantity_requested ?? 0}</td>
+                          <td>{toSafeNumber(qc?.last_inspection?.vendor_offered) ?? 0}</td> */}
+                          {/* <td>
+                            {qc?.last_inspection
+                              ? `${toSafeNumber(qc.last_inspection.vendor_offered)} / ${toSafeNumber(qc.last_inspection.checked)} / ${toSafeNumber(qc.last_inspection.passed)}`
+                              : "N/A"}
+                          </td> */}
+                          <td>{qc?.order?.status}</td>
+                          <td>{toSafeNumber(qc?.last_inspection?.passed) ?? 0}</td>
+                          <td>
+                            <span
+                              className={[
+                                "om-table-tooltip-trigger",
+                                pendingAlignmentInfo.isAligned
+                                  ? ""
+                                  : "text-danger fw-semibold",
+                              ]
+                                .filter(Boolean)
+                                .join(" ")}
+                              data-tooltip={pendingAlignmentInfo.tooltip}
+                              tabIndex={0}
+                            >
+                              {pendingAlignmentInfo.pendingQty}
+                            </span>
+                          </td>
+                          <td>{formatPositiveCbm(qc?.cbm?.total, "NA")}</td>
+                          <td>{qc?.inspector?.name || "N/A"}</td>
+                          <td>
+                            <div className="d-flex flex-column gap-2">
+                              <button
+                                type="button"
+                                className="btn btn-outline-secondary btn-sm"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  handleDetailsClick(qc);
+                                }}
+                              >
+                                See Details
+                              </button>
+                              {canRealign &&
+                                toSafeNumber(qc?.quantities?.pending) > 0 && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-primary btn-sm"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      openRealignModal(qc);
+                                    }}
+                                  >
+                                    Realign QC
+                                  </button>
+                                )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+
+                  {!loading && qcList.length === 0 && (
                     <tr>
-                      <td colSpan="14" className="text-center py-4">
+                      <td colSpan={TABLE_COLUMN_COUNT} className="text-center py-4">
                         No QC records found
                       </td>
                     </tr>
@@ -806,7 +829,7 @@ const QCPage = () => {
           <button
             type="button"
             className="btn btn-outline-secondary btn-sm"
-            disabled={page === 1}
+            disabled={page === 1 || loading}
             onClick={() => setPage(page - 1)}
           >
             Prev
@@ -817,7 +840,7 @@ const QCPage = () => {
           <button
             type="button"
             className="btn btn-outline-secondary btn-sm"
-            disabled={page === totalPages}
+            disabled={page === totalPages || loading}
             onClick={() => setPage(page + 1)}
           >
             Next

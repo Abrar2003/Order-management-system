@@ -29,6 +29,13 @@ router.patch(
   qcController.updateQC
 );
 
+router.patch(
+  "/goods-not-ready/:id",
+  auth,
+  authorize("QC", "admin", "manager"),
+  qcController.markGoodsNotReady
+);
+
 router.post(
   "/sync-item-details",
   auth,
@@ -55,6 +62,13 @@ router.get(
   auth,
   authorize("admin", "manager", "dev"),
   qcController.getVendorReports,
+);
+
+router.get(
+  "/reports/weekly-summary",
+  auth,
+  authorize("admin", "manager", "dev"),
+  qcController.getWeeklyOrderSummary,
 );
 
 router.get(

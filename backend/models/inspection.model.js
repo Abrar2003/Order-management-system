@@ -58,6 +58,11 @@ const InspectionSchema = new mongoose.Schema(
     // final labels added in this visit
     labels_added: [{ type: Number, min: 0 }],
 
+    goods_not_ready: {
+      ready: {type: Boolean, default: false},
+      reason: { type: String, default: "" },
+    },
+
     remarks: { type: String, default: "" },
 
     createdBy: {
