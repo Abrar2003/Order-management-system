@@ -4,7 +4,7 @@ const Inspector = require("../models/inspector.model");
 const Item = require("../models/item.model");
 const XLSX = require("xlsx");
 
-const Order = require("../models/order.model")
+const Order = require("../models/order.model");
 const mongoose = require("mongoose");
 const { upsertItemFromQc } = require("../services/itemSync");
 
@@ -37,6 +37,9 @@ const QC_REQUEST_TYPES = Object.freeze({
 const CLOSED_ORDER_STATUSES = ["Shipped", "Cancelled"];
 const MANAGER_ALLOWED_PAST_DAYS = 2;
 const QC_ALLOWED_PAST_DAYS = 1;
+const UPDATE_QC_PAST_DAYS_OVERRIDE_BY_USER = Object.freeze({
+  "6993ff47473290fa1cf76b65": 3,
+});
 const ACTIVE_ORDER_MATCH = {
   archived: { $ne: true },
   status: { $ne: "Cancelled" },
@@ -72,15 +75,19 @@ const computeAqlSampleQuantity = (quantity) => {
 };
 
 const parseDateFromPartsToIso = (year, month, day) => {
-  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day)
+  ) {
     return "";
   }
   const parsed = new Date(Date.UTC(year, month - 1, day));
   if (Number.isNaN(parsed.getTime())) return "";
   if (
-    parsed.getUTCFullYear() !== year
-    || parsed.getUTCMonth() + 1 !== month
-    || parsed.getUTCDate() !== day
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() + 1 !== month ||
+    parsed.getUTCDate() !== day
   ) {
     return "";
   }
@@ -138,7 +145,9 @@ const toISODateString = (value) => {
   }
 
   const shouldTryNativeParse =
-    /[a-zA-Z]/.test(asString) || asString.includes(",") || asString.includes(" ");
+    /[a-zA-Z]/.test(asString) ||
+    asString.includes(",") ||
+    asString.includes(" ");
   if (!shouldTryNativeParse) return "";
 
   const parsed = new Date(asString);
@@ -154,7 +163,11 @@ const parseIsoDateToUtcDate = (isoDate) => {
   const normalized = toISODateString(isoDate);
   if (!normalized) return null;
   const [year, month, day] = normalized.split("-").map(Number);
-  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day)
+  ) {
     return null;
   }
   const parsed = new Date(Date.UTC(year, month - 1, day));
@@ -167,13 +180,13 @@ const isIsoDateWithinPastDaysInclusive = (isoDate, daysBack = 0) => {
   if (!target) return false;
 
   const now = new Date();
-  const todayUtc = new Date(Date.UTC(
-    now.getUTCFullYear(),
-    now.getUTCMonth(),
-    now.getUTCDate(),
-  ));
+  const todayUtc = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
   const minAllowedUtc = new Date(todayUtc);
-  minAllowedUtc.setUTCDate(minAllowedUtc.getUTCDate() - Math.max(0, Number(daysBack) || 0));
+  minAllowedUtc.setUTCDate(
+    minAllowedUtc.getUTCDate() - Math.max(0, Number(daysBack) || 0),
+  );
 
   return target >= minAllowedUtc && target <= todayUtc;
 };
@@ -183,16 +196,36 @@ const isIsoDateExactlyDaysBack = (isoDate, daysBack = 0) => {
   if (!target) return false;
 
   const now = new Date();
-  const todayUtc = new Date(Date.UTC(
-    now.getUTCFullYear(),
-    now.getUTCMonth(),
-    now.getUTCDate(),
-  ));
+  const todayUtc = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
   const offsetDays = Number(daysBack) || 0;
   const expectedUtc = new Date(todayUtc);
   expectedUtc.setUTCDate(expectedUtc.getUTCDate() - offsetDays);
 
   return target.getTime() === expectedUtc.getTime();
+};
+
+const getUpdateQcPastDaysLimit = (role = "", userId = "") => {
+  const normalizedUserId = String(userId || "").trim();
+  const override = UPDATE_QC_PAST_DAYS_OVERRIDE_BY_USER[normalizedUserId];
+  if (Number.isInteger(override) && override >= 0) {
+    return override;
+  }
+
+  const normalizedRole = String(role || "").trim().toLowerCase();
+  if (normalizedRole === "manager") return MANAGER_ALLOWED_PAST_DAYS;
+  if (normalizedRole === "qc") return QC_ALLOWED_PAST_DAYS;
+  return 0;
+};
+
+const buildUpdateQcPastDaysMessage = (role = "", daysBack = 0) => {
+  const normalizedRole = String(role || "").trim().toLowerCase();
+  const actorLabel = normalizedRole === "manager" ? "Manager" : "QC";
+  const safeDaysBack =
+    Number.isInteger(daysBack) && daysBack >= 0 ? daysBack : 0;
+  const dayLabel = safeDaysBack === 1 ? "day" : "days";
+  return `${actorLabel} can update QC only for today and previous ${safeDaysBack} ${dayLabel}`;
 };
 
 const formatDateDDMMYYYY = (value, fallback = "") => {
@@ -230,45 +263,54 @@ const hasCompletePositiveLbh = (dimensions = {}) => {
 const normalizeItemCodeKey = (value) => normalizeText(value).toLowerCase();
 const getItemInspectedCbmTotal = (itemDoc = {}) =>
   normalizeText(
-    itemDoc?.cbm?.calculated_inspected_total
-      ?? itemDoc?.cbm?.inspected_total
-      ?? itemDoc?.cbm?.calculated_total
-      ?? itemDoc?.cbm?.qc_total
-      ?? itemDoc?.cbm?.total
-      ?? "",
+    itemDoc?.cbm?.calculated_inspected_total ??
+      itemDoc?.cbm?.inspected_total ??
+      itemDoc?.cbm?.calculated_total ??
+      itemDoc?.cbm?.qc_total ??
+      itemDoc?.cbm?.total ??
+      "",
   );
 const getItemWeightNet = (itemDoc = {}) =>
   toNonNegativeNumber(
-    itemDoc?.inspected_weight?.net ?? itemDoc?.pis_weight?.net ?? itemDoc?.weight?.net,
+    itemDoc?.inspected_weight?.net ??
+      itemDoc?.pis_weight?.net ??
+      itemDoc?.weight?.net,
     0,
   );
 const getItemWeightGross = (itemDoc = {}) =>
   toNonNegativeNumber(
-    itemDoc?.inspected_weight?.gross ?? itemDoc?.pis_weight?.gross ?? itemDoc?.weight?.gross,
+    itemDoc?.inspected_weight?.gross ??
+      itemDoc?.pis_weight?.gross ??
+      itemDoc?.weight?.gross,
     0,
   );
 const getItemItemLbh = (itemDoc = {}) =>
-  itemDoc?.inspected_item_LBH || itemDoc?.pis_item_LBH || itemDoc?.item_LBH || {};
+  itemDoc?.inspected_item_LBH ||
+  itemDoc?.pis_item_LBH ||
+  itemDoc?.item_LBH ||
+  {};
 const getItemBoxLbh = (itemDoc = {}) =>
   itemDoc?.inspected_box_LBH || itemDoc?.pis_box_LBH || itemDoc?.box_LBH || {};
 
 const hasMeaningfulItemQcDetails = (itemDoc) => {
   if (!itemDoc || typeof itemDoc !== "object") return false;
 
-  const itemDescription = normalizeText(itemDoc?.description || itemDoc?.name || "");
+  const itemDescription = normalizeText(
+    itemDoc?.description || itemDoc?.name || "",
+  );
   const cbmTotal = getItemInspectedCbmTotal(itemDoc);
   const itemQc = itemDoc?.qc || {};
   const barcode = Number(itemQc?.barcode || 0);
   const lastInspectedDate = normalizeText(itemQc?.last_inspected_date || "");
 
   return Boolean(
-    itemDescription
-      || (cbmTotal && cbmTotal !== "0")
-      || barcode > 0
-      || itemQc?.packed_size === true
-      || itemQc?.finishing === true
-      || itemQc?.branding === true
-      || lastInspectedDate,
+    itemDescription ||
+    (cbmTotal && cbmTotal !== "0") ||
+    barcode > 0 ||
+    itemQc?.packed_size === true ||
+    itemQc?.finishing === true ||
+    itemQc?.branding === true ||
+    lastInspectedDate,
   );
 };
 
@@ -286,14 +328,21 @@ const buildQcItemDetailsPatch = ({
   }
 
   const set = {};
-  const itemDescription = normalizeText(itemDoc?.description || itemDoc?.name || "");
-  const itemCode = normalizeText(itemDoc?.code || qcSnapshot?.item?.item_code || "");
+  const itemDescription = normalizeText(
+    itemDoc?.description || itemDoc?.name || "",
+  );
+  const itemCode = normalizeText(
+    itemDoc?.code || qcSnapshot?.item?.item_code || "",
+  );
   const cbmTotal = getItemInspectedCbmTotal(itemDoc);
   const itemQc = itemDoc?.qc || {};
   const barcode = Math.max(0, Number(itemQc?.barcode || 0));
   const lastInspectedDate = normalizeText(itemQc?.last_inspected_date || "");
 
-  if (itemDescription && normalizeText(qcSnapshot?.item?.description) !== itemDescription) {
+  if (
+    itemDescription &&
+    normalizeText(qcSnapshot?.item?.description) !== itemDescription
+  ) {
     set["item.description"] = itemDescription;
   }
 
@@ -301,7 +350,11 @@ const buildQcItemDetailsPatch = ({
     set["item.item_code"] = itemCode;
   }
 
-  if (cbmTotal && cbmTotal !== "0" && normalizeText(qcSnapshot?.cbm?.total) !== cbmTotal) {
+  if (
+    cbmTotal &&
+    cbmTotal !== "0" &&
+    normalizeText(qcSnapshot?.cbm?.total) !== cbmTotal
+  ) {
     set["cbm.total"] = cbmTotal;
   }
 
@@ -322,8 +375,8 @@ const buildQcItemDetailsPatch = ({
   }
 
   if (
-    lastInspectedDate
-    && normalizeText(qcSnapshot?.last_inspected_date) !== lastInspectedDate
+    lastInspectedDate &&
+    normalizeText(qcSnapshot?.last_inspected_date) !== lastInspectedDate
   ) {
     set.last_inspected_date = lastInspectedDate;
   }
@@ -336,7 +389,12 @@ const buildQcItemDetailsPatch = ({
 };
 
 const applyQcItemDetailsPatch = (qcDoc, patch = {}) => {
-  if (!qcDoc || typeof qcDoc.set !== "function" || !patch || typeof patch !== "object") {
+  if (
+    !qcDoc ||
+    typeof qcDoc.set !== "function" ||
+    !patch ||
+    typeof patch !== "object"
+  ) {
     return;
   }
 
@@ -346,7 +404,8 @@ const applyQcItemDetailsPatch = (qcDoc, patch = {}) => {
 };
 
 const resolveLatestRequestEntry = (requestHistory = []) => {
-  if (!Array.isArray(requestHistory) || requestHistory.length === 0) return null;
+  if (!Array.isArray(requestHistory) || requestHistory.length === 0)
+    return null;
   return requestHistory[requestHistory.length - 1] || null;
 };
 
@@ -372,9 +431,16 @@ const upsertInspectionRecordForRequest = async ({
 
   const resolvedInspectorId = String(inspectorId || "").trim();
   const resolvedRequestDate = String(requestDate || "").trim();
-  const resolvedInspectionDate = String(inspectionDate || resolvedRequestDate).trim();
+  const resolvedInspectionDate = String(
+    inspectionDate || resolvedRequestDate,
+  ).trim();
 
-  if (!resolvedInspectorId || !resolvedRequestDate || !resolvedInspectionDate || !createdBy) {
+  if (
+    !resolvedInspectorId ||
+    !resolvedRequestDate ||
+    !resolvedInspectionDate ||
+    !createdBy
+  ) {
     return null;
   }
 
@@ -396,10 +462,13 @@ const upsertInspectionRecordForRequest = async ({
   const requestedQty = toNonNegativeNumber(requestedQuantity, 0);
   const pendingAfter = toNonNegativeNumber(
     qcDoc?.quantities?.pending ??
-      ((qcDoc?.quantities?.client_demand || 0) - (qcDoc?.quantities?.qc_passed || 0)),
+      (qcDoc?.quantities?.client_demand || 0) -
+        (qcDoc?.quantities?.qc_passed || 0),
     0,
   );
-  const labelRangesToAppend = Array.isArray(appendLabelRanges) ? appendLabelRanges : [];
+  const labelRangesToAppend = Array.isArray(appendLabelRanges)
+    ? appendLabelRanges
+    : [];
   const labelsToAppend = normalizeLabels(appendLabels);
   const normalizedGoodsNotReady =
     goodsNotReady && typeof goodsNotReady === "object"
@@ -436,7 +505,11 @@ const upsertInspectionRecordForRequest = async ({
     });
 
     qcDoc.inspection_record = qcDoc.inspection_record || [];
-    if (!qcDoc.inspection_record.some((entry) => String(entry) === String(inspectionRecord._id))) {
+    if (
+      !qcDoc.inspection_record.some(
+        (entry) => String(entry) === String(inspectionRecord._id),
+      )
+    ) {
       qcDoc.inspection_record.push(inspectionRecord._id);
     }
 
@@ -445,16 +518,20 @@ const upsertInspectionRecordForRequest = async ({
 
   inspectionRecord.inspector = resolvedInspectorId;
   inspectionRecord.requested_date = resolvedRequestDate;
-  inspectionRecord.request_history_id = requestHistoryId || inspectionRecord.request_history_id || null;
+  inspectionRecord.request_history_id =
+    requestHistoryId || inspectionRecord.request_history_id || null;
   inspectionRecord.inspection_date = resolvedInspectionDate;
   inspectionRecord.vendor_requested = requestedQty;
 
   const nextChecked =
-    toNonNegativeNumber(inspectionRecord.checked, 0) + toNonNegativeNumber(addChecked, 0);
+    toNonNegativeNumber(inspectionRecord.checked, 0) +
+    toNonNegativeNumber(addChecked, 0);
   const nextPassed =
-    toNonNegativeNumber(inspectionRecord.passed, 0) + toNonNegativeNumber(addPassed, 0);
+    toNonNegativeNumber(inspectionRecord.passed, 0) +
+    toNonNegativeNumber(addPassed, 0);
   const nextOffered =
-    toNonNegativeNumber(inspectionRecord.vendor_offered, 0) + toNonNegativeNumber(addProvision, 0);
+    toNonNegativeNumber(inspectionRecord.vendor_offered, 0) +
+    toNonNegativeNumber(addProvision, 0);
 
   inspectionRecord.checked = nextChecked;
   inspectionRecord.passed = nextPassed;
@@ -474,7 +551,9 @@ const upsertInspectionRecordForRequest = async ({
       ? inspectionRecord.label_ranges
       : [];
     const rangeKeys = new Set(
-      existingRanges.map((range) => `${Number(range?.start)}-${Number(range?.end)}`),
+      existingRanges.map(
+        (range) => `${Number(range?.start)}-${Number(range?.end)}`,
+      ),
     );
     for (const range of labelRangesToAppend) {
       const start = Number(range?.start);
@@ -490,7 +569,10 @@ const upsertInspectionRecordForRequest = async ({
 
   if (labelsToAppend.length > 0) {
     const existingLabels = normalizeLabels(inspectionRecord.labels_added || []);
-    inspectionRecord.labels_added = normalizeLabels([...existingLabels, ...labelsToAppend]);
+    inspectionRecord.labels_added = normalizeLabels([
+      ...existingLabels,
+      ...labelsToAppend,
+    ]);
   }
 
   if (normalizedGoodsNotReady) {
@@ -504,7 +586,11 @@ const upsertInspectionRecordForRequest = async ({
   await inspectionRecord.save();
 
   qcDoc.inspection_record = qcDoc.inspection_record || [];
-  if (!qcDoc.inspection_record.some((entry) => String(entry) === String(inspectionRecord._id))) {
+  if (
+    !qcDoc.inspection_record.some(
+      (entry) => String(entry) === String(inspectionRecord._id),
+    )
+  ) {
     qcDoc.inspection_record.push(inspectionRecord._id);
   }
 
@@ -516,7 +602,9 @@ const upsertInspectionRecordForRequest = async ({
  * Fetch all QC records (pagination optional)
  */
 const escapeRegex = (value = "") =>
-  String(value).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  String(value)
+    .trim()
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const toDateInputValue = (value = new Date()) => {
   const parsed = new Date(value);
@@ -564,11 +652,13 @@ const REPORT_TIMELINE_DAYS = Object.freeze({
 const toUtcDayStart = (value = new Date()) => {
   const parsed = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
-  return new Date(Date.UTC(
-    parsed.getUTCFullYear(),
-    parsed.getUTCMonth(),
-    parsed.getUTCDate(),
-  ));
+  return new Date(
+    Date.UTC(
+      parsed.getUTCFullYear(),
+      parsed.getUTCMonth(),
+      parsed.getUTCDate(),
+    ),
+  );
 };
 
 const addUtcDays = (date, days = 0) => {
@@ -584,17 +674,18 @@ const parseCustomDaysInput = (value, fallback = 30) => {
   return Math.min(parsed, 3650);
 };
 
-const resolveTimelineRange = ({
-  timeline = "1m",
-  customDays = "",
-} = {}) => {
-  const normalizedTimelineInput = String(timeline || "").trim().toLowerCase();
+const resolveTimelineRange = ({ timeline = "1m", customDays = "" } = {}) => {
+  const normalizedTimelineInput = String(timeline || "")
+    .trim()
+    .toLowerCase();
   const timelineKey = Object.prototype.hasOwnProperty.call(
     REPORT_TIMELINE_DAYS,
     normalizedTimelineInput,
   )
     ? normalizedTimelineInput
-    : (normalizedTimelineInput === "custom" ? "custom" : "1m");
+    : normalizedTimelineInput === "custom"
+      ? "custom"
+      : "1m";
 
   const days =
     timelineKey === "custom"
@@ -679,11 +770,13 @@ const resolveOrderStatusFromSet = (statuses = []) => {
     "Partial Shipped",
     "Shipped",
   ];
-  const normalizedStatuses = [...new Set(
-    (Array.isArray(statuses) ? statuses : [])
-      .map((status) => String(status || "").trim())
-      .filter(Boolean),
-  )];
+  const normalizedStatuses = [
+    ...new Set(
+      (Array.isArray(statuses) ? statuses : [])
+        .map((status) => String(status || "").trim())
+        .filter(Boolean),
+    ),
+  ];
 
   if (normalizedStatuses.length === 0) return "Pending";
   if (normalizedStatuses.length === 1) return normalizedStatuses[0];
@@ -780,16 +873,20 @@ const buildStringDateToDateExpression = (fieldPath) => ({
   },
 });
 
-const requestDateToDateExpression = buildStringDateToDateExpression("$request_date");
-const inspectionDateToDateExpression = buildStringDateToDateExpression("$inspection_date");
-const lastInspectedDateToDateExpression = buildStringDateToDateExpression("$last_inspected_date");
+const requestDateToDateExpression =
+  buildStringDateToDateExpression("$request_date");
+const inspectionDateToDateExpression =
+  buildStringDateToDateExpression("$inspection_date");
+const lastInspectedDateToDateExpression = buildStringDateToDateExpression(
+  "$last_inspected_date",
+);
 
 const normalizeDistinctValues = (values = []) =>
-  [...new Set(
-    values
-      .map((value) => String(value ?? "").trim())
-      .filter(Boolean),
-  )].sort((a, b) => a.localeCompare(b));
+  [
+    ...new Set(
+      values.map((value) => String(value ?? "").trim()).filter(Boolean),
+    ),
+  ].sort((a, b) => a.localeCompare(b));
 
 const buildQcListMatch = ({
   inspector = "",
@@ -918,7 +1015,6 @@ const resolveQcListSortConfig = ({
 };
 
 exports.getQCList = async (req, res) => {
-
   await QC.createIndexes();
   try {
     const {
@@ -934,7 +1030,9 @@ exports.getQCList = async (req, res) => {
       sort = "-request_date",
     } = req.query;
     const requestedInspectorId = String(inspector || "").trim();
-    const normalizedRole = String(req.user?.role || "").trim().toLowerCase();
+    const normalizedRole = String(req.user?.role || "")
+      .trim()
+      .toLowerCase();
     const isQcUser = normalizedRole === "qc";
     const currentUserId = String(req.user?._id || req.user?.id || "").trim();
     const inspectorId = isQcUser ? currentUserId : requestedInspectorId;
@@ -992,7 +1090,9 @@ exports.getQCList = async (req, res) => {
                 as: "inspector",
               },
             },
-            { $unwind: { path: "$inspector", preserveNullAndEmptyArrays: true } },
+            {
+              $unwind: { path: "$inspector", preserveNullAndEmptyArrays: true },
+            },
             {
               $lookup: {
                 from: "inspections",
@@ -1074,9 +1174,13 @@ exports.getQCList = async (req, res) => {
         sort_order: sortOrder,
       },
       filters: {
-        vendors: normalizeDistinctValues(vendorsRaw.map((entry) => entry?.value)),
+        vendors: normalizeDistinctValues(
+          vendorsRaw.map((entry) => entry?.value),
+        ),
         orders: normalizeDistinctValues(ordersRaw.map((entry) => entry?.value)),
-        item_codes: normalizeDistinctValues(itemCodesRaw.map((entry) => entry?.value)),
+        item_codes: normalizeDistinctValues(
+          itemCodesRaw.map((entry) => entry?.value),
+        ),
       },
     });
   } catch (err) {
@@ -1099,9 +1203,12 @@ exports.exportQCList = async (req, res) => {
       sort = "-request_date",
       format = "xlsx",
     } = req.query;
-    const exportFormat = String(format || "").trim().toLowerCase() === "csv"
-      ? "csv"
-      : "xlsx";
+    const exportFormat =
+      String(format || "")
+        .trim()
+        .toLowerCase() === "csv"
+        ? "csv"
+        : "xlsx";
 
     const inspectorId = String(inspector || "").trim();
     if (inspectorId && !mongoose.Types.ObjectId.isValid(inspectorId)) {
@@ -1286,14 +1393,19 @@ exports.exportQCList = async (req, res) => {
       { key: "shipment_quantities", header: "Shipment Quantities" },
       { key: "shipment_pending", header: "Shipment Pending" },
       { key: "shipment_remarks", header: "Shipment Remarks" },
-      { key: "shipment_rows", header: "Shipment Rows (Date/Container/Qty/Pending/Remarks)" },
+      {
+        key: "shipment_rows",
+        header: "Shipment Rows (Date/Container/Qty/Pending/Remarks)",
+      },
     ];
 
     const exportRows = qcRows.map((entry) => {
       const qcItemCode = normalizeText(entry?.item?.item_code || "");
       const qcItemDescription = normalizeText(entry?.item?.description || "");
       const orderItemCode = normalizeText(entry?.order?.item?.item_code || "");
-      const orderItemDescription = normalizeText(entry?.order?.item?.description || "");
+      const orderItemDescription = normalizeText(
+        entry?.order?.item?.description || "",
+      );
       const itemMaster = itemMasterMap.get(
         normalizeItemCodeKey(qcItemCode || orderItemCode),
       );
@@ -1333,14 +1445,20 @@ exports.exportQCList = async (req, res) => {
       const inspectorName = normalizeText(entry?.inspector?.name || "");
       const inspectorEmail = normalizeText(entry?.inspector?.email || "");
       const createdByName =
-        normalizeText(entry?.createdByUser?.name)
-        || normalizeText(entry?.createdByUser?.email)
-        || "";
+        normalizeText(entry?.createdByUser?.name) ||
+        normalizeText(entry?.createdByUser?.email) ||
+        "";
 
       return {
-        po: normalizeText(entry?.order_meta?.order_id || entry?.order?.order_id || ""),
-        brand: normalizeText(entry?.order_meta?.brand || entry?.order?.brand || ""),
-        vendor: normalizeText(entry?.order_meta?.vendor || entry?.order?.vendor || ""),
+        po: normalizeText(
+          entry?.order_meta?.order_id || entry?.order?.order_id || "",
+        ),
+        brand: normalizeText(
+          entry?.order_meta?.brand || entry?.order?.brand || "",
+        ),
+        vendor: normalizeText(
+          entry?.order_meta?.vendor || entry?.order?.vendor || "",
+        ),
         qc_request_type: normalizeQcRequestType(entry?.request_type),
         item_code: qcItemCode,
         description: qcItemDescription,
@@ -1350,10 +1468,16 @@ exports.exportQCList = async (req, res) => {
         item_master_name: normalizeText(itemMaster?.name || ""),
         item_master_description: normalizeText(itemMaster?.description || ""),
         item_master_brands: Array.isArray(itemMaster?.brands)
-          ? itemMaster.brands.map((brandValue) => normalizeText(brandValue)).filter(Boolean).join(" | ")
+          ? itemMaster.brands
+              .map((brandValue) => normalizeText(brandValue))
+              .filter(Boolean)
+              .join(" | ")
           : "",
         item_master_vendors: Array.isArray(itemMaster?.vendors)
-          ? itemMaster.vendors.map((vendorValue) => normalizeText(vendorValue)).filter(Boolean).join(" | ")
+          ? itemMaster.vendors
+              .map((vendorValue) => normalizeText(vendorValue))
+              .filter(Boolean)
+              .join(" | ")
           : "",
         item_master_weight_net: getItemWeightNet(itemMaster),
         item_master_weight_gross: getItemWeightGross(itemMaster),
@@ -1366,8 +1490,14 @@ exports.exportQCList = async (req, res) => {
         etd: formatDateDDMMYYYY(entry?.order?.ETD, ""),
         order_status: normalizeText(entry?.order?.status || ""),
         order_quantity: toNonNegativeNumber(entry?.order?.quantity, 0),
-        quantity_requested: toNonNegativeNumber(entry?.quantities?.quantity_requested, 0),
-        vendor_provision: toNonNegativeNumber(entry?.quantities?.vendor_provision, 0),
+        quantity_requested: toNonNegativeNumber(
+          entry?.quantities?.quantity_requested,
+          0,
+        ),
+        vendor_provision: toNonNegativeNumber(
+          entry?.quantities?.vendor_provision,
+          0,
+        ),
         qc_checked: toNonNegativeNumber(entry?.quantities?.qc_checked, 0),
         qc_passed: toNonNegativeNumber(entry?.quantities?.qc_passed, 0),
         pending: toNonNegativeNumber(entry?.quantities?.pending, 0),
@@ -1413,7 +1543,7 @@ exports.exportQCList = async (req, res) => {
           .replace(/\r\n/g, "\n")
           .replace(/\r/g, "\n");
         if (/["\n,]/.test(normalized)) {
-          return `"${normalized.replace(/"/g, "\"\"")}"`;
+          return `"${normalized.replace(/"/g, '""')}"`;
         }
         return normalized;
       };
@@ -1453,10 +1583,7 @@ exports.exportQCList = async (req, res) => {
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${fileName}"`,
-    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     return res.status(200).send(fileBuffer);
   } catch (err) {
     console.error("QC Export Error:", err);
@@ -1505,7 +1632,7 @@ exports.alignQC = async (req, res) => {
 
     const clientDemand = Number(quantities?.client_demand);
     const quantityRequestedInput = Number(
-      quantities?.quantity_requested ?? quantities?.vendor_provision
+      quantities?.quantity_requested ?? quantities?.vendor_provision,
     );
     const normalizedRequestType = normalizeQcRequestType(
       request_type ?? quantities?.request_type,
@@ -1514,10 +1641,9 @@ exports.alignQC = async (req, res) => {
       quantities?.vendor_provision !== undefined &&
       quantities?.vendor_provision !== null &&
       quantities?.vendor_provision !== "";
-    const vendorProvision =
-      !hasVendorProvisionInput
-        ? 0
-        : Number(quantities?.vendor_provision);
+    const vendorProvision = !hasVendorProvisionInput
+      ? 0
+      : Number(quantities?.vendor_provision);
 
     const quantityRequested =
       normalizedRequestType === QC_REQUEST_TYPES.AQL
@@ -1527,7 +1653,8 @@ exports.alignQC = async (req, res) => {
     if (
       Number.isNaN(clientDemand) ||
       Number.isNaN(vendorProvision) ||
-      (normalizedRequestType === QC_REQUEST_TYPES.FULL && Number.isNaN(quantityRequestedInput))
+      (normalizedRequestType === QC_REQUEST_TYPES.FULL &&
+        Number.isNaN(quantityRequestedInput))
     ) {
       return res.status(400).json({
         message:
@@ -1538,7 +1665,8 @@ exports.alignQC = async (req, res) => {
     if (
       clientDemand < 0 ||
       vendorProvision < 0 ||
-      (normalizedRequestType === QC_REQUEST_TYPES.FULL && quantityRequestedInput < 0)
+      (normalizedRequestType === QC_REQUEST_TYPES.FULL &&
+        quantityRequestedInput < 0)
     ) {
       return res.status(400).json({
         message: "Quantity values must be valid non-negative numbers",
@@ -1565,10 +1693,14 @@ exports.alignQC = async (req, res) => {
     const parsedRequestDate = new Date(`${requestDateValue}T00:00:00Z`);
 
     if (Number.isNaN(parsedRequestDate.getTime())) {
-      return res.status(400).json({ message: "request date must be a valid date" });
+      return res
+        .status(400)
+        .json({ message: "request date must be a valid date" });
     }
 
-    const normalizedRole = String(req.user?.role || "").trim().toLowerCase();
+    const normalizedRole = String(req.user?.role || "")
+      .trim()
+      .toLowerCase();
     const isAdmin = normalizedRole === "admin";
     const isManager = normalizedRole === "manager";
 
@@ -1603,7 +1735,6 @@ exports.alignQC = async (req, res) => {
       : null;
 
     if (existingQC) {
-
       if (clientDemand < existingQC.quantities.qc_passed) {
         return res.status(400).json({
           message: "client demand cannot be less than already passed quantity",
@@ -1612,8 +1743,8 @@ exports.alignQC = async (req, res) => {
 
       const existingPendingRaw = Number(
         existingQC?.quantities?.pending ??
-          ((existingQC?.quantities?.client_demand || 0) -
-            (existingQC?.quantities?.qc_passed || 0)),
+          (existingQC?.quantities?.client_demand || 0) -
+            (existingQC?.quantities?.qc_passed || 0),
       );
       const existingPendingQuantity = Number.isFinite(existingPendingRaw)
         ? Math.max(0, existingPendingRaw)
@@ -1625,20 +1756,24 @@ exports.alignQC = async (req, res) => {
         });
       }
 
-      if (hasVendorProvisionInput && vendorProvision < existingQC.quantities.qc_passed) {
+      if (
+        hasVendorProvisionInput &&
+        vendorProvision < existingQC.quantities.qc_passed
+      ) {
         return res.status(400).json({
-          message: "vendor provision cannot be less than already passed quantity",
+          message:
+            "vendor provision cannot be less than already passed quantity",
         });
       }
 
-      const totalOffered =
-        (hasVendorProvisionInput
-          ? vendorProvision
-          : (existingQC.quantities.vendor_provision || 0));
+      const totalOffered = hasVendorProvisionInput
+        ? vendorProvision
+        : existingQC.quantities.vendor_provision || 0;
 
       if ((existingQC.quantities.qc_checked || 0) > totalOffered) {
         return res.status(400).json({
-          message: "vendor provision cannot be less than already checked quantity",
+          message:
+            "vendor provision cannot be less than already checked quantity",
         });
       }
 
@@ -1685,7 +1820,8 @@ exports.alignQC = async (req, res) => {
         qcDoc: existingQC,
         inspectorId,
         requestDate: requestDateValue,
-        requestHistoryId: resolveLatestRequestEntry(existingQC.request_history)?._id || null,
+        requestHistoryId:
+          resolveLatestRequestEntry(existingQC.request_history)?._id || null,
         requestedQuantity: quantityRequested,
         inspectionDate: requestDateValue,
         remarks: remarks || "",
@@ -1703,7 +1839,9 @@ exports.alignQC = async (req, res) => {
 
       if (orderRecord) {
         const passedQty = Number(existingQC.quantities?.qc_passed || 0);
-        const clientDemandQty = Number(existingQC.quantities?.client_demand || 0);
+        const clientDemandQty = Number(
+          existingQC.quantities?.client_demand || 0,
+        );
         orderRecord.status =
           clientDemandQty > 0 && passedQty >= clientDemandQty
             ? "Inspection Done"
@@ -1738,14 +1876,14 @@ exports.alignQC = async (req, res) => {
     };
 
     const qc = await QC.create({
-      order, 
+      order,
       item,
       inspector: inspectorId,
       request_type: normalizedRequestType,
       order_meta: {
         order_id: orderRecord.order_id,
         vendor: orderRecord.vendor,
-        brand: orderRecord.brand
+        brand: orderRecord.brand,
       },
       request_date: requestDateValue,
       last_inspected_date: requestDateValue,
@@ -1757,9 +1895,7 @@ exports.alignQC = async (req, res) => {
         qc_passed: 0,
         pending: clientDemand,
       },
-      request_history: [
-        requestHistoryEntry,
-      ],
+      request_history: [requestHistoryEntry],
       remarks,
       createdBy: req.user._id,
     });
@@ -1777,7 +1913,8 @@ exports.alignQC = async (req, res) => {
       qcDoc: qc,
       inspectorId,
       requestDate: requestDateValue,
-      requestHistoryId: resolveLatestRequestEntry(qc.request_history)?._id || null,
+      requestHistoryId:
+        resolveLatestRequestEntry(qc.request_history)?._id || null,
       requestedQuantity: quantityRequested,
       inspectionDate: requestDateValue,
       remarks: remarks || "",
@@ -1790,7 +1927,6 @@ exports.alignQC = async (req, res) => {
       replaceCbmSnapshot: true,
       allowRequestedDateFallback: false,
     });
-
 
     orderRecord.status = "Under Inspection";
     orderRecord.qc_record = qc._id;
@@ -1849,957 +1985,1061 @@ exports.updateQC = async (req, res) => {
       inspected_weight,
     } = req.body;
 
-      const qc = await QC.findById(req.params.id)
-        .populate("inspector")
-        .populate("order", "status");
+    const qc = await QC.findById(req.params.id)
+      .populate("inspector")
+      .populate("order", "status");
 
-      if (!qc) {
-        return res.status(404).json({ message: "QC record not found" });
-      }
+    if (!qc) {
+      return res.status(404).json({ message: "QC record not found" });
+    }
 
-      const normalizedRole = String(req.user?.role || "").trim().toLowerCase();
-      const isAdmin = normalizedRole === "admin";
-      const isManager = normalizedRole === "manager";
-      const isQcUser = normalizedRole === "qc";
-      const hasElevatedAccess = isAdmin || isManager;
-      const currentUserId = String(req.user?._id || req.user?.id || "").trim();
-      const isInspectionDone = qc?.order?.status === "Inspection Done";
+    const normalizedRole = String(req.user?.role || "")
+      .trim()
+      .toLowerCase();
+    const isAdmin = normalizedRole === "admin";
+    const isManager = normalizedRole === "manager";
+    const isQcUser = normalizedRole === "qc";
+    const hasElevatedAccess = isAdmin || isManager;
+    const currentUserId = String(req.user?._id || req.user?.id || "").trim();
+    const updateQcPastDaysLimit = getUpdateQcPastDaysLimit(
+      normalizedRole,
+      currentUserId,
+    );
+    const isInspectionDone = qc?.order?.status === "Inspection Done";
 
-      if (!hasElevatedAccess && isInspectionDone) {
-        return res.status(403).json({
-          message: "Only admin or manager can update this QC record after inspection is done",
-        });
-      }
+    if (!hasElevatedAccess && isInspectionDone) {
+      return res.status(403).json({
+        message:
+          "Only admin or manager can update this QC record after inspection is done",
+      });
+    }
 
-      const requestedInspectorId =
-        inspector !== undefined && inspector !== null && String(inspector).trim() !== ""
-          ? String(inspector).trim()
-          : null;
+    const requestedInspectorId =
+      inspector !== undefined &&
+      inspector !== null &&
+      String(inspector).trim() !== ""
+        ? String(inspector).trim()
+        : null;
 
-      const hasStartedInspection =
-        Number(qc.quantities?.qc_checked || 0) > 0 ||
-        Number(qc.quantities?.qc_passed || 0) > 0 ||
-        Number(qc.quantities?.vendor_provision || 0) > 0 ||
-        normalizeLabels(qc.labels).length > 0;
+    const hasStartedInspection =
+      Number(qc.quantities?.qc_checked || 0) > 0 ||
+      Number(qc.quantities?.qc_passed || 0) > 0 ||
+      Number(qc.quantities?.vendor_provision || 0) > 0 ||
+      normalizeLabels(qc.labels).length > 0;
 
-      const latestRequestEntry = resolveLatestRequestEntry(qc?.request_history || []);
-      const latestRequestedQuantity =
-        latestRequestEntry?.quantity_requested !== undefined
-          ? toNonNegativeNumber(latestRequestEntry.quantity_requested, 0)
-          : toNonNegativeNumber(qc?.quantities?.quantity_requested, 0);
-      const hasQcRequest =
-        (Array.isArray(qc?.request_history) && qc.request_history.length > 0) ||
-        latestRequestedQuantity > 0;
+    const latestRequestEntry = resolveLatestRequestEntry(
+      qc?.request_history || [],
+    );
+    const latestRequestedQuantity =
+      latestRequestEntry?.quantity_requested !== undefined
+        ? toNonNegativeNumber(latestRequestEntry.quantity_requested, 0)
+        : toNonNegativeNumber(qc?.quantities?.quantity_requested, 0);
+    const hasQcRequest =
+      (Array.isArray(qc?.request_history) && qc.request_history.length > 0) ||
+      latestRequestedQuantity > 0;
 
-      if (!hasQcRequest) {
+    if (!hasQcRequest) {
+      return res.status(400).json({
+        message: "QC is not requested yet. Align QC request before updating.",
+      });
+    }
+
+    const inspectionDateForPermissionRaw =
+      last_inspected_date !== undefined &&
+      String(last_inspected_date).trim() !== ""
+        ? String(last_inspected_date).trim()
+        : String(qc?.last_inspected_date || qc?.request_date || "").trim();
+    const inspectionDateForPermission = toISODateString(
+      inspectionDateForPermissionRaw,
+    );
+
+    if (!hasElevatedAccess) {
+      if (!inspectionDateForPermission) {
         return res.status(400).json({
-          message: "QC is not requested yet. Align QC request before updating.",
+          message:
+            "last_inspected_date must be a valid date in DD/MM/YYYY or YYYY-MM-DD format",
+        });
+      }
+      if (
+        !isIsoDateWithinPastDaysInclusive(
+          inspectionDateForPermission,
+          updateQcPastDaysLimit,
+        )
+      ) {
+        return res.status(403).json({
+          message: buildUpdateQcPastDaysMessage(
+            normalizedRole,
+            updateQcPastDaysLimit,
+          ),
         });
       }
 
-      const inspectionDateForPermissionRaw =
-        last_inspected_date !== undefined && String(last_inspected_date).trim() !== ""
-          ? String(last_inspected_date).trim()
-          : String(qc?.last_inspected_date || qc?.request_date || "").trim();
-      const inspectionDateForPermission = toISODateString(inspectionDateForPermissionRaw);
-
-      if (!hasElevatedAccess) {
-        if (!inspectionDateForPermission) {
-          return res.status(400).json({
-            message: "last_inspected_date must be a valid date in DD/MM/YYYY or YYYY-MM-DD format",
-          });
-        }
-        if (!isIsoDateWithinPastDaysInclusive(inspectionDateForPermission, QC_ALLOWED_PAST_DAYS)) {
-          return res.status(403).json({
-            message: "QC can update only for today and previous 1 day",
-          });
-        }
-
-        const isOneDayBackdatedEntry = isIsoDateExactlyDaysBack(
-          inspectionDateForPermission,
-          1,
-        );
-        if (isQcUser && isOneDayBackdatedEntry) {
-          if (!mongoose.Types.ObjectId.isValid(currentUserId)) {
-            return res.status(401).json({ message: "Unauthorized" });
-          }
-          const existingOneDayBackdatedUpdate = await Inspection.exists({
-            qc: qc._id,
-            inspector: new mongoose.Types.ObjectId(currentUserId),
-            inspection_date: inspectionDateForPermission,
-            $or: [
-              { checked: { $gt: 0 } },
-              { passed: { $gt: 0 } },
-              { vendor_offered: { $gt: 0 } },
-              { "labels_added.0": { $exists: true } },
-            ],
-          });
-          if (existingOneDayBackdatedUpdate) {
-            return res.status(403).json({
-              message: "QC can update a 1-day backdated entry only once",
-            });
-          }
-        }
-      }
-
-      if (!hasElevatedAccess) {
-        if (!currentUserId) {
+      const isOneDayBackdatedEntry = isIsoDateExactlyDaysBack(
+        inspectionDateForPermission,
+        1,
+      );
+      if (isQcUser && isOneDayBackdatedEntry) {
+        if (!mongoose.Types.ObjectId.isValid(currentUserId)) {
           return res.status(401).json({ message: "Unauthorized" });
         }
-
-        const alignedInspectorId = String(qc?.inspector?._id || qc?.inspector || "").trim();
-        if (!alignedInspectorId || alignedInspectorId !== currentUserId) {
+        const existingOneDayBackdatedUpdate = await Inspection.exists({
+          qc: qc._id,
+          inspector: new mongoose.Types.ObjectId(currentUserId),
+          inspection_date: inspectionDateForPermission,
+          $or: [
+            { checked: { $gt: 0 } },
+            { passed: { $gt: 0 } },
+            { vendor_offered: { $gt: 0 } },
+            { "labels_added.0": { $exists: true } },
+          ],
+        });
+        if (existingOneDayBackdatedUpdate) {
           return res.status(403).json({
-            message: "QC can update only records aligned to them",
-          });
-        }
-
-        if (requestedInspectorId && requestedInspectorId !== alignedInspectorId) {
-          return res.status(403).json({
-            message: "QC cannot change the requested inspector",
+            message: "QC can update a 1-day backdated entry only once",
           });
         }
       }
+    }
 
-      if (requestedInspectorId) {
-        if (!mongoose.Types.ObjectId.isValid(requestedInspectorId)) {
-          return res.status(400).json({ message: "Invalid inspector id" });
-        }
-        qc.inspector = requestedInspectorId;
+    if (!hasElevatedAccess) {
+      if (!currentUserId) {
+        return res.status(401).json({ message: "Unauthorized" });
       }
 
-      /* ────────────────────────
+      const alignedInspectorId = String(
+        qc?.inspector?._id || qc?.inspector || "",
+      ).trim();
+      if (!alignedInspectorId || alignedInspectorId !== currentUserId) {
+        return res.status(403).json({
+          message: "QC can update only records aligned to them",
+        });
+      }
+
+      if (requestedInspectorId && requestedInspectorId !== alignedInspectorId) {
+        return res.status(403).json({
+          message: "QC cannot change the requested inspector",
+        });
+      }
+    }
+
+    if (requestedInspectorId) {
+      if (!mongoose.Types.ObjectId.isValid(requestedInspectorId)) {
+        return res.status(400).json({ message: "Invalid inspector id" });
+      }
+      qc.inspector = requestedInspectorId;
+    }
+
+    /* ────────────────────────
          📐 LBH → CBM HELPERS
       ──────────────────────── */
 
-      const hasCbmUpdate = CBM !== undefined || CBM_top !== undefined || CBM_bottom !== undefined;
+    const hasCbmUpdate =
+      CBM !== undefined || CBM_top !== undefined || CBM_bottom !== undefined;
 
-      const parseCbmField = (value, fieldName) => {
-        if (value === undefined) return { hasInput: false, value: null };
-        if (value === null || String(value).trim() === "") {
-          return { hasInput: true, value: 0 };
-        }
+    const parseCbmField = (value, fieldName) => {
+      if (value === undefined) return { hasInput: false, value: null };
+      if (value === null || String(value).trim() === "") {
+        return { hasInput: true, value: 0 };
+      }
 
-        const parsed = Number(value);
-        if (!Number.isFinite(parsed) || parsed < 0) {
-          throw new Error(`${fieldName} must be a valid non-negative number`);
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        throw new Error(`${fieldName} must be a valid non-negative number`);
+      }
+      return { hasInput: true, value: parsed };
+    };
+
+    const parsedCbmTotal = parseCbmField(CBM, "CBM");
+    const parsedCbmTop = parseCbmField(CBM_top, "CBM top");
+    const parsedCbmBottom = parseCbmField(CBM_bottom, "CBM bottom");
+
+    const parseLbhPayload = (value, fieldName) => {
+      if (value === undefined) return null;
+      if (value === null || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error(`${fieldName} must be an object with L, B and H`);
+      }
+
+      const hasAnyInput =
+        value.L !== undefined || value.B !== undefined || value.H !== undefined;
+      if (!hasAnyInput) return null;
+
+      if (
+        value.L === undefined ||
+        value.B === undefined ||
+        value.H === undefined
+      ) {
+        throw new Error(`${fieldName} must include L, B and H`);
+      }
+
+      const L = toNonNegativeNumber(value.L, NaN);
+      const B = toNonNegativeNumber(value.B, NaN);
+      const H = toNonNegativeNumber(value.H, NaN);
+      if (
+        !Number.isFinite(L) ||
+        !Number.isFinite(B) ||
+        !Number.isFinite(H) ||
+        L <= 0 ||
+        B <= 0 ||
+        H <= 0
+      ) {
+        throw new Error(
+          `${fieldName} values must be valid numbers greater than 0`,
+        );
+      }
+
+      return { L, B, H };
+    };
+    const parseInspectedWeightPayloadField = (value, fieldName) => {
+      if (value === undefined) return { hasInput: false, value: null };
+      const normalized = String(value ?? "").trim();
+      if (!normalized) {
+        throw new Error(`${fieldName} must be greater than 0`);
+      }
+
+      const parsed = toNonNegativeNumber(normalized, NaN);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        throw new Error(`${fieldName} must be greater than 0`);
+      }
+      return { hasInput: true, value: parsed };
+    };
+    const isSameLbhValue = (left = {}, right = {}) =>
+      toNonNegativeNumber(left?.L, 0) === toNonNegativeNumber(right?.L, 0) &&
+      toNonNegativeNumber(left?.B, 0) === toNonNegativeNumber(right?.B, 0) &&
+      toNonNegativeNumber(left?.H, 0) === toNonNegativeNumber(right?.H, 0);
+    const hasSameNumericValue = (left, right) =>
+      Math.abs(toNonNegativeNumber(left, 0) - toNonNegativeNumber(right, 0)) <
+      0.000001;
+
+    const nextInspectedItemLbh = parseLbhPayload(
+      inspected_item_LBH,
+      "inspected_item_LBH",
+    );
+    const nextInspectedItemTopLbh = parseLbhPayload(
+      inspected_item_top_LBH,
+      "inspected_item_top_LBH",
+    );
+    const nextInspectedItemBottomLbh = parseLbhPayload(
+      inspected_item_bottom_LBH,
+      "inspected_item_bottom_LBH",
+    );
+    const nextInspectedBoxLbh = parseLbhPayload(
+      inspected_box_LBH,
+      "inspected_box_LBH",
+    );
+    const nextInspectedTopLbh = parseLbhPayload(
+      inspected_box_top_LBH !== undefined
+        ? inspected_box_top_LBH
+        : inspected_top_LBH,
+      "inspected_box_top_LBH",
+    );
+    const nextInspectedBottomLbh = parseLbhPayload(
+      inspected_box_bottom_LBH !== undefined
+        ? inspected_box_bottom_LBH
+        : inspected_bottom_LBH,
+      "inspected_box_bottom_LBH",
+    );
+    const hasInspectedLbhUpdate = Boolean(
+      nextInspectedItemLbh ||
+      nextInspectedItemTopLbh ||
+      nextInspectedItemBottomLbh ||
+      nextInspectedBoxLbh ||
+      nextInspectedTopLbh ||
+      nextInspectedBottomLbh,
+    );
+
+    if (
+      inspected_weight !== undefined &&
+      (inspected_weight === null ||
+        typeof inspected_weight !== "object" ||
+        Array.isArray(inspected_weight))
+    ) {
+      return res.status(400).json({
+        message: "inspected_weight must be an object with net and/or gross",
+      });
+    }
+    const parsedInspectedWeightNet = parseInspectedWeightPayloadField(
+      inspected_weight?.net,
+      "inspected_weight.net",
+    );
+    const parsedInspectedWeightGross = parseInspectedWeightPayloadField(
+      inspected_weight?.gross,
+      "inspected_weight.gross",
+    );
+    const hasInspectedWeightUpdate =
+      parsedInspectedWeightNet.hasInput || parsedInspectedWeightGross.hasInput;
+
+    const hasItemMasterUpdate =
+      hasInspectedLbhUpdate || hasInspectedWeightUpdate;
+    const itemCodeForInspectedLbhUpdate =
+      hasItemMasterUpdate || hasCbmUpdate
+        ? normalizeText(qc?.item?.item_code || "")
+        : "";
+    if (
+      (hasItemMasterUpdate || hasCbmUpdate) &&
+      !itemCodeForInspectedLbhUpdate
+    ) {
+      return res.status(400).json({
+        message:
+          "Item code is required to update inspected LBH/weight or CBM fields",
+      });
+    }
+
+    let itemDocForInspectedLbhUpdate = null;
+    if (itemCodeForInspectedLbhUpdate) {
+      itemDocForInspectedLbhUpdate = await Item.findOne({
+        code: {
+          $regex: `^${escapeRegex(itemCodeForInspectedLbhUpdate)}$`,
+          $options: "i",
+        },
+      });
+    }
+
+    if (hasItemMasterUpdate && !itemDocForInspectedLbhUpdate) {
+      return res.status(404).json({
+        message: "Item master record not found for this item code",
+      });
+    }
+
+    if (hasInspectedLbhUpdate) {
+      const assertWriteOnceLbh = (incomingValue, existingValue, fieldName) => {
+        if (!incomingValue) return;
+        if (
+          hasCompletePositiveLbh(existingValue) &&
+          !isSameLbhValue(existingValue, incomingValue)
+        ) {
+          throw new Error(`${fieldName} can only be set once`);
         }
-        return { hasInput: true, value: parsed };
       };
 
-      const parsedCbmTotal = parseCbmField(CBM, "CBM");
-      const parsedCbmTop = parseCbmField(CBM_top, "CBM top");
-      const parsedCbmBottom = parseCbmField(CBM_bottom, "CBM bottom");
-
-      const parseLbhPayload = (value, fieldName) => {
-        if (value === undefined) return null;
-        if (value === null || typeof value !== "object" || Array.isArray(value)) {
-          throw new Error(`${fieldName} must be an object with L, B and H`);
-        }
-
-        const hasAnyInput =
-          value.L !== undefined || value.B !== undefined || value.H !== undefined;
-        if (!hasAnyInput) return null;
-
-        if (value.L === undefined || value.B === undefined || value.H === undefined) {
-          throw new Error(`${fieldName} must include L, B and H`);
-        }
-
-        const L = toNonNegativeNumber(value.L, NaN);
-        const B = toNonNegativeNumber(value.B, NaN);
-        const H = toNonNegativeNumber(value.H, NaN);
-        if (!Number.isFinite(L) || !Number.isFinite(B) || !Number.isFinite(H) || L <= 0 || B <= 0 || H <= 0) {
-          throw new Error(`${fieldName} values must be valid numbers greater than 0`);
-        }
-
-        return { L, B, H };
-      };
-      const parseInspectedWeightPayloadField = (value, fieldName) => {
-        if (value === undefined) return { hasInput: false, value: null };
-        const normalized = String(value ?? "").trim();
-        if (!normalized) {
-          throw new Error(`${fieldName} must be greater than 0`);
-        }
-
-        const parsed = toNonNegativeNumber(normalized, NaN);
-        if (!Number.isFinite(parsed) || parsed <= 0) {
-          throw new Error(`${fieldName} must be greater than 0`);
-        }
-        return { hasInput: true, value: parsed };
-      };
-      const isSameLbhValue = (left = {}, right = {}) =>
-        toNonNegativeNumber(left?.L, 0) === toNonNegativeNumber(right?.L, 0)
-        && toNonNegativeNumber(left?.B, 0) === toNonNegativeNumber(right?.B, 0)
-        && toNonNegativeNumber(left?.H, 0) === toNonNegativeNumber(right?.H, 0);
-      const hasSameNumericValue = (left, right) =>
-        Math.abs(toNonNegativeNumber(left, 0) - toNonNegativeNumber(right, 0)) < 0.000001;
-
-      const nextInspectedItemLbh = parseLbhPayload(
-        inspected_item_LBH,
+      assertWriteOnceLbh(
+        nextInspectedItemLbh,
+        itemDocForInspectedLbhUpdate?.inspected_item_LBH,
         "inspected_item_LBH",
       );
-      const nextInspectedItemTopLbh = parseLbhPayload(
-        inspected_item_top_LBH,
+      assertWriteOnceLbh(
+        nextInspectedItemTopLbh,
+        itemDocForInspectedLbhUpdate?.inspected_item_top_LBH,
         "inspected_item_top_LBH",
       );
-      const nextInspectedItemBottomLbh = parseLbhPayload(
-        inspected_item_bottom_LBH,
+      assertWriteOnceLbh(
+        nextInspectedItemBottomLbh,
+        itemDocForInspectedLbhUpdate?.inspected_item_bottom_LBH,
         "inspected_item_bottom_LBH",
       );
-      const nextInspectedBoxLbh = parseLbhPayload(
-        inspected_box_LBH,
+      assertWriteOnceLbh(
+        nextInspectedBoxLbh,
+        itemDocForInspectedLbhUpdate?.inspected_box_LBH,
         "inspected_box_LBH",
       );
-      const nextInspectedTopLbh = parseLbhPayload(
-        inspected_box_top_LBH !== undefined ? inspected_box_top_LBH : inspected_top_LBH,
+      assertWriteOnceLbh(
+        nextInspectedTopLbh,
+        itemDocForInspectedLbhUpdate?.inspected_box_top_LBH ||
+          itemDocForInspectedLbhUpdate?.inspected_top_LBH,
         "inspected_box_top_LBH",
       );
-      const nextInspectedBottomLbh = parseLbhPayload(
-        inspected_box_bottom_LBH !== undefined ? inspected_box_bottom_LBH : inspected_bottom_LBH,
+      assertWriteOnceLbh(
+        nextInspectedBottomLbh,
+        itemDocForInspectedLbhUpdate?.inspected_box_bottom_LBH ||
+          itemDocForInspectedLbhUpdate?.inspected_bottom_LBH,
         "inspected_box_bottom_LBH",
       );
-      const hasInspectedLbhUpdate = Boolean(
-        nextInspectedItemLbh
-        || nextInspectedItemTopLbh
-        || nextInspectedItemBottomLbh
-        || nextInspectedBoxLbh
-        || nextInspectedTopLbh
-        || nextInspectedBottomLbh,
+    }
+
+    if (hasInspectedWeightUpdate) {
+      const existingInspectedNetWeight = toNonNegativeNumber(
+        itemDocForInspectedLbhUpdate?.inspected_weight?.net,
+        0,
+      );
+      const existingInspectedGrossWeight = toNonNegativeNumber(
+        itemDocForInspectedLbhUpdate?.inspected_weight?.gross,
+        0,
       );
 
       if (
-        inspected_weight !== undefined
-        && (inspected_weight === null
-          || typeof inspected_weight !== "object"
-          || Array.isArray(inspected_weight))
+        parsedInspectedWeightNet.hasInput &&
+        existingInspectedNetWeight > 0 &&
+        !hasSameNumericValue(
+          existingInspectedNetWeight,
+          parsedInspectedWeightNet.value,
+        )
       ) {
+        throw new Error("inspected_weight.net can only be set once");
+      }
+
+      if (
+        parsedInspectedWeightGross.hasInput &&
+        existingInspectedGrossWeight > 0 &&
+        !hasSameNumericValue(
+          existingInspectedGrossWeight,
+          parsedInspectedWeightGross.value,
+        )
+      ) {
+        throw new Error("inspected_weight.gross can only be set once");
+      }
+    }
+
+    const effectiveInspectedItemLbh =
+      nextInspectedItemLbh ||
+      itemDocForInspectedLbhUpdate?.inspected_item_LBH ||
+      itemDocForInspectedLbhUpdate?.item_LBH ||
+      {};
+    const effectiveInspectedItemTopLbh =
+      nextInspectedItemTopLbh ||
+      itemDocForInspectedLbhUpdate?.inspected_item_top_LBH ||
+      {};
+    const effectiveInspectedItemBottomLbh =
+      nextInspectedItemBottomLbh ||
+      itemDocForInspectedLbhUpdate?.inspected_item_bottom_LBH ||
+      {};
+    const effectiveInspectedBoxLbh =
+      nextInspectedBoxLbh ||
+      itemDocForInspectedLbhUpdate?.inspected_box_LBH ||
+      itemDocForInspectedLbhUpdate?.box_LBH ||
+      {};
+    const effectiveInspectedTopLbh =
+      nextInspectedTopLbh ||
+      itemDocForInspectedLbhUpdate?.inspected_box_top_LBH ||
+      itemDocForInspectedLbhUpdate?.inspected_top_LBH ||
+      {};
+    const effectiveInspectedBottomLbh =
+      nextInspectedBottomLbh ||
+      itemDocForInspectedLbhUpdate?.inspected_box_bottom_LBH ||
+      itemDocForInspectedLbhUpdate?.inspected_bottom_LBH ||
+      {};
+    const existingCbmTotal = toNonNegativeNumber(qc?.cbm?.total, 0);
+    const existingCbmTop = toNonNegativeNumber(qc?.cbm?.top, 0);
+    const existingCbmBottom = toNonNegativeNumber(qc?.cbm?.bottom, 0);
+    const cbmLockedByLbh =
+      hasCompletePositiveLbh(effectiveInspectedItemLbh) ||
+      hasCompletePositiveLbh(effectiveInspectedItemTopLbh) ||
+      hasCompletePositiveLbh(effectiveInspectedItemBottomLbh) ||
+      hasCompletePositiveLbh(effectiveInspectedBoxLbh) ||
+      hasCompletePositiveLbh(effectiveInspectedTopLbh) ||
+      hasCompletePositiveLbh(effectiveInspectedBottomLbh);
+
+    if (hasCbmUpdate && cbmLockedByLbh) {
+      return res.status(400).json({
+        message:
+          "CBM fields are locked because inspected LBH is present. Update LBH instead.",
+      });
+    }
+
+    if (hasCbmUpdate) {
+      let nextTotal = parsedCbmTotal.hasInput
+        ? parsedCbmTotal.value
+        : existingCbmTotal;
+      let nextTop = parsedCbmTop.hasInput ? parsedCbmTop.value : existingCbmTop;
+      let nextBottom = parsedCbmBottom.hasInput
+        ? parsedCbmBottom.value
+        : existingCbmBottom;
+
+      const hasTopAndBottom = nextTop > 0 && nextBottom > 0;
+      if (hasTopAndBottom) {
+        nextTotal = nextTop + nextBottom;
+      }
+
+      qc.cbm = {
+        top: toNormalizedCbmString(nextTop),
+        bottom: toNormalizedCbmString(nextBottom),
+        total: toNormalizedCbmString(nextTotal),
+      };
+    }
+
+    if (last_inspected_date !== undefined) {
+      const normalizedLastInspectedDate = toISODateString(last_inspected_date);
+      if (!normalizedLastInspectedDate) {
         return res.status(400).json({
-          message: "inspected_weight must be an object with net and/or gross",
+          message:
+            "last_inspected_date must be a valid date in DD/MM/YYYY or YYYY-MM-DD format",
         });
       }
-      const parsedInspectedWeightNet = parseInspectedWeightPayloadField(
-        inspected_weight?.net,
-        "inspected_weight.net",
-      );
-      const parsedInspectedWeightGross = parseInspectedWeightPayloadField(
-        inspected_weight?.gross,
-        "inspected_weight.gross",
-      );
-      const hasInspectedWeightUpdate =
-        parsedInspectedWeightNet.hasInput || parsedInspectedWeightGross.hasInput;
-
-      const hasItemMasterUpdate = hasInspectedLbhUpdate || hasInspectedWeightUpdate;
-      const itemCodeForInspectedLbhUpdate = (hasItemMasterUpdate || hasCbmUpdate)
-        ? normalizeText(qc?.item?.item_code || "")
-        : "";
-      if ((hasItemMasterUpdate || hasCbmUpdate) && !itemCodeForInspectedLbhUpdate) {
-        return res.status(400).json({
-          message: "Item code is required to update inspected LBH/weight or CBM fields",
+      if (
+        isManager &&
+        !isIsoDateWithinPastDaysInclusive(
+          normalizedLastInspectedDate,
+          updateQcPastDaysLimit,
+        )
+      ) {
+        return res.status(403).json({
+          message: buildUpdateQcPastDaysMessage(
+            normalizedRole,
+            updateQcPastDaysLimit,
+          ),
         });
       }
+      qc.last_inspected_date = normalizedLastInspectedDate;
+    }
 
-      let itemDocForInspectedLbhUpdate = null;
-      if (itemCodeForInspectedLbhUpdate) {
-        itemDocForInspectedLbhUpdate = await Item.findOne({
-          code: {
-            $regex: `^${escapeRegex(itemCodeForInspectedLbhUpdate)}$`,
-            $options: "i",
-          },
-        });
-      }
-
-      if (hasItemMasterUpdate && !itemDocForInspectedLbhUpdate) {
-        return res.status(404).json({
-          message: "Item master record not found for this item code",
-        });
-      }
-
-      if (hasInspectedLbhUpdate) {
-        const assertWriteOnceLbh = (incomingValue, existingValue, fieldName) => {
-          if (!incomingValue) return;
-          if (hasCompletePositiveLbh(existingValue) && !isSameLbhValue(existingValue, incomingValue)) {
-            throw new Error(`${fieldName} can only be set once`);
-          }
-        };
-
-        assertWriteOnceLbh(
-          nextInspectedItemLbh,
-          itemDocForInspectedLbhUpdate?.inspected_item_LBH,
-          "inspected_item_LBH",
-        );
-        assertWriteOnceLbh(
-          nextInspectedItemTopLbh,
-          itemDocForInspectedLbhUpdate?.inspected_item_top_LBH,
-          "inspected_item_top_LBH",
-        );
-        assertWriteOnceLbh(
-          nextInspectedItemBottomLbh,
-          itemDocForInspectedLbhUpdate?.inspected_item_bottom_LBH,
-          "inspected_item_bottom_LBH",
-        );
-        assertWriteOnceLbh(
-          nextInspectedBoxLbh,
-          itemDocForInspectedLbhUpdate?.inspected_box_LBH,
-          "inspected_box_LBH",
-        );
-        assertWriteOnceLbh(
-          nextInspectedTopLbh,
-          itemDocForInspectedLbhUpdate?.inspected_box_top_LBH
-            || itemDocForInspectedLbhUpdate?.inspected_top_LBH,
-          "inspected_box_top_LBH",
-        );
-        assertWriteOnceLbh(
-          nextInspectedBottomLbh,
-          itemDocForInspectedLbhUpdate?.inspected_box_bottom_LBH
-            || itemDocForInspectedLbhUpdate?.inspected_bottom_LBH,
-          "inspected_box_bottom_LBH",
-        );
-      }
-
-      if (hasInspectedWeightUpdate) {
-        const existingInspectedNetWeight = toNonNegativeNumber(
-          itemDocForInspectedLbhUpdate?.inspected_weight?.net,
-          0,
-        );
-        const existingInspectedGrossWeight = toNonNegativeNumber(
-          itemDocForInspectedLbhUpdate?.inspected_weight?.gross,
-          0,
-        );
-
-        if (
-          parsedInspectedWeightNet.hasInput
-          && existingInspectedNetWeight > 0
-          && !hasSameNumericValue(existingInspectedNetWeight, parsedInspectedWeightNet.value)
-        ) {
-          throw new Error("inspected_weight.net can only be set once");
-        }
-
-        if (
-          parsedInspectedWeightGross.hasInput
-          && existingInspectedGrossWeight > 0
-          && !hasSameNumericValue(existingInspectedGrossWeight, parsedInspectedWeightGross.value)
-        ) {
-          throw new Error("inspected_weight.gross can only be set once");
-        }
-      }
-
-      const effectiveInspectedItemLbh = nextInspectedItemLbh
-        || itemDocForInspectedLbhUpdate?.inspected_item_LBH
-        || itemDocForInspectedLbhUpdate?.item_LBH
-        || {};
-      const effectiveInspectedItemTopLbh = nextInspectedItemTopLbh
-        || itemDocForInspectedLbhUpdate?.inspected_item_top_LBH
-        || {};
-      const effectiveInspectedItemBottomLbh = nextInspectedItemBottomLbh
-        || itemDocForInspectedLbhUpdate?.inspected_item_bottom_LBH
-        || {};
-      const effectiveInspectedBoxLbh = nextInspectedBoxLbh
-        || itemDocForInspectedLbhUpdate?.inspected_box_LBH
-        || itemDocForInspectedLbhUpdate?.box_LBH
-        || {};
-      const effectiveInspectedTopLbh = nextInspectedTopLbh
-        || itemDocForInspectedLbhUpdate?.inspected_box_top_LBH
-        || itemDocForInspectedLbhUpdate?.inspected_top_LBH
-        || {};
-      const effectiveInspectedBottomLbh = nextInspectedBottomLbh
-        || itemDocForInspectedLbhUpdate?.inspected_box_bottom_LBH
-        || itemDocForInspectedLbhUpdate?.inspected_bottom_LBH
-        || {};
-      const cbmLockedByLbh =
-        hasCompletePositiveLbh(effectiveInspectedItemLbh)
-        || hasCompletePositiveLbh(effectiveInspectedItemTopLbh)
-        || hasCompletePositiveLbh(effectiveInspectedItemBottomLbh)
-        || hasCompletePositiveLbh(effectiveInspectedBoxLbh)
-        || hasCompletePositiveLbh(effectiveInspectedTopLbh)
-        || hasCompletePositiveLbh(effectiveInspectedBottomLbh);
-
-      if (hasCbmUpdate && cbmLockedByLbh) {
-        return res.status(400).json({
-          message: "CBM fields are locked because inspected LBH is present. Update LBH instead.",
-        });
-      }
-
-      if (hasCbmUpdate) {
-        const existingTotal = toNonNegativeNumber(qc?.cbm?.total, 0);
-        const existingTop = toNonNegativeNumber(qc?.cbm?.top, 0);
-        const existingBottom = toNonNegativeNumber(qc?.cbm?.bottom, 0);
-
-        let nextTotal = parsedCbmTotal.hasInput ? parsedCbmTotal.value : existingTotal;
-        let nextTop = parsedCbmTop.hasInput ? parsedCbmTop.value : existingTop;
-        let nextBottom = parsedCbmBottom.hasInput ? parsedCbmBottom.value : existingBottom;
-
-        const hasTopAndBottom = nextTop > 0 && nextBottom > 0;
-        if (hasTopAndBottom) {
-          nextTotal = nextTop + nextBottom;
-        }
-
-        qc.cbm = {
-          top: toNormalizedCbmString(nextTop),
-          bottom: toNormalizedCbmString(nextBottom),
-          total: toNormalizedCbmString(nextTotal),
-        };
-      }
-
-      if (last_inspected_date !== undefined) {
-        const normalizedLastInspectedDate = toISODateString(last_inspected_date);
-        if (!normalizedLastInspectedDate) {
-          return res.status(400).json({
-            message: "last_inspected_date must be a valid date in DD/MM/YYYY or YYYY-MM-DD format",
-          });
-        }
-        if (
-          isManager &&
-          !isIsoDateWithinPastDaysInclusive(
-            normalizedLastInspectedDate,
-            MANAGER_ALLOWED_PAST_DAYS,
-          )
-        ) {
-          return res.status(403).json({
-            message: "Manager can update QC only for today and previous 2 days",
-          });
-        }
-        qc.last_inspected_date = normalizedLastInspectedDate;
-      }
-
-      /* ────────────────────────
+    /* ────────────────────────
          🔢 BARCODE
       ──────────────────────── */
 
-      if (barcode !== undefined) {
-        if (!isAdmin && qc.barcode > 0 && Number(barcode) !== qc.barcode) {
-          return res.status(400).json({ message: "barcode can only be set once" });
-        }
-        qc.barcode = Number(barcode);
+    if (barcode !== undefined) {
+      if (!isAdmin && qc.barcode > 0 && Number(barcode) !== qc.barcode) {
+        return res
+          .status(400)
+          .json({ message: "barcode can only be set once" });
       }
+      qc.barcode = Number(barcode);
+    }
 
-      /* ────────────────────────
+    /* ────────────────────────
          ✅ BOOLEAN FLAGS
       ──────────────────────── */
 
-      const setOnceBoolean = (field, value, name) => {
-        if (value === undefined) return;
-        if (typeof value !== "boolean") {
-          throw new Error(`${name} must be boolean`);
-        }
-        if (qc[field] && value === false) {
-          throw new Error(`${name} can only be set once`);
-        }
-        if (!qc[field] && value === true) {
-          qc[field] = true;
-        }
-      };
+    const setOnceBoolean = (field, value, name) => {
+      if (value === undefined) return;
+      if (typeof value !== "boolean") {
+        throw new Error(`${name} must be boolean`);
+      }
+      if (qc[field] && value === false) {
+        throw new Error(`${name} can only be set once`);
+      }
+      if (!qc[field] && value === true) {
+        qc[field] = true;
+      }
+    };
 
-      setOnceBoolean("packed_size", packed_size, "packed_size");
-      setOnceBoolean("finishing", finishing, "finishing");
-      setOnceBoolean("branding", branding, "branding");
+    setOnceBoolean("packed_size", packed_size, "packed_size");
+    setOnceBoolean("finishing", finishing, "finishing");
+    setOnceBoolean("branding", branding, "branding");
 
-      /* ────────────────────────
+    /* ────────────────────────
          🔢 QUANTITIES
       ──────────────────────── */
 
-      const addChecked = Number(qc_checked || 0);
-      const addPassed = Number(qc_passed || 0);
-      const addProvision = Number(vendor_provision || 0);
-      const requestType = normalizeQcRequestType(qc?.request_type);
-      const isAqlRequest = requestType === QC_REQUEST_TYPES.AQL;
-      const clientDemandQuantity = toNonNegativeNumber(
-        qc?.quantities?.client_demand,
-        0,
+    const addChecked = Number(qc_checked || 0);
+    const addPassed = Number(qc_passed || 0);
+    const addProvision = Number(vendor_provision || 0);
+    const requestType = normalizeQcRequestType(qc?.request_type);
+    const isAqlRequest = requestType === QC_REQUEST_TYPES.AQL;
+    const clientDemandQuantity = toNonNegativeNumber(
+      qc?.quantities?.client_demand,
+      0,
+    );
+    const aqlSampleQuantity = computeAqlSampleQuantity(clientDemandQuantity);
+
+    if (
+      [addChecked, addPassed, addProvision].some(
+        (v) => v < 0 || Number.isNaN(v),
+      )
+    ) {
+      return res.status(400).json({
+        message: "Quantity values must be valid non-negative numbers",
+      });
+    }
+
+    const hasLabelRangePayload =
+      Array.isArray(label_ranges) &&
+      label_ranges.some(
+        (range) =>
+          range &&
+          (String(range.start ?? "").trim() !== "" ||
+            String(range.end ?? "").trim() !== ""),
       );
-      const aqlSampleQuantity = computeAqlSampleQuantity(clientDemandQuantity);
+    const hasLabelsPayload =
+      (Array.isArray(labels) && labels.length > 0) || hasLabelRangePayload;
 
-      if ([addChecked, addPassed, addProvision].some((v) => v < 0 || Number.isNaN(v))) {
+    // If user is updating passed quantity or labels, they must provide checked in same visit
+    if (
+      (addPassed ||
+        (Array.isArray(labels) && labels.length) ||
+        hasLabelRangePayload) &&
+      addChecked <= 0
+    ) {
+      return res.status(400).json({
+        message:
+          "qc_checked must be greater than 0 when updating quantities or labels",
+      });
+    }
+
+    if (isAqlRequest && addChecked > aqlSampleQuantity) {
+      return res.status(400).json({
+        message: `AQL checked quantity cannot exceed 10% sample (${aqlSampleQuantity})`,
+      });
+    }
+
+    if (isAqlRequest && addPassed > addChecked) {
+      return res.status(400).json({
+        message: "For AQL, passed quantity cannot exceed checked quantity",
+      });
+    }
+
+    const nextVendorProvision = qc.quantities.vendor_provision + addProvision;
+
+    const nextChecked = qc.quantities.qc_checked + addChecked;
+    const nextPassedInput = qc.quantities.qc_passed + addPassed;
+    const shouldAutoPassAql = isAqlRequest && addChecked > 0;
+    const nextPassed = shouldAutoPassAql
+      ? clientDemandQuantity
+      : nextPassedInput;
+
+    if (nextVendorProvision < 0) {
+      return res
+        .status(400)
+        .json({ message: "offered quantity cannot be negative" });
+    }
+
+    if (isAqlRequest && nextChecked > aqlSampleQuantity) {
+      return res.status(400).json({
+        message: `AQL checked quantity cannot exceed 10% sample (${aqlSampleQuantity})`,
+      });
+    }
+
+    const quantityRequestedCap = Number(
+      qc.quantities.quantity_requested > 0
+        ? qc.quantities.quantity_requested
+        : (qc.quantities.client_demand ?? 0),
+    );
+
+    const parsedPendingQuantityLimit = Number(
+      qc.quantities?.pending ??
+        (qc.quantities?.client_demand || 0) - (qc.quantities?.qc_passed || 0),
+    );
+    const pendingQuantityLimit = Number.isFinite(parsedPendingQuantityLimit)
+      ? Math.max(0, parsedPendingQuantityLimit)
+      : 0;
+
+    if (hasStartedInspection) {
+      if (addProvision > pendingQuantityLimit) {
         return res.status(400).json({
-          message: "Quantity values must be valid non-negative numbers",
+          message: "offered quantity cannot exceed pending quantity",
         });
       }
+    } else if (
+      Number.isFinite(quantityRequestedCap) &&
+      quantityRequestedCap >= 0 &&
+      nextVendorProvision > quantityRequestedCap
+    ) {
+      return res.status(400).json({
+        message: "offered quantity cannot exceed quantity requested",
+      });
+    }
 
-      const hasLabelRangePayload =
-        Array.isArray(label_ranges) &&
-        label_ranges.some(
-          (range) =>
-            range &&
-            (String(range.start ?? "").trim() !== "" ||
-              String(range.end ?? "").trim() !== ""),
-        );
-      const hasLabelsPayload =
-        (Array.isArray(labels) && labels.length > 0) || hasLabelRangePayload;
+    if (!isAqlRequest && nextPassed > nextChecked) {
+      return res.status(400).json({
+        message: "qc_passed cannot exceed qc_checked",
+      });
+    }
 
-      // If user is updating passed quantity or labels, they must provide checked in same visit
-      if (
-        (addPassed ||
-          (Array.isArray(labels) && labels.length) ||
-          hasLabelRangePayload) &&
-        addChecked <= 0
-      ) {
-        return res.status(400).json({
-          message: "qc_checked must be greater than 0 when updating quantities or labels",
-        });
-      }
+   const inspectedQuantityForLabels = Math.max(0, nextChecked);
+const maxLabelsAllowed = inspectedQuantityForLabels * 2;
 
-      if (isAqlRequest && addChecked > aqlSampleQuantity) {
-        return res.status(400).json({
-          message: `AQL checked quantity cannot exceed 10% sample (${aqlSampleQuantity})`,
-        });
-      }
+    qc.quantities.vendor_provision = nextVendorProvision;
+    qc.quantities.qc_checked = nextChecked;
+    qc.quantities.qc_passed = nextPassed;
+    qc.quantities.pending =
+      qc.quantities.client_demand - qc.quantities.qc_passed;
 
-      if (isAqlRequest && addPassed > addChecked) {
-        return res.status(400).json({
-          message: "For AQL, passed quantity cannot exceed checked quantity",
-        });
-      }
-
-      const nextVendorProvision = qc.quantities.vendor_provision + addProvision;
-
-      const nextChecked = qc.quantities.qc_checked + addChecked;
-      const nextPassedInput = qc.quantities.qc_passed + addPassed;
-      const shouldAutoPassAql = isAqlRequest && addChecked > 0;
-      const nextPassed = shouldAutoPassAql
-        ? clientDemandQuantity
-        : nextPassedInput;
-
-      if (nextVendorProvision < 0) {
-        return res.status(400).json({ message: "offered quantity cannot be negative" });
-      }
-
-      if (isAqlRequest && nextChecked > aqlSampleQuantity) {
-        return res.status(400).json({
-          message: `AQL checked quantity cannot exceed 10% sample (${aqlSampleQuantity})`,
-        });
-      }
-
-      const quantityRequestedCap = Number(
-        qc.quantities.quantity_requested > 0
-          ? qc.quantities.quantity_requested
-          : (qc.quantities.client_demand ?? 0)
-      );
-
-      const parsedPendingQuantityLimit = Number(
-        qc.quantities?.pending ??
-          ((qc.quantities?.client_demand || 0) - (qc.quantities?.qc_passed || 0))
-      );
-      const pendingQuantityLimit = Number.isFinite(parsedPendingQuantityLimit)
-        ? Math.max(0, parsedPendingQuantityLimit)
-        : 0;
-
-      if (hasStartedInspection) {
-        if (addProvision > pendingQuantityLimit) {
-          return res.status(400).json({
-            message: "offered quantity cannot exceed pending quantity",
-          });
-        }
-      } else if (
-        Number.isFinite(quantityRequestedCap) &&
-        quantityRequestedCap >= 0 &&
-        nextVendorProvision > quantityRequestedCap
-      ) {
-        return res.status(400).json({
-          message: "offered quantity cannot exceed quantity requested",
-        });
-      }
-
-      if (!isAqlRequest && nextPassed > nextChecked) {
-        return res.status(400).json({
-          message: "qc_passed cannot exceed qc_checked",
-        });
-      }
-
-      const inspectedQuantityForLabels = Math.max(0, nextChecked);
-      const baseLabelLimit = inspectedQuantityForLabels;
-      const cbmTopValue = toNonNegativeNumber(qc?.cbm?.top, 0);
-      const cbmBottomValue = toNonNegativeNumber(qc?.cbm?.bottom, 0);
-      const hasTopBottomBoxLbhForLabels =
-        hasCompletePositiveLbh(effectiveInspectedTopLbh)
-        && hasCompletePositiveLbh(effectiveInspectedBottomLbh);
-      const hasTopBottomItemLbhForLabels =
-        hasCompletePositiveLbh(effectiveInspectedItemTopLbh)
-        && hasCompletePositiveLbh(effectiveInspectedItemBottomLbh);
-      const hasTopBottomLbhForLabels =
-        hasTopBottomBoxLbhForLabels || hasTopBottomItemLbhForLabels;
-      const hasTopBottomCbm =
-        (cbmTopValue > 0 && cbmBottomValue > 0) || hasTopBottomLbhForLabels;
-      const maxLabelsAllowed = hasTopBottomCbm ? baseLabelLimit * 2 : baseLabelLimit;
-
-      qc.quantities.vendor_provision = nextVendorProvision;
-      qc.quantities.qc_checked = nextChecked;
-      qc.quantities.qc_passed = nextPassed;
-      qc.quantities.pending = qc.quantities.client_demand - qc.quantities.qc_passed;
-
-      /* ────────────────────────
+    /* ────────────────────────
          🏷️ LABELS (UNCHANGED LOGIC)
       ──────────────────────── */
 
-      const buildLabelsFromRanges = (ranges = []) => {
-        const normalizedRanges = [];
-        const generatedLabels = [];
+    const buildLabelsFromRanges = (ranges = []) => {
+      const normalizedRanges = [];
+      const generatedLabels = [];
 
-        for (let i = 0; i < ranges.length; i++) {
-          const range = ranges[i] || {};
-          const hasStart = String(range.start ?? "").trim() !== "";
-          const hasEnd = String(range.end ?? "").trim() !== "";
+      for (let i = 0; i < ranges.length; i++) {
+        const range = ranges[i] || {};
+        const hasStart = String(range.start ?? "").trim() !== "";
+        const hasEnd = String(range.end ?? "").trim() !== "";
 
-          if (!hasStart && !hasEnd) continue;
-          if (!hasStart || !hasEnd) {
-            throw new Error(
-              `Both start and end are required for label range ${i + 1}`,
-            );
-          }
-
-          const start = Number(range.start);
-          const end = Number(range.end);
-          if (!Number.isInteger(start) || !Number.isInteger(end)) {
-            throw new Error(`Label range ${i + 1} must contain integer values`);
-          }
-          if (start < 0 || end < 0) {
-            throw new Error(
-              `Label range ${i + 1} must contain non-negative values`,
-            );
-          }
-          if (start > end) {
-            throw new Error(
-              `Start cannot be greater than end in label range ${i + 1}`,
-            );
-          }
-
-          normalizedRanges.push({ start, end });
-          for (let label = start; label <= end; label++) {
-            generatedLabels.push(label);
-          }
+        if (!hasStart && !hasEnd) continue;
+        if (!hasStart || !hasEnd) {
+          throw new Error(
+            `Both start and end are required for label range ${i + 1}`,
+          );
         }
 
-        return { generatedLabels, normalizedRanges };
-      };
-
-      let labelsAddedThisVisit = [];
-      let labelRangesUsedThisVisit = [];
-      if (hasLabelsPayload) {
-        const inspectionInspectorUserId = qc.inspector?._id
-          ? qc.inspector._id
-          : qc.inspector;
-        const inspector = await Inspector.findOne({ user: inspectionInspectorUserId });
-
-        if (!inspector) {
-          return res.status(404).json({ message: "Inspector record not found" });
+        const start = Number(range.start);
+        const end = Number(range.end);
+        if (!Number.isInteger(start) || !Number.isInteger(end)) {
+          throw new Error(`Label range ${i + 1} must contain integer values`);
+        }
+        if (start < 0 || end < 0) {
+          throw new Error(
+            `Label range ${i + 1} must contain non-negative values`,
+          );
+        }
+        if (start > end) {
+          throw new Error(
+            `Start cannot be greater than end in label range ${i + 1}`,
+          );
         }
 
-        const directLabels = Array.isArray(labels) ? labels : [];
-        const parsedDirectLabels = directLabels.map(Number);
-        if (
-          parsedDirectLabels.some(
-            (label) => !Number.isInteger(label) || label < 0,
-          )
-        ) {
-          return res.status(400).json({
-            message: "All labels must be non-negative integers",
-          });
+        normalizedRanges.push({ start, end });
+        for (let label = start; label <= end; label++) {
+          generatedLabels.push(label);
         }
-
-        let generatedFromRanges = [];
-        if (Array.isArray(label_ranges)) {
-          const rangeResult = buildLabelsFromRanges(label_ranges);
-          generatedFromRanges = rangeResult.generatedLabels;
-          labelRangesUsedThisVisit = rangeResult.normalizedRanges;
-        }
-
-        // If client sends explicit labels, treat them as authoritative.
-        // Otherwise derive from ranges.
-        const labelsForUpdate =
-          parsedDirectLabels.length > 0 ? parsedDirectLabels : generatedFromRanges;
-        const uniqueIncoming = [...new Set(labelsForUpdate)];
-        const existingSet = new Set(normalizeLabels(qc.labels || []));
-        const incomingNew = uniqueIncoming.filter((label) => !existingSet.has(label));
-        const allocatedSet = new Set(normalizeLabels(inspector.alloted_labels || []));
-        const usedSet = new Set(normalizeLabels(inspector.used_labels || []));
-
-        const unallocatedIncoming = incomingNew.filter(
-          (label) => !allocatedSet.has(label),
-        );
-        if (unallocatedIncoming.length > 0) {
-          const preview = unallocatedIncoming.slice(0, 10).join(", ");
-          return res.status(400).json({
-            message: `Only allocated labels are accepted. Unallocated labels: ${preview}${unallocatedIncoming.length > 10 ? "..." : ""}`,
-          });
-        }
-
-        const alreadyUsedIncoming = incomingNew.filter((label) => usedSet.has(label));
-        if (alreadyUsedIncoming.length > 0) {
-          const preview = alreadyUsedIncoming.slice(0, 10).join(", ");
-          return res.status(400).json({
-            message: `Some labels are already used and cannot be reused: ${preview}${alreadyUsedIncoming.length > 10 ? "..." : ""}`,
-          });
-        }
-
-        const totalLabels = existingSet.size + incomingNew.length;
-        if (totalLabels > maxLabelsAllowed) {
-          return res.status(400).json({
-            message: hasTopBottomCbm
-              ? `Total labels cannot exceed double inspected quantity (${maxLabelsAllowed}) when CBM top and bottom are set`
-              : `Total labels cannot exceed inspected quantity (${maxLabelsAllowed})`,
-          });
-        }
-
-        qc.labels = [...new Set([...(qc.labels || []), ...incomingNew])];
-
-        inspector.used_labels = [
-          ...new Set([...(inspector.used_labels || []), ...incomingNew]),
-        ];
-
-        await inspector.save();
-
-        labelsAddedThisVisit = incomingNew;
       }
 
-      if (remarks) qc.remarks = remarks;
+      return { generatedLabels, normalizedRanges };
+    };
 
-      /* ────────────────────────
+    let labelsAddedThisVisit = [];
+    let labelRangesUsedThisVisit = [];
+    if (hasLabelsPayload) {
+      const inspectionInspectorUserId = qc.inspector?._id
+        ? qc.inspector._id
+        : qc.inspector;
+      const inspector = await Inspector.findOne({
+        user: inspectionInspectorUserId,
+      });
+
+      if (!inspector) {
+        return res.status(404).json({ message: "Inspector record not found" });
+      }
+
+      const directLabels = Array.isArray(labels) ? labels : [];
+      const parsedDirectLabels = directLabels.map(Number);
+      if (
+        parsedDirectLabels.some(
+          (label) => !Number.isInteger(label) || label < 0,
+        )
+      ) {
+        return res.status(400).json({
+          message: "All labels must be non-negative integers",
+        });
+      }
+
+      let generatedFromRanges = [];
+      if (Array.isArray(label_ranges)) {
+        const rangeResult = buildLabelsFromRanges(label_ranges);
+        generatedFromRanges = rangeResult.generatedLabels;
+        labelRangesUsedThisVisit = rangeResult.normalizedRanges;
+      }
+
+      // If client sends explicit labels, treat them as authoritative.
+      // Otherwise derive from ranges.
+      const labelsForUpdate =
+        parsedDirectLabels.length > 0
+          ? parsedDirectLabels
+          : generatedFromRanges;
+      const uniqueIncoming = [...new Set(labelsForUpdate)];
+      const existingSet = new Set(normalizeLabels(qc.labels || []));
+      const incomingNew = uniqueIncoming.filter(
+        (label) => !existingSet.has(label),
+      );
+      const allocatedSet = new Set(
+        normalizeLabels(inspector.alloted_labels || []),
+      );
+      const usedSet = new Set(normalizeLabels(inspector.used_labels || []));
+
+      const unallocatedIncoming = incomingNew.filter(
+        (label) => !allocatedSet.has(label),
+      );
+      if (unallocatedIncoming.length > 0) {
+        const preview = unallocatedIncoming.slice(0, 10).join(", ");
+        return res.status(400).json({
+          message: `Only allocated labels are accepted. Unallocated labels: ${preview}${unallocatedIncoming.length > 10 ? "..." : ""}`,
+        });
+      }
+
+      const alreadyUsedIncoming = incomingNew.filter((label) =>
+        usedSet.has(label),
+      );
+      if (alreadyUsedIncoming.length > 0) {
+        const preview = alreadyUsedIncoming.slice(0, 10).join(", ");
+        return res.status(400).json({
+          message: `Some labels are already used and cannot be reused: ${preview}${alreadyUsedIncoming.length > 10 ? "..." : ""}`,
+        });
+      }
+
+      const totalLabels = existingSet.size + incomingNew.length;
+      console.log("Total labels after update:", totalLabels, {
+        existing: existingSet.size,
+        incomingNew: incomingNew.length,
+        maxAllowed: maxLabelsAllowed,
+      });
+      if (totalLabels > maxLabelsAllowed) {
+        return res.status(400).json({
+          message: hasTopBottomCapacityBoost
+            ? `Total labels cannot exceed double inspected quantity (${maxLabelsAllowed}) when both top and bottom CBM/LBH are available`
+            : `Total labels cannot exceed inspected quantity (${maxLabelsAllowed})`,
+        });
+      }
+
+      qc.labels = [...new Set([...(qc.labels || []), ...incomingNew])];
+
+      inspector.used_labels = [
+        ...new Set([...(inspector.used_labels || []), ...incomingNew]),
+      ];
+
+      await inspector.save();
+
+      labelsAddedThisVisit = incomingNew;
+    }
+
+    if (remarks) qc.remarks = remarks;
+
+    /* ────────────────────────
          🧾 CREATE INSPECTION RECORD (NEW)
          We create a record only when there's a "visit update"
       ──────────────────────── */
 
-      const isVisitUpdate =
-        addChecked > 0 ||
-        addPassed > 0 ||
-        addProvision > 0 ||
-        (labelsAddedThisVisit && labelsAddedThisVisit.length > 0);
-      const addPassedForInspectionRecord =
-        shouldAutoPassAql
-          ? Math.max(
-              0,
-              Math.min(addChecked, addPassed > 0 ? addPassed : addChecked),
-            )
-          : addPassed;
+    const isVisitUpdate =
+      addChecked > 0 ||
+      addPassed > 0 ||
+      addProvision > 0 ||
+      (labelsAddedThisVisit && labelsAddedThisVisit.length > 0);
+    const addPassedForInspectionRecord = shouldAutoPassAql
+      ? Math.max(
+          0,
+          Math.min(addChecked, addPassed > 0 ? addPassed : addChecked),
+        )
+      : addPassed;
 
-      const shouldUpdateInspectionRecord =
-        isVisitUpdate ||
-        hasCbmUpdate ||
-        (last_inspected_date !== undefined && String(last_inspected_date).trim() !== "") ||
-        String(remarks || "").trim() !== "";
+    const shouldUpdateInspectionRecord =
+      isVisitUpdate ||
+      hasCbmUpdate ||
+      (last_inspected_date !== undefined &&
+        String(last_inspected_date).trim() !== "") ||
+      String(remarks || "").trim() !== "";
 
-      if (shouldUpdateInspectionRecord) {
-        const inspectionInspectorId = qc.inspector?._id
-          ? qc.inspector._id
-          : qc.inspector;
-        if (!inspectionInspectorId) {
-          return res
-            .status(400)
-            .json({ message: "Inspector is required before updating inspection quantities" });
+    if (shouldUpdateInspectionRecord) {
+      const inspectionInspectorId = qc.inspector?._id
+        ? qc.inspector._id
+        : qc.inspector;
+      if (!inspectionInspectorId) {
+        return res.status(400).json({
+          message:
+            "Inspector is required before updating inspection quantities",
+        });
+      }
+
+      const inspectionDateForRecordRaw =
+        last_inspected_date !== undefined &&
+        String(last_inspected_date).trim() !== ""
+          ? String(last_inspected_date).trim()
+          : String(qc.last_inspected_date || qc.request_date || "").trim();
+      const inspectionDateForRecord = toISODateString(
+        inspectionDateForRecordRaw,
+      );
+
+      if (!inspectionDateForRecord) {
+        return res.status(400).json({
+          message: "last_inspected_date is required for inspection records",
+        });
+      }
+      if (
+        isManager &&
+        !isIsoDateWithinPastDaysInclusive(
+          inspectionDateForRecord,
+          MANAGER_ALLOWED_PAST_DAYS,
+        )
+      ) {
+        return res.status(403).json({
+          message: "Manager can update QC only for today and previous 2 days",
+        });
+      }
+
+      const latestRequestEntry = resolveLatestRequestEntry(qc.request_history);
+      const requestedDateForRecordRaw = String(
+        latestRequestEntry?.request_date ||
+          qc.request_date ||
+          inspectionDateForRecord,
+      ).trim();
+      const requestedDateForRecord = toISODateString(requestedDateForRecordRaw);
+      if (!requestedDateForRecord) {
+        return res.status(400).json({
+          message: "request_date is invalid for inspection records",
+        });
+      }
+
+      const requestedQuantityForRecord =
+        latestRequestEntry?.quantity_requested !== undefined
+          ? Number(latestRequestEntry.quantity_requested)
+          : quantityRequestedCap;
+
+      const inspectionRecord = await upsertInspectionRecordForRequest({
+        qcDoc: qc,
+        inspectorId: inspectionInspectorId,
+        requestDate: requestedDateForRecord,
+        requestHistoryId: latestRequestEntry?._id || null,
+        requestedQuantity: requestedQuantityForRecord,
+        inspectionDate: inspectionDateForRecord,
+        remarks: remarks || "",
+        createdBy: req.user._id,
+        addChecked: isVisitUpdate ? addChecked : 0,
+        addPassed: isVisitUpdate ? addPassedForInspectionRecord : 0,
+        addProvision: isVisitUpdate ? addProvision : 0,
+        appendLabelRanges: isVisitUpdate ? labelRangesUsedThisVisit : [],
+        appendLabels: isVisitUpdate ? labelsAddedThisVisit : [],
+        replaceCbmSnapshot: hasCbmUpdate || isVisitUpdate,
+      });
+
+      if (latestRequestEntry && inspectionRecord && isVisitUpdate) {
+        latestRequestEntry.status = "inspected";
+      }
+    }
+
+    if (hasItemMasterUpdate) {
+      const itemDoc = itemDocForInspectedLbhUpdate;
+      let hasItemDocChanges = false;
+      const setLbhPath = (path, value) => {
+        if (!value) return false;
+        const nextValue = {
+          L: toNonNegativeNumber(value?.L, 0),
+          B: toNonNegativeNumber(value?.B, 0),
+          H: toNonNegativeNumber(value?.H, 0),
+        };
+        const existingValue = itemDoc.get(path);
+        if (isSameLbhValue(existingValue, nextValue)) return false;
+        itemDoc.set(path, nextValue);
+        itemDoc.markModified(path);
+        return true;
+      };
+
+      if (hasInspectedLbhUpdate) {
+        hasItemDocChanges =
+          setLbhPath("inspected_item_LBH", nextInspectedItemLbh) ||
+          hasItemDocChanges;
+        hasItemDocChanges =
+          setLbhPath("inspected_item_top_LBH", nextInspectedItemTopLbh) ||
+          hasItemDocChanges;
+        hasItemDocChanges =
+          setLbhPath("inspected_item_bottom_LBH", nextInspectedItemBottomLbh) ||
+          hasItemDocChanges;
+        hasItemDocChanges =
+          setLbhPath("inspected_box_LBH", nextInspectedBoxLbh) ||
+          hasItemDocChanges;
+
+        if (setLbhPath("inspected_box_top_LBH", nextInspectedTopLbh)) {
+          hasItemDocChanges = true;
+          setLbhPath("inspected_top_LBH", nextInspectedTopLbh);
         }
 
-        const inspectionDateForRecordRaw =
-          last_inspected_date !== undefined && String(last_inspected_date).trim() !== ""
-            ? String(last_inspected_date).trim()
-            : String(qc.last_inspected_date || qc.request_date || "").trim();
-        const inspectionDateForRecord = toISODateString(inspectionDateForRecordRaw);
-
-        if (!inspectionDateForRecord) {
-          return res.status(400).json({
-            message: "last_inspected_date is required for inspection records",
-          });
+        if (setLbhPath("inspected_box_bottom_LBH", nextInspectedBottomLbh)) {
+          hasItemDocChanges = true;
+          setLbhPath("inspected_bottom_LBH", nextInspectedBottomLbh);
         }
+      }
+
+      if (hasInspectedWeightUpdate) {
+        const nextInspectedWeight = {
+          net: parsedInspectedWeightNet.hasInput
+            ? parsedInspectedWeightNet.value
+            : toNonNegativeNumber(itemDoc?.inspected_weight?.net, 0),
+          gross: parsedInspectedWeightGross.hasInput
+            ? parsedInspectedWeightGross.value
+            : toNonNegativeNumber(itemDoc?.inspected_weight?.gross, 0),
+        };
+        const existingInspectedWeight = {
+          net: toNonNegativeNumber(itemDoc?.inspected_weight?.net, 0),
+          gross: toNonNegativeNumber(itemDoc?.inspected_weight?.gross, 0),
+        };
         if (
-          isManager &&
-          !isIsoDateWithinPastDaysInclusive(
-            inspectionDateForRecord,
-            MANAGER_ALLOWED_PAST_DAYS,
+          !hasSameNumericValue(
+            existingInspectedWeight.net,
+            nextInspectedWeight.net,
+          ) ||
+          !hasSameNumericValue(
+            existingInspectedWeight.gross,
+            nextInspectedWeight.gross,
           )
         ) {
-          return res.status(403).json({
-            message: "Manager can update QC only for today and previous 2 days",
-          });
-        }
-
-        const latestRequestEntry = resolveLatestRequestEntry(qc.request_history);
-        const requestedDateForRecordRaw = String(
-          latestRequestEntry?.request_date || qc.request_date || inspectionDateForRecord,
-        ).trim();
-        const requestedDateForRecord = toISODateString(requestedDateForRecordRaw);
-        if (!requestedDateForRecord) {
-          return res.status(400).json({
-            message: "request_date is invalid for inspection records",
-          });
-        }
-
-        const requestedQuantityForRecord =
-          latestRequestEntry?.quantity_requested !== undefined
-            ? Number(latestRequestEntry.quantity_requested)
-            : quantityRequestedCap;
-
-        const inspectionRecord = await upsertInspectionRecordForRequest({
-          qcDoc: qc,
-          inspectorId: inspectionInspectorId,
-          requestDate: requestedDateForRecord,
-          requestHistoryId: latestRequestEntry?._id || null,
-          requestedQuantity: requestedQuantityForRecord,
-          inspectionDate: inspectionDateForRecord,
-          remarks: remarks || "",
-          createdBy: req.user._id,
-          addChecked: isVisitUpdate ? addChecked : 0,
-          addPassed: isVisitUpdate ? addPassedForInspectionRecord : 0,
-          addProvision: isVisitUpdate ? addProvision : 0,
-          appendLabelRanges: isVisitUpdate ? labelRangesUsedThisVisit : [],
-          appendLabels: isVisitUpdate ? labelsAddedThisVisit : [],
-          replaceCbmSnapshot: hasCbmUpdate || isVisitUpdate,
-        });
-
-        if (latestRequestEntry && inspectionRecord && isVisitUpdate) {
-          latestRequestEntry.status = "inspected";
-        }
-      }
-
-      if (hasItemMasterUpdate) {
-        const itemDoc = itemDocForInspectedLbhUpdate;
-        let hasItemDocChanges = false;
-        const setLbhPath = (path, value) => {
-          if (!value) return false;
-          const nextValue = {
-            L: toNonNegativeNumber(value?.L, 0),
-            B: toNonNegativeNumber(value?.B, 0),
-            H: toNonNegativeNumber(value?.H, 0),
-          };
-          const existingValue = itemDoc.get(path);
-          if (isSameLbhValue(existingValue, nextValue)) return false;
-          itemDoc.set(path, nextValue);
-          itemDoc.markModified(path);
-          return true;
-        };
-
-        if (hasInspectedLbhUpdate) {
-          hasItemDocChanges =
-            setLbhPath("inspected_item_LBH", nextInspectedItemLbh) || hasItemDocChanges;
-          hasItemDocChanges =
-            setLbhPath("inspected_item_top_LBH", nextInspectedItemTopLbh) || hasItemDocChanges;
-          hasItemDocChanges =
-            setLbhPath("inspected_item_bottom_LBH", nextInspectedItemBottomLbh)
-            || hasItemDocChanges;
-          hasItemDocChanges =
-            setLbhPath("inspected_box_LBH", nextInspectedBoxLbh) || hasItemDocChanges;
-
-          if (setLbhPath("inspected_box_top_LBH", nextInspectedTopLbh)) {
-            hasItemDocChanges = true;
-            setLbhPath("inspected_top_LBH", nextInspectedTopLbh);
-          }
-
-          if (setLbhPath("inspected_box_bottom_LBH", nextInspectedBottomLbh)) {
-            hasItemDocChanges = true;
-            setLbhPath("inspected_bottom_LBH", nextInspectedBottomLbh);
-          }
-        }
-
-        if (hasInspectedWeightUpdate) {
-          const nextInspectedWeight = {
-            net: parsedInspectedWeightNet.hasInput
-              ? parsedInspectedWeightNet.value
-              : toNonNegativeNumber(itemDoc?.inspected_weight?.net, 0),
-            gross: parsedInspectedWeightGross.hasInput
-              ? parsedInspectedWeightGross.value
-              : toNonNegativeNumber(itemDoc?.inspected_weight?.gross, 0),
-          };
-          const existingInspectedWeight = {
-            net: toNonNegativeNumber(itemDoc?.inspected_weight?.net, 0),
-            gross: toNonNegativeNumber(itemDoc?.inspected_weight?.gross, 0),
-          };
-          if (
-            !hasSameNumericValue(existingInspectedWeight.net, nextInspectedWeight.net)
-            || !hasSameNumericValue(existingInspectedWeight.gross, nextInspectedWeight.gross)
-          ) {
-            itemDoc.set("inspected_weight", nextInspectedWeight);
-            itemDoc.markModified("inspected_weight");
-            hasItemDocChanges = true;
-          }
-        }
-
-        if (hasInspectedLbhUpdate) {
-          const calculatedInspectedTopCbm = calculateCbmFromLbh(
-            itemDoc?.inspected_box_top_LBH
-            || itemDoc?.inspected_top_LBH
-            || itemDoc?.inspected_item_top_LBH
-            || {},
-          );
-          const calculatedInspectedBottomCbm = calculateCbmFromLbh(
-            itemDoc?.inspected_box_bottom_LBH
-            || itemDoc?.inspected_bottom_LBH
-            || itemDoc?.inspected_item_bottom_LBH
-            || {},
-          );
-          const hasTopAndBottomInspectedCbm =
-            toNonNegativeNumber(calculatedInspectedTopCbm, 0) > 0
-            && toNonNegativeNumber(calculatedInspectedBottomCbm, 0) > 0;
-
-          const calculatedInspectedCbmFromBox = calculateCbmFromLbh(
-            itemDoc?.inspected_box_LBH
-            || itemDoc?.box_LBH
-            || itemDoc?.inspected_item_LBH
-            || itemDoc?.item_LBH
-            || {},
-          );
-          const calculatedInspectedCbm = hasTopAndBottomInspectedCbm
-            ? toNormalizedCbmString(
-                toNonNegativeNumber(calculatedInspectedTopCbm, 0)
-                + toNonNegativeNumber(calculatedInspectedBottomCbm, 0),
-              )
-            : calculatedInspectedCbmFromBox;
-          const calculatedPisCbm = calculateCbmFromLbh(
-            itemDoc?.pis_box_LBH
-            || itemDoc?.box_LBH
-            || itemDoc?.pis_item_LBH
-            || itemDoc?.item_LBH
-            || {},
-          );
-
-          itemDoc.cbm = {
-            ...(itemDoc.cbm || {}),
-            inspected_top: calculatedInspectedTopCbm,
-            inspected_bottom: calculatedInspectedBottomCbm,
-            inspected_total: calculatedInspectedCbm,
-            calculated_inspected_total: calculatedInspectedCbm,
-            calculated_pis_total: calculatedPisCbm,
-            calculated_total: calculatedInspectedCbm,
-          };
+          itemDoc.set("inspected_weight", nextInspectedWeight);
+          itemDoc.markModified("inspected_weight");
           hasItemDocChanges = true;
-
-          if (nextInspectedBoxLbh || nextInspectedTopLbh || nextInspectedBottomLbh) {
-            qc.cbm = {
-              ...(qc.cbm || {}),
-              top: calculatedInspectedTopCbm,
-              bottom: calculatedInspectedBottomCbm,
-              total: calculatedInspectedCbm,
-            };
-          }
-        }
-
-        if (hasItemDocChanges) {
-          await itemDoc.save();
         }
       }
 
-      await qc.save();
+      if (hasInspectedLbhUpdate) {
+        const calculatedInspectedTopCbm = calculateCbmFromLbh(
+          itemDoc?.inspected_box_top_LBH ||
+            itemDoc?.inspected_top_LBH ||
+            itemDoc?.inspected_item_top_LBH ||
+            {},
+        );
+        const calculatedInspectedBottomCbm = calculateCbmFromLbh(
+          itemDoc?.inspected_box_bottom_LBH ||
+            itemDoc?.inspected_bottom_LBH ||
+            itemDoc?.inspected_item_bottom_LBH ||
+            {},
+        );
+        const hasTopAndBottomInspectedCbm =
+          toNonNegativeNumber(calculatedInspectedTopCbm, 0) > 0 &&
+          toNonNegativeNumber(calculatedInspectedBottomCbm, 0) > 0;
 
-      const orderId = qc?.order?._id || qc.order;
-      const orderRecord = await Order.findById(orderId);
-      if (orderRecord && !CLOSED_ORDER_STATUSES.includes(orderRecord.status)) {
-        const passedQty = Number(qc.quantities?.qc_passed || 0);
-        const clientDemandQty = Number(qc.quantities?.client_demand || 0);
+        const calculatedInspectedCbmFromBox = calculateCbmFromLbh(
+          itemDoc?.inspected_box_LBH ||
+            itemDoc?.box_LBH ||
+            itemDoc?.inspected_item_LBH ||
+            itemDoc?.item_LBH ||
+            {},
+        );
+        const calculatedInspectedCbm = hasTopAndBottomInspectedCbm
+          ? toNormalizedCbmString(
+              toNonNegativeNumber(calculatedInspectedTopCbm, 0) +
+                toNonNegativeNumber(calculatedInspectedBottomCbm, 0),
+            )
+          : calculatedInspectedCbmFromBox;
+        const calculatedPisCbm = calculateCbmFromLbh(
+          itemDoc?.pis_box_LBH ||
+            itemDoc?.box_LBH ||
+            itemDoc?.pis_item_LBH ||
+            itemDoc?.item_LBH ||
+            {},
+        );
 
-        orderRecord.status =
-          clientDemandQty > 0 && passedQty >= clientDemandQty
-            ? "Inspection Done"
-            : "Under Inspection";
-        await orderRecord.save();
+        itemDoc.cbm = {
+          ...(itemDoc.cbm || {}),
+          inspected_top: calculatedInspectedTopCbm,
+          inspected_bottom: calculatedInspectedBottomCbm,
+          inspected_total: calculatedInspectedCbm,
+          calculated_inspected_total: calculatedInspectedCbm,
+          calculated_pis_total: calculatedPisCbm,
+          calculated_total: calculatedInspectedCbm,
+        };
+        hasItemDocChanges = true;
+
+        if (
+          nextInspectedBoxLbh ||
+          nextInspectedTopLbh ||
+          nextInspectedBottomLbh
+        ) {
+          qc.cbm = {
+            ...(qc.cbm || {}),
+            top: calculatedInspectedTopCbm,
+            bottom: calculatedInspectedBottomCbm,
+            total: calculatedInspectedCbm,
+          };
+        }
       }
 
-      try {
-        await upsertItemFromQc(qc);
-      } catch (itemSyncError) {
-        console.error("Item sync after QC update failed:", {
-          qcId: qc?._id,
-          error: itemSyncError?.message || String(itemSyncError),
-        });
+      if (hasItemDocChanges) {
+        await itemDoc.save();
       }
+    }
 
-      res.json({
-        message: "QC updated successfully",
-        data: qc,
+    await qc.save();
+
+    const orderId = qc?.order?._id || qc.order;
+    const orderRecord = await Order.findById(orderId);
+    if (orderRecord && !CLOSED_ORDER_STATUSES.includes(orderRecord.status)) {
+      const passedQty = Number(qc.quantities?.qc_passed || 0);
+      const clientDemandQty = Number(qc.quantities?.client_demand || 0);
+
+      orderRecord.status =
+        clientDemandQty > 0 && passedQty >= clientDemandQty
+          ? "Inspection Done"
+          : "Under Inspection";
+      await orderRecord.save();
+    }
+
+    try {
+      await upsertItemFromQc(qc);
+    } catch (itemSyncError) {
+      console.error("Item sync after QC update failed:", {
+        qcId: qc?._id,
+        error: itemSyncError?.message || String(itemSyncError),
       });
+    }
+
+    res.json({
+      message: "QC updated successfully",
+      data: qc,
+    });
   } catch (err) {
     res.status(400).json({ message: err.message });
   }
@@ -2953,41 +3193,41 @@ exports.getInspectorReports = async (req, res) => {
       const cbmPerUnit = toNonNegativeNumber(inspection?.cbm?.total, 0);
       const inspectedCbm = cbmPerUnit * inspectedQty;
       const inspectionDateIso =
-        toISODateString(inspection?.inspection_date)
-        || toISODateString(inspection?.createdAt)
-        || "";
-      const weekStartIso = getWeekStartIsoDate(inspectionDateIso || inspection?.createdAt);
-      const inspectorId = String(inspection?.inspector?._id || inspection?.inspector || "unassigned");
+        toISODateString(inspection?.inspection_date) ||
+        toISODateString(inspection?.createdAt) ||
+        "";
+      const weekStartIso = getWeekStartIsoDate(
+        inspectionDateIso || inspection?.createdAt,
+      );
+      const inspectorId = String(
+        inspection?.inspector?._id || inspection?.inspector || "unassigned",
+      );
       const orderId = String(
-        inspection?.qc?.order_meta?.order_id
-          || inspection?.qc?.order?.order_id
-          || "",
+        inspection?.qc?.order_meta?.order_id ||
+          inspection?.qc?.order?.order_id ||
+          "",
       ).trim();
 
-      const inspectorEntry = upsertBucket(
-        inspectorMap,
-        inspectorId,
-        () => ({
-          inspector: inspection?.inspector
-            ? {
-                _id: inspection.inspector._id,
-                name: inspection.inspector.name || "Unknown",
-                email: inspection.inspector.email || "",
-              }
-            : {
-                _id: null,
-                name: "Unassigned",
-                email: "",
-              },
-          total_inspections: 0,
-          total_checked: 0,
-          total_passed: 0,
-          total_inspected_cbm: 0,
-          order_keys: new Set(),
-          daily: new Map(),
-          weekly: new Map(),
-        }),
-      );
+      const inspectorEntry = upsertBucket(inspectorMap, inspectorId, () => ({
+        inspector: inspection?.inspector
+          ? {
+              _id: inspection.inspector._id,
+              name: inspection.inspector.name || "Unknown",
+              email: inspection.inspector.email || "",
+            }
+          : {
+              _id: null,
+              name: "Unassigned",
+              email: "",
+            },
+        total_inspections: 0,
+        total_checked: 0,
+        total_passed: 0,
+        total_inspected_cbm: 0,
+        order_keys: new Set(),
+        daily: new Map(),
+        weekly: new Map(),
+      }));
       if (!inspectorEntry) continue;
 
       inspectorEntry.total_inspections += 1;
@@ -3080,7 +3320,7 @@ exports.getInspectorReports = async (req, res) => {
     }
 
     const sortByDateDesc = (a, b, key) =>
-      (toSortableTimestamp(b?.[key]) - toSortableTimestamp(a?.[key]));
+      toSortableTimestamp(b?.[key]) - toSortableTimestamp(a?.[key]);
 
     const inspectors = Array.from(inspectorMap.values())
       .map((entry) => ({
@@ -3104,7 +3344,9 @@ exports.getInspectorReports = async (req, res) => {
           .sort((a, b) => sortByDateDesc(a, b, "week_start")),
       }))
       .sort((a, b) =>
-        String(a?.inspector?.name || "").localeCompare(String(b?.inspector?.name || "")),
+        String(a?.inspector?.name || "").localeCompare(
+          String(b?.inspector?.name || ""),
+        ),
       );
 
     const daily_totals = Array.from(dailyTotalsMap.values())
@@ -3123,7 +3365,8 @@ exports.getInspectorReports = async (req, res) => {
     return res.status(200).json({
       filters: {
         timeline: timelineRange.timeline,
-        custom_days: timelineRange.timeline === "custom" ? timelineRange.days : null,
+        custom_days:
+          timelineRange.timeline === "custom" ? timelineRange.days : null,
         from_date: timelineRange.from_date_iso,
         to_date: timelineRange.to_date_iso,
       },
@@ -3140,7 +3383,9 @@ exports.getInspectorReports = async (req, res) => {
     });
   } catch (err) {
     console.error("Inspector Reports Error:", err);
-    return res.status(500).json({ message: err.message || "Failed to fetch inspector reports" });
+    return res
+      .status(500)
+      .json({ message: err.message || "Failed to fetch inspector reports" });
   }
 };
 
@@ -3201,16 +3446,17 @@ exports.getVendorReports = async (req, res) => {
 
       const orderDateUtc = toUtcDateOnly(row?.order_date);
       if (
-        orderDateUtc
-        && (!entry.order_date_utc || orderDateUtc.getTime() < entry.order_date_utc.getTime())
+        orderDateUtc &&
+        (!entry.order_date_utc ||
+          orderDateUtc.getTime() < entry.order_date_utc.getTime())
       ) {
         entry.order_date_utc = orderDateUtc;
       }
 
       const plannedEtdUtc = toUtcDateOnly(row?.ETD);
       if (
-        plannedEtdUtc
-        && (!entry.etd_utc || plannedEtdUtc.getTime() > entry.etd_utc.getTime())
+        plannedEtdUtc &&
+        (!entry.etd_utc || plannedEtdUtc.getTime() > entry.etd_utc.getTime())
       ) {
         entry.etd_utc = plannedEtdUtc;
       }
@@ -3218,9 +3464,9 @@ exports.getVendorReports = async (req, res) => {
       for (const shipment of Array.isArray(row?.shipment) ? row.shipment : []) {
         const shipmentDateUtc = toUtcDateOnly(shipment?.stuffing_date);
         if (
-          shipmentDateUtc
-          && (!entry.latest_shipment_utc
-            || shipmentDateUtc.getTime() > entry.latest_shipment_utc.getTime())
+          shipmentDateUtc &&
+          (!entry.latest_shipment_utc ||
+            shipmentDateUtc.getTime() > entry.latest_shipment_utc.getTime())
         ) {
           entry.latest_shipment_utc = shipmentDateUtc;
         }
@@ -3231,8 +3477,10 @@ exports.getVendorReports = async (req, res) => {
     const timelineOrders = [...orderGroupMap.values()].filter((entry) => {
       if (!entry?.order_date_utc) return false;
       return (
-        entry.order_date_utc.getTime() >= timelineRange.from_date_utc.getTime()
-        && entry.order_date_utc.getTime() < timelineRange.to_date_exclusive_utc.getTime()
+        entry.order_date_utc.getTime() >=
+          timelineRange.from_date_utc.getTime() &&
+        entry.order_date_utc.getTime() <
+          timelineRange.to_date_exclusive_utc.getTime()
       );
     });
     const brandOptionsBase = selectedVendor
@@ -3266,9 +3514,9 @@ exports.getVendorReports = async (req, res) => {
       const hasShippedStatus = String(status || "").trim() === "Shipped";
       const actualShippedDateUtc = orderEntry.latest_shipment_utc;
       const hasEtdCrossed = Boolean(
-        hasPlannedEtd
-          && todayUtc
-          && plannedEtdUtc.getTime() < todayUtc.getTime(),
+        hasPlannedEtd &&
+        todayUtc &&
+        plannedEtdUtc.getTime() < todayUtc.getTime(),
       );
 
       let delayDays = 0;
@@ -3276,7 +3524,10 @@ exports.getVendorReports = async (req, res) => {
       let delayReference = hasShippedStatus ? "latest_shipment_date" : "today";
 
       if (hasPlannedEtd && hasShippedStatus) {
-        if (actualShippedDateUtc && actualShippedDateUtc.getTime() > plannedEtdUtc.getTime()) {
+        if (
+          actualShippedDateUtc &&
+          actualShippedDateUtc.getTime() > plannedEtdUtc.getTime()
+        ) {
           isDelayed = true;
           delayReference = "latest_shipment_date";
         }
@@ -3286,9 +3537,7 @@ exports.getVendorReports = async (req, res) => {
       }
 
       if (isDelayed) {
-        const delayEndDate = hasShippedStatus
-          ? actualShippedDateUtc
-          : todayUtc;
+        const delayEndDate = hasShippedStatus ? actualShippedDateUtc : todayUtc;
         if (delayEndDate) {
           const rawDelay = Math.floor(
             (delayEndDate.getTime() - plannedEtdUtc.getTime()) / MS_PER_DAY,
@@ -3334,7 +3583,9 @@ exports.getVendorReports = async (req, res) => {
         brand: orderEntry.brand,
         vendor: orderEntry.vendor,
         status,
-        order_date: orderEntry.order_date_utc ? toISODateString(orderEntry.order_date_utc) : "",
+        order_date: orderEntry.order_date_utc
+          ? toISODateString(orderEntry.order_date_utc)
+          : "",
         etd: plannedEtdUtc ? toISODateString(plannedEtdUtc) : "",
         latest_shipment_date: orderEntry.latest_shipment_utc
           ? toISODateString(orderEntry.latest_shipment_utc)
@@ -3349,23 +3600,34 @@ exports.getVendorReports = async (req, res) => {
     const vendors = Array.from(vendorMap.values())
       .map((entry) => ({
         vendor: entry.vendor,
-        brands: [...entry.brands].sort((a, b) => String(a || "").localeCompare(String(b || ""))),
+        brands: [...entry.brands].sort((a, b) =>
+          String(a || "").localeCompare(String(b || "")),
+        ),
         orders_count: entry.orders_count,
         delayed_orders_count: entry.delayed_orders_count,
         orders_with_etd_count: entry.orders_with_etd_count,
         total_delay_days: entry.total_delay_days,
-        average_delay_days: entry.delayed_orders_count > 0
-          ? toRoundedNumber(entry.total_delay_days / entry.delayed_orders_count, 2)
-          : 0,
+        average_delay_days:
+          entry.delayed_orders_count > 0
+            ? toRoundedNumber(
+                entry.total_delay_days / entry.delayed_orders_count,
+                2,
+              )
+            : 0,
         orders: [...entry.orders].sort((a, b) => {
           const aDelay = Number.isFinite(a?.delay_days) ? a.delay_days : -1;
           const bDelay = Number.isFinite(b?.delay_days) ? b.delay_days : -1;
           if (aDelay !== bDelay) return bDelay - aDelay;
-          return toSortableTimestamp(b?.order_date) - toSortableTimestamp(a?.order_date);
+          return (
+            toSortableTimestamp(b?.order_date) -
+            toSortableTimestamp(a?.order_date)
+          );
         }),
       }))
       .sort((a, b) => {
-        const avgDiff = Number(b?.average_delay_days || 0) - Number(a?.average_delay_days || 0);
+        const avgDiff =
+          Number(b?.average_delay_days || 0) -
+          Number(a?.average_delay_days || 0);
         if (avgDiff !== 0) return avgDiff;
         return String(a?.vendor || "").localeCompare(String(b?.vendor || ""));
       });
@@ -3373,7 +3635,8 @@ exports.getVendorReports = async (req, res) => {
     return res.status(200).json({
       filters: {
         timeline: timelineRange.timeline,
-        custom_days: timelineRange.timeline === "custom" ? timelineRange.days : null,
+        custom_days:
+          timelineRange.timeline === "custom" ? timelineRange.days : null,
         from_date: timelineRange.from_date_iso,
         to_date: timelineRange.to_date_iso,
         brand: selectedBrand,
@@ -3387,15 +3650,18 @@ exports.getVendorReports = async (req, res) => {
         delayed_orders_count: delayedOrdersCount,
         orders_with_etd_count: ordersWithEtdCount,
         total_delay_days: totalDelayDaysDelayedOnly,
-        average_delay_days: delayedOrdersCount > 0
-          ? toRoundedNumber(totalDelayDaysDelayedOnly / delayedOrdersCount, 2)
-          : 0,
+        average_delay_days:
+          delayedOrdersCount > 0
+            ? toRoundedNumber(totalDelayDaysDelayedOnly / delayedOrdersCount, 2)
+            : 0,
       },
       vendors,
     });
   } catch (err) {
     console.error("Vendor Reports Error:", err);
-    return res.status(500).json({ message: err.message || "Failed to fetch vendor reports" });
+    return res
+      .status(500)
+      .json({ message: err.message || "Failed to fetch vendor reports" });
   }
 };
 
@@ -3404,7 +3670,9 @@ exports.getWeeklyOrderSummary = async (req, res) => {
     const selectedBrand = normalizeOptionalReportFilter(req.query.brand);
     const weekRange = getPreviousUtcWeekRange(new Date());
     if (!weekRange) {
-      return res.status(500).json({ message: "Failed to resolve last week range" });
+      return res
+        .status(500)
+        .json({ message: "Failed to resolve last week range" });
     }
 
     const weeklyRows = await QC.aggregate([
@@ -3435,6 +3703,49 @@ exports.getWeeklyOrderSummary = async (req, res) => {
       buildActiveOrderLookupStage("order_doc"),
       { $unwind: "$order_doc" },
       {
+        $lookup: {
+          from: "inspections",
+          let: { qcId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $eq: ["$qc", "$$qcId"] },
+              },
+            },
+            {
+              $addFields: {
+                inspection_date_sort_key: {
+                  $ifNull: [inspectionDateToDateExpression, "$createdAt"],
+                },
+              },
+            },
+            {
+              $match: {
+                inspection_date_sort_key: {
+                  $gte: weekRange.from_date_utc,
+                  $lt: weekRange.to_date_exclusive_utc,
+                },
+              },
+            },
+            { $sort: { inspection_date_sort_key: -1, createdAt: -1 } },
+            { $limit: 1 },
+            {
+              $project: {
+                inspection_date: 1,
+                goods_not_ready: 1,
+                remarks: 1,
+              },
+            },
+          ],
+          as: "last_inspection",
+        },
+      },
+      {
+        $addFields: {
+          last_inspection: { $arrayElemAt: ["$last_inspection", 0] },
+        },
+      },
+      {
         $project: {
           _id: 0,
           order_meta: 1,
@@ -3452,14 +3763,27 @@ exports.getWeeklyOrderSummary = async (req, res) => {
             brand: "$order_doc.brand",
             quantity: "$order_doc.quantity",
           },
+          last_inspection: {
+            inspection_date: "$last_inspection.inspection_date",
+            goods_not_ready: "$last_inspection.goods_not_ready",
+            remarks: "$last_inspection.remarks",
+          },
         },
       },
     ]);
 
     const normalizedRows = weeklyRows.map((row) => ({
-      order_id: normalizeText(row?.order_meta?.order_id || row?.order_doc?.order_id || "") || "N/A",
-      vendor: normalizeText(row?.order_meta?.vendor || row?.order_doc?.vendor || "") || "N/A",
-      brand: normalizeText(row?.order_meta?.brand || row?.order_doc?.brand || "") || "N/A",
+      order_id:
+        normalizeText(
+          row?.order_meta?.order_id || row?.order_doc?.order_id || "",
+        ) || "N/A",
+      vendor:
+        normalizeText(
+          row?.order_meta?.vendor || row?.order_doc?.vendor || "",
+        ) || "N/A",
+      brand:
+        normalizeText(row?.order_meta?.brand || row?.order_doc?.brand || "") ||
+        "N/A",
       item_code: normalizeText(row?.item?.item_code || "") || "N/A",
       total_order_quantity: toNonNegativeNumber(
         row?.quantities?.client_demand ?? row?.order_doc?.quantity,
@@ -3467,6 +3791,15 @@ exports.getWeeklyOrderSummary = async (req, res) => {
       ),
       quantity_passed: toNonNegativeNumber(row?.quantities?.qc_passed, 0),
       pending: toNonNegativeNumber(row?.quantities?.pending, 0),
+      goods_not_ready: Boolean(row?.last_inspection?.goods_not_ready?.ready),
+      goods_not_ready_reason: normalizeText(
+        row?.last_inspection?.goods_not_ready?.reason ||
+          row?.last_inspection?.remarks ||
+          "",
+      ),
+      goods_not_ready_inspection_date: normalizeText(
+        row?.last_inspection?.inspection_date || "",
+      ),
     }));
 
     const brandOptions = normalizeDistinctValues(
@@ -3495,15 +3828,22 @@ exports.getWeeklyOrderSummary = async (req, res) => {
         total_order_quantity: row.total_order_quantity,
         quantity_passed: row.quantity_passed,
         pending: row.pending,
+        goods_not_ready: row.goods_not_ready,
+        goods_not_ready_reason: row.goods_not_ready_reason,
+        goods_not_ready_inspection_date: row.goods_not_ready_inspection_date,
       });
     }
 
     const vendors = Array.from(vendorMap.values())
       .map((entry) => {
         const items = [...entry.items].sort((left, right) => {
-          const orderCompare = String(left?.order_id || "").localeCompare(String(right?.order_id || ""));
+          const orderCompare = String(left?.order_id || "").localeCompare(
+            String(right?.order_id || ""),
+          );
           if (orderCompare !== 0) return orderCompare;
-          return String(left?.item_code || "").localeCompare(String(right?.item_code || ""));
+          return String(left?.item_code || "").localeCompare(
+            String(right?.item_code || ""),
+          );
         });
 
         return {
@@ -3511,7 +3851,9 @@ exports.getWeeklyOrderSummary = async (req, res) => {
           items,
         };
       })
-      .sort((left, right) => String(left?.vendor || "").localeCompare(String(right?.vendor || "")));
+      .sort((left, right) =>
+        String(left?.vendor || "").localeCompare(String(right?.vendor || "")),
+      );
 
     return res.status(200).json({
       filters: {
@@ -3526,7 +3868,9 @@ exports.getWeeklyOrderSummary = async (req, res) => {
     });
   } catch (err) {
     console.error("Weekly Order Summary Error:", err);
-    return res.status(500).json({ message: err.message || "Failed to fetch weekly order summary" });
+    return res
+      .status(500)
+      .json({ message: err.message || "Failed to fetch weekly order summary" });
   }
 };
 
@@ -3545,7 +3889,9 @@ exports.markGoodsNotReady = async (req, res) => {
       return res.status(404).json({ message: "QC record not found" });
     }
 
-    const normalizedRole = String(req.user?.role || "").trim().toLowerCase();
+    const normalizedRole = String(req.user?.role || "")
+      .trim()
+      .toLowerCase();
     const isAdmin = normalizedRole === "admin";
     const isManager = normalizedRole === "manager";
     const hasElevatedAccess = isAdmin || isManager;
@@ -3554,11 +3900,14 @@ exports.markGoodsNotReady = async (req, res) => {
 
     if (!hasElevatedAccess && isInspectionDone) {
       return res.status(403).json({
-        message: "Only admin or manager can update this QC record after inspection is done",
+        message:
+          "Only admin or manager can update this QC record after inspection is done",
       });
     }
 
-    const latestRequestEntry = resolveLatestRequestEntry(qc?.request_history || []);
+    const latestRequestEntry = resolveLatestRequestEntry(
+      qc?.request_history || [],
+    );
     const latestRequestedQuantity =
       latestRequestEntry?.quantity_requested !== undefined
         ? toNonNegativeNumber(latestRequestEntry.quantity_requested, 0)
@@ -3578,7 +3927,9 @@ exports.markGoodsNotReady = async (req, res) => {
         return res.status(401).json({ message: "Unauthorized" });
       }
 
-      const alignedInspectorId = String(qc?.inspector?._id || qc?.inspector || "").trim();
+      const alignedInspectorId = String(
+        qc?.inspector?._id || qc?.inspector || "",
+      ).trim();
       if (!alignedInspectorId || alignedInspectorId !== currentUserId) {
         return res.status(403).json({
           message: "QC can update only records aligned to them",
@@ -3597,7 +3948,9 @@ exports.markGoodsNotReady = async (req, res) => {
 
     const inspectionDate = toISODateString(new Date());
     if (!inspectionDate) {
-      return res.status(500).json({ message: "Failed to resolve inspection date" });
+      return res
+        .status(500)
+        .json({ message: "Failed to resolve inspection date" });
     }
 
     const requestedDateForRecordRaw = String(
@@ -3664,7 +4017,9 @@ exports.markGoodsNotReady = async (req, res) => {
     });
   } catch (err) {
     console.error("Goods Not Ready Error:", err);
-    return res.status(400).json({ message: err.message || "Failed to mark goods not ready" });
+    return res
+      .status(400)
+      .json({ message: err.message || "Failed to mark goods not ready" });
   }
 };
 
@@ -3690,7 +4045,9 @@ exports.getDailyReport = async (req, res) => {
         : trimmedToken.startsWith("+")
           ? "asc"
           : null;
-      const normalizedExplicit = String(explicitOrder || "").trim().toLowerCase();
+      const normalizedExplicit = String(explicitOrder || "")
+        .trim()
+        .toLowerCase();
       if (normalizedExplicit === "asc" || normalizedExplicit === "desc") {
         return normalizedExplicit;
       }
@@ -3723,7 +4080,9 @@ exports.getDailyReport = async (req, res) => {
     });
     const alignedSortDirection = alignedSortOrder === "asc" ? 1 : -1;
 
-    const rawInspectionSortToken = String(req.query.inspection_sort || "").trim();
+    const rawInspectionSortToken = String(
+      req.query.inspection_sort || "",
+    ).trim();
     const rawInspectionSortBy = String(
       req.query.inspection_sort_by ?? req.query.inspectionSortBy ?? "",
     ).trim();
@@ -3756,12 +4115,14 @@ exports.getDailyReport = async (req, res) => {
       const primary =
         alignedSortBy === "order_id"
           ? compareText(a?.order_id, b?.order_id)
-          : toSortableTimestamp(a?.request_date) - toSortableTimestamp(b?.request_date);
+          : toSortableTimestamp(a?.request_date) -
+            toSortableTimestamp(b?.request_date);
       if (primary !== 0) return primary * alignedSortDirection;
 
       const secondary =
         alignedSortBy === "order_id"
-          ? toSortableTimestamp(a?.request_date) - toSortableTimestamp(b?.request_date)
+          ? toSortableTimestamp(a?.request_date) -
+            toSortableTimestamp(b?.request_date)
           : compareText(a?.order_id, b?.order_id);
       if (secondary !== 0) {
         return alignedSortBy === "order_id" ? secondary * -1 : secondary;
@@ -3773,14 +4134,14 @@ exports.getDailyReport = async (req, res) => {
       const primary =
         inspectionSortBy === "order_id"
           ? compareText(a?.order_id, b?.order_id)
-          : toSortableTimestamp(a?.inspection_date)
-            - toSortableTimestamp(b?.inspection_date);
+          : toSortableTimestamp(a?.inspection_date) -
+            toSortableTimestamp(b?.inspection_date);
       if (primary !== 0) return primary * inspectionSortDirection;
 
       const secondary =
         inspectionSortBy === "order_id"
-          ? toSortableTimestamp(a?.inspection_date)
-            - toSortableTimestamp(b?.inspection_date)
+          ? toSortableTimestamp(a?.inspection_date) -
+            toSortableTimestamp(b?.inspection_date)
           : compareText(a?.order_id, b?.order_id);
       if (secondary !== 0) {
         return inspectionSortBy === "order_id" ? secondary * -1 : secondary;
@@ -3788,8 +4149,7 @@ exports.getDailyReport = async (req, res) => {
       return compareText(a?.item_code, b?.item_code);
     };
 
-    const [reportYear, reportMonth, reportDay] = String(reportDate)
-      .split("-");
+    const [reportYear, reportMonth, reportDay] = String(reportDate).split("-");
     const inspectionDateVariants = [
       reportDate,
       `${reportDay}/${reportMonth}/${reportYear}`,
@@ -3826,7 +4186,9 @@ exports.getDailyReport = async (req, res) => {
     ]);
 
     const alignedRequests = alignedRequestsRaw.filter((qc) => qc?.order);
-    const inspections = inspectionsRaw.filter((inspection) => inspection?.qc?.order);
+    const inspections = inspectionsRaw.filter(
+      (inspection) => inspection?.qc?.order,
+    );
 
     const aligned_requests = alignedRequests.map((qc) => ({
       qc_id: qc._id,
@@ -3850,7 +4212,9 @@ exports.getDailyReport = async (req, res) => {
       quantity_pending: Number(qc?.quantities?.pending || 0),
       order_status: qc?.order?.status || "N/A",
     }));
-    const sortedAlignedRequests = [...aligned_requests].sort(compareAlignedRows);
+    const sortedAlignedRequests = [...aligned_requests].sort(
+      compareAlignedRows,
+    );
 
     const inspectorMap = new Map();
     const inspectorCbmKeyMap = new Map();
@@ -3889,7 +4253,7 @@ exports.getDailyReport = async (req, res) => {
       const cbmSnapshot =
         inspection?.cbm && typeof inspection.cbm === "object"
           ? inspection.cbm
-          : (qcRecord?.cbm || {});
+          : qcRecord?.cbm || {};
       const cbmTotal = Number(cbmSnapshot?.total || 0);
       const safeCbmTotal = Number.isFinite(cbmTotal) ? cbmTotal : 0;
       const orderIdForKey = String(
@@ -3920,7 +4284,8 @@ exports.getDailyReport = async (req, res) => {
       entry.inspections.push({
         inspection_id: inspection._id,
         inspection_date: inspection.inspection_date || null,
-        order_id: qcRecord?.order_meta?.order_id || qcRecord?.order?.order_id || "N/A",
+        order_id:
+          qcRecord?.order_meta?.order_id || qcRecord?.order?.order_id || "N/A",
         item_code: qcRecord?.item?.item_code || "N/A",
         description: qcRecord?.item?.description || "N/A",
         inspected_quantity: inspectedQty,
@@ -3944,7 +4309,9 @@ exports.getDailyReport = async (req, res) => {
     }
 
     const inspector_compiled = Array.from(inspectorMap.values()).sort((a, b) =>
-      String(a?.inspector?.name || "").localeCompare(String(b?.inspector?.name || "")),
+      String(a?.inspector?.name || "").localeCompare(
+        String(b?.inspector?.name || ""),
+      ),
     );
 
     const totalInspectedQty = inspector_compiled.reduce(
@@ -3980,8 +4347,6 @@ exports.getDailyReport = async (req, res) => {
   }
 };
 
-
-
 exports.getQCById = async (req, res) => {
   try {
     const qc = await QC.findById(req.params.id)
@@ -4003,12 +4368,20 @@ exports.getQCById = async (req, res) => {
       return res.status(404).json({ message: "QC record not found" });
     }
 
-    const normalizedRole = String(req.user?.role || "").trim().toLowerCase();
+    const normalizedRole = String(req.user?.role || "")
+      .trim()
+      .toLowerCase();
     const isQcUser = normalizedRole === "qc";
     if (isQcUser) {
       const currentUserId = String(req.user?._id || req.user?.id || "").trim();
-      const alignedInspectorId = String(qc?.inspector?._id || qc?.inspector || "").trim();
-      if (!currentUserId || !alignedInspectorId || alignedInspectorId !== currentUserId) {
+      const alignedInspectorId = String(
+        qc?.inspector?._id || qc?.inspector || "",
+      ).trim();
+      if (
+        !currentUserId ||
+        !alignedInspectorId ||
+        alignedInspectorId !== currentUserId
+      ) {
         return res.status(403).json({
           message: "QC can only view records aligned to them",
         });
@@ -4048,9 +4421,11 @@ exports.getQCById = async (req, res) => {
     const sortedInspectionRecords = Array.isArray(qcData.inspection_record)
       ? [...qcData.inspection_record].sort((a, b) => {
           const aTime =
-            toSortableTimestamp(a?.inspection_date) || toSortableTimestamp(a?.createdAt);
+            toSortableTimestamp(a?.inspection_date) ||
+            toSortableTimestamp(a?.createdAt);
           const bTime =
-            toSortableTimestamp(b?.inspection_date) || toSortableTimestamp(b?.createdAt);
+            toSortableTimestamp(b?.inspection_date) ||
+            toSortableTimestamp(b?.createdAt);
           return bTime - aTime;
         })
       : [];
@@ -4072,14 +4447,18 @@ exports.getQCById = async (req, res) => {
 exports.editInspectionRecords = async (req, res) => {
   try {
     const qcId = String(req.params.id || "").trim();
-    const payloadRecords = Array.isArray(req.body?.records) ? req.body.records : [];
+    const payloadRecords = Array.isArray(req.body?.records)
+      ? req.body.records
+      : [];
 
     if (!mongoose.Types.ObjectId.isValid(qcId)) {
       return res.status(400).json({ message: "Invalid QC id" });
     }
 
     if (payloadRecords.length === 0) {
-      return res.status(400).json({ message: "At least one inspection row is required" });
+      return res
+        .status(400)
+        .json({ message: "At least one inspection row is required" });
     }
 
     const qc = await QC.findById(qcId);
@@ -4089,7 +4468,9 @@ exports.editInspectionRecords = async (req, res) => {
 
     const inspectionDocs = await Inspection.find({ qc: qc._id });
     if (inspectionDocs.length === 0) {
-      return res.status(404).json({ message: "No inspection records found for this QC record" });
+      return res
+        .status(404)
+        .json({ message: "No inspection records found for this QC record" });
     }
 
     const inspectionMap = new Map(
@@ -4136,7 +4517,9 @@ exports.editInspectionRecords = async (req, res) => {
 
       const record = inspectionMap.get(recordId);
       if (!record) {
-        throw new Error(`Inspection record ${recordId} does not belong to this QC`);
+        throw new Error(
+          `Inspection record ${recordId} does not belong to this QC`,
+        );
       }
 
       const requestedDate = parseRequiredDate(
@@ -4176,21 +4559,24 @@ exports.editInspectionRecords = async (req, res) => {
         throw new Error("Passed quantity cannot exceed checked quantity");
       }
 
-      const cbmInput =
-        row?.cbm && typeof row.cbm === "object" ? row.cbm : null;
-      const cbmTop = cbmInput?.top !== undefined
-        ? String(cbmInput.top ?? "0")
-        : String(record?.cbm?.top ?? "0");
-      const cbmBottom = cbmInput?.bottom !== undefined
-        ? String(cbmInput.bottom ?? "0")
-        : String(record?.cbm?.bottom ?? "0");
-      const cbmTotal = cbmInput?.total !== undefined
-        ? String(cbmInput.total ?? "0")
-        : String(record?.cbm?.total ?? "0");
+      const cbmInput = row?.cbm && typeof row.cbm === "object" ? row.cbm : null;
+      const cbmTop =
+        cbmInput?.top !== undefined
+          ? String(cbmInput.top ?? "0")
+          : String(record?.cbm?.top ?? "0");
+      const cbmBottom =
+        cbmInput?.bottom !== undefined
+          ? String(cbmInput.bottom ?? "0")
+          : String(record?.cbm?.bottom ?? "0");
+      const cbmTotal =
+        cbmInput?.total !== undefined
+          ? String(cbmInput.total ?? "0")
+          : String(record?.cbm?.total ?? "0");
 
-      const remarks = row?.remarks !== undefined
-        ? String(row.remarks || "")
-        : String(record?.remarks || "");
+      const remarks =
+        row?.remarks !== undefined
+          ? String(row.remarks || "")
+          : String(record?.remarks || "");
 
       touchedInspectors.add(String(record.inspector || ""));
       touchedInspectors.add(inspectorId);
@@ -4237,7 +4623,10 @@ exports.editInspectionRecords = async (req, res) => {
       ),
     );
 
-    const clientDemandQty = toNonNegativeNumber(qc?.quantities?.client_demand, 0);
+    const clientDemandQty = toNonNegativeNumber(
+      qc?.quantities?.client_demand,
+      0,
+    );
     qc.quantities.qc_checked = totalChecked;
     qc.quantities.qc_passed = totalPassed;
     qc.quantities.vendor_provision = totalVendorOffered;
@@ -4248,14 +4637,18 @@ exports.editInspectionRecords = async (req, res) => {
     if (Array.isArray(qc.request_history)) {
       const inspectionStatusByRequestId = new Map();
       for (const record of refreshedInspections) {
-        const requestHistoryId = String(record?.request_history_id || "").trim();
+        const requestHistoryId = String(
+          record?.request_history_id || "",
+        ).trim();
         if (!requestHistoryId) continue;
         const hasActivity =
-          toNonNegativeNumber(record?.checked, 0) > 0
-          || toNonNegativeNumber(record?.passed, 0) > 0
-          || toNonNegativeNumber(record?.vendor_offered, 0) > 0
-          || (Array.isArray(record?.labels_added) && record.labels_added.length > 0)
-          || (Array.isArray(record?.label_ranges) && record.label_ranges.length > 0);
+          toNonNegativeNumber(record?.checked, 0) > 0 ||
+          toNonNegativeNumber(record?.passed, 0) > 0 ||
+          toNonNegativeNumber(record?.vendor_offered, 0) > 0 ||
+          (Array.isArray(record?.labels_added) &&
+            record.labels_added.length > 0) ||
+          (Array.isArray(record?.label_ranges) &&
+            record.label_ranges.length > 0);
 
         if (!inspectionStatusByRequestId.has(requestHistoryId)) {
           inspectionStatusByRequestId.set(requestHistoryId, hasActivity);
@@ -4287,14 +4680,16 @@ exports.editInspectionRecords = async (req, res) => {
       })[0];
 
       qc.last_inspected_date = String(
-        latestRecord?.inspection_date
-          || toDateInputValue(latestRecord?.createdAt)
-          || qc.request_date
-          || qc.last_inspected_date
-          || "",
+        latestRecord?.inspection_date ||
+          toDateInputValue(latestRecord?.createdAt) ||
+          qc.request_date ||
+          qc.last_inspected_date ||
+          "",
       );
     } else {
-      qc.last_inspected_date = String(qc.request_date || qc.last_inspected_date || "");
+      qc.last_inspected_date = String(
+        qc.request_date || qc.last_inspected_date || "",
+      );
     }
 
     await qc.save();
@@ -4317,7 +4712,9 @@ exports.editInspectionRecords = async (req, res) => {
       const inspectorDoc = await Inspector.findOne({ user: inspectorUserId });
       if (!inspectorDoc) continue;
 
-      const labelUsageRecords = await Inspection.find({ inspector: inspectorUserId })
+      const labelUsageRecords = await Inspection.find({
+        inspector: inspectorUserId,
+      })
         .select("labels_added")
         .lean();
 
@@ -4344,7 +4741,9 @@ exports.editInspectionRecords = async (req, res) => {
     });
   } catch (err) {
     console.error("Edit Inspection Records Error:", err);
-    return res.status(400).json({ message: err.message || "Failed to edit inspection records" });
+    return res
+      .status(400)
+      .json({ message: err.message || "Failed to edit inspection records" });
   }
 };
 
@@ -4374,8 +4773,9 @@ exports.deleteInspectionRecord = async (req, res) => {
       return res.status(404).json({ message: "Inspection record not found" });
     }
 
-    qc.inspection_record = (Array.isArray(qc.inspection_record) ? qc.inspection_record : [])
-      .filter((entryId) => String(entryId) !== String(inspection._id));
+    qc.inspection_record = (
+      Array.isArray(qc.inspection_record) ? qc.inspection_record : []
+    ).filter((entryId) => String(entryId) !== String(inspection._id));
 
     const currentChecked = Number(qc?.quantities?.qc_checked || 0);
     const currentPassed = Number(qc?.quantities?.qc_passed || 0);
@@ -4392,7 +4792,10 @@ exports.deleteInspectionRecord = async (req, res) => {
       0,
       currentProvision - removedProvision,
     );
-    qc.quantities.pending = Math.max(0, currentClientDemand - qc.quantities.qc_passed);
+    qc.quantities.pending = Math.max(
+      0,
+      currentClientDemand - qc.quantities.qc_passed,
+    );
 
     const remainingInspections = await Inspection.find({
       qc: qc._id,
@@ -4424,11 +4827,11 @@ exports.deleteInspectionRecord = async (req, res) => {
       })[0];
 
       qc.last_inspected_date = String(
-        latestRecord?.inspection_date
-          || toDateInputValue(latestRecord?.createdAt)
-          || qc.request_date
-          || qc.last_inspected_date
-          || "",
+        latestRecord?.inspection_date ||
+          toDateInputValue(latestRecord?.createdAt) ||
+          qc.request_date ||
+          qc.last_inspected_date ||
+          "",
       );
 
       await qc.save();
@@ -4436,9 +4839,13 @@ exports.deleteInspectionRecord = async (req, res) => {
 
     await Inspection.deleteOne({ _id: inspection._id });
 
-    const inspectorDoc = await Inspector.findOne({ user: inspection.inspector });
+    const inspectorDoc = await Inspector.findOne({
+      user: inspection.inspector,
+    });
     if (inspectorDoc) {
-      const stillUsedRecords = await Inspection.find({ inspector: inspection.inspector })
+      const stillUsedRecords = await Inspection.find({
+        inspector: inspection.inspector,
+      })
         .select("labels_added")
         .lean();
 
@@ -4451,9 +4858,14 @@ exports.deleteInspectionRecord = async (req, res) => {
       );
 
       const nextUsedLabels = normalizeLabels(
-        (Array.isArray(inspectorDoc.used_labels) ? inspectorDoc.used_labels : [])
+        (Array.isArray(inspectorDoc.used_labels)
+          ? inspectorDoc.used_labels
+          : []
+        )
           .map((label) => Number(label))
-          .filter((label) => Number.isFinite(label) && stillUsedLabels.has(label)),
+          .filter(
+            (label) => Number.isFinite(label) && stillUsedLabels.has(label),
+          ),
       );
 
       inspectorDoc.used_labels = nextUsedLabels;
@@ -4473,7 +4885,8 @@ exports.deleteInspectionRecord = async (req, res) => {
       await QC.deleteOne({ _id: qc._id });
 
       return res.status(200).json({
-        message: "Last inspection record deleted. QC record removed and order moved to Pending.",
+        message:
+          "Last inspection record deleted. QC record removed and order moved to Pending.",
         qc_deleted: true,
         data: null,
       });

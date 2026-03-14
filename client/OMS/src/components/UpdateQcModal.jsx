@@ -88,6 +88,32 @@ const getUtcDayOffsetFromToday = (isoDateValue) => {
   return Math.round((todayUtc - targetUtc) / oneDayMs);
 };
 
+const UPDATE_QC_PAST_DAYS_OVERRIDE_BY_USER = Object.freeze({
+  "6993ff47473290fa1cf76b65": 3,
+});
+
+const getUpdateQcPastDaysLimit = (role = "", userId = "") => {
+  const normalizedUserId = String(userId || "").trim();
+  const override = UPDATE_QC_PAST_DAYS_OVERRIDE_BY_USER[normalizedUserId];
+  if (Number.isInteger(override) && override >= 0) {
+    return override;
+  }
+
+  const normalizedRole = String(role || "").trim().toLowerCase();
+  if (normalizedRole === "manager") return 2;
+  if (normalizedRole === "qc") return 1;
+  return 0;
+};
+
+const buildUpdateQcPastDaysMessage = (role = "", daysBack = 0) => {
+  const normalizedRole = String(role || "").trim().toLowerCase();
+  const actorLabel = normalizedRole === "manager" ? "Manager" : "QC";
+  const safeDaysBack =
+    Number.isInteger(daysBack) && daysBack >= 0 ? daysBack : 0;
+  const dayLabel = safeDaysBack === 1 ? "day" : "days";
+  return `${actorLabel} can update QC only for today and previous ${safeDaysBack} ${dayLabel}.`;
+};
+
 const PREFERRED_BARCODE_FORMATS = [
   "code_128",
   "ean_13",
@@ -106,9 +132,13 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const canManageLabels = ["admin", "manager"].includes(user?.role);
   const isManager = normalizedRole === "manager";
   const todayIso = toLocalIsoDate(new Date());
-  const managerMinAllowedDateIso = (() => {
+  const updateQcPastDaysLimit = getUpdateQcPastDaysLimit(
+    normalizedRole,
+    currentUserId,
+  );
+  const updateQcMinAllowedDateIso = (() => {
     const minDate = new Date();
-    minDate.setDate(minDate.getDate() - 2);
+    minDate.setDate(minDate.getDate() - updateQcPastDaysLimit);
     return toLocalIsoDate(minDate);
   })();
 
@@ -864,17 +894,21 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       isManager &&
       lastInspectedDateIso &&
       (
-        lastInspectedDateIso < managerMinAllowedDateIso
+        lastInspectedDateIso < updateQcMinAllowedDateIso
         || lastInspectedDateIso > todayIso
       )
     ) {
-      setError("Manager can update QC only for today and previous 2 days.");
+      setError(buildUpdateQcPastDaysMessage(normalizedRole, updateQcPastDaysLimit));
       return;
     }
     if (isQcUser && lastInspectedDateIso) {
       const qcDateOffset = getUtcDayOffsetFromToday(lastInspectedDateIso);
-      if (qcDateOffset === null || qcDateOffset < 0 || qcDateOffset > 1) {
-        setError("QC can update only for today and previous 1 day.");
+      if (
+        qcDateOffset === null
+        || qcDateOffset < 0
+        || qcDateOffset > updateQcPastDaysLimit
+      ) {
+        setError(buildUpdateQcPastDaysMessage(normalizedRole, updateQcPastDaysLimit));
         return;
       }
       if (qcDateOffset === 1) {
@@ -902,13 +936,46 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     }
 
     const hasTotalCbmValue = String(form.CBM || "").trim() !== "";
-    const hasCbmTopValue = String(form.CBM_top || "").trim() !== "";
-    const hasCbmBottomValue = String(form.CBM_bottom || "").trim() !== "";
+    const existingCbmTopValue = Number(qc?.cbm?.top || 0);
+    const existingCbmBottomValue = Number(qc?.cbm?.bottom || 0);
+    const currentCbmTopValue = cbmTop.hasValue ? Number(cbmTop.value) : existingCbmTopValue;
+    const currentCbmBottomValue = cbmBottom.hasValue
+      ? Number(cbmBottom.value)
+      : existingCbmBottomValue;
+    const existingBoxTopLbhForLabels =
+      existingItemMaster?.inspected_box_top_LBH
+      || existingItemMaster?.inspected_top_LBH
+      || {};
+    const existingBoxBottomLbhForLabels =
+      existingItemMaster?.inspected_box_bottom_LBH
+      || existingItemMaster?.inspected_bottom_LBH
+      || {};
+    const existingItemTopLbhForLabels =
+      existingItemMaster?.inspected_item_top_LBH
+      || {};
+    const existingItemBottomLbhForLabels =
+      existingItemMaster?.inspected_item_bottom_LBH
+      || {};
+    const currentBoxTopLbhForLabels = inspectedTopLbh.value || existingBoxTopLbhForLabels;
+    const currentBoxBottomLbhForLabels = inspectedBottomLbh.value || existingBoxBottomLbhForLabels;
+    const currentItemTopLbhForLabels =
+      inspectedItemTopLbh.value || existingItemTopLbhForLabels;
+    const currentItemBottomLbhForLabels =
+      inspectedItemBottomLbh.value || existingItemBottomLbhForLabels;
+    const hasTopBottomBoxLbhForLabels =
+      hasCompletePositiveLbh(currentBoxTopLbhForLabels)
+      && hasCompletePositiveLbh(currentBoxBottomLbhForLabels);
+    const hasTopBottomItemLbhForLabels =
+      hasCompletePositiveLbh(currentItemTopLbhForLabels)
+      && hasCompletePositiveLbh(currentItemBottomLbhForLabels);
     const hasTopBottomLbh =
-      (inspectedTopLbh.hasAnyInput && inspectedBottomLbh.hasAnyInput)
-      || (inspectedItemTopLbh.hasAnyInput && inspectedItemBottomLbh.hasAnyInput);
+      hasTopBottomBoxLbhForLabels || hasTopBottomItemLbhForLabels;
+    const hasTopBottomCbmForLabels =
+      !hasTotalCbmValue
+      && currentCbmTopValue > 0
+      && currentCbmBottomValue > 0;
     const hasSplitTopBottomForLabels =
-      !hasTotalCbmValue && ((hasCbmTopValue && hasCbmBottomValue) || hasTopBottomLbh);
+      hasTopBottomCbmForLabels || hasTopBottomLbh;
 
     const isVisitUpdate = hasQuantityUpdate || hasLabelUpdate;
     if (isVisitUpdate && !selectedInspectorId) {

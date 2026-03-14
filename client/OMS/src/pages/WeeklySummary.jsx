@@ -41,6 +41,10 @@ const toReportQuantity = (value) => {
 };
 
 const isCompletelyPendingItem = (item) => {
+  if (Boolean(item?.goods_not_ready)) {
+    return false;
+  }
+
   const totalOrderQuantity = toReportQuantity(item?.total_order_quantity);
   const quantityPassed = toReportQuantity(item?.quantity_passed);
   const pending = toReportQuantity(item?.pending);
@@ -107,6 +111,9 @@ const buildVendorDisplayRows = (items = []) => {
         totalOrderQuantity: toReportQuantity(item?.total_order_quantity),
         quantityPassed: toReportQuantity(item?.quantity_passed),
         pending: toReportQuantity(item?.pending),
+        goodsNotReady: Boolean(item?.goods_not_ready),
+        goodsNotReadyReason: String(item?.goods_not_ready_reason || "").trim(),
+        goodsNotReadyInspectionDate: String(item?.goods_not_ready_inspection_date || "").trim(),
         packedSummary: false,
       }));
     });
@@ -398,7 +405,7 @@ const WeeklySummary = () => {
                 <div>
                   <h3 className="h5 mb-1">Weekly Order Summary</h3>
                   <div className="text-secondary small">
-                    {filters.period_label}: {formatDateDDMMYYYY(filters.from_date)} - {formatDateDDMMYYYY(filters.to_date)}
+                    {formatDateDDMMYYYY(filters.from_date)} - {formatDateDDMMYYYY(filters.to_date)}
                   </div>
                 </div>
                 {brandLogoSrc ? (
@@ -454,13 +461,40 @@ const WeeklySummary = () => {
                           {vendorDisplayRows.map((row) => (
                             <tr
                               key={`${vendorKey}-${row.key}`}
-                              className={row.packedSummary ? "weekly-summary-packed-row" : ""}
+                              className={
+                                row.goodsNotReady
+                                  ? "weekly-summary-warning-row"
+                                  : row.packedSummary
+                                    ? "weekly-summary-packed-row"
+                                    : ""
+                              }
                             >
                               <td>{row.po || ""}</td>
-                              <td>{row.itemLabel || "N/A"}</td>
-                              <td>{row.totalOrderQuantity ?? 0}</td>
-                              <td>{row.quantityPassed ?? 0}</td>
-                              <td>{row.pending ?? 0}</td>
+                              <td>
+                                <div>{row.itemLabel || "N/A"}</div>
+                                {row.goodsNotReady ? (
+                                  <div className="small fw-semibold">Goods Not Ready</div>
+                                ) : null}
+                              </td>
+                              {row.goodsNotReady ? (
+                                <td colSpan="3">
+                                  <div className="fw-semibold">
+                                    {row.goodsNotReadyReason || "Reason not provided"}
+                                  </div>
+                                  <div className="small">
+                                    Inspection Date:{" "}
+                                    {formatDateDDMMYYYY(row.goodsNotReadyInspectionDate)
+                                      || row.goodsNotReadyInspectionDate
+                                      || "N/A"}
+                                  </div>
+                                </td>
+                              ) : (
+                                <>
+                                  <td>{row.totalOrderQuantity ?? 0}</td>
+                                  <td>{row.quantityPassed ?? 0}</td>
+                                  <td>{row.pending ?? 0}</td>
+                                </>
+                              )}
                             </tr>
                           ))}
                         </tbody>

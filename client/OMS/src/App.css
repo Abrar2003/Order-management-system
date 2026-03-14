@@ -551,6 +551,13 @@
   font-weight: 600;
 }
 
+.weekly-summary-warning-row > * {
+  background: #fff3cd !important;
+  color: #7c2d12;
+  font-weight: 600;
+  vertical-align: top;
+}
+
 .auth-card {
   max-width: 440px;
 }
