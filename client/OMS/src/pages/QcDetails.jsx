@@ -823,7 +823,7 @@ const QcDetails = () => {
       {showUpdateModal && (
         <UpdateQcModal
           qc={qc}
-          isAdmin={isAdmin}
+          isAdmin={isOnlyAdmin}
           onClose={() => setShowUpdateModal(false)}
           onUpdated={() => {
             setShowUpdateModal(false);

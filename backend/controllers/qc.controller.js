@@ -2005,6 +2005,13 @@ exports.updateQC = async (req, res) => {
       normalizedRole,
       currentUserId,
     );
+    const adminRewriteLatestRecord =
+      isAdmin &&
+      (req.body?.admin_rewrite_latest_record === true ||
+        String(req.body?.admin_rewrite_latest_record || "")
+          .trim()
+          .toLowerCase() === "true");
+    const allowAdminRewrite = adminRewriteLatestRecord;
     const isInspectionDone = qc?.order?.status === "Inspection Done";
 
     if (!hasElevatedAccess && isInspectionDone) {
@@ -2300,7 +2307,7 @@ exports.updateQC = async (req, res) => {
       });
     }
 
-    if (hasInspectedLbhUpdate) {
+    if (hasInspectedLbhUpdate && !allowAdminRewrite) {
       const assertWriteOnceLbh = (incomingValue, existingValue, fieldName) => {
         if (!incomingValue) return;
         if (
@@ -2345,7 +2352,7 @@ exports.updateQC = async (req, res) => {
       );
     }
 
-    if (hasInspectedWeightUpdate) {
+    if (hasInspectedWeightUpdate && !allowAdminRewrite) {
       const existingInspectedNetWeight = toNonNegativeNumber(
         itemDocForInspectedLbhUpdate?.inspected_weight?.net,
         0,
@@ -2417,7 +2424,7 @@ exports.updateQC = async (req, res) => {
       hasCompletePositiveLbh(effectiveInspectedTopLbh) ||
       hasCompletePositiveLbh(effectiveInspectedBottomLbh);
 
-    if (hasCbmUpdate && cbmLockedByLbh) {
+    if (hasCbmUpdate && cbmLockedByLbh && !allowAdminRewrite) {
       return res.status(400).json({
         message:
           "CBM fields are locked because inspected LBH is present. Update LBH instead.",
@@ -2475,7 +2482,7 @@ exports.updateQC = async (req, res) => {
       ──────────────────────── */
 
     if (barcode !== undefined) {
-      if (!isAdmin && qc.barcode > 0 && Number(barcode) !== qc.barcode) {
+      if (!allowAdminRewrite && !isAdmin && qc.barcode > 0 && Number(barcode) !== qc.barcode) {
         return res
           .status(400)
           .json({ message: "barcode can only be set once" });
@@ -2491,6 +2498,10 @@ exports.updateQC = async (req, res) => {
       if (value === undefined) return;
       if (typeof value !== "boolean") {
         throw new Error(`${name} must be boolean`);
+      }
+      if (allowAdminRewrite) {
+        qc[field] = value;
+        return;
       }
       if (qc[field] && value === false) {
         throw new Error(`${name} can only be set once`);
@@ -2539,6 +2550,47 @@ exports.updateQC = async (req, res) => {
       );
     const hasLabelsPayload =
       (Array.isArray(labels) && labels.length > 0) || hasLabelRangePayload;
+
+    const buildLabelsFromRanges = (ranges = []) => {
+      const normalizedRanges = [];
+      const generatedLabels = [];
+
+      for (let i = 0; i < ranges.length; i++) {
+        const range = ranges[i] || {};
+        const hasStart = String(range.start ?? "").trim() !== "";
+        const hasEnd = String(range.end ?? "").trim() !== "";
+
+        if (!hasStart && !hasEnd) continue;
+        if (!hasStart || !hasEnd) {
+          throw new Error(
+            `Both start and end are required for label range ${i + 1}`,
+          );
+        }
+
+        const start = Number(range.start);
+        const end = Number(range.end);
+        if (!Number.isInteger(start) || !Number.isInteger(end)) {
+          throw new Error(`Label range ${i + 1} must contain integer values`);
+        }
+        if (start < 0 || end < 0) {
+          throw new Error(
+            `Label range ${i + 1} must contain non-negative values`,
+          );
+        }
+        if (start > end) {
+          throw new Error(
+            `Start cannot be greater than end in label range ${i + 1}`,
+          );
+        }
+
+        normalizedRanges.push({ start, end });
+        for (let label = start; label <= end; label++) {
+          generatedLabels.push(label);
+        }
+      }
+
+      return { generatedLabels, normalizedRanges };
+    };
 
     // If user is updating passed quantity or labels, they must provide checked in same visit
     if (
@@ -2622,8 +2674,23 @@ exports.updateQC = async (req, res) => {
       });
     }
 
-   const inspectedQuantityForLabels = Math.max(0, nextChecked);
-const maxLabelsAllowed = inspectedQuantityForLabels * 2;
+    const inspectedQuantityForLabels = Math.max(0, nextChecked);
+    const hasTopBottomBoxLbhForLabels =
+      hasCompletePositiveLbh(effectiveInspectedTopLbh) &&
+      hasCompletePositiveLbh(effectiveInspectedBottomLbh);
+    const hasTopBottomItemLbhForLabels =
+      hasCompletePositiveLbh(effectiveInspectedItemTopLbh) &&
+      hasCompletePositiveLbh(effectiveInspectedItemBottomLbh);
+    const hasTopBottomLbhForLabels =
+      hasTopBottomBoxLbhForLabels || hasTopBottomItemLbhForLabels;
+    const hasTopBottomCbmForLabels =
+      toNonNegativeNumber(qc?.cbm?.top, 0) > 0 &&
+      toNonNegativeNumber(qc?.cbm?.bottom, 0) > 0;
+    const hasTopBottomCapacityBoost =
+      hasTopBottomCbmForLabels || hasTopBottomLbhForLabels;
+    const maxLabelsAllowed = hasTopBottomCapacityBoost
+      ? inspectedQuantityForLabels * 2
+      : inspectedQuantityForLabels;
 
     qc.quantities.vendor_provision = nextVendorProvision;
     qc.quantities.qc_checked = nextChecked;
@@ -2634,47 +2701,6 @@ const maxLabelsAllowed = inspectedQuantityForLabels * 2;
     /* ────────────────────────
          🏷️ LABELS (UNCHANGED LOGIC)
       ──────────────────────── */
-
-    const buildLabelsFromRanges = (ranges = []) => {
-      const normalizedRanges = [];
-      const generatedLabels = [];
-
-      for (let i = 0; i < ranges.length; i++) {
-        const range = ranges[i] || {};
-        const hasStart = String(range.start ?? "").trim() !== "";
-        const hasEnd = String(range.end ?? "").trim() !== "";
-
-        if (!hasStart && !hasEnd) continue;
-        if (!hasStart || !hasEnd) {
-          throw new Error(
-            `Both start and end are required for label range ${i + 1}`,
-          );
-        }
-
-        const start = Number(range.start);
-        const end = Number(range.end);
-        if (!Number.isInteger(start) || !Number.isInteger(end)) {
-          throw new Error(`Label range ${i + 1} must contain integer values`);
-        }
-        if (start < 0 || end < 0) {
-          throw new Error(
-            `Label range ${i + 1} must contain non-negative values`,
-          );
-        }
-        if (start > end) {
-          throw new Error(
-            `Start cannot be greater than end in label range ${i + 1}`,
-          );
-        }
-
-        normalizedRanges.push({ start, end });
-        for (let label = start; label <= end; label++) {
-          generatedLabels.push(label);
-        }
-      }
-
-      return { generatedLabels, normalizedRanges };
-    };
 
     let labelsAddedThisVisit = [];
     let labelRangesUsedThisVisit = [];
@@ -2770,7 +2796,9 @@ const maxLabelsAllowed = inspectedQuantityForLabels * 2;
       labelsAddedThisVisit = incomingNew;
     }
 
-    if (remarks) qc.remarks = remarks;
+    if (remarks !== undefined) {
+      qc.remarks = String(remarks || "");
+    }
 
     /* ────────────────────────
          🧾 CREATE INSPECTION RECORD (NEW)
@@ -2790,11 +2818,14 @@ const maxLabelsAllowed = inspectedQuantityForLabels * 2;
       : addPassed;
 
     const shouldUpdateInspectionRecord =
-      isVisitUpdate ||
-      hasCbmUpdate ||
-      (last_inspected_date !== undefined &&
-        String(last_inspected_date).trim() !== "") ||
-      String(remarks || "").trim() !== "";
+      !allowAdminRewrite &&
+      (
+        isVisitUpdate ||
+        hasCbmUpdate ||
+        (last_inspected_date !== undefined &&
+          String(last_inspected_date).trim() !== "") ||
+        remarks !== undefined
+      );
 
     if (shouldUpdateInspectionRecord) {
       const inspectionInspectorId = qc.inspector?._id
@@ -4509,6 +4540,47 @@ exports.editInspectionRecords = async (req, res) => {
       return parsed;
     };
 
+    const buildLabelsFromRanges = (ranges = []) => {
+      const normalizedRanges = [];
+      const generatedLabels = [];
+
+      for (let i = 0; i < ranges.length; i++) {
+        const range = ranges[i] || {};
+        const hasStart = String(range.start ?? "").trim() !== "";
+        const hasEnd = String(range.end ?? "").trim() !== "";
+
+        if (!hasStart && !hasEnd) continue;
+        if (!hasStart || !hasEnd) {
+          throw new Error(
+            `Both start and end are required for label range ${i + 1}`,
+          );
+        }
+
+        const start = Number(range.start);
+        const end = Number(range.end);
+        if (!Number.isInteger(start) || !Number.isInteger(end)) {
+          throw new Error(`Label range ${i + 1} must contain integer values`);
+        }
+        if (start < 0 || end < 0) {
+          throw new Error(
+            `Label range ${i + 1} must contain non-negative values`,
+          );
+        }
+        if (start > end) {
+          throw new Error(
+            `Start cannot be greater than end in label range ${i + 1}`,
+          );
+        }
+
+        normalizedRanges.push({ start, end });
+        for (let label = start; label <= end; label++) {
+          generatedLabels.push(label);
+        }
+      }
+
+      return { generatedLabels, normalizedRanges };
+    };
+
     for (const row of payloadRecords) {
       const recordId = String(row?._id || row?.id || "").trim();
       if (!recordId || !mongoose.Types.ObjectId.isValid(recordId)) {
@@ -4573,6 +4645,46 @@ exports.editInspectionRecords = async (req, res) => {
           ? String(cbmInput.total ?? "0")
           : String(record?.cbm?.total ?? "0");
 
+      const hasLabelRangesField = Array.isArray(row?.label_ranges);
+      const labelsFieldInput = Array.isArray(row?.labels_added)
+        ? row.labels_added
+        : Array.isArray(row?.labels)
+          ? row.labels
+          : null;
+      const hasLabelsField = Array.isArray(labelsFieldInput);
+      let nextLabelRanges = Array.isArray(record?.label_ranges)
+        ? record.label_ranges
+        : [];
+      let nextLabelsAdded = normalizeLabels(
+        Array.isArray(record?.labels_added) ? record.labels_added : [],
+      );
+
+      if (hasLabelRangesField || hasLabelsField) {
+        let generatedFromRanges = [];
+        let normalizedRanges = [];
+        if (hasLabelRangesField) {
+          const rangeResult = buildLabelsFromRanges(row?.label_ranges || []);
+          generatedFromRanges = rangeResult.generatedLabels;
+          normalizedRanges = rangeResult.normalizedRanges;
+        }
+
+        if (hasLabelsField) {
+          const parsedLabels = labelsFieldInput.map(Number);
+          if (
+            parsedLabels.some(
+              (label) => !Number.isInteger(label) || label < 0,
+            )
+          ) {
+            throw new Error("Labels added must be non-negative integers");
+          }
+          nextLabelsAdded = normalizeLabels(parsedLabels);
+        } else {
+          nextLabelsAdded = normalizeLabels(generatedFromRanges);
+        }
+
+        nextLabelRanges = hasLabelRangesField ? normalizedRanges : [];
+      }
+
       const remarks =
         row?.remarks !== undefined
           ? String(row.remarks || "")
@@ -4594,6 +4706,8 @@ exports.editInspectionRecords = async (req, res) => {
         bottom: cbmBottom,
         total: cbmTotal,
       };
+      record.label_ranges = nextLabelRanges;
+      record.labels_added = nextLabelsAdded;
       record.remarks = remarks;
     }
 

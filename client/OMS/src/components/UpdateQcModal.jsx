@@ -88,6 +88,91 @@ const getUtcDayOffsetFromToday = (isoDateValue) => {
   return Math.round((todayUtc - targetUtc) / oneDayMs);
 };
 
+const toSortableTimestamp = (value) => {
+  const isoDate = toISODateString(value);
+  if (isoDate) {
+    const parsed = new Date(`${isoDate}T00:00:00Z`);
+    return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+};
+
+const normalizeLabels = (labels = []) => {
+  if (!Array.isArray(labels)) return [];
+  const numericLabels = labels
+    .map((label) => Number(label))
+    .filter((label) => Number.isInteger(label) && label >= 0);
+  return [...new Set(numericLabels)].sort((a, b) => a - b);
+};
+
+const buildLabelRangesFromLabels = (labels = []) => {
+  const normalizedLabels = normalizeLabels(labels);
+  if (normalizedLabels.length === 0) return [];
+
+  const ranges = [];
+  let start = normalizedLabels[0];
+  let end = normalizedLabels[0];
+
+  for (let index = 1; index < normalizedLabels.length; index += 1) {
+    const label = normalizedLabels[index];
+    if (label === end + 1) {
+      end = label;
+      continue;
+    }
+
+    ranges.push({ start: String(start), end: String(end) });
+    start = label;
+    end = label;
+  }
+
+  ranges.push({ start: String(start), end: String(end) });
+  return ranges;
+};
+
+const getInitialLabelRanges = (record) => {
+  const existingRanges = Array.isArray(record?.label_ranges)
+    ? record.label_ranges
+        .map((range) => ({
+          start: String(range?.start ?? "").trim(),
+          end: String(range?.end ?? "").trim(),
+        }))
+        .filter((range) => range.start !== "" || range.end !== "")
+    : [];
+
+  if (existingRanges.length > 0) return existingRanges;
+
+  const rangesFromLabels = buildLabelRangesFromLabels(record?.labels_added);
+  return rangesFromLabels.length > 0 ? rangesFromLabels : [createEmptyLabelRange()];
+};
+
+const getLatestInspectionRecord = (qc = {}) =>
+  (Array.isArray(qc?.inspection_record) ? [...qc.inspection_record] : [])
+    .sort((left, right) => {
+      const leftTime = Math.max(
+        toSortableTimestamp(left?.inspection_date),
+        toSortableTimestamp(left?.createdAt),
+      );
+      const rightTime = Math.max(
+        toSortableTimestamp(right?.inspection_date),
+        toSortableTimestamp(right?.createdAt),
+      );
+      return rightTime - leftTime;
+    })[0] || null;
+
+const toQuantityInputValue = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return "";
+  return String(parsed);
+};
+
+const computeAqlSampleQuantity = (quantity) => {
+  const parsed = Number(quantity);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.max(1, Math.ceil(parsed * 0.1));
+};
+
 const UPDATE_QC_PAST_DAYS_OVERRIDE_BY_USER = Object.freeze({
   "6993ff47473290fa1cf76b65": 3,
 });
@@ -128,9 +213,12 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const user = getUserFromToken();
   const currentUserId = String(user?.id || user?._id || "").trim();
   const normalizedRole = String(user?.role || "").trim().toLowerCase();
+  const isActualAdmin = normalizedRole === "admin";
   const isQcUser = normalizedRole === "qc";
-  const canManageLabels = ["admin", "manager"].includes(user?.role);
   const isManager = normalizedRole === "manager";
+  const canRewriteLatestInspectionRecord = isActualAdmin || Boolean(isAdmin);
+  const hasElevatedAccess = canRewriteLatestInspectionRecord || isManager;
+  const canManageLabels = ["admin", "manager"].includes(normalizedRole);
   const todayIso = toLocalIsoDate(new Date());
   const updateQcPastDaysLimit = getUpdateQcPastDaysLimit(
     normalizedRole,
@@ -191,7 +279,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const barcodeDetectorRef = useRef(null);
   const barcodeReaderRef = useRef(null);
   const barcodeReaderControlsRef = useRef(null);
-  const lockBarcodeField = qc?.barcode > 0 && !isAdmin;
+  const lockBarcodeField = qc?.barcode > 0 && !canRewriteLatestInspectionRecord;
+  const latestInspectionRecord = getLatestInspectionRecord(qc);
 
   useEffect(() => {
     if (isQcUser) {
@@ -214,7 +303,19 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   useEffect(() => {
     if (!qc) return;
     const assignedInspectorId = String(qc?.inspector?._id || qc?.inspector || "");
-    const defaultInspectorId = assignedInspectorId;
+    const adminRecord = canRewriteLatestInspectionRecord ? latestInspectionRecord : null;
+    const defaultInspectorId = String(
+      adminRecord?.inspector?._id ||
+        adminRecord?.inspector ||
+        assignedInspectorId,
+    );
+    const initialLabelRanges = adminRecord
+      ? getInitialLabelRanges(adminRecord)
+      : [createEmptyLabelRange()];
+    const initialRemarks =
+      adminRecord?.remarks !== undefined
+        ? String(adminRecord.remarks || "")
+        : String(qc?.remarks || "");
     const initialCbmTop =
       qc?.cbm?.top && qc.cbm.top !== "0" ? String(qc.cbm.top) : "";
     const initialCbmBottom =
@@ -245,15 +346,17 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
     setForm({
       inspector: defaultInspectorId,
-      qc_checked: "",
-      qc_passed: "",
-      offeredQuantity: "",
+      qc_checked: adminRecord ? toQuantityInputValue(adminRecord?.checked) : "",
+      qc_passed: adminRecord ? toQuantityInputValue(adminRecord?.passed) : "",
+      offeredQuantity: adminRecord
+        ? toQuantityInputValue(adminRecord?.vendor_offered)
+        : "",
       barcode: qc.barcode > 0 ? String(qc.barcode) : "",
-      packed_size: "",
-      finishing: "",
-      branding: "",
-      labelRanges: [createEmptyLabelRange()],
-      remarks: "",
+      packed_size: Boolean(qc?.packed_size),
+      finishing: Boolean(qc?.finishing),
+      branding: Boolean(qc?.branding),
+      labelRanges: initialLabelRanges,
+      remarks: canRewriteLatestInspectionRecord ? initialRemarks : "",
       CBM: hasTopOrBottomCbm ? "" : initialCbmTotal,
       CBM_top: initialCbmTop,
       CBM_bottom: initialCbmBottom,
@@ -277,9 +380,12 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       inspected_item_bottom_L: strictInspectedItemBottomLbh.L,
       inspected_item_bottom_B: strictInspectedItemBottomLbh.B,
       inspected_item_bottom_H: strictInspectedItemBottomLbh.H,
-      last_inspected_date: toDDMMYYYYInputValue(qc.last_inspected_date, ""),
+      last_inspected_date: toDDMMYYYYInputValue(
+        adminRecord?.inspection_date || qc.last_inspected_date,
+        "",
+      ),
     });
-  }, [qc]);
+  }, [qc, canRewriteLatestInspectionRecord, latestInspectionRecord]);
 
   useEffect(() => {
     if (lockBarcodeField && barcodeScannerOpen) {
@@ -678,20 +784,29 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     }
     const labels = parsedLabelRangeData.labels;
     const normalizedLabelRanges = parsedLabelRangeData.ranges;
-    const labelsForUpdate = [...new Set(labels)];
-
-    const hasQuantityUpdate =
-      form.qc_checked !== "" ||
-      form.qc_passed !== "" ||
-      form.offeredQuantity !== "";
+    const labelsForUpdate = normalizeLabels(labels);
+    const isAdminRewriteMode =
+      canRewriteLatestInspectionRecord && Boolean(latestInspectionRecord?._id);
+    const hasQuantityUpdate = isAdminRewriteMode
+      ? qcChecked > 0 || qcPassed > 0 || offeredQuantity > 0
+      : (
+        form.qc_checked !== "" ||
+        form.qc_passed !== "" ||
+        form.offeredQuantity !== ""
+      );
     const hasLabelUpdate =
       labelsForUpdate.length > 0 || normalizedLabelRanges.length > 0;
     const selectedInspectorId = String(form.inspector || "").trim();
     const currentInspectorId = String(
       qc?.inspector?._id || qc?.inspector || "",
     ).trim();
+    const normalizedRemarks = String(form.remarks || "").trim();
+    const clientDemandQuantity = Number(qc?.quantities?.client_demand || 0) || 0;
+    const requestType = String(qc?.request_type || "").trim().toUpperCase();
+    const isAqlRequest = requestType === "AQL";
+    const aqlSampleQuantity = computeAqlSampleQuantity(clientDemandQuantity);
 
-    if ((hasQuantityUpdate || hasLabelUpdate) && qcChecked <= 0) {
+    if ((qcPassed > 0 || hasLabelUpdate) && qcChecked <= 0) {
       setError("QC checked must be greater than 0 for updates.");
       return;
     }
@@ -702,29 +817,31 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     }
 
     const existingItemMaster = qc?.item_master || {};
-    const lockInspectedItemLbh = hasCompletePositiveLbh(
+    const lockInspectedItemLbh = !canRewriteLatestInspectionRecord && hasCompletePositiveLbh(
       existingItemMaster?.inspected_item_LBH,
     );
-    const lockInspectedBoxLbh = hasCompletePositiveLbh(
+    const lockInspectedBoxLbh = !canRewriteLatestInspectionRecord && hasCompletePositiveLbh(
       existingItemMaster?.inspected_box_LBH,
     );
-    const lockInspectedBoxTopLbh = hasCompletePositiveLbh(
+    const lockInspectedBoxTopLbh = !canRewriteLatestInspectionRecord && hasCompletePositiveLbh(
       existingItemMaster?.inspected_box_top_LBH
       || existingItemMaster?.inspected_top_LBH,
     );
-    const lockInspectedBoxBottomLbh = hasCompletePositiveLbh(
+    const lockInspectedBoxBottomLbh = !canRewriteLatestInspectionRecord && hasCompletePositiveLbh(
       existingItemMaster?.inspected_box_bottom_LBH
       || existingItemMaster?.inspected_bottom_LBH,
     );
-    const lockInspectedItemTopLbh = hasCompletePositiveLbh(
+    const lockInspectedItemTopLbh = !canRewriteLatestInspectionRecord && hasCompletePositiveLbh(
       existingItemMaster?.inspected_item_top_LBH,
     );
-    const lockInspectedItemBottomLbh = hasCompletePositiveLbh(
+    const lockInspectedItemBottomLbh = !canRewriteLatestInspectionRecord && hasCompletePositiveLbh(
       existingItemMaster?.inspected_item_bottom_LBH,
     );
     const lockInspectedNetWeight =
+      !canRewriteLatestInspectionRecord &&
       Number(existingItemMaster?.inspected_weight?.net || 0) > 0;
     const lockInspectedGrossWeight =
+      !canRewriteLatestInspectionRecord &&
       Number(existingItemMaster?.inspected_weight?.gross || 0) > 0;
 
     const parseLbhGroup = (groupName, values) => {
@@ -863,7 +980,9 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
     const barcodeValue = form.barcode.trim();
     const parseOptionalCbm = (value, label) => {
-      if (cbmLockedByLbh) return { hasValue: false, value: null };
+      if (cbmLockedByLbh && !canRewriteLatestInspectionRecord) {
+        return { hasValue: false, value: null };
+      }
       const raw = value.trim();
       if (raw === "") return { hasValue: false, value: null };
       const parsed = Number(raw);
@@ -978,12 +1097,12 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       hasTopBottomCbmForLabels || hasTopBottomLbh;
 
     const isVisitUpdate = hasQuantityUpdate || hasLabelUpdate;
-    if (isVisitUpdate && !selectedInspectorId) {
+    if ((isVisitUpdate || isAdminRewriteMode) && !selectedInspectorId) {
       setError("Inspector is required for inspection updates.");
       return;
     }
 
-    if (isVisitUpdate && !lastInspectedDateValue) {
+    if ((isVisitUpdate || isAdminRewriteMode) && !lastInspectedDateValue) {
       setError("Last inspected date is required.");
       return;
     }
@@ -997,30 +1116,270 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       setError("Barcode must be a positive integer.");
       return;
     }
+    const hasTotalCbmInput = String(form.CBM || "").trim() !== "";
+    const hasTopOrBottomInput =
+      String(form.CBM_top || "").trim() !== "" ||
+      String(form.CBM_bottom || "").trim() !== "";
+
+    const buildQcPayload = () => {
+      const payload = isAdminRewriteMode
+        ? {
+            admin_rewrite_latest_record: true,
+            remarks: normalizedRemarks,
+            packed_size: Boolean(form.packed_size),
+            finishing: Boolean(form.finishing),
+            branding: Boolean(form.branding),
+            last_inspected_date: lastInspectedDateIso,
+          }
+        : {
+            remarks: normalizedRemarks || undefined,
+          };
+
+      if (!isAdminRewriteMode) {
+        if (form.qc_checked !== "") payload.qc_checked = qcChecked;
+        if (form.qc_passed !== "") payload.qc_passed = qcPassed;
+        if (form.offeredQuantity !== "") payload.vendor_provision = offeredQuantity;
+        if (labelsForUpdate.length > 0) {
+          payload.labels = labelsForUpdate;
+        }
+        if (normalizedLabelRanges.length > 0) {
+          payload.label_ranges = normalizedLabelRanges;
+        }
+      }
+
+      if (
+        selectedInspectorId &&
+        (isAdminRewriteMode || selectedInspectorId !== currentInspectorId)
+      ) {
+        payload.inspector = selectedInspectorId;
+      }
+
+      if (
+        (!cbmLockedByLbh || canRewriteLatestInspectionRecord) &&
+        (isAdminRewriteMode || hasTotalCbmInput || hasTopOrBottomInput)
+      ) {
+        if (hasTotalCbmInput) {
+          payload.CBM = cbmTotal.value ?? "0";
+          payload.CBM_top = "0";
+          payload.CBM_bottom = "0";
+        } else if (hasTopOrBottomInput) {
+          payload.CBM = "0";
+          payload.CBM_top =
+            cbmTop.hasValue && cbmTop.value !== null ? cbmTop.value : "0";
+          payload.CBM_bottom =
+            cbmBottom.hasValue && cbmBottom.value !== null ? cbmBottom.value : "0";
+        } else if (isAdminRewriteMode) {
+          payload.CBM = "0";
+          payload.CBM_top = "0";
+          payload.CBM_bottom = "0";
+        }
+      }
+
+      if (isAdminRewriteMode && barcodeParsed !== null) {
+        payload.barcode = barcodeParsed;
+      } else if (!isAdminRewriteMode && barcodeParsed !== null) {
+        payload.barcode = barcodeParsed;
+      }
+
+      if (lastInspectedDateValue && !isAdminRewriteMode) {
+        payload.last_inspected_date = lastInspectedDateIso;
+      }
+
+      if (!lockInspectedItemLbh && inspectedItemLbh.hasAnyInput && inspectedItemLbh.value) {
+        payload.inspected_item_LBH = inspectedItemLbh.value;
+      }
+      if (!lockInspectedBoxLbh && inspectedBoxLbh.hasAnyInput && inspectedBoxLbh.value) {
+        payload.inspected_box_LBH = inspectedBoxLbh.value;
+      }
+      if (!lockInspectedBoxTopLbh && inspectedTopLbh.hasAnyInput && inspectedTopLbh.value) {
+        payload.inspected_box_top_LBH = inspectedTopLbh.value;
+        payload.inspected_top_LBH = inspectedTopLbh.value;
+      }
+      if (
+        !lockInspectedBoxBottomLbh &&
+        inspectedBottomLbh.hasAnyInput &&
+        inspectedBottomLbh.value
+      ) {
+        payload.inspected_box_bottom_LBH = inspectedBottomLbh.value;
+        payload.inspected_bottom_LBH = inspectedBottomLbh.value;
+      }
+      if (
+        !lockInspectedItemTopLbh &&
+        inspectedItemTopLbh.hasAnyInput &&
+        inspectedItemTopLbh.value
+      ) {
+        payload.inspected_item_top_LBH = inspectedItemTopLbh.value;
+      }
+      if (
+        !lockInspectedItemBottomLbh &&
+        inspectedItemBottomLbh.hasAnyInput &&
+        inspectedItemBottomLbh.value
+      ) {
+        payload.inspected_item_bottom_LBH = inspectedItemBottomLbh.value;
+      }
+      if (
+        (!lockInspectedNetWeight && inspectedNetWeight.hasAnyInput) ||
+        (!lockInspectedGrossWeight && inspectedGrossWeight.hasAnyInput)
+      ) {
+        payload.inspected_weight = {};
+        if (
+          !lockInspectedNetWeight &&
+          inspectedNetWeight.hasAnyInput &&
+          inspectedNetWeight.value !== null
+        ) {
+          payload.inspected_weight.net = inspectedNetWeight.value;
+        }
+        if (
+          !lockInspectedGrossWeight &&
+          inspectedGrossWeight.hasAnyInput &&
+          inspectedGrossWeight.value !== null
+        ) {
+          payload.inspected_weight.gross = inspectedGrossWeight.value;
+        }
+      }
+
+      if (!isAdminRewriteMode) {
+        if (!qc.packed_size && form.packed_size) payload.packed_size = true;
+        if (!qc.finishing && form.finishing) payload.finishing = true;
+        if (!qc.branding && form.branding) payload.branding = true;
+      }
+
+      return payload;
+    };
+
+    if (isAdminRewriteMode) {
+      const otherInspectionRecords = (Array.isArray(qc?.inspection_record)
+        ? qc.inspection_record
+        : []
+      ).filter(
+        (record) =>
+          String(record?._id || "") !== String(latestInspectionRecord?._id || ""),
+      );
+      const otherChecked = otherInspectionRecords.reduce(
+        (sum, record) => sum + (Number(record?.checked || 0) || 0),
+        0,
+      );
+      const otherPassed = otherInspectionRecords.reduce(
+        (sum, record) => sum + (Number(record?.passed || 0) || 0),
+        0,
+      );
+      const otherOffered = otherInspectionRecords.reduce(
+        (sum, record) => sum + (Number(record?.vendor_offered || 0) || 0),
+        0,
+      );
+      const otherLabels = normalizeLabels(
+        otherInspectionRecords.flatMap((record) =>
+          Array.isArray(record?.labels_added) ? record.labels_added : [],
+        ),
+      );
+      const totalOfferedAfterRewrite = otherOffered + offeredQuantity;
+      const totalCheckedAfterRewrite = otherChecked + qcChecked;
+      const totalPassedAfterRewrite = otherPassed + qcPassed;
+      const totalLabelsAfterRewrite = new Set([
+        ...otherLabels,
+        ...labelsForUpdate,
+      ]).size;
+      const maxLabelsAllowed = hasSplitTopBottomForLabels
+        ? Math.max(0, totalCheckedAfterRewrite) * 2
+        : Math.max(0, totalCheckedAfterRewrite);
+      const pendingAfterRewrite = Math.max(
+        0,
+        clientDemandQuantity - totalPassedAfterRewrite,
+      );
+      const requestedDateIso = toISODateString(
+        latestInspectionRecord?.requested_date ||
+          latestInspectionRecord?.request_date ||
+          qc?.request_date ||
+          lastInspectedDateIso,
+      );
+
+      if (!requestedDateIso) {
+        setError("Requested date is missing on the latest inspection record.");
+        return;
+      }
+
+      if (isAqlRequest && totalCheckedAfterRewrite > aqlSampleQuantity) {
+        setError(
+          `AQL checked quantity cannot exceed 10% sample (${aqlSampleQuantity}).`,
+        );
+        return;
+      }
+
+      if (totalCheckedAfterRewrite > totalOfferedAfterRewrite) {
+        setError("QC checked cannot exceed offered quantity.");
+        return;
+      }
+
+      if (totalPassedAfterRewrite > totalOfferedAfterRewrite) {
+        setError("Passed quantity cannot exceed offered quantity.");
+        return;
+      }
+
+      if (totalLabelsAfterRewrite > maxLabelsAllowed) {
+        setError(
+          hasSplitTopBottomForLabels
+            ? `Total labels cannot exceed double inspected quantity (${maxLabelsAllowed}) when top and bottom CBM/LBH are set.`
+            : `Total labels cannot exceed inspected quantity (${maxLabelsAllowed}).`,
+        );
+        return;
+      }
+
+      const qcPayload = buildQcPayload();
+
+      try {
+        setSaving(true);
+        const qcResponse = await api.patch(`/qc/update-qc/${qc._id}`, qcPayload);
+        const updatedQc = qcResponse?.data?.data || qc;
+        await api.patch(`/qc/${qc._id}/inspection-records`, {
+          records: [
+            {
+              _id: latestInspectionRecord._id,
+              requested_date: requestedDateIso,
+              inspection_date: lastInspectedDateIso,
+              inspector: selectedInspectorId,
+              vendor_requested: Number(latestInspectionRecord?.vendor_requested || 0) || 0,
+              vendor_offered: offeredQuantity,
+              checked: qcChecked,
+              passed: qcPassed,
+              pending_after: pendingAfterRewrite,
+              cbm: {
+                top: String(updatedQc?.cbm?.top ?? "0"),
+                bottom: String(updatedQc?.cbm?.bottom ?? "0"),
+                total: String(updatedQc?.cbm?.total ?? "0"),
+              },
+              label_ranges: normalizedLabelRanges,
+              labels_added: labelsForUpdate,
+              remarks: normalizedRemarks,
+            },
+          ],
+        });
+        alert("QC updated successfully.");
+        onUpdated?.();
+        onClose();
+      } catch (err) {
+        setError(err.response?.data?.message || "Failed to update QC record.");
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
 
     const nextNetOffered =
       (qc.quantities?.vendor_provision || 0) + offeredQuantity;
-
     const totalOfferedNext = nextNetOffered;
     const nextChecked = (qc.quantities?.qc_checked || 0) + qcChecked;
     const nextPassed = (qc.quantities?.qc_passed || 0) + qcPassed;
-    const existingLabelsSet = new Set(
-      (Array.isArray(qc?.labels) ? qc.labels : [])
-        .map((label) => Number(label))
-        .filter((label) => Number.isInteger(label) && label >= 0),
-    );
+    const existingLabelsSet = new Set(normalizeLabels(qc?.labels));
     const incomingNewLabels = labelsForUpdate.filter(
       (label) => !existingLabelsSet.has(label),
     );
     const totalLabelsAfterUpdate =
       existingLabelsSet.size + incomingNewLabels.length;
-
     const quantityRequestedLimit =
       qc.quantities?.quantity_requested &&
       qc.quantities.quantity_requested !== 0
         ? qc.quantities.quantity_requested
         : qc.quantities?.client_demand;
-
     const hasStartedInspection =
       (qc.quantities?.qc_checked || 0) > 0 ||
       Number(qc?.quantities?.qc_passed || 0) > 0 ||
@@ -1035,7 +1394,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
             : 0;
           return checked > 0 || passed > 0 || offered > 0 || labelsAdded > 0;
         }));
-
     const parsedPendingQuantityLimit = Number(
       qc.quantities?.pending ??
         (qc.quantities?.client_demand || 0) - (qc.quantities?.qc_passed || 0),
@@ -1043,6 +1401,13 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     const pendingQuantityLimit = Number.isFinite(parsedPendingQuantityLimit)
       ? Math.max(0, parsedPendingQuantityLimit)
       : 0;
+
+    if (isAqlRequest && nextChecked > aqlSampleQuantity) {
+      setError(
+        `AQL checked quantity cannot exceed 10% sample (${aqlSampleQuantity}).`,
+      );
+      return;
+    }
 
     if (hasStartedInspection) {
       if (offeredQuantity > pendingQuantityLimit) {
@@ -1089,100 +1454,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       return;
     }
 
-    const payload = {
-      remarks: form.remarks?.trim() ? form.remarks.trim() : undefined,
-    };
-
-    if (form.qc_checked !== "") payload.qc_checked = qcChecked;
-    if (form.qc_passed !== "") payload.qc_passed = qcPassed;
-    if (form.offeredQuantity !== "") payload.vendor_provision = offeredQuantity;
-    if (selectedInspectorId && selectedInspectorId !== currentInspectorId) {
-      payload.inspector = selectedInspectorId;
-    }
-
-    const hasTotalCbmInput = String(form.CBM || "").trim() !== "";
-    const hasTopOrBottomInput =
-      String(form.CBM_top || "").trim() !== "" ||
-      String(form.CBM_bottom || "").trim() !== "";
-
-    if (!cbmLockedByLbh) {
-      if (hasTotalCbmInput) {
-        payload.CBM = cbmTotal.value ?? "0";
-        payload.CBM_top = "0";
-        payload.CBM_bottom = "0";
-      } else if (hasTopOrBottomInput) {
-        payload.CBM = "0";
-        payload.CBM_top = cbmTop.hasValue && cbmTop.value !== null ? cbmTop.value : "0";
-        payload.CBM_bottom =
-          cbmBottom.hasValue && cbmBottom.value !== null ? cbmBottom.value : "0";
-      }
-    }
-    if (lastInspectedDateValue)
-      payload.last_inspected_date = lastInspectedDateIso;
-
-    if (barcodeParsed !== null) payload.barcode = barcodeParsed;
-    if (!qc.packed_size && form.packed_size) payload.packed_size = true;
-    if (!qc.finishing && form.finishing) payload.finishing = true;
-    if (!qc.branding && form.branding) payload.branding = true;
-
-    if (labelsForUpdate.length > 0) {
-      payload.labels = labelsForUpdate;
-    }
-    if (normalizedLabelRanges.length > 0) {
-      payload.label_ranges = normalizedLabelRanges;
-    }
-    if (!lockInspectedItemLbh && inspectedItemLbh.hasAnyInput && inspectedItemLbh.value) {
-      payload.inspected_item_LBH = inspectedItemLbh.value;
-    }
-    if (!lockInspectedBoxLbh && inspectedBoxLbh.hasAnyInput && inspectedBoxLbh.value) {
-      payload.inspected_box_LBH = inspectedBoxLbh.value;
-    }
-    if (!lockInspectedBoxTopLbh && inspectedTopLbh.hasAnyInput && inspectedTopLbh.value) {
-      payload.inspected_box_top_LBH = inspectedTopLbh.value;
-      payload.inspected_top_LBH = inspectedTopLbh.value;
-    }
-    if (
-      !lockInspectedBoxBottomLbh &&
-      inspectedBottomLbh.hasAnyInput &&
-      inspectedBottomLbh.value
-    ) {
-      payload.inspected_box_bottom_LBH = inspectedBottomLbh.value;
-      payload.inspected_bottom_LBH = inspectedBottomLbh.value;
-    }
-    if (
-      !lockInspectedItemTopLbh &&
-      inspectedItemTopLbh.hasAnyInput &&
-      inspectedItemTopLbh.value
-    ) {
-      payload.inspected_item_top_LBH = inspectedItemTopLbh.value;
-    }
-    if (
-      !lockInspectedItemBottomLbh &&
-      inspectedItemBottomLbh.hasAnyInput &&
-      inspectedItemBottomLbh.value
-    ) {
-      payload.inspected_item_bottom_LBH = inspectedItemBottomLbh.value;
-    }
-    if (
-      (!lockInspectedNetWeight && inspectedNetWeight.hasAnyInput) ||
-      (!lockInspectedGrossWeight && inspectedGrossWeight.hasAnyInput)
-    ) {
-      payload.inspected_weight = {};
-      if (
-        !lockInspectedNetWeight &&
-        inspectedNetWeight.hasAnyInput &&
-        inspectedNetWeight.value !== null
-      ) {
-        payload.inspected_weight.net = inspectedNetWeight.value;
-      }
-      if (
-        !lockInspectedGrossWeight &&
-        inspectedGrossWeight.hasAnyInput &&
-        inspectedGrossWeight.value !== null
-      ) {
-        payload.inspected_weight.gross = inspectedGrossWeight.value;
-      }
-    }
+    const payload = buildQcPayload();
 
     try {
       setSaving(true);
@@ -1209,34 +1481,36 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       || "",
   ).trim();
   const disableInspectorSelection =
-    isQcUser || (!isAdmin && (qc?.quantities?.qc_checked || 0) > 0);
+    isQcUser || (!hasElevatedAccess && (qc?.quantities?.qc_checked || 0) > 0);
   const hasTotalCbmInput = String(form.CBM || "").trim() !== "";
   const hasTopOrBottomCbmInput =
     String(form.CBM_top || "").trim() !== "" ||
     String(form.CBM_bottom || "").trim() !== "";
   const existingItemMaster = qc?.item_master || {};
-  const lockInspectedItemLbh = hasCompletePositiveLbh(
+  const lockInspectedItemLbh = !canRewriteLatestInspectionRecord && hasCompletePositiveLbh(
     existingItemMaster?.inspected_item_LBH,
   );
-  const lockInspectedBoxLbh = hasCompletePositiveLbh(
+  const lockInspectedBoxLbh = !canRewriteLatestInspectionRecord && hasCompletePositiveLbh(
     existingItemMaster?.inspected_box_LBH,
   );
-  const lockInspectedBoxTopLbh = hasCompletePositiveLbh(
+  const lockInspectedBoxTopLbh = !canRewriteLatestInspectionRecord && hasCompletePositiveLbh(
     existingItemMaster?.inspected_box_top_LBH || existingItemMaster?.inspected_top_LBH,
   );
-  const lockInspectedBoxBottomLbh = hasCompletePositiveLbh(
+  const lockInspectedBoxBottomLbh = !canRewriteLatestInspectionRecord && hasCompletePositiveLbh(
     existingItemMaster?.inspected_box_bottom_LBH || existingItemMaster?.inspected_bottom_LBH,
   );
-  const lockInspectedItemTopLbh = hasCompletePositiveLbh(
+  const lockInspectedItemTopLbh = !canRewriteLatestInspectionRecord && hasCompletePositiveLbh(
     existingItemMaster?.inspected_item_top_LBH,
   );
-  const lockInspectedItemBottomLbh = hasCompletePositiveLbh(
+  const lockInspectedItemBottomLbh = !canRewriteLatestInspectionRecord && hasCompletePositiveLbh(
     existingItemMaster?.inspected_item_bottom_LBH,
   );
   const existingInspectedWeight = existingItemMaster?.inspected_weight || {};
   const lockInspectedNetWeight =
+    !canRewriteLatestInspectionRecord &&
     Number(existingInspectedWeight?.net || 0) > 0;
   const lockInspectedGrossWeight =
+    !canRewriteLatestInspectionRecord &&
     Number(existingInspectedWeight?.gross || 0) > 0;
   const hasAnyLockedInspectedLbh = (
     lockInspectedItemLbh ||
@@ -1266,8 +1540,12 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     form.inspected_item_bottom_B,
     form.inspected_item_bottom_H,
   ]);
-  const disableCbmTotal = hasTopOrBottomCbmInput || cbmLockedByLbh;
-  const disableCbmTopBottom = hasTotalCbmInput || cbmLockedByLbh;
+  const disableCbmTotal =
+    hasTopOrBottomCbmInput ||
+    (cbmLockedByLbh && !canRewriteLatestInspectionRecord);
+  const disableCbmTopBottom =
+    hasTotalCbmInput ||
+    (cbmLockedByLbh && !canRewriteLatestInspectionRecord);
 
   return (
     <div
@@ -1326,6 +1604,12 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 </div>
               </div>
             </div>
+
+            {canRewriteLatestInspectionRecord && latestInspectionRecord && (
+              <div className="small text-secondary">
+                Admin updates rewrite the latest inspection record and sync the QC totals.
+              </div>
+            )}
 
             <div className="row g-3">
               <div className="col-md-12">
@@ -1440,7 +1724,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 />
               </div>
 
-              {cbmLockedByLbh && (
+              {cbmLockedByLbh && !canRewriteLatestInspectionRecord && (
                 <div className="col-12">
                   <div className="small text-secondary">
                     CBM fields are locked because inspected LBH is present. Update LBH to recalculate CBM.
@@ -1701,7 +1985,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   className="form-control"
                   name="last_inspected_date"
                   value={toISODateString(form.last_inspected_date)}
-                  min={isManager ? managerMinAllowedDateIso : undefined}
+                  min={isManager ? updateQcMinAllowedDateIso : undefined}
                   max={isManager ? todayIso : undefined}
                   onChange={(e) =>
                     setForm((prev) => ({
@@ -1809,7 +2093,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     name="packed_size"
                     checked={form.packed_size}
                     onChange={handleChange}
-                    disabled={qc.packed_size && !isAdmin}
+                    disabled={qc.packed_size && !canRewriteLatestInspectionRecord}
                   />
                   <label
                     htmlFor="packed_size"
@@ -1832,7 +2116,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     name="finishing"
                     checked={form.finishing}
                     onChange={handleChange}
-                    disabled={qc.finishing && !isAdmin}
+                    disabled={qc.finishing && !canRewriteLatestInspectionRecord}
                   />
                   <label
                     htmlFor="finishing"
@@ -1853,7 +2137,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     name="branding"
                     checked={form.branding}
                     onChange={handleChange}
-                    disabled={qc.branding && !isAdmin}
+                    disabled={qc.branding && !canRewriteLatestInspectionRecord}
                   />
                   <label
                     htmlFor="branding"
