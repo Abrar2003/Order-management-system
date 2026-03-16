@@ -106,7 +106,7 @@ Use the prepared nginx config:
 sudo cp /var/www/order-management-system/deploy/nginx/order-management-system.conf /etc/nginx/sites-available/order-management-system.conf
 sudo ln -s /etc/nginx/sites-available/order-management-system.conf /etc/nginx/sites-enabled/order-management-system.conf
 sudo nginx -t
-sudo systemctl reload nginx
+sudo systemctl reload nginx 
 ```
 
 If you cloned the repo somewhere other than `/var/www/order-management-system`, update the `root` path too.
@@ -154,7 +154,7 @@ Optional overrides:
 
 ```bash
 GIT_BRANCH=main bash deploy/scripts/deploy_vps.sh
-APP_DIR=/var/www/Order-management-system bash deploy/scripts/deploy_vps.sh
+APP_DIR=/var/www/order-management-system bash deploy/scripts/deploy_vps.sh
 ```
 
 ## 10. Post-Migration Operations
