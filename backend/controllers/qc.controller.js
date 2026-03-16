@@ -3760,11 +3760,22 @@ exports.getWeeklyOrderSummary = async (req, res) => {
             },
             { $sort: { inspection_date_sort_key: -1, createdAt: -1 } },
             { $limit: 1 },
+            // Lookup inspector name
+            {
+              $lookup: {
+                from: "users",
+                localField: "inspector",
+                foreignField: "_id",
+                as: "inspector_user"
+              }
+            },
+            { $addFields: { inspector_user: { $arrayElemAt: ["$inspector_user", 0] } } },
             {
               $project: {
                 inspection_date: 1,
                 goods_not_ready: 1,
                 remarks: 1,
+                inspector_name: "$inspector_user.name"
               },
             },
           ],
@@ -3798,6 +3809,7 @@ exports.getWeeklyOrderSummary = async (req, res) => {
             inspection_date: "$last_inspection.inspection_date",
             goods_not_ready: "$last_inspection.goods_not_ready",
             remarks: "$last_inspection.remarks",
+            inspector_name: "$last_inspection.inspector_name"
           },
         },
       },
@@ -3831,6 +3843,8 @@ exports.getWeeklyOrderSummary = async (req, res) => {
       goods_not_ready_inspection_date: normalizeText(
         row?.last_inspection?.inspection_date || "",
       ),
+      last_inspector_name: normalizeText(row?.last_inspection?.inspector_name || ""),
+      last_inspection_date: normalizeText(row?.last_inspection?.inspection_date || ""),
     }));
 
     const brandOptions = normalizeDistinctValues(
@@ -3862,6 +3876,8 @@ exports.getWeeklyOrderSummary = async (req, res) => {
         goods_not_ready: row.goods_not_ready,
         goods_not_ready_reason: row.goods_not_ready_reason,
         goods_not_ready_inspection_date: row.goods_not_ready_inspection_date,
+        last_inspector_name: row.last_inspector_name,
+        last_inspection_date: row.last_inspection_date,
       });
     }
 
@@ -3902,6 +3918,211 @@ exports.getWeeklyOrderSummary = async (req, res) => {
     return res
       .status(500)
       .json({ message: err.message || "Failed to fetch weekly order summary" });
+  }
+};
+
+exports.getDailyOrderSummary = async (req, res) => {
+  try {
+    const reportDate = resolveReportDate(req.query.date);
+    if (!reportDate) {
+      return res.status(400).json({ message: "Invalid date format" });
+    }
+
+    const selectedBrand = normalizeOptionalReportFilter(req.query.brand);
+    const reportDateUtc = parseIsoDateToUtcDate(reportDate);
+    const nextDateUtc = addUtcDays(reportDateUtc, 1);
+    if (!reportDateUtc || !nextDateUtc) {
+      return res.status(400).json({ message: "Invalid date format" });
+    }
+
+    const dailyRows = await Inspection.aggregate([
+      {
+        $addFields: {
+          inspection_date_value: {
+            $ifNull: [inspectionDateToDateExpression, "$createdAt"],
+          },
+        },
+      },
+      {
+        $match: {
+          inspection_date_value: {
+            $gte: reportDateUtc,
+            $lt: nextDateUtc,
+          },
+        },
+      },
+      {
+        $sort: {
+          qc: 1,
+          inspection_date_value: -1,
+          createdAt: -1,
+        },
+      },
+      {
+        $group: {
+          _id: "$qc",
+          inspection_id: { $first: "$_id" },
+          inspection_date: { $first: "$inspection_date" },
+          requested_quantity: { $first: "$vendor_requested" },
+          passed_quantity: { $first: "$passed" },
+          open_quantity: { $first: "$pending_after" },
+          goods_not_ready: { $first: "$goods_not_ready" },
+          remarks: { $first: "$remarks" },
+          inspector_id: { $first: "$inspector" },
+        },
+      },
+      {
+        $lookup: {
+          from: QC.collection.name,
+          localField: "_id",
+          foreignField: "_id",
+          as: "qc_doc",
+        },
+      },
+      { $unwind: "$qc_doc" },
+      {
+        $lookup: {
+          from: Order.collection.name,
+          let: { orderId: "$qc_doc.order" },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $eq: ["$_id", "$$orderId"] },
+              },
+            },
+            {
+              $match: ACTIVE_ORDER_MATCH,
+            },
+          ],
+          as: "order_doc",
+        },
+      },
+      { $unwind: "$order_doc" },
+      {
+        $lookup: {
+          from: "users",
+          localField: "inspector_id",
+          foreignField: "_id",
+          as: "inspector_user",
+        },
+      },
+      {
+        $addFields: {
+          inspector_user: { $arrayElemAt: ["$inspector_user", 0] },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          qc_id: "$_id",
+          inspection_id: 1,
+          order_id: {
+            $ifNull: ["$qc_doc.order_meta.order_id", "$order_doc.order_id"],
+          },
+          vendor: {
+            $ifNull: ["$qc_doc.order_meta.vendor", "$order_doc.vendor"],
+          },
+          brand: {
+            $ifNull: ["$qc_doc.order_meta.brand", "$order_doc.brand"],
+          },
+          item_code: "$qc_doc.item.item_code",
+          requested_quantity: 1,
+          passed_quantity: 1,
+          open_quantity: 1,
+          goods_not_ready: 1,
+          remarks: 1,
+          inspection_date: 1,
+          inspector_name: "$inspector_user.name",
+        },
+      },
+    ]);
+
+    const normalizedRows = dailyRows.map((row) => ({
+      qc_id: String(row?.qc_id || "").trim(),
+      inspection_id: String(row?.inspection_id || "").trim(),
+      order_id: normalizeText(row?.order_id || "") || "N/A",
+      vendor: normalizeText(row?.vendor || "") || "N/A",
+      brand: normalizeText(row?.brand || "") || "N/A",
+      item_code: normalizeText(row?.item_code || "") || "N/A",
+      requested_quantity: toNonNegativeNumber(row?.requested_quantity, 0),
+      passed_quantity: toNonNegativeNumber(row?.passed_quantity, 0),
+      open_quantity: toNonNegativeNumber(row?.open_quantity, 0),
+      goods_not_ready: Boolean(row?.goods_not_ready?.ready),
+      goods_not_ready_reason: normalizeText(
+        row?.goods_not_ready?.reason || row?.remarks || "",
+      ),
+      inspector_name: normalizeText(row?.inspector_name || ""),
+      inspection_date: normalizeText(row?.inspection_date || ""),
+    }));
+
+    const brandOptions = normalizeDistinctValues(
+      normalizedRows.map((row) => row?.brand || ""),
+    );
+
+    const filteredRows = selectedBrand
+      ? normalizedRows.filter((row) => row.brand === selectedBrand)
+      : normalizedRows;
+
+    const vendorMap = new Map();
+    for (const row of filteredRows) {
+      const vendorKey = String(row.vendor || "").toLowerCase();
+      if (!vendorMap.has(vendorKey)) {
+        vendorMap.set(vendorKey, {
+          vendor: row.vendor,
+          items: [],
+        });
+      }
+
+      const vendorEntry = vendorMap.get(vendorKey);
+      vendorEntry.items.push({
+        qc_id: row.qc_id,
+        inspection_id: row.inspection_id,
+        order_id: row.order_id,
+        item_code: row.item_code,
+        requested_quantity: row.requested_quantity,
+        passed_quantity: row.passed_quantity,
+        open_quantity: row.open_quantity,
+        goods_not_ready: row.goods_not_ready,
+        goods_not_ready_reason: row.goods_not_ready_reason,
+        inspector_name: row.inspector_name,
+        inspection_date: row.inspection_date,
+      });
+    }
+
+    const vendors = Array.from(vendorMap.values())
+      .map((entry) => ({
+        vendor: entry.vendor,
+        items: [...entry.items].sort((left, right) => {
+          const orderCompare = String(left?.order_id || "").localeCompare(
+            String(right?.order_id || ""),
+          );
+          if (orderCompare !== 0) return orderCompare;
+          return String(left?.item_code || "").localeCompare(
+            String(right?.item_code || ""),
+          );
+        }),
+      }))
+      .sort((left, right) =>
+        String(left?.vendor || "").localeCompare(String(right?.vendor || "")),
+      );
+
+    return res.status(200).json({
+      filters: {
+        date: reportDate,
+        brand: selectedBrand,
+        brand_options: brandOptions,
+      },
+      summary: {
+        vendors_count: vendors.length,
+        items_count: filteredRows.length,
+      },
+      vendors,
+    });
+  } catch (err) {
+    console.error("Daily Order Summary Error:", err);
+    return res
+      .status(500)
+      .json({ message: err.message || "Failed to fetch daily order summary" });
   }
 };
 
@@ -4179,6 +4400,11 @@ exports.getDailyReport = async (req, res) => {
       }
       return compareText(a?.item_code, b?.item_code);
     };
+    const getInspectionSortValue = (inspection = {}) =>
+      Math.max(
+        toSortableTimestamp(inspection?.inspection_date),
+        toSortableTimestamp(inspection?.createdAt),
+      );
 
     const [reportYear, reportMonth, reportDay] = String(reportDate).split("-");
     const inspectionDateVariants = [
@@ -4200,7 +4426,7 @@ exports.getDailyReport = async (req, res) => {
         .lean(),
       Inspection.find({ inspection_date: { $in: inspectionDateVariants } })
         .select(
-          "inspection_date inspector qc checked passed vendor_requested vendor_offered pending_after cbm remarks createdAt",
+          "inspection_date inspector qc checked passed vendor_requested vendor_offered pending_after cbm goods_not_ready remarks createdAt",
         )
         .populate("inspector", "name email role")
         .populate({
@@ -4220,29 +4446,55 @@ exports.getDailyReport = async (req, res) => {
     const inspections = inspectionsRaw.filter(
       (inspection) => inspection?.qc?.order,
     );
+    const latestInspectionByQcId = new Map();
+    for (const inspection of inspections) {
+      const qcId = String(inspection?.qc?._id || inspection?.qc || "").trim();
+      if (!qcId) continue;
 
-    const aligned_requests = alignedRequests.map((qc) => ({
-      qc_id: qc._id,
-      request_date: qc.request_date,
-      order_id: qc?.order_meta?.order_id || qc?.order?.order_id || "N/A",
-      brand: qc?.order_meta?.brand || qc?.order?.brand || "N/A",
-      vendor: qc?.order_meta?.vendor || qc?.order?.vendor || "N/A",
-      item_code: qc?.item?.item_code || "N/A",
-      description: qc?.item?.description || "N/A",
-      inspector: qc?.inspector
-        ? {
-            _id: qc.inspector._id,
-            name: qc.inspector.name,
-            email: qc.inspector.email,
-            role: qc.inspector.role,
-          }
-        : null,
-      quantity_requested: Number(qc?.quantities?.quantity_requested || 0),
-      quantity_inspected: Number(qc?.quantities?.qc_checked || 0),
-      quantity_passed: Number(qc?.quantities?.qc_passed || 0),
-      quantity_pending: Number(qc?.quantities?.pending || 0),
-      order_status: qc?.order?.status || "N/A",
-    }));
+      const existingInspection = latestInspectionByQcId.get(qcId);
+      if (
+        !existingInspection ||
+        getInspectionSortValue(inspection) > getInspectionSortValue(existingInspection)
+      ) {
+        latestInspectionByQcId.set(qcId, inspection);
+      }
+    }
+
+    const aligned_requests = alignedRequests.map((qc) => {
+      const latestInspection = latestInspectionByQcId.get(String(qc?._id || "").trim());
+      const goodsNotReady = Boolean(latestInspection?.goods_not_ready?.ready);
+
+      return {
+        qc_id: qc._id,
+        request_date: qc.request_date,
+        order_id: qc?.order_meta?.order_id || qc?.order?.order_id || "N/A",
+        brand: qc?.order_meta?.brand || qc?.order?.brand || "N/A",
+        vendor: qc?.order_meta?.vendor || qc?.order?.vendor || "N/A",
+        item_code: qc?.item?.item_code || "N/A",
+        description: qc?.item?.description || "N/A",
+        inspector: qc?.inspector
+          ? {
+              _id: qc.inspector._id,
+              name: qc.inspector.name,
+              email: qc.inspector.email,
+              role: qc.inspector.role,
+            }
+          : null,
+        quantity_requested: Number(qc?.quantities?.quantity_requested || 0),
+        quantity_inspected: Number(qc?.quantities?.qc_checked || 0),
+        quantity_passed: Number(qc?.quantities?.qc_passed || 0),
+        quantity_pending: Number(qc?.quantities?.pending || 0),
+        order_status: qc?.order?.status || "N/A",
+        goods_not_ready: goodsNotReady,
+        goods_not_ready_reason: goodsNotReady
+          ? normalizeText(
+              latestInspection?.goods_not_ready?.reason ||
+                latestInspection?.remarks ||
+                "",
+            )
+          : "",
+      };
+    });
     const sortedAlignedRequests = [...aligned_requests].sort(
       compareAlignedRows,
     );
@@ -4324,6 +4576,10 @@ exports.getDailyReport = async (req, res) => {
         vendor_requested: Number(inspection?.vendor_requested || 0),
         vendor_offered: Number(inspection?.vendor_offered || 0),
         pending_after: Number(inspection?.pending_after || 0),
+        goods_not_ready: Boolean(inspection?.goods_not_ready?.ready),
+        goods_not_ready_reason: normalizeText(
+          inspection?.goods_not_ready?.reason || inspection?.remarks || "",
+        ),
         cbm: {
           top: String(cbmSnapshot?.top ?? "0"),
           bottom: String(cbmSnapshot?.bottom ?? "0"),

@@ -28,6 +28,7 @@ const toSafeNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
+const isGoodsNotReady = (qc = {}) => Boolean(qc?.last_inspection?.goods_not_ready?.ready);
 
 const getPendingAlignmentInfo = (qc = {}) => {
   const pendingQty = Math.max(
@@ -760,7 +761,15 @@ const QCPage = () => {
                               ? `${toSafeNumber(qc.last_inspection.vendor_offered)} / ${toSafeNumber(qc.last_inspection.checked)} / ${toSafeNumber(qc.last_inspection.passed)}`
                               : "N/A"}
                           </td> */}
-                          <td>{qc?.order?.status}</td>
+                          <td>
+                            {isGoodsNotReady(qc) ? (
+                              <span className="text-danger fw-semibold">
+                                Goods Not Ready
+                              </span>
+                            ) : (
+                              qc?.order?.status || "N/A"
+                            )}
+                          </td>
                           <td>{toSafeNumber(qc?.last_inspection?.passed) ?? 0}</td>
                           <td>
                             <span

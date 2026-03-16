@@ -72,6 +72,13 @@ router.get(
 );
 
 router.get(
+  "/reports/daily-summary",
+  auth,
+  authorize("admin", "manager", "dev"),
+  qcController.getDailyOrderSummary,
+);
+
+router.get(
   "/export",
   auth,
   authorize("admin", "manager", "dev"),

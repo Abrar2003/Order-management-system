@@ -104,7 +104,7 @@ const Home = () => {
       vendorSummary.reduce(
         (acc, summary) => {
           acc.totalOrders += toNumber(summary?.totalOrders);
-          acc.totalPending += toNumber(summary?.totalPending);
+          acc.totalPending += toNumber(summary?.totalPending) + toNumber(summary?.totalPartialShipped);
           acc.totalOnTime += toNumber(summary?.totalOnTime);
           acc.totalDelayedOrders += toNumber(summary?.totalDelayedOrders);
           acc.totalShipped += toNumber(summary?.totalShipped);
@@ -440,7 +440,7 @@ const Home = () => {
                           className="table-clickable"
                           onClick={() => navigate(`/orders/${selectedBrand}/${summary.vendor}/Pending`)}
                         >
-                          {summary.totalPending}
+                          {toNumber(summary.totalPending) + toNumber(summary.totalPartialShipped)}
                         </td>
                         <td
                           className="table-clickable"

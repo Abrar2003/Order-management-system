@@ -38,6 +38,8 @@ const parseSortOrder = (value, sortBy) => {
   if (normalized === "asc" || normalized === "desc") return normalized;
   return sortBy === "order_id" ? "asc" : "desc";
 };
+const getGoodsNotReadyStatusLabel = (value) =>
+  value ? <span className="text-danger fw-semibold">Goods Not Ready</span> : null;
 
 const DailyReport = () => {
   const navigate = useNavigate();
@@ -363,15 +365,32 @@ const DailyReport = () => {
                   )}
 
                   {report.aligned_requests.map((request) => (
-                    <tr key={request.qc_id} style={{ cursor: "pointer"}} onClick={ () => navigate(`/qc/${request.qc_id}`)}>
+                    <tr
+                      key={request.qc_id}
+                      className={request?.goods_not_ready ? "weekly-summary-warning-row" : ""}
+                      style={{ cursor: "pointer" }}
+                      onClick={() => navigate(`/qc/${request.qc_id}`)}
+                    >
                       <td>{formatDateDDMMYYYY(request.request_date)}</td>
                       <td>{request.order_id || "N/A"}</td>
-                      <td>{request.item_code || "N/A"}</td>
+                      <td>
+                        <div>{request.item_code || "N/A"}</div>
+                        {request?.goods_not_ready ? (
+                          <div className="small fw-semibold">Goods Not Ready</div>
+                        ) : null}
+                        {request?.goods_not_ready_reason ? (
+                          <div className="small">{request.goods_not_ready_reason}</div>
+                        ) : null}
+                      </td>
                       <td>{request.vendor || "N/A"}</td>
                       <td>{request.brand || "N/A"}</td>
                       <td>{request?.inspector?.name || "Unassigned"}</td>
                       <td>{request.quantity_requested ?? 0}</td>
-                      <td>{request.order_status || "N/A"}</td>
+                      <td>
+                        {getGoodsNotReadyStatusLabel(request?.goods_not_ready)
+                          || request.order_status
+                          || "N/A"}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -435,15 +454,26 @@ const DailyReport = () => {
                       </thead>
                       <tbody>
                         {(entry?.inspections || []).map((inspection) => (
-                          <tr key={inspection.inspection_id}>
+                          <tr
+                            key={inspection.inspection_id}
+                            className={inspection?.goods_not_ready ? "weekly-summary-warning-row" : ""}
+                          >
                             <td>{formatDateDDMMYYYY(inspection.inspection_date)}</td>
                             <td>{inspection.order_id || "N/A"}</td>
-                            <td>{inspection.item_code || "N/A"}</td>
+                            <td>
+                              <div>{inspection.item_code || "N/A"}</div>
+                              {inspection?.goods_not_ready ? (
+                                <div className="small fw-semibold">Goods Not Ready</div>
+                              ) : null}
+                              {inspection?.goods_not_ready_reason ? (
+                                <div className="small">{inspection.goods_not_ready_reason}</div>
+                              ) : null}
+                            </td>
                             <td>{inspection.inspected_quantity ?? 0}</td>
                             <td>{inspection.passed_quantity ?? 0}</td>
                             <td>{formatCbm(inspection?.cbm?.total)}</td>
                             <td>{formatCbm((inspection?.cbm?.total || 0) * (inspection?.inspected_quantity || 0))}</td>
-                            <td>{inspection?.remarks || "None"}</td>
+                            <td>{inspection?.remarks || inspection?.goods_not_ready_reason || "None"}</td>
                           </tr>
                         ))}
                       </tbody>

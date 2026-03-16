@@ -101,6 +101,8 @@ const buildVendorDisplayRows = (items = []) => {
           ),
           pending: 0,
           packedSummary: true,
+          lastInspector: "",
+          lastInspectionDate: "",
         }];
       }
 
@@ -114,6 +116,8 @@ const buildVendorDisplayRows = (items = []) => {
         goodsNotReady: Boolean(item?.goods_not_ready),
         goodsNotReadyReason: String(item?.goods_not_ready_reason || "").trim(),
         goodsNotReadyInspectionDate: String(item?.goods_not_ready_inspection_date || "").trim(),
+        lastInspector: item?.last_inspector_name || "",
+        lastInspectionDate: item?.last_inspection_date || "",
         packedSummary: false,
       }));
     });
@@ -455,6 +459,8 @@ const WeeklySummary = () => {
                             <th>Total Order Quantity</th>
                             <th>Packed</th>
                             <th>Open Quantity</th>
+                            <th>Last Inspector</th>
+                            <th>Last Inspection Date</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -493,6 +499,8 @@ const WeeklySummary = () => {
                                   <td>{row.totalOrderQuantity ?? 0}</td>
                                   <td>{row.quantityPassed ?? 0}</td>
                                   <td>{row.pending ?? 0}</td>
+                                  <td>{row.lastInspector || "-"}</td>
+                                  <td>{row.lastInspectionDate ? formatDateDDMMYYYY(row.lastInspectionDate) : "-"}</td>
                                 </>
                               )}
                             </tr>
