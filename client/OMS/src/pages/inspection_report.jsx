@@ -62,6 +62,21 @@ const toDisplayValue = (value, fallback = "N/A") => {
   const normalized = String(value ?? "").trim();
   return normalized || fallback;
 };
+const getWeightValue = (weight = {}, key = "") => {
+  const normalizedKey = String(key || "").trim();
+  if (!normalizedKey) return 0;
+
+  const legacyFallbackByKey = {
+    total_net: "net",
+    total_gross: "gross",
+  };
+  const rawValue =
+    weight?.[normalizedKey]
+    ?? (legacyFallbackByKey[normalizedKey] ? weight?.[legacyFallbackByKey[normalizedKey]] : undefined)
+    ?? 0;
+  const parsed = Number(rawValue);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
 
 const getBrandKey = (value) => String(value || "").trim().toLowerCase();
 
@@ -231,15 +246,17 @@ const InspectionReport = () => {
           || itemMaster?.box_LBH
           || itemMaster?.item_LBH,
         );
-    const pisNetWeight = toDisplayNumber(itemMaster?.pis_weight?.net ?? itemMaster?.weight?.net);
+    const pisNetWeight = toDisplayNumber(
+      getWeightValue(itemMaster?.pis_weight, "total_net") || itemMaster?.weight?.net,
+    );
     const checkedNetWeight = toDisplayNumber(
-      itemMaster?.inspected_weight?.net ?? itemMaster?.weight?.net,
+      getWeightValue(itemMaster?.inspected_weight, "total_net") || itemMaster?.weight?.net,
     );
     const pisGrossWeight = toDisplayNumber(
-      itemMaster?.pis_weight?.gross ?? itemMaster?.weight?.gross,
+      getWeightValue(itemMaster?.pis_weight, "total_gross") || itemMaster?.weight?.gross,
     );
     const checkedGrossWeight = toDisplayNumber(
-      itemMaster?.inspected_weight?.gross ?? itemMaster?.weight?.gross,
+      getWeightValue(itemMaster?.inspected_weight, "total_gross") || itemMaster?.weight?.gross,
     );
     const calculatedInspectedCbmRaw =
       itemMaster?.cbm?.calculated_inspected_total ??

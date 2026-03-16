@@ -59,6 +59,21 @@ const toSafeNumber = (value, fallback = 0) => {
   if (!Number.isFinite(parsed)) return fallback;
   return parsed;
 };
+const getWeightValue = (weight = {}, key = "") => {
+  const normalizedKey = String(key || "").trim();
+  if (!normalizedKey) return 0;
+
+  const legacyFallbackByKey = {
+    total_net: "net",
+    total_gross: "gross",
+  };
+  const rawValue =
+    weight?.[normalizedKey]
+    ?? (legacyFallbackByKey[normalizedKey] ? weight?.[legacyFallbackByKey[normalizedKey]] : undefined)
+    ?? 0;
+  const parsed = Number(rawValue);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
 
 const getUtcDayOffsetFromToday = (value) => {
   const isoDate = toISODateString(value);
@@ -314,12 +329,14 @@ const QcDetails = () => {
       ?? "0",
     ).trim();
     const netWeight = Number(
-      itemMaster?.pis_weight?.net ?? itemMaster?.weight?.net ?? 0,
+      getWeightValue(itemMaster?.pis_weight, "total_net")
+      || itemMaster?.weight?.net
+      || 0,
     );
     const grossWeight = Number(
-      itemMaster?.pis_weight?.gross
-      ?? itemMaster?.weight?.gross
-      ?? 0,
+      getWeightValue(itemMaster?.pis_weight, "total_gross")
+      || itemMaster?.weight?.gross
+      || 0,
     );
     const itemLbhSource = itemMaster?.pis_item_LBH || itemMaster?.item_LBH;
     const boxLbhSource = itemMaster?.pis_box_LBH || itemMaster?.box_LBH;

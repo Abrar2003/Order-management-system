@@ -4,6 +4,7 @@ import Navbar from "../components/Navbar";
 import { getUserFromToken } from "../auth/auth.utils";
 import AlignQCModal from "../components/AlignQcModal";
 import EditOrderModal from "../components/EditOrderModal";
+import EditCompleteOrderModal from "../components/EditCompleteOrderModal";
 import ArchiveOrderModal from "../components/ArchiveOrderModal";
 import RevisedEtdModal from "../components/RevisedEtdModal";
 import { archiveOrder } from "../services/orders.service";
@@ -46,6 +47,7 @@ const Orders = () => {
   const [orders, setOrders] = useState([]);
   const [alignContext, setAlignContext] = useState(null);
   const [editingOrder, setEditingOrder] = useState(null);
+  const [editingCompleteOrder, setEditingCompleteOrder] = useState(null);
   const [revisedEtdTarget, setRevisedEtdTarget] = useState(null);
   const [archiveTarget, setArchiveTarget] = useState(null);
   const [archiving, setArchiving] = useState(false);
@@ -53,7 +55,7 @@ const Orders = () => {
   const [loading, setLoading] = useState(true);
   const [itemCodeSortOrder, setItemCodeSortOrder] = useState("asc");
 
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
   const user = getUserFromToken();
@@ -174,15 +176,26 @@ const Orders = () => {
         </div>
 
         <div className="card om-card mb-3">
-          <div className="card-body d-flex flex-wrap gap-2">
-            <span className="om-summary-chip">Order: {primaryOrder?.order_id ?? "N/A"}</span>
-            <span className="om-summary-chip">Brand: {primaryOrder?.brand ?? "N/A"}</span>
-            <span className="om-summary-chip">Vendor: {primaryOrder?.vendor ?? "N/A"}</span>
-            <span className="om-summary-chip">Status: {primaryOrder?.status ?? "N/A"}</span>
-            <span className="om-summary-chip">
-              Order Date: {formatDateDDMMYYYY(primaryOrder?.order_date)}
-            </span>
-            <span className="om-summary-chip">ETD: {formatDateDDMMYYYY(primaryOrder?.ETD)}</span>
+          <div className="card-body d-flex flex-wrap gap-2 justify-content-between align-items-start">
+            <div className="d-flex flex-wrap gap-2">
+              <span className="om-summary-chip">Order: {primaryOrder?.order_id ?? "N/A"}</span>
+              <span className="om-summary-chip">Brand: {primaryOrder?.brand ?? "N/A"}</span>
+              <span className="om-summary-chip">Vendor: {primaryOrder?.vendor ?? "N/A"}</span>
+              <span className="om-summary-chip">Status: {primaryOrder?.status ?? "N/A"}</span>
+              <span className="om-summary-chip">
+                Order Date: {formatDateDDMMYYYY(primaryOrder?.order_date)}
+              </span>
+              <span className="om-summary-chip">ETD: {formatDateDDMMYYYY(primaryOrder?.ETD)}</span>
+            </div>
+            {canEditOrder && primaryOrder ? (
+              <button
+                type="button"
+                className="btn btn-outline-primary btn-sm"
+                onClick={() => setEditingCompleteOrder(primaryOrder)}
+              >
+                Update Complete Order
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -341,6 +354,29 @@ const Orders = () => {
           onClose={() => setEditingOrder(null)}
           onSuccess={() => {
             setEditingOrder(null);
+            fetchOrders();
+          }}
+        />
+      )}
+
+      {editingCompleteOrder && (
+        <EditCompleteOrderModal
+          order={editingCompleteOrder}
+          rowCount={orders.length}
+          onClose={() => setEditingCompleteOrder(null)}
+          onSuccess={(response) => {
+            const nextOrderId = String(
+              response?.group?.order_id || editingCompleteOrder?.order_id || "",
+            ).trim();
+            setEditingCompleteOrder(null);
+
+            if (nextOrderId && nextOrderId !== String(orderId || "").trim()) {
+              const nextParams = new URLSearchParams(searchParams);
+              nextParams.set("order_id", nextOrderId);
+              setSearchParams(nextParams, { replace: true });
+              return;
+            }
+
             fetchOrders();
           }}
         />

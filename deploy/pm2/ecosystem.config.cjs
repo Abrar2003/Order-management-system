@@ -1,8 +1,10 @@
+const path = require("path");
+
 module.exports = {
   apps: [
     {
       name: "oms-backend",
-      cwd: "/var/www/order-management-system/backend",
+      cwd: path.resolve(__dirname, "../../backend"),
       script: "index.js",
       instances: 1,
       exec_mode: "fork",

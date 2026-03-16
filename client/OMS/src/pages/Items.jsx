@@ -52,16 +52,33 @@ const formatLbh = (value) => {
   return `${safeL} x ${safeB} x ${safeH}`;
 };
 
-const getInspectedWeight = (item, key) => {
-  const value = item?.inspected_weight?.[key] ?? item?.weight?.[key] ?? 0;
-  const parsed = Number(value);
+const getWeightValue = (weight = {}, key = "") => {
+  const normalizedKey = String(key || "").trim();
+  if (!normalizedKey) return 0;
+
+  const weightKeyMap = {
+    net: "total_net",
+    gross: "total_gross",
+  };
+  const resolvedKey = weightKeyMap[normalizedKey] || normalizedKey;
+  const legacyFallbackByKey = {
+    total_net: "net",
+    total_gross: "gross",
+  };
+  const rawValue =
+    weight?.[resolvedKey]
+    ?? (legacyFallbackByKey[resolvedKey] ? weight?.[legacyFallbackByKey[resolvedKey]] : undefined)
+    ?? 0;
+  const parsed = Number(rawValue);
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const getInspectedWeight = (item, key) => {
+  return getWeightValue(item?.inspected_weight, key) || getWeightValue(item?.weight, key);
+};
+
 const getPisWeight = (item, key) => {
-  const value = item?.pis_weight?.[key] ?? 0;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
+  return getWeightValue(item?.pis_weight, key);
 };
 
 const getInspectedItemLbh = (item) => item?.inspected_item_LBH || item?.item_LBH || {};

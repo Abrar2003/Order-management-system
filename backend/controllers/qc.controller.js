@@ -21,6 +21,29 @@ const toNonNegativeNumber = (value, fallback = 0) => {
   if (!Number.isFinite(parsed) || parsed < 0) return fallback;
   return parsed;
 };
+const INSPECTED_WEIGHT_FIELD_KEYS = Object.freeze([
+  "top_net",
+  "top_gross",
+  "bottom_net",
+  "bottom_gross",
+  "total_net",
+  "total_gross",
+]);
+const LEGACY_WEIGHT_FALLBACK_BY_KEY = Object.freeze({
+  total_net: "net",
+  total_gross: "gross",
+});
+const getWeightFieldValue = (weight = {}, fieldKey = "", fallback = 0) => {
+  const normalizedFieldKey = String(fieldKey || "").trim();
+  if (!normalizedFieldKey) return fallback;
+
+  const legacyFieldKey = LEGACY_WEIGHT_FALLBACK_BY_KEY[normalizedFieldKey];
+  const rawValue =
+    weight?.[normalizedFieldKey] ??
+    (legacyFieldKey ? weight?.[legacyFieldKey] : undefined);
+
+  return toNonNegativeNumber(rawValue, fallback);
+};
 const toNormalizedCbmString = (value) => {
   const safe = toNonNegativeNumber(value, 0);
   if (safe <= 0) return "0";
@@ -272,15 +295,15 @@ const getItemInspectedCbmTotal = (itemDoc = {}) =>
   );
 const getItemWeightNet = (itemDoc = {}) =>
   toNonNegativeNumber(
-    itemDoc?.inspected_weight?.net ??
-      itemDoc?.pis_weight?.net ??
+    getWeightFieldValue(itemDoc?.inspected_weight, "total_net", NaN) ||
+      getWeightFieldValue(itemDoc?.pis_weight, "total_net", NaN) ||
       itemDoc?.weight?.net,
     0,
   );
 const getItemWeightGross = (itemDoc = {}) =>
   toNonNegativeNumber(
-    itemDoc?.inspected_weight?.gross ??
-      itemDoc?.pis_weight?.gross ??
+    getWeightFieldValue(itemDoc?.inspected_weight, "total_gross", NaN) ||
+      getWeightFieldValue(itemDoc?.pis_weight, "total_gross", NaN) ||
       itemDoc?.weight?.gross,
     0,
   );
@@ -2261,19 +2284,28 @@ exports.updateQC = async (req, res) => {
         Array.isArray(inspected_weight))
     ) {
       return res.status(400).json({
-        message: "inspected_weight must be an object with net and/or gross",
+        message:
+          "inspected_weight must be an object with top/bottom/total net/gross values",
       });
     }
-    const parsedInspectedWeightNet = parseInspectedWeightPayloadField(
-      inspected_weight?.net,
-      "inspected_weight.net",
+    const parsedInspectedWeightFields = INSPECTED_WEIGHT_FIELD_KEYS.reduce(
+      (accumulator, fieldKey) => {
+        const rawValue =
+          inspected_weight?.[fieldKey] ??
+          (LEGACY_WEIGHT_FALLBACK_BY_KEY[fieldKey]
+            ? inspected_weight?.[LEGACY_WEIGHT_FALLBACK_BY_KEY[fieldKey]]
+            : undefined);
+        accumulator[fieldKey] = parseInspectedWeightPayloadField(
+          rawValue,
+          `inspected_weight.${fieldKey}`,
+        );
+        return accumulator;
+      },
+      {},
     );
-    const parsedInspectedWeightGross = parseInspectedWeightPayloadField(
-      inspected_weight?.gross,
-      "inspected_weight.gross",
+    const hasInspectedWeightUpdate = INSPECTED_WEIGHT_FIELD_KEYS.some(
+      (fieldKey) => parsedInspectedWeightFields[fieldKey]?.hasInput,
     );
-    const hasInspectedWeightUpdate =
-      parsedInspectedWeightNet.hasInput || parsedInspectedWeightGross.hasInput;
 
     const hasItemMasterUpdate =
       hasInspectedLbhUpdate || hasInspectedWeightUpdate;
@@ -2353,35 +2385,22 @@ exports.updateQC = async (req, res) => {
     }
 
     if (hasInspectedWeightUpdate && !allowAdminRewrite) {
-      const existingInspectedNetWeight = toNonNegativeNumber(
-        itemDocForInspectedLbhUpdate?.inspected_weight?.net,
-        0,
-      );
-      const existingInspectedGrossWeight = toNonNegativeNumber(
-        itemDocForInspectedLbhUpdate?.inspected_weight?.gross,
-        0,
-      );
+      for (const fieldKey of INSPECTED_WEIGHT_FIELD_KEYS) {
+        const parsedField = parsedInspectedWeightFields[fieldKey];
+        if (!parsedField?.hasInput) continue;
 
-      if (
-        parsedInspectedWeightNet.hasInput &&
-        existingInspectedNetWeight > 0 &&
-        !hasSameNumericValue(
-          existingInspectedNetWeight,
-          parsedInspectedWeightNet.value,
-        )
-      ) {
-        throw new Error("inspected_weight.net can only be set once");
-      }
+        const existingWeightValue = getWeightFieldValue(
+          itemDocForInspectedLbhUpdate?.inspected_weight,
+          fieldKey,
+          0,
+        );
 
-      if (
-        parsedInspectedWeightGross.hasInput &&
-        existingInspectedGrossWeight > 0 &&
-        !hasSameNumericValue(
-          existingInspectedGrossWeight,
-          parsedInspectedWeightGross.value,
-        )
-      ) {
-        throw new Error("inspected_weight.gross can only be set once");
+        if (
+          existingWeightValue > 0 &&
+          !hasSameNumericValue(existingWeightValue, parsedField.value)
+        ) {
+          throw new Error(`inspected_weight.${fieldKey} can only be set once`);
+        }
       }
     }
 
@@ -2947,28 +2966,35 @@ exports.updateQC = async (req, res) => {
       }
 
       if (hasInspectedWeightUpdate) {
-        const nextInspectedWeight = {
-          net: parsedInspectedWeightNet.hasInput
-            ? parsedInspectedWeightNet.value
-            : toNonNegativeNumber(itemDoc?.inspected_weight?.net, 0),
-          gross: parsedInspectedWeightGross.hasInput
-            ? parsedInspectedWeightGross.value
-            : toNonNegativeNumber(itemDoc?.inspected_weight?.gross, 0),
-        };
-        const existingInspectedWeight = {
-          net: toNonNegativeNumber(itemDoc?.inspected_weight?.net, 0),
-          gross: toNonNegativeNumber(itemDoc?.inspected_weight?.gross, 0),
-        };
-        if (
-          !hasSameNumericValue(
-            existingInspectedWeight.net,
-            nextInspectedWeight.net,
-          ) ||
-          !hasSameNumericValue(
-            existingInspectedWeight.gross,
-            nextInspectedWeight.gross,
-          )
-        ) {
+        const nextInspectedWeight = INSPECTED_WEIGHT_FIELD_KEYS.reduce(
+          (accumulator, fieldKey) => {
+            const parsedField = parsedInspectedWeightFields[fieldKey];
+            accumulator[fieldKey] = parsedField?.hasInput
+              ? parsedField.value
+              : getWeightFieldValue(itemDoc?.inspected_weight, fieldKey, 0);
+            return accumulator;
+          },
+          {},
+        );
+        const existingInspectedWeight = INSPECTED_WEIGHT_FIELD_KEYS.reduce(
+          (accumulator, fieldKey) => {
+            accumulator[fieldKey] = getWeightFieldValue(
+              itemDoc?.inspected_weight,
+              fieldKey,
+              0,
+            );
+            return accumulator;
+          },
+          {},
+        );
+        const hasAnyWeightChange = INSPECTED_WEIGHT_FIELD_KEYS.some(
+          (fieldKey) =>
+            !hasSameNumericValue(
+              existingInspectedWeight[fieldKey],
+              nextInspectedWeight[fieldKey],
+            ),
+        );
+        if (hasAnyWeightChange) {
           itemDoc.set("inspected_weight", nextInspectedWeight);
           itemDoc.markModified("inspected_weight");
           hasItemDocChanges = true;

@@ -726,6 +726,8 @@ const buildOrderEditLogSnapshot = (orderEntry = {}) => ({
   vendor: normalizeLooseString(orderEntry?.vendor),
   item_code: normalizeLooseString(orderEntry?.item?.item_code),
   description: normalizeLooseString(orderEntry?.item?.description),
+  order_date: formatDateDDMMYYYY(orderEntry?.order_date, "Not Set"),
+  etd: formatDateDDMMYYYY(orderEntry?.ETD, "Not Set"),
   quantity: String(Number(orderEntry?.quantity || 0)),
   revised_ETD: formatDateDDMMYYYY(orderEntry?.revised_ETD, "Not Set"),
   status: normalizeLooseString(orderEntry?.status) || "Not Set",
@@ -736,10 +738,13 @@ const buildOrderEditLogSnapshot = (orderEntry = {}) => ({
 
 const buildOrderEditChanges = (beforeSnapshot = {}, afterSnapshot = {}) => {
   const fields = [
+    { key: "order_id", label: "Order ID" },
     { key: "brand", label: "Brand" },
     { key: "vendor", label: "Vendor" },
     { key: "item_code", label: "Item Code" },
     { key: "description", label: "Description" },
+    { key: "order_date", label: "Order Date" },
+    { key: "etd", label: "ETD" },
     { key: "quantity", label: "Quantity" },
     { key: "revised_ETD", label: "Revised ETD" },
     { key: "shipment", label: "Shipment" },
@@ -5005,6 +5010,226 @@ exports.editOrder = async (req, res) => {
     console.error("Edit Order Error:", error);
     return res.status(500).json({
       message: "Failed to update order",
+      error: error.message,
+    });
+  }
+};
+
+exports.editCompleteOrder = async (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid order id" });
+    }
+
+    const anchorOrder = await Order.findOne({ _id: id, ...ACTIVE_ORDER_MATCH });
+    if (!anchorOrder) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    const payload = req.body || {};
+    const hasOrderId = hasOwn(payload, "order_id");
+    const hasBrand = hasOwn(payload, "brand");
+    const hasVendor = hasOwn(payload, "vendor");
+    const hasOrderDate = hasOwn(payload, "order_date") || hasOwn(payload, "orderDate");
+    const hasEtd = hasOwn(payload, "ETD") || hasOwn(payload, "etd");
+    const requestedEditFields = [
+      hasOrderId ? "order_id" : "",
+      hasBrand ? "brand" : "",
+      hasVendor ? "vendor" : "",
+      hasOrderDate ? "order_date" : "",
+      hasEtd ? "ETD" : "",
+    ].filter(Boolean);
+
+    const nextOrderId = hasOrderId
+      ? normalizeOrderKey(payload.order_id)
+      : normalizeOrderKey(anchorOrder.order_id);
+    const nextBrand = hasBrand
+      ? String(payload.brand ?? "").trim()
+      : String(anchorOrder.brand || "").trim();
+    const nextVendor = hasVendor
+      ? String(payload.vendor ?? "").trim()
+      : String(anchorOrder.vendor || "").trim();
+
+    const rawOrderDate = hasOwn(payload, "order_date")
+      ? payload.order_date
+      : payload.orderDate;
+    const rawEtd = hasOwn(payload, "ETD") ? payload.ETD : payload.etd;
+
+    if (!nextOrderId) {
+      return res.status(400).json({ message: "order_id is required" });
+    }
+    if (!nextBrand) {
+      return res.status(400).json({ message: "brand is required" });
+    }
+    if (!nextVendor) {
+      return res.status(400).json({ message: "vendor is required" });
+    }
+
+    let nextOrderDate = anchorOrder.order_date || null;
+    if (hasOrderDate) {
+      const orderDateInput = String(rawOrderDate ?? "").trim();
+      if (!orderDateInput) {
+        return res.status(400).json({ message: "order_date is required" });
+      }
+      const parsedOrderDate = parseDateLike(orderDateInput);
+      if (!parsedOrderDate) {
+        return res.status(400).json({ message: "order_date must be a valid date" });
+      }
+      nextOrderDate = parsedOrderDate;
+    }
+
+    let nextEtd = anchorOrder.ETD || null;
+    if (hasEtd) {
+      const etdInput = String(rawEtd ?? "").trim();
+      if (!etdInput) {
+        return res.status(400).json({ message: "ETD is required" });
+      }
+      const parsedEtd = parseDateLike(etdInput);
+      if (!parsedEtd) {
+        return res.status(400).json({ message: "ETD must be a valid date" });
+      }
+      nextEtd = parsedEtd;
+    }
+
+    const groupOrders = await Order.find({
+      order_id: anchorOrder.order_id,
+      ...ACTIVE_ORDER_MATCH,
+    });
+    if (groupOrders.length === 0) {
+      return res.status(404).json({ message: "No active orders found for this PO" });
+    }
+
+    const groupOrderIds = groupOrders.map((orderDoc) => orderDoc._id);
+    const beforeSnapshotsById = new Map(
+      groupOrders.map((orderDoc) => [
+        String(orderDoc._id),
+        buildOrderEditLogSnapshot(orderDoc),
+      ]),
+    );
+
+    const groupItemCodes = normalizeDistinctValues(
+      groupOrders.map((orderDoc) => orderDoc?.item?.item_code || ""),
+    );
+    if (groupItemCodes.length > 0) {
+      const conflictingOrder = await Order.findOne({
+        _id: { $nin: groupOrderIds },
+        ...ACTIVE_ORDER_MATCH,
+        order_id: nextOrderId,
+        "item.item_code": { $in: groupItemCodes },
+      })
+        .select("order_id item.item_code")
+        .lean();
+
+      if (conflictingOrder) {
+        return res.status(400).json({
+          message: `Another active order already exists with PO ${nextOrderId} and item ${String(conflictingOrder?.item?.item_code || "").trim() || "N/A"}`,
+        });
+      }
+    }
+
+    const qcRecords = await QC.find({ order: { $in: groupOrderIds } });
+    const qcRecordsByOrderId = qcRecords.reduce((accumulator, qcRecord) => {
+      const orderKey = String(qcRecord?.order || "").trim();
+      if (!accumulator.has(orderKey)) {
+        accumulator.set(orderKey, []);
+      }
+      accumulator.get(orderKey).push(qcRecord);
+      return accumulator;
+    }, new Map());
+
+    const oldGroupMap = new Map();
+    for (const orderDoc of groupOrders) {
+      const oldGroup = {
+        order_id: String(orderDoc?.order_id || "").trim(),
+        brand: String(orderDoc?.brand || "").trim(),
+        vendor: String(orderDoc?.vendor || "").trim(),
+      };
+      oldGroupMap.set(
+        `${oldGroup.order_id}__${oldGroup.brand}__${oldGroup.vendor}`,
+        oldGroup,
+      );
+
+      orderDoc.order_id = nextOrderId;
+      orderDoc.brand = nextBrand;
+      orderDoc.vendor = nextVendor;
+      orderDoc.order_date = nextOrderDate;
+      orderDoc.ETD = nextEtd;
+
+      const linkedQcRecords = qcRecordsByOrderId.get(String(orderDoc._id)) || [];
+      for (const qcRecord of linkedQcRecords) {
+        qcRecord.order_meta = qcRecord.order_meta || {};
+        qcRecord.order_meta.order_id = nextOrderId;
+        qcRecord.order_meta.brand = nextBrand;
+        qcRecord.order_meta.vendor = nextVendor;
+      }
+    }
+
+    await Promise.all(groupOrders.map((orderDoc) => orderDoc.save()));
+    await Promise.all(qcRecords.map((qcRecord) => qcRecord.save()));
+
+    try {
+      await Promise.all(groupOrders.map((orderDoc) => upsertItemFromOrder(orderDoc)));
+    } catch (itemSyncError) {
+      console.error("Item sync after complete order edit failed:", {
+        orderId: nextOrderId,
+        error: itemSyncError?.message || String(itemSyncError),
+      });
+    }
+
+    const newGroup = {
+      order_id: nextOrderId,
+      brand: nextBrand,
+      vendor: nextVendor,
+    };
+    const groupMap = new Map(oldGroupMap);
+    groupMap.set(
+      `${newGroup.order_id}__${newGroup.brand}__${newGroup.vendor}`,
+      newGroup,
+    );
+    const groupsToSync = [...groupMap.values()];
+    const syncSettled = await Promise.allSettled(
+      groupsToSync.map((group) => syncOrderGroup(group)),
+    );
+    const calendar_sync = syncSettled.map((entry, index) => {
+      const group = groupsToSync[index];
+      if (entry.status === "fulfilled") {
+        return { group, ok: true, result: entry.value };
+      }
+      return {
+        group,
+        ok: false,
+        error: entry.reason?.message || String(entry.reason),
+      };
+    });
+
+    for (const orderDoc of groupOrders) {
+      await createOrderEditLog({
+        reqUser: req.user,
+        operationType: "order_edit",
+        beforeSnapshot: beforeSnapshotsById.get(String(orderDoc._id)) || {},
+        afterSnapshot: buildOrderEditLogSnapshot(orderDoc),
+        calendarSyncResults: calendar_sync,
+        extraRemarks: [
+          `Complete order update applied to ${groupOrders.length} row(s) in this PO.`,
+          requestedEditFields.length > 0
+            ? `Requested fields: ${requestedEditFields.join(", ")}.`
+            : "",
+        ],
+      });
+    }
+
+    return res.status(200).json({
+      message: "Complete order updated successfully",
+      rows_updated: groupOrders.length,
+      group: newGroup,
+      data: groupOrders,
+      calendar_sync,
+    });
+  } catch (error) {
+    console.error("Edit Complete Order Error:", error);
+    return res.status(500).json({
+      message: "Failed to update complete order",
       error: error.message,
     });
   }

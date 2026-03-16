@@ -17,8 +17,12 @@ const NON_NEGATIVE_FIELDS = new Set([
   "CBM",
   "CBM_top",
   "CBM_bottom",
-  "inspected_weight_net",
-  "inspected_weight_gross",
+  "inspected_weight_top_net",
+  "inspected_weight_top_gross",
+  "inspected_weight_bottom_net",
+  "inspected_weight_bottom_gross",
+  "inspected_weight_total_net",
+  "inspected_weight_total_gross",
   "inspected_item_L",
   "inspected_item_B",
   "inspected_item_H",
@@ -39,11 +43,61 @@ const NON_NEGATIVE_FIELDS = new Set([
   "inspected_item_bottom_H",
 ]);
 
+const INSPECTED_WEIGHT_FIELDS = Object.freeze([
+  {
+    formKey: "inspected_weight_top_net",
+    payloadKey: "top_net",
+    label: "Top Net Weight",
+  },
+  {
+    formKey: "inspected_weight_top_gross",
+    payloadKey: "top_gross",
+    label: "Top Gross Weight",
+  },
+  {
+    formKey: "inspected_weight_bottom_net",
+    payloadKey: "bottom_net",
+    label: "Bottom Net Weight",
+  },
+  {
+    formKey: "inspected_weight_bottom_gross",
+    payloadKey: "bottom_gross",
+    label: "Bottom Gross Weight",
+  },
+  {
+    formKey: "inspected_weight_total_net",
+    payloadKey: "total_net",
+    label: "Total Net Weight",
+  },
+  {
+    formKey: "inspected_weight_total_gross",
+    payloadKey: "total_gross",
+    label: "Total Gross Weight",
+  },
+]);
+
+const LEGACY_INSPECTED_WEIGHT_FALLBACK_BY_KEY = Object.freeze({
+  total_net: "net",
+  total_gross: "gross",
+});
+
 const createEmptyLabelRange = () => ({ start: "", end: "" });
 const toDimensionInputValue = (value) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return "";
   return String(parsed);
+};
+const getWeightValueFromModel = (weightData = {}, payloadKey = "") => {
+  const normalizedPayloadKey = String(payloadKey || "").trim();
+  if (!normalizedPayloadKey) return 0;
+
+  const legacyKey = LEGACY_INSPECTED_WEIGHT_FALLBACK_BY_KEY[normalizedPayloadKey];
+  const rawValue =
+    weightData?.[normalizedPayloadKey]
+    ?? (legacyKey ? weightData?.[legacyKey] : undefined)
+    ?? 0;
+  const parsed = Number(rawValue);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 };
 
 const hasAnyLbhInput = (values = []) =>
@@ -245,8 +299,12 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     CBM: "",
     CBM_top: "",
     CBM_bottom: "",
-    inspected_weight_net: "",
-    inspected_weight_gross: "",
+    inspected_weight_top_net: "",
+    inspected_weight_top_gross: "",
+    inspected_weight_bottom_net: "",
+    inspected_weight_bottom_gross: "",
+    inspected_weight_total_net: "",
+    inspected_weight_total_gross: "",
     inspected_item_L: "",
     inspected_item_B: "",
     inspected_item_H: "",
@@ -360,8 +418,24 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       CBM: hasTopOrBottomCbm ? "" : initialCbmTotal,
       CBM_top: initialCbmTop,
       CBM_bottom: initialCbmBottom,
-      inspected_weight_net: toDimensionInputValue(inspectedWeight?.net),
-      inspected_weight_gross: toDimensionInputValue(inspectedWeight?.gross),
+      inspected_weight_top_net: toDimensionInputValue(
+        getWeightValueFromModel(inspectedWeight, "top_net"),
+      ),
+      inspected_weight_top_gross: toDimensionInputValue(
+        getWeightValueFromModel(inspectedWeight, "top_gross"),
+      ),
+      inspected_weight_bottom_net: toDimensionInputValue(
+        getWeightValueFromModel(inspectedWeight, "bottom_net"),
+      ),
+      inspected_weight_bottom_gross: toDimensionInputValue(
+        getWeightValueFromModel(inspectedWeight, "bottom_gross"),
+      ),
+      inspected_weight_total_net: toDimensionInputValue(
+        getWeightValueFromModel(inspectedWeight, "total_net"),
+      ),
+      inspected_weight_total_gross: toDimensionInputValue(
+        getWeightValueFromModel(inspectedWeight, "total_gross"),
+      ),
       inspected_item_L: strictInspectedItemLbh.L,
       inspected_item_B: strictInspectedItemLbh.B,
       inspected_item_H: strictInspectedItemLbh.H,
@@ -837,12 +911,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     const lockInspectedItemBottomLbh = !canRewriteLatestInspectionRecord && hasCompletePositiveLbh(
       existingItemMaster?.inspected_item_bottom_LBH,
     );
-    const lockInspectedNetWeight =
-      !canRewriteLatestInspectionRecord &&
-      Number(existingItemMaster?.inspected_weight?.net || 0) > 0;
-    const lockInspectedGrossWeight =
-      !canRewriteLatestInspectionRecord &&
-      Number(existingItemMaster?.inspected_weight?.gross || 0) > 0;
 
     const parseLbhGroup = (groupName, values) => {
       const entries = Object.entries(values);
@@ -939,22 +1007,14 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       return { hasAnyInput: true, value: parsed };
     };
 
-    const inspectedNetWeight = parseWeightInput(
-      "Inspected Net Weight",
-      form.inspected_weight_net,
-    );
-    if (inspectedNetWeight.error) {
-      setError(inspectedNetWeight.error);
-      return;
-    }
-
-    const inspectedGrossWeight = parseWeightInput(
-      "Inspected Gross Weight",
-      form.inspected_weight_gross,
-    );
-    if (inspectedGrossWeight.error) {
-      setError(inspectedGrossWeight.error);
-      return;
+    const inspectedWeightInputs = {};
+    for (const field of INSPECTED_WEIGHT_FIELDS) {
+      const parsedWeightInput = parseWeightInput(field.label, form[field.formKey]);
+      if (parsedWeightInput.error) {
+        setError(parsedWeightInput.error);
+        return;
+      }
+      inspectedWeightInputs[field.payloadKey] = parsedWeightInput;
     }
 
     const cbmLockedByLbh = hasAnyLbhInput([
@@ -1218,23 +1278,26 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         payload.inspected_item_bottom_LBH = inspectedItemBottomLbh.value;
       }
       if (
-        (!lockInspectedNetWeight && inspectedNetWeight.hasAnyInput) ||
-        (!lockInspectedGrossWeight && inspectedGrossWeight.hasAnyInput)
+        INSPECTED_WEIGHT_FIELDS.some(
+          (field) =>
+            !inspectedWeightLocks[field.payloadKey]
+            && inspectedWeightInputs[field.payloadKey]?.hasAnyInput,
+        )
       ) {
         payload.inspected_weight = {};
-        if (
-          !lockInspectedNetWeight &&
-          inspectedNetWeight.hasAnyInput &&
-          inspectedNetWeight.value !== null
-        ) {
-          payload.inspected_weight.net = inspectedNetWeight.value;
+        for (const field of INSPECTED_WEIGHT_FIELDS) {
+          const parsedWeightInput = inspectedWeightInputs[field.payloadKey];
+          if (
+            inspectedWeightLocks[field.payloadKey]
+            || !parsedWeightInput?.hasAnyInput
+            || parsedWeightInput.value === null
+          ) {
+            continue;
+          }
+          payload.inspected_weight[field.payloadKey] = parsedWeightInput.value;
         }
-        if (
-          !lockInspectedGrossWeight &&
-          inspectedGrossWeight.hasAnyInput &&
-          inspectedGrossWeight.value !== null
-        ) {
-          payload.inspected_weight.gross = inspectedGrossWeight.value;
+        if (Object.keys(payload.inspected_weight).length === 0) {
+          delete payload.inspected_weight;
         }
       }
 
@@ -1506,12 +1569,15 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     existingItemMaster?.inspected_item_bottom_LBH,
   );
   const existingInspectedWeight = existingItemMaster?.inspected_weight || {};
-  const lockInspectedNetWeight =
-    !canRewriteLatestInspectionRecord &&
-    Number(existingInspectedWeight?.net || 0) > 0;
-  const lockInspectedGrossWeight =
-    !canRewriteLatestInspectionRecord &&
-    Number(existingInspectedWeight?.gross || 0) > 0;
+  const inspectedWeightLocks = INSPECTED_WEIGHT_FIELDS.reduce((accumulator, field) => {
+    accumulator[field.payloadKey] =
+      !canRewriteLatestInspectionRecord &&
+      getWeightValueFromModel(existingInspectedWeight, field.payloadKey) > 0;
+    return accumulator;
+  }, {});
+  const hasLockedInspectedWeight = INSPECTED_WEIGHT_FIELDS.some(
+    (field) => inspectedWeightLocks[field.payloadKey],
+  );
   const hasAnyLockedInspectedLbh = (
     lockInspectedItemLbh ||
     lockInspectedBoxLbh ||
@@ -1642,37 +1708,27 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
               <div className="col-md-12">{"   "}</div>
 
-              <div className="col-md-6">
-                <label className="form-label">Inspected Net Weight</label>
-                <input
-                  type="number"
-                  className="form-control"
-                  name="inspected_weight_net"
-                  value={form.inspected_weight_net}
-                  onChange={handleChange}
-                  min="0"
-                  step="any"
-                  disabled={lockInspectedNetWeight}
-                  placeholder={lockInspectedNetWeight ? "Locked" : "Enter net weight"}
-                />
-              </div>
+              {INSPECTED_WEIGHT_FIELDS.map((field) => {
+                const isLocked = inspectedWeightLocks[field.payloadKey];
+                return (
+                  <div key={field.formKey} className="col-md-4">
+                    <label className="form-label">{field.label}</label>
+                    <input
+                      type="number"
+                      className="form-control"
+                      name={field.formKey}
+                      value={form[field.formKey]}
+                      onChange={handleChange}
+                      min="0"
+                      step="any"
+                      disabled={isLocked}
+                      placeholder={isLocked ? "Locked" : `Enter ${field.label.toLowerCase()}`}
+                    />
+                  </div>
+                );
+              })}
 
-              <div className="col-md-6">
-                <label className="form-label">Inspected Gross Weight</label>
-                <input
-                  type="number"
-                  className="form-control"
-                  name="inspected_weight_gross"
-                  value={form.inspected_weight_gross}
-                  onChange={handleChange}
-                  min="0"
-                  step="any"
-                  disabled={lockInspectedGrossWeight}
-                  placeholder={lockInspectedGrossWeight ? "Locked" : "Enter gross weight"}
-                />
-              </div>
-
-              {(lockInspectedNetWeight || lockInspectedGrossWeight) && (
+              {hasLockedInspectedWeight && (
                 <div className="col-12">
                   <div className="small text-secondary">
                     Inspected weight fields are locked after first update.

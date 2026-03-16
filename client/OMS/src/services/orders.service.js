@@ -193,6 +193,21 @@ export const editOrder = async (id, payload) => {
   return res.data;
 };
 
+export const editCompleteOrder = async (id, payload) => {
+  if (!id) {
+    throw new Error("Order id is required");
+  }
+
+  const token = localStorage.getItem("token");
+  const res = await axios.patch(`/orders/edit-complete-order/${id}`, payload, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return res.data;
+};
+
 export const archiveOrder = async (id, remark) => {
   if (!id) {
     throw new Error("Order id is required");

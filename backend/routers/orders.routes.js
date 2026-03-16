@@ -19,6 +19,7 @@ const {
   exportShipmentsDb,
   exportOrdersDb,
   editOrder,
+  editCompleteOrder,
   archiveOrder,
   getArchivedOrders,
   syncZeroQuantityOrdersArchive,
@@ -108,6 +109,13 @@ router.patch(
   authenticate,
   authorize("admin"),
   editOrder,
+);
+
+router.patch(
+  "/edit-complete-order/:id",
+  authenticate,
+  authorize("admin"),
+  editCompleteOrder,
 );
 
 router.patch(

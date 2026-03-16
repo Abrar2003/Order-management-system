@@ -9,7 +9,9 @@ This runbook prepares the OMS stack for a Linux VPS deployment:
 
 1. Rotate all secrets currently used in local `.env` files (JWT, MongoDB, Google OAuth).
 2. Confirm production domain and DNS records:
-   - `oms.example.com` -> VPS public IP
+   - `ghouse-sourcing.com` -> VPS public IP
+   - `oms.ghouse-sourcing.com` -> VPS public IP
+   - `api.ghouse-sourcing.com` -> VPS public IP
 3. Confirm MongoDB access allowlist includes VPS IP.
 4. Create server user (non-root) with `sudo` access.
 
@@ -45,8 +47,8 @@ cd order-management-system
 
 ```bash
 cd /var/www/order-management-system/backend
-cp .env.example .env
-nano .env
+cp .env.example .env.production
+nano .env.production
 ```
 
 Set real values for:
@@ -59,14 +61,14 @@ Set real values for:
 
 ```bash
 cd /var/www/order-management-system/client/OMS
-cp .env.example .env
-nano .env
+cp .env.example .env.production
+nano .env.production
 ```
 
 Recommended value:
 
 ```env
-VITE_API_BASE_URL=/api
+VITE_API_BASE_URL=https://api.ghouse-sourcing.com
 ```
 
 ## 4. Install + Build
@@ -74,7 +76,7 @@ VITE_API_BASE_URL=/api
 ```bash
 cd /var/www/order-management-system/backend
 npm ci --omit=dev
-npm run check:env
+NODE_ENV=production npm run check:env
 
 cd /var/www/order-management-system/client/OMS
 npm ci
@@ -95,7 +97,7 @@ pm2 startup
 
 Follow the command PM2 prints for enabling startup on boot.
 
-## 6. nginx Setup (Frontend + API Proxy)
+## 6. nginx Setup (Frontend + API Domain)
 
 Use the prepared nginx config:
 - [deploy/nginx/order-management-system.conf](../deploy/nginx/order-management-system.conf)
@@ -107,13 +109,13 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-Update `server_name` in the nginx file before reload.
+If you cloned the repo somewhere other than `/var/www/order-management-system`, update the `root` path too.
 
 ## 7. HTTPS (Let's Encrypt)
 
 ```bash
 sudo apt install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d oms.example.com -d www.oms.example.com
+sudo certbot --nginx -d ghouse-sourcing.com -d oms.ghouse-sourcing.com -d api.ghouse-sourcing.com
 ```
 
 Verify auto-renew:
@@ -125,8 +127,8 @@ sudo certbot renew --dry-run
 ## 8. Health Checks
 
 ```bash
-curl -I https://oms.example.com
-curl https://oms.example.com/healthz
+curl -I https://oms.ghouse-sourcing.com
+curl https://api.ghouse-sourcing.com/healthz
 pm2 status
 pm2 logs oms-backend --lines 100
 ```
@@ -142,6 +144,17 @@ Use the prepared deploy script:
 cd /var/www/order-management-system
 chmod +x deploy/scripts/deploy_vps.sh
 bash deploy/scripts/deploy_vps.sh
+```
+
+The deploy script expects:
+- `backend/.env.production`
+- `client/OMS/.env.production`
+
+Optional overrides:
+
+```bash
+GIT_BRANCH=main bash deploy/scripts/deploy_vps.sh
+APP_DIR=/var/www/Order-management-system bash deploy/scripts/deploy_vps.sh
 ```
 
 ## 10. Post-Migration Operations
