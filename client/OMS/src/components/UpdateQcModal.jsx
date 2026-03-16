@@ -48,31 +48,55 @@ const INSPECTED_WEIGHT_FIELDS = Object.freeze([
     formKey: "inspected_weight_top_net",
     payloadKey: "top_net",
     label: "Top Net Weight",
+    shortLabel: "Net",
   },
   {
     formKey: "inspected_weight_top_gross",
     payloadKey: "top_gross",
     label: "Top Gross Weight",
+    shortLabel: "Gross",
   },
   {
     formKey: "inspected_weight_bottom_net",
     payloadKey: "bottom_net",
     label: "Bottom Net Weight",
+    shortLabel: "Net",
   },
   {
     formKey: "inspected_weight_bottom_gross",
     payloadKey: "bottom_gross",
     label: "Bottom Gross Weight",
+    shortLabel: "Gross",
   },
   {
     formKey: "inspected_weight_total_net",
     payloadKey: "total_net",
     label: "Total Net Weight",
+    shortLabel: "Net",
   },
   {
     formKey: "inspected_weight_total_gross",
     payloadKey: "total_gross",
     label: "Total Gross Weight",
+    shortLabel: "Gross",
+  },
+]);
+
+const INSPECTED_WEIGHT_GROUPS = Object.freeze([
+  {
+    key: "top",
+    label: "Top Weight (Net/Gross)",
+    fields: [INSPECTED_WEIGHT_FIELDS[0], INSPECTED_WEIGHT_FIELDS[1]],
+  },
+  {
+    key: "bottom",
+    label: "Bottom Weight (Net/Gross)",
+    fields: [INSPECTED_WEIGHT_FIELDS[2], INSPECTED_WEIGHT_FIELDS[3]],
+  },
+  {
+    key: "total",
+    label: "Total Weight (Net/Gross)",
+    fields: [INSPECTED_WEIGHT_FIELDS[4], INSPECTED_WEIGHT_FIELDS[5]],
   },
 ]);
 
@@ -1708,25 +1732,30 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
               <div className="col-md-12">{"   "}</div>
 
-              {INSPECTED_WEIGHT_FIELDS.map((field) => {
-                const isLocked = inspectedWeightLocks[field.payloadKey];
-                return (
-                  <div key={field.formKey} className="col-md-4">
-                    <label className="form-label">{field.label}</label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      name={field.formKey}
-                      value={form[field.formKey]}
-                      onChange={handleChange}
-                      min="0"
-                      step="any"
-                      disabled={isLocked}
-                      placeholder={isLocked ? "Locked" : `Enter ${field.label.toLowerCase()}`}
-                    />
+              {INSPECTED_WEIGHT_GROUPS.map((group) => (
+                <div key={group.key} className="col-md-4">
+                  <label className="form-label">{group.label}</label>
+                  <div className="input-group">
+                    {group.fields.map((field) => {
+                      const isLocked = inspectedWeightLocks[field.payloadKey];
+                      return (
+                        <input
+                          key={field.formKey}
+                          type="number"
+                          className="form-control"
+                          name={field.formKey}
+                          value={form[field.formKey]}
+                          onChange={handleChange}
+                          min="0"
+                          step="any"
+                          disabled={isLocked}
+                          placeholder={isLocked ? "Locked" : field.shortLabel}
+                        />
+                      );
+                    })}
                   </div>
-                );
-              })}
+                </div>
+              ))}
 
               {hasLockedInspectedWeight && (
                 <div className="col-12">
