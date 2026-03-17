@@ -28,6 +28,10 @@ dist-ssr
 .env.testing
 .env.development.local
 .env.testing.local
+
+.env.production
+.env.development
+.env.test
 *data
 uploads/*
 !uploads/.gitkeep
