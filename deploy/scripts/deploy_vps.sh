@@ -86,9 +86,17 @@ require_path "$FRONTEND_ENV_FILE" "frontend env file"
 
 log "Updating repository"
 cd "$APP_DIR"
+
+mkdir -p /tmp/oms-deploy-backup
+cp -f "$BACKEND_ENV_FILE" /tmp/oms-deploy-backup/backend.env.production 2>/dev/null || true
+cp -f "$FRONTEND_ENV_FILE" /tmp/oms-deploy-backup/frontend.env.production 2>/dev/null || true
+
 git fetch --all --prune
 git checkout "$GIT_BRANCH"
-git pull --ff-only origin "$GIT_BRANCH"
+git reset --hard "origin/$GIT_BRANCH"
+
+cp -f /tmp/oms-deploy-backup/backend.env.production "$BACKEND_ENV_FILE" 2>/dev/null || true
+cp -f /tmp/oms-deploy-backup/frontend.env.production "$FRONTEND_ENV_FILE" 2>/dev/null || true
 
 log "Installing backend dependencies"
 cd "$BACKEND_DIR"
