@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
 import { editCompleteOrder } from "../services/orders.service";
+import OrderEtdWithHistory from "./OrderEtdWithHistory";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import "../App.css";
 
@@ -146,7 +147,12 @@ const EditCompleteOrderModal = ({
                 Current Order Date: {formatDateDDMMYYYY(order?.order_date)}
               </div>
               <div className="small text-secondary">
-                Current ETD: {formatDateDDMMYYYY(order?.ETD)}
+                Current ETD:{" "}
+                <OrderEtdWithHistory
+                  orderId={order?.order_id}
+                  etd={order?.ETD}
+                  className="ms-1"
+                />
               </div>
 
               <div className="row g-3">

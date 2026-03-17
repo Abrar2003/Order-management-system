@@ -193,6 +193,57 @@ export const editOrder = async (id, payload) => {
   return res.data;
 };
 
+export const bulkUpdateRevisedEtd = async ({
+  orderIds = [],
+  revised_ETD = "",
+} = {}) => {
+  const normalizedOrderIds = Array.isArray(orderIds)
+    ? orderIds.map((value) => String(value || "").trim()).filter(Boolean)
+    : [];
+  if (normalizedOrderIds.length === 0) {
+    throw new Error("At least one order id is required");
+  }
+
+  const token = localStorage.getItem("token");
+  const res = await axios.patch(
+    "/orders/bulk-revised-etd",
+    {
+      order_ids: normalizedOrderIds,
+      revised_ETD: String(revised_ETD || "").trim(),
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  return res.data;
+};
+
+export const getOrderRevisedEtdHistory = async ({
+  orderId,
+  itemCode = "",
+} = {}) => {
+  const normalizedOrderId = String(orderId || "").trim();
+  if (!normalizedOrderId) {
+    throw new Error("Order id is required");
+  }
+
+  const token = localStorage.getItem("token");
+  const res = await axios.get("/orders/revised-etd-history", {
+    params: {
+      order_id: normalizedOrderId,
+      item_code: String(itemCode || "").trim(),
+    },
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return res.data;
+};
+
 export const editCompleteOrder = async (id, payload) => {
   if (!id) {
     throw new Error("Order id is required");

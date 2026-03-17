@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { editOrder } from "../services/orders.service";
+import OrderEtdWithHistory from "./OrderEtdWithHistory";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import "../App.css";
 
@@ -51,7 +52,13 @@ const RevisedEtdModal = ({ order, onClose, onSuccess }) => {
           <form onSubmit={handleSubmit}>
             <div className="modal-body d-grid gap-3">
               <div className="small text-secondary">
-                Current ETD: {formatDateDDMMYYYY(order?.ETD)}
+                Current ETD:{" "}
+                <OrderEtdWithHistory
+                  orderId={order?.order_id}
+                  itemCode={order?.item?.item_code}
+                  etd={order?.ETD}
+                  className="ms-1"
+                />
               </div>
               <div className="small text-secondary">
                 Current Revised ETD: {formatDateDDMMYYYY(order?.revised_ETD)}

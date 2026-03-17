@@ -67,3 +67,7 @@ Deployment assets:
 - [PM2 config](deploy/pm2/ecosystem.config.cjs)
 - [nginx config](deploy/nginx/order-management-system.conf)
 - [deploy script](deploy/scripts/deploy_vps.sh)
+
+GitHub Actions:
+- [CI workflow](.github/workflows/ci.yml)
+- [VPS deploy workflow](.github/workflows/deploy-vps.yml)

@@ -6,6 +6,7 @@ import {
   toDDMMYYYYInputValue,
   toISODateString,
 } from "../utils/date";
+import { formatCbm } from "../utils/cbm";
 import { getUserFromToken } from "../auth/auth.utils";
 import "../App.css";
 
@@ -61,6 +62,9 @@ const AlignQCModal = ({
       ? String(initialQuantityRequested)
       : "",
   );
+  const [selectedDateRequests, setSelectedDateRequests] = useState([]);
+  const [selectedDateRequestsLoading, setSelectedDateRequestsLoading] = useState(false);
+  const [selectedDateRequestsError, setSelectedDateRequestsError] = useState("");
 
   const parsedOpenQuantity = Number(openQuantity);
   const fallbackOpenQuantity = Number(order?.quantity);
@@ -107,6 +111,53 @@ const AlignQCModal = ({
     initialQuantityRequested,
     initialRequestType,
   ]);
+
+  useEffect(() => {
+    const requestDateIso = toISODateString(request_date);
+    if (!requestDateIso || !isValidDDMMYYYY(request_date)) {
+      setSelectedDateRequests([]);
+      setSelectedDateRequestsError("");
+      setSelectedDateRequestsLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const fetchSelectedDateRequests = async () => {
+      try {
+        setSelectedDateRequestsLoading(true);
+        setSelectedDateRequestsError("");
+
+        const response = await axios.get("/qc/daily-report", {
+          params: { date: requestDateIso },
+        });
+
+        if (cancelled) return;
+
+        setSelectedDateRequests(
+          Array.isArray(response?.data?.aligned_requests)
+            ? response.data.aligned_requests
+            : [],
+        );
+      } catch (err) {
+        if (cancelled) return;
+        setSelectedDateRequests([]);
+        setSelectedDateRequestsError(
+          err?.response?.data?.message || "Failed to load requests for selected date.",
+        );
+      } finally {
+        if (!cancelled) {
+          setSelectedDateRequestsLoading(false);
+        }
+      }
+    };
+
+    fetchSelectedDateRequests();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [request_date]);
 
   const handleSubmit = async () => {
     const token = localStorage.getItem("token");
@@ -185,7 +236,7 @@ const AlignQCModal = ({
 
   return (
     <div className="modal d-block om-modal-backdrop" tabIndex="-1" role="dialog">
-      <div className="modal-dialog modal-dialog-centered" role="document">
+      <div className="modal-dialog modal-dialog-centered modal-dialog-scrollable" role="document">
         <div className="modal-content">
           <div className="modal-header">
             <h5 className="modal-title">Align QC Request</h5>
@@ -295,6 +346,59 @@ const AlignQCModal = ({
               {requestType === "AQL" && (
                 <div className="small text-secondary mt-1">
                   AQL request uses 10% sample ({aqlSampleQuantity}) and backend auto-handles pass logic.
+                </div>
+              )}
+            </div>
+
+            <div>
+              <div className="d-flex justify-content-between align-items-center gap-2 mb-2">
+                <label className="form-label mb-0">Requests On Selected Date</label>
+                <span className="small text-secondary">
+                  {selectedDateRequests.length} request{selectedDateRequests.length === 1 ? "" : "s"}
+                </span>
+              </div>
+
+              {selectedDateRequestsError ? (
+                <div className="small text-danger">{selectedDateRequestsError}</div>
+              ) : selectedDateRequestsLoading ? (
+                <div className="small text-secondary">Loading requests...</div>
+              ) : selectedDateRequests.length === 0 ? (
+                <div className="small text-secondary">
+                  No QC requests found on this date.
+                </div>
+              ) : (
+                <div className="table-responsive align-qc-request-table-wrap">
+                  <table className="table table-sm table-striped align-middle mb-0 align-qc-request-table">
+                    <thead className="table-light">
+                      <tr>
+                        <th>PO</th>
+                        <th>Item Code</th>
+                        <th>Inspector</th>
+                        <th>Requested Qty</th>
+                        <th>Inspected CBM</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedDateRequests.map((request, index) => (
+                        <tr
+                          key={request?.qc_id || `${request?.order_id || "po"}-${request?.item_code || "item"}-${index}`}
+                          className={
+                            request?.goods_not_ready
+                              ? "weekly-summary-warning-row"
+                              : request?.is_inspection_done
+                                ? "om-report-success-row"
+                                : ""
+                          }
+                        >
+                          <td>{request?.order_id || "N/A"}</td>
+                          <td>{request?.item_code || "N/A"}</td>
+                          <td>{request?.inspector?.name || "Unassigned"}</td>
+                          <td>{request?.quantity_requested ?? 0}</td>
+                          <td>{formatCbm(request?.inspected_cbm_total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>

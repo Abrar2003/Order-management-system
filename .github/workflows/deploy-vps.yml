@@ -1,0 +1,134 @@
+name: Deploy VPS
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "backend/**"
+      - "client/OMS/**"
+      - "deploy/**"
+      - ".github/workflows/deploy-vps.yml"
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Git branch to deploy on the VPS"
+        required: true
+        default: "main"
+      reload_nginx:
+        description: "Run nginx validation and reload on the VPS"
+        required: true
+        type: choice
+        default: "false"
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  verify-backend:
+    name: Verify Backend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Prepare production env example
+        run: cp .env.example .env.production
+
+      - name: Install backend dependencies
+        run: npm ci
+
+      - name: Validate backend production env
+        run: NODE_ENV=production npm run check:env
+
+  verify-frontend:
+    name: Verify Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client/OMS
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: client/OMS/package-lock.json
+
+      - name: Prepare production env example
+        run: cp .env.example .env.production
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+  deploy:
+    name: Deploy To VPS
+    runs-on: ubuntu-latest
+    needs:
+      - verify-backend
+      - verify-frontend
+    environment: production
+    timeout-minutes: 20
+    env:
+      DEPLOY_BRANCH: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.branch || github.ref_name }}
+      DEPLOY_RELOAD_NGINX: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.reload_nginx || 'false' }}
+      VPS_SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
+      VPS_SSH_PORT: ${{ secrets.VPS_SSH_PORT }}
+      VPS_SSH_USER: ${{ secrets.VPS_SSH_USER }}
+      VPS_APP_DIR: ${{ secrets.VPS_APP_DIR }}
+      VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+      VPS_SSH_KNOWN_HOSTS: ${{ secrets.VPS_SSH_KNOWN_HOSTS }}
+    steps:
+      - name: Validate required deployment secrets
+        run: |
+          set -euo pipefail
+          for name in VPS_SSH_HOST VPS_SSH_USER VPS_SSH_PRIVATE_KEY VPS_SSH_KNOWN_HOSTS; do
+            if [ -z "${!name:-}" ]; then
+              echo "Missing required secret: $name" >&2
+              exit 1
+            fi
+          done
+
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$VPS_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Run remote deploy script
+        run: |
+          set -euo pipefail
+          APP_DIR="${VPS_APP_DIR:-/var/www/order-management-system}"
+          SSH_PORT="${VPS_SSH_PORT:-22}"
+          ssh \
+            -i ~/.ssh/id_ed25519 \
+            -o BatchMode=yes \
+            -p "$SSH_PORT" \
+            "$VPS_SSH_USER@$VPS_SSH_HOST" \
+            "cd '$APP_DIR' && APP_DIR='$APP_DIR' GIT_BRANCH='$DEPLOY_BRANCH' VALIDATE_NGINX='$DEPLOY_RELOAD_NGINX' RELOAD_NGINX='$DEPLOY_RELOAD_NGINX' bash deploy/scripts/deploy_vps.sh"

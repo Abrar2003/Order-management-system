@@ -7,6 +7,8 @@ import EditOrderModal from "../components/EditOrderModal";
 import EditCompleteOrderModal from "../components/EditCompleteOrderModal";
 import ArchiveOrderModal from "../components/ArchiveOrderModal";
 import RevisedEtdModal from "../components/RevisedEtdModal";
+import BulkRevisedEtdModal from "../components/BulkRevisedEtdModal";
+import OrderEtdWithHistory from "../components/OrderEtdWithHistory";
 import { archiveOrder } from "../services/orders.service";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatDateDDMMYYYY } from "../utils/date";
@@ -49,6 +51,7 @@ const Orders = () => {
   const [editingOrder, setEditingOrder] = useState(null);
   const [editingCompleteOrder, setEditingCompleteOrder] = useState(null);
   const [revisedEtdTarget, setRevisedEtdTarget] = useState(null);
+  const [showBulkRevisedEtdModal, setShowBulkRevisedEtdModal] = useState(false);
   const [archiveTarget, setArchiveTarget] = useState(null);
   const [archiving, setArchiving] = useState(false);
   const [archiveError, setArchiveError] = useState("");
@@ -185,16 +188,32 @@ const Orders = () => {
               <span className="om-summary-chip">
                 Order Date: {formatDateDDMMYYYY(primaryOrder?.order_date)}
               </span>
-              <span className="om-summary-chip">ETD: {formatDateDDMMYYYY(primaryOrder?.ETD)}</span>
+              <span className="om-summary-chip">
+                ETD:{" "}
+                <OrderEtdWithHistory
+                  orderId={primaryOrder?.order_id}
+                  etd={primaryOrder?.ETD}
+                  className="ms-1"
+                />
+              </span>
             </div>
             {canEditOrder && primaryOrder ? (
-              <button
-                type="button"
-                className="btn btn-outline-primary btn-sm"
-                onClick={() => setEditingCompleteOrder(primaryOrder)}
-              >
-                Update Complete Order
-              </button>
+              <div className="d-flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn btn-outline-primary btn-sm"
+                  onClick={() => setEditingCompleteOrder(primaryOrder)}
+                >
+                  Update Complete Order
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary btn-sm"
+                  onClick={() => setShowBulkRevisedEtdModal(true)}
+                >
+                  Bulk Revised ETD
+                </button>
+              </div>
             ) : null}
           </div>
         </div>
@@ -388,6 +407,17 @@ const Orders = () => {
           onClose={() => setRevisedEtdTarget(null)}
           onSuccess={() => {
             setRevisedEtdTarget(null);
+            fetchOrders();
+          }}
+        />
+      )}
+
+      {showBulkRevisedEtdModal && (
+        <BulkRevisedEtdModal
+          orders={sortedOrders}
+          onClose={() => setShowBulkRevisedEtdModal(false)}
+          onSuccess={() => {
+            setShowBulkRevisedEtdModal(false);
             fetchOrders();
           }}
         />

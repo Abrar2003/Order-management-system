@@ -1,5 +1,21 @@
 const mongoose = require("mongoose");
 
+const RevisedEtdHistorySchema = new mongoose.Schema(
+  {
+    revised_etd: { type: Date, required: true },
+    updated_at: { type: Date, default: Date.now },
+    updated_by: {
+      user: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "users",
+        default: null,
+      },
+      name: { type: String, default: "" },
+    },
+  },
+  { _id: false },
+);
+
 const Order_Schema = new mongoose.Schema(
   {
     order_id: { type: String, required: true },
@@ -11,6 +27,7 @@ const Order_Schema = new mongoose.Schema(
     vendor: { type: String, required: true },
     ETD: { type: Date },
     revised_ETD: { type: Date },
+    revised_etd_history: { type: [RevisedEtdHistorySchema], default: [] },
     order_date: { type: Date, default: Date.now() },
     status: {
       type: String,

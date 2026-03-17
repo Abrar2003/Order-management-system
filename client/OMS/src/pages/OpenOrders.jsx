@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
 import OrderExportModal from "../components/OrderExportModal";
+import OrderEtdWithHistory from "../components/OrderEtdWithHistory";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
@@ -536,7 +537,12 @@ const OpenOrders = () => {
                         <td>{getStatus(order)}</td>
                         <td>{order.items}</td>
                         <td>{formatDateDDMMYYYY(order.order_date)}</td>
-                        <td>{formatDateDDMMYYYY(order.ETD)}</td>
+                        <td>
+                          <OrderEtdWithHistory
+                            orderId={order?.order_id}
+                            etd={order?.ETD}
+                          />
+                        </td>
                       </tr>
                     ))}
                   </tbody>

@@ -15,6 +15,34 @@ BACKEND_ENV_FILE="${BACKEND_ENV_FILE:-$BACKEND_DIR/.env.production}"
 FRONTEND_ENV_FILE="${FRONTEND_ENV_FILE:-$FRONTEND_DIR/.env.production}"
 BACKEND_HEALTHCHECK_URL="${BACKEND_HEALTHCHECK_URL:-http://127.0.0.1:8008/healthz}"
 FRONTEND_HEALTHCHECK_URL="${FRONTEND_HEALTHCHECK_URL:-}"
+VALIDATE_NGINX="${VALIDATE_NGINX:-false}"
+RELOAD_NGINX="${RELOAD_NGINX:-false}"
+
+is_truthy() {
+  local value="${1:-}"
+  case "${value,,}" in
+    1|true|yes|on)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+run_with_optional_sudo() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    "$@"
+    return
+  fi
+
+  if ! command -v sudo >/dev/null 2>&1; then
+    echo "sudo is required to run: $*"
+    exit 1
+  fi
+
+  sudo "$@"
+}
 
 log() {
   echo
@@ -82,14 +110,14 @@ cd "$APP_DIR"
 pm2 startOrRestart "$PM2_CONFIG" --update-env
 pm2 save
 
-if command -v nginx >/dev/null 2>&1; then
+if is_truthy "$VALIDATE_NGINX" && command -v nginx >/dev/null 2>&1; then
   log "Validating nginx config"
-  sudo nginx -t
+  run_with_optional_sudo nginx -t
 fi
 
-if command -v systemctl >/dev/null 2>&1 && command -v nginx >/dev/null 2>&1; then
+if is_truthy "$RELOAD_NGINX" && command -v systemctl >/dev/null 2>&1 && command -v nginx >/dev/null 2>&1; then
   log "Reloading nginx"
-  sudo systemctl reload nginx
+  run_with_optional_sudo systemctl reload nginx
 fi
 
 if command -v curl >/dev/null 2>&1; then

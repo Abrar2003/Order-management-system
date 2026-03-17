@@ -38,8 +38,15 @@ const parseSortOrder = (value, sortBy) => {
   if (normalized === "asc" || normalized === "desc") return normalized;
   return sortBy === "order_id" ? "asc" : "desc";
 };
+
 const getGoodsNotReadyStatusLabel = (value) =>
   value ? <span className="text-danger fw-semibold">Goods Not Ready</span> : null;
+
+const getAlignedRequestRowClassName = (request) => {
+  if (request?.goods_not_ready) return "weekly-summary-warning-row";
+  if (request?.is_inspection_done) return "om-report-success-row";
+  return "";
+};
 
 const DailyReport = () => {
   const navigate = useNavigate();
@@ -260,7 +267,7 @@ const DailyReport = () => {
     <>
       <Navbar />
 
-      <div className="page-shell py-3">
+      <div className="page-shell om-report-page py-3">
         <div className="d-flex justify-content-between align-items-center mb-3">
           <button
             type="button"
@@ -309,7 +316,7 @@ const DailyReport = () => {
               Total Inspected Qty: {summary?.total_inspected_quantity ?? 0}
             </span>
             <span className="om-summary-chip">
-              Total CBM: {formatCbm(summary?.total_inspected_cbm * summary?.total_inspected_quantity)}
+              Total CBM: {formatCbm(summary?.total_inspected_cbm)}
             </span>
           </div>
         </div>
@@ -352,13 +359,14 @@ const DailyReport = () => {
                     <th>Brand</th>
                     <th>Inspector</th>
                     <th>Requested</th>
+                    <th>Inspected CBM</th>
                     <th>Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {report.aligned_requests.length === 0 && (
                     <tr>
-                      <td colSpan="8" className="text-center py-3">
+                      <td colSpan="9" className="text-center py-3">
                         No aligned requests found for this date.
                       </td>
                     </tr>
@@ -367,7 +375,7 @@ const DailyReport = () => {
                   {report.aligned_requests.map((request) => (
                     <tr
                       key={request.qc_id}
-                      className={request?.goods_not_ready ? "weekly-summary-warning-row" : ""}
+                      className={getAlignedRequestRowClassName(request)}
                       style={{ cursor: "pointer" }}
                       onClick={() => navigate(`/qc/${request.qc_id}`)}
                     >
@@ -386,6 +394,7 @@ const DailyReport = () => {
                       <td>{request.brand || "N/A"}</td>
                       <td>{request?.inspector?.name || "Unassigned"}</td>
                       <td>{request.quantity_requested ?? 0}</td>
+                      <td>{formatCbm(request?.inspected_cbm_total)}</td>
                       <td>
                         {getGoodsNotReadyStatusLabel(request?.goods_not_ready)
                           || request.order_status
@@ -444,6 +453,8 @@ const DailyReport = () => {
                               Order ID{inspectionSortIndicator("order_id")}
                             </button>
                           </th>
+                          <th>Vendor</th>
+                          <th>Brand</th>
                           <th>Item</th>
                           <th>Inspected</th>
                           <th>Passed</th>
@@ -460,6 +471,8 @@ const DailyReport = () => {
                           >
                             <td>{formatDateDDMMYYYY(inspection.inspection_date)}</td>
                             <td>{inspection.order_id || "N/A"}</td>
+                            <td>{inspection.vendor || "N/A"}</td>
+                            <td>{inspection.brand || "N/A"}</td>
                             <td>
                               <div>{inspection.item_code || "N/A"}</div>
                               {inspection?.goods_not_ready ? (

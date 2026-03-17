@@ -19,11 +19,13 @@ const {
   exportShipmentsDb,
   exportOrdersDb,
   editOrder,
+  bulkUpdateRevisedEtd,
   editCompleteOrder,
   archiveOrder,
   getArchivedOrders,
   syncZeroQuantityOrdersArchive,
   finalizeOrder,
+  getRevisedEtdHistory,
   reSync,
 } = require("../controllers/order.controller");
 
@@ -87,6 +89,7 @@ router.get(
 // get orders with optional filters via query params
 router.get("/filters", authenticate, getOrdersByFiltersDb);
 router.get("/export", authenticate, exportOrdersDb);
+router.get("/revised-etd-history", authenticate, getRevisedEtdHistory);
 
 // List shipped/partially shipped/inspection-done items with latest shipment details
 router.get(
@@ -109,6 +112,13 @@ router.patch(
   authenticate,
   authorize("admin"),
   editOrder,
+);
+
+router.patch(
+  "/bulk-revised-etd",
+  authenticate,
+  authorize("admin"),
+  bulkUpdateRevisedEtd,
 );
 
 router.patch(

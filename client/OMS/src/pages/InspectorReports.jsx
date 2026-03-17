@@ -141,7 +141,7 @@ const InspectorReports = () => {
     <>
       <Navbar />
 
-      <div className="page-shell py-3">
+      <div className="page-shell om-report-page py-3">
         <div className="d-flex justify-content-between align-items-center mb-3">
           <button
             type="button"

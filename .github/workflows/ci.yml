@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - "client/OMS/**"
+      - "deploy/**"
+      - ".github/workflows/**"
+  push:
+    paths:
+      - "backend/**"
+      - "client/OMS/**"
+      - "deploy/**"
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend Env Check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Prepare production env example
+        run: cp .env.example .env.production
+
+      - name: Install backend dependencies
+        run: npm ci
+
+      - name: Validate backend production env
+        run: NODE_ENV=production npm run check:env
+
+  frontend:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client/OMS
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: client/OMS/package-lock.json
+
+      - name: Prepare production env example
+        run: cp .env.example .env.production
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build

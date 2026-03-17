@@ -128,6 +128,17 @@ const ACTIVE_ORDER_MATCH = {
 const buildArchivedByName = (user) =>
   String(user?.name || user?.username || user?.email || "").trim();
 
+const normalizeHistoryActor = (value = {}) => {
+  const actorId = value?.user && mongoose.Types.ObjectId.isValid(value.user)
+    ? value.user
+    : null;
+
+  return {
+    user: actorId,
+    name: String(value?.name || "").trim(),
+  };
+};
+
 const buildOrderListMatch = ({
   brand,
   vendor,
@@ -354,6 +365,127 @@ const pickRectifyItemCode = (row = {}) =>
 const toDateDayKey = (value) => {
   const formatted = formatDateDDMMYYYY(value, "");
   return formatted || "";
+};
+
+const toTimestamp = (value) => {
+  const parsed = value instanceof Date ? value : parseDateLike(value);
+  if (!parsed) return 0;
+  return parsed.getTime();
+};
+
+const normalizeRevisedEtdHistoryEntries = (entries = []) =>
+  (Array.isArray(entries) ? entries : [])
+    .map((entry) => {
+      const revisedEtd = entry?.revised_etd instanceof Date
+        ? entry.revised_etd
+        : parseDateLike(entry?.revised_etd);
+      if (!revisedEtd) return null;
+
+      const updatedAt = entry?.updated_at instanceof Date
+        ? entry.updated_at
+        : parseDateLike(entry?.updated_at) || revisedEtd;
+
+      return {
+        revised_etd: revisedEtd,
+        updated_at: updatedAt,
+        updated_by: normalizeHistoryActor(entry?.updated_by),
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => toTimestamp(right?.updated_at) - toTimestamp(left?.updated_at));
+
+const buildRevisedEtdHistoryEntry = ({
+  revisedEtd = null,
+  updatedAt = new Date(),
+  user = null,
+} = {}) => {
+  const parsedRevisedEtd = revisedEtd instanceof Date
+    ? revisedEtd
+    : parseDateLike(revisedEtd);
+  if (!parsedRevisedEtd) return null;
+
+  const parsedUpdatedAt = updatedAt instanceof Date
+    ? updatedAt
+    : parseDateLike(updatedAt) || new Date();
+  const actorId = user?._id && mongoose.Types.ObjectId.isValid(user._id)
+    ? user._id
+    : null;
+
+  return {
+    revised_etd: parsedRevisedEtd,
+    updated_at: parsedUpdatedAt,
+    updated_by: {
+      user: actorId,
+      name: buildArchivedByName(user),
+    },
+  };
+};
+
+const getOrderRevisedEtdHistoryEntries = (orderEntry = {}) => {
+  const normalizedHistory = normalizeRevisedEtdHistoryEntries(
+    orderEntry?.revised_etd_history,
+  );
+  const currentRevisedEtdKey = toDateDayKey(orderEntry?.revised_ETD);
+
+  if (
+    currentRevisedEtdKey
+    && !normalizedHistory.some(
+      (entry) => toDateDayKey(entry?.revised_etd) === currentRevisedEtdKey,
+    )
+  ) {
+    const fallbackEntry = buildRevisedEtdHistoryEntry({
+      revisedEtd: orderEntry?.revised_ETD,
+      updatedAt:
+        orderEntry?.updatedAt || orderEntry?.createdAt || orderEntry?.revised_ETD,
+      user: {
+        _id: orderEntry?.updated_by?.user || null,
+        name: orderEntry?.updated_by?.name || "",
+      },
+    });
+    if (fallbackEntry) {
+      normalizedHistory.unshift(fallbackEntry);
+    }
+  }
+
+  return normalizedHistory
+    .sort((left, right) => toTimestamp(right?.updated_at) - toTimestamp(left?.updated_at))
+    .map((entry) => ({
+      revised_etd: entry?.revised_etd || null,
+      updated_at: entry?.updated_at || null,
+      updated_by: {
+        user: entry?.updated_by?.user || null,
+        name: String(entry?.updated_by?.name || "").trim(),
+      },
+    }));
+};
+
+const applyRevisedEtdUpdateToOrder = ({
+  orderDoc,
+  nextRevisedEtd = null,
+  user = null,
+  updatedAt = new Date(),
+} = {}) => {
+  if (!orderDoc) return;
+
+  const normalizedHistory = normalizeRevisedEtdHistoryEntries(
+    orderDoc?.revised_etd_history,
+  );
+  const currentRevisedEtdKey = toDateDayKey(orderDoc?.revised_ETD);
+  const nextRevisedEtdKey = toDateDayKey(nextRevisedEtd);
+
+  if (nextRevisedEtdKey && nextRevisedEtdKey !== currentRevisedEtdKey) {
+    const historyEntry = buildRevisedEtdHistoryEntry({
+      revisedEtd: nextRevisedEtd,
+      updatedAt,
+      user,
+    });
+    if (historyEntry) {
+      normalizedHistory.unshift(historyEntry);
+    }
+  }
+
+  orderDoc.revised_ETD = nextRevisedEtd || null;
+  orderDoc.revised_etd_history = normalizedHistory;
 };
 
 const normalizeRectifiedPdfRow = (row = {}, { brand, vendor } = {}) => {
@@ -3227,6 +3359,70 @@ exports.getOrderById = async (req, res) => {
   }
 };
 
+exports.getRevisedEtdHistory = async (req, res) => {
+  try {
+    const orderId = normalizeOrderKey(req.query.order_id ?? req.query.orderId);
+    const itemCode = String(req.query.item_code ?? req.query.itemCode ?? "").trim();
+
+    if (!orderId) {
+      return res.status(400).json({
+        success: false,
+        message: "order_id is required",
+      });
+    }
+
+    const match = {
+      ...ACTIVE_ORDER_MATCH,
+      order_id: {
+        $regex: `^${escapeRegex(orderId)}$`,
+        $options: "i",
+      },
+    };
+
+    if (itemCode) {
+      match["item.item_code"] = {
+        $regex: `^${escapeRegex(itemCode)}$`,
+        $options: "i",
+      };
+    }
+
+    const orders = await Order.find(match)
+      .select(
+        "order_id item revised_ETD revised_etd_history updatedAt createdAt",
+      )
+      .sort({ "item.item_code": 1, updatedAt: -1 })
+      .lean();
+
+    const items = (Array.isArray(orders) ? orders : []).map((orderDoc) => ({
+      id: String(orderDoc?._id || ""),
+      order_id: String(orderDoc?.order_id || "").trim(),
+      item_code: String(orderDoc?.item?.item_code || "").trim(),
+      description: String(orderDoc?.item?.description || "").trim(),
+      current_revised_etd: orderDoc?.revised_ETD || null,
+      history: getOrderRevisedEtdHistoryEntries(orderDoc),
+    }));
+
+    return res.status(200).json({
+      success: true,
+      order_id: orderId,
+      item_code: itemCode,
+      items,
+      total_entries: items.reduce(
+        (sum, entry) =>
+          sum + (Array.isArray(entry?.history) ? entry.history.length : 0),
+        0,
+      ),
+    });
+  } catch (error) {
+    console.error("Get Revised ETD History Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch revised ETD history",
+      error: error.message,
+    });
+  }
+};
+
 exports.getVendorSummaryByBrand = async (req, res) => {
   try {
     const { brand } = req.params;
@@ -4933,7 +5129,11 @@ exports.editOrder = async (req, res) => {
     order.quantity = nextQuantity;
     order.item.item_code = nextItemCode;
     order.item.description = nextDescription;
-    order.revised_ETD = nextRevisedEtd;
+    applyRevisedEtdUpdateToOrder({
+      orderDoc: order,
+      nextRevisedEtd,
+      user: req.user,
+    });
     if (shouldRebuildShipment) {
       order.shipment = adjustedShipment;
     }
@@ -5010,6 +5210,104 @@ exports.editOrder = async (req, res) => {
     console.error("Edit Order Error:", error);
     return res.status(500).json({
       message: "Failed to update order",
+      error: error.message,
+    });
+  }
+};
+
+exports.bulkUpdateRevisedEtd = async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const orderIds = [
+      ...new Set(
+        (Array.isArray(payload.order_ids) ? payload.order_ids : [])
+          .map((value) => String(value || "").trim())
+          .filter(Boolean),
+      ),
+    ];
+    const rawRevisedEtd = hasOwn(payload, "revised_ETD")
+      ? payload.revised_ETD
+      : (hasOwn(payload, "revised_etd")
+        ? payload.revised_etd
+        : payload.revisedEtd);
+
+    if (orderIds.length === 0) {
+      return res.status(400).json({
+        message: "At least one order id is required",
+      });
+    }
+
+    const invalidOrderIds = orderIds.filter(
+      (value) => !mongoose.Types.ObjectId.isValid(value),
+    );
+    if (invalidOrderIds.length > 0) {
+      return res.status(400).json({
+        message: "One or more order ids are invalid",
+      });
+    }
+
+    let nextRevisedEtd = null;
+    const revisedEtdInput = String(rawRevisedEtd ?? "").trim();
+    if (revisedEtdInput) {
+      nextRevisedEtd = parseDateLike(revisedEtdInput);
+      if (!nextRevisedEtd) {
+        return res.status(400).json({
+          message: "revised_ETD must be a valid date",
+        });
+      }
+    }
+
+    const orders = await Order.find({
+      _id: { $in: orderIds },
+      ...ACTIVE_ORDER_MATCH,
+    });
+
+    if (orders.length !== orderIds.length) {
+      return res.status(404).json({
+        message: "One or more selected orders were not found",
+      });
+    }
+
+    const updatedAt = new Date();
+    const updatedRows = [];
+
+    for (const orderDoc of orders) {
+      const beforeSnapshot = buildOrderEditLogSnapshot(orderDoc);
+      applyRevisedEtdUpdateToOrder({
+        orderDoc,
+        nextRevisedEtd,
+        user: req.user,
+        updatedAt,
+      });
+      await orderDoc.save();
+
+      await createOrderEditLog({
+        reqUser: req.user,
+        operationType: "order_edit",
+        beforeSnapshot,
+        afterSnapshot: buildOrderEditLogSnapshot(orderDoc),
+        extraRemarks: [
+          `Bulk revised ETD update applied to ${orders.length} row(s).`,
+        ],
+      });
+
+      updatedRows.push({
+        id: String(orderDoc?._id || ""),
+        order_id: String(orderDoc?.order_id || "").trim(),
+        item_code: String(orderDoc?.item?.item_code || "").trim(),
+        revised_ETD: orderDoc?.revised_ETD || null,
+      });
+    }
+
+    return res.status(200).json({
+      message: `Revised ETD updated for ${updatedRows.length} item(s).`,
+      count: updatedRows.length,
+      data: updatedRows,
+    });
+  } catch (error) {
+    console.error("Bulk Update Revised ETD Error:", error);
+    return res.status(500).json({
+      message: "Failed to bulk update revised ETD",
       error: error.message,
     });
   }

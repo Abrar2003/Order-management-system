@@ -347,7 +347,7 @@ const WeeklySummary = () => {
     <>
       <Navbar />
 
-      <div className="page-shell py-3">
+      <div className="page-shell om-report-page py-3">
         <div className="d-flex justify-content-between align-items-center mb-3">
           <button
             type="button"
@@ -454,53 +454,50 @@ const WeeklySummary = () => {
                       <table className="table table-sm table-striped align-middle mb-0">
                         <thead>
                           <tr>
+                            <th>Last Inspection Date</th>
                             <th>PO</th>
                             <th>Item Code</th>
                             <th>Total Order Quantity</th>
                             <th>Packed</th>
                             <th>Open Quantity</th>
                             <th>Last Inspector</th>
-                            <th>Last Inspection Date</th>
                           </tr>
                         </thead>
                         <tbody>
                           {vendorDisplayRows.map((row) => (
                             <tr
-                              key={`${vendorKey}-${row.key}`}
-                              className={
+                            key={`${vendorKey}-${row.key}`}
+                            className={
                                 row.goodsNotReady
                                   ? "weekly-summary-warning-row"
                                   : row.packedSummary
-                                    ? "weekly-summary-packed-row"
-                                    : ""
-                              }
-                            >
+                                  ? "weekly-summary-packed-row"
+                                  : ""
+                                }
+                                >
+                              <td>{row.lastInspectionDate ? formatDateDDMMYYYY(row.lastInspectionDate) : "-"}</td>
                               <td>{row.po || ""}</td>
                               <td>
                                 <div>{row.itemLabel || "N/A"}</div>
-                                {row.goodsNotReady ? (
+                                {/* {row.goodsNotReady ? (
                                   <div className="small fw-semibold">Goods Not Ready</div>
-                                ) : null}
+                                ) : null} */}
                               </td>
                               {row.goodsNotReady ? (
-                                <td colSpan="3">
+                                <>
+                                <td colSpan="1"></td>
+                                <td colSpan="5">
                                   <div className="fw-semibold">
                                     {row.goodsNotReadyReason || "Reason not provided"}
                                   </div>
-                                  <div className="small">
-                                    Inspection Date:{" "}
-                                    {formatDateDDMMYYYY(row.goodsNotReadyInspectionDate)
-                                      || row.goodsNotReadyInspectionDate
-                                      || "N/A"}
-                                  </div>
                                 </td>
+                                </>
                               ) : (
                                 <>
                                   <td>{row.totalOrderQuantity ?? 0}</td>
                                   <td>{row.quantityPassed ?? 0}</td>
                                   <td>{row.pending ?? 0}</td>
                                   <td>{row.lastInspector || "-"}</td>
-                                  <td>{row.lastInspectionDate ? formatDateDDMMYYYY(row.lastInspectionDate) : "-"}</td>
                                 </>
                               )}
                             </tr>

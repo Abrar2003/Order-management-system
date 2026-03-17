@@ -4473,9 +4473,23 @@ exports.getDailyReport = async (req, res) => {
       (inspection) => inspection?.qc?.order,
     );
     const latestInspectionByQcId = new Map();
+    const inspectedCbmTotalByQcId = new Map();
     for (const inspection of inspections) {
       const qcId = String(inspection?.qc?._id || inspection?.qc || "").trim();
       if (!qcId) continue;
+
+      const inspectionCbmPerUnit = Number(
+        inspection?.cbm?.total ?? inspection?.qc?.cbm?.total ?? 0,
+      );
+      const safeInspectionCbmPerUnit = Number.isFinite(inspectionCbmPerUnit)
+        ? inspectionCbmPerUnit
+        : 0;
+      const inspectedQty = Number(inspection?.checked || 0);
+      const inspectedCbmTotal = safeInspectionCbmPerUnit * inspectedQty;
+      inspectedCbmTotalByQcId.set(
+        qcId,
+        Number(inspectedCbmTotalByQcId.get(qcId) || 0) + inspectedCbmTotal,
+      );
 
       const existingInspection = latestInspectionByQcId.get(qcId);
       if (
@@ -4489,6 +4503,18 @@ exports.getDailyReport = async (req, res) => {
     const aligned_requests = alignedRequests.map((qc) => {
       const latestInspection = latestInspectionByQcId.get(String(qc?._id || "").trim());
       const goodsNotReady = Boolean(latestInspection?.goods_not_ready?.ready);
+      const latestPendingAfter = Number(latestInspection?.pending_after);
+      const currentPendingQuantity = Number(qc?.quantities?.pending || 0);
+      const effectivePendingQuantity = Number.isFinite(latestPendingAfter)
+        ? latestPendingAfter
+        : currentPendingQuantity;
+      const latestInspectedQuantity = Number(
+        latestInspection?.checked ?? qc?.quantities?.qc_checked ?? 0,
+      );
+      const isInspectionDone =
+        !goodsNotReady
+        && effectivePendingQuantity <= 0
+        && latestInspectedQuantity > 0;
 
       return {
         qc_id: qc._id,
@@ -4510,7 +4536,12 @@ exports.getDailyReport = async (req, res) => {
         quantity_inspected: Number(qc?.quantities?.qc_checked || 0),
         quantity_passed: Number(qc?.quantities?.qc_passed || 0),
         quantity_pending: Number(qc?.quantities?.pending || 0),
+        inspected_cbm_total: toRoundedNumber(
+          Number(inspectedCbmTotalByQcId.get(String(qc?._id || "").trim()) || 0),
+          3,
+        ),
         order_status: qc?.order?.status || "N/A",
+        is_inspection_done: isInspectionDone,
         goods_not_ready: goodsNotReady,
         goods_not_ready_reason: goodsNotReady
           ? normalizeText(
@@ -4526,8 +4557,6 @@ exports.getDailyReport = async (req, res) => {
     );
 
     const inspectorMap = new Map();
-    const inspectorCbmKeyMap = new Map();
-    const globalCbmKeys = new Set();
     let totalInspectedCbm = 0;
     for (const inspection of inspections) {
       const inspectorId = String(
@@ -4565,29 +4594,11 @@ exports.getDailyReport = async (req, res) => {
           : qcRecord?.cbm || {};
       const cbmTotal = Number(cbmSnapshot?.total || 0);
       const safeCbmTotal = Number.isFinite(cbmTotal) ? cbmTotal : 0;
-      const orderIdForKey = String(
-        qcRecord?.order_meta?.order_id || qcRecord?.order?.order_id || "",
-      ).trim();
-      const itemCodeForKey = String(qcRecord?.item?.item_code || "").trim();
-      const cbmKey =
-        orderIdForKey && itemCodeForKey
-          ? `${orderIdForKey}__${itemCodeForKey}`
-          : `inspection:${inspection._id}`;
+      const inspectedCbmTotal = safeCbmTotal * inspectedQty;
 
       entry.total_inspected_quantity += inspectedQty;
-      if (!inspectorCbmKeyMap.has(inspectorId)) {
-        inspectorCbmKeyMap.set(inspectorId, new Set());
-      }
-      const inspectorCbmKeys = inspectorCbmKeyMap.get(inspectorId);
-      if (!inspectorCbmKeys.has(cbmKey)) {
-        entry.total_inspected_cbm += safeCbmTotal;
-        inspectorCbmKeys.add(cbmKey);
-      }
-
-      if (!globalCbmKeys.has(cbmKey)) {
-        totalInspectedCbm += safeCbmTotal;
-        globalCbmKeys.add(cbmKey);
-      }
+      entry.total_inspected_cbm += inspectedCbmTotal;
+      totalInspectedCbm += inspectedCbmTotal;
 
       entry.inspections_count += 1;
       entry.inspections.push({
@@ -4595,6 +4606,8 @@ exports.getDailyReport = async (req, res) => {
         inspection_date: inspection.inspection_date || null,
         order_id:
           qcRecord?.order_meta?.order_id || qcRecord?.order?.order_id || "N/A",
+        vendor: qcRecord?.order_meta?.vendor || qcRecord?.order?.vendor || "N/A",
+        brand: qcRecord?.order_meta?.brand || qcRecord?.order?.brand || "N/A",
         item_code: qcRecord?.item?.item_code || "N/A",
         description: qcRecord?.item?.description || "N/A",
         inspected_quantity: inspectedQty,
@@ -4639,7 +4652,7 @@ exports.getDailyReport = async (req, res) => {
         inspectors_count: inspector_compiled.length,
         inspections_count: inspections.length,
         total_inspected_quantity: totalInspectedQty,
-        total_inspected_cbm: totalInspectedCbm,
+        total_inspected_cbm: toRoundedNumber(totalInspectedCbm, 3),
       },
       aligned_requests: sortedAlignedRequests,
       inspector_compiled,

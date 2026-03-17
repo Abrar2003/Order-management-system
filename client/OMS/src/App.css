@@ -110,6 +110,27 @@
   vertical-align: middle;
 }
 
+.om-report-page .table th,
+.om-report-page .table td {
+  text-align: right;
+}
+
+.om-report-page .table th > .btn.btn-link {
+  width: 100%;
+  display: inline-flex;
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.align-qc-request-table-wrap {
+  max-height: 16rem;
+}
+
+.align-qc-request-table th,
+.align-qc-request-table td {
+  white-space: nowrap;
+}
+
 .orders-action-col {
   width: 20%;
   min-width: 320px;
@@ -558,6 +579,13 @@
   vertical-align: top;
 }
 
+.om-report-success-row > *{
+  background: #0ffb91 !important;
+  color: #0f5132;
+  font-weight: 600;
+  vertical-align: top;
+}
+
 .auth-card {
   max-width: 440px;
 }
@@ -579,6 +607,85 @@
 .open-orders-filter-actions .btn {
   flex: 1 1 0;
   white-space: nowrap;
+}
+
+.om-etd-history {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: help;
+  outline: none;
+}
+
+.om-etd-history-label {
+  text-decoration: underline dotted;
+  text-underline-offset: 0.15rem;
+}
+
+.om-etd-history-panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 0.5rem);
+  min-width: 14rem;
+  max-width: min(20rem, calc(100vw - 1rem));
+  max-height: 16rem;
+  overflow-y: auto;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 0.45rem;
+  background: var(--bs-body-bg);
+  color: var(--bs-body-color);
+  box-shadow: 0 0.25rem 0.85rem rgba(15, 23, 42, 0.18);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 1085;
+}
+
+.om-etd-history:hover .om-etd-history-panel,
+.om-etd-history:focus-visible .om-etd-history-panel {
+  opacity: 1;
+  visibility: visible;
+}
+
+.om-etd-history-title,
+.om-etd-history-section,
+.om-etd-history-item-code,
+.om-etd-history-row,
+.om-etd-history-empty,
+.om-etd-history-meta {
+  display: block;
+}
+
+.om-etd-history-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  margin-bottom: 0.35rem;
+}
+
+.om-etd-history-section + .om-etd-history-section {
+  margin-top: 0.45rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid var(--bs-border-color);
+}
+
+.om-etd-history-item-code {
+  font-size: 0.74rem;
+  font-weight: 700;
+  margin-bottom: 0.2rem;
+}
+
+.om-etd-history-row + .om-etd-history-row {
+  margin-top: 0.2rem;
+}
+
+.om-etd-history-meta {
+  font-size: 0.7rem;
+  color: var(--bs-secondary-color);
+}
+
+.om-etd-history-empty {
+  font-size: 0.76rem;
 }
 
 .om-table-tooltip-trigger {

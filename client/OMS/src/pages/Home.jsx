@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
+import OrderEtdWithHistory from "../components/OrderEtdWithHistory";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
@@ -585,7 +586,12 @@ const Home = () => {
                           </td>
                           <td>{order?.vendor || "N/A"}</td>
                           <td>{order?.order_id || "N/A"}</td>
-                          <td>{formatDateDDMMYYYY(order?.ETD)}</td>
+                          <td>
+                            <OrderEtdWithHistory
+                              orderId={order?.order_id}
+                              etd={order?.ETD}
+                            />
+                          </td>
                           <td>{Number(order?.itemCount || 0)}</td>
                           <td>{order?.status || "N/A"}</td>
                           <td>{Number(order?.shippedCount || 0)}</td>

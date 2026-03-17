@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import OrderEtdWithHistory from "../components/OrderEtdWithHistory";
 import { formatDateDDMMYYYY } from "../utils/date";
 import "../App.css";
 
@@ -170,7 +171,13 @@ const ItemOrdersHistory = () => {
                           <td>{toText(order?.brand)}</td>
                           <td>{toText(order?.vendor)}</td>
                           <td>{formatDateDDMMYYYY(order?.order_date)}</td>
-                          <td>{formatDateDDMMYYYY(order?.ETD)}</td>
+                          <td>
+                            <OrderEtdWithHistory
+                              orderId={order?.order_id}
+                              itemCode={order?.item_code}
+                              etd={order?.ETD}
+                            />
+                          </td>
                           <td>{toText(order?.status)}</td>
                           <td>{toSafeNumber(order?.quantity)}</td>
                         </tr>
