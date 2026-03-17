@@ -212,6 +212,12 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
           ...row,
           row_id: toTrimmedString(row?.row_id) || fallbackId,
           change_type: toTrimmedString(row?.change_type).toLowerCase(),
+          changed_fields: Array.isArray(row?.changed_fields)
+            ? row.changed_fields
+            : toTrimmedString(row?.changed_fields)
+              .split(",")
+              .map((entry) => entry.trim())
+              .filter(Boolean),
         };
       });
 
@@ -577,10 +583,14 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
                     <div className="card-body d-grid gap-1">
                       <div className="small">Extracted: {Number(uploadPreviewSummary.extracted_rows || 0)}</div>
                       <div className="small">Valid Unique: {Number(uploadPreviewSummary.valid_unique_rows || 0)}</div>
+                      <div className="small">Changed: {Number(uploadPreviewSummary.changed_rows || 0)}</div>
+                      <div className="small">New: {Number(uploadPreviewSummary.new_rows || 0)}</div>
+                      <div className="small">Modified: {Number(uploadPreviewSummary.modified_rows || 0)}</div>
+                      <div className="small">Closed: {Number(uploadPreviewSummary.closed_rows || 0)}</div>
                       <div className="small">Selectable New Rows: {Number(uploadPreviewSummary.selectable_rows || 0)}</div>
                       <div className="small">Invalid: {Number(uploadPreviewSummary.invalid_rows || 0)}</div>
                       <div className="small">Duplicate In File: {Number(uploadPreviewSummary.duplicate_in_file_rows || 0)}</div>
-                      <div className="small">Already Exists: {Number(uploadPreviewSummary.already_exists_rows || 0)}</div>
+                      <div className="small">Existing Unchanged: {Number(uploadPreviewSummary.already_exists_rows || 0)}</div>
                     </div>
                   </div>
                 )}
@@ -588,7 +598,7 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
                 {uploadPreviewRows.length > 0 && (
                   <div className="card">
                     <div className="card-header d-flex justify-content-between align-items-center">
-                      <strong>Upload Preview</strong>
+                      <strong>Upload Comparison Preview</strong>
                       <span className="small text-muted">
                         Selected: {selectedUploadCount} / {selectableUploadRows.length}
                       </span>
@@ -616,6 +626,8 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
                               <th>Qty</th>
                               <th>ETD</th>
                               <th>Order Date</th>
+                              <th>Existing Status</th>
+                              <th>Changed Fields</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -647,6 +659,12 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
                                   <td>{row.quantity || "-"}</td>
                                   <td>{toUploadDateText(row.ETD)}</td>
                                   <td>{toUploadDateText(row.order_date)}</td>
+                                  <td>{row.existing_order_status || "-"}</td>
+                                  <td>
+                                    {Array.isArray(row.changed_fields) && row.changed_fields.length > 0
+                                      ? row.changed_fields.join(", ")
+                                      : "-"}
+                                  </td>
                                 </tr>
                               );
                             })}

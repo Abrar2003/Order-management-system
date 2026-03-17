@@ -609,6 +609,82 @@ const getRectifiedChangedFields = (incomingRow, existingOrder) => {
   return changedFields;
 };
 
+const getExistingOrderPreviewMeta = (existingOrder = null) => ({
+  existing_order_id: String(existingOrder?._id || "").trim() || null,
+  existing_order_status: normalizeLooseString(existingOrder?.status) || null,
+});
+
+const buildBrandVendorPairsFromRows = (rows = []) => {
+  const pairsByKey = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const brand = normalizeLooseString(row?.brand);
+    const vendor = normalizeLooseString(row?.vendor);
+    if (!brand || !vendor) continue;
+    const brandVendorKey = normalizeBrandVendorKey(brand, vendor);
+
+    if (!pairsByKey.has(brandVendorKey)) {
+      pairsByKey.set(brandVendorKey, { brand, vendor });
+    }
+  }
+
+  return [...pairsByKey.values()];
+};
+
+const loadExistingOrdersForBrandVendorPairs = async (pairs = []) => {
+  const normalizedPairs = buildBrandVendorPairsFromRows(pairs);
+  if (normalizedPairs.length === 0) {
+    return {
+      existingOrders: [],
+      existingByKey: new Map(),
+      openOrdersByKey: new Map(),
+    };
+  }
+
+  const existingOrders = await Order.find({
+    ...ACTIVE_ORDER_MATCH,
+    $or: normalizedPairs.map((entry) => ({
+      brand: entry.brand,
+      vendor: entry.vendor,
+    })),
+  })
+    .select("_id order_id item brand vendor quantity ETD order_date status shipment qc_record")
+    .populate({
+      path: "qc_record",
+      select: "quantities",
+    })
+    .sort({ updatedAt: -1, createdAt: -1 })
+    .lean();
+
+  const existingByKey = new Map();
+  const openOrdersByKey = new Map();
+
+  for (const existingOrder of existingOrders) {
+    const key = makeRectifyKey(
+      existingOrder?.order_id,
+      existingOrder?.item?.item_code,
+    );
+    if (!key) continue;
+
+    if (!existingByKey.has(key)) {
+      existingByKey.set(key, existingOrder);
+    }
+
+    if (
+      String(existingOrder?.status || "").trim() !== "Shipped"
+      && !openOrdersByKey.has(key)
+    ) {
+      openOrdersByKey.set(key, existingOrder);
+    }
+  }
+
+  return {
+    existingOrders,
+    existingByKey,
+    openOrdersByKey,
+  };
+};
+
 const formatDateForUploadSheet = (value) => formatDateDDMMYYYY(value, "");
 
 const buildRectifyWorkbookBuffer = (rows = []) => {
@@ -623,6 +699,7 @@ const buildRectifyWorkbookBuffer = (rows = []) => {
     order_date: formatDateForUploadSheet(entry?.order_date),
     change_type: entry?.change_type || "",
     changedType: entry?.change_type || "",
+    existing_status: entry?.existing_order_status || "",
     changed_fields: Array.isArray(entry?.changed_fields)
       ? entry.changed_fields.join(", ")
       : "",
@@ -642,6 +719,7 @@ const buildRectifyWorkbookBuffer = (rows = []) => {
       "order_date",
       "change_type",
       "changedType",
+      "existing_status",
       "changed_fields",
       "source_refer",
       "source_quantity_text",
@@ -693,12 +771,14 @@ const normalizeRectifiedSelectionRow = (row = {}, defaults = {}) => {
   const changeType = rawChangeType || fallbackChangeType;
   const changedFields = normalizeRectifyChangedFields(row?.changed_fields);
   const existingOrderId = String(row?.existing_order_id || "").trim();
+  const existingOrderStatus = normalizeLooseString(row?.existing_order_status);
 
   return {
     ...normalizedRow,
     change_type: changeType,
     changed_fields: changedFields,
     existing_order_id: existingOrderId || null,
+    existing_order_status: existingOrderStatus || null,
   };
 };
 
@@ -716,6 +796,7 @@ const buildRectifyRowsForResponse = (rows = []) =>
     change_type: normalizeRectifyChangeType(row?.change_type),
     changed_fields: normalizeRectifyChangedFields(row?.changed_fields),
     existing_order_id: String(row?.existing_order_id || "").trim() || null,
+    existing_order_status: normalizeLooseString(row?.existing_order_status) || null,
   }));
 
 const createRectifyUploadLog = async ({
@@ -1697,6 +1778,9 @@ const normalizeUploadedSelectionRow = (row = {}, index = 0) => {
     order_date: dateParser(row?.order_date ?? row?.orderDate),
     change_type: "",
     reason: "",
+    changed_fields: [],
+    existing_order_id: String(row?.existing_order_id || "").trim() || null,
+    existing_order_status: normalizeLooseString(row?.existing_order_status) || null,
   };
 };
 
@@ -1727,6 +1811,11 @@ const buildUploadPreviewSummary = ({
     extracted_rows: totalRowsReceived,
     valid_unique_rows: totalRowsUnique,
     selectable_rows: countByType("new"),
+    changed_rows:
+      countByType("new") + countByType("modified") + countByType("closed"),
+    new_rows: countByType("new"),
+    modified_rows: countByType("modified"),
+    closed_rows: countByType("closed"),
     invalid_rows: countByType("missing_required_fields") + countByType("invalid_quantity"),
     duplicate_in_file_rows: countByType("duplicate_in_file"),
     already_exists_rows: countByType("already_exists"),
@@ -1738,6 +1827,7 @@ const prepareUploadOrdersFromRows = async (rowsInput = []) => {
   const totalRowsReceived = sourceRows.length;
   const duplicateEntries = [];
   const seenKeys = new Set();
+  const presentUploadKeys = new Set();
 
   const previewRows = sourceRows.map((row, index) =>
     normalizeUploadedSelectionRow(row, index),
@@ -1751,6 +1841,11 @@ const prepareUploadOrdersFromRows = async (rowsInput = []) => {
     const brand = previewRow.brand;
     const vendor = previewRow.vendor;
     const quantity = Number(previewRow.quantity);
+    const key = makeUploadOrderKey(orderId, itemCode);
+
+    if (orderId && itemCode && key) {
+      presentUploadKeys.add(key);
+    }
 
     if (!orderId || !itemCode || !brand || !vendor) {
       previewRow.change_type = "missing_required_fields";
@@ -1774,7 +1869,6 @@ const prepareUploadOrdersFromRows = async (rowsInput = []) => {
       continue;
     }
 
-    const key = makeUploadOrderKey(orderId, itemCode);
     if (seenKeys.has(key)) {
       previewRow.change_type = "duplicate_in_file";
       previewRow.reason = "duplicate_in_file";
@@ -1797,31 +1891,30 @@ const prepareUploadOrdersFromRows = async (rowsInput = []) => {
     candidateRows.map((row) => normalizeOrderKey(row.order_id)).filter(Boolean),
   ).size;
 
-  let existingKeys = new Set();
-  if (candidateRows.length > 0) {
-    const existingOrders = await Order.find({
-      ...ACTIVE_ORDER_MATCH,
-      $or: candidateRows.map((row) => ({
-        order_id: row.order_id,
-        "item.item_code": row.item_code,
-      })),
-    })
-      .select("order_id item.item_code")
-      .lean();
-
-    existingKeys = new Set(
-      existingOrders.map((order) =>
-        makeUploadOrderKey(order?.order_id, order?.item?.item_code),
-      ),
-    );
-  }
+  const comparisonPairs = buildBrandVendorPairsFromRows(candidateRows);
+  const { existingByKey, openOrdersByKey } = await loadExistingOrdersForBrandVendorPairs(
+    comparisonPairs,
+  );
 
   const orders = candidateRows.map((row) => buildUploadedOrderDocument(row));
   const newOrders = [];
 
   for (const previewRow of candidateRows) {
     const key = makeUploadOrderKey(previewRow.order_id, previewRow.item_code);
-    if (existingKeys.has(key)) {
+    const existingOrder = existingByKey.get(key);
+
+    if (!existingOrder) {
+      previewRow.change_type = "new";
+      previewRow.reason = "";
+      previewRow.changed_fields = ["new_order"];
+      newOrders.push(buildUploadedOrderDocument(previewRow));
+      continue;
+    }
+
+    Object.assign(previewRow, getExistingOrderPreviewMeta(existingOrder));
+
+    const changedFields = getRectifiedChangedFields(previewRow, existingOrder);
+    if (changedFields.length === 0) {
       previewRow.change_type = "already_exists";
       previewRow.reason = "already_exists";
       duplicateEntries.push({
@@ -1832,7 +1925,32 @@ const prepareUploadOrdersFromRows = async (rowsInput = []) => {
       continue;
     }
 
-    newOrders.push(buildUploadedOrderDocument(previewRow));
+    previewRow.change_type = "modified";
+    previewRow.reason = "";
+    previewRow.changed_fields = changedFields;
+  }
+
+  for (const [openKey, openOrder] of openOrdersByKey.entries()) {
+    if (presentUploadKeys.has(openKey)) continue;
+
+    const openQuantity = computeRectifyOpenQuantity(openOrder);
+    if (!Number.isFinite(openQuantity) || openQuantity <= 0) continue;
+
+    previewRows.push({
+      row_id: `${openKey}__closed`,
+      order_id: normalizeOrderKey(openOrder?.order_id),
+      item_code: normalizeLooseString(openOrder?.item?.item_code),
+      description: normalizeLooseString(openOrder?.item?.description),
+      brand: normalizeLooseString(openOrder?.brand),
+      vendor: normalizeLooseString(openOrder?.vendor),
+      quantity: openQuantity,
+      ETD: openOrder?.ETD || deriveRectifyDefaultEtd(openOrder?.order_date) || null,
+      order_date: openOrder?.order_date || null,
+      change_type: "closed",
+      reason: "",
+      changed_fields: ["missing_in_upload"],
+      ...getExistingOrderPreviewMeta(openOrder),
+    });
   }
 
   return {
@@ -2907,29 +3025,9 @@ exports.rectifyPdfOrders = async (req, res) => {
       dedupedRows.push(normalizedRow);
     }
 
-    const existingOrders = dedupedRows.length > 0
-      ? await Order.find({
-        ...ACTIVE_ORDER_MATCH,
-        $or: dedupedRows.map((row) => ({
-          order_id: row.order_id,
-          "item.item_code": row.item_code,
-        })),
-      })
-        .select("_id order_id item brand vendor quantity ETD order_date shipment qc_record")
-        .sort({ updatedAt: -1, createdAt: -1 })
-        .lean()
-      : [];
-
-    const existingByKey = new Map();
-    for (const existingOrder of existingOrders) {
-      const key = makeRectifyKey(
-        existingOrder?.order_id,
-        existingOrder?.item?.item_code,
-      );
-      if (!existingByKey.has(key)) {
-        existingByKey.set(key, existingOrder);
-      }
-    }
+    const { existingByKey, openOrdersByKey } = await loadExistingOrdersForBrandVendorPairs([
+      { brand: brandInput, vendor: vendorInput },
+    ]);
 
     const changedRows = [];
     let unchangedCount = 0;
@@ -2947,7 +3045,7 @@ exports.rectifyPdfOrders = async (req, res) => {
           ...row,
           change_type: "new",
           changed_fields: ["new_order"],
-          existing_order_id: null,
+          ...getExistingOrderPreviewMeta(null),
         });
         continue;
       }
@@ -2963,34 +3061,8 @@ exports.rectifyPdfOrders = async (req, res) => {
         ...row,
         change_type: "modified",
         changed_fields: changedFields,
-        existing_order_id: String(existing._id || ""),
+        ...getExistingOrderPreviewMeta(existing),
       });
-    }
-
-    const openOrdersForBrandVendor = await Order.find({
-      ...ACTIVE_ORDER_MATCH,
-      brand: brandInput,
-      vendor: vendorInput,
-      status: { $nin: ["Shipped"] },
-    })
-      .select("_id order_id item brand vendor quantity ETD order_date shipment qc_record")
-      .populate({
-        path: "qc_record",
-        select: "quantities",
-      })
-      .sort({ updatedAt: -1, createdAt: -1 })
-      .lean();
-
-    const openOrdersByKey = new Map();
-    for (const openOrder of openOrdersForBrandVendor) {
-      const orderId = normalizeOrderKey(openOrder?.order_id);
-      const itemCode = normalizeRectifyText(openOrder?.item?.item_code);
-      if (!orderId || !itemCode) continue;
-
-      const key = makeRectifyKey(orderId, itemCode);
-      if (!openOrdersByKey.has(key)) {
-        openOrdersByKey.set(key, openOrder);
-      }
     }
 
     for (const [openKey, openOrder] of openOrdersByKey.entries()) {
@@ -3011,7 +3083,7 @@ exports.rectifyPdfOrders = async (req, res) => {
         order_date: openOrder?.order_date || null,
         change_type: "closed",
         changed_fields: ["missing_in_pdf"],
-        existing_order_id: String(openOrder?._id || ""),
+        ...getExistingOrderPreviewMeta(openOrder),
         source: {
           refer: "",
           raw_quantity: "",

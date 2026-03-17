@@ -246,7 +246,7 @@ const RectifyPdfModal = ({ onClose, onSuccess }) => {
             {previewRows.length > 0 && (
               <div className="card">
                 <div className="card-header d-flex justify-content-between align-items-center">
-                  <strong>New/Modified Entries</strong>
+                  <strong>Rectify Comparison Preview</strong>
                   <span className="small text-muted">
                     Selected: {selectedCount} / {selectableRows.length}
                   </span>
@@ -272,6 +272,7 @@ const RectifyPdfModal = ({ onClose, onSuccess }) => {
                           <th>Qty</th>
                           <th>ETD</th>
                           <th>Order Date</th>
+                          <th>Existing Status</th>
                           <th>Changed Fields</th>
                         </tr>
                       </thead>
@@ -302,6 +303,7 @@ const RectifyPdfModal = ({ onClose, onSuccess }) => {
                               <td>{Number(row.quantity || 0)}</td>
                               <td>{toDateText(row.ETD)}</td>
                               <td>{toDateText(row.order_date)}</td>
+                              <td>{row.existing_order_status || "-"}</td>
                               <td>
                                 {Array.isArray(row.changed_fields) && row.changed_fields.length > 0
                                   ? row.changed_fields.join(", ")
