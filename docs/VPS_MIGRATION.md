@@ -70,7 +70,7 @@ Host github.com
 ```
 
 Then verify access:
-
+ 
 ```bash
 ssh -T git@github.com
 ```

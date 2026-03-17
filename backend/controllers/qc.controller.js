@@ -57,6 +57,11 @@ const QC_REQUEST_TYPES = Object.freeze({
   FULL: "FULL",
   AQL: "AQL",
 });
+const INSPECTION_RECORD_STATUS = Object.freeze({
+  PENDING: "pending",
+  DONE: "Inspection Done",
+  GOODS_NOT_READY: "goods not ready",
+});
 const CLOSED_ORDER_STATUSES = ["Shipped", "Cancelled"];
 const MANAGER_ALLOWED_PAST_DAYS = 2;
 const QC_ALLOWED_PAST_DAYS = 1;
@@ -95,6 +100,80 @@ const computeAqlSampleQuantity = (quantity) => {
   const safeQuantity = toNonNegativeNumber(quantity, 0);
   if (safeQuantity <= 0) return 0;
   return Math.max(1, Math.ceil(safeQuantity * 0.1));
+};
+
+const normalizeInspectionStatus = (value) =>
+  String(value || "").trim().toLowerCase();
+
+const hasInspectionRecordActivity = ({
+  checked = 0,
+  passed = 0,
+  vendorOffered = 0,
+  labelsAdded = [],
+  labelRanges = [],
+  goodsNotReady = null,
+} = {}) =>
+  Boolean(goodsNotReady?.ready) ||
+  toNonNegativeNumber(checked, 0) > 0 ||
+  toNonNegativeNumber(passed, 0) > 0 ||
+  toNonNegativeNumber(vendorOffered, 0) > 0 ||
+  (Array.isArray(labelsAdded) && labelsAdded.length > 0) ||
+  (Array.isArray(labelRanges) && labelRanges.length > 0);
+
+const resolveInspectionRecordStatus = ({
+  checked = 0,
+  goodsNotReady = null,
+} = {}) => {
+  if (Boolean(goodsNotReady?.ready)) {
+    return INSPECTION_RECORD_STATUS.GOODS_NOT_READY;
+  }
+
+  if (toNonNegativeNumber(checked, 0) > 0) {
+    return INSPECTION_RECORD_STATUS.DONE;
+  }
+
+  return INSPECTION_RECORD_STATUS.PENDING;
+};
+
+const syncQcRequestHistoryStatuses = (qcDoc, inspectionRecords = []) => {
+  if (!Array.isArray(qcDoc?.request_history)) return false;
+
+  const inspectionStatusByRequestId = new Map();
+  for (const record of Array.isArray(inspectionRecords) ? inspectionRecords : []) {
+    const requestHistoryId = String(record?.request_history_id || "").trim();
+    if (!requestHistoryId) continue;
+
+    const hasActivity = hasInspectionRecordActivity({
+      checked: record?.checked,
+      passed: record?.passed,
+      vendorOffered: record?.vendor_offered,
+      labelsAdded: record?.labels_added,
+      labelRanges: record?.label_ranges,
+      goodsNotReady: record?.goods_not_ready,
+    });
+
+    if (!inspectionStatusByRequestId.has(requestHistoryId)) {
+      inspectionStatusByRequestId.set(requestHistoryId, hasActivity);
+    } else if (hasActivity) {
+      inspectionStatusByRequestId.set(requestHistoryId, true);
+    }
+  }
+
+  let hasChanges = false;
+  for (const entry of qcDoc.request_history) {
+    const requestId = String(entry?._id || "").trim();
+    if (!requestId) continue;
+
+    const nextStatus = inspectionStatusByRequestId.get(requestId)
+      ? "inspected"
+      : "open";
+    if (String(entry?.status || "") !== nextStatus) {
+      entry.status = nextStatus;
+      hasChanges = true;
+    }
+  }
+
+  return hasChanges;
 };
 
 const parseDateFromPartsToIso = (year, month, day) => {
@@ -506,6 +585,15 @@ const upsertInspectionRecordForRequest = async ({
       qc: qcDoc._id,
       inspector: resolvedInspectorId,
       inspection_date: resolvedInspectionDate,
+      status: resolveInspectionRecordStatus({
+        checked: addChecked,
+        passed: addPassed,
+        vendorOffered: addProvision,
+        labelsAdded: labelsToAppend,
+        labelRanges: labelRangesToAppend,
+        goodsNotReady: normalizedGoodsNotReady,
+        requestType: qcDoc?.request_type,
+      }),
       request_history_id: requestHistoryId || null,
       requested_date: resolvedRequestDate,
       checked: toNonNegativeNumber(addChecked, 0),
@@ -601,6 +689,16 @@ const upsertInspectionRecordForRequest = async ({
   if (normalizedGoodsNotReady) {
     inspectionRecord.goods_not_ready = normalizedGoodsNotReady;
   }
+
+  inspectionRecord.status = resolveInspectionRecordStatus({
+    checked: nextChecked,
+    passed: nextPassed,
+    vendorOffered: nextOffered,
+    labelsAdded: inspectionRecord.labels_added,
+    labelRanges: inspectionRecord.label_ranges,
+    goodsNotReady: inspectionRecord.goods_not_ready,
+    requestType: qcDoc?.request_type,
+  });
 
   if (String(remarks || "").trim()) {
     inspectionRecord.remarks = String(remarks || "").trim();
@@ -4441,7 +4539,7 @@ exports.getDailyReport = async (req, res) => {
 
     const [alignedRequestsRaw, inspectionsRaw] = await Promise.all([
       QC.find({ request_date: reportDate })
-        .select("request_date order_meta item inspector quantities order")
+        .select("request_date request_type order_meta item inspector quantities order cbm")
         .populate("inspector", "name email role")
         .populate({
           path: "order",
@@ -4452,12 +4550,12 @@ exports.getDailyReport = async (req, res) => {
         .lean(),
       Inspection.find({ inspection_date: { $in: inspectionDateVariants } })
         .select(
-          "inspection_date inspector qc checked passed vendor_requested vendor_offered pending_after cbm goods_not_ready remarks createdAt",
+          "inspection_date status inspector qc checked passed vendor_requested vendor_offered pending_after cbm labels_added label_ranges goods_not_ready remarks createdAt",
         )
         .populate("inspector", "name email role")
         .populate({
           path: "qc",
-          select: "item order_meta order cbm request_date",
+          select: "item order_meta order cbm request_date request_type",
           populate: {
             path: "order",
             select: "order_id status quantity brand vendor archived",
@@ -4472,24 +4570,22 @@ exports.getDailyReport = async (req, res) => {
     const inspections = inspectionsRaw.filter(
       (inspection) => inspection?.qc?.order,
     );
-    const latestInspectionByQcId = new Map();
-    const inspectedCbmTotalByQcId = new Map();
-    for (const inspection of inspections) {
-      const qcId = String(inspection?.qc?._id || inspection?.qc || "").trim();
-      if (!qcId) continue;
+    const alignedRequestQcIds = alignedRequests
+      .map((qc) => String(qc?._id || "").trim())
+      .filter((value) => mongoose.Types.ObjectId.isValid(value));
+    const latestAlignedRequestInspections = alignedRequestQcIds.length > 0
+      ? await Inspection.find({ qc: { $in: alignedRequestQcIds } })
+        .select(
+          "inspection_date status qc checked passed vendor_requested vendor_offered pending_after cbm labels_added label_ranges goods_not_ready remarks createdAt",
+        )
+        .sort({ createdAt: -1 })
+        .lean()
+      : [];
 
-      const inspectionCbmPerUnit = Number(
-        inspection?.cbm?.total ?? inspection?.qc?.cbm?.total ?? 0,
-      );
-      const safeInspectionCbmPerUnit = Number.isFinite(inspectionCbmPerUnit)
-        ? inspectionCbmPerUnit
-        : 0;
-      const inspectedQty = Number(inspection?.checked || 0);
-      const inspectedCbmTotal = safeInspectionCbmPerUnit * inspectedQty;
-      inspectedCbmTotalByQcId.set(
-        qcId,
-        Number(inspectedCbmTotalByQcId.get(qcId) || 0) + inspectedCbmTotal,
-      );
+    const latestInspectionByQcId = new Map();
+    for (const inspection of latestAlignedRequestInspections) {
+      const qcId = String(inspection?.qc || "").trim();
+      if (!qcId) continue;
 
       const existingInspection = latestInspectionByQcId.get(qcId);
       if (
@@ -4502,19 +4598,27 @@ exports.getDailyReport = async (req, res) => {
 
     const aligned_requests = alignedRequests.map((qc) => {
       const latestInspection = latestInspectionByQcId.get(String(qc?._id || "").trim());
-      const goodsNotReady = Boolean(latestInspection?.goods_not_ready?.ready);
-      const latestPendingAfter = Number(latestInspection?.pending_after);
-      const currentPendingQuantity = Number(qc?.quantities?.pending || 0);
-      const effectivePendingQuantity = Number.isFinite(latestPendingAfter)
-        ? latestPendingAfter
-        : currentPendingQuantity;
-      const latestInspectedQuantity = Number(
-        latestInspection?.checked ?? qc?.quantities?.qc_checked ?? 0,
+      const derivedInspectionStatus = resolveInspectionRecordStatus({
+        checked: latestInspection?.checked,
+        passed: latestInspection?.passed,
+        vendorOffered: latestInspection?.vendor_offered,
+        labelsAdded: latestInspection?.labels_added,
+        labelRanges: latestInspection?.label_ranges,
+        goodsNotReady: latestInspection?.goods_not_ready,
+        requestType: qc?.request_type,
+      });
+      const inspectionStatus = String(
+        derivedInspectionStatus || latestInspection?.status,
+      ).trim() || INSPECTION_RECORD_STATUS.PENDING;
+      const normalizedInspectionStatus = normalizeInspectionStatus(
+        inspectionStatus,
       );
+      const goodsNotReady =
+        normalizedInspectionStatus ===
+        normalizeInspectionStatus(INSPECTION_RECORD_STATUS.GOODS_NOT_READY);
       const isInspectionDone =
-        !goodsNotReady
-        && effectivePendingQuantity <= 0
-        && latestInspectedQuantity > 0;
+        normalizedInspectionStatus ===
+        normalizeInspectionStatus(INSPECTION_RECORD_STATUS.DONE);
 
       return {
         qc_id: qc._id,
@@ -4533,13 +4637,19 @@ exports.getDailyReport = async (req, res) => {
             }
           : null,
         quantity_requested: Number(qc?.quantities?.quantity_requested || 0),
-        quantity_inspected: Number(qc?.quantities?.qc_checked || 0),
-        quantity_passed: Number(qc?.quantities?.qc_passed || 0),
-        quantity_pending: Number(qc?.quantities?.pending || 0),
+        quantity_inspected: Number(latestInspection?.checked || 0),
+        quantity_passed: Number(latestInspection?.passed || 0),
+        quantity_pending: Number(
+          latestInspection?.pending_after ?? qc?.quantities?.pending ?? 0,
+        ),
         inspected_cbm_total: toRoundedNumber(
-          Number(inspectedCbmTotalByQcId.get(String(qc?._id || "").trim()) || 0),
+          Number(
+            (Number(latestInspection?.cbm?.total ?? qc?.cbm?.total ?? 0) || 0)
+            * Number(latestInspection?.checked || 0),
+          ),
           3,
         ),
+        inspection_status: inspectionStatus,
         order_status: qc?.order?.status || "N/A",
         is_inspection_done: isInspectionDone,
         goods_not_ready: goodsNotReady,
@@ -5001,6 +5111,15 @@ exports.editInspectionRecords = async (req, res) => {
         bottom: cbmBottom,
         total: cbmTotal,
       };
+      record.status = resolveInspectionRecordStatus({
+        checked,
+        passed,
+        vendorOffered,
+        labelsAdded: nextLabelsAdded,
+        labelRanges: nextLabelRanges,
+        goodsNotReady: record?.goods_not_ready,
+        requestType: qc?.request_type,
+      });
       record.label_ranges = nextLabelRanges;
       record.labels_added = nextLabelsAdded;
       record.remarks = remarks;
@@ -5010,7 +5129,7 @@ exports.editInspectionRecords = async (req, res) => {
 
     const refreshedInspections = await Inspection.find({ qc: qc._id })
       .select(
-        "inspection_date requested_date request_history_id inspector checked passed vendor_offered labels_added label_ranges createdAt",
+        "inspection_date requested_date request_history_id inspector checked passed vendor_offered labels_added label_ranges goods_not_ready status createdAt",
       )
       .lean();
 
@@ -5043,37 +5162,7 @@ exports.editInspectionRecords = async (req, res) => {
     qc.quantities.qc_rejected = Math.max(0, totalChecked - totalPassed);
     qc.labels = mergedLabels;
 
-    if (Array.isArray(qc.request_history)) {
-      const inspectionStatusByRequestId = new Map();
-      for (const record of refreshedInspections) {
-        const requestHistoryId = String(
-          record?.request_history_id || "",
-        ).trim();
-        if (!requestHistoryId) continue;
-        const hasActivity =
-          toNonNegativeNumber(record?.checked, 0) > 0 ||
-          toNonNegativeNumber(record?.passed, 0) > 0 ||
-          toNonNegativeNumber(record?.vendor_offered, 0) > 0 ||
-          (Array.isArray(record?.labels_added) &&
-            record.labels_added.length > 0) ||
-          (Array.isArray(record?.label_ranges) &&
-            record.label_ranges.length > 0);
-
-        if (!inspectionStatusByRequestId.has(requestHistoryId)) {
-          inspectionStatusByRequestId.set(requestHistoryId, hasActivity);
-        } else if (hasActivity) {
-          inspectionStatusByRequestId.set(requestHistoryId, true);
-        }
-      }
-
-      for (const entry of qc.request_history) {
-        const requestId = String(entry?._id || "").trim();
-        if (!requestId) continue;
-        entry.status = inspectionStatusByRequestId.get(requestId)
-          ? "inspected"
-          : "open";
-      }
-    }
+    syncQcRequestHistoryStatuses(qc, refreshedInspections);
 
     if (refreshedInspections.length > 0) {
       const latestRecord = [...refreshedInspections].sort((a, b) => {
@@ -5210,7 +5299,9 @@ exports.deleteInspectionRecord = async (req, res) => {
       qc: qc._id,
       _id: { $ne: inspection._id },
     })
-      .select("inspection_date createdAt labels_added")
+      .select(
+        "inspection_date createdAt labels_added request_history_id checked passed vendor_offered label_ranges goods_not_ready status",
+      )
       .lean();
 
     const recalculatedLabels = normalizeLabels(
@@ -5222,6 +5313,8 @@ exports.deleteInspectionRecord = async (req, res) => {
 
     if (!shouldDeleteQcRecord) {
       qc.labels = recalculatedLabels;
+
+      syncQcRequestHistoryStatuses(qc, remainingInspections);
 
       const latestRecord = [...remainingInspections].sort((a, b) => {
         const aTime = Math.max(
@@ -5328,5 +5421,89 @@ exports.deleteInspectionRecord = async (req, res) => {
   } catch (err) {
     console.error("Delete Inspection Record Error:", err);
     return res.status(500).json({ message: err.message });
+  }
+};
+
+exports.syncInspectionStatuses = async (req, res) => {
+  try {
+    const inspections = await Inspection.find({})
+      .select(
+        "qc status checked passed vendor_offered labels_added label_ranges goods_not_ready",
+      )
+      .populate("qc", "request_type")
+      .lean();
+
+    const bulkOps = [];
+    const inspectionRecordsByQcId = new Map();
+
+    for (const inspection of inspections) {
+      const nextStatus = resolveInspectionRecordStatus({
+        checked: inspection?.checked,
+        passed: inspection?.passed,
+        vendorOffered: inspection?.vendor_offered,
+        labelsAdded: inspection?.labels_added,
+        labelRanges: inspection?.label_ranges,
+        goodsNotReady: inspection?.goods_not_ready,
+        requestType: inspection?.qc?.request_type,
+      });
+
+      if (String(inspection?.status || "") !== nextStatus) {
+        bulkOps.push({
+          updateOne: {
+            filter: { _id: inspection._id },
+            update: { $set: { status: nextStatus } },
+          },
+        });
+      }
+
+      const qcId = String(inspection?.qc?._id || inspection?.qc || "").trim();
+      if (!qcId) continue;
+      if (!inspectionRecordsByQcId.has(qcId)) {
+        inspectionRecordsByQcId.set(qcId, []);
+      }
+      inspectionRecordsByQcId.get(qcId).push({
+        ...inspection,
+        status: nextStatus,
+      });
+    }
+
+    if (bulkOps.length > 0) {
+      await Inspection.bulkWrite(bulkOps, { ordered: false });
+    }
+
+    const qcIds = [...inspectionRecordsByQcId.keys()].filter((value) =>
+      mongoose.Types.ObjectId.isValid(value),
+    );
+    const qcDocs = qcIds.length > 0
+      ? await QC.find({ _id: { $in: qcIds } })
+      : [];
+
+    let updatedQcCount = 0;
+    for (const qcDoc of qcDocs) {
+      const hasChanges = syncQcRequestHistoryStatuses(
+        qcDoc,
+        inspectionRecordsByQcId.get(String(qcDoc?._id || "").trim()) || [],
+      );
+      if (!hasChanges) continue;
+      await qcDoc.save();
+      updatedQcCount += 1;
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Inspection statuses synced successfully",
+      summary: {
+        processed: inspections.length,
+        updated_inspections: bulkOps.length,
+        updated_qcs: updatedQcCount,
+      },
+    });
+  } catch (err) {
+    console.error("Sync Inspection Statuses Error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to sync inspection statuses",
+      error: err.message,
+    });
   }
 };

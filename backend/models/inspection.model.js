@@ -19,6 +19,13 @@ const InspectionSchema = new mongoose.Schema(
     inspection_date: {
       type: String,
       required: true,
+    }, 
+
+    status: {
+      type: String,
+      enum: ["pending", "Inspection Done", "goods not ready"],
+      default: "pending",
+      index: true
     },
 
     request_history_id: {

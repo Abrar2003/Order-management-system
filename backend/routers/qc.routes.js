@@ -43,6 +43,13 @@ router.post(
   qcController.syncQcDetailsFromItems,
 );
 
+router.post(
+  "/sync-inspections",
+  auth,
+  authorize("admin", "manager", "dev"),
+  qcController.syncInspectionStatuses,
+);
+
 router.get(
   "/daily-report",
   auth,

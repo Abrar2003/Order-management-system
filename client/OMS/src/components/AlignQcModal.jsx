@@ -13,6 +13,9 @@ import "../App.css";
 const normalizeRequestType = (value) =>
   String(value || "").trim().toUpperCase() === "AQL" ? "AQL" : "FULL";
 
+const normalizeInspectionStatus = (value) =>
+  String(value || "").trim().toLowerCase();
+
 const computeAqlSampleQuantity = (quantity) => {
   const parsedQuantity = Number(quantity);
   if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) return 0;
@@ -375,6 +378,7 @@ const AlignQCModal = ({
                         <th>Item Code</th>
                         <th>Inspector</th>
                         <th>Requested Qty</th>
+                        <th>Passed Qty</th>
                         <th>Inspected CBM</th>
                       </tr>
                     </thead>
@@ -383,9 +387,9 @@ const AlignQCModal = ({
                         <tr
                           key={request?.qc_id || `${request?.order_id || "po"}-${request?.item_code || "item"}-${index}`}
                           className={
-                            request?.goods_not_ready
+                            normalizeInspectionStatus(request?.inspection_status) === "goods not ready"
                               ? "weekly-summary-warning-row"
-                              : request?.is_inspection_done
+                              : normalizeInspectionStatus(request?.inspection_status) === "inspection done"
                                 ? "om-report-success-row"
                                 : ""
                           }
@@ -394,6 +398,7 @@ const AlignQCModal = ({
                           <td>{request?.item_code || "N/A"}</td>
                           <td>{request?.inspector?.name || "Unassigned"}</td>
                           <td>{request?.quantity_requested ?? 0}</td>
+                          <td>{request?.quantity_passed ?? 0}</td>
                           <td>{formatCbm(request?.inspected_cbm_total)}</td>
                         </tr>
                       ))}

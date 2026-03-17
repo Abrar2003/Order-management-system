@@ -39,12 +39,24 @@ const parseSortOrder = (value, sortBy) => {
   return sortBy === "order_id" ? "asc" : "desc";
 };
 
-const getGoodsNotReadyStatusLabel = (value) =>
-  value ? <span className="text-danger fw-semibold">Goods Not Ready</span> : null;
+const normalizeInspectionStatus = (value) =>
+  String(value || "").trim().toLowerCase();
+
+const renderInspectionStatus = (value) => {
+  const normalized = normalizeInspectionStatus(value);
+  if (normalized === "goods not ready") {
+    return <span className="text-danger fw-semibold">Goods Not Ready</span>;
+  }
+  if (normalized === "inspection done") {
+    return <span className="text-success fw-semibold">Inspection Done</span>;
+  }
+  return <span>Pending</span>;
+};
 
 const getAlignedRequestRowClassName = (request) => {
-  if (request?.goods_not_ready) return "weekly-summary-warning-row";
-  if (request?.is_inspection_done) return "om-report-success-row";
+  const normalizedStatus = normalizeInspectionStatus(request?.inspection_status);
+  if (normalizedStatus === "goods not ready") return "weekly-summary-warning-row";
+  if (normalizedStatus === "inspection done") return "om-report-success-row";
   return "";
 };
 
@@ -359,6 +371,7 @@ const DailyReport = () => {
                     <th>Brand</th>
                     <th>Inspector</th>
                     <th>Requested</th>
+                    <th>Passed</th>
                     <th>Inspected CBM</th>
                     <th>Status</th>
                   </tr>
@@ -366,7 +379,7 @@ const DailyReport = () => {
                 <tbody>
                   {report.aligned_requests.length === 0 && (
                     <tr>
-                      <td colSpan="9" className="text-center py-3">
+                      <td colSpan="10" className="text-center py-3">
                         No aligned requests found for this date.
                       </td>
                     </tr>
@@ -394,12 +407,9 @@ const DailyReport = () => {
                       <td>{request.brand || "N/A"}</td>
                       <td>{request?.inspector?.name || "Unassigned"}</td>
                       <td>{request.quantity_requested ?? 0}</td>
+                      <td>{request.quantity_passed ?? 0}</td>
                       <td>{formatCbm(request?.inspected_cbm_total)}</td>
-                      <td>
-                        {getGoodsNotReadyStatusLabel(request?.goods_not_ready)
-                          || request.order_status
-                          || "N/A"}
-                      </td>
+                      <td>{renderInspectionStatus(request?.inspection_status)}</td>
                     </tr>
                   ))}
                 </tbody>
