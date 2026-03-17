@@ -130,7 +130,20 @@ fi
 
 if command -v curl >/dev/null 2>&1; then
   log "Checking backend health"
-  curl --fail --silent --show-error "$BACKEND_HEALTHCHECK_URL" >/dev/null
+  for i in {1..10}; do
+    if curl --fail --silent --show-error "$BACKEND_HEALTHCHECK_URL" >/dev/null; then
+      echo "Backend health check passed"
+      break
+    fi
+
+    if [[ "$i" -eq 10 ]]; then
+      echo "Backend health check failed after multiple attempts"
+      exit 1
+    fi
+
+    echo "Backend not ready yet, retrying in 3 seconds..."
+    sleep 3
+  done
 
   if [[ -n "$FRONTEND_HEALTHCHECK_URL" ]]; then
     log "Checking frontend health"
