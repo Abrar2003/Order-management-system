@@ -488,9 +488,6 @@ const DailyReport = () => {
                               {inspection?.goods_not_ready ? (
                                 <div className="small fw-semibold">Goods Not Ready</div>
                               ) : null}
-                              {inspection?.goods_not_ready_reason ? (
-                                <div className="small">{inspection.goods_not_ready_reason}</div>
-                              ) : null}
                             </td>
                             <td>{inspection.inspected_quantity ?? 0}</td>
                             <td>{inspection.passed_quantity ?? 0}</td>
