@@ -188,7 +188,13 @@ const buildOrderListMatch = ({
   }
 
   if (isDelayed) {
-    match.ETD = { $lt: new Date() };
+    const now = new Date();
+    match.$expr = {
+      $and: [
+        { $ne: [buildEffectiveEtdExpression(), null] },
+        { $lt: [buildEffectiveEtdExpression(), now] },
+      ],
+    };
     match.status = { $nin: ["Shipped"] };
   }
 
@@ -298,6 +304,13 @@ const parseDateLike = (value) => {
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed;
 };
+
+const buildEffectiveEtdExpression = (
+  revisedEtdField = "$revised_ETD",
+  etdField = "$ETD",
+) => ({
+  $ifNull: [revisedEtdField, etdField],
+});
 
 const formatDateDDMMYYYY = (value, fallback = "") => {
   if (value === undefined || value === null || value === "") return fallback;
@@ -3461,6 +3474,7 @@ exports.getVendorSummaryByBrand = async (req, res) => {
           vendor: { $first: "$vendor" },
           order_id: { $first: "$order_id" },
           etd: { $min: "$ETD" },
+          effectiveEtd: { $min: buildEffectiveEtdExpression() },
           minStatusRank: { $min: "$statusRank" },
         },
       },
@@ -3480,15 +3494,15 @@ exports.getVendorSummaryByBrand = async (req, res) => {
           isDelayedOrder: {
             $and: [
               "$isActiveOrder",
-              { $ne: ["$etd", null] },
-              { $lt: ["$etd", today] },
+              { $ne: ["$effectiveEtd", null] },
+              { $lt: ["$effectiveEtd", today] },
             ],
           },
           isOnTimeOrder: {
             $and: [
               "$isActiveOrder",
-              { $ne: ["$etd", null] },
-              { $gte: ["$etd", today] },
+              { $ne: ["$effectiveEtd", null] },
+              { $gte: ["$effectiveEtd", today] },
             ],
           },
         },
@@ -3857,12 +3871,12 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
     }
 
     if (isOnTimeStatus) {
-      postGroupMatch.ETD = { $ne: null, $gte: today };
+      postGroupMatch.effective_ETD = { $ne: null, $gte: today };
       postGroupMatch.totalStatus = { $nin: ["Shipped"] };
     }
 
     if (isDelayedFilter) {
-      postGroupMatch.ETD = { $ne: null, $lt: today };
+      postGroupMatch.effective_ETD = { $ne: null, $lt: today };
       postGroupMatch.totalStatus = { $nin: ["Shipped"] };
     }
 
@@ -3876,6 +3890,7 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
           vendor: { $first: "$vendor" },
           ETD: { $min: "$ETD" },
           revised_ETD: { $min: "$revised_ETD" },
+          effective_ETD: { $min: buildEffectiveEtdExpression() },
           order_date: { $first: "$order_date" },
           statuses: { $addToSet: "$status" },
         },
@@ -3947,6 +3962,7 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
           vendor: 1,
           ETD: 1,
           revised_ETD: 1,
+          effective_ETD: 1,
           order_date: 1,
           statuses: 1,
           totalStatus: 1,

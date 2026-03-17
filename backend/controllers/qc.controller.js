@@ -845,6 +845,12 @@ const toUtcDateOnly = (value) => {
   return toUtcDayStart(parsed);
 };
 
+const resolveEffectiveOrderEtdUtc = (order = {}) => {
+  const revisedEtdUtc = toUtcDateOnly(order?.revised_ETD);
+  if (revisedEtdUtc) return revisedEtdUtc;
+  return toUtcDateOnly(order?.ETD);
+};
+
 const getWeekStartIsoDate = (value) => {
   const dayStart = toUtcDateOnly(value);
   if (!dayStart) return "";
@@ -3560,7 +3566,7 @@ exports.getVendorReports = async (req, res) => {
       ...ACTIVE_ORDER_MATCH,
     })
       .select(
-        "order_id brand vendor status order_date ETD quantity item shipment",
+        "order_id brand vendor status order_date ETD revised_ETD quantity item shipment",
       )
       .lean();
 
@@ -3608,12 +3614,12 @@ exports.getVendorReports = async (req, res) => {
         entry.order_date_utc = orderDateUtc;
       }
 
-      const plannedEtdUtc = toUtcDateOnly(row?.ETD);
+      const effectiveEtdUtc = resolveEffectiveOrderEtdUtc(row);
       if (
-        plannedEtdUtc &&
-        (!entry.etd_utc || plannedEtdUtc.getTime() > entry.etd_utc.getTime())
+        effectiveEtdUtc &&
+        (!entry.etd_utc || effectiveEtdUtc.getTime() > entry.etd_utc.getTime())
       ) {
-        entry.etd_utc = plannedEtdUtc;
+        entry.etd_utc = effectiveEtdUtc;
       }
 
       for (const shipment of Array.isArray(row?.shipment) ? row.shipment : []) {
@@ -3664,29 +3670,29 @@ exports.getVendorReports = async (req, res) => {
 
     for (const orderEntry of filteredOrders) {
       const status = resolveOrderStatusFromSet([...orderEntry.statuses]);
-      const plannedEtdUtc = orderEntry.etd_utc;
-      const hasPlannedEtd = Boolean(plannedEtdUtc);
+      const effectiveEtdUtc = orderEntry.etd_utc;
+      const hasEffectiveEtd = Boolean(effectiveEtdUtc);
       const hasShippedStatus = String(status || "").trim() === "Shipped";
       const actualShippedDateUtc = orderEntry.latest_shipment_utc;
       const hasEtdCrossed = Boolean(
-        hasPlannedEtd &&
+        hasEffectiveEtd &&
         todayUtc &&
-        plannedEtdUtc.getTime() < todayUtc.getTime(),
+        effectiveEtdUtc.getTime() < todayUtc.getTime(),
       );
 
       let delayDays = 0;
       let isDelayed = false;
       let delayReference = hasShippedStatus ? "latest_shipment_date" : "today";
 
-      if (hasPlannedEtd && hasShippedStatus) {
+      if (hasEffectiveEtd && hasShippedStatus) {
         if (
           actualShippedDateUtc &&
-          actualShippedDateUtc.getTime() > plannedEtdUtc.getTime()
+          actualShippedDateUtc.getTime() > effectiveEtdUtc.getTime()
         ) {
           isDelayed = true;
           delayReference = "latest_shipment_date";
         }
-      } else if (hasPlannedEtd && hasEtdCrossed) {
+      } else if (hasEffectiveEtd && hasEtdCrossed) {
         isDelayed = true;
         delayReference = "today";
       }
@@ -3695,13 +3701,13 @@ exports.getVendorReports = async (req, res) => {
         const delayEndDate = hasShippedStatus ? actualShippedDateUtc : todayUtc;
         if (delayEndDate) {
           const rawDelay = Math.floor(
-            (delayEndDate.getTime() - plannedEtdUtc.getTime()) / MS_PER_DAY,
+            (delayEndDate.getTime() - effectiveEtdUtc.getTime()) / MS_PER_DAY,
           );
           delayDays = Math.max(0, rawDelay);
         }
       }
 
-      if (hasPlannedEtd) {
+      if (hasEffectiveEtd) {
         ordersWithEtdCount += 1;
       }
       if (isDelayed) {
@@ -3728,7 +3734,7 @@ exports.getVendorReports = async (req, res) => {
         vendorEntry.delayed_orders_count += 1;
         vendorEntry.total_delay_days += delayDays;
       }
-      if (hasPlannedEtd) {
+      if (hasEffectiveEtd) {
         vendorEntry.orders_with_etd_count += 1;
       }
 
@@ -3741,7 +3747,7 @@ exports.getVendorReports = async (req, res) => {
         order_date: orderEntry.order_date_utc
           ? toISODateString(orderEntry.order_date_utc)
           : "",
-        etd: plannedEtdUtc ? toISODateString(plannedEtdUtc) : "",
+        etd: effectiveEtdUtc ? toISODateString(effectiveEtdUtc) : "",
         latest_shipment_date: orderEntry.latest_shipment_utc
           ? toISODateString(orderEntry.latest_shipment_utc)
           : "",
