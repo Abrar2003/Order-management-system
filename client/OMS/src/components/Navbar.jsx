@@ -81,6 +81,7 @@ const Navbar = () => {
       links.push({ label: "PIS", path: "/pis" });
       links.push({ label: "Upload Logs", path: "/upload-logs" });
       links.push({ label: "Order Edit Logs", path: "/order-edit-logs" });
+      links.push({ label: "Email Logs", path: "/email-logs" });
     }
 
     if (canCreateUsers) {

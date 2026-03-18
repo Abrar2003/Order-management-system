@@ -33,6 +33,7 @@ import VendorReports from "./pages/VendorReports";
 import PIS from "./pages/PIS";
 import WeeklySummary from "./pages/WeeklySummary";
 import DailySummary from "./pages/DailySummary";
+import EmailLogs from "./pages/EmailLogs";
 
 // import Users from "./pages/Users"; // later
 const clearStaleUiOverlays = ({ removeCustomModalRoots = false } = {}) => {
@@ -175,11 +176,11 @@ const App = () => {
               </ProtectedRoute>
             }
           />
-
+ 
           <Route
             path="/summary/daily"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute> 
                 <DailySummary />
               </ProtectedRoute>
             }
@@ -244,6 +245,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <OrderEditLogs />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/email-logs"
+            element={
+              <ProtectedRoute>
+                <EmailLogs />
               </ProtectedRoute>
             }
           />

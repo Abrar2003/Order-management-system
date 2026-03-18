@@ -339,13 +339,14 @@ const DailySummary = () => {
                     <table className="table table-sm table-striped align-middle mb-0">
                       <thead>
                         <tr>
+                          <th>Inspection Date</th>
                           <th>PO</th>
                           <th>Item Code</th>
                           <th>Requested</th>
                           <th>Passed</th>
                           <th>Open Quantity</th>
                           <th>Inspector</th>
-                          <th>Inspection Date</th>
+                          <th>Remarks</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -354,25 +355,24 @@ const DailySummary = () => {
                             key={`${vendorEntry.vendorKey}-${row?.inspection_id || row?.qc_id || index}`}
                             className={row?.goods_not_ready ? "weekly-summary-warning-row" : ""}
                           >
+                            <td>
+                              {row?.inspection_date
+                                ? formatDateDDMMYYYY(row.inspection_date)
+                                : "-"}
+                            </td>
                             <td>{row?.order_id || "N/A"}</td>
                             <td>
                               <div>{row?.item_code || "N/A"}</div>
                               {row?.goods_not_ready ? (
                                 <div className="small fw-semibold">Goods Not Ready</div>
                               ) : null}
-                              {row?.goods_not_ready_reason ? (
-                                <div className="small">{row.goods_not_ready_reason}</div>
-                              ) : null}
+                              
                             </td>
                             <td>{Number(row?.requested_quantity || 0)}</td>
                             <td>{Number(row?.passed_quantity || 0)}</td>
                             <td>{Number(row?.open_quantity || 0)}</td>
                             <td>{row?.inspector_name || "-"}</td>
-                            <td>
-                              {row?.inspection_date
-                                ? formatDateDDMMYYYY(row.inspection_date)
-                                : "-"}
-                            </td>
+                            <td>{row?.goods_not_ready_reason || "-"}</td>
                           </tr>
                         ))}
                       </tbody>

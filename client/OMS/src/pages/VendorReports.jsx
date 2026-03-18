@@ -13,7 +13,6 @@ const DEFAULT_CUSTOM_DAYS = 30;
 const DEFAULT_ENTITY_FILTER = "all";
 const DEFAULT_VENDOR_TABLE_SORT_FIELD = "latest_shipment_date";
 const DEFAULT_VENDOR_TABLE_SORT_ORDER = "desc";
-
 const normalizeTimeline = (value) => {
   const normalized = String(value || "").trim().toLowerCase();
   if (normalized === "1m" || normalized === "3m" || normalized === "6m") {
@@ -54,18 +53,65 @@ const toSortableDateValue = (value) => {
   const normalized = String(value || "").trim();
   if (!normalized) return null;
 
-  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
-    const [year, month, day] = normalized.split("-").map(Number);
-    return Date.UTC(year, month - 1, day);
+  const ymdMatch = normalized.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|T|\s)/);
+  if (ymdMatch) {
+    const year = Number(ymdMatch[1]);
+    const month = Number(ymdMatch[2]);
+    const day = Number(ymdMatch[3]);
+    return Date.UTC(year, month - 1, day) / (24 * 60 * 60 * 1000);
   }
 
   if (/^\d{2}[/-]\d{2}[/-]\d{4}$/.test(normalized)) {
     const [day, month, year] = normalized.split(/[/-]/).map(Number);
-    return Date.UTC(year, month - 1, day);
+    return Date.UTC(year, month - 1, day) / (24 * 60 * 60 * 1000);
   }
 
   const parsed = new Date(normalized);
-  return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
+  if (Number.isNaN(parsed.getTime())) return null;
+  return Date.UTC(
+    parsed.getUTCFullYear(),
+    parsed.getUTCMonth(),
+    parsed.getUTCDate(),
+  ) / (24 * 60 * 60 * 1000);
+};
+
+const getVendorOrderDifferenceInDays = (orderRow = {}) => {
+  const effectiveEtdValue = toSortableDateValue(orderRow?.etd);
+  if (effectiveEtdValue === null) return null;
+
+  const latestShipmentValue = toSortableDateValue(orderRow?.latest_shipment_date);
+  const isShipped = String(orderRow?.status || "").trim() === "Shipped";
+
+  if (isShipped && latestShipmentValue !== null) {
+    return latestShipmentValue - effectiveEtdValue;
+  }
+
+  const delayedDays = Number(orderRow?.delay_days);
+  if (Number.isFinite(delayedDays) && delayedDays > 0) {
+    return delayedDays;
+  }
+
+  return 0;
+};
+
+const getVendorOrderRowClassName = (orderRow = {}) => {
+  const differenceInDays = getVendorOrderDifferenceInDays(orderRow);
+  const isShipped = String(orderRow?.status || "").trim() === "Shipped";
+
+  if (isShipped && Number.isFinite(differenceInDays) && differenceInDays < 0) {
+    return "om-report-success-row";
+  }
+
+  if (Number.isFinite(differenceInDays) && differenceInDays > 0) {
+    return "om-report-danger-row";
+  }
+
+  const delayedDays = Number(orderRow?.delay_days);
+  if (!isShipped && Number.isFinite(delayedDays) && delayedDays > 0) {
+    return "om-report-danger-row";
+  }
+
+  return "";
 };
 
 const defaultReport = {
@@ -448,7 +494,7 @@ const VendorReports = () => {
                     </div>
 
                     <div className="table-responsive">
-                      <table className="table table-sm table-striped align-middle mb-0">
+                      <table className="table table-sm table-striped align-middle mb-0 vendor-report-table">
                         <thead>
                           <tr>
                             <th>Order ID</th>
@@ -481,7 +527,7 @@ const VendorReports = () => {
                                 Latest Shipment{activeSortField === "latest_shipment_date" ? (activeSortOrder === "asc" ? " (asc)" : " (desc)") : ""}
                               </button>
                             </th>
-                            <th>Delay (Days)</th>
+                            <th>Difference in Days</th>
                             <th>Item Count</th>
                             <th>Qty</th>
                           </tr>
@@ -496,40 +542,48 @@ const VendorReports = () => {
                               </td>
                             </tr>
                           )}
-                          {filteredOrders.map((orderRow) => (
-                            <tr key={`${vendorKey}-${orderRow.order_id}-${orderRow.brand}`}>
-                              <td>
-                                {orderRow.order_id ? (
-                                  <button
-                                    type="button"
-                                    className="btn btn-link p-0 align-baseline text-decoration-none"
-                                    onClick={() => handleOpenShipmentOrder(orderRow.order_id)}
-                                  >
-                                    {orderRow.order_id}
-                                  </button>
-                                ) : (
-                                  "N/A"
-                                )}
-                              </td>
-                              <td>{orderRow.brand || "N/A"}</td>
-                              <td>{orderRow.status || "N/A"}</td>
-                              <td>{formatDateDDMMYYYY(orderRow.order_date)}</td>
-                              <td>
-                                <OrderEtdWithHistory
-                                  orderId={orderRow?.order_id}
-                                  etd={orderRow?.etd}
-                                />
-                              </td>
-                              <td>{formatDateDDMMYYYY(orderRow.latest_shipment_date)}</td>
-                              <td>
-                                {Number.isFinite(orderRow.delay_days)
-                                  ? orderRow.delay_days
-                                  : "N/A"}
-                              </td>
-                              <td>{orderRow.item_count ?? 0}</td>
-                              <td>{orderRow.quantity_total ?? 0}</td>
-                            </tr>
-                          ))}
+                          {filteredOrders.map((orderRow) => {
+                            const differenceInDays = getVendorOrderDifferenceInDays(orderRow);
+                            const rowClassName = getVendorOrderRowClassName(orderRow);
+
+                            return (
+                              <tr
+                                key={`${vendorKey}-${orderRow.order_id}-${orderRow.brand}`}
+                                className={rowClassName}
+                              >
+                                <td>
+                                  {orderRow.order_id ? (
+                                    <button
+                                      type="button"
+                                      className="btn btn-link p-0 align-baseline text-decoration-none"
+                                      onClick={() => handleOpenShipmentOrder(orderRow.order_id)}
+                                    >
+                                      {orderRow.order_id}
+                                    </button>
+                                  ) : (
+                                    "N/A"
+                                  )}
+                                </td>
+                                <td>{orderRow.brand || "N/A"}</td>
+                                <td>{orderRow.status || "N/A"}</td>
+                                <td>{formatDateDDMMYYYY(orderRow.order_date)}</td>
+                                <td>
+                                  <OrderEtdWithHistory
+                                    orderId={orderRow?.order_id}
+                                    etd={orderRow?.etd}
+                                  />
+                                </td>
+                                <td>{formatDateDDMMYYYY(orderRow.latest_shipment_date)}</td>
+                                <td>
+                                  {Number.isFinite(differenceInDays)
+                                    ? differenceInDays
+                                    : "N/A"}
+                                </td>
+                                <td>{orderRow.item_count ?? 0}</td>
+                                <td>{orderRow.quantity_total ?? 0}</td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>

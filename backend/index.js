@@ -20,6 +20,7 @@ const inspectorRouter = require("./routers/inspector.routes");
 const userRouter = require("./routers/user.routes");
 const googleRouter = require("./routers/google.routes");
 const itemRouter = require("./routers/items.routes");
+const emailLogsRouter = require("./routers/emailLogs.routes");
 
 const app = express();
 const PORT = Number.parseInt(String(process.env.PORT || "8008"), 10) || 8008;
@@ -76,8 +77,8 @@ app.use("/brands", brandRouter);
 app.use("/inspectors", inspectorRouter);
 app.use("/users", userRouter);
 app.use("/google", googleRouter);
-
 app.use("/items", itemRouter);
+app.use("/email-logs", emailLogsRouter);
 
 app.get("/", (req, res) => {
   res.send({ message: "Server OK" });

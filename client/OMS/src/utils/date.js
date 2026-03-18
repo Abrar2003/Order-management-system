@@ -41,11 +41,11 @@ const extractParts = (value) => {
   const asString = String(value ?? "").trim();
   if (!asString) return null;
 
-  const ymdOnly = asString.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (ymdOnly) {
-    const year = Number(ymdOnly[1]);
-    const month = Number(ymdOnly[2]);
-    const day = Number(ymdOnly[3]);
+  const ymdWithOptionalTime = asString.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|T|\s)/);
+  if (ymdWithOptionalTime) {
+    const year = Number(ymdWithOptionalTime[1]);
+    const month = Number(ymdWithOptionalTime[2]);
+    const day = Number(ymdWithOptionalTime[3]);
     const parts = { day, month, year };
     return isValidDateParts(parts) ? parts : null;
   }
