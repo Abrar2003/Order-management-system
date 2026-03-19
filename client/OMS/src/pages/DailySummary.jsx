@@ -39,6 +39,10 @@ const getDefaultDailySummaryDate = () => {
 };
 
 const toBrandLogoDataUrl = (logoObj) => {
+  if (typeof logoObj?.url === "string" && logoObj.url.trim()) {
+    return logoObj.url.trim();
+  }
+
   const raw = logoObj?.data?.data || logoObj?.data;
   if (!Array.isArray(raw) || raw.length === 0) return "";
 
@@ -47,7 +51,7 @@ const toBrandLogoDataUrl = (logoObj) => {
     binary += String.fromCharCode(byte);
   });
 
-  return `data:image/webp;base64,${window.btoa(binary)}`;
+  return `data:${logoObj?.contentType || "image/webp"};base64,${window.btoa(binary)}`;
 };
 
 const createDefaultReport = (dateValue = getDefaultDailySummaryDate()) => ({

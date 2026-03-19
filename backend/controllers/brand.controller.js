@@ -1,12 +1,59 @@
 const Brand = require("../models/brand.model");
+const {
+  isConfigured: isWasabiConfigured,
+  createStorageKey,
+  uploadBuffer,
+} = require("../services/wasabiStorage.service");
 
 const escapeRegex = (value = "") =>
   String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+const normalizeBrandLogo = (brand = {}) => {
+  const logoUrl = String(brand?.logo_url || "").trim();
+  const contentType = String(brand?.logo_content_type || "image/webp").trim() || "image/webp";
+  const size = Number(brand?.logo_size || 0);
+
+  if (logoUrl) {
+    return {
+      url: logoUrl,
+      storageKey: String(brand?.logo_storage_key || "").trim(),
+      contentType,
+      size: Number.isFinite(size) ? size : 0,
+    };
+  }
+
+  const rawLogo = brand?.logo;
+  const logoBuffer = Buffer.isBuffer(rawLogo)
+    ? rawLogo
+    : Array.isArray(rawLogo?.data)
+      ? Buffer.from(rawLogo.data)
+      : rawLogo?.type === "Buffer" && Array.isArray(rawLogo?.data)
+        ? Buffer.from(rawLogo.data)
+        : null;
+
+  if (!logoBuffer) {
+    return null;
+  }
+
+  return {
+    data: logoBuffer,
+    contentType,
+    size: Number.isFinite(size) && size > 0 ? size : logoBuffer.length,
+  };
+};
+
+const toBrandResponse = (brandDoc = {}) => ({
+  ...brandDoc,
+  logo: normalizeBrandLogo(brandDoc),
+});
+
 // Get all brands
 exports.getAllBrands = async (req, res) => {
   try {
-    const brands = await Brand.find({}, "name logo calendar");
+    const brands = await Brand.find(
+      {},
+      "name logo logo_url logo_storage_key logo_content_type logo_size calendar",
+    ).lean();
 
     if (!brands || brands.length === 0) {
       return res.status(200).json({
@@ -17,7 +64,7 @@ exports.getAllBrands = async (req, res) => {
 
     res.status(200).json({
       message: "Brands retrieved successfully",
-      data: brands,
+      data: brands.map(toBrandResponse),
     });
   } catch (error) {
     console.error(error);
@@ -45,15 +92,39 @@ exports.createBrand = async (req, res) => {
       return res.status(400).json({ message: "Brand name is required" });
     }
 
+    const logoPayload = {
+      logo: req.file.buffer,
+      logo_content_type: req.file.mimetype || "image/webp",
+      logo_size: Number(req.file.size || req.file.buffer?.length || 0),
+    };
+
+    if (isWasabiConfigured()) {
+      const storageKey = createStorageKey({
+        folder: "brands/logos",
+        originalName: req.file.originalname || `${name}.webp`,
+        extension: ".webp",
+      });
+      const uploadedLogo = await uploadBuffer({
+        buffer: req.file.buffer,
+        key: storageKey,
+        contentType: req.file.mimetype || "image/webp",
+      });
+      logoPayload.logo = null;
+      logoPayload.logo_url = uploadedLogo.url;
+      logoPayload.logo_storage_key = uploadedLogo.key;
+      logoPayload.logo_content_type = uploadedLogo.contentType;
+      logoPayload.logo_size = uploadedLogo.size;
+    }
+
     const newBrand = new Brand({
       name,
-      logo: req.file.buffer,
+      ...logoPayload,
       calendar: calendar || undefined,
     });
     await newBrand.save();
     res.status(201).json({
       message: "Brand created successfully",
-      data: newBrand,
+      data: toBrandResponse(newBrand.toObject()),
     });
   } catch (error) {
     console.error(error);
