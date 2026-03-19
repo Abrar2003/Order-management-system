@@ -73,6 +73,10 @@ const Home = () => {
 
   const { brandLogosById, brandLogosByName } = useMemo(() => {
     const toDataUrl = (logoObj) => {
+      if (typeof logoObj?.url === "string" && logoObj.url.trim()) {
+        return logoObj.url.trim();
+      }
+
       const raw = logoObj?.data?.data || logoObj?.data;
       if (!raw || !Array.isArray(raw)) return null;
 
@@ -81,7 +85,7 @@ const Home = () => {
         binary += String.fromCharCode(byte);
       });
       const base64 = window.btoa(binary);
-      return `data:image/webp;base64,${base64}`;
+      return `data:${logoObj?.contentType || "image/webp"};base64,${base64}`;
     };
 
     const logoById = new Map();

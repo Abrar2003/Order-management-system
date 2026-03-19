@@ -1,5 +1,4 @@
 const XLSX = require("xlsx");
-const fs = require("fs");
 const Order = require("../models/order.model");
 const QC = require("../models/qc.model");
 const Item = require("../models/item.model");
@@ -7,7 +6,6 @@ const UploadLog = require("../models/uploadLog.model");
 const OrderEditLog = require("../models/orderEditLog.model");
 const mongoose = require("mongoose");
 const dateParser = require("../helpers/dateparsser");
-const deleteFile = require("../helpers/fileCleanup");
 const {
   syncOrderGroup,
   purgeOmsEventsForConfiguredBrandCalendars,
@@ -19,6 +17,11 @@ const {
 const {
   extractTableRowsFromPdfBuffer,
 } = require("../services/pdfRectifyParser.service");
+const {
+  isConfigured: isWasabiConfigured,
+  createStorageKey,
+  uploadBuffer,
+} = require("../services/wasabiStorage.service");
 
 
 const ORDER_STATUS_SEQUENCE = [
@@ -319,6 +322,21 @@ const buildEffectiveEtdExpression = (
 ) => ({
   $ifNull: [revisedEtdField, etdField],
 });
+
+const uploadSourceFileToWasabi = async (file, folder) => {
+  if (!file || !file.buffer || !isWasabiConfigured()) return null;
+
+  const storageKey = createStorageKey({
+    folder,
+    originalName: file.originalname || "upload.bin",
+  });
+
+  return uploadBuffer({
+    buffer: file.buffer,
+    key: storageKey,
+    contentType: file.mimetype || "application/octet-stream",
+  });
+};
 
 const formatDateDDMMYYYY = (value, fallback = "") => {
   if (value === undefined || value === null || value === "") return fallback;
@@ -2000,6 +2018,7 @@ exports.uploadOrders = async (req, res) => {
       req.file?.originalname || req.body?.source_filename || "",
     ).trim(),
     source_size_bytes: Number(req.file?.size || req.body?.source_size_bytes || 0),
+    source_file_storage: null,
   };
 
   let totalRowsReceived = 0;
@@ -2042,7 +2061,11 @@ exports.uploadOrders = async (req, res) => {
         return res.status(400).json({ message: "No file uploaded" });
       }
 
-      const workbook = XLSX.readFile(req.file.path);
+      uploadMeta.source_file_storage = await uploadSourceFileToWasabi(
+        req.file,
+        "orders/uploads",
+      );
+      const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
       const sheetName = workbook.SheetNames[0];
       sourceRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
     }
@@ -2353,9 +2376,6 @@ exports.uploadOrders = async (req, res) => {
       message: "Upload failed",
       error: error.message,
     });
-  } finally {
-    // Cleanup uploaded file
-    deleteFile(req.file?.path);
   }
 };
 
@@ -2989,7 +3009,11 @@ exports.rectifyPdfOrders = async (req, res) => {
       return res.status(400).json({ message: "Only PDF files are supported" });
     }
 
-    const pdfBuffer = fs.readFileSync(req.file.path);
+    uploadMeta.source_file_storage = await uploadSourceFileToWasabi(
+      req.file,
+      "orders/rectify-pdf",
+    );
+    const pdfBuffer = req.file.buffer;
     const extractedRows = extractTableRowsFromPdfBuffer(pdfBuffer);
 
     const invalidEntries = [];
@@ -3193,8 +3217,6 @@ exports.rectifyPdfOrders = async (req, res) => {
       message: "Failed to rectify PDF",
       error: error?.message || String(error),
     });
-  } finally {
-    deleteFile(req.file?.path);
   }
 };
 

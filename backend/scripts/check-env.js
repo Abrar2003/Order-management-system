@@ -18,6 +18,14 @@ const googleVars = [
   "GOOGLE_REFRESH_TOKEN",
 ];
 
+const wasabiVars = [
+  "WASABI_ACCESS_KEY_ID",
+  "WASABI_SECRET_ACCESS_KEY",
+  "WASABI_BUCKET",
+  "WASABI_REGION",
+  "WASABI_ENDPOINT",
+];
+
 const isMissing = (key) => {
   const value = process.env[key];
   return value === undefined || String(value).trim() === "";
@@ -35,6 +43,13 @@ const missingGoogle = googleVars.filter(isMissing);
 if (missingGoogle.length > 0 && missingGoogle.length < googleVars.length) {
   console.warn(
     `Partial Google config detected. Missing: ${missingGoogle.join(", ")}`,
+  );
+}
+
+const missingWasabi = wasabiVars.filter(isMissing);
+if (missingWasabi.length > 0 && missingWasabi.length < wasabiVars.length) {
+  console.warn(
+    `Partial Wasabi config detected. Missing: ${missingWasabi.join(", ")}`,
   );
 }
 
