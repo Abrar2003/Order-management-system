@@ -2,6 +2,8 @@ const QC = require("../models/qc.model");
 const Inspection = require("../models/inspection.model");
 const Inspector = require("../models/inspector.model");
 const Item = require("../models/item.model");
+const QcEditLog = require("../models/qcEditLog.model");
+const OrderEditLog = require("../models/orderEditLog.model");
 const XLSX = require("xlsx");
 
 const Order = require("../models/order.model");
@@ -105,6 +107,25 @@ const computeAqlSampleQuantity = (quantity) => {
 const normalizeInspectionStatus = (value) =>
   String(value || "").trim().toLowerCase();
 
+const buildAuditActor = (user = null, fallbackName = "") => ({
+  user:
+    user?._id && mongoose.Types.ObjectId.isValid(user._id)
+      ? user._id
+      : null,
+  name: normalizeText(
+    user?.name || user?.username || user?.email || fallbackName || "",
+  ),
+});
+
+const stampRequestHistoryEntry = (
+  entry,
+  { user = null, updatedAt = new Date(), fallbackName = "" } = {},
+) => {
+  if (!entry) return;
+  entry.updatedAt = updatedAt;
+  entry.updated_by = buildAuditActor(user, fallbackName);
+};
+
 const hasInspectionRecordActivity = ({
   checked = 0,
   passed = 0,
@@ -135,7 +156,11 @@ const resolveInspectionRecordStatus = ({
   return INSPECTION_RECORD_STATUS.PENDING;
 };
 
-const syncQcRequestHistoryStatuses = (qcDoc, inspectionRecords = []) => {
+const syncQcRequestHistoryStatuses = (
+  qcDoc,
+  inspectionRecords = [],
+  { user = null, updatedAt = new Date(), fallbackName = "" } = {},
+) => {
   if (!Array.isArray(qcDoc?.request_history)) return false;
 
   const inspectionStatusByRequestId = new Map();
@@ -169,6 +194,11 @@ const syncQcRequestHistoryStatuses = (qcDoc, inspectionRecords = []) => {
       : "open";
     if (String(entry?.status || "") !== nextStatus) {
       entry.status = nextStatus;
+      stampRequestHistoryEntry(entry, {
+        user,
+        updatedAt,
+        fallbackName,
+      });
       hasChanges = true;
     }
   }
@@ -337,6 +367,254 @@ const formatDateDDMMYYYY = (value, fallback = "") => {
   return `${day}/${month}/${year}`;
 };
 
+const formatAuditBoolean = (value) => (value ? "Yes" : "No");
+
+const formatAuditList = (values = []) => {
+  const normalized = (Array.isArray(values) ? values : [])
+    .map((value) => normalizeText(value))
+    .filter(Boolean);
+  return normalized.length > 0 ? normalized.join(", ") : "None";
+};
+
+const formatRequestHistoryForAudit = (entries = []) => {
+  const rows = Array.isArray(entries) ? entries : [];
+  if (rows.length === 0) return "None";
+
+  return rows
+    .map((entry, index) => {
+      const requestDate = formatDateDDMMYYYY(entry?.request_date, "Not Set");
+      const requestType = normalizeText(entry?.request_type) || "Not Set";
+      const quantityRequested = toNonNegativeNumber(
+        entry?.quantity_requested,
+        0,
+      );
+      const inspectorName =
+        normalizeText(entry?.inspector?.name || entry?.updated_by?.name || "") ||
+        "Not Set";
+      const status = normalizeText(entry?.status) || "open";
+      const remarks = normalizeText(entry?.remarks) || "None";
+      return `${index + 1}) ${requestDate} | ${requestType} | qty ${quantityRequested} | inspector ${inspectorName} | ${status} | remarks: ${remarks}`;
+    })
+    .join(" || ");
+};
+
+const formatInspectionRecordsForAudit = (entries = []) => {
+  const rows = Array.isArray(entries) ? entries : [];
+  if (rows.length === 0) return "None";
+
+  return rows
+    .map((entry, index) => {
+      const inspectionDate = formatDateDDMMYYYY(
+        entry?.inspection_date || entry?.createdAt,
+        "Not Set",
+      );
+      const status = normalizeText(entry?.status) || "pending";
+      const checked = toNonNegativeNumber(entry?.checked, 0);
+      const passed = toNonNegativeNumber(entry?.passed, 0);
+      const offered = toNonNegativeNumber(entry?.vendor_offered, 0);
+      const remarks = normalizeText(entry?.remarks) || "None";
+      return `${index + 1}) ${inspectionDate} | offered ${offered} | checked ${checked} | passed ${passed} | ${status} | remarks: ${remarks}`;
+    })
+    .join(" || ");
+};
+
+const buildQcEditLogSnapshot = (qcDoc = {}, inspectionRecords = []) => ({
+  order_id: normalizeText(qcDoc?.order_meta?.order_id),
+  brand: normalizeText(qcDoc?.order_meta?.brand),
+  vendor: normalizeText(qcDoc?.order_meta?.vendor),
+  item_code: normalizeText(qcDoc?.item?.item_code),
+  inspector:
+    normalizeText(qcDoc?.inspector?.name || qcDoc?.inspector?.email || "") ||
+    normalizeText(qcDoc?.inspector),
+  request_type: normalizeText(qcDoc?.request_type) || "Not Set",
+  request_date: formatDateDDMMYYYY(qcDoc?.request_date, "Not Set"),
+  last_inspected_date: formatDateDDMMYYYY(
+    qcDoc?.last_inspected_date,
+    "Not Set",
+  ),
+  client_demand: String(toNonNegativeNumber(qcDoc?.quantities?.client_demand, 0)),
+  quantity_requested: String(
+    toNonNegativeNumber(qcDoc?.quantities?.quantity_requested, 0),
+  ),
+  vendor_provision: String(
+    toNonNegativeNumber(qcDoc?.quantities?.vendor_provision, 0),
+  ),
+  qc_checked: String(toNonNegativeNumber(qcDoc?.quantities?.qc_checked, 0)),
+  qc_passed: String(toNonNegativeNumber(qcDoc?.quantities?.qc_passed, 0)),
+  pending: String(toNonNegativeNumber(qcDoc?.quantities?.pending, 0)),
+  qc_rejected: String(toNonNegativeNumber(qcDoc?.quantities?.qc_rejected, 0)),
+  barcode: String(toNonNegativeNumber(qcDoc?.barcode, 0)),
+  packed_size: formatAuditBoolean(qcDoc?.packed_size),
+  finishing: formatAuditBoolean(qcDoc?.finishing),
+  branding: formatAuditBoolean(qcDoc?.branding),
+  cbm: [
+    `top ${normalizeText(qcDoc?.cbm?.top) || "0"}`,
+    `bottom ${normalizeText(qcDoc?.cbm?.bottom) || "0"}`,
+    `total ${normalizeText(qcDoc?.cbm?.total) || "0"}`,
+  ].join(" | "),
+  labels: formatAuditList(qcDoc?.labels),
+  remarks: normalizeText(qcDoc?.remarks) || "None",
+  request_history: formatRequestHistoryForAudit(qcDoc?.request_history),
+  inspection_record: formatInspectionRecordsForAudit(inspectionRecords),
+});
+
+const buildAuditChanges = (
+  beforeSnapshot = {},
+  afterSnapshot = {},
+  fields = [],
+) => {
+  const toDisplayText = (value) => {
+    const normalized = String(value ?? "").trim();
+    return normalized || "Not Set";
+  };
+
+  return fields.reduce((changes, { key, label }) => {
+    const beforeValue = toDisplayText(beforeSnapshot?.[key]);
+    const afterValue = toDisplayText(afterSnapshot?.[key]);
+    if (beforeValue === afterValue) return changes;
+    changes.push({
+      field: label,
+      before: beforeValue,
+      after: afterValue,
+    });
+    return changes;
+  }, []);
+};
+
+const createQcEditLog = async ({
+  reqUser = null,
+  qcDoc = null,
+  beforeSnapshot = {},
+  afterSnapshot = {},
+  operationType = "qc_update",
+  extraRemarks = [],
+} = {}) => {
+  const changes = buildAuditChanges(beforeSnapshot, afterSnapshot, [
+    { key: "inspector", label: "Inspector" },
+    { key: "request_type", label: "Request Type" },
+    { key: "request_date", label: "Request Date" },
+    { key: "last_inspected_date", label: "Last Inspected Date" },
+    { key: "client_demand", label: "Client Demand" },
+    { key: "quantity_requested", label: "Quantity Requested" },
+    { key: "vendor_provision", label: "Vendor Provision" },
+    { key: "qc_checked", label: "QC Checked" },
+    { key: "qc_passed", label: "QC Passed" },
+    { key: "pending", label: "Pending" },
+    { key: "qc_rejected", label: "QC Rejected" },
+    { key: "barcode", label: "Barcode" },
+    { key: "packed_size", label: "Packed Size" },
+    { key: "finishing", label: "Finishing" },
+    { key: "branding", label: "Branding" },
+    { key: "cbm", label: "CBM" },
+    { key: "labels", label: "Labels" },
+    { key: "remarks", label: "Remarks" },
+    { key: "request_history", label: "Request History" },
+    { key: "inspection_record", label: "Inspection Record" },
+  ]);
+
+  const remarks = [
+    changes.length > 0
+      ? `Edited fields: ${changes.map((entry) => entry.field).join(", ")}.`
+      : "No net changes detected in audited QC fields.",
+    ...(Array.isArray(extraRemarks) ? extraRemarks : [])
+      .map((entry) => normalizeText(entry))
+      .filter(Boolean),
+  ];
+
+  if (changes.length === 0) {
+    return;
+  }
+
+  try {
+    await QcEditLog.create({
+      edited_by:
+        reqUser?._id && mongoose.Types.ObjectId.isValid(reqUser._id)
+          ? reqUser._id
+          : null,
+      edited_by_name: normalizeText(
+        reqUser?.name || reqUser?.username || reqUser?.email || "",
+      ),
+      qc: qcDoc?._id || null,
+      order: qcDoc?.order?._id || qcDoc?.order || null,
+      order_id: afterSnapshot?.order_id || beforeSnapshot?.order_id || "",
+      brand: afterSnapshot?.brand || beforeSnapshot?.brand || "",
+      vendor: afterSnapshot?.vendor || beforeSnapshot?.vendor || "",
+      item_code: afterSnapshot?.item_code || beforeSnapshot?.item_code || "",
+      operation_type: operationType,
+      changed_fields_count: changes.length,
+      changed_fields: changes.map((entry) => entry.field),
+      changes,
+      remarks,
+    });
+  } catch (error) {
+    console.error("QC edit log save failed:", {
+      qcId: qcDoc?._id,
+      error: error?.message || String(error),
+    });
+  }
+};
+
+const buildOrderAuditSnapshotForQc = (orderDoc = {}) => ({
+  order_id: normalizeText(orderDoc?.order_id),
+  brand: normalizeText(orderDoc?.brand),
+  vendor: normalizeText(orderDoc?.vendor),
+  item_code: normalizeText(orderDoc?.item?.item_code),
+  status: normalizeText(orderDoc?.status) || "Not Set",
+  qc_record: normalizeText(orderDoc?.qc_record) || "Not Set",
+});
+
+const createOrderEditLogFromQc = async ({
+  reqUser = null,
+  orderDoc = null,
+  beforeSnapshot = {},
+  afterSnapshot = {},
+  extraRemarks = [],
+} = {}) => {
+  const changes = buildAuditChanges(beforeSnapshot, afterSnapshot, [
+    { key: "status", label: "Status" },
+    { key: "qc_record", label: "QC Record" },
+  ]);
+
+  if (changes.length === 0) {
+    return;
+  }
+
+  const remarks = [
+    changes.length > 0
+      ? `Edited fields: ${changes.map((entry) => entry.field).join(", ")}.`
+      : "No net changes detected in audited order fields.",
+    ...(Array.isArray(extraRemarks) ? extraRemarks : [])
+      .map((entry) => normalizeText(entry))
+      .filter(Boolean),
+  ];
+
+  try {
+    await OrderEditLog.create({
+      edited_by:
+        reqUser?._id && mongoose.Types.ObjectId.isValid(reqUser._id)
+          ? reqUser._id
+          : null,
+      edited_by_name: normalizeText(
+        reqUser?.name || reqUser?.username || reqUser?.email || "",
+      ),
+      order_id: afterSnapshot?.order_id || beforeSnapshot?.order_id || "UNKNOWN",
+      brand: afterSnapshot?.brand || beforeSnapshot?.brand || "",
+      vendor: afterSnapshot?.vendor || beforeSnapshot?.vendor || "",
+      item_code: afterSnapshot?.item_code || beforeSnapshot?.item_code || "",
+      operation_type: "order_edit",
+      changed_fields_count: changes.length,
+      changed_fields: changes.map((entry) => entry.field),
+      changes,
+      remarks,
+    });
+  } catch (error) {
+    console.error("Order edit log save failed from QC flow:", {
+      orderId: afterSnapshot?.order_id || beforeSnapshot?.order_id,
+      error: error?.message || String(error),
+    });
+  }
+};
+
 const formatLbh = (dimensions = {}) => {
   const L = toNonNegativeNumber(dimensions?.L, 0);
   const B = toNonNegativeNumber(dimensions?.B, 0);
@@ -393,6 +671,86 @@ const getItemItemLbh = (itemDoc = {}) =>
   {};
 const getItemBoxLbh = (itemDoc = {}) =>
   itemDoc?.inspected_box_LBH || itemDoc?.pis_box_LBH || itemDoc?.box_LBH || {};
+
+const toPositiveCbmNumber = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  return numeric;
+};
+
+const resolveSplitOrSingleLbhCbmTotal = ({
+  topLbh = null,
+  bottomLbh = null,
+  singleLbh = null,
+} = {}) => {
+  const topCbm = toPositiveCbmNumber(calculateCbmFromLbh(topLbh));
+  const bottomCbm = toPositiveCbmNumber(calculateCbmFromLbh(bottomLbh));
+  if (topCbm > 0 && bottomCbm > 0) {
+    return topCbm + bottomCbm;
+  }
+
+  return toPositiveCbmNumber(calculateCbmFromLbh(singleLbh));
+};
+
+const resolveItemReportCbmPerUnit = (itemDoc = null, inspection = null) => {
+  const inspectedStoredCbm = [
+    itemDoc?.cbm?.calculated_inspected_total,
+    itemDoc?.cbm?.inspected_total,
+  ]
+    .map((value) => toPositiveCbmNumber(value))
+    .find((value) => value > 0);
+  if (inspectedStoredCbm) {
+    return inspectedStoredCbm;
+  }
+
+  const pisTopCbm = toPositiveCbmNumber(itemDoc?.cbm?.top);
+  const pisBottomCbm = toPositiveCbmNumber(itemDoc?.cbm?.bottom);
+  if (pisTopCbm > 0 && pisBottomCbm > 0) {
+    return pisTopCbm + pisBottomCbm;
+  }
+
+  const pisStoredCbm = [
+    itemDoc?.cbm?.calculated_pis_total,
+    itemDoc?.cbm?.total,
+  ]
+    .map((value) => toPositiveCbmNumber(value))
+    .find((value) => value > 0);
+  if (pisStoredCbm) {
+    return pisStoredCbm;
+  }
+
+  const inspectedLbhCbm = resolveSplitOrSingleLbhCbmTotal({
+    topLbh:
+      itemDoc?.inspected_box_top_LBH ||
+      itemDoc?.inspected_top_LBH ||
+      itemDoc?.inspected_item_top_LBH,
+    bottomLbh:
+      itemDoc?.inspected_box_bottom_LBH ||
+      itemDoc?.inspected_bottom_LBH ||
+      itemDoc?.inspected_item_bottom_LBH,
+    singleLbh: itemDoc?.inspected_box_LBH || itemDoc?.inspected_item_LBH,
+  });
+  if (inspectedLbhCbm > 0) {
+    return inspectedLbhCbm;
+  }
+
+  const pisLbhCbm = resolveSplitOrSingleLbhCbmTotal({
+    topLbh: itemDoc?.pis_box_top_LBH || itemDoc?.pis_item_top_LBH,
+    bottomLbh: itemDoc?.pis_box_bottom_LBH || itemDoc?.pis_item_bottom_LBH,
+    singleLbh: itemDoc?.pis_box_LBH || itemDoc?.pis_item_LBH,
+  });
+  if (pisLbhCbm > 0) {
+    return pisLbhCbm;
+  }
+
+  const inspectionTopCbm = toPositiveCbmNumber(inspection?.cbm?.top);
+  const inspectionBottomCbm = toPositiveCbmNumber(inspection?.cbm?.bottom);
+  if (inspectionTopCbm > 0 && inspectionBottomCbm > 0) {
+    return inspectionTopCbm + inspectionBottomCbm;
+  }
+
+  return toPositiveCbmNumber(inspection?.cbm?.total);
+};
 
 const hasMeaningfulItemQcDetails = (itemDoc) => {
   if (!itemDoc || typeof itemDoc !== "object") return false;
@@ -520,6 +878,7 @@ const upsertInspectionRecordForRequest = async ({
   inspectionDate = "",
   remarks = "",
   createdBy,
+  auditUser = null,
   addChecked = 0,
   addPassed = 0,
   addProvision = 0,
@@ -613,6 +972,7 @@ const upsertInspectionRecordForRequest = async ({
         : {}),
       remarks: String(remarks || "").trim(),
       createdBy,
+      updated_by: buildAuditActor(auditUser),
     });
 
     qcDoc.inspection_record = qcDoc.inspection_record || [];
@@ -703,6 +1063,7 @@ const upsertInspectionRecordForRequest = async ({
   if (String(remarks || "").trim()) {
     inspectionRecord.remarks = String(remarks || "").trim();
   }
+  inspectionRecord.updated_by = buildAuditActor(auditUser);
 
   await inspectionRecord.save();
 
@@ -833,6 +1194,45 @@ const resolveTimelineRange = ({ timeline = "1m", customDays = "" } = {}) => {
   };
 };
 
+const resolveExplicitDateRange = ({ fromDate = "", toDate = "" } = {}) => {
+  const normalizedFrom = toISODateString(fromDate);
+  const normalizedTo = toISODateString(toDate);
+
+  if (!normalizedFrom && !normalizedTo) {
+    return null;
+  }
+
+  const fromDateIso = normalizedFrom || normalizedTo;
+  const toDateIso = normalizedTo || normalizedFrom;
+  const fromDateUtc = parseIsoDateToUtcDate(fromDateIso);
+  const toDateInclusiveUtc = parseIsoDateToUtcDate(toDateIso);
+  if (!fromDateUtc || !toDateInclusiveUtc) return null;
+  if (fromDateUtc.getTime() > toDateInclusiveUtc.getTime()) return null;
+
+  const toDateExclusiveUtc = addUtcDays(toDateInclusiveUtc, 1);
+  if (!toDateExclusiveUtc) return null;
+
+  return {
+    timeline: null,
+    days: null,
+    from_date_iso: fromDateIso,
+    to_date_iso: toDateIso,
+    from_date_utc: fromDateUtc,
+    to_date_exclusive_utc: toDateExclusiveUtc,
+  };
+};
+
+const resolveInspectorReportRange = ({
+  fromDate = "",
+  toDate = "",
+  timeline = "1m",
+  customDays = "",
+} = {}) => {
+  const explicitRange = resolveExplicitDateRange({ fromDate, toDate });
+  if (explicitRange) return explicitRange;
+  return resolveTimelineRange({ timeline, customDays });
+};
+
 const toUtcDateOnly = (value) => {
   if (!value) return null;
   const asIso = toISODateString(value);
@@ -859,6 +1259,29 @@ const getWeekStartIsoDate = (value) => {
   const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
   const monday = addUtcDays(dayStart, diffToMonday);
   return monday ? toISODateString(monday) : "";
+};
+
+const getWeekEndIsoDate = (weekStartValue) => {
+  const weekStart = toUtcDateOnly(weekStartValue);
+  if (!weekStart) return "";
+
+  const sunday = addUtcDays(weekStart, 6);
+  return sunday ? toISODateString(sunday) : "";
+};
+
+const resolveInspectionReportDateIso = (inspection = {}) =>
+  toISODateString(inspection?.inspection_date) ||
+  toISODateString(inspection?.createdAt) ||
+  "";
+
+const isIsoDateWithinInclusiveRange = (
+  isoDate = "",
+  fromDateIso = "",
+  toDateIso = "",
+) => {
+  const normalizedIso = toISODateString(isoDate);
+  if (!normalizedIso || !fromDateIso || !toDateIso) return false;
+  return normalizedIso >= fromDateIso && normalizedIso <= toDateIso;
 };
 
 const getPreviousUtcWeekRange = (referenceDate = new Date()) => {
@@ -1862,6 +2285,16 @@ exports.alignQC = async (req, res) => {
       : null;
 
     if (existingQC) {
+      const auditTimestamp = new Date();
+      const beforeQcInspectionRecords = await Inspection.find({
+        qc: existingQC._id,
+      }).lean();
+      const beforeQcSnapshot = buildQcEditLogSnapshot(
+        existingQC.toObject(),
+        beforeQcInspectionRecords,
+      );
+      const beforeOrderSnapshot = buildOrderAuditSnapshotForQc(orderRecord);
+
       if (clientDemand < existingQC.quantities.qc_passed) {
         return res.status(400).json({
           message: "client demand cannot be less than already passed quantity",
@@ -1940,8 +2373,11 @@ exports.alignQC = async (req, res) => {
         status: "open",
         remarks: remarks || "",
         createdBy: req.user._id,
+        updatedAt: auditTimestamp,
+        updated_by: buildAuditActor(req.user),
       };
       existingQC.request_history.push(requestHistoryEntry);
+      existingQC.updated_by = buildAuditActor(req.user);
 
       await upsertInspectionRecordForRequest({
         qcDoc: existingQC,
@@ -1953,6 +2389,7 @@ exports.alignQC = async (req, res) => {
         inspectionDate: requestDateValue,
         remarks: remarks || "",
         createdBy: req.user._id,
+        auditUser: req.user,
         addChecked: 0,
         addPassed: 0,
         addProvision: 0,
@@ -1974,8 +2411,31 @@ exports.alignQC = async (req, res) => {
             ? "Inspection Done"
             : "Under Inspection";
         orderRecord.qc_record = existingQC._id;
+        orderRecord.updated_by = buildAuditActor(req.user);
         await orderRecord.save();
       }
+
+      const afterQcInspectionRecords = await Inspection.find({
+        qc: existingQC._id,
+      }).lean();
+      await createQcEditLog({
+        reqUser: req.user,
+        qcDoc: existingQC,
+        beforeSnapshot: beforeQcSnapshot,
+        afterSnapshot: buildQcEditLogSnapshot(
+          existingQC.toObject(),
+          afterQcInspectionRecords,
+        ),
+        operationType: "qc_align",
+        extraRemarks: ["QC request re-aligned through align-qc route."],
+      });
+      await createOrderEditLogFromQc({
+        reqUser: req.user,
+        orderDoc: orderRecord,
+        beforeSnapshot: beforeOrderSnapshot,
+        afterSnapshot: buildOrderAuditSnapshotForQc(orderRecord),
+        extraRemarks: ["Order updated from align-qc flow."],
+      });
 
       try {
         await upsertItemFromQc(existingQC);
@@ -1992,6 +2452,8 @@ exports.alignQC = async (req, res) => {
       });
     }
 
+    const auditTimestamp = new Date();
+    const beforeOrderSnapshot = buildOrderAuditSnapshotForQc(orderRecord);
     const requestHistoryEntry = {
       request_date: requestDateValue,
       request_type: normalizedRequestType,
@@ -2000,6 +2462,8 @@ exports.alignQC = async (req, res) => {
       status: "open",
       remarks: remarks || "",
       createdBy: req.user._id,
+      updatedAt: auditTimestamp,
+      updated_by: buildAuditActor(req.user),
     };
 
     const qc = await QC.create({
@@ -2025,6 +2489,7 @@ exports.alignQC = async (req, res) => {
       request_history: [requestHistoryEntry],
       remarks,
       createdBy: req.user._id,
+      updated_by: buildAuditActor(req.user),
     });
 
     const createPatchResult = buildQcItemDetailsPatch({
@@ -2046,6 +2511,7 @@ exports.alignQC = async (req, res) => {
       inspectionDate: requestDateValue,
       remarks: remarks || "",
       createdBy: req.user._id,
+      auditUser: req.user,
       addChecked: 0,
       addPassed: 0,
       addProvision: 0,
@@ -2057,9 +2523,27 @@ exports.alignQC = async (req, res) => {
 
     orderRecord.status = "Under Inspection";
     orderRecord.qc_record = qc._id;
+    orderRecord.updated_by = buildAuditActor(req.user);
 
     await qc.save();
     await orderRecord.save();
+
+    const afterQcInspectionRecords = await Inspection.find({ qc: qc._id }).lean();
+    await createQcEditLog({
+      reqUser: req.user,
+      qcDoc: qc,
+      beforeSnapshot: {},
+      afterSnapshot: buildQcEditLogSnapshot(qc.toObject(), afterQcInspectionRecords),
+      operationType: "qc_align",
+      extraRemarks: ["QC created through align-qc route."],
+    });
+    await createOrderEditLogFromQc({
+      reqUser: req.user,
+      orderDoc: orderRecord,
+      beforeSnapshot: beforeOrderSnapshot,
+      afterSnapshot: buildOrderAuditSnapshotForQc(orderRecord),
+      extraRemarks: ["Order updated from align-qc flow."],
+    });
 
     try {
       await upsertItemFromQc(qc);
@@ -2119,6 +2603,17 @@ exports.updateQC = async (req, res) => {
     if (!qc) {
       return res.status(404).json({ message: "QC record not found" });
     }
+    const beforeInspectionRecords = await Inspection.find({ qc: qc._id }).lean();
+    const beforeQcSnapshot = buildQcEditLogSnapshot(
+      qc.toObject(),
+      beforeInspectionRecords,
+    );
+    const linkedOrderId = qc?.order?._id || qc.order;
+    const linkedOrderBefore =
+      linkedOrderId && mongoose.Types.ObjectId.isValid(linkedOrderId)
+        ? await Order.findById(linkedOrderId)
+        : null;
+    const beforeOrderSnapshot = buildOrderAuditSnapshotForQc(linkedOrderBefore);
 
     const normalizedRole = String(req.user?.role || "")
       .trim()
@@ -3014,6 +3509,7 @@ exports.updateQC = async (req, res) => {
         inspectionDate: inspectionDateForRecord,
         remarks: remarks || "",
         createdBy: req.user._id,
+        auditUser: req.user,
         addChecked: isVisitUpdate ? addChecked : 0,
         addPassed: isVisitUpdate ? addPassedForInspectionRecord : 0,
         addProvision: isVisitUpdate ? addProvision : 0,
@@ -3024,6 +3520,9 @@ exports.updateQC = async (req, res) => {
 
       if (latestRequestEntry && inspectionRecord && isVisitUpdate) {
         latestRequestEntry.status = "inspected";
+        stampRequestHistoryEntry(latestRequestEntry, {
+          user: req.user,
+        });
       }
     }
 
@@ -3173,6 +3672,7 @@ exports.updateQC = async (req, res) => {
       }
     }
 
+    qc.updated_by = buildAuditActor(req.user);
     await qc.save();
 
     const orderId = qc?.order?._id || qc.order;
@@ -3185,7 +3685,27 @@ exports.updateQC = async (req, res) => {
         clientDemandQty > 0 && passedQty >= clientDemandQty
           ? "Inspection Done"
           : "Under Inspection";
+      orderRecord.updated_by = buildAuditActor(req.user);
       await orderRecord.save();
+    }
+
+    const afterInspectionRecords = await Inspection.find({ qc: qc._id }).lean();
+    await createQcEditLog({
+      reqUser: req.user,
+      qcDoc: qc,
+      beforeSnapshot: beforeQcSnapshot,
+      afterSnapshot: buildQcEditLogSnapshot(qc.toObject(), afterInspectionRecords),
+      operationType: "qc_update",
+      extraRemarks: ["QC updated through update-qc route."],
+    });
+    if (orderRecord) {
+      await createOrderEditLogFromQc({
+        reqUser: req.user,
+        orderDoc: orderRecord,
+        beforeSnapshot: beforeOrderSnapshot,
+        afterSnapshot: buildOrderAuditSnapshotForQc(orderRecord),
+        extraRemarks: ["Order status evaluated from QC update flow."],
+      });
     }
 
     try {
@@ -3302,21 +3822,67 @@ exports.syncQcDetailsFromItems = async (req, res) => {
 
 exports.getInspectorReports = async (req, res) => {
   try {
-    const timelineRange = resolveTimelineRange({
+    const selectedInspector = normalizeOptionalReportFilter(
+      req.query.inspector ?? req.query.inspector_id ?? req.query.inspectorId,
+    );
+    if (
+      selectedInspector &&
+      !mongoose.Types.ObjectId.isValid(selectedInspector)
+    ) {
+      return res.status(400).json({ message: "Invalid inspector filter" });
+    }
+
+    const reportRange = resolveInspectorReportRange({
+      fromDate: req.query.from_date ?? req.query.fromDate,
+      toDate: req.query.to_date ?? req.query.toDate,
       timeline: req.query.timeline,
       customDays: req.query.custom_days ?? req.query.customDays,
     });
-    if (!timelineRange) {
-      return res.status(400).json({ message: "Invalid timeline filters" });
+    if (!reportRange) {
+      return res.status(400).json({ message: "Invalid inspector report filters" });
     }
 
-    const inspectionsRaw = await Inspection.find({
-      createdAt: {
-        $gte: timelineRange.from_date_utc,
-        $lt: timelineRange.to_date_exclusive_utc,
-      },
-    })
-      .select("inspector inspection_date createdAt checked passed cbm qc")
+    const baseInspectionMatch = {
+      $or: [
+        {
+          inspection_date: {
+            $gte: reportRange.from_date_iso,
+            $lte: reportRange.to_date_iso,
+          },
+        },
+        {
+          createdAt: {
+            $gte: reportRange.from_date_utc,
+            $lt: reportRange.to_date_exclusive_utc,
+          },
+        },
+      ],
+    };
+    const inspectionMatch = selectedInspector
+      ? {
+          ...baseInspectionMatch,
+          inspector: new mongoose.Types.ObjectId(selectedInspector),
+        }
+      : baseInspectionMatch;
+
+    const [inspectorOptionsRaw, inspectionsRaw] = await Promise.all([
+      Inspection.find(baseInspectionMatch)
+        .select("inspector inspection_date createdAt qc")
+        .populate("inspector", "name email")
+        .populate({
+          path: "qc",
+          select: "order",
+          populate: {
+            path: "order",
+            select: "_id",
+            match: ACTIVE_ORDER_MATCH,
+          },
+        })
+        .lean(),
+      Inspection.find(inspectionMatch)
+        .select(
+          "inspector inspection_date createdAt checked passed vendor_requested cbm qc",
+        )
       .populate("inspector", "name email")
       .populate({
         path: "qc",
@@ -3328,9 +3894,71 @@ exports.getInspectorReports = async (req, res) => {
         },
       })
       .sort({ createdAt: -1 })
-      .lean();
+        .lean(),
+    ]);
 
-    const inspections = inspectionsRaw.filter((entry) => entry?.qc?.order);
+    const inspectorOptionsMap = new Map();
+    for (const optionEntry of inspectorOptionsRaw) {
+      if (!optionEntry?.qc?.order) continue;
+
+      const optionDateIso = resolveInspectionReportDateIso(optionEntry);
+      if (
+        !isIsoDateWithinInclusiveRange(
+          optionDateIso,
+          reportRange.from_date_iso,
+          reportRange.to_date_iso,
+        )
+      ) {
+        continue;
+      }
+
+      const optionInspectorId = String(
+        optionEntry?.inspector?._id || optionEntry?.inspector || "",
+      ).trim();
+      if (!optionInspectorId) continue;
+
+      if (!inspectorOptionsMap.has(optionInspectorId)) {
+        inspectorOptionsMap.set(optionInspectorId, {
+          _id: optionInspectorId,
+          name: normalizeText(optionEntry?.inspector?.name || "Unknown"),
+          email: normalizeText(optionEntry?.inspector?.email || ""),
+        });
+      }
+    }
+
+    const inspections = inspectionsRaw.filter((entry) => {
+      if (!entry?.qc?.order) return false;
+
+      const reportDateIso = resolveInspectionReportDateIso(entry);
+      return isIsoDateWithinInclusiveRange(
+        reportDateIso,
+        reportRange.from_date_iso,
+        reportRange.to_date_iso,
+      );
+    });
+    const uniqueItemCodes = [
+      ...new Set(
+        inspections
+          .map((entry) => normalizeText(entry?.qc?.item?.item_code || ""))
+          .filter(Boolean),
+      ),
+    ];
+    const itemDocs = uniqueItemCodes.length
+      ? await Item.find({
+          code: {
+            $in: uniqueItemCodes.map(
+              (itemCode) => new RegExp(`^${escapeRegex(itemCode)}$`, "i"),
+            ),
+          },
+        })
+          .select(
+            "code cbm inspected_item_LBH inspected_item_top_LBH inspected_item_bottom_LBH inspected_box_LBH inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_item_LBH pis_item_top_LBH pis_item_bottom_LBH pis_box_LBH pis_box_top_LBH pis_box_bottom_LBH",
+          )
+          .lean()
+      : [];
+    const itemDocByCodeKey = new Map(
+      itemDocs.map((itemDoc) => [normalizeItemCodeKey(itemDoc?.code), itemDoc]),
+    );
     const inspectorMap = new Map();
     const dailyTotalsMap = new Map();
     const weeklyTotalsMap = new Map();
@@ -3344,19 +3972,20 @@ exports.getInspectorReports = async (req, res) => {
       return bucketMap.get(normalizedKey);
     };
 
+    let totalRequested = 0;
     let totalChecked = 0;
     let totalPassed = 0;
     let totalInspectedCbm = 0;
 
     for (const inspection of inspections) {
+      const requestedQty = toNonNegativeNumber(inspection?.vendor_requested, 0);
       const inspectedQty = toNonNegativeNumber(inspection?.checked, 0);
       const passedQty = toNonNegativeNumber(inspection?.passed, 0);
-      const cbmPerUnit = toNonNegativeNumber(inspection?.cbm?.total, 0);
+      const itemCodeKey = normalizeItemCodeKey(inspection?.qc?.item?.item_code || "");
+      const itemDoc = itemDocByCodeKey.get(itemCodeKey) || null;
+      const cbmPerUnit = resolveItemReportCbmPerUnit(itemDoc, inspection);
       const inspectedCbm = cbmPerUnit * inspectedQty;
-      const inspectionDateIso =
-        toISODateString(inspection?.inspection_date) ||
-        toISODateString(inspection?.createdAt) ||
-        "";
+      const inspectionDateIso = resolveInspectionReportDateIso(inspection);
       const weekStartIso = getWeekStartIsoDate(
         inspectionDateIso || inspection?.createdAt,
       );
@@ -3382,6 +4011,7 @@ exports.getInspectorReports = async (req, res) => {
               email: "",
             },
         total_inspections: 0,
+        total_requested: 0,
         total_checked: 0,
         total_passed: 0,
         total_inspected_cbm: 0,
@@ -3392,6 +4022,7 @@ exports.getInspectorReports = async (req, res) => {
       if (!inspectorEntry) continue;
 
       inspectorEntry.total_inspections += 1;
+      inspectorEntry.total_requested += requestedQty;
       inspectorEntry.total_checked += inspectedQty;
       inspectorEntry.total_passed += passedQty;
       inspectorEntry.total_inspected_cbm += inspectedCbm;
@@ -3399,6 +4030,7 @@ exports.getInspectorReports = async (req, res) => {
         inspectorEntry.order_keys.add(orderId);
       }
 
+      totalRequested += requestedQty;
       totalChecked += inspectedQty;
       totalPassed += passedQty;
       totalInspectedCbm += inspectedCbm;
@@ -3409,6 +4041,7 @@ exports.getInspectorReports = async (req, res) => {
           inspectionDateIso,
           (bucketKey) => ({
             date: bucketKey,
+            requested_quantity: 0,
             checked_quantity: 0,
             passed_quantity: 0,
             inspections_count: 0,
@@ -3416,6 +4049,7 @@ exports.getInspectorReports = async (req, res) => {
           }),
         );
         if (dailyBucket) {
+          dailyBucket.requested_quantity += requestedQty;
           dailyBucket.checked_quantity += inspectedQty;
           dailyBucket.passed_quantity += passedQty;
           dailyBucket.inspections_count += 1;
@@ -3427,6 +4061,7 @@ exports.getInspectorReports = async (req, res) => {
           inspectionDateIso,
           (bucketKey) => ({
             date: bucketKey,
+            requested_quantity: 0,
             checked_quantity: 0,
             passed_quantity: 0,
             inspections_count: 0,
@@ -3434,6 +4069,7 @@ exports.getInspectorReports = async (req, res) => {
           }),
         );
         if (globalDaily) {
+          globalDaily.requested_quantity += requestedQty;
           globalDaily.checked_quantity += inspectedQty;
           globalDaily.passed_quantity += passedQty;
           globalDaily.inspections_count += 1;
@@ -3447,6 +4083,8 @@ exports.getInspectorReports = async (req, res) => {
           weekStartIso,
           (bucketKey) => ({
             week_start: bucketKey,
+            week_end: getWeekEndIsoDate(bucketKey),
+            requested_quantity: 0,
             checked_quantity: 0,
             passed_quantity: 0,
             inspections_count: 0,
@@ -3454,6 +4092,7 @@ exports.getInspectorReports = async (req, res) => {
           }),
         );
         if (weeklyBucket) {
+          weeklyBucket.requested_quantity += requestedQty;
           weeklyBucket.checked_quantity += inspectedQty;
           weeklyBucket.passed_quantity += passedQty;
           weeklyBucket.inspections_count += 1;
@@ -3465,6 +4104,8 @@ exports.getInspectorReports = async (req, res) => {
           weekStartIso,
           (bucketKey) => ({
             week_start: bucketKey,
+            week_end: getWeekEndIsoDate(bucketKey),
+            requested_quantity: 0,
             checked_quantity: 0,
             passed_quantity: 0,
             inspections_count: 0,
@@ -3472,6 +4113,7 @@ exports.getInspectorReports = async (req, res) => {
           }),
         );
         if (globalWeekly) {
+          globalWeekly.requested_quantity += requestedQty;
           globalWeekly.checked_quantity += inspectedQty;
           globalWeekly.passed_quantity += passedQty;
           globalWeekly.inspections_count += 1;
@@ -3487,6 +4129,7 @@ exports.getInspectorReports = async (req, res) => {
       .map((entry) => ({
         inspector: entry.inspector,
         total_inspections: entry.total_inspections,
+        total_requested: entry.total_requested,
         total_checked: entry.total_checked,
         total_passed: entry.total_passed,
         total_inspected_cbm: toRoundedNumber(entry.total_inspected_cbm, 3),
@@ -3522,18 +4165,26 @@ exports.getInspectorReports = async (req, res) => {
         inspected_cbm: toRoundedNumber(bucket.inspected_cbm, 3),
       }))
       .sort((a, b) => sortByDateDesc(a, b, "week_start"));
+    const inspector_options = Array.from(inspectorOptionsMap.values()).sort(
+      (a, b) =>
+        String(a?.name || "").localeCompare(String(b?.name || "")) ||
+        String(a?._id || "").localeCompare(String(b?._id || "")),
+    );
 
     return res.status(200).json({
       filters: {
-        timeline: timelineRange.timeline,
+        timeline: reportRange.timeline,
         custom_days:
-          timelineRange.timeline === "custom" ? timelineRange.days : null,
-        from_date: timelineRange.from_date_iso,
-        to_date: timelineRange.to_date_iso,
+          reportRange.timeline === "custom" ? reportRange.days : null,
+        from_date: reportRange.from_date_iso,
+        to_date: reportRange.to_date_iso,
+        inspector: selectedInspector,
+        inspector_options,
       },
       summary: {
         inspectors_count: inspectors.length,
         inspections_count: inspections.length,
+        total_requested: totalRequested,
         total_checked: totalChecked,
         total_passed: totalPassed,
         total_inspected_cbm: toRoundedNumber(totalInspectedCbm, 3),
@@ -4270,6 +4921,11 @@ exports.markGoodsNotReady = async (req, res) => {
     if (!qc) {
       return res.status(404).json({ message: "QC record not found" });
     }
+    const beforeInspectionRecords = await Inspection.find({ qc: qc._id }).lean();
+    const beforeQcSnapshot = buildQcEditLogSnapshot(
+      qc.toObject(),
+      beforeInspectionRecords,
+    );
 
     const normalizedRole = String(req.user?.role || "")
       .trim()
@@ -4356,6 +5012,7 @@ exports.markGoodsNotReady = async (req, res) => {
 
     qc.last_inspected_date = inspectionDate;
     qc.remarks = reason;
+    qc.updated_by = buildAuditActor(req.user);
 
     const inspectionRecord = await upsertInspectionRecordForRequest({
       qcDoc: qc,
@@ -4366,6 +5023,7 @@ exports.markGoodsNotReady = async (req, res) => {
       inspectionDate,
       remarks: reason,
       createdBy: req.user._id,
+      auditUser: req.user,
       addChecked: 0,
       addPassed: 0,
       addProvision: 0,
@@ -4380,9 +5038,22 @@ exports.markGoodsNotReady = async (req, res) => {
 
     if (latestRequestEntry && inspectionRecord) {
       latestRequestEntry.status = "inspected";
+      stampRequestHistoryEntry(latestRequestEntry, {
+        user: req.user,
+      });
     }
 
     await qc.save();
+
+    const afterInspectionRecords = await Inspection.find({ qc: qc._id }).lean();
+    await createQcEditLog({
+      reqUser: req.user,
+      qcDoc: qc,
+      beforeSnapshot: beforeQcSnapshot,
+      afterSnapshot: buildQcEditLogSnapshot(qc.toObject(), afterInspectionRecords),
+      operationType: "qc_goods_not_ready",
+      extraRemarks: ["Goods-not-ready inspection recorded."],
+    });
 
     try {
       await upsertItemFromQc(qc);
@@ -4796,6 +5467,8 @@ exports.getQCById = async (req, res) => {
       .populate("createdBy", "name email role")
       .populate("request_history.inspector", "name email role")
       .populate("request_history.createdBy", "name email role")
+      .populate("request_history.updated_by.user", "name email role")
+      .populate("updated_by.user", "name email role")
       .populate({
         path: "order",
         match: ACTIVE_ORDER_MATCH,
@@ -4803,7 +5476,10 @@ exports.getQCById = async (req, res) => {
       .populate({
         path: "inspection_record",
         options: { sort: { inspection_date: -1, createdAt: -1 } },
-        populate: { path: "inspector", select: "name email role" },
+        populate: [
+          { path: "inspector", select: "name email role" },
+          { path: "updated_by.user", select: "name email role" },
+        ],
       });
 
     if (!qc || !qc.order) {
@@ -4914,6 +5590,15 @@ exports.editInspectionRecords = async (req, res) => {
         .status(404)
         .json({ message: "No inspection records found for this QC record" });
     }
+    const beforeQcSnapshot = buildQcEditLogSnapshot(
+      qc.toObject(),
+      inspectionDocs.map((doc) => doc.toObject()),
+    );
+    const linkedOrderBefore =
+      qc?.order && mongoose.Types.ObjectId.isValid(qc.order)
+        ? await Order.findById(qc.order)
+        : null;
+    const beforeOrderSnapshot = buildOrderAuditSnapshotForQc(linkedOrderBefore);
 
     const inspectionMap = new Map(
       inspectionDocs.map((doc) => [String(doc._id), doc]),
@@ -5129,6 +5814,7 @@ exports.editInspectionRecords = async (req, res) => {
       record.label_ranges = nextLabelRanges;
       record.labels_added = nextLabelsAdded;
       record.remarks = remarks;
+      record.updated_by = buildAuditActor(req.user);
     }
 
     await Promise.all(inspectionDocs.map((doc) => doc.save()));
@@ -5168,7 +5854,9 @@ exports.editInspectionRecords = async (req, res) => {
     qc.quantities.qc_rejected = Math.max(0, totalChecked - totalPassed);
     qc.labels = mergedLabels;
 
-    syncQcRequestHistoryStatuses(qc, refreshedInspections);
+    syncQcRequestHistoryStatuses(qc, refreshedInspections, {
+      user: req.user,
+    });
 
     if (refreshedInspections.length > 0) {
       const latestRecord = [...refreshedInspections].sort((a, b) => {
@@ -5196,6 +5884,7 @@ exports.editInspectionRecords = async (req, res) => {
       );
     }
 
+    qc.updated_by = buildAuditActor(req.user);
     await qc.save();
 
     const orderId = qc?.order?._id || qc.order;
@@ -5205,6 +5894,7 @@ exports.editInspectionRecords = async (req, res) => {
         clientDemandQty > 0 && totalPassed >= clientDemandQty
           ? "Inspection Done"
           : "Under Inspection";
+      orderRecord.updated_by = buildAuditActor(req.user);
       await orderRecord.save();
     }
 
@@ -5228,6 +5918,24 @@ exports.editInspectionRecords = async (req, res) => {
         ),
       );
       await inspectorDoc.save();
+    }
+
+    await createQcEditLog({
+      reqUser: req.user,
+      qcDoc: qc,
+      beforeSnapshot: beforeQcSnapshot,
+      afterSnapshot: buildQcEditLogSnapshot(qc.toObject(), refreshedInspections),
+      operationType: "qc_inspection_record_edit",
+      extraRemarks: ["Inspection records edited through admin route."],
+    });
+    if (orderRecord) {
+      await createOrderEditLogFromQc({
+        reqUser: req.user,
+        orderDoc: orderRecord,
+        beforeSnapshot: beforeOrderSnapshot,
+        afterSnapshot: buildOrderAuditSnapshotForQc(orderRecord),
+        extraRemarks: ["Order status recalculated from inspection record edit."],
+      });
     }
 
     try {
@@ -5276,6 +5984,13 @@ exports.deleteInspectionRecord = async (req, res) => {
     if (!inspection) {
       return res.status(404).json({ message: "Inspection record not found" });
     }
+    const existingInspectionDocs = await Inspection.find({ qc: qc._id }).lean();
+    const beforeQcSnapshot = buildQcEditLogSnapshot(qc.toObject(), existingInspectionDocs);
+    const linkedOrderBefore =
+      qc?.order && mongoose.Types.ObjectId.isValid(qc.order)
+        ? await Order.findById(qc.order)
+        : null;
+    const beforeOrderSnapshot = buildOrderAuditSnapshotForQc(linkedOrderBefore);
 
     qc.inspection_record = (
       Array.isArray(qc.inspection_record) ? qc.inspection_record : []
@@ -5320,7 +6035,9 @@ exports.deleteInspectionRecord = async (req, res) => {
     if (!shouldDeleteQcRecord) {
       qc.labels = recalculatedLabels;
 
-      syncQcRequestHistoryStatuses(qc, remainingInspections);
+      syncQcRequestHistoryStatuses(qc, remainingInspections, {
+        user: req.user,
+      });
 
       const latestRecord = [...remainingInspections].sort((a, b) => {
         const aTime = Math.max(
@@ -5342,6 +6059,7 @@ exports.deleteInspectionRecord = async (req, res) => {
           "",
       );
 
+      qc.updated_by = buildAuditActor(req.user);
       await qc.save();
     }
 
@@ -5387,10 +6105,31 @@ exports.deleteInspectionRecord = async (req, res) => {
       if (orderRecord) {
         orderRecord.qc_record = null;
         orderRecord.status = "Pending";
+        orderRecord.updated_by = buildAuditActor(req.user);
         await orderRecord.save();
       }
 
       await QC.deleteOne({ _id: qc._id });
+
+      await createQcEditLog({
+        reqUser: req.user,
+        qcDoc: qc,
+        beforeSnapshot: beforeQcSnapshot,
+        afterSnapshot: {},
+        operationType: "qc_inspection_record_delete",
+        extraRemarks: [
+          "Last inspection record deleted. QC record removed.",
+        ],
+      });
+      if (orderRecord) {
+        await createOrderEditLogFromQc({
+          reqUser: req.user,
+          orderDoc: orderRecord,
+          beforeSnapshot: beforeOrderSnapshot,
+          afterSnapshot: buildOrderAuditSnapshotForQc(orderRecord),
+          extraRemarks: ["Order reset after QC record deletion."],
+        });
+      }
 
       return res.status(200).json({
         message:
@@ -5408,7 +6147,26 @@ exports.deleteInspectionRecord = async (req, res) => {
         clientDemandQty > 0 && passedQty >= clientDemandQty
           ? "Inspection Done"
           : "Under Inspection";
+      orderRecord.updated_by = buildAuditActor(req.user);
       await orderRecord.save();
+    }
+
+    await createQcEditLog({
+      reqUser: req.user,
+      qcDoc: qc,
+      beforeSnapshot: beforeQcSnapshot,
+      afterSnapshot: buildQcEditLogSnapshot(qc.toObject(), remainingInspections),
+      operationType: "qc_inspection_record_delete",
+      extraRemarks: ["Inspection record deleted through admin route."],
+    });
+    if (orderRecord) {
+      await createOrderEditLogFromQc({
+        reqUser: req.user,
+        orderDoc: orderRecord,
+        beforeSnapshot: beforeOrderSnapshot,
+        afterSnapshot: buildOrderAuditSnapshotForQc(orderRecord),
+        extraRemarks: ["Order status recalculated after inspection deletion."],
+      });
     }
 
     try {
@@ -5457,7 +6215,12 @@ exports.syncInspectionStatuses = async (req, res) => {
         bulkOps.push({
           updateOne: {
             filter: { _id: inspection._id },
-            update: { $set: { status: nextStatus } },
+            update: {
+              $set: {
+                status: nextStatus,
+                updated_by: buildAuditActor(req.user, "System Sync"),
+              },
+            },
           },
         });
       }
@@ -5489,8 +6252,13 @@ exports.syncInspectionStatuses = async (req, res) => {
       const hasChanges = syncQcRequestHistoryStatuses(
         qcDoc,
         inspectionRecordsByQcId.get(String(qcDoc?._id || "").trim()) || [],
+        {
+          user: req.user,
+          fallbackName: "System Sync",
+        },
       );
       if (!hasChanges) continue;
+      qcDoc.updated_by = buildAuditActor(req.user, "System Sync");
       await qcDoc.save();
       updatedQcCount += 1;
     }

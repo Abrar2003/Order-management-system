@@ -1,5 +1,17 @@
 const mongoose = require("mongoose");
 
+const AuditActorSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "users",
+      default: null,
+    },
+    name: { type: String, default: "" },
+  },
+  { _id: false },
+);
+
 const InspectionSchema = new mongoose.Schema(
   {
     qc: {
@@ -77,6 +89,7 @@ const InspectionSchema = new mongoose.Schema(
       ref: "users",
       required: true,
     },
+    updated_by: { type: AuditActorSchema, default: () => ({}) },
   },
   { timestamps: true }
 );

@@ -1,5 +1,17 @@
 const mongoose = require("mongoose");
 
+const AuditActorSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "users",
+      default: null,
+    },
+    name: { type: String, default: "" },
+  },
+  { _id: false },
+);
+
 const qcSchema = new mongoose.Schema(
   {
     order: {
@@ -73,6 +85,8 @@ const qcSchema = new mongoose.Schema(
           required: true,
         },
         createdAt: { type: Date, default: Date.now },
+        updatedAt: { type: Date, default: Date.now },
+        updated_by: { type: AuditActorSchema, default: () => ({}) },
       },
     ],
 
@@ -147,6 +161,7 @@ const qcSchema = new mongoose.Schema(
       ref: "users", // admin / manager
       required: true,
     },
+    updated_by: { type: AuditActorSchema, default: () => ({}) },
   },
   {
     timestamps: true,

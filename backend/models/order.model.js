@@ -16,6 +16,31 @@ const RevisedEtdHistorySchema = new mongoose.Schema(
   { _id: false },
 );
 
+const AuditActorSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "users",
+      default: null,
+    },
+    name: { type: String, default: "" },
+  },
+  { _id: false },
+);
+
+const ShipmentEntrySchema = new mongoose.Schema(
+  {
+    container: { type: String, trim: true },
+    stuffing_date: { type: Date },
+    quantity: { type: Number },
+    pending: { type: Number },
+    remaining_remarks: { type: String },
+    updated_at: { type: Date, default: Date.now },
+    updated_by: { type: AuditActorSchema, default: () => ({}) },
+  },
+  { _id: true },
+);
+
 const Order_Schema = new mongoose.Schema(
   {
     order_id: { type: String, required: true },
@@ -42,15 +67,7 @@ const Order_Schema = new mongoose.Schema(
       default: "Pending",
     },
     quantity: { type: Number, required: true },
-    shipment: [
-      {
-        container: { type: String, trim: true },
-        stuffing_date: { type: Date },
-        quantity: { type: Number },
-        pending: { type: Number },
-        remaining_remarks: { type: String }
-      }
-    ],
+    shipment: { type: [ShipmentEntrySchema], default: [] },
     gcal: {
       calendarId: { type: String, default: null },
       eventId: { type: String, default: null },
@@ -73,6 +90,7 @@ const Order_Schema = new mongoose.Schema(
       },
       name: { type: String, default: "" },
     },
+    updated_by: { type: AuditActorSchema, default: () => ({}) },
   },
   { timestamps: true }
 );

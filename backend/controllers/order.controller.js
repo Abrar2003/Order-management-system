@@ -128,6 +128,14 @@ const ACTIVE_ORDER_MATCH = {
 const buildArchivedByName = (user) =>
   String(user?.name || user?.username || user?.email || "").trim();
 
+const buildAuditActor = (user = null) => ({
+  user:
+    user?._id && mongoose.Types.ObjectId.isValid(user._id)
+      ? user._id
+      : null,
+  name: buildArchivedByName(user),
+});
+
 const normalizeHistoryActor = (value = {}) => {
   const actorId = value?.user && mongoose.Types.ObjectId.isValid(value.user)
     ? value.user
@@ -420,17 +428,10 @@ const buildRevisedEtdHistoryEntry = ({
   const parsedUpdatedAt = updatedAt instanceof Date
     ? updatedAt
     : parseDateLike(updatedAt) || new Date();
-  const actorId = user?._id && mongoose.Types.ObjectId.isValid(user._id)
-    ? user._id
-    : null;
-
   return {
     revised_etd: parsedRevisedEtd,
     updated_at: parsedUpdatedAt,
-    updated_by: {
-      user: actorId,
-      name: buildArchivedByName(user),
-    },
+    updated_by: buildAuditActor(user),
   };
 };
 
@@ -499,6 +500,9 @@ const applyRevisedEtdUpdateToOrder = ({
 
   orderDoc.revised_ETD = nextRevisedEtd || null;
   orderDoc.revised_etd_history = normalizedHistory;
+  if (user) {
+    orderDoc.updated_by = buildAuditActor(user);
+  }
 };
 
 const normalizeRectifiedPdfRow = (row = {}, { brand, vendor } = {}) => {
@@ -1360,11 +1364,17 @@ const normalizeShipmentEntries = (shipmentPayload) => {
       stuffing_date: stuffingDate,
       quantity,
       remaining_remarks: remarks,
+      updated_at: entry?.updated_at ? parseDateLike(entry.updated_at) : null,
+      updated_by: normalizeHistoryActor(entry?.updated_by),
     };
   });
 };
 
-const fitShipmentEntriesToOrderQuantity = (shipmentEntries = [], orderQuantity = 0) => {
+const fitShipmentEntriesToOrderQuantity = (
+  shipmentEntries = [],
+  orderQuantity = 0,
+  { user = null, updatedAt = new Date() } = {},
+) => {
   const normalizedQuantity = Number(orderQuantity);
   if (!Number.isFinite(normalizedQuantity) || normalizedQuantity <= 0) return [];
 
@@ -1388,6 +1398,13 @@ const fitShipmentEntriesToOrderQuantity = (shipmentEntries = [], orderQuantity =
       quantity: adjustedQuantity,
       pending: Math.max(0, normalizedQuantity - cumulativeShipped),
       remaining_remarks: String(entry?.remaining_remarks ?? "").trim(),
+      updated_at:
+        user
+          ? updatedAt
+          : (entry?.updated_at ? parseDateLike(entry.updated_at) : null) || updatedAt,
+      updated_by: user
+        ? buildAuditActor(user)
+        : normalizeHistoryActor(entry?.updated_by),
     });
   }
 
@@ -5115,6 +5132,7 @@ exports.editOrder = async (req, res) => {
         user: req.user?._id || null,
         name: buildArchivedByName(req.user),
       };
+      order.updated_by = buildAuditActor(req.user);
       await order.save();
 
       const archiveCalendarSync = [];
@@ -5158,6 +5176,7 @@ exports.editOrder = async (req, res) => {
       });
     }
 
+    const updatedAt = new Date();
     const shouldRebuildShipment = hasShipment || hasQuantity;
     let adjustedShipment = Array.isArray(order.shipment) ? order.shipment : [];
     if (shouldRebuildShipment) {
@@ -5166,6 +5185,10 @@ exports.editOrder = async (req, res) => {
       adjustedShipment = fitShipmentEntriesToOrderQuantity(
         normalizedShipmentSource,
         nextQuantity,
+        {
+          user: req.user,
+          updatedAt,
+        },
       );
     }
     const shippedQuantity = getShipmentQuantityTotal(adjustedShipment);
@@ -5221,10 +5244,12 @@ exports.editOrder = async (req, res) => {
       orderDoc: order,
       nextRevisedEtd,
       user: req.user,
+      updatedAt,
     });
     if (shouldRebuildShipment) {
       order.shipment = adjustedShipment;
     }
+    order.updated_by = buildAuditActor(req.user);
 
     order.status = computeOrderStatus({
       orderQuantity: nextQuantity,
@@ -5367,6 +5392,7 @@ exports.bulkUpdateRevisedEtd = async (req, res) => {
         user: req.user,
         updatedAt,
       });
+      orderDoc.updated_by = buildAuditActor(req.user);
       await orderDoc.save();
 
       await createOrderEditLog({
@@ -5541,6 +5567,7 @@ exports.editCompleteOrder = async (req, res) => {
       orderDoc.vendor = nextVendor;
       orderDoc.order_date = nextOrderDate;
       orderDoc.ETD = nextEtd;
+      orderDoc.updated_by = buildAuditActor(req.user);
 
       const linkedQcRecords = qcRecordsByOrderId.get(String(orderDoc._id)) || [];
       for (const qcRecord of linkedQcRecords) {
@@ -5645,6 +5672,7 @@ exports.archiveOrder = async (req, res) => {
       brand: order.brand,
       vendor: order.vendor,
     };
+    const beforeSnapshot = buildOrderEditLogSnapshot(order);
 
     order.archived = true;
     order.status = "Cancelled";
@@ -5654,7 +5682,7 @@ exports.archiveOrder = async (req, res) => {
       user: req.user?._id || null,
       name: buildArchivedByName(req.user),
     };
-
+    order.updated_by = buildAuditActor(req.user);
     await order.save();
 
     try {
@@ -5665,6 +5693,16 @@ exports.archiveOrder = async (req, res) => {
         error: syncErr?.message || String(syncErr),
       });
     }
+
+    await createOrderEditLog({
+      reqUser: req.user,
+      operationType: "order_edit_archive",
+      beforeSnapshot,
+      afterSnapshot: buildOrderEditLogSnapshot(order),
+      extraRemarks: [
+        "Order archived through archive-order route.",
+      ],
+    });
 
     return res.status(200).json({
       success: true,
@@ -5814,6 +5852,10 @@ exports.syncZeroQuantityOrdersArchive = async (req, res) => {
             user: req.user?._id || null,
             name: actorName,
           },
+          updated_by: {
+            user: req.user?._id || null,
+            name: actorName,
+          },
         },
       },
     );
@@ -5905,6 +5947,8 @@ exports.finalizeOrder = async (req, res) => {
     const qcRecord = order?.qc_record
       ? await QC.findById(order.qc_record).select("quantities.qc_passed")
       : await QC.findOne({ order: order._id }).select("quantities.qc_passed");
+    const beforeSnapshot = buildOrderEditLogSnapshot(order);
+    const updatedAt = new Date();
 
     const passedQuantity = Number(qcRecord?.quantities?.qc_passed || 0);
 
@@ -5943,13 +5987,26 @@ exports.finalizeOrder = async (req, res) => {
       quantity: parsedQuantity,
       pending,
       remaining_remarks: remarks,
+      updated_at: updatedAt,
+      updated_by: buildAuditActor(req.user),
     });
 
     const shippedAfter = shippedAlready + parsedQuantity;
     order.status =
       shippedAfter >= orderQuantity ? "Shipped" : "Partial Shipped";
+    order.updated_by = buildAuditActor(req.user);
 
     await order.save();
+
+    await createOrderEditLog({
+      reqUser: req.user,
+      operationType: "order_edit",
+      beforeSnapshot,
+      afterSnapshot: buildOrderEditLogSnapshot(order),
+      extraRemarks: [
+        "Shipment entry added through finalize-order route.",
+      ],
+    });
 
     return res.status(200).json({
       message: "Order shipment updated successfully",
