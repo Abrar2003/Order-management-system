@@ -81,7 +81,7 @@ const PreviousOrderCheckModal = ({
       strategy === REPLACE_PREVIOUS
       && !result?.capabilities?.can_replace_previous
     ) {
-      setError("This previous order cannot be replaced because it has shipment history.");
+      setError("This previous order can be replaced only when its status is Partial Shipped.");
       return;
     }
 
@@ -185,7 +185,7 @@ const PreviousOrderCheckModal = ({
 
                 {!capabilities.can_replace_previous && (
                   <div className="small text-muted">
-                    Replacement is disabled because the previous order already has shipment history.
+                    Replacement and transfer are available only when the searched order status is Partial Shipped.
                   </div>
                 )}
 

@@ -8,6 +8,7 @@ const {
   syncItemsFromOrders,
   updateItem,
   updateItemPis,
+  getItemFileUrl,
   uploadItemFile,
 } = require("../controllers/item.controller");
 
@@ -32,6 +33,13 @@ router.get(
   auth,
   authorize("admin", "manager", "QC", "dev"),
   getItemOrdersHistory,
+);
+
+router.get(
+  "/:id/files/:fileType/url",
+  auth,
+  authorize("admin", "manager", "QC", "dev"),
+  getItemFileUrl,
 );
 
 router.patch(

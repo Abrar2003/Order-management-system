@@ -171,12 +171,62 @@ const isShipmentEditableStatus = (statusValue) => {
   );
 };
 
+const RELATED_FILE_OPTIONS = Object.freeze([
+  {
+    value: "product_image",
+    label: "Product Image",
+    buttonLabel: "Item image",
+    field: "image",
+    accept: ".jpg,.jpeg,.png,image/jpeg,image/png",
+    extensions: [".jpg", ".jpeg", ".png"],
+    mimeTypes: ["image/jpeg", "image/png"],
+    invalidMessage:
+      "Only JPG, JPEG, or PNG files are allowed for product images.",
+  },
+  {
+    value: "cad_file",
+    label: "CAD File",
+    buttonLabel: "CAD file",
+    field: "cad_file",
+    accept: ".jpg,.jpeg,.png,image/jpeg,image/png",
+    extensions: [".jpg", ".jpeg", ".png"],
+    mimeTypes: ["image/jpeg", "image/png"],
+    invalidMessage:
+      "Only JPG, JPEG, or PNG files are allowed for CAD files.",
+  },
+  {
+    value: "pis_file",
+    label: "PIS",
+    buttonLabel: "PIS",
+    field: "pis_file",
+    accept: ".pdf,application/pdf",
+    extensions: [".pdf"],
+    mimeTypes: ["application/pdf"],
+    invalidMessage: "Only PDF files are allowed for PIS.",
+  },
+]);
+
+const RELATED_FILE_OPTIONS_BY_VALUE = Object.freeze(
+  RELATED_FILE_OPTIONS.reduce((acc, option) => {
+    acc[option.value] = option;
+    return acc;
+  }, {}),
+);
+
+const hasStoredItemFile = (file = {}) =>
+  Boolean(
+    String(
+      file?.key || file?.url || file?.link || file?.public_id || "",
+    ).trim(),
+  );
+
 const QcDetails = () => {
   const { id } = useParams();
   const [qc, setQc] = useState(null);
   const [loading, setLoading] = useState(true);
   const [relatedFileType, setRelatedFileType] = useState("product_image");
   const [uploadingRelatedFile, setUploadingRelatedFile] = useState(false);
+  const [openingRelatedFileType, setOpeningRelatedFileType] = useState("");
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [showShippingModal, setShowShippingModal] = useState(false);
   const [showEditShippingModal, setShowEditShippingModal] = useState(false);
@@ -250,6 +300,12 @@ const QcDetails = () => {
     pendingAlignmentInfo.hasRequest &&
     isQcAlignedRecord;
   const canUploadRelatedFile = Boolean(qc?.item_master?._id) && canUpdateQc;
+  const activeRelatedFileConfig = useMemo(
+    () =>
+      RELATED_FILE_OPTIONS_BY_VALUE[relatedFileType]
+      || RELATED_FILE_OPTIONS[0],
+    [relatedFileType],
+  );
 
   const sortedLabels = useMemo(() => normalizeLabels(qc?.labels), [qc?.labels]);
   const backTarget = useMemo(() => {
@@ -358,6 +414,18 @@ const QcDetails = () => {
       calculatedPisCbm: formatPositiveCbm(calculatedPisCbm, "Not Set"),
     };
   }, [qc]);
+  const itemMasterFiles = useMemo(
+    () =>
+      RELATED_FILE_OPTIONS.map((option) => ({
+        ...option,
+        file: qc?.item_master?.[option.field] || null,
+      })),
+    [qc?.item_master],
+  );
+  const hasAnyItemMasterFile = useMemo(
+    () => itemMasterFiles.some((entry) => hasStoredItemFile(entry.file)),
+    [itemMasterFiles],
+  );
 
   const requestInspectionTimeline = useMemo(() => {
     const requestHistory = Array.isArray(qc?.request_history)
@@ -472,20 +540,78 @@ const QcDetails = () => {
     relatedFileInputRef.current?.click();
   }, [canUploadRelatedFile, uploadingRelatedFile]);
 
+  const handleOpenRelatedFile = useCallback(async (fileType) => {
+    const fileConfig =
+      RELATED_FILE_OPTIONS_BY_VALUE[String(fileType || "").trim().toLowerCase()];
+    if (!fileConfig || !qc?.item_master?._id) return;
+
+    const currentFile = qc?.item_master?.[fileConfig.field];
+    if (!hasStoredItemFile(currentFile)) {
+      alert(`${fileConfig.label} is not uploaded yet.`);
+      return;
+    }
+
+    let previewWindow = null;
+    try {
+      previewWindow = window.open("", "_blank");
+    } catch (windowError) {
+      previewWindow = null;
+    }
+
+    try {
+      setOpeningRelatedFileType(fileConfig.value);
+      const response = await api.get(
+        `/items/${encodeURIComponent(qc.item_master._id)}/files/${encodeURIComponent(fileConfig.value)}/url`,
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("token")}`,
+          },
+        },
+      );
+
+      const fileUrl = String(response?.data?.data?.url || "").trim();
+      if (!fileUrl) {
+        throw new Error(`${fileConfig.label} URL is not available.`);
+      }
+
+      if (previewWindow) {
+        previewWindow.opener = null;
+        previewWindow.location.href = fileUrl;
+      } else {
+        window.open(fileUrl, "_blank", "noopener,noreferrer");
+      }
+    } catch (error) {
+      if (previewWindow && !previewWindow.closed) {
+        previewWindow.close();
+      }
+      console.error(error);
+      alert(
+        error?.response?.data?.message
+          || error?.message
+          || `Failed to open ${fileConfig.label}.`,
+      );
+    } finally {
+      setOpeningRelatedFileType("");
+    }
+  }, [qc?.item_master]);
+
   const handleRelatedFileChange = useCallback(async (event) => {
     const selectedFile = event.target?.files?.[0];
     if (!selectedFile) return;
 
+    const fileConfig =
+      RELATED_FILE_OPTIONS_BY_VALUE[relatedFileType]
+      || RELATED_FILE_OPTIONS[0];
     const normalizedName = String(selectedFile.name || "").toLowerCase();
-    const hasAllowedExtension = [".jpg", ".jpeg", ".png"].some((extension) =>
+    const normalizedType = String(selectedFile.type || "").toLowerCase();
+    const hasAllowedExtension = fileConfig.extensions.some((extension) =>
       normalizedName.endsWith(extension),
     );
-    const hasAllowedMimeType = ["image/jpeg", "image/png"].includes(
-      String(selectedFile.type || "").toLowerCase(),
-    );
+    const hasAllowedMimeType =
+      !normalizedType || fileConfig.mimeTypes.includes(normalizedType);
 
     if (!hasAllowedExtension || !hasAllowedMimeType) {
-      alert("Only JPG, JPEG, or PNG files are allowed for product images.");
+      alert(fileConfig.invalidMessage);
       event.target.value = "";
       return;
     }
@@ -512,12 +638,12 @@ const QcDetails = () => {
         },
       );
 
-      alert(response?.data?.message || "Product image uploaded successfully.");
+      alert(response?.data?.message || `${fileConfig.label} uploaded successfully.`);
       await fetchQcDetails();
     } catch (error) {
       console.error(error);
       alert(
-        error?.response?.data?.message || "Failed to upload product image.",
+        error?.response?.data?.message || `Failed to upload ${fileConfig.label}.`,
       );
     } finally {
       setUploadingRelatedFile(false);
@@ -590,7 +716,15 @@ const QcDetails = () => {
       <Navbar />
 
       <div className="page-shell py-3">
-        <div className="d-flex justify-content-between align-items-center mb-3">
+        <input
+          ref={relatedFileInputRef}
+          type="file"
+          className="d-none"
+          accept={activeRelatedFileConfig.accept}
+          onChange={handleRelatedFileChange}
+        />
+
+        <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
           <button
             type="button"
             className="btn btn-outline-secondary btn-sm"
@@ -599,17 +733,60 @@ const QcDetails = () => {
             Back
           </button>
           <h2 className="h4 mb-0">QC Details</h2>
-          <button
-            type="button"
-            className="btn btn-outline-primary btn-sm"
-            onClick={() =>
-              navigate(`/qc/${encodeURIComponent(id)}/inspection-report`, {
-                state: { fromQcDetails: location.pathname + location.search },
-              })
-            }
-          >
-            Export PDF
-          </button>
+          <div className="d-flex align-items-center flex-wrap justify-content-end gap-2">
+            <select
+              className="form-select form-select-sm"
+              style={{ width: "auto", minWidth: "160px" }}
+              value={relatedFileType}
+              onChange={(e) => setRelatedFileType(String(e.target.value || "product_image"))}
+              disabled={!canUploadRelatedFile || uploadingRelatedFile}
+              title={!qc?.item_master?._id ? "Item master not found for this QC." : ""}
+            >
+              {RELATED_FILE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+
+            <button
+              type="button"
+              className="btn btn-outline-primary btn-sm"
+              onClick={handleOpenRelatedFilePicker}
+              disabled={!canUploadRelatedFile || uploadingRelatedFile}
+              title={
+                !canUploadRelatedFile
+                  ? !qc?.item_master?._id
+                    ? "Item master not found for this QC."
+                    : !pendingAlignmentInfo.hasRequest
+                    ? "QC is not requested yet. Align QC request before uploading."
+                    : !isQcAlignedRecord
+                    ? "QC can upload only records aligned to them."
+                    : isInspectionDone
+                    ? "After inspection is done, only admin can update this record."
+                    : !isQcInspectionDateAllowed
+                    ? "QC date rule will be validated while submitting."
+                    : hasUsedOneDayBackdatedUpdate
+                    ? "Backdated one-time rule will be validated while submitting."
+                    : "Only admin, manager, or aligned QC can upload related files."
+                  : ""
+              }
+            >
+              {uploadingRelatedFile ? "Uploading..." : "Upload Related File"}
+            </button>
+
+            <button
+              type="button"
+              className="btn btn-outline-primary btn-sm"
+              onClick={() =>
+                navigate(`/qc/${encodeURIComponent(id)}/inspection-report`, {
+                  state: { fromQcDetails: location.pathname + location.search },
+                })
+              }
+            >
+              Export PDF
+            </button>
+          </div>
         </div>
 
         <div className="card om-card">
@@ -661,6 +838,34 @@ const QcDetails = () => {
                   value={itemMasterDetails.calculatedPisCbm}
                 />
               </div>
+              <div className="d-flex flex-wrap gap-2 mt-3">
+                {itemMasterFiles.map((entry) => {
+                  const hasFile = hasStoredItemFile(entry.file);
+                  const isOpening = openingRelatedFileType === entry.value;
+
+                  return (
+                    <button
+                      key={entry.value}
+                      type="button"
+                      className="btn btn-outline-secondary btn-sm rounded-pill"
+                      onClick={() => handleOpenRelatedFile(entry.value)}
+                      disabled={!hasFile || isOpening}
+                      title={
+                        hasFile
+                          ? entry.file?.originalName || `Open ${entry.label}`
+                          : `${entry.label} is not uploaded yet.`
+                      }
+                    >
+                      {isOpening ? "Opening..." : entry.buttonLabel}
+                    </button>
+                  );
+                })}
+              </div>
+              {!hasAnyItemMasterFile && (
+                <div className="small text-muted mt-2">
+                  No related item files uploaded yet.
+                </div>
+              )}
             </section>
 
             <section>
@@ -834,14 +1039,6 @@ const QcDetails = () => {
             </section>
 
             <div className="d-flex justify-content-end flex-wrap gap-2">
-              <input
-                ref={relatedFileInputRef}
-                type="file"
-                className="d-none"
-                accept=".jpg,.jpeg,.png,image/jpeg,image/png"
-                onChange={handleRelatedFileChange}
-              />
-
               {canFinalizeShipping &&
                 ["Inspection Done", "Partial Shipped"].includes(
                   qc?.order?.status,
@@ -854,43 +1051,6 @@ const QcDetails = () => {
                     Finalize Shipping
                   </button>
                 )}
-
-              <select
-                className="form-select"
-                style={{ width: "auto", minWidth: "180px" }}
-                value={relatedFileType}
-                onChange={(e) => setRelatedFileType(String(e.target.value || "product_image"))}
-                disabled={!canUploadRelatedFile || uploadingRelatedFile}
-                title={!qc?.item_master?._id ? "Item master not found for this QC." : ""}
-              >
-                <option value="product_image">Product Image</option>
-              </select>
-
-              <button
-                type="button"
-                className="btn btn-outline-primary"
-                onClick={handleOpenRelatedFilePicker}
-                disabled={!canUploadRelatedFile || uploadingRelatedFile}
-                title={
-                  !canUploadRelatedFile
-                    ? !qc?.item_master?._id
-                      ? "Item master not found for this QC."
-                      : !pendingAlignmentInfo.hasRequest
-                      ? "QC is not requested yet. Align QC request before uploading."
-                      : !isQcAlignedRecord
-                      ? "QC can upload only records aligned to them."
-                      : isInspectionDone
-                      ? "After inspection is done, only admin can update this record."
-                      : !isQcInspectionDateAllowed
-                      ? "QC date rule will be validated while submitting."
-                      : hasUsedOneDayBackdatedUpdate
-                      ? "Backdated one-time rule will be validated while submitting."
-                      : "Only admin, manager, or aligned QC can upload related files."
-                    : ""
-                }
-              >
-                {uploadingRelatedFile ? "Uploading..." : "Upload Related File"}
-              </button>
 
               <button
                 type="button"
