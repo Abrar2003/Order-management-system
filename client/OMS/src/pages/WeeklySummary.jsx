@@ -44,6 +44,27 @@ const toReportQuantity = (value) => {
   return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
 };
 
+const toDateInputValue = (date) => {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
+};
+
+const getDefaultWeeklySummaryRange = () => {
+  const now = new Date();
+  const todayUtc = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+  const toDate = new Date(todayUtc);
+  toDate.setUTCDate(toDate.getUTCDate() - 1);
+  const fromDate = new Date(toDate);
+  fromDate.setUTCDate(fromDate.getUTCDate() - 7);
+
+  return {
+    fromDate: toDateInputValue(fromDate),
+    toDate: toDateInputValue(toDate),
+  };
+};
+
 const toTimestamp = (value) => {
   if (!value) return 0;
   const asString = String(value).trim();
@@ -64,14 +85,39 @@ const toTimestamp = (value) => {
   return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
 };
 
-const getItemLastInspectionDate = (item = {}) =>
+const isIsoDateWithinInclusiveRange = (
+  isoDate = "",
+  fromDate = "",
+  toDate = "",
+) => {
+  const normalizedDate = String(isoDate || "").trim();
+  const normalizedFrom = String(fromDate || "").trim();
+  const normalizedTo = String(toDate || "").trim();
+
+  if (!normalizedDate || !normalizedFrom || !normalizedTo) {
+    return false;
+  }
+
+  return normalizedDate >= normalizedFrom && normalizedDate <= normalizedTo;
+};
+
+const getItemInspectionDateInRange = (item = {}) =>
   String(
-    item?.last_inspection_date ||
+    item?.last_inspection_date_in_range ||
       item?.goods_not_ready_inspection_date ||
       "",
   ).trim();
 
-const buildVendorDisplayRows = (items = []) => {
+const getItemLatestOverallInspectionDate = (item = {}) =>
+  String(item?.latest_overall_inspection_date || "").trim();
+
+const isUnderInspectionStatus = (value) =>
+  String(value || "").trim().toLowerCase() === "under inspection";
+
+const buildVendorDisplayRows = (
+  items = [],
+  { fromDate = "", toDate = "" } = {},
+) => {
   const poMap = new Map();
 
   for (const item of Array.isArray(items) ? items : []) {
@@ -88,12 +134,19 @@ const buildVendorDisplayRows = (items = []) => {
       const sortedItems = [...poItems].sort((left, right) =>
         String(left?.item_code || "").localeCompare(String(right?.item_code || "")),
       );
+      const inspectedItemsInRange = sortedItems.filter((item) =>
+        Boolean(item?.inspected_in_range),
+      );
       const allItemsPacked =
         sortedItems.length > 0 &&
-        sortedItems.every((item) => toReportQuantity(item?.pending) <= 0);
-      const latestInspectionMeta = sortedItems.reduce(
+        sortedItems.every(
+          (item) =>
+            toReportQuantity(item?.pending) <= 0 &&
+            !isUnderInspectionStatus(item?.order_status),
+        );
+      const latestOverallInspectionMeta = sortedItems.reduce(
         (latest, item) => {
-          const inspectionDate = getItemLastInspectionDate(item);
+          const inspectionDate = getItemLatestOverallInspectionDate(item);
           const inspectionTime = toTimestamp(inspectionDate);
           if (inspectionTime <= (latest?.inspectionTime || 0)) {
             return latest;
@@ -102,7 +155,9 @@ const buildVendorDisplayRows = (items = []) => {
           return {
             inspectionTime,
             inspectionDate,
-            inspectorName: String(item?.last_inspector_name || "").trim(),
+            inspectorName: String(
+              item?.latest_overall_inspector_name || "",
+            ).trim(),
           };
         },
         {
@@ -112,11 +167,18 @@ const buildVendorDisplayRows = (items = []) => {
         },
       );
 
-      if (sortedItems.length === 0) {
+      if (sortedItems.length === 0 || inspectedItemsInRange.length === 0) {
         return [];
       }
 
-      if (allItemsPacked) {
+      if (
+        allItemsPacked &&
+        isIsoDateWithinInclusiveRange(
+          latestOverallInspectionMeta.inspectionDate,
+          fromDate,
+          toDate,
+        )
+      ) {
         return [{
           key: `${orderId}-packed`,
           po: orderId,
@@ -131,12 +193,12 @@ const buildVendorDisplayRows = (items = []) => {
           ),
           pending: 0,
           packedSummary: true,
-          lastInspector: latestInspectionMeta.inspectorName,
-          lastInspectionDate: latestInspectionMeta.inspectionDate,
+          lastInspector: latestOverallInspectionMeta.inspectorName,
+          lastInspectionDate: latestOverallInspectionMeta.inspectionDate,
         }];
       }
 
-      return sortedItems.map((item, index) => ({
+      return inspectedItemsInRange.map((item, index) => ({
         key: `${orderId}-${item?.item_code || "item"}-${index}`,
         po: index === 0 ? orderId : "",
         itemLabel: item?.item_code || "N/A",
@@ -146,8 +208,8 @@ const buildVendorDisplayRows = (items = []) => {
         goodsNotReady: Boolean(item?.goods_not_ready),
         goodsNotReadyReason: String(item?.goods_not_ready_reason || "").trim(),
         goodsNotReadyInspectionDate: String(item?.goods_not_ready_inspection_date || "").trim(),
-        lastInspector: item?.last_inspector_name || "",
-        lastInspectionDate: getItemLastInspectionDate(item),
+        lastInspector: item?.last_inspector_name_in_range || "",
+        lastInspectionDate: getItemInspectionDateInRange(item),
         packedSummary: false,
       }));
     });
@@ -170,9 +232,24 @@ const WeeklySummary = () => {
   const reportRef = useRef(null);
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "weekly-order-summary");
+  const defaultDateRange = useMemo(() => getDefaultWeeklySummaryRange(), []);
 
   const [brandFilter, setBrandFilter] = useState(() =>
     normalizeEntityFilter(searchParams.get("brand")),
+  );
+  const [fromDateFilter, setFromDateFilter] = useState(() =>
+    String(
+      searchParams.get("from_date")
+      || searchParams.get("fromDate")
+      || defaultDateRange.fromDate,
+    ).trim(),
+  );
+  const [toDateFilter, setToDateFilter] = useState(() =>
+    String(
+      searchParams.get("to_date")
+      || searchParams.get("toDate")
+      || defaultDateRange.toDate,
+    ).trim(),
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -189,6 +266,12 @@ const WeeklySummary = () => {
       const params = {};
       if (brandFilter !== DEFAULT_ENTITY_FILTER) {
         params.brand = brandFilter;
+      }
+      if (fromDateFilter) {
+        params.from_date = fromDateFilter;
+      }
+      if (toDateFilter) {
+        params.to_date = toDateFilter;
       }
 
       const response = await api.get("/qc/reports/weekly-summary", { params });
@@ -207,7 +290,7 @@ const WeeklySummary = () => {
     } finally {
       setLoading(false);
     }
-  }, [brandFilter]);
+  }, [brandFilter, fromDateFilter, toDateFilter]);
 
   useEffect(() => {
     fetchReport();
@@ -218,9 +301,22 @@ const WeeklySummary = () => {
     if (syncedQuery === currentQuery) return;
 
     const nextBrandFilter = normalizeEntityFilter(searchParams.get("brand"));
+    const nextFromDate = String(
+      searchParams.get("from_date")
+      || searchParams.get("fromDate")
+      || defaultDateRange.fromDate,
+    ).trim();
+    const nextToDate = String(
+      searchParams.get("to_date")
+      || searchParams.get("toDate")
+      || defaultDateRange.toDate,
+    ).trim();
+
     setBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
+    setFromDateFilter((prev) => (prev === nextFromDate ? prev : nextFromDate));
+    setToDateFilter((prev) => (prev === nextToDate ? prev : nextToDate));
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
-  }, [searchParams, syncedQuery]);
+  }, [defaultDateRange.fromDate, defaultDateRange.toDate, searchParams, syncedQuery]);
 
   useEffect(() => {
     const currentQuery = searchParams.toString();
@@ -230,11 +326,24 @@ const WeeklySummary = () => {
     if (brandFilter !== DEFAULT_ENTITY_FILTER) {
       next.set("brand", brandFilter);
     }
+    if (fromDateFilter) {
+      next.set("from_date", fromDateFilter);
+    }
+    if (toDateFilter) {
+      next.set("to_date", toDateFilter);
+    }
 
     if (!areSearchParamsEquivalent(next, searchParams)) {
       setSearchParams(next, { replace: true });
     }
-  }, [brandFilter, searchParams, setSearchParams, syncedQuery]);
+  }, [
+    brandFilter,
+    fromDateFilter,
+    searchParams,
+    setSearchParams,
+    syncedQuery,
+    toDateFilter,
+  ]);
 
   const filters = useMemo(
     () => report?.filters || defaultReport.filters,
@@ -245,7 +354,10 @@ const WeeklySummary = () => {
     () =>
       (Array.isArray(report?.vendors) ? report.vendors : [])
         .map((vendorEntry, index) => {
-          const vendorDisplayRows = buildVendorDisplayRows(vendorEntry?.items);
+          const vendorDisplayRows = buildVendorDisplayRows(vendorEntry?.items, {
+            fromDate: filters.from_date || fromDateFilter,
+            toDate: filters.to_date || toDateFilter,
+          });
           if (vendorDisplayRows.length === 0) {
             return null;
           }
@@ -257,7 +369,7 @@ const WeeklySummary = () => {
           };
         })
         .filter(Boolean),
-    [report?.vendors],
+    [filters.from_date, filters.to_date, fromDateFilter, report?.vendors, toDateFilter],
   );
 
   useEffect(() => {
@@ -413,6 +525,26 @@ const WeeklySummary = () => {
                   </option>
                 ))}
               </select>
+            </div>
+
+            <div>
+              <label className="form-label mb-1">From</label>
+              <input
+                type="date"
+                className="form-control"
+                value={fromDateFilter}
+                onChange={(e) => setFromDateFilter(String(e.target.value || "").trim())}
+              />
+            </div>
+
+            <div>
+              <label className="form-label mb-1">To</label>
+              <input
+                type="date"
+                className="form-control"
+                value={toDateFilter}
+                onChange={(e) => setToDateFilter(String(e.target.value || "").trim())}
+              />
             </div>
 
             <button
