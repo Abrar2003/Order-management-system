@@ -139,7 +139,19 @@ const itemSchema = new mongoose.Schema(
       size: { type: Number, default: 0, min: 0 },
       link: { type: String, default: "", trim: true },
       public_id: { type: String, default: "", trim: true },
-    }
+    },
+    cad_file: {
+      key: { type: String, default: "", trim: true },
+      originalName: { type: String, default: "", trim: true },
+      contentType: { type: String, default: "", trim: true },
+      size: { type: Number, default: 0, min: 0 },
+    },
+    pis_file: {
+      key: { type: String, default: "", trim: true },
+      originalName: { type: String, default: "", trim: true },
+      contentType: { type: String, default: "", trim: true },
+      size: { type: Number, default: 0, min: 0 },
+    },
   },
   { timestamps: true },
 );

@@ -6,6 +6,7 @@ const { syncAllItemsFromOrdersAndQc } = require("../services/itemSync");
 const {
   isConfigured: isWasabiConfigured,
   createStorageKey,
+  getSignedObjectUrl,
   uploadBuffer,
   deleteObject,
 } = require("../services/wasabiStorage.service");
@@ -135,14 +136,61 @@ const normalizeDistinctValues = (values = []) =>
       .filter(Boolean),
   )].sort((a, b) => a.localeCompare(b));
 
-const ALLOWED_ITEM_FILE_TYPES = new Set(["product_image"]);
-const ALLOWED_ITEM_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png"]);
-const ALLOWED_ITEM_IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png"]);
+const ITEM_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png"]);
+const ITEM_IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png"]);
+const ITEM_PDF_MIME_TYPES = new Set(["application/pdf"]);
+const ITEM_PDF_EXTENSIONS = new Set([".pdf"]);
+const ITEM_FILE_CONFIG = Object.freeze({
+  product_image: {
+    field: "image",
+    folder: "item-image",
+    label: "Product image",
+    mimeTypes: ITEM_IMAGE_MIME_TYPES,
+    extensions: ITEM_IMAGE_EXTENSIONS,
+    defaultExtension: ".jpg",
+    invalidTypeMessage:
+      "Only JPG, JPEG, and PNG files are allowed for product images",
+  },
+  cad_file: {
+    field: "cad_file",
+    folder: "item-cad",
+    label: "CAD file",
+    mimeTypes: ITEM_IMAGE_MIME_TYPES,
+    extensions: ITEM_IMAGE_EXTENSIONS,
+    defaultExtension: ".jpg",
+    invalidTypeMessage:
+      "Only JPG, JPEG, and PNG files are allowed for CAD files",
+  },
+  pis_file: {
+    field: "pis_file",
+    folder: "item-pis",
+    label: "PIS file",
+    mimeTypes: ITEM_PDF_MIME_TYPES,
+    extensions: ITEM_PDF_EXTENSIONS,
+    defaultExtension: ".pdf",
+    invalidTypeMessage: "Only PDF files are allowed for PIS files",
+  },
+});
+const ALLOWED_ITEM_FILE_TYPES = new Set(Object.keys(ITEM_FILE_CONFIG));
 
 const toSafeNumber = (value, fallback = 0) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return parsed;
+};
+
+const getItemFileConfig = (fileType = "") =>
+  ITEM_FILE_CONFIG[normalizeTextField(fileType).toLowerCase()] || null;
+
+const normalizeStoredItemFile = (file = {}) => {
+  const parsedSize = Number(file?.size || 0);
+  return {
+    key: normalizeTextField(file?.key || file?.public_id),
+    originalName: normalizeTextField(file?.originalName),
+    contentType: normalizeTextField(file?.contentType),
+    size: Number.isFinite(parsedSize) && parsedSize > 0 ? parsedSize : 0,
+    url: normalizeTextField(file?.url || file?.link),
+  };
 };
 
 const toTimestamp = (value) => {
@@ -847,6 +895,85 @@ exports.updateItemPis = async (req, res) => {
   }
 };
 
+exports.getItemFileUrl = async (req, res) => {
+  try {
+    const itemId = String(req.params.id || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(itemId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid item id",
+      });
+    }
+
+    const fileType = normalizeTextField(
+      req.params.fileType || req.query.file_type || req.query.fileType || "",
+    ).toLowerCase();
+    const fileConfig = getItemFileConfig(fileType);
+    if (!fileConfig) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid file type",
+      });
+    }
+
+    const item = await Item.findById(itemId).select(
+      `code ${fileConfig.field}`,
+    );
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: "Item not found",
+      });
+    }
+
+    const storedFile = normalizeStoredItemFile(item?.[fileConfig.field]);
+    if (!storedFile.key && !storedFile.url) {
+      return res.status(404).json({
+        success: false,
+        message: `${fileConfig.label} not found`,
+      });
+    }
+
+    let url = storedFile.url;
+    if (storedFile.key) {
+      if (!isWasabiConfigured()) {
+        return res.status(500).json({
+          success: false,
+          message: "Wasabi storage is not configured",
+        });
+      }
+
+      url = await getSignedObjectUrl(storedFile.key, {
+        expiresIn: 24 * 60 * 60,
+        filename:
+          storedFile.originalName ||
+          `${normalizeTextField(item?.code || itemId)}${fileConfig.defaultExtension}`,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        item_id: item._id,
+        file_type: fileType,
+        file: {
+          key: storedFile.key,
+          originalName: storedFile.originalName,
+          contentType: storedFile.contentType,
+          size: storedFile.size,
+        },
+        url,
+      },
+    });
+  } catch (error) {
+    console.error("Get Item File URL Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to generate item file URL",
+    });
+  }
+};
+
 exports.uploadItemFile = async (req, res) => {
   try {
     const itemId = String(req.params.id || "").trim();
@@ -860,7 +987,8 @@ exports.uploadItemFile = async (req, res) => {
     const fileType = normalizeTextField(
       req.body?.file_type || req.body?.fileType || "",
     ).toLowerCase();
-    if (!ALLOWED_ITEM_FILE_TYPES.has(fileType)) {
+    const fileConfig = getItemFileConfig(fileType);
+    if (!fileConfig || !ALLOWED_ITEM_FILE_TYPES.has(fileType)) {
       return res.status(400).json({
         success: false,
         message: "Invalid file type",
@@ -884,12 +1012,12 @@ exports.uploadItemFile = async (req, res) => {
     const mimeType = normalizeTextField(req.file.mimetype).toLowerCase();
     const extension = path.extname(String(req.file.originalname || "")).toLowerCase();
     if (
-      !ALLOWED_ITEM_IMAGE_MIME_TYPES.has(mimeType)
-      || !ALLOWED_ITEM_IMAGE_EXTENSIONS.has(extension)
+      !fileConfig.mimeTypes.has(mimeType)
+      || !fileConfig.extensions.has(extension)
     ) {
       return res.status(400).json({
         success: false,
-        message: "Only JPG, JPEG, and PNG files are allowed for product images",
+        message: fileConfig.invalidTypeMessage,
       });
     }
 
@@ -901,36 +1029,36 @@ exports.uploadItemFile = async (req, res) => {
       });
     }
 
-    const previousStorageKey = normalizeTextField(
-      item?.image?.key || item?.image?.public_id,
-    );
+    const previousFile = normalizeStoredItemFile(item?.[fileConfig.field]);
+    const previousStorageKey = previousFile.key;
+    const fallbackOriginalName =
+      req.file.originalname ||
+      `${normalizeTextField(item?.code || itemId)}${extension || fileConfig.defaultExtension}`;
     const uploadResult = await uploadBuffer({
       buffer: req.file.buffer,
       key: createStorageKey({
-        folder: "item-image",
-        originalName:
-          req.file.originalname || `${normalizeTextField(item?.code || itemId)}${extension || ".jpg"}`,
-        extension: extension || ".jpg",
+        folder: fileConfig.folder,
+        originalName: fallbackOriginalName,
+        extension: extension || fileConfig.defaultExtension,
       }),
-      originalName: req.file.originalname || `${normalizeTextField(item?.code || itemId)}${extension || ".jpg"}`,
-      contentType: mimeType || "image/jpeg",
+      originalName: fallbackOriginalName,
+      contentType: mimeType || "application/octet-stream",
     });
 
-    item.image = {
+    item[fileConfig.field] = {
       key: uploadResult.key,
       originalName: uploadResult.originalName,
       contentType: uploadResult.contentType,
       size: uploadResult.size,
-      link: "",
-      public_id: "",
     };
     await item.save();
 
     if (previousStorageKey && previousStorageKey !== uploadResult.key) {
       deleteObject(previousStorageKey).catch((error) => {
-        console.error("Delete previous item image failed:", {
+        console.error("Delete previous item file failed:", {
           itemId,
           previousStorageKey,
+          fileType,
           error: error?.message || String(error),
         });
       });
@@ -938,11 +1066,11 @@ exports.uploadItemFile = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Product image uploaded successfully",
+      message: `${fileConfig.label} uploaded successfully`,
       data: {
         item_id: item._id,
         file_type: fileType,
-        image: item.image,
+        file: normalizeStoredItemFile(item?.[fileConfig.field]),
       },
     });
   } catch (error) {

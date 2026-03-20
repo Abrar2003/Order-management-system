@@ -673,12 +673,12 @@ const getItemItemLbh = (itemDoc = {}) =>
 const getItemBoxLbh = (itemDoc = {}) =>
   itemDoc?.inspected_box_LBH || itemDoc?.pis_box_LBH || itemDoc?.box_LBH || {};
 
-const buildSignedItemImage = async (image = {}) => {
-  const key = normalizeText(image?.key || image?.public_id || "");
-  const originalName = normalizeText(image?.originalName || "");
-  const contentType = normalizeText(image?.contentType || "");
-  const size = toNonNegativeNumber(image?.size, 0);
-  const legacyUrl = normalizeText(image?.link || "");
+const buildSignedItemFile = async (file = {}, { logLabel = "Item file" } = {}) => {
+  const key = normalizeText(file?.key || file?.public_id || "");
+  const originalName = normalizeText(file?.originalName || "");
+  const contentType = normalizeText(file?.contentType || "");
+  const size = toNonNegativeNumber(file?.size, 0);
+  const legacyUrl = normalizeText(file?.url || file?.link || "");
 
   if (key) {
     try {
@@ -693,7 +693,7 @@ const buildSignedItemImage = async (image = {}) => {
         }),
       };
     } catch (error) {
-      console.error("Item image signed URL generation failed:", {
+      console.error(`${logLabel} signed URL generation failed:`, {
         key,
         error: error?.message || String(error),
       });
@@ -712,6 +712,9 @@ const buildSignedItemImage = async (image = {}) => {
 
   return null;
 };
+
+const buildSignedItemImage = async (image = {}) =>
+  buildSignedItemFile(image, { logLabel: "Item image" });
 
 const toPositiveCbmNumber = (value) => {
   const numeric = Number(value);
@@ -5559,7 +5562,7 @@ exports.getQCById = async (req, res) => {
           },
         })
           .select(
-            "code name description brand_name brands vendors inspected_weight pis_weight weight cbm pis_barcode qc.barcode inspected_item_LBH inspected_item_top_LBH inspected_item_bottom_LBH pis_item_LBH pis_item_top_LBH pis_item_bottom_LBH item_LBH inspected_box_LBH inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_box_LBH pis_box_top_LBH pis_box_bottom_LBH box_LBH image",
+            "code name description brand_name brands vendors inspected_weight pis_weight weight cbm pis_barcode qc.barcode inspected_item_LBH inspected_item_top_LBH inspected_item_bottom_LBH pis_item_LBH pis_item_top_LBH pis_item_bottom_LBH item_LBH inspected_box_LBH inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_box_LBH pis_box_top_LBH pis_box_bottom_LBH box_LBH image cad_file pis_file",
           )
           .lean()
       : null;
@@ -5567,6 +5570,12 @@ exports.getQCById = async (req, res) => {
       ? {
           ...itemMaster,
           image: await buildSignedItemImage(itemMaster?.image),
+          cad_file: await buildSignedItemFile(itemMaster?.cad_file, {
+            logLabel: "CAD file",
+          }),
+          pis_file: await buildSignedItemFile(itemMaster?.pis_file, {
+            logLabel: "PIS file",
+          }),
         }
       : null;
     const sortedLabels = normalizeLabels(qcData.labels);

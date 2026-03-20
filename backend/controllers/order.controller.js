@@ -677,8 +677,17 @@ const buildPreviousOrderMetrics = ({ orderDoc = null, qcDoc = null } = {}) => {
   };
 };
 
+const isPartialShippedStatus = (statusValue = "") => {
+  const normalized = normalizeLooseString(statusValue).toLowerCase();
+  return (
+    normalized === "partial shipped" ||
+    normalized === "partially shipped"
+  );
+};
+
 const buildPreviousOrderResponse = ({ orderDoc = null, qcDoc = null } = {}) => {
   const metrics = buildPreviousOrderMetrics({ orderDoc, qcDoc });
+  const isPartialShipped = isPartialShippedStatus(orderDoc?.status);
 
   return {
     order: {
@@ -696,9 +705,15 @@ const buildPreviousOrderResponse = ({ orderDoc = null, qcDoc = null } = {}) => {
     metrics,
     capabilities: {
       can_keep_both: true,
-      can_replace_previous: metrics.shipped_quantity === 0,
+      can_replace_previous: isPartialShipped,
       can_transfer_inspections:
-        metrics.passed_quantity > 0 && Boolean(qcDoc?._id),
+        isPartialShipped &&
+        metrics.passed_quantity > 0 &&
+        Boolean(qcDoc?._id),
+    },
+    requirements: {
+      requires_partial_shipped: true,
+      is_partial_shipped: isPartialShipped,
     },
   };
 };
@@ -798,7 +813,7 @@ const resolvePreviousOrderReplacementPlan = async ({
 
   if (!previousOrderResponse.capabilities.can_replace_previous) {
     warnings.push(
-      `Previous order ${normalizeOrderKey(previousOrder?.order_id) || "UNKNOWN"} has shipment history, so it was kept instead of being replaced.`,
+      `Previous order ${normalizeOrderKey(previousOrder?.order_id) || "UNKNOWN"} is not Partial Shipped, so it was kept instead of being replaced.`,
     );
     return {
       action: previousOrderAction,
