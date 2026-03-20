@@ -4560,6 +4560,19 @@ exports.getWeeklyOrderSummary = async (req, res) => {
       { $unwind: "$order_doc" },
       {
         $lookup: {
+          from: "users",
+          localField: "inspector",
+          foreignField: "_id",
+          as: "qc_inspector_user",
+        },
+      },
+      {
+        $addFields: {
+          qc_inspector_user: { $arrayElemAt: ["$qc_inspector_user", 0] },
+        },
+      },
+      {
+        $lookup: {
           from: "inspections",
           let: { qcId: "$_id" },
           pipeline: [
@@ -4572,14 +4585,6 @@ exports.getWeeklyOrderSummary = async (req, res) => {
               $addFields: {
                 inspection_date_sort_key: {
                   $ifNull: [inspectionDateToDateExpression, "$createdAt"],
-                },
-              },
-            },
-            {
-              $match: {
-                inspection_date_sort_key: {
-                  $gte: weekRange.from_date_utc,
-                  $lt: weekRange.to_date_exclusive_utc,
                 },
               },
             },
@@ -4621,6 +4626,7 @@ exports.getWeeklyOrderSummary = async (req, res) => {
           },
           quantities: {
             client_demand: "$quantities.client_demand",
+            qc_checked: "$quantities.qc_checked",
             qc_passed: "$quantities.qc_passed",
             pending: "$quantities.pending",
           },
@@ -4630,6 +4636,8 @@ exports.getWeeklyOrderSummary = async (req, res) => {
             brand: "$order_doc.brand",
             quantity: "$order_doc.quantity",
           },
+          last_inspected_date: 1,
+          qc_inspector_name: "$qc_inspector_user.name",
           last_inspection: {
             inspection_date: "$last_inspection.inspection_date",
             goods_not_ready: "$last_inspection.goods_not_ready",
@@ -4668,8 +4676,22 @@ exports.getWeeklyOrderSummary = async (req, res) => {
       goods_not_ready_inspection_date: normalizeText(
         row?.last_inspection?.inspection_date || "",
       ),
-      last_inspector_name: normalizeText(row?.last_inspection?.inspector_name || ""),
-      last_inspection_date: normalizeText(row?.last_inspection?.inspection_date || ""),
+      last_inspector_name: normalizeText(
+        row?.last_inspection?.inspector_name ||
+          ((toNonNegativeNumber(row?.quantities?.qc_checked, 0) > 0 ||
+            toNonNegativeNumber(row?.quantities?.qc_passed, 0) > 0)
+            ? row?.qc_inspector_name
+            : "") ||
+          "",
+      ),
+      last_inspection_date: normalizeText(
+        row?.last_inspection?.inspection_date ||
+          ((toNonNegativeNumber(row?.quantities?.qc_checked, 0) > 0 ||
+            toNonNegativeNumber(row?.quantities?.qc_passed, 0) > 0)
+            ? row?.last_inspected_date
+            : "") ||
+          "",
+      ),
     }));
 
     const brandOptions = normalizeDistinctValues(

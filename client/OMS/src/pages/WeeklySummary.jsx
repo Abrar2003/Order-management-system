@@ -44,25 +44,32 @@ const toReportQuantity = (value) => {
   return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
 };
 
-const isCompletelyPendingItem = (item) => {
-  if (Boolean(item?.goods_not_ready)) {
-    return false;
+const toTimestamp = (value) => {
+  if (!value) return 0;
+  const asString = String(value).trim();
+  if (!asString) return 0;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(asString)) {
+    const parsed = new Date(`${asString}T00:00:00Z`);
+    return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
   }
 
-  const totalOrderQuantity = toReportQuantity(item?.total_order_quantity);
-  const quantityPassed = toReportQuantity(item?.quantity_passed);
-  const pending = toReportQuantity(item?.pending);
-
-  if (pending <= 0 || quantityPassed > 0) {
-    return false;
+  if (/^\d{2}[/-]\d{2}[/-]\d{4}$/.test(asString)) {
+    const [day, month, year] = asString.split(/[/-]/).map(Number);
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
   }
 
-  if (totalOrderQuantity <= 0) {
-    return true;
-  }
-
-  return pending >= totalOrderQuantity;
+  const parsed = new Date(asString);
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
 };
+
+const getItemLastInspectionDate = (item = {}) =>
+  String(
+    item?.last_inspection_date ||
+      item?.goods_not_ready_inspection_date ||
+      "",
+  ).trim();
 
 const buildVendorDisplayRows = (items = []) => {
   const poMap = new Map();
@@ -81,12 +88,31 @@ const buildVendorDisplayRows = (items = []) => {
       const sortedItems = [...poItems].sort((left, right) =>
         String(left?.item_code || "").localeCompare(String(right?.item_code || "")),
       );
-      const visibleItems = sortedItems.filter((item) => !isCompletelyPendingItem(item));
       const allItemsPacked =
         sortedItems.length > 0 &&
         sortedItems.every((item) => toReportQuantity(item?.pending) <= 0);
+      const latestInspectionMeta = sortedItems.reduce(
+        (latest, item) => {
+          const inspectionDate = getItemLastInspectionDate(item);
+          const inspectionTime = toTimestamp(inspectionDate);
+          if (inspectionTime <= (latest?.inspectionTime || 0)) {
+            return latest;
+          }
 
-      if (visibleItems.length === 0) {
+          return {
+            inspectionTime,
+            inspectionDate,
+            inspectorName: String(item?.last_inspector_name || "").trim(),
+          };
+        },
+        {
+          inspectionTime: 0,
+          inspectionDate: "",
+          inspectorName: "",
+        },
+      );
+
+      if (sortedItems.length === 0) {
         return [];
       }
 
@@ -95,22 +121,22 @@ const buildVendorDisplayRows = (items = []) => {
           key: `${orderId}-packed`,
           po: orderId,
           itemLabel: "All items are packed",
-          totalOrderQuantity: visibleItems.reduce(
+          totalOrderQuantity: sortedItems.reduce(
             (sum, item) => sum + toReportQuantity(item?.total_order_quantity),
             0,
           ),
-          quantityPassed: visibleItems.reduce(
+          quantityPassed: sortedItems.reduce(
             (sum, item) => sum + toReportQuantity(item?.quantity_passed),
             0,
           ),
           pending: 0,
           packedSummary: true,
-          lastInspector: "",
-          lastInspectionDate: "",
+          lastInspector: latestInspectionMeta.inspectorName,
+          lastInspectionDate: latestInspectionMeta.inspectionDate,
         }];
       }
 
-      return visibleItems.map((item, index) => ({
+      return sortedItems.map((item, index) => ({
         key: `${orderId}-${item?.item_code || "item"}-${index}`,
         po: index === 0 ? orderId : "",
         itemLabel: item?.item_code || "N/A",
@@ -121,7 +147,7 @@ const buildVendorDisplayRows = (items = []) => {
         goodsNotReadyReason: String(item?.goods_not_ready_reason || "").trim(),
         goodsNotReadyInspectionDate: String(item?.goods_not_ready_inspection_date || "").trim(),
         lastInspector: item?.last_inspector_name || "",
-        lastInspectionDate: item?.last_inspection_date || "",
+        lastInspectionDate: getItemLastInspectionDate(item),
         packedSummary: false,
       }));
     });
