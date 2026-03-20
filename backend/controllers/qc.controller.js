@@ -1,6 +1,7 @@
 const QC = require("../models/qc.model");
 const Inspection = require("../models/inspection.model");
 const Inspector = require("../models/inspector.model");
+const User = require("../models/user.model");
 const Item = require("../models/item.model");
 const QcEditLog = require("../models/qcEditLog.model");
 const OrderEditLog = require("../models/orderEditLog.model");
@@ -1392,6 +1393,29 @@ const normalizeOptionalReportFilter = (value) => {
   }
   return normalized;
 };
+
+const resolveWeeklySummaryRange = ({ fromDate = "", toDate = "" } = {}) => {
+  const explicitRange = resolveExplicitDateRange({ fromDate, toDate });
+  if (explicitRange) return explicitRange;
+  return getPreviousUtcWeekRange(new Date());
+};
+
+const buildWeeklySummaryPoKey = ({
+  orderId = "",
+  vendor = "",
+  brand = "",
+} = {}) =>
+  [
+    normalizeText(orderId).toLowerCase(),
+    normalizeText(vendor).toLowerCase(),
+    normalizeText(brand).toLowerCase(),
+  ].join("__");
+
+const resolveWeeklySummaryPoMeta = (qcDoc = {}) => ({
+  order_id: normalizeText(qcDoc?.order_meta?.order_id || qcDoc?.order?.order_id || ""),
+  vendor: normalizeText(qcDoc?.order_meta?.vendor || qcDoc?.order?.vendor || ""),
+  brand: normalizeText(qcDoc?.order_meta?.brand || qcDoc?.order?.brand || ""),
+});
 
 const buildStringDateToDateExpression = (fieldPath) => ({
   $let: {
@@ -4524,175 +4548,277 @@ exports.getVendorReports = async (req, res) => {
 exports.getWeeklyOrderSummary = async (req, res) => {
   try {
     const selectedBrand = normalizeOptionalReportFilter(req.query.brand);
-    const weekRange = getPreviousUtcWeekRange(new Date());
-    if (!weekRange) {
-      return res
-        .status(500)
-        .json({ message: "Failed to resolve last week range" });
+    const reportRange = resolveWeeklySummaryRange({
+      fromDate: req.query.from_date ?? req.query.fromDate,
+      toDate: req.query.to_date ?? req.query.toDate,
+    });
+    if (!reportRange) {
+      return res.status(400).json({ message: "Invalid weekly summary filters" });
     }
 
-    const weeklyRows = await QC.aggregate([
+    const inspectedQcSnapshots = await Inspection.aggregate([
       {
         $addFields: {
-          request_date_value: requestDateToDateExpression,
-          last_inspected_date_value: lastInspectedDateToDateExpression,
+          inspection_date_value: {
+            $ifNull: [inspectionDateToDateExpression, "$createdAt"],
+          },
         },
       },
       {
         $match: {
-          $or: [
-            {
-              request_date_value: {
-                $gte: weekRange.from_date_utc,
-                $lt: weekRange.to_date_exclusive_utc,
-              },
-            },
-            {
-              last_inspected_date_value: {
-                $gte: weekRange.from_date_utc,
-                $lt: weekRange.to_date_exclusive_utc,
-              },
-            },
-          ],
-        },
-      },
-      buildActiveOrderLookupStage("order_doc"),
-      { $unwind: "$order_doc" },
-      {
-        $lookup: {
-          from: "users",
-          localField: "inspector",
-          foreignField: "_id",
-          as: "qc_inspector_user",
-        },
-      },
-      {
-        $addFields: {
-          qc_inspector_user: { $arrayElemAt: ["$qc_inspector_user", 0] },
-        },
-      },
-      {
-        $lookup: {
-          from: "inspections",
-          let: { qcId: "$_id" },
-          pipeline: [
-            {
-              $match: {
-                $expr: { $eq: ["$qc", "$$qcId"] },
-              },
-            },
-            {
-              $addFields: {
-                inspection_date_sort_key: {
-                  $ifNull: [inspectionDateToDateExpression, "$createdAt"],
-                },
-              },
-            },
-            { $sort: { inspection_date_sort_key: -1, createdAt: -1 } },
-            { $limit: 1 },
-            // Lookup inspector name
-            {
-              $lookup: {
-                from: "users",
-                localField: "inspector",
-                foreignField: "_id",
-                as: "inspector_user"
-              }
-            },
-            { $addFields: { inspector_user: { $arrayElemAt: ["$inspector_user", 0] } } },
-            {
-              $project: {
-                inspection_date: 1,
-                goods_not_ready: 1,
-                remarks: 1,
-                inspector_name: "$inspector_user.name"
-              },
-            },
-          ],
-          as: "last_inspection",
-        },
-      },
-      {
-        $addFields: {
-          last_inspection: { $arrayElemAt: ["$last_inspection", 0] },
-        },
-      },
-      {
-        $project: {
-          _id: 0,
-          order_meta: 1,
-          item: {
-            item_code: "$item.item_code",
+          inspection_date_value: {
+            $gte: reportRange.from_date_utc,
+            $lt: reportRange.to_date_exclusive_utc,
           },
-          quantities: {
-            client_demand: "$quantities.client_demand",
-            qc_checked: "$quantities.qc_checked",
-            qc_passed: "$quantities.qc_passed",
-            pending: "$quantities.pending",
-          },
-          order_doc: {
-            order_id: "$order_doc.order_id",
-            vendor: "$order_doc.vendor",
-            brand: "$order_doc.brand",
-            quantity: "$order_doc.quantity",
-          },
-          last_inspected_date: 1,
-          qc_inspector_name: "$qc_inspector_user.name",
-          last_inspection: {
-            inspection_date: "$last_inspection.inspection_date",
-            goods_not_ready: "$last_inspection.goods_not_ready",
-            remarks: "$last_inspection.remarks",
-            inspector_name: "$last_inspection.inspector_name"
-          },
+        },
+      },
+      {
+        $sort: {
+          qc: 1,
+          inspection_date_value: -1,
+          createdAt: -1,
+        },
+      },
+      {
+        $group: {
+          _id: "$qc",
+          inspection_date: { $first: "$inspection_date" },
+          createdAt: { $first: "$createdAt" },
+          goods_not_ready: { $first: "$goods_not_ready" },
+          remarks: { $first: "$remarks" },
+          inspector: { $first: "$inspector" },
         },
       },
     ]);
 
-    const normalizedRows = weeklyRows.map((row) => ({
-      order_id:
-        normalizeText(
-          row?.order_meta?.order_id || row?.order_doc?.order_id || "",
-        ) || "N/A",
-      vendor:
-        normalizeText(
-          row?.order_meta?.vendor || row?.order_doc?.vendor || "",
-        ) || "N/A",
-      brand:
-        normalizeText(row?.order_meta?.brand || row?.order_doc?.brand || "") ||
-        "N/A",
-      item_code: normalizeText(row?.item?.item_code || "") || "N/A",
-      total_order_quantity: toNonNegativeNumber(
-        row?.quantities?.client_demand ?? row?.order_doc?.quantity,
-        0,
+    const touchedQcIds = inspectedQcSnapshots
+      .map((entry) => entry?._id)
+      .filter((value) => mongoose.Types.ObjectId.isValid(value));
+
+    if (touchedQcIds.length === 0) {
+      return res.status(200).json({
+        filters: {
+          period: "selected_range",
+          period_label: `${formatDateDDMMYYYY(reportRange.from_date_iso)} - ${formatDateDDMMYYYY(reportRange.to_date_iso)}`,
+          from_date: reportRange.from_date_iso,
+          to_date: reportRange.to_date_iso,
+          brand: selectedBrand,
+          brand_options: [],
+        },
+        summary: {
+          vendors_count: 0,
+          pos_count: 0,
+          items_count: 0,
+          inspected_items_count: 0,
+        },
+        vendors: [],
+      });
+    }
+
+    const touchedQcDocs = await QC.find({ _id: { $in: touchedQcIds } })
+      .select("order order_meta item quantities")
+      .populate({
+        path: "order",
+        match: ACTIVE_ORDER_MATCH,
+        select: "order_id vendor brand quantity status",
+      })
+      .lean();
+
+    const touchedQcDocById = new Map(
+      touchedQcDocs
+        .filter((entry) => entry?.order)
+        .map((entry) => [String(entry._id), entry]),
+    );
+
+    const includedPoMap = new Map();
+    const inspectionInRangeByQcId = new Map();
+
+    for (const snapshot of inspectedQcSnapshots) {
+      const qcId = String(snapshot?._id || "").trim();
+      const qcDoc = touchedQcDocById.get(qcId);
+      if (!qcDoc) continue;
+
+      const poMeta = resolveWeeklySummaryPoMeta(qcDoc);
+      if (!poMeta.order_id) continue;
+
+      const poKey = buildWeeklySummaryPoKey({
+        orderId: poMeta.order_id,
+        vendor: poMeta.vendor,
+        brand: poMeta.brand,
+      });
+      includedPoMap.set(poKey, poMeta);
+      inspectionInRangeByQcId.set(qcId, {
+        inspection_date: resolveInspectionReportDateIso(snapshot),
+        goods_not_ready: Boolean(snapshot?.goods_not_ready?.ready),
+        goods_not_ready_reason: normalizeText(
+          snapshot?.goods_not_ready?.reason || snapshot?.remarks || "",
+        ),
+        inspector_id: String(snapshot?.inspector || "").trim(),
+      });
+    }
+
+    const includedOrderIds = [
+      ...new Set(
+        Array.from(includedPoMap.values())
+          .map((entry) => normalizeText(entry?.order_id || ""))
+          .filter(Boolean),
       ),
-      quantity_passed: toNonNegativeNumber(row?.quantities?.qc_passed, 0),
-      pending: toNonNegativeNumber(row?.quantities?.pending, 0),
-      goods_not_ready: Boolean(row?.last_inspection?.goods_not_ready?.ready),
-      goods_not_ready_reason: normalizeText(
-        row?.last_inspection?.goods_not_ready?.reason ||
-          row?.last_inspection?.remarks ||
-          "",
+    ];
+
+    if (includedOrderIds.length === 0) {
+      return res.status(200).json({
+        filters: {
+          period: "selected_range",
+          period_label: `${formatDateDDMMYYYY(reportRange.from_date_iso)} - ${formatDateDDMMYYYY(reportRange.to_date_iso)}`,
+          from_date: reportRange.from_date_iso,
+          to_date: reportRange.to_date_iso,
+          brand: selectedBrand,
+          brand_options: [],
+        },
+        summary: {
+          vendors_count: 0,
+          pos_count: 0,
+          items_count: 0,
+          inspected_items_count: 0,
+        },
+        vendors: [],
+      });
+    }
+
+    const allPoQcDocs = await QC.find({
+      "order_meta.order_id": { $in: includedOrderIds },
+    })
+      .select("order order_meta item quantities")
+      .populate({
+        path: "order",
+        match: ACTIVE_ORDER_MATCH,
+        select: "order_id vendor brand quantity status",
+      })
+      .lean();
+
+    const includedQcDocs = allPoQcDocs.filter((qcDoc) => {
+      if (!qcDoc?.order) return false;
+      const poMeta = resolveWeeklySummaryPoMeta(qcDoc);
+      if (!poMeta.order_id) return false;
+      const poKey = buildWeeklySummaryPoKey({
+        orderId: poMeta.order_id,
+        vendor: poMeta.vendor,
+        brand: poMeta.brand,
+      });
+      return includedPoMap.has(poKey);
+    });
+
+    const includedQcIds = includedQcDocs
+      .map((entry) => entry?._id)
+      .filter((value) => mongoose.Types.ObjectId.isValid(value));
+
+    const latestInspectionByQc = includedQcIds.length
+      ? await Inspection.aggregate([
+          {
+            $match: {
+              qc: { $in: includedQcIds },
+            },
+          },
+          {
+            $addFields: {
+              inspection_date_value: {
+                $ifNull: [inspectionDateToDateExpression, "$createdAt"],
+              },
+            },
+          },
+          {
+            $sort: {
+              qc: 1,
+              inspection_date_value: -1,
+              createdAt: -1,
+            },
+          },
+          {
+            $group: {
+              _id: "$qc",
+              inspection_date: { $first: "$inspection_date" },
+              createdAt: { $first: "$createdAt" },
+              inspector: { $first: "$inspector" },
+            },
+          },
+        ])
+      : [];
+
+    const latestInspectionByQcId = new Map(
+      latestInspectionByQc.map((entry) => [
+        String(entry?._id || "").trim(),
+        {
+          inspection_date: resolveInspectionReportDateIso(entry),
+          inspector_id: String(entry?.inspector || "").trim(),
+        },
+      ]),
+    );
+
+    const userIds = [
+      ...new Set(
+        [
+          ...Array.from(inspectionInRangeByQcId.values()).map((entry) =>
+            String(entry?.inspector_id || "").trim(),
+          ),
+          ...Array.from(latestInspectionByQcId.values()).map((entry) =>
+            String(entry?.inspector_id || "").trim(),
+          ),
+        ].filter((value) => mongoose.Types.ObjectId.isValid(value)),
       ),
-      goods_not_ready_inspection_date: normalizeText(
-        row?.last_inspection?.inspection_date || "",
-      ),
-      last_inspector_name: normalizeText(
-        row?.last_inspection?.inspector_name ||
-          ((toNonNegativeNumber(row?.quantities?.qc_checked, 0) > 0 ||
-            toNonNegativeNumber(row?.quantities?.qc_passed, 0) > 0)
-            ? row?.qc_inspector_name
-            : "") ||
-          "",
-      ),
-      last_inspection_date: normalizeText(
-        row?.last_inspection?.inspection_date ||
-          ((toNonNegativeNumber(row?.quantities?.qc_checked, 0) > 0 ||
-            toNonNegativeNumber(row?.quantities?.qc_passed, 0) > 0)
-            ? row?.last_inspected_date
-            : "") ||
-          "",
-      ),
-    }));
+    ];
+
+    const users = userIds.length
+      ? await User.find({ _id: { $in: userIds } })
+          .select("name email")
+          .lean()
+      : [];
+    const userNameById = new Map(
+      users.map((entry) => [
+        String(entry?._id || "").trim(),
+        normalizeText(entry?.name || entry?.email || ""),
+      ]),
+    );
+
+    const normalizedRows = includedQcDocs.map((qcDoc) => {
+      const qcId = String(qcDoc?._id || "").trim();
+      const poMeta = resolveWeeklySummaryPoMeta(qcDoc);
+      const weeklyInspection = inspectionInRangeByQcId.get(qcId) || null;
+      const latestOverallInspection = latestInspectionByQcId.get(qcId) || null;
+
+      return {
+        order_id: poMeta.order_id || "N/A",
+        vendor: poMeta.vendor || "N/A",
+        brand: poMeta.brand || "N/A",
+        item_code: normalizeText(qcDoc?.item?.item_code || "") || "N/A",
+        total_order_quantity: toNonNegativeNumber(
+          qcDoc?.quantities?.client_demand ?? qcDoc?.order?.quantity,
+          0,
+        ),
+        order_status: normalizeText(qcDoc?.order?.status || "") || "Pending",
+        quantity_passed: toNonNegativeNumber(qcDoc?.quantities?.qc_passed, 0),
+        pending: toNonNegativeNumber(qcDoc?.quantities?.pending, 0),
+        goods_not_ready: Boolean(weeklyInspection?.goods_not_ready),
+        goods_not_ready_reason: normalizeText(
+          weeklyInspection?.goods_not_ready_reason || "",
+        ),
+        goods_not_ready_inspection_date: normalizeText(
+          weeklyInspection?.inspection_date || "",
+        ),
+        inspected_in_range: Boolean(weeklyInspection),
+        last_inspection_date_in_range: normalizeText(
+          weeklyInspection?.inspection_date || "",
+        ),
+        last_inspector_name_in_range: normalizeText(
+          userNameById.get(String(weeklyInspection?.inspector_id || "").trim()) || "",
+        ),
+        latest_overall_inspection_date: normalizeText(
+          latestOverallInspection?.inspection_date || "",
+        ),
+        latest_overall_inspector_name: normalizeText(
+          userNameById.get(String(latestOverallInspection?.inspector_id || "").trim()) || "",
+        ),
+      };
+    });
 
     const brandOptions = normalizeDistinctValues(
       normalizedRows.map((row) => row?.brand || ""),
@@ -4703,8 +4829,16 @@ exports.getWeeklyOrderSummary = async (req, res) => {
       : normalizedRows;
 
     const vendorMap = new Map();
+    const poKeys = new Set();
 
     for (const row of filteredRows) {
+      const poKey = buildWeeklySummaryPoKey({
+        orderId: row.order_id,
+        vendor: row.vendor,
+        brand: row.brand,
+      });
+      poKeys.add(poKey);
+
       const vendorKey = String(row.vendor || "").toLowerCase();
       if (!vendorMap.has(vendorKey)) {
         vendorMap.set(vendorKey, {
@@ -4713,24 +4847,28 @@ exports.getWeeklyOrderSummary = async (req, res) => {
         });
       }
 
-      const vendorEntry = vendorMap.get(vendorKey);
-      vendorEntry.items.push({
+      vendorMap.get(vendorKey).items.push({
         order_id: row.order_id,
         item_code: row.item_code,
         total_order_quantity: row.total_order_quantity,
+        order_status: row.order_status,
         quantity_passed: row.quantity_passed,
         pending: row.pending,
         goods_not_ready: row.goods_not_ready,
         goods_not_ready_reason: row.goods_not_ready_reason,
         goods_not_ready_inspection_date: row.goods_not_ready_inspection_date,
-        last_inspector_name: row.last_inspector_name,
-        last_inspection_date: row.last_inspection_date,
+        inspected_in_range: row.inspected_in_range,
+        last_inspection_date_in_range: row.last_inspection_date_in_range,
+        last_inspector_name_in_range: row.last_inspector_name_in_range,
+        latest_overall_inspection_date: row.latest_overall_inspection_date,
+        latest_overall_inspector_name: row.latest_overall_inspector_name,
       });
     }
 
     const vendors = Array.from(vendorMap.values())
-      .map((entry) => {
-        const items = [...entry.items].sort((left, right) => {
+      .map((entry) => ({
+        vendor: entry.vendor,
+        items: [...entry.items].sort((left, right) => {
           const orderCompare = String(left?.order_id || "").localeCompare(
             String(right?.order_id || ""),
           );
@@ -4738,25 +4876,26 @@ exports.getWeeklyOrderSummary = async (req, res) => {
           return String(left?.item_code || "").localeCompare(
             String(right?.item_code || ""),
           );
-        });
-
-        return {
-          vendor: entry.vendor,
-          items,
-        };
-      })
+        }),
+      }))
       .sort((left, right) =>
         String(left?.vendor || "").localeCompare(String(right?.vendor || "")),
       );
 
     return res.status(200).json({
       filters: {
-        period: "rolling_week_until_yesterday",
-        period_label: weekRange.label,
-        from_date: weekRange.from_date_iso,
-        to_date: weekRange.to_date_iso,
+        period: "selected_range",
+        period_label: `${formatDateDDMMYYYY(reportRange.from_date_iso)} - ${formatDateDDMMYYYY(reportRange.to_date_iso)}`,
+        from_date: reportRange.from_date_iso,
+        to_date: reportRange.to_date_iso,
         brand: selectedBrand,
         brand_options: brandOptions,
+      },
+      summary: {
+        vendors_count: vendors.length,
+        pos_count: poKeys.size,
+        items_count: filteredRows.length,
+        inspected_items_count: filteredRows.filter((row) => row.inspected_in_range).length,
       },
       vendors,
     });
