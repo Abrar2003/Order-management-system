@@ -8,6 +8,7 @@ const {
   rectifyPdfOrders,
   getUploadLogs,
   getOrderEditLogs,
+  lookupPreviousOrder,
   getOrders,
   getOrdersByFiltersDb,
   getOrderById,
@@ -52,6 +53,13 @@ router.post(
   authorize("admin", "manager", "dev"),
   upload.single("file"),
   rectifyPdfOrders,
+);
+
+router.get(
+  "/previous-order-check",
+  authenticate,
+  authorize("admin", "manager", "dev"),
+  lookupPreviousOrder,
 );
 
 router.get(

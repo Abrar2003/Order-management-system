@@ -133,6 +133,10 @@ const itemSchema = new mongoose.Schema(
       from_qc: { type: Boolean, default: false },
     },
     image: {
+      key: { type: String, default: "", trim: true },
+      originalName: { type: String, default: "", trim: true },
+      contentType: { type: String, default: "", trim: true },
+      size: { type: Number, default: 0, min: 0 },
       link: { type: String, default: "", trim: true },
       public_id: { type: String, default: "", trim: true },
     }

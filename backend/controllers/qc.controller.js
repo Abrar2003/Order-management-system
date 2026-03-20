@@ -9,6 +9,7 @@ const XLSX = require("xlsx");
 const Order = require("../models/order.model");
 const mongoose = require("mongoose");
 const { upsertItemFromQc } = require("../services/itemSync");
+const { getSignedObjectUrl } = require("../services/wasabiStorage.service");
 
 const normalizeLabels = (labels = []) => {
   if (!Array.isArray(labels)) return [];
@@ -671,6 +672,46 @@ const getItemItemLbh = (itemDoc = {}) =>
   {};
 const getItemBoxLbh = (itemDoc = {}) =>
   itemDoc?.inspected_box_LBH || itemDoc?.pis_box_LBH || itemDoc?.box_LBH || {};
+
+const buildSignedItemImage = async (image = {}) => {
+  const key = normalizeText(image?.key || image?.public_id || "");
+  const originalName = normalizeText(image?.originalName || "");
+  const contentType = normalizeText(image?.contentType || "");
+  const size = toNonNegativeNumber(image?.size, 0);
+  const legacyUrl = normalizeText(image?.link || "");
+
+  if (key) {
+    try {
+      return {
+        key,
+        originalName,
+        contentType,
+        size,
+        url: await getSignedObjectUrl(key, {
+          expiresIn: 24 * 60 * 60,
+          filename: originalName,
+        }),
+      };
+    } catch (error) {
+      console.error("Item image signed URL generation failed:", {
+        key,
+        error: error?.message || String(error),
+      });
+    }
+  }
+
+  if (legacyUrl) {
+    return {
+      key: "",
+      originalName,
+      contentType,
+      size,
+      url: legacyUrl,
+    };
+  }
+
+  return null;
+};
 
 const toPositiveCbmNumber = (value) => {
   const numeric = Number(value);
@@ -5518,9 +5559,15 @@ exports.getQCById = async (req, res) => {
           },
         })
           .select(
-            "code name description brand_name brands vendors inspected_weight pis_weight weight cbm pis_barcode qc.barcode inspected_item_LBH inspected_item_top_LBH inspected_item_bottom_LBH pis_item_LBH pis_item_top_LBH pis_item_bottom_LBH item_LBH inspected_box_LBH inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_box_LBH pis_box_top_LBH pis_box_bottom_LBH box_LBH",
+            "code name description brand_name brands vendors inspected_weight pis_weight weight cbm pis_barcode qc.barcode inspected_item_LBH inspected_item_top_LBH inspected_item_bottom_LBH pis_item_LBH pis_item_top_LBH pis_item_bottom_LBH item_LBH inspected_box_LBH inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_box_LBH pis_box_top_LBH pis_box_bottom_LBH box_LBH image",
           )
           .lean()
+      : null;
+    const itemMasterWithSignedUrls = itemMaster
+      ? {
+          ...itemMaster,
+          image: await buildSignedItemImage(itemMaster?.image),
+        }
       : null;
     const sortedLabels = normalizeLabels(qcData.labels);
     const sortedRequestHistory = Array.isArray(qcData.request_history)
@@ -5551,7 +5598,7 @@ exports.getQCById = async (req, res) => {
     res.json({
       data: {
         ...qcData,
-        item_master: itemMaster || null,
+        item_master: itemMasterWithSignedUrls,
         labels: sortedLabels,
         request_history: sortedRequestHistory,
         inspection_record: sortedInspectionRecords,

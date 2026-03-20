@@ -2,23 +2,53 @@ const Brand = require("../models/brand.model");
 const {
   isConfigured: isWasabiConfigured,
   createStorageKey,
+  getSignedObjectUrl,
   uploadBuffer,
 } = require("../services/wasabiStorage.service");
 
 const escapeRegex = (value = "") =>
   String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const normalizeBrandLogo = (brand = {}) => {
-  const logoUrl = String(brand?.logo_url || "").trim();
-  const contentType = String(brand?.logo_content_type || "image/webp").trim() || "image/webp";
-  const size = Number(brand?.logo_size || 0);
+const normalizeBrandLogo = async (brand = {}) => {
+  const legacyStorageKey = String(brand?.logo_storage_key || "").trim();
+  const storedLogo = brand?.logo_file && typeof brand.logo_file === "object"
+    ? brand.logo_file
+    : {};
+  const legacyLogoUrl = String(brand?.logo_url || "").trim();
+  const storageKey = String(storedLogo?.key || legacyStorageKey || "").trim();
+  const originalName = String(storedLogo?.originalName || "").trim();
+  const contentType = String(
+    storedLogo?.contentType || brand?.logo_content_type || "image/webp",
+  ).trim() || "image/webp";
+  const size = Number(storedLogo?.size || brand?.logo_size || 0);
 
-  if (logoUrl) {
+  if (storageKey && isWasabiConfigured()) {
+    try {
+      return {
+        key: storageKey,
+        originalName,
+        contentType,
+        size: Number.isFinite(size) ? size : 0,
+        url: await getSignedObjectUrl(storageKey, {
+          expiresIn: 24 * 60 * 60,
+          filename: originalName,
+        }),
+      };
+    } catch (error) {
+      console.error("Brand logo signed URL generation failed:", {
+        storageKey,
+        error: error?.message || String(error),
+      });
+    }
+  }
+
+  if (legacyLogoUrl) {
     return {
-      url: logoUrl,
-      storageKey: String(brand?.logo_storage_key || "").trim(),
+      key: "",
+      originalName,
       contentType,
       size: Number.isFinite(size) ? size : 0,
+      url: legacyLogoUrl,
     };
   }
 
@@ -42,9 +72,9 @@ const normalizeBrandLogo = (brand = {}) => {
   };
 };
 
-const toBrandResponse = (brandDoc = {}) => ({
+const toBrandResponse = async (brandDoc = {}) => ({
   ...brandDoc,
-  logo: normalizeBrandLogo(brandDoc),
+  logo: await normalizeBrandLogo(brandDoc),
 });
 
 // Get all brands
@@ -52,7 +82,7 @@ exports.getAllBrands = async (req, res) => {
   try {
     const brands = await Brand.find(
       {},
-      "name logo logo_url logo_storage_key logo_content_type logo_size calendar",
+      "name logo logo_file logo_url logo_storage_key logo_content_type logo_size calendar",
     ).lean();
 
     if (!brands || brands.length === 0) {
@@ -64,7 +94,7 @@ exports.getAllBrands = async (req, res) => {
 
     res.status(200).json({
       message: "Brands retrieved successfully",
-      data: brands.map(toBrandResponse),
+      data: await Promise.all(brands.map((brand) => toBrandResponse(brand))),
     });
   } catch (error) {
     console.error(error);
@@ -75,15 +105,11 @@ exports.getAllBrands = async (req, res) => {
   }
 };
 
-
 exports.createBrand = async (req, res) => {
   try {
-
     if (!req.file) {
       return res.status(400).json({ message: "No logo file uploaded" });
     }
-
-    // const svgString = fs.readFileSync(req.file.path, "utf-8");
 
     const name = String(req.body?.name || "").trim();
     const calendar = String(req.body?.calendar || "").trim();
@@ -96,6 +122,8 @@ exports.createBrand = async (req, res) => {
       logo: req.file.buffer,
       logo_content_type: req.file.mimetype || "image/webp",
       logo_size: Number(req.file.size || req.file.buffer?.length || 0),
+      logo_url: "",
+      logo_storage_key: "",
     };
 
     if (isWasabiConfigured()) {
@@ -104,13 +132,21 @@ exports.createBrand = async (req, res) => {
         originalName: req.file.originalname || `${name}.webp`,
         extension: ".webp",
       });
+
       const uploadedLogo = await uploadBuffer({
         buffer: req.file.buffer,
         key: storageKey,
         contentType: req.file.mimetype || "image/webp",
       });
+
       logoPayload.logo = null;
-      logoPayload.logo_url = uploadedLogo.url;
+      logoPayload.logo_file = {
+        key: uploadedLogo.key,
+        originalName: req.file.originalname || `${name}.webp`,
+        contentType: uploadedLogo.contentType,
+        size: uploadedLogo.size,
+      };
+      logoPayload.logo_url = "";
       logoPayload.logo_storage_key = uploadedLogo.key;
       logoPayload.logo_content_type = uploadedLogo.contentType;
       logoPayload.logo_size = uploadedLogo.size;
@@ -121,14 +157,19 @@ exports.createBrand = async (req, res) => {
       ...logoPayload,
       calendar: calendar || undefined,
     });
+
     await newBrand.save();
+
     res.status(201).json({
       message: "Brand created successfully",
-      data: toBrandResponse(newBrand.toObject()),
+      data: await toBrandResponse(newBrand.toObject()),
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: "Failed to create brand" });
+    res.status(500).json({
+      error: "Failed to create brand",
+      details: error.message,
+    });
   }
 };
 
