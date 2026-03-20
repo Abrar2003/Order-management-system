@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
@@ -175,6 +175,8 @@ const QcDetails = () => {
   const { id } = useParams();
   const [qc, setQc] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [relatedFileType, setRelatedFileType] = useState("product_image");
+  const [uploadingRelatedFile, setUploadingRelatedFile] = useState(false);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [showShippingModal, setShowShippingModal] = useState(false);
   const [showEditShippingModal, setShowEditShippingModal] = useState(false);
@@ -184,6 +186,7 @@ const QcDetails = () => {
 
   const navigate = useNavigate();
   const location = useLocation();
+  const relatedFileInputRef = useRef(null);
   const user = getUserFromToken();
   const normalizedRole = String(user?.role || "").trim().toLowerCase();
   const currentUserId = String(user?.id || user?._id || "").trim();
@@ -246,6 +249,7 @@ const QcDetails = () => {
     canUpdateQcByRole &&
     pendingAlignmentInfo.hasRequest &&
     isQcAlignedRecord;
+  const canUploadRelatedFile = Boolean(qc?.item_master?._id) && canUpdateQc;
 
   const sortedLabels = useMemo(() => normalizeLabels(qc?.labels), [qc?.labels]);
   const backTarget = useMemo(() => {
@@ -462,6 +466,64 @@ const QcDetails = () => {
       setLoading(false);
     }
   }, [id]);
+
+  const handleOpenRelatedFilePicker = useCallback(() => {
+    if (!canUploadRelatedFile || uploadingRelatedFile) return;
+    relatedFileInputRef.current?.click();
+  }, [canUploadRelatedFile, uploadingRelatedFile]);
+
+  const handleRelatedFileChange = useCallback(async (event) => {
+    const selectedFile = event.target?.files?.[0];
+    if (!selectedFile) return;
+
+    const normalizedName = String(selectedFile.name || "").toLowerCase();
+    const hasAllowedExtension = [".jpg", ".jpeg", ".png"].some((extension) =>
+      normalizedName.endsWith(extension),
+    );
+    const hasAllowedMimeType = ["image/jpeg", "image/png"].includes(
+      String(selectedFile.type || "").toLowerCase(),
+    );
+
+    if (!hasAllowedExtension || !hasAllowedMimeType) {
+      alert("Only JPG, JPEG, or PNG files are allowed for product images.");
+      event.target.value = "";
+      return;
+    }
+
+    if (!qc?.item_master?._id) {
+      alert("Item master record not found for this QC.");
+      event.target.value = "";
+      return;
+    }
+
+    try {
+      setUploadingRelatedFile(true);
+      const formData = new FormData();
+      formData.append("file_type", relatedFileType);
+      formData.append("file", selectedFile);
+
+      const response = await api.post(
+        `/items/${encodeURIComponent(qc.item_master._id)}/files`,
+        formData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        },
+      );
+
+      alert(response?.data?.message || "Product image uploaded successfully.");
+      await fetchQcDetails();
+    } catch (error) {
+      console.error(error);
+      alert(
+        error?.response?.data?.message || "Failed to upload product image.",
+      );
+    } finally {
+      setUploadingRelatedFile(false);
+      event.target.value = "";
+    }
+  }, [fetchQcDetails, qc?.item_master?._id, relatedFileType]);
 
   const handleDeleteInspectionRecord = useCallback(
     async (recordId) => {
@@ -772,6 +834,14 @@ const QcDetails = () => {
             </section>
 
             <div className="d-flex justify-content-end flex-wrap gap-2">
+              <input
+                ref={relatedFileInputRef}
+                type="file"
+                className="d-none"
+                accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                onChange={handleRelatedFileChange}
+              />
+
               {canFinalizeShipping &&
                 ["Inspection Done", "Partial Shipped"].includes(
                   qc?.order?.status,
@@ -784,6 +854,43 @@ const QcDetails = () => {
                     Finalize Shipping
                   </button>
                 )}
+
+              <select
+                className="form-select"
+                style={{ width: "auto", minWidth: "180px" }}
+                value={relatedFileType}
+                onChange={(e) => setRelatedFileType(String(e.target.value || "product_image"))}
+                disabled={!canUploadRelatedFile || uploadingRelatedFile}
+                title={!qc?.item_master?._id ? "Item master not found for this QC." : ""}
+              >
+                <option value="product_image">Product Image</option>
+              </select>
+
+              <button
+                type="button"
+                className="btn btn-outline-primary"
+                onClick={handleOpenRelatedFilePicker}
+                disabled={!canUploadRelatedFile || uploadingRelatedFile}
+                title={
+                  !canUploadRelatedFile
+                    ? !qc?.item_master?._id
+                      ? "Item master not found for this QC."
+                      : !pendingAlignmentInfo.hasRequest
+                      ? "QC is not requested yet. Align QC request before uploading."
+                      : !isQcAlignedRecord
+                      ? "QC can upload only records aligned to them."
+                      : isInspectionDone
+                      ? "After inspection is done, only admin can update this record."
+                      : !isQcInspectionDateAllowed
+                      ? "QC date rule will be validated while submitting."
+                      : hasUsedOneDayBackdatedUpdate
+                      ? "Backdated one-time rule will be validated while submitting."
+                      : "Only admin, manager, or aligned QC can upload related files."
+                    : ""
+                }
+              >
+                {uploadingRelatedFile ? "Uploading..." : "Upload Related File"}
+              </button>
 
               <button
                 type="button"

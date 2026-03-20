@@ -60,9 +60,7 @@ const UploadLogSchema = new mongoose.Schema(
     source_size_bytes: { type: Number, default: 0, min: 0 },
     source_file_storage: {
       key: { type: String, default: "", trim: true },
-      url: { type: String, default: "", trim: true },
-      bucket: { type: String, default: "", trim: true },
-      endpoint: { type: String, default: "", trim: true },
+      originalName: { type: String, default: "", trim: true },
       contentType: { type: String, default: "", trim: true },
       size: { type: Number, default: 0, min: 0 },
     },

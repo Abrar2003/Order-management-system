@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { applyRectifiedRows, rectifyPdfOrders } from "../services/orders.service";
+import PreviousOrderCheckModal from "./PreviousOrderCheckModal";
 import { formatDateDDMMYYYY } from "../utils/date";
 import "../App.css";
 
@@ -24,6 +25,23 @@ const triggerFileDownload = (blob, fileName) => {
   window.URL.revokeObjectURL(objectUrl);
 };
 
+const isPreviousOrderCheckable = (row = {}) =>
+  String(row?.change_type || "").trim().toLowerCase() === "new";
+
+const formatPreviousOrderActionSummary = (action = {}) => {
+  const previousOrderId = String(action?.previous_order_order_id || "").trim();
+  if (!previousOrderId) return "";
+
+  const strategy = String(action?.strategy || "").trim().toLowerCase();
+  if (strategy === "replace_previous") {
+    return action?.transfer_inspection_records
+      ? `Replace ${previousOrderId} and transfer QC`
+      : `Replace ${previousOrderId}`;
+  }
+
+  return `Keep both with ${previousOrderId}`;
+};
+
 const RectifyPdfModal = ({ onClose, onSuccess }) => {
   const [file, setFile] = useState(null);
   const [brand, setBrand] = useState("");
@@ -33,6 +51,7 @@ const RectifyPdfModal = ({ onClose, onSuccess }) => {
   const [result, setResult] = useState(null);
   const [previewRows, setPreviewRows] = useState([]);
   const [checkedRows, setCheckedRows] = useState({});
+  const [activePreviousOrderRow, setActivePreviousOrderRow] = useState(null);
 
   const toDateText = (value) => {
     const formatted = formatDateDDMMYYYY(value, "");
@@ -161,6 +180,22 @@ const RectifyPdfModal = ({ onClose, onSuccess }) => {
     }
   };
 
+  const handlePreviousOrderActionSave = (nextAction) => {
+    if (!activePreviousOrderRow?.row_id) return;
+
+    setPreviewRows((prevRows) =>
+      prevRows.map((row) =>
+        row.row_id !== activePreviousOrderRow.row_id
+          ? row
+          : {
+            ...row,
+            previous_order_action: nextAction,
+          },
+      ),
+    );
+    setActivePreviousOrderRow(null);
+  };
+
   const summary = result?.summary || null;
   const apply = result?.apply || null;
 
@@ -274,6 +309,7 @@ const RectifyPdfModal = ({ onClose, onSuccess }) => {
                           <th>Order Date</th>
                           <th>Existing Status</th>
                           <th>Changed Fields</th>
+                          <th>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -309,6 +345,31 @@ const RectifyPdfModal = ({ onClose, onSuccess }) => {
                                   ? row.changed_fields.join(", ")
                                   : "-"}
                               </td>
+                              <td>
+                                {isPreviousOrderCheckable(row) ? (
+                                  <div className="d-grid gap-1">
+                                    <button
+                                      type="button"
+                                      className="btn btn-outline-primary btn-sm"
+                                      onClick={() => setActivePreviousOrderRow(row)}
+                                      disabled={loading}
+                                    >
+                                      Check Prev Orders
+                                    </button>
+                                    {formatPreviousOrderActionSummary(
+                                      row?.previous_order_action,
+                                    ) && (
+                                      <div className="small text-muted">
+                                        {formatPreviousOrderActionSummary(
+                                          row?.previous_order_action,
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  "-"
+                                )}
+                              </td>
                             </tr>
                           );
                         })}
@@ -322,6 +383,13 @@ const RectifyPdfModal = ({ onClose, onSuccess }) => {
             {error && <div className="alert alert-danger py-2 mb-0">{error}</div>}
             {result?.message && !error && (
               <div className="alert alert-success py-2 mb-0">{result.message}</div>
+            )}
+            {Array.isArray(apply?.warnings) && apply.warnings.length > 0 && (
+              <div className="alert alert-warning py-2 mb-0">
+                {apply.warnings.map((warning, index) => (
+                  <div key={`${warning}-${index}`}>{warning}</div>
+                ))}
+              </div>
             )}
           </div>
 
@@ -353,6 +421,14 @@ const RectifyPdfModal = ({ onClose, onSuccess }) => {
           </div>
         </div>
       </div>
+      {activePreviousOrderRow && (
+        <PreviousOrderCheckModal
+          row={activePreviousOrderRow}
+          action={activePreviousOrderRow?.previous_order_action}
+          onClose={() => setActivePreviousOrderRow(null)}
+          onApply={handlePreviousOrderActionSave}
+        />
+      )}
     </div>
   );
 };

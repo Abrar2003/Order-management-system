@@ -44,18 +44,49 @@ const formatLbhValue = (value) => {
   return `${safeLength} x ${safeBreadth} x ${safeHeight}`;
 };
 
-const hasCompletePositiveLbh = (value = {}) => {
+const hasAnyPositiveLbh = (value = {}) => {
   const length = Number(value?.L || 0);
   const breadth = Number(value?.B || 0);
   const height = Number(value?.H || 0);
   return (
-    Number.isFinite(length)
-    && Number.isFinite(breadth)
-    && Number.isFinite(height)
-    && length > 0
-    && breadth > 0
-    && height > 0
+    (Number.isFinite(length) && length > 0)
+    || (Number.isFinite(breadth) && breadth > 0)
+    || (Number.isFinite(height) && height > 0)
   );
+};
+
+const pickDisplayableLbh = (...values) =>
+  values.find((value) => hasAnyPositiveLbh(value)) || null;
+
+const formatStructuredLbhValue = ({
+  top = null,
+  bottom = null,
+  single = null,
+  fallback = null,
+} = {}) => {
+  const resolvedTop = pickDisplayableLbh(top);
+  const resolvedBottom = pickDisplayableLbh(bottom);
+  const resolvedSingle = pickDisplayableLbh(single, fallback);
+
+  if (resolvedTop || resolvedBottom) {
+    return {
+      mode: "split",
+      top: resolvedTop,
+      bottom: resolvedBottom,
+      display: [
+        resolvedTop ? `Top: ${formatLbhValue(resolvedTop)}` : "",
+        resolvedBottom ? `Bottom: ${formatLbhValue(resolvedBottom)}` : "",
+      ]
+        .filter(Boolean)
+        .join(" | "),
+    };
+  }
+
+  return {
+    mode: "single",
+    value: resolvedSingle,
+    display: formatLbhValue(resolvedSingle || {}),
+  };
 };
 
 const toDisplayValue = (value, fallback = "N/A") => {
@@ -106,28 +137,67 @@ const toComparableValue = (value) =>
     .trim()
     .toLowerCase();
 
-const LBH_REGEX = /^(-?\d+(?:\.\d+)?)\s*x\s*(-?\d+(?:\.\d+)?)\s*x\s*(-?\d+(?:\.\d+)?)$/i;
-
-const parseLbhString = (value) => {
-  const normalized = String(value ?? "").trim();
-  const match = normalized.match(LBH_REGEX);
-  if (!match) return null;
-
-  const length = Number(match[1]);
-  const breadth = Number(match[2]);
-  const height = Number(match[3]);
-  if (!Number.isFinite(length) || !Number.isFinite(breadth) || !Number.isFinite(height)) {
-    return null;
-  }
-
-  return { L: length, B: breadth, H: height };
-};
-
 const formatDifferenceNumber = (value) => {
   const numeric = Math.abs(Number(value));
   if (!Number.isFinite(numeric)) return "0";
   if (Number.isInteger(numeric)) return String(numeric);
   return numeric.toFixed(2).replace(/\.?0+$/, "");
+};
+
+const collectLbhDifferenceLogs = ({
+  attribute = "",
+  pisMeta = null,
+  checkedMeta = null,
+} = {}) => {
+  const logs = [];
+  const dimensionNames = {
+    L: "length",
+    B: "breadth",
+    H: "height",
+  };
+
+  const compareLbhSegment = (segmentLabel, pisLbh, checkedLbh) => {
+    const hasPis = hasAnyPositiveLbh(pisLbh || {});
+    const hasChecked = hasAnyPositiveLbh(checkedLbh || {});
+    if (!hasPis && !hasChecked) return;
+
+    const labelPrefix = segmentLabel ? `${attribute} ${segmentLabel}` : attribute;
+
+    if (!hasPis && hasChecked) {
+      logs.push(
+        `For ${labelPrefix}, inspected value is ${formatLbhValue(checkedLbh)} while PIS value is not set.`,
+      );
+      return;
+    }
+
+    if (hasPis && !hasChecked) {
+      logs.push(
+        `For ${labelPrefix}, PIS value is ${formatLbhValue(pisLbh)} while inspected value is not set.`,
+      );
+      return;
+    }
+
+    ["L", "B", "H"].forEach((axis) => {
+      const pisAxisValue = Number(pisLbh?.[axis] || 0);
+      const checkedAxisValue = Number(checkedLbh?.[axis] || 0);
+      const delta = checkedAxisValue - pisAxisValue;
+      if (!Number.isFinite(delta) || Math.abs(delta) < 0.0001) return;
+
+      const direction = delta > 0 ? "greater" : "smaller";
+      logs.push(
+        `For ${labelPrefix}, inspected ${dimensionNames[axis]} is ${formatDifferenceNumber(delta)} cm ${direction} than PIS size.`,
+      );
+    });
+  };
+
+  if (pisMeta?.mode === "split" || checkedMeta?.mode === "split") {
+    compareLbhSegment("Top", pisMeta?.top, checkedMeta?.top);
+    compareLbhSegment("Bottom", pisMeta?.bottom, checkedMeta?.bottom);
+    return logs;
+  }
+
+  compareLbhSegment("", pisMeta?.value, checkedMeta?.value);
+  return logs;
 };
 
 const InspectionReport = () => {
@@ -163,6 +233,11 @@ const InspectionReport = () => {
       itemDescription: toDisplayValue(qc?.item?.description),
     };
   }, [qc]);
+
+  const productImageSrc = useMemo(
+    () => String(qc?.item_master?.image?.url || "").trim(),
+    [qc?.item_master?.image?.url],
+  );
 
   const inspectionRows = useMemo(() => {
     const sourceRows = Array.isArray(qc?.inspection_record) ? qc.inspection_record : [];
@@ -224,13 +299,32 @@ const InspectionReport = () => {
 
   const itemMasterSummary = useMemo(() => {
     const itemMaster = qc?.item_master || {};
-    const pisItemLbh = formatLbhValue(itemMaster?.pis_item_LBH || itemMaster?.item_LBH);
-    const checkedItemLbh = formatLbhValue(
-      itemMaster?.inspected_item_LBH || itemMaster?.item_LBH,
-    );
-    const pisPackedSize = formatLbhValue(
-      itemMaster?.pis_box_LBH || itemMaster?.pis_item_LBH || itemMaster?.box_LBH || itemMaster?.item_LBH,
-    );
+    const pisProductLbh = formatStructuredLbhValue({
+      top: itemMaster?.pis_item_top_LBH,
+      bottom: itemMaster?.pis_item_bottom_LBH,
+      single: itemMaster?.pis_item_LBH,
+      fallback: itemMaster?.item_LBH,
+    });
+    const checkedProductLbh = formatStructuredLbhValue({
+      top: itemMaster?.inspected_item_top_LBH,
+      bottom: itemMaster?.inspected_item_bottom_LBH,
+      single: itemMaster?.inspected_item_LBH,
+      fallback: itemMaster?.item_LBH,
+    });
+    const pisBoxTopLbh =
+      itemMaster?.pis_box_top_LBH || itemMaster?.pis_item_top_LBH || {};
+    const pisBoxBottomLbh =
+      itemMaster?.pis_box_bottom_LBH || itemMaster?.pis_item_bottom_LBH || {};
+    const pisPackedSize = formatStructuredLbhValue({
+      top: pisBoxTopLbh,
+      bottom: pisBoxBottomLbh,
+      single:
+        itemMaster?.pis_box_LBH
+        || itemMaster?.pis_item_LBH
+        || itemMaster?.box_LBH
+        || itemMaster?.item_LBH,
+      fallback: itemMaster?.box_LBH || itemMaster?.item_LBH,
+    });
     const inspectedTopLbh =
       itemMaster?.inspected_box_top_LBH
       || itemMaster?.inspected_top_LBH
@@ -241,15 +335,16 @@ const InspectionReport = () => {
       || itemMaster?.inspected_bottom_LBH
       || itemMaster?.inspected_item_bottom_LBH
       || {};
-    const checkedPackedSize = hasCompletePositiveLbh(inspectedTopLbh)
-      && hasCompletePositiveLbh(inspectedBottomLbh)
-      ? `Top: ${formatLbhValue(inspectedTopLbh)} | Bottom: ${formatLbhValue(inspectedBottomLbh)}`
-      : formatLbhValue(
-          itemMaster?.inspected_box_LBH
-          || itemMaster?.inspected_item_LBH
-          || itemMaster?.box_LBH
-          || itemMaster?.item_LBH,
-        );
+    const checkedPackedSize = formatStructuredLbhValue({
+      top: inspectedTopLbh,
+      bottom: inspectedBottomLbh,
+      single:
+        itemMaster?.inspected_box_LBH
+        || itemMaster?.inspected_item_LBH
+        || itemMaster?.box_LBH
+        || itemMaster?.item_LBH,
+      fallback: itemMaster?.box_LBH || itemMaster?.item_LBH,
+    });
     const pisNetWeight = toDisplayNumber(
       getWeightValue(itemMaster?.pis_weight, "total_net") || itemMaster?.weight?.net,
     );
@@ -319,8 +414,20 @@ const InspectionReport = () => {
       pisBarcodeValue !== "Not Set" ? pisBarcodeValue : inspectedBarcodeValue;
 
     const rows = [
-      { attribute: "Item Size (L x B x H)", pis: pisItemLbh, checked: checkedItemLbh },
-      { attribute: "Packed Size (L x B x H)", pis: pisPackedSize, checked: checkedPackedSize },
+      {
+        attribute: "Product Size (L x B x H)",
+        pis: pisProductLbh.display,
+        checked: checkedProductLbh.display,
+        pis_meta: pisProductLbh,
+        checked_meta: checkedProductLbh,
+      },
+      {
+        attribute: "Box Size (L x B x H)",
+        pis: pisPackedSize.display,
+        checked: checkedPackedSize.display,
+        pis_meta: pisPackedSize,
+        checked_meta: checkedPackedSize,
+      },
       { attribute: "Net Weight", pis: pisNetWeight, checked: checkedNetWeight },
       { attribute: "Gross Weight", pis: pisGrossWeight, checked: checkedGrossWeight },
       ...(showCbmTop ? [{ attribute: "CBM Top", pis: pisCbmTop, checked: checkedCbmTop }] : []),
@@ -341,20 +448,28 @@ const InspectionReport = () => {
   const differenceLogs = useMemo(() => {
     const rows = Array.isArray(itemMasterSummary?.rows) ? itemMasterSummary.rows : [];
     const logs = [];
-    const dimensionNames = {
-      L: "length",
-      B: "breadth",
-      H: "height",
-    };
 
     rows.forEach((row) => {
       const attribute = String(row?.attribute || "").trim();
       const pisValue = String(row?.pis ?? "").trim();
       const checkedValue = String(row?.checked ?? "").trim();
-      const normalizedPis = toComparableValue(pisValue);
-      const normalizedChecked = toComparableValue(checkedValue);
 
       if (!attribute || !pisValue || !checkedValue) return;
+
+      if (row?.pis_meta || row?.checked_meta) {
+        const lbhLogs = collectLbhDifferenceLogs({
+          attribute,
+          pisMeta: row?.pis_meta,
+          checkedMeta: row?.checked_meta,
+        });
+        if (lbhLogs.length > 0) {
+          logs.push(...lbhLogs);
+        }
+        return;
+      }
+
+      const normalizedPis = toComparableValue(pisValue);
+      const normalizedChecked = toComparableValue(checkedValue);
       if (normalizedPis === normalizedChecked) return;
 
       const isMissingPis = normalizedPis === "not set" || normalizedPis === "n/a";
@@ -369,25 +484,6 @@ const InspectionReport = () => {
         return;
       }
       if (isMissingPis && isMissingChecked) return;
-
-      const parsedPisLbh = parseLbhString(pisValue);
-      const parsedCheckedLbh = parseLbhString(checkedValue);
-      if (parsedPisLbh && parsedCheckedLbh) {
-        let hasDimensionDifference = false;
-        (["L", "B", "H"]).forEach((axis) => {
-          const pisAxisValue = Number(parsedPisLbh[axis]);
-          const checkedAxisValue = Number(parsedCheckedLbh[axis]);
-          const delta = checkedAxisValue - pisAxisValue;
-          if (!Number.isFinite(delta) || Math.abs(delta) < 0.0001) return;
-          hasDimensionDifference = true;
-          const direction = delta > 0 ? "greater" : "smaller";
-          logs.push(
-            `For ${attribute}, inspected ${dimensionNames[axis]} is ${formatDifferenceNumber(delta)} cm ${direction} than PIS size.`,
-          );
-        });
-
-        if (hasDimensionDifference) return;
-      }
 
       const pisNumeric = Number(pisValue);
       const checkedNumeric = Number(checkedValue);
@@ -624,8 +720,18 @@ const InspectionReport = () => {
                   </div>
                 </div>
                 <div className="inspection-report-summary-column inspection-report-summary-media">
-                  <div className="inspection-report-image-skeleton">
-                    <span>Product Image not available yet</span>
+                  <div className="inspection-report-brand-panel">
+                    {productImageSrc ? (
+                      <img
+                        src={productImageSrc}
+                        alt={`${orderInfo.itemDescription} product`}
+                        className="inspection-report-brand-logo"
+                      />
+                    ) : (
+                      <div className="inspection-report-image-skeleton">
+                        <span>Product Image not available yet</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

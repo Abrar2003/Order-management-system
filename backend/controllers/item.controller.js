@@ -1,7 +1,14 @@
 const Item = require("../models/item.model");
 const Order = require("../models/order.model");
 const mongoose = require("mongoose");
+const path = require("path");
 const { syncAllItemsFromOrdersAndQc } = require("../services/itemSync");
+const {
+  isConfigured: isWasabiConfigured,
+  createStorageKey,
+  uploadBuffer,
+  deleteObject,
+} = require("../services/wasabiStorage.service");
 
 const escapeRegex = (value = "") =>
   String(value)
@@ -127,6 +134,10 @@ const normalizeDistinctValues = (values = []) =>
       .map((value) => String(value ?? "").trim())
       .filter(Boolean),
   )].sort((a, b) => a.localeCompare(b));
+
+const ALLOWED_ITEM_FILE_TYPES = new Set(["product_image"]);
+const ALLOWED_ITEM_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png"]);
+const ALLOWED_ITEM_IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png"]);
 
 const toSafeNumber = (value, fallback = 0) => {
   const parsed = Number(value);
@@ -832,6 +843,113 @@ exports.updateItemPis = async (req, res) => {
     return res.status(400).json({
       success: false,
       message: error.message || "Failed to update PIS values",
+    });
+  }
+};
+
+exports.uploadItemFile = async (req, res) => {
+  try {
+    const itemId = String(req.params.id || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(itemId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid item id",
+      });
+    }
+
+    const fileType = normalizeTextField(
+      req.body?.file_type || req.body?.fileType || "",
+    ).toLowerCase();
+    if (!ALLOWED_ITEM_FILE_TYPES.has(fileType)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid file type",
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "No file uploaded",
+      });
+    }
+
+    if (!isWasabiConfigured()) {
+      return res.status(500).json({
+        success: false,
+        message: "Wasabi storage is not configured",
+      });
+    }
+
+    const mimeType = normalizeTextField(req.file.mimetype).toLowerCase();
+    const extension = path.extname(String(req.file.originalname || "")).toLowerCase();
+    if (
+      !ALLOWED_ITEM_IMAGE_MIME_TYPES.has(mimeType)
+      || !ALLOWED_ITEM_IMAGE_EXTENSIONS.has(extension)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Only JPG, JPEG, and PNG files are allowed for product images",
+      });
+    }
+
+    const item = await Item.findById(itemId);
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: "Item not found",
+      });
+    }
+
+    const previousStorageKey = normalizeTextField(
+      item?.image?.key || item?.image?.public_id,
+    );
+    const uploadResult = await uploadBuffer({
+      buffer: req.file.buffer,
+      key: createStorageKey({
+        folder: "item-image",
+        originalName:
+          req.file.originalname || `${normalizeTextField(item?.code || itemId)}${extension || ".jpg"}`,
+        extension: extension || ".jpg",
+      }),
+      originalName: req.file.originalname || `${normalizeTextField(item?.code || itemId)}${extension || ".jpg"}`,
+      contentType: mimeType || "image/jpeg",
+    });
+
+    item.image = {
+      key: uploadResult.key,
+      originalName: uploadResult.originalName,
+      contentType: uploadResult.contentType,
+      size: uploadResult.size,
+      link: "",
+      public_id: "",
+    };
+    await item.save();
+
+    if (previousStorageKey && previousStorageKey !== uploadResult.key) {
+      deleteObject(previousStorageKey).catch((error) => {
+        console.error("Delete previous item image failed:", {
+          itemId,
+          previousStorageKey,
+          error: error?.message || String(error),
+        });
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Product image uploaded successfully",
+      data: {
+        item_id: item._id,
+        file_type: fileType,
+        image: item.image,
+      },
+    });
+  } catch (error) {
+    console.error("Upload Item File Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to upload item file",
     });
   }
 };

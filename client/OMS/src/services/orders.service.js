@@ -73,6 +73,35 @@ export const createManualOrders = async (orders = []) => {
   return res.data;
 };
 
+export const checkPreviousOrder = async ({
+  orderId = "",
+  itemCode = "",
+} = {}) => {
+  const normalizedOrderId = String(orderId || "").trim();
+  const normalizedItemCode = String(itemCode || "").trim();
+
+  if (!normalizedOrderId) {
+    throw new Error("Previous PO is required");
+  }
+
+  if (!normalizedItemCode) {
+    throw new Error("Item code is required");
+  }
+
+  const token = localStorage.getItem("token");
+  const res = await axios.get("/orders/previous-order-check", {
+    params: {
+      order_id: normalizedOrderId,
+      item_code: normalizedItemCode,
+    },
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return res.data;
+};
+
 export const rectifyPdfOrders = async ({
   file,
   brand,

@@ -139,6 +139,57 @@ const buildAuditActor = (user = null) => ({
   name: buildArchivedByName(user),
 });
 
+const PREVIOUS_ORDER_ACTION_STRATEGY = Object.freeze({
+  KEEP_BOTH: "keep_both",
+  REPLACE_PREVIOUS: "replace_previous",
+});
+
+const normalizeActionBoolean = (value, fallback = false) => {
+  if (value === undefined || value === null || value === "") return fallback;
+  return ["1", "true", "yes", "y", "on"].includes(
+    String(value).trim().toLowerCase(),
+  );
+};
+
+const normalizePreviousOrderActionStrategy = (value) =>
+  String(value || "").trim().toLowerCase()
+  === PREVIOUS_ORDER_ACTION_STRATEGY.REPLACE_PREVIOUS
+    ? PREVIOUS_ORDER_ACTION_STRATEGY.REPLACE_PREVIOUS
+    : PREVIOUS_ORDER_ACTION_STRATEGY.KEEP_BOTH;
+
+const normalizePreviousOrderActionInput = (value = {}) => {
+  const source = value && typeof value === "object" ? value : {};
+  const previousOrderDbId = String(
+    source?.previous_order_db_id
+    || source?.previousOrderDbId
+    || source?.previous_order_id
+    || source?.previousOrderId
+    || "",
+  ).trim();
+  const previousOrderOrderId = normalizeOrderKey(
+    source?.previous_order_order_id
+    || source?.previousOrderOrderId
+    || source?.previous_order_po
+    || source?.previousOrderPo
+    || "",
+  );
+
+  return {
+    previous_order_db_id:
+      previousOrderDbId && mongoose.Types.ObjectId.isValid(previousOrderDbId)
+        ? previousOrderDbId
+        : null,
+    previous_order_order_id: previousOrderOrderId || null,
+    strategy: normalizePreviousOrderActionStrategy(
+      source?.strategy || source?.action || source?.mode,
+    ),
+    transfer_inspection_records: normalizeActionBoolean(
+      source?.transfer_inspection_records ?? source?.transferInspectionRecords,
+      false,
+    ),
+  };
+};
+
 const normalizeHistoryActor = (value = {}) => {
   const actorId = value?.user && mongoose.Types.ObjectId.isValid(value.user)
     ? value.user
@@ -334,6 +385,7 @@ const uploadSourceFileToWasabi = async (file, folder) => {
   return uploadBuffer({
     buffer: file.buffer,
     key: storageKey,
+    originalName: file.originalname || "upload.bin",
     contentType: file.mimetype || "application/octet-stream",
   });
 };
@@ -580,6 +632,209 @@ const computeRectifyOpenQuantity = (orderEntry = {}) => {
   return pendingShipmentQuantity + boundedInspectionPending;
 };
 
+const buildExactTextQuery = (value) => ({
+  $regex: `^${escapeRegex(String(value || "").trim())}$`,
+  $options: "i",
+});
+
+const loadLinkedQcForOrder = async (orderDoc, { session = null } = {}) => {
+  if (!orderDoc?._id) return null;
+
+  if (orderDoc.qc_record && mongoose.Types.ObjectId.isValid(orderDoc.qc_record)) {
+    return QC.findById(orderDoc.qc_record).session(session);
+  }
+
+  return QC.findOne({ order: orderDoc._id }).session(session);
+};
+
+const buildPreviousOrderMetrics = ({ orderDoc = null, qcDoc = null } = {}) => {
+  const orderQuantity = Math.max(
+    0,
+    Number(parseQuantityLike(orderDoc?.quantity) || 0),
+  );
+  const shippedQuantity = Math.max(
+    0,
+    Number(getShipmentQuantityTotal(orderDoc?.shipment) || 0),
+  );
+  const passedQuantity = Math.max(
+    0,
+    Number(parseQuantityLike(qcDoc?.quantities?.qc_passed) || 0),
+  );
+  const qcPendingQuantity = Math.max(
+    0,
+    Number(parseQuantityLike(qcDoc?.quantities?.pending) || 0),
+  );
+  const pendingQuantity = qcDoc
+    ? qcPendingQuantity
+    : Math.max(0, orderQuantity - shippedQuantity);
+
+  return {
+    order_quantity: orderQuantity,
+    shipped_quantity: shippedQuantity,
+    passed_quantity: passedQuantity,
+    pending_quantity: pendingQuantity,
+    has_qc_record: Boolean(qcDoc?._id),
+  };
+};
+
+const buildPreviousOrderResponse = ({ orderDoc = null, qcDoc = null } = {}) => {
+  const metrics = buildPreviousOrderMetrics({ orderDoc, qcDoc });
+
+  return {
+    order: {
+      _id: String(orderDoc?._id || "").trim() || null,
+      order_id: normalizeOrderKey(orderDoc?.order_id),
+      item_code: normalizeRectifyText(orderDoc?.item?.item_code),
+      description: normalizeRectifyText(orderDoc?.item?.description),
+      brand: normalizeLooseString(orderDoc?.brand),
+      vendor: normalizeLooseString(orderDoc?.vendor),
+      status: normalizeLooseString(orderDoc?.status) || "Pending",
+      quantity: metrics.order_quantity,
+      ETD: orderDoc?.ETD || null,
+      order_date: orderDoc?.order_date || null,
+    },
+    metrics,
+    capabilities: {
+      can_keep_both: true,
+      can_replace_previous: metrics.shipped_quantity === 0,
+      can_transfer_inspections:
+        metrics.passed_quantity > 0 && Boolean(qcDoc?._id),
+    },
+  };
+};
+
+const resolvePreviousOrderReplacementPlan = async ({
+  row = {},
+  session = null,
+} = {}) => {
+  const previousOrderAction = normalizePreviousOrderActionInput(
+    row?.previous_order_action || row?.previousOrderAction,
+  );
+
+  if (
+    previousOrderAction.strategy !== PREVIOUS_ORDER_ACTION_STRATEGY.REPLACE_PREVIOUS
+  ) {
+    return {
+      action: previousOrderAction,
+      mode: PREVIOUS_ORDER_ACTION_STRATEGY.KEEP_BOTH,
+      warnings: [],
+      previousOrder: null,
+      previousQc: null,
+    };
+  }
+
+  const warnings = [];
+  const previousOrderDbId = previousOrderAction.previous_order_db_id;
+  const previousOrderOrderId = previousOrderAction.previous_order_order_id;
+  const itemCode = normalizeRectifyText(row?.item_code);
+
+  if (!itemCode) {
+    warnings.push(
+      `Previous-order replacement skipped for ${normalizeOrderKey(row?.order_id) || "UNKNOWN"}/${normalizeRectifyText(row?.item_code) || "UNKNOWN"} because item code is missing.`,
+    );
+    return {
+      action: previousOrderAction,
+      mode: PREVIOUS_ORDER_ACTION_STRATEGY.KEEP_BOTH,
+      warnings,
+      previousOrder: null,
+      previousQc: null,
+    };
+  }
+
+  let previousOrder = null;
+  if (previousOrderDbId) {
+    previousOrder = await Order.findOne({
+      _id: previousOrderDbId,
+      ...ACTIVE_ORDER_MATCH,
+    }).session(session);
+  }
+
+  if (!previousOrder && previousOrderOrderId) {
+    previousOrder = await Order.findOne({
+      ...ACTIVE_ORDER_MATCH,
+      order_id: buildExactTextQuery(previousOrderOrderId),
+      "item.item_code": buildExactTextQuery(itemCode),
+    })
+      .sort({ updatedAt: -1, createdAt: -1 })
+      .session(session);
+  }
+
+  if (!previousOrder) {
+    warnings.push(
+      `Previous order ${previousOrderOrderId || "UNKNOWN"} was not found for item ${itemCode}. Row will be added without replacing the old order.`,
+    );
+    return {
+      action: previousOrderAction,
+      mode: PREVIOUS_ORDER_ACTION_STRATEGY.KEEP_BOTH,
+      warnings,
+      previousOrder: null,
+      previousQc: null,
+    };
+  }
+
+  const previousOrderItemCode = normalizeRectifyText(previousOrder?.item?.item_code);
+  if (
+    previousOrderItemCode
+    && itemCode
+    && previousOrderItemCode.toLowerCase() !== itemCode.toLowerCase()
+  ) {
+    warnings.push(
+      `Previous order ${normalizeOrderKey(previousOrder?.order_id) || "UNKNOWN"} does not match item ${itemCode}. Row will be added without replacing the old order.`,
+    );
+    return {
+      action: previousOrderAction,
+      mode: PREVIOUS_ORDER_ACTION_STRATEGY.KEEP_BOTH,
+      warnings,
+      previousOrder: null,
+      previousQc: null,
+    };
+  }
+
+  const previousQc = await loadLinkedQcForOrder(previousOrder, { session });
+  const previousOrderResponse = buildPreviousOrderResponse({
+    orderDoc: previousOrder,
+    qcDoc: previousQc,
+  });
+
+  if (!previousOrderResponse.capabilities.can_replace_previous) {
+    warnings.push(
+      `Previous order ${normalizeOrderKey(previousOrder?.order_id) || "UNKNOWN"} has shipment history, so it was kept instead of being replaced.`,
+    );
+    return {
+      action: previousOrderAction,
+      mode: PREVIOUS_ORDER_ACTION_STRATEGY.KEEP_BOTH,
+      warnings,
+      previousOrder: null,
+      previousQc: null,
+    };
+  }
+
+  if (
+    previousOrderAction.transfer_inspection_records
+    && previousOrderResponse.metrics.passed_quantity > Number(row?.quantity || 0)
+  ) {
+    warnings.push(
+      `Transfer skipped for ${normalizeOrderKey(row?.order_id) || "UNKNOWN"}/${itemCode} because new quantity is less than previous passed quantity.`,
+    );
+    return {
+      action: previousOrderAction,
+      mode: PREVIOUS_ORDER_ACTION_STRATEGY.KEEP_BOTH,
+      warnings,
+      previousOrder: null,
+      previousQc: null,
+    };
+  }
+
+  return {
+    action: previousOrderAction,
+    mode: PREVIOUS_ORDER_ACTION_STRATEGY.REPLACE_PREVIOUS,
+    warnings,
+    previousOrder,
+    previousQc,
+    previousOrderResponse,
+  };
+};
+
 const normalizeOrderComparisonValue = (value) =>
   normalizeRectifyText(value).toLowerCase();
 
@@ -801,6 +1056,9 @@ const normalizeRectifiedSelectionRow = (row = {}, defaults = {}) => {
     changed_fields: changedFields,
     existing_order_id: existingOrderId || null,
     existing_order_status: existingOrderStatus || null,
+    previous_order_action: normalizePreviousOrderActionInput(
+      row?.previous_order_action || row?.previousOrderAction,
+    ),
   };
 };
 
@@ -819,6 +1077,9 @@ const buildRectifyRowsForResponse = (rows = []) =>
     changed_fields: normalizeRectifyChangedFields(row?.changed_fields),
     existing_order_id: String(row?.existing_order_id || "").trim() || null,
     existing_order_status: normalizeLooseString(row?.existing_order_status) || null,
+    previous_order_action: normalizePreviousOrderActionInput(
+      row?.previous_order_action || row?.previousOrderAction,
+    ),
   }));
 
 const createRectifyUploadLog = async ({
@@ -1081,9 +1342,252 @@ const createOrderEditLog = async ({
   }
 };
 
+const applyNewOrderRows = async ({
+  rows = [],
+  reqUser = null,
+  actionLabel = "upload",
+} = {}) => {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  if (safeRows.length === 0) {
+    return {
+      inserted_count: 0,
+      warnings: [],
+    };
+  }
+
+  const insertedDocs = [];
+  const warnings = [];
+  const groupsToSync = new Map();
+  const orderLogs = [];
+
+  for (const row of safeRows) {
+    let postCommitNewOrder = null;
+    let rowWarnings = [];
+    const rowGroupsToSync = new Map();
+    const rowOrderLogs = [];
+
+    try {
+      const replacementPlan = await resolvePreviousOrderReplacementPlan({
+        row,
+      });
+
+      rowWarnings = [...replacementPlan.warnings];
+      const newOrder = new Order({
+        order_id: row.order_id,
+        item: {
+          item_code: row.item_code,
+          description: row.description,
+        },
+        brand: row.brand,
+        vendor: row.vendor,
+        ETD: row.ETD || undefined,
+        order_date: row.order_date || undefined,
+        status: "Pending",
+        quantity: Number(row.quantity),
+        updated_by: buildAuditActor(reqUser),
+      });
+
+      const newOrderBeforeSnapshot = {};
+      const newOrderGroup = {
+        order_id: newOrder.order_id,
+        brand: newOrder.brand,
+        vendor: newOrder.vendor,
+      };
+      await newOrder.validate();
+
+      if (
+        replacementPlan.mode === PREVIOUS_ORDER_ACTION_STRATEGY.REPLACE_PREVIOUS
+        && replacementPlan.previousOrder
+      ) {
+        const previousOrder = replacementPlan.previousOrder;
+        const previousQc = replacementPlan.previousQc;
+        const previousOrderBeforeSnapshot = buildOrderEditLogSnapshot(previousOrder);
+        const archiveRemark = `Replaced by PO ${normalizeOrderKey(newOrder.order_id) || "UNKNOWN"} during ${actionLabel}.`;
+
+        if (
+          replacementPlan.action.transfer_inspection_records
+          && previousQc
+          && Number(previousQc?.quantities?.qc_passed || 0) > 0
+        ) {
+          const nextQuantity = Math.max(0, Number(newOrder.quantity || 0));
+          const clampToDemand = (value) => {
+            const parsed = Number(value || 0);
+            if (!Number.isFinite(parsed) || parsed < 0) return 0;
+            return Math.min(parsed, nextQuantity);
+          };
+
+          previousQc.order = newOrder._id;
+          previousQc.order_meta = previousQc.order_meta || {};
+          previousQc.order_meta.order_id = newOrder.order_id;
+          previousQc.order_meta.brand = newOrder.brand;
+          previousQc.order_meta.vendor = newOrder.vendor;
+          previousQc.item = previousQc.item || {};
+          previousQc.item.item_code = newOrder.item.item_code;
+          previousQc.item.description = newOrder.item.description;
+          previousQc.quantities = previousQc.quantities || {};
+
+          const nextPassed = clampToDemand(previousQc.quantities.qc_passed);
+          const nextChecked = Math.max(
+            nextPassed,
+            clampToDemand(previousQc.quantities.qc_checked),
+          );
+          const nextRequested = clampToDemand(
+            previousQc.quantities.quantity_requested,
+          );
+          const nextProvision = Math.max(
+            nextPassed,
+            clampToDemand(previousQc.quantities.vendor_provision),
+          );
+
+          previousQc.quantities.client_demand = nextQuantity;
+          previousQc.quantities.qc_passed = nextPassed;
+          previousQc.quantities.qc_checked = nextChecked;
+          previousQc.quantities.quantity_requested = nextRequested;
+          previousQc.quantities.vendor_provision = nextProvision;
+          previousQc.quantities.pending = Math.max(0, nextQuantity - nextPassed);
+          previousQc.quantities.qc_rejected = Math.max(
+            0,
+            nextChecked - nextPassed,
+          );
+          previousQc.updated_by = buildAuditActor(reqUser);
+
+          newOrder.qc_record = previousQc._id;
+          newOrder.status = computeOrderStatus({
+            orderQuantity: nextQuantity,
+            shippedQuantity: 0,
+            qcRecord: previousQc,
+          });
+
+          previousOrder.qc_record = null;
+          await previousQc.save();
+        }
+
+        previousOrder.archived = true;
+        previousOrder.status = "Cancelled";
+        previousOrder.archived_remark = archiveRemark;
+        previousOrder.archived_at = new Date();
+        previousOrder.archived_by = {
+          user:
+            reqUser?._id && mongoose.Types.ObjectId.isValid(reqUser._id)
+              ? reqUser._id
+              : null,
+          name: buildArchivedByName(reqUser),
+        };
+        previousOrder.updated_by = buildAuditActor(reqUser);
+
+        await previousOrder.save();
+
+        const postCommitPreviousOrder = previousOrder.toObject();
+        rowOrderLogs.push({
+          reqUser,
+          operationType: "order_edit_archive",
+          beforeSnapshot: previousOrderBeforeSnapshot,
+          afterSnapshot: buildOrderEditLogSnapshot(postCommitPreviousOrder),
+          extraRemarks: [
+            archiveRemark,
+            replacementPlan.action.transfer_inspection_records
+              ? "Existing QC history was transferred to the new PO."
+              : "Previous order was archived and the new PO was kept separate.",
+          ],
+        });
+
+        const previousGroup = {
+          order_id: previousOrder.order_id,
+          brand: previousOrder.brand,
+          vendor: previousOrder.vendor,
+        };
+        rowGroupsToSync.set(
+          `${previousGroup.order_id}__${previousGroup.brand}__${previousGroup.vendor}`,
+          previousGroup,
+        );
+      }
+
+      await newOrder.save();
+
+      postCommitNewOrder = newOrder.toObject();
+      rowGroupsToSync.set(
+        `${newOrderGroup.order_id}__${newOrderGroup.brand}__${newOrderGroup.vendor}`,
+        newOrderGroup,
+      );
+      rowOrderLogs.push({
+        reqUser,
+        operationType: "order_edit",
+        beforeSnapshot: newOrderBeforeSnapshot,
+        afterSnapshot: buildOrderEditLogSnapshot(postCommitNewOrder),
+        extraRemarks: [
+          `Order created from ${actionLabel}.`,
+          replacementPlan.mode === PREVIOUS_ORDER_ACTION_STRATEGY.REPLACE_PREVIOUS
+            ? `Previous order ${normalizeOrderKey(replacementPlan.previousOrder?.order_id) || "UNKNOWN"} was replaced.`
+            : "No previous order replacement action was applied.",
+        ],
+      });
+    } catch (error) {
+      rowWarnings.push(
+        `Failed to create ${normalizeOrderKey(row?.order_id) || "UNKNOWN"}/${normalizeRectifyText(row?.item_code) || "UNKNOWN"} during ${actionLabel}: ${error?.message || String(error)}`,
+      );
+    }
+
+    if (postCommitNewOrder) {
+      insertedDocs.push(postCommitNewOrder);
+      for (const [groupKey, groupValue] of rowGroupsToSync.entries()) {
+        groupsToSync.set(groupKey, groupValue);
+      }
+      orderLogs.push(...rowOrderLogs);
+    }
+
+    warnings.push(...rowWarnings);
+  }
+
+  for (const doc of insertedDocs) {
+    try {
+      await upsertItemFromOrder(doc);
+    } catch (itemSyncError) {
+      warnings.push(
+        `Item sync failed for ${normalizeOrderKey(doc?.order_id) || "UNKNOWN"}/${normalizeRectifyText(doc?.item?.item_code) || "UNKNOWN"}.`,
+      );
+      console.error("Item sync after order creation failed:", {
+        orderId: doc?.order_id,
+        itemCode: doc?.item?.item_code,
+        error: itemSyncError?.message || String(itemSyncError),
+      });
+    }
+  }
+
+  const uniqueGroupsToSync = [...groupsToSync.values()];
+  const syncBatchSize = 5;
+  for (let i = 0; i < uniqueGroupsToSync.length; i += syncBatchSize) {
+    const batch = uniqueGroupsToSync.slice(i, i + syncBatchSize);
+    await Promise.all(
+      batch.map(async (group) => {
+        try {
+          await syncOrderGroup(group);
+        } catch (syncErr) {
+          warnings.push(
+            `Calendar sync failed for ${normalizeOrderKey(group?.order_id) || "UNKNOWN"} (${group?.brand || "N/A"} / ${group?.vendor || "N/A"}).`,
+          );
+          console.error("Google Calendar sync failed for order create group:", {
+            group,
+            error: syncErr?.message || String(syncErr),
+          });
+        }
+      }),
+    );
+  }
+
+  for (const logEntry of orderLogs) {
+    await createOrderEditLog(logEntry);
+  }
+
+  return {
+    inserted_count: insertedDocs.length,
+    warnings,
+  };
+};
+
 const applyRectifiedOrderRows = async ({
   rows = [],
   existingByKey = new Map(),
+  reqUser = null,
 } = {}) => {
   const safeRows = Array.isArray(rows) ? rows : [];
   if (safeRows.length === 0) {
@@ -1120,39 +1624,13 @@ const applyRectifiedOrderRows = async ({
   const groupsToSync = new Map();
 
   if (rowsToInsert.length > 0) {
-    const docsToInsert = rowsToInsert.map((row) => ({
-      order_id: row.order_id,
-      item: {
-        item_code: row.item_code,
-        description: row.description,
-      },
-      brand: row.brand,
-      vendor: row.vendor,
-      ETD: row.ETD || undefined,
-      order_date: row.order_date || undefined,
-      status: "Pending",
-      quantity: Number(row.quantity),
-    }));
-
-    const insertedDocs = await Order.insertMany(docsToInsert);
-    insertedCount = insertedDocs.length;
-
-    try {
-      await upsertItemsFromOrders(insertedDocs);
-    } catch (itemSyncError) {
-      console.error("Item sync after rectify insert failed:", {
-        error: itemSyncError?.message || String(itemSyncError),
-      });
-    }
-
-    for (const doc of insertedDocs) {
-      const key = `${doc.order_id}__${doc.brand}__${doc.vendor}`;
-      groupsToSync.set(key, {
-        order_id: doc.order_id,
-        brand: doc.brand,
-        vendor: doc.vendor,
-      });
-    }
+    const insertSummary = await applyNewOrderRows({
+      rows: rowsToInsert,
+      reqUser,
+      actionLabel: "rectify",
+    });
+    insertedCount = insertSummary.inserted_count;
+    warnings.push(...(Array.isArray(insertSummary?.warnings) ? insertSummary.warnings : []));
   }
 
   for (const entry of rowsToUpdate) {
@@ -1800,6 +2278,9 @@ const buildUploadOrderRowId = (row = {}, index = 0) => {
 const normalizeUploadedSelectionRow = (row = {}, index = 0) => {
   const quantityRaw = row?.quantity;
   const parsedQuantity = Number(quantityRaw);
+  const previousOrderAction = normalizePreviousOrderActionInput(
+    row?.previous_order_action || row?.previousOrderAction,
+  );
 
   return {
     row_id: String(row?.row_id || buildUploadOrderRowId(row, index)),
@@ -1816,6 +2297,7 @@ const normalizeUploadedSelectionRow = (row = {}, index = 0) => {
     changed_fields: [],
     existing_order_id: String(row?.existing_order_id || "").trim() || null,
     existing_order_status: normalizeLooseString(row?.existing_order_status) || null,
+    previous_order_action: previousOrderAction,
   };
 };
 
@@ -2004,6 +2486,57 @@ const prepareUploadOrdersFromRows = async (rowsInput = []) => {
   };
 };
 
+exports.lookupPreviousOrder = async (req, res) => {
+  try {
+    const orderId = normalizeOrderKey(
+      req.query?.order_id
+      ?? req.query?.previous_order_id
+      ?? req.body?.order_id
+      ?? req.body?.previous_order_id
+      ?? "",
+    );
+    const itemCode = normalizeRectifyText(
+      req.query?.item_code ?? req.body?.item_code ?? "",
+    );
+
+    if (!orderId) {
+      return res.status(400).json({ message: "order_id is required" });
+    }
+
+    if (!itemCode) {
+      return res.status(400).json({ message: "item_code is required" });
+    }
+
+    const orderDoc = await Order.findOne({
+      ...ACTIVE_ORDER_MATCH,
+      order_id: buildExactTextQuery(orderId),
+      "item.item_code": buildExactTextQuery(itemCode),
+    })
+      .sort({ updatedAt: -1, createdAt: -1 });
+
+    if (!orderDoc) {
+      return res.status(404).json({
+        message: `No active order found for PO ${orderId} and item ${itemCode}`,
+      });
+    }
+
+    const qcDoc = await loadLinkedQcForOrder(orderDoc);
+    return res.status(200).json({
+      success: true,
+      ...buildPreviousOrderResponse({
+        orderDoc,
+        qcDoc,
+      }),
+    });
+  } catch (error) {
+    console.error("Lookup Previous Order Error:", error);
+    return res.status(500).json({
+      message: "Failed to check previous order",
+      error: error?.message || String(error),
+    });
+  }
+};
+
 // Upload Orders Controller
 exports.uploadOrders = async (req, res) => {
   const uploadedById = req.user?._id && mongoose.Types.ObjectId.isValid(req.user._id)
@@ -2072,7 +2605,10 @@ exports.uploadOrders = async (req, res) => {
 
     const preparedUpload = await prepareUploadOrdersFromRows(sourceRows);
     const orders = preparedUpload.orders;
-    let newOrders = preparedUpload.newOrders;
+    const newRowsToInsert = preparedUpload.previewRows.filter(
+      (row) => String(row?.change_type || "").trim().toLowerCase() === "new",
+    );
+    const applyWarnings = [];
 
     totalRowsReceived = preparedUpload.totalRowsReceived;
     totalRowsUnique = preparedUpload.totalRowsUnique;
@@ -2240,49 +2776,18 @@ exports.uploadOrders = async (req, res) => {
         };
       });
 
-    insertedCount = newOrders.length;
+    insertedCount = 0;
 
-    if (newOrders.length > 0) {
-      await Order.insertMany(newOrders);
-
-      try {
-        await upsertItemsFromOrders(newOrders);
-      } catch (itemSyncError) {
-        console.error("Item sync after upload failed:", {
-          error: itemSyncError?.message || String(itemSyncError),
-        });
-      }
-
-      // sync unique groups
-      const groups = new Map();
-      for (const o of newOrders) {
-        const k = `${o.order_id}__${o.brand}__${o.vendor}`;
-        groups.set(k, {
-          order_id: o.order_id,
-          brand: o.brand,
-          vendor: o.vendor,
-        });
-      }
-
-      // run with small concurrency
-      const arr = [...groups.values()];
-      const limit = 5;
-
-      for (let i = 0; i < arr.length; i += limit) {
-        const batch = arr.slice(i, i + limit);
-        await Promise.all(
-          batch.map(async (g) => {
-            try {
-              await syncOrderGroup(g);
-            } catch (syncErr) {
-              console.error("Google Calendar sync failed for uploaded group:", {
-                group: g,
-                error: syncErr?.message || String(syncErr),
-              });
-            }
-          }),
-        );
-      }
+    if (newRowsToInsert.length > 0) {
+      const insertSummary = await applyNewOrderRows({
+        rows: newRowsToInsert,
+        reqUser: req.user,
+        actionLabel: "upload",
+      });
+      insertedCount = insertSummary.inserted_count;
+      applyWarnings.push(
+        ...(Array.isArray(insertSummary?.warnings) ? insertSummary.warnings : []),
+      );
     }
 
     const remarks = [
@@ -2303,6 +2808,9 @@ exports.uploadOrders = async (req, res) => {
         `Open orders missing in this upload: ${missingOpenOrderIds.join(", ")}.`,
       );
     }
+    if (applyWarnings.length > 0) {
+      remarks.push(...applyWarnings);
+    }
 
     const uploadLog = await UploadLog.create({
       ...uploadMeta,
@@ -2322,7 +2830,7 @@ exports.uploadOrders = async (req, res) => {
 
     const hasConflicts = conflicts.length > 0;
     const hasDuplicates = duplicateEntries.length > 0;
-    const hasInsertions = newOrders.length > 0;
+    const hasInsertions = insertedCount > 0;
 
     let responseMessage = "No new orders to upload";
     if (hasInsertions) {
@@ -2336,7 +2844,7 @@ exports.uploadOrders = async (req, res) => {
 
     res.status(201).json({
       message: responseMessage,
-      inserted_count: newOrders.length,
+      inserted_count: insertedCount,
       duplicate_count: duplicateEntries.length,
       duplicate_entries: duplicateEntries,
       total_distinct_orders_uploaded: totalDistinctOrdersUploaded,
@@ -2345,6 +2853,7 @@ exports.uploadOrders = async (req, res) => {
       missing_open_orders_count: missingOpenOrderIds.length,
       missing_open_order_ids: missingOpenOrderIds,
       conflicts,
+      warnings: applyWarnings,
       upload_log_id: uploadLog?._id || null,
     });
   } catch (error) {
@@ -2931,6 +3440,7 @@ exports.rectifyPdfOrders = async (req, res) => {
         applySummary = await applyRectifiedOrderRows({
           rows: rowsEligibleForApply,
           existingByKey,
+          reqUser: req.user,
         });
         applySummary.skipped_closed_count = dedupedRows.length - rowsEligibleForApply.length;
       }

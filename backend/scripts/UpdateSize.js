@@ -61,17 +61,18 @@ function isValidLBH(obj) {
 
 function parseFlag(value) {
   const raw = cleanString(value).toLowerCase();
-
+    console.log(`Parsing flag from value: "${value}", cleaned: "${raw}"`);
   if (!raw) return "single";
 
-  if (raw === "true" || raw === "top") {
+  if (raw === "true" || raw === "top" || raw === "TOP") {
     return "top";
   }
 
   if (
     raw === "false" ||
     raw === "flase" ||
-    raw === "bottom"
+    raw === "bottom" ||
+    raw === "FALSE"
   ) {
     return "bottom";
   }
@@ -107,7 +108,7 @@ async function run() {
         box: parseLBH(row["box_size"]),
         net: extractNumber(row["net_weight"]),
         gross: extractNumber(row["gross_weight"]),
-        flag: parseFlag(row["true/false"]),
+        flag: parseFlag(row["top_or_bottom"]),
         remarks: cleanString(row["remarks"]),
       };
 
@@ -128,8 +129,9 @@ async function run() {
     let bottomEntry = null;
     let singleEntry = null;
     const unknownEntries = [];
-
+    // console.log(`Processing code: ${code} with ${entries.length} entries`);
     for (const entry of entries) {
+        // console.log(`  Entry flag: ${entry.flag}, product: ${JSON.stringify(entry.product)}, box: ${JSON.stringify(entry.box)}, net: ${entry.net}, gross: ${entry.gross}`);
       if (entry.flag === "top" && !topEntry) {
         topEntry = entry;
       } else if (entry.flag === "bottom" && !bottomEntry) {

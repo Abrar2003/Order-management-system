@@ -18,13 +18,16 @@ const googleVars = [
   "GOOGLE_REFRESH_TOKEN",
 ];
 
-const wasabiVars = [
-  "WASABI_ACCESS_KEY_ID",
-  "WASABI_SECRET_ACCESS_KEY",
-  "WASABI_BUCKET",
-  "WASABI_REGION",
-  "WASABI_ENDPOINT",
-];
+const wasabiVarAlternatives = {
+  WASABI_ACCESS_KEY_ID: ["WASABI_ACCESS_KEY_ID", "WASABI_ACCESS_KEY"],
+  WASABI_SECRET_ACCESS_KEY: [
+    "WASABI_SECRET_ACCESS_KEY",
+    "WASABI_ACCESS_SECRET_KEY",
+  ],
+  WASABI_BUCKET: ["WASABI_BUCKET", "WASABI_BUCKET_NAME"],
+  WASABI_REGION: ["WASABI_REGION"],
+  WASABI_ENDPOINT: ["WASABI_ENDPOINT"],
+};
 
 const isMissing = (key) => {
   const value = process.env[key];
@@ -46,8 +49,16 @@ if (missingGoogle.length > 0 && missingGoogle.length < googleVars.length) {
   );
 }
 
-const missingWasabi = wasabiVars.filter(isMissing);
-if (missingWasabi.length > 0 && missingWasabi.length < wasabiVars.length) {
+const isMissingAll = (keys = []) =>
+  !(Array.isArray(keys) ? keys : []).some((key) => !isMissing(key));
+
+const missingWasabi = Object.entries(wasabiVarAlternatives)
+  .filter(([, keys]) => isMissingAll(keys))
+  .map(([label]) => label);
+if (
+  missingWasabi.length > 0
+  && missingWasabi.length < Object.keys(wasabiVarAlternatives).length
+) {
   console.warn(
     `Partial Wasabi config detected. Missing: ${missingWasabi.join(", ")}`,
   );

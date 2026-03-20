@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import api from "../api/axios";
+import PreviousOrderCheckModal from "./PreviousOrderCheckModal";
 import {
   applyUploadedRows,
   createManualOrders,
@@ -77,6 +78,23 @@ const toUploadDateText = (value) => {
   return formatted || "-";
 };
 
+const isPreviousOrderCheckable = (row = {}) =>
+  String(row?.change_type || "").trim().toLowerCase() === "new";
+
+const formatPreviousOrderActionSummary = (action = {}) => {
+  const previousOrderId = String(action?.previous_order_order_id || "").trim();
+  if (!previousOrderId) return "";
+
+  const strategy = String(action?.strategy || "").trim().toLowerCase();
+  if (strategy === "replace_previous") {
+    return action?.transfer_inspection_records
+      ? `Replace ${previousOrderId} and transfer QC`
+      : `Replace ${previousOrderId}`;
+  }
+
+  return `Keep both with ${previousOrderId}`;
+};
+
 const UploadOrdersModal = ({ onClose, onSuccess }) => {
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -92,6 +110,7 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
   const [uploadPreviewSummary, setUploadPreviewSummary] = useState(null);
   const [uploadPreviewRows, setUploadPreviewRows] = useState([]);
   const [checkedUploadRows, setCheckedUploadRows] = useState({});
+  const [activePreviousOrderRow, setActivePreviousOrderRow] = useState(null);
   const itemLookupCacheRef = useRef(new Map());
 
   const selectableUploadRows = useMemo(
@@ -248,10 +267,14 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
     try {
       setLoading(true);
       setError("");
-      await applyUploadedRows({
+      const response = await applyUploadedRows({
         rows: rowsToApply,
         sourceFileName: file?.name || "",
       });
+      const warnings = Array.isArray(response?.warnings) ? response.warnings : [];
+      if (warnings.length > 0) {
+        window.alert(["Upload completed with warnings:", ...warnings].join("\n"));
+      }
       onSuccess?.();
       onClose?.();
     } catch (err) {
@@ -259,6 +282,22 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handlePreviousOrderActionSave = (nextAction) => {
+    if (!activePreviousOrderRow?.row_id) return;
+
+    setUploadPreviewRows((prevRows) =>
+      prevRows.map((row) =>
+        row.row_id !== activePreviousOrderRow.row_id
+          ? row
+          : {
+            ...row,
+            previous_order_action: nextAction,
+          },
+      ),
+    );
+    setActivePreviousOrderRow(null);
   };
 
   const handleManualRowChange = (rowId, field, value) => {
@@ -628,6 +667,7 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
                               <th>Order Date</th>
                               <th>Existing Status</th>
                               <th>Changed Fields</th>
+                              <th>Actions</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -664,6 +704,31 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
                                     {Array.isArray(row.changed_fields) && row.changed_fields.length > 0
                                       ? row.changed_fields.join(", ")
                                       : "-"}
+                                  </td>
+                                  <td>
+                                    {isPreviousOrderCheckable(row) ? (
+                                      <div className="d-grid gap-1">
+                                        <button
+                                          type="button"
+                                          className="btn btn-outline-primary btn-sm"
+                                          onClick={() => setActivePreviousOrderRow(row)}
+                                          disabled={loading}
+                                        >
+                                          Check Prev Orders
+                                        </button>
+                                        {formatPreviousOrderActionSummary(
+                                          row?.previous_order_action,
+                                        ) && (
+                                          <div className="small text-muted">
+                                            {formatPreviousOrderActionSummary(
+                                              row?.previous_order_action,
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      "-"
+                                    )}
                                   </td>
                                 </tr>
                               );
@@ -876,6 +941,14 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
           </div>
         </div>
       </div>
+      {activePreviousOrderRow && (
+        <PreviousOrderCheckModal
+          row={activePreviousOrderRow}
+          action={activePreviousOrderRow?.previous_order_action}
+          onClose={() => setActivePreviousOrderRow(null)}
+          onApply={handlePreviousOrderActionSave}
+        />
+      )}
     </div>
   );
 };

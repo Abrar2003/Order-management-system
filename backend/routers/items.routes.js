@@ -1,4 +1,5 @@
 const express = require("express");
+const upload = require("../config/multer.config");
 const auth = require("../middlewares/auth.middleware");
 const authorize = require("../middlewares/authorize.middleware");
 const {
@@ -7,6 +8,7 @@ const {
   syncItemsFromOrders,
   updateItem,
   updateItemPis,
+  uploadItemFile,
 } = require("../controllers/item.controller");
 
 const router = express.Router();
@@ -44,6 +46,14 @@ router.patch(
   auth,
   authorize("admin", "manager", "dev"),
   updateItemPis,
+);
+
+router.post(
+  "/:id/files",
+  auth,
+  authorize("admin", "manager", "QC", "dev"),
+  upload.single("file"),
+  uploadItemFile,
 );
 
 module.exports = router;
