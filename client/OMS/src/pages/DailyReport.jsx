@@ -463,9 +463,10 @@ const DailyReport = () => {
                               Order ID{inspectionSortIndicator("order_id")}
                             </button>
                           </th>
+                          <th>Item</th>
                           <th>Vendor</th>
                           <th>Brand</th>
-                          <th>Item</th>
+                          <th>Requested</th>
                           <th>Inspected</th>
                           <th>Passed</th>
                           <th>CBM</th>
@@ -481,14 +482,15 @@ const DailyReport = () => {
                           >
                             <td>{formatDateDDMMYYYY(inspection.inspection_date)}</td>
                             <td>{inspection.order_id || "N/A"}</td>
-                            <td>{inspection.vendor || "N/A"}</td>
-                            <td>{inspection.brand || "N/A"}</td>
                             <td>
                               <div>{inspection.item_code || "N/A"}</div>
                               {inspection?.goods_not_ready ? (
                                 <div className="small fw-semibold">Goods Not Ready</div>
                               ) : null}
                             </td>
+                            <td>{inspection.vendor || "N/A"}</td>
+                            <td>{inspection.brand || "N/A"}</td>
+                            <td>{inspection.vendor_requested ?? 0}</td>
                             <td>{inspection.inspected_quantity ?? 0}</td>
                             <td>{inspection.passed_quantity ?? 0}</td>
                             <td>{formatCbm(inspection?.cbm?.total)}</td>
