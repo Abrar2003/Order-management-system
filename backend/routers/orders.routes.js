@@ -18,6 +18,8 @@ const {
   getOrderSummary,
   getShipmentsDb,
   exportShipmentsDb,
+  getDelayedPoReport,
+  exportDelayedPoReport,
   exportOrdersDb,
   editOrder,
   bulkUpdateRevisedEtd,
@@ -97,6 +99,18 @@ router.get(
 // get orders with optional filters via query params
 router.get("/filters", authenticate, getOrdersByFiltersDb);
 router.get("/export", authenticate, exportOrdersDb);
+router.get(
+  "/delayed-po-report",
+  authenticate,
+  authorize("admin", "manager", "QC", "dev"),
+  getDelayedPoReport,
+);
+router.get(
+  "/delayed-po-report/export",
+  authenticate,
+  authorize("admin", "manager", "QC", "dev"),
+  exportDelayedPoReport,
+);
 router.get("/revised-etd-history", authenticate, getRevisedEtdHistory);
 
 // List shipped/partially shipped/inspection-done items with latest shipment details
