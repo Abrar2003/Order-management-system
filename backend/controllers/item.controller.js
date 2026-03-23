@@ -155,11 +155,10 @@ const ITEM_FILE_CONFIG = Object.freeze({
     field: "cad_file",
     folder: "item-cad",
     label: "CAD file",
-    mimeTypes: ITEM_IMAGE_MIME_TYPES,
-    extensions: ITEM_IMAGE_EXTENSIONS,
-    defaultExtension: ".jpg",
-    invalidTypeMessage:
-      "Only JPG, JPEG, and PNG files are allowed for CAD files",
+    mimeTypes: ITEM_PDF_MIME_TYPES,
+    extensions: ITEM_PDF_EXTENSIONS,
+    defaultExtension: ".pdf",
+    invalidTypeMessage: "Only PDF files are allowed for CAD files",
   },
   pis_file: {
     field: "pis_file",

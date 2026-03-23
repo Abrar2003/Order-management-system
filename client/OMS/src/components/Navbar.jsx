@@ -96,6 +96,7 @@ const Navbar = () => {
     return [
       { label: "Inspector Reports", path: "/reports/inspectors" },
       { label: "Vendor Reports", path: "/reports/vendors" },
+      { label: "Delayed PO Reports", path: "/reports/delayed-pos" },
     ];
   }, [canAccessQc, isQcOnlyRole]);
 

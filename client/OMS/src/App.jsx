@@ -30,6 +30,7 @@ import ArchivedOrders from "./pages/ArchivedOrders";
 import InspectionReport from "./pages/inspection_report";
 import InspectorReports from "./pages/InspectorReports";
 import VendorReports from "./pages/VendorReports";
+import DelayedPoReports from "./pages/DelayedPoReports";
 import PIS from "./pages/PIS";
 import WeeklySummary from "./pages/WeeklySummary";
 import DailySummary from "./pages/DailySummary";
@@ -164,6 +165,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <VendorReports />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/reports/delayed-pos"
+            element={
+              <ProtectedRoute>
+                <DelayedPoReports />
               </ProtectedRoute>
             }
           />

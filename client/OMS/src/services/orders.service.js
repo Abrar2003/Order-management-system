@@ -207,6 +207,29 @@ export const exportOrders = async (params = {}, format = "xlsx") => {
   });
 };
 
+export const getDelayedPoReport = async (params = {}) => {
+  const token = localStorage.getItem("token");
+  const res = await axios.get("/orders/delayed-po-report", {
+    params,
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return res.data;
+};
+
+export const exportDelayedPoReport = async (params = {}) => {
+  const token = localStorage.getItem("token");
+  return axios.get("/orders/delayed-po-report/export", {
+    responseType: "blob",
+    params,
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+};
+
 export const editOrder = async (id, payload) => {
   if (!id) {
     throw new Error("Order id is required");

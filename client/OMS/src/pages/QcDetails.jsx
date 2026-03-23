@@ -7,6 +7,7 @@ import ShippingModal from "../components/ShippingModal";
 import EditOrderModal from "../components/EditOrderModal";
 import EditInspectionRecordsModal from "../components/EditInspectionRecordsModal";
 import GoodsNotReadyModal from "../components/GoodsNotReadyModal";
+import PdfViewerModal from "../components/PdfViewerModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { formatPositiveCbm } from "../utils/cbm";
@@ -177,6 +178,7 @@ const RELATED_FILE_OPTIONS = Object.freeze([
     label: "Product Image",
     buttonLabel: "Item image",
     field: "image",
+    previewMode: "image",
     accept: ".jpg,.jpeg,.png,image/jpeg,image/png",
     extensions: [".jpg", ".jpeg", ".png"],
     mimeTypes: ["image/jpeg", "image/png"],
@@ -188,17 +190,18 @@ const RELATED_FILE_OPTIONS = Object.freeze([
     label: "CAD File",
     buttonLabel: "CAD file",
     field: "cad_file",
-    accept: ".jpg,.jpeg,.png,image/jpeg,image/png",
-    extensions: [".jpg", ".jpeg", ".png"],
-    mimeTypes: ["image/jpeg", "image/png"],
-    invalidMessage:
-      "Only JPG, JPEG, or PNG files are allowed for CAD files.",
+    previewMode: "pdf",
+    accept: ".pdf,application/pdf",
+    extensions: [".pdf"],
+    mimeTypes: ["application/pdf"],
+    invalidMessage: "Only PDF files are allowed for CAD files.",
   },
   {
     value: "pis_file",
     label: "PIS",
     buttonLabel: "PIS",
     field: "pis_file",
+    previewMode: "pdf",
     accept: ".pdf,application/pdf",
     extensions: [".pdf"],
     mimeTypes: ["application/pdf"],
@@ -227,6 +230,7 @@ const QcDetails = () => {
   const [relatedFileType, setRelatedFileType] = useState("product_image");
   const [uploadingRelatedFile, setUploadingRelatedFile] = useState(false);
   const [openingRelatedFileType, setOpeningRelatedFileType] = useState("");
+  const [pdfViewerFile, setPdfViewerFile] = useState(null);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [showShippingModal, setShowShippingModal] = useState(false);
   const [showEditShippingModal, setShowEditShippingModal] = useState(false);
@@ -551,13 +555,6 @@ const QcDetails = () => {
       return;
     }
 
-    let previewWindow = null;
-    try {
-      previewWindow = window.open("", "_blank");
-    } catch (windowError) {
-      previewWindow = null;
-    }
-
     try {
       setOpeningRelatedFileType(fileConfig.value);
       const response = await api.get(
@@ -574,16 +571,17 @@ const QcDetails = () => {
         throw new Error(`${fileConfig.label} URL is not available.`);
       }
 
-      if (previewWindow) {
-        previewWindow.opener = null;
-        previewWindow.location.href = fileUrl;
+      if (fileConfig.previewMode === "pdf") {
+        setPdfViewerFile({
+          title: fileConfig.label,
+          url: fileUrl,
+          originalName:
+            String(response?.data?.data?.file?.originalName || currentFile?.originalName || "").trim(),
+        });
       } else {
         window.open(fileUrl, "_blank", "noopener,noreferrer");
       }
     } catch (error) {
-      if (previewWindow && !previewWindow.closed) {
-        previewWindow.close();
-      }
       console.error(error);
       alert(
         error?.response?.data?.message
@@ -1157,6 +1155,15 @@ const QcDetails = () => {
             setShowGoodsNotReadyModal(false);
             fetchQcDetails();
           }}
+        />
+      )}
+
+      {pdfViewerFile && (
+        <PdfViewerModal
+          title={pdfViewerFile.title}
+          url={pdfViewerFile.url}
+          originalName={pdfViewerFile.originalName}
+          onClose={() => setPdfViewerFile(null)}
         />
       )}
     </>
