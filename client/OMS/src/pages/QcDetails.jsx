@@ -84,12 +84,10 @@ const getUtcDayOffsetFromToday = (value) => {
     return null;
   }
   const targetUtc = Date.UTC(year, month - 1, day);
-  const now = new Date();
-  const todayUtc = Date.UTC(
-    now.getUTCFullYear(),
-    now.getUTCMonth(),
-    now.getUTCDate(),
-  );
+  const todayIso = toISODateString(new Date());
+  if (!todayIso) return null;
+  const [todayYear, todayMonth, todayDay] = todayIso.split("-").map(Number);
+  const todayUtc = Date.UTC(todayYear, todayMonth - 1, todayDay);
   const oneDayMs = 24 * 60 * 60 * 1000;
   return Math.round((todayUtc - targetUtc) / oneDayMs);
 };

@@ -21,6 +21,7 @@ const Navbar = () => {
   const [showMainMenu, setShowMainMenu] = useState(false);
   const [showReportsMenu, setShowReportsMenu] = useState(false);
   const [showSummaryMenu, setShowSummaryMenu] = useState(false);
+  const [showLogsMenu, setShowLogsMenu] = useState(false);
   const mainMenuRef = useRef(null);
 
   const getInitialTheme = () => {
@@ -79,9 +80,6 @@ const Navbar = () => {
 
     if (canManageOrders) {
       links.push({ label: "PIS", path: "/pis" });
-      links.push({ label: "Upload Logs", path: "/upload-logs" });
-      links.push({ label: "Order Edit Logs", path: "/order-edit-logs" });
-      links.push({ label: "Email Logs", path: "/email-logs" });
     }
 
     if (canCreateUsers) {
@@ -99,6 +97,15 @@ const Navbar = () => {
       { label: "Delayed PO Reports", path: "/reports/delayed-pos" },
     ];
   }, [canAccessQc, isQcOnlyRole]);
+
+  const logRouteLinks = useMemo(() => {
+    if (!canManageOrders || isQcOnlyRole) return [];
+    return [
+      { label: "Upload Logs", path: "/upload-logs" },
+      { label: "Order Edit Logs", path: "/order-edit-logs" },
+      { label: "Email Logs", path: "/email-logs" },
+    ];
+  }, [canManageOrders, isQcOnlyRole]);
 
   const summaryRouteLinks = useMemo(() => {
     if (!canAccessQc || isQcOnlyRole) return [];
@@ -118,6 +125,7 @@ const Navbar = () => {
     setShowMainMenu(false);
     setShowReportsMenu(false);
     setShowSummaryMenu(false);
+    setShowLogsMenu(false);
   };
 
   useEffect(() => {
@@ -135,6 +143,7 @@ const Navbar = () => {
         setShowMainMenu(false);
         setShowReportsMenu(false);
         setShowSummaryMenu(false);
+        setShowLogsMenu(false);
       }
     };
 
@@ -206,6 +215,7 @@ const Navbar = () => {
                               onClick={() => {
                                 setShowReportsMenu((prev) => !prev);
                                 setShowSummaryMenu(false);
+                                setShowLogsMenu(false);
                               }}
                             >
                               <span>Reports</span>
@@ -235,6 +245,7 @@ const Navbar = () => {
                               onClick={() => {
                                 setShowSummaryMenu((prev) => !prev);
                                 setShowReportsMenu(false);
+                                setShowLogsMenu(false);
                               }}
                             >
                               <span>Summary</span>
@@ -243,6 +254,36 @@ const Navbar = () => {
                               </span>
                             </button>
                             {showSummaryMenu && summaryRouteLinks.map((link) => (
+                              <button
+                                key={link.path}
+                                type="button"
+                                className="list-group-item list-group-item-action text-start ps-4"
+                                onClick={() => handleNavigate(link.path)}
+                              >
+                                {link.label}
+                              </button>
+                            ))}
+                          </>
+                        )}
+
+                        {logRouteLinks.length > 0 && (
+                          <>
+                            <button
+                              type="button"
+                              className="list-group-item list-group-item-action text-start d-flex justify-content-between align-items-center"
+                              aria-expanded={showLogsMenu}
+                              onClick={() => {
+                                setShowLogsMenu((prev) => !prev);
+                                setShowReportsMenu(false);
+                                setShowSummaryMenu(false);
+                              }}
+                            >
+                              <span>Logs</span>
+                              <span className="small text-secondary">
+                                {showLogsMenu ? "Hide" : "Show"}
+                              </span>
+                            </button>
+                            {showLogsMenu && logRouteLinks.map((link) => (
                               <button
                                 key={link.path}
                                 type="button"
@@ -274,6 +315,7 @@ const Navbar = () => {
                             setShowMainMenu(false);
                             setShowReportsMenu(false);
                             setShowSummaryMenu(false);
+                            setShowLogsMenu(false);
                           }}
                         >
                           {theme === "system"
@@ -289,6 +331,7 @@ const Navbar = () => {
                           onClick={() => {
                             setShowChangePasswordModal(true);
                             setShowMainMenu(false);
+                            setShowLogsMenu(false);
                           }}
                         >
                           Change Password
@@ -301,6 +344,7 @@ const Navbar = () => {
                             onClick={() => {
                               setShowCheckLabelsModal(true);
                               setShowMainMenu(false);
+                              setShowLogsMenu(false);
                             }}
                           >
                             Check Labels
@@ -314,6 +358,7 @@ const Navbar = () => {
                             onClick={() => {
                               setShowAllocateModal(true);
                               setShowMainMenu(false);
+                              setShowLogsMenu(false);
                             }}
                           >
                             Allocate Labels

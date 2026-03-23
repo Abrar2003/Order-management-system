@@ -11,6 +11,11 @@ const Order = require("../models/order.model");
 const mongoose = require("mongoose");
 const { upsertItemFromQc } = require("../services/itemSync");
 const { getSignedObjectUrl } = require("../services/wasabiStorage.service");
+const {
+  formatDateOnlyDDMMYYYY,
+  parseDateOnly,
+  toDateOnlyIso,
+} = require("../helpers/dateOnly");
 
 const normalizeLabels = (labels = []) => {
   if (!Array.isArray(labels)) return [];
@@ -208,115 +213,18 @@ const syncQcRequestHistoryStatuses = (
   return hasChanges;
 };
 
-const parseDateFromPartsToIso = (year, month, day) => {
-  if (
-    !Number.isInteger(year) ||
-    !Number.isInteger(month) ||
-    !Number.isInteger(day)
-  ) {
-    return "";
-  }
-  const parsed = new Date(Date.UTC(year, month - 1, day));
-  if (Number.isNaN(parsed.getTime())) return "";
-  if (
-    parsed.getUTCFullYear() !== year ||
-    parsed.getUTCMonth() + 1 !== month ||
-    parsed.getUTCDate() !== day
-  ) {
-    return "";
-  }
-  return `${year}-${pad2(month)}-${pad2(day)}`;
-};
-
-const toISODateString = (value) => {
-  if (value instanceof Date) {
-    if (Number.isNaN(value.getTime())) return "";
-    return parseDateFromPartsToIso(
-      value.getUTCFullYear(),
-      value.getUTCMonth() + 1,
-      value.getUTCDate(),
-    );
-  }
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    const parsedValue = new Date(value);
-    if (Number.isNaN(parsedValue.getTime())) return "";
-    return parseDateFromPartsToIso(
-      parsedValue.getUTCFullYear(),
-      parsedValue.getUTCMonth() + 1,
-      parsedValue.getUTCDate(),
-    );
-  }
-
-  const asString = normalizeText(value);
-  if (!asString) return "";
-
-  const ymdWithOptionalTime = asString.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|T)/);
-  if (ymdWithOptionalTime) {
-    return parseDateFromPartsToIso(
-      Number(ymdWithOptionalTime[1]),
-      Number(ymdWithOptionalTime[2]),
-      Number(ymdWithOptionalTime[3]),
-    );
-  }
-
-  const dmySlash = asString.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (dmySlash) {
-    return parseDateFromPartsToIso(
-      Number(dmySlash[3]),
-      Number(dmySlash[2]),
-      Number(dmySlash[1]),
-    );
-  }
-
-  const dmyDash = asString.match(/^(\d{2})-(\d{2})-(\d{4})$/);
-  if (dmyDash) {
-    return parseDateFromPartsToIso(
-      Number(dmyDash[3]),
-      Number(dmyDash[2]),
-      Number(dmyDash[1]),
-    );
-  }
-
-  const shouldTryNativeParse =
-    /[a-zA-Z]/.test(asString) ||
-    asString.includes(",") ||
-    asString.includes(" ");
-  if (!shouldTryNativeParse) return "";
-
-  const parsed = new Date(asString);
-  if (Number.isNaN(parsed.getTime())) return "";
-  return parseDateFromPartsToIso(
-    parsed.getUTCFullYear(),
-    parsed.getUTCMonth() + 1,
-    parsed.getUTCDate(),
-  );
-};
+const toISODateString = (value) => toDateOnlyIso(value);
 
 const parseIsoDateToUtcDate = (isoDate) => {
-  const normalized = toISODateString(isoDate);
-  if (!normalized) return null;
-  const [year, month, day] = normalized.split("-").map(Number);
-  if (
-    !Number.isInteger(year) ||
-    !Number.isInteger(month) ||
-    !Number.isInteger(day)
-  ) {
-    return null;
-  }
-  const parsed = new Date(Date.UTC(year, month - 1, day));
-  if (Number.isNaN(parsed.getTime())) return null;
-  return parsed;
+  return parseDateOnly(isoDate);
 };
 
 const isIsoDateWithinPastDaysInclusive = (isoDate, daysBack = 0) => {
   const target = parseIsoDateToUtcDate(isoDate);
   if (!target) return false;
 
-  const now = new Date();
-  const todayUtc = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-  );
+  const todayUtc = toUtcDayStart(new Date());
+  if (!todayUtc) return false;
   const minAllowedUtc = new Date(todayUtc);
   minAllowedUtc.setUTCDate(
     minAllowedUtc.getUTCDate() - Math.max(0, Number(daysBack) || 0),
@@ -329,10 +237,8 @@ const isIsoDateExactlyDaysBack = (isoDate, daysBack = 0) => {
   const target = parseIsoDateToUtcDate(isoDate);
   if (!target) return false;
 
-  const now = new Date();
-  const todayUtc = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-  );
+  const todayUtc = toUtcDayStart(new Date());
+  if (!todayUtc) return false;
   const offsetDays = Number(daysBack) || 0;
   const expectedUtc = new Date(todayUtc);
   expectedUtc.setUTCDate(expectedUtc.getUTCDate() - offsetDays);
@@ -362,12 +268,8 @@ const buildUpdateQcPastDaysMessage = (role = "", daysBack = 0) => {
   return `${actorLabel} can update QC only for today and previous ${safeDaysBack} ${dayLabel}`;
 };
 
-const formatDateDDMMYYYY = (value, fallback = "") => {
-  const isoDate = toISODateString(value);
-  if (!isoDate) return fallback;
-  const [year, month, day] = isoDate.split("-");
-  return `${day}/${month}/${year}`;
-};
+const formatDateDDMMYYYY = (value, fallback = "") =>
+  formatDateOnlyDDMMYYYY(value, fallback);
 
 const formatAuditBoolean = (value) => (value ? "Yes" : "No");
 
@@ -1133,14 +1035,7 @@ const escapeRegex = (value = "") =>
     .trim()
     .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const toDateInputValue = (value = new Date()) => {
-  const parsed = new Date(value);
-  if (!Number.isNaN(parsed.getTime())) {
-    const offsetMs = parsed.getTimezoneOffset() * 60000;
-    return new Date(parsed.getTime() - offsetMs).toISOString().slice(0, 10);
-  }
-  return toISODateString(value) || null;
-};
+const toDateInputValue = (value = new Date()) => toISODateString(value) || null;
 
 const resolveReportDate = (value) => {
   const asString = String(value || "").trim();
@@ -1176,17 +1071,7 @@ const REPORT_TIMELINE_DAYS = Object.freeze({
   "6m": 180,
 });
 
-const toUtcDayStart = (value = new Date()) => {
-  const parsed = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return new Date(
-    Date.UTC(
-      parsed.getUTCFullYear(),
-      parsed.getUTCMonth(),
-      parsed.getUTCDate(),
-    ),
-  );
-};
+const toUtcDayStart = (value = new Date()) => parseDateOnly(value);
 
 const addUtcDays = (date, days = 0) => {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;

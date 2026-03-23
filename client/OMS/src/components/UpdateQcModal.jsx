@@ -139,15 +139,6 @@ const toStrictLbhInputGroup = (dimensions = {}) => {
   return { L: "", B: "", H: "" };
 };
 
-const toLocalIsoDate = (dateValue) => {
-  const date = dateValue instanceof Date ? dateValue : new Date(dateValue);
-  if (Number.isNaN(date.getTime())) return "";
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
-
 const getUtcDayOffsetFromToday = (isoDateValue) => {
   const normalizedIso = toISODateString(isoDateValue);
   if (!normalizedIso) return null;
@@ -156,12 +147,10 @@ const getUtcDayOffsetFromToday = (isoDateValue) => {
     return null;
   }
   const targetUtc = Date.UTC(year, month - 1, day);
-  const now = new Date();
-  const todayUtc = Date.UTC(
-    now.getUTCFullYear(),
-    now.getUTCMonth(),
-    now.getUTCDate(),
-  );
+  const todayIso = toISODateString(new Date());
+  if (!todayIso) return null;
+  const [todayYear, todayMonth, todayDay] = todayIso.split("-").map(Number);
+  const todayUtc = Date.UTC(todayYear, todayMonth - 1, todayDay);
   const oneDayMs = 24 * 60 * 60 * 1000;
   return Math.round((todayUtc - targetUtc) / oneDayMs);
 };
@@ -297,7 +286,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const canRewriteLatestInspectionRecord = isActualAdmin || Boolean(isAdmin);
   const hasElevatedAccess = canRewriteLatestInspectionRecord || isManager;
   const canManageLabels = ["admin", "manager"].includes(normalizedRole);
-  const todayIso = toLocalIsoDate(new Date());
+  const todayIso = toISODateString(new Date());
   const updateQcPastDaysLimit = getUpdateQcPastDaysLimit(
     normalizedRole,
     currentUserId,
@@ -305,7 +294,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const updateQcMinAllowedDateIso = (() => {
     const minDate = new Date();
     minDate.setDate(minDate.getDate() - updateQcPastDaysLimit);
-    return toLocalIsoDate(minDate);
+    return toISODateString(minDate);
   })();
 
 
