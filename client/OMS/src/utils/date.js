@@ -1,95 +1,118 @@
+export const APP_DATE_TIMEZONE = "Asia/Kolkata";
+
 const pad2 = (value) => String(value).padStart(2, "0");
 
 const isValidDateParts = ({ day, month, year }) => {
-  if (!Number.isInteger(day) || !Number.isInteger(month) || !Number.isInteger(year)) {
+  if (
+    !Number.isInteger(day) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(year)
+  ) {
     return false;
   }
+
   if (year < 1000 || year > 9999) return false;
   if (month < 1 || month > 12) return false;
   if (day < 1 || day > 31) return false;
 
   const parsed = new Date(Date.UTC(year, month - 1, day));
   return (
-    parsed.getUTCFullYear() === year
-    && parsed.getUTCMonth() + 1 === month
-    && parsed.getUTCDate() === day
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() + 1 === month &&
+    parsed.getUTCDate() === day
   );
+};
+
+const datePartsFormatter = new Intl.DateTimeFormat("en-GB", {
+  timeZone: APP_DATE_TIMEZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+const extractZonedParts = (value) => {
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  const parts = datePartsFormatter.formatToParts(parsed);
+  const lookup = Object.create(null);
+  for (const part of parts) {
+    if (part?.type) {
+      lookup[part.type] = part.value;
+    }
+  }
+
+  const normalized = {
+    day: Number(lookup.day),
+    month: Number(lookup.month),
+    year: Number(lookup.year),
+  };
+  return isValidDateParts(normalized) ? normalized : null;
 };
 
 const extractParts = (value) => {
   if (value instanceof Date) {
-    if (Number.isNaN(value.getTime())) return null;
-    const parts = {
-      day: value.getDate(),
-      month: value.getMonth() + 1,
-      year: value.getFullYear(),
-    };
-    return isValidDateParts(parts) ? parts : null;
+    return extractZonedParts(value);
   }
 
-  if (typeof value === "number") {
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return null;
-    const parts = {
-      day: parsed.getDate(),
-      month: parsed.getMonth() + 1,
-      year: parsed.getFullYear(),
-    };
-    return isValidDateParts(parts) ? parts : null;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return extractZonedParts(value);
   }
 
   const asString = String(value ?? "").trim();
   if (!asString) return null;
 
-  const ymdWithOptionalTime = asString.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|T|\s)/);
-  if (ymdWithOptionalTime) {
-    const year = Number(ymdWithOptionalTime[1]);
-    const month = Number(ymdWithOptionalTime[2]);
-    const day = Number(ymdWithOptionalTime[3]);
-    const parts = { day, month, year };
-    return isValidDateParts(parts) ? parts : null;
-  }
-
-  const dmySlash = asString.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (dmySlash) {
-    const day = Number(dmySlash[1]);
-    const month = Number(dmySlash[2]);
-    const year = Number(dmySlash[3]);
-    const parts = { day, month, year };
-    return isValidDateParts(parts) ? parts : null;
-  }
-
-  const dmyDash = asString.match(/^(\d{2})-(\d{2})-(\d{4})$/);
-  if (dmyDash) {
-    const day = Number(dmyDash[1]);
-    const month = Number(dmyDash[2]);
-    const year = Number(dmyDash[3]);
-    const parts = { day, month, year };
+  const ymdExact = asString.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (ymdExact) {
+    const parts = {
+      day: Number(ymdExact[3]),
+      month: Number(ymdExact[2]),
+      year: Number(ymdExact[1]),
+    };
     return isValidDateParts(parts) ? parts : null;
   }
 
   const ymdSlash = asString.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
   if (ymdSlash) {
-    const year = Number(ymdSlash[1]);
-    const month = Number(ymdSlash[2]);
-    const day = Number(ymdSlash[3]);
-    const parts = { day, month, year };
+    const parts = {
+      day: Number(ymdSlash[3]),
+      month: Number(ymdSlash[2]),
+      year: Number(ymdSlash[1]),
+    };
+    return isValidDateParts(parts) ? parts : null;
+  }
+
+  const dmySlash = asString.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (dmySlash) {
+    const parts = {
+      day: Number(dmySlash[1]),
+      month: Number(dmySlash[2]),
+      year: Number(dmySlash[3]),
+    };
+    return isValidDateParts(parts) ? parts : null;
+  }
+
+  const dmyDash = asString.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (dmyDash) {
+    const parts = {
+      day: Number(dmyDash[1]),
+      month: Number(dmyDash[2]),
+      year: Number(dmyDash[3]),
+    };
     return isValidDateParts(parts) ? parts : null;
   }
 
   const shouldTryNativeParse =
-    /[a-zA-Z]/.test(asString) || asString.includes(",") || asString.includes(" ");
+    /[a-zA-Z]/.test(asString) ||
+    asString.includes(",") ||
+    asString.includes("T") ||
+    /\d{4}-\d{2}-\d{2}\s+\d/.test(asString);
   if (!shouldTryNativeParse) return null;
 
-  const parsed = new Date(asString);
-  if (Number.isNaN(parsed.getTime())) return null;
-  const parts = {
-    day: parsed.getDate(),
-    month: parsed.getMonth() + 1,
-    year: parsed.getFullYear(),
-  };
-  return isValidDateParts(parts) ? parts : null;
+  return extractZonedParts(asString);
 };
+
+export const extractDateParts = (value) => extractParts(value);
 
 export const formatDateDDMMYYYY = (value, fallback = "N/A") => {
   const parts = extractParts(value);
@@ -114,9 +137,6 @@ export const isValidDDMMYYYY = (value) =>
   Boolean(String(value ?? "").trim().match(/^\d{2}\/\d{2}\/\d{4}$/))
   && Boolean(extractParts(value));
 
-export const getTodayDDMMYYYY = () => {
-  const today = new Date();
-  const offsetMs = today.getTimezoneOffset() * 60000;
-  const localIso = new Date(today.getTime() - offsetMs).toISOString().slice(0, 10);
-  return toDDMMYYYYInputValue(localIso, "");
-};
+export const getTodayISODate = () => toISODateString(new Date());
+
+export const getTodayDDMMYYYY = () => formatDateDDMMYYYY(new Date(), "");

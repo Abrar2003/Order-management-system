@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const EmailLogs = require("../models/emailLogs.model");
 const Order = require("../models/order.model");
 const Brand = require("../models/brand.model");
+const { parseDateOnly, toDateOnlyIso } = require("../helpers/dateOnly");
 
 const DEFAULT_PAGE_LIMIT = 30;
 const PAGE_LIMIT_OPTIONS = [7, 30, 50, 90];
@@ -25,74 +26,18 @@ const parseLimit = (value) => {
   return PAGE_LIMIT_OPTIONS.includes(parsedValue) ? parsedValue : DEFAULT_PAGE_LIMIT;
 };
 
-const parseDateLike = (value) => {
-  if (value instanceof Date) {
-    if (Number.isNaN(value.getTime())) return null;
-    return new Date(Date.UTC(
-      value.getUTCFullYear(),
-      value.getUTCMonth(),
-      value.getUTCDate(),
-    ));
-  }
-
-  if (typeof value === "number") {
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return null;
-    return new Date(Date.UTC(
-      parsed.getUTCFullYear(),
-      parsed.getUTCMonth(),
-      parsed.getUTCDate(),
-    ));
-  }
-
-  const asString = normalizeText(value);
-  if (!asString) return null;
-
-  const parseFromParts = (year, month, day) => {
-    const parsed = new Date(Date.UTC(year, month - 1, day));
-    if (Number.isNaN(parsed.getTime())) return null;
-    if (
-      parsed.getUTCFullYear() !== year
-      || parsed.getUTCMonth() + 1 !== month
-      || parsed.getUTCDate() !== day
-    ) {
-      return null;
-    }
-    return parsed;
-  };
-
-  const ymd = asString.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|T|\s)/);
-  if (ymd) {
-    return parseFromParts(Number(ymd[1]), Number(ymd[2]), Number(ymd[3]));
-  }
-
-  const dmySlash = asString.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (dmySlash) {
-    return parseFromParts(Number(dmySlash[3]), Number(dmySlash[2]), Number(dmySlash[1]));
-  }
-
-  const parsed = new Date(asString);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return new Date(Date.UTC(
-    parsed.getUTCFullYear(),
-    parsed.getUTCMonth(),
-    parsed.getUTCDate(),
-  ));
-};
+const parseDateLike = (value) => parseDateOnly(value);
 
 const addUtcDays = (dateValue, daysToAdd = 0) => {
   const parsedDate = parseDateLike(dateValue);
   if (!parsedDate) return null;
-  return new Date(Date.UTC(
-    parsedDate.getUTCFullYear(),
-    parsedDate.getUTCMonth(),
-    parsedDate.getUTCDate() + Number(daysToAdd || 0),
-  ));
+  const nextDate = new Date(parsedDate);
+  nextDate.setUTCDate(nextDate.getUTCDate() + Number(daysToAdd || 0));
+  return nextDate;
 };
 
 const getUtcDateKey = (value) => {
-  const parsedDate = parseDateLike(value);
-  return parsedDate ? parsedDate.toISOString().slice(0, 10) : "";
+  return toDateOnlyIso(value);
 };
 
 const escapeRegex = (value = "") =>

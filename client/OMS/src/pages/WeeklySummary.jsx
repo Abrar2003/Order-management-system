@@ -4,7 +4,7 @@ import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
-import { formatDateDDMMYYYY } from "../utils/date";
+import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
@@ -44,16 +44,11 @@ const toReportQuantity = (value) => {
   return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
 };
 
-const toDateInputValue = (date) => {
-  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
-  return date.toISOString().slice(0, 10);
-};
+const toDateInputValue = (date) => toISODateString(date);
 
 const getDefaultWeeklySummaryRange = () => {
-  const now = new Date();
-  const todayUtc = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-  );
+  const todayIso = toISODateString(new Date());
+  const todayUtc = todayIso ? new Date(`${todayIso}T00:00:00Z`) : new Date();
   const toDate = new Date(todayUtc);
   toDate.setUTCDate(toDate.getUTCDate() - 1);
   const fromDate = new Date(toDate);

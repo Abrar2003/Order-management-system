@@ -7,6 +7,12 @@ const OrderEditLog = require("../models/orderEditLog.model");
 const mongoose = require("mongoose");
 const dateParser = require("../helpers/dateparsser");
 const {
+  formatDateOnlyDDMMYYYY,
+  parseDateOnly,
+  parseDateTime,
+  toDateOnlyIso,
+} = require("../helpers/dateOnly");
+const {
   syncOrderGroup,
   purgeOmsEventsForConfiguredBrandCalendars,
 } = require("../services/gcalSync");
@@ -22,7 +28,6 @@ const {
   createStorageKey,
   uploadBuffer,
 } = require("../services/wasabiStorage.service");
-
 
 const ORDER_STATUS_SEQUENCE = [
   "Pending",
@@ -123,10 +128,7 @@ const normalizeStatusList = (values = []) => {
 };
 
 const ACTIVE_ORDER_MATCH = {
-  $and: [
-    { archived: { $ne: true } },
-    { status: { $ne: "Cancelled" } },
-  ],
+  $and: [{ archived: { $ne: true } }, { status: { $ne: "Cancelled" } }],
 };
 
 const buildArchivedByName = (user) =>
@@ -134,9 +136,7 @@ const buildArchivedByName = (user) =>
 
 const buildAuditActor = (user = null) => ({
   user:
-    user?._id && mongoose.Types.ObjectId.isValid(user._id)
-      ? user._id
-      : null,
+    user?._id && mongoose.Types.ObjectId.isValid(user._id) ? user._id : null,
   name: buildArchivedByName(user),
 });
 
@@ -153,26 +153,27 @@ const normalizeActionBoolean = (value, fallback = false) => {
 };
 
 const normalizePreviousOrderActionStrategy = (value) =>
-  String(value || "").trim().toLowerCase()
-  === PREVIOUS_ORDER_ACTION_STRATEGY.REPLACE_PREVIOUS
+  String(value || "")
+    .trim()
+    .toLowerCase() === PREVIOUS_ORDER_ACTION_STRATEGY.REPLACE_PREVIOUS
     ? PREVIOUS_ORDER_ACTION_STRATEGY.REPLACE_PREVIOUS
     : PREVIOUS_ORDER_ACTION_STRATEGY.KEEP_BOTH;
 
 const normalizePreviousOrderActionInput = (value = {}) => {
   const source = value && typeof value === "object" ? value : {};
   const previousOrderDbId = String(
-    source?.previous_order_db_id
-    || source?.previousOrderDbId
-    || source?.previous_order_id
-    || source?.previousOrderId
-    || "",
+    source?.previous_order_db_id ||
+      source?.previousOrderDbId ||
+      source?.previous_order_id ||
+      source?.previousOrderId ||
+      "",
   ).trim();
   const previousOrderOrderId = normalizeOrderKey(
-    source?.previous_order_order_id
-    || source?.previousOrderOrderId
-    || source?.previous_order_po
-    || source?.previousOrderPo
-    || "",
+    source?.previous_order_order_id ||
+      source?.previousOrderOrderId ||
+      source?.previous_order_po ||
+      source?.previousOrderPo ||
+      "",
   );
 
   return {
@@ -192,9 +193,10 @@ const normalizePreviousOrderActionInput = (value = {}) => {
 };
 
 const normalizeHistoryActor = (value = {}) => {
-  const actorId = value?.user && mongoose.Types.ObjectId.isValid(value.user)
-    ? value.user
-    : null;
+  const actorId =
+    value?.user && mongoose.Types.ObjectId.isValid(value.user)
+      ? value.user
+      : null;
 
   return {
     user: actorId,
@@ -307,9 +309,9 @@ const buildShipmentMatch = ({
   }
 
   if (
-    includeStatus
-    && normalizedStatus
-    && SHIPMENT_VISIBLE_STATUSES.includes(normalizedStatus)
+    includeStatus &&
+    normalizedStatus &&
+    SHIPMENT_VISIBLE_STATUSES.includes(normalizedStatus)
   ) {
     match.status = normalizedStatus;
   }
@@ -319,60 +321,10 @@ const buildShipmentMatch = ({
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 
-const parseDateLike = (value) => {
-  const asString = String(value ?? "").trim();
-  if (!asString) return null;
-
-  const parseFromParts = (year, month, day) => {
-    const parsed = new Date(Date.UTC(year, month - 1, day));
-    if (Number.isNaN(parsed.getTime())) return null;
-    if (
-      parsed.getUTCFullYear() !== year
-      || parsed.getUTCMonth() + 1 !== month
-      || parsed.getUTCDate() !== day
-    ) {
-      return null;
-    }
-    return parsed;
-  };
-
-  const ymd = asString.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|T)/);
-  if (ymd) {
-    return parseFromParts(Number(ymd[1]), Number(ymd[2]), Number(ymd[3]));
-  }
-
-  const dmySlash = asString.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (dmySlash) {
-    return parseFromParts(
-      Number(dmySlash[3]),
-      Number(dmySlash[2]),
-      Number(dmySlash[1]),
-    );
-  }
-
-  const dmyDash = asString.match(/^(\d{2})-(\d{2})-(\d{4})$/);
-  if (dmyDash) {
-    return parseFromParts(
-      Number(dmyDash[3]),
-      Number(dmyDash[2]),
-      Number(dmyDash[1]),
-    );
-  }
-
-  const shouldTryNativeParse =
-    /[a-zA-Z]/.test(asString) || asString.includes(",") || asString.includes(" ");
-  if (!shouldTryNativeParse) return null;
-
-  const parsed = new Date(asString);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return parsed;
-};
+const parseDateLike = (value) => parseDateOnly(value);
 
 const toUtcDayStart = (value = new Date()) => {
-  const parsed =
-    value instanceof Date
-      ? value
-      : parseDateLike(value) || new Date(value);
+  const parsed = parseDateLike(value);
 
   if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) {
     return null;
@@ -387,11 +339,7 @@ const toUtcDayStart = (value = new Date()) => {
   );
 };
 
-const toISODateString = (value) => {
-  const dayStart = toUtcDayStart(value);
-  if (!dayStart) return "";
-  return dayStart.toISOString().slice(0, 10);
-};
+const toISODateString = (value) => toDateOnlyIso(value);
 
 const diffUtcDays = (laterValue, earlierValue) => {
   const later = toUtcDayStart(laterValue);
@@ -401,12 +349,10 @@ const diffUtcDays = (laterValue, earlierValue) => {
 };
 
 const resolveLaterDate = (currentValue, nextValue) => {
-  const currentDate = currentValue instanceof Date
-    ? currentValue
-    : parseDateLike(currentValue);
-  const nextDate = nextValue instanceof Date
-    ? nextValue
-    : parseDateLike(nextValue);
+  const currentDate =
+    currentValue instanceof Date ? currentValue : parseDateLike(currentValue);
+  const nextDate =
+    nextValue instanceof Date ? nextValue : parseDateLike(nextValue);
 
   if (!(currentDate instanceof Date) || Number.isNaN(currentDate.getTime())) {
     return nextDate instanceof Date && !Number.isNaN(nextDate.getTime())
@@ -422,12 +368,10 @@ const resolveLaterDate = (currentValue, nextValue) => {
 };
 
 const resolveEarlierDate = (currentValue, nextValue) => {
-  const currentDate = currentValue instanceof Date
-    ? currentValue
-    : parseDateLike(currentValue);
-  const nextDate = nextValue instanceof Date
-    ? nextValue
-    : parseDateLike(nextValue);
+  const currentDate =
+    currentValue instanceof Date ? currentValue : parseDateLike(currentValue);
+  const nextDate =
+    nextValue instanceof Date ? nextValue : parseDateLike(nextValue);
 
   if (!(currentDate instanceof Date) || Number.isNaN(currentDate.getTime())) {
     return nextDate instanceof Date && !Number.isNaN(nextDate.getTime())
@@ -506,10 +450,7 @@ const resolveDelayedPoLastProgress = (row = {}) => {
     };
   }
 
-  if (
-    Number(row?.inspection_done_count || 0) > 0 &&
-    row?.last_inspected_date
-  ) {
+  if (Number(row?.inspection_done_count || 0) > 0 && row?.last_inspected_date) {
     return {
       type: "inspection_done",
       value: toISODateString(row.last_inspected_date),
@@ -555,19 +496,8 @@ const uploadSourceFileToWasabi = async (file, folder) => {
   });
 };
 
-const formatDateDDMMYYYY = (value, fallback = "") => {
-  if (value === undefined || value === null || value === "") return fallback;
-
-  const parsed = value instanceof Date ? value : parseDateLike(value);
-  if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) {
-    return fallback;
-  }
-
-  const day = String(parsed.getUTCDate()).padStart(2, "0");
-  const month = String(parsed.getUTCMonth() + 1).padStart(2, "0");
-  const year = String(parsed.getUTCFullYear());
-  return `${day}/${month}/${year}`;
-};
+const formatDateDDMMYYYY = (value, fallback = "") =>
+  formatDateOnlyDDMMYYYY(value, fallback);
 
 const parseQuantityLike = (value) => {
   if (value === undefined || value === null) return null;
@@ -611,11 +541,11 @@ const pickRectifyOrderId = (row = {}) =>
 
 const pickRectifyItemCode = (row = {}) =>
   normalizeRectifyText(
-    row?.item_code
-    || row?.itemCode
-    || row?.ourItemCode
-    || row?.yourItemCode
-    || "",
+    row?.item_code ||
+      row?.itemCode ||
+      row?.ourItemCode ||
+      row?.yourItemCode ||
+      "",
   );
 
 const toDateDayKey = (value) => {
@@ -623,8 +553,10 @@ const toDateDayKey = (value) => {
   return formatted || "";
 };
 
+const parseTimestampLike = (value) => parseDateTime(value);
+
 const toTimestamp = (value) => {
-  const parsed = value instanceof Date ? value : parseDateLike(value);
+  const parsed = value instanceof Date ? value : parseTimestampLike(value);
   if (!parsed) return 0;
   return parsed.getTime();
 };
@@ -632,14 +564,16 @@ const toTimestamp = (value) => {
 const normalizeRevisedEtdHistoryEntries = (entries = []) =>
   (Array.isArray(entries) ? entries : [])
     .map((entry) => {
-      const revisedEtd = entry?.revised_etd instanceof Date
-        ? entry.revised_etd
-        : parseDateLike(entry?.revised_etd);
+      const revisedEtd =
+        entry?.revised_etd instanceof Date
+          ? entry.revised_etd
+          : parseDateLike(entry?.revised_etd);
       if (!revisedEtd) return null;
 
-      const updatedAt = entry?.updated_at instanceof Date
-        ? entry.updated_at
-        : parseDateLike(entry?.updated_at) || revisedEtd;
+      const updatedAt =
+        entry?.updated_at instanceof Date
+          ? entry.updated_at
+          : parseTimestampLike(entry?.updated_at) || revisedEtd;
 
       return {
         revised_etd: revisedEtd,
@@ -648,21 +582,24 @@ const normalizeRevisedEtdHistoryEntries = (entries = []) =>
       };
     })
     .filter(Boolean)
-    .sort((left, right) => toTimestamp(right?.updated_at) - toTimestamp(left?.updated_at));
+    .sort(
+      (left, right) =>
+        toTimestamp(right?.updated_at) - toTimestamp(left?.updated_at),
+    );
 
 const buildRevisedEtdHistoryEntry = ({
   revisedEtd = null,
   updatedAt = new Date(),
   user = null,
 } = {}) => {
-  const parsedRevisedEtd = revisedEtd instanceof Date
-    ? revisedEtd
-    : parseDateLike(revisedEtd);
+  const parsedRevisedEtd =
+    revisedEtd instanceof Date ? revisedEtd : parseDateLike(revisedEtd);
   if (!parsedRevisedEtd) return null;
 
-  const parsedUpdatedAt = updatedAt instanceof Date
-    ? updatedAt
-    : parseDateLike(updatedAt) || new Date();
+  const parsedUpdatedAt =
+    updatedAt instanceof Date
+      ? updatedAt
+      : parseTimestampLike(updatedAt) || new Date();
   return {
     revised_etd: parsedRevisedEtd,
     updated_at: parsedUpdatedAt,
@@ -677,15 +614,17 @@ const getOrderRevisedEtdHistoryEntries = (orderEntry = {}) => {
   const currentRevisedEtdKey = toDateDayKey(orderEntry?.revised_ETD);
 
   if (
-    currentRevisedEtdKey
-    && !normalizedHistory.some(
+    currentRevisedEtdKey &&
+    !normalizedHistory.some(
       (entry) => toDateDayKey(entry?.revised_etd) === currentRevisedEtdKey,
     )
   ) {
     const fallbackEntry = buildRevisedEtdHistoryEntry({
       revisedEtd: orderEntry?.revised_ETD,
       updatedAt:
-        orderEntry?.updatedAt || orderEntry?.createdAt || orderEntry?.revised_ETD,
+        orderEntry?.updatedAt ||
+        orderEntry?.createdAt ||
+        orderEntry?.revised_ETD,
       user: {
         _id: orderEntry?.updated_by?.user || null,
         name: orderEntry?.updated_by?.name || "",
@@ -697,7 +636,10 @@ const getOrderRevisedEtdHistoryEntries = (orderEntry = {}) => {
   }
 
   return normalizedHistory
-    .sort((left, right) => toTimestamp(right?.updated_at) - toTimestamp(left?.updated_at))
+    .sort(
+      (left, right) =>
+        toTimestamp(right?.updated_at) - toTimestamp(left?.updated_at),
+    )
     .map((entry) => ({
       revised_etd: entry?.revised_etd || null,
       updated_at: entry?.updated_at || null,
@@ -741,6 +683,7 @@ const applyRevisedEtdUpdateToOrder = ({
 };
 
 const normalizeRectifiedPdfRow = (row = {}, { brand, vendor } = {}) => {
+
   const orderId = pickRectifyOrderId(row);
   const itemCode = pickRectifyItemCode(row);
   const description = normalizeRectifyText(row?.description || "");
@@ -775,7 +718,8 @@ const computeRectifyOpenQuantity = (orderEntry = {}) => {
     0,
     (Array.isArray(orderEntry?.shipment) ? orderEntry.shipment : []).reduce(
       (sum, shipmentEntry) =>
-        sum + Math.max(0, Number(parseQuantityLike(shipmentEntry?.quantity) || 0)),
+        sum +
+        Math.max(0, Number(parseQuantityLike(shipmentEntry?.quantity) || 0)),
       0,
     ),
   );
@@ -805,7 +749,10 @@ const buildExactTextQuery = (value) => ({
 const loadLinkedQcForOrder = async (orderDoc, { session = null } = {}) => {
   if (!orderDoc?._id) return null;
 
-  if (orderDoc.qc_record && mongoose.Types.ObjectId.isValid(orderDoc.qc_record)) {
+  if (
+    orderDoc.qc_record &&
+    mongoose.Types.ObjectId.isValid(orderDoc.qc_record)
+  ) {
     return QC.findById(orderDoc.qc_record).session(session);
   }
 
@@ -844,10 +791,7 @@ const buildPreviousOrderMetrics = ({ orderDoc = null, qcDoc = null } = {}) => {
 
 const isPartialShippedStatus = (statusValue = "") => {
   const normalized = normalizeLooseString(statusValue).toLowerCase();
-  return (
-    normalized === "partial shipped" ||
-    normalized === "partially shipped"
-  );
+  return normalized === "partial shipped" || normalized === "partially shipped";
 };
 
 const buildPreviousOrderResponse = ({ orderDoc = null, qcDoc = null } = {}) => {
@@ -872,9 +816,7 @@ const buildPreviousOrderResponse = ({ orderDoc = null, qcDoc = null } = {}) => {
       can_keep_both: true,
       can_replace_previous: isPartialShipped,
       can_transfer_inspections:
-        isPartialShipped &&
-        metrics.passed_quantity > 0 &&
-        Boolean(qcDoc?._id),
+        isPartialShipped && metrics.passed_quantity > 0 && Boolean(qcDoc?._id),
     },
     requirements: {
       requires_partial_shipped: true,
@@ -892,7 +834,8 @@ const resolvePreviousOrderReplacementPlan = async ({
   );
 
   if (
-    previousOrderAction.strategy !== PREVIOUS_ORDER_ACTION_STRATEGY.REPLACE_PREVIOUS
+    previousOrderAction.strategy !==
+    PREVIOUS_ORDER_ACTION_STRATEGY.REPLACE_PREVIOUS
   ) {
     return {
       action: previousOrderAction,
@@ -952,11 +895,13 @@ const resolvePreviousOrderReplacementPlan = async ({
     };
   }
 
-  const previousOrderItemCode = normalizeRectifyText(previousOrder?.item?.item_code);
+  const previousOrderItemCode = normalizeRectifyText(
+    previousOrder?.item?.item_code,
+  );
   if (
-    previousOrderItemCode
-    && itemCode
-    && previousOrderItemCode.toLowerCase() !== itemCode.toLowerCase()
+    previousOrderItemCode &&
+    itemCode &&
+    previousOrderItemCode.toLowerCase() !== itemCode.toLowerCase()
   ) {
     warnings.push(
       `Previous order ${normalizeOrderKey(previousOrder?.order_id) || "UNKNOWN"} does not match item ${itemCode}. Row will be added without replacing the old order.`,
@@ -990,8 +935,8 @@ const resolvePreviousOrderReplacementPlan = async ({
   }
 
   if (
-    previousOrderAction.transfer_inspection_records
-    && previousOrderResponse.metrics.passed_quantity > Number(row?.quantity || 0)
+    previousOrderAction.transfer_inspection_records &&
+    previousOrderResponse.metrics.passed_quantity > Number(row?.quantity || 0)
   ) {
     warnings.push(
       `Transfer skipped for ${normalizeOrderKey(row?.order_id) || "UNKNOWN"}/${itemCode} because new quantity is less than previous passed quantity.`,
@@ -1022,22 +967,22 @@ const getRectifiedChangedFields = (incomingRow, existingOrder) => {
   const changedFields = [];
 
   if (
-    normalizeOrderComparisonValue(incomingRow?.brand)
-    !== normalizeOrderComparisonValue(existingOrder?.brand)
+    normalizeOrderComparisonValue(incomingRow?.brand) !==
+    normalizeOrderComparisonValue(existingOrder?.brand)
   ) {
     changedFields.push("brand");
   }
 
   if (
-    normalizeOrderComparisonValue(incomingRow?.vendor)
-    !== normalizeOrderComparisonValue(existingOrder?.vendor)
+    normalizeOrderComparisonValue(incomingRow?.vendor) !==
+    normalizeOrderComparisonValue(existingOrder?.vendor)
   ) {
     changedFields.push("vendor");
   }
 
   if (
-    normalizeOrderComparisonValue(incomingRow?.description)
-    !== normalizeOrderComparisonValue(existingOrder?.item?.description)
+    normalizeOrderComparisonValue(incomingRow?.description) !==
+    normalizeOrderComparisonValue(existingOrder?.item?.description)
   ) {
     changedFields.push("description");
   }
@@ -1045,9 +990,9 @@ const getRectifiedChangedFields = (incomingRow, existingOrder) => {
   const incomingQuantity = Number(incomingRow?.quantity);
   const existingQuantity = Number(existingOrder?.quantity);
   if (
-    Number.isFinite(incomingQuantity)
-    && Number.isFinite(existingQuantity)
-    && incomingQuantity !== existingQuantity
+    Number.isFinite(incomingQuantity) &&
+    Number.isFinite(existingQuantity) &&
+    incomingQuantity !== existingQuantity
   ) {
     changedFields.push("quantity");
   }
@@ -1057,8 +1002,8 @@ const getRectifiedChangedFields = (incomingRow, existingOrder) => {
   }
 
   if (
-    toDateDayKey(incomingRow?.order_date)
-    !== toDateDayKey(existingOrder?.order_date)
+    toDateDayKey(incomingRow?.order_date) !==
+    toDateDayKey(existingOrder?.order_date)
   ) {
     changedFields.push("order_date");
   }
@@ -1105,7 +1050,9 @@ const loadExistingOrdersForBrandVendorPairs = async (pairs = []) => {
       vendor: entry.vendor,
     })),
   })
-    .select("_id order_id item brand vendor quantity ETD order_date status shipment qc_record")
+    .select(
+      "_id order_id item brand vendor quantity ETD order_date status shipment qc_record",
+    )
     .populate({
       path: "qc_record",
       select: "quantities",
@@ -1128,8 +1075,8 @@ const loadExistingOrdersForBrandVendorPairs = async (pairs = []) => {
     }
 
     if (
-      String(existingOrder?.status || "").trim() !== "Shipped"
-      && !openOrdersByKey.has(key)
+      String(existingOrder?.status || "").trim() !== "Shipped" &&
+      !openOrdersByKey.has(key)
     ) {
       openOrdersByKey.set(key, existingOrder);
     }
@@ -1199,8 +1146,14 @@ const makeRectifyKey = (orderId, itemCode) =>
   `${normalizeOrderKey(orderId)}__${normalizeRectifyText(itemCode).toUpperCase()}`;
 
 const normalizeRectifyChangeType = (value) => {
-  const normalized = String(value || "").trim().toLowerCase();
-  if (normalized === "new" || normalized === "modified" || normalized === "closed") {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (
+    normalized === "new" ||
+    normalized === "modified" ||
+    normalized === "closed"
+  ) {
     return normalized;
   }
   return "";
@@ -1256,7 +1209,8 @@ const buildRectifyRowsForResponse = (rows = []) =>
     change_type: normalizeRectifyChangeType(row?.change_type),
     changed_fields: normalizeRectifyChangedFields(row?.changed_fields),
     existing_order_id: String(row?.existing_order_id || "").trim() || null,
-    existing_order_status: normalizeLooseString(row?.existing_order_status) || null,
+    existing_order_status:
+      normalizeLooseString(row?.existing_order_status) || null,
     previous_order_action: normalizePreviousOrderActionInput(
       row?.previous_order_action || row?.previousOrderAction,
     ),
@@ -1276,23 +1230,30 @@ const createRectifyUploadLog = async ({
   changedRows = [],
   applySummary = {},
 } = {}) => {
-  const appliedDbChangeCount = Number(applySummary?.inserted_count || 0)
-    + Number(applySummary?.updated_count || 0);
+  const appliedDbChangeCount =
+    Number(applySummary?.inserted_count || 0) +
+    Number(applySummary?.updated_count || 0);
   if (appliedDbChangeCount <= 0) {
     return null;
   }
 
   const rowsByOrder = new Map();
-  for (const row of Array.isArray(rowsEligibleForApply) ? rowsEligibleForApply : []) {
+  for (const row of Array.isArray(rowsEligibleForApply)
+    ? rowsEligibleForApply
+    : []) {
     const orderId = normalizeOrderKey(row?.order_id);
     if (!orderId) continue;
     rowsByOrder.set(orderId, Number(rowsByOrder.get(orderId) || 0) + 1);
   }
 
-  const uploadedOrderIds = [...rowsByOrder.keys()].sort((a, b) => a.localeCompare(b));
+  const uploadedOrderIds = [...rowsByOrder.keys()].sort((a, b) =>
+    a.localeCompare(b),
+  );
   const missingOpenOrderIds = normalizeDistinctValues(
     (Array.isArray(changedRows) ? changedRows : [])
-      .filter((row) => normalizeRectifyChangeType(row?.change_type) === "closed")
+      .filter(
+        (row) => normalizeRectifyChangeType(row?.change_type) === "closed",
+      )
       .map((row) => normalizeOrderKey(row?.order_id))
       .filter(Boolean),
   );
@@ -1320,7 +1281,10 @@ const createRectifyUploadLog = async ({
     );
   }
 
-  if (Array.isArray(applySummary?.warnings) && applySummary.warnings.length > 0) {
+  if (
+    Array.isArray(applySummary?.warnings) &&
+    applySummary.warnings.length > 0
+  ) {
     remarks.push(
       ...applySummary.warnings
         .map((warning) => String(warning || "").trim())
@@ -1336,9 +1300,10 @@ const createRectifyUploadLog = async ({
     message: `Brand ${brand} / Vendor ${vendor} has open order ${orderId} in system but it was not present in the rectify PDF.`,
   }));
 
-  const uploadedById = reqUser?._id && mongoose.Types.ObjectId.isValid(reqUser._id)
-    ? reqUser._id
-    : null;
+  const uploadedById =
+    reqUser?._id && mongoose.Types.ObjectId.isValid(reqUser._id)
+      ? reqUser._id
+      : null;
 
   try {
     const uploadLog = await UploadLog.create({
@@ -1351,34 +1316,41 @@ const createRectifyUploadLog = async ({
       total_rows_received: Number(totalRowsReceived || 0),
       total_rows_unique: Number(totalRowsUnique || 0),
       inserted_item_rows: appliedDbChangeCount,
-      duplicate_count: Number(duplicateInPdfCount || 0)
-        + (Array.isArray(invalidEntries) ? invalidEntries.length : 0),
-      duplicate_entries: (Array.isArray(invalidEntries) ? invalidEntries : []).map((entry) => ({
-        order_id: normalizeOrderKey(entry?.source?.orderNumber || entry?.source?.order_id || ""),
+      duplicate_count:
+        Number(duplicateInPdfCount || 0) +
+        (Array.isArray(invalidEntries) ? invalidEntries.length : 0),
+      duplicate_entries: (Array.isArray(invalidEntries)
+        ? invalidEntries
+        : []
+      ).map((entry) => ({
+        order_id: normalizeOrderKey(
+          entry?.source?.orderNumber || entry?.source?.order_id || "",
+        ),
         item_code: pickRectifyItemCode(entry?.source || {}),
         reason: String(entry?.reason || "invalid_row").trim(),
       })),
       uploaded_brands: brand ? [brand] : [],
       uploaded_vendors: vendor ? [vendor] : [],
       total_distinct_orders_uploaded: uploadedOrderIds.length,
-      vendor_summaries: brand && vendor
-        ? [
-          {
-            brand,
-            vendor,
-            uploaded_order_ids: uploadedOrderIds,
-            uploaded_orders_count: uploadedOrderIds.length,
-            uploaded_items_count: rowsEligibleForApply.length,
-            items_per_order: itemsPerOrder,
-            missing_open_order_ids: missingOpenOrderIds,
-            missing_open_orders_count: missingOpenOrderIds.length,
-            remark:
-              missingOpenOrderIds.length > 0
-                ? "Open orders missing in PDF were exported as closed rows."
-                : "",
-          },
-        ]
-        : [],
+      vendor_summaries:
+        brand && vendor
+          ? [
+              {
+                brand,
+                vendor,
+                uploaded_order_ids: uploadedOrderIds,
+                uploaded_orders_count: uploadedOrderIds.length,
+                uploaded_items_count: rowsEligibleForApply.length,
+                items_per_order: itemsPerOrder,
+                missing_open_order_ids: missingOpenOrderIds,
+                missing_open_orders_count: missingOpenOrderIds.length,
+                remark:
+                  missingOpenOrderIds.length > 0
+                    ? "Open orders missing in PDF were exported as closed rows."
+                    : "",
+              },
+            ]
+          : [],
       conflicts,
       remarks,
       status: conflicts.length > 0 ? "success_with_conflicts" : "success",
@@ -1421,7 +1393,8 @@ const buildOrderEditLogSnapshot = (orderEntry = {}) => ({
   revised_ETD: formatDateDDMMYYYY(orderEntry?.revised_ETD, "Not Set"),
   status: normalizeLooseString(orderEntry?.status) || "Not Set",
   archived: Boolean(orderEntry?.archived) ? "Yes" : "No",
-  archived_remark: normalizeLooseString(orderEntry?.archived_remark) || "Not Set",
+  archived_remark:
+    normalizeLooseString(orderEntry?.archived_remark) || "Not Set",
   shipment: formatShipmentEntriesForUploadLog(orderEntry?.shipment),
 });
 
@@ -1468,15 +1441,23 @@ const createOrderEditLog = async ({
   calendarSyncResults = [],
   extraRemarks = [],
 } = {}) => {
-  const orderId = normalizeLooseString(afterSnapshot?.order_id || beforeSnapshot?.order_id);
-  const brand = normalizeLooseString(afterSnapshot?.brand || beforeSnapshot?.brand);
-  const vendor = normalizeLooseString(afterSnapshot?.vendor || beforeSnapshot?.vendor);
-  const itemCode = normalizeLooseString(afterSnapshot?.item_code || beforeSnapshot?.item_code);
+  const orderId = normalizeLooseString(
+    afterSnapshot?.order_id || beforeSnapshot?.order_id,
+  );
+  const brand = normalizeLooseString(
+    afterSnapshot?.brand || beforeSnapshot?.brand,
+  );
+  const vendor = normalizeLooseString(
+    afterSnapshot?.vendor || beforeSnapshot?.vendor,
+  );
+  const itemCode = normalizeLooseString(
+    afterSnapshot?.item_code || beforeSnapshot?.item_code,
+  );
   const editDetails = buildOrderEditChanges(beforeSnapshot, afterSnapshot);
 
-  const calendarFailures = (Array.isArray(calendarSyncResults) ? calendarSyncResults : []).filter(
-    (entry) => entry && entry.ok === false,
-  );
+  const calendarFailures = (
+    Array.isArray(calendarSyncResults) ? calendarSyncResults : []
+  ).filter((entry) => entry && entry.ok === false);
 
   const remarks = [
     editDetails.length > 0
@@ -1488,12 +1469,15 @@ const createOrderEditLog = async ({
   ];
 
   if (calendarFailures.length > 0) {
-    remarks.push(`Calendar sync failed for ${calendarFailures.length} group(s).`);
+    remarks.push(
+      `Calendar sync failed for ${calendarFailures.length} group(s).`,
+    );
   }
 
-  const uploadedById = reqUser?._id && mongoose.Types.ObjectId.isValid(reqUser._id)
-    ? reqUser._id
-    : null;
+  const uploadedById =
+    reqUser?._id && mongoose.Types.ObjectId.isValid(reqUser._id)
+      ? reqUser._id
+      : null;
 
   try {
     await OrderEditLog.create({
@@ -1506,7 +1490,9 @@ const createOrderEditLog = async ({
       vendor,
       item_code: itemCode,
       operation_type:
-        String(operationType || "").trim().toLowerCase() === "order_edit_archive"
+        String(operationType || "")
+          .trim()
+          .toLowerCase() === "order_edit_archive"
           ? "order_edit_archive"
           : "order_edit",
       changed_fields_count: editDetails.length,
@@ -1576,18 +1562,20 @@ const applyNewOrderRows = async ({
       await newOrder.validate();
 
       if (
-        replacementPlan.mode === PREVIOUS_ORDER_ACTION_STRATEGY.REPLACE_PREVIOUS
-        && replacementPlan.previousOrder
+        replacementPlan.mode ===
+          PREVIOUS_ORDER_ACTION_STRATEGY.REPLACE_PREVIOUS &&
+        replacementPlan.previousOrder
       ) {
         const previousOrder = replacementPlan.previousOrder;
         const previousQc = replacementPlan.previousQc;
-        const previousOrderBeforeSnapshot = buildOrderEditLogSnapshot(previousOrder);
+        const previousOrderBeforeSnapshot =
+          buildOrderEditLogSnapshot(previousOrder);
         const archiveRemark = `Replaced by PO ${normalizeOrderKey(newOrder.order_id) || "UNKNOWN"} during ${actionLabel}.`;
 
         if (
-          replacementPlan.action.transfer_inspection_records
-          && previousQc
-          && Number(previousQc?.quantities?.qc_passed || 0) > 0
+          replacementPlan.action.transfer_inspection_records &&
+          previousQc &&
+          Number(previousQc?.quantities?.qc_passed || 0) > 0
         ) {
           const nextQuantity = Math.max(0, Number(newOrder.quantity || 0));
           const clampToDemand = (value) => {
@@ -1624,7 +1612,10 @@ const applyNewOrderRows = async ({
           previousQc.quantities.qc_checked = nextChecked;
           previousQc.quantities.quantity_requested = nextRequested;
           previousQc.quantities.vendor_provision = nextProvision;
-          previousQc.quantities.pending = Math.max(0, nextQuantity - nextPassed);
+          previousQc.quantities.pending = Math.max(
+            0,
+            nextQuantity - nextPassed,
+          );
           previousQc.quantities.qc_rejected = Math.max(
             0,
             nextChecked - nextPassed,
@@ -1696,7 +1687,8 @@ const applyNewOrderRows = async ({
         afterSnapshot: buildOrderEditLogSnapshot(postCommitNewOrder),
         extraRemarks: [
           `Order created from ${actionLabel}.`,
-          replacementPlan.mode === PREVIOUS_ORDER_ACTION_STRATEGY.REPLACE_PREVIOUS
+          replacementPlan.mode ===
+          PREVIOUS_ORDER_ACTION_STRATEGY.REPLACE_PREVIOUS
             ? `Previous order ${normalizeOrderKey(replacementPlan.previousOrder?.order_id) || "UNKNOWN"} was replaced.`
             : "No previous order replacement action was applied.",
         ],
@@ -1810,11 +1802,16 @@ const applyRectifiedOrderRows = async ({
       actionLabel: "rectify",
     });
     insertedCount = insertSummary.inserted_count;
-    warnings.push(...(Array.isArray(insertSummary?.warnings) ? insertSummary.warnings : []));
+    warnings.push(
+      ...(Array.isArray(insertSummary?.warnings) ? insertSummary.warnings : []),
+    );
   }
 
   for (const entry of rowsToUpdate) {
-    if (!entry?.existingId || !mongoose.Types.ObjectId.isValid(entry.existingId)) {
+    if (
+      !entry?.existingId ||
+      !mongoose.Types.ObjectId.isValid(entry.existingId)
+    ) {
       continue;
     }
 
@@ -1839,8 +1836,13 @@ const applyRectifiedOrderRows = async ({
 
     const nextQuantity = Number(entry.row.quantity);
     const currentQuantity = Number(orderDoc.quantity);
-    if (Number.isFinite(nextQuantity) && Number.isFinite(currentQuantity) && nextQuantity !== currentQuantity) {
-      const hasShipment = Array.isArray(orderDoc.shipment) && orderDoc.shipment.length > 0;
+    if (
+      Number.isFinite(nextQuantity) &&
+      Number.isFinite(currentQuantity) &&
+      nextQuantity !== currentQuantity
+    ) {
+      const hasShipment =
+        Array.isArray(orderDoc.shipment) && orderDoc.shipment.length > 0;
       const hasQcRecord = Boolean(orderDoc.qc_record);
       if (hasShipment || hasQcRecord) {
         quantitySkippedCount += 1;
@@ -1921,9 +1923,9 @@ const resolveClientDayRange = (dateValue, tzOffsetValue) => {
   const utcMidnightMs = Date.UTC(year, month - 1, day);
   const validationDate = new Date(utcMidnightMs);
   if (
-    validationDate.getUTCFullYear() !== year
-    || validationDate.getUTCMonth() + 1 !== month
-    || validationDate.getUTCDate() !== day
+    validationDate.getUTCFullYear() !== year ||
+    validationDate.getUTCMonth() + 1 !== month ||
+    validationDate.getUTCDate() !== day
   ) {
     return null;
   }
@@ -2030,7 +2032,9 @@ const normalizeShipmentEntries = (shipmentPayload) => {
 
     const quantity = Number(entry?.quantity);
     if (!Number.isFinite(quantity) || quantity <= 0) {
-      throw new Error(`shipment[${index + 1}] quantity must be a positive number`);
+      throw new Error(
+        `shipment[${index + 1}] quantity must be a positive number`,
+      );
     }
 
     const remarks = String(entry?.remaining_remarks ?? "").trim();
@@ -2040,7 +2044,9 @@ const normalizeShipmentEntries = (shipmentPayload) => {
       stuffing_date: stuffingDate,
       quantity,
       remaining_remarks: remarks,
-      updated_at: entry?.updated_at ? parseDateLike(entry.updated_at) : null,
+      updated_at: entry?.updated_at
+        ? parseTimestampLike(entry.updated_at)
+        : null,
       updated_by: normalizeHistoryActor(entry?.updated_by),
     };
   });
@@ -2052,7 +2058,8 @@ const fitShipmentEntriesToOrderQuantity = (
   { user = null, updatedAt = new Date() } = {},
 ) => {
   const normalizedQuantity = Number(orderQuantity);
-  if (!Number.isFinite(normalizedQuantity) || normalizedQuantity <= 0) return [];
+  if (!Number.isFinite(normalizedQuantity) || normalizedQuantity <= 0)
+    return [];
 
   let cumulativeShipped = 0;
   const nextEntries = [];
@@ -2074,10 +2081,10 @@ const fitShipmentEntriesToOrderQuantity = (
       quantity: adjustedQuantity,
       pending: Math.max(0, normalizedQuantity - cumulativeShipped),
       remaining_remarks: String(entry?.remaining_remarks ?? "").trim(),
-      updated_at:
-        user
-          ? updatedAt
-          : (entry?.updated_at ? parseDateLike(entry.updated_at) : null) || updatedAt,
+      updated_at: user
+        ? updatedAt
+        : (entry?.updated_at ? parseTimestampLike(entry.updated_at) : null) ||
+          updatedAt,
       updated_by: user
         ? buildAuditActor(user)
         : normalizeHistoryActor(entry?.updated_by),
@@ -2163,9 +2170,9 @@ const resolveShipmentSortConfig = ({
       : null;
 
   const normalizedSortKey = String(
-    rawSortBy
-      || String(normalizedSortToken || "").replace(/^[+-]/, "")
-      || "stuffing_date",
+    rawSortBy ||
+      String(normalizedSortToken || "").replace(/^[+-]/, "") ||
+      "stuffing_date",
   )
     .trim()
     .replace(/[^a-zA-Z0-9_]/g, "")
@@ -2386,7 +2393,9 @@ const getShipmentDataset = async ({
 
   const containerFilteredRows = containerNeedle
     ? rows.filter((row) =>
-        String(row?.container || "").toLowerCase().includes(containerNeedle),
+        String(row?.container || "")
+          .toLowerCase()
+          .includes(containerNeedle),
       )
     : rows;
 
@@ -2469,14 +2478,17 @@ const normalizeUploadedSelectionRow = (row = {}, index = 0) => {
     description: normalizeLooseString(row?.description),
     brand: normalizeLooseString(row?.brand),
     vendor: normalizeLooseString(row?.vendor),
-    quantity: Number.isFinite(parsedQuantity) ? parsedQuantity : quantityRaw ?? "",
+    quantity: Number.isFinite(parsedQuantity)
+      ? parsedQuantity
+      : (quantityRaw ?? ""),
     ETD: dateParser(row?.ETD ?? row?.etd),
     order_date: dateParser(row?.order_date ?? row?.orderDate),
     change_type: "",
     reason: "",
     changed_fields: [],
     existing_order_id: String(row?.existing_order_id || "").trim() || null,
-    existing_order_status: normalizeLooseString(row?.existing_order_status) || null,
+    existing_order_status:
+      normalizeLooseString(row?.existing_order_status) || null,
     previous_order_action: previousOrderAction,
   };
 };
@@ -2502,7 +2514,12 @@ const buildUploadPreviewSummary = ({
 } = {}) => {
   const rows = Array.isArray(previewRows) ? previewRows : [];
   const countByType = (type) =>
-    rows.filter((row) => String(row?.change_type || "").trim().toLowerCase() === type).length;
+    rows.filter(
+      (row) =>
+        String(row?.change_type || "")
+          .trim()
+          .toLowerCase() === type,
+    ).length;
 
   return {
     extracted_rows: totalRowsReceived,
@@ -2513,7 +2530,8 @@ const buildUploadPreviewSummary = ({
     new_rows: countByType("new"),
     modified_rows: countByType("modified"),
     closed_rows: countByType("closed"),
-    invalid_rows: countByType("missing_required_fields") + countByType("invalid_quantity"),
+    invalid_rows:
+      countByType("missing_required_fields") + countByType("invalid_quantity"),
     duplicate_in_file_rows: countByType("duplicate_in_file"),
     already_exists_rows: countByType("already_exists"),
   };
@@ -2589,9 +2607,8 @@ const prepareUploadOrdersFromRows = async (rowsInput = []) => {
   ).size;
 
   const comparisonPairs = buildBrandVendorPairsFromRows(candidateRows);
-  const { existingByKey, openOrdersByKey } = await loadExistingOrdersForBrandVendorPairs(
-    comparisonPairs,
-  );
+  const { existingByKey, openOrdersByKey } =
+    await loadExistingOrdersForBrandVendorPairs(comparisonPairs);
 
   const orders = candidateRows.map((row) => buildUploadedOrderDocument(row));
   const newOrders = [];
@@ -2641,7 +2658,10 @@ const prepareUploadOrdersFromRows = async (rowsInput = []) => {
       brand: normalizeLooseString(openOrder?.brand),
       vendor: normalizeLooseString(openOrder?.vendor),
       quantity: openQuantity,
-      ETD: openOrder?.ETD || deriveRectifyDefaultEtd(openOrder?.order_date) || null,
+      ETD:
+        openOrder?.ETD ||
+        deriveRectifyDefaultEtd(openOrder?.order_date) ||
+        null,
       order_date: openOrder?.order_date || null,
       change_type: "closed",
       reason: "",
@@ -2669,11 +2689,11 @@ const prepareUploadOrdersFromRows = async (rowsInput = []) => {
 exports.lookupPreviousOrder = async (req, res) => {
   try {
     const orderId = normalizeOrderKey(
-      req.query?.order_id
-      ?? req.query?.previous_order_id
-      ?? req.body?.order_id
-      ?? req.body?.previous_order_id
-      ?? "",
+      req.query?.order_id ??
+        req.query?.previous_order_id ??
+        req.body?.order_id ??
+        req.body?.previous_order_id ??
+        "",
     );
     const itemCode = normalizeRectifyText(
       req.query?.item_code ?? req.body?.item_code ?? "",
@@ -2691,8 +2711,7 @@ exports.lookupPreviousOrder = async (req, res) => {
       ...ACTIVE_ORDER_MATCH,
       order_id: buildExactTextQuery(orderId),
       "item.item_code": buildExactTextQuery(itemCode),
-    })
-      .sort({ updatedAt: -1, createdAt: -1 });
+    }).sort({ updatedAt: -1, createdAt: -1 });
 
     if (!orderDoc) {
       return res.status(404).json({
@@ -2719,9 +2738,10 @@ exports.lookupPreviousOrder = async (req, res) => {
 
 // Upload Orders Controller
 exports.uploadOrders = async (req, res) => {
-  const uploadedById = req.user?._id && mongoose.Types.ObjectId.isValid(req.user._id)
-    ? req.user._id
-    : null;
+  const uploadedById =
+    req.user?._id && mongoose.Types.ObjectId.isValid(req.user._id)
+      ? req.user._id
+      : null;
   const uploadMeta = {
     uploaded_by: uploadedById,
     uploaded_by_name: String(
@@ -2730,7 +2750,9 @@ exports.uploadOrders = async (req, res) => {
     source_filename: String(
       req.file?.originalname || req.body?.source_filename || "",
     ).trim(),
-    source_size_bytes: Number(req.file?.size || req.body?.source_size_bytes || 0),
+    source_size_bytes: Number(
+      req.file?.size || req.body?.source_size_bytes || 0,
+    ),
     source_file_storage: null,
   };
 
@@ -2758,10 +2780,14 @@ exports.uploadOrders = async (req, res) => {
           if (Array.isArray(parsed)) {
             selectedRowsPayload = parsed;
           } else {
-            return res.status(400).json({ message: "selected_rows must be an array" });
+            return res
+              .status(400)
+              .json({ message: "selected_rows must be an array" });
           }
         } catch {
-          return res.status(400).json({ message: "selected_rows must be valid JSON array" });
+          return res
+            .status(400)
+            .json({ message: "selected_rows must be valid JSON array" });
         }
       }
     }
@@ -2786,7 +2812,10 @@ exports.uploadOrders = async (req, res) => {
     const preparedUpload = await prepareUploadOrdersFromRows(sourceRows);
     const orders = preparedUpload.orders;
     const newRowsToInsert = preparedUpload.previewRows.filter(
-      (row) => String(row?.change_type || "").trim().toLowerCase() === "new",
+      (row) =>
+        String(row?.change_type || "")
+          .trim()
+          .toLowerCase() === "new",
     );
     const applyWarnings = [];
 
@@ -2852,23 +2881,26 @@ exports.uploadOrders = async (req, res) => {
       .sort((a, b) => a.localeCompare(b));
     uploadedVendors = normalizeDistinctValues(uploadedVendors);
 
-    const uploadedBrandVendorPairs = [...brandVendorUploadMap.values()].map((entry) => ({
-      brand: entry.brand,
-      vendor: entry.vendor,
-    }));
+    const uploadedBrandVendorPairs = [...brandVendorUploadMap.values()].map(
+      (entry) => ({
+        brand: entry.brand,
+        vendor: entry.vendor,
+      }),
+    );
 
-    const openOrders = uploadedBrandVendorPairs.length > 0
-      ? await Order.find({
-        ...ACTIVE_ORDER_MATCH,
-        status: { $nin: ["Shipped"] },
-        $or: uploadedBrandVendorPairs.map((entry) => ({
-          brand: entry.brand,
-          vendor: entry.vendor,
-        })),
-      })
-        .select("brand vendor order_id")
-        .lean()
-      : [];
+    const openOrders =
+      uploadedBrandVendorPairs.length > 0
+        ? await Order.find({
+            ...ACTIVE_ORDER_MATCH,
+            status: { $nin: ["Shipped"] },
+            $or: uploadedBrandVendorPairs.map((entry) => ({
+              brand: entry.brand,
+              vendor: entry.vendor,
+            })),
+          })
+            .select("brand vendor order_id")
+            .lean()
+        : [];
 
     const openBrandVendorOrderMap = new Map();
     for (const openOrder of openOrders) {
@@ -2881,10 +2913,10 @@ exports.uploadOrders = async (req, res) => {
       const orderKey = normalizeOrderKey(orderId);
 
       if (
-        !brandKey
-        || !vendorKey
-        || !orderKey
-        || !brandVendorUploadMap.has(brandVendorKey)
+        !brandKey ||
+        !vendorKey ||
+        !orderKey ||
+        !brandVendorUploadMap.has(brandVendorKey)
       ) {
         continue;
       }
@@ -2907,8 +2939,8 @@ exports.uploadOrders = async (req, res) => {
         return a.vendor.localeCompare(b.vendor);
       })
       .map((vendorEntry) => {
-        const uploadedOrderIds = [...vendorEntry.uploaded_order_ids].sort((a, b) =>
-          a.localeCompare(b),
+        const uploadedOrderIds = [...vendorEntry.uploaded_order_ids].sort(
+          (a, b) => a.localeCompare(b),
         );
         const perOrderCounts = vendorEntry.items_per_order_count;
 
@@ -2923,15 +2955,19 @@ exports.uploadOrders = async (req, res) => {
         );
 
         const openOrderMap =
-          openBrandVendorOrderMap.get(vendorEntry.brand_vendor_key) || new Map();
+          openBrandVendorOrderMap.get(vendorEntry.brand_vendor_key) ||
+          new Map();
         const missingOpenOrderIds = [...openOrderMap.entries()]
-          .filter(([orderKey]) => !vendorEntry.uploaded_order_keys.has(orderKey))
+          .filter(
+            ([orderKey]) => !vendorEntry.uploaded_order_keys.has(orderKey),
+          )
           .map(([, orderId]) => orderId)
           .sort((a, b) => a.localeCompare(b));
 
-        const remark = missingOpenOrderIds.length > 0
-          ? `You were uploading orders for brand ${vendorEntry.brand} and vendor ${vendorEntry.vendor}; these open orders are missing in this upload: ${missingOpenOrderIds.join(", ")}.`
-          : "";
+        const remark =
+          missingOpenOrderIds.length > 0
+            ? `You were uploading orders for brand ${vendorEntry.brand} and vendor ${vendorEntry.vendor}; these open orders are missing in this upload: ${missingOpenOrderIds.join(", ")}.`
+            : "";
 
         missingOpenOrderIds.forEach((orderId) => {
           conflicts.push({
@@ -2966,12 +3002,16 @@ exports.uploadOrders = async (req, res) => {
       });
       insertedCount = insertSummary.inserted_count;
       applyWarnings.push(
-        ...(Array.isArray(insertSummary?.warnings) ? insertSummary.warnings : []),
+        ...(Array.isArray(insertSummary?.warnings)
+          ? insertSummary.warnings
+          : []),
       );
     }
 
     const remarks = [
-      ...vendorSummaries.map((entry) => String(entry?.remark || "").trim()).filter(Boolean),
+      ...vendorSummaries
+        .map((entry) => String(entry?.remark || "").trim())
+        .filter(Boolean),
     ];
     const missingOpenOrderIds = normalizeDistinctValues(
       conflicts.map((entry) => String(entry?.order_id || "").trim()),
@@ -3069,9 +3109,10 @@ exports.uploadOrders = async (req, res) => {
 };
 
 exports.createOrdersManually = async (req, res) => {
-  const uploadedById = req.user?._id && mongoose.Types.ObjectId.isValid(req.user._id)
-    ? req.user._id
-    : null;
+  const uploadedById =
+    req.user?._id && mongoose.Types.ObjectId.isValid(req.user._id)
+      ? req.user._id
+      : null;
   const uploadMeta = {
     uploaded_by: uploadedById,
     uploaded_by_name: String(
@@ -3103,9 +3144,9 @@ exports.createOrdersManually = async (req, res) => {
       `${normalizeOrderKey(orderId)}__${normalizeValue(itemCode).toUpperCase()}`;
     const isProvided = (value) =>
       !(
-        value === undefined
-        || value === null
-        || (typeof value === "string" && value.trim() === "")
+        value === undefined ||
+        value === null ||
+        (typeof value === "string" && value.trim() === "")
       );
 
     duplicateEntries = [];
@@ -3122,7 +3163,9 @@ exports.createOrdersManually = async (req, res) => {
     }));
 
     const uniqueItemCodes = [
-      ...new Set(draftRows.map((row) => normalizeValue(row?.itemCode)).filter(Boolean)),
+      ...new Set(
+        draftRows.map((row) => normalizeValue(row?.itemCode)).filter(Boolean),
+      ),
     ];
 
     let itemDetailsByCodeKey = new Map();
@@ -3140,15 +3183,17 @@ exports.createOrdersManually = async (req, res) => {
 
       itemDetailsByCodeKey = new Map(
         itemDocs.map((itemDoc) => {
-          const normalizedCodeKey = normalizeLooseString(itemDoc?.code).toLowerCase();
+          const normalizedCodeKey = normalizeLooseString(
+            itemDoc?.code,
+          ).toLowerCase();
           const normalizedDescription = normalizeLooseString(
             itemDoc?.description || itemDoc?.name || "",
           );
           const normalizedBrand = normalizeLooseString(
-            itemDoc?.brand
-            || itemDoc?.brand_name
-            || (Array.isArray(itemDoc?.brands) ? itemDoc.brands[0] : "")
-            || "",
+            itemDoc?.brand ||
+              itemDoc?.brand_name ||
+              (Array.isArray(itemDoc?.brands) ? itemDoc.brands[0] : "") ||
+              "",
           );
           const normalizedVendors = normalizeDistinctValues(
             Array.isArray(itemDoc?.vendors) ? itemDoc.vendors : [],
@@ -3175,13 +3220,18 @@ exports.createOrdersManually = async (req, res) => {
         const description = draftRow.description;
         const quantity = draftRow.quantity;
         const existingItemDetails =
-          itemDetailsByCodeKey.get(normalizeLooseString(itemCode).toLowerCase()) || null;
+          itemDetailsByCodeKey.get(
+            normalizeLooseString(itemCode).toLowerCase(),
+          ) || null;
         const existingDescription = normalizeLooseString(
           existingItemDetails?.description || "",
         );
-        const existingBrand = normalizeLooseString(existingItemDetails?.brand || "");
+        const existingBrand = normalizeLooseString(
+          existingItemDetails?.brand || "",
+        );
         const existingVendor = normalizeLooseString(
-          Array.isArray(existingItemDetails?.vendors) && existingItemDetails.vendors.length > 0
+          Array.isArray(existingItemDetails?.vendors) &&
+            existingItemDetails.vendors.length > 0
             ? existingItemDetails.vendors[0]
             : "",
         );
@@ -3324,12 +3374,14 @@ exports.createOrdersManually = async (req, res) => {
         return a.vendor.localeCompare(b.vendor);
       })
       .map((brandVendorEntry) => {
-        const uploadedOrderIds = [...brandVendorEntry.uploaded_order_ids].sort((a, b) =>
-          a.localeCompare(b),
+        const uploadedOrderIds = [...brandVendorEntry.uploaded_order_ids].sort(
+          (a, b) => a.localeCompare(b),
         );
         const itemsPerOrder = uploadedOrderIds.map((orderId) => ({
           order_id: orderId,
-          items_count: Number(brandVendorEntry.items_per_order_count.get(orderId) || 0),
+          items_count: Number(
+            brandVendorEntry.items_per_order_count.get(orderId) || 0,
+          ),
         }));
 
         return {
@@ -3410,10 +3462,13 @@ exports.createOrdersManually = async (req, res) => {
             try {
               await syncOrderGroup(group);
             } catch (syncErr) {
-              console.error("Google Calendar sync failed for manual order group:", {
-                group,
-                error: syncErr?.message || String(syncErr),
-              });
+              console.error(
+                "Google Calendar sync failed for manual order group:",
+                {
+                  group,
+                  error: syncErr?.message || String(syncErr),
+                },
+              );
             }
           }),
         );
@@ -3510,10 +3565,14 @@ exports.rectifyPdfOrders = async (req, res) => {
           if (Array.isArray(parsed)) {
             selectedRowsPayload = parsed;
           } else {
-            return res.status(400).json({ message: "selected_rows must be an array" });
+            return res
+              .status(400)
+              .json({ message: "selected_rows must be an array" });
           }
         } catch {
-          return res.status(400).json({ message: "selected_rows must be valid JSON array" });
+          return res
+            .status(400)
+            .json({ message: "selected_rows must be valid JSON array" });
         }
       }
     }
@@ -3557,7 +3616,10 @@ exports.rectifyPdfOrders = async (req, res) => {
           continue;
         }
 
-        if (!Number.isFinite(Number(normalizedRow.quantity)) || Number(normalizedRow.quantity) <= 0) {
+        if (
+          !Number.isFinite(Number(normalizedRow.quantity)) ||
+          Number(normalizedRow.quantity) <= 0
+        ) {
           invalidEntries.push({
             row_index: index + 1,
             reason: "invalid_quantity",
@@ -3566,7 +3628,10 @@ exports.rectifyPdfOrders = async (req, res) => {
           continue;
         }
 
-        const key = makeRectifyKey(normalizedRow.order_id, normalizedRow.item_code);
+        const key = makeRectifyKey(
+          normalizedRow.order_id,
+          normalizedRow.item_code,
+        );
         if (seenKeys.has(key)) {
           duplicateInSelectionCount += 1;
           continue;
@@ -3589,7 +3654,9 @@ exports.rectifyPdfOrders = async (req, res) => {
           "item.item_code": row.item_code,
         })),
       })
-        .select("_id order_id item brand vendor quantity ETD order_date shipment qc_record")
+        .select(
+          "_id order_id item brand vendor quantity ETD order_date shipment qc_record",
+        )
         .sort({ updatedAt: -1, createdAt: -1 })
         .lean();
 
@@ -3616,33 +3683,38 @@ exports.rectifyPdfOrders = async (req, res) => {
         warnings: [],
       };
 
-      if (shouldApplyChanges && rowsEligibleForApply.length > 0) {
-        applySummary = await applyRectifiedOrderRows({
-          rows: rowsEligibleForApply,
-          existingByKey,
-          reqUser: req.user,
-        });
-        applySummary.skipped_closed_count = dedupedRows.length - rowsEligibleForApply.length;
-      }
+        if (shouldApplyChanges && rowsEligibleForApply.length > 0) {
+          applySummary = await applyRectifiedOrderRows({
+            rows: rowsEligibleForApply,
+            existingByKey,
+            reqUser: req.user,
+          });
+          applySummary.skipped_closed_count =
+              dedupedRows.length - rowsEligibleForApply.length;
+        }
 
-      const fallbackBrand = brandInput || normalizeRectifyText(dedupedRows[0]?.brand || "");
-      const fallbackVendor = vendorInput || normalizeRectifyText(dedupedRows[0]?.vendor || "");
+      const fallbackBrand =
+        brandInput || normalizeRectifyText(dedupedRows[0]?.brand || "");
+      const fallbackVendor =
+        vendorInput || normalizeRectifyText(dedupedRows[0]?.vendor || "");
 
       const uploadLogId = shouldApplyChanges
         ? await createRectifyUploadLog({
-          reqUser: req.user,
-          brand: fallbackBrand,
-          vendor: fallbackVendor,
-          sourceFilename: normalizeRectifyText(req.body?.source_filename) || "rectify_selection",
-          sourceSizeBytes: 0,
-          totalRowsReceived: selectedRowsPayload.length,
-          totalRowsUnique: dedupedRows.length,
-          invalidEntries,
-          duplicateInPdfCount: duplicateInSelectionCount,
-          rowsEligibleForApply,
-          changedRows: dedupedRows,
-          applySummary,
-        })
+            reqUser: req.user,
+            brand: fallbackBrand,
+            vendor: fallbackVendor,
+            sourceFilename:
+              normalizeRectifyText(req.body?.source_filename) ||
+              "rectify_selection",
+            sourceSizeBytes: 0,
+            totalRowsReceived: selectedRowsPayload.length,
+            totalRowsUnique: dedupedRows.length,
+            invalidEntries,
+            duplicateInPdfCount: duplicateInSelectionCount,
+            rowsEligibleForApply,
+            changedRows: dedupedRows,
+            applySummary,
+          })
         : null;
 
       const newCount = dedupedRows.filter(
@@ -3693,13 +3765,17 @@ exports.rectifyPdfOrders = async (req, res) => {
     }
 
     const isPdfFile =
-      String(req.file?.mimetype || "").toLowerCase().includes("pdf")
-      || String(req.file?.originalname || "").toLowerCase().endsWith(".pdf");
+      String(req.file?.mimetype || "")
+        .toLowerCase()
+        .includes("pdf") ||
+      String(req.file?.originalname || "")
+        .toLowerCase()
+        .endsWith(".pdf");
     if (!isPdfFile) {
       return res.status(400).json({ message: "Only PDF files are supported" });
     }
 
-    uploadMeta.source_file_storage = await uploadSourceFileToWasabi(
+    const sourceFileStorage = await uploadSourceFileToWasabi(
       req.file,
       "orders/rectify-pdf",
     );
@@ -3727,7 +3803,10 @@ exports.rectifyPdfOrders = async (req, res) => {
         continue;
       }
 
-      const key = makeRectifyKey(normalizedRow.order_id, normalizedRow.item_code);
+      const key = makeRectifyKey(
+        normalizedRow.order_id,
+        normalizedRow.item_code,
+      );
       presentPdfKeys.add(key);
 
       if (!normalizedRow.description) {
@@ -3739,7 +3818,10 @@ exports.rectifyPdfOrders = async (req, res) => {
         continue;
       }
 
-      if (!Number.isFinite(Number(normalizedRow.quantity)) || Number(normalizedRow.quantity) <= 0) {
+      if (
+        !Number.isFinite(Number(normalizedRow.quantity)) ||
+        Number(normalizedRow.quantity) <= 0
+      ) {
         invalidEntries.push({
           row_index: index + 1,
           reason: "invalid_quantity",
@@ -3756,9 +3838,10 @@ exports.rectifyPdfOrders = async (req, res) => {
       dedupedRows.push(normalizedRow);
     }
 
-    const { existingByKey, openOrdersByKey } = await loadExistingOrdersForBrandVendorPairs([
-      { brand: brandInput, vendor: vendorInput },
-    ]);
+    const { existingByKey, openOrdersByKey } =
+      await loadExistingOrdersForBrandVendorPairs([
+        { brand: brandInput, vendor: vendorInput },
+      ]);
 
     const changedRows = [];
     let unchangedCount = 0;
@@ -3810,7 +3893,10 @@ exports.rectifyPdfOrders = async (req, res) => {
         brand: normalizeRectifyText(openOrder?.brand),
         vendor: normalizeRectifyText(openOrder?.vendor),
         quantity: openQuantity,
-        ETD: openOrder?.ETD || deriveRectifyDefaultEtd(openOrder?.order_date) || null,
+        ETD:
+          openOrder?.ETD ||
+          deriveRectifyDefaultEtd(openOrder?.order_date) ||
+          null,
         order_date: openOrder?.order_date || null,
         change_type: "closed",
         changed_fields: ["missing_in_pdf"],
@@ -3843,38 +3929,44 @@ exports.rectifyPdfOrders = async (req, res) => {
     const rowsEligibleForApply = changedRows.filter(
       (row) => row?.change_type !== "closed",
     );
-    applySummary.skipped_closed_count = changedRows.length - rowsEligibleForApply.length;
+    applySummary.skipped_closed_count =
+      changedRows.length - rowsEligibleForApply.length;
 
     if (shouldApplyChanges && rowsEligibleForApply.length > 0) {
       applySummary = await applyRectifiedOrderRows({
         rows: rowsEligibleForApply,
         existingByKey,
+        reqUser: req.user,
       });
-      applySummary.skipped_closed_count = changedRows.length - rowsEligibleForApply.length;
+      applySummary.skipped_closed_count =
+        changedRows.length - rowsEligibleForApply.length;
     }
 
     const uploadLogId = shouldApplyChanges
       ? await createRectifyUploadLog({
-        reqUser: req.user,
-        brand: brandInput,
-        vendor: vendorInput,
-        sourceFilename: String(req.file?.originalname || "rectify_pdf").trim(),
-        sourceSizeBytes: Number(req.file?.size || 0),
-        totalRowsReceived: extractedRows.length,
-        totalRowsUnique: dedupedRows.length,
-        invalidEntries,
-        duplicateInPdfCount,
-        rowsEligibleForApply,
-        changedRows,
-        applySummary,
-      })
+          reqUser: req.user,
+          brand: brandInput,
+          vendor: vendorInput,
+          sourceFilename: String(
+            req.file?.originalname || "rectify_pdf",
+          ).trim(),
+          sourceSizeBytes: Number(req.file?.size || 0),
+          totalRowsReceived: extractedRows.length,
+          totalRowsUnique: dedupedRows.length,
+          invalidEntries,
+          duplicateInPdfCount,
+          rowsEligibleForApply,
+          changedRows,
+          applySummary,
+        })
       : null;
 
-    const message = changedRows.length === 0
-      ? "No new or modified entries found in this PDF"
-      : shouldApplyChanges
-        ? "PDF rectified, changed entries exported, and DB updates processed"
-        : "PDF rectified and changed entries exported";
+    const message =
+      changedRows.length === 0
+        ? "No new or modified entries found in this PDF"
+        : shouldApplyChanges
+          ? "PDF rectified, changed entries exported, and DB updates processed"
+          : "PDF rectified and changed entries exported";
 
     return res.status(200).json({
       success: true,
@@ -3919,7 +4011,9 @@ exports.getUploadLogs = async (req, res) => {
     const brand = normalizeFilterValue(req.query.brand);
     const vendor = normalizeFilterValue(req.query.vendor);
     const status = normalizeFilterValue(req.query.status);
-    const orderId = normalizeFilterValue(req.query.order_id ?? req.query.orderId);
+    const orderId = normalizeFilterValue(
+      req.query.order_id ?? req.query.orderId,
+    );
 
     const match = {
       source_filename: { $nin: ["order_edit", "order_edit_archive"] },
@@ -3961,27 +4055,33 @@ exports.getUploadLogs = async (req, res) => {
       ];
     }
 
-    const [logs, totalRecords, brandsRaw, vendorsRaw, statusesRaw, statusCountsRaw] =
-      await Promise.all([
-        UploadLog.find(match)
-          .sort({ createdAt: -1 })
-          .skip(skip)
-          .limit(limit)
-          .lean(),
-        UploadLog.countDocuments(match),
-        UploadLog.distinct("uploaded_brands"),
-        UploadLog.distinct("uploaded_vendors"),
-        UploadLog.distinct("status"),
-        UploadLog.aggregate([
-          { $match: match },
-          {
-            $group: {
-              _id: "$status",
-              count: { $sum: 1 },
-            },
+    const [
+      logs,
+      totalRecords,
+      brandsRaw,
+      vendorsRaw,
+      statusesRaw,
+      statusCountsRaw,
+    ] = await Promise.all([
+      UploadLog.find(match)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      UploadLog.countDocuments(match),
+      UploadLog.distinct("uploaded_brands"),
+      UploadLog.distinct("uploaded_vendors"),
+      UploadLog.distinct("status"),
+      UploadLog.aggregate([
+        { $match: match },
+        {
+          $group: {
+            _id: "$status",
+            count: { $sum: 1 },
           },
-        ]),
-      ]);
+        },
+      ]),
+    ]);
 
     const summary = {
       total: totalRecords,
@@ -4032,7 +4132,9 @@ exports.getOrderEditLogs = async (req, res) => {
 
     const brand = normalizeFilterValue(req.query.brand);
     const vendor = normalizeFilterValue(req.query.vendor);
-    const orderId = normalizeFilterValue(req.query.order_id ?? req.query.orderId);
+    const orderId = normalizeFilterValue(
+      req.query.order_id ?? req.query.orderId,
+    );
     const operationType = normalizeFilterValue(
       req.query.operation_type ?? req.query.operationType,
     );
@@ -4052,34 +4154,44 @@ exports.getOrderEditLogs = async (req, res) => {
       match.order_id = { $regex: escaped, $options: "i" };
     }
 
-    if (operationType && ["order_edit", "order_edit_archive"].includes(operationType)) {
+    if (
+      operationType &&
+      ["order_edit", "order_edit_archive"].includes(operationType)
+    ) {
       match.operation_type = operationType;
     }
 
-    const [logs, totalRecords, brandsRaw, vendorsRaw, operationsRaw, totalsRaw] =
-      await Promise.all([
-        OrderEditLog.find(match)
-          .sort({ createdAt: -1 })
-          .skip(skip)
-          .limit(limit)
-          .lean(),
-        OrderEditLog.countDocuments(match),
-        OrderEditLog.distinct("brand", match),
-        OrderEditLog.distinct("vendor", match),
-        OrderEditLog.distinct("operation_type", match),
-        OrderEditLog.aggregate([
-          { $match: match },
-          {
-            $group: {
-              _id: null,
-              total_logs: { $sum: 1 },
-              total_field_changes: { $sum: "$changed_fields_count" },
-            },
+    const [
+      logs,
+      totalRecords,
+      brandsRaw,
+      vendorsRaw,
+      operationsRaw,
+      totalsRaw,
+    ] = await Promise.all([
+      OrderEditLog.find(match)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      OrderEditLog.countDocuments(match),
+      OrderEditLog.distinct("brand", match),
+      OrderEditLog.distinct("vendor", match),
+      OrderEditLog.distinct("operation_type", match),
+      OrderEditLog.aggregate([
+        { $match: match },
+        {
+          $group: {
+            _id: null,
+            total_logs: { $sum: 1 },
+            total_field_changes: { $sum: "$changed_fields_count" },
           },
-        ]),
-      ]);
+        },
+      ]),
+    ]);
 
-    const totals = Array.isArray(totalsRaw) && totalsRaw.length > 0 ? totalsRaw[0] : null;
+    const totals =
+      Array.isArray(totalsRaw) && totalsRaw.length > 0 ? totalsRaw[0] : null;
 
     return res.status(200).json({
       success: true,
@@ -4176,7 +4288,9 @@ exports.getOrderById = async (req, res) => {
 exports.getRevisedEtdHistory = async (req, res) => {
   try {
     const orderId = normalizeOrderKey(req.query.order_id ?? req.query.orderId);
-    const itemCode = String(req.query.item_code ?? req.query.itemCode ?? "").trim();
+    const itemCode = String(
+      req.query.item_code ?? req.query.itemCode ?? "",
+    ).trim();
 
     if (!orderId) {
       return res.status(400).json({
@@ -4387,9 +4501,9 @@ exports.getTodayEtdOrdersByBrand = async (req, res) => {
         ? "asc"
         : null;
     const normalizedSortKey = String(
-      rawSortBy
-      || String(normalizedSortToken || "").replace(/^[+-]/, "")
-      || "ETD",
+      rawSortBy ||
+        String(normalizedSortToken || "").replace(/^[+-]/, "") ||
+        "ETD",
     )
       .trim()
       .replace(/[^a-zA-Z0-9_]/g, "")
@@ -4515,9 +4629,18 @@ exports.getTodayEtdOrdersByBrand = async (req, res) => {
             $switch: {
               branches: [
                 { case: { $eq: ["$minStatusRank", 0] }, then: "Pending" },
-                { case: { $eq: ["$minStatusRank", 1] }, then: "Under Inspection" },
-                { case: { $eq: ["$minStatusRank", 2] }, then: "Inspection Done" },
-                { case: { $eq: ["$minStatusRank", 3] }, then: "Partial Shipped" },
+                {
+                  case: { $eq: ["$minStatusRank", 1] },
+                  then: "Under Inspection",
+                },
+                {
+                  case: { $eq: ["$minStatusRank", 2] },
+                  then: "Inspection Done",
+                },
+                {
+                  case: { $eq: ["$minStatusRank", 3] },
+                  then: "Partial Shipped",
+                },
                 { case: { $eq: ["$minStatusRank", 4] }, then: "Shipped" },
               ],
               default: "Pending",
@@ -4595,9 +4718,9 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
         ? "asc"
         : null;
     const normalizedSortKey = String(
-      rawSortBy
-      || String(normalizedSortToken || "").replace(/^[+-]/, "")
-      || "order_date",
+      rawSortBy ||
+        String(normalizedSortToken || "").replace(/^[+-]/, "") ||
+        "order_date",
     )
       .trim()
       .replace(/[^a-zA-Z0-9_]/g, "")
@@ -4637,11 +4760,13 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const normalizedStatus = String(status || "").trim().toLowerCase();
+    const normalizedStatus = String(status || "")
+      .trim()
+      .toLowerCase();
     const isOnTimeStatus =
-      normalizedStatus === "on-time"
-      || normalizedStatus === "on time"
-      || normalizedStatus === "ontime";
+      normalizedStatus === "on-time" ||
+      normalizedStatus === "on time" ||
+      normalizedStatus === "ontime";
     const isDelayedStatus = normalizedStatus === "delayed";
     const isDelayedFilter =
       String(isDelayed || "")
@@ -4665,7 +4790,12 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
     const postGroupMatch = {};
     if (normalizedStatus === "pending") {
       postGroupMatch.totalStatus = {
-        $in: ["Pending", "Under Inspection", "Inspection Done", "Partial Shipped"],
+        $in: [
+          "Pending",
+          "Under Inspection",
+          "Inspection Done",
+          "Partial Shipped",
+        ],
       };
     } else if (exactOrderStatus) {
       postGroupMatch.totalStatus = exactOrderStatus;
@@ -4711,9 +4841,18 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
                   $switch: {
                     branches: [
                       { case: { $eq: ["$$statusValue", "Pending"] }, then: 0 },
-                      { case: { $eq: ["$$statusValue", "Under Inspection"] }, then: 1 },
-                      { case: { $eq: ["$$statusValue", "Inspection Done"] }, then: 2 },
-                      { case: { $eq: ["$$statusValue", "Partial Shipped"] }, then: 3 },
+                      {
+                        case: { $eq: ["$$statusValue", "Under Inspection"] },
+                        then: 1,
+                      },
+                      {
+                        case: { $eq: ["$$statusValue", "Inspection Done"] },
+                        then: 2,
+                      },
+                      {
+                        case: { $eq: ["$$statusValue", "Partial Shipped"] },
+                        then: 3,
+                      },
                       { case: { $eq: ["$$statusValue", "Shipped"] }, then: 4 },
                     ],
                     default: 99,
@@ -4741,9 +4880,18 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
                   then: "Partial Shipped",
                 },
                 { case: { $eq: ["$minStatusRank", 0] }, then: "Pending" },
-                { case: { $eq: ["$minStatusRank", 1] }, then: "Under Inspection" },
-                { case: { $eq: ["$minStatusRank", 2] }, then: "Inspection Done" },
-                { case: { $eq: ["$minStatusRank", 3] }, then: "Partial Shipped" },
+                {
+                  case: { $eq: ["$minStatusRank", 1] },
+                  then: "Under Inspection",
+                },
+                {
+                  case: { $eq: ["$minStatusRank", 2] },
+                  then: "Inspection Done",
+                },
+                {
+                  case: { $eq: ["$minStatusRank", 3] },
+                  then: "Partial Shipped",
+                },
                 { case: { $eq: ["$minStatusRank", 4] }, then: "Shipped" },
               ],
               default: "Pending",
@@ -4818,9 +4966,9 @@ exports.getOrdersByFiltersDb = async (req, res) => {
         ? "asc"
         : null;
     const normalizedSortKey = String(
-      rawSortBy
-      || String(normalizedSortToken || "").replace(/^[+-]/, "")
-      || "order_date",
+      rawSortBy ||
+        String(normalizedSortToken || "").replace(/^[+-]/, "") ||
+        "order_date",
     )
       .trim()
       .replace(/[^a-zA-Z0-9_]/g, "")
@@ -4866,62 +5014,68 @@ exports.getOrdersByFiltersDb = async (req, res) => {
 
     const matchStage = buildOrderListMatch(filterInput);
 
-    const [result, vendorsRaw, brandsRaw, statusesRaw, orderIdsRaw, itemCodesRaw] =
-      await Promise.all([
-        Order.aggregate([
-          { $match: matchStage },
-          {
-            $group: {
-              _id: "$order_id",
-              items: { $sum: 1 },
-              brand: { $first: "$brand" },
-              vendor: { $first: "$vendor" },
-              ETD: { $first: "$ETD" },
-              order_date: { $first: "$order_date" },
-              statuses: { $addToSet: "$status" },
-            },
+    const [
+      result,
+      vendorsRaw,
+      brandsRaw,
+      statusesRaw,
+      orderIdsRaw,
+      itemCodesRaw,
+    ] = await Promise.all([
+      Order.aggregate([
+        { $match: matchStage },
+        {
+          $group: {
+            _id: "$order_id",
+            items: { $sum: 1 },
+            brand: { $first: "$brand" },
+            vendor: { $first: "$vendor" },
+            ETD: { $first: "$ETD" },
+            order_date: { $first: "$order_date" },
+            statuses: { $addToSet: "$status" },
           },
-          {
-            $project: {
-              _id: 0,
-              order_id: "$_id",
-              items: 1,
-              brand: 1,
-              vendor: 1,
-              ETD: 1,
-              order_date: 1,
-              statuses: 1,
-            },
+        },
+        {
+          $project: {
+            _id: 0,
+            order_id: "$_id",
+            items: 1,
+            brand: 1,
+            vendor: 1,
+            ETD: 1,
+            order_date: 1,
+            statuses: 1,
           },
-          { $sort: sortStage },
-          {
-            $facet: {
-              data: [{ $skip: skip }, { $limit: limit }],
-              totalCount: [{ $count: "count" }],
-            },
+        },
+        { $sort: sortStage },
+        {
+          $facet: {
+            data: [{ $skip: skip }, { $limit: limit }],
+            totalCount: [{ $count: "count" }],
           },
-        ]),
-        Order.distinct(
-          "vendor",
-          buildOrderListMatch({ ...filterInput, includeVendor: false }),
-        ),
-        Order.distinct(
-          "brand",
-          buildOrderListMatch({ ...filterInput, includeBrand: false }),
-        ),
-        Order.distinct(
-          "status",
-          buildOrderListMatch({ ...filterInput, includeStatus: false }),
-        ),
-        Order.distinct(
-          "order_id",
-          buildOrderListMatch({ ...filterInput, includeOrder: false }),
-        ),
-        Order.distinct(
-          "item.item_code",
-          buildOrderListMatch({ ...filterInput, includeItemCode: false }),
-        ),
-      ]);
+        },
+      ]),
+      Order.distinct(
+        "vendor",
+        buildOrderListMatch({ ...filterInput, includeVendor: false }),
+      ),
+      Order.distinct(
+        "brand",
+        buildOrderListMatch({ ...filterInput, includeBrand: false }),
+      ),
+      Order.distinct(
+        "status",
+        buildOrderListMatch({ ...filterInput, includeStatus: false }),
+      ),
+      Order.distinct(
+        "order_id",
+        buildOrderListMatch({ ...filterInput, includeOrder: false }),
+      ),
+      Order.distinct(
+        "item.item_code",
+        buildOrderListMatch({ ...filterInput, includeItemCode: false }),
+      ),
+    ]);
 
     const data = result?.[0]?.data || [];
     const totalRecords = result?.[0]?.totalCount?.[0]?.count || 0;
@@ -4970,7 +5124,9 @@ exports.exportOrdersDb = async (req, res) => {
     const tzOffsetValue =
       req.query.tz_offset_minutes ?? req.query.tzOffset ?? req.query.tz_offset;
     const exportFormat =
-      String(req.query.format || "").trim().toLowerCase() === "csv"
+      String(req.query.format || "")
+        .trim()
+        .toLowerCase() === "csv"
         ? "csv"
         : "xlsx";
 
@@ -4984,9 +5140,9 @@ exports.exportOrdersDb = async (req, res) => {
         ? "asc"
         : null;
     const normalizedSortKey = String(
-      rawSortBy
-      || String(normalizedSortToken || "").replace(/^[+-]/, "")
-      || "order_date",
+      rawSortBy ||
+        String(normalizedSortToken || "").replace(/^[+-]/, "") ||
+        "order_date",
     )
       .trim()
       .replace(/[^a-zA-Z0-9_]/g, "")
@@ -5104,7 +5260,12 @@ exports.exportOrdersDb = async (req, res) => {
           const requestType = normalizeText(entry?.request_type);
           const quantityRequested = toSafeNumber(entry?.quantity_requested);
           const statusText = normalizeText(entry?.status);
-          return [requestDate, requestType, `qty ${quantityRequested}`, statusText]
+          return [
+            requestDate,
+            requestType,
+            `qty ${quantityRequested}`,
+            statusText,
+          ]
             .filter(Boolean)
             .join(" / ");
         })
@@ -5138,7 +5299,10 @@ exports.exportOrdersDb = async (req, res) => {
       { key: "qc_labels", header: "QC Labels" },
       { key: "qc_inspection_dates", header: "QC Inspection Dates" },
       { key: "qc_request_history", header: "QC Request History" },
-      { key: "qc_inspection_records_count", header: "QC Inspection Records Count" },
+      {
+        key: "qc_inspection_records_count",
+        header: "QC Inspection Records Count",
+      },
       { key: "qc_cbm_top", header: "QC CBM Top" },
       { key: "qc_cbm_bottom", header: "QC CBM Bottom" },
       { key: "qc_cbm_total", header: "QC CBM Total" },
@@ -5280,7 +5444,7 @@ exports.exportOrdersDb = async (req, res) => {
           .replace(/\r\n/g, "\n")
           .replace(/\r/g, "\n");
         if (/["\n,]/.test(normalized)) {
-          return `"${normalized.replace(/"/g, "\"\"")}"`;
+          return `"${normalized.replace(/"/g, '""')}"`;
         }
         return normalized;
       };
@@ -5320,10 +5484,7 @@ exports.exportOrdersDb = async (req, res) => {
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${fileName}"`,
-    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     return res.status(200).send(fileBuffer);
   } catch (error) {
     console.error("Export Orders DB Error:", error);
@@ -5395,15 +5556,23 @@ const buildDelayedPoReportDataset = async ({
     const groupedEntry = groupedOrders.get(groupKey);
     const status = normalizeLooseString(orderEntry?.status);
     const itemCode = normalizeLooseString(orderEntry?.item?.item_code);
-    const quantity = Math.max(0, Number(parseQuantityLike(orderEntry?.quantity) || 0));
+    const quantity = Math.max(
+      0,
+      Number(parseQuantityLike(orderEntry?.quantity) || 0),
+    );
     const orderDate = parseDateLike(orderEntry?.order_date);
     const etdDate = parseDateLike(orderEntry?.ETD);
     const revisedEtdDate = parseDateLike(orderEntry?.revised_ETD);
     const effectiveEtdDate = resolveEffectiveOrderEtdDate(orderEntry);
     const latestShipmentDate = resolveLatestShipmentDate(orderEntry?.shipment);
-    const latestInspectionDate = resolveLatestInspectionDate(orderEntry?.qc_record);
+    const latestInspectionDate = resolveLatestInspectionDate(
+      orderEntry?.qc_record,
+    );
 
-    groupedEntry.order_date = resolveEarlierDate(groupedEntry.order_date, orderDate);
+    groupedEntry.order_date = resolveEarlierDate(
+      groupedEntry.order_date,
+      orderDate,
+    );
     groupedEntry.etd = resolveEarlierDate(groupedEntry.etd, etdDate);
     groupedEntry.revised_etd = resolveEarlierDate(
       groupedEntry.revised_etd,
@@ -5459,22 +5628,19 @@ const buildDelayedPoReportDataset = async ({
       }
 
       const hasOpenItems =
-        groupedEntry.pending_count > 0 || groupedEntry.inspection_done_count > 0;
+        groupedEntry.pending_count > 0 ||
+        groupedEntry.inspection_done_count > 0;
       const isFullyShipped =
         groupedEntry.pending_count === 0 &&
         groupedEntry.inspection_done_count === 0 &&
         groupedEntry.shipped_count > 0;
-      const etdCrossed =
-        effectiveEtd.getTime() < todayUtc.getTime();
+      const etdCrossed = effectiveEtd.getTime() < todayUtc.getTime();
 
       if (isFullyShipped || !(hasOpenItems && etdCrossed)) {
         return null;
       }
 
-      const delayDays = Math.max(
-        0,
-        diffUtcDays(todayUtc, effectiveEtd),
-      );
+      const delayDays = Math.max(0, diffUtcDays(todayUtc, effectiveEtd));
       const lastProgress = resolveDelayedPoLastProgress(groupedEntry);
 
       return {
@@ -5526,11 +5692,17 @@ const buildDelayedPoReportDataset = async ({
         (parseDateLike(right?.effective_etd)?.getTime() || 0);
       if (etdCompare !== 0) return etdCompare;
 
-      return String(left?.order_id || "").localeCompare(String(right?.order_id || ""));
+      return String(left?.order_id || "").localeCompare(
+        String(right?.order_id || ""),
+      );
     });
 
-  const brandOptions = normalizeDistinctValues(allRows.map((row) => row?.brand || ""));
-  const vendorOptions = normalizeDistinctValues(allRows.map((row) => row?.vendor || ""));
+  const brandOptions = normalizeDistinctValues(
+    allRows.map((row) => row?.brand || ""),
+  );
+  const vendorOptions = normalizeDistinctValues(
+    allRows.map((row) => row?.vendor || ""),
+  );
 
   const filteredRows = allRows.filter((row) => {
     if (selectedBrand && row?.brand !== selectedBrand) return false;
@@ -5664,7 +5836,10 @@ exports.exportDelayedPoReport = async (req, res) => {
       { key: "total_items", header: "Item Count" },
       { key: "total_quantity", header: "Total Quantity" },
       { key: "pending_item_codes", header: "Pending Item Codes" },
-      { key: "inspection_done_item_codes", header: "Inspection Done Item Codes" },
+      {
+        key: "inspection_done_item_codes",
+        header: "Inspection Done Item Codes",
+      },
       { key: "shipped_item_codes", header: "Shipped Item Codes" },
     ];
 
@@ -5721,10 +5896,7 @@ exports.exportDelayedPoReport = async (req, res) => {
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${fileName}"`,
-    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     return res.status(200).send(fileBuffer);
   } catch (error) {
     console.error("Export Delayed PO Report Error:", error);
@@ -5899,9 +6071,12 @@ exports.exportShipmentsDb = async (req, res) => {
     const itemCode = req.query.item_code;
     const container = req.query.container ?? req.query.container_number;
     const statusFilter = normalizeFilterValue(req.query.status);
-    const exportFormat = String(req.query.format || "").trim().toLowerCase() === "csv"
-      ? "csv"
-      : "xlsx";
+    const exportFormat =
+      String(req.query.format || "")
+        .trim()
+        .toLowerCase() === "csv"
+        ? "csv"
+        : "xlsx";
 
     const shipmentData = await getShipmentDataset({
       vendor,
@@ -5962,7 +6137,7 @@ exports.exportShipmentsDb = async (req, res) => {
           .replace(/\r\n/g, "\n")
           .replace(/\r/g, "\n");
         if (/["\n,]/.test(normalized)) {
-          return `"${normalized.replace(/"/g, "\"\"")}"`;
+          return `"${normalized.replace(/"/g, '""')}"`;
         }
         return normalized;
       };
@@ -6002,10 +6177,7 @@ exports.exportShipmentsDb = async (req, res) => {
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${fileName}"`,
-    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     return res.status(200).send(fileBuffer);
   } catch (error) {
     console.error("Export Shipments DB Error:", error);
@@ -6129,9 +6301,9 @@ exports.editOrder = async (req, res) => {
     const hasQuantity = hasOwn(payload, "quantity");
     const hasShipment = hasOwn(payload, "shipment");
     const hasRevisedEtd =
-      hasOwn(payload, "revised_ETD")
-      || hasOwn(payload, "revised_etd")
-      || hasOwn(payload, "revisedEtd");
+      hasOwn(payload, "revised_ETD") ||
+      hasOwn(payload, "revised_etd") ||
+      hasOwn(payload, "revisedEtd");
     const requestedEditFields = [
       hasBrand ? "brand" : "",
       hasVendor ? "vendor" : "",
@@ -6141,7 +6313,9 @@ exports.editOrder = async (req, res) => {
       hasShipment ? "shipment" : "",
       hasRevisedEtd ? "revised_ETD" : "",
     ].filter(Boolean);
-    const requesterRole = String(req.user?.role || "").trim().toLowerCase();
+    const requesterRole = String(req.user?.role || "")
+      .trim()
+      .toLowerCase();
     const isRequesterAdmin = requesterRole === "admin";
     const archiveRemarkInput = String(
       payload.archive_remark ?? payload.archiveRemark ?? "",
@@ -6154,20 +6328,26 @@ exports.editOrder = async (req, res) => {
       });
     }
 
-    const nextBrand = hasBrand ? String(payload.brand ?? "").trim() : String(order.brand || "").trim();
-    const nextVendor = hasVendor ? String(payload.vendor ?? "").trim() : String(order.vendor || "").trim();
+    const nextBrand = hasBrand
+      ? String(payload.brand ?? "").trim()
+      : String(order.brand || "").trim();
+    const nextVendor = hasVendor
+      ? String(payload.vendor ?? "").trim()
+      : String(order.vendor || "").trim();
     const nextItemCode = hasItemCode
       ? String(payload.item_code ?? "").trim()
       : String(order?.item?.item_code || "").trim();
     const nextDescription = hasDescription
       ? String(payload.description ?? "").trim()
       : String(order?.item?.description || "").trim();
-    const nextQuantity = hasQuantity ? Number(payload.quantity) : Number(order.quantity || 0);
+    const nextQuantity = hasQuantity
+      ? Number(payload.quantity)
+      : Number(order.quantity || 0);
     const rawRevisedEtd = hasOwn(payload, "revised_ETD")
       ? payload.revised_ETD
-      : (hasOwn(payload, "revised_etd")
+      : hasOwn(payload, "revised_etd")
         ? payload.revised_etd
-        : payload.revisedEtd);
+        : payload.revisedEtd;
 
     if (!nextBrand) {
       return res.status(400).json({ message: "brand is required" });
@@ -6204,8 +6384,8 @@ exports.editOrder = async (req, res) => {
     }
 
     if (
-      nextItemCode !== String(order?.item?.item_code || "").trim()
-      && (await Order.exists({
+      nextItemCode !== String(order?.item?.item_code || "").trim() &&
+      (await Order.exists({
         _id: { $ne: order._id },
         ...ACTIVE_ORDER_MATCH,
         order_id: order.order_id,
@@ -6213,7 +6393,8 @@ exports.editOrder = async (req, res) => {
       }))
     ) {
       return res.status(400).json({
-        message: "Another item with the same order_id and item_code already exists",
+        message:
+          "Another item with the same order_id and item_code already exists",
       });
     }
 
@@ -6293,7 +6474,9 @@ exports.editOrder = async (req, res) => {
     const shouldRebuildShipment = hasShipment || hasQuantity;
     let adjustedShipment = Array.isArray(order.shipment) ? order.shipment : [];
     if (shouldRebuildShipment) {
-      const shipmentSource = hasShipment ? payload.shipment : order.shipment || [];
+      const shipmentSource = hasShipment
+        ? payload.shipment
+        : order.shipment || [];
       const normalizedShipmentSource = normalizeShipmentEntries(shipmentSource);
       adjustedShipment = fitShipmentEntriesToOrderQuantity(
         normalizedShipmentSource,
@@ -6334,8 +6517,12 @@ exports.editOrder = async (req, res) => {
         const nextPassed = clampToDemand(qcRecord.quantities.qc_passed);
         const nextCheckedRaw = clampToDemand(qcRecord.quantities.qc_checked);
         const nextChecked = Math.max(nextPassed, nextCheckedRaw);
-        const nextRequested = clampToDemand(qcRecord.quantities.quantity_requested);
-        const nextProvision = clampToDemand(qcRecord.quantities.vendor_provision);
+        const nextRequested = clampToDemand(
+          qcRecord.quantities.quantity_requested,
+        );
+        const nextProvision = clampToDemand(
+          qcRecord.quantities.vendor_provision,
+        );
 
         qcRecord.quantities.client_demand = nextQuantity;
         qcRecord.quantities.qc_passed = nextPassed;
@@ -6396,8 +6583,14 @@ exports.editOrder = async (req, res) => {
     };
 
     const groupMap = new Map();
-    groupMap.set(`${oldGroup.order_id}__${oldGroup.brand}__${oldGroup.vendor}`, oldGroup);
-    groupMap.set(`${newGroup.order_id}__${newGroup.brand}__${newGroup.vendor}`, newGroup);
+    groupMap.set(
+      `${oldGroup.order_id}__${oldGroup.brand}__${oldGroup.vendor}`,
+      oldGroup,
+    );
+    groupMap.set(
+      `${newGroup.order_id}__${newGroup.brand}__${newGroup.vendor}`,
+      newGroup,
+    );
     const groupsToSync = [...groupMap.values()];
 
     const syncSettled = await Promise.allSettled(
@@ -6422,9 +6615,10 @@ exports.editOrder = async (req, res) => {
       beforeSnapshot: beforeEditSnapshot,
       afterSnapshot: buildOrderEditLogSnapshot(order),
       calendarSyncResults: calendar_sync,
-      extraRemarks: requestedEditFields.length > 0
-        ? [`Requested fields: ${requestedEditFields.join(", ")}.`]
-        : [],
+      extraRemarks:
+        requestedEditFields.length > 0
+          ? [`Requested fields: ${requestedEditFields.join(", ")}.`]
+          : [],
     });
 
     return res.status(200).json({
@@ -6453,9 +6647,9 @@ exports.bulkUpdateRevisedEtd = async (req, res) => {
     ];
     const rawRevisedEtd = hasOwn(payload, "revised_ETD")
       ? payload.revised_ETD
-      : (hasOwn(payload, "revised_etd")
+      : hasOwn(payload, "revised_etd")
         ? payload.revised_etd
-        : payload.revisedEtd);
+        : payload.revisedEtd;
 
     if (orderIds.length === 0) {
       return res.status(400).json({
@@ -6556,7 +6750,8 @@ exports.editCompleteOrder = async (req, res) => {
     const hasOrderId = hasOwn(payload, "order_id");
     const hasBrand = hasOwn(payload, "brand");
     const hasVendor = hasOwn(payload, "vendor");
-    const hasOrderDate = hasOwn(payload, "order_date") || hasOwn(payload, "orderDate");
+    const hasOrderDate =
+      hasOwn(payload, "order_date") || hasOwn(payload, "orderDate");
     const hasEtd = hasOwn(payload, "ETD") || hasOwn(payload, "etd");
     const requestedEditFields = [
       hasOrderId ? "order_id" : "",
@@ -6599,7 +6794,9 @@ exports.editCompleteOrder = async (req, res) => {
       }
       const parsedOrderDate = parseDateLike(orderDateInput);
       if (!parsedOrderDate) {
-        return res.status(400).json({ message: "order_date must be a valid date" });
+        return res
+          .status(400)
+          .json({ message: "order_date must be a valid date" });
       }
       nextOrderDate = parsedOrderDate;
     }
@@ -6622,7 +6819,9 @@ exports.editCompleteOrder = async (req, res) => {
       ...ACTIVE_ORDER_MATCH,
     });
     if (groupOrders.length === 0) {
-      return res.status(404).json({ message: "No active orders found for this PO" });
+      return res
+        .status(404)
+        .json({ message: "No active orders found for this PO" });
     }
 
     const groupOrderIds = groupOrders.map((orderDoc) => orderDoc._id);
@@ -6682,7 +6881,8 @@ exports.editCompleteOrder = async (req, res) => {
       orderDoc.ETD = nextEtd;
       orderDoc.updated_by = buildAuditActor(req.user);
 
-      const linkedQcRecords = qcRecordsByOrderId.get(String(orderDoc._id)) || [];
+      const linkedQcRecords =
+        qcRecordsByOrderId.get(String(orderDoc._id)) || [];
       for (const qcRecord of linkedQcRecords) {
         qcRecord.order_meta = qcRecord.order_meta || {};
         qcRecord.order_meta.order_id = nextOrderId;
@@ -6695,7 +6895,9 @@ exports.editCompleteOrder = async (req, res) => {
     await Promise.all(qcRecords.map((qcRecord) => qcRecord.save()));
 
     try {
-      await Promise.all(groupOrders.map((orderDoc) => upsertItemFromOrder(orderDoc)));
+      await Promise.all(
+        groupOrders.map((orderDoc) => upsertItemFromOrder(orderDoc)),
+      );
     } catch (itemSyncError) {
       console.error("Item sync after complete order edit failed:", {
         orderId: nextOrderId,
@@ -6769,7 +6971,10 @@ exports.archiveOrder = async (req, res) => {
     }
 
     const remark = String(
-      req.body?.remark ?? req.body?.archive_remark ?? req.body?.archiveRemark ?? "",
+      req.body?.remark ??
+        req.body?.archive_remark ??
+        req.body?.archiveRemark ??
+        "",
     ).trim();
     if (!remark) {
       return res.status(400).json({ message: "archive remark is required" });
@@ -6777,7 +6982,9 @@ exports.archiveOrder = async (req, res) => {
 
     const order = await Order.findOne({ _id: id, ...ACTIVE_ORDER_MATCH });
     if (!order) {
-      return res.status(404).json({ message: "Order not found or already archived" });
+      return res
+        .status(404)
+        .json({ message: "Order not found or already archived" });
     }
 
     const group = {
@@ -6812,9 +7019,7 @@ exports.archiveOrder = async (req, res) => {
       operationType: "order_edit_archive",
       beforeSnapshot,
       afterSnapshot: buildOrderEditLogSnapshot(order),
-      extraRemarks: [
-        "Order archived through archive-order route.",
-      ],
+      extraRemarks: ["Order archived through archive-order route."],
     });
 
     return res.status(200).json({
@@ -6946,8 +7151,12 @@ exports.syncZeroQuantityOrdersArchive = async (req, res) => {
         success: true,
         message: "No active zero-quantity orders found to archive",
         archived_count: 0,
-        remark_backfilled_count: Number(remarkBackfillResult?.modifiedCount || 0),
-        status_backfilled_count: Number(statusBackfillResult?.modifiedCount || 0),
+        remark_backfilled_count: Number(
+          remarkBackfillResult?.modifiedCount || 0,
+        ),
+        status_backfilled_count: Number(
+          statusBackfillResult?.modifiedCount || 0,
+        ),
         calendar_sync: [],
       });
     }
@@ -7021,7 +7230,10 @@ exports.finalizeOrder = async (req, res) => {
   try {
     const { stuffing_date, container, quantity, remarks } = req.body;
 
-    const order = await Order.findOne({ _id: req.params.id, ...ACTIVE_ORDER_MATCH });
+    const order = await Order.findOne({
+      _id: req.params.id,
+      ...ACTIVE_ORDER_MATCH,
+    });
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
     }
@@ -7116,9 +7328,7 @@ exports.finalizeOrder = async (req, res) => {
       operationType: "order_edit",
       beforeSnapshot,
       afterSnapshot: buildOrderEditLogSnapshot(order),
-      extraRemarks: [
-        "Shipment entry added through finalize-order route.",
-      ],
+      extraRemarks: ["Shipment entry added through finalize-order route."],
     });
 
     return res.status(200).json({
@@ -7131,7 +7341,6 @@ exports.finalizeOrder = async (req, res) => {
       },
     });
   } catch (error) {
-    
     return res.status(500).json({
       message: "Failed to finalize order shipment",
       error: error.message,
@@ -7141,7 +7350,10 @@ exports.finalizeOrder = async (req, res) => {
 exports.reSync = async (req, res) => {
   try {
     const batchSize = Math.min(20, parsePositiveInt(req.query.batchSize, 5));
-    const timeoutMs = Math.min(1200000, parsePositiveInt(req.query.timeoutMs, 300000));
+    const timeoutMs = Math.min(
+      1200000,
+      parsePositiveInt(req.query.timeoutMs, 300000),
+    );
 
     const purgeSummary = await withTimeout(
       purgeOmsEventsForConfiguredBrandCalendars(),
@@ -7149,17 +7361,14 @@ exports.reSync = async (req, res) => {
       "purge existing OMS calendar events",
     );
 
-    await Order.updateMany(
-      ACTIVE_ORDER_MATCH,
-      {
-        $set: {
-          "gcal.calendarId": null,
-          "gcal.eventId": null,
-          "gcal.lastSyncedAt": null,
-          "gcal.lastSyncError": null,
-        },
+    await Order.updateMany(ACTIVE_ORDER_MATCH, {
+      $set: {
+        "gcal.calendarId": null,
+        "gcal.eventId": null,
+        "gcal.lastSyncedAt": null,
+        "gcal.lastSyncError": null,
       },
-    );
+    });
 
     const groups = await Order.aggregate([
       {
@@ -7218,12 +7427,15 @@ exports.reSync = async (req, res) => {
               group,
               error: errorMessage,
             });
-            await Order.updateMany({ ...group, ...ACTIVE_ORDER_MATCH }, {
-              $set: {
-                "gcal.lastSyncedAt": new Date(),
-                "gcal.lastSyncError": errorMessage,
+            await Order.updateMany(
+              { ...group, ...ACTIVE_ORDER_MATCH },
+              {
+                $set: {
+                  "gcal.lastSyncedAt": new Date(),
+                  "gcal.lastSyncError": errorMessage,
+                },
               },
-            });
+            );
             return { group, ok: false, error: errorMessage };
           }
         }),
@@ -7249,13 +7461,13 @@ exports.reSync = async (req, res) => {
     });
   } catch (error) {
     const getErrInfo = (error) => ({
-  message: error?.message,
-  code: error?.code,
-  status: error?.response?.status,
-  data: error?.response?.data,
-  errors: error?.errors,
-  stack: error?.stack,
-});
+      message: error?.message,
+      code: error?.code,
+      status: error?.response?.status,
+      data: error?.response?.data,
+      errors: error?.errors,
+      stack: error?.stack,
+    });
     console.error("reSync failed:", getErrInfo(error));
     return res.status(500).json({
       success: false,

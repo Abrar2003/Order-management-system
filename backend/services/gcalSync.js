@@ -1,6 +1,7 @@
 const { google } = require("googleapis");
 const Order = require("../models/order.model");
 const Brand = require("../models/brand.model");
+const { parseDateOnly, toDateOnlyIso } = require("../helpers/dateOnly");
 
 function getCalendarClient() {
   const missing = [
@@ -26,15 +27,14 @@ function getCalendarClient() {
 }
 
 function toDateOnlyISO(date) {
-  const d = new Date(date);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString().slice(0, 10); // yyyy-mm-dd
+  return toDateOnlyIso(date) || null;
 }
 
 function addDays(dateOnlyISO, days) {
-  const d = new Date(dateOnlyISO + "T00:00:00.000Z");
+  const d = parseDateOnly(dateOnlyISO);
+  if (!(d instanceof Date) || Number.isNaN(d.getTime())) return null;
   d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
+  return toDateOnlyIso(d) || null;
 }
 
 const escapeRegex = (value = "") =>
@@ -291,7 +291,9 @@ async function syncOrderGroup({ order_id, brand, vendor }) {
     throw new Error(errorMessage);
   }
 
-  const etds = docs.map(d => d.ETD).filter(Boolean);
+  const etds = docs
+    .map((doc) => parseDateOnly(doc?.ETD))
+    .filter((value) => value instanceof Date && !Number.isNaN(value.getTime()));
 
   if (etds.length === 0) {
     const del = await deleteEventByKey({ calendar, calendarId, key });
@@ -307,7 +309,7 @@ async function syncOrderGroup({ order_id, brand, vendor }) {
   }
 
   // earliest ETD
-  const minEtd = new Date(Math.min(...etds.map(d => new Date(d).getTime())));
+  const minEtd = new Date(Math.min(...etds.map((entry) => entry.getTime())));
   const etdISO = toDateOnlyISO(minEtd);
 
   const summary = `${order_id} | ${vendor}`;

@@ -22,15 +22,6 @@ const computeAqlSampleQuantity = (quantity) => {
   return Math.max(1, Math.ceil(parsedQuantity * 0.1));
 };
 
-const toLocalIsoDate = (dateValue) => {
-  const date = dateValue instanceof Date ? dateValue : new Date(dateValue);
-  if (Number.isNaN(date.getTime())) return "";
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
-
 const AlignQCModal = ({
   order,
   onClose,
@@ -44,11 +35,11 @@ const AlignQCModal = ({
   const user = getUserFromToken();
   const normalizedRole = String(user?.role || "").trim().toLowerCase();
   const isManager = normalizedRole === "manager";
-  const todayIso = toLocalIsoDate(new Date());
+  const todayIso = toISODateString(new Date());
   const managerMinAllowedDateIso = (() => {
     const minDate = new Date();
     minDate.setDate(minDate.getDate() - 2);
-    return toLocalIsoDate(minDate);
+    return toISODateString(minDate);
   })();
   const [inspectors, setInspectors] = useState([]);
   const [inspector, setInspector] = useState(
