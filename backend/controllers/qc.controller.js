@@ -3143,9 +3143,16 @@ exports.updateQC = async (req, res) => {
          🔢 QUANTITIES
       ──────────────────────── */
 
-    const addChecked = Number(qc_checked || 0);
-    const addPassed = Number(qc_passed || 0);
-    const addProvision = Number(vendor_provision || 0);
+    const addChecked = Number(qc_checked ?? 0);
+    const addPassed = Number(qc_passed ?? 0);
+    const addProvision = Number(vendor_provision ?? 0);
+    const hasExplicitQuantityPayload =
+      qc_checked !== undefined ||
+      qc_passed !== undefined ||
+      vendor_provision !== undefined;
+    const hasExplicitLabelsPayload =
+      labels !== undefined ||
+      label_ranges !== undefined;
     const requestType = normalizeQcRequestType(qc?.request_type);
     const isAqlRequest = requestType === QC_REQUEST_TYPES.AQL;
     const clientDemandQuantity = toNonNegativeNumber(
@@ -3218,9 +3225,12 @@ exports.updateQC = async (req, res) => {
 
     // If user is updating passed quantity or labels, they must provide checked in same visit
     if (
-      (addPassed ||
+      !allowAdminRewrite &&
+      (
+        addPassed ||
         (Array.isArray(labels) && labels.length) ||
-        hasLabelRangePayload) &&
+        hasLabelRangePayload
+      ) &&
       addChecked <= 0
     ) {
       return res.status(400).json({
@@ -3241,14 +3251,26 @@ exports.updateQC = async (req, res) => {
       });
     }
 
-    const nextVendorProvision = qc.quantities.vendor_provision + addProvision;
+    let nextVendorProvision = qc.quantities.vendor_provision;
+    let nextChecked = qc.quantities.qc_checked;
+    let nextPassedInput = qc.quantities.qc_passed;
+    let shouldAutoPassAql = false;
+    let nextPassed = qc.quantities.qc_passed;
 
-    const nextChecked = qc.quantities.qc_checked + addChecked;
-    const nextPassedInput = qc.quantities.qc_passed + addPassed;
-    const shouldAutoPassAql = isAqlRequest && addChecked > 0;
-    const nextPassed = shouldAutoPassAql
-      ? clientDemandQuantity
-      : nextPassedInput;
+    if (allowAdminRewrite && hasExplicitQuantityPayload) {
+      nextVendorProvision = toNonNegativeNumber(vendor_provision, 0);
+      nextChecked = toNonNegativeNumber(qc_checked, 0);
+      nextPassedInput = toNonNegativeNumber(qc_passed, 0);
+      nextPassed = nextPassedInput;
+    } else {
+      nextVendorProvision = qc.quantities.vendor_provision + addProvision;
+      nextChecked = qc.quantities.qc_checked + addChecked;
+      nextPassedInput = qc.quantities.qc_passed + addPassed;
+      shouldAutoPassAql = isAqlRequest && addChecked > 0;
+      nextPassed = shouldAutoPassAql
+        ? clientDemandQuantity
+        : nextPassedInput;
+    }
 
     if (nextVendorProvision < 0) {
       return res
@@ -3276,7 +3298,17 @@ exports.updateQC = async (req, res) => {
       ? Math.max(0, parsedPendingQuantityLimit)
       : 0;
 
-    if (hasStartedInspection) {
+    if (allowAdminRewrite && hasExplicitQuantityPayload) {
+      if (
+        Number.isFinite(quantityRequestedCap) &&
+        quantityRequestedCap >= 0 &&
+        nextVendorProvision > quantityRequestedCap
+      ) {
+        return res.status(400).json({
+          message: "offered quantity cannot exceed quantity requested",
+        });
+      }
+    } else if (hasStartedInspection) {
       if (addProvision > pendingQuantityLimit) {
         return res.status(400).json({
           message: "offered quantity cannot exceed pending quantity",
@@ -3295,6 +3327,26 @@ exports.updateQC = async (req, res) => {
     if (!isAqlRequest && nextPassed > nextChecked) {
       return res.status(400).json({
         message: "qc_passed cannot exceed qc_checked",
+      });
+    }
+
+    if (
+      allowAdminRewrite &&
+      hasExplicitQuantityPayload &&
+      nextChecked > nextVendorProvision
+    ) {
+      return res.status(400).json({
+        message: "qc_checked cannot exceed offered quantity",
+      });
+    }
+
+    if (
+      allowAdminRewrite &&
+      hasExplicitQuantityPayload &&
+      nextPassed > nextVendorProvision
+    ) {
+      return res.status(400).json({
+        message: "passed quantity cannot exceed offered quantity",
       });
     }
 
@@ -3328,7 +3380,41 @@ exports.updateQC = async (req, res) => {
 
     let labelsAddedThisVisit = [];
     let labelRangesUsedThisVisit = [];
-    if (hasLabelsPayload) {
+    if (allowAdminRewrite && hasExplicitLabelsPayload) {
+      const directLabels = Array.isArray(labels) ? labels : [];
+      const parsedDirectLabels = directLabels.map(Number);
+      if (
+        parsedDirectLabels.some(
+          (label) => !Number.isInteger(label) || label < 0,
+        )
+      ) {
+        return res.status(400).json({
+          message: "All labels must be non-negative integers",
+        });
+      }
+
+      let generatedFromRanges = [];
+      if (Array.isArray(label_ranges)) {
+        const rangeResult = buildLabelsFromRanges(label_ranges);
+        generatedFromRanges = rangeResult.generatedLabels;
+      }
+
+      const replacementLabels =
+        parsedDirectLabels.length > 0
+          ? parsedDirectLabels
+          : generatedFromRanges;
+      const normalizedReplacementLabels = normalizeLabels(replacementLabels);
+
+      if (normalizedReplacementLabels.length > maxLabelsAllowed) {
+        return res.status(400).json({
+          message: hasTopBottomCapacityBoost
+            ? `Total labels cannot exceed double inspected quantity (${maxLabelsAllowed}) when both top and bottom CBM/LBH are available`
+            : `Total labels cannot exceed inspected quantity (${maxLabelsAllowed})`,
+        });
+      }
+
+      qc.labels = normalizedReplacementLabels;
+    } else if (hasLabelsPayload) {
       const inspectionInspectorUserId = qc.inspector?._id
         ? qc.inspector._id
         : qc.inspector;
