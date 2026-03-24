@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 
+const upload = require("../config/multer.config");
 const auth = require("../middlewares/auth.middleware");
 const authorize = require("../middlewares/authorize.middleware");
 const qcController = require("../controllers/qc.controller");
@@ -34,6 +35,14 @@ router.patch(
   auth,
   authorize("QC", "admin", "manager"),
   qcController.markGoodsNotReady
+);
+
+router.post(
+  "/:id/images",
+  auth,
+  authorize("QC", "admin", "manager", "dev"),
+  upload.array("files", 20),
+  qcController.uploadQcImages,
 );
 
 router.post(

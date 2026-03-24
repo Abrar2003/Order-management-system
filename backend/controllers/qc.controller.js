@@ -6,11 +6,18 @@ const Item = require("../models/item.model");
 const QcEditLog = require("../models/qcEditLog.model");
 const OrderEditLog = require("../models/orderEditLog.model");
 const XLSX = require("xlsx");
+const path = require("path");
 
 const Order = require("../models/order.model");
 const mongoose = require("mongoose");
 const { upsertItemFromQc } = require("../services/itemSync");
-const { getSignedObjectUrl } = require("../services/wasabiStorage.service");
+const { optimizeImageForStorage } = require("../services/imageOptimization.service");
+const {
+  createStorageKey,
+  getSignedObjectUrl,
+  isConfigured: isWasabiConfigured,
+  uploadBuffer,
+} = require("../services/wasabiStorage.service");
 const {
   formatDateOnlyDDMMYYYY,
   parseDateOnly,
@@ -81,6 +88,18 @@ const ACTIVE_ORDER_MATCH = {
   archived: { $ne: true },
   status: { $ne: "Cancelled" },
 };
+const QC_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png"]);
+const QC_IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png"]);
+const QC_IMAGE_UPLOAD_MODES = Object.freeze({
+  SINGLE: "single",
+  BULK: "bulk",
+});
+const MAX_QC_IMAGE_UPLOAD_COUNT = 20;
+const EMPTY_LBH = Object.freeze({
+  L: 0,
+  B: 0,
+  H: 0,
+});
 const buildActiveOrderLookupStage = (asField = "order") => ({
   $lookup: {
     from: "orders",
@@ -618,6 +637,9 @@ const buildSignedItemFile = async (file = {}, { logLabel = "Item file" } = {}) =
 
 const buildSignedItemImage = async (image = {}) =>
   buildSignedItemFile(image, { logLabel: "Item image" });
+
+const buildSignedQcImage = async (image = {}) =>
+  buildSignedItemFile(image, { logLabel: "QC image" });
 
 const toPositiveCbmNumber = (value) => {
   const numeric = Number(value);
@@ -2744,14 +2766,24 @@ exports.updateQC = async (req, res) => {
     const parsedCbmBottom = parseCbmField(CBM_bottom, "CBM bottom");
 
     const parseLbhPayload = (value, fieldName) => {
-      if (value === undefined) return null;
-      if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      if (value === undefined) return { hasInput: false, value: null };
+      if (value === null) {
+        if (!allowAdminRewrite) {
+          throw new Error(`${fieldName} must be an object with L, B and H`);
+        }
+        return { hasInput: true, value: { ...EMPTY_LBH } };
+      }
+      if (typeof value !== "object" || Array.isArray(value)) {
         throw new Error(`${fieldName} must be an object with L, B and H`);
       }
 
       const hasAnyInput =
         value.L !== undefined || value.B !== undefined || value.H !== undefined;
-      if (!hasAnyInput) return null;
+      if (!hasAnyInput) {
+        return allowAdminRewrite
+          ? { hasInput: true, value: { ...EMPTY_LBH } }
+          : { hasInput: false, value: null };
+      }
 
       if (
         value.L === undefined ||
@@ -2777,12 +2809,15 @@ exports.updateQC = async (req, res) => {
         );
       }
 
-      return { L, B, H };
+      return { hasInput: true, value: { L, B, H } };
     };
     const parseInspectedWeightPayloadField = (value, fieldName) => {
       if (value === undefined) return { hasInput: false, value: null };
       const normalized = String(value ?? "").trim();
       if (!normalized) {
+        if (allowAdminRewrite) {
+          return { hasInput: true, value: 0 };
+        }
         throw new Error(`${fieldName} must be greater than 0`);
       }
 
@@ -2800,41 +2835,47 @@ exports.updateQC = async (req, res) => {
       Math.abs(toNonNegativeNumber(left, 0) - toNonNegativeNumber(right, 0)) <
       0.000001;
 
-    const nextInspectedItemLbh = parseLbhPayload(
+    const parsedInspectedItemLbh = parseLbhPayload(
       inspected_item_LBH,
       "inspected_item_LBH",
     );
-    const nextInspectedItemTopLbh = parseLbhPayload(
+    const parsedInspectedItemTopLbh = parseLbhPayload(
       inspected_item_top_LBH,
       "inspected_item_top_LBH",
     );
-    const nextInspectedItemBottomLbh = parseLbhPayload(
+    const parsedInspectedItemBottomLbh = parseLbhPayload(
       inspected_item_bottom_LBH,
       "inspected_item_bottom_LBH",
     );
-    const nextInspectedBoxLbh = parseLbhPayload(
+    const parsedInspectedBoxLbh = parseLbhPayload(
       inspected_box_LBH,
       "inspected_box_LBH",
     );
-    const nextInspectedTopLbh = parseLbhPayload(
+    const parsedInspectedTopLbh = parseLbhPayload(
       inspected_box_top_LBH !== undefined
         ? inspected_box_top_LBH
         : inspected_top_LBH,
       "inspected_box_top_LBH",
     );
-    const nextInspectedBottomLbh = parseLbhPayload(
+    const parsedInspectedBottomLbh = parseLbhPayload(
       inspected_box_bottom_LBH !== undefined
         ? inspected_box_bottom_LBH
         : inspected_bottom_LBH,
       "inspected_box_bottom_LBH",
     );
+    const nextInspectedItemLbh = parsedInspectedItemLbh.value;
+    const nextInspectedItemTopLbh = parsedInspectedItemTopLbh.value;
+    const nextInspectedItemBottomLbh = parsedInspectedItemBottomLbh.value;
+    const nextInspectedBoxLbh = parsedInspectedBoxLbh.value;
+    const nextInspectedTopLbh = parsedInspectedTopLbh.value;
+    const nextInspectedBottomLbh = parsedInspectedBottomLbh.value;
     const hasInspectedLbhUpdate = Boolean(
-      nextInspectedItemLbh ||
-      nextInspectedItemTopLbh ||
-      nextInspectedItemBottomLbh ||
-      nextInspectedBoxLbh ||
-      nextInspectedTopLbh ||
-      nextInspectedBottomLbh,
+      parsedInspectedItemLbh.hasInput ||
+      parsedInspectedItemTopLbh.hasInput ||
+      parsedInspectedItemBottomLbh.hasInput ||
+      parsedInspectedBoxLbh.hasInput ||
+      parsedInspectedTopLbh.hasInput ||
+      parsedInspectedBottomLbh.hasInput
     );
 
     if (
@@ -2965,33 +3006,37 @@ exports.updateQC = async (req, res) => {
     }
 
     const effectiveInspectedItemLbh =
-      nextInspectedItemLbh ||
-      itemDocForInspectedLbhUpdate?.inspected_item_LBH ||
-      itemDocForInspectedLbhUpdate?.item_LBH ||
-      {};
+      parsedInspectedItemLbh.hasInput
+        ? nextInspectedItemLbh || {}
+        : itemDocForInspectedLbhUpdate?.inspected_item_LBH ||
+          itemDocForInspectedLbhUpdate?.item_LBH ||
+          {};
     const effectiveInspectedItemTopLbh =
-      nextInspectedItemTopLbh ||
-      itemDocForInspectedLbhUpdate?.inspected_item_top_LBH ||
-      {};
+      parsedInspectedItemTopLbh.hasInput
+        ? nextInspectedItemTopLbh || {}
+        : itemDocForInspectedLbhUpdate?.inspected_item_top_LBH || {};
     const effectiveInspectedItemBottomLbh =
-      nextInspectedItemBottomLbh ||
-      itemDocForInspectedLbhUpdate?.inspected_item_bottom_LBH ||
-      {};
+      parsedInspectedItemBottomLbh.hasInput
+        ? nextInspectedItemBottomLbh || {}
+        : itemDocForInspectedLbhUpdate?.inspected_item_bottom_LBH || {};
     const effectiveInspectedBoxLbh =
-      nextInspectedBoxLbh ||
-      itemDocForInspectedLbhUpdate?.inspected_box_LBH ||
-      itemDocForInspectedLbhUpdate?.box_LBH ||
-      {};
+      parsedInspectedBoxLbh.hasInput
+        ? nextInspectedBoxLbh || {}
+        : itemDocForInspectedLbhUpdate?.inspected_box_LBH ||
+          itemDocForInspectedLbhUpdate?.box_LBH ||
+          {};
     const effectiveInspectedTopLbh =
-      nextInspectedTopLbh ||
-      itemDocForInspectedLbhUpdate?.inspected_box_top_LBH ||
-      itemDocForInspectedLbhUpdate?.inspected_top_LBH ||
-      {};
+      parsedInspectedTopLbh.hasInput
+        ? nextInspectedTopLbh || {}
+        : itemDocForInspectedLbhUpdate?.inspected_box_top_LBH ||
+          itemDocForInspectedLbhUpdate?.inspected_top_LBH ||
+          {};
     const effectiveInspectedBottomLbh =
-      nextInspectedBottomLbh ||
-      itemDocForInspectedLbhUpdate?.inspected_box_bottom_LBH ||
-      itemDocForInspectedLbhUpdate?.inspected_bottom_LBH ||
-      {};
+      parsedInspectedBottomLbh.hasInput
+        ? nextInspectedBottomLbh || {}
+        : itemDocForInspectedLbhUpdate?.inspected_box_bottom_LBH ||
+          itemDocForInspectedLbhUpdate?.inspected_bottom_LBH ||
+          {};
     const existingCbmTotal = toNonNegativeNumber(qc?.cbm?.total, 0);
     const existingCbmTop = toNonNegativeNumber(qc?.cbm?.top, 0);
     const existingCbmBottom = toNonNegativeNumber(qc?.cbm?.bottom, 0);
@@ -3490,8 +3535,9 @@ exports.updateQC = async (req, res) => {
     if (hasItemMasterUpdate) {
       const itemDoc = itemDocForInspectedLbhUpdate;
       let hasItemDocChanges = false;
-      const setLbhPath = (path, value) => {
-        if (!value) return false;
+      const setLbhPath = (path, parsedUpdate) => {
+        if (!parsedUpdate?.hasInput) return false;
+        const value = parsedUpdate.value || EMPTY_LBH;
         const nextValue = {
           L: toNonNegativeNumber(value?.L, 0),
           B: toNonNegativeNumber(value?.B, 0),
@@ -3506,27 +3552,31 @@ exports.updateQC = async (req, res) => {
 
       if (hasInspectedLbhUpdate) {
         hasItemDocChanges =
-          setLbhPath("inspected_item_LBH", nextInspectedItemLbh) ||
+          setLbhPath("inspected_item_LBH", parsedInspectedItemLbh) ||
           hasItemDocChanges;
         hasItemDocChanges =
-          setLbhPath("inspected_item_top_LBH", nextInspectedItemTopLbh) ||
+          setLbhPath("inspected_item_top_LBH", parsedInspectedItemTopLbh) ||
           hasItemDocChanges;
         hasItemDocChanges =
-          setLbhPath("inspected_item_bottom_LBH", nextInspectedItemBottomLbh) ||
+          setLbhPath("inspected_item_bottom_LBH", parsedInspectedItemBottomLbh) ||
           hasItemDocChanges;
         hasItemDocChanges =
-          setLbhPath("inspected_box_LBH", nextInspectedBoxLbh) ||
+          setLbhPath("inspected_box_LBH", parsedInspectedBoxLbh) ||
           hasItemDocChanges;
 
-        if (setLbhPath("inspected_box_top_LBH", nextInspectedTopLbh)) {
-          hasItemDocChanges = true;
-          setLbhPath("inspected_top_LBH", nextInspectedTopLbh);
-        }
+        hasItemDocChanges =
+          setLbhPath("inspected_box_top_LBH", parsedInspectedTopLbh) ||
+          hasItemDocChanges;
+        hasItemDocChanges =
+          setLbhPath("inspected_top_LBH", parsedInspectedTopLbh) ||
+          hasItemDocChanges;
 
-        if (setLbhPath("inspected_box_bottom_LBH", nextInspectedBottomLbh)) {
-          hasItemDocChanges = true;
-          setLbhPath("inspected_bottom_LBH", nextInspectedBottomLbh);
-        }
+        hasItemDocChanges =
+          setLbhPath("inspected_box_bottom_LBH", parsedInspectedBottomLbh) ||
+          hasItemDocChanges;
+        hasItemDocChanges =
+          setLbhPath("inspected_bottom_LBH", parsedInspectedBottomLbh) ||
+          hasItemDocChanges;
       }
 
       if (hasInspectedWeightUpdate) {
@@ -5602,6 +5652,198 @@ exports.getDailyReport = async (req, res) => {
   }
 };
 
+exports.uploadQcImages = async (req, res) => {
+  try {
+    const qcId = String(req.params.id || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(qcId)) {
+      return res.status(400).json({ success: false, message: "Invalid QC id" });
+    }
+
+    const qc = await QC.findById(qcId)
+      .populate("inspector")
+      .populate("order", "status");
+
+    if (!qc) {
+      return res.status(404).json({ success: false, message: "QC record not found" });
+    }
+
+    const normalizedRole = String(req.user?.role || "")
+      .trim()
+      .toLowerCase();
+    const isAdmin = normalizedRole === "admin";
+    const isManager = normalizedRole === "manager";
+    const hasElevatedAccess = isAdmin || isManager;
+    const currentUserId = String(req.user?._id || req.user?.id || "").trim();
+    const isInspectionDone = qc?.order?.status === "Inspection Done";
+
+    if (!hasElevatedAccess && isInspectionDone) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Only admin or manager can upload QC images after inspection is done",
+      });
+    }
+
+    const latestRequestEntry = resolveLatestRequestEntry(qc?.request_history || []);
+    const latestRequestedQuantity =
+      latestRequestEntry?.quantity_requested !== undefined
+        ? toNonNegativeNumber(latestRequestEntry.quantity_requested, 0)
+        : toNonNegativeNumber(qc?.quantities?.quantity_requested, 0);
+    const hasQcRequest =
+      (Array.isArray(qc?.request_history) && qc.request_history.length > 0) ||
+      latestRequestedQuantity > 0;
+
+    if (!hasQcRequest) {
+      return res.status(400).json({
+        success: false,
+        message: "QC is not requested yet. Align QC request before uploading QC images.",
+      });
+    }
+
+    if (!hasElevatedAccess) {
+      if (!currentUserId) {
+        return res.status(401).json({ success: false, message: "Unauthorized" });
+      }
+
+      const alignedInspectorId = String(
+        qc?.inspector?._id || qc?.inspector || "",
+      ).trim();
+      if (!alignedInspectorId || alignedInspectorId !== currentUserId) {
+        return res.status(403).json({
+          success: false,
+          message: "QC can upload images only for records aligned to them",
+        });
+      }
+    }
+
+    const uploadMode = String(
+      req.body?.upload_mode || req.body?.uploadMode || QC_IMAGE_UPLOAD_MODES.SINGLE,
+    )
+      .trim()
+      .toLowerCase();
+    if (
+      uploadMode !== QC_IMAGE_UPLOAD_MODES.SINGLE &&
+      uploadMode !== QC_IMAGE_UPLOAD_MODES.BULK
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid QC image upload mode",
+      });
+    }
+
+    const files = Array.isArray(req.files) ? req.files.filter(Boolean) : [];
+    if (files.length === 0) {
+      return res.status(400).json({ success: false, message: "No image uploaded" });
+    }
+    if (files.length > MAX_QC_IMAGE_UPLOAD_COUNT) {
+      return res.status(400).json({
+        success: false,
+        message: `You can upload up to ${MAX_QC_IMAGE_UPLOAD_COUNT} QC images at once`,
+      });
+    }
+    if (uploadMode === QC_IMAGE_UPLOAD_MODES.SINGLE && files.length !== 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Single image upload accepts exactly one image",
+      });
+    }
+
+    if (!isWasabiConfigured()) {
+      return res.status(500).json({
+        success: false,
+        message: "Wasabi storage is not configured",
+      });
+    }
+
+    const singleImageComment =
+      uploadMode === QC_IMAGE_UPLOAD_MODES.SINGLE
+        ? normalizeText(req.body?.comment || "")
+        : "";
+    const uploadedAt = new Date();
+    const uploadedBy = buildAuditActor(req.user);
+    const uploadedImages = [];
+    let optimizedUploadCount = 0;
+    let totalBytesSaved = 0;
+
+    for (const file of files) {
+      const mimeType = normalizeText(file?.mimetype).toLowerCase();
+      const extension = path
+        .extname(String(file?.originalname || ""))
+        .toLowerCase();
+
+      if (
+        !QC_IMAGE_MIME_TYPES.has(mimeType) ||
+        !QC_IMAGE_EXTENSIONS.has(extension)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Only JPG, JPEG, and PNG files are allowed for QC images",
+        });
+      }
+
+      const fallbackOriginalName =
+        file?.originalname ||
+        `${normalizeText(qc?.order_meta?.order_id || qcId)}${extension || ".jpg"}`;
+      const optimizedImage = await optimizeImageForStorage({
+        buffer: file.buffer,
+        contentType: mimeType || "application/octet-stream",
+        originalName: fallbackOriginalName,
+      });
+      if (optimizedImage?.optimized) {
+        optimizedUploadCount += 1;
+        totalBytesSaved += toNonNegativeNumber(optimizedImage.bytesSaved, 0);
+      }
+      const optimizedExtension = path
+        .extname(String(optimizedImage?.originalName || ""))
+        .toLowerCase() || extension || ".jpg";
+      const uploadResult = await uploadBuffer({
+        buffer: optimizedImage.buffer,
+        key: createStorageKey({
+          folder: "qc-images",
+          originalName: optimizedImage.originalName || fallbackOriginalName,
+          extension: optimizedExtension,
+        }),
+        originalName: optimizedImage.originalName || fallbackOriginalName,
+        contentType: optimizedImage.contentType || mimeType || "application/octet-stream",
+      });
+
+      uploadedImages.push({
+        key: uploadResult.key,
+        originalName: uploadResult.originalName,
+        contentType: uploadResult.contentType,
+        size: uploadResult.size,
+        comment: singleImageComment,
+        uploadedAt,
+        uploaded_by: uploadedBy,
+      });
+    }
+
+    qc.qc_images = [
+      ...(Array.isArray(qc.qc_images) ? qc.qc_images : []),
+      ...uploadedImages,
+    ];
+    qc.updated_by = uploadedBy;
+    await qc.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `${uploadedImages.length} QC image${uploadedImages.length === 1 ? "" : "s"} uploaded successfully`,
+      data: {
+        qc_id: qc._id,
+        uploaded_count: uploadedImages.length,
+        optimized_count: optimizedUploadCount,
+        bytes_saved: totalBytesSaved,
+      },
+    });
+  } catch (error) {
+    console.error("Upload QC Images Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to upload QC images",
+    });
+  }
+};
+
 exports.getQCById = async (req, res) => {
   try {
     const qc = await QC.findById(req.params.id)
@@ -5676,6 +5918,24 @@ exports.getQCById = async (req, res) => {
           }),
         }
       : null;
+    const qcImagesWithSignedUrls = await Promise.all(
+      (Array.isArray(qcData?.qc_images) ? [...qcData.qc_images] : [])
+        .sort(
+          (a, b) =>
+            toSortableTimestamp(b?.uploadedAt || b?.createdAt) -
+            toSortableTimestamp(a?.uploadedAt || a?.createdAt),
+        )
+        .map(
+        async (image) => {
+          const signedImage = await buildSignedQcImage(image);
+          return {
+            ...image,
+            ...(signedImage || {}),
+            comment: normalizeText(image?.comment || ""),
+          };
+        },
+      ),
+    );
     const sortedLabels = normalizeLabels(qcData.labels);
     const sortedRequestHistory = Array.isArray(qcData.request_history)
       ? [...qcData.request_history].sort((a, b) => {
@@ -5706,6 +5966,7 @@ exports.getQCById = async (req, res) => {
       data: {
         ...qcData,
         item_master: itemMasterWithSignedUrls,
+        qc_images: qcImagesWithSignedUrls,
         labels: sortedLabels,
         request_history: sortedRequestHistory,
         inspection_record: sortedInspectionRecords,

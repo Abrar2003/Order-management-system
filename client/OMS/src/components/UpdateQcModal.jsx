@@ -1395,6 +1395,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       String(form.CBM_bottom || "").trim() !== "";
 
     const buildQcPayload = () => {
+      const shouldSendAdminItemMasterFields =
+        isAdminRewriteMode && Boolean(qc?.item_master?._id);
       const payload = isAdminRewriteMode
         ? {
             admin_rewrite_latest_record: true,
@@ -1448,9 +1450,9 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         }
       }
 
-      if (isAdminRewriteMode && barcodeParsed !== null) {
-        payload.barcode = barcodeParsed;
-      } else if (!isAdminRewriteMode && barcodeParsed !== null) {
+      if (isAdminRewriteMode) {
+        payload.barcode = barcodeParsed ?? 0;
+      } else if (barcodeParsed !== null) {
         payload.barcode = barcodeParsed;
       }
 
@@ -1458,17 +1460,39 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         payload.last_inspected_date = lastInspectedDateIso;
       }
 
-      if (!lockInspectedItemLbh && inspectedItemLbh.hasAnyInput && inspectedItemLbh.value) {
+      if (shouldSendAdminItemMasterFields) {
+        payload.inspected_item_LBH =
+          inspectedItemLbh.hasAnyInput && inspectedItemLbh.value
+            ? inspectedItemLbh.value
+            : null;
+      } else if (!lockInspectedItemLbh && inspectedItemLbh.hasAnyInput && inspectedItemLbh.value) {
         payload.inspected_item_LBH = inspectedItemLbh.value;
       }
-      if (!lockInspectedBoxLbh && inspectedBoxLbh.hasAnyInput && inspectedBoxLbh.value) {
+      if (shouldSendAdminItemMasterFields) {
+        payload.inspected_box_LBH =
+          inspectedBoxLbh.hasAnyInput && inspectedBoxLbh.value
+            ? inspectedBoxLbh.value
+            : null;
+      } else if (!lockInspectedBoxLbh && inspectedBoxLbh.hasAnyInput && inspectedBoxLbh.value) {
         payload.inspected_box_LBH = inspectedBoxLbh.value;
       }
-      if (!lockInspectedBoxTopLbh && inspectedTopLbh.hasAnyInput && inspectedTopLbh.value) {
+      if (shouldSendAdminItemMasterFields) {
+        payload.inspected_box_top_LBH =
+          inspectedTopLbh.hasAnyInput && inspectedTopLbh.value
+            ? inspectedTopLbh.value
+            : null;
+        payload.inspected_top_LBH = payload.inspected_box_top_LBH;
+      } else if (!lockInspectedBoxTopLbh && inspectedTopLbh.hasAnyInput && inspectedTopLbh.value) {
         payload.inspected_box_top_LBH = inspectedTopLbh.value;
         payload.inspected_top_LBH = inspectedTopLbh.value;
       }
-      if (
+      if (shouldSendAdminItemMasterFields) {
+        payload.inspected_box_bottom_LBH =
+          inspectedBottomLbh.hasAnyInput && inspectedBottomLbh.value
+            ? inspectedBottomLbh.value
+            : null;
+        payload.inspected_bottom_LBH = payload.inspected_box_bottom_LBH;
+      } else if (
         !lockInspectedBoxBottomLbh &&
         inspectedBottomLbh.hasAnyInput &&
         inspectedBottomLbh.value
@@ -1476,14 +1500,24 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         payload.inspected_box_bottom_LBH = inspectedBottomLbh.value;
         payload.inspected_bottom_LBH = inspectedBottomLbh.value;
       }
-      if (
+      if (shouldSendAdminItemMasterFields) {
+        payload.inspected_item_top_LBH =
+          inspectedItemTopLbh.hasAnyInput && inspectedItemTopLbh.value
+            ? inspectedItemTopLbh.value
+            : null;
+      } else if (
         !lockInspectedItemTopLbh &&
         inspectedItemTopLbh.hasAnyInput &&
         inspectedItemTopLbh.value
       ) {
         payload.inspected_item_top_LBH = inspectedItemTopLbh.value;
       }
-      if (
+      if (shouldSendAdminItemMasterFields) {
+        payload.inspected_item_bottom_LBH =
+          inspectedItemBottomLbh.hasAnyInput && inspectedItemBottomLbh.value
+            ? inspectedItemBottomLbh.value
+            : null;
+      } else if (
         !lockInspectedItemBottomLbh &&
         inspectedItemBottomLbh.hasAnyInput &&
         inspectedItemBottomLbh.value
@@ -1491,6 +1525,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         payload.inspected_item_bottom_LBH = inspectedItemBottomLbh.value;
       }
       if (
+        shouldSendAdminItemMasterFields ||
         INSPECTED_WEIGHT_FIELDS.some(
           (field) =>
             !inspectedWeightLocks[field.payloadKey]
@@ -1500,6 +1535,11 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         payload.inspected_weight = {};
         for (const field of INSPECTED_WEIGHT_FIELDS) {
           const parsedWeightInput = inspectedWeightInputs[field.payloadKey];
+          if (shouldSendAdminItemMasterFields) {
+            payload.inspected_weight[field.payloadKey] =
+              parsedWeightInput?.hasAnyInput ? parsedWeightInput.value : null;
+            continue;
+          }
           if (
             inspectedWeightLocks[field.payloadKey]
             || !parsedWeightInput?.hasAnyInput
@@ -1509,7 +1549,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
           }
           payload.inspected_weight[field.payloadKey] = parsedWeightInput.value;
         }
-        if (Object.keys(payload.inspected_weight).length === 0) {
+        if (!shouldSendAdminItemMasterFields && Object.keys(payload.inspected_weight).length === 0) {
           delete payload.inspected_weight;
         }
       }
