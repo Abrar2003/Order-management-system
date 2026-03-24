@@ -496,8 +496,7 @@ exports.createEmailLog = async (req, res) => {
       });
     }
 
-    const creationDates = Array.from({ length: 7 }, (_, index) =>
-      addUtcDays(data.creation_date, index)).filter(Boolean);
+    const creationDates = [data.creation_date].filter(Boolean);
     const dateConflicts = await findExistingDateConflicts({
       order_id: data.order_id,
       brandId: data.brand.id,
@@ -531,7 +530,7 @@ exports.createEmailLog = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: `${serializedLogs.length} email logs created successfully`,
+      message: "Email log created successfully",
       data: serializedLogs,
     });
   } catch (err) {

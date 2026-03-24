@@ -126,7 +126,7 @@ const EmailLogsModal = ({
       const successMessage = response?.data?.message
         || (isUpdateMode
           ? "Email log updated successfully."
-          : "7 email logs created successfully.");
+          : "Email log created successfully.");
 
       setSuccess(successMessage);
       if (!isUpdateMode) {
@@ -136,7 +136,7 @@ const EmailLogsModal = ({
     } catch (err) {
       setError(
         err?.response?.data?.message
-        || (isUpdateMode ? "Failed to update email log." : "Failed to create email logs."),
+        || (isUpdateMode ? "Failed to update email log." : "Failed to create email log."),
       );
     } finally {
       setSaving(false);
@@ -149,7 +149,7 @@ const EmailLogsModal = ({
         <div className="modal-content">
           <div className="modal-header">
             <h5 className="modal-title">
-              {isUpdateMode ? "Update Email Log" : "Create 7 Email Logs"}
+              {isUpdateMode ? "Update Email Log" : "Create Email Log"}
             </h5>
             <button
               type="button"
@@ -162,13 +162,6 @@ const EmailLogsModal = ({
 
           <form onSubmit={handleSubmit}>
             <div className="modal-body d-grid gap-3">
-              {!isUpdateMode && (
-                <div className="small text-secondary">
-                  This creates 7 records for the selected start date and the next 6 consecutive days.
-                  Each new record starts with empty log matter.
-                </div>
-              )}
-
               {optionsError && <div className="alert alert-warning mb-0">{optionsError}</div>}
               {error && <div className="alert alert-danger mb-0">{error}</div>}
               {success && <div className="alert alert-success mb-0">{success}</div>}
@@ -227,7 +220,7 @@ const EmailLogsModal = ({
 
               <div>
                 <label className="form-label">
-                  {isUpdateMode ? "Creation Date" : "Start Creation Date"}
+                  Creation Date
                 </label>
                 <input
                   type="date"
@@ -273,7 +266,7 @@ const EmailLogsModal = ({
               >
                 {saving
                   ? "Saving..."
-                  : (isUpdateMode ? "Update Log" : "Create 7 Records")}
+                  : (isUpdateMode ? "Update Log" : "Create Record")}
               </button>
             </div>
           </form>

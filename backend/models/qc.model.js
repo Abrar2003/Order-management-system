@@ -117,6 +117,17 @@ const qcSchema = new mongoose.Schema(
         default: [],
       },
     ],
+    qc_images: [
+      {
+        key: { type: String, default: "", trim: true },
+        originalName: { type: String, default: "", trim: true },
+        contentType: { type: String, default: "", trim: true },
+        size: { type: Number, default: 0, min: 0 },
+        comment: { type: String, default: "", trim: true },
+        uploadedAt: { type: Date, default: Date.now },
+        uploaded_by: { type: AuditActorSchema, default: () => ({}) },
+      },
+    ],
     labels: {
       type: [{ type: Number, min: 0 }],
       default: [],

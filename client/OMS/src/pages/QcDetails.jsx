@@ -175,6 +175,7 @@ const RELATED_FILE_OPTIONS = Object.freeze([
     value: "product_image",
     label: "Product Image",
     buttonLabel: "Item image",
+    scope: "item_master",
     field: "image",
     previewMode: "image",
     accept: ".jpg,.jpeg,.png,image/jpeg,image/png",
@@ -187,6 +188,7 @@ const RELATED_FILE_OPTIONS = Object.freeze([
     value: "cad_file",
     label: "CAD File",
     buttonLabel: "CAD file",
+    scope: "item_master",
     field: "cad_file",
     previewMode: "pdf",
     accept: ".pdf,application/pdf",
@@ -198,12 +200,26 @@ const RELATED_FILE_OPTIONS = Object.freeze([
     value: "pis_file",
     label: "PIS",
     buttonLabel: "PIS",
+    scope: "item_master",
     field: "pis_file",
     previewMode: "pdf",
     accept: ".pdf,application/pdf",
     extensions: [".pdf"],
     mimeTypes: ["application/pdf"],
     invalidMessage: "Only PDF files are allowed for PIS.",
+  },
+  {
+    value: "qc_images",
+    label: "QC Images",
+    buttonLabel: "QC images",
+    scope: "qc",
+    previewMode: "image",
+    accept: ".jpg,.jpeg,.png,image/jpeg,image/png",
+    extensions: [".jpg", ".jpeg", ".png"],
+    mimeTypes: ["image/jpeg", "image/png"],
+    invalidMessage:
+      "Only JPG, JPEG, or PNG files are allowed for QC images.",
+    supportsBulk: true,
   },
 ]);
 
@@ -214,7 +230,11 @@ const RELATED_FILE_OPTIONS_BY_VALUE = Object.freeze(
   }, {}),
 );
 
-const hasStoredItemFile = (file = {}) =>
+const ITEM_MASTER_FILE_OPTIONS = Object.freeze(
+  RELATED_FILE_OPTIONS.filter((option) => option.scope === "item_master"),
+);
+
+const hasStoredFile = (file = {}) =>
   Boolean(
     String(
       file?.key || file?.url || file?.link || file?.public_id || "",
@@ -226,6 +246,8 @@ const QcDetails = () => {
   const [qc, setQc] = useState(null);
   const [loading, setLoading] = useState(true);
   const [relatedFileType, setRelatedFileType] = useState("product_image");
+  const [qcImageUploadMode, setQcImageUploadMode] = useState("single");
+  const [qcSingleImageComment, setQcSingleImageComment] = useState("");
   const [uploadingRelatedFile, setUploadingRelatedFile] = useState(false);
   const [openingRelatedFileType, setOpeningRelatedFileType] = useState("");
   const [pdfViewerFile, setPdfViewerFile] = useState(null);
@@ -234,6 +256,8 @@ const QcDetails = () => {
   const [showEditShippingModal, setShowEditShippingModal] = useState(false);
   const [showEditInspectionModal, setShowEditInspectionModal] = useState(false);
   const [showGoodsNotReadyModal, setShowGoodsNotReadyModal] = useState(false);
+  const [showQcImageGallery, setShowQcImageGallery] = useState(false);
+  const [activeQcImageIndex, setActiveQcImageIndex] = useState(0);
   const [deletingInspectionId, setDeletingInspectionId] = useState("");
 
   const navigate = useNavigate();
@@ -301,13 +325,34 @@ const QcDetails = () => {
     canUpdateQcByRole &&
     pendingAlignmentInfo.hasRequest &&
     isQcAlignedRecord;
-  const canUploadRelatedFile = Boolean(qc?.item_master?._id) && canUpdateQc;
   const activeRelatedFileConfig = useMemo(
     () =>
       RELATED_FILE_OPTIONS_BY_VALUE[relatedFileType]
       || RELATED_FILE_OPTIONS[0],
     [relatedFileType],
   );
+  const canUploadRelatedFile = canUpdateQc;
+  const canUploadActiveRelatedFile =
+    canUploadRelatedFile &&
+    (
+      activeRelatedFileConfig?.scope === "qc" ||
+      Boolean(qc?.item_master?._id)
+    );
+  const relatedFileUploadDisabledReason = !canUploadActiveRelatedFile
+    ? activeRelatedFileConfig?.scope === "item_master" && !qc?.item_master?._id
+      ? "Item master not found for this QC."
+      : !pendingAlignmentInfo.hasRequest
+      ? "QC is not requested yet. Align QC request before uploading."
+      : !isQcAlignedRecord
+      ? "QC can upload only records aligned to them."
+      : isInspectionDone
+      ? "After inspection is done, only admin can update this record."
+      : !isQcInspectionDateAllowed
+      ? "QC date rule will be validated while submitting."
+      : hasUsedOneDayBackdatedUpdate
+      ? "Backdated one-time rule will be validated while submitting."
+      : "Only admin, manager, or aligned QC can upload related files."
+    : "";
 
   const sortedLabels = useMemo(() => normalizeLabels(qc?.labels), [qc?.labels]);
   const backTarget = useMemo(() => {
@@ -418,16 +463,21 @@ const QcDetails = () => {
   }, [qc]);
   const itemMasterFiles = useMemo(
     () =>
-      RELATED_FILE_OPTIONS.map((option) => ({
+      ITEM_MASTER_FILE_OPTIONS.map((option) => ({
         ...option,
         file: qc?.item_master?.[option.field] || null,
       })),
     [qc?.item_master],
   );
   const hasAnyItemMasterFile = useMemo(
-    () => itemMasterFiles.some((entry) => hasStoredItemFile(entry.file)),
+    () => itemMasterFiles.some((entry) => hasStoredFile(entry.file)),
     [itemMasterFiles],
   );
+  const qcImages = useMemo(
+    () => (Array.isArray(qc?.qc_images) ? qc.qc_images : []),
+    [qc?.qc_images],
+  );
+  const activeQcImage = qcImages[activeQcImageIndex] || null;
 
   const requestInspectionTimeline = useMemo(() => {
     const requestHistory = Array.isArray(qc?.request_history)
@@ -538,17 +588,17 @@ const QcDetails = () => {
   }, [id]);
 
   const handleOpenRelatedFilePicker = useCallback(() => {
-    if (!canUploadRelatedFile || uploadingRelatedFile) return;
+    if (!canUploadActiveRelatedFile || uploadingRelatedFile) return;
     relatedFileInputRef.current?.click();
-  }, [canUploadRelatedFile, uploadingRelatedFile]);
+  }, [canUploadActiveRelatedFile, uploadingRelatedFile]);
 
   const handleOpenRelatedFile = useCallback(async (fileType) => {
     const fileConfig =
       RELATED_FILE_OPTIONS_BY_VALUE[String(fileType || "").trim().toLowerCase()];
-    if (!fileConfig || !qc?.item_master?._id) return;
+    if (!fileConfig || fileConfig.scope !== "item_master" || !qc?.item_master?._id) return;
 
     const currentFile = qc?.item_master?.[fileConfig.field];
-    if (!hasStoredItemFile(currentFile)) {
+    if (!hasStoredFile(currentFile)) {
       alert(`${fileConfig.label} is not uploaded yet.`);
       return;
     }
@@ -592,60 +642,93 @@ const QcDetails = () => {
   }, [qc?.item_master]);
 
   const handleRelatedFileChange = useCallback(async (event) => {
-    const selectedFile = event.target?.files?.[0];
-    if (!selectedFile) return;
+    const selectedFiles = Array.from(event.target?.files || []);
+    if (selectedFiles.length === 0) return;
 
     const fileConfig =
       RELATED_FILE_OPTIONS_BY_VALUE[relatedFileType]
       || RELATED_FILE_OPTIONS[0];
-    const normalizedName = String(selectedFile.name || "").toLowerCase();
-    const normalizedType = String(selectedFile.type || "").toLowerCase();
-    const hasAllowedExtension = fileConfig.extensions.some((extension) =>
-      normalizedName.endsWith(extension),
-    );
-    const hasAllowedMimeType =
-      !normalizedType || fileConfig.mimeTypes.includes(normalizedType);
-
-    if (!hasAllowedExtension || !hasAllowedMimeType) {
-      alert(fileConfig.invalidMessage);
-      event.target.value = "";
-      return;
-    }
-
-    if (!qc?.item_master?._id) {
-      alert("Item master record not found for this QC.");
-      event.target.value = "";
-      return;
-    }
 
     try {
       setUploadingRelatedFile(true);
-      const formData = new FormData();
-      formData.append("file_type", relatedFileType);
-      formData.append("file", selectedFile);
+      for (const selectedFile of selectedFiles) {
+        const normalizedName = String(selectedFile.name || "").toLowerCase();
+        const normalizedType = String(selectedFile.type || "").toLowerCase();
+        const hasAllowedExtension = fileConfig.extensions.some((extension) =>
+          normalizedName.endsWith(extension),
+        );
+        const hasAllowedMimeType =
+          !normalizedType || fileConfig.mimeTypes.includes(normalizedType);
 
-      const response = await api.post(
-        `/items/${encodeURIComponent(qc.item_master._id)}/files`,
-        formData,
-        {
-          headers: {
-            "Content-Type": "multipart/form-data",
+        if (!hasAllowedExtension || !hasAllowedMimeType) {
+          throw new Error(fileConfig.invalidMessage);
+        }
+      }
+
+      let response;
+      if (fileConfig.value === "qc_images") {
+        const formData = new FormData();
+        formData.append("upload_mode", qcImageUploadMode);
+        if (qcImageUploadMode === "single") {
+          formData.append("comment", qcSingleImageComment);
+        }
+        selectedFiles.forEach((file) => {
+          formData.append("files", file);
+        });
+
+        response = await api.post(
+          `/qc/${encodeURIComponent(id)}/images`,
+          formData,
+          {
+            headers: {
+              "Content-Type": "multipart/form-data",
+            },
           },
-        },
-      );
+        );
+      } else {
+        if (!qc?.item_master?._id) {
+          throw new Error("Item master record not found for this QC.");
+        }
+
+        const formData = new FormData();
+        formData.append("file_type", relatedFileType);
+        formData.append("file", selectedFiles[0]);
+
+        response = await api.post(
+          `/items/${encodeURIComponent(qc.item_master._id)}/files`,
+          formData,
+          {
+            headers: {
+              "Content-Type": "multipart/form-data",
+            },
+          },
+        );
+      }
 
       alert(response?.data?.message || `${fileConfig.label} uploaded successfully.`);
+      if (fileConfig.value === "qc_images") {
+        setQcSingleImageComment("");
+      }
       await fetchQcDetails();
     } catch (error) {
       console.error(error);
       alert(
-        error?.response?.data?.message || `Failed to upload ${fileConfig.label}.`,
+        error?.response?.data?.message
+          || error?.message
+          || `Failed to upload ${fileConfig.label}.`,
       );
     } finally {
       setUploadingRelatedFile(false);
       event.target.value = "";
     }
-  }, [fetchQcDetails, qc?.item_master?._id, relatedFileType]);
+  }, [
+    fetchQcDetails,
+    id,
+    qc?.item_master?._id,
+    qcImageUploadMode,
+    qcSingleImageComment,
+    relatedFileType,
+  ]);
 
   const handleDeleteInspectionRecord = useCallback(
     async (recordId) => {
@@ -685,6 +768,51 @@ const QcDetails = () => {
     [fetchQcDetails, handleBackNavigation, id, isOnlyAdmin],
   );
 
+  const handleOpenQcImageGallery = useCallback((index = 0) => {
+    if (qcImages.length === 0) return;
+    const nextIndex = Math.min(
+      Math.max(Number(index) || 0, 0),
+      qcImages.length - 1,
+    );
+    setActiveQcImageIndex(nextIndex);
+    setShowQcImageGallery(true);
+  }, [qcImages.length]);
+
+  const handleCloseQcImageGallery = useCallback(() => {
+    setShowQcImageGallery(false);
+  }, []);
+
+  useEffect(() => {
+    if (qcImages.length === 0) {
+      setShowQcImageGallery(false);
+      setActiveQcImageIndex(0);
+      return;
+    }
+
+    if (activeQcImageIndex > qcImages.length - 1) {
+      setActiveQcImageIndex(0);
+    }
+  }, [activeQcImageIndex, qcImages.length]);
+
+  useEffect(() => {
+    if (!showQcImageGallery) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        setShowQcImageGallery(false);
+      }
+    };
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showQcImageGallery]);
+
   useEffect(() => {
     fetchQcDetails();
   }, [fetchQcDetails]);
@@ -717,6 +845,10 @@ const QcDetails = () => {
           type="file"
           className="d-none"
           accept={activeRelatedFileConfig.accept}
+          multiple={
+            activeRelatedFileConfig?.value === "qc_images" &&
+            qcImageUploadMode === "bulk"
+          }
           onChange={handleRelatedFileChange}
         />
 
@@ -736,7 +868,7 @@ const QcDetails = () => {
               value={relatedFileType}
               onChange={(e) => setRelatedFileType(String(e.target.value || "product_image"))}
               disabled={!canUploadRelatedFile || uploadingRelatedFile}
-              title={!qc?.item_master?._id ? "Item master not found for this QC." : ""}
+              title={relatedFileUploadDisabledReason}
             >
               {RELATED_FILE_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -745,28 +877,39 @@ const QcDetails = () => {
               ))}
             </select>
 
+            {activeRelatedFileConfig?.value === "qc_images" && (
+              <>
+                <select
+                  className="form-select form-select-sm"
+                  style={{ width: "auto", minWidth: "140px" }}
+                  value={qcImageUploadMode}
+                  onChange={(e) => setQcImageUploadMode(String(e.target.value || "single"))}
+                  disabled={!canUploadActiveRelatedFile || uploadingRelatedFile}
+                >
+                  <option value="single">Single Image</option>
+                  <option value="bulk">Bulk Images</option>
+                </select>
+
+                {qcImageUploadMode === "single" && (
+                  <input
+                    type="text"
+                    className="form-control form-control-sm"
+                    style={{ width: "220px" }}
+                    value={qcSingleImageComment}
+                    onChange={(e) => setQcSingleImageComment(String(e.target.value || ""))}
+                    placeholder="Comment (optional)"
+                    disabled={!canUploadActiveRelatedFile || uploadingRelatedFile}
+                  />
+                )}
+              </>
+            )}
+
             <button
               type="button"
               className="btn btn-outline-primary btn-sm"
               onClick={handleOpenRelatedFilePicker}
-              disabled={!canUploadRelatedFile || uploadingRelatedFile}
-              title={
-                !canUploadRelatedFile
-                  ? !qc?.item_master?._id
-                    ? "Item master not found for this QC."
-                    : !pendingAlignmentInfo.hasRequest
-                    ? "QC is not requested yet. Align QC request before uploading."
-                    : !isQcAlignedRecord
-                    ? "QC can upload only records aligned to them."
-                    : isInspectionDone
-                    ? "After inspection is done, only admin can update this record."
-                    : !isQcInspectionDateAllowed
-                    ? "QC date rule will be validated while submitting."
-                    : hasUsedOneDayBackdatedUpdate
-                    ? "Backdated one-time rule will be validated while submitting."
-                    : "Only admin, manager, or aligned QC can upload related files."
-                  : ""
-              }
+              disabled={!canUploadActiveRelatedFile || uploadingRelatedFile}
+              title={relatedFileUploadDisabledReason}
             >
               {uploadingRelatedFile ? "Uploading..." : "Upload Related File"}
             </button>
@@ -836,7 +979,7 @@ const QcDetails = () => {
               </div>
               <div className="d-flex flex-wrap gap-2 mt-3">
                 {itemMasterFiles.map((entry) => {
-                  const hasFile = hasStoredItemFile(entry.file);
+                  const hasFile = hasStoredFile(entry.file);
                   const isOpening = openingRelatedFileType === entry.value;
 
                   return (
@@ -856,10 +999,51 @@ const QcDetails = () => {
                     </button>
                   );
                 })}
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary btn-sm rounded-pill"
+                  onClick={() => handleOpenQcImageGallery(0)}
+                  disabled={qcImages.length === 0}
+                  title={
+                    qcImages.length > 0
+                      ? `Open ${qcImages.length} QC image${qcImages.length === 1 ? "" : "s"}`
+                      : "No QC images uploaded yet."
+                  }
+                >
+                  QC images
+                </button>
               </div>
               {!hasAnyItemMasterFile && (
                 <div className="small text-muted mt-2">
                   No related item files uploaded yet.
+                </div>
+              )}
+            </section>
+
+            <section>
+              <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                <h3 className="h6 mb-0">QC Images</h3>
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary btn-sm rounded-pill"
+                  onClick={() => handleOpenQcImageGallery(0)}
+                  disabled={qcImages.length === 0}
+                  title={
+                    qcImages.length > 0
+                      ? `Open ${qcImages.length} QC image${qcImages.length === 1 ? "" : "s"}`
+                      : "No QC images uploaded yet."
+                  }
+                >
+                  Open QC Image Gallery
+                </button>
+              </div>
+              {qcImages.length > 0 ? (
+                <div className="small text-muted">
+                  {`${qcImages.length} QC image${qcImages.length === 1 ? "" : "s"} uploaded. Click the gallery button to browse them in grid view.`}
+                </div>
+              ) : (
+                <div className="small text-muted">
+                  No QC images uploaded yet.
                 </div>
               )}
             </section>
@@ -1163,6 +1347,101 @@ const QcDetails = () => {
           originalName={pdfViewerFile.originalName}
           onClose={() => setPdfViewerFile(null)}
         />
+      )}
+
+      {showQcImageGallery && activeQcImage && (
+        <div
+          className="qc-image-gallery-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label="QC image gallery"
+          onClick={handleCloseQcImageGallery}
+        >
+          <div
+            className="qc-image-gallery-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+              <div>
+                <h3 className="h5 mb-1">QC Image Gallery</h3>
+                <div className="small text-muted">
+                  {`${qcImages.length} image${qcImages.length === 1 ? "" : "s"} available`}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-outline-secondary btn-sm"
+                onClick={handleCloseQcImageGallery}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="qc-image-gallery-body">
+              <div className="qc-image-gallery-preview mb-3">
+                {String(activeQcImage?.url || "").trim() ? (
+                  <img
+                    src={activeQcImage.url}
+                    alt={activeQcImage?.originalName || "QC image"}
+                    className="qc-image-gallery-preview-image"
+                  />
+                ) : (
+                  <div className="qc-image-gallery-preview-empty">
+                    Preview unavailable
+                  </div>
+                )}
+                <div className="qc-image-gallery-preview-meta">
+                  <div className="fw-semibold">
+                    {activeQcImage?.originalName || "QC image"}
+                  </div>
+                  <div className="small text-muted mt-1">
+                    {String(activeQcImage?.uploaded_by?.name || "").trim()
+                      ? `Uploaded by ${activeQcImage.uploaded_by.name}`
+                      : "Uploaded image"}
+                  </div>
+                  {String(activeQcImage?.comment || "").trim() && (
+                    <div className="small mt-3">
+                      <strong>Comment:</strong> {String(activeQcImage.comment || "").trim()}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="qc-image-gallery-grid">
+                {qcImages.map((image, index) => {
+                  const imageUrl = String(image?.url || "").trim();
+                  const isSelected = index === activeQcImageIndex;
+
+                  return (
+                    <button
+                      key={String(
+                        image?._id ||
+                        image?.key ||
+                        `${image?.originalName || "qc-image"}-${index}`,
+                      )}
+                      type="button"
+                      className={`qc-image-gallery-thumb${isSelected ? " is-active" : ""}`}
+                      onClick={() => setActiveQcImageIndex(index)}
+                      title={image?.originalName || `QC image ${index + 1}`}
+                    >
+                      {imageUrl ? (
+                        <img
+                          src={imageUrl}
+                          alt={image?.originalName || `QC image ${index + 1}`}
+                          className="qc-image-gallery-thumb-image"
+                        />
+                      ) : (
+                        <span className="qc-image-gallery-thumb-empty">
+                          Preview unavailable
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );
