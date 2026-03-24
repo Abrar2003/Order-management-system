@@ -639,7 +639,11 @@ const resolveSplitOrSingleLbhCbmTotal = ({
   return toPositiveCbmNumber(calculateCbmFromLbh(singleLbh));
 };
 
-const resolveItemReportCbmPerUnit = (itemDoc = null, inspection = null) => {
+const resolveItemReportCbmPerUnit = (
+  itemDoc = null,
+  inspection = null,
+  { allowPlainInspectionFallback = true } = {},
+) => {
   const inspectedStoredCbm = [
     itemDoc?.cbm?.calculated_inspected_total,
     itemDoc?.cbm?.inspected_total,
@@ -688,6 +692,10 @@ const resolveItemReportCbmPerUnit = (itemDoc = null, inspection = null) => {
   });
   if (pisLbhCbm > 0) {
     return pisLbhCbm;
+  }
+
+  if (!allowPlainInspectionFallback) {
+    return 0;
   }
 
   const inspectionTopCbm = toPositiveCbmNumber(inspection?.cbm?.top);
@@ -5337,6 +5345,29 @@ exports.getDailyReport = async (req, res) => {
     const inspections = inspectionsRaw.filter(
       (inspection) => inspection?.qc?.order,
     );
+    const uniqueItemCodes = [
+      ...new Set(
+        [...alignedRequests, ...inspections.map((inspection) => inspection?.qc)]
+          .map((record) => normalizeText(record?.item?.item_code || ""))
+          .filter(Boolean),
+      ),
+    ];
+    const itemDocs = uniqueItemCodes.length > 0
+      ? await Item.find({
+          code: {
+            $in: uniqueItemCodes.map(
+              (itemCode) => new RegExp(`^${escapeRegex(itemCode)}$`, "i"),
+            ),
+          },
+        })
+          .select(
+            "code cbm inspected_item_LBH inspected_item_top_LBH inspected_item_bottom_LBH inspected_box_LBH inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_item_LBH pis_item_top_LBH pis_item_bottom_LBH pis_box_LBH pis_box_top_LBH pis_box_bottom_LBH",
+          )
+          .lean()
+      : [];
+    const itemDocByCodeKey = new Map(
+      itemDocs.map((itemDoc) => [normalizeItemCodeKey(itemDoc?.code), itemDoc]),
+    );
     const alignedRequestQcIds = alignedRequests
       .map((qc) => String(qc?._id || "").trim())
       .filter((value) => mongoose.Types.ObjectId.isValid(value));
@@ -5365,6 +5396,18 @@ exports.getDailyReport = async (req, res) => {
 
     const aligned_requests = alignedRequests.map((qc) => {
       const latestInspection = latestInspectionByQcId.get(String(qc?._id || "").trim());
+      const itemCodeKey = normalizeItemCodeKey(qc?.item?.item_code || "");
+      const itemDoc = itemDocByCodeKey.get(itemCodeKey) || null;
+      const inspectedQty = Number(latestInspection?.checked || 0);
+      const reportCbmPerUnit = resolveItemReportCbmPerUnit(
+        itemDoc,
+        latestInspection,
+        { allowPlainInspectionFallback: false },
+      );
+      const hasReportCbm = reportCbmPerUnit > 0;
+      const inspectedCbmTotal = hasReportCbm
+        ? toRoundedNumber(reportCbmPerUnit * inspectedQty, 3)
+        : null;
       const derivedInspectionStatus = resolveInspectionRecordStatus({
         checked: latestInspection?.checked,
         passed: latestInspection?.passed,
@@ -5404,18 +5447,15 @@ exports.getDailyReport = async (req, res) => {
             }
           : null,
         quantity_requested: Number(qc?.quantities?.quantity_requested || 0),
-        quantity_inspected: Number(latestInspection?.checked || 0),
+        quantity_inspected: inspectedQty,
         quantity_passed: Number(latestInspection?.passed || 0),
         quantity_pending: Number(
           latestInspection?.pending_after ?? qc?.quantities?.pending ?? 0,
         ),
-        inspected_cbm_total: toRoundedNumber(
-          Number(
-            (Number(latestInspection?.cbm?.total ?? qc?.cbm?.total ?? 0) || 0)
-            * Number(latestInspection?.checked || 0),
-          ),
-          3,
-        ),
+        report_cbm_per_unit: hasReportCbm
+          ? toRoundedNumber(reportCbmPerUnit, 3)
+          : null,
+        inspected_cbm_total: inspectedCbmTotal,
         inspection_status: inspectionStatus,
         order_status: qc?.order?.status || "N/A",
         is_inspection_done: isInspectionDone,
@@ -5465,13 +5505,19 @@ exports.getDailyReport = async (req, res) => {
       const entry = inspectorMap.get(inspectorId);
       const inspectedQty = Number(inspection?.checked || 0);
       const qcRecord = inspection?.qc || {};
+      const itemCodeKey = normalizeItemCodeKey(qcRecord?.item?.item_code || "");
+      const itemDoc = itemDocByCodeKey.get(itemCodeKey) || null;
+      const reportCbmPerUnit = resolveItemReportCbmPerUnit(
+        itemDoc,
+        inspection,
+        { allowPlainInspectionFallback: false },
+      );
+      const hasReportCbm = reportCbmPerUnit > 0;
+      const inspectedCbmTotal = hasReportCbm ? reportCbmPerUnit * inspectedQty : 0;
       const cbmSnapshot =
         inspection?.cbm && typeof inspection.cbm === "object"
           ? inspection.cbm
           : qcRecord?.cbm || {};
-      const cbmTotal = Number(cbmSnapshot?.total || 0);
-      const safeCbmTotal = Number.isFinite(cbmTotal) ? cbmTotal : 0;
-      const inspectedCbmTotal = safeCbmTotal * inspectedQty;
 
       entry.total_inspected_quantity += inspectedQty;
       entry.total_inspected_cbm += inspectedCbmTotal;
@@ -5496,6 +5542,12 @@ exports.getDailyReport = async (req, res) => {
         goods_not_ready_reason: normalizeText(
           inspection?.goods_not_ready?.reason || inspection?.remarks || "",
         ),
+        report_cbm_per_unit: hasReportCbm
+          ? toRoundedNumber(reportCbmPerUnit, 3)
+          : null,
+        report_cbm_total: hasReportCbm
+          ? toRoundedNumber(inspectedCbmTotal, 3)
+          : null,
         cbm: {
           top: String(cbmSnapshot?.top ?? "0"),
           bottom: String(cbmSnapshot?.bottom ?? "0"),

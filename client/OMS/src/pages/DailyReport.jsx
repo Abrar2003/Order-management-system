@@ -9,7 +9,7 @@ import {
   toDDMMYYYYInputValue,
   toISODateString,
 } from "../utils/date";
-import { formatCbm } from "../utils/cbm";
+import { formatCbm, formatPositiveCbm } from "../utils/cbm";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
@@ -58,6 +58,13 @@ const getAlignedRequestRowClassName = (request) => {
   if (normalizedStatus === "goods not ready") return "weekly-summary-warning-row";
   if (normalizedStatus === "inspection done") return "om-report-success-row";
   return "";
+};
+
+const renderResolvedCbm = (value) => formatPositiveCbm(value, "N/A");
+
+const renderResolvedCbmTotal = (value) => {
+  if (value === null || value === undefined || value === "") return "N/A";
+  return formatCbm(value);
 };
 
 const DailyReport = () => {
@@ -173,6 +180,7 @@ const DailyReport = () => {
           ? res.data.inspector_compiled
           : [],
       });
+      console.log("Fetched daily report:", res.data.inspector_compiled);
     } catch (err) {
       setError(err?.response?.data?.message || "Failed to load daily report.");
       setReport((prev) => ({
@@ -372,7 +380,7 @@ const DailyReport = () => {
                     <th>Inspector</th>
                     <th>Requested</th>
                     <th>Passed</th>
-                    <th>Inspected CBM</th>
+                    <th>Inspected/PIS CBM Total</th>
                     <th>Status</th>
                   </tr>
                 </thead>
@@ -408,7 +416,7 @@ const DailyReport = () => {
                       <td>{request?.inspector?.name || "Unassigned"}</td>
                       <td>{request.quantity_requested ?? 0}</td>
                       <td>{request.quantity_passed ?? 0}</td>
-                      <td>{formatCbm(request?.inspected_cbm_total)}</td>
+                      <td>{renderResolvedCbmTotal(request?.inspected_cbm_total)}</td>
                       <td>{renderInspectionStatus(request?.inspection_status)}</td>
                     </tr>
                   ))}
@@ -469,8 +477,8 @@ const DailyReport = () => {
                           <th>Requested</th>
                           <th>Inspected</th>
                           <th>Passed</th>
-                          <th>CBM</th>
-                          <th>CBM Total</th>
+                          <th>Inspected/PIS CBM</th>
+                          <th>Inspected/PIS CBM Total</th>
                           <th>Remarks</th>
                         </tr>
                       </thead>
@@ -493,8 +501,8 @@ const DailyReport = () => {
                             <td>{inspection.vendor_requested ?? 0}</td>
                             <td>{inspection.inspected_quantity ?? 0}</td>
                             <td>{inspection.passed_quantity ?? 0}</td>
-                            <td>{formatCbm(inspection?.cbm?.total)}</td>
-                            <td>{formatCbm((inspection?.cbm?.total || 0) * (inspection?.inspected_quantity || 0))}</td>
+                            <td>{renderResolvedCbm(inspection?.report_cbm_per_unit)}</td>
+                            <td>{renderResolvedCbmTotal(inspection?.report_cbm_total)}</td>
                             <td>{inspection?.remarks || inspection?.goods_not_ready_reason || "None"}</td>
                           </tr>
                         ))}
