@@ -109,6 +109,57 @@ const getWeightValue = (weight = {}, key = "") => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const hasPositiveWeightValue = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0;
+};
+
+const pickFiniteWeightValue = (...values) => {
+  for (const value of values) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+};
+
+const formatWeightValue = (value, fallback = "Not Set") => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  if (Number.isInteger(parsed)) return String(parsed);
+  return parsed.toFixed(3).replace(/\.?0+$/, "") || "0";
+};
+
+const formatStructuredWeightValue = ({
+  top = null,
+  bottom = null,
+  single = null,
+  fallback = null,
+} = {}) => {
+  const resolvedTop = hasPositiveWeightValue(top) ? Number(top) : null;
+  const resolvedBottom = hasPositiveWeightValue(bottom) ? Number(bottom) : null;
+  const resolvedSingle = pickFiniteWeightValue(single, fallback);
+
+  if (resolvedTop !== null || resolvedBottom !== null) {
+    return {
+      mode: "split",
+      top: resolvedTop,
+      bottom: resolvedBottom,
+      display: [
+        resolvedTop !== null ? `Top: ${formatWeightValue(resolvedTop)}` : "",
+        resolvedBottom !== null ? `Bottom: ${formatWeightValue(resolvedBottom)}` : "",
+      ]
+        .filter(Boolean)
+        .join(" | "),
+    };
+  }
+
+  return {
+    mode: "single",
+    value: resolvedSingle,
+    display: formatWeightValue(resolvedSingle, "Not Set"),
+  };
+};
+
 const getBrandKey = (value) => String(value || "").trim().toLowerCase();
 
 const toBrandLogoDataUrl = (logoObj) => {
@@ -125,11 +176,6 @@ const toBrandLogoDataUrl = (logoObj) => {
   });
 
   return `data:${logoObj?.contentType || "image/webp"};base64,${window.btoa(binary)}`;
-};
-
-const toDisplayNumber = (value, fallback = "Not Set") => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
 };
 
 const toComparableValue = (value) =>
@@ -197,6 +243,53 @@ const collectLbhDifferenceLogs = ({
   }
 
   compareLbhSegment("", pisMeta?.value, checkedMeta?.value);
+  return logs;
+};
+
+const collectWeightDifferenceLogs = ({
+  attribute = "",
+  pisMeta = null,
+  checkedMeta = null,
+} = {}) => {
+  const logs = [];
+
+  const compareWeightSegment = (segmentLabel, pisWeight, checkedWeight) => {
+    const hasPis = pisWeight !== null && pisWeight !== undefined;
+    const hasChecked = checkedWeight !== null && checkedWeight !== undefined;
+    if (!hasPis && !hasChecked) return;
+
+    const labelPrefix = segmentLabel ? `${attribute} ${segmentLabel}` : attribute;
+
+    if (!hasPis && hasChecked) {
+      logs.push(
+        `For ${labelPrefix}, inspected value is ${formatWeightValue(checkedWeight)} while PIS value is not set.`,
+      );
+      return;
+    }
+
+    if (hasPis && !hasChecked) {
+      logs.push(
+        `For ${labelPrefix}, PIS value is ${formatWeightValue(pisWeight)} while inspected value is not set.`,
+      );
+      return;
+    }
+
+    const delta = Number(checkedWeight) - Number(pisWeight);
+    if (!Number.isFinite(delta) || Math.abs(delta) < 0.0001) return;
+
+    const direction = delta > 0 ? "greater" : "smaller";
+    logs.push(
+      `For ${labelPrefix}, inspected value is ${formatDifferenceNumber(delta)} ${direction} than PIS weight.`,
+    );
+  };
+
+  if (pisMeta?.mode === "split" || checkedMeta?.mode === "split") {
+    compareWeightSegment("Top", pisMeta?.top, checkedMeta?.top);
+    compareWeightSegment("Bottom", pisMeta?.bottom, checkedMeta?.bottom);
+    return logs;
+  }
+
+  compareWeightSegment("", pisMeta?.value, checkedMeta?.value);
   return logs;
 };
 
@@ -345,18 +438,30 @@ const InspectionReport = () => {
         || itemMaster?.item_LBH,
       fallback: itemMaster?.box_LBH || itemMaster?.item_LBH,
     });
-    const pisNetWeight = toDisplayNumber(
-      getWeightValue(itemMaster?.pis_weight, "total_net") || itemMaster?.weight?.net,
-    );
-    const checkedNetWeight = toDisplayNumber(
-      getWeightValue(itemMaster?.inspected_weight, "total_net") || itemMaster?.weight?.net,
-    );
-    const pisGrossWeight = toDisplayNumber(
-      getWeightValue(itemMaster?.pis_weight, "total_gross") || itemMaster?.weight?.gross,
-    );
-    const checkedGrossWeight = toDisplayNumber(
-      getWeightValue(itemMaster?.inspected_weight, "total_gross") || itemMaster?.weight?.gross,
-    );
+    const pisNetWeight = formatStructuredWeightValue({
+      top: getWeightValue(itemMaster?.pis_weight, "top_net"),
+      bottom: getWeightValue(itemMaster?.pis_weight, "bottom_net"),
+      single: getWeightValue(itemMaster?.pis_weight, "total_net"),
+      fallback: itemMaster?.weight?.net,
+    });
+    const checkedNetWeight = formatStructuredWeightValue({
+      top: getWeightValue(itemMaster?.inspected_weight, "top_net"),
+      bottom: getWeightValue(itemMaster?.inspected_weight, "bottom_net"),
+      single: getWeightValue(itemMaster?.inspected_weight, "total_net"),
+      fallback: itemMaster?.weight?.net,
+    });
+    const pisGrossWeight = formatStructuredWeightValue({
+      top: getWeightValue(itemMaster?.pis_weight, "top_gross"),
+      bottom: getWeightValue(itemMaster?.pis_weight, "bottom_gross"),
+      single: getWeightValue(itemMaster?.pis_weight, "total_gross"),
+      fallback: itemMaster?.weight?.gross,
+    });
+    const checkedGrossWeight = formatStructuredWeightValue({
+      top: getWeightValue(itemMaster?.inspected_weight, "top_gross"),
+      bottom: getWeightValue(itemMaster?.inspected_weight, "bottom_gross"),
+      single: getWeightValue(itemMaster?.inspected_weight, "total_gross"),
+      fallback: itemMaster?.weight?.gross,
+    });
     const calculatedInspectedCbmRaw =
       itemMaster?.cbm?.calculated_inspected_total ??
       itemMaster?.cbm?.calculated_total ??
@@ -418,6 +523,7 @@ const InspectionReport = () => {
         attribute: "Product Size (L x B x H)",
         pis: pisProductLbh.display,
         checked: checkedProductLbh.display,
+        comparison_type: "lbh",
         pis_meta: pisProductLbh,
         checked_meta: checkedProductLbh,
       },
@@ -425,11 +531,26 @@ const InspectionReport = () => {
         attribute: "Box Size (L x B x H)",
         pis: pisPackedSize.display,
         checked: checkedPackedSize.display,
+        comparison_type: "lbh",
         pis_meta: pisPackedSize,
         checked_meta: checkedPackedSize,
       },
-      { attribute: "Net Weight", pis: pisNetWeight, checked: checkedNetWeight },
-      { attribute: "Gross Weight", pis: pisGrossWeight, checked: checkedGrossWeight },
+      {
+        attribute: "Net Weight",
+        pis: pisNetWeight.display,
+        checked: checkedNetWeight.display,
+        comparison_type: "weight",
+        pis_meta: pisNetWeight,
+        checked_meta: checkedNetWeight,
+      },
+      {
+        attribute: "Gross Weight",
+        pis: pisGrossWeight.display,
+        checked: checkedGrossWeight.display,
+        comparison_type: "weight",
+        pis_meta: pisGrossWeight,
+        checked_meta: checkedGrossWeight,
+      },
       ...(showCbmTop ? [{ attribute: "CBM Top", pis: pisCbmTop, checked: checkedCbmTop }] : []),
       ...(showCbmBottom ? [{ attribute: "CBM Bottom", pis: pisCbmBottom, checked: checkedCbmBottom }] : []),
       { attribute: "CBM", pis: calculatedPisCbm, checked: checkedCbmTotal },
@@ -456,7 +577,7 @@ const InspectionReport = () => {
 
       if (!attribute || !pisValue || !checkedValue) return;
 
-      if (row?.pis_meta || row?.checked_meta) {
+      if (row?.comparison_type === "lbh") {
         const lbhLogs = collectLbhDifferenceLogs({
           attribute,
           pisMeta: row?.pis_meta,
@@ -464,6 +585,18 @@ const InspectionReport = () => {
         });
         if (lbhLogs.length > 0) {
           logs.push(...lbhLogs);
+        }
+        return;
+      }
+
+      if (row?.comparison_type === "weight") {
+        const weightLogs = collectWeightDifferenceLogs({
+          attribute,
+          pisMeta: row?.pis_meta,
+          checkedMeta: row?.checked_meta,
+        });
+        if (weightLogs.length > 0) {
+          logs.push(...weightLogs);
         }
         return;
       }
