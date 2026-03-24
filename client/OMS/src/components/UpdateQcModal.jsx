@@ -1588,13 +1588,14 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
           Array.isArray(record?.labels_added) ? record.labels_added : [],
         ),
       );
+      const allLabelsAfterRewrite = normalizeLabels([
+        ...otherLabels,
+        ...labelsForUpdate,
+      ]);
       const totalOfferedAfterRewrite = otherOffered + offeredQuantity;
       const totalCheckedAfterRewrite = otherChecked + qcChecked;
       const totalPassedAfterRewrite = otherPassed + qcPassed;
-      const totalLabelsAfterRewrite = new Set([
-        ...otherLabels,
-        ...labelsForUpdate,
-      ]).size;
+      const totalLabelsAfterRewrite = allLabelsAfterRewrite.length;
       const maxLabelsAllowed = hasSplitTopBottomForLabels
         ? Math.max(0, totalCheckedAfterRewrite) * 2
         : Math.max(0, totalCheckedAfterRewrite);
@@ -1641,6 +1642,10 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       }
 
       const qcPayload = buildQcPayload();
+      qcPayload.vendor_provision = totalOfferedAfterRewrite;
+      qcPayload.qc_checked = totalCheckedAfterRewrite;
+      qcPayload.qc_passed = totalPassedAfterRewrite;
+      qcPayload.labels = allLabelsAfterRewrite;
 
       try {
         setSaving(true);
