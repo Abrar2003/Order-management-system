@@ -159,6 +159,58 @@ const formatStructuredWeightValue = ({
     display: formatWeightValue(resolvedSingle, "Not Set"),
   };
 };
+const normalizeMeasurementEntries = (entries = [], weightKey = "") =>
+  (Array.isArray(entries) ? entries : [])
+    .map((entry) => {
+      const L = Number(entry?.L || 0);
+      const B = Number(entry?.B || 0);
+      const H = Number(entry?.H || 0);
+      const weight = Number(weightKey ? entry?.[weightKey] : 0);
+      return {
+        remark: String(entry?.remark || entry?.type || "").trim().toLowerCase(),
+        L: Number.isFinite(L) ? L : 0,
+        B: Number.isFinite(B) ? B : 0,
+        H: Number.isFinite(H) ? H : 0,
+        weight: Number.isFinite(weight) ? weight : 0,
+      };
+    })
+    .filter((entry) => entry.L > 0 && entry.B > 0 && entry.H > 0)
+    .slice(0, 3);
+const toStructuredLbhFromEntries = (entries = [], fallback = null) => {
+  const normalizedEntries = normalizeMeasurementEntries(entries);
+  if (normalizedEntries.length === 0) {
+    return formatStructuredLbhValue({ single: fallback, fallback });
+  }
+  if (normalizedEntries.length === 1) {
+    return formatStructuredLbhValue({ single: normalizedEntries[0], fallback });
+  }
+  return formatStructuredLbhValue({
+    top: normalizedEntries[0],
+    bottom: normalizedEntries[1],
+    fallback,
+  });
+};
+const toStructuredWeightFromEntries = (entries = [], fallback = null) => {
+  const normalizedEntries = Array.isArray(entries) ? entries : [];
+  if (normalizedEntries.length === 0) {
+    return formatStructuredWeightValue({ single: fallback, fallback });
+  }
+  const weights = normalizedEntries
+    .map((entry) => Number(entry?.weight || 0))
+    .filter((weight) => Number.isFinite(weight) && weight > 0);
+  if (weights.length === 0) {
+    return formatStructuredWeightValue({ single: fallback, fallback });
+  }
+  if (weights.length === 1) {
+    return formatStructuredWeightValue({ single: weights[0], fallback });
+  }
+  return formatStructuredWeightValue({
+    top: weights[0],
+    bottom: weights[1],
+    single: weights.reduce((sum, weight) => sum + weight, 0),
+    fallback,
+  });
+};
 
 const getBrandKey = (value) => String(value || "").trim().toLowerCase();
 
@@ -392,32 +444,69 @@ const InspectionReport = () => {
 
   const itemMasterSummary = useMemo(() => {
     const itemMaster = qc?.item_master || {};
-    const pisProductLbh = formatStructuredLbhValue({
-      top: itemMaster?.pis_item_top_LBH,
-      bottom: itemMaster?.pis_item_bottom_LBH,
-      single: itemMaster?.pis_item_LBH,
-      fallback: itemMaster?.item_LBH,
-    });
-    const checkedProductLbh = formatStructuredLbhValue({
-      top: itemMaster?.inspected_item_top_LBH,
-      bottom: itemMaster?.inspected_item_bottom_LBH,
-      single: itemMaster?.inspected_item_LBH,
-      fallback: itemMaster?.item_LBH,
-    });
+    const pisItemEntries = normalizeMeasurementEntries(
+      itemMaster?.pis_item_sizes,
+      "net_weight",
+    );
+    const inspectedItemEntries = normalizeMeasurementEntries(
+      itemMaster?.inspected_item_sizes,
+      "net_weight",
+    );
+    const pisBoxEntries = normalizeMeasurementEntries(
+      itemMaster?.pis_box_sizes,
+      "gross_weight",
+    );
+    const inspectedBoxEntries = normalizeMeasurementEntries(
+      itemMaster?.inspected_box_sizes,
+      "gross_weight",
+    );
+    const pisProductLbh =
+      pisItemEntries.length > 0
+        ? toStructuredLbhFromEntries(
+            pisItemEntries,
+            itemMaster?.pis_item_LBH || itemMaster?.item_LBH,
+          )
+        : formatStructuredLbhValue({
+            top: itemMaster?.pis_item_top_LBH,
+            bottom: itemMaster?.pis_item_bottom_LBH,
+            single: itemMaster?.pis_item_LBH,
+            fallback: itemMaster?.item_LBH,
+          });
+    const checkedProductLbh =
+      inspectedItemEntries.length > 0
+        ? toStructuredLbhFromEntries(
+            inspectedItemEntries,
+            itemMaster?.inspected_item_LBH || itemMaster?.item_LBH,
+          )
+        : formatStructuredLbhValue({
+            top: itemMaster?.inspected_item_top_LBH,
+            bottom: itemMaster?.inspected_item_bottom_LBH,
+            single: itemMaster?.inspected_item_LBH,
+            fallback: itemMaster?.item_LBH,
+          });
     const pisBoxTopLbh =
       itemMaster?.pis_box_top_LBH || itemMaster?.pis_item_top_LBH || {};
     const pisBoxBottomLbh =
       itemMaster?.pis_box_bottom_LBH || itemMaster?.pis_item_bottom_LBH || {};
-    const pisPackedSize = formatStructuredLbhValue({
-      top: pisBoxTopLbh,
-      bottom: pisBoxBottomLbh,
-      single:
-        itemMaster?.pis_box_LBH
-        || itemMaster?.pis_item_LBH
-        || itemMaster?.box_LBH
-        || itemMaster?.item_LBH,
-      fallback: itemMaster?.box_LBH || itemMaster?.item_LBH,
-    });
+    const pisPackedSize =
+      pisBoxEntries.length > 0
+        ? toStructuredLbhFromEntries(
+            pisBoxEntries,
+            itemMaster?.pis_box_LBH
+              || itemMaster?.pis_item_LBH
+              || itemMaster?.box_LBH
+              || itemMaster?.item_LBH,
+          )
+        : formatStructuredLbhValue({
+            top: pisBoxTopLbh,
+            bottom: pisBoxBottomLbh,
+            single:
+              itemMaster?.pis_box_LBH
+              || itemMaster?.pis_item_LBH
+              || itemMaster?.box_LBH
+              || itemMaster?.item_LBH,
+            fallback: itemMaster?.box_LBH || itemMaster?.item_LBH,
+          });
     const inspectedTopLbh =
       itemMaster?.inspected_box_top_LBH
       || itemMaster?.inspected_top_LBH
@@ -428,40 +517,61 @@ const InspectionReport = () => {
       || itemMaster?.inspected_bottom_LBH
       || itemMaster?.inspected_item_bottom_LBH
       || {};
-    const checkedPackedSize = formatStructuredLbhValue({
-      top: inspectedTopLbh,
-      bottom: inspectedBottomLbh,
-      single:
-        itemMaster?.inspected_box_LBH
-        || itemMaster?.inspected_item_LBH
-        || itemMaster?.box_LBH
-        || itemMaster?.item_LBH,
-      fallback: itemMaster?.box_LBH || itemMaster?.item_LBH,
-    });
-    const pisNetWeight = formatStructuredWeightValue({
-      top: getWeightValue(itemMaster?.pis_weight, "top_net"),
-      bottom: getWeightValue(itemMaster?.pis_weight, "bottom_net"),
-      single: getWeightValue(itemMaster?.pis_weight, "total_net"),
-      fallback: itemMaster?.weight?.net,
-    });
-    const checkedNetWeight = formatStructuredWeightValue({
-      top: getWeightValue(itemMaster?.inspected_weight, "top_net"),
-      bottom: getWeightValue(itemMaster?.inspected_weight, "bottom_net"),
-      single: getWeightValue(itemMaster?.inspected_weight, "total_net"),
-      fallback: itemMaster?.weight?.net,
-    });
-    const pisGrossWeight = formatStructuredWeightValue({
-      top: getWeightValue(itemMaster?.pis_weight, "top_gross"),
-      bottom: getWeightValue(itemMaster?.pis_weight, "bottom_gross"),
-      single: getWeightValue(itemMaster?.pis_weight, "total_gross"),
-      fallback: itemMaster?.weight?.gross,
-    });
-    const checkedGrossWeight = formatStructuredWeightValue({
-      top: getWeightValue(itemMaster?.inspected_weight, "top_gross"),
-      bottom: getWeightValue(itemMaster?.inspected_weight, "bottom_gross"),
-      single: getWeightValue(itemMaster?.inspected_weight, "total_gross"),
-      fallback: itemMaster?.weight?.gross,
-    });
+    const checkedPackedSize =
+      inspectedBoxEntries.length > 0
+        ? toStructuredLbhFromEntries(
+            inspectedBoxEntries,
+            itemMaster?.inspected_box_LBH
+              || itemMaster?.inspected_item_LBH
+              || itemMaster?.box_LBH
+              || itemMaster?.item_LBH,
+          )
+        : formatStructuredLbhValue({
+            top: inspectedTopLbh,
+            bottom: inspectedBottomLbh,
+            single:
+              itemMaster?.inspected_box_LBH
+              || itemMaster?.inspected_item_LBH
+              || itemMaster?.box_LBH
+              || itemMaster?.item_LBH,
+            fallback: itemMaster?.box_LBH || itemMaster?.item_LBH,
+          });
+    const pisNetWeight =
+      pisItemEntries.length > 0
+        ? toStructuredWeightFromEntries(pisItemEntries, itemMaster?.weight?.net)
+        : formatStructuredWeightValue({
+            top: getWeightValue(itemMaster?.pis_weight, "top_net"),
+            bottom: getWeightValue(itemMaster?.pis_weight, "bottom_net"),
+            single: getWeightValue(itemMaster?.pis_weight, "total_net"),
+            fallback: itemMaster?.weight?.net,
+          });
+    const checkedNetWeight =
+      inspectedItemEntries.length > 0
+        ? toStructuredWeightFromEntries(inspectedItemEntries, itemMaster?.weight?.net)
+        : formatStructuredWeightValue({
+            top: getWeightValue(itemMaster?.inspected_weight, "top_net"),
+            bottom: getWeightValue(itemMaster?.inspected_weight, "bottom_net"),
+            single: getWeightValue(itemMaster?.inspected_weight, "total_net"),
+            fallback: itemMaster?.weight?.net,
+          });
+    const pisGrossWeight =
+      pisBoxEntries.length > 0
+        ? toStructuredWeightFromEntries(pisBoxEntries, itemMaster?.weight?.gross)
+        : formatStructuredWeightValue({
+            top: getWeightValue(itemMaster?.pis_weight, "top_gross"),
+            bottom: getWeightValue(itemMaster?.pis_weight, "bottom_gross"),
+            single: getWeightValue(itemMaster?.pis_weight, "total_gross"),
+            fallback: itemMaster?.weight?.gross,
+          });
+    const checkedGrossWeight =
+      inspectedBoxEntries.length > 0
+        ? toStructuredWeightFromEntries(inspectedBoxEntries, itemMaster?.weight?.gross)
+        : formatStructuredWeightValue({
+            top: getWeightValue(itemMaster?.inspected_weight, "top_gross"),
+            bottom: getWeightValue(itemMaster?.inspected_weight, "bottom_gross"),
+            single: getWeightValue(itemMaster?.inspected_weight, "total_gross"),
+            fallback: itemMaster?.weight?.gross,
+          });
     const calculatedInspectedCbmRaw =
       itemMaster?.cbm?.calculated_inspected_total ??
       itemMaster?.cbm?.calculated_total ??

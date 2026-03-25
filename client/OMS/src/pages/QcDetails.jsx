@@ -54,6 +54,53 @@ const formatLbhValue = (value) => {
   }
   return `${safeLength} x ${safeBreadth} x ${safeHeight}`;
 };
+const normalizeMeasurementEntries = (entries = [], weightKey = "") =>
+  (Array.isArray(entries) ? entries : [])
+    .map((entry) => {
+      const L = Number(entry?.L || 0);
+      const B = Number(entry?.B || 0);
+      const H = Number(entry?.H || 0);
+      const weight = Number(weightKey ? entry?.[weightKey] : 0);
+      return {
+        remark: String(entry?.remark || entry?.type || "").trim().toLowerCase(),
+        L: Number.isFinite(L) ? L : 0,
+        B: Number.isFinite(B) ? B : 0,
+        H: Number.isFinite(H) ? H : 0,
+        weight: Number.isFinite(weight) ? weight : 0,
+      };
+    })
+    .filter((entry) => entry.L > 0 && entry.B > 0 && entry.H > 0)
+    .slice(0, 3);
+const formatMeasurementRemark = (remark = "") => {
+  const normalized = String(remark || "").trim().toLowerCase();
+  if (!normalized) return "";
+  if (normalized === "top") return "Top";
+  if (normalized === "base") return "Base";
+  return normalized.replace(/([a-z]+)(\d+)/i, (_, prefix, number) =>
+    `${prefix.charAt(0).toUpperCase()}${prefix.slice(1)} ${number}`,
+  );
+};
+const formatMeasurementEntries = (
+  entries = [],
+  { weightLabel = "", fallback = "Not Set" } = {},
+) => {
+  const normalizedEntries = Array.isArray(entries) ? entries : [];
+  if (normalizedEntries.length === 0) return fallback;
+  return normalizedEntries
+    .map((entry) => {
+      const parts = [];
+      const remarkLabel = formatMeasurementRemark(entry?.remark);
+      if (remarkLabel) parts.push(remarkLabel);
+      parts.push(formatLbhValue(entry));
+      if (weightLabel && Number(entry?.weight || 0) > 0) {
+        parts.push(`${weightLabel}: ${Number(entry.weight)}`);
+      }
+      return parts.join(" | ");
+    })
+    .join(" / ");
+};
+const sumMeasurementWeights = (entries = []) =>
+  entries.reduce((sum, entry) => sum + (Number(entry?.weight || 0) || 0), 0);
 
 const toSafeNumber = (value, fallback = 0) => {
   const parsed = Number(value);
@@ -445,13 +492,27 @@ const QcDetails = () => {
       ?? itemMaster?.cbm?.total
       ?? "0",
     ).trim();
+    const pisItemSizeEntries = normalizeMeasurementEntries(
+      itemMaster?.pis_item_sizes,
+      "net_weight",
+    );
+    const pisBoxSizeEntries = normalizeMeasurementEntries(
+      itemMaster?.pis_box_sizes,
+      "gross_weight",
+    );
     const netWeight = Number(
-      getWeightValue(itemMaster?.pis_weight, "total_net")
+      (pisItemSizeEntries.length > 0
+        ? sumMeasurementWeights(pisItemSizeEntries)
+        : 0)
+      || getWeightValue(itemMaster?.pis_weight, "total_net")
       || itemMaster?.weight?.net
       || 0,
     );
     const grossWeight = Number(
-      getWeightValue(itemMaster?.pis_weight, "total_gross")
+      (pisBoxSizeEntries.length > 0
+        ? sumMeasurementWeights(pisBoxSizeEntries)
+        : 0)
+      || getWeightValue(itemMaster?.pis_weight, "total_gross")
       || itemMaster?.weight?.gross
       || 0,
     );
@@ -465,8 +526,14 @@ const QcDetails = () => {
       brandName: brandName || "N/A",
       weightNet: Number.isFinite(netWeight) ? netWeight : 0,
       weightGross: Number.isFinite(grossWeight) ? grossWeight : 0,
-      itemLbh: formatLbhValue(itemLbhSource),
-      boxLbh: formatLbhValue(boxLbhSource),
+      itemLbh:
+        pisItemSizeEntries.length > 0
+          ? formatMeasurementEntries(pisItemSizeEntries, { weightLabel: "Net" })
+          : formatLbhValue(itemLbhSource),
+      boxLbh:
+        pisBoxSizeEntries.length > 0
+          ? formatMeasurementEntries(pisBoxSizeEntries, { weightLabel: "Gross" })
+          : formatLbhValue(boxLbhSource),
       pisCbm: formatPositiveCbm(pisCbm, "Not Set"),
       calculatedPisCbm: formatPositiveCbm(calculatedPisCbm, "Not Set"),
     };

@@ -51,6 +51,29 @@ const formatLbh = (value) => {
   const safeH = Number.isFinite(h) ? h : 0;
   return `${safeL} x ${safeB} x ${safeH}`;
 };
+const normalizeMeasurementEntries = (entries = [], weightKey = "") =>
+  (Array.isArray(entries) ? entries : [])
+    .map((entry) => {
+      const L = Number(entry?.L || 0);
+      const B = Number(entry?.B || 0);
+      const H = Number(entry?.H || 0);
+      const weight = Number(weightKey ? entry?.[weightKey] : 0);
+      return {
+        L: Number.isFinite(L) ? L : 0,
+        B: Number.isFinite(B) ? B : 0,
+        H: Number.isFinite(H) ? H : 0,
+        weight: Number.isFinite(weight) ? weight : 0,
+      };
+    })
+    .filter((entry) => entry.L > 0 && entry.B > 0 && entry.H > 0)
+    .slice(0, 3);
+const getPrimaryMeasurementLbh = (entries = [], fallback = {}) =>
+  normalizeMeasurementEntries(entries)[0] || fallback || {};
+const sumMeasurementWeights = (entries = [], weightKey = "") =>
+  normalizeMeasurementEntries(entries, weightKey).reduce(
+    (sum, entry) => sum + (Number(entry?.weight || 0) || 0),
+    0,
+  );
 
 const getWeightValue = (weight = {}, key = "") => {
   const normalizedKey = String(key || "").trim();
@@ -74,17 +97,31 @@ const getWeightValue = (weight = {}, key = "") => {
 };
 
 const getInspectedWeight = (item, key) => {
-  return getWeightValue(item?.inspected_weight, key) || getWeightValue(item?.weight, key);
+  const weightKey = key === "net" ? "net_weight" : "gross_weight";
+  const sizeEntryWeight =
+    key === "net"
+      ? sumMeasurementWeights(item?.inspected_item_sizes, weightKey)
+      : sumMeasurementWeights(item?.inspected_box_sizes, weightKey);
+  return sizeEntryWeight || getWeightValue(item?.inspected_weight, key) || getWeightValue(item?.weight, key);
 };
 
 const getPisWeight = (item, key) => {
-  return getWeightValue(item?.pis_weight, key);
+  const weightKey = key === "net" ? "net_weight" : "gross_weight";
+  const sizeEntryWeight =
+    key === "net"
+      ? sumMeasurementWeights(item?.pis_item_sizes, weightKey)
+      : sumMeasurementWeights(item?.pis_box_sizes, weightKey);
+  return sizeEntryWeight || getWeightValue(item?.pis_weight, key);
 };
 
-const getInspectedItemLbh = (item) => item?.inspected_item_LBH || item?.item_LBH || {};
-const getInspectedBoxLbh = (item) => item?.inspected_box_LBH || item?.box_LBH || {};
-const getPisItemLbh = (item) => item?.pis_item_LBH || {};
-const getPisBoxLbh = (item) => item?.pis_box_LBH || {};
+const getInspectedItemLbh = (item) =>
+  getPrimaryMeasurementLbh(item?.inspected_item_sizes, item?.inspected_item_LBH || item?.item_LBH || {});
+const getInspectedBoxLbh = (item) =>
+  getPrimaryMeasurementLbh(item?.inspected_box_sizes, item?.inspected_box_LBH || item?.box_LBH || {});
+const getPisItemLbh = (item) =>
+  getPrimaryMeasurementLbh(item?.pis_item_sizes, item?.pis_item_LBH || {});
+const getPisBoxLbh = (item) =>
+  getPrimaryMeasurementLbh(item?.pis_box_sizes, item?.pis_box_LBH || {});
 const getCalculatedInspectedCbm = (item) =>
   item?.cbm?.calculated_inspected_total
   ?? item?.cbm?.inspected_total

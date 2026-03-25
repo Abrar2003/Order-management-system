@@ -51,6 +51,29 @@ const formatLbh = (value) => {
   const safeH = Number.isFinite(h) ? h : 0;
   return `${safeL} x ${safeB} x ${safeH}`;
 };
+const normalizeMeasurementEntries = (entries = [], weightKey = "") =>
+  (Array.isArray(entries) ? entries : [])
+    .map((entry) => {
+      const L = Number(entry?.L || 0);
+      const B = Number(entry?.B || 0);
+      const H = Number(entry?.H || 0);
+      const weight = Number(weightKey ? entry?.[weightKey] : 0);
+      return {
+        L: Number.isFinite(L) ? L : 0,
+        B: Number.isFinite(B) ? B : 0,
+        H: Number.isFinite(H) ? H : 0,
+        weight: Number.isFinite(weight) ? weight : 0,
+      };
+    })
+    .filter((entry) => entry.L > 0 && entry.B > 0 && entry.H > 0)
+    .slice(0, 3);
+const getPrimaryMeasurementLbh = (entries = [], fallback = {}) =>
+  normalizeMeasurementEntries(entries)[0] || fallback || {};
+const sumMeasurementWeights = (entries = [], weightKey = "") =>
+  normalizeMeasurementEntries(entries, weightKey).reduce(
+    (sum, entry) => sum + (Number(entry?.weight || 0) || 0),
+    0,
+  );
 
 const getBrand = (item) =>
   item?.brand_name
@@ -63,7 +86,11 @@ const getVendors = (item) =>
     : "N/A";
 
 const getPisWeight = (item, key) => {
-  const value = item?.pis_weight?.[key] ?? 0;
+  const sizeEntryWeight =
+    key === "net"
+      ? sumMeasurementWeights(item?.pis_item_sizes, "net_weight")
+      : sumMeasurementWeights(item?.pis_box_sizes, "gross_weight");
+  const value = sizeEntryWeight || (item?.pis_weight?.[key] ?? 0);
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
@@ -349,8 +376,8 @@ const PIS = () => {
                         <td>{getVendors(item)}</td>
                         <td>{getPisWeight(item, "net")}</td>
                         <td>{getPisWeight(item, "gross")}</td>
-                        <td>{formatLbh(item?.pis_item_LBH || {})}</td>
-                        <td>{formatLbh(item?.pis_box_LBH || {})}</td>
+                        <td>{formatLbh(getPrimaryMeasurementLbh(item?.pis_item_sizes, item?.pis_item_LBH || {}))}</td>
+                        <td>{formatLbh(getPrimaryMeasurementLbh(item?.pis_box_sizes, item?.pis_box_LBH || {}))}</td>
                         <td>{formatCbm(item?.cbm?.calculated_pis_total)}</td>
                         <td>
                           <button

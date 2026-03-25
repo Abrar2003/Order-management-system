@@ -186,6 +186,252 @@ const toStrictLbhInputGroup = (dimensions = {}) => {
   if (L && B && H) return { L, B, H };
   return { L: "", B: "", H: "" };
 };
+const SIZE_ENTRY_LIMIT = 3;
+const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
+  { value: "top", label: "Top" },
+  { value: "base", label: "Base" },
+  { value: "item1", label: "Item 1" },
+  { value: "item2", label: "Item 2" },
+  { value: "item3", label: "Item 3" },
+]);
+const BOX_SIZE_REMARK_OPTIONS = Object.freeze([
+  { value: "top", label: "Top" },
+  { value: "base", label: "Base" },
+  { value: "box1", label: "Box 1" },
+  { value: "box2", label: "Box 2" },
+  { value: "box3", label: "Box 3" },
+]);
+const createEmptyMeasuredSizeEntry = () => ({
+  remark: "",
+  L: "",
+  B: "",
+  H: "",
+  weight: "",
+});
+const normalizeSizeCount = (value, fallback = 1) => {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > SIZE_ENTRY_LIMIT) {
+    return fallback;
+  }
+  return parsed;
+};
+const ensureMeasuredSizeEntryCount = (entries = [], count = 1) => {
+  const safeCount = normalizeSizeCount(count, 1);
+  const nextEntries = Array.isArray(entries)
+    ? entries.slice(0, safeCount).map((entry) => ({
+        remark: String(entry?.remark || "").trim().toLowerCase(),
+        L: String(entry?.L || ""),
+        B: String(entry?.B || ""),
+        H: String(entry?.H || ""),
+        weight: String(entry?.weight || ""),
+      }))
+    : [];
+
+  while (nextEntries.length < safeCount) {
+    nextEntries.push(createEmptyMeasuredSizeEntry());
+  }
+
+  if (safeCount === 1 && nextEntries[0]) {
+    nextEntries[0].remark = "";
+  }
+
+  return nextEntries;
+};
+const toMeasuredSizeEntryValue = (entry = {}, weightKey = "") => ({
+  remark: String(entry?.remark || entry?.type || "").trim().toLowerCase(),
+  L: toDimensionInputValue(entry?.L),
+  B: toDimensionInputValue(entry?.B),
+  H: toDimensionInputValue(entry?.H),
+  weight: toDimensionInputValue(weightKey ? entry?.[weightKey] : ""),
+});
+const hasMeaningfulMeasuredSize = (entry = {}) =>
+  String(entry?.L || "").trim() !== "" ||
+  String(entry?.B || "").trim() !== "" ||
+  String(entry?.H || "").trim() !== "" ||
+  String(entry?.weight || "").trim() !== "" ||
+  String(entry?.remark || "").trim() !== "";
+const buildMeasuredSizeEntriesFromLegacy = ({
+  primaryEntries = [],
+  singleLbh = {},
+  topLbh = {},
+  bottomLbh = {},
+  totalWeight = 0,
+  topWeight = 0,
+  bottomWeight = 0,
+  weightKey = "",
+  topRemark = "top",
+  bottomRemark = "base",
+} = {}) => {
+  const normalizedPrimaryEntries = Array.isArray(primaryEntries)
+    ? primaryEntries
+        .map((entry) => toMeasuredSizeEntryValue(entry, weightKey))
+        .filter((entry) => hasMeaningfulMeasuredSize(entry))
+        .slice(0, SIZE_ENTRY_LIMIT)
+    : [];
+  if (normalizedPrimaryEntries.length > 0) {
+    return normalizedPrimaryEntries;
+  }
+
+  const topEntry = toMeasuredSizeEntryValue(
+    { ...topLbh, remark: topRemark, [weightKey]: topWeight },
+    weightKey,
+  );
+  const bottomEntry = toMeasuredSizeEntryValue(
+    { ...bottomLbh, remark: bottomRemark, [weightKey]: bottomWeight },
+    weightKey,
+  );
+  if (hasMeaningfulMeasuredSize(topEntry) || hasMeaningfulMeasuredSize(bottomEntry)) {
+    return [topEntry, bottomEntry].filter((entry) => hasMeaningfulMeasuredSize(entry));
+  }
+
+  const singleEntry = toMeasuredSizeEntryValue(
+    { ...singleLbh, [weightKey]: totalWeight },
+    weightKey,
+  );
+  return hasMeaningfulMeasuredSize(singleEntry) ? [singleEntry] : [createEmptyMeasuredSizeEntry()];
+};
+const deriveLegacyFromMeasuredSizeEntries = (
+  entries = [],
+  { count = 1, weightKey = "weight", remarkOrder = [] } = {},
+) => {
+  const safeCount = normalizeSizeCount(count, 1);
+  const safeEntries = ensureMeasuredSizeEntryCount(entries, safeCount);
+  const normalizedEntries = safeEntries
+    .map((entry) => ({
+      remark: String(entry?.remark || "").trim().toLowerCase(),
+      L: toDimensionInputValue(entry?.L),
+      B: toDimensionInputValue(entry?.B),
+      H: toDimensionInputValue(entry?.H),
+      weight: toDimensionInputValue(entry?.[weightKey] ?? entry?.weight),
+    }))
+    .sort((left, right) => {
+      if (!Array.isArray(remarkOrder) || remarkOrder.length === 0) return 0;
+      const leftIndex = remarkOrder.indexOf(left.remark);
+      const rightIndex = remarkOrder.indexOf(right.remark);
+      const safeLeftIndex = leftIndex >= 0 ? leftIndex : remarkOrder.length + 1;
+      const safeRightIndex = rightIndex >= 0 ? rightIndex : remarkOrder.length + 1;
+      return safeLeftIndex - safeRightIndex;
+    });
+  const toLegacyLbh = (entry = null) =>
+    entry &&
+    entry.L &&
+    entry.B &&
+    entry.H
+      ? {
+          L: Number(entry.L),
+          B: Number(entry.B),
+          H: Number(entry.H),
+        }
+      : null;
+  const totalWeight = normalizedEntries.reduce(
+    (sum, entry) => sum + (Number(entry?.weight || 0) || 0),
+    0,
+  );
+
+  return {
+    single: safeCount === 1 ? toLegacyLbh(normalizedEntries[0]) : null,
+    top: safeCount >= 2 ? toLegacyLbh(normalizedEntries[0]) : null,
+    bottom: safeCount >= 2 ? toLegacyLbh(normalizedEntries[1]) : null,
+    totalWeight: totalWeight > 0 ? totalWeight : null,
+    topWeight:
+      safeCount >= 2 && Number(normalizedEntries[0]?.weight || 0) > 0
+        ? Number(normalizedEntries[0].weight)
+        : null,
+    bottomWeight:
+      safeCount >= 2 && Number(normalizedEntries[1]?.weight || 0) > 0
+        ? Number(normalizedEntries[1].weight)
+        : null,
+  };
+};
+const getRemarkValues = (options = []) =>
+  options.map((option) => String(option?.value || "").trim().toLowerCase()).filter(Boolean);
+const getRemarkLabel = (options = [], remark = "") =>
+  options.find((option) => option.value === remark)?.label || remark;
+const parseMeasuredSizeEntries = ({
+  entries = [],
+  count = 1,
+  groupLabel = "Sizes",
+  remarkOptions = [],
+  payloadWeightKey = "",
+  weightFieldLabel = "Weight",
+  treatEmptyAsInput = false,
+} = {}) => {
+  const safeCount = normalizeSizeCount(count, 1);
+  const scopedEntries = ensureMeasuredSizeEntryCount(entries, safeCount).slice(0, safeCount);
+  const hasMeaningfulInput = scopedEntries.some((entry) => hasMeaningfulMeasuredSize(entry));
+
+  if (!hasMeaningfulInput) {
+    return {
+      count: safeCount,
+      hasAnyInput: Boolean(treatEmptyAsInput),
+      hasMeaningfulInput: false,
+      value: [],
+    };
+  }
+
+  const allowedRemarks = getRemarkValues(remarkOptions);
+  const seenRemarks = new Set();
+  const parsedEntries = [];
+
+  for (let index = 0; index < scopedEntries.length; index += 1) {
+    const entry = scopedEntries[index] || {};
+    const entryLabel = `${groupLabel} ${index + 1}`;
+    const L = Number(String(entry?.L ?? "").trim());
+    const B = Number(String(entry?.B ?? "").trim());
+    const H = Number(String(entry?.H ?? "").trim());
+
+    if (!Number.isFinite(L) || L <= 0) {
+      return { error: `${entryLabel} length must be greater than 0.` };
+    }
+    if (!Number.isFinite(B) || B <= 0) {
+      return { error: `${entryLabel} breadth must be greater than 0.` };
+    }
+    if (!Number.isFinite(H) || H <= 0) {
+      return { error: `${entryLabel} height must be greater than 0.` };
+    }
+
+    let normalizedRemark = "";
+    if (safeCount > 1) {
+      normalizedRemark = String(entry?.remark || "").trim().toLowerCase();
+      if (!normalizedRemark) {
+        return { error: `${entryLabel} remark is required.` };
+      }
+      if (!allowedRemarks.includes(normalizedRemark)) {
+        return { error: `${entryLabel} remark is invalid.` };
+      }
+      if (seenRemarks.has(normalizedRemark)) {
+        return { error: `${groupLabel} remarks must be unique.` };
+      }
+      seenRemarks.add(normalizedRemark);
+    }
+
+    const parsedEntry = {
+      remark: normalizedRemark,
+      L,
+      B,
+      H,
+    };
+
+    if (payloadWeightKey) {
+      const parsedWeight = Number(String(entry?.weight ?? "").trim());
+      if (!Number.isFinite(parsedWeight) || parsedWeight <= 0) {
+        return {
+          error: `${entryLabel} ${weightFieldLabel.toLowerCase()} must be greater than 0.`,
+        };
+      }
+      parsedEntry[payloadWeightKey] = parsedWeight;
+    }
+
+    parsedEntries.push(parsedEntry);
+  }
+
+  return {
+    count: safeCount,
+    hasAnyInput: true,
+    hasMeaningfulInput: true,
+    value: parsedEntries,
+  };
+};
 
 const getUtcDayOffsetFromToday = (isoDateValue) => {
   const normalizedIso = toISODateString(isoDateValue);
@@ -401,6 +647,10 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     inspected_item_bottom_L: "",
     inspected_item_bottom_B: "",
     inspected_item_bottom_H: "",
+    inspected_item_count: "1",
+    inspected_box_count: "1",
+    inspected_item_sizes: [createEmptyMeasuredSizeEntry()],
+    inspected_box_sizes: [createEmptyMeasuredSizeEntry()],
     last_inspected_date: "",
   });
   const [inspectors, setInspectors] = useState([]);
@@ -479,6 +729,30 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     const strictInspectedBottomLbh = toStrictLbhInputGroup(inspectedBottomLbh);
     const strictInspectedItemTopLbh = toStrictLbhInputGroup(inspectedItemTopLbh);
     const strictInspectedItemBottomLbh = toStrictLbhInputGroup(inspectedItemBottomLbh);
+    const inspectedItemSizeEntries = buildMeasuredSizeEntriesFromLegacy({
+      primaryEntries: itemMaster?.inspected_item_sizes,
+      singleLbh: inspectedItemLbh,
+      topLbh: inspectedItemTopLbh,
+      bottomLbh: inspectedItemBottomLbh,
+      totalWeight: getWeightValueFromModel(inspectedWeight, "total_net"),
+      topWeight: getWeightValueFromModel(inspectedWeight, "top_net"),
+      bottomWeight: getWeightValueFromModel(inspectedWeight, "bottom_net"),
+      weightKey: "net_weight",
+      topRemark: "top",
+      bottomRemark: "base",
+    });
+    const inspectedBoxSizeEntries = buildMeasuredSizeEntriesFromLegacy({
+      primaryEntries: itemMaster?.inspected_box_sizes,
+      singleLbh: inspectedBoxLbh,
+      topLbh: inspectedTopLbh,
+      bottomLbh: inspectedBottomLbh,
+      totalWeight: getWeightValueFromModel(inspectedWeight, "total_gross"),
+      topWeight: getWeightValueFromModel(inspectedWeight, "top_gross"),
+      bottomWeight: getWeightValueFromModel(inspectedWeight, "bottom_gross"),
+      weightKey: "gross_weight",
+      topRemark: "top",
+      bottomRemark: "base",
+    });
 
     setForm({
       inspector: defaultInspectorId,
@@ -532,6 +806,20 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       inspected_item_bottom_L: strictInspectedItemBottomLbh.L,
       inspected_item_bottom_B: strictInspectedItemBottomLbh.B,
       inspected_item_bottom_H: strictInspectedItemBottomLbh.H,
+      inspected_item_count: String(
+        normalizeSizeCount(inspectedItemSizeEntries.length, 1),
+      ),
+      inspected_box_count: String(
+        normalizeSizeCount(inspectedBoxSizeEntries.length, 1),
+      ),
+      inspected_item_sizes: ensureMeasuredSizeEntryCount(
+        inspectedItemSizeEntries,
+        inspectedItemSizeEntries.length || 1,
+      ),
+      inspected_box_sizes: ensureMeasuredSizeEntryCount(
+        inspectedBoxSizeEntries,
+        inspectedBoxSizeEntries.length || 1,
+      ),
       last_inspected_date: toDDMMYYYYInputValue(
         adminRecord?.inspection_date || qc.last_inspected_date,
         "",
@@ -769,6 +1057,22 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     setForm((prev) => {
       const nextValue = type === "checkbox" ? checked : value;
 
+      if (name === "inspected_item_count" || name === "inspected_box_count") {
+        const safeCount = String(normalizeSizeCount(nextValue, 1));
+        const entriesKey =
+          name === "inspected_item_count"
+            ? "inspected_item_sizes"
+            : "inspected_box_sizes";
+        return {
+          ...prev,
+          [name]: safeCount,
+          [entriesKey]: ensureMeasuredSizeEntryCount(prev[entriesKey], safeCount),
+          CBM: "",
+          CBM_top: "",
+          CBM_bottom: "",
+        };
+      }
+
       if (name === "CBM") {
         const hasTotalValue = String(nextValue).trim() !== "";
         return {
@@ -905,6 +1209,36 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         [name]: nextValue,
       };
     });
+  };
+
+  const handleSizeEntryChange = (groupKey, index, field, value) => {
+    if (field !== "remark" && value !== "") {
+      const parsedValue = Number(value);
+      if (!Number.isFinite(parsedValue) || parsedValue < 0) {
+        return;
+      }
+    }
+
+    setForm((prev) => ({
+      ...prev,
+      [groupKey]: ensureMeasuredSizeEntryCount(
+        prev[groupKey].map((entry, entryIndex) =>
+          entryIndex === index
+            ? {
+                ...entry,
+                [field]:
+                  field === "remark"
+                    ? String(value || "").trim().toLowerCase()
+                    : value,
+              }
+            : entry,
+        ),
+        prev[groupKey]?.length || 1,
+      ),
+      CBM: "",
+      CBM_top: "",
+      CBM_bottom: "",
+    }));
   };
 
   const handleLabelRangeChange = (index, field, value) => {
@@ -1068,208 +1402,134 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     }
 
     const existingItemMaster = qc?.item_master || {};
-    const lockInspectedItemLbh = !canRewriteLatestInspectionRecord && hasCompletePositiveLbh(
-      existingItemMaster?.inspected_item_LBH,
+    const existingInspectedWeight = existingItemMaster?.inspected_weight || {};
+    const existingItemSizeEntries = buildMeasuredSizeEntriesFromLegacy({
+      primaryEntries: existingItemMaster?.inspected_item_sizes,
+      singleLbh: existingItemMaster?.inspected_item_LBH || existingItemMaster?.item_LBH,
+      topLbh: existingItemMaster?.inspected_item_top_LBH,
+      bottomLbh: existingItemMaster?.inspected_item_bottom_LBH,
+      totalWeight: getWeightValueFromModel(existingInspectedWeight, "total_net"),
+      topWeight: getWeightValueFromModel(existingInspectedWeight, "top_net"),
+      bottomWeight: getWeightValueFromModel(existingInspectedWeight, "bottom_net"),
+      weightKey: "net_weight",
+      topRemark: "top",
+      bottomRemark: "base",
+    }).filter((entry) => hasMeaningfulMeasuredSize(entry));
+    const existingBoxSizeEntries = buildMeasuredSizeEntriesFromLegacy({
+      primaryEntries: existingItemMaster?.inspected_box_sizes,
+      singleLbh: existingItemMaster?.inspected_box_LBH || existingItemMaster?.box_LBH,
+      topLbh:
+        existingItemMaster?.inspected_box_top_LBH || existingItemMaster?.inspected_top_LBH,
+      bottomLbh:
+        existingItemMaster?.inspected_box_bottom_LBH || existingItemMaster?.inspected_bottom_LBH,
+      totalWeight: getWeightValueFromModel(existingInspectedWeight, "total_gross"),
+      topWeight: getWeightValueFromModel(existingInspectedWeight, "top_gross"),
+      bottomWeight: getWeightValueFromModel(existingInspectedWeight, "bottom_gross"),
+      weightKey: "gross_weight",
+      topRemark: "top",
+      bottomRemark: "base",
+    }).filter((entry) => hasMeaningfulMeasuredSize(entry));
+    const lockInspectedItemSection =
+      !canRewriteLatestInspectionRecord && existingItemSizeEntries.length > 0;
+    const lockInspectedBoxSection =
+      !canRewriteLatestInspectionRecord && existingBoxSizeEntries.length > 0;
+    const inspectedItemSizePayload = parseMeasuredSizeEntries({
+      entries: form.inspected_item_sizes,
+      count: form.inspected_item_count,
+      groupLabel: "Inspected item size",
+      remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
+      payloadWeightKey: "net_weight",
+      weightFieldLabel: "Net weight",
+      treatEmptyAsInput: isAdminRewriteMode,
+    });
+    if (inspectedItemSizePayload.error) {
+      setError(inspectedItemSizePayload.error);
+      return;
+    }
+
+    const inspectedBoxSizePayload = parseMeasuredSizeEntries({
+      entries: form.inspected_box_sizes,
+      count: form.inspected_box_count,
+      groupLabel: "Inspected box size",
+      remarkOptions: BOX_SIZE_REMARK_OPTIONS,
+      payloadWeightKey: "gross_weight",
+      weightFieldLabel: "Gross weight",
+      treatEmptyAsInput: isAdminRewriteMode,
+    });
+    if (inspectedBoxSizePayload.error) {
+      setError(inspectedBoxSizePayload.error);
+      return;
+    }
+
+    const itemLegacyValues = deriveLegacyFromMeasuredSizeEntries(
+      inspectedItemSizePayload.value,
+      {
+        count: inspectedItemSizePayload.count,
+        weightKey: "net_weight",
+        remarkOrder: getRemarkValues(ITEM_SIZE_REMARK_OPTIONS),
+      },
     );
-    const lockInspectedBoxLbh = !canRewriteLatestInspectionRecord && hasCompletePositiveLbh(
-      existingItemMaster?.inspected_box_LBH,
-    );
-    const lockInspectedBoxTopLbh = !canRewriteLatestInspectionRecord && hasCompletePositiveLbh(
-      existingItemMaster?.inspected_box_top_LBH
-      || existingItemMaster?.inspected_top_LBH,
-    );
-    const lockInspectedBoxBottomLbh = !canRewriteLatestInspectionRecord && hasCompletePositiveLbh(
-      existingItemMaster?.inspected_box_bottom_LBH
-      || existingItemMaster?.inspected_bottom_LBH,
-    );
-    const lockInspectedItemTopLbh = !canRewriteLatestInspectionRecord && hasCompletePositiveLbh(
-      existingItemMaster?.inspected_item_top_LBH,
-    );
-    const lockInspectedItemBottomLbh = !canRewriteLatestInspectionRecord && hasCompletePositiveLbh(
-      existingItemMaster?.inspected_item_bottom_LBH,
+    const boxLegacyValues = deriveLegacyFromMeasuredSizeEntries(
+      inspectedBoxSizePayload.value,
+      {
+        count: inspectedBoxSizePayload.count,
+        weightKey: "gross_weight",
+        remarkOrder: getRemarkValues(BOX_SIZE_REMARK_OPTIONS),
+      },
     );
 
-    const parseLbhGroup = (groupName, values) => {
-      const entries = Object.entries(values);
-      const parsed = {};
-      const hasAnyInput = entries.some(([, rawValue]) => String(rawValue ?? "").trim() !== "");
-
-      if (!hasAnyInput) return { hasAnyInput: false, value: null };
-
-      const hasAllInputs = entries.every(([, rawValue]) => String(rawValue ?? "").trim() !== "");
-      if (!hasAllInputs) {
-        return { error: `${groupName} requires L, B and H values.` };
-      }
-
-      for (const [key, rawValue] of entries) {
-        const normalized = String(rawValue ?? "").trim();
-        const numeric = Number(normalized);
-        if (!Number.isFinite(numeric) || numeric <= 0) {
-          return { error: `${groupName} ${key} must be greater than 0.` };
-        }
-
-        parsed[key] = numeric;
-      }
-
-      return { hasAnyInput: true, value: parsed };
+    const inspectedItemLbh = {
+      hasAnyInput: Boolean(itemLegacyValues.single),
+      value: itemLegacyValues.single,
     };
-
-    const inspectedItemLbh = parseLbhGroup("Inspected Item LBH", {
-      L: form.inspected_item_L,
-      B: form.inspected_item_B,
-      H: form.inspected_item_H,
-    });
-    if (inspectedItemLbh.error) {
-      setError(inspectedItemLbh.error);
-      return;
-    }
-
-    const inspectedBoxLbh = parseLbhGroup("Inspected Box LBH", {
-      L: form.inspected_box_L,
-      B: form.inspected_box_B,
-      H: form.inspected_box_H,
-    });
-    if (inspectedBoxLbh.error) {
-      setError(inspectedBoxLbh.error);
-      return;
-    }
-
-    const inspectedTopLbh = parseLbhGroup("Inspected Box Top LBH", {
-      L: form.inspected_top_L,
-      B: form.inspected_top_B,
-      H: form.inspected_top_H,
-    });
-    if (inspectedTopLbh.error) {
-      setError(inspectedTopLbh.error);
-      return;
-    }
-
-    const inspectedBottomLbh = parseLbhGroup("Inspected Box Bottom LBH", {
-      L: form.inspected_bottom_L,
-      B: form.inspected_bottom_B,
-      H: form.inspected_bottom_H,
-    });
-    if (inspectedBottomLbh.error) {
-      setError(inspectedBottomLbh.error);
-      return;
-    }
-
-    const inspectedItemTopLbh = parseLbhGroup("Inspected Item Top LBH", {
-      L: form.inspected_item_top_L,
-      B: form.inspected_item_top_B,
-      H: form.inspected_item_top_H,
-    });
-    if (inspectedItemTopLbh.error) {
-      setError(inspectedItemTopLbh.error);
-      return;
-    }
-
-    const inspectedItemBottomLbh = parseLbhGroup("Inspected Item Bottom LBH", {
-      L: form.inspected_item_bottom_L,
-      B: form.inspected_item_bottom_B,
-      H: form.inspected_item_bottom_H,
-    });
-    if (inspectedItemBottomLbh.error) {
-      setError(inspectedItemBottomLbh.error);
-      return;
-    }
-
-    const parseWeightInput = (fieldLabel, rawValue) => {
-      const normalized = String(rawValue ?? "").trim();
-      if (!normalized) return { hasAnyInput: false, value: null };
-      const parsed = Number(normalized);
-      if (!Number.isFinite(parsed) || parsed <= 0) {
-        return { error: `${fieldLabel} must be greater than 0.` };
-      }
-      return { hasAnyInput: true, value: parsed };
+    const inspectedItemTopLbh = {
+      hasAnyInput: Boolean(itemLegacyValues.top),
+      value: itemLegacyValues.top,
     };
-
-    const inspectedWeightInputs = {};
-    for (const field of INSPECTED_WEIGHT_FIELDS) {
-      const parsedWeightInput = parseWeightInput(field.label, form[field.formKey]);
-      if (parsedWeightInput.error) {
-        setError(parsedWeightInput.error);
-        return;
-      }
-      inspectedWeightInputs[field.payloadKey] = parsedWeightInput;
-    }
-
-    const hasInspectedItemTotalLbhInput = inspectedItemLbh.hasAnyInput;
-    const hasInspectedItemTopLbhInput = inspectedItemTopLbh.hasAnyInput;
-    const hasInspectedItemBottomLbhInput = inspectedItemBottomLbh.hasAnyInput;
-    const hasInspectedBoxTotalLbhInput = inspectedBoxLbh.hasAnyInput;
-    const hasInspectedBoxTopLbhInput = inspectedTopLbh.hasAnyInput;
-    const hasInspectedBoxBottomLbhInput = inspectedBottomLbh.hasAnyInput;
-    const hasTopWeightInput = INSPECTED_WEIGHT_TOP_FORM_KEYS.some(
-      (formKey) => Boolean(inspectedWeightInputs[formKey.replace("inspected_weight_", "")]?.hasAnyInput),
-    );
-    const hasBottomWeightInput = INSPECTED_WEIGHT_BOTTOM_FORM_KEYS.some(
-      (formKey) => Boolean(inspectedWeightInputs[formKey.replace("inspected_weight_", "")]?.hasAnyInput),
-    );
-    const hasTotalWeightInput = INSPECTED_WEIGHT_TOTAL_FORM_KEYS.some(
-      (formKey) => Boolean(inspectedWeightInputs[formKey.replace("inspected_weight_", "")]?.hasAnyInput),
-    );
-
-    if (
-      hasInspectedItemTopLbhInput !== hasInspectedItemBottomLbhInput
-    ) {
-      setError("Enter both Inspected Item Top LBH and Inspected Item Bottom LBH, or use Inspected Item LBH.");
-      return;
-    }
-
-    if (
-      hasInspectedBoxTopLbhInput !== hasInspectedBoxBottomLbhInput
-    ) {
-      setError("Enter both Inspected Box Top LBH and Inspected Box Bottom LBH, or use Inspected Box LBH.");
-      return;
-    }
-
-    if (
-      hasInspectedItemTotalLbhInput &&
-      (hasInspectedItemTopLbhInput || hasInspectedItemBottomLbhInput)
-    ) {
-      setError("Use either Inspected Item LBH or Item Top/Bottom LBH, not both.");
-      return;
-    }
-
-    if (
-      hasInspectedBoxTotalLbhInput &&
-      (hasInspectedBoxTopLbhInput || hasInspectedBoxBottomLbhInput)
-    ) {
-      setError("Use either Inspected Box LBH or Box Top/Bottom LBH, not both.");
-      return;
-    }
-
-    if (hasTopWeightInput !== hasBottomWeightInput) {
-      setError("Enter both Top Weight and Bottom Weight, or use Total Weight.");
-      return;
-    }
-
-    if (hasTotalWeightInput && (hasTopWeightInput || hasBottomWeightInput)) {
-      setError("Use either Total Weight or Top/Bottom Weight, not both.");
-      return;
-    }
-
-    const cbmLockedByLbh = hasAnyLbhInput([
-      form.inspected_item_L,
-      form.inspected_item_B,
-      form.inspected_item_H,
-      form.inspected_box_L,
-      form.inspected_box_B,
-      form.inspected_box_H,
-      form.inspected_top_L,
-      form.inspected_top_B,
-      form.inspected_top_H,
-      form.inspected_bottom_L,
-      form.inspected_bottom_B,
-      form.inspected_bottom_H,
-      form.inspected_item_top_L,
-      form.inspected_item_top_B,
-      form.inspected_item_top_H,
-      form.inspected_item_bottom_L,
-      form.inspected_item_bottom_B,
-      form.inspected_item_bottom_H,
-    ]);
+    const inspectedItemBottomLbh = {
+      hasAnyInput: Boolean(itemLegacyValues.bottom),
+      value: itemLegacyValues.bottom,
+    };
+    const inspectedBoxLbh = {
+      hasAnyInput: Boolean(boxLegacyValues.single),
+      value: boxLegacyValues.single,
+    };
+    const inspectedTopLbh = {
+      hasAnyInput: Boolean(boxLegacyValues.top),
+      value: boxLegacyValues.top,
+    };
+    const inspectedBottomLbh = {
+      hasAnyInput: Boolean(boxLegacyValues.bottom),
+      value: boxLegacyValues.bottom,
+    };
+    const inspectedWeightInputs = {
+      top_net: {
+        hasAnyInput: itemLegacyValues.topWeight !== null,
+        value: itemLegacyValues.topWeight,
+      },
+      bottom_net: {
+        hasAnyInput: itemLegacyValues.bottomWeight !== null,
+        value: itemLegacyValues.bottomWeight,
+      },
+      total_net: {
+        hasAnyInput: itemLegacyValues.totalWeight !== null,
+        value: itemLegacyValues.totalWeight,
+      },
+      top_gross: {
+        hasAnyInput: boxLegacyValues.topWeight !== null,
+        value: boxLegacyValues.topWeight,
+      },
+      bottom_gross: {
+        hasAnyInput: boxLegacyValues.bottomWeight !== null,
+        value: boxLegacyValues.bottomWeight,
+      },
+      total_gross: {
+        hasAnyInput: boxLegacyValues.totalWeight !== null,
+        value: boxLegacyValues.totalWeight,
+      },
+    };
+    const cbmLockedByLbh =
+      inspectedItemSizePayload.hasMeaningfulInput || inspectedBoxSizePayload.hasMeaningfulInput;
 
     const barcodeValue = form.barcode.trim();
     const parseOptionalCbm = (value, label) => {
@@ -1368,12 +1628,18 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     const existingItemBottomLbhForLabels =
       existingItemMaster?.inspected_item_bottom_LBH
       || {};
-    const currentBoxTopLbhForLabels = inspectedTopLbh.value || existingBoxTopLbhForLabels;
-    const currentBoxBottomLbhForLabels = inspectedBottomLbh.value || existingBoxBottomLbhForLabels;
-    const currentItemTopLbhForLabels =
-      inspectedItemTopLbh.value || existingItemTopLbhForLabels;
-    const currentItemBottomLbhForLabels =
-      inspectedItemBottomLbh.value || existingItemBottomLbhForLabels;
+    const currentBoxTopLbhForLabels = inspectedTopLbh.hasAnyInput
+      ? (inspectedTopLbh.value || {})
+      : existingBoxTopLbhForLabels;
+    const currentBoxBottomLbhForLabels = inspectedBottomLbh.hasAnyInput
+      ? (inspectedBottomLbh.value || {})
+      : existingBoxBottomLbhForLabels;
+    const currentItemTopLbhForLabels = inspectedItemTopLbh.hasAnyInput
+      ? (inspectedItemTopLbh.value || {})
+      : existingItemTopLbhForLabels;
+    const currentItemBottomLbhForLabels = inspectedItemBottomLbh.hasAnyInput
+      ? (inspectedItemBottomLbh.value || {})
+      : existingItemBottomLbhForLabels;
     const hasTopBottomBoxLbhForLabels =
       hasCompletePositiveLbh(currentBoxTopLbhForLabels)
       && hasCompletePositiveLbh(currentBoxBottomLbhForLabels);
@@ -1480,98 +1746,19 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         payload.last_inspected_date = lastInspectedDateIso;
       }
 
-      if (shouldSendAdminItemMasterFields) {
-        payload.inspected_item_LBH =
-          inspectedItemLbh.hasAnyInput && inspectedItemLbh.value
-            ? inspectedItemLbh.value
-            : null;
-      } else if (!lockInspectedItemLbh && inspectedItemLbh.hasAnyInput && inspectedItemLbh.value) {
-        payload.inspected_item_LBH = inspectedItemLbh.value;
-      }
-      if (shouldSendAdminItemMasterFields) {
-        payload.inspected_box_LBH =
-          inspectedBoxLbh.hasAnyInput && inspectedBoxLbh.value
-            ? inspectedBoxLbh.value
-            : null;
-      } else if (!lockInspectedBoxLbh && inspectedBoxLbh.hasAnyInput && inspectedBoxLbh.value) {
-        payload.inspected_box_LBH = inspectedBoxLbh.value;
-      }
-      if (shouldSendAdminItemMasterFields) {
-        payload.inspected_box_top_LBH =
-          inspectedTopLbh.hasAnyInput && inspectedTopLbh.value
-            ? inspectedTopLbh.value
-            : null;
-        payload.inspected_top_LBH = payload.inspected_box_top_LBH;
-      } else if (!lockInspectedBoxTopLbh && inspectedTopLbh.hasAnyInput && inspectedTopLbh.value) {
-        payload.inspected_box_top_LBH = inspectedTopLbh.value;
-        payload.inspected_top_LBH = inspectedTopLbh.value;
-      }
-      if (shouldSendAdminItemMasterFields) {
-        payload.inspected_box_bottom_LBH =
-          inspectedBottomLbh.hasAnyInput && inspectedBottomLbh.value
-            ? inspectedBottomLbh.value
-            : null;
-        payload.inspected_bottom_LBH = payload.inspected_box_bottom_LBH;
-      } else if (
-        !lockInspectedBoxBottomLbh &&
-        inspectedBottomLbh.hasAnyInput &&
-        inspectedBottomLbh.value
-      ) {
-        payload.inspected_box_bottom_LBH = inspectedBottomLbh.value;
-        payload.inspected_bottom_LBH = inspectedBottomLbh.value;
-      }
-      if (shouldSendAdminItemMasterFields) {
-        payload.inspected_item_top_LBH =
-          inspectedItemTopLbh.hasAnyInput && inspectedItemTopLbh.value
-            ? inspectedItemTopLbh.value
-            : null;
-      } else if (
-        !lockInspectedItemTopLbh &&
-        inspectedItemTopLbh.hasAnyInput &&
-        inspectedItemTopLbh.value
-      ) {
-        payload.inspected_item_top_LBH = inspectedItemTopLbh.value;
-      }
-      if (shouldSendAdminItemMasterFields) {
-        payload.inspected_item_bottom_LBH =
-          inspectedItemBottomLbh.hasAnyInput && inspectedItemBottomLbh.value
-            ? inspectedItemBottomLbh.value
-            : null;
-      } else if (
-        !lockInspectedItemBottomLbh &&
-        inspectedItemBottomLbh.hasAnyInput &&
-        inspectedItemBottomLbh.value
-      ) {
-        payload.inspected_item_bottom_LBH = inspectedItemBottomLbh.value;
-      }
-      if (
+      const shouldSendItemSizeFields =
         shouldSendAdminItemMasterFields ||
-        INSPECTED_WEIGHT_FIELDS.some(
-          (field) =>
-            !inspectedWeightLocks[field.payloadKey]
-            && inspectedWeightInputs[field.payloadKey]?.hasAnyInput,
-        )
-      ) {
-        payload.inspected_weight = {};
-        for (const field of INSPECTED_WEIGHT_FIELDS) {
-          const parsedWeightInput = inspectedWeightInputs[field.payloadKey];
-          if (shouldSendAdminItemMasterFields) {
-            payload.inspected_weight[field.payloadKey] =
-              parsedWeightInput?.hasAnyInput ? parsedWeightInput.value : null;
-            continue;
-          }
-          if (
-            inspectedWeightLocks[field.payloadKey]
-            || !parsedWeightInput?.hasAnyInput
-            || parsedWeightInput.value === null
-          ) {
-            continue;
-          }
-          payload.inspected_weight[field.payloadKey] = parsedWeightInput.value;
-        }
-        if (!shouldSendAdminItemMasterFields && Object.keys(payload.inspected_weight).length === 0) {
-          delete payload.inspected_weight;
-        }
+        (!lockInspectedItemSection && inspectedItemSizePayload.hasAnyInput);
+      const shouldSendBoxSizeFields =
+        shouldSendAdminItemMasterFields ||
+        (!lockInspectedBoxSection && inspectedBoxSizePayload.hasAnyInput);
+
+      if (shouldSendItemSizeFields) {
+        payload.inspected_item_sizes = inspectedItemSizePayload.value;
+      }
+
+      if (shouldSendBoxSizeFields) {
+        payload.inspected_box_sizes = inspectedBoxSizePayload.value;
       }
 
       if (!isAdminRewriteMode) {
@@ -1751,8 +1938,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         return;
       }
     } else if (
-      quantityRequestedLimit !== undefined &&
-      nextNetOffered > quantityRequestedLimit
+      requestedQuantityLimit !== undefined &&
+      nextNetOffered > requestedQuantityLimit
     ) {
       setError("Offered quantity cannot exceed quantity requested.");
       return;
@@ -1822,81 +2009,192 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const hasTopOrBottomCbmInput =
     String(form.CBM_top || "").trim() !== "" ||
     String(form.CBM_bottom || "").trim() !== "";
-  const hasTotalWeightInput = hasAnyLbhInput(
-    INSPECTED_WEIGHT_TOTAL_FORM_KEYS.map((fieldKey) => form[fieldKey]),
-  );
-  const hasTotalItemLbhInput = hasAnyLbhInput(
-    INSPECTED_ITEM_TOTAL_LBH_FORM_KEYS.map((fieldKey) => form[fieldKey]),
-  );
-  const hasTotalBoxLbhInput = hasAnyLbhInput(
-    INSPECTED_BOX_TOTAL_LBH_FORM_KEYS.map((fieldKey) => form[fieldKey]),
-  );
   const existingItemMaster = qc?.item_master || {};
-  const lockInspectedItemLbh = !canRewriteLatestInspectionRecord && hasCompletePositiveLbh(
-    existingItemMaster?.inspected_item_LBH,
-  );
-  const lockInspectedBoxLbh = !canRewriteLatestInspectionRecord && hasCompletePositiveLbh(
-    existingItemMaster?.inspected_box_LBH,
-  );
-  const lockInspectedBoxTopLbh = !canRewriteLatestInspectionRecord && hasCompletePositiveLbh(
-    existingItemMaster?.inspected_box_top_LBH || existingItemMaster?.inspected_top_LBH,
-  );
-  const lockInspectedBoxBottomLbh = !canRewriteLatestInspectionRecord && hasCompletePositiveLbh(
-    existingItemMaster?.inspected_box_bottom_LBH || existingItemMaster?.inspected_bottom_LBH,
-  );
-  const lockInspectedItemTopLbh = !canRewriteLatestInspectionRecord && hasCompletePositiveLbh(
-    existingItemMaster?.inspected_item_top_LBH,
-  );
-  const lockInspectedItemBottomLbh = !canRewriteLatestInspectionRecord && hasCompletePositiveLbh(
-    existingItemMaster?.inspected_item_bottom_LBH,
-  );
   const existingInspectedWeight = existingItemMaster?.inspected_weight || {};
-  const inspectedWeightLocks = INSPECTED_WEIGHT_FIELDS.reduce((accumulator, field) => {
-    accumulator[field.payloadKey] =
-      !canRewriteLatestInspectionRecord &&
-      getWeightValueFromModel(existingInspectedWeight, field.payloadKey) > 0;
-    return accumulator;
-  }, {});
-  const hasLockedInspectedWeight = INSPECTED_WEIGHT_FIELDS.some(
-    (field) => inspectedWeightLocks[field.payloadKey],
+  const existingItemSizeEntries = buildMeasuredSizeEntriesFromLegacy({
+    primaryEntries: existingItemMaster?.inspected_item_sizes,
+    singleLbh: existingItemMaster?.inspected_item_LBH || existingItemMaster?.item_LBH,
+    topLbh: existingItemMaster?.inspected_item_top_LBH,
+    bottomLbh: existingItemMaster?.inspected_item_bottom_LBH,
+    totalWeight: getWeightValueFromModel(existingInspectedWeight, "total_net"),
+    topWeight: getWeightValueFromModel(existingInspectedWeight, "top_net"),
+    bottomWeight: getWeightValueFromModel(existingInspectedWeight, "bottom_net"),
+    weightKey: "net_weight",
+    topRemark: "top",
+    bottomRemark: "base",
+  }).filter((entry) => hasMeaningfulMeasuredSize(entry));
+  const existingBoxSizeEntries = buildMeasuredSizeEntriesFromLegacy({
+    primaryEntries: existingItemMaster?.inspected_box_sizes,
+    singleLbh: existingItemMaster?.inspected_box_LBH || existingItemMaster?.box_LBH,
+    topLbh:
+      existingItemMaster?.inspected_box_top_LBH || existingItemMaster?.inspected_top_LBH,
+    bottomLbh:
+      existingItemMaster?.inspected_box_bottom_LBH || existingItemMaster?.inspected_bottom_LBH,
+    totalWeight: getWeightValueFromModel(existingInspectedWeight, "total_gross"),
+    topWeight: getWeightValueFromModel(existingInspectedWeight, "top_gross"),
+    bottomWeight: getWeightValueFromModel(existingInspectedWeight, "bottom_gross"),
+    weightKey: "gross_weight",
+    topRemark: "top",
+    bottomRemark: "base",
+  }).filter((entry) => hasMeaningfulMeasuredSize(entry));
+  const lockInspectedItemSection =
+    !canRewriteLatestInspectionRecord && existingItemSizeEntries.length > 0;
+  const lockInspectedBoxSection =
+    !canRewriteLatestInspectionRecord && existingBoxSizeEntries.length > 0;
+  const hasLockedInspectedWeight = lockInspectedItemSection || lockInspectedBoxSection;
+  const hasAnyLockedInspectedLbh = hasLockedInspectedWeight;
+  const displayedItemEntries = ensureMeasuredSizeEntryCount(
+    form.inspected_item_sizes,
+    form.inspected_item_count,
   );
-  const hasAnyLockedInspectedLbh = (
-    lockInspectedItemLbh ||
-    lockInspectedBoxLbh ||
-    lockInspectedBoxTopLbh ||
-    lockInspectedBoxBottomLbh ||
-    lockInspectedItemTopLbh ||
-    lockInspectedItemBottomLbh
+  const displayedBoxEntries = ensureMeasuredSizeEntryCount(
+    form.inspected_box_sizes,
+    form.inspected_box_count,
   );
-  const cbmLockedByLbh = hasAnyLbhInput([
-    form.inspected_item_L,
-    form.inspected_item_B,
-    form.inspected_item_H,
-    form.inspected_box_L,
-    form.inspected_box_B,
-    form.inspected_box_H,
-    form.inspected_top_L,
-    form.inspected_top_B,
-    form.inspected_top_H,
-    form.inspected_bottom_L,
-    form.inspected_bottom_B,
-    form.inspected_bottom_H,
-    form.inspected_item_top_L,
-    form.inspected_item_top_B,
-    form.inspected_item_top_H,
-    form.inspected_item_bottom_L,
-    form.inspected_item_bottom_B,
-    form.inspected_item_bottom_H,
-  ]);
+  const cbmLockedByLbh =
+    displayedItemEntries.some((entry) => hasMeaningfulMeasuredSize(entry)) ||
+    displayedBoxEntries.some((entry) => hasMeaningfulMeasuredSize(entry));
   const disableCbmTotal =
     hasTopOrBottomCbmInput ||
     (cbmLockedByLbh && !canRewriteLatestInspectionRecord);
   const disableCbmTopBottom =
     hasTotalCbmInput ||
     (cbmLockedByLbh && !canRewriteLatestInspectionRecord);
-  const disableSplitWeightInputs = hasTotalWeightInput;
-  const disableItemSplitLbhInputs = hasTotalItemLbhInput;
-  const disableBoxSplitLbhInputs = hasTotalBoxLbhInput;
+  const renderMeasuredSizeSection = ({
+    title,
+    countName,
+    countValue,
+    entriesKey,
+    entries,
+    remarkOptions,
+    weightLabel,
+    locked,
+    countLabel,
+  }) => {
+    const safeCount = normalizeSizeCount(countValue, 1);
+    const entryColumnClass = safeCount > 1 ? "col-md-2" : "col-md-3";
+
+    return (
+      <>
+        <div className="col-md-2">
+          <label className="form-label">{countLabel}</label>
+          <select
+            className="form-select"
+            name={countName}
+            value={String(safeCount)}
+            onChange={handleChange}
+            disabled={locked}
+          >
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+          </select>
+        </div>
+        <div className="col-md-10">
+          <label className="form-label">{title}</label>
+          <div className="d-grid gap-2">
+            {entries.slice(0, safeCount).map((entry, index) => (
+              <div key={`${entriesKey}-${index}`} className="border rounded p-3">
+                <div className="small text-secondary mb-2">
+                  {safeCount === 1
+                    ? "Single entry"
+                    : `Entry ${index + 1}${entry.remark ? ` | ${getRemarkLabel(remarkOptions, entry.remark)}` : ""}`}
+                </div>
+                <div className="row g-2">
+                  {safeCount > 1 && (
+                    <div className="col-md-3">
+                      <label className="form-label small text-secondary">Remark</label>
+                      <select
+                        className="form-select"
+                        value={entry.remark}
+                        onChange={(event) =>
+                          handleSizeEntryChange(
+                            entriesKey,
+                            index,
+                            "remark",
+                            event.target.value,
+                          )
+                        }
+                        disabled={locked}
+                      >
+                        <option value="">Select remark</option>
+                        {remarkOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <div className={entryColumnClass}>
+                    <label className="form-label small text-secondary">L</label>
+                    <input
+                      type="number"
+                      className="form-control"
+                      value={entry.L}
+                      onChange={(event) =>
+                        handleSizeEntryChange(entriesKey, index, "L", event.target.value)
+                      }
+                      min="0"
+                      step="any"
+                      disabled={locked}
+                    />
+                  </div>
+                  <div className={entryColumnClass}>
+                    <label className="form-label small text-secondary">B</label>
+                    <input
+                      type="number"
+                      className="form-control"
+                      value={entry.B}
+                      onChange={(event) =>
+                        handleSizeEntryChange(entriesKey, index, "B", event.target.value)
+                      }
+                      min="0"
+                      step="any"
+                      disabled={locked}
+                    />
+                  </div>
+                  <div className={entryColumnClass}>
+                    <label className="form-label small text-secondary">H</label>
+                    <input
+                      type="number"
+                      className="form-control"
+                      value={entry.H}
+                      onChange={(event) =>
+                        handleSizeEntryChange(entriesKey, index, "H", event.target.value)
+                      }
+                      min="0"
+                      step="any"
+                      disabled={locked}
+                    />
+                  </div>
+                  <div className={safeCount > 1 ? "col-md-3" : "col-md-3"}>
+                    <label className="form-label small text-secondary">{weightLabel}</label>
+                    <input
+                      type="number"
+                      className="form-control"
+                      value={entry.weight}
+                      onChange={(event) =>
+                        handleSizeEntryChange(entriesKey, index, "weight", event.target.value)
+                      }
+                      min="0"
+                      step="any"
+                      disabled={locked}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          {safeCount === 1 && (
+            <div className="small text-secondary mt-2">
+              Single-entry measurements do not use remarks.
+            </div>
+          )}
+        </div>
+      </>
+    );
+  };
 
   return (
     <div
@@ -1993,51 +2291,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
               <div className="col-md-12">{"   "}</div>
 
-              {INSPECTED_WEIGHT_GROUPS.map((group) => (
-                <div key={group.key} className="col-md-4">
-                  <label className="form-label">{group.label}</label>
-                  <div className="input-group">
-                    {group.fields.map((field) => {
-                      const isLocked = inspectedWeightLocks[field.payloadKey];
-                      const isDisabledByTotalMode =
-                        group.key !== "total" && disableSplitWeightInputs;
-                      return (
-                        <input
-                          key={field.formKey}
-                          type="number"
-                          className="form-control"
-                          name={field.formKey}
-                          value={form[field.formKey]}
-                          onChange={handleChange}
-                          min="0"
-                          step="any"
-                          disabled={isLocked || isDisabledByTotalMode}
-                          placeholder={isLocked ? "Locked" : field.shortLabel}
-                        />
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-
-              {hasTotalWeightInput && (
-                <div className="col-12">
-                  <div className="small text-secondary">
-                    Total weight is entered, so top/bottom weight inputs are disabled.
-                  </div>
-                </div>
-              )}
-
-              {hasLockedInspectedWeight && (
-                <div className="col-12">
-                  <div className="small text-secondary">
-                    Inspected weight fields are locked after first update.
-                  </div>
-                </div>
-              )}
-
-              <div className="col-md-12">{"   "}</div>
-
               <div className="col-md-4">
                 <label className="form-label">CBM Total</label>
                 <input
@@ -2083,271 +2336,46 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
               {cbmLockedByLbh && !canRewriteLatestInspectionRecord && (
                 <div className="col-12">
                   <div className="small text-secondary">
-                    CBM fields are locked because inspected LBH is present. Update LBH to recalculate CBM.
+                    CBM fields are locked because inspected sizes are present. Update the size entries to recalculate CBM.
                   </div>
                 </div>
               )}
 
               <div className="col-12">
-                <h6 className="mb-0">Inspected LBH (cm)</h6>
+                <h6 className="mb-0">Inspected Measurements</h6>
               </div>
+
               {hasAnyLockedInspectedLbh && (
                 <div className="col-12">
                   <div className="small text-secondary">
-                    Inspected LBH fields are locked after first update.
+                    Existing inspected measurement entries are locked after first update.
                   </div>
                 </div>
               )}
 
-              {hasTotalItemLbhInput && (
-                <div className="col-12">
-                  <div className="small text-secondary">
-                    Inspected Item LBH is entered, so Item Top/Bottom LBH inputs are disabled.
-                  </div>
-                </div>
-              )}
+              {renderMeasuredSizeSection({
+                title: "Inspected Item Sizes (cm) and Net Weight",
+                countName: "inspected_item_count",
+                countValue: form.inspected_item_count,
+                entriesKey: "inspected_item_sizes",
+                entries: displayedItemEntries,
+                remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
+                weightLabel: "Net Weight",
+                locked: lockInspectedItemSection,
+                countLabel: "Item PC",
+              })}
 
-              {hasTotalBoxLbhInput && (
-                <div className="col-12">
-                  <div className="small text-secondary">
-                    Inspected Box LBH is entered, so Box Top/Bottom LBH inputs are disabled.
-                  </div>
-                </div>
-              )}
-
-              <div className="col-md-5">
-                <label className="form-label">Inspected Item LBH (L/B/H)</label>
-                <div className="input-group">
-                  <input
-                    type="number"
-                    className="form-control"
-                    name="inspected_item_L"
-                    value={form.inspected_item_L}
-                    onChange={handleChange}
-                    min="0"
-                    step="any"
-                    placeholder="L"
-                    disabled={lockInspectedItemLbh}
-                  />
-                  <input
-                    type="number"
-                    className="form-control"
-                    name="inspected_item_B"
-                    value={form.inspected_item_B}
-                    onChange={handleChange}
-                    min="0"
-                    step="any"
-                    placeholder="B"
-                    disabled={lockInspectedItemLbh}
-                  />
-                  <input
-                    type="number"
-                    className="form-control"
-                    name="inspected_item_H"
-                    value={form.inspected_item_H}
-                    onChange={handleChange}
-                    min="0"
-                    step="any"
-                    placeholder="H"
-                    disabled={lockInspectedItemLbh}
-                  />
-                </div>
-              </div>
-<div className="col-md-2">{"   "}</div>
-              <div className="col-md-5">
-                <label className="form-label">Inspected Box LBH (L/B/H)</label>
-                <div className="input-group">
-                  <input
-                    type="number"
-                    className="form-control"
-                    name="inspected_box_L"
-                    value={form.inspected_box_L}
-                    onChange={handleChange}
-                    min="0"
-                    step="any"
-                    placeholder="L"
-                    disabled={lockInspectedBoxLbh}
-                  />
-                  <input
-                    type="number"
-                    className="form-control"
-                    name="inspected_box_B"
-                    value={form.inspected_box_B}
-                    onChange={handleChange}
-                    min="0"
-                    step="any"
-                    placeholder="B"
-                    disabled={lockInspectedBoxLbh}
-                  />
-                  <input
-                    type="number"
-                    className="form-control"
-                    name="inspected_box_H"
-                    value={form.inspected_box_H}
-                    onChange={handleChange}
-                    min="0"
-                    step="any"
-                    placeholder="H"
-                    disabled={lockInspectedBoxLbh}
-                  />
-                </div>
-              </div>
-              <div className="col-md-5">
-                <label className="form-label">Inspected Item Top LBH (L/B/H)</label>
-                <div className="input-group">
-                  <input
-                    type="number"
-                    className="form-control"
-                    name="inspected_item_top_L"
-                    value={form.inspected_item_top_L}
-                    onChange={handleChange}
-                    min="0"
-                    step="any"
-                    placeholder="L"
-                    disabled={lockInspectedItemTopLbh || disableItemSplitLbhInputs}
-                  />
-                  <input
-                    type="number"
-                    className="form-control"
-                    name="inspected_item_top_B"
-                    value={form.inspected_item_top_B}
-                    onChange={handleChange}
-                    min="0"
-                    step="any"
-                    placeholder="B"
-                    disabled={lockInspectedItemTopLbh || disableItemSplitLbhInputs}
-                  />
-                  <input
-                    type="number"
-                    className="form-control"
-                    name="inspected_item_top_H"
-                    value={form.inspected_item_top_H}
-                    onChange={handleChange}
-                    min="0"
-                    step="any"
-                    placeholder="H"
-                    disabled={lockInspectedItemTopLbh || disableItemSplitLbhInputs}
-                  />
-                </div>
-              </div>
-<div className="col-md-2">{"   "}</div>
-              <div className="col-md-5">
-                <label className="form-label">Inspected Box Top LBH (L/B/H)</label>
-                <div className="input-group">
-                  <input
-                    type="number"
-                    className="form-control"
-                    name="inspected_top_L"
-                    value={form.inspected_top_L}
-                    onChange={handleChange}
-                    min="0"
-                    step="any"
-                    placeholder="L"
-                    disabled={lockInspectedBoxTopLbh || disableBoxSplitLbhInputs}
-                  />
-                  <input
-                    type="number"
-                    className="form-control"
-                    name="inspected_top_B"
-                    value={form.inspected_top_B}
-                    onChange={handleChange}
-                    min="0"
-                    step="any"
-                    placeholder="B"
-                    disabled={lockInspectedBoxTopLbh || disableBoxSplitLbhInputs}
-                  />
-                  <input
-                    type="number"
-                    className="form-control"
-                    name="inspected_top_H"
-                    value={form.inspected_top_H}
-                    onChange={handleChange}
-                    min="0"
-                    step="any"
-                    placeholder="H"
-                    disabled={lockInspectedBoxTopLbh || disableBoxSplitLbhInputs}
-                  />
-                </div>
-              </div>
-              <div className="col-md-5">
-                <label className="form-label">Inspected Item Bottom LBH (L/B/H)</label>
-                <div className="input-group">
-                  <input
-                    type="number"
-                    className="form-control"
-                    name="inspected_item_bottom_L"
-                    value={form.inspected_item_bottom_L}
-                    onChange={handleChange}
-                    min="0"
-                    step="any"
-                    placeholder="L"
-                    disabled={lockInspectedItemBottomLbh || disableItemSplitLbhInputs}
-                  />
-                  <input
-                    type="number"
-                    className="form-control"
-                    name="inspected_item_bottom_B"
-                    value={form.inspected_item_bottom_B}
-                    onChange={handleChange}
-                    min="0"
-                    step="any"
-                    placeholder="B"
-                    disabled={lockInspectedItemBottomLbh || disableItemSplitLbhInputs}
-                  />
-                  <input
-                    type="number"
-                    className="form-control"
-                    name="inspected_item_bottom_H"
-                    value={form.inspected_item_bottom_H}
-                    onChange={handleChange}
-                    min="0"
-                    step="any"
-                    placeholder="H"
-                    disabled={lockInspectedItemBottomLbh || disableItemSplitLbhInputs}
-                  />
-                </div>
-              </div>
-
-<div className="col-md-2">{"   "}</div>
-
-              <div className="col-md-5">
-                <label className="form-label">Inspected Box Bottom LBH (L/B/H)</label>
-                <div className="input-group">
-                  <input
-                    type="number"
-                    className="form-control"
-                    name="inspected_bottom_L"
-                    value={form.inspected_bottom_L}
-                    onChange={handleChange}
-                    min="0"
-                    step="any"
-                    placeholder="L"
-                    disabled={lockInspectedBoxBottomLbh || disableBoxSplitLbhInputs}
-                  />
-                  <input
-                    type="number"
-                    className="form-control"
-                    name="inspected_bottom_B"
-                    value={form.inspected_bottom_B}
-                    onChange={handleChange}
-                    min="0"
-                    step="any"
-                    placeholder="B"
-                    disabled={lockInspectedBoxBottomLbh || disableBoxSplitLbhInputs}
-                  />
-                  <input
-                    type="number"
-                    className="form-control"
-                    name="inspected_bottom_H"
-                    value={form.inspected_bottom_H}
-                    onChange={handleChange}
-                    min="0"
-                    step="any"
-                    placeholder="H"
-                    disabled={lockInspectedBoxBottomLbh || disableBoxSplitLbhInputs}
-                  />
-                </div>
-              </div>
+              {renderMeasuredSizeSection({
+                title: "Inspected Box Sizes (cm) and Gross Weight",
+                countName: "inspected_box_count",
+                countValue: form.inspected_box_count,
+                entriesKey: "inspected_box_sizes",
+                entries: displayedBoxEntries,
+                remarkOptions: BOX_SIZE_REMARK_OPTIONS,
+                weightLabel: "Gross Weight",
+                locked: lockInspectedBoxSection,
+                countLabel: "Box PC",
+              })}
 
               <div className="col-md-6">
                 <label className="form-label">Last Inspected Date</label>
