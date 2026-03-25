@@ -541,6 +541,7 @@ const OpenOrders = () => {
                           <OrderEtdWithHistory
                             orderId={order?.order_id}
                             etd={order?.ETD}
+                            revisedEtd={order?.effective_ETD || order?.revised_ETD}
                           />
                         </td>
                       </tr>

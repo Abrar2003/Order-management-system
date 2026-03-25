@@ -176,6 +176,7 @@ const ItemOrdersHistory = () => {
                               orderId={order?.order_id}
                               itemCode={order?.item_code}
                               etd={order?.ETD}
+                              revisedEtd={order?.revised_ETD}
                             />
                           </td>
                           <td>{toText(order?.status)}</td>

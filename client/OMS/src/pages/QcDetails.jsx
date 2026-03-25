@@ -229,6 +229,7 @@ const RELATED_FILE_OPTIONS_BY_VALUE = Object.freeze(
     return acc;
   }, {}),
 );
+const MAX_QC_IMAGE_UPLOAD_COUNT = 60;
 
 const ITEM_MASTER_FILE_OPTIONS = Object.freeze(
   RELATED_FILE_OPTIONS.filter((option) => option.scope === "item_master"),
@@ -240,6 +241,14 @@ const hasStoredFile = (file = {}) =>
       file?.key || file?.url || file?.link || file?.public_id || "",
     ).trim(),
   );
+
+const getSelectedFileSignature = (file) =>
+  [
+    String(file?.name || "").trim().toLowerCase(),
+    Number(file?.size || 0),
+    Number(file?.lastModified || 0),
+    String(file?.type || "").trim().toLowerCase(),
+  ].join("__");
 
 const QcDetails = () => {
   const { id } = useParams();
@@ -263,6 +272,7 @@ const QcDetails = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const relatedFileInputRef = useRef(null);
+  const relatedFileUploadInFlightRef = useRef(false);
   const user = getUserFromToken();
   const normalizedRole = String(user?.role || "").trim().toLowerCase();
   const currentUserId = String(user?.id || user?._id || "").trim();
@@ -588,7 +598,13 @@ const QcDetails = () => {
   }, [id]);
 
   const handleOpenRelatedFilePicker = useCallback(() => {
-    if (!canUploadActiveRelatedFile || uploadingRelatedFile) return;
+    if (
+      !canUploadActiveRelatedFile ||
+      uploadingRelatedFile ||
+      relatedFileUploadInFlightRef.current
+    ) {
+      return;
+    }
     relatedFileInputRef.current?.click();
   }, [canUploadActiveRelatedFile, uploadingRelatedFile]);
 
@@ -641,94 +657,114 @@ const QcDetails = () => {
     }
   }, [qc?.item_master]);
 
-  const handleRelatedFileChange = useCallback(async (event) => {
-    const selectedFiles = Array.from(event.target?.files || []);
-    if (selectedFiles.length === 0) return;
+ const handleRelatedFileChange = useCallback(async (event) => {
+  const inputElement = event.target;
+  const rawSelectedFiles = Array.from(inputElement?.files || []);
+  if (rawSelectedFiles.length === 0) return;
 
-    const fileConfig =
-      RELATED_FILE_OPTIONS_BY_VALUE[relatedFileType]
-      || RELATED_FILE_OPTIONS[0];
+  if (relatedFileUploadInFlightRef.current) {
+    if (inputElement) inputElement.value = "";
+    return;
+  }
 
-    try {
-      setUploadingRelatedFile(true);
-      for (const selectedFile of selectedFiles) {
-        const normalizedName = String(selectedFile.name || "").toLowerCase();
-        const normalizedType = String(selectedFile.type || "").toLowerCase();
-        const hasAllowedExtension = fileConfig.extensions.some((extension) =>
-          normalizedName.endsWith(extension),
-        );
-        const hasAllowedMimeType =
-          !normalizedType || fileConfig.mimeTypes.includes(normalizedType);
+  const fileConfig =
+    RELATED_FILE_OPTIONS_BY_VALUE[relatedFileType] ||
+    RELATED_FILE_OPTIONS[0];
+  const selectedFiles = Array.from(
+    new Map(
+      rawSelectedFiles.map((file) => [getSelectedFileSignature(file), file]),
+    ).values(),
+  );
 
-        if (!hasAllowedExtension || !hasAllowedMimeType) {
-          throw new Error(fileConfig.invalidMessage);
-        }
-      }
+  try {
+    relatedFileUploadInFlightRef.current = true;
+    setUploadingRelatedFile(true);
 
-      let response;
-      if (fileConfig.value === "qc_images") {
-        const formData = new FormData();
-        formData.append("upload_mode", qcImageUploadMode);
-        if (qcImageUploadMode === "single") {
-          formData.append("comment", qcSingleImageComment);
-        }
-        selectedFiles.forEach((file) => {
-          formData.append("files", file);
-        });
+    for (const selectedFile of selectedFiles) {
+      const normalizedName = String(selectedFile.name || "").toLowerCase();
+      const normalizedType = String(selectedFile.type || "").toLowerCase();
 
-        response = await api.post(
-          `/qc/${encodeURIComponent(id)}/images`,
-          formData,
-          {
-            headers: {
-              "Content-Type": "multipart/form-data",
-            },
-          },
-        );
-      } else {
-        if (!qc?.item_master?._id) {
-          throw new Error("Item master record not found for this QC.");
-        }
-
-        const formData = new FormData();
-        formData.append("file_type", relatedFileType);
-        formData.append("file", selectedFiles[0]);
-
-        response = await api.post(
-          `/items/${encodeURIComponent(qc.item_master._id)}/files`,
-          formData,
-          {
-            headers: {
-              "Content-Type": "multipart/form-data",
-            },
-          },
-        );
-      }
-
-      alert(response?.data?.message || `${fileConfig.label} uploaded successfully.`);
-      if (fileConfig.value === "qc_images") {
-        setQcSingleImageComment("");
-      }
-      await fetchQcDetails();
-    } catch (error) {
-      console.error(error);
-      alert(
-        error?.response?.data?.message
-          || error?.message
-          || `Failed to upload ${fileConfig.label}.`,
+      const hasAllowedExtension = fileConfig.extensions.some((extension) =>
+        normalizedName.endsWith(extension)
       );
-    } finally {
-      setUploadingRelatedFile(false);
-      event.target.value = "";
+
+      const hasAllowedMimeType =
+        !normalizedType || fileConfig.mimeTypes.includes(normalizedType);
+
+      if (!hasAllowedExtension || !hasAllowedMimeType) {
+        throw new Error(fileConfig.invalidMessage);
+      }
     }
-  }, [
-    fetchQcDetails,
-    id,
-    qc?.item_master?._id,
-    qcImageUploadMode,
-    qcSingleImageComment,
-    relatedFileType,
-  ]);
+
+    let response;
+
+    if (fileConfig.value === "qc_images") {
+      if (selectedFiles.length > MAX_QC_IMAGE_UPLOAD_COUNT) {
+        throw new Error(
+          `You can upload up to ${MAX_QC_IMAGE_UPLOAD_COUNT} QC images at once.`,
+        );
+      }
+
+      const formData = new FormData();
+
+      formData.append("upload_mode", qcImageUploadMode);
+
+      if (qcImageUploadMode === "single") {
+        formData.append("comment", qcSingleImageComment);
+      }
+
+      selectedFiles.forEach((file) => {
+        formData.append("files", file);
+      });
+
+      response = await api.post(
+        `/qc/${encodeURIComponent(id)}/images`,
+        formData
+      );
+    } else {
+      if (!qc?.item_master?._id) {
+        throw new Error("Item master record not found for this QC.");
+      }
+
+      const formData = new FormData();
+      formData.append("file_type", relatedFileType);
+      formData.append("file", selectedFiles[0]);
+
+      response = await api.post(
+        `/items/${encodeURIComponent(qc.item_master._id)}/files`,
+        formData
+      );
+    }
+
+    alert(
+      response?.data?.message || `${fileConfig.label} uploaded successfully.`
+    );
+
+    if (fileConfig.value === "qc_images") {
+      setQcSingleImageComment("");
+    }
+
+    await fetchQcDetails();
+  } catch (error) {
+    console.error(error);
+    alert(
+      error?.response?.data?.message ||
+        error?.message ||
+        `Failed to upload ${fileConfig.label}.`
+    );
+  } finally {
+    relatedFileUploadInFlightRef.current = false;
+    setUploadingRelatedFile(false);
+    if (inputElement) inputElement.value = "";
+  }
+}, [
+  fetchQcDetails,
+  id,
+  qc?.item_master?._id,
+  qcImageUploadMode,
+  qcSingleImageComment,
+  relatedFileType,
+]);
 
   const handleDeleteInspectionRecord = useCallback(
     async (recordId) => {
@@ -1149,6 +1185,7 @@ const QcDetails = () => {
                       <tr>
                         <th>Stuffing Date</th>
                         <th>Container Number</th>
+                        <th>Invoice Number</th>
                         <th>Quantity</th>
                         <th>Remaining</th>
                         <th>Remaining Remarks</th>
@@ -1163,6 +1200,7 @@ const QcDetails = () => {
                             )}
                           </td>
                           <td>{record?.container || "N/A"}</td>
+                          <td>{record?.invoice_number || "N/A"}</td>
                           <td>{record?.quantity ?? 0}</td>
                           <td>{ record?.pending ?? 0}</td>
                           <td>{ record?.remaining_remarks ?? "None"}</td>

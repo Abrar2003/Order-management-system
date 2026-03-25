@@ -594,6 +594,7 @@ const Home = () => {
                             <OrderEtdWithHistory
                               orderId={order?.order_id}
                               etd={order?.ETD}
+                              revisedEtd={order?.effective_ETD || order?.revised_ETD}
                             />
                           </td>
                           <td>{Number(order?.itemCount || 0)}</td>

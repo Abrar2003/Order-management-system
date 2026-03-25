@@ -571,6 +571,7 @@ const VendorReports = () => {
                                   <OrderEtdWithHistory
                                     orderId={orderRow?.order_id}
                                     etd={orderRow?.etd}
+                                    revisedEtd={orderRow?.effective_etd || orderRow?.revised_etd}
                                   />
                                 </td>
                                 <td>{formatDateDDMMYYYY(orderRow.latest_shipment_date)}</td>

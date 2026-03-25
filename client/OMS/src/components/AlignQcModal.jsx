@@ -67,11 +67,11 @@ const AlignQCModal = ({
     : Number.isFinite(fallbackOpenQuantity)
       ? fallbackOpenQuantity
       : 0;
-  const aqlSampleQuantity = computeAqlSampleQuantity(effectiveOpenQuantity);
-  const effectiveQuantityRequested =
-    requestType === "AQL"
-      ? String(aqlSampleQuantity)
-      : quantityRequested;
+  const parsedRequestedQuantity = Number(quantityRequested);
+  const requestedQuantityNumber = Number.isFinite(parsedRequestedQuantity)
+    ? Math.max(0, parsedRequestedQuantity)
+    : 0;
+  const aqlSampleQuantity = computeAqlSampleQuantity(requestedQuantityNumber);
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -160,7 +160,7 @@ const AlignQCModal = ({
     if (
       !inspector ||
       !request_date ||
-      (requestType === "FULL" && quantityRequested === "")
+      quantityRequested === ""
     ) {
       alert("Inspector, request date and quantity requested are required.");
       return;
@@ -180,17 +180,12 @@ const AlignQCModal = ({
       return;
     }
 
-    const quantityRequestedNumber =
-      requestType === "AQL"
-        ? aqlSampleQuantity
-        : Number(quantityRequested);
-
     if (Number.isNaN(quantityRequestedNumber) || quantityRequestedNumber < 0) {
       alert("Quantity values must be valid non-negative numbers.");
       return;
     }
     if (requestType === "AQL" && quantityRequestedNumber <= 0) {
-      alert("AQL sample quantity is invalid for this order.");
+      alert("Quantity requested must be greater than 0 for AQL.");
       return;
     }
 
@@ -327,7 +322,7 @@ const AlignQCModal = ({
               <input
                 type="number"
                 className="form-control"
-                value={effectiveQuantityRequested}
+                value={quantityRequested}
                 onChange={(e) => {
                   const nextValue = e.target.value;
                   if (nextValue === "" || Number(nextValue) >= 0) {
@@ -335,11 +330,12 @@ const AlignQCModal = ({
                   }
                 }}
                 min="0"
-                disabled={requestType === "AQL"}
               />
               {requestType === "AQL" && (
                 <div className="small text-secondary mt-1">
-                  AQL request uses 10% sample ({aqlSampleQuantity}) and backend auto-handles pass logic.
+                  {quantityRequested === ""
+                    ? "Enter requested quantity to calculate the AQL sample."
+                    : `AQL sample uses 10% of requested quantity (${aqlSampleQuantity}) and backend auto-handles pass logic for that requested batch.`}
                 </div>
               )}
             </div>

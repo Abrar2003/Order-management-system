@@ -41,7 +41,7 @@ router.post(
   "/:id/images",
   auth,
   authorize("QC", "admin", "manager", "dev"),
-  upload.array("files", 20),
+  upload.any(),
   qcController.uploadQcImages,
 );
 

@@ -219,6 +219,18 @@ export const getDelayedPoReport = async (params = {}) => {
   return res.data;
 };
 
+export const getPoStatusReport = async (params = {}) => {
+  const token = localStorage.getItem("token");
+  const res = await axios.get("/orders/po-status-report", {
+    params,
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return res.data;
+};
+
 export const exportDelayedPoReport = async (params = {}) => {
   const token = localStorage.getItem("token");
   return axios.get("/orders/delayed-po-report/export", {

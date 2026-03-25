@@ -288,6 +288,23 @@ const computeAqlSampleQuantity = (quantity) => {
   return Math.max(1, Math.ceil(parsed * 0.1));
 };
 
+const getLatestRequestedQuantity = (qc = {}) => {
+  const requestHistory = Array.isArray(qc?.request_history) ? qc.request_history : [];
+  const latestRequestEntry =
+    requestHistory.length > 0 ? requestHistory[requestHistory.length - 1] : null;
+  const latestRequestedQuantity = Number(latestRequestEntry?.quantity_requested);
+  if (Number.isFinite(latestRequestedQuantity) && latestRequestedQuantity >= 0) {
+    return latestRequestedQuantity;
+  }
+
+  const fallbackRequestedQuantity = Number(qc?.quantities?.quantity_requested);
+  if (Number.isFinite(fallbackRequestedQuantity) && fallbackRequestedQuantity >= 0) {
+    return fallbackRequestedQuantity;
+  }
+
+  return 0;
+};
+
 const UPDATE_QC_PAST_DAYS_OVERRIDE_BY_USER = Object.freeze({
   "6993ff47473290fa1cf76b65": 3,
 });
@@ -1035,7 +1052,10 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     const clientDemandQuantity = Number(qc?.quantities?.client_demand || 0) || 0;
     const requestType = String(qc?.request_type || "").trim().toUpperCase();
     const isAqlRequest = requestType === "AQL";
-    const aqlSampleQuantity = computeAqlSampleQuantity(clientDemandQuantity);
+    const requestedQuantityLimit = getLatestRequestedQuantity(qc);
+    const aqlBaseQuantity =
+      requestedQuantityLimit > 0 ? requestedQuantityLimit : clientDemandQuantity;
+    const aqlSampleQuantity = computeAqlSampleQuantity(aqlBaseQuantity);
 
     if ((qcPassed > 0 || hasLabelUpdate) && qcChecked <= 0) {
       setError("QC checked must be greater than 0 for updates.");
@@ -1696,11 +1716,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     );
     const totalLabelsAfterUpdate =
       existingLabelsSet.size + incomingNewLabels.length;
-    const quantityRequestedLimit =
-      qc.quantities?.quantity_requested &&
-      qc.quantities.quantity_requested !== 0
-        ? qc.quantities.quantity_requested
-        : qc.quantities?.client_demand;
     const hasStartedInspection =
       (qc.quantities?.qc_checked || 0) > 0 ||
       Number(qc?.quantities?.qc_passed || 0) > 0 ||

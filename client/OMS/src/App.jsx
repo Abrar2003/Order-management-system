@@ -31,6 +31,7 @@ import InspectionReport from "./pages/inspection_report";
 import InspectorReports from "./pages/InspectorReports";
 import VendorReports from "./pages/VendorReports";
 import DelayedPoReports from "./pages/DelayedPoReports";
+import PoStatusReport from "./pages/PoStatusReport";
 import PIS from "./pages/PIS";
 import WeeklySummary from "./pages/WeeklySummary";
 import DailySummary from "./pages/DailySummary";
@@ -174,6 +175,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <DelayedPoReports />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/reports/po-status"
+            element={
+              <ProtectedRoute>
+                <PoStatusReport />
               </ProtectedRoute>
             }
           />

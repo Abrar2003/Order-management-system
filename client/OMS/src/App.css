@@ -155,8 +155,13 @@
 }
 
 .orders-action-col {
-  width: 20%;
-  min-width: 320px;
+  width: 18%;
+  min-width: 300px;
+}
+
+.orders-cbm-col {
+  min-width: 170px;
+  width: 12%;
 }
 
 .orders-action-stack {
@@ -696,8 +701,8 @@
   bottom: calc(100% + 0.5rem);
   min-width: 14rem;
   max-width: min(20rem, calc(100vw - 1rem));
-  max-height: 16rem;
-  overflow-y: auto;
+  max-height: none;
+  overflow: visible;
   padding: 0.55rem 0.65rem;
   border: 1px solid rgba(0, 0, 0, 0.15);
   border-radius: 0.45rem;

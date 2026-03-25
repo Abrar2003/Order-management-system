@@ -36,6 +36,7 @@ const ORDER_STATUS_SEQUENCE = [
   "Partial Shipped",
   "Shipped",
 ];
+const DEFAULT_PO_STATUS_REPORT_STATUS = "Inspection Done";
 
 const SHIPMENT_VISIBLE_STATUSES = [
   "Inspection Done",
@@ -95,6 +96,140 @@ const normalizeDistinctValues = (values = []) =>
   ].sort((a, b) => a.localeCompare(b));
 
 const normalizeLooseString = (value) => String(value ?? "").trim();
+const normalizeShipmentInvoiceNumber = (value, fallback = "N/A") => {
+  const normalized = String(value ?? "").trim();
+  if (normalized) return normalized;
+  return String(fallback ?? "").trim();
+};
+const toPositiveCbmNumber = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return parsed;
+};
+
+const toRoundedCbmValue = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Number(parsed.toFixed(6));
+};
+
+const calculateCbmFromLbh = (dimensions = {}) => {
+  const length = Math.max(0, Number(dimensions?.L || 0));
+  const breadth = Math.max(0, Number(dimensions?.B || 0));
+  const height = Math.max(0, Number(dimensions?.H || 0));
+  if (!Number.isFinite(length) || !Number.isFinite(breadth) || !Number.isFinite(height)) {
+    return 0;
+  }
+  if (length <= 0 || breadth <= 0 || height <= 0) return 0;
+  return (length * breadth * height) / 1000000;
+};
+
+const resolveSplitOrSingleLbhCbmTotal = ({
+  topLbh = null,
+  bottomLbh = null,
+  singleLbh = null,
+} = {}) => {
+  const topCbm = toPositiveCbmNumber(calculateCbmFromLbh(topLbh));
+  const bottomCbm = toPositiveCbmNumber(calculateCbmFromLbh(bottomLbh));
+  if (topCbm > 0 && bottomCbm > 0) {
+    return topCbm + bottomCbm;
+  }
+
+  return toPositiveCbmNumber(calculateCbmFromLbh(singleLbh));
+};
+
+const resolveOrderRowCbmSummary = (itemDoc = null, orderQuantity = 0) => {
+  if (!itemDoc || typeof itemDoc !== "object") {
+    return {
+      source: null,
+      per_item: null,
+      total: null,
+    };
+  }
+
+  const inspectedStoredCbm = [
+    itemDoc?.cbm?.calculated_inspected_total,
+    itemDoc?.cbm?.inspected_total,
+  ]
+    .map((value) => toPositiveCbmNumber(value))
+    .find((value) => value > 0);
+  if (inspectedStoredCbm > 0) {
+    const perItem = toRoundedCbmValue(inspectedStoredCbm);
+    return {
+      source: "inspected",
+      per_item: perItem,
+      total: toRoundedCbmValue(Math.max(0, Number(orderQuantity || 0)) * perItem),
+    };
+  }
+
+  const pisTopCbm = toPositiveCbmNumber(itemDoc?.cbm?.top);
+  const pisBottomCbm = toPositiveCbmNumber(itemDoc?.cbm?.bottom);
+  if (pisTopCbm > 0 && pisBottomCbm > 0) {
+    const perItem = toRoundedCbmValue(pisTopCbm + pisBottomCbm);
+    return {
+      source: "pis",
+      per_item: perItem,
+      total: toRoundedCbmValue(Math.max(0, Number(orderQuantity || 0)) * perItem),
+    };
+  }
+
+  const pisStoredCbm = [
+    itemDoc?.cbm?.calculated_pis_total,
+    itemDoc?.cbm?.total,
+  ]
+    .map((value) => toPositiveCbmNumber(value))
+    .find((value) => value > 0);
+  if (pisStoredCbm > 0) {
+    const perItem = toRoundedCbmValue(pisStoredCbm);
+    return {
+      source: "pis",
+      per_item: perItem,
+      total: toRoundedCbmValue(Math.max(0, Number(orderQuantity || 0)) * perItem),
+    };
+  }
+
+  const inspectedLbhCbm = resolveSplitOrSingleLbhCbmTotal({
+    topLbh:
+      itemDoc?.inspected_box_top_LBH ||
+      itemDoc?.inspected_top_LBH ||
+      itemDoc?.inspected_item_top_LBH,
+    bottomLbh:
+      itemDoc?.inspected_box_bottom_LBH ||
+      itemDoc?.inspected_bottom_LBH ||
+      itemDoc?.inspected_item_bottom_LBH,
+    singleLbh:
+      itemDoc?.inspected_box_LBH ||
+      itemDoc?.inspected_item_LBH,
+  });
+  if (inspectedLbhCbm > 0) {
+    const perItem = toRoundedCbmValue(inspectedLbhCbm);
+    return {
+      source: "inspected",
+      per_item: perItem,
+      total: toRoundedCbmValue(Math.max(0, Number(orderQuantity || 0)) * perItem),
+    };
+  }
+
+  const pisLbhCbm = resolveSplitOrSingleLbhCbmTotal({
+    topLbh: itemDoc?.pis_box_top_LBH || itemDoc?.pis_item_top_LBH,
+    bottomLbh: itemDoc?.pis_box_bottom_LBH || itemDoc?.pis_item_bottom_LBH,
+    singleLbh: itemDoc?.pis_box_LBH || itemDoc?.pis_item_LBH,
+  });
+  if (pisLbhCbm > 0) {
+    const perItem = toRoundedCbmValue(pisLbhCbm);
+    return {
+      source: "pis",
+      per_item: perItem,
+      total: toRoundedCbmValue(Math.max(0, Number(orderQuantity || 0)) * perItem),
+    };
+  }
+
+  return {
+    source: null,
+    per_item: null,
+    total: null,
+  };
+};
 
 const normalizeBrandKey = (value) => normalizeLooseString(value).toLowerCase();
 
@@ -125,6 +260,16 @@ const normalizeStatusList = (values = []) => {
     if (bIndex === -1) return -1;
     return aIndex - bIndex;
   });
+};
+
+const normalizePoStatusReportStatus = (value) => {
+  const normalized = normalizeFilterValue(value);
+  if (!normalized) return DEFAULT_PO_STATUS_REPORT_STATUS;
+
+  const matchedStatus = ORDER_STATUS_SEQUENCE.find(
+    (status) => status.toLowerCase() === normalized.toLowerCase(),
+  );
+  return matchedStatus || DEFAULT_PO_STATUS_REPORT_STATUS;
 };
 
 const ACTIVE_ORDER_MATCH = {
@@ -1373,10 +1518,13 @@ const formatShipmentEntriesForUploadLog = (shipmentEntries = []) => {
     .map((entry, index) => {
       const stuffingDate = formatDateDDMMYYYY(entry?.stuffing_date, "Not Set");
       const container = String(entry?.container || "").trim() || "N/A";
+      const invoiceNumber = normalizeShipmentInvoiceNumber(
+        entry?.invoice_number,
+      );
       const quantity = Number(entry?.quantity || 0);
       const pending = Number(entry?.pending || 0);
       const remarks = String(entry?.remaining_remarks || "").trim() || "None";
-      return `${index + 1}) ${stuffingDate} | ${container} | qty ${Number.isFinite(quantity) ? quantity : 0} | pending ${Number.isFinite(pending) ? pending : 0} | remarks: ${remarks}`;
+      return `${index + 1}) ${stuffingDate} | ${container} | invoice ${invoiceNumber} | qty ${Number.isFinite(quantity) ? quantity : 0} | pending ${Number.isFinite(pending) ? pending : 0} | remarks: ${remarks}`;
     })
     .join(" || ");
 };
@@ -2025,6 +2173,14 @@ const normalizeShipmentEntries = (shipmentPayload) => {
       throw new Error(`shipment[${index + 1}] container is required`);
     }
 
+    const invoiceNumber = normalizeShipmentInvoiceNumber(
+      entry?.invoice_number ?? entry?.invoiceNumber ?? entry?.invoice,
+      "",
+    );
+    if (!invoiceNumber) {
+      throw new Error(`shipment[${index + 1}] invoice_number is required`);
+    }
+
     const stuffingDate = parseDateLike(entry?.stuffing_date);
     if (!stuffingDate) {
       throw new Error(`shipment[${index + 1}] stuffing_date is invalid`);
@@ -2041,6 +2197,7 @@ const normalizeShipmentEntries = (shipmentPayload) => {
 
     return {
       container,
+      invoice_number: invoiceNumber,
       stuffing_date: stuffingDate,
       quantity,
       remaining_remarks: remarks,
@@ -2077,6 +2234,7 @@ const fitShipmentEntriesToOrderQuantity = (
     cumulativeShipped += adjustedQuantity;
     nextEntries.push({
       container: String(entry?.container ?? "").trim(),
+      invoice_number: normalizeShipmentInvoiceNumber(entry?.invoice_number),
       stuffing_date: parseDateLike(entry?.stuffing_date),
       quantity: adjustedQuantity,
       pending: Math.max(0, normalizedQuantity - cumulativeShipped),
@@ -2142,6 +2300,9 @@ const resolveShipmentSortConfig = ({
     container: "container",
     containernumber: "container",
     container_number: "container",
+    invoice: "invoice_number",
+    invoicenumber: "invoice_number",
+    invoice_number: "invoice_number",
     quantity: "quantity",
     pending: "pending",
     orderquantity: "order_quantity",
@@ -2157,6 +2318,7 @@ const resolveShipmentSortConfig = ({
     "order_quantity",
     "stuffing_date",
     "container",
+    "invoice_number",
     "quantity",
     "pending",
   ]);
@@ -2242,6 +2404,7 @@ const mapOrdersToShipmentRows = (orders = []) =>
           shipment_id: null,
           stuffing_date: null,
           container: "",
+          invoice_number: "N/A",
           quantity: normalizedOrderQuantity,
           pending: normalizedOrderQuantity,
           remaining_remarks: "",
@@ -2258,6 +2421,7 @@ const mapOrdersToShipmentRows = (orders = []) =>
         shipment_id: entry?._id || `${order?._id || "order"}-${index}`,
         stuffing_date: entry?.stuffing_date || null,
         container: entry?.container || "",
+        invoice_number: normalizeShipmentInvoiceNumber(entry?.invoice_number),
         quantity: Number.isFinite(parsedShipmentQuantity)
           ? parsedShipmentQuantity
           : 0,
@@ -2307,6 +2471,8 @@ const getShipmentSortValue = (row, sortBy) => {
       return toShipmentTimestamp(row?.stuffing_date);
     case "container":
       return String(row?.container || "");
+    case "invoice_number":
+      return normalizeShipmentInvoiceNumber(row?.invoice_number);
     case "quantity":
       return toShipmentNumber(row?.quantity);
     case "pending":
@@ -4261,25 +4427,198 @@ exports.getOrders = async (req, res) => {
   }
 };
 
+exports.getPoStatusReport = async (req, res) => {
+  try {
+    const selectedBrand = normalizeFilterValue(req.query.brand);
+    const selectedVendor = normalizeFilterValue(req.query.vendor);
+    const selectedStatus = normalizePoStatusReportStatus(req.query.status);
+    const activeMatch = { ...ACTIVE_ORDER_MATCH };
+    const reportMatch = {
+      ...activeMatch,
+      status: selectedStatus,
+    };
+
+    if (selectedBrand) {
+      reportMatch.brand = selectedBrand;
+    }
+    if (selectedVendor) {
+      reportMatch.vendor = selectedVendor;
+    }
+
+    const [brandOptionsRaw, vendorOptionsRaw, reportOrdersRaw] = await Promise.all([
+      Order.distinct("brand", activeMatch),
+      Order.distinct("vendor", activeMatch),
+      Order.find(reportMatch)
+        .select("_id brand vendor order_id status quantity order_date ETD item")
+        .lean(),
+    ]);
+
+    const reportOrders = [...reportOrdersRaw].sort((left, right) => {
+      const leftVendor = normalizeLooseString(left?.vendor || "N/A");
+      const rightVendor = normalizeLooseString(right?.vendor || "N/A");
+      const vendorComparison = leftVendor.localeCompare(rightVendor, undefined, {
+        sensitivity: "base",
+      });
+      if (vendorComparison !== 0) return vendorComparison;
+
+      const leftBrand = normalizeLooseString(left?.brand || "N/A");
+      const rightBrand = normalizeLooseString(right?.brand || "N/A");
+      const brandComparison = leftBrand.localeCompare(rightBrand, undefined, {
+        sensitivity: "base",
+      });
+      if (brandComparison !== 0) return brandComparison;
+
+      const leftOrderId = normalizeLooseString(left?.order_id || "");
+      const rightOrderId = normalizeLooseString(right?.order_id || "");
+      const orderComparison = leftOrderId.localeCompare(rightOrderId, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+      if (orderComparison !== 0) return orderComparison;
+
+      const leftItemCode = normalizeLooseString(left?.item?.item_code || "");
+      const rightItemCode = normalizeLooseString(right?.item?.item_code || "");
+      return leftItemCode.localeCompare(rightItemCode, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+    });
+
+    const vendorsMap = new Map();
+    let totalOrderQuantity = 0;
+
+    for (const orderEntry of reportOrders) {
+      const vendorName = normalizeLooseString(orderEntry?.vendor || "") || "N/A";
+      const brandName = normalizeLooseString(orderEntry?.brand || "") || "N/A";
+      const parsedOrderQuantity = Number(orderEntry?.quantity);
+      const orderQuantity = Number.isFinite(parsedOrderQuantity)
+        ? Math.max(0, parsedOrderQuantity)
+        : 0;
+
+      const row = {
+        _id: String(orderEntry?._id || ""),
+        brand: brandName,
+        order_id: normalizeLooseString(orderEntry?.order_id || ""),
+        order_date: orderEntry?.order_date || null,
+        ETD: orderEntry?.ETD || null,
+        item_code: normalizeLooseString(orderEntry?.item?.item_code || ""),
+        description: normalizeLooseString(orderEntry?.item?.description || ""),
+        order_quantity: orderQuantity,
+        status: normalizeLooseString(orderEntry?.status || selectedStatus),
+      };
+
+      totalOrderQuantity += orderQuantity;
+
+      if (!vendorsMap.has(vendorName)) {
+        vendorsMap.set(vendorName, {
+          vendor: vendorName,
+          total_rows: 0,
+          total_order_quantity: 0,
+          rows: [],
+        });
+      }
+
+      const vendorEntry = vendorsMap.get(vendorName);
+      vendorEntry.rows.push(row);
+      vendorEntry.total_rows += 1;
+      vendorEntry.total_order_quantity += orderQuantity;
+    }
+
+    const vendors = Array.from(vendorsMap.values());
+
+    return res.status(200).json({
+      success: true,
+      filters: {
+        brand: selectedBrand || "",
+        vendor: selectedVendor || "",
+        status: selectedStatus,
+        brand_options: normalizeDistinctValues(brandOptionsRaw),
+        vendor_options: normalizeDistinctValues(vendorOptionsRaw),
+        status_options: [...ORDER_STATUS_SEQUENCE],
+      },
+      summary: {
+        vendors_count: vendors.length,
+        rows_count: reportOrders.length,
+        total_order_quantity: totalOrderQuantity,
+      },
+      vendors,
+    });
+  } catch (error) {
+    console.error("PO Status Report Error:", error);
+    return res.status(500).json({
+      message: error?.message || "Failed to fetch PO status report",
+    });
+  }
+};
+
 // Get Order by ID
 exports.getOrderById = async (req, res) => {
   try {
-    const order = await Order.find({
+    const orders = await Order.find({
       ...ACTIVE_ORDER_MATCH,
       order_id: req.params.id,
-    }).populate({
-      path: "qc_record",
-      populate: {
-        path: "inspector",
-        select: "name role",
-      },
-    });
+    })
+      .populate({
+        path: "qc_record",
+        populate: {
+          path: "inspector",
+          select: "name role",
+        },
+      })
+      .lean();
 
-    if (!order) {
+    if (!Array.isArray(orders) || orders.length === 0) {
       return res.status(404).json({ error: "Not found" });
     }
 
-    res.status(200).json(order);
+    const itemCodes = [
+      ...new Set(
+        orders
+          .map((orderRow) => normalizeLooseString(orderRow?.item?.item_code))
+          .filter(Boolean),
+      ),
+    ];
+    const itemDocs = itemCodes.length > 0
+      ? await Item.find({ code: { $in: itemCodes } })
+        .select(
+          [
+            "code",
+            "cbm",
+            "inspected_item_LBH",
+            "inspected_item_top_LBH",
+            "inspected_item_bottom_LBH",
+            "inspected_box_LBH",
+            "inspected_box_top_LBH",
+            "inspected_box_bottom_LBH",
+            "inspected_top_LBH",
+            "inspected_bottom_LBH",
+            "pis_item_LBH",
+            "pis_item_top_LBH",
+            "pis_item_bottom_LBH",
+            "pis_box_LBH",
+            "pis_box_top_LBH",
+            "pis_box_bottom_LBH",
+          ].join(" "),
+        )
+        .lean()
+      : [];
+    const itemMap = new Map(
+      itemDocs.map((itemDoc) => [
+        normalizeLooseString(itemDoc?.code).toLowerCase(),
+        itemDoc,
+      ]),
+    );
+
+    const enrichedOrders = orders.map((orderRow) => {
+      const itemCodeKey = normalizeLooseString(orderRow?.item?.item_code).toLowerCase();
+      const itemDoc = itemMap.get(itemCodeKey) || null;
+      return {
+        ...orderRow,
+        cbm_summary: resolveOrderRowCbmSummary(itemDoc, orderRow?.quantity),
+      };
+    });
+
+    res.status(200).json(enrichedOrders);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -4593,6 +4932,8 @@ exports.getTodayEtdOrdersByBrand = async (req, res) => {
           brand: { $first: "$brand" },
           vendor: { $first: "$vendor" },
           ETD: { $first: "$ETD" },
+          revised_ETD: { $min: "$revised_ETD" },
+          effective_ETD: { $min: buildEffectiveEtdExpression() },
           itemCount: { $sum: 1 },
           pendingCount: {
             $sum: {
@@ -4655,6 +4996,8 @@ exports.getTodayEtdOrdersByBrand = async (req, res) => {
           brand: 1,
           vendor: 1,
           ETD: 1,
+          revised_ETD: 1,
+          effective_ETD: 1,
           itemCount: 1,
           status: 1,
           inspectionDoneCount: 1,
@@ -5313,6 +5656,7 @@ exports.exportOrdersDb = async (req, res) => {
       { key: "shipment_index", header: "Shipment Index" },
       { key: "shipment_stuffing_date", header: "Shipment Stuffing Date" },
       { key: "shipment_container", header: "Shipment Container" },
+      { key: "shipment_invoice_number", header: "Shipment Invoice Number" },
       { key: "shipment_quantity", header: "Shipment Quantity" },
       { key: "shipment_pending", header: "Shipment Pending" },
       { key: "shipment_remarks", header: "Shipment Remarks" },
@@ -5396,6 +5740,7 @@ exports.exportOrdersDb = async (req, res) => {
             shipment_index: "",
             shipment_stuffing_date: "",
             shipment_container: "",
+            shipment_invoice_number: "N/A",
             shipment_quantity: 0,
             shipment_pending: shippingPendingQuantity,
             shipment_remarks: "",
@@ -5421,6 +5766,9 @@ exports.exportOrdersDb = async (req, res) => {
             "",
           ),
           shipment_container: normalizeText(shipmentEntry?.container),
+          shipment_invoice_number: normalizeShipmentInvoiceNumber(
+            shipmentEntry?.invoice_number,
+          ),
           shipment_quantity: shipmentQuantity,
           shipment_pending: Number.isFinite(Number(shipmentEntry?.pending))
             ? pendingValue
@@ -6101,6 +6449,7 @@ exports.exportShipmentsDb = async (req, res) => {
       { key: "etd", header: "ETD" },
       { key: "stuffing_date", header: "Stuffing Date" },
       { key: "container", header: "Container Number" },
+      { key: "invoice_number", header: "Invoice Number" },
       { key: "quantity", header: "Shipment Quantity" },
       { key: "pending", header: "Pending" },
       { key: "remaining_remarks", header: "Remarks" },
@@ -6118,6 +6467,7 @@ exports.exportShipmentsDb = async (req, res) => {
       etd: formatDateDDMMYYYY(row?.ETD, ""),
       stuffing_date: formatDateDDMMYYYY(row?.stuffing_date, ""),
       container: String(row?.container || "").trim(),
+      invoice_number: normalizeShipmentInvoiceNumber(row?.invoice_number),
       quantity: Number(row?.quantity || 0),
       pending: Number(row?.pending || 0),
       remaining_remarks: String(row?.remaining_remarks || "").trim(),
@@ -6235,6 +6585,7 @@ exports.getShipments = async (req, res) => {
             shipment_id: null,
             stuffing_date: null,
             container: "",
+            invoice_number: "N/A",
             quantity: normalizedOrderQuantity,
             pending: normalizedOrderQuantity,
             remaining_remarks: "",
@@ -6251,6 +6602,7 @@ exports.getShipments = async (req, res) => {
           shipment_id: entry?._id || `${order?._id || "order"}-${index}`,
           stuffing_date: entry?.stuffing_date || null,
           container: entry?.container || "",
+          invoice_number: normalizeShipmentInvoiceNumber(entry?.invoice_number),
           quantity: Number.isFinite(parsedShipmentQuantity)
             ? parsedShipmentQuantity
             : 0,
@@ -7228,7 +7580,15 @@ exports.syncZeroQuantityOrdersArchive = async (req, res) => {
 
 exports.finalizeOrder = async (req, res) => {
   try {
-    const { stuffing_date, container, quantity, remarks } = req.body;
+    const {
+      stuffing_date,
+      container,
+      quantity,
+      remarks,
+      invoice_number,
+      invoiceNumber,
+      invoice,
+    } = req.body;
 
     const order = await Order.findOne({
       _id: req.params.id,
@@ -7244,9 +7604,17 @@ exports.finalizeOrder = async (req, res) => {
       });
     }
 
-    if (!stuffing_date || container === undefined || quantity === undefined) {
+    if (
+      !stuffing_date ||
+      container === undefined ||
+      quantity === undefined ||
+      (invoice_number === undefined &&
+        invoiceNumber === undefined &&
+        invoice === undefined)
+    ) {
       return res.status(400).json({
-        message: "stuffing_date, container and quantity are required",
+        message:
+          "stuffing_date, container, invoice_number and quantity are required",
       });
     }
 
@@ -7259,6 +7627,16 @@ exports.finalizeOrder = async (req, res) => {
     if (!parsedContainer) {
       return res.status(400).json({
         message: "container must be a valid non-empty string",
+      });
+    }
+
+    const parsedInvoiceNumber = normalizeShipmentInvoiceNumber(
+      invoice_number ?? invoiceNumber ?? invoice,
+      "",
+    );
+    if (!parsedInvoiceNumber) {
+      return res.status(400).json({
+        message: "invoice_number must be a valid non-empty string",
       });
     }
 
@@ -7308,6 +7686,7 @@ exports.finalizeOrder = async (req, res) => {
     order.shipment = order.shipment || [];
     order.shipment.push({
       container: parsedContainer,
+      invoice_number: parsedInvoiceNumber,
       stuffing_date: parsedStuffingDate,
       quantity: parsedQuantity,
       pending,

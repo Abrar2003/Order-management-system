@@ -12,6 +12,7 @@ import OrderEtdWithHistory from "../components/OrderEtdWithHistory";
 import { archiveOrder } from "../services/orders.service";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatDateDDMMYYYY } from "../utils/date";
+import { formatCbm } from "../utils/cbm";
 import "../App.css";
 
 const toSafeNumber = (value) => {
@@ -43,6 +44,25 @@ const getPendingDisplayQuantity = (order) => {
   const inspectionDoneQuantity = getInspectionDoneQuantity(order);
   const shippedQuantity = getShippedQuantity(order);
   return Math.max(0, inspectionDoneQuantity - shippedQuantity);
+};
+
+const formatResolvedCbm = (value) => {
+  if (value === null || value === undefined || value === "") return "N/A";
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return "N/A";
+  return formatCbm(parsed);
+};
+
+const renderOrderCbmCell = (order) => {
+  const perItemCbm = order?.cbm_summary?.per_item;
+  const totalCbm = order?.cbm_summary?.total;
+
+  return (
+    <div className="d-flex flex-column gap-1">
+      <span>Item: {formatResolvedCbm(perItemCbm)}</span>
+      <span>Total: {formatResolvedCbm(totalCbm)}</span>
+    </div>
+  );
 };
 
 const Orders = () => {
@@ -193,6 +213,7 @@ const Orders = () => {
                 <OrderEtdWithHistory
                   orderId={primaryOrder?.order_id}
                   etd={primaryOrder?.ETD}
+                  revisedEtd={primaryOrder?.revised_ETD}
                   className="ms-1"
                 />
               </span>
@@ -244,6 +265,7 @@ const Orders = () => {
                       <th>Quantity</th>
                       <th>Open Quantity</th>
                       <th>Packed</th>
+                      <th className="orders-cbm-col">CBM</th>
                       <th>Status</th>
                       <th>Revised ETD</th>
                       {canManageOrders && <th className="orders-action-col">Action</th>}
@@ -257,6 +279,7 @@ const Orders = () => {
                         <td>{order.quantity}</td>
                         <td>{getOpenInspectionQuantity(order)}</td>
                         <td>{getPendingDisplayQuantity(order)}</td>
+                        <td className="orders-cbm-col">{renderOrderCbmCell(order)}</td>
                         <td>{order.status}</td>
                         <td>{formatDateDDMMYYYY(order?.revised_ETD)}</td>
                         {canManageOrders && (
@@ -338,7 +361,7 @@ const Orders = () => {
 
                     {orders.length === 0 && (
                       <tr>
-                        <td colSpan={canManageOrders ? 8 : 7} className="text-center py-4">
+                        <td colSpan={canManageOrders ? 9 : 8} className="text-center py-4">
                           No orders found
                         </td>
                       </tr>
