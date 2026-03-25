@@ -665,7 +665,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const barcodeDetectorRef = useRef(null);
   const barcodeReaderRef = useRef(null);
   const barcodeReaderControlsRef = useRef(null);
-  const lockBarcodeField = qc?.barcode > 0 && !canRewriteLatestInspectionRecord;
+  const canEditLockedQcFields = canRewriteLatestInspectionRecord || isQcUser;
+  const lockBarcodeField = qc?.barcode > 0 && !canEditLockedQcFields;
   const latestInspectionRecord = getLatestInspectionRecord(qc);
 
   useEffect(() => {
@@ -1395,18 +1396,29 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     const requestType = String(qc?.request_type || "").trim().toUpperCase();
     const isAqlRequest = requestType === "AQL";
     const requestedQuantityLimit = getLatestRequestedQuantity(qc);
-    const aqlBaseQuantity =
+    const aqlRequestedQuantity =
       requestedQuantityLimit > 0 ? requestedQuantityLimit : clientDemandQuantity;
-    const aqlSampleQuantity = computeAqlSampleQuantity(aqlBaseQuantity);
+    const aqlSampleQuantity = computeAqlSampleQuantity(aqlRequestedQuantity);
 
     if ((qcPassed > 0 || hasLabelUpdate) && qcChecked <= 0) {
       setError("QC checked must be greater than 0 for updates.");
       return;
     }
 
-    if (qcPassed > qcChecked && qcChecked > 0) {
+    if (!isAqlRequest && qcPassed > qcChecked && qcChecked > 0) {
       setError("Passed cannot exceed checked quantity.");
       return;
+    }
+
+    if (isAqlRequest && form.qc_passed !== "") {
+      if (qcPassed < 1) {
+        setError("For AQL, passed quantity must be at least 1.");
+        return;
+      }
+      if (qcPassed > aqlRequestedQuantity) {
+        setError("For AQL, passed quantity cannot exceed requested quantity.");
+        return;
+      }
     }
 
     const existingItemMaster = qc?.item_master || {};
@@ -1438,9 +1450,9 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       bottomRemark: "base",
     }).filter((entry) => hasMeaningfulMeasuredSize(entry));
     const lockInspectedItemSection =
-      !canRewriteLatestInspectionRecord && existingItemSizeEntries.length > 0;
+      !canEditLockedQcFields && existingItemSizeEntries.length > 0;
     const lockInspectedBoxSection =
-      !canRewriteLatestInspectionRecord && existingBoxSizeEntries.length > 0;
+      !canEditLockedQcFields && existingBoxSizeEntries.length > 0;
     const inspectedItemSizePayload = parseMeasuredSizeEntries({
       entries: form.inspected_item_sizes,
       count: form.inspected_item_count,
@@ -1541,7 +1553,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
     const barcodeValue = form.barcode.trim();
     const parseOptionalCbm = (value, label) => {
-      if (cbmLockedByLbh && !canRewriteLatestInspectionRecord) {
+      if (cbmLockedByLbh && !canEditLockedQcFields) {
         return { hasValue: false, value: null };
       }
       const raw = value.trim();
@@ -1724,7 +1736,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       }
 
       if (
-        (!cbmLockedByLbh || canRewriteLatestInspectionRecord) &&
+        (!cbmLockedByLbh || canEditLockedQcFields) &&
         (isAdminRewriteMode || hasTotalCbmInput || hasTopOrBottomInput)
       ) {
         if (hasTotalCbmInput) {
@@ -1770,9 +1782,15 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       }
 
       if (!isAdminRewriteMode) {
-        if (!qc.packed_size && form.packed_size) payload.packed_size = true;
-        if (!qc.finishing && form.finishing) payload.finishing = true;
-        if (!qc.branding && form.branding) payload.branding = true;
+        if (Boolean(qc?.packed_size) !== Boolean(form.packed_size)) {
+          payload.packed_size = Boolean(form.packed_size);
+        }
+        if (Boolean(qc?.finishing) !== Boolean(form.finishing)) {
+          payload.finishing = Boolean(form.finishing);
+        }
+        if (Boolean(qc?.branding) !== Boolean(form.branding)) {
+          payload.branding = Boolean(form.branding);
+        }
       }
 
       return payload;
@@ -1807,9 +1825,17 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         ...otherLabels,
         ...labelsForUpdate,
       ]);
-      const totalOfferedAfterRewrite = otherOffered + offeredQuantity;
+      const rawTotalOfferedAfterRewrite = otherOffered + offeredQuantity;
       const totalCheckedAfterRewrite = otherChecked + qcChecked;
-      const totalPassedAfterRewrite = otherPassed + qcPassed;
+      const rawTotalPassedAfterRewrite = otherPassed + qcPassed;
+      const shouldAutoCompleteAqlAfterRewrite =
+        isAqlRequest && rawTotalPassedAfterRewrite > 0;
+      const totalOfferedAfterRewrite = shouldAutoCompleteAqlAfterRewrite
+        ? Math.max(rawTotalOfferedAfterRewrite, aqlRequestedQuantity)
+        : rawTotalOfferedAfterRewrite;
+      const totalPassedAfterRewrite = shouldAutoCompleteAqlAfterRewrite
+        ? aqlRequestedQuantity
+        : rawTotalPassedAfterRewrite;
       const totalLabelsAfterRewrite = allLabelsAfterRewrite.length;
       const maxLabelsAllowed = hasSplitTopBottomForLabels
         ? Math.max(0, totalCheckedAfterRewrite) * 2
@@ -1876,7 +1902,10 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
               vendor_requested: Number(latestInspectionRecord?.vendor_requested || 0) || 0,
               vendor_offered: offeredQuantity,
               checked: qcChecked,
-              passed: qcPassed,
+              passed:
+                isAqlRequest && qcPassed > 0
+                  ? Math.max(1, Math.min(qcPassed, qcChecked > 0 ? qcChecked : qcPassed))
+                  : qcPassed,
               pending_after: pendingAfterRewrite,
               cbm: {
                 top: String(updatedQc?.cbm?.top ?? "0"),
@@ -1900,11 +1929,17 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       return;
     }
 
-    const nextNetOffered =
+    const rawNextNetOffered =
       (qc.quantities?.vendor_provision || 0) + offeredQuantity;
-    const totalOfferedNext = nextNetOffered;
+    const nextPassedRaw = (qc.quantities?.qc_passed || 0) + qcPassed;
+    const shouldAutoCompleteAql = isAqlRequest && nextPassedRaw > 0;
+    const totalOfferedNext = shouldAutoCompleteAql
+      ? Math.max(rawNextNetOffered, aqlRequestedQuantity)
+      : rawNextNetOffered;
     const nextChecked = (qc.quantities?.qc_checked || 0) + qcChecked;
-    const nextPassed = (qc.quantities?.qc_passed || 0) + qcPassed;
+    const nextPassed = shouldAutoCompleteAql
+      ? aqlRequestedQuantity
+      : nextPassedRaw;
     const existingLabelsSet = new Set(normalizeLabels(qc?.labels));
     const incomingNewLabels = labelsForUpdate.filter(
       (label) => !existingLabelsSet.has(label),
@@ -2046,9 +2081,9 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     bottomRemark: "base",
   }).filter((entry) => hasMeaningfulMeasuredSize(entry));
   const lockInspectedItemSection =
-    !canRewriteLatestInspectionRecord && existingItemSizeEntries.length > 0;
+    !canEditLockedQcFields && existingItemSizeEntries.length > 0;
   const lockInspectedBoxSection =
-    !canRewriteLatestInspectionRecord && existingBoxSizeEntries.length > 0;
+    !canEditLockedQcFields && existingBoxSizeEntries.length > 0;
   const hasLockedInspectedWeight = lockInspectedItemSection || lockInspectedBoxSection;
   const hasAnyLockedInspectedLbh = hasLockedInspectedWeight;
   const displayedItemEntries = ensureMeasuredSizeEntryCount(
@@ -2064,10 +2099,10 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     displayedBoxEntries.some((entry) => hasMeaningfulMeasuredSize(entry));
   const disableCbmTotal =
     hasTopOrBottomCbmInput ||
-    (cbmLockedByLbh && !canRewriteLatestInspectionRecord);
+    (cbmLockedByLbh && !canEditLockedQcFields);
   const disableCbmTopBottom =
     hasTotalCbmInput ||
-    (cbmLockedByLbh && !canRewriteLatestInspectionRecord);
+    (cbmLockedByLbh && !canEditLockedQcFields);
   const renderMeasuredSizeSection = ({
     title,
     countName,
@@ -2309,7 +2344,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   onChange={handleChange}
                   min="0"
                   step="any"
-                  disabled={true}
+                  disabled={disableCbmTotal}
                 />
               </div>
 
@@ -2323,7 +2358,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   onChange={handleChange}
                   min="0"
                   step="any"
-                  disabled={true}
+                  disabled={disableCbmTopBottom}
                 />
               </div>
 
@@ -2337,11 +2372,11 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   onChange={handleChange}
                   min="0"
                   step="any"
-                  disabled={true}
+                  disabled={disableCbmTopBottom}
                 />
               </div>
 
-              {cbmLockedByLbh && !canRewriteLatestInspectionRecord && (
+              {cbmLockedByLbh && !canEditLockedQcFields && (
                 <div className="col-12">
                   <div className="small text-secondary">
                     CBM fields are locked because inspected sizes are present. Update the size entries to recalculate CBM.
@@ -2353,7 +2388,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 <h6 className="mb-0">Inspected Measurements</h6>
               </div>
 
-              {hasAnyLockedInspectedLbh && (
+              {hasAnyLockedInspectedLbh && !canEditLockedQcFields && (
                 <div className="col-12">
                   <div className="small text-secondary">
                     Existing inspected measurement entries are locked after first update.
@@ -2501,7 +2536,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     name="packed_size"
                     checked={form.packed_size}
                     onChange={handleChange}
-                    disabled={qc.packed_size && !canRewriteLatestInspectionRecord}
+                    disabled={!canEditLockedQcFields && qc.packed_size}
                   />
                   <label
                     htmlFor="packed_size"
@@ -2524,7 +2559,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     name="finishing"
                     checked={form.finishing}
                     onChange={handleChange}
-                    disabled={qc.finishing && !canRewriteLatestInspectionRecord}
+                    disabled={!canEditLockedQcFields && qc.finishing}
                   />
                   <label
                     htmlFor="finishing"
@@ -2545,7 +2580,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     name="branding"
                     checked={form.branding}
                     onChange={handleChange}
-                    disabled={qc.branding && !canRewriteLatestInspectionRecord}
+                    disabled={!canEditLockedQcFields && qc.branding}
                   />
                   <label
                     htmlFor="branding"

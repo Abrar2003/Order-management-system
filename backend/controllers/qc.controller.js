@@ -2800,6 +2800,7 @@ exports.updateQC = async (req, res) => {
           .trim()
           .toLowerCase() === "true");
     const allowAdminRewrite = adminRewriteLatestRecord;
+    const allowQcFieldEdits = allowAdminRewrite || isQcUser;
     const isInspectionDone = qc?.order?.status === "Inspection Done";
 
     if (!hasElevatedAccess && isInspectionDone) {
@@ -3373,7 +3374,7 @@ exports.updateQC = async (req, res) => {
       });
     }
 
-    if (hasInspectedLbhUpdate && !allowAdminRewrite) {
+    if (hasInspectedLbhUpdate && !allowQcFieldEdits) {
       const assertWriteOnceLbh = (incomingValue, existingValue, fieldName) => {
         if (!incomingValue) return;
         if (
@@ -3418,7 +3419,7 @@ exports.updateQC = async (req, res) => {
       );
     }
 
-    if (hasInspectedWeightUpdate && !allowAdminRewrite) {
+    if (hasInspectedWeightUpdate && !allowQcFieldEdits) {
       for (const fieldKey of INSPECTED_WEIGHT_FIELD_KEYS) {
         const parsedField = parsedInspectedWeightFields[fieldKey];
         if (!parsedField?.hasInput) continue;
@@ -3481,7 +3482,7 @@ exports.updateQC = async (req, res) => {
       hasCompletePositiveLbh(effectiveInspectedTopLbh) ||
       hasCompletePositiveLbh(effectiveInspectedBottomLbh);
 
-    if (hasCbmUpdate && cbmLockedByLbh && !allowAdminRewrite) {
+    if (hasCbmUpdate && cbmLockedByLbh && !allowQcFieldEdits) {
       return res.status(400).json({
         message:
           "CBM fields are locked because inspected LBH is present. Update LBH instead.",
@@ -3539,7 +3540,7 @@ exports.updateQC = async (req, res) => {
       ──────────────────────── */
 
     if (barcode !== undefined) {
-      if (!allowAdminRewrite && !isAdmin && qc.barcode > 0 && Number(barcode) !== qc.barcode) {
+      if (!allowQcFieldEdits && !isAdmin && qc.barcode > 0 && Number(barcode) !== qc.barcode) {
         return res
           .status(400)
           .json({ message: "barcode can only be set once" });
@@ -3556,7 +3557,7 @@ exports.updateQC = async (req, res) => {
       if (typeof value !== "boolean") {
         throw new Error(`${name} must be boolean`);
       }
-      if (allowAdminRewrite) {
+      if (allowQcFieldEdits) {
         qc[field] = value;
         return;
       }
@@ -3683,9 +3684,14 @@ exports.updateQC = async (req, res) => {
       });
     }
 
-    if (isAqlRequest && addPassed > addChecked) {
+    if (
+      isAqlRequest &&
+      qc_passed !== undefined &&
+      addPassed > 0 &&
+      addPassed > aqlBaseQuantity
+    ) {
       return res.status(400).json({
-        message: "For AQL, passed quantity cannot exceed checked quantity",
+        message: "For AQL, passed quantity cannot exceed quantity requested",
       });
     }
 
@@ -3699,15 +3705,22 @@ exports.updateQC = async (req, res) => {
       nextVendorProvision = toNonNegativeNumber(vendor_provision, 0);
       nextChecked = toNonNegativeNumber(qc_checked, 0);
       nextPassedInput = toNonNegativeNumber(qc_passed, 0);
-      nextPassed = nextPassedInput;
     } else {
       nextVendorProvision = qc.quantities.vendor_provision + addProvision;
       nextChecked = qc.quantities.qc_checked + addChecked;
       nextPassedInput = qc.quantities.qc_passed + addPassed;
-      shouldAutoPassAql = isAqlRequest && addChecked > 0;
-      nextPassed = shouldAutoPassAql
-        ? aqlBaseQuantity
-        : nextPassedInput;
+    }
+
+    shouldAutoPassAql = isAqlRequest && nextPassedInput > 0;
+    nextPassed = shouldAutoPassAql
+      ? aqlBaseQuantity
+      : nextPassedInput;
+
+    if (shouldAutoPassAql) {
+      nextVendorProvision = Math.max(
+        toNonNegativeNumber(nextVendorProvision, 0),
+        aqlBaseQuantity,
+      );
     }
 
     if (nextVendorProvision < 0) {

@@ -335,7 +335,7 @@ const AlignQCModal = ({
                 <div className="small text-secondary mt-1">
                   {quantityRequested === ""
                     ? "Enter requested quantity to calculate the AQL sample."
-                    : `AQL sample uses 10% of requested quantity (${aqlSampleQuantity}) and backend auto-handles pass logic for that requested batch.`}
+                    : `AQL sample uses 10% of requested quantity (${aqlSampleQuantity}). Any positive AQL pass will complete the full requested quantity.`}
                 </div>
               )}
             </div>
