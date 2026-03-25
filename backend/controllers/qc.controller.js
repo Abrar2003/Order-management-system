@@ -1019,6 +1019,98 @@ const resolveLatestRequestEntry = (requestHistory = []) => {
   return requestHistory[requestHistory.length - 1] || null;
 };
 
+const syncQcCurrentRequestFieldsFromHistory = (
+  qcDoc,
+  inspectionRecords = [],
+) => {
+  if (!qcDoc) return false;
+
+  let latestRequestEntry = resolveLatestRequestEntry(qcDoc?.request_history || []);
+
+  if (!latestRequestEntry) {
+    const latestInspection = [...(Array.isArray(inspectionRecords) ? inspectionRecords : [])]
+      .sort((left, right) => {
+        const leftTime = Math.max(
+          toSortableTimestamp(left?.requested_date),
+          toSortableTimestamp(left?.inspection_date),
+          toSortableTimestamp(left?.createdAt),
+        );
+        const rightTime = Math.max(
+          toSortableTimestamp(right?.requested_date),
+          toSortableTimestamp(right?.inspection_date),
+          toSortableTimestamp(right?.createdAt),
+        );
+        return rightTime - leftTime;
+      })[0];
+
+    if (!latestInspection) return false;
+
+    latestRequestEntry = {
+      request_date:
+        latestInspection?.requested_date ||
+        latestInspection?.inspection_date ||
+        qcDoc?.request_date ||
+        "",
+      request_type: qcDoc?.request_type || QC_REQUEST_TYPES.FULL,
+      quantity_requested:
+        latestInspection?.vendor_requested ??
+        qcDoc?.quantities?.quantity_requested ??
+        0,
+      inspector: latestInspection?.inspector || qcDoc?.inspector || null,
+      remarks: qcDoc?.remarks || "",
+    };
+  }
+
+  let hasChanges = false;
+  const nextRequestDate = normalizeText(
+    latestRequestEntry?.request_date || qcDoc?.request_date || "",
+  );
+  if (nextRequestDate && String(qcDoc?.request_date || "") !== nextRequestDate) {
+    qcDoc.request_date = nextRequestDate;
+    hasChanges = true;
+  }
+
+  const nextRequestType = normalizeQcRequestType(
+    latestRequestEntry?.request_type || qcDoc?.request_type,
+  );
+  if (String(qcDoc?.request_type || "") !== nextRequestType) {
+    qcDoc.request_type = nextRequestType;
+    hasChanges = true;
+  }
+
+  const currentInspectorId = String(
+    qcDoc?.inspector?._id || qcDoc?.inspector || "",
+  ).trim();
+  const nextInspectorId = String(
+    latestRequestEntry?.inspector?._id || latestRequestEntry?.inspector || "",
+  ).trim();
+  if (nextInspectorId !== currentInspectorId) {
+    qcDoc.inspector = nextInspectorId || null;
+    hasChanges = true;
+  }
+
+  const currentRequestedQty = toNonNegativeNumber(
+    qcDoc?.quantities?.quantity_requested,
+    0,
+  );
+  const nextRequestedQty = toNonNegativeNumber(
+    latestRequestEntry?.quantity_requested,
+    currentRequestedQty,
+  );
+  if (currentRequestedQty !== nextRequestedQty && qcDoc?.quantities) {
+    qcDoc.quantities.quantity_requested = nextRequestedQty;
+    hasChanges = true;
+  }
+
+  const nextRemarks = String(latestRequestEntry?.remarks || "");
+  if (String(qcDoc?.remarks || "") !== nextRemarks) {
+    qcDoc.remarks = nextRemarks;
+    hasChanges = true;
+  }
+
+  return hasChanges;
+};
+
 const upsertInspectionRecordForRequest = async ({
   qcDoc,
   inspectorId,
@@ -7157,6 +7249,9 @@ exports.deleteInspectionRecord = async (req, res) => {
     const removedChecked = Number(inspection?.checked || 0);
     const removedPassed = Number(inspection?.passed || 0);
     const removedProvision = Number(inspection?.vendor_offered || 0);
+    const deletedRequestHistoryId = String(
+      inspection?.request_history_id || "",
+    ).trim();
 
     qc.quantities.qc_checked = Math.max(0, currentChecked - removedChecked);
     qc.quantities.qc_passed = Math.max(0, currentPassed - removedPassed);
@@ -7174,9 +7269,23 @@ exports.deleteInspectionRecord = async (req, res) => {
       _id: { $ne: inspection._id },
     })
       .select(
-        "inspection_date createdAt labels_added request_history_id checked passed vendor_offered label_ranges goods_not_ready status",
+        "inspection_date requested_date createdAt inspector labels_added request_history_id checked passed vendor_requested vendor_offered label_ranges goods_not_ready status",
       )
       .lean();
+
+    if (
+      deletedRequestHistoryId &&
+      Array.isArray(qc.request_history) &&
+      !remainingInspections.some(
+        (entry) =>
+          String(entry?.request_history_id || "").trim() ===
+          deletedRequestHistoryId,
+      )
+    ) {
+      qc.request_history = qc.request_history.filter(
+        (entry) => String(entry?._id || "").trim() !== deletedRequestHistoryId,
+      );
+    }
 
     const recalculatedLabels = normalizeLabels(
       remainingInspections.flatMap((entry) =>
@@ -7191,6 +7300,7 @@ exports.deleteInspectionRecord = async (req, res) => {
       syncQcRequestHistoryStatuses(qc, remainingInspections, {
         user: req.user,
       });
+      syncQcCurrentRequestFieldsFromHistory(qc, remainingInspections);
 
       const latestRecord = [...remainingInspections].sort((a, b) => {
         const aTime = Math.max(
