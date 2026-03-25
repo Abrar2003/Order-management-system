@@ -13,6 +13,7 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
     toDDMMYYYYInputValue(new Date(), "") || getTodayDDMMYYYY(),
   );
   const [containerNumber, setContainerNumber] = useState("");
+  const [invoiceNumber, setInvoiceNumber] = useState("");
   const [shipmentQuantity, setShipmentQuantity] = useState("");
   const [remarks, setRemarks] = useState("");
   const [saving, setSaving] = useState(false);
@@ -34,8 +35,15 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
     setError("");
     const stuffingDateIso = toISODateString(stuffingDate);
 
-    if (!stuffingDate || containerNumber === "" || shipmentQuantity === "") {
-      setError("Stuffing date, container number and quantity are required.");
+    if (
+      !stuffingDate ||
+      containerNumber === "" ||
+      invoiceNumber === "" ||
+      shipmentQuantity === ""
+    ) {
+      setError(
+        "Stuffing date, container number, invoice number and quantity are required.",
+      );
       return;
     }
     if (!isValidDDMMYYYY(stuffingDate) || !stuffingDateIso) {
@@ -44,10 +52,16 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
     }
 
     const parsedContainer = containerNumber.trim();
+    const parsedInvoiceNumber = invoiceNumber.trim();
     const parsedQuantity = Number(shipmentQuantity);
 
     if (!parsedContainer) {
       setError("Container number must be a non-empty value.");
+      return;
+    }
+
+    if (!parsedInvoiceNumber) {
+      setError("Invoice number must be a non-empty value.");
       return;
     }
 
@@ -66,6 +80,7 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
       await axios.patch(`/orders/finalize-order/${order._id}`, {
         stuffing_date: stuffingDateIso,
         container: parsedContainer,
+        invoice_number: parsedInvoiceNumber,
         quantity: parsedQuantity,
         remarks
       });
@@ -125,6 +140,16 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
                 className="form-control"
                 value={containerNumber}
                 onChange={(e) => setContainerNumber(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label className="form-label">Invoice Number</label>
+              <input
+                type="text"
+                className="form-control"
+                value={invoiceNumber}
+                onChange={(e) => setInvoiceNumber(e.target.value)}
               />
             </div>
 

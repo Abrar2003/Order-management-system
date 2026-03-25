@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { formatDateDDMMYYYY } from "../utils/date";
+import { useEffect, useMemo, useState } from "react";
+import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { getOrderRevisedEtdHistory } from "../services/orders.service";
 import "../App.css";
 
@@ -15,6 +15,12 @@ const createDefaultState = () => ({
   error: "",
 });
 
+const toDateKey = (value) => toISODateString(value);
+const toTimestamp = (value) => {
+  const parsed = value ? new Date(value).getTime() : 0;
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
 const normalizeHistoryItems = (items = [], itemCode = "") => {
   const normalizedItemCode = String(itemCode || "").trim().toLowerCase();
   const safeItems = Array.isArray(items) ? items : [];
@@ -28,6 +34,7 @@ const normalizeHistoryItems = (items = [], itemCode = "") => {
       id: String(entry?.id || ""),
       item_code: String(entry?.item_code || "").trim(),
       description: String(entry?.description || "").trim(),
+      current_revised_etd: entry?.current_revised_etd || null,
       history: (Array.isArray(entry?.history) ? entry.history : [])
         .map((historyEntry) => ({
           revised_etd: historyEntry?.revised_etd || null,
@@ -40,7 +47,7 @@ const normalizeHistoryItems = (items = [], itemCode = "") => {
           return rightTime - leftTime;
         }),
     }))
-    .filter((entry) => entry.history.length > 0)
+    .filter((entry) => entry.history.length > 0 || toDateKey(entry?.current_revised_etd))
     .sort((left, right) =>
       left.item_code.localeCompare(right.item_code, undefined, {
         numeric: true,
@@ -49,9 +56,29 @@ const normalizeHistoryItems = (items = [], itemCode = "") => {
     );
 };
 
+const getCurrentRevisedEntry = (entry = {}) => {
+  const currentDateKey = toDateKey(entry?.current_revised_etd);
+  if (!currentDateKey) {
+    return {
+      value: null,
+      updatedAt: null,
+    };
+  }
+
+  const matchingHistoryEntry = (Array.isArray(entry?.history) ? entry.history : []).find(
+    (historyEntry) => toDateKey(historyEntry?.revised_etd) === currentDateKey,
+  );
+
+  return {
+    value: entry?.current_revised_etd || null,
+    updatedAt: matchingHistoryEntry?.updated_at || null,
+  };
+};
+
 const OrderEtdWithHistory = ({
   orderId,
   etd,
+  revisedEtd = "",
   itemCode = "",
   className = "",
   fallback = "N/A",
@@ -63,9 +90,29 @@ const OrderEtdWithHistory = ({
   const [historyState, setHistoryState] = useState(
     () => historyCache.get(cacheKey) || createDefaultState(),
   );
-
-  const formattedEtd = formatDateDDMMYYYY(etd, fallback);
   const hasLookup = Boolean(String(orderId || "").trim());
+  const normalizedItemCode = String(itemCode || "").trim().toLowerCase();
+
+  useEffect(() => {
+    setHistoryState(historyCache.get(cacheKey) || createDefaultState());
+  }, [cacheKey]);
+
+  useEffect(() => {
+    if (!hasLookup) return;
+
+    const revisedEtdKey = toDateKey(revisedEtd);
+    if (!revisedEtdKey) return;
+
+    const cached = historyCache.get(cacheKey);
+    const hasMatchingCurrentValue = Array.isArray(cached?.items)
+      && cached.items.some((entry) => toDateKey(entry?.current_revised_etd) === revisedEtdKey);
+
+    if (hasMatchingCurrentValue) return;
+
+    historyCache.delete(cacheKey);
+    pendingHistoryRequests.delete(cacheKey);
+    setHistoryState(createDefaultState());
+  }, [cacheKey, hasLookup, revisedEtd]);
 
   const loadHistory = async () => {
     if (!hasLookup) return;
@@ -116,13 +163,135 @@ const OrderEtdWithHistory = ({
     setHistoryState(nextState);
   };
 
-  const totalHistoryEntries = useMemo(
+  const historyDisplayValue = useMemo(() => {
+    const candidates = historyState.items
+      .map((entry) => {
+        const currentEntry = getCurrentRevisedEntry(entry);
+        return {
+          value: currentEntry.value,
+          updatedAt: toTimestamp(currentEntry.updatedAt),
+        };
+      })
+      .filter((entry) => toDateKey(entry?.value));
+
+    if (candidates.length === 0) return null;
+
+    candidates.sort((left, right) => right.updatedAt - left.updatedAt);
+    return candidates[0]?.value || null;
+  }, [historyState.items]);
+
+  const displayValue = historyDisplayValue || revisedEtd || etd;
+  const formattedEtd = formatDateDDMMYYYY(displayValue, fallback);
+
+  const tooltipHistoryItems = useMemo(() => {
+    const baseItems =
+      historyState.items.length > 0
+        ? historyState.items
+        : [
+            {
+              id: cacheKey,
+              item_code: String(itemCode || "").trim(),
+              description: "",
+              current_revised_etd: revisedEtd || null,
+              history: [],
+            },
+          ];
+
+    const relevantItems = normalizedItemCode
+      ? baseItems.filter(
+          (entry) =>
+            String(entry?.item_code || "").trim().toLowerCase() === normalizedItemCode,
+        )
+      : baseItems;
+
+    const revisedHistoryByDate = new Map();
+    const addRevisedEntry = (value, updatedAt = null) => {
+      const dateKey = toDateKey(value);
+      if (!dateKey) return;
+
+      const nextTimestamp = toTimestamp(updatedAt);
+      const existing = revisedHistoryByDate.get(dateKey);
+      if (!existing) {
+        revisedHistoryByDate.set(dateKey, {
+          revised_etd: value,
+          updated_at: updatedAt || null,
+          sort_timestamp: nextTimestamp,
+        });
+        return;
+      }
+
+      if (!existing.updated_at || (nextTimestamp && nextTimestamp < existing.sort_timestamp)) {
+        revisedHistoryByDate.set(dateKey, {
+          revised_etd: value,
+          updated_at: updatedAt || null,
+          sort_timestamp: nextTimestamp,
+        });
+      }
+    };
+
+    for (const entry of relevantItems) {
+      const currentEntry = getCurrentRevisedEntry(entry);
+      addRevisedEntry(currentEntry.value, currentEntry.updatedAt);
+
+      for (const historyEntry of Array.isArray(entry?.history) ? entry.history : []) {
+        addRevisedEntry(historyEntry?.revised_etd, historyEntry?.updated_at);
+      }
+    }
+
+    if (relevantItems.length === 1 && revisedEtd) {
+      addRevisedEntry(revisedEtd, null);
+    }
+
+    const originalDateKey = toDateKey(etd);
+    const displayDateKey = toDateKey(displayValue);
+    const hasCurrentRevision = Boolean(displayDateKey && displayDateKey !== originalDateKey);
+
+    const mergedTooltipHistory = [];
+    if (originalDateKey && (hasCurrentRevision || revisedHistoryByDate.size > 0)) {
+      mergedTooltipHistory.push({
+        revised_etd: etd,
+        updated_at: null,
+        meta: "Original ETD",
+      });
+    }
+
+    const previousRevisedHistory = Array.from(revisedHistoryByDate.values())
+      .filter((historyEntry) => {
+        const historyDateKey = toDateKey(historyEntry?.revised_etd);
+        if (!historyDateKey) return false;
+        if (historyDateKey === originalDateKey) return false;
+        if (displayDateKey && historyDateKey === displayDateKey) return false;
+        return true;
+      })
+      .sort((left, right) => left.sort_timestamp - right.sort_timestamp)
+      .map((historyEntry) => ({
+        revised_etd: historyEntry.revised_etd,
+        updated_at: historyEntry.updated_at,
+        meta: "Previous Revised ETD",
+      }));
+
+    mergedTooltipHistory.push(...previousRevisedHistory);
+
+    return mergedTooltipHistory.length > 0
+      ? [
+          {
+            id: cacheKey,
+            item_code: "",
+            description: "",
+            tooltip_history: mergedTooltipHistory,
+          },
+        ]
+      : [];
+  }, [cacheKey, displayValue, etd, historyState.items, normalizedItemCode, revisedEtd]);
+
+  const totalTooltipHistoryEntries = useMemo(
     () =>
-      historyState.items.reduce(
-        (sum, entry) => sum + (Array.isArray(entry?.history) ? entry.history.length : 0),
+      tooltipHistoryItems.reduce(
+        (sum, entry) =>
+          sum + (Array.isArray(entry?.tooltip_history) ? entry.tooltip_history.length : 0),
         0,
       ),
-    [historyState.items],
+    [tooltipHistoryItems],
   );
 
   if (!hasLookup) {
@@ -139,33 +308,33 @@ const OrderEtdWithHistory = ({
       <span className="om-etd-history-label">{formattedEtd}</span>
       <span className="om-etd-history-panel" role="tooltip">
         {historyState.status === "loading" ? (
-          <span className="om-etd-history-empty">Loading revised ETDs...</span>
+          <span className="om-etd-history-empty">Loading ETD history...</span>
         ) : historyState.status === "error" ? (
           <span className="om-etd-history-empty">{historyState.error}</span>
-        ) : totalHistoryEntries === 0 ? (
-          <span className="om-etd-history-empty">No revised ETD history.</span>
+        ) : totalTooltipHistoryEntries === 0 ? (
+          <span className="om-etd-history-empty">No ETD history.</span>
         ) : (
           <>
-            <span className="om-etd-history-title">Revised ETDs</span>
-            {historyState.items.map((entry) => (
+            <span className="om-etd-history-title">ETD History</span>
+            {tooltipHistoryItems.map((entry) => (
               <span
                 key={entry.id || `${entry.item_code}-${entry.description}`}
                 className="om-etd-history-section"
               >
-                {historyState.items.length > 1 ? (
+                {tooltipHistoryItems.length > 1 ? (
                   <span className="om-etd-history-item-code">
                     {entry.item_code || "Item"}
                   </span>
-                ) : null}
-                {entry.history.map((historyEntry, index) => (
+                  ) : null}
+                {entry.tooltip_history.map((historyEntry, index) => (
                   <span
                     key={`${entry.item_code || "item"}-${historyEntry.revised_etd || index}-${historyEntry.updated_at || index}`}
                     className="om-etd-history-row"
                   >
                     <span>{formatDateDDMMYYYY(historyEntry.revised_etd, "-")}</span>
-                    {historyEntry.updated_by_name ? (
+                    {historyEntry.meta ? (
                       <span className="om-etd-history-meta">
-                        {historyEntry.updated_by_name}
+                        {historyEntry.meta}
                       </span>
                     ) : null}
                   </span>

@@ -13,6 +13,7 @@ import "../App.css";
 const makeInitialShipmentRows = (shipment = []) =>
   (Array.isArray(shipment) ? shipment : []).map((entry) => ({
     container: String(entry?.container ?? ""),
+    invoice_number: String(entry?.invoice_number ?? "N/A"),
     stuffing_date: toDDMMYYYYInputValue(entry?.stuffing_date, ""),
     quantity: String(entry?.quantity ?? ""),
     remaining_remarks: String(entry?.remaining_remarks ?? ""),
@@ -20,6 +21,7 @@ const makeInitialShipmentRows = (shipment = []) =>
 
 const createEmptyShipmentRow = () => ({
   container: "",
+  invoice_number: "",
   stuffing_date: getTodayDDMMYYYY(),
   quantity: "",
   remaining_remarks: "",
@@ -50,6 +52,7 @@ const buildAdjustedShipmentPreview = (shipmentRows, targetQuantity) => {
     cumulative += adjustedQty;
     adjustedRows.push({
       container: String(row?.container || "").trim(),
+      invoice_number: String(row?.invoice_number || "").trim() || "N/A",
       stuffing_date: toDDMMYYYYInputValue(row?.stuffing_date, ""),
       quantity: adjustedQty,
       pending: Math.max(0, normalizedTarget - cumulative),
@@ -146,11 +149,13 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
       for (let i = 0; i < form.shipment.length; i += 1) {
         const row = form.shipment[i] || {};
         const container = String(row.container || "").trim();
+        const invoiceNumber = String(row.invoice_number || "").trim();
         const stuffingDate = String(row.stuffing_date || "").trim();
         const stuffingDateIso = toISODateString(stuffingDate);
         const shipmentQty = Number(row.quantity);
 
         if (!container) return `shipment row ${i + 1}: container is required`;
+        if (!invoiceNumber) return `shipment row ${i + 1}: invoice number is required`;
         if (!stuffingDateIso || !isValidDDMMYYYY(stuffingDate)) {
           return `shipment row ${i + 1}: stuffing date must be in DD/MM/YYYY format`;
         }
@@ -190,7 +195,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
       } else {
         adjustedShipmentPreview.forEach((entry, idx) => {
           lines.push(
-            `${idx + 1}) ${entry.container} | ${formatDateDDMMYYYY(entry.stuffing_date, "-")} | qty ${entry.quantity} | pending ${entry.pending} | remarks ${entry.remaining_remarks || "-"}`,
+            `${idx + 1}) ${entry.container} | invoice ${entry.invoice_number || "N/A"} | ${formatDateDDMMYYYY(entry.stuffing_date, "-")} | qty ${entry.quantity} | pending ${entry.pending} | remarks ${entry.remaining_remarks || "-"}`,
           );
         });
       }
@@ -218,6 +223,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
       payload.quantity = Number(form.quantity);
       payload.shipment = form.shipment.map((entry) => ({
         container: String(entry?.container || "").trim(),
+        invoice_number: String(entry?.invoice_number || "").trim(),
         stuffing_date: toISODateString(entry?.stuffing_date),
         quantity: Number(entry?.quantity),
         remaining_remarks: String(entry?.remaining_remarks ?? "").trim(),
@@ -334,17 +340,18 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
               <table className="table table-sm table-striped align-middle mb-0">
                 <thead>
                   <tr>
-                    <th style={{ width: "18%" }}>Container</th>
-                    <th style={{ width: "18%" }}>Stuffing Date</th>
-                    <th style={{ width: "14%" }}>Quantity</th>
-                    <th style={{ width: "40%" }}>Remarks</th>
+                    <th style={{ width: "16%" }}>Container</th>
+                    <th style={{ width: "18%" }}>Invoice Number</th>
+                    <th style={{ width: "16%" }}>Stuffing Date</th>
+                    <th style={{ width: "12%" }}>Quantity</th>
+                    <th style={{ width: "28%" }}>Remarks</th>
                     <th style={{ width: "10%" }}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {form.shipment.length === 0 && (
                     <tr>
-                      <td colSpan="5" className="text-center text-secondary py-3">
+                      <td colSpan="6" className="text-center text-secondary py-3">
                         No shipment rows
                       </td>
                     </tr>
@@ -359,6 +366,17 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                           disabled={!isAdmin}
                           onChange={(e) =>
                             updateShipmentRow(index, "container", e.target.value)
+                          }
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="text"
+                          className="form-control form-control-sm"
+                          value={entry.invoice_number}
+                          disabled={!isAdmin}
+                          onChange={(e) =>
+                            updateShipmentRow(index, "invoice_number", e.target.value)
                           }
                         />
                       </td>

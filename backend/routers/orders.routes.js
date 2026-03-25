@@ -10,6 +10,7 @@ const {
   getOrderEditLogs,
   lookupPreviousOrder,
   getOrders,
+  getPoStatusReport,
   getOrdersByFiltersDb,
   getOrderById,
   getVendorSummaryByBrand,
@@ -99,6 +100,12 @@ router.get(
 // get orders with optional filters via query params
 router.get("/filters", authenticate, getOrdersByFiltersDb);
 router.get("/export", authenticate, exportOrdersDb);
+router.get(
+  "/po-status-report",
+  authenticate,
+  authorize("admin", "manager", "dev"),
+  getPoStatusReport,
+);
 router.get(
   "/delayed-po-report",
   authenticate,

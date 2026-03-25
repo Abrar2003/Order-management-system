@@ -1,5 +1,10 @@
 const mongoose = require("mongoose");
 
+const normalizeShipmentInvoiceNumber = (value) => {
+  const normalized = String(value ?? "").trim();
+  return normalized || "N/A";
+};
+
 const RevisedEtdHistorySchema = new mongoose.Schema(
   {
     revised_etd: { type: Date, required: true },
@@ -30,7 +35,13 @@ const AuditActorSchema = new mongoose.Schema(
 
 const ShipmentEntrySchema = new mongoose.Schema(
   {
-    container: { type: String, trim: true },
+    container: { type: String, trim: true, required: true },
+    invoice_number: {
+      type: String,
+      trim: true,
+      required: true,
+      default: "N/A",
+    },
     stuffing_date: { type: Date },
     quantity: { type: Number },
     pending: { type: Number },
@@ -94,5 +105,14 @@ const Order_Schema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+Order_Schema.pre("validate", function backfillLegacyShipmentInvoices() {
+  if (!Array.isArray(this.shipment)) return;
+
+  this.shipment.forEach((entry) => {
+    if (!entry) return;
+    entry.invoice_number = normalizeShipmentInvoiceNumber(entry.invoice_number);
+  });
+});
 
 module.exports = mongoose.model("orders", Order_Schema);

@@ -57,6 +57,7 @@ const RevisedEtdModal = ({ order, onClose, onSuccess }) => {
                   orderId={order?.order_id}
                   itemCode={order?.item?.item_code}
                   etd={order?.ETD}
+                  revisedEtd={order?.revised_ETD}
                   className="ms-1"
                 />
               </div>

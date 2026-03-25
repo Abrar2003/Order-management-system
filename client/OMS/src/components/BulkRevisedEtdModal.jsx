@@ -177,6 +177,7 @@ const BulkRevisedEtdModal = ({
                               orderId={order?.order_id}
                               itemCode={order?.item?.item_code}
                               etd={order?.ETD}
+                              revisedEtd={order?.revised_ETD}
                             />
                           </td>
                           <td>{formatDateDDMMYYYY(order?.revised_ETD)}</td>

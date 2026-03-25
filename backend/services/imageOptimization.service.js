@@ -45,7 +45,7 @@ const optimizeImageForStorage = async ({
       .rotate()
       .webp({
         lossless: true,
-        effort: 6,
+        effort: 3,
       })
       .toBuffer();
 

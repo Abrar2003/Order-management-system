@@ -60,6 +60,7 @@ const parseSortBy = (value) => {
     "order_quantity",
     "stuffing_date",
     "container",
+    "invoice_number",
     "quantity",
     "pending",
   ]);
@@ -668,6 +669,15 @@ const Shipments = () => {
                         <button
                           type="button"
                           className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                          onClick={() => handleSortColumn("invoice_number", "asc")}
+                        >
+                          Invoice Number{sortIndicator("invoice_number")}
+                        </button>
+                      </th>
+                      <th>
+                        <button
+                          type="button"
+                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
                           onClick={() => handleSortColumn("quantity", "desc")}
                         >
                           Quantity{sortIndicator("quantity")}
@@ -692,7 +702,7 @@ const Shipments = () => {
                       <tr>
                         <td
                           colSpan={
-                            (canFinalizeShipping ? 11 : 10) + (isAdmin ? 1 : 0)
+                            (canFinalizeShipping ? 12 : 11) + (isAdmin ? 1 : 0)
                           }
                           className="text-center py-4"
                         >
@@ -710,6 +720,7 @@ const Shipments = () => {
                         <td>{row?.order_quantity || "N/A"}</td>
                         <td>{formatDateDDMMYYYY(row?.stuffing_date)}</td>
                         <td>{row?.container || "N/A"}</td>
+                        <td>{row?.invoice_number || "N/A"}</td>
                         <td>{row?.quantity ?? "N/A"}</td>
                         <td>{row?.pending ?? "N/A"}</td>
                         <td>{row?.remaining_remarks || "N/A"}</td>

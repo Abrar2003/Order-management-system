@@ -48,6 +48,9 @@ const Container = () => {
   const [containerNumber, setContainerNumber] = useState(() =>
     normalizeSearchParam(searchParams.get("container_number")),
   );
+  const [invoiceNumber, setInvoiceNumber] = useState(() =>
+    normalizeSearchParam(searchParams.get("invoice_number")),
+  );
   const [shippingDate, setShippingDate] = useState(() =>
     toDDMMYYYYInputValue(searchParams.get("shipping_date"), getTodayDDMMYYYY()),
   );
@@ -187,6 +190,9 @@ const Container = () => {
     const nextContainerNumber = normalizeSearchParam(
       searchParams.get("container_number"),
     );
+    const nextInvoiceNumber = normalizeSearchParam(
+      searchParams.get("invoice_number"),
+    );
     const nextShippingDate = toDDMMYYYYInputValue(
       searchParams.get("shipping_date"),
       getTodayDDMMYYYY(),
@@ -196,6 +202,7 @@ const Container = () => {
     const nextStatusFilter = normalizeFilterParam(searchParams.get("status"), "all");
 
     setContainerNumber((prev) => (prev === nextContainerNumber ? prev : nextContainerNumber));
+    setInvoiceNumber((prev) => (prev === nextInvoiceNumber ? prev : nextInvoiceNumber));
     setShippingDate((prev) => (prev === nextShippingDate ? prev : nextShippingDate));
     setVendor((prev) => (prev === nextVendor ? prev : nextVendor));
     setOrderIdFilter((prev) => (prev === nextOrderIdFilter ? prev : nextOrderIdFilter));
@@ -209,11 +216,13 @@ const Container = () => {
 
     const next = new URLSearchParams();
     const containerValue = normalizeSearchParam(containerNumber);
+    const invoiceValue = normalizeSearchParam(invoiceNumber);
     const vendorValue = normalizeSearchParam(vendor);
     const orderIdValue = normalizeSearchParam(orderIdFilter);
     const shippingDateIso = toISODateString(shippingDate);
 
     if (containerValue) next.set("container_number", containerValue);
+    if (invoiceValue) next.set("invoice_number", invoiceValue);
     if (shippingDateIso) next.set("shipping_date", shippingDateIso);
     if (vendorValue) next.set("vendor", vendorValue);
     if (orderIdValue) next.set("order_id", orderIdValue);
@@ -224,6 +233,7 @@ const Container = () => {
     }
   }, [
     containerNumber,
+    invoiceNumber,
     orderIdFilter,
     searchParams,
     setSearchParams,
@@ -330,6 +340,12 @@ const Container = () => {
       return;
     }
 
+    const invoiceNumberValue = String(invoiceNumber || "").trim();
+    if (!invoiceNumberValue) {
+      setError("Invoice number is required.");
+      return;
+    }
+
     if (!shippingDate) {
       setError("Shipping date is required.");
       return;
@@ -368,6 +384,7 @@ const Container = () => {
           api.patch(`/orders/finalize-order/${row.orderDocumentId}`, {
             stuffing_date: shippingDateIso,
             container,
+            invoice_number: invoiceNumberValue,
             quantity: row.quantity,
             remarks: "Bulk container shipment",
           }),
@@ -438,7 +455,7 @@ const Container = () => {
         <div className="card om-card mb-3">
           <div className="card-body">
             <div className="row g-2 justify-content-center align-items-end">
-              <div className="col-md-4">
+              <div className="col-md-3">
                 <label className="form-label">Container Number</label>
                 <input
                   type="text"
@@ -450,6 +467,17 @@ const Container = () => {
               </div>
 
               <div className="col-md-3">
+                <label className="form-label">Invoice Number</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={invoiceNumber}
+                  onChange={(e) => setInvoiceNumber(e.target.value)}
+                  placeholder="Enter invoice number"
+                />
+              </div>
+
+              <div className="col-md-2">
                 <label className="form-label">Shipping Date</label>
                 <input
                   type="date"
@@ -462,7 +490,7 @@ const Container = () => {
                 />
               </div>
 
-              <div className="col-md-3">
+              <div className="col-md-2">
                 <label className="form-label">Vendor</label>
                 <select
                   className="form-select"

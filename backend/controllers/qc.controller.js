@@ -94,12 +94,46 @@ const QC_IMAGE_UPLOAD_MODES = Object.freeze({
   SINGLE: "single",
   BULK: "bulk",
 });
-const MAX_QC_IMAGE_UPLOAD_COUNT = 20;
+const MAX_QC_IMAGE_UPLOAD_COUNT = 60;
+const QC_IMAGE_UPLOAD_CONCURRENCY = 4;
 const EMPTY_LBH = Object.freeze({
   L: 0,
   B: 0,
   H: 0,
 });
+const mapWithConcurrencyLimit = async (
+  items = [],
+  concurrencyLimit = 1,
+  mapper = async (item) => item,
+) => {
+  const safeItems = Array.isArray(items) ? items : [];
+  const safeConcurrencyLimit = Math.max(1, Number(concurrencyLimit) || 1);
+  const results = new Array(safeItems.length);
+  let nextIndex = 0;
+
+  const workers = Array.from(
+    { length: Math.min(safeConcurrencyLimit, safeItems.length) },
+    () =>
+      (async () => {
+        while (true) {
+          const currentIndex = nextIndex;
+          nextIndex += 1;
+
+          if (currentIndex >= safeItems.length) {
+            return;
+          }
+
+          results[currentIndex] = await mapper(
+            safeItems[currentIndex],
+            currentIndex,
+          );
+        }
+      })(),
+  );
+
+  await Promise.all(workers);
+  return results;
+};
 const buildActiveOrderLookupStage = (asField = "order") => ({
   $lookup: {
     from: "orders",
@@ -128,6 +162,11 @@ const computeAqlSampleQuantity = (quantity) => {
   const safeQuantity = toNonNegativeNumber(quantity, 0);
   if (safeQuantity <= 0) return 0;
   return Math.max(1, Math.ceil(safeQuantity * 0.1));
+};
+const resolveAqlBaseQuantity = (requestedQuantity, fallbackQuantity = 0) => {
+  const normalizedRequestedQuantity = toNonNegativeNumber(requestedQuantity, 0);
+  if (normalizedRequestedQuantity > 0) return normalizedRequestedQuantity;
+  return toNonNegativeNumber(fallbackQuantity, 0);
 };
 
 const normalizeInspectionStatus = (value) =>
@@ -2178,16 +2217,12 @@ exports.alignQC = async (req, res) => {
       ? 0
       : Number(quantities?.vendor_provision);
 
-    const quantityRequested =
-      normalizedRequestType === QC_REQUEST_TYPES.AQL
-        ? computeAqlSampleQuantity(clientDemand)
-        : quantityRequestedInput;
+    const quantityRequested = quantityRequestedInput;
 
     if (
       Number.isNaN(clientDemand) ||
       Number.isNaN(vendorProvision) ||
-      (normalizedRequestType === QC_REQUEST_TYPES.FULL &&
-        Number.isNaN(quantityRequestedInput))
+      Number.isNaN(quantityRequestedInput)
     ) {
       return res.status(400).json({
         message:
@@ -2198,11 +2233,19 @@ exports.alignQC = async (req, res) => {
     if (
       clientDemand < 0 ||
       vendorProvision < 0 ||
-      (normalizedRequestType === QC_REQUEST_TYPES.FULL &&
-        quantityRequestedInput < 0)
+      quantityRequestedInput < 0
     ) {
       return res.status(400).json({
         message: "Quantity values must be valid non-negative numbers",
+      });
+    }
+
+    if (
+      normalizedRequestType === QC_REQUEST_TYPES.AQL &&
+      quantityRequested <= 0
+    ) {
+      return res.status(400).json({
+        message: "quantity requested must be greater than 0 for AQL",
       });
     }
 
@@ -3155,11 +3198,16 @@ exports.updateQC = async (req, res) => {
       label_ranges !== undefined;
     const requestType = normalizeQcRequestType(qc?.request_type);
     const isAqlRequest = requestType === QC_REQUEST_TYPES.AQL;
+    const quantityRequestedCap = latestRequestedQuantity;
     const clientDemandQuantity = toNonNegativeNumber(
       qc?.quantities?.client_demand,
       0,
     );
-    const aqlSampleQuantity = computeAqlSampleQuantity(clientDemandQuantity);
+    const aqlBaseQuantity = resolveAqlBaseQuantity(
+      quantityRequestedCap,
+      clientDemandQuantity,
+    );
+    const aqlSampleQuantity = computeAqlSampleQuantity(aqlBaseQuantity);
 
     if (
       [addChecked, addPassed, addProvision].some(
@@ -3268,7 +3316,7 @@ exports.updateQC = async (req, res) => {
       nextPassedInput = qc.quantities.qc_passed + addPassed;
       shouldAutoPassAql = isAqlRequest && addChecked > 0;
       nextPassed = shouldAutoPassAql
-        ? clientDemandQuantity
+        ? aqlBaseQuantity
         : nextPassedInput;
     }
 
@@ -3283,12 +3331,6 @@ exports.updateQC = async (req, res) => {
         message: `AQL checked quantity cannot exceed 10% sample (${aqlSampleQuantity})`,
       });
     }
-
-    const quantityRequestedCap = Number(
-      qc.quantities.quantity_requested > 0
-        ? qc.quantities.quantity_requested
-        : (qc.quantities.client_demand ?? 0),
-    );
 
     const parsedPendingQuantityLimit = Number(
       qc.quantities?.pending ??
@@ -3574,7 +3616,6 @@ exports.updateQC = async (req, res) => {
         });
       }
 
-      const latestRequestEntry = resolveLatestRequestEntry(qc.request_history);
       const requestedDateForRecordRaw = String(
         latestRequestEntry?.request_date ||
           qc.request_date ||
@@ -5817,7 +5858,11 @@ exports.uploadQcImages = async (req, res) => {
       });
     }
 
-    const files = Array.isArray(req.files) ? req.files.filter(Boolean) : [];
+    const files = Array.isArray(req.files)
+      ? req.files.filter(Boolean)
+      : Object.values(req.files || {})
+        .flatMap((entry) => (Array.isArray(entry) ? entry : []))
+        .filter(Boolean);
     if (files.length === 0) {
       return res.status(400).json({ success: false, message: "No image uploaded" });
     }
@@ -5866,33 +5911,54 @@ exports.uploadQcImages = async (req, res) => {
           message: "Only JPG, JPEG, and PNG files are allowed for QC images",
         });
       }
+    }
 
-      const fallbackOriginalName =
-        file?.originalname ||
-        `${normalizeText(qc?.order_meta?.order_id || qcId)}${extension || ".jpg"}`;
-      const optimizedImage = await optimizeImageForStorage({
-        buffer: file.buffer,
-        contentType: mimeType || "application/octet-stream",
-        originalName: fallbackOriginalName,
-      });
-      if (optimizedImage?.optimized) {
-        optimizedUploadCount += 1;
-        totalBytesSaved += toNonNegativeNumber(optimizedImage.bytesSaved, 0);
-      }
-      const optimizedExtension = path
-        .extname(String(optimizedImage?.originalName || ""))
-        .toLowerCase() || extension || ".jpg";
-      const uploadResult = await uploadBuffer({
-        buffer: optimizedImage.buffer,
-        key: createStorageKey({
-          folder: "qc-images",
+    const uploadResults = await mapWithConcurrencyLimit(
+      files,
+      QC_IMAGE_UPLOAD_CONCURRENCY,
+      async (file) => {
+        const mimeType = normalizeText(file?.mimetype).toLowerCase();
+        const extension = path
+          .extname(String(file?.originalname || ""))
+          .toLowerCase();
+        const fallbackOriginalName =
+          file?.originalname ||
+          `${normalizeText(qc?.order_meta?.order_id || qcId)}${extension || ".jpg"}`;
+        const optimizedImage = await optimizeImageForStorage({
+          buffer: file.buffer,
+          contentType: mimeType || "application/octet-stream",
+          originalName: fallbackOriginalName,
+        });
+        const optimizedExtension = path
+          .extname(String(optimizedImage?.originalName || ""))
+          .toLowerCase() || extension || ".jpg";
+        const uploadResult = await uploadBuffer({
+          buffer: optimizedImage.buffer,
+          key: createStorageKey({
+            folder: "qc-images",
+            originalName: optimizedImage.originalName || fallbackOriginalName,
+            extension: optimizedExtension,
+          }),
           originalName: optimizedImage.originalName || fallbackOriginalName,
-          extension: optimizedExtension,
-        }),
-        originalName: optimizedImage.originalName || fallbackOriginalName,
-        contentType: optimizedImage.contentType || mimeType || "application/octet-stream",
-      });
+          contentType:
+            optimizedImage.contentType || mimeType || "application/octet-stream",
+        });
 
+        return {
+          uploadResult,
+          optimized: Boolean(optimizedImage?.optimized),
+          bytesSaved: toNonNegativeNumber(optimizedImage?.bytesSaved, 0),
+        };
+      },
+    );
+
+    for (const processedUpload of uploadResults) {
+      if (processedUpload?.optimized) {
+        optimizedUploadCount += 1;
+        totalBytesSaved += processedUpload.bytesSaved;
+      }
+
+      const uploadResult = processedUpload?.uploadResult || {};
       uploadedImages.push({
         key: uploadResult.key,
         originalName: uploadResult.originalName,
