@@ -1,5 +1,29 @@
 const mongoose = require("mongoose");
 
+const ITEM_SIZE_REMARKS = ["", "top", "base", "item1", "item2", "item3"];
+const BOX_SIZE_REMARKS = ["", "top", "base", "box1", "box2", "box3"];
+
+const createSizeEntrySchema = (remarkEnum = []) =>
+  new mongoose.Schema(
+    {
+      L: { type: Number, default: 0, min: 0 },
+      B: { type: Number, default: 0, min: 0 },
+      H: { type: Number, default: 0, min: 0 },
+      remark: {
+        type: String,
+        enum: remarkEnum,
+        default: "",
+        trim: true,
+      },
+      net_weight: { type: Number, default: 0, min: 0 },
+      gross_weight: { type: Number, default: 0, min: 0 },
+    },
+    { _id: false },
+  );
+
+const itemSizeEntrySchema = createSizeEntrySchema(ITEM_SIZE_REMARKS);
+const boxSizeEntrySchema = createSizeEntrySchema(BOX_SIZE_REMARKS);
+
 const itemSchema = new mongoose.Schema(
   {
     code: {
@@ -50,6 +74,14 @@ const itemSchema = new mongoose.Schema(
       B: { type: Number, default: 0, min: 0 },
       H: { type: Number, default: 0, min: 0 },
     },
+    inspected_item_sizes: {
+      type: [itemSizeEntrySchema],
+      default: [],
+      validate: {
+        validator: (entries) => !Array.isArray(entries) || entries.length <= 3,
+        message: "inspected_item_sizes cannot exceed 3 entries",
+      },
+    },
     inspected_item_top_LBH: {
       L: { type: Number, default: 0, min: 0 },
       B: { type: Number, default: 0, min: 0 },
@@ -64,6 +96,14 @@ const itemSchema = new mongoose.Schema(
       L: { type: Number, default: 0, min: 0 },
       B: { type: Number, default: 0, min: 0 },
       H: { type: Number, default: 0, min: 0 },
+    },
+    inspected_box_sizes: {
+      type: [boxSizeEntrySchema],
+      default: [],
+      validate: {
+        validator: (entries) => !Array.isArray(entries) || entries.length <= 3,
+        message: "inspected_box_sizes cannot exceed 3 entries",
+      },
     },
     inspected_box_top_LBH: {
       L: { type: Number, default: 0, min: 0 },
@@ -90,6 +130,14 @@ const itemSchema = new mongoose.Schema(
       B: { type: Number, default: 0, min: 0 },
       H: { type: Number, default: 0, min: 0 },
     },
+    pis_item_sizes: {
+      type: [itemSizeEntrySchema],
+      default: [],
+      validate: {
+        validator: (entries) => !Array.isArray(entries) || entries.length <= 3,
+        message: "pis_item_sizes cannot exceed 3 entries",
+      },
+    },
     pis_item_top_LBH: {
       L: { type: Number, default: 0, min: 0 },
       B: { type: Number, default: 0, min: 0 },
@@ -104,6 +152,14 @@ const itemSchema = new mongoose.Schema(
       L: { type: Number, default: 0, min: 0 },
       B: { type: Number, default: 0, min: 0 },
       H: { type: Number, default: 0, min: 0 },
+    },
+    pis_box_sizes: {
+      type: [boxSizeEntrySchema],
+      default: [],
+      validate: {
+        validator: (entries) => !Array.isArray(entries) || entries.length <= 3,
+        message: "pis_box_sizes cannot exceed 3 entries",
+      },
     },
     pis_box_top_LBH: {
       L: { type: Number, default: 0, min: 0 },
