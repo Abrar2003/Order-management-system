@@ -753,6 +753,18 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       topRemark: "top",
       bottomRemark: "base",
     });
+    const hasStoredInspectedItemSizes =
+      Array.isArray(itemMaster?.inspected_item_sizes)
+      && itemMaster.inspected_item_sizes.length > 0;
+    const hasStoredInspectedBoxSizes =
+      Array.isArray(itemMaster?.inspected_box_sizes)
+      && itemMaster.inspected_box_sizes.length > 0;
+    const initialInspectedItemCount = hasStoredInspectedItemSizes
+      ? normalizeSizeCount(inspectedItemSizeEntries.length, 1)
+      : 1;
+    const initialInspectedBoxCount = hasStoredInspectedBoxSizes
+      ? normalizeSizeCount(inspectedBoxSizeEntries.length, 1)
+      : 1;
 
     setForm({
       inspector: defaultInspectorId,
@@ -806,19 +818,15 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       inspected_item_bottom_L: strictInspectedItemBottomLbh.L,
       inspected_item_bottom_B: strictInspectedItemBottomLbh.B,
       inspected_item_bottom_H: strictInspectedItemBottomLbh.H,
-      inspected_item_count: String(
-        normalizeSizeCount(inspectedItemSizeEntries.length, 1),
-      ),
-      inspected_box_count: String(
-        normalizeSizeCount(inspectedBoxSizeEntries.length, 1),
-      ),
+      inspected_item_count: String(initialInspectedItemCount),
+      inspected_box_count: String(initialInspectedBoxCount),
       inspected_item_sizes: ensureMeasuredSizeEntryCount(
         inspectedItemSizeEntries,
-        inspectedItemSizeEntries.length || 1,
+        initialInspectedItemCount,
       ),
       inspected_box_sizes: ensureMeasuredSizeEntryCount(
         inspectedBoxSizeEntries,
-        inspectedBoxSizeEntries.length || 1,
+        initialInspectedBoxCount,
       ),
       last_inspected_date: toDDMMYYYYInputValue(
         adminRecord?.inspection_date || qc.last_inspected_date,
@@ -2301,7 +2309,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   onChange={handleChange}
                   min="0"
                   step="any"
-                  disabled={disableCbmTotal}
+                  disabled={true}
                 />
               </div>
 
@@ -2315,7 +2323,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   onChange={handleChange}
                   min="0"
                   step="any"
-                  disabled={disableCbmTopBottom}
+                  disabled={true}
                 />
               </div>
 
@@ -2329,7 +2337,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   onChange={handleChange}
                   min="0"
                   step="any"
-                  disabled={disableCbmTopBottom}
+                  disabled={true}
                 />
               </div>
 
