@@ -5391,6 +5391,13 @@ exports.getDailyReport = async (req, res) => {
       order: "order_id",
       orderid: "order_id",
       order_id: "order_id",
+      vendor: "vendor",
+      qc: "inspector_name",
+      qcname: "inspector_name",
+      qc_name: "inspector_name",
+      inspector: "inspector_name",
+      inspectorname: "inspector_name",
+      inspector_name: "inspector_name",
       date: "request_date",
       requestdate: "request_date",
       request_date: "request_date",
@@ -5404,7 +5411,10 @@ exports.getDailyReport = async (req, res) => {
     const alignedSortOrder = resolveSortOrder({
       token: rawAlignedSortToken,
       explicitOrder: req.query.aligned_sort_order ?? req.query.alignedSortOrder,
-      defaultOrder: alignedSortBy === "order_id" ? "asc" : "desc",
+      defaultOrder:
+        alignedSortBy === "request_date"
+          ? "desc"
+          : "asc",
     });
     const alignedSortDirection = alignedSortOrder === "asc" ? 1 : -1;
 
@@ -5440,21 +5450,48 @@ exports.getDailyReport = async (req, res) => {
     const compareText = (aValue, bValue) =>
       String(aValue || "").localeCompare(String(bValue || ""));
     const compareAlignedRows = (a, b) => {
-      const primary =
-        alignedSortBy === "order_id"
-          ? compareText(a?.order_id, b?.order_id)
-          : toSortableTimestamp(a?.request_date) -
-            toSortableTimestamp(b?.request_date);
+      const primary = (() => {
+        if (alignedSortBy === "order_id") {
+          return compareText(a?.order_id, b?.order_id);
+        }
+        if (alignedSortBy === "vendor") {
+          return compareText(a?.vendor, b?.vendor);
+        }
+        if (alignedSortBy === "inspector_name") {
+          return compareText(a?.inspector?.name || "Unassigned", b?.inspector?.name || "Unassigned");
+        }
+        return toSortableTimestamp(a?.request_date) -
+          toSortableTimestamp(b?.request_date);
+      })();
       if (primary !== 0) return primary * alignedSortDirection;
 
-      const secondary =
-        alignedSortBy === "order_id"
-          ? toSortableTimestamp(a?.request_date) -
-            toSortableTimestamp(b?.request_date)
-          : compareText(a?.order_id, b?.order_id);
+      const secondary = (() => {
+        if (alignedSortBy === "order_id") {
+          return toSortableTimestamp(a?.request_date) -
+            toSortableTimestamp(b?.request_date);
+        }
+        if (alignedSortBy === "vendor") {
+          return compareText(a?.inspector?.name || "Unassigned", b?.inspector?.name || "Unassigned");
+        }
+        if (alignedSortBy === "inspector_name") {
+          return compareText(a?.vendor, b?.vendor);
+        }
+        return compareText(a?.order_id, b?.order_id);
+      })();
       if (secondary !== 0) {
         return alignedSortBy === "order_id" ? secondary * -1 : secondary;
       }
+
+      const tertiary =
+        toSortableTimestamp(b?.request_date) -
+        toSortableTimestamp(a?.request_date);
+      if (alignedSortBy !== "request_date" && tertiary !== 0) {
+        return tertiary;
+      }
+
+      const quaternary = compareText(a?.order_id, b?.order_id);
+      if (quaternary !== 0) return quaternary;
+
       return compareText(a?.item_code, b?.item_code);
     };
 
@@ -5488,11 +5525,39 @@ exports.getDailyReport = async (req, res) => {
       `${reportDay}/${reportMonth}/${reportYear}`,
       `${reportDay}-${reportMonth}-${reportYear}`,
     ];
+    const toReportDateKey = (value) => toISODateString(value) || "";
+    const isOnOrBeforeReportDate = (value) => {
+      const normalized = toReportDateKey(value);
+      return Boolean(normalized) && normalized <= reportDate;
+    };
+    const buildDailyRequestLookupKey = ({
+      qcId = "",
+      requestHistoryId = "",
+      requestDate = "",
+    } = {}) => {
+      const normalizedQcId = String(qcId || "").trim();
+      const normalizedRequestHistoryId = String(requestHistoryId || "").trim();
+      if (normalizedRequestHistoryId) {
+        return `history:${normalizedRequestHistoryId}`;
+      }
+
+      const normalizedRequestDate = toReportDateKey(requestDate);
+      if (!normalizedQcId || !normalizedRequestDate) return "";
+      return `legacy:${normalizedQcId}:${normalizedRequestDate}`;
+    };
 
     const [alignedRequestsRaw, inspectionsRaw] = await Promise.all([
-      QC.find({ request_date: reportDate })
-        .select("request_date request_type order_meta item inspector quantities order cbm")
+      QC.find({
+        $or: [
+          { request_date: { $lte: reportDate } },
+          { request_history: { $elemMatch: { request_date: { $lte: reportDate } } } },
+        ],
+      })
+        .select(
+          "request_date request_type request_history order_meta item inspector quantities order cbm",
+        )
         .populate("inspector", "name email role")
+        .populate("request_history.inspector", "name email role")
         .populate({
           path: "order",
           select: "order_id status quantity brand vendor archived",
@@ -5518,13 +5583,13 @@ exports.getDailyReport = async (req, res) => {
         .lean(),
     ]);
 
-    const alignedRequests = alignedRequestsRaw.filter((qc) => qc?.order);
+    const alignedRequestQcs = alignedRequestsRaw.filter((qc) => qc?.order);
     const inspections = inspectionsRaw.filter(
       (inspection) => inspection?.qc?.order,
     );
     const uniqueItemCodes = [
       ...new Set(
-        [...alignedRequests, ...inspections.map((inspection) => inspection?.qc)]
+        [...alignedRequestQcs, ...inspections.map((inspection) => inspection?.qc)]
           .map((record) => normalizeText(record?.item?.item_code || ""))
           .filter(Boolean),
       ),
@@ -5545,106 +5610,174 @@ exports.getDailyReport = async (req, res) => {
     const itemDocByCodeKey = new Map(
       itemDocs.map((itemDoc) => [normalizeItemCodeKey(itemDoc?.code), itemDoc]),
     );
-    const alignedRequestQcIds = alignedRequests
+    const alignedRequestQcIds = alignedRequestQcs
       .map((qc) => String(qc?._id || "").trim())
       .filter((value) => mongoose.Types.ObjectId.isValid(value));
-    const latestAlignedRequestInspections = alignedRequestQcIds.length > 0
+    const alignedRequestInspections = alignedRequestQcIds.length > 0
       ? await Inspection.find({ qc: { $in: alignedRequestQcIds } })
         .select(
-          "inspection_date status qc checked passed vendor_requested vendor_offered pending_after cbm labels_added label_ranges goods_not_ready remarks createdAt",
+          "inspection_date requested_date request_history_id status qc checked passed vendor_requested vendor_offered pending_after cbm labels_added label_ranges goods_not_ready remarks createdAt",
         )
         .sort({ createdAt: -1 })
         .lean()
       : [];
 
-    const latestInspectionByQcId = new Map();
-    for (const inspection of latestAlignedRequestInspections) {
-      const qcId = String(inspection?.qc || "").trim();
-      if (!qcId) continue;
+    const latestInspectionByRequestKey = new Map();
+    for (const inspection of alignedRequestInspections) {
+      if (!isOnOrBeforeReportDate(inspection?.inspection_date || inspection?.createdAt)) {
+        continue;
+      }
 
-      const existingInspection = latestInspectionByQcId.get(qcId);
+      const requestLookupKey = buildDailyRequestLookupKey({
+        qcId: inspection?.qc,
+        requestHistoryId: inspection?.request_history_id,
+        requestDate: inspection?.requested_date,
+      });
+      if (!requestLookupKey) continue;
+
+      const existingInspection = latestInspectionByRequestKey.get(requestLookupKey);
       if (
         !existingInspection ||
         getInspectionSortValue(inspection) > getInspectionSortValue(existingInspection)
       ) {
-        latestInspectionByQcId.set(qcId, inspection);
+        latestInspectionByRequestKey.set(requestLookupKey, inspection);
       }
     }
 
-    const aligned_requests = alignedRequests.map((qc) => {
-      const latestInspection = latestInspectionByQcId.get(String(qc?._id || "").trim());
-      const itemCodeKey = normalizeItemCodeKey(qc?.item?.item_code || "");
-      const itemDoc = itemDocByCodeKey.get(itemCodeKey) || null;
-      const inspectedQty = Number(latestInspection?.checked || 0);
-      const reportCbmPerUnit = resolveItemReportCbmPerUnit(
-        itemDoc,
-        latestInspection,
-        { allowPlainInspectionFallback: false },
-      );
-      const hasReportCbm = reportCbmPerUnit > 0;
-      const inspectedCbmTotal = hasReportCbm
-        ? toRoundedNumber(reportCbmPerUnit * inspectedQty, 3)
-        : null;
-      const derivedInspectionStatus = resolveInspectionRecordStatus({
-        checked: latestInspection?.checked,
-        passed: latestInspection?.passed,
-        vendorOffered: latestInspection?.vendor_offered,
-        labelsAdded: latestInspection?.labels_added,
-        labelRanges: latestInspection?.label_ranges,
-        goodsNotReady: latestInspection?.goods_not_ready,
-        requestType: qc?.request_type,
-      });
-      const inspectionStatus = String(
-        derivedInspectionStatus || latestInspection?.status,
-      ).trim() || INSPECTION_RECORD_STATUS.PENDING;
-      const normalizedInspectionStatus = normalizeInspectionStatus(
-        inspectionStatus,
-      );
-      const goodsNotReady =
-        normalizedInspectionStatus ===
-        normalizeInspectionStatus(INSPECTION_RECORD_STATUS.GOODS_NOT_READY);
-      const isInspectionDone =
-        normalizedInspectionStatus ===
-        normalizeInspectionStatus(INSPECTION_RECORD_STATUS.DONE);
+    const toInspectorSummary = (inspector = null) => {
+      if (!inspector) return null;
+
+      const inspectorId = inspector?._id || inspector || null;
+      const inspectorName = normalizeText(inspector?.name || "");
+      const inspectorEmail = normalizeText(inspector?.email || "");
+      const inspectorRole = normalizeText(inspector?.role || "");
+
+      if (!inspectorId && !inspectorName) return null;
 
       return {
-        qc_id: qc._id,
-        request_date: qc.request_date,
-        order_id: qc?.order_meta?.order_id || qc?.order?.order_id || "N/A",
-        brand: qc?.order_meta?.brand || qc?.order?.brand || "N/A",
-        vendor: qc?.order_meta?.vendor || qc?.order?.vendor || "N/A",
-        item_code: qc?.item?.item_code || "N/A",
-        description: qc?.item?.description || "N/A",
-        inspector: qc?.inspector
-          ? {
-              _id: qc.inspector._id,
-              name: qc.inspector.name,
-              email: qc.inspector.email,
-              role: qc.inspector.role,
-            }
-          : null,
-        quantity_requested: Number(qc?.quantities?.quantity_requested || 0),
-        quantity_inspected: inspectedQty,
-        quantity_passed: Number(latestInspection?.passed || 0),
-        quantity_pending: Number(
-          latestInspection?.pending_after ?? qc?.quantities?.pending ?? 0,
-        ),
-        report_cbm_per_unit: hasReportCbm
-          ? toRoundedNumber(reportCbmPerUnit, 3)
-          : null,
-        inspected_cbm_total: inspectedCbmTotal,
-        inspection_status: inspectionStatus,
-        order_status: qc?.order?.status || "N/A",
-        is_inspection_done: isInspectionDone,
-        goods_not_ready: goodsNotReady,
-        goods_not_ready_reason: goodsNotReady
-          ? normalizeText(
-              latestInspection?.goods_not_ready?.reason ||
-                latestInspection?.remarks ||
-                "",
-            )
-          : "",
+        _id: inspectorId,
+        name: inspectorName || "Unassigned",
+        email: inspectorEmail,
+        role: inspectorRole,
       };
+    };
+
+    const aligned_requests = alignedRequestQcs.flatMap((qc) => {
+      const qcId = String(qc?._id || "").trim();
+      if (!qcId) return [];
+
+      const requestEntries =
+        Array.isArray(qc?.request_history) && qc.request_history.length > 0
+          ? qc.request_history.map((entry) => ({
+              request_history_id: entry?._id || null,
+              request_date: entry?.request_date || "",
+              request_type: entry?.request_type || qc?.request_type,
+              quantity_requested: entry?.quantity_requested,
+              inspector: entry?.inspector || qc?.inspector || null,
+            }))
+          : [
+              {
+                request_history_id: null,
+                request_date: qc?.request_date || "",
+                request_type: qc?.request_type,
+                quantity_requested: qc?.quantities?.quantity_requested,
+                inspector: qc?.inspector || null,
+              },
+            ];
+
+      return requestEntries
+        .map((requestEntry) => {
+          const requestDateKey = toReportDateKey(requestEntry?.request_date);
+          if (!requestDateKey || requestDateKey > reportDate) return null;
+
+          const requestLookupKey = buildDailyRequestLookupKey({
+            qcId,
+            requestHistoryId: requestEntry?.request_history_id,
+            requestDate: requestDateKey,
+          });
+          const latestInspection = latestInspectionByRequestKey.get(requestLookupKey);
+          const hasInspectionActivity = hasInspectionRecordActivity({
+            checked: latestInspection?.checked,
+            passed: latestInspection?.passed,
+            vendorOffered: latestInspection?.vendor_offered,
+            labelsAdded: latestInspection?.labels_added,
+            labelRanges: latestInspection?.label_ranges,
+            goodsNotReady: latestInspection?.goods_not_ready,
+          });
+          const shouldIncludeRequest = requestDateKey === reportDate;
+
+          if (!shouldIncludeRequest) return null;
+
+          const itemCodeKey = normalizeItemCodeKey(qc?.item?.item_code || "");
+          const itemDoc = itemDocByCodeKey.get(itemCodeKey) || null;
+          const inspectedQty = Number(latestInspection?.checked || 0);
+          const reportCbmPerUnit = resolveItemReportCbmPerUnit(
+            itemDoc,
+            latestInspection,
+            { allowPlainInspectionFallback: false },
+          );
+          const hasReportCbm = reportCbmPerUnit > 0;
+          const inspectedCbmTotal = hasReportCbm
+            ? toRoundedNumber(reportCbmPerUnit * inspectedQty, 3)
+            : null;
+          const derivedInspectionStatus = resolveInspectionRecordStatus({
+            checked: latestInspection?.checked,
+            passed: latestInspection?.passed,
+            vendorOffered: latestInspection?.vendor_offered,
+            labelsAdded: latestInspection?.labels_added,
+            labelRanges: latestInspection?.label_ranges,
+            goodsNotReady: latestInspection?.goods_not_ready,
+            requestType: requestEntry?.request_type || qc?.request_type,
+          });
+          const inspectionStatus = String(
+            derivedInspectionStatus || latestInspection?.status,
+          ).trim() || INSPECTION_RECORD_STATUS.PENDING;
+          const normalizedInspectionStatus = normalizeInspectionStatus(
+            inspectionStatus,
+          );
+          const goodsNotReady =
+            normalizedInspectionStatus ===
+            normalizeInspectionStatus(INSPECTION_RECORD_STATUS.GOODS_NOT_READY);
+          const isInspectionDone =
+            normalizedInspectionStatus ===
+            normalizeInspectionStatus(INSPECTION_RECORD_STATUS.DONE);
+
+          return {
+            request_row_id: requestLookupKey || `${qcId}:${requestDateKey}`,
+            qc_id: qc._id,
+            request_history_id: requestEntry?.request_history_id || null,
+            request_date: requestDateKey,
+            order_id: qc?.order_meta?.order_id || qc?.order?.order_id || "N/A",
+            brand: qc?.order_meta?.brand || qc?.order?.brand || "N/A",
+            vendor: qc?.order_meta?.vendor || qc?.order?.vendor || "N/A",
+            item_code: qc?.item?.item_code || "N/A",
+            description: qc?.item?.description || "N/A",
+            inspector: toInspectorSummary(requestEntry?.inspector),
+            quantity_requested: Number(requestEntry?.quantity_requested || 0),
+            quantity_inspected: inspectedQty,
+            quantity_passed: Number(latestInspection?.passed || 0),
+            quantity_pending: Number(
+              latestInspection?.pending_after ?? qc?.quantities?.pending ?? 0,
+            ),
+            report_cbm_per_unit: hasReportCbm
+              ? toRoundedNumber(reportCbmPerUnit, 3)
+              : null,
+            inspected_cbm_total: inspectedCbmTotal,
+            inspection_status: inspectionStatus,
+            order_status: qc?.order?.status || "N/A",
+            is_inspection_done: isInspectionDone,
+            request_pending_action: !hasInspectionActivity,
+            goods_not_ready: goodsNotReady,
+            goods_not_ready_reason: goodsNotReady
+              ? normalizeText(
+                  latestInspection?.goods_not_ready?.reason ||
+                    latestInspection?.remarks ||
+                    "",
+                )
+              : "",
+          };
+        })
+        .filter(Boolean);
     });
     const sortedAlignedRequests = [...aligned_requests].sort(
       compareAlignedRows,

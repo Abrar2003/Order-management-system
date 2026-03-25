@@ -180,16 +180,16 @@ const AlignQCModal = ({
       return;
     }
 
-    if (Number.isNaN(quantityRequestedNumber) || quantityRequestedNumber < 0) {
+    if (Number.isNaN(requestedQuantityNumber) || requestedQuantityNumber < 0) {
       alert("Quantity values must be valid non-negative numbers.");
       return;
     }
-    if (requestType === "AQL" && quantityRequestedNumber <= 0) {
+    if (requestType === "AQL" && requestedQuantityNumber <= 0) {
       alert("Quantity requested must be greater than 0 for AQL.");
       return;
     }
 
-    if (quantityRequestedNumber > effectiveOpenQuantity) {
+    if (requestedQuantityNumber > effectiveOpenQuantity) {
       alert("Quantity requested cannot exceed pending quantity.");
       return;
     }
@@ -205,7 +205,7 @@ const AlignQCModal = ({
           request_date: requestDateIso,
           quantities: {
             client_demand: order.quantity,
-            quantity_requested: quantityRequestedNumber,
+            quantity_requested: requestedQuantityNumber,
           },
         },
         {

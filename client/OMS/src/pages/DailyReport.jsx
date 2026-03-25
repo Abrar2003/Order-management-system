@@ -18,9 +18,22 @@ const DEFAULT_ALIGNED_SORT_BY = "request_date";
 const DEFAULT_INSPECTION_SORT_BY = "inspection_date";
 
 const normalizeQueryText = (value) => String(value || "").trim();
+const getDefaultAlignedSortOrder = (sortBy) =>
+  sortBy === "request_date" ? "desc" : "asc";
+const getDefaultInspectionSortOrder = (sortBy) =>
+  sortBy === "order_id" ? "asc" : "desc";
 
 const parseAlignedSortBy = (value) => {
   const normalized = normalizeQueryText(value).toLowerCase();
+  if (normalized === "vendor") return "vendor";
+  if (
+    normalized === "inspector_name"
+    || normalized === "inspector"
+    || normalized === "qc"
+    || normalized === "qc_name"
+  ) {
+    return "inspector_name";
+  }
   if (normalized === "order_id") return "order_id";
   if (normalized === "request_date") return "request_date";
   return DEFAULT_ALIGNED_SORT_BY;
@@ -36,7 +49,9 @@ const parseInspectionSortBy = (value) => {
 const parseSortOrder = (value, sortBy) => {
   const normalized = normalizeQueryText(value).toLowerCase();
   if (normalized === "asc" || normalized === "desc") return normalized;
-  return sortBy === "order_id" ? "asc" : "desc";
+  return sortBy === "inspection_date" || sortBy === "request_date"
+    ? "desc"
+    : "asc";
 };
 
 const normalizeInspectionStatus = (value) =>
@@ -50,10 +65,11 @@ const renderInspectionStatus = (value) => {
   if (normalized === "inspection done") {
     return <span className="text-success fw-semibold">Inspection Done</span>;
   }
-  return <span>Pending</span>;
+  return <span className="text-danger fw-semibold">Pending</span>;
 };
 
 const getAlignedRequestRowClassName = (request) => {
+  if (request?.request_pending_action) return "om-report-danger-row";
   const normalizedStatus = normalizeInspectionStatus(request?.inspection_status);
   if (normalizedStatus === "goods not ready") return "weekly-summary-warning-row";
   if (normalizedStatus === "inspection done") return "om-report-success-row";
@@ -247,13 +263,13 @@ const DailyReport = () => {
     if (alignedSortBy !== DEFAULT_ALIGNED_SORT_BY) {
       next.set("aligned_sort_by", alignedSortBy);
     }
-    if (alignedSortOrder !== parseSortOrder("", alignedSortBy)) {
+    if (alignedSortOrder !== getDefaultAlignedSortOrder(alignedSortBy)) {
       next.set("aligned_sort_order", alignedSortOrder);
     }
     if (inspectionSortBy !== DEFAULT_INSPECTION_SORT_BY) {
       next.set("inspection_sort_by", inspectionSortBy);
     }
-    if (inspectionSortOrder !== parseSortOrder("", inspectionSortBy)) {
+    if (inspectionSortOrder !== getDefaultInspectionSortOrder(inspectionSortBy)) {
       next.set("inspection_sort_order", inspectionSortOrder);
     }
 
@@ -350,7 +366,7 @@ const DailyReport = () => {
         <div className="card om-card mb-3">
           <div className="card-body p-0">
             <div className="px-3 py-2 border-bottom">
-              <h3 className="h6 mb-0">Requests Aligned For Selected Date</h3>
+              <h3 className="h6 mb-0">Requests For Selected Date</h3>
             </div>
             <div className="table-responsive">
               <table className="table table-sm table-striped align-middle mb-0">
@@ -375,9 +391,25 @@ const DailyReport = () => {
                       </button>
                     </th>
                     <th>Item</th>
-                    <th>Vendor</th>
+                    <th>
+                      <button
+                        type="button"
+                        className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                        onClick={() => handleAlignedSort("vendor", "asc")}
+                      >
+                        Vendor{alignedSortIndicator("vendor")}
+                      </button>
+                    </th>
                     <th>Brand</th>
-                    <th>Inspector</th>
+                    <th>
+                      <button
+                        type="button"
+                        className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                        onClick={() => handleAlignedSort("inspector_name", "asc")}
+                      >
+                        QC{alignedSortIndicator("inspector_name")}
+                      </button>
+                    </th>
                     <th>Requested</th>
                     <th>Passed</th>
                     <th>Inspected/PIS CBM Total</th>
@@ -388,14 +420,14 @@ const DailyReport = () => {
                   {report.aligned_requests.length === 0 && (
                     <tr>
                       <td colSpan="10" className="text-center py-3">
-                        No aligned requests found for this date.
+                        No requests found for the selected date.
                       </td>
                     </tr>
                   )}
 
                   {report.aligned_requests.map((request) => (
                     <tr
-                      key={request.qc_id}
+                      key={request.request_row_id || request.qc_id}
                       className={getAlignedRequestRowClassName(request)}
                       style={{ cursor: "pointer" }}
                       onClick={() => navigate(`/qc/${request.qc_id}`)}
