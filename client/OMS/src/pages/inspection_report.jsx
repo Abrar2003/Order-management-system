@@ -9,6 +9,9 @@ import { formatDateDDMMYYYY } from "../utils/date";
 import { formatPositiveCbm } from "../utils/cbm";
 import "../App.css";
 
+const SIZE_UNIT = "cm";
+const WEIGHT_UNIT = "kg";
+
 const toTimestamp = (value) => {
   if (!value) return 0;
   const asString = String(value).trim();
@@ -41,7 +44,51 @@ const formatLbhValue = (value) => {
     return "Not Set";
   }
 
-  return `${safeLength} x ${safeBreadth} x ${safeHeight}`;
+  return `${safeLength} x ${safeBreadth} x ${safeHeight} ${SIZE_UNIT}`;
+};
+
+const ITEM_INDEXED_REMARKS = ["item1", "item2", "item3"];
+const BOX_INDEXED_REMARKS = ["box1", "box2", "box3"];
+
+const formatMeasurementRemark = (remark = "") => {
+  const normalized = String(remark || "").trim().toLowerCase();
+  if (!normalized) return "";
+  if (normalized === "top") return "Top";
+  if (normalized === "base") return "Base";
+  return normalized.replace(/([a-z]+)(\d+)/i, (_, prefix, number) =>
+    `${prefix.charAt(0).toUpperCase()}${prefix.slice(1)} ${number}`,
+  );
+};
+
+const buildMeasurementEntryKey = (entry = {}, index = 0) => {
+  const normalizedRemark = String(entry?.remark || "").trim().toLowerCase();
+  return normalizedRemark || `entry${index + 1}`;
+};
+
+const sortMeasurementEntries = (entries = [], remarkOrder = []) =>
+  [...entries].sort((left, right) => {
+    const leftKey = buildMeasurementEntryKey(left);
+    const rightKey = buildMeasurementEntryKey(right);
+    const safeOrder = Array.isArray(remarkOrder) ? remarkOrder : [];
+    const leftIndex = safeOrder.indexOf(leftKey);
+    const rightIndex = safeOrder.indexOf(rightKey);
+    const safeLeftIndex = leftIndex >= 0 ? leftIndex : safeOrder.length + 1;
+    const safeRightIndex = rightIndex >= 0 ? rightIndex : safeOrder.length + 1;
+    if (safeLeftIndex !== safeRightIndex) {
+      return safeLeftIndex - safeRightIndex;
+    }
+    return leftKey.localeCompare(rightKey);
+  });
+
+const hasIndexedMeasurementEntries = (entries = [], indexedRemarks = []) =>
+  entries.some((entry) =>
+    (Array.isArray(indexedRemarks) ? indexedRemarks : []).includes(
+      String(entry?.remark || "").trim().toLowerCase(),
+    ));
+
+const toPositiveWeightOrNull = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 };
 
 const hasAnyPositiveLbh = (value = {}) => {
@@ -63,6 +110,8 @@ const formatStructuredLbhValue = ({
   bottom = null,
   single = null,
   fallback = null,
+  topLabel = "Top",
+  bottomLabel = "Base",
 } = {}) => {
   const resolvedTop = pickDisplayableLbh(top);
   const resolvedBottom = pickDisplayableLbh(bottom);
@@ -73,9 +122,11 @@ const formatStructuredLbhValue = ({
       mode: "split",
       top: resolvedTop,
       bottom: resolvedBottom,
+      topLabel,
+      bottomLabel,
       display: [
-        resolvedTop ? `Top: ${formatLbhValue(resolvedTop)}` : "",
-        resolvedBottom ? `Bottom: ${formatLbhValue(resolvedBottom)}` : "",
+        resolvedTop ? `${topLabel}: ${formatLbhValue(resolvedTop)}` : "",
+        resolvedBottom ? `${bottomLabel}: ${formatLbhValue(resolvedBottom)}` : "",
       ]
         .filter(Boolean)
         .join(" | "),
@@ -125,8 +176,10 @@ const pickFiniteWeightValue = (...values) => {
 const formatWeightValue = (value, fallback = "Not Set") => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
-  if (Number.isInteger(parsed)) return String(parsed);
-  return parsed.toFixed(3).replace(/\.?0+$/, "") || "0";
+  const formatted = Number.isInteger(parsed)
+    ? String(parsed)
+    : parsed.toFixed(3).replace(/\.?0+$/, "") || "0";
+  return `${formatted} ${WEIGHT_UNIT}`;
 };
 
 const formatStructuredWeightValue = ({
@@ -134,6 +187,8 @@ const formatStructuredWeightValue = ({
   bottom = null,
   single = null,
   fallback = null,
+  topLabel = "Top",
+  bottomLabel = "Base",
 } = {}) => {
   const resolvedTop = hasPositiveWeightValue(top) ? Number(top) : null;
   const resolvedBottom = hasPositiveWeightValue(bottom) ? Number(bottom) : null;
@@ -144,9 +199,11 @@ const formatStructuredWeightValue = ({
       mode: "split",
       top: resolvedTop,
       bottom: resolvedBottom,
+      topLabel,
+      bottomLabel,
       display: [
-        resolvedTop !== null ? `Top: ${formatWeightValue(resolvedTop)}` : "",
-        resolvedBottom !== null ? `Bottom: ${formatWeightValue(resolvedBottom)}` : "",
+        resolvedTop !== null ? `${topLabel}: ${formatWeightValue(resolvedTop)}` : "",
+        resolvedBottom !== null ? `${bottomLabel}: ${formatWeightValue(resolvedBottom)}` : "",
       ]
         .filter(Boolean)
         .join(" | "),
@@ -159,57 +216,225 @@ const formatStructuredWeightValue = ({
     display: formatWeightValue(resolvedSingle, "Not Set"),
   };
 };
-const normalizeMeasurementEntries = (entries = [], weightKey = "") =>
-  (Array.isArray(entries) ? entries : [])
-    .map((entry) => {
-      const L = Number(entry?.L || 0);
-      const B = Number(entry?.B || 0);
-      const H = Number(entry?.H || 0);
-      const weight = Number(weightKey ? entry?.[weightKey] : 0);
-      return {
-        remark: String(entry?.remark || entry?.type || "").trim().toLowerCase(),
-        L: Number.isFinite(L) ? L : 0,
-        B: Number.isFinite(B) ? B : 0,
-        H: Number.isFinite(H) ? H : 0,
-        weight: Number.isFinite(weight) ? weight : 0,
-      };
-    })
-    .filter((entry) => entry.L > 0 && entry.B > 0 && entry.H > 0)
-    .slice(0, 3);
-const toStructuredLbhFromEntries = (entries = [], fallback = null) => {
-  const normalizedEntries = normalizeMeasurementEntries(entries);
+const normalizeMeasurementEntries = (
+  entries = [],
+  weightKey = "",
+  remarkOrder = [],
+) =>
+  sortMeasurementEntries(
+    (Array.isArray(entries) ? entries : [])
+      .map((entry) => {
+        const L = Number(entry?.L || 0);
+        const B = Number(entry?.B || 0);
+        const H = Number(entry?.H || 0);
+        const weight = Number(weightKey ? entry?.[weightKey] : 0);
+        return {
+          remark: String(entry?.remark || entry?.type || "").trim().toLowerCase(),
+          L: Number.isFinite(L) ? L : 0,
+          B: Number.isFinite(B) ? B : 0,
+          H: Number.isFinite(H) ? H : 0,
+          weight: Number.isFinite(weight) ? weight : 0,
+        };
+      })
+      .filter((entry) => entry.L > 0 && entry.B > 0 && entry.H > 0)
+      .slice(0, 3),
+    remarkOrder,
+  );
+
+const toMeasurementRowEntry = (entry = {}, index = 0, value, display = "") => ({
+  key: buildMeasurementEntryKey(entry, index),
+  label: formatMeasurementRemark(entry?.remark) || `Entry ${index + 1}`,
+  value,
+  display,
+});
+
+const toStructuredLbhFromEntries = (
+  entries = [],
+  fallback = null,
+  { indexedRemarks = [] } = {},
+) => {
+  const normalizedEntries = Array.isArray(entries) ? entries : [];
   if (normalizedEntries.length === 0) {
     return formatStructuredLbhValue({ single: fallback, fallback });
   }
-  if (normalizedEntries.length === 1) {
-    return formatStructuredLbhValue({ single: normalizedEntries[0], fallback });
+  if (hasIndexedMeasurementEntries(normalizedEntries, indexedRemarks)) {
+    return {
+      mode: "indexed",
+      entries: normalizedEntries.map((entry, index) =>
+        toMeasurementRowEntry(
+          entry,
+          index,
+          { L: entry.L, B: entry.B, H: entry.H },
+          formatLbhValue(entry),
+        )),
+    };
   }
+  if (normalizedEntries.length === 1) {
+    const [firstEntry] = normalizedEntries;
+    if (firstEntry?.remark === "top" || firstEntry?.remark === "base") {
+      return formatStructuredLbhValue({
+        top: firstEntry?.remark === "top" ? firstEntry : null,
+        bottom: firstEntry?.remark === "base" ? firstEntry : null,
+        topLabel: "Top",
+        bottomLabel: "Base",
+      });
+    }
+    return formatStructuredLbhValue({ single: firstEntry });
+  }
+  const [firstEntry, secondEntry] = normalizedEntries;
   return formatStructuredLbhValue({
-    top: normalizedEntries[0],
-    bottom: normalizedEntries[1],
-    fallback,
+    top: firstEntry,
+    bottom: secondEntry,
+    topLabel: formatMeasurementRemark(firstEntry?.remark) || "Top",
+    bottomLabel: formatMeasurementRemark(secondEntry?.remark) || "Base",
   });
 };
-const toStructuredWeightFromEntries = (entries = [], fallback = null) => {
+const toStructuredWeightFromEntries = (
+  entries = [],
+  fallback = null,
+  { indexedRemarks = [] } = {},
+) => {
   const normalizedEntries = Array.isArray(entries) ? entries : [];
   if (normalizedEntries.length === 0) {
     return formatStructuredWeightValue({ single: fallback, fallback });
   }
-  const weights = normalizedEntries
-    .map((entry) => Number(entry?.weight || 0))
-    .filter((weight) => Number.isFinite(weight) && weight > 0);
-  if (weights.length === 0) {
-    return formatStructuredWeightValue({ single: fallback, fallback });
+  if (hasIndexedMeasurementEntries(normalizedEntries, indexedRemarks)) {
+    const indexedEntries = normalizedEntries.map((entry, index) =>
+      toMeasurementRowEntry(
+        entry,
+        index,
+        toPositiveWeightOrNull(entry?.weight),
+        formatWeightValue(toPositiveWeightOrNull(entry?.weight), "Not Set"),
+      ));
+    return {
+      mode: "indexed",
+      entries: indexedEntries,
+      display: indexedEntries
+        .map((entry) => `${entry.label}: ${entry.display}`)
+        .join(" | "),
+    };
   }
-  if (weights.length === 1) {
-    return formatStructuredWeightValue({ single: weights[0], fallback });
+  if (normalizedEntries.length === 1) {
+    const [firstEntry] = normalizedEntries;
+    const firstWeight = toPositiveWeightOrNull(firstEntry?.weight);
+    if (firstEntry?.remark === "top" || firstEntry?.remark === "base") {
+      return formatStructuredWeightValue({
+        top: firstEntry?.remark === "top" ? firstWeight : null,
+        bottom: firstEntry?.remark === "base" ? firstWeight : null,
+        topLabel: "Top",
+        bottomLabel: "Base",
+      });
+    }
+    return formatStructuredWeightValue({ single: firstWeight });
   }
+  const [firstEntry, secondEntry] = normalizedEntries;
   return formatStructuredWeightValue({
-    top: weights[0],
-    bottom: weights[1],
-    single: weights.reduce((sum, weight) => sum + weight, 0),
-    fallback,
+    top: toPositiveWeightOrNull(firstEntry?.weight),
+    bottom: toPositiveWeightOrNull(secondEntry?.weight),
+    topLabel: formatMeasurementRemark(firstEntry?.remark) || "Top",
+    bottomLabel: formatMeasurementRemark(secondEntry?.remark) || "Base",
   });
+};
+
+const buildMeasurementComparisonRows = ({
+  attribute = "",
+  comparisonType = "",
+  pisMeta = null,
+  checkedMeta = null,
+  indexedRemarkOrder = [],
+} = {}) => {
+  const normalizedAttribute = String(attribute || "").trim();
+  if (!normalizedAttribute) return [];
+
+  const pisEntries = Array.isArray(pisMeta?.entries) ? pisMeta.entries : [];
+  const checkedEntries = Array.isArray(checkedMeta?.entries) ? checkedMeta.entries : [];
+  const hasIndexedRows =
+    pisMeta?.mode === "indexed" || checkedMeta?.mode === "indexed";
+
+  if (hasIndexedRows && comparisonType === "weight") {
+    return [
+      {
+        key: normalizedAttribute,
+        attribute: normalizedAttribute,
+        pis: pisMeta?.display || "Not Set",
+        checked: checkedMeta?.display || "Not Set",
+        comparison_type: comparisonType,
+        pis_meta: pisMeta,
+        checked_meta: checkedMeta,
+      },
+    ];
+  }
+
+  if (!hasIndexedRows) {
+    return [
+      {
+        key: normalizedAttribute,
+        attribute: normalizedAttribute,
+        pis: pisMeta?.display || "Not Set",
+        checked: checkedMeta?.display || "Not Set",
+        comparison_type: comparisonType,
+        pis_meta: pisMeta,
+        checked_meta: checkedMeta,
+      },
+    ];
+  }
+
+  const pisEntryMap = new Map(pisEntries.map((entry) => [entry.key, entry]));
+  const checkedEntryMap = new Map(
+    checkedEntries.map((entry) => [entry.key, entry]),
+  );
+  const preferredOrder =
+    Array.isArray(indexedRemarkOrder) && indexedRemarkOrder.length > 0
+      ? indexedRemarkOrder
+      : [...new Set([...pisEntries.map((entry) => entry.key), ...checkedEntries.map((entry) => entry.key)])];
+  const trailingKeys = [
+    ...new Set([
+      ...pisEntries.map((entry) => entry.key),
+      ...checkedEntries.map((entry) => entry.key),
+    ]),
+  ].filter((key) => !preferredOrder.includes(key));
+  const orderedKeys = [...preferredOrder, ...trailingKeys];
+
+  const expandedRows = orderedKeys
+    .filter((key) => pisEntryMap.has(key) || checkedEntryMap.has(key))
+    .map((key, index) => {
+      const pisEntry = pisEntryMap.get(key) || null;
+      const checkedEntry = checkedEntryMap.get(key) || null;
+      const label =
+        pisEntry?.label
+        || checkedEntry?.label
+        || formatMeasurementRemark(key)
+        || `Entry ${index + 1}`;
+      return {
+        key: `${normalizedAttribute}-${key}`,
+        attribute: `${normalizedAttribute} - ${label}`,
+        pis: pisEntry?.display || "Not Set",
+        checked: checkedEntry?.display || "Not Set",
+        comparison_type: comparisonType,
+        pis_meta:
+          comparisonType === "lbh"
+            ? { mode: "single", value: pisEntry?.value || null }
+            : { mode: "single", value: pisEntry?.value ?? null },
+        checked_meta:
+          comparisonType === "lbh"
+            ? { mode: "single", value: checkedEntry?.value || null }
+            : { mode: "single", value: checkedEntry?.value ?? null },
+      };
+    });
+
+  return expandedRows.length > 0
+    ? expandedRows
+    : [
+        {
+          key: normalizedAttribute,
+          attribute: normalizedAttribute,
+          pis: pisMeta?.display || "Not Set",
+          checked: checkedMeta?.display || "Not Set",
+          comparison_type: comparisonType,
+          pis_meta: pisMeta,
+          checked_meta: checkedMeta,
+        },
+      ];
 };
 
 const getBrandKey = (value) => String(value || "").trim().toLowerCase();
@@ -283,14 +508,14 @@ const collectLbhDifferenceLogs = ({
 
       const direction = delta > 0 ? "greater" : "smaller";
       logs.push(
-        `For ${labelPrefix}, inspected ${dimensionNames[axis]} is ${formatDifferenceNumber(delta)} cm ${direction} than PIS size.`,
+        `For ${labelPrefix}, inspected ${dimensionNames[axis]} is ${formatDifferenceNumber(delta)} ${SIZE_UNIT} ${direction} than PIS size.`,
       );
     });
   };
 
   if (pisMeta?.mode === "split" || checkedMeta?.mode === "split") {
-    compareLbhSegment("Top", pisMeta?.top, checkedMeta?.top);
-    compareLbhSegment("Bottom", pisMeta?.bottom, checkedMeta?.bottom);
+    compareLbhSegment(pisMeta?.topLabel || checkedMeta?.topLabel || "Top", pisMeta?.top, checkedMeta?.top);
+    compareLbhSegment(pisMeta?.bottomLabel || checkedMeta?.bottomLabel || "Base", pisMeta?.bottom, checkedMeta?.bottom);
     return logs;
   }
 
@@ -331,13 +556,41 @@ const collectWeightDifferenceLogs = ({
 
     const direction = delta > 0 ? "greater" : "smaller";
     logs.push(
-      `For ${labelPrefix}, inspected value is ${formatDifferenceNumber(delta)} ${direction} than PIS weight.`,
+      `For ${labelPrefix}, inspected value is ${formatDifferenceNumber(delta)} ${WEIGHT_UNIT} ${direction} than PIS weight.`,
     );
   };
 
+  if (pisMeta?.mode === "indexed" || checkedMeta?.mode === "indexed") {
+    const pisEntries = Array.isArray(pisMeta?.entries) ? pisMeta.entries : [];
+    const checkedEntries = Array.isArray(checkedMeta?.entries) ? checkedMeta.entries : [];
+    const pisEntryMap = new Map(pisEntries.map((entry) => [entry.key, entry]));
+    const checkedEntryMap = new Map(
+      checkedEntries.map((entry) => [entry.key, entry]),
+    );
+    const orderedKeys = [
+      ...new Set([
+        ...pisEntries.map((entry) => entry.key),
+        ...checkedEntries.map((entry) => entry.key),
+      ]),
+    ];
+
+    orderedKeys.forEach((key, index) => {
+      const pisEntry = pisEntryMap.get(key) || null;
+      const checkedEntry = checkedEntryMap.get(key) || null;
+      const label =
+        pisEntry?.label
+        || checkedEntry?.label
+        || formatMeasurementRemark(key)
+        || `Entry ${index + 1}`;
+      compareWeightSegment(label, pisEntry?.value, checkedEntry?.value);
+    });
+
+    return logs;
+  }
+
   if (pisMeta?.mode === "split" || checkedMeta?.mode === "split") {
-    compareWeightSegment("Top", pisMeta?.top, checkedMeta?.top);
-    compareWeightSegment("Bottom", pisMeta?.bottom, checkedMeta?.bottom);
+    compareWeightSegment(pisMeta?.topLabel || checkedMeta?.topLabel || "Top", pisMeta?.top, checkedMeta?.top);
+    compareWeightSegment(pisMeta?.bottomLabel || checkedMeta?.bottomLabel || "Base", pisMeta?.bottom, checkedMeta?.bottom);
     return logs;
   }
 
@@ -447,24 +700,29 @@ const InspectionReport = () => {
     const pisItemEntries = normalizeMeasurementEntries(
       itemMaster?.pis_item_sizes,
       "net_weight",
+      ["top", "base", ...ITEM_INDEXED_REMARKS],
     );
     const inspectedItemEntries = normalizeMeasurementEntries(
       itemMaster?.inspected_item_sizes,
       "net_weight",
+      ["top", "base", ...ITEM_INDEXED_REMARKS],
     );
     const pisBoxEntries = normalizeMeasurementEntries(
       itemMaster?.pis_box_sizes,
       "gross_weight",
+      ["top", "base", ...BOX_INDEXED_REMARKS],
     );
     const inspectedBoxEntries = normalizeMeasurementEntries(
       itemMaster?.inspected_box_sizes,
       "gross_weight",
+      ["top", "base", ...BOX_INDEXED_REMARKS],
     );
     const pisProductLbh =
       pisItemEntries.length > 0
         ? toStructuredLbhFromEntries(
             pisItemEntries,
             itemMaster?.pis_item_LBH || itemMaster?.item_LBH,
+            { indexedRemarks: ITEM_INDEXED_REMARKS },
           )
         : formatStructuredLbhValue({
             top: itemMaster?.pis_item_top_LBH,
@@ -477,6 +735,7 @@ const InspectionReport = () => {
         ? toStructuredLbhFromEntries(
             inspectedItemEntries,
             itemMaster?.inspected_item_LBH || itemMaster?.item_LBH,
+            { indexedRemarks: ITEM_INDEXED_REMARKS },
           )
         : formatStructuredLbhValue({
             top: itemMaster?.inspected_item_top_LBH,
@@ -496,6 +755,7 @@ const InspectionReport = () => {
               || itemMaster?.pis_item_LBH
               || itemMaster?.box_LBH
               || itemMaster?.item_LBH,
+            { indexedRemarks: BOX_INDEXED_REMARKS },
           )
         : formatStructuredLbhValue({
             top: pisBoxTopLbh,
@@ -525,6 +785,7 @@ const InspectionReport = () => {
               || itemMaster?.inspected_item_LBH
               || itemMaster?.box_LBH
               || itemMaster?.item_LBH,
+            { indexedRemarks: BOX_INDEXED_REMARKS },
           )
         : formatStructuredLbhValue({
             top: inspectedTopLbh,
@@ -538,7 +799,11 @@ const InspectionReport = () => {
           });
     const pisNetWeight =
       pisItemEntries.length > 0
-        ? toStructuredWeightFromEntries(pisItemEntries, itemMaster?.weight?.net)
+        ? toStructuredWeightFromEntries(
+            pisItemEntries,
+            itemMaster?.weight?.net,
+            { indexedRemarks: ITEM_INDEXED_REMARKS },
+          )
         : formatStructuredWeightValue({
             top: getWeightValue(itemMaster?.pis_weight, "top_net"),
             bottom: getWeightValue(itemMaster?.pis_weight, "bottom_net"),
@@ -547,7 +812,11 @@ const InspectionReport = () => {
           });
     const checkedNetWeight =
       inspectedItemEntries.length > 0
-        ? toStructuredWeightFromEntries(inspectedItemEntries, itemMaster?.weight?.net)
+        ? toStructuredWeightFromEntries(
+            inspectedItemEntries,
+            itemMaster?.weight?.net,
+            { indexedRemarks: ITEM_INDEXED_REMARKS },
+          )
         : formatStructuredWeightValue({
             top: getWeightValue(itemMaster?.inspected_weight, "top_net"),
             bottom: getWeightValue(itemMaster?.inspected_weight, "bottom_net"),
@@ -556,7 +825,11 @@ const InspectionReport = () => {
           });
     const pisGrossWeight =
       pisBoxEntries.length > 0
-        ? toStructuredWeightFromEntries(pisBoxEntries, itemMaster?.weight?.gross)
+        ? toStructuredWeightFromEntries(
+            pisBoxEntries,
+            itemMaster?.weight?.gross,
+            { indexedRemarks: BOX_INDEXED_REMARKS },
+          )
         : formatStructuredWeightValue({
             top: getWeightValue(itemMaster?.pis_weight, "top_gross"),
             bottom: getWeightValue(itemMaster?.pis_weight, "bottom_gross"),
@@ -565,7 +838,11 @@ const InspectionReport = () => {
           });
     const checkedGrossWeight =
       inspectedBoxEntries.length > 0
-        ? toStructuredWeightFromEntries(inspectedBoxEntries, itemMaster?.weight?.gross)
+        ? toStructuredWeightFromEntries(
+            inspectedBoxEntries,
+            itemMaster?.weight?.gross,
+            { indexedRemarks: BOX_INDEXED_REMARKS },
+          )
         : formatStructuredWeightValue({
             top: getWeightValue(itemMaster?.inspected_weight, "top_gross"),
             bottom: getWeightValue(itemMaster?.inspected_weight, "bottom_gross"),
@@ -629,38 +906,34 @@ const InspectionReport = () => {
       pisBarcodeValue !== "Not Set" ? pisBarcodeValue : inspectedBarcodeValue;
 
     const rows = [
-      {
+      ...buildMeasurementComparisonRows({
         attribute: "Product Size (L x B x H)",
-        pis: pisProductLbh.display,
-        checked: checkedProductLbh.display,
-        comparison_type: "lbh",
-        pis_meta: pisProductLbh,
-        checked_meta: checkedProductLbh,
-      },
-      {
+        comparisonType: "lbh",
+        pisMeta: pisProductLbh,
+        checkedMeta: checkedProductLbh,
+        indexedRemarkOrder: ITEM_INDEXED_REMARKS,
+      }),
+      ...buildMeasurementComparisonRows({
         attribute: "Box Size (L x B x H)",
-        pis: pisPackedSize.display,
-        checked: checkedPackedSize.display,
-        comparison_type: "lbh",
-        pis_meta: pisPackedSize,
-        checked_meta: checkedPackedSize,
-      },
-      {
+        comparisonType: "lbh",
+        pisMeta: pisPackedSize,
+        checkedMeta: checkedPackedSize,
+        indexedRemarkOrder: BOX_INDEXED_REMARKS,
+      }),
+      ...buildMeasurementComparisonRows({
         attribute: "Net Weight",
-        pis: pisNetWeight.display,
-        checked: checkedNetWeight.display,
-        comparison_type: "weight",
-        pis_meta: pisNetWeight,
-        checked_meta: checkedNetWeight,
-      },
-      {
+        comparisonType: "weight",
+        pisMeta: pisNetWeight,
+        checkedMeta: checkedNetWeight,
+        indexedRemarkOrder: ITEM_INDEXED_REMARKS,
+      }),
+      ...buildMeasurementComparisonRows({
         attribute: "Gross Weight",
-        pis: pisGrossWeight.display,
-        checked: checkedGrossWeight.display,
-        comparison_type: "weight",
-        pis_meta: pisGrossWeight,
-        checked_meta: checkedGrossWeight,
-      },
+        comparisonType: "weight",
+        pisMeta: pisGrossWeight,
+        checkedMeta: checkedGrossWeight,
+        indexedRemarkOrder: BOX_INDEXED_REMARKS,
+      }),
       ...(showCbmTop ? [{ attribute: "CBM Top", pis: pisCbmTop, checked: checkedCbmTop }] : []),
       ...(showCbmBottom ? [{ attribute: "CBM Bottom", pis: pisCbmBottom, checked: checkedCbmBottom }] : []),
       { attribute: "CBM", pis: calculatedPisCbm, checked: checkedCbmTotal },
@@ -1031,7 +1304,7 @@ const InspectionReport = () => {
                   </thead>
                   <tbody>
                     {itemMasterSummary.rows.map((row) => (
-                      <tr key={row.attribute}>
+                      <tr key={row.key || row.attribute}>
                         <td>{row.attribute}</td>
                         <td>{row.pis}</td>
                         <td>{row.checked}</td>
