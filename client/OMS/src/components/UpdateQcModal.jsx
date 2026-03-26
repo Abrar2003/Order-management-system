@@ -2435,7 +2435,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
                 weightLabel: "Net Weight",
                 locked: lockInspectedItemSection,
-                countLabel: "Item PC",
+                countLabel: "Item Sets",
               })}
 
               {renderMeasuredSizeSection({
@@ -2447,7 +2447,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 remarkOptions: BOX_SIZE_REMARK_OPTIONS,
                 weightLabel: "Gross Weight",
                 locked: lockInspectedBoxSection,
-                countLabel: "Box PC",
+                countLabel: "Box Sets",
               })}
 
               <div className="col-md-6">

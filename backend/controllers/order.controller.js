@@ -37,6 +37,10 @@ const ORDER_STATUS_SEQUENCE = [
   "Shipped",
 ];
 const DEFAULT_PO_STATUS_REPORT_STATUS = "Inspection Done";
+const PO_STATUS_REPORT_STATUS_OPTIONS = [
+  "Partially Inspected",
+  "Inspection Done",
+];
 
 const SHIPMENT_VISIBLE_STATUSES = [
   "Inspection Done",
@@ -266,11 +270,60 @@ const normalizePoStatusReportStatus = (value) => {
   const normalized = normalizeFilterValue(value);
   if (!normalized) return DEFAULT_PO_STATUS_REPORT_STATUS;
 
-  const matchedStatus = ORDER_STATUS_SEQUENCE.find(
+  const matchedStatus = PO_STATUS_REPORT_STATUS_OPTIONS.find(
     (status) => status.toLowerCase() === normalized.toLowerCase(),
   );
   return matchedStatus || DEFAULT_PO_STATUS_REPORT_STATUS;
 };
+
+const createPoStatusCounts = () => ({
+  pending: 0,
+  under_inspection: 0,
+  inspection_done: 0,
+  partially_shipped: 0,
+  shipped: 0,
+});
+
+const incrementPoStatusCounts = (counts, statusValue = "") => {
+  const target = counts && typeof counts === "object" ? counts : createPoStatusCounts();
+  const normalizedStatus = normalizeLooseString(statusValue).toLowerCase();
+
+  if (normalizedStatus === "pending") {
+    target.pending += 1;
+  } else if (normalizedStatus === "under inspection") {
+    target.under_inspection += 1;
+  } else if (normalizedStatus === "inspection done") {
+    target.inspection_done += 1;
+  } else if (normalizedStatus === "partial shipped") {
+    target.partially_shipped += 1;
+  } else if (normalizedStatus === "shipped") {
+    target.shipped += 1;
+  }
+
+  return target;
+};
+
+const sumPoStatusCounts = (baseCounts, nextCounts) => {
+  const source = nextCounts && typeof nextCounts === "object" ? nextCounts : {};
+  const target =
+    baseCounts && typeof baseCounts === "object" ? baseCounts : createPoStatusCounts();
+
+  target.pending += Number(source.pending || 0);
+  target.under_inspection += Number(source.under_inspection || 0);
+  target.inspection_done += Number(source.inspection_done || 0);
+  target.partially_shipped += Number(source.partially_shipped || 0);
+  target.shipped += Number(source.shipped || 0);
+
+  return target;
+};
+
+const getPoOpenItemsCount = (counts = {}) =>
+  Number(counts.pending || 0) + Number(counts.under_inspection || 0);
+
+const getPoProgressedItemsCount = (counts = {}) =>
+  Number(counts.inspection_done || 0) +
+  Number(counts.partially_shipped || 0) +
+  Number(counts.shipped || 0);
 
 const ACTIVE_ORDER_MATCH = {
   $and: [{ archived: { $ne: true } }, { status: { $ne: "Cancelled" } }],
@@ -4433,10 +4486,7 @@ exports.getPoStatusReport = async (req, res) => {
     const selectedVendor = normalizeFilterValue(req.query.vendor);
     const selectedStatus = normalizePoStatusReportStatus(req.query.status);
     const activeMatch = { ...ACTIVE_ORDER_MATCH };
-    const reportMatch = {
-      ...activeMatch,
-      status: selectedStatus,
-    };
+    const reportMatch = { ...activeMatch };
 
     if (selectedBrand) {
       reportMatch.brand = selectedBrand;
@@ -4449,79 +4499,159 @@ exports.getPoStatusReport = async (req, res) => {
       Order.distinct("brand", activeMatch),
       Order.distinct("vendor", activeMatch),
       Order.find(reportMatch)
-        .select("_id brand vendor order_id status quantity order_date ETD item")
+        .select("_id brand vendor order_id status quantity order_date ETD revised_ETD item qc_record")
         .lean(),
     ]);
 
-    const reportOrders = [...reportOrdersRaw].sort((left, right) => {
-      const leftVendor = normalizeLooseString(left?.vendor || "N/A");
-      const rightVendor = normalizeLooseString(right?.vendor || "N/A");
-      const vendorComparison = leftVendor.localeCompare(rightVendor, undefined, {
-        sensitivity: "base",
-      });
-      if (vendorComparison !== 0) return vendorComparison;
+    const poEntryMap = new Map();
 
-      const leftBrand = normalizeLooseString(left?.brand || "N/A");
-      const rightBrand = normalizeLooseString(right?.brand || "N/A");
-      const brandComparison = leftBrand.localeCompare(rightBrand, undefined, {
-        sensitivity: "base",
-      });
-      if (brandComparison !== 0) return brandComparison;
-
-      const leftOrderId = normalizeLooseString(left?.order_id || "");
-      const rightOrderId = normalizeLooseString(right?.order_id || "");
-      const orderComparison = leftOrderId.localeCompare(rightOrderId, undefined, {
-        numeric: true,
-        sensitivity: "base",
-      });
-      if (orderComparison !== 0) return orderComparison;
-
-      const leftItemCode = normalizeLooseString(left?.item?.item_code || "");
-      const rightItemCode = normalizeLooseString(right?.item?.item_code || "");
-      return leftItemCode.localeCompare(rightItemCode, undefined, {
-        numeric: true,
-        sensitivity: "base",
-      });
-    });
-
-    const vendorsMap = new Map();
-    let totalOrderQuantity = 0;
-
-    for (const orderEntry of reportOrders) {
+    for (const orderEntry of reportOrdersRaw) {
       const vendorName = normalizeLooseString(orderEntry?.vendor || "") || "N/A";
       const brandName = normalizeLooseString(orderEntry?.brand || "") || "N/A";
-      const parsedOrderQuantity = Number(orderEntry?.quantity);
-      const orderQuantity = Number.isFinite(parsedOrderQuantity)
-        ? Math.max(0, parsedOrderQuantity)
-        : 0;
-
-      const row = {
-        _id: String(orderEntry?._id || ""),
+      const orderId = normalizeOrderKey(orderEntry?.order_id || "") || "N/A";
+      const effectiveEtd = resolveEffectiveOrderEtdDate(orderEntry);
+      const poKey = buildDelayedPoGroupKey({
+        orderId,
         brand: brandName,
-        order_id: normalizeLooseString(orderEntry?.order_id || ""),
-        order_date: orderEntry?.order_date || null,
-        ETD: orderEntry?.ETD || null,
-        item_code: normalizeLooseString(orderEntry?.item?.item_code || ""),
-        description: normalizeLooseString(orderEntry?.item?.description || ""),
-        order_quantity: orderQuantity,
-        status: normalizeLooseString(orderEntry?.status || selectedStatus),
-      };
+        vendor: vendorName,
+      });
 
-      totalOrderQuantity += orderQuantity;
+      if (!poEntryMap.has(poKey)) {
+        poEntryMap.set(poKey, {
+          key: poKey,
+          vendor: vendorName,
+          brand: brandName,
+          order_id: orderId,
+          order_date: orderEntry?.order_date || null,
+          effective_etd: effectiveEtd || null,
+          item_counts: createPoStatusCounts(),
+          inspected_items: [],
+        });
+      }
+
+      const poEntry = poEntryMap.get(poKey);
+      poEntry.order_date = resolveEarlierDate(
+        poEntry.order_date,
+        orderEntry?.order_date,
+      );
+      poEntry.effective_etd = resolveLaterDate(
+        poEntry.effective_etd,
+        effectiveEtd,
+      );
+
+      incrementPoStatusCounts(poEntry.item_counts, orderEntry?.status);
+
+      if (!isPendingOrderStatus(orderEntry?.status)) {
+        poEntry.inspected_items.push({
+          _id: String(orderEntry?._id || ""),
+          qc_id: String(orderEntry?.qc_record || "").trim() || null,
+          item_code: normalizeLooseString(orderEntry?.item?.item_code || "") || "N/A",
+          status: normalizeLooseString(orderEntry?.status || "") || "N/A",
+          order_quantity: Number.isFinite(Number(orderEntry?.quantity))
+            ? Math.max(0, Number(orderEntry.quantity))
+            : 0,
+        });
+      }
+    }
+
+    const allPoEntries = Array.from(poEntryMap.values()).map((poEntry) => {
+      const inspectedItems = Array.isArray(poEntry.inspected_items)
+        ? [...poEntry.inspected_items]
+        : [];
+      inspectedItems.sort((left, right) => {
+        const leftStatus = normalizeLooseString(left?.status || "").toLowerCase();
+        const rightStatus = normalizeLooseString(right?.status || "").toLowerCase();
+        const leftStatusRank = ORDER_STATUS_SEQUENCE.findIndex(
+          (status) => status.toLowerCase() === leftStatus,
+        );
+        const rightStatusRank = ORDER_STATUS_SEQUENCE.findIndex(
+          (status) => status.toLowerCase() === rightStatus,
+        );
+        if (leftStatusRank !== rightStatusRank) {
+          return leftStatusRank - rightStatusRank;
+        }
+
+        const leftItemCode = normalizeLooseString(left?.item_code || "");
+        const rightItemCode = normalizeLooseString(right?.item_code || "");
+        return leftItemCode.localeCompare(rightItemCode, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        });
+      });
+
+      return {
+        ...poEntry,
+        item_counts: { ...poEntry.item_counts },
+        inspected_items: inspectedItems,
+        total_items_count:
+          getPoOpenItemsCount(poEntry.item_counts) +
+          getPoProgressedItemsCount(poEntry.item_counts),
+        open_items_count: getPoOpenItemsCount(poEntry.item_counts),
+        progressed_items_count: getPoProgressedItemsCount(poEntry.item_counts),
+      };
+    });
+
+    const filteredPoEntries = allPoEntries
+      .filter((poEntry) => {
+        const openItemsCount = getPoOpenItemsCount(poEntry.item_counts);
+        const progressedItemsCount = getPoProgressedItemsCount(poEntry.item_counts);
+        const shippedItemsCount = Number(poEntry?.item_counts?.shipped || 0);
+        const totalItemsCount = Number(poEntry?.total_items_count || 0);
+
+        if (selectedStatus === "Inspection Done") {
+          return (
+            openItemsCount === 0 &&
+            progressedItemsCount > 0 &&
+            shippedItemsCount < totalItemsCount
+          );
+        }
+
+        return openItemsCount > 0 && progressedItemsCount > 0;
+      })
+      .sort((left, right) => {
+        const leftVendor = normalizeLooseString(left?.vendor || "N/A");
+        const rightVendor = normalizeLooseString(right?.vendor || "N/A");
+        const vendorComparison = leftVendor.localeCompare(rightVendor, undefined, {
+          sensitivity: "base",
+        });
+        if (vendorComparison !== 0) return vendorComparison;
+
+        const leftBrand = normalizeLooseString(left?.brand || "N/A");
+        const rightBrand = normalizeLooseString(right?.brand || "N/A");
+        const brandComparison = leftBrand.localeCompare(rightBrand, undefined, {
+          sensitivity: "base",
+        });
+        if (brandComparison !== 0) return brandComparison;
+
+        const leftOrderId = normalizeLooseString(left?.order_id || "");
+        const rightOrderId = normalizeLooseString(right?.order_id || "");
+        return leftOrderId.localeCompare(rightOrderId, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        });
+      });
+
+    const vendorsMap = new Map();
+    const summaryCounts = createPoStatusCounts();
+
+    for (const poEntry of filteredPoEntries) {
+      const vendorName = normalizeLooseString(poEntry?.vendor || "") || "N/A";
 
       if (!vendorsMap.has(vendorName)) {
         vendorsMap.set(vendorName, {
           vendor: vendorName,
-          total_rows: 0,
-          total_order_quantity: 0,
-          rows: [],
+          po_count: 0,
+          status_counts: createPoStatusCounts(),
+          pos: [],
         });
       }
 
       const vendorEntry = vendorsMap.get(vendorName);
-      vendorEntry.rows.push(row);
-      vendorEntry.total_rows += 1;
-      vendorEntry.total_order_quantity += orderQuantity;
+      vendorEntry.po_count += 1;
+      sumPoStatusCounts(vendorEntry.status_counts, poEntry.item_counts);
+      vendorEntry.pos.push(poEntry);
+
+      sumPoStatusCounts(summaryCounts, poEntry.item_counts);
     }
 
     const vendors = Array.from(vendorsMap.values());
@@ -4534,12 +4664,18 @@ exports.getPoStatusReport = async (req, res) => {
         status: selectedStatus,
         brand_options: normalizeDistinctValues(brandOptionsRaw),
         vendor_options: normalizeDistinctValues(vendorOptionsRaw),
-        status_options: [...ORDER_STATUS_SEQUENCE],
+        status_options: [...PO_STATUS_REPORT_STATUS_OPTIONS],
       },
       summary: {
         vendors_count: vendors.length,
-        rows_count: reportOrders.length,
-        total_order_quantity: totalOrderQuantity,
+        po_count: filteredPoEntries.length,
+        pending_count: summaryCounts.pending,
+        under_inspection_count: summaryCounts.under_inspection,
+        inspection_done_count: summaryCounts.inspection_done,
+        partially_shipped_count: summaryCounts.partially_shipped,
+        shipped_count: summaryCounts.shipped,
+        open_items_count: getPoOpenItemsCount(summaryCounts),
+        progressed_items_count: getPoProgressedItemsCount(summaryCounts),
       },
       vendors,
     });

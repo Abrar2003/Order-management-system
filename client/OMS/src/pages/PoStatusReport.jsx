@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import html2canvas from "html2canvas";
+import { jsPDF } from "jspdf";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import { getPoStatusReport } from "../services/orders.service";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
@@ -10,11 +12,8 @@ import "../App.css";
 const DEFAULT_ENTITY_FILTER = "all";
 const DEFAULT_STATUS_FILTER = "Inspection Done";
 const STATUS_OPTIONS_FALLBACK = [
-  "Pending",
-  "Under Inspection",
+  "Partially Inspected",
   "Inspection Done",
-  "Partial Shipped",
-  "Shipped",
 ];
 
 const normalizeEntityFilter = (value) => {
@@ -37,6 +36,14 @@ const normalizeStatusFilter = (value) => {
   return matchedStatus || DEFAULT_STATUS_FILTER;
 };
 
+const normalizeStatusCounts = (value = {}) => ({
+  pending: Number(value?.pending || 0),
+  under_inspection: Number(value?.under_inspection || 0),
+  inspection_done: Number(value?.inspection_done || 0),
+  partially_shipped: Number(value?.partially_shipped || 0),
+  shipped: Number(value?.shipped || 0),
+});
+
 const defaultReport = {
   filters: {
     brand: "",
@@ -48,13 +55,46 @@ const defaultReport = {
   },
   summary: {
     vendors_count: 0,
-    rows_count: 0,
-    total_order_quantity: 0,
+    po_count: 0,
+    pending_count: 0,
+    under_inspection_count: 0,
+    inspection_done_count: 0,
+    partially_shipped_count: 0,
+    shipped_count: 0,
+    open_items_count: 0,
+    progressed_items_count: 0,
   },
   vendors: [],
 };
 
+const InspectionDoneItemCounts = ({ counts }) => {
+  const normalizedCounts = normalizeStatusCounts(counts);
+
+  return (
+    <div className="d-grid gap-1">
+      <div>Inspection Done: {normalizedCounts.inspection_done}</div>
+      <div>Partially Shipped: {normalizedCounts.partially_shipped}</div>
+      <div>Shipped: {normalizedCounts.shipped}</div>
+    </div>
+  );
+};
+
+const PartiallyInspectedItemCounts = ({ counts }) => {
+  const normalizedCounts = normalizeStatusCounts(counts);
+
+  return (
+    <div className="d-grid gap-1">
+      <div>Pending: {normalizedCounts.pending}</div>
+      <div>Under Inspection: {normalizedCounts.under_inspection}</div>
+      <div>Inspection Done: {normalizedCounts.inspection_done}</div>
+      <div>Partially Shipped: {normalizedCounts.partially_shipped}</div>
+      <div>Shipped: {normalizedCounts.shipped}</div>
+    </div>
+  );
+};
+
 const PoStatusReport = () => {
+  const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "po-status-report");
@@ -69,9 +109,11 @@ const PoStatusReport = () => {
     normalizeStatusFilter(searchParams.get("status")),
   );
   const [loading, setLoading] = useState(true);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [error, setError] = useState("");
   const [report, setReport] = useState(defaultReport);
   const [syncedQuery, setSyncedQuery] = useState(null);
+  const reportRef = useRef(null);
 
   const fetchReport = useCallback(async () => {
     try {
@@ -94,7 +136,10 @@ const PoStatusReport = () => {
           ...defaultReport.filters,
           ...(response?.filters || {}),
         },
-        summary: response?.summary || defaultReport.summary,
+        summary: {
+          ...defaultReport.summary,
+          ...(response?.summary || {}),
+        },
         vendors: Array.isArray(response?.vendors) ? response.vendors : [],
       });
     } catch (err) {
@@ -156,21 +201,129 @@ const PoStatusReport = () => {
     [report?.filters],
   );
   const summary = useMemo(
-    () => report?.summary || defaultReport.summary,
+    () => ({
+      ...defaultReport.summary,
+      ...(report?.summary || {}),
+    }),
     [report?.summary],
   );
   const statusOptions = useMemo(() => {
     const rawOptions = Array.isArray(filters.status_options)
       ? filters.status_options
       : STATUS_OPTIONS_FALLBACK;
-    return Array.from(new Set(rawOptions.map((value) => String(value || "").trim()).filter(Boolean)));
+    return Array.from(
+      new Set(rawOptions.map((value) => String(value || "").trim()).filter(Boolean)),
+    );
   }, [filters.status_options]);
+  const isInspectionDoneMode = useMemo(
+    () => normalizeStatusFilter(statusFilter) === "Inspection Done",
+    [statusFilter],
+  );
 
-  const handleOpenOrder = useCallback((orderId) => {
-    const normalizedOrderId = String(orderId || "").trim();
-    if (!normalizedOrderId) return;
-    navigate(`/orders?order_id=${encodeURIComponent(normalizedOrderId)}`);
-  }, [navigate]);
+  const handleOpenOrder = useCallback(
+    (orderId) => {
+      const normalizedOrderId = String(orderId || "").trim();
+      if (!normalizedOrderId) return;
+      navigate(`/orders?order_id=${encodeURIComponent(normalizedOrderId)}`);
+    },
+    [navigate],
+  );
+
+  const handleOpenQcDetails = useCallback(
+    (qcId, orderId) => {
+      const normalizedQcId = String(qcId || "").trim();
+      if (normalizedQcId) {
+        navigate(`/qc/${encodeURIComponent(normalizedQcId)}`, {
+          state: {
+            fromQcList: `${location.pathname}${location.search}`,
+          },
+        });
+        return;
+      }
+
+      handleOpenOrder(orderId);
+    },
+    [handleOpenOrder, location.pathname, location.search, navigate],
+  );
+
+  const handleExportPdf = useCallback(async () => {
+    if (!reportRef.current || loading || exportingPdf || report.vendors.length === 0) {
+      return;
+    }
+
+    const confirmed = window.confirm("Confirm export of this PO status report as PDF?");
+    if (!confirmed) return;
+
+    try {
+      setExportingPdf(true);
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+      const target = reportRef.current;
+      const canvas = await html2canvas(target, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        windowWidth: Math.max(target.scrollWidth, target.clientWidth),
+        windowHeight: Math.max(target.scrollHeight, target.clientHeight),
+        scrollX: 0,
+        scrollY: -window.scrollY,
+      });
+
+      const imageData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF({
+        orientation: "portrait",
+        unit: "pt",
+        format: "a4",
+      });
+
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 18;
+      const printableWidth = pageWidth - margin * 2;
+      const printableHeight = pageHeight - margin * 2;
+      const imageHeight = (canvas.height * printableWidth) / canvas.width;
+
+      let remainingHeight = imageHeight;
+      let yPosition = margin;
+
+      pdf.addImage(
+        imageData,
+        "PNG",
+        margin,
+        yPosition,
+        printableWidth,
+        imageHeight,
+        undefined,
+        "FAST",
+      );
+
+      remainingHeight -= printableHeight;
+      while (remainingHeight > 0) {
+        pdf.addPage();
+        yPosition = margin - (imageHeight - remainingHeight);
+        pdf.addImage(
+          imageData,
+          "PNG",
+          margin,
+          yPosition,
+          printableWidth,
+          imageHeight,
+          undefined,
+          "FAST",
+        );
+        remainingHeight -= printableHeight;
+      }
+
+      const safeStatus = String(statusFilter || "status").replace(/[^a-zA-Z0-9_-]/g, "_");
+      const safeVendor = String(vendorFilter || "all-vendors").replace(/[^a-zA-Z0-9_-]/g, "_");
+      const safeBrand = String(brandFilter || "all-brands").replace(/[^a-zA-Z0-9_-]/g, "_");
+      pdf.save(`po-status-report-${safeStatus}-${safeVendor}-${safeBrand}.pdf`);
+    } catch (err) {
+      console.error("PO status report export failed:", err);
+      alert("Failed to export PO status report PDF.");
+    } finally {
+      setExportingPdf(false);
+    }
+  }, [brandFilter, exportingPdf, loading, report.vendors.length, statusFilter, vendorFilter]);
 
   return (
     <>
@@ -186,7 +339,14 @@ const PoStatusReport = () => {
             Back
           </button>
           <h2 className="h4 mb-0">PO Status Report</h2>
-          <span className="d-none d-md-inline" />
+          <button
+            type="button"
+            className="btn btn-outline-primary btn-sm"
+            onClick={handleExportPdf}
+            disabled={loading || exportingPdf || report.vendors.length === 0}
+          >
+            {exportingPdf ? "Exporting..." : "Export PDF"}
+          </button>
         </div>
 
         <div className="card om-card mb-3">
@@ -255,122 +415,261 @@ const PoStatusReport = () => {
           </div>
         </div>
 
-        <div className="card om-card mb-3">
-          <div className="card-body d-flex flex-wrap gap-2">
-            <span className="om-summary-chip">
-              Vendor: {vendorFilter === DEFAULT_ENTITY_FILTER ? "all" : vendorFilter}
-            </span>
-            <span className="om-summary-chip">
-              Brand: {brandFilter === DEFAULT_ENTITY_FILTER ? "all" : brandFilter}
-            </span>
-            <span className="om-summary-chip">
-              Status: {statusFilter}
-            </span>
-            <span className="om-summary-chip">
-              Vendors: {summary.vendors_count ?? 0}
-            </span>
-            <span className="om-summary-chip">
-              Items: {summary.rows_count ?? 0}
-            </span>
-            <span className="om-summary-chip">
-              Total Order Qty: {summary.total_order_quantity ?? 0}
-            </span>
-          </div>
-        </div>
+        <div ref={reportRef}>
 
-        {error && (
-          <div className="alert alert-danger mb-3" role="alert">
-            {error}
-          </div>
-        )}
-
-        <div className="d-grid gap-3">
-          {loading ? (
-            <div className="card om-card">
-              <div className="card-body text-center py-4">Loading...</div>
+          <div className="card om-card mb-3">
+            <div className="card-body d-flex flex-wrap gap-2">
+              {!exportingPdf && (
+                <>
+                  <span className="om-summary-chip">
+                    Vendor: {vendorFilter === DEFAULT_ENTITY_FILTER ? "all" : vendorFilter}
+                  </span>
+                  <span className="om-summary-chip">
+                    Brand: {brandFilter === DEFAULT_ENTITY_FILTER ? "all" : brandFilter}
+                  </span>
+                  <span className="om-summary-chip">
+                    Status: {statusFilter}
+                  </span>
+                </>
+              )}
+              <span className="om-summary-chip">
+                Vendors: {summary.vendors_count ?? 0}
+              </span>
+              <span className="om-summary-chip">
+                POs: {summary.po_count ?? 0}
+              </span>
+              {!isInspectionDoneMode && (
+                <>
+                  <span className="om-summary-chip">
+                    Pending: {summary.pending_count ?? 0}
+                  </span>
+                  <span className="om-summary-chip">
+                    Under Inspection: {summary.under_inspection_count ?? 0}
+                  </span>
+                </>
+              )}
+              <span className="om-summary-chip">
+                Inspection Done: {summary.inspection_done_count ?? 0}
+              </span>
+              <span className="om-summary-chip">
+                Partially Shipped: {summary.partially_shipped_count ?? 0}
+              </span>
+              <span className="om-summary-chip">
+                Shipped: {summary.shipped_count ?? 0}
+              </span>
             </div>
-          ) : report.vendors.length === 0 ? (
-            <div className="card om-card">
-              <div className="card-body text-secondary">
-                No rows found for the selected filters.
+          </div>
+
+          {error && (
+            <div className="alert alert-danger mb-3" role="alert">
+              {error}
+            </div>
+          )}
+
+          <div className="d-grid gap-3">
+            {loading ? (
+              <div className="card om-card">
+                <div className="card-body text-center py-4">Loading...</div>
               </div>
-            </div>
-          ) : (
-            report.vendors.map((vendorEntry, index) => {
-              const rows = Array.isArray(vendorEntry?.rows) ? vendorEntry.rows : [];
-              const vendorKey = String(vendorEntry?.vendor || "").trim() || `vendor-${index}`;
+            ) : report.vendors.length === 0 ? (
+              <div className="card om-card">
+                <div className="card-body text-secondary">
+                  No rows found for the selected filters.
+                </div>
+              </div>
+            ) : (
+              report.vendors.map((vendorEntry, index) => {
+                const pos = Array.isArray(vendorEntry?.pos) ? vendorEntry.pos : [];
+                const vendorKey = String(vendorEntry?.vendor || "").trim() || `vendor-${index}`;
+                const vendorCounts = normalizeStatusCounts(vendorEntry?.status_counts);
 
-              return (
-                <div key={vendorKey} className="card om-card">
-                  <div className="card-body p-0">
-                    <div className="px-3 py-2 border-bottom d-flex flex-wrap gap-2">
-                      <span className="fw-semibold">Vendor: {vendorEntry.vendor}</span>
-                      <span className="om-summary-chip">
-                        Items: {vendorEntry.total_rows ?? rows.length}
-                      </span>
-                      <span className="om-summary-chip">
-                        Total Order Qty: {vendorEntry.total_order_quantity ?? 0}
-                      </span>
-                    </div>
+                return (
+                  <div key={vendorKey} className="card om-card">
+                    <div className="card-body p-0">
+                      <div className="px-3 py-2 border-bottom d-flex flex-wrap gap-2">
+                        <span className="fw-semibold">Vendor: {vendorEntry.vendor}</span>
+                        <span className="om-summary-chip">
+                          POs: {vendorEntry.po_count ?? pos.length}
+                        </span>
+                        {!isInspectionDoneMode && (
+                          <>
+                            <span className="om-summary-chip">
+                              Pending: {vendorCounts.pending}
+                            </span>
+                            <span className="om-summary-chip">
+                              Under Inspection: {vendorCounts.under_inspection}
+                            </span>
+                          </>
+                        )}
+                        <span className="om-summary-chip">
+                          Inspection Done: {vendorCounts.inspection_done}
+                        </span>
+                        <span className="om-summary-chip">
+                          Partially Shipped: {vendorCounts.partially_shipped}
+                        </span>
+                        <span className="om-summary-chip">
+                          Shipped: {vendorCounts.shipped}
+                        </span>
+                      </div>
 
-                    <div className="table-responsive">
-                      <table className="table table-sm table-striped align-middle mb-0">
-                        <thead>
-                          <tr>
-                            <th>Brand</th>
-                            <th>PO</th>
-                            <th>Order Date</th>
-                            <th>ETD</th>
-                            <th>Item Code</th>
-                            <th>Description</th>
-                            <th>Order Qty</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {rows.length === 0 ? (
-                            <tr>
-                              <td colSpan="7" className="text-center py-3">
-                                No rows for this vendor.
-                              </td>
-                            </tr>
-                          ) : (
-                            rows.map((row) => (
-                              <tr
-                                key={`${vendorKey}-${row._id || `${row.order_id}-${row.item_code}`}`}
-                                className="table-clickable"
-                                onClick={() => handleOpenOrder(row.order_id)}
-                              >
-                                <td>{row.brand || "N/A"}</td>
-                                <td>
-                                  <button
-                                    type="button"
-                                    className="btn btn-link p-0 align-baseline text-decoration-none"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      handleOpenOrder(row.order_id);
-                                    }}
-                                  >
-                                    {row.order_id || "N/A"}
-                                  </button>
-                                </td>
-                                <td>{formatDateDDMMYYYY(row.order_date)}</td>
-                                <td>{formatDateDDMMYYYY(row.ETD)}</td>
-                                <td>{row.item_code || "N/A"}</td>
-                                <td>{row.description || "N/A"}</td>
-                                <td>{row.order_quantity ?? 0}</td>
+                      <div className="table-responsive">
+                        {isInspectionDoneMode ? (
+                          <table className="table table-sm table-striped align-middle mb-0">
+                            <thead>
+                              <tr>
+                                <th>Brand</th>
+                                <th>PO</th>
+                                <th>Order Date</th>
+                                <th>ETD</th>
+                                <th>Item Count</th>
                               </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
+                            </thead>
+                            <tbody>
+                              {pos.length === 0 ? (
+                                <tr>
+                                  <td colSpan="5" className="text-center py-3">
+                                    No POs for this vendor.
+                                  </td>
+                                </tr>
+                              ) : (
+                                pos.map((row) => (
+                                  <tr
+                                    key={`${vendorKey}-${row.key || row.order_id}`}
+                                    className="table-clickable"
+                                    onClick={() => handleOpenOrder(row.order_id)}
+                                  >
+                                    <td>{row.brand || "N/A"}</td>
+                                    <td>
+                                      <button
+                                        type="button"
+                                        className="btn btn-link p-0 align-baseline text-decoration-none"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          handleOpenOrder(row.order_id);
+                                        }}
+                                      >
+                                        {row.order_id || "N/A"}
+                                      </button>
+                                    </td>
+                                    <td>{formatDateDDMMYYYY(row.order_date)}</td>
+                                    <td>{formatDateDDMMYYYY(row.effective_etd)}</td>
+                                    <td>
+                                      <InspectionDoneItemCounts counts={row.item_counts} />
+                                    </td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        ) : (
+                          <table className="table table-sm table-striped align-middle mb-0">
+                            <thead>
+                              <tr>
+                                <th>Brand</th>
+                                <th>PO</th>
+                                <th>Item Code</th>
+                                <th>Order Date</th>
+                                <th>ETD</th>
+                                <th>Item Count / Order Qty</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {pos.length === 0 ? (
+                                <tr>
+                                  <td colSpan="6" className="text-center py-3">
+                                    No partially inspected POs for this vendor.
+                                  </td>
+                                </tr>
+                              ) : (
+                                pos.map((row) => (
+                                  <FragmentLikeGroup
+                                    key={`${vendorKey}-${row.key || row.order_id}`}
+                                    row={row}
+                                    handleOpenOrder={handleOpenOrder}
+                                    handleOpenQcDetails={handleOpenQcDetails}
+                                  />
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })
-          )}
+                );
+              })
+            )}
+          </div>
         </div>
       </div>
+    </>
+  );
+};
+
+const FragmentLikeGroup = ({ row, handleOpenOrder, handleOpenQcDetails }) => {
+  const inspectedItems = Array.isArray(row?.inspected_items)
+    ? row.inspected_items
+    : Array.isArray(row?.open_items)
+      ? row.open_items
+      : [];
+
+  return (
+    <>
+      <tr
+        className="table-active table-clickable"
+        onClick={() => handleOpenOrder(row.order_id)}
+      >
+        <td>{row.brand || "N/A"}</td>
+        <td>
+          <button
+            type="button"
+            className="btn btn-link p-0 align-baseline text-decoration-none"
+            onClick={(event) => {
+              event.stopPropagation();
+              handleOpenOrder(row.order_id);
+            }}
+          >
+            {row.order_id || "N/A"}
+          </button>
+        </td>
+        <td />
+        <td>{formatDateDDMMYYYY(row.order_date)}</td>
+        <td>{formatDateDDMMYYYY(row.effective_etd)}</td>
+        <td>
+          <PartiallyInspectedItemCounts counts={row.item_counts} />
+        </td>
+      </tr>
+
+      {inspectedItems.map((openItem) => (
+        <tr
+          key={`${row.key || row.order_id}-${openItem._id || openItem.item_code}`}
+          className="table-clickable"
+          onClick={() => handleOpenOrder(row.order_id)}
+        >
+          <td>{row.brand || "N/A"}</td>
+          <td>{row.order_id || "N/A"}</td>
+          <td>
+            {openItem.qc_id ? (
+              <button
+                type="button"
+                className="btn btn-link p-0 align-baseline text-decoration-none"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleOpenQcDetails(openItem.qc_id, row.order_id);
+                }}
+              >
+                {openItem.item_code || "N/A"}
+              </button>
+            ) : (
+              <div>{openItem.item_code || "N/A"}</div>
+            )}
+            <div className="small text-secondary">{openItem.status || "N/A"}</div>
+          </td>
+          <td>{formatDateDDMMYYYY(row.order_date)}</td>
+          <td>{formatDateDDMMYYYY(row.effective_etd)}</td>
+          <td>{openItem.order_quantity ?? 0}</td>
+        </tr>
+      ))}
     </>
   );
 };
