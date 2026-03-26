@@ -33,6 +33,12 @@ router.get("/:id", inspectorController.getInspectorById);
 router.patch("/:id/allocate-labels", inspectorController.allocateLabels);
 
 /**
+ * PATCH /inspectors/transfer-labels
+ * Transfer unused QC labels from one inspector to another
+ */
+router.patch("/transfer-labels", inspectorController.transferLabels);
+
+/**
  * PATCH /inspectors/:id/replace-labels
  * Replace all allocated labels for an inspector
  */

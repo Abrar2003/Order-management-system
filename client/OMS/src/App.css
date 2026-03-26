@@ -615,7 +615,7 @@
 }
 
 .om-report-danger-row > * {
-  background: #f8d7da !important;
+  /* background: #f8d7da !important; */
   color: #842029;
   font-weight: 600;
   vertical-align: top;
