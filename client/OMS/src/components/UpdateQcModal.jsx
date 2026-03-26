@@ -1982,13 +1982,13 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       }
     } else if (
       requestedQuantityLimit !== undefined &&
-      nextNetOffered > requestedQuantityLimit
+      totalOfferedNext > requestedQuantityLimit
     ) {
       setError("Offered quantity cannot exceed quantity requested.");
       return;
     }
 
-    if (nextNetOffered < 0) {
+    if (totalOfferedNext < 0) {
       setError("Offered quantity cannot be negative.");
       return;
     }
@@ -2000,7 +2000,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
     if (
       qc.quantities?.vendor_provision !== undefined &&
-      nextPassed > nextNetOffered
+      nextPassed > totalOfferedNext
     ) {
       setError("Passed quantity cannot exceed offered quantity.");
       return;
