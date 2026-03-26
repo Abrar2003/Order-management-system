@@ -536,16 +536,37 @@ const computeAqlSampleQuantity = (quantity) => {
 
 const getLatestRequestedQuantity = (qc = {}) => {
   const requestHistory = Array.isArray(qc?.request_history) ? qc.request_history : [];
+  console.log("requestHistory", requestHistory);
   const latestRequestEntry =
-    requestHistory.length > 0 ? requestHistory[requestHistory.length - 1] : null;
+    requestHistory.length > 0 ? requestHistory[0] : null;
   const latestRequestedQuantity = Number(latestRequestEntry?.quantity_requested);
-  if (Number.isFinite(latestRequestedQuantity) && latestRequestedQuantity >= 0) {
+  if (Number.isFinite(latestRequestedQuantity) && latestRequestedQuantity > 0) {
     return latestRequestedQuantity;
   }
 
   const fallbackRequestedQuantity = Number(qc?.quantities?.quantity_requested);
+  if (Number.isFinite(fallbackRequestedQuantity) && fallbackRequestedQuantity > 0) {
+    return fallbackRequestedQuantity;
+  }
+
+  for (let index = requestHistory.length - 1; index >= 0; index -= 1) {
+    const historicalQuantity = Number(requestHistory[index]?.quantity_requested);
+    if (Number.isFinite(historicalQuantity) && historicalQuantity > 0) {
+      return historicalQuantity;
+    }
+  }
+
+  if (Number.isFinite(latestRequestedQuantity) && latestRequestedQuantity >= 0) {
+    return latestRequestedQuantity;
+  }
+
   if (Number.isFinite(fallbackRequestedQuantity) && fallbackRequestedQuantity >= 0) {
     return fallbackRequestedQuantity;
+  }
+
+  const clientDemandQuantity = Number(qc?.quantities?.client_demand);
+  if (Number.isFinite(clientDemandQuantity) && clientDemandQuantity > 0) {
+    return clientDemandQuantity;
   }
 
   return 0;
@@ -1856,6 +1877,11 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         return;
       }
 
+      if (offeredQuantity > requestedQuantityLimit) {
+        setError("Offered quantity cannot exceed quantity requested.");
+        return;
+      }
+
       if (isAqlRequest && totalCheckedAfterRewrite > aqlSampleQuantity) {
         setError(
           `AQL checked quantity cannot exceed 10% sample (${aqlSampleQuantity}).`,
@@ -1899,7 +1925,11 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
               requested_date: requestedDateIso,
               inspection_date: lastInspectedDateIso,
               inspector: selectedInspectorId,
-              vendor_requested: Number(latestInspectionRecord?.vendor_requested || 0) || 0,
+              vendor_requested:
+                Number(latestInspectionRecord?.vendor_requested || 0)
+                || requestedQuantityLimit
+                || aqlRequestedQuantity
+                || 0,
               vendor_offered: offeredQuantity,
               checked: qcChecked,
               passed:

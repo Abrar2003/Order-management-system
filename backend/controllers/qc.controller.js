@@ -244,9 +244,13 @@ const syncQcRequestHistoryStatuses = (
   if (!Array.isArray(qcDoc?.request_history)) return false;
 
   const inspectionStatusByRequestId = new Map();
+  const inspectionStatusByRequestKey = new Map();
   for (const record of Array.isArray(inspectionRecords) ? inspectionRecords : []) {
     const requestHistoryId = String(record?.request_history_id || "").trim();
-    if (!requestHistoryId) continue;
+    const requestedDateKey = toISODateString(
+      record?.requested_date || record?.inspection_date || record?.createdAt,
+    );
+    const inspectorId = String(record?.inspector?._id || record?.inspector || "").trim();
 
     const hasActivity = hasInspectionRecordActivity({
       checked: record?.checked,
@@ -257,10 +261,31 @@ const syncQcRequestHistoryStatuses = (
       goodsNotReady: record?.goods_not_ready,
     });
 
-    if (!inspectionStatusByRequestId.has(requestHistoryId)) {
-      inspectionStatusByRequestId.set(requestHistoryId, hasActivity);
-    } else if (hasActivity) {
-      inspectionStatusByRequestId.set(requestHistoryId, true);
+    if (requestHistoryId) {
+      if (!inspectionStatusByRequestId.has(requestHistoryId)) {
+        inspectionStatusByRequestId.set(requestHistoryId, hasActivity);
+      } else if (hasActivity) {
+        inspectionStatusByRequestId.set(requestHistoryId, true);
+      }
+    }
+
+    if (requestedDateKey) {
+      const dateOnlyKey = `date:${requestedDateKey}`;
+      const dateInspectorKey = inspectorId
+        ? `${dateOnlyKey}:inspector:${inspectorId}`
+        : "";
+      if (!inspectionStatusByRequestKey.has(dateOnlyKey)) {
+        inspectionStatusByRequestKey.set(dateOnlyKey, hasActivity);
+      } else if (hasActivity) {
+        inspectionStatusByRequestKey.set(dateOnlyKey, true);
+      }
+      if (dateInspectorKey) {
+        if (!inspectionStatusByRequestKey.has(dateInspectorKey)) {
+          inspectionStatusByRequestKey.set(dateInspectorKey, hasActivity);
+        } else if (hasActivity) {
+          inspectionStatusByRequestKey.set(dateInspectorKey, true);
+        }
+      }
     }
   }
 
@@ -269,9 +294,21 @@ const syncQcRequestHistoryStatuses = (
     const requestId = String(entry?._id || "").trim();
     if (!requestId) continue;
 
-    const nextStatus = inspectionStatusByRequestId.get(requestId)
-      ? "inspected"
-      : "open";
+    const requestDateKey = toISODateString(entry?.request_date);
+    const requestInspectorId = String(
+      entry?.inspector?._id || entry?.inspector || "",
+    ).trim();
+    const fallbackStatus = requestDateKey
+      ? inspectionStatusByRequestKey.get(
+          requestInspectorId
+            ? `date:${requestDateKey}:inspector:${requestInspectorId}`
+            : `date:${requestDateKey}`,
+        ) ?? inspectionStatusByRequestKey.get(`date:${requestDateKey}`)
+      : false;
+    const nextStatus =
+      inspectionStatusByRequestId.get(requestId) || fallbackStatus
+        ? "inspected"
+        : "open";
     if (String(entry?.status || "") !== nextStatus) {
       entry.status = nextStatus;
       stampRequestHistoryEntry(entry, {
@@ -1014,9 +1051,49 @@ const applyQcItemDetailsPatch = (qcDoc, patch = {}) => {
 };
 
 const resolveLatestRequestEntry = (requestHistory = []) => {
+  console.log("requestHistory", requestHistory);
   if (!Array.isArray(requestHistory) || requestHistory.length === 0)
     return null;
   return requestHistory[requestHistory.length - 1] || null;
+};
+
+const resolveRequestedQuantityFromQc = (qcDoc = {}) => {
+  console.log("qcDoc", qcDoc);
+  const requestHistory = Array.isArray(qcDoc?.request_history)
+    ? qcDoc.request_history
+    : [];
+  const latestRequestEntry = resolveLatestRequestEntry(requestHistory);
+  const latestRequestedQuantity = Number(latestRequestEntry?.quantity_requested);
+  if (Number.isFinite(latestRequestedQuantity) && latestRequestedQuantity > 0) {
+    return latestRequestedQuantity;
+  }
+
+  const storedRequestedQuantity = Number(qcDoc?.quantities?.quantity_requested);
+  if (Number.isFinite(storedRequestedQuantity) && storedRequestedQuantity > 0) {
+    return storedRequestedQuantity;
+  }
+
+  for (let index = requestHistory.length - 1; index >= 0; index -= 1) {
+    const historicalQuantity = Number(requestHistory[index]?.quantity_requested);
+    if (Number.isFinite(historicalQuantity) && historicalQuantity > 0) {
+      return historicalQuantity;
+    }
+  }
+
+  if (Number.isFinite(latestRequestedQuantity) && latestRequestedQuantity >= 0) {
+    return latestRequestedQuantity;
+  }
+
+  if (Number.isFinite(storedRequestedQuantity) && storedRequestedQuantity >= 0) {
+    return storedRequestedQuantity;
+  }
+
+  const clientDemandQuantity = Number(qcDoc?.quantities?.client_demand);
+  if (Number.isFinite(clientDemandQuantity) && clientDemandQuantity > 0) {
+    return clientDemandQuantity;
+  }
+
+  return 0;
 };
 
 const syncQcCurrentRequestFieldsFromHistory = (
@@ -2918,10 +2995,7 @@ exports.updateQC = async (req, res) => {
     const latestRequestEntry = resolveLatestRequestEntry(
       qc?.request_history || [],
     );
-    const latestRequestedQuantity =
-      latestRequestEntry?.quantity_requested !== undefined
-        ? toNonNegativeNumber(latestRequestEntry.quantity_requested, 0)
-        : toNonNegativeNumber(qc?.quantities?.quantity_requested, 0);
+    const latestRequestedQuantity = resolveRequestedQuantityFromQc(qc);
     const hasQcRequest =
       (Array.isArray(qc?.request_history) && qc.request_history.length > 0) ||
       latestRequestedQuantity > 0;
@@ -3836,15 +3910,8 @@ exports.updateQC = async (req, res) => {
       : 0;
 
     if (allowAdminRewrite && hasExplicitQuantityPayload) {
-      if (
-        Number.isFinite(quantityRequestedCap) &&
-        quantityRequestedCap >= 0 &&
-        nextVendorProvision > quantityRequestedCap
-      ) {
-        return res.status(400).json({
-          message: "offered quantity cannot exceed quantity requested",
-        });
-      }
+      // Admin rewrite updates aggregate QC totals across inspection rows.
+      // Per-request offered/requested validation belongs to the inspection row edit route.
     } else if (hasStartedInspection) {
       if (addProvision > pendingQuantityLimit) {
         return res.status(400).json({
@@ -4123,10 +4190,7 @@ exports.updateQC = async (req, res) => {
         });
       }
 
-      const requestedQuantityForRecord =
-        latestRequestEntry?.quantity_requested !== undefined
-          ? Number(latestRequestEntry.quantity_requested)
-          : quantityRequestedCap;
+      const requestedQuantityForRecord = quantityRequestedCap;
 
       const inspectionRecord = await upsertInspectionRecordForRequest({
         qcDoc: qc,
@@ -5766,10 +5830,7 @@ exports.markGoodsNotReady = async (req, res) => {
     const latestRequestEntry = resolveLatestRequestEntry(
       qc?.request_history || [],
     );
-    const latestRequestedQuantity =
-      latestRequestEntry?.quantity_requested !== undefined
-        ? toNonNegativeNumber(latestRequestEntry.quantity_requested, 0)
-        : toNonNegativeNumber(qc?.quantities?.quantity_requested, 0);
+    const latestRequestedQuantity = resolveRequestedQuantityFromQc(qc);
     const hasQcRequest =
       (Array.isArray(qc?.request_history) && qc.request_history.length > 0) ||
       latestRequestedQuantity > 0;
@@ -5821,14 +5882,7 @@ exports.markGoodsNotReady = async (req, res) => {
       });
     }
 
-    const requestedQuantityForRecord =
-      latestRequestEntry?.quantity_requested !== undefined
-        ? Number(latestRequestEntry.quantity_requested)
-        : Number(
-            qc?.quantities?.quantity_requested > 0
-              ? qc.quantities.quantity_requested
-              : (qc?.quantities?.client_demand ?? 0),
-          );
+    const requestedQuantityForRecord = latestRequestedQuantity;
 
     qc.last_inspected_date = inspectionDate;
     qc.remarks = reason;
@@ -6490,10 +6544,7 @@ exports.uploadQcImages = async (req, res) => {
     }
 
     const latestRequestEntry = resolveLatestRequestEntry(qc?.request_history || []);
-    const latestRequestedQuantity =
-      latestRequestEntry?.quantity_requested !== undefined
-        ? toNonNegativeNumber(latestRequestEntry.quantity_requested, 0)
-        : toNonNegativeNumber(qc?.quantities?.quantity_requested, 0);
+    const latestRequestedQuantity = resolveRequestedQuantityFromQc(qc);
     const hasQcRequest =
       (Array.isArray(qc?.request_history) && qc.request_history.length > 0) ||
       latestRequestedQuantity > 0;
@@ -6849,6 +6900,7 @@ exports.editInspectionRecords = async (req, res) => {
       inspectionDocs.map((doc) => [String(doc._id), doc]),
     );
     const touchedInspectors = new Set();
+    const qcRequestedQuantityCap = resolveRequestedQuantityFromQc(qc);
 
     const parseRequiredDate = (value, fieldName) => {
       const rawValue = String(value || "").trim();
@@ -6947,8 +6999,16 @@ exports.editInspectionRecords = async (req, res) => {
         row?.inspector ?? row?.inspector_id ?? record.inspector,
       );
 
+      const rawVendorRequested =
+        row?.vendor_requested ??
+        record.vendor_requested ??
+        qcRequestedQuantityCap;
       const vendorRequested = parseNonNegativeField(
-        row?.vendor_requested ?? record.vendor_requested,
+        (
+          Number(rawVendorRequested) > 0
+            ? rawVendorRequested
+            : qcRequestedQuantityCap
+        ),
         "Vendor requested",
       );
       const vendorOffered = parseNonNegativeField(
@@ -6970,6 +7030,15 @@ exports.editInspectionRecords = async (req, res) => {
 
       if (passed > checked) {
         throw new Error("Passed quantity cannot exceed checked quantity");
+      }
+      if (vendorOffered > vendorRequested) {
+        throw new Error("offered quantity cannot exceed quantity requested");
+      }
+      if (checked > vendorOffered) {
+        throw new Error("Checked quantity cannot exceed offered quantity");
+      }
+      if (passed > vendorOffered) {
+        throw new Error("Passed quantity cannot exceed offered quantity");
       }
 
       const cbmInput = row?.cbm && typeof row.cbm === "object" ? row.cbm : null;

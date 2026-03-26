@@ -6,6 +6,13 @@ const parsePositiveInteger = (value, fallback) => {
   return parsed;
 };
 
+const normalizeInspectorLabels = (labels = []) =>
+  [...new Set(
+    (Array.isArray(labels) ? labels : [])
+      .map((label) => Number(label))
+      .filter((label) => Number.isInteger(label) && label > 0),
+  )].sort((left, right) => left - right);
+
 const QC_USER_FILTER = {
   $and: [
     { role: { $regex: "^qc$", $options: "i" } },
@@ -243,6 +250,114 @@ exports.allocateLabels = async (req, res) => {
     });
   } catch (err) {
     res.status(400).json({ message: err.message });
+  }
+};
+
+/**
+ * PATCH /inspectors/transfer-labels
+ * Transfer unused QC labels between inspectors
+ * Only accessible to Manager and Admin
+ */
+exports.transferLabels = async (req, res) => {
+  try {
+    const {
+      from_inspector_id: fromInspectorId,
+      to_inspector_id: toInspectorId,
+      labels,
+    } = req.body || {};
+
+    const normalizedLabels = normalizeInspectorLabels(labels);
+    if (normalizedLabels.length === 0) {
+      return res.status(400).json({
+        message: "Labels must be a non-empty array of positive integers",
+      });
+    }
+
+    if (!fromInspectorId || !toInspectorId) {
+      return res.status(400).json({
+        message: "Source and target inspectors are required",
+      });
+    }
+
+    if (String(fromInspectorId) === String(toInspectorId)) {
+      return res.status(400).json({
+        message: "Source and target inspectors must be different",
+      });
+    }
+
+    const [sourceInspector, targetInspector] = await Promise.all([
+      Inspector.findById(fromInspectorId).populate("user", "name email role"),
+      Inspector.findById(toInspectorId).populate("user", "name email role"),
+    ]);
+
+    if (!sourceInspector) {
+      return res.status(404).json({ message: "Source inspector not found" });
+    }
+
+    if (!targetInspector) {
+      return res.status(404).json({ message: "Target inspector not found" });
+    }
+
+    const sourceAllocated = normalizeInspectorLabels(sourceInspector.alloted_labels);
+    const sourceUsed = new Set(normalizeInspectorLabels(sourceInspector.used_labels));
+    const targetAllocated = normalizeInspectorLabels(targetInspector.alloted_labels);
+    const targetUsed = new Set(normalizeInspectorLabels(targetInspector.used_labels));
+
+    const sourceAllocatedSet = new Set(sourceAllocated);
+    const targetAllocatedSet = new Set(targetAllocated);
+
+    const missingFromSource = normalizedLabels.filter(
+      (label) => !sourceAllocatedSet.has(label),
+    );
+    const usedInSource = normalizedLabels.filter((label) => sourceUsed.has(label));
+    const alreadyInTarget = normalizedLabels.filter(
+      (label) => targetAllocatedSet.has(label) || targetUsed.has(label),
+    );
+
+    if (missingFromSource.length > 0) {
+      return res.status(400).json({
+        message: "Some labels are not allocated to the source inspector",
+        labels_not_in_source: missingFromSource,
+      });
+    }
+
+    if (usedInSource.length > 0) {
+      return res.status(400).json({
+        message: "Used labels cannot be transferred",
+        used_labels: usedInSource,
+      });
+    }
+
+    if (alreadyInTarget.length > 0) {
+      return res.status(400).json({
+        message: "Some labels are already assigned to the target inspector",
+        target_conflicts: alreadyInTarget,
+      });
+    }
+
+    const transferSet = new Set(normalizedLabels);
+    sourceInspector.alloted_labels = sourceAllocated.filter(
+      (label) => !transferSet.has(label),
+    );
+    targetInspector.alloted_labels = normalizeInspectorLabels([
+      ...targetAllocated,
+      ...normalizedLabels,
+    ]);
+    sourceInspector.labels_allotted_by = req.user?._id || sourceInspector.labels_allotted_by;
+    targetInspector.labels_allotted_by = req.user?._id || targetInspector.labels_allotted_by;
+
+    await Promise.all([sourceInspector.save(), targetInspector.save()]);
+
+    return res.json({
+      message: `${normalizedLabels.length} label(s) transferred successfully`,
+      transferred_labels: normalizedLabels,
+      data: {
+        from_inspector: sourceInspector,
+        to_inspector: targetInspector,
+      },
+    });
+  } catch (err) {
+    return res.status(400).json({ message: err.message });
   }
 };
 
