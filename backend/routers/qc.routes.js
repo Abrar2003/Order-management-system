@@ -40,9 +40,16 @@ router.patch(
 router.post(
   "/:id/images",
   auth,
-  authorize("QC", "admin", "manager", "dev"),
+  authorize("QC", "admin", "manager"),
   upload.any(),
   qcController.uploadQcImages,
+);
+
+router.delete(
+  "/:id/images",
+  auth,
+  authorize("admin", "manager"),
+  qcController.deleteQcImages,
 );
 
 router.post(

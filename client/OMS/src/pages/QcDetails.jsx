@@ -276,7 +276,7 @@ const RELATED_FILE_OPTIONS_BY_VALUE = Object.freeze(
     return acc;
   }, {}),
 );
-const MAX_QC_IMAGE_UPLOAD_COUNT = 60;
+const MAX_QC_IMAGE_UPLOAD_COUNT = 100;
 
 const ITEM_MASTER_FILE_OPTIONS = Object.freeze(
   RELATED_FILE_OPTIONS.filter((option) => option.scope === "item_master"),
@@ -296,6 +296,11 @@ const getSelectedFileSignature = (file) =>
     Number(file?.lastModified || 0),
     String(file?.type || "").trim().toLowerCase(),
   ].join("__");
+
+const getQcImageSelectionValue = (image) =>
+  String(image?._id || image?.key || "").trim();
+
+const isMongoObjectIdLike = (value) => /^[a-f0-9]{24}$/i.test(String(value || "").trim());
 
 const buildSelectedFileBatchKey = ({
   qcId = "",
@@ -324,6 +329,7 @@ const QcDetails = () => {
   const [qcImageUploadMode, setQcImageUploadMode] = useState("single");
   const [qcSingleImageComment, setQcSingleImageComment] = useState("");
   const [uploadingRelatedFile, setUploadingRelatedFile] = useState(false);
+  const [deletingRelatedFile, setDeletingRelatedFile] = useState(false);
   const [relatedFileUploadProgress, setRelatedFileUploadProgress] = useState(0);
   const [openingRelatedFileType, setOpeningRelatedFileType] = useState("");
   const [pdfViewerFile, setPdfViewerFile] = useState(null);
@@ -334,6 +340,8 @@ const QcDetails = () => {
   const [showGoodsNotReadyModal, setShowGoodsNotReadyModal] = useState(false);
   const [showQcImageGallery, setShowQcImageGallery] = useState(false);
   const [activeQcImageIndex, setActiveQcImageIndex] = useState(0);
+  const [selectedQcImageIds, setSelectedQcImageIds] = useState([]);
+  const [deletingQcImages, setDeletingQcImages] = useState(false);
   const [deletingInspectionId, setDeletingInspectionId] = useState("");
 
   const navigate = useNavigate();
@@ -409,7 +417,13 @@ const QcDetails = () => {
       || RELATED_FILE_OPTIONS[0],
     [relatedFileType],
   );
-  const canUploadRelatedFile = canUpdateQc;
+  const canUploadQcImages = canUpdateQc;
+  const canUploadItemMasterFiles = isAdmin && canUpdateQc;
+  const canUploadRelatedFile =
+    activeRelatedFileConfig?.scope === "qc"
+      ? canUploadQcImages
+      : canUploadItemMasterFiles;
+  const canManageQcImages = isAdmin;
   const canUploadActiveRelatedFile =
     canUploadRelatedFile &&
     (
@@ -419,6 +433,8 @@ const QcDetails = () => {
   const relatedFileUploadDisabledReason = !canUploadActiveRelatedFile
     ? activeRelatedFileConfig?.scope === "item_master" && !qc?.item_master?._id
       ? "Item master not found for this QC."
+      : activeRelatedFileConfig?.scope === "item_master" && !isAdmin
+      ? "Only admin or manager can upload item related files."
       : !pendingAlignmentInfo.hasRequest
       ? "QC is not requested yet. Align QC request before uploading."
       : !isQcAlignedRecord
@@ -429,7 +445,9 @@ const QcDetails = () => {
       ? "QC date rule will be validated while submitting."
       : hasUsedOneDayBackdatedUpdate
       ? "Backdated one-time rule will be validated while submitting."
-      : "Only admin, manager, or aligned QC can upload related files."
+      : activeRelatedFileConfig?.scope === "qc"
+      ? "Only admin, manager, or aligned QC can upload QC images."
+      : "Only admin or manager can upload item related files."
     : "";
 
   const sortedLabels = useMemo(() => normalizeLabels(qc?.labels), [qc?.labels]);
@@ -575,7 +593,47 @@ const QcDetails = () => {
     () => (Array.isArray(qc?.qc_images) ? qc.qc_images : []),
     [qc?.qc_images],
   );
+  const activeRelatedStoredFile = useMemo(
+    () => (
+      activeRelatedFileConfig?.scope === "item_master" && activeRelatedFileConfig?.field
+        ? qc?.item_master?.[activeRelatedFileConfig.field] || null
+        : null
+    ),
+    [activeRelatedFileConfig, qc?.item_master],
+  );
+  const canDeleteActiveRelatedFile = useMemo(
+    () => (
+      activeRelatedFileConfig?.scope === "item_master"
+      && isAdmin
+      && hasStoredFile(activeRelatedStoredFile)
+    ),
+    [activeRelatedFileConfig, activeRelatedStoredFile, isAdmin],
+  );
+  const relatedFileDeleteDisabledReason = useMemo(() => {
+    if (activeRelatedFileConfig?.scope === "qc") {
+      return "Only admin or manager can delete QC images in the gallery.";
+    }
+    if (!isAdmin) {
+      return "Only admin or manager can delete related files.";
+    }
+    if (!canUploadActiveRelatedFile) {
+      return relatedFileUploadDisabledReason || "Only admin or manager can delete related files.";
+    }
+    if (!hasStoredFile(activeRelatedStoredFile)) {
+      return `${activeRelatedFileConfig?.label || "Selected file"} is not uploaded yet.`;
+    }
+    return "";
+  }, [
+    activeRelatedFileConfig,
+    activeRelatedStoredFile,
+    canUploadActiveRelatedFile,
+    relatedFileUploadDisabledReason,
+  ]);
   const activeQcImage = qcImages[activeQcImageIndex] || null;
+  const selectedQcImages = useMemo(
+    () => qcImages.filter((image) => selectedQcImageIds.includes(getQcImageSelectionValue(image))),
+    [qcImages, selectedQcImageIds],
+  );
 
   const requestInspectionTimeline = useMemo(() => {
     const requestHistory = Array.isArray(qc?.request_history)
@@ -757,6 +815,64 @@ const QcDetails = () => {
 
     setRelatedFileUploadProgress((current) => (current > 0 ? current : 10));
   }, []);
+
+  const handleDeleteRelatedFile = useCallback(async () => {
+    if (deletingRelatedFile) return;
+
+    if (!isAdmin) {
+      alert("Only admin or manager can delete related files.");
+      return;
+    }
+
+    if (activeRelatedFileConfig?.scope === "qc") {
+      alert("Only admin or manager can delete QC images in the gallery.");
+      return;
+    }
+
+    if (!qc?.item_master?._id) {
+      alert("Item master record not found for this QC.");
+      return;
+    }
+
+    if (!hasStoredFile(activeRelatedStoredFile)) {
+      alert(`${activeRelatedFileConfig?.label || "Selected file"} is not uploaded yet.`);
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete ${activeRelatedFileConfig?.label || "selected file"}?`,
+    );
+    if (!confirmed) return;
+
+    try {
+      setDeletingRelatedFile(true);
+      const response = await api.delete(
+        `/items/${encodeURIComponent(qc.item_master._id)}/files/${encodeURIComponent(activeRelatedFileConfig.value)}`,
+      );
+
+      alert(
+        response?.data?.message ||
+          `${activeRelatedFileConfig?.label || "Selected file"} deleted successfully.`,
+      );
+      await fetchQcDetails();
+    } catch (error) {
+      console.error(error);
+      alert(
+        error?.response?.data?.message ||
+          error?.message ||
+          `Failed to delete ${activeRelatedFileConfig?.label || "selected file"}.`,
+      );
+    } finally {
+      setDeletingRelatedFile(false);
+    }
+  }, [
+    activeRelatedFileConfig,
+    activeRelatedStoredFile,
+    deletingRelatedFile,
+    fetchQcDetails,
+    isAdmin,
+    qc?.item_master?._id,
+  ]);
 
   const handleRelatedFileChange = useCallback(async (event) => {
     const inputElement = event.target;
@@ -946,10 +1062,62 @@ const QcDetails = () => {
     setShowQcImageGallery(false);
   }, []);
 
+  const handleToggleQcImageSelection = useCallback((image) => {
+    const selectionValue = getQcImageSelectionValue(image);
+    if (!selectionValue) return;
+
+    setSelectedQcImageIds((previous) =>
+      previous.includes(selectionValue)
+        ? previous.filter((entry) => entry !== selectionValue)
+        : [...previous, selectionValue],
+    );
+  }, []);
+
+  const handleDeleteSelectedQcImages = useCallback(async () => {
+    if (deletingQcImages || selectedQcImages.length === 0) return;
+
+    const confirmed = window.confirm(
+      `Delete ${selectedQcImages.length} selected QC image${selectedQcImages.length === 1 ? "" : "s"}?`,
+    );
+    if (!confirmed) return;
+
+    const imageIds = selectedQcImages
+      .map((image) => String(image?._id || "").trim())
+      .filter((value) => isMongoObjectIdLike(value));
+    const imageKeys = selectedQcImages
+      .filter((image) => !isMongoObjectIdLike(String(image?._id || "").trim()))
+      .map((image) => String(image?.key || "").trim())
+      .filter(Boolean);
+
+    try {
+      setDeletingQcImages(true);
+      const response = await api.delete(`/qc/${encodeURIComponent(id)}/images`, {
+        data: {
+          image_ids: imageIds,
+          image_keys: imageKeys,
+        },
+      });
+
+      alert(response?.data?.message || "Selected QC images deleted successfully.");
+      setSelectedQcImageIds([]);
+      await fetchQcDetails();
+    } catch (error) {
+      console.error(error);
+      alert(
+        error?.response?.data?.message ||
+          error?.message ||
+          "Failed to delete selected QC images.",
+      );
+    } finally {
+      setDeletingQcImages(false);
+    }
+  }, [deletingQcImages, fetchQcDetails, id, selectedQcImages]);
+
   useEffect(() => {
     if (qcImages.length === 0) {
       setShowQcImageGallery(false);
       setActiveQcImageIndex(0);
+      setSelectedQcImageIds([]);
       return;
     }
 
@@ -957,6 +1125,19 @@ const QcDetails = () => {
       setActiveQcImageIndex(0);
     }
   }, [activeQcImageIndex, qcImages.length]);
+
+  useEffect(() => {
+    setSelectedQcImageIds((previous) =>
+      previous.filter((selectionValue) =>
+        qcImages.some((image) => getQcImageSelectionValue(image) === selectionValue)
+      ),
+    );
+  }, [qcImages]);
+
+  useEffect(() => {
+    if (showQcImageGallery) return;
+    setSelectedQcImageIds([]);
+  }, [showQcImageGallery]);
 
   useEffect(() => {
     if (!showQcImageGallery) return undefined;
@@ -1033,7 +1214,7 @@ const QcDetails = () => {
                 style={{ width: "auto", minWidth: "160px" }}
                 value={relatedFileType}
                 onChange={(e) => setRelatedFileType(String(e.target.value || "product_image"))}
-                disabled={!canUploadRelatedFile || uploadingRelatedFile}
+                disabled={!canUploadRelatedFile || uploadingRelatedFile || deletingRelatedFile}
                 title={relatedFileUploadDisabledReason}
               >
                 {RELATED_FILE_OPTIONS.map((option) => (
@@ -1050,7 +1231,7 @@ const QcDetails = () => {
                     style={{ width: "auto", minWidth: "140px" }}
                     value={qcImageUploadMode}
                     onChange={(e) => setQcImageUploadMode(String(e.target.value || "single"))}
-                    disabled={!canUploadActiveRelatedFile || uploadingRelatedFile}
+                    disabled={!canUploadActiveRelatedFile || uploadingRelatedFile || deletingRelatedFile}
                   >
                     <option value="single">Single Image</option>
                     <option value="bulk">Bulk Images</option>
@@ -1064,7 +1245,7 @@ const QcDetails = () => {
                       value={qcSingleImageComment}
                       onChange={(e) => setQcSingleImageComment(String(e.target.value || ""))}
                       placeholder="Comment (optional)"
-                      disabled={!canUploadActiveRelatedFile || uploadingRelatedFile}
+                      disabled={!canUploadActiveRelatedFile || uploadingRelatedFile || deletingRelatedFile}
                     />
                   )}
                 </>
@@ -1074,10 +1255,20 @@ const QcDetails = () => {
                 type="button"
                 className="btn btn-outline-primary btn-sm"
                 onClick={handleOpenRelatedFilePicker}
-                disabled={!canUploadActiveRelatedFile || uploadingRelatedFile}
+                disabled={!canUploadActiveRelatedFile || uploadingRelatedFile || deletingRelatedFile}
                 title={relatedFileUploadDisabledReason}
               >
                 {uploadingRelatedFile ? "Uploading..." : "Upload Related File"}
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-outline-danger btn-sm"
+                onClick={handleDeleteRelatedFile}
+                disabled={!canDeleteActiveRelatedFile || uploadingRelatedFile || deletingRelatedFile}
+                title={relatedFileDeleteDisabledReason}
+              >
+                {deletingRelatedFile ? "Deleting..." : "Delete File"}
               </button>
 
               <button
@@ -1563,14 +1754,34 @@ const QcDetails = () => {
                 <div className="small text-muted">
                   {`${qcImages.length} image${qcImages.length === 1 ? "" : "s"} available`}
                 </div>
+                {selectedQcImages.length > 0 && (
+                  <div className="small text-muted">
+                    {`${selectedQcImages.length} selected`}
+                  </div>
+                )}
               </div>
-              <button
-                type="button"
-                className="btn btn-outline-secondary btn-sm"
-                onClick={handleCloseQcImageGallery}
-              >
-                Close
-              </button>
+              <div className="d-flex flex-wrap align-items-center gap-2">
+                {canManageQcImages && (
+                  <button
+                    type="button"
+                    className="btn btn-outline-danger btn-sm"
+                    onClick={handleDeleteSelectedQcImages}
+                    disabled={selectedQcImages.length === 0 || deletingQcImages}
+                  >
+                    {deletingQcImages
+                      ? "Deleting..."
+                      : `Delete Selected${selectedQcImages.length > 0 ? ` (${selectedQcImages.length})` : ""}`}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary btn-sm"
+                  onClick={handleCloseQcImageGallery}
+                  disabled={deletingQcImages}
+                >
+                  Close
+                </button>
+              </div>
             </div>
 
             <div className="qc-image-gallery-body">
@@ -1607,31 +1818,53 @@ const QcDetails = () => {
                 {qcImages.map((image, index) => {
                   const imageUrl = String(image?.url || "").trim();
                   const isSelected = index === activeQcImageIndex;
+                  const selectionValue = getQcImageSelectionValue(image);
+                  const isChecked =
+                    selectionValue && selectedQcImageIds.includes(selectionValue);
 
                   return (
-                    <button
+                    <div
+                      className="qc-image-gallery-thumb-wrap"
                       key={String(
                         image?._id ||
                         image?.key ||
                         `${image?.originalName || "qc-image"}-${index}`,
                       )}
-                      type="button"
-                      className={`qc-image-gallery-thumb${isSelected ? " is-active" : ""}`}
-                      onClick={() => setActiveQcImageIndex(index)}
-                      title={image?.originalName || `QC image ${index + 1}`}
                     >
-                      {imageUrl ? (
-                        <img
-                          src={imageUrl}
-                          alt={image?.originalName || `QC image ${index + 1}`}
-                          className="qc-image-gallery-thumb-image"
-                        />
-                      ) : (
-                        <span className="qc-image-gallery-thumb-empty">
-                          Preview unavailable
-                        </span>
+                      <button
+                        type="button"
+                        className={`qc-image-gallery-thumb${isSelected ? " is-active" : ""}${isChecked ? " is-marked" : ""}`}
+                        onClick={() => setActiveQcImageIndex(index)}
+                        title={image?.originalName || `QC image ${index + 1}`}
+                      >
+                        {imageUrl ? (
+                          <img
+                            src={imageUrl}
+                            alt={image?.originalName || `QC image ${index + 1}`}
+                            className="qc-image-gallery-thumb-image"
+                          />
+                        ) : (
+                          <span className="qc-image-gallery-thumb-empty">
+                            Preview unavailable
+                          </span>
+                        )}
+                      </button>
+
+                      {canManageQcImages && (
+                        <label
+                          className="qc-image-gallery-thumb-check"
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <input
+                            type="checkbox"
+                            className="form-check-input m-0"
+                            checked={Boolean(isChecked)}
+                            onChange={() => handleToggleQcImageSelection(image)}
+                            disabled={deletingQcImages}
+                          />
+                        </label>
                       )}
-                    </button>
+                    </div>
                   );
                 })}
               </div>

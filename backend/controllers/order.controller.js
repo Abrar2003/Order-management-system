@@ -325,6 +325,42 @@ const getPoProgressedItemsCount = (counts = {}) =>
   Number(counts.partially_shipped || 0) +
   Number(counts.shipped || 0);
 
+const getPoStatusTooltipShippedQuantity = (shipmentEntries = []) =>
+  Math.max(0, Number(getShipmentQuantityTotal(shipmentEntries) || 0));
+
+const getPoStatusTooltipOpenQuantity = (orderEntry = {}) => {
+  const totalQuantity = Math.max(0, Number(parseQuantityLike(orderEntry?.quantity) || 0));
+  const qcPendingQuantity = Math.max(
+    0,
+    Number(parseQuantityLike(orderEntry?.qc_record?.quantities?.pending) || 0),
+  );
+
+  if (qcPendingQuantity > 0) {
+    return qcPendingQuantity;
+  }
+
+  return Math.max(
+    0,
+    totalQuantity - getPoStatusTooltipShippedQuantity(orderEntry?.shipment),
+  );
+};
+
+const buildPoStatusTooltipItem = (orderEntry = {}) => ({
+  _id: String(orderEntry?._id || ""),
+  order_id: normalizeOrderKey(orderEntry?.order_id || "") || "N/A",
+  qc_id: String(orderEntry?.qc_record?._id || orderEntry?.qc_record || "").trim() || null,
+  item_code: normalizeLooseString(orderEntry?.item?.item_code || "") || "N/A",
+  status: normalizeLooseString(orderEntry?.status || "") || "N/A",
+  order_quantity: Number.isFinite(Number(orderEntry?.quantity))
+    ? Math.max(0, Number(orderEntry.quantity))
+    : 0,
+  total_quantity: Number.isFinite(Number(orderEntry?.quantity))
+    ? Math.max(0, Number(orderEntry.quantity))
+    : 0,
+  open_quantity: getPoStatusTooltipOpenQuantity(orderEntry),
+  shipped_quantity: getPoStatusTooltipShippedQuantity(orderEntry?.shipment),
+});
+
 const ACTIVE_ORDER_MATCH = {
   $and: [{ archived: { $ne: true } }, { status: { $ne: "Cancelled" } }],
 };
@@ -4499,7 +4535,11 @@ exports.getPoStatusReport = async (req, res) => {
       Order.distinct("brand", activeMatch),
       Order.distinct("vendor", activeMatch),
       Order.find(reportMatch)
-        .select("_id brand vendor order_id status quantity order_date ETD revised_ETD item qc_record")
+        .select("_id brand vendor order_id status quantity order_date ETD revised_ETD item qc_record shipment")
+        .populate({
+          path: "qc_record",
+          select: "quantities",
+        })
         .lean(),
     ]);
 
@@ -4525,6 +4565,7 @@ exports.getPoStatusReport = async (req, res) => {
           order_date: orderEntry?.order_date || null,
           effective_etd: effectiveEtd || null,
           item_counts: createPoStatusCounts(),
+          status_items: [],
           inspected_items: [],
         });
       }
@@ -4541,23 +4582,41 @@ exports.getPoStatusReport = async (req, res) => {
 
       incrementPoStatusCounts(poEntry.item_counts, orderEntry?.status);
 
+      const tooltipItem = buildPoStatusTooltipItem(orderEntry);
+      poEntry.status_items.push(tooltipItem);
+
       if (!isPendingOrderStatus(orderEntry?.status)) {
-        poEntry.inspected_items.push({
-          _id: String(orderEntry?._id || ""),
-          qc_id: String(orderEntry?.qc_record || "").trim() || null,
-          item_code: normalizeLooseString(orderEntry?.item?.item_code || "") || "N/A",
-          status: normalizeLooseString(orderEntry?.status || "") || "N/A",
-          order_quantity: Number.isFinite(Number(orderEntry?.quantity))
-            ? Math.max(0, Number(orderEntry.quantity))
-            : 0,
-        });
+        poEntry.inspected_items.push({ ...tooltipItem });
       }
     }
 
     const allPoEntries = Array.from(poEntryMap.values()).map((poEntry) => {
+      const statusItems = Array.isArray(poEntry.status_items)
+        ? [...poEntry.status_items]
+        : [];
       const inspectedItems = Array.isArray(poEntry.inspected_items)
         ? [...poEntry.inspected_items]
         : [];
+      statusItems.sort((left, right) => {
+        const leftStatus = normalizeLooseString(left?.status || "").toLowerCase();
+        const rightStatus = normalizeLooseString(right?.status || "").toLowerCase();
+        const leftStatusRank = ORDER_STATUS_SEQUENCE.findIndex(
+          (status) => status.toLowerCase() === leftStatus,
+        );
+        const rightStatusRank = ORDER_STATUS_SEQUENCE.findIndex(
+          (status) => status.toLowerCase() === rightStatus,
+        );
+        if (leftStatusRank !== rightStatusRank) {
+          return leftStatusRank - rightStatusRank;
+        }
+
+        const leftItemCode = normalizeLooseString(left?.item_code || "");
+        const rightItemCode = normalizeLooseString(right?.item_code || "");
+        return leftItemCode.localeCompare(rightItemCode, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        });
+      });
       inspectedItems.sort((left, right) => {
         const leftStatus = normalizeLooseString(left?.status || "").toLowerCase();
         const rightStatus = normalizeLooseString(right?.status || "").toLowerCase();
@@ -4582,6 +4641,7 @@ exports.getPoStatusReport = async (req, res) => {
       return {
         ...poEntry,
         item_counts: { ...poEntry.item_counts },
+        status_items: statusItems,
         inspected_items: inspectedItems,
         total_items_count:
           getPoOpenItemsCount(poEntry.item_counts) +

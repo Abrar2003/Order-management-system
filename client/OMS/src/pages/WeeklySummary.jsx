@@ -52,7 +52,7 @@ const getDefaultWeeklySummaryRange = () => {
   const toDate = new Date(todayUtc);
   toDate.setUTCDate(toDate.getUTCDate() - 1);
   const fromDate = new Date(toDate);
-  fromDate.setUTCDate(fromDate.getUTCDate() - 7);
+  fromDate.setUTCDate(fromDate.getUTCDate() - 6);
 
   return {
     fromDate: toDateInputValue(fromDate),
@@ -213,7 +213,7 @@ const buildVendorDisplayRows = (
 const defaultReport = {
   filters: {
     period: "rolling_week_until_yesterday",
-    period_label: "Yesterday - 7 days to Yesterday",
+    period_label: "Yesterday - 6 days to Yesterday",
     from_date: "",
     to_date: "",
     brand: "",
@@ -643,7 +643,7 @@ const WeeklySummary = () => {
                               {row.goodsNotReady ? (
                                 <>
                                 <td colSpan="1"></td>
-                                <td colSpan="5">
+                                <td colSpan="3">
                                   <div className="fw-semibold">
                                     {row.goodsNotReadyReason || "Reason not provided"}
                                   </div>
