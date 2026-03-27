@@ -1171,3 +1171,78 @@ exports.uploadItemFile = async (req, res) => {
     });
   }
 };
+
+exports.deleteItemFile = async (req, res) => {
+  try {
+    const itemId = String(req.params.id || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(itemId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid item id",
+      });
+    }
+
+    const fileType = normalizeTextField(
+      req.params.fileType || req.query.file_type || req.query.fileType || "",
+    ).toLowerCase();
+    const fileConfig = getItemFileConfig(fileType);
+    if (!fileConfig || !ALLOWED_ITEM_FILE_TYPES.has(fileType)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid file type",
+      });
+    }
+
+    const item = await Item.findById(itemId);
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: "Item not found",
+      });
+    }
+
+    const existingFile = normalizeStoredItemFile(item?.[fileConfig.field]);
+    if (!existingFile.key && !existingFile.url) {
+      return res.status(404).json({
+        success: false,
+        message: `${fileConfig.label} not found`,
+      });
+    }
+
+    item[fileConfig.field] = {};
+    await item.save();
+
+    let storageDeleteWarning = "";
+    if (existingFile.key) {
+      try {
+        await deleteObject(existingFile.key);
+      } catch (storageError) {
+        storageDeleteWarning = storageError?.message || String(storageError);
+        console.error("Delete item file storage object failed:", {
+          itemId,
+          fileType,
+          storageKey: existingFile.key,
+          error: storageDeleteWarning,
+        });
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: storageDeleteWarning
+        ? `${fileConfig.label} removed from item. Storage cleanup failed.`
+        : `${fileConfig.label} deleted successfully`,
+      data: {
+        item_id: item._id,
+        file_type: fileType,
+        storage_delete_warning: storageDeleteWarning,
+      },
+    });
+  } catch (error) {
+    console.error("Delete Item File Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to delete item file",
+    });
+  }
+};

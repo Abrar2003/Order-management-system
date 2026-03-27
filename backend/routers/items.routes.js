@@ -11,6 +11,7 @@ const {
   updateItemPis,
   getItemFileUrl,
   uploadItemFile,
+  deleteItemFile,
 } = require("../controllers/item.controller");
 
 const router = express.Router();
@@ -67,9 +68,16 @@ router.patch(
 router.post(
   "/:id/files",
   auth,
-  authorize("admin", "manager", "QC", "dev"),
+  authorize("admin", "manager"),
   upload.single("file"),
   uploadItemFile,
+);
+
+router.delete(
+  "/:id/files/:fileType",
+  auth,
+  authorize("admin", "manager"),
+  deleteItemFile,
 );
 
 module.exports = router;

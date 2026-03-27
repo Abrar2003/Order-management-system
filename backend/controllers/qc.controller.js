@@ -96,7 +96,7 @@ const QC_IMAGE_UPLOAD_MODES = Object.freeze({
   SINGLE: "single",
   BULK: "bulk",
 });
-const MAX_QC_IMAGE_UPLOAD_COUNT = 60;
+const MAX_QC_IMAGE_UPLOAD_COUNT = 100;
 const QC_IMAGE_UPLOAD_CONCURRENCY = 4;
 const EMPTY_LBH = Object.freeze({
   L: 0,
@@ -1628,7 +1628,7 @@ const getPreviousUtcWeekRange = (referenceDate = new Date()) => {
   if (!todayStart) return null;
 
   const yesterdayUtc = addUtcDays(todayStart, -1);
-  const startUtc = addUtcDays(yesterdayUtc, -7);
+  const startUtc = addUtcDays(yesterdayUtc, -6);
   const toDateExclusiveUtc = addUtcDays(yesterdayUtc, 1);
 
   if (!yesterdayUtc || !startUtc || !toDateExclusiveUtc) {
@@ -1636,7 +1636,7 @@ const getPreviousUtcWeekRange = (referenceDate = new Date()) => {
   }
 
   return {
-    label: "Yesterday - 7 days to Yesterday",
+    label: "Yesterday - 6 days to Yesterday",
     from_date_utc: startUtc,
     to_date_exclusive_utc: toDateExclusiveUtc,
     from_date_iso: toISODateString(startUtc),
@@ -6811,43 +6811,16 @@ exports.uploadQcImages = async (req, res) => {
       );
     }
 
-    const latestQc = await QC.findById(qc._id).select("qc_images.hash").lean();
-    if (!latestQc) {
-      await cleanupUploadedQcImageObjects(successfulUploads);
-
-      return res.status(404).json({
-        success: false,
-        message: "QC record not found",
-      });
-    }
-
-    const latestHashes = new Set(
-      (Array.isArray(latestQc?.qc_images) ? latestQc.qc_images : [])
-        .map((image) => normalizeQcImageHash(image?.hash))
-        .filter(Boolean),
-    );
     const uploadedImages = [];
-    const duplicateUploadsAfterTransfer = [];
+    const duplicateUploadsAfterPersist = [];
+    const persistFailures = [];
+    const uploadedImageHashes = new Set();
 
     for (const successfulUpload of successfulUploads) {
       const normalizedHash = normalizeQcImageHash(
         successfulUpload?.preparedUpload?.hash,
       );
-
-      if (latestHashes.has(normalizedHash)) {
-        duplicateUploadsAfterTransfer.push(successfulUpload);
-        skippedDuplicates.push(
-          buildQcImageDuplicateEntry({
-            originalName: successfulUpload?.preparedUpload?.originalName,
-            hash: normalizedHash,
-            reason: "already_uploaded",
-          }),
-        );
-        continue;
-      }
-
-      latestHashes.add(normalizedHash);
-      uploadedImages.push({
+      const nextImageEntry = {
         key: successfulUpload?.uploadResult?.key || "",
         hash: normalizedHash,
         originalName: successfulUpload?.uploadResult?.originalName || "",
@@ -6856,41 +6829,62 @@ exports.uploadQcImages = async (req, res) => {
         comment: singleImageComment,
         uploadedAt,
         uploaded_by: uploadedBy,
-      });
-    }
+      };
 
-    if (duplicateUploadsAfterTransfer.length > 0) {
-      await cleanupUploadedQcImageObjects(duplicateUploadsAfterTransfer);
-    }
-
-    if (uploadedImages.length > 0) {
       try {
-        await QC.updateOne(
-          { _id: qc._id },
+        const persistResult = await QC.updateOne(
+          {
+            _id: qc._id,
+            "qc_images.hash": { $ne: normalizedHash },
+          },
           {
             $push: {
-              qc_images: {
-                $each: uploadedImages,
-              },
+              qc_images: nextImageEntry,
             },
             $set: {
               updated_by: uploadedBy,
             },
           },
         );
+
+        if (Number(persistResult?.modifiedCount || 0) > 0) {
+          uploadedImages.push(nextImageEntry);
+          uploadedImageHashes.add(normalizedHash);
+          continue;
+        }
       } catch (persistError) {
-        await cleanupUploadedQcImageObjects(uploadedImages);
-        throw persistError;
+        persistFailures.push({
+          successfulUpload,
+          persistError,
+        });
+        continue;
       }
+
+      duplicateUploadsAfterPersist.push(successfulUpload);
+      skippedDuplicates.push(
+        buildQcImageDuplicateEntry({
+          originalName: successfulUpload?.preparedUpload?.originalName,
+          hash: normalizedHash,
+          reason: "already_uploaded",
+        }),
+      );
+    }
+
+    if (duplicateUploadsAfterPersist.length > 0) {
+      await cleanupUploadedQcImageObjects(duplicateUploadsAfterPersist);
+    }
+
+    if (persistFailures.length > 0) {
+      await cleanupUploadedQcImageObjects(
+        persistFailures.map((entry) => entry?.successfulUpload),
+      );
+      throw new Error(
+        persistFailures[0]?.persistError?.message || "Failed to save QC images",
+      );
     }
 
     const uploadedCount = uploadedImages.length;
     const skippedDuplicateCount = skippedDuplicates.length;
-    const uploadedImageHashes = new Set(
-      uploadedImages
-        .map((image) => normalizeQcImageHash(image?.hash))
-        .filter(Boolean),
-    );
     const optimizedUploadCount = successfulUploads.reduce(
       (sum, entry) =>
         uploadedImageHashes.has(
@@ -6930,6 +6924,162 @@ exports.uploadQcImages = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error.message || "Failed to upload QC images",
+    });
+  }
+};
+
+exports.deleteQcImages = async (req, res) => {
+  try {
+    const qcId = String(req.params.id || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(qcId)) {
+      return res.status(400).json({ success: false, message: "Invalid QC id" });
+    }
+
+    const qc = await QC.findById(qcId)
+      .populate("inspector")
+      .populate("order", "status");
+
+    if (!qc) {
+      return res.status(404).json({ success: false, message: "QC record not found" });
+    }
+
+    const normalizedRole = String(req.user?.role || "")
+      .trim()
+      .toLowerCase();
+    const isAdmin = normalizedRole === "admin";
+    const isManager = normalizedRole === "manager";
+    const hasElevatedAccess = isAdmin || isManager;
+    const currentUserId = String(req.user?._id || req.user?.id || "").trim();
+    const isInspectionDone = qc?.order?.status === "Inspection Done";
+
+    if (!hasElevatedAccess && isInspectionDone) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Only admin or manager can delete QC images after inspection is done",
+      });
+    }
+
+    if (!hasElevatedAccess) {
+      if (!currentUserId) {
+        return res.status(401).json({ success: false, message: "Unauthorized" });
+      }
+
+      const alignedInspectorId = String(
+        qc?.inspector?._id || qc?.inspector || "",
+      ).trim();
+      if (!alignedInspectorId || alignedInspectorId !== currentUserId) {
+        return res.status(403).json({
+          success: false,
+          message: "QC can delete images only for records aligned to them",
+        });
+      }
+    }
+
+    const rawImageIds = Array.isArray(req.body?.image_ids)
+      ? req.body.image_ids
+      : Array.isArray(req.body?.imageIds)
+        ? req.body.imageIds
+        : [];
+    const rawImageKeys = Array.isArray(req.body?.image_keys)
+      ? req.body.image_keys
+      : Array.isArray(req.body?.imageKeys)
+        ? req.body.imageKeys
+        : [];
+
+    const requestedImageIds = Array.from(
+      new Set(rawImageIds.map((value) => String(value || "").trim()).filter(Boolean)),
+    );
+    const requestedImageKeys = Array.from(
+      new Set(rawImageKeys.map((value) => normalizeText(value)).filter(Boolean)),
+    );
+
+    if (requestedImageIds.length === 0 && requestedImageKeys.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Select at least one QC image to delete",
+      });
+    }
+
+    const qcImages = Array.isArray(qc?.qc_images) ? qc.qc_images : [];
+    const imagesToDelete = qcImages.filter((image) => {
+      const imageId = String(image?._id || "").trim();
+      const imageKey = normalizeText(image?.key || "");
+      return (
+        (imageId && requestedImageIds.includes(imageId)) ||
+        (imageKey && requestedImageKeys.includes(imageKey))
+      );
+    });
+
+    if (imagesToDelete.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Selected QC images were not found",
+      });
+    }
+
+    const objectIdsToDelete = imagesToDelete
+      .map((image) => String(image?._id || "").trim())
+      .filter((value) => mongoose.Types.ObjectId.isValid(value))
+      .map((value) => new mongoose.Types.ObjectId(value));
+    const objectKeysToDelete = imagesToDelete
+      .map((image) => normalizeText(image?.key || ""))
+      .filter(Boolean);
+
+    const pullConditions = [];
+    if (objectIdsToDelete.length > 0) {
+      pullConditions.push({ _id: { $in: objectIdsToDelete } });
+    }
+    if (objectKeysToDelete.length > 0) {
+      pullConditions.push({ key: { $in: objectKeysToDelete } });
+    }
+
+    if (pullConditions.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Selected QC images are invalid",
+      });
+    }
+
+    await QC.updateOne(
+      { _id: qc._id },
+      {
+        $pull: {
+          qc_images:
+            pullConditions.length === 1
+              ? pullConditions[0]
+              : { $or: pullConditions },
+        },
+        $set: {
+          updated_by: buildAuditActor(req.user),
+        },
+      },
+    );
+
+    const storageDeleteResults = await Promise.allSettled(
+      objectKeysToDelete.map((key) => deleteObject(key)),
+    );
+    const failedStorageDeletes = storageDeleteResults.filter(
+      (entry) => entry.status === "rejected",
+    );
+
+    return res.status(200).json({
+      success: true,
+      message:
+        failedStorageDeletes.length > 0
+          ? `${imagesToDelete.length} QC image${imagesToDelete.length === 1 ? "" : "s"} removed. Some storage objects could not be deleted.`
+          : `${imagesToDelete.length} QC image${imagesToDelete.length === 1 ? "" : "s"} deleted successfully`,
+      data: {
+        qc_id: qc._id,
+        deleted_count: imagesToDelete.length,
+        storage_delete_failure_count: failedStorageDeletes.length,
+      },
+    });
+  } catch (error) {
+    console.error("Delete QC Images Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to delete QC images",
     });
   }
 };
