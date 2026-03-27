@@ -203,7 +203,10 @@ const buildVendorDisplayRows = (
         goodsNotReady: Boolean(item?.goods_not_ready),
         goodsNotReadyReason: String(item?.goods_not_ready_reason || "").trim(),
         goodsNotReadyInspectionDate: String(item?.goods_not_ready_inspection_date || "").trim(),
-        lastInspector: item?.last_inspector_name_in_range || "",
+        lastInspector:
+          item?.last_inspector_name_in_range
+          || item?.latest_overall_inspector_name
+          || "",
         lastInspectionDate: getItemInspectionDateInRange(item),
         packedSummary: false,
       }));
@@ -623,15 +626,15 @@ const WeeklySummary = () => {
                         <tbody>
                           {vendorDisplayRows.map((row) => (
                             <tr
-                            key={`${vendorKey}-${row.key}`}
-                            className={
+                              key={`${vendorKey}-${row.key}`}
+                              className={
                                 row.goodsNotReady
                                   ? "weekly-summary-warning-row"
                                   : row.packedSummary
                                   ? "weekly-summary-packed-row"
                                   : ""
-                                }
-                                >
+                              }
+                            >
                               <td>{row.lastInspectionDate ? formatDateDDMMYYYY(row.lastInspectionDate) : "-"}</td>
                               <td>{row.po || ""}</td>
                               <td>
@@ -642,12 +645,13 @@ const WeeklySummary = () => {
                               </td>
                               {row.goodsNotReady ? (
                                 <>
-                                <td colSpan="1"></td>
-                                <td colSpan="3">
-                                  <div className="fw-semibold">
-                                    {row.goodsNotReadyReason || "Reason not provided"}
-                                  </div>
-                                </td>
+                                  <td colSpan="1"></td>
+                                  <td colSpan="2">
+                                    <div className="fw-semibold">
+                                      {row.goodsNotReadyReason || "Reason not provided"}
+                                    </div>
+                                  </td>
+                                  <td>{row.lastInspector || "-"}</td>
                                 </>
                               ) : (
                                 <>
