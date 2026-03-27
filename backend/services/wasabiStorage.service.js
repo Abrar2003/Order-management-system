@@ -265,11 +265,68 @@ const deleteObject = async (key) => {
   }
 };
 
+const getObjectBuffer = async (key) => {
+  if (!normalizeValue(key)) {
+    throw new Error("Object key is required");
+  }
+
+  const client = getClient();
+  const config = getConfig();
+
+  try {
+    const response = await client.send(
+      new GetObjectCommand({
+        Bucket: config.bucket,
+        Key: key,
+      }),
+    );
+
+    const body = response?.Body;
+    if (!body) {
+      throw new Error("Object body is empty");
+    }
+
+    if (typeof body.transformToByteArray === "function") {
+      const bytes = await body.transformToByteArray();
+      return {
+        buffer: Buffer.from(bytes),
+        contentType: String(response?.ContentType || "").trim(),
+        size: Number(response?.ContentLength || bytes.length || 0),
+      };
+    }
+
+    if (Buffer.isBuffer(body)) {
+      return {
+        buffer: body,
+        contentType: String(response?.ContentType || "").trim(),
+        size: Number(response?.ContentLength || body.length || 0),
+      };
+    }
+
+    const chunks = [];
+    for await (const chunk of body) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+
+    const buffer = Buffer.concat(chunks);
+    return {
+      buffer,
+      contentType: String(response?.ContentType || "").trim(),
+      size: Number(response?.ContentLength || buffer.length || 0),
+    };
+  } catch (error) {
+    throw new Error(
+      `Wasabi download failed: ${error?.message || String(error)}`,
+    );
+  }
+};
+
 module.exports = {
   isConfigured,
   createStorageKey,
   getObjectUrl,
   getSignedObjectUrl,
+  getObjectBuffer,
   uploadBuffer,
   deleteObject,
 };

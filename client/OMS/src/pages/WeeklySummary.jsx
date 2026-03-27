@@ -39,6 +39,68 @@ const toBrandLogoDataUrl = (logoObj) => {
   return `data:${logoObj?.contentType || "image/webp"};base64,${window.btoa(binary)}`;
 };
 
+const blobToDataUrl = (blob) =>
+  new Promise((resolve, reject) => {
+    if (!(blob instanceof Blob)) {
+      resolve("");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => reject(new Error("Failed to read brand logo"));
+    reader.readAsDataURL(blob);
+  });
+
+const waitForImageLoad = (image) =>
+  new Promise((resolve) => {
+    if (!image || image.complete) {
+      resolve();
+      return;
+    }
+
+    const handleDone = () => resolve();
+    image.addEventListener("load", handleDone, { once: true });
+    image.addEventListener("error", handleDone, { once: true });
+  });
+
+const waitForImagesToLoad = async (container) => {
+  if (!container) return;
+  const images = Array.from(container.querySelectorAll("img"));
+  await Promise.all(images.map((image) => waitForImageLoad(image)));
+};
+
+const fetchRemoteLogoAsDataUrl = async (url) => {
+  const normalizedUrl = String(url || "").trim();
+  if (!normalizedUrl) return "";
+
+  const response = await fetch(normalizedUrl, { mode: "cors" });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch remote logo: ${response.status}`);
+  }
+
+  return blobToDataUrl(await response.blob());
+};
+
+const fetchBrandLogoFallback = async (brandName) => {
+  const response = await api.get("/brands/");
+  const brands = Array.isArray(response?.data?.data) ? response.data.data : [];
+  const matchedBrand = brands.find(
+    (brand) => getBrandKey(brand?.name) === getBrandKey(brandName),
+  );
+  const resolvedLogoSrc = toBrandLogoDataUrl(matchedBrand?.logo);
+  if (!resolvedLogoSrc) return "";
+  if (resolvedLogoSrc.startsWith("data:image/")) {
+    return resolvedLogoSrc;
+  }
+
+  try {
+    return await fetchRemoteLogoAsDataUrl(resolvedLogoSrc);
+  } catch (error) {
+    return resolvedLogoSrc;
+  }
+};
+
 const toReportQuantity = (value) => {
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
@@ -255,6 +317,7 @@ const WeeklySummary = () => {
   const [syncedQuery, setSyncedQuery] = useState(null);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [brandLogoSrc, setBrandLogoSrc] = useState("");
+  const [brandLogoLoading, setBrandLogoLoading] = useState(false);
 
   const fetchReport = useCallback(async () => {
     try {
@@ -374,25 +437,42 @@ const WeeklySummary = () => {
     const brandName = brandFilter === DEFAULT_ENTITY_FILTER ? "" : String(brandFilter || "").trim();
     if (!brandName) {
       setBrandLogoSrc("");
+      setBrandLogoLoading(false);
       return undefined;
     }
 
     let cancelled = false;
+    setBrandLogoSrc("");
+    setBrandLogoLoading(true);
 
     const fetchBrandLogo = async () => {
       try {
-        const response = await api.get("/brands/");
-        const brands = Array.isArray(response?.data?.data) ? response.data.data : [];
-        const matchedBrand = brands.find(
-          (brand) => getBrandKey(brand?.name) === getBrandKey(brandName),
+        const response = await api.get(
+          "/brands/logo",
+          {
+            params: { brand: brandName },
+            responseType: "blob",
+          },
         );
+        const nextLogoSrc = await blobToDataUrl(response?.data);
 
         if (!cancelled) {
-          setBrandLogoSrc(toBrandLogoDataUrl(matchedBrand?.logo));
+          setBrandLogoSrc(nextLogoSrc);
         }
       } catch (err) {
+        try {
+          const fallbackLogoSrc = await fetchBrandLogoFallback(brandName);
+          if (!cancelled) {
+            setBrandLogoSrc(fallbackLogoSrc);
+          }
+        } catch {
+          if (!cancelled) {
+            setBrandLogoSrc("");
+          }
+        }
+      } finally {
         if (!cancelled) {
-          setBrandLogoSrc("");
+          setBrandLogoLoading(false);
         }
       }
     };
@@ -405,7 +485,13 @@ const WeeklySummary = () => {
   }, [brandFilter]);
 
   const handleConfirmAndExport = useCallback(async () => {
-    if (!reportRef.current || exportingPdf || loading || visibleVendors.length === 0) {
+    if (
+      !reportRef.current
+      || exportingPdf
+      || loading
+      || brandLogoLoading
+      || visibleVendors.length === 0
+    ) {
       return;
     }
 
@@ -417,6 +503,7 @@ const WeeklySummary = () => {
     try {
       setExportingPdf(true);
       const target = reportRef.current;
+      await waitForImagesToLoad(target);
       const canvas = await html2canvas(target, {
         scale: 2,
         useCORS: true,
@@ -481,7 +568,14 @@ const WeeklySummary = () => {
     } finally {
       setExportingPdf(false);
     }
-  }, [exportingPdf, filters.from_date, filters.to_date, loading, visibleVendors.length]);
+  }, [
+    brandLogoLoading,
+    exportingPdf,
+    filters.from_date,
+    filters.to_date,
+    loading,
+    visibleVendors.length,
+  ]);
 
   return (
     <>
@@ -501,9 +595,13 @@ const WeeklySummary = () => {
             type="button"
             className="btn btn-primary btn-sm"
             onClick={handleConfirmAndExport}
-            disabled={loading || exportingPdf || visibleVendors.length === 0}
+            disabled={loading || exportingPdf || brandLogoLoading || visibleVendors.length === 0}
           >
-            {exportingPdf ? "Exporting..." : "Confirm & Export PDF"}
+            {exportingPdf
+              ? "Exporting..."
+              : brandLogoLoading
+              ? "Loading logo..."
+              : "Confirm & Export PDF"}
           </button>
         </div>
 

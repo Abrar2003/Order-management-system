@@ -33,6 +33,20 @@ router.get(
 );
 
 router.get(
+  "/logo",
+  auth,
+  authorize("admin", "manager", "QC", "dev", "user"),
+  brandController.getBrandLogo,
+);
+
+router.get(
+  "/:name/logo",
+  auth,
+  authorize("admin", "manager", "QC", "dev", "user"),
+  brandController.getBrandLogo,
+);
+
+router.get(
   "/:name/calendar",
   auth,
   authorize("admin", "manager", "QC", "dev", "user"),

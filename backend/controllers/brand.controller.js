@@ -1,13 +1,106 @@
+const axios = require("axios");
 const Brand = require("../models/brand.model");
 const {
   isConfigured: isWasabiConfigured,
   createStorageKey,
   getSignedObjectUrl,
+  getObjectBuffer,
   uploadBuffer,
 } = require("../services/wasabiStorage.service");
 
 const escapeRegex = (value = "") =>
   String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const findBrandByName = async (brandName = "", selectFields = "") => {
+  const normalizedName = String(brandName || "").trim();
+  const projection = String(selectFields || "").trim();
+  const queryByName = { name: normalizedName };
+  const queryByNameCaseInsensitive = {
+    name: { $regex: `^${escapeRegex(normalizedName)}$`, $options: "i" },
+  };
+
+  const findOne = (query) =>
+    projection
+      ? Brand.findOne(query).select(projection).lean()
+      : Brand.findOne(query).lean();
+
+  return (
+    (await findOne(queryByName)) ||
+    (await findOne(queryByNameCaseInsensitive))
+  );
+};
+
+const toStoredLogoBuffer = (brand = {}) => {
+  const rawLogo = brand?.logo;
+  if (Buffer.isBuffer(rawLogo)) {
+    return rawLogo;
+  }
+  if (Array.isArray(rawLogo?.data)) {
+    return Buffer.from(rawLogo.data);
+  }
+  if (rawLogo?.type === "Buffer" && Array.isArray(rawLogo?.data)) {
+    return Buffer.from(rawLogo.data);
+  }
+  return null;
+};
+
+const resolveBrandLogoPayload = async (brand = {}) => {
+  const legacyStorageKey = String(brand?.logo_storage_key || "").trim();
+  const storedLogo = brand?.logo_file && typeof brand.logo_file === "object"
+    ? brand.logo_file
+    : {};
+  const legacyLogoUrl = String(brand?.logo_url || "").trim();
+  const storageKey = String(storedLogo?.key || legacyStorageKey || "").trim();
+  const originalName = String(storedLogo?.originalName || "").trim();
+  const defaultContentType = String(
+    storedLogo?.contentType || brand?.logo_content_type || "image/webp",
+  ).trim() || "image/webp";
+  const size = Number(storedLogo?.size || brand?.logo_size || 0);
+
+  if (storageKey && isWasabiConfigured()) {
+    const storedPayload = await getObjectBuffer(storageKey);
+    return {
+      key: storageKey,
+      originalName,
+      contentType: storedPayload?.contentType || defaultContentType,
+      size: Number.isFinite(storedPayload?.size) && storedPayload.size > 0
+        ? storedPayload.size
+        : Number.isFinite(size)
+          ? size
+          : 0,
+      buffer: storedPayload?.buffer || null,
+    };
+  }
+
+  if (legacyLogoUrl) {
+    const response = await axios.get(legacyLogoUrl, {
+      responseType: "arraybuffer",
+    });
+    const remoteBuffer = Buffer.from(response?.data || []);
+    return {
+      key: "",
+      originalName,
+      contentType:
+        String(response?.headers?.["content-type"] || "").trim()
+        || defaultContentType,
+      size: Number.isFinite(remoteBuffer.length) ? remoteBuffer.length : 0,
+      buffer: remoteBuffer,
+    };
+  }
+
+  const logoBuffer = toStoredLogoBuffer(brand);
+  if (!logoBuffer) {
+    return null;
+  }
+
+  return {
+    key: "",
+    originalName,
+    contentType: defaultContentType,
+    size: Number.isFinite(size) && size > 0 ? size : logoBuffer.length,
+    buffer: logoBuffer,
+  };
+};
 
 const normalizeBrandLogo = async (brand = {}) => {
   const legacyStorageKey = String(brand?.logo_storage_key || "").trim();
@@ -52,15 +145,7 @@ const normalizeBrandLogo = async (brand = {}) => {
     };
   }
 
-  const rawLogo = brand?.logo;
-  const logoBuffer = Buffer.isBuffer(rawLogo)
-    ? rawLogo
-    : Array.isArray(rawLogo?.data)
-      ? Buffer.from(rawLogo.data)
-      : rawLogo?.type === "Buffer" && Array.isArray(rawLogo?.data)
-        ? Buffer.from(rawLogo.data)
-        : null;
-
+  const logoBuffer = toStoredLogoBuffer(brand);
   if (!logoBuffer) {
     return null;
   }
@@ -100,6 +185,41 @@ exports.getAllBrands = async (req, res) => {
     console.error(error);
     res.status(500).json({
       message: "Failed to retrieve brands",
+      error: error.message,
+    });
+  }
+};
+
+exports.getBrandLogo = async (req, res) => {
+  try {
+    const brandName = String(req.params?.name || req.query?.brand || "").trim();
+    if (!brandName) {
+      return res.status(400).json({ message: "brand is required" });
+    }
+
+    const brandDoc = await findBrandByName(
+      brandName,
+      "name logo logo_file logo_url logo_storage_key logo_content_type logo_size",
+    );
+
+    if (!brandDoc) {
+      return res.status(404).json({ message: "Brand not found" });
+    }
+
+    const logoPayload = await resolveBrandLogoPayload(brandDoc);
+    if (!logoPayload?.buffer || !Buffer.isBuffer(logoPayload.buffer)) {
+      return res.status(404).json({ message: "Brand logo not found" });
+    }
+
+    res.setHeader("Content-Type", logoPayload.contentType || "image/webp");
+    res.setHeader("Content-Length", String(logoPayload.buffer.length));
+    res.setHeader("Cache-Control", "private, max-age=3600");
+
+    return res.status(200).send(logoPayload.buffer);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      message: "Failed to fetch brand logo",
       error: error.message,
     });
   }
@@ -180,13 +300,7 @@ exports.getBrandCalendar = async (req, res) => {
       return res.status(400).json({ message: "brand is required" });
     }
 
-    const brandDoc =
-      (await Brand.findOne({ name: brandName }).select("name calendar").lean()) ||
-      (await Brand.findOne({
-        name: { $regex: `^${escapeRegex(brandName)}$`, $options: "i" },
-      })
-        .select("name calendar")
-        .lean());
+    const brandDoc = await findBrandByName(brandName, "name calendar");
 
     if (!brandDoc) {
       return res.status(404).json({ message: "Brand not found" });
