@@ -7,6 +7,7 @@ const QcEditLog = require("../models/qcEditLog.model");
 const OrderEditLog = require("../models/orderEditLog.model");
 const XLSX = require("xlsx");
 const path = require("path");
+const crypto = require("crypto");
 
 const Order = require("../models/order.model");
 const mongoose = require("mongoose");
@@ -17,6 +18,7 @@ const {
   getSignedObjectUrl,
   isConfigured: isWasabiConfigured,
   uploadBuffer,
+  deleteObject,
 } = require("../services/wasabiStorage.service");
 const {
   formatDateOnlyDDMMYYYY,
@@ -836,6 +838,41 @@ const buildSignedItemImage = async (image = {}) =>
 
 const buildSignedQcImage = async (image = {}) =>
   buildSignedItemFile(image, { logLabel: "QC image" });
+
+const normalizeQcImageHash = (value) =>
+  normalizeText(value).toLowerCase();
+
+const computeBufferSha256 = (buffer) => {
+  if (!Buffer.isBuffer(buffer)) {
+    throw new Error("Hashing requires a Buffer");
+  }
+
+  return crypto.createHash("sha256").update(buffer).digest("hex");
+};
+
+const buildQcImageDuplicateEntry = ({
+  originalName = "",
+  hash = "",
+  reason = "duplicate",
+} = {}) => ({
+  originalName: normalizeText(originalName) || "qc-image",
+  hash: normalizeQcImageHash(hash),
+  reason: normalizeText(reason) || "duplicate",
+});
+
+const cleanupUploadedQcImageObjects = async (entries = []) => {
+  const keys = Array.isArray(entries)
+    ? entries
+      .map((entry) => normalizeText(entry?.uploadResult?.key || entry?.key || ""))
+      .filter(Boolean)
+    : [];
+
+  if (keys.length === 0) return;
+
+  await Promise.allSettled(
+    keys.map((key) => deleteObject(key).catch(() => undefined)),
+  );
+};
 
 const toPositiveCbmNumber = (value) => {
   const numeric = Number(value);
@@ -6621,9 +6658,12 @@ exports.uploadQcImages = async (req, res) => {
         : "";
     const uploadedAt = new Date();
     const uploadedBy = buildAuditActor(req.user);
-    const uploadedImages = [];
-    let optimizedUploadCount = 0;
-    let totalBytesSaved = 0;
+    const existingHashes = new Set(
+      (Array.isArray(qc?.qc_images) ? qc.qc_images : [])
+        .map((image) => normalizeQcImageHash(image?.hash))
+        .filter(Boolean),
+    );
+    const skippedDuplicates = [];
 
     for (const file of files) {
       const mimeType = normalizeText(file?.mimetype).toLowerCase();
@@ -6642,7 +6682,7 @@ exports.uploadQcImages = async (req, res) => {
       }
     }
 
-    const uploadResults = await mapWithConcurrencyLimit(
+    const preparedUploads = await mapWithConcurrencyLimit(
       files,
       QC_IMAGE_UPLOAD_CONCURRENCY,
       async (file) => {
@@ -6658,60 +6698,229 @@ exports.uploadQcImages = async (req, res) => {
           contentType: mimeType || "application/octet-stream",
           originalName: fallbackOriginalName,
         });
-        const optimizedExtension = path
-          .extname(String(optimizedImage?.originalName || ""))
-          .toLowerCase() || extension || ".jpg";
-        const uploadResult = await uploadBuffer({
+
+        return {
           buffer: optimizedImage.buffer,
-          key: createStorageKey({
-            folder: "qc-images",
-            originalName: optimizedImage.originalName || fallbackOriginalName,
-            extension: optimizedExtension,
-          }),
+          hash: computeBufferSha256(optimizedImage.buffer),
           originalName: optimizedImage.originalName || fallbackOriginalName,
           contentType:
             optimizedImage.contentType || mimeType || "application/octet-stream",
-        });
-
-        return {
-          uploadResult,
+          extension:
+            path
+              .extname(String(optimizedImage?.originalName || ""))
+              .toLowerCase() || extension || ".jpg",
+          size: Buffer.byteLength(optimizedImage.buffer),
           optimized: Boolean(optimizedImage?.optimized),
           bytesSaved: toNonNegativeNumber(optimizedImage?.bytesSaved, 0),
+          optimizationError: normalizeText(optimizedImage?.optimizationError || ""),
         };
       },
     );
 
-    for (const processedUpload of uploadResults) {
-      if (processedUpload?.optimized) {
-        optimizedUploadCount += 1;
-        totalBytesSaved += processedUpload.bytesSaved;
+    const requestHashes = new Set();
+    const uniquePreparedUploads = [];
+
+    for (const preparedUpload of preparedUploads) {
+      const normalizedHash = normalizeQcImageHash(preparedUpload?.hash);
+      if (!normalizedHash) continue;
+
+      if (requestHashes.has(normalizedHash)) {
+        skippedDuplicates.push(
+          buildQcImageDuplicateEntry({
+            originalName: preparedUpload?.originalName,
+            hash: normalizedHash,
+            reason: "duplicate_in_request",
+          }),
+        );
+        continue;
       }
 
-      const uploadResult = processedUpload?.uploadResult || {};
+      if (existingHashes.has(normalizedHash)) {
+        skippedDuplicates.push(
+          buildQcImageDuplicateEntry({
+            originalName: preparedUpload?.originalName,
+            hash: normalizedHash,
+            reason: "already_uploaded",
+          }),
+        );
+        continue;
+      }
+
+      requestHashes.add(normalizedHash);
+      uniquePreparedUploads.push(preparedUpload);
+    }
+
+    if (uniquePreparedUploads.length === 0) {
+      const skippedDuplicateCount = skippedDuplicates.length;
+      return res.status(200).json({
+        success: true,
+        message:
+          skippedDuplicateCount > 0
+            ? "All selected QC images were duplicates and were skipped"
+            : "No QC images uploaded",
+        data: {
+          qc_id: qc._id,
+          uploaded_count: 0,
+          skipped_duplicate_count: skippedDuplicateCount,
+          skipped_duplicates: skippedDuplicates,
+          optimized_count: 0,
+          bytes_saved: 0,
+        },
+      });
+    }
+
+    const settledUploadResults = await mapWithConcurrencyLimit(
+      uniquePreparedUploads,
+      QC_IMAGE_UPLOAD_CONCURRENCY,
+      async (preparedUpload) => {
+        try {
+          const uploadResult = await uploadBuffer({
+            buffer: preparedUpload.buffer,
+            key: createStorageKey({
+              folder: "qc-images",
+              originalName: preparedUpload.originalName,
+              extension: preparedUpload.extension,
+            }),
+            originalName: preparedUpload.originalName,
+            contentType: preparedUpload.contentType,
+          });
+
+          return {
+            ok: true,
+            preparedUpload,
+            uploadResult,
+          };
+        } catch (uploadError) {
+          return {
+            ok: false,
+            preparedUpload,
+            error: uploadError,
+          };
+        }
+      },
+    );
+
+    const failedUploads = settledUploadResults.filter((entry) => !entry?.ok);
+    const successfulUploads = settledUploadResults.filter((entry) => entry?.ok);
+
+    if (failedUploads.length > 0) {
+      await cleanupUploadedQcImageObjects(successfulUploads);
+
+      throw new Error(
+        failedUploads[0]?.error?.message || "Failed to upload QC images",
+      );
+    }
+
+    const latestQc = await QC.findById(qc._id).select("qc_images.hash").lean();
+    if (!latestQc) {
+      await cleanupUploadedQcImageObjects(successfulUploads);
+
+      return res.status(404).json({
+        success: false,
+        message: "QC record not found",
+      });
+    }
+
+    const latestHashes = new Set(
+      (Array.isArray(latestQc?.qc_images) ? latestQc.qc_images : [])
+        .map((image) => normalizeQcImageHash(image?.hash))
+        .filter(Boolean),
+    );
+    const uploadedImages = [];
+    const duplicateUploadsAfterTransfer = [];
+
+    for (const successfulUpload of successfulUploads) {
+      const normalizedHash = normalizeQcImageHash(
+        successfulUpload?.preparedUpload?.hash,
+      );
+
+      if (latestHashes.has(normalizedHash)) {
+        duplicateUploadsAfterTransfer.push(successfulUpload);
+        skippedDuplicates.push(
+          buildQcImageDuplicateEntry({
+            originalName: successfulUpload?.preparedUpload?.originalName,
+            hash: normalizedHash,
+            reason: "already_uploaded",
+          }),
+        );
+        continue;
+      }
+
+      latestHashes.add(normalizedHash);
       uploadedImages.push({
-        key: uploadResult.key,
-        originalName: uploadResult.originalName,
-        contentType: uploadResult.contentType,
-        size: uploadResult.size,
+        key: successfulUpload?.uploadResult?.key || "",
+        hash: normalizedHash,
+        originalName: successfulUpload?.uploadResult?.originalName || "",
+        contentType: successfulUpload?.uploadResult?.contentType || "",
+        size: toNonNegativeNumber(successfulUpload?.uploadResult?.size, 0),
         comment: singleImageComment,
         uploadedAt,
         uploaded_by: uploadedBy,
       });
     }
 
-    qc.qc_images = [
-      ...(Array.isArray(qc.qc_images) ? qc.qc_images : []),
-      ...uploadedImages,
-    ];
-    qc.updated_by = uploadedBy;
-    await qc.save();
+    if (duplicateUploadsAfterTransfer.length > 0) {
+      await cleanupUploadedQcImageObjects(duplicateUploadsAfterTransfer);
+    }
+
+    if (uploadedImages.length > 0) {
+      try {
+        await QC.updateOne(
+          { _id: qc._id },
+          {
+            $push: {
+              qc_images: {
+                $each: uploadedImages,
+              },
+            },
+            $set: {
+              updated_by: uploadedBy,
+            },
+          },
+        );
+      } catch (persistError) {
+        await cleanupUploadedQcImageObjects(uploadedImages);
+        throw persistError;
+      }
+    }
+
+    const uploadedCount = uploadedImages.length;
+    const skippedDuplicateCount = skippedDuplicates.length;
+    const uploadedImageHashes = new Set(
+      uploadedImages
+        .map((image) => normalizeQcImageHash(image?.hash))
+        .filter(Boolean),
+    );
+    const optimizedUploadCount = successfulUploads.reduce(
+      (sum, entry) =>
+        uploadedImageHashes.has(
+          normalizeQcImageHash(entry?.preparedUpload?.hash),
+        ) && entry?.preparedUpload?.optimized
+          ? sum + 1
+          : sum,
+      0,
+    );
+    const totalBytesSaved = successfulUploads.reduce(
+      (sum, entry) =>
+        uploadedImageHashes.has(
+          normalizeQcImageHash(entry?.preparedUpload?.hash),
+        )
+          ? sum + toNonNegativeNumber(entry?.preparedUpload?.bytesSaved, 0)
+          : sum,
+      0,
+    );
 
     return res.status(200).json({
       success: true,
-      message: `${uploadedImages.length} QC image${uploadedImages.length === 1 ? "" : "s"} uploaded successfully`,
+      message:
+        uploadedCount > 0
+          ? `${uploadedCount} QC image${uploadedCount === 1 ? "" : "s"} uploaded successfully${skippedDuplicateCount > 0 ? `. ${skippedDuplicateCount} duplicate${skippedDuplicateCount === 1 ? "" : "s"} skipped.` : ""}`
+          : "All selected QC images were duplicates and were skipped",
       data: {
         qc_id: qc._id,
-        uploaded_count: uploadedImages.length,
+        uploaded_count: uploadedCount,
+        skipped_duplicate_count: skippedDuplicateCount,
+        skipped_duplicates: skippedDuplicates,
         optimized_count: optimizedUploadCount,
         bytes_saved: totalBytesSaved,
       },

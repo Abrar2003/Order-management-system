@@ -120,6 +120,7 @@ const qcSchema = new mongoose.Schema(
     qc_images: [
       {
         key: { type: String, default: "", trim: true },
+        hash: { type: String, default: "", trim: true, lowercase: true },
         originalName: { type: String, default: "", trim: true },
         contentType: { type: String, default: "", trim: true },
         size: { type: Number, default: 0, min: 0 },

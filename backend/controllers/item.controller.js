@@ -136,6 +136,32 @@ const normalizeDistinctValues = (values = []) =>
       .filter(Boolean),
   )].sort((a, b) => a.localeCompare(b));
 
+const ACTIVE_ORDER_MATCH = {
+  archived: { $ne: true },
+  status: { $ne: "Cancelled" },
+};
+
+const getShippedQuantity = (shipmentEntries = []) =>
+  (Array.isArray(shipmentEntries) ? shipmentEntries : []).reduce(
+    (sum, entry) => sum + Math.max(0, toSafeNumber(entry?.quantity, 0)),
+    0,
+  );
+
+const getPassedQuantity = (qcRecord = null) =>
+  Math.max(0, toSafeNumber(qcRecord?.quantities?.qc_passed, 0));
+
+const getOpenQuantity = (order = {}) => {
+  const totalQuantity = Math.max(0, toSafeNumber(order?.quantity, 0));
+  const qcRecord =
+    order?.qc_record && typeof order.qc_record === "object" ? order.qc_record : null;
+
+  if (qcRecord) {
+    return Math.max(0, toSafeNumber(qcRecord?.quantities?.pending, 0));
+  }
+
+  return Math.max(0, totalQuantity - getPassedQuantity(qcRecord));
+};
+
 const ITEM_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png"]);
 const ITEM_IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png"]);
 const ITEM_PDF_MIME_TYPES = new Set(["application/pdf"]);
@@ -452,6 +478,71 @@ exports.getItemOrdersHistory = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch item order history",
+      error: error.message,
+    });
+  }
+};
+
+exports.getItemOrderPresence = async (req, res) => {
+  try {
+    const itemCodeInput = String(req.params.itemCode || "").trim();
+    if (!itemCodeInput) {
+      return res.status(400).json({
+        success: false,
+        message: "Item code is required",
+      });
+    }
+
+    const escapedItemCode = escapeRegex(itemCodeInput);
+    const itemCodeMatch = new RegExp(`^\\s*${escapedItemCode}\\s*$`, "i");
+
+    const orders = await Order.find({
+      ...ACTIVE_ORDER_MATCH,
+      "item.item_code": itemCodeMatch,
+    })
+      .select(
+        "order_id status quantity shipment order_date ETD revised_ETD updatedAt qc_record",
+      )
+      .populate({
+        path: "qc_record",
+        select: "quantities",
+      })
+      .sort({ order_date: -1, ETD: -1, updatedAt: -1, order_id: 1 })
+      .lean();
+
+    const rows = (Array.isArray(orders) ? orders : []).map((order) => {
+      const qcRecord =
+        order?.qc_record && typeof order.qc_record === "object"
+          ? order.qc_record
+          : null;
+      const totalQuantity = Math.max(0, toSafeNumber(order?.quantity, 0));
+      const shippedQuantity = getShippedQuantity(order?.shipment);
+
+      return {
+        id: String(order?._id || ""),
+        order_id: String(order?.order_id || "").trim(),
+        status: String(order?.status || "").trim(),
+        total_quantity: totalQuantity,
+        open_quantity: getOpenQuantity(order),
+        shipped_quantity: shippedQuantity,
+        order_date: order?.order_date || null,
+        effective_etd: order?.revised_ETD || order?.ETD || null,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      item_code: itemCodeInput,
+      data: rows,
+      summary: {
+        total_orders: rows.length,
+      },
+    });
+  } catch (error) {
+    console.error("Get Item Order Presence Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch item order presence",
       error: error.message,
     });
   }

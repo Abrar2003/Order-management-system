@@ -1,7 +1,7 @@
 const crypto = require("crypto");
+const { Upload } = require("@aws-sdk/lib-storage");
 const {
   S3Client,
-  PutObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
 } = require("@aws-sdk/client-s3");
@@ -101,6 +101,8 @@ const createStorageKey = ({
 
 let cachedClient = null;
 let cachedClientKey = "";
+const DEFAULT_UPLOAD_QUEUE_SIZE = 4;
+const DEFAULT_UPLOAD_PART_SIZE = 8 * 1024 * 1024;
 
 const getClient = () => {
   if (!isConfigured()) {
@@ -195,6 +197,8 @@ const uploadBuffer = async ({
   key,
   originalName = "",
   contentType = "application/octet-stream",
+  queueSize = DEFAULT_UPLOAD_QUEUE_SIZE,
+  partSize = DEFAULT_UPLOAD_PART_SIZE,
 }) => {
   if (!Buffer.isBuffer(buffer)) {
     throw new Error("uploadBuffer requires buffer to be a Buffer");
@@ -206,16 +210,27 @@ const uploadBuffer = async ({
 
   const client = getClient();
   const config = getConfig();
+  const safeQueueSize = Math.max(1, Number(queueSize) || DEFAULT_UPLOAD_QUEUE_SIZE);
+  const safePartSize = Math.max(
+    5 * 1024 * 1024,
+    Number(partSize) || DEFAULT_UPLOAD_PART_SIZE,
+  );
 
   try {
-    await client.send(
-      new PutObjectCommand({
+    const uploader = new Upload({
+      client,
+      queueSize: safeQueueSize,
+      partSize: safePartSize,
+      leavePartsOnError: false,
+      params: {
         Bucket: config.bucket,
         Key: key,
         Body: buffer,
         ContentType: contentType,
-      }),
-    );
+      },
+    });
+
+    await uploader.done();
   } catch (error) {
     throw new Error(
       `Wasabi upload failed: ${error?.message || String(error)}`,

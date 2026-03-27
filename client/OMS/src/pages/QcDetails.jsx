@@ -297,6 +297,25 @@ const getSelectedFileSignature = (file) =>
     String(file?.type || "").trim().toLowerCase(),
   ].join("__");
 
+const buildSelectedFileBatchKey = ({
+  qcId = "",
+  fileType = "",
+  uploadMode = "",
+  comment = "",
+  files = [],
+} = {}) =>
+  [
+    String(qcId || "").trim(),
+    String(fileType || "").trim().toLowerCase(),
+    String(uploadMode || "").trim().toLowerCase(),
+    String(comment || "").trim(),
+    ...(
+      Array.isArray(files)
+        ? files.map((file) => getSelectedFileSignature(file)).sort()
+        : []
+    ),
+  ].join("::");
+
 const QcDetails = () => {
   const { id } = useParams();
   const [qc, setQc] = useState(null);
@@ -305,6 +324,7 @@ const QcDetails = () => {
   const [qcImageUploadMode, setQcImageUploadMode] = useState("single");
   const [qcSingleImageComment, setQcSingleImageComment] = useState("");
   const [uploadingRelatedFile, setUploadingRelatedFile] = useState(false);
+  const [relatedFileUploadProgress, setRelatedFileUploadProgress] = useState(0);
   const [openingRelatedFileType, setOpeningRelatedFileType] = useState("");
   const [pdfViewerFile, setPdfViewerFile] = useState(null);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
@@ -320,6 +340,7 @@ const QcDetails = () => {
   const location = useLocation();
   const relatedFileInputRef = useRef(null);
   const relatedFileUploadInFlightRef = useRef(false);
+  const relatedFileUploadBatchKeyRef = useRef("");
   const user = getUserFromToken();
   const normalizedRole = String(user?.role || "").trim().toLowerCase();
   const currentUserId = String(user?.id || user?._id || "").trim();
@@ -724,114 +745,154 @@ const QcDetails = () => {
     }
   }, [qc?.item_master]);
 
- const handleRelatedFileChange = useCallback(async (event) => {
-  const inputElement = event.target;
-  const rawSelectedFiles = Array.from(inputElement?.files || []);
-  if (rawSelectedFiles.length === 0) return;
+  const handleRelatedFileUploadProgress = useCallback((progressEvent) => {
+    const total = Number(progressEvent?.total || 0);
+    const loaded = Number(progressEvent?.loaded || 0);
 
-  if (relatedFileUploadInFlightRef.current) {
-    if (inputElement) inputElement.value = "";
-    return;
-  }
-
-  const fileConfig =
-    RELATED_FILE_OPTIONS_BY_VALUE[relatedFileType] ||
-    RELATED_FILE_OPTIONS[0];
-  const selectedFiles = Array.from(
-    new Map(
-      rawSelectedFiles.map((file) => [getSelectedFileSignature(file), file]),
-    ).values(),
-  );
-
-  try {
-    relatedFileUploadInFlightRef.current = true;
-    setUploadingRelatedFile(true);
-
-    for (const selectedFile of selectedFiles) {
-      const normalizedName = String(selectedFile.name || "").toLowerCase();
-      const normalizedType = String(selectedFile.type || "").toLowerCase();
-
-      const hasAllowedExtension = fileConfig.extensions.some((extension) =>
-        normalizedName.endsWith(extension)
-      );
-
-      const hasAllowedMimeType =
-        !normalizedType || fileConfig.mimeTypes.includes(normalizedType);
-
-      if (!hasAllowedExtension || !hasAllowedMimeType) {
-        throw new Error(fileConfig.invalidMessage);
-      }
+    if (total > 0 && loaded >= 0) {
+      const percent = Math.round((loaded / total) * 100);
+      setRelatedFileUploadProgress(Math.max(0, Math.min(percent, 95)));
+      return;
     }
 
-    let response;
+    setRelatedFileUploadProgress((current) => (current > 0 ? current : 10));
+  }, []);
 
-    if (fileConfig.value === "qc_images") {
-      if (selectedFiles.length > MAX_QC_IMAGE_UPLOAD_COUNT) {
-        throw new Error(
-          `You can upload up to ${MAX_QC_IMAGE_UPLOAD_COUNT} QC images at once.`,
+  const handleRelatedFileChange = useCallback(async (event) => {
+    const inputElement = event.target;
+    const rawSelectedFiles = Array.from(inputElement?.files || []);
+    if (rawSelectedFiles.length === 0) return;
+
+    if (relatedFileUploadInFlightRef.current) {
+      if (inputElement) inputElement.value = "";
+      return;
+    }
+
+    const fileConfig =
+      RELATED_FILE_OPTIONS_BY_VALUE[relatedFileType] ||
+      RELATED_FILE_OPTIONS[0];
+    const selectedFiles = Array.from(
+      new Map(
+        rawSelectedFiles.map((file) => [getSelectedFileSignature(file), file]),
+      ).values(),
+    );
+    const batchKey = buildSelectedFileBatchKey({
+      qcId: id,
+      fileType: relatedFileType,
+      uploadMode: qcImageUploadMode,
+      comment: qcImageUploadMode === "single" ? qcSingleImageComment : "",
+      files: selectedFiles,
+    });
+
+    try {
+      if (
+        relatedFileUploadInFlightRef.current ||
+        relatedFileUploadBatchKeyRef.current === batchKey
+      ) {
+        if (inputElement) inputElement.value = "";
+        return;
+      }
+
+      relatedFileUploadInFlightRef.current = true;
+      relatedFileUploadBatchKeyRef.current = batchKey;
+      setUploadingRelatedFile(true);
+      setRelatedFileUploadProgress(0);
+
+      for (const selectedFile of selectedFiles) {
+        const normalizedName = String(selectedFile.name || "").toLowerCase();
+        const normalizedType = String(selectedFile.type || "").toLowerCase();
+
+        const hasAllowedExtension = fileConfig.extensions.some((extension) =>
+          normalizedName.endsWith(extension)
+        );
+
+        const hasAllowedMimeType =
+          !normalizedType || fileConfig.mimeTypes.includes(normalizedType);
+
+        if (!hasAllowedExtension || !hasAllowedMimeType) {
+          throw new Error(fileConfig.invalidMessage);
+        }
+      }
+
+      let response;
+
+      if (fileConfig.value === "qc_images") {
+        if (selectedFiles.length > MAX_QC_IMAGE_UPLOAD_COUNT) {
+          throw new Error(
+            `You can upload up to ${MAX_QC_IMAGE_UPLOAD_COUNT} QC images at once.`,
+          );
+        }
+
+        const formData = new FormData();
+
+        formData.append("upload_mode", qcImageUploadMode);
+
+        if (qcImageUploadMode === "single") {
+          formData.append("comment", qcSingleImageComment);
+        }
+
+        selectedFiles.forEach((file) => {
+          formData.append("files", file);
+        });
+
+        response = await api.post(
+          `/qc/${encodeURIComponent(id)}/images`,
+          formData,
+          {
+            onUploadProgress: handleRelatedFileUploadProgress,
+          },
+        );
+      } else {
+        if (!qc?.item_master?._id) {
+          throw new Error("Item master record not found for this QC.");
+        }
+
+        const formData = new FormData();
+        formData.append("file_type", relatedFileType);
+        formData.append("file", selectedFiles[0]);
+
+        response = await api.post(
+          `/items/${encodeURIComponent(qc.item_master._id)}/files`,
+          formData,
+          {
+            onUploadProgress: handleRelatedFileUploadProgress,
+          },
         );
       }
 
-      const formData = new FormData();
+      setRelatedFileUploadProgress(100);
+      alert(
+        response?.data?.message || `${fileConfig.label} uploaded successfully.`,
+      );
 
-      formData.append("upload_mode", qcImageUploadMode);
-
-      if (qcImageUploadMode === "single") {
-        formData.append("comment", qcSingleImageComment);
+      if (fileConfig.value === "qc_images") {
+        setQcSingleImageComment("");
       }
 
-      selectedFiles.forEach((file) => {
-        formData.append("files", file);
-      });
-
-      response = await api.post(
-        `/qc/${encodeURIComponent(id)}/images`,
-        formData
+      await fetchQcDetails();
+    } catch (error) {
+      console.error(error);
+      alert(
+        error?.response?.data?.message ||
+          error?.message ||
+          `Failed to upload ${fileConfig.label}.`,
       );
-    } else {
-      if (!qc?.item_master?._id) {
-        throw new Error("Item master record not found for this QC.");
-      }
-
-      const formData = new FormData();
-      formData.append("file_type", relatedFileType);
-      formData.append("file", selectedFiles[0]);
-
-      response = await api.post(
-        `/items/${encodeURIComponent(qc.item_master._id)}/files`,
-        formData
-      );
+    } finally {
+      relatedFileUploadInFlightRef.current = false;
+      relatedFileUploadBatchKeyRef.current = "";
+      setUploadingRelatedFile(false);
+      setRelatedFileUploadProgress(0);
+      if (inputElement) inputElement.value = "";
     }
-
-    alert(
-      response?.data?.message || `${fileConfig.label} uploaded successfully.`
-    );
-
-    if (fileConfig.value === "qc_images") {
-      setQcSingleImageComment("");
-    }
-
-    await fetchQcDetails();
-  } catch (error) {
-    console.error(error);
-    alert(
-      error?.response?.data?.message ||
-        error?.message ||
-        `Failed to upload ${fileConfig.label}.`
-    );
-  } finally {
-    relatedFileUploadInFlightRef.current = false;
-    setUploadingRelatedFile(false);
-    if (inputElement) inputElement.value = "";
-  }
-}, [
-  fetchQcDetails,
-  id,
-  qc?.item_master?._id,
-  qcImageUploadMode,
-  qcSingleImageComment,
-  relatedFileType,
-]);
+  }, [
+    fetchQcDetails,
+    handleRelatedFileUploadProgress,
+    id,
+    qc?.item_master?._id,
+    qcImageUploadMode,
+    qcSingleImageComment,
+    relatedFileType,
+  ]);
 
   const handleDeleteInspectionRecord = useCallback(
     async (recordId) => {
@@ -947,6 +1008,7 @@ const QcDetails = () => {
           ref={relatedFileInputRef}
           type="file"
           className="d-none"
+          disabled={!canUploadActiveRelatedFile || uploadingRelatedFile}
           accept={activeRelatedFileConfig.accept}
           multiple={
             activeRelatedFileConfig?.value === "qc_images" &&
@@ -964,70 +1026,99 @@ const QcDetails = () => {
             Back
           </button>
           <h2 className="h4 mb-0">QC Details</h2>
-          <div className="d-flex align-items-center flex-wrap justify-content-end gap-2">
-            <select
-              className="form-select form-select-sm"
-              style={{ width: "auto", minWidth: "160px" }}
-              value={relatedFileType}
-              onChange={(e) => setRelatedFileType(String(e.target.value || "product_image"))}
-              disabled={!canUploadRelatedFile || uploadingRelatedFile}
-              title={relatedFileUploadDisabledReason}
-            >
-              {RELATED_FILE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+          <div className="d-flex flex-column align-items-end gap-2">
+            <div className="d-flex align-items-center flex-wrap justify-content-end gap-2">
+              <select
+                className="form-select form-select-sm"
+                style={{ width: "auto", minWidth: "160px" }}
+                value={relatedFileType}
+                onChange={(e) => setRelatedFileType(String(e.target.value || "product_image"))}
+                disabled={!canUploadRelatedFile || uploadingRelatedFile}
+                title={relatedFileUploadDisabledReason}
+              >
+                {RELATED_FILE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
 
-            {activeRelatedFileConfig?.value === "qc_images" && (
-              <>
-                <select
-                  className="form-select form-select-sm"
-                  style={{ width: "auto", minWidth: "140px" }}
-                  value={qcImageUploadMode}
-                  onChange={(e) => setQcImageUploadMode(String(e.target.value || "single"))}
-                  disabled={!canUploadActiveRelatedFile || uploadingRelatedFile}
-                >
-                  <option value="single">Single Image</option>
-                  <option value="bulk">Bulk Images</option>
-                </select>
-
-                {qcImageUploadMode === "single" && (
-                  <input
-                    type="text"
-                    className="form-control form-control-sm"
-                    style={{ width: "220px" }}
-                    value={qcSingleImageComment}
-                    onChange={(e) => setQcSingleImageComment(String(e.target.value || ""))}
-                    placeholder="Comment (optional)"
+              {activeRelatedFileConfig?.value === "qc_images" && (
+                <>
+                  <select
+                    className="form-select form-select-sm"
+                    style={{ width: "auto", minWidth: "140px" }}
+                    value={qcImageUploadMode}
+                    onChange={(e) => setQcImageUploadMode(String(e.target.value || "single"))}
                     disabled={!canUploadActiveRelatedFile || uploadingRelatedFile}
+                  >
+                    <option value="single">Single Image</option>
+                    <option value="bulk">Bulk Images</option>
+                  </select>
+
+                  {qcImageUploadMode === "single" && (
+                    <input
+                      type="text"
+                      className="form-control form-control-sm"
+                      style={{ width: "220px" }}
+                      value={qcSingleImageComment}
+                      onChange={(e) => setQcSingleImageComment(String(e.target.value || ""))}
+                      placeholder="Comment (optional)"
+                      disabled={!canUploadActiveRelatedFile || uploadingRelatedFile}
+                    />
+                  )}
+                </>
+              )}
+
+              <button
+                type="button"
+                className="btn btn-outline-primary btn-sm"
+                onClick={handleOpenRelatedFilePicker}
+                disabled={!canUploadActiveRelatedFile || uploadingRelatedFile}
+                title={relatedFileUploadDisabledReason}
+              >
+                {uploadingRelatedFile ? "Uploading..." : "Upload Related File"}
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-outline-primary btn-sm"
+                onClick={() =>
+                  navigate(`/qc/${encodeURIComponent(id)}/inspection-report`, {
+                    state: { fromQcDetails: location.pathname + location.search },
+                  })
+                }
+              >
+                Export PDF
+              </button>
+            </div>
+
+            {uploadingRelatedFile && (
+              <div
+                className="d-flex flex-column align-items-end"
+                style={{ width: "min(100%, 260px)" }}
+              >
+                <div
+                  className="progress w-100"
+                  role="progressbar"
+                  aria-label="Related file upload progress"
+                  aria-valuenow={Math.max(0, Math.min(100, relatedFileUploadProgress))}
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  style={{ height: "6px" }}
+                >
+                  <div
+                    className="progress-bar progress-bar-striped progress-bar-animated"
+                    style={{
+                      width: `${Math.max(3, Math.min(100, relatedFileUploadProgress))}%`,
+                    }}
                   />
-                )}
-              </>
+                </div>
+                <small className="text-muted mt-1">
+                  Upload progress: {Math.max(0, Math.min(100, relatedFileUploadProgress))}%
+                </small>
+              </div>
             )}
-
-            <button
-              type="button"
-              className="btn btn-outline-primary btn-sm"
-              onClick={handleOpenRelatedFilePicker}
-              disabled={!canUploadActiveRelatedFile || uploadingRelatedFile}
-              title={relatedFileUploadDisabledReason}
-            >
-              {uploadingRelatedFile ? "Uploading..." : "Upload Related File"}
-            </button>
-
-            <button
-              type="button"
-              className="btn btn-outline-primary btn-sm"
-              onClick={() =>
-                navigate(`/qc/${encodeURIComponent(id)}/inspection-report`, {
-                  state: { fromQcDetails: location.pathname + location.search },
-                })
-              }
-            >
-              Export PDF
-            </button>
           </div>
         </div>
 
