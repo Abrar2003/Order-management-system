@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import EditItemModal from "../components/EditItemModal";
+import ItemOrderPresenceTooltip from "../components/ItemOrderPresenceTooltip";
 import { getUserFromToken } from "../auth/auth.utils";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { formatCbm } from "../utils/cbm";
@@ -468,17 +469,16 @@ const Items = () => {
                     {rows.map((item) => (
                       <tr key={item?._id || item?.code}>
                         <td>
-                          {item?.code ? (
-                            <button
-                              type="button"
-                              className="btn btn-link btn-sm p-0 text-start"
-                              onClick={() => navigateToItemOrdersHistory(item)}
-                            >
-                              {item.code}
-                            </button>
-                          ) : (
-                            "N/A"
-                          )}
+                          <ItemOrderPresenceTooltip
+                            itemCode={item?.code}
+                            label={item?.code || "N/A"}
+                            onClick={
+                              item?.code
+                                ? () => navigateToItemOrdersHistory(item)
+                                : undefined
+                            }
+                            buttonClassName="btn btn-link btn-sm p-0 text-start"
+                          />
                         </td>
                         <td>{item?.name || "N/A"}</td>
                         <td>

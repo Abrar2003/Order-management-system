@@ -9,6 +9,7 @@ import ArchiveOrderModal from "../components/ArchiveOrderModal";
 import RevisedEtdModal from "../components/RevisedEtdModal";
 import BulkRevisedEtdModal from "../components/BulkRevisedEtdModal";
 import OrderEtdWithHistory from "../components/OrderEtdWithHistory";
+import ItemOrderPresenceTooltip from "../components/ItemOrderPresenceTooltip";
 import { archiveOrder } from "../services/orders.service";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatDateDDMMYYYY } from "../utils/date";
@@ -274,7 +275,13 @@ const Orders = () => {
                   <tbody>
                     {sortedOrders.map((order) => (
                       <tr key={order._id}>
-                        <td>{order.item?.item_code}</td>
+                        <td>
+                          <ItemOrderPresenceTooltip
+                            itemCode={order?.item?.item_code}
+                            excludeOrderId={order?.order_id}
+                            label={order?.item?.item_code || "N/A"}
+                          />
+                        </td>
                         <td>{order.item?.description}</td>
                         <td>{order.quantity}</td>
                         <td>{getOpenInspectionQuantity(order)}</td>

@@ -4,6 +4,7 @@ const auth = require("../middlewares/auth.middleware");
 const authorize = require("../middlewares/authorize.middleware");
 const {
   getItems,
+  getItemOrderPresence,
   getItemOrdersHistory,
   syncItemsFromOrders,
   updateItem,
@@ -26,6 +27,13 @@ router.post(
   auth,
   authorize("admin", "manager", "dev"),
   syncItemsFromOrders,
+);
+
+router.get(
+  "/:itemCode/order-presence",
+  auth,
+  authorize("admin", "manager", "QC", "dev"),
+  getItemOrderPresence,
 );
 
 router.get(
