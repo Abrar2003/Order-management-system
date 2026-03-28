@@ -35,15 +35,8 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
     setError("");
     const stuffingDateIso = toISODateString(stuffingDate);
 
-    if (
-      !stuffingDate ||
-      containerNumber === "" ||
-      invoiceNumber === "" ||
-      shipmentQuantity === ""
-    ) {
-      setError(
-        "Stuffing date, container number, invoice number and quantity are required.",
-      );
+    if (!stuffingDate || containerNumber === "" || shipmentQuantity === "") {
+      setError("Stuffing date, container number and quantity are required.");
       return;
     }
     if (!isValidDDMMYYYY(stuffingDate) || !stuffingDateIso) {
@@ -57,11 +50,6 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
 
     if (!parsedContainer) {
       setError("Container number must be a non-empty value.");
-      return;
-    }
-
-    if (!parsedInvoiceNumber) {
-      setError("Invoice number must be a non-empty value.");
       return;
     }
 
@@ -144,7 +132,7 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
             </div>
 
             <div>
-              <label className="form-label">Invoice Number</label>
+              <label className="form-label">Invoice Number (Optional)</label>
               <input
                 type="text"
                 className="form-control"

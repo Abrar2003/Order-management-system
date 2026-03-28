@@ -341,10 +341,6 @@ const Container = () => {
     }
 
     const invoiceNumberValue = String(invoiceNumber || "").trim();
-    if (!invoiceNumberValue) {
-      setError("Invoice number is required.");
-      return;
-    }
 
     if (!shippingDate) {
       setError("Shipping date is required.");
@@ -467,7 +463,7 @@ const Container = () => {
               </div>
 
               <div className="col-md-3">
-                <label className="form-label">Invoice Number</label>
+                <label className="form-label">Invoice Number (Optional)</label>
                 <input
                   type="text"
                   className="form-control"

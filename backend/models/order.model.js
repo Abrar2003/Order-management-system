@@ -1,8 +1,8 @@
 const mongoose = require("mongoose");
 
-const normalizeShipmentInvoiceNumber = (value) => {
+const normalizeShipmentInvoiceNumber = (value, fallback = "") => {
   const normalized = String(value ?? "").trim();
-  return normalized || "N/A";
+  return normalized || String(fallback ?? "").trim();
 };
 
 const RevisedEtdHistorySchema = new mongoose.Schema(
@@ -39,8 +39,8 @@ const ShipmentEntrySchema = new mongoose.Schema(
     invoice_number: {
       type: String,
       trim: true,
-      required: true,
-      default: "N/A",
+      required: false,
+      default: "",
     },
     stuffing_date: { type: Date },
     quantity: { type: Number },
@@ -111,7 +111,10 @@ Order_Schema.pre("validate", function backfillLegacyShipmentInvoices() {
 
   this.shipment.forEach((entry) => {
     if (!entry) return;
-    entry.invoice_number = normalizeShipmentInvoiceNumber(entry.invoice_number);
+    entry.invoice_number = normalizeShipmentInvoiceNumber(
+      entry.invoice_number,
+      "",
+    );
   });
 });
 

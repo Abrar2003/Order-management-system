@@ -10,10 +10,15 @@ import {
 } from "../utils/date";
 import "../App.css";
 
+const normalizeShipmentDraftInvoiceNumber = (value) => {
+  const normalized = String(value ?? "").trim();
+  return normalized && normalized !== "N/A" ? normalized : "";
+};
+
 const makeInitialShipmentRows = (shipment = []) =>
   (Array.isArray(shipment) ? shipment : []).map((entry) => ({
     container: String(entry?.container ?? ""),
-    invoice_number: String(entry?.invoice_number ?? "N/A"),
+    invoice_number: normalizeShipmentDraftInvoiceNumber(entry?.invoice_number),
     stuffing_date: toDDMMYYYYInputValue(entry?.stuffing_date, ""),
     quantity: String(entry?.quantity ?? ""),
     remaining_remarks: String(entry?.remaining_remarks ?? ""),
@@ -149,13 +154,11 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
       for (let i = 0; i < form.shipment.length; i += 1) {
         const row = form.shipment[i] || {};
         const container = String(row.container || "").trim();
-        const invoiceNumber = String(row.invoice_number || "").trim();
         const stuffingDate = String(row.stuffing_date || "").trim();
         const stuffingDateIso = toISODateString(stuffingDate);
         const shipmentQty = Number(row.quantity);
 
         if (!container) return `shipment row ${i + 1}: container is required`;
-        if (!invoiceNumber) return `shipment row ${i + 1}: invoice number is required`;
         if (!stuffingDateIso || !isValidDDMMYYYY(stuffingDate)) {
           return `shipment row ${i + 1}: stuffing date must be in DD/MM/YYYY format`;
         }
@@ -341,7 +344,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                 <thead>
                   <tr>
                     <th style={{ width: "16%" }}>Container</th>
-                    <th style={{ width: "18%" }}>Invoice Number</th>
+                    <th style={{ width: "18%" }}>Invoice Number (Optional)</th>
                     <th style={{ width: "16%" }}>Stuffing Date</th>
                     <th style={{ width: "12%" }}>Quantity</th>
                     <th style={{ width: "28%" }}>Remarks</th>

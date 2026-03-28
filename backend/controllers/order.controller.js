@@ -2266,9 +2266,6 @@ const normalizeShipmentEntries = (shipmentPayload) => {
       entry?.invoice_number ?? entry?.invoiceNumber ?? entry?.invoice,
       "",
     );
-    if (!invoiceNumber) {
-      throw new Error(`shipment[${index + 1}] invoice_number is required`);
-    }
 
     const stuffingDate = parseDateLike(entry?.stuffing_date);
     if (!stuffingDate) {
@@ -2323,7 +2320,10 @@ const fitShipmentEntriesToOrderQuantity = (
     cumulativeShipped += adjustedQuantity;
     nextEntries.push({
       container: String(entry?.container ?? "").trim(),
-      invoice_number: normalizeShipmentInvoiceNumber(entry?.invoice_number),
+      invoice_number: normalizeShipmentInvoiceNumber(
+        entry?.invoice_number,
+        "",
+      ),
       stuffing_date: parseDateLike(entry?.stuffing_date),
       quantity: adjustedQuantity,
       pending: Math.max(0, normalizedQuantity - cumulativeShipped),
@@ -8135,14 +8135,10 @@ exports.finalizeOrder = async (req, res) => {
     if (
       !stuffing_date ||
       container === undefined ||
-      quantity === undefined ||
-      (invoice_number === undefined &&
-        invoiceNumber === undefined &&
-        invoice === undefined)
+      quantity === undefined
     ) {
       return res.status(400).json({
-        message:
-          "stuffing_date, container, invoice_number and quantity are required",
+        message: "stuffing_date, container and quantity are required",
       });
     }
 
@@ -8162,11 +8158,6 @@ exports.finalizeOrder = async (req, res) => {
       invoice_number ?? invoiceNumber ?? invoice,
       "",
     );
-    if (!parsedInvoiceNumber) {
-      return res.status(400).json({
-        message: "invoice_number must be a valid non-empty string",
-      });
-    }
 
     const parsedQuantity = Number(quantity);
     if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) {
