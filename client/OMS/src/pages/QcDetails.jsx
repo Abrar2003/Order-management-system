@@ -325,7 +325,10 @@ const QcDetails = () => {
   const { id } = useParams();
   const [qc, setQc] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [relatedFileType, setRelatedFileType] = useState("product_image");
+  const [relatedFileType, setRelatedFileType] = useState(() => {
+    const initialRole = String(getUserFromToken()?.role || "").trim().toLowerCase();
+    return initialRole === "qc" ? "qc_images" : "product_image";
+  });
   const [qcImageUploadMode, setQcImageUploadMode] = useState("single");
   const [qcSingleImageComment, setQcSingleImageComment] = useState("");
   const [uploadingRelatedFile, setUploadingRelatedFile] = useState(false);
@@ -411,11 +414,19 @@ const QcDetails = () => {
     canUpdateQcByRole &&
     pendingAlignmentInfo.hasRequest &&
     isQcAlignedRecord;
+  const availableRelatedFileOptions = useMemo(
+    () =>
+      isQcUser
+        ? RELATED_FILE_OPTIONS.filter((option) => option.scope === "qc")
+        : RELATED_FILE_OPTIONS,
+    [isQcUser],
+  );
   const activeRelatedFileConfig = useMemo(
     () =>
       RELATED_FILE_OPTIONS_BY_VALUE[relatedFileType]
+      || availableRelatedFileOptions[0]
       || RELATED_FILE_OPTIONS[0],
-    [relatedFileType],
+    [availableRelatedFileOptions, relatedFileType],
   );
   const canUploadQcImages = canUpdateQc;
   const canUploadItemMasterFiles = isAdmin && canUpdateQc;
@@ -884,9 +895,7 @@ const QcDetails = () => {
       return;
     }
 
-    const fileConfig =
-      RELATED_FILE_OPTIONS_BY_VALUE[relatedFileType] ||
-      RELATED_FILE_OPTIONS[0];
+    const fileConfig = activeRelatedFileConfig || RELATED_FILE_OPTIONS[0];
     const selectedFiles = Array.from(
       new Map(
         rawSelectedFiles.map((file) => [getSelectedFileSignature(file), file]),
@@ -1007,6 +1016,7 @@ const QcDetails = () => {
     qc?.item_master?._id,
     qcImageUploadMode,
     qcSingleImageComment,
+    activeRelatedFileConfig,
     relatedFileType,
   ]);
 
@@ -1162,6 +1172,18 @@ const QcDetails = () => {
     fetchQcDetails();
   }, [fetchQcDetails]);
 
+  useEffect(() => {
+    if (
+      availableRelatedFileOptions.some((option) => option.value === relatedFileType)
+    ) {
+      return;
+    }
+
+    setRelatedFileType(
+      String(availableRelatedFileOptions[0]?.value || RELATED_FILE_OPTIONS[0]?.value || "qc_images"),
+    );
+  }, [availableRelatedFileOptions, relatedFileType]);
+
   if (loading) {
     return (
       <>
@@ -1214,10 +1236,15 @@ const QcDetails = () => {
                 style={{ width: "auto", minWidth: "160px" }}
                 value={relatedFileType}
                 onChange={(e) => setRelatedFileType(String(e.target.value || "product_image"))}
-                disabled={!canUploadRelatedFile || uploadingRelatedFile || deletingRelatedFile}
+                disabled={
+                  !canUploadRelatedFile ||
+                  uploadingRelatedFile ||
+                  deletingRelatedFile ||
+                  availableRelatedFileOptions.length <= 1
+                }
                 title={relatedFileUploadDisabledReason}
               >
-                {RELATED_FILE_OPTIONS.map((option) => (
+                {availableRelatedFileOptions.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
@@ -1258,18 +1285,24 @@ const QcDetails = () => {
                 disabled={!canUploadActiveRelatedFile || uploadingRelatedFile || deletingRelatedFile}
                 title={relatedFileUploadDisabledReason}
               >
-                {uploadingRelatedFile ? "Uploading..." : "Upload Related File"}
+                {uploadingRelatedFile
+                  ? "Uploading..."
+                  : activeRelatedFileConfig?.value === "qc_images"
+                  ? "Upload QC Images"
+                  : "Upload Related File"}
               </button>
 
-              <button
-                type="button"
-                className="btn btn-outline-danger btn-sm"
-                onClick={handleDeleteRelatedFile}
-                disabled={!canDeleteActiveRelatedFile || uploadingRelatedFile || deletingRelatedFile}
-                title={relatedFileDeleteDisabledReason}
-              >
-                {deletingRelatedFile ? "Deleting..." : "Delete File"}
-              </button>
+              {isAdmin && (
+                <button
+                  type="button"
+                  className="btn btn-outline-danger btn-sm"
+                  onClick={handleDeleteRelatedFile}
+                  disabled={!canDeleteActiveRelatedFile || uploadingRelatedFile || deletingRelatedFile}
+                  title={relatedFileDeleteDisabledReason}
+                >
+                  {deletingRelatedFile ? "Deleting..." : "Delete File"}
+                </button>
+              )}
 
               <button
                 type="button"
