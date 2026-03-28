@@ -6570,15 +6570,6 @@ exports.uploadQcImages = async (req, res) => {
     const isManager = normalizedRole === "manager";
     const hasElevatedAccess = isAdmin || isManager;
     const currentUserId = String(req.user?._id || req.user?.id || "").trim();
-    const isInspectionDone = qc?.order?.status === "Inspection Done";
-
-    if (!hasElevatedAccess && isInspectionDone) {
-      return res.status(403).json({
-        success: false,
-        message:
-          "Only admin or manager can upload QC images after inspection is done",
-      });
-    }
 
     const latestRequestEntry = resolveLatestRequestEntry(qc?.request_history || []);
     const latestRequestedQuantity = resolveRequestedQuantityFromQc(qc);

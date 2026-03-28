@@ -428,7 +428,12 @@ const QcDetails = () => {
       || RELATED_FILE_OPTIONS[0],
     [availableRelatedFileOptions, relatedFileType],
   );
-  const canUploadQcImages = canUpdateQc;
+  const canUploadQcImages =
+    pendingAlignmentInfo.hasRequest &&
+    (
+      isAdmin ||
+      (isQcUser && isQcAlignedRecord)
+    );
   const canUploadItemMasterFiles = isAdmin && canUpdateQc;
   const canUploadRelatedFile =
     activeRelatedFileConfig?.scope === "qc"
