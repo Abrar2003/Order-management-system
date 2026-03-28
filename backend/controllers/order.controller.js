@@ -6340,6 +6340,314 @@ const buildDelayedPoReportDataset = async ({
   };
 };
 
+const buildUpcomingEtdReportDataset = async ({
+  brand = "",
+  vendor = "",
+  toDate = "",
+} = {}) => {
+  const selectedBrand = normalizeFilterValue(brand) || "";
+  const selectedVendor = normalizeFilterValue(vendor) || "";
+  const todayUtc = toUtcDayStart(new Date());
+  const defaultRangeEnd = todayUtc
+    ? new Date(todayUtc.getTime() + 15 * MS_PER_DAY)
+    : null;
+  const reportEndDateUtc = toUtcDayStart(toDate) || defaultRangeEnd;
+
+  const orders = await Order.find(ACTIVE_ORDER_MATCH)
+    .select(
+      "order_id item brand vendor quantity status ETD revised_ETD order_date shipment qc_record",
+    )
+    .populate({
+      path: "qc_record",
+      select: "last_inspected_date inspection_dates",
+    })
+    .sort({ vendor: 1, brand: 1, order_id: 1, order_date: -1 })
+    .lean();
+
+  const groupedOrders = new Map();
+
+  for (const orderEntry of orders) {
+    const orderId =
+      normalizeOrderKey(orderEntry?.order_id) ||
+      normalizeLooseString(orderEntry?.order_id) ||
+      "N/A";
+    const vendorName = normalizeLooseString(orderEntry?.vendor) || "N/A";
+    const brandName = normalizeLooseString(orderEntry?.brand) || "N/A";
+    const groupKey = buildDelayedPoGroupKey({
+      orderId,
+      brand: brandName,
+      vendor: vendorName,
+    });
+
+    if (!groupedOrders.has(groupKey)) {
+      groupedOrders.set(groupKey, {
+        order_id: orderId,
+        brand: brandName,
+        vendor: vendorName,
+        order_date: null,
+        etd: null,
+        revised_etd: null,
+        effective_etd: null,
+        pending_count: 0,
+        inspection_done_count: 0,
+        shipped_count: 0,
+        total_items: 0,
+        total_quantity: 0,
+        item_codes: new Set(),
+        pending_item_codes: new Set(),
+        inspection_done_item_codes: new Set(),
+        shipped_item_codes: new Set(),
+        last_shipment_date: null,
+        last_inspected_date: null,
+      });
+    }
+
+    const groupedEntry = groupedOrders.get(groupKey);
+    const status = normalizeLooseString(orderEntry?.status);
+    const itemCode = normalizeLooseString(orderEntry?.item?.item_code);
+    const quantity = Math.max(
+      0,
+      Number(parseQuantityLike(orderEntry?.quantity) || 0),
+    );
+    const orderDate = parseDateLike(orderEntry?.order_date);
+    const etdDate = parseDateLike(orderEntry?.ETD);
+    const revisedEtdDate = parseDateLike(orderEntry?.revised_ETD);
+    const effectiveEtdDate = resolveEffectiveOrderEtdDate(orderEntry);
+    const latestShipmentDate = resolveLatestShipmentDate(orderEntry?.shipment);
+    const latestInspectionDate = resolveLatestInspectionDate(
+      orderEntry?.qc_record,
+    );
+
+    groupedEntry.order_date = resolveEarlierDate(
+      groupedEntry.order_date,
+      orderDate,
+    );
+    groupedEntry.etd = resolveEarlierDate(groupedEntry.etd, etdDate);
+    groupedEntry.revised_etd = resolveEarlierDate(
+      groupedEntry.revised_etd,
+      revisedEtdDate,
+    );
+    groupedEntry.effective_etd = resolveEarlierDate(
+      groupedEntry.effective_etd,
+      effectiveEtdDate,
+    );
+    groupedEntry.last_shipment_date = resolveLaterDate(
+      groupedEntry.last_shipment_date,
+      latestShipmentDate,
+    );
+    groupedEntry.last_inspected_date = resolveLaterDate(
+      groupedEntry.last_inspected_date,
+      latestInspectionDate,
+    );
+    groupedEntry.total_items += 1;
+    groupedEntry.total_quantity += quantity;
+
+    if (itemCode) {
+      groupedEntry.item_codes.add(itemCode);
+    }
+
+    if (isShippedLikeOrderStatus(status)) {
+      groupedEntry.shipped_count += 1;
+      if (itemCode) {
+        groupedEntry.shipped_item_codes.add(itemCode);
+      }
+    } else if (isInspectionDoneOrderStatus(status)) {
+      groupedEntry.inspection_done_count += 1;
+      if (itemCode) {
+        groupedEntry.inspection_done_item_codes.add(itemCode);
+      }
+    } else if (isPendingOrderStatus(status)) {
+      groupedEntry.pending_count += 1;
+      if (itemCode) {
+        groupedEntry.pending_item_codes.add(itemCode);
+      }
+    } else {
+      groupedEntry.pending_count += 1;
+      if (itemCode) {
+        groupedEntry.pending_item_codes.add(itemCode);
+      }
+    }
+  }
+
+  const allRows = Array.from(groupedOrders.values())
+    .map((groupedEntry) => {
+      const effectiveEtd = groupedEntry.effective_etd;
+      if (!effectiveEtd || !todayUtc || !reportEndDateUtc) {
+        return null;
+      }
+
+      const hasOpenItems =
+        groupedEntry.pending_count > 0 ||
+        groupedEntry.inspection_done_count > 0;
+      const isFullyShipped =
+        groupedEntry.pending_count === 0 &&
+        groupedEntry.inspection_done_count === 0 &&
+        groupedEntry.shipped_count > 0;
+      const isWithinUpcomingWindow =
+        effectiveEtd.getTime() >= todayUtc.getTime() &&
+        effectiveEtd.getTime() <= reportEndDateUtc.getTime();
+
+      if (isFullyShipped || !(hasOpenItems && isWithinUpcomingWindow)) {
+        return null;
+      }
+
+      const daysUntilEtd = Math.max(0, diffUtcDays(effectiveEtd, todayUtc));
+      const lastProgress = resolveDelayedPoLastProgress(groupedEntry);
+
+      return {
+        order_id: groupedEntry.order_id,
+        brand: groupedEntry.brand,
+        vendor: groupedEntry.vendor,
+        order_date: toISODateString(groupedEntry.order_date),
+        etd: toISODateString(groupedEntry.etd),
+        revised_etd: toISODateString(groupedEntry.revised_etd),
+        effective_etd: toISODateString(groupedEntry.effective_etd),
+        days_until_etd: daysUntilEtd,
+        pending_count: groupedEntry.pending_count,
+        inspection_done_count: groupedEntry.inspection_done_count,
+        shipped_count: groupedEntry.shipped_count,
+        total_items: groupedEntry.total_items,
+        total_quantity: groupedEntry.total_quantity,
+        item_codes: Array.from(groupedEntry.item_codes).sort((a, b) =>
+          a.localeCompare(b),
+        ),
+        pending_item_codes: Array.from(groupedEntry.pending_item_codes).sort(
+          (a, b) => a.localeCompare(b),
+        ),
+        inspection_done_item_codes: Array.from(
+          groupedEntry.inspection_done_item_codes,
+        ).sort((a, b) => a.localeCompare(b)),
+        shipped_item_codes: Array.from(groupedEntry.shipped_item_codes).sort(
+          (a, b) => a.localeCompare(b),
+        ),
+        last_shipment_date: toISODateString(groupedEntry.last_shipment_date),
+        last_inspected_date: toISODateString(groupedEntry.last_inspected_date),
+        last_progress: lastProgress.display,
+        last_progress_type: lastProgress.type,
+        last_progress_value: lastProgress.value,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      const vendorCompare = String(left?.vendor || "").localeCompare(
+        String(right?.vendor || ""),
+      );
+      if (vendorCompare !== 0) return vendorCompare;
+
+      const daysCompare =
+        Number(left?.days_until_etd || 0) - Number(right?.days_until_etd || 0);
+      if (daysCompare !== 0) return daysCompare;
+
+      const etdCompare =
+        (parseDateLike(left?.effective_etd)?.getTime() || 0) -
+        (parseDateLike(right?.effective_etd)?.getTime() || 0);
+      if (etdCompare !== 0) return etdCompare;
+
+      return String(left?.order_id || "").localeCompare(
+        String(right?.order_id || ""),
+      );
+    });
+
+  const brandOptions = normalizeDistinctValues(
+    allRows.map((row) => row?.brand || ""),
+  );
+  const vendorOptions = normalizeDistinctValues(
+    allRows.map((row) => row?.vendor || ""),
+  );
+
+  const filteredRows = allRows.filter((row) => {
+    if (selectedBrand && row?.brand !== selectedBrand) return false;
+    if (selectedVendor && row?.vendor !== selectedVendor) return false;
+    return true;
+  });
+
+  const vendorMap = new Map();
+  let totalDaysUntilEtd = 0;
+  let totalPendingCount = 0;
+  let totalInspectionDoneCount = 0;
+  let totalShippedCount = 0;
+
+  for (const row of filteredRows) {
+    const vendorKey = normalizeVendorKey(row?.vendor);
+    if (!vendorMap.has(vendorKey)) {
+      vendorMap.set(vendorKey, {
+        vendor: row.vendor,
+        brands: new Set(),
+        upcoming_po_count: 0,
+        pending_count: 0,
+        inspection_done_count: 0,
+        shipped_count: 0,
+        total_days_until_etd: 0,
+        rows: [],
+      });
+    }
+
+    const vendorEntry = vendorMap.get(vendorKey);
+    vendorEntry.brands.add(row.brand);
+    vendorEntry.upcoming_po_count += 1;
+    vendorEntry.pending_count += Number(row.pending_count || 0);
+    vendorEntry.inspection_done_count += Number(row.inspection_done_count || 0);
+    vendorEntry.shipped_count += Number(row.shipped_count || 0);
+    vendorEntry.total_days_until_etd += Number(row.days_until_etd || 0);
+    vendorEntry.rows.push(row);
+
+    totalDaysUntilEtd += Number(row.days_until_etd || 0);
+    totalPendingCount += Number(row.pending_count || 0);
+    totalInspectionDoneCount += Number(row.inspection_done_count || 0);
+    totalShippedCount += Number(row.shipped_count || 0);
+  }
+
+  const vendors = Array.from(vendorMap.values())
+    .map((vendorEntry) => ({
+      vendor: vendorEntry.vendor,
+      brands: Array.from(vendorEntry.brands).sort((a, b) =>
+        String(a || "").localeCompare(String(b || "")),
+      ),
+      upcoming_po_count: vendorEntry.upcoming_po_count,
+      pending_count: vendorEntry.pending_count,
+      inspection_done_count: vendorEntry.inspection_done_count,
+      shipped_count: vendorEntry.shipped_count,
+      total_days_until_etd: vendorEntry.total_days_until_etd,
+      average_days_until_etd:
+        vendorEntry.upcoming_po_count > 0
+          ? Number(
+              (
+                vendorEntry.total_days_until_etd / vendorEntry.upcoming_po_count
+              ).toFixed(2),
+            )
+          : 0,
+      rows: vendorEntry.rows,
+    }))
+    .sort((left, right) =>
+      String(left?.vendor || "").localeCompare(String(right?.vendor || "")),
+    );
+
+  return {
+    filters: {
+      brand: selectedBrand,
+      vendor: selectedVendor,
+      brand_options: brandOptions,
+      vendor_options: vendorOptions,
+      report_start_date: toISODateString(todayUtc),
+      report_end_date: toISODateString(reportEndDateUtc),
+    },
+    summary: {
+      upcoming_po_count: filteredRows.length,
+      vendors_count: vendors.length,
+      pending_count: totalPendingCount,
+      inspection_done_count: totalInspectionDoneCount,
+      shipped_count: totalShippedCount,
+      total_days_until_etd: totalDaysUntilEtd,
+      average_days_until_etd:
+        filteredRows.length > 0
+          ? Number((totalDaysUntilEtd / filteredRows.length).toFixed(2))
+          : 0,
+    },
+    vendors,
+    rows: filteredRows,
+  };
+};
+
 exports.getDelayedPoReport = async (req, res) => {
   try {
     const dataset = await buildDelayedPoReportDataset({
@@ -6353,6 +6661,30 @@ exports.getDelayedPoReport = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to load delayed PO report",
+      error: error.message,
+    });
+  }
+};
+
+exports.getUpcomingEtdReport = async (req, res) => {
+  try {
+    const dataset = await buildUpcomingEtdReportDataset({
+      brand: req.query.brand,
+      vendor: req.query.vendor,
+      toDate:
+        req.query.to_date ??
+        req.query.toDate ??
+        req.query.date ??
+        req.query.end_date ??
+        req.query.endDate,
+    });
+
+    return res.status(200).json(dataset);
+  } catch (error) {
+    console.error("Get Upcoming ETD Report Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to load upcoming ETD report",
       error: error.message,
     });
   }

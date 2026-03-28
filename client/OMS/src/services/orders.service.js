@@ -231,6 +231,18 @@ export const getPoStatusReport = async (params = {}) => {
   return res.data;
 };
 
+export const getUpcomingEtdReport = async (params = {}) => {
+  const token = localStorage.getItem("token");
+  const res = await axios.get("/orders/upcoming-etd-report", {
+    params,
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return res.data;
+};
+
 export const exportDelayedPoReport = async (params = {}) => {
   const token = localStorage.getItem("token");
   return axios.get("/orders/delayed-po-report/export", {

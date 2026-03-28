@@ -20,6 +20,7 @@ const {
   getShipmentsDb,
   exportShipmentsDb,
   getDelayedPoReport,
+  getUpcomingEtdReport,
   exportDelayedPoReport,
   exportOrdersDb,
   editOrder,
@@ -111,6 +112,12 @@ router.get(
   authenticate,
   authorize("admin", "manager", "QC", "dev"),
   getDelayedPoReport,
+);
+router.get(
+  "/upcoming-etd-report",
+  authenticate,
+  authorize("admin", "manager", "QC", "dev"),
+  getUpcomingEtdReport,
 );
 router.get(
   "/delayed-po-report/export",
