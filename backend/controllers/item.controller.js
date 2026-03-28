@@ -501,7 +501,7 @@ exports.getItemOrderPresence = async (req, res) => {
       "item.item_code": itemCodeMatch,
     })
       .select(
-        "order_id status quantity shipment order_date ETD revised_ETD updatedAt qc_record",
+        "order_id status quantity shipment order_date ETD revised_ETD updatedAt qc_record item",
       )
       .populate({
         path: "qc_record",
@@ -521,6 +521,7 @@ exports.getItemOrderPresence = async (req, res) => {
       return {
         id: String(order?._id || ""),
         order_id: String(order?.order_id || "").trim(),
+        description: String(order?.item?.description || "").trim(),
         status: String(order?.status || "").trim(),
         total_quantity: totalQuantity,
         open_quantity: getOpenQuantity(order),

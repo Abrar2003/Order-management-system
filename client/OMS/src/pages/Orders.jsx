@@ -9,6 +9,7 @@ import ArchiveOrderModal from "../components/ArchiveOrderModal";
 import RevisedEtdModal from "../components/RevisedEtdModal";
 import BulkRevisedEtdModal from "../components/BulkRevisedEtdModal";
 import OrderEtdWithHistory from "../components/OrderEtdWithHistory";
+import OrderQuantityWithHistory from "../components/OrderQuantityWithHistory";
 import ItemOrderPresenceTooltip from "../components/ItemOrderPresenceTooltip";
 import { archiveOrder } from "../services/orders.service";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -283,7 +284,13 @@ const Orders = () => {
                           />
                         </td>
                         <td>{order.item?.description}</td>
-                        <td>{order.quantity}</td>
+                        <td>
+                          <OrderQuantityWithHistory
+                            orderId={order?.order_id}
+                            itemCode={order?.item?.item_code}
+                            quantity={order?.quantity}
+                          />
+                        </td>
                         <td>{getOpenInspectionQuantity(order)}</td>
                         <td>{getPendingDisplayQuantity(order)}</td>
                         <td className="orders-cbm-col">{renderOrderCbmCell(order)}</td>

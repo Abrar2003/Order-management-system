@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import api from "../api/axios";
+import HoverPortal from "./HoverPortal";
 
 const orderPresenceCache = new Map();
 const orderPresenceInflight = new Map();
@@ -39,14 +40,14 @@ const fetchOrderPresence = async (itemCode = "") => {
   return request;
 };
 
-const formatQuantitySummary = (row = {}) => {
+const formatPresenceSummary = (row = {}) => {
   const status = normalizeText(row?.status).toLowerCase();
-  const totalQuantity = Number(row?.total_quantity || 0);
   const openQuantity = Number(row?.open_quantity || 0);
   const shippedQuantity = Number(row?.shipped_quantity || 0);
+  const totalQuantity = Number(row?.total_quantity || 0);
 
   if (status === "under inspection") {
-    return `Total: ${totalQuantity} | Open: ${openQuantity}`;
+    return `Open: ${openQuantity}`;
   }
 
   if (status === "partial shipped") {
@@ -57,7 +58,7 @@ const formatQuantitySummary = (row = {}) => {
     return `Shipped: ${shippedQuantity || totalQuantity}`;
   }
 
-  return `Total: ${totalQuantity}`;
+  return "";
 };
 
 const ItemOrderPresenceTooltip = ({
@@ -116,12 +117,11 @@ const ItemOrderPresenceTooltip = ({
   const triggerLabel = label || normalizedItemCode;
 
   return (
-    <span
+    <HoverPortal
       className={`om-item-order-presence ${className}`.trim()}
-      onMouseEnter={loadTooltipData}
-      onFocus={loadTooltipData}
-    >
-      {onClick ? (
+      panelClassName="om-item-order-presence-panel"
+      onOpen={loadTooltipData}
+      trigger={onClick ? (
         <button
           type="button"
           className={buttonClassName || "btn btn-link btn-sm p-0 text-start"}
@@ -134,42 +134,54 @@ const ItemOrderPresenceTooltip = ({
           {triggerLabel}
         </span>
       )}
+    >
+      <span className="om-item-order-presence-title">
+        {excludeOrderId ? "Other Active POs" : "Active POs"}
+      </span>
 
-      <span className="om-item-order-presence-panel" role="tooltip">
-        <span className="om-item-order-presence-title">
-          {excludeOrderId ? "Other Active POs" : "Active POs"}
+      {loading ? (
+        <span className="om-item-order-presence-empty">Loading...</span>
+      ) : error ? (
+        <span className="om-item-order-presence-empty">{error}</span>
+      ) : visibleRows.length === 0 ? (
+        <span className="om-item-order-presence-empty">
+          {excludeOrderId
+            ? "No other active POs found for this item."
+            : "No active POs found for this item."}
         </span>
+      ) : (
+        visibleRows.map((row) => {
+          const detailText = formatPresenceSummary(row);
 
-        {loading ? (
-          <span className="om-item-order-presence-empty">Loading...</span>
-        ) : error ? (
-          <span className="om-item-order-presence-empty">{error}</span>
-        ) : visibleRows.length === 0 ? (
-          <span className="om-item-order-presence-empty">
-            {excludeOrderId
-              ? "No other active POs found for this item."
-              : "No active POs found for this item."}
-          </span>
-        ) : (
-          visibleRows.map((row) => (
+          return (
             <span
               key={`${normalizeText(row?.id)}-${normalizeText(row?.order_id)}`}
               className="om-item-order-presence-entry"
             >
-              <span className="om-item-order-presence-po">
-                PO: {normalizeText(row?.order_id) || "N/A"}
+              <span className="om-item-order-presence-head">
+                <span className="om-item-order-presence-po">
+                  PO: {normalizeText(row?.order_id) || "N/A"}
+                </span>
+                <span className="om-item-order-presence-detail">
+                  Qty: {Number(row?.total_quantity || 0)}
+                </span>
               </span>
+              {normalizeText(row?.description) ? (
+                <span className="om-item-order-presence-detail">
+                  {normalizeText(row?.description)}
+                </span>
+              ) : null}
               <span className="om-item-order-presence-row">
                 Status: {normalizeText(row?.status) || "N/A"}
               </span>
-              <span className="om-item-order-presence-meta">
-                {formatQuantitySummary(row)}
-              </span>
+              {detailText ? (
+                <span className="om-item-order-presence-detail">{detailText}</span>
+              ) : null}
             </span>
-          ))
-        )}
-      </span>
-    </span>
+          );
+        })
+      )}
+    </HoverPortal>
   );
 };
 
