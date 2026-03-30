@@ -7200,6 +7200,9 @@ exports.editOrder = async (req, res) => {
     const archiveRemarkInput = String(
       payload.archive_remark ?? payload.archiveRemark ?? "",
     ).trim();
+    const editRemarkInput = String(
+      payload.edit_remark ?? payload.editRemark ?? payload.remark ?? "",
+    ).trim();
     const beforeEditSnapshot = buildOrderEditLogSnapshot(order);
 
     if ((hasQuantity || hasShipment) && !isRequesterAdmin) {
@@ -7337,6 +7340,7 @@ exports.editOrder = async (req, res) => {
         calendarSyncResults: archiveCalendarSync,
         extraRemarks: [
           "Order archived through edit-order route (quantity set to 0).",
+          editRemarkInput ? `Edit remark: ${editRemarkInput}` : "",
           requestedEditFields.length > 0
             ? `Requested fields: ${requestedEditFields.join(", ")}.`
             : "",
@@ -7496,9 +7500,12 @@ exports.editOrder = async (req, res) => {
       afterSnapshot: buildOrderEditLogSnapshot(order),
       calendarSyncResults: calendar_sync,
       extraRemarks:
-        requestedEditFields.length > 0
-          ? [`Requested fields: ${requestedEditFields.join(", ")}.`]
-          : [],
+        [
+          requestedEditFields.length > 0
+            ? `Requested fields: ${requestedEditFields.join(", ")}.`
+            : "",
+          editRemarkInput ? `Edit remark: ${editRemarkInput}` : "",
+        ].filter(Boolean),
     });
 
     return res.status(200).json({

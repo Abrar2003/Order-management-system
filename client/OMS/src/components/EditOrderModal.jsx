@@ -78,6 +78,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
     quantity: String(order?.quantity ?? ""),
     item_code: String(order?.item?.item_code ?? ""),
     description: String(order?.item?.description ?? ""),
+    edit_remark: "",
     shipment: makeInitialShipmentRows(order?.shipment),
   });
   const [saving, setSaving] = useState(false);
@@ -180,6 +181,9 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
       `Brand: ${payload.brand}`,
       `Vendor: ${payload.vendor}`,
     ];
+    if (payload.edit_remark) {
+      lines.push(`Edit Remark: ${payload.edit_remark}`);
+    }
 
     if (isAdmin) {
       lines.push(
@@ -220,6 +224,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
       vendor: String(form.vendor || "").trim(),
       item_code: String(form.item_code || "").trim(),
       description: String(form.description ?? "").trim(),
+      edit_remark: String(form.edit_remark ?? "").trim(),
     };
 
     if (isAdmin) {
@@ -326,6 +331,16 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                   className="form-control"
                   value={form.description}
                   onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
+                />
+              </div>
+              <div className="col-12">
+                <label className="form-label">Edit Remark</label>
+                <textarea
+                  className="form-control"
+                  rows="2"
+                  value={form.edit_remark}
+                  onChange={(e) => setForm((prev) => ({ ...prev, edit_remark: e.target.value }))}
+                  placeholder="Add a remark for this order edit"
                 />
               </div>
             </div>

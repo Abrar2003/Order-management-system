@@ -336,13 +336,14 @@ const OrderEditLogs = () => {
                       <th>Type</th>
                       <th>Changed Fields</th>
                       <th>Fields Updated</th>
+                      <th>Remarks</th>
                       <th>Details</th>
                     </tr>
                   </thead>
                   <tbody>
                     {rows.length === 0 && (
                       <tr>
-                        <td colSpan="9" className="text-center py-4">
+                        <td colSpan="10" className="text-center py-4">
                           No edit logs found
                         </td>
                       </tr>
@@ -353,6 +354,7 @@ const OrderEditLogs = () => {
                         ? log.changed_fields
                         : [];
                       const changes = Array.isArray(log?.changes) ? log.changes : [];
+                      const remarks = Array.isArray(log?.remarks) ? log.remarks : [];
                       return (
                         <tr key={log?._id || `${log?.createdAt || ""}-${log?.order_id || ""}`}>
                           <td>{formatDateDDMMYYYY(log?.createdAt)}</td>
@@ -368,6 +370,11 @@ const OrderEditLogs = () => {
                             {changedFields.length > 0
                               ? changedFields.join(", ")
                               : "No net changes"}
+                          </td>
+                          <td>
+                            {remarks.length > 0
+                              ? remarks.join(" | ")
+                              : "N/A"}
                           </td>
                           <td>
                             {changes.length > 0 ? (

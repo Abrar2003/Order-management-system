@@ -936,6 +936,7 @@
 .om-order-quantity-history-entry,
 .om-order-quantity-history-row,
 .om-order-quantity-history-meta,
+.om-order-quantity-history-remarks,
 .om-order-quantity-history-empty {
   display: block;
 }
@@ -965,6 +966,7 @@
 }
 
 .om-order-quantity-history-meta,
+.om-order-quantity-history-remarks,
 .om-order-quantity-history-empty {
   font-size: 0.74rem;
   color: var(--bs-secondary-color);
@@ -972,7 +974,9 @@
 }
 
 .om-order-quantity-history-row + .om-order-quantity-history-meta,
-.om-order-quantity-history-meta + .om-order-quantity-history-meta {
+.om-order-quantity-history-meta + .om-order-quantity-history-meta,
+.om-order-quantity-history-meta + .om-order-quantity-history-remarks,
+.om-order-quantity-history-remarks + .om-order-quantity-history-meta {
   margin-top: 0.1rem;
 }
 

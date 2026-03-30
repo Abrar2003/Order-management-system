@@ -8,6 +8,18 @@ const historyCache = new Map();
 const pendingRequests = new Map();
 
 const normalizeText = (value) => String(value || "").trim();
+const shouldHideTooltipRemark = (value) => {
+  const normalized = normalizeText(value).toLowerCase();
+  return (
+    normalized.startsWith("edited fields:")
+    || normalized.startsWith("requested fields:")
+    || normalized === "no net changes detected in editable fields."
+  );
+};
+const normalizeTooltipRemarks = (remarks) => (Array.isArray(remarks) ? remarks : [remarks])
+  .map((remark) => normalizeText(remark))
+  .filter((remark) => remark && !shouldHideTooltipRemark(remark))
+  .join(" | ");
 
 const getCacheKey = (orderId, itemCode) =>
   `${normalizeText(orderId)}__${normalizeText(itemCode).toLowerCase()}`;
@@ -33,9 +45,7 @@ const normalizeQuantityHistoryItems = (logs = [], itemCode = "") => {
     })
     .flatMap((entry) => {
       const editedByName = normalizeText(entry?.edited_by_name);
-      const remarks = Array.isArray(entry?.remarks)
-        ? entry.remarks.map((remark) => normalizeText(remark)).filter(Boolean).join(" | ")
-        : normalizeText(entry?.remarks);
+      const remarks = normalizeTooltipRemarks(entry?.remarks);
 
       return (Array.isArray(entry?.changes) ? entry.changes : [])
         .filter((change) => normalizeText(change?.field).toLowerCase() === "quantity")
@@ -157,7 +167,11 @@ const OrderQuantityWithHistory = ({
                 {formatDateDDMMYYYY(entry.updated_at, "-")}
                 {entry.updated_by_name ? ` | ${entry.updated_by_name}` : ""}
               </span>
-             
+              {entry.remarks ? (
+                <span className="om-order-quantity-history-remarks">
+                  {entry.remarks}
+                </span>
+              ) : null}
             </span>
           ))}
         </>

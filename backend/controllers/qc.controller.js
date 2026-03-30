@@ -7249,7 +7249,14 @@ exports.editInspectionRecords = async (req, res) => {
     const inspectionMap = new Map(
       inspectionDocs.map((doc) => [String(doc._id), doc]),
     );
+    const requestHistoryEntries = Array.isArray(qc?.request_history)
+      ? qc.request_history
+      : [];
+    const requestHistoryEntryById = new Map(
+      requestHistoryEntries.map((entry) => [String(entry?._id || "").trim(), entry]),
+    );
     const touchedInspectors = new Set();
+    const requestHistoryDateUpdates = new Map();
     const qcRequestedQuantityCap = resolveRequestedQuantityFromQc(qc);
 
     const parseRequiredDate = (value, fieldName) => {
@@ -7322,6 +7329,40 @@ exports.editInspectionRecords = async (req, res) => {
       }
 
       return { generatedLabels, normalizedRanges };
+    };
+
+    const resolveLinkedRequestHistoryEntry = (record) => {
+      const requestHistoryId = String(record?.request_history_id || "").trim();
+      if (requestHistoryId && requestHistoryEntryById.has(requestHistoryId)) {
+        return requestHistoryEntryById.get(requestHistoryId) || null;
+      }
+
+      const recordRequestedDate = toISODateString(
+        record?.requested_date || record?.inspection_date || record?.createdAt,
+      );
+      const recordInspectorId = String(
+        record?.inspector?._id || record?.inspector || "",
+      ).trim();
+
+      if (!recordRequestedDate) return null;
+
+      const exactMatch = requestHistoryEntries.find((entry) => {
+        const entryRequestDate = toISODateString(entry?.request_date);
+        const entryInspectorId = String(
+          entry?.inspector?._id || entry?.inspector || "",
+        ).trim();
+        return (
+          entryRequestDate === recordRequestedDate &&
+          (!recordInspectorId || entryInspectorId === recordInspectorId)
+        );
+      });
+      if (exactMatch) return exactMatch;
+
+      return (
+        requestHistoryEntries.find(
+          (entry) => toISODateString(entry?.request_date) === recordRequestedDate,
+        ) || null
+      );
     };
 
     for (const row of payloadRecords) {
@@ -7449,10 +7490,30 @@ exports.editInspectionRecords = async (req, res) => {
         row?.remarks !== undefined
           ? String(row.remarks || "")
           : String(record?.remarks || "");
+      const linkedRequestHistoryEntry = resolveLinkedRequestHistoryEntry(record);
+      const linkedRequestHistoryId = String(
+        linkedRequestHistoryEntry?._id || record?.request_history_id || "",
+      ).trim();
+
+      if (linkedRequestHistoryId) {
+        const previousRequestedDate = requestHistoryDateUpdates.get(
+          linkedRequestHistoryId,
+        );
+        if (
+          previousRequestedDate &&
+          previousRequestedDate !== requestedDate
+        ) {
+          throw new Error(
+            "Rows linked to the same request history must use the same request date",
+          );
+        }
+        requestHistoryDateUpdates.set(linkedRequestHistoryId, requestedDate);
+      }
 
       touchedInspectors.add(String(record.inspector || ""));
       touchedInspectors.add(inspectorId);
 
+      record.request_history_id = linkedRequestHistoryId || record.request_history_id || null;
       record.requested_date = requestedDate;
       record.inspection_date = inspectionDate;
       record.inspector = inspectorId;
@@ -7481,11 +7542,25 @@ exports.editInspectionRecords = async (req, res) => {
       record.updated_by = buildAuditActor(req.user);
     }
 
+    const requestHistoryUpdatedAt = new Date();
+    for (const [requestHistoryId, nextRequestedDate] of requestHistoryDateUpdates) {
+      const requestHistoryEntry = requestHistoryEntryById.get(requestHistoryId);
+      if (!requestHistoryEntry) continue;
+
+      if (String(requestHistoryEntry?.request_date || "") !== nextRequestedDate) {
+        requestHistoryEntry.request_date = nextRequestedDate;
+        stampRequestHistoryEntry(requestHistoryEntry, {
+          user: req.user,
+          updatedAt: requestHistoryUpdatedAt,
+        });
+      }
+    }
+
     await Promise.all(inspectionDocs.map((doc) => doc.save()));
 
     const refreshedInspections = await Inspection.find({ qc: qc._id })
       .select(
-        "inspection_date requested_date request_history_id inspector checked passed vendor_offered labels_added label_ranges goods_not_ready status createdAt",
+        "inspection_date requested_date request_history_id inspector checked passed vendor_requested vendor_offered labels_added label_ranges goods_not_ready status createdAt",
       )
       .lean();
 
@@ -7521,6 +7596,7 @@ exports.editInspectionRecords = async (req, res) => {
     syncQcRequestHistoryStatuses(qc, refreshedInspections, {
       user: req.user,
     });
+    syncQcCurrentRequestFieldsFromHistory(qc, refreshedInspections);
 
     if (refreshedInspections.length > 0) {
       const latestRecord = [...refreshedInspections].sort((a, b) => {
