@@ -704,9 +704,6 @@
 }
 
 .om-etd-history-panel {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 0.5rem);
   min-width: 14rem;
   max-width: min(20rem, calc(100vw - 1rem));
   max-height: none;
@@ -717,16 +714,7 @@
   background: var(--bs-body-bg);
   color: var(--bs-body-color);
   box-shadow: 0 0.25rem 0.85rem rgba(15, 23, 42, 0.18);
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  z-index: 1085;
-}
-
-.om-etd-history:hover .om-etd-history-panel,
-.om-etd-history:focus-visible .om-etd-history-panel {
-  opacity: 1;
-  visibility: visible;
+  z-index: 2000;
 }
 
 .om-etd-history-title,

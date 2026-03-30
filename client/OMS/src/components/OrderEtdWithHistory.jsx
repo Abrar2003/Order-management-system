@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { getOrderRevisedEtdHistory } from "../services/orders.service";
+import HoverPortal from "./HoverPortal";
 import "../App.css";
 
 const historyCache = new Map();
@@ -299,52 +300,50 @@ const OrderEtdWithHistory = ({
   }
 
   return (
-    <span
+    <HoverPortal
       className={`om-etd-history ${className}`.trim()}
-      onMouseEnter={loadHistory}
-      onFocus={loadHistory}
-      tabIndex={0}
+      panelClassName="om-etd-history-panel"
+      onOpen={loadHistory}
+      align="right"
+      trigger={<span className="om-etd-history-label" tabIndex={0}>{formattedEtd}</span>}
     >
-      <span className="om-etd-history-label">{formattedEtd}</span>
-      <span className="om-etd-history-panel" role="tooltip">
-        {historyState.status === "loading" ? (
-          <span className="om-etd-history-empty">Loading ETD history...</span>
-        ) : historyState.status === "error" ? (
-          <span className="om-etd-history-empty">{historyState.error}</span>
-        ) : totalTooltipHistoryEntries === 0 ? (
-          <span className="om-etd-history-empty">No ETD history.</span>
-        ) : (
-          <>
-            <span className="om-etd-history-title">ETD History</span>
-            {tooltipHistoryItems.map((entry) => (
-              <span
-                key={entry.id || `${entry.item_code}-${entry.description}`}
-                className="om-etd-history-section"
-              >
-                {tooltipHistoryItems.length > 1 ? (
-                  <span className="om-etd-history-item-code">
-                    {entry.item_code || "Item"}
-                  </span>
+      {historyState.status === "loading" ? (
+        <span className="om-etd-history-empty">Loading ETD history...</span>
+      ) : historyState.status === "error" ? (
+        <span className="om-etd-history-empty">{historyState.error}</span>
+      ) : totalTooltipHistoryEntries === 0 ? (
+        <span className="om-etd-history-empty">No ETD history.</span>
+      ) : (
+        <>
+          <span className="om-etd-history-title">ETD History</span>
+          {tooltipHistoryItems.map((entry) => (
+            <span
+              key={entry.id || `${entry.item_code}-${entry.description}`}
+              className="om-etd-history-section"
+            >
+              {tooltipHistoryItems.length > 1 ? (
+                <span className="om-etd-history-item-code">
+                  {entry.item_code || "Item"}
+                </span>
+              ) : null}
+              {entry.tooltip_history.map((historyEntry, index) => (
+                <span
+                  key={`${entry.item_code || "item"}-${historyEntry.revised_etd || index}-${historyEntry.updated_at || index}`}
+                  className="om-etd-history-row"
+                >
+                  <span>{formatDateDDMMYYYY(historyEntry.revised_etd, "-")}</span>
+                  {historyEntry.meta ? (
+                    <span className="om-etd-history-meta">
+                      {historyEntry.meta}
+                    </span>
                   ) : null}
-                {entry.tooltip_history.map((historyEntry, index) => (
-                  <span
-                    key={`${entry.item_code || "item"}-${historyEntry.revised_etd || index}-${historyEntry.updated_at || index}`}
-                    className="om-etd-history-row"
-                  >
-                    <span>{formatDateDDMMYYYY(historyEntry.revised_etd, "-")}</span>
-                    {historyEntry.meta ? (
-                      <span className="om-etd-history-meta">
-                        {historyEntry.meta}
-                      </span>
-                    ) : null}
-                  </span>
-                ))}
-              </span>
-            ))}
-          </>
-        )}
-      </span>
-    </span>
+                </span>
+              ))}
+            </span>
+          ))}
+        </>
+      )}
+    </HoverPortal>
   );
 };
 
