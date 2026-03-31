@@ -104,4 +104,10 @@ InspectionSchema.index({ qc: 1, request_history_id: 1, createdAt: -1 });
 // Optional: prevent duplicate “same visit” accidental double-submit
 // qcInspectionSchema.index({ qc: 1, inspector: 1, createdAt: 1 });
 
+// Vendor Wise QA report scans inspection_date ranges before joining QC metadata.
+InspectionSchema.index({ inspection_date: -1 });
+
+// Vendor Wise QA detailed tab can narrow by inspector and still keep date scans ordered.
+InspectionSchema.index({ inspector: 1, inspection_date: -1 });
+
 module.exports = mongoose.model("inspections", InspectionSchema);

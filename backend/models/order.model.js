@@ -1,5 +1,19 @@
 const mongoose = require("mongoose");
 
+const ACTIVE_ORDER_STATUSES = [
+  "Pending",
+  "Under Inspection",
+  "Inspection Done",
+  "Partial Shipped",
+  "Shipped",
+];
+
+const SHIPMENT_QUERY_STATUSES = [
+  "Inspection Done",
+  "Partial Shipped",
+  "Shipped",
+];
+
 const normalizeShipmentInvoiceNumber = (value, fallback = "") => {
   const normalized = String(value ?? "").trim();
   return normalized || String(fallback ?? "").trim();
@@ -67,14 +81,7 @@ const Order_Schema = new mongoose.Schema(
     order_date: { type: Date, default: Date.now() },
     status: {
       type: String,
-      enum: [
-        "Pending",
-        "Under Inspection",
-        "Inspection Done",
-        "Partial Shipped",
-        "Shipped",
-        "Cancelled",
-      ],
+      enum: [...ACTIVE_ORDER_STATUSES, "Cancelled"],
       default: "Pending",
     },
     quantity: { type: Number, required: true },
@@ -90,7 +97,7 @@ const Order_Schema = new mongoose.Schema(
       ref: "qc",
       default: null,
     },
-    archived: { type: Boolean, default: false, index: true },
+    archived: { type: Boolean, default: false },
     archived_remark: { type: String, default: "" },
     archived_at: { type: Date, default: null },
     archived_by: {
@@ -104,6 +111,56 @@ const Order_Schema = new mongoose.Schema(
     updated_by: { type: AuditActorSchema, default: () => ({}) },
   },
   { timestamps: true }
+);
+
+// Exact PO + brand + vendor lookups drive calendar sync and order-link resolution.
+Order_Schema.index(
+  { order_id: 1, brand: 1, vendor: 1 },
+  { name: "orders_order_brand_vendor_idx" },
+);
+
+// PO + item lookups are used heavily for duplicate detection and previous-order replacement.
+Order_Schema.index(
+  { order_id: 1, "item.item_code": 1 },
+  { name: "orders_order_item_code_idx" },
+);
+
+// Vendor/status screens page newest orders first, so keep the filter and recency sort together.
+Order_Schema.index(
+  { vendor: 1, status: 1, order_date: -1, order_id: 1 },
+  { name: "orders_vendor_status_order_date_idx" },
+);
+
+// Item drilldowns read many rows by item code and then sort by the latest order/update activity.
+Order_Schema.index(
+  { "item.item_code": 1, order_date: -1, updatedAt: -1, order_id: 1 },
+  { name: "orders_item_code_activity_idx" },
+);
+
+// Shipment searches focus on shippable statuses and container lookups, so keep this index partial.
+Order_Schema.index(
+  {
+    "shipment.container": 1,
+    vendor: 1,
+    order_date: -1,
+    updatedAt: -1,
+    order_id: 1,
+  },
+  {
+    name: "orders_shipment_container_vendor_idx",
+    partialFilterExpression: {
+      status: { $in: SHIPMENT_QUERY_STATUSES },
+    },
+  },
+);
+
+// Archived-order pages sort by archive time; this replaces the old single-field archived index.
+Order_Schema.index(
+  { archived: 1, archived_at: -1, updatedAt: -1, order_id: -1 },
+  {
+    name: "orders_archived_list_idx",
+    partialFilterExpression: { archived: true },
+  },
 );
 
 Order_Schema.pre("validate", function backfillLegacyShipmentInvoices() {

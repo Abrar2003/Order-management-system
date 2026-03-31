@@ -94,6 +94,7 @@ const Navbar = () => {
     return [
       { label: "Inspector Reports", path: "/reports/inspectors" },
       { label: "Vendor Reports", path: "/reports/vendors" },
+      { label: "Vendor Wise QA Report", path: "/reports/vendor-wise-qa" },
       { label: "Delayed PO Reports", path: "/reports/delayed-pos" },
       { label: "Upcoming ETD Reports", path: "/reports/upcoming-etd" },
       { label: "PO Status Report", path: "/reports/po-status" },

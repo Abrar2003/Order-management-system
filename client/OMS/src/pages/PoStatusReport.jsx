@@ -44,29 +44,6 @@ const normalizeStatusCounts = (value = {}) => ({
   shipped: Number(value?.shipped || 0),
 });
 
-const normalizeText = (value) => String(value || "").trim();
-
-const formatPoTooltipQuantitySummary = (row = {}) => {
-  const status = normalizeText(row?.status).toLowerCase();
-  const totalQuantity = Number(row?.total_quantity || row?.order_quantity || 0);
-  const openQuantity = Number(row?.open_quantity || 0);
-  const shippedQuantity = Number(row?.shipped_quantity || 0);
-
-  if (status === "under inspection") {
-    return `Total: ${totalQuantity} | Open: ${openQuantity}`;
-  }
-
-  if (status === "partial shipped") {
-    return `Shipped: ${shippedQuantity}`;
-  }
-
-  if (status === "shipped") {
-    return `Shipped: ${shippedQuantity || totalQuantity}`;
-  }
-
-  return `Total: ${totalQuantity}`;
-};
-
 const defaultReport = {
   filters: {
     brand: "",
@@ -94,7 +71,7 @@ const InspectionDoneItemCounts = ({ counts }) => {
   const normalizedCounts = normalizeStatusCounts(counts);
 
   return (
-    <div className="d-grid gap-1">
+    <div className="d-grid gap-1 po-status-item-counts">
       <div>Inspection Done: {normalizedCounts.inspection_done}</div>
       <div>Partially Shipped: {normalizedCounts.partially_shipped}</div>
       <div>Shipped: {normalizedCounts.shipped}</div>
@@ -106,7 +83,7 @@ const PartiallyInspectedItemCounts = ({ counts }) => {
   const normalizedCounts = normalizeStatusCounts(counts);
 
   return (
-    <div className="d-grid gap-1">
+    <div className="d-grid gap-1 po-status-item-counts">
       <div>Pending: {normalizedCounts.pending}</div>
       <div>Under Inspection: {normalizedCounts.under_inspection}</div>
       <div>Inspection Done: {normalizedCounts.inspection_done}</div>
@@ -267,13 +244,6 @@ const PoStatusReport = () => {
       handleOpenOrder(orderId);
     },
     [handleOpenOrder, location.pathname, location.search, navigate],
-  );
-
-  const handleOpenPoStatusTooltipItem = useCallback(
-    (item) => {
-      handleOpenQcDetails(item?.qc_id, item?.order_id);
-    },
-    [handleOpenQcDetails],
   );
 
   const handleExportPdf = useCallback(async () => {
@@ -544,14 +514,14 @@ const PoStatusReport = () => {
 
                       <div className="table-responsive">
                         {isInspectionDoneMode ? (
-                          <table className="table table-sm table-striped align-middle mb-0">
+                          <table className="table table-sm table-striped align-middle mb-0 po-status-report-table">
                             <thead>
                               <tr>
                                 <th>Brand</th>
                                 <th>PO</th>
                                 <th>Order Date</th>
                                 <th>ETD</th>
-                                <th>Item Count</th>
+                                <th className="po-status-item-count-column">Item Count</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -583,17 +553,8 @@ const PoStatusReport = () => {
                                     </td>
                                     <td>{formatDateDDMMYYYY(row.order_date)}</td>
                                     <td>{formatDateDDMMYYYY(row.effective_etd)}</td>
-                                    <td>
-                                      <PoStatusRowItemsTooltip
-                                        items={
-                                          Array.isArray(row?.status_items)
-                                            ? row.status_items
-                                            : row?.inspected_items
-                                        }
-                                        onOpenItem={handleOpenPoStatusTooltipItem}
-                                      >
-                                        <InspectionDoneItemCounts counts={row.item_counts} />
-                                      </PoStatusRowItemsTooltip>
+                                    <td className="po-status-item-count-column">
+                                      <InspectionDoneItemCounts counts={row.item_counts} />
                                     </td>
                                   </tr>
                                 ))
@@ -601,7 +562,7 @@ const PoStatusReport = () => {
                             </tbody>
                           </table>
                         ) : (
-                          <table className="table table-sm table-striped align-middle mb-0">
+                          <table className="table table-sm table-striped align-middle mb-0 po-status-report-table">
                             <thead>
                               <tr>
                                 <th>Brand</th>
@@ -609,7 +570,7 @@ const PoStatusReport = () => {
                                 <th>Item Code</th>
                                 <th>Order Date</th>
                                 <th>ETD</th>
-                                <th>Item Count / Order Qty</th>
+                                <th className="po-status-item-count-column">Item Count / Order Qty</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -626,7 +587,6 @@ const PoStatusReport = () => {
                                     row={row}
                                     handleOpenOrder={handleOpenOrder}
                                     handleOpenQcDetails={handleOpenQcDetails}
-                                    handleOpenPoStatusTooltipItem={handleOpenPoStatusTooltipItem}
                                   />
                                 ))
                               )}
@@ -646,83 +606,11 @@ const PoStatusReport = () => {
   );
 };
 
-const PoStatusRowItemsTooltip = ({
-  items = [],
-  onOpenItem,
-  children,
-  title = "PO Item Status",
-}) => {
-  const visibleItems = Array.isArray(items) ? items.filter(Boolean) : [];
-
-  return (
-    <span className="om-item-order-presence">
-      <span className="om-item-order-presence-label" tabIndex={0}>
-        {children}
-      </span>
-
-      <span className="om-item-order-presence-panel" role="tooltip">
-        <span className="om-item-order-presence-title">{title}</span>
-
-        {visibleItems.length === 0 ? (
-          <span className="om-item-order-presence-empty">
-            No PO items found.
-          </span>
-        ) : (
-          visibleItems.map((item) => {
-            const tooltipKey = [
-              normalizeText(item?._id),
-              normalizeText(item?.item_code),
-              normalizeText(item?.status),
-            ]
-              .filter(Boolean)
-              .join("-");
-
-            return (
-              <span key={tooltipKey} className="om-item-order-presence-entry">
-                {onOpenItem ? (
-                  <button
-                    type="button"
-                    className="btn btn-link btn-sm p-0 text-start text-decoration-none fw-semibold"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      onOpenItem(item);
-                    }}
-                  >
-                    Item: {normalizeText(item?.item_code) || "N/A"}
-                  </button>
-                ) : (
-                  <span className="om-item-order-presence-po">
-                    Item: {normalizeText(item?.item_code) || "N/A"}
-                  </span>
-                )}
-
-                <span className="om-item-order-presence-row">
-                  Status: {normalizeText(item?.status) || "N/A"}
-                </span>
-                <span className="om-item-order-presence-meta">
-                  {formatPoTooltipQuantitySummary(item)}
-                </span>
-              </span>
-            );
-          })
-        )}
-      </span>
-    </span>
-  );
-};
-
 const FragmentLikeGroup = ({
   row,
   handleOpenOrder,
   handleOpenQcDetails,
-  handleOpenPoStatusTooltipItem,
 }) => {
-  const statusItems = Array.isArray(row?.status_items)
-    ? row.status_items
-    : Array.isArray(row?.inspected_items)
-      ? row.inspected_items
-    : [];
   const inspectedItems = Array.isArray(row?.inspected_items)
     ? row.inspected_items
     : Array.isArray(row?.open_items)
@@ -751,13 +639,8 @@ const FragmentLikeGroup = ({
         <td />
         <td>{formatDateDDMMYYYY(row.order_date)}</td>
         <td>{formatDateDDMMYYYY(row.effective_etd)}</td>
-        <td>
-          <PoStatusRowItemsTooltip
-            items={statusItems}
-            onOpenItem={handleOpenPoStatusTooltipItem}
-          >
-            <PartiallyInspectedItemCounts counts={row.item_counts} />
-          </PoStatusRowItemsTooltip>
+        <td className="po-status-item-count-column">
+          <PartiallyInspectedItemCounts counts={row.item_counts} />
         </td>
       </tr>
 
@@ -788,7 +671,7 @@ const FragmentLikeGroup = ({
           </td>
           <td>{formatDateDDMMYYYY(row.order_date)}</td>
           <td>{formatDateDDMMYYYY(row.effective_etd)}</td>
-          <td>{openItem.order_quantity ?? 0}</td>
+          <td className="po-status-item-count-column">{openItem.order_quantity ?? 0}</td>
         </tr>
       ))}
     </>

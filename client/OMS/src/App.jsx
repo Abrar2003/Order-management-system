@@ -30,6 +30,7 @@ import ArchivedOrders from "./pages/ArchivedOrders";
 import InspectionReport from "./pages/inspection_report";
 import InspectorReports from "./pages/InspectorReports";
 import VendorReports from "./pages/VendorReports";
+import VendorWiseQAReport from "./pages/VendorWiseQAReport";
 import DelayedPoReports from "./pages/DelayedPoReports";
 import UpcomingEtdReports from "./pages/UpcomingEtdReports";
 import PoStatusReport from "./pages/PoStatusReport";
@@ -167,6 +168,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <VendorReports />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/reports/vendor-wise-qa"
+            element={
+              <ProtectedRoute>
+                <VendorWiseQAReport />
               </ProtectedRoute>
             }
           />
