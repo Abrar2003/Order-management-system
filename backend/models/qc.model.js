@@ -77,7 +77,7 @@ const qcSchema = new mongoose.Schema(
           ref: "users",
           default: null
         },
-        status: { type: String, enum: [ "open", "inspected" ], required: true, default: "open" },
+        status: { type: String, enum: [ "open", "inspected", "transfered" ], required: true, default: "open" },
         remarks: { type: String, default: "" },
         createdBy: {
           type: mongoose.Schema.Types.ObjectId,

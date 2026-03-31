@@ -38,6 +38,13 @@ router.patch(
 );
 
 router.post(
+  "/:id/transfer-request",
+  auth,
+  authorize("admin", "manager"),
+  qcController.transferQcRequest,
+);
+
+router.post(
   "/:id/images",
   auth,
   authorize("QC", "admin", "manager"),

@@ -75,10 +75,16 @@ const QC_REQUEST_TYPES = Object.freeze({
   FULL: "FULL",
   AQL: "AQL",
 });
+const REQUEST_HISTORY_STATUS = Object.freeze({
+  OPEN: "open",
+  INSPECTED: "inspected",
+  TRANSFERRED: "transfered",
+});
 const INSPECTION_RECORD_STATUS = Object.freeze({
   PENDING: "pending",
   DONE: "Inspection Done",
   GOODS_NOT_READY: "goods not ready",
+  TRANSFERRED: "transfered",
 });
 const CLOSED_ORDER_STATUSES = ["Shipped", "Cancelled"];
 const MANAGER_ALLOWED_PAST_DAYS = 2;
@@ -189,6 +195,22 @@ const resolveAqlBaseQuantity = (requestedQuantity, fallbackQuantity = 0) => {
 const normalizeInspectionStatus = (value) =>
   String(value || "").trim().toLowerCase();
 
+const normalizeRequestHistoryStatus = (value) =>
+  String(value || "").trim().toLowerCase();
+
+const normalizeActionBoolean = (value, fallback = false) => {
+  if (typeof value === "boolean") return value;
+
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  if (!normalized) return fallback;
+
+  if (["true", "1", "yes", "y"].includes(normalized)) return true;
+  if (["false", "0", "no", "n"].includes(normalized)) return false;
+  return fallback;
+};
+
 const buildAuditActor = (user = null, fallbackName = "") => ({
   user:
     user?._id && mongoose.Types.ObjectId.isValid(user._id)
@@ -215,7 +237,10 @@ const hasInspectionRecordActivity = ({
   labelsAdded = [],
   labelRanges = [],
   goodsNotReady = null,
+  status = "",
 } = {}) =>
+  normalizeInspectionStatus(status) ===
+    normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED) ||
   Boolean(goodsNotReady?.ready) ||
   toNonNegativeNumber(checked, 0) > 0 ||
   toNonNegativeNumber(passed, 0) > 0 ||
@@ -226,7 +251,15 @@ const hasInspectionRecordActivity = ({
 const resolveInspectionRecordStatus = ({
   checked = 0,
   goodsNotReady = null,
+  explicitStatus = "",
 } = {}) => {
+  if (
+    normalizeInspectionStatus(explicitStatus) ===
+    normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED)
+  ) {
+    return INSPECTION_RECORD_STATUS.TRANSFERRED;
+  }
+
   if (Boolean(goodsNotReady?.ready)) {
     return INSPECTION_RECORD_STATUS.GOODS_NOT_READY;
   }
@@ -245,6 +278,23 @@ const syncQcRequestHistoryStatuses = (
 ) => {
   if (!Array.isArray(qcDoc?.request_history)) return false;
 
+  const statusPriority = {
+    [REQUEST_HISTORY_STATUS.OPEN]: 0,
+    [REQUEST_HISTORY_STATUS.INSPECTED]: 1,
+    [REQUEST_HISTORY_STATUS.TRANSFERRED]: 2,
+  };
+  const mergeRequestHistoryStatus = (currentStatus, nextStatus) => {
+    const normalizedCurrent = normalizeRequestHistoryStatus(
+      currentStatus || REQUEST_HISTORY_STATUS.OPEN,
+    );
+    const normalizedNext = normalizeRequestHistoryStatus(
+      nextStatus || REQUEST_HISTORY_STATUS.OPEN,
+    );
+
+    return (statusPriority[normalizedNext] || 0) >= (statusPriority[normalizedCurrent] || 0)
+      ? normalizedNext
+      : normalizedCurrent;
+  };
   const inspectionStatusByRequestId = new Map();
   const inspectionStatusByRequestKey = new Map();
   for (const record of Array.isArray(inspectionRecords) ? inspectionRecords : []) {
@@ -253,6 +303,11 @@ const syncQcRequestHistoryStatuses = (
       record?.requested_date || record?.inspection_date || record?.createdAt,
     );
     const inspectorId = String(record?.inspector?._id || record?.inspector || "").trim();
+    const resolvedInspectionStatus = resolveInspectionRecordStatus({
+      checked: record?.checked,
+      goodsNotReady: record?.goods_not_ready,
+      explicitStatus: record?.status,
+    });
 
     const hasActivity = hasInspectionRecordActivity({
       checked: record?.checked,
@@ -261,14 +316,24 @@ const syncQcRequestHistoryStatuses = (
       labelsAdded: record?.labels_added,
       labelRanges: record?.label_ranges,
       goodsNotReady: record?.goods_not_ready,
+      status: resolvedInspectionStatus,
     });
+    const nextRequestHistoryStatus =
+      normalizeInspectionStatus(resolvedInspectionStatus) ===
+      normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED)
+        ? REQUEST_HISTORY_STATUS.TRANSFERRED
+        : hasActivity
+          ? REQUEST_HISTORY_STATUS.INSPECTED
+          : REQUEST_HISTORY_STATUS.OPEN;
 
     if (requestHistoryId) {
-      if (!inspectionStatusByRequestId.has(requestHistoryId)) {
-        inspectionStatusByRequestId.set(requestHistoryId, hasActivity);
-      } else if (hasActivity) {
-        inspectionStatusByRequestId.set(requestHistoryId, true);
-      }
+      inspectionStatusByRequestId.set(
+        requestHistoryId,
+        mergeRequestHistoryStatus(
+          inspectionStatusByRequestId.get(requestHistoryId),
+          nextRequestHistoryStatus,
+        ),
+      );
     }
 
     if (requestedDateKey) {
@@ -276,17 +341,21 @@ const syncQcRequestHistoryStatuses = (
       const dateInspectorKey = inspectorId
         ? `${dateOnlyKey}:inspector:${inspectorId}`
         : "";
-      if (!inspectionStatusByRequestKey.has(dateOnlyKey)) {
-        inspectionStatusByRequestKey.set(dateOnlyKey, hasActivity);
-      } else if (hasActivity) {
-        inspectionStatusByRequestKey.set(dateOnlyKey, true);
-      }
+      inspectionStatusByRequestKey.set(
+        dateOnlyKey,
+        mergeRequestHistoryStatus(
+          inspectionStatusByRequestKey.get(dateOnlyKey),
+          nextRequestHistoryStatus,
+        ),
+      );
       if (dateInspectorKey) {
-        if (!inspectionStatusByRequestKey.has(dateInspectorKey)) {
-          inspectionStatusByRequestKey.set(dateInspectorKey, hasActivity);
-        } else if (hasActivity) {
-          inspectionStatusByRequestKey.set(dateInspectorKey, true);
-        }
+        inspectionStatusByRequestKey.set(
+          dateInspectorKey,
+          mergeRequestHistoryStatus(
+            inspectionStatusByRequestKey.get(dateInspectorKey),
+            nextRequestHistoryStatus,
+          ),
+        );
       }
     }
   }
@@ -306,12 +375,12 @@ const syncQcRequestHistoryStatuses = (
             ? `date:${requestDateKey}:inspector:${requestInspectorId}`
             : `date:${requestDateKey}`,
         ) ?? inspectionStatusByRequestKey.get(`date:${requestDateKey}`)
-      : false;
+      : REQUEST_HISTORY_STATUS.OPEN;
     const nextStatus =
-      inspectionStatusByRequestId.get(requestId) || fallbackStatus
-        ? "inspected"
-        : "open";
-    if (String(entry?.status || "") !== nextStatus) {
+      inspectionStatusByRequestId.get(requestId) ||
+      fallbackStatus ||
+      REQUEST_HISTORY_STATUS.OPEN;
+    if (normalizeRequestHistoryStatus(entry?.status || "") !== nextStatus) {
       entry.status = nextStatus;
       stampRequestHistoryEntry(entry, {
         user,
@@ -1088,14 +1157,78 @@ const applyQcItemDetailsPatch = (qcDoc, patch = {}) => {
 };
 
 const resolveLatestRequestEntry = (requestHistory = []) => {
-  console.log("requestHistory", requestHistory);
   if (!Array.isArray(requestHistory) || requestHistory.length === 0)
     return null;
   return requestHistory[requestHistory.length - 1] || null;
 };
 
+const resolveLatestInspectionRecordForRequestEntry = (
+  inspectionRecords = [],
+  requestEntry = null,
+) => {
+  if (!requestEntry) return null;
+
+  const requestHistoryId = String(requestEntry?._id || "").trim();
+  const requestDateKey = toISODateString(requestEntry?.request_date);
+  const requestInspectorId = String(
+    requestEntry?.inspector?._id || requestEntry?.inspector || "",
+  ).trim();
+
+  const findLatestMatchingRecord = (matcher) => {
+    let latestRecord = null;
+    let latestTimestamp = 0;
+
+    for (const record of Array.isArray(inspectionRecords) ? inspectionRecords : []) {
+      if (!matcher(record)) continue;
+
+      const recordTimestamp = Math.max(
+        toSortableTimestamp(record?.inspection_date),
+        toSortableTimestamp(record?.requested_date),
+        toSortableTimestamp(record?.createdAt),
+      );
+      if (!latestRecord || recordTimestamp >= latestTimestamp) {
+        latestRecord = record;
+        latestTimestamp = recordTimestamp;
+      }
+    }
+
+    return latestRecord;
+  };
+
+  if (requestHistoryId) {
+    const recordByRequestId = findLatestMatchingRecord(
+      (record) =>
+        String(record?.request_history_id || "").trim() === requestHistoryId,
+    );
+    if (recordByRequestId) return recordByRequestId;
+  }
+
+  if (!requestDateKey) return null;
+
+  return (
+    findLatestMatchingRecord((record) => {
+      const recordRequestedDate = toISODateString(
+        record?.requested_date || record?.inspection_date || record?.createdAt,
+      );
+      if (recordRequestedDate !== requestDateKey) return false;
+
+      if (!requestInspectorId) return true;
+
+      const recordInspectorId = String(
+        record?.inspector?._id || record?.inspector || "",
+      ).trim();
+      return !recordInspectorId || recordInspectorId === requestInspectorId;
+    }) ||
+    findLatestMatchingRecord((record) => {
+      const recordRequestedDate = toISODateString(
+        record?.requested_date || record?.inspection_date || record?.createdAt,
+      );
+      return recordRequestedDate === requestDateKey;
+    })
+  );
+};
+
 const resolveRequestedQuantityFromQc = (qcDoc = {}) => {
-  console.log("qcDoc", qcDoc);
   const requestHistory = Array.isArray(qcDoc?.request_history)
     ? qcDoc.request_history
     : [];
@@ -2525,6 +2658,10 @@ exports.alignQC = async (req, res) => {
       request_date,
       request_type,
     } = req.body;
+    const ignoreUnworkedRequest = normalizeActionBoolean(
+      req.body?.ignore_unworked_request ?? req.body?.ignoreUnworkedRequest,
+      false,
+    );
 
     const inspectorId = String(inspector || "").trim();
     if (!inspectorId) {
@@ -2659,6 +2796,55 @@ exports.alignQC = async (req, res) => {
       const beforeQcInspectionRecords = await Inspection.find({
         qc: existingQC._id,
       }).lean();
+      const latestRequestEntry = resolveLatestRequestEntry(
+        existingQC.request_history || [],
+      );
+      const latestRequestInspection = resolveLatestInspectionRecordForRequestEntry(
+        beforeQcInspectionRecords,
+        latestRequestEntry,
+      );
+      const latestRequestHasActivity = latestRequestInspection
+        ? hasInspectionRecordActivity({
+            checked: latestRequestInspection?.checked,
+            passed: latestRequestInspection?.passed,
+            vendorOffered: latestRequestInspection?.vendor_offered,
+            labelsAdded: latestRequestInspection?.labels_added,
+            labelRanges: latestRequestInspection?.label_ranges,
+            goodsNotReady: latestRequestInspection?.goods_not_ready,
+            status: latestRequestInspection?.status,
+          })
+        : false;
+      const latestRequestStatus = normalizeRequestHistoryStatus(
+        latestRequestEntry?.status || REQUEST_HISTORY_STATUS.OPEN,
+      );
+
+      if (
+        latestRequestEntry &&
+        !ignoreUnworkedRequest &&
+        latestRequestStatus !== REQUEST_HISTORY_STATUS.TRANSFERRED &&
+        latestRequestStatus !== REQUEST_HISTORY_STATUS.INSPECTED &&
+        !latestRequestHasActivity
+      ) {
+        return res.status(409).json({
+          message:
+            "The last request for this item has not been worked upon yet. Consider transferring that request from QC Details instead of creating a new one.",
+          suggest_transfer: true,
+          code: "LATEST_REQUEST_NOT_WORKED",
+          data: {
+            qc_id: existingQC._id,
+            latest_request: {
+              request_history_id: latestRequestEntry?._id || null,
+              request_date:
+                toISODateString(latestRequestEntry?.request_date) || "",
+              quantity_requested: toNonNegativeNumber(
+                latestRequestEntry?.quantity_requested,
+                0,
+              ),
+            },
+          },
+        });
+      }
+
       const beforeQcSnapshot = buildQcEditLogSnapshot(
         existingQC.toObject(),
         beforeQcInspectionRecords,
@@ -5987,6 +6173,239 @@ exports.markGoodsNotReady = async (req, res) => {
   }
 };
 
+exports.transferQcRequest = async (req, res) => {
+  try {
+    const qcId = String(req.params.id || "").trim();
+    const targetInspectorId = String(
+      req.body?.inspector_id || req.body?.inspector || "",
+    ).trim();
+    const requestHistoryIds = [
+      ...new Set(
+        (Array.isArray(req.body?.request_history_ids)
+          ? req.body.request_history_ids
+          : [req.body?.request_history_id]
+        )
+          .map((value) => String(value || "").trim())
+          .filter(Boolean),
+      ),
+    ];
+
+    if (!mongoose.Types.ObjectId.isValid(qcId)) {
+      return res.status(400).json({ message: "Invalid QC id" });
+    }
+    if (!mongoose.Types.ObjectId.isValid(targetInspectorId)) {
+      return res.status(400).json({ message: "A valid target inspector is required" });
+    }
+    if (requestHistoryIds.length !== 1) {
+      return res.status(400).json({
+        message: "Select exactly one request history row to transfer",
+      });
+    }
+
+    const qc = await QC.findById(qcId)
+      .populate("inspector", "name email role")
+      .populate("request_history.inspector", "name email role")
+      .populate("order", "status");
+
+    if (!qc) {
+      return res.status(404).json({ message: "QC record not found" });
+    }
+
+    const beforeInspectionRecords = await Inspection.find({ qc: qc._id }).lean();
+    const beforeQcSnapshot = buildQcEditLogSnapshot(
+      qc.toObject(),
+      beforeInspectionRecords,
+    );
+    const targetInspector = await User.findById(targetInspectorId).select(
+      "name email role",
+    );
+
+    if (!targetInspector) {
+      return res.status(404).json({ message: "Target inspector not found" });
+    }
+
+    if (String(targetInspector?.role || "").trim().toLowerCase() !== "qc") {
+      return res.status(400).json({ message: "Selected user is not a QC inspector" });
+    }
+
+    const selectedRequestHistoryId = requestHistoryIds[0];
+    const requestEntry = Array.isArray(qc.request_history)
+      ? qc.request_history.find(
+          (entry) => String(entry?._id || "").trim() === selectedRequestHistoryId,
+        )
+      : null;
+
+    if (!requestEntry) {
+      return res.status(404).json({ message: "Selected request history row not found" });
+    }
+
+    if (
+      normalizeRequestHistoryStatus(requestEntry?.status) ===
+      normalizeRequestHistoryStatus(REQUEST_HISTORY_STATUS.TRANSFERRED)
+    ) {
+      return res.status(400).json({ message: "This request is already transferred" });
+    }
+
+    const currentRequestInspectorId = String(
+      requestEntry?.inspector?._id || requestEntry?.inspector || "",
+    ).trim();
+    if (currentRequestInspectorId && currentRequestInspectorId === targetInspectorId) {
+      return res.status(400).json({
+        message: "Select a different inspector for transfer",
+      });
+    }
+
+    const latestInspection = await Inspection.findOne({
+      qc: qc._id,
+      request_history_id: requestEntry._id,
+    }).sort({ createdAt: -1 });
+
+    if (!latestInspection) {
+      return res.status(400).json({
+        message: "No linked inspection record found for the selected request",
+      });
+    }
+
+    const latestInspectionStatus = resolveInspectionRecordStatus({
+      checked: latestInspection?.checked,
+      goodsNotReady: latestInspection?.goods_not_ready,
+      explicitStatus: latestInspection?.status,
+    });
+    if (
+      normalizeInspectionStatus(latestInspectionStatus) ===
+      normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED)
+    ) {
+      return res.status(400).json({
+        message: "The latest inspection record is already transferred",
+      });
+    }
+
+    const requestedQuantity = toNonNegativeNumber(
+      requestEntry?.quantity_requested,
+      0,
+    );
+    const pendingQuantity = Math.max(
+      toNonNegativeNumber(latestInspection?.pending_after, 0),
+      Math.max(
+        0,
+        requestedQuantity - toNonNegativeNumber(latestInspection?.passed, 0),
+      ),
+    );
+
+    if (pendingQuantity <= 0) {
+      return res.status(400).json({
+        message: "No pending quantity is available to transfer",
+      });
+    }
+
+    const transferDate = toISODateString(
+      requestEntry?.request_date ||
+        latestInspection?.requested_date ||
+        qc?.request_date ||
+        new Date(),
+    );
+    if (!transferDate) {
+      return res.status(500).json({ message: "Failed to resolve transfer date" });
+    }
+
+    const targetInspectorName = normalizeText(targetInspector?.name || "Selected Inspector");
+    const previousInspectorName = normalizeText(
+      requestEntry?.inspector?.name || qc?.inspector?.name || "",
+    );
+    const transferNote = `Transferred to ${targetInspectorName}`;
+    const newRequestRemarks = previousInspectorName
+      ? `Transferred from ${previousInspectorName}`
+      : "";
+    const auditTimestamp = new Date();
+
+    latestInspection.status = INSPECTION_RECORD_STATUS.TRANSFERRED;
+    latestInspection.remarks = transferNote;
+    latestInspection.updated_by = buildAuditActor(req.user);
+    await latestInspection.save();
+
+    requestEntry.status = REQUEST_HISTORY_STATUS.TRANSFERRED;
+    requestEntry.remarks = transferNote;
+    stampRequestHistoryEntry(requestEntry, {
+      user: req.user,
+      updatedAt: auditTimestamp,
+    });
+
+    qc.request_history = Array.isArray(qc.request_history) ? qc.request_history : [];
+    qc.request_history.push({
+      request_date: transferDate,
+      request_type: normalizeQcRequestType(
+        requestEntry?.request_type || qc?.request_type,
+      ),
+      quantity_requested: requestedQuantity,
+      inspector: targetInspectorId,
+      status: REQUEST_HISTORY_STATUS.OPEN,
+      remarks: newRequestRemarks,
+      createdBy: req.user._id,
+      updatedAt: auditTimestamp,
+      updated_by: buildAuditActor(req.user),
+    });
+
+    const latestTransferredRequestEntry =
+      qc.request_history[qc.request_history.length - 1] || null;
+
+    await upsertInspectionRecordForRequest({
+      qcDoc: qc,
+      inspectorId: targetInspectorId,
+      requestDate: transferDate,
+      requestHistoryId: latestTransferredRequestEntry?._id || null,
+      requestedQuantity: requestedQuantity,
+      inspectionDate: transferDate,
+      remarks: newRequestRemarks,
+      createdBy: req.user._id,
+      auditUser: req.user,
+      addChecked: 0,
+      addPassed: 0,
+      addProvision: 0,
+      appendLabelRanges: [],
+      appendLabels: [],
+      replaceCbmSnapshot: false,
+      allowRequestedDateFallback: false,
+    });
+
+    const refreshedInspectionRecords = await Inspection.find({ qc: qc._id }).lean();
+    syncQcCurrentRequestFieldsFromHistory(qc, refreshedInspectionRecords);
+    syncQcRequestHistoryStatuses(qc, refreshedInspectionRecords, {
+      user: req.user,
+      updatedAt: auditTimestamp,
+    });
+    qc.updated_by = buildAuditActor(req.user);
+
+    await qc.save();
+
+    await createQcEditLog({
+      reqUser: req.user,
+      qcDoc: qc,
+      beforeSnapshot: beforeQcSnapshot,
+      afterSnapshot: buildQcEditLogSnapshot(qc.toObject(), refreshedInspectionRecords),
+      operationType: "qc_request_transfer",
+      extraRemarks: [transferNote],
+    });
+
+    return res.status(200).json({
+      message: `Request transferred to ${targetInspectorName}`,
+      data: {
+        qc_id: qc._id,
+        target_inspector: {
+          _id: targetInspector._id,
+          name: targetInspector.name || "Selected Inspector",
+        },
+        transfer_quantity: requestedQuantity,
+        pending_quantity: pendingQuantity,
+      },
+    });
+  } catch (err) {
+    console.error("Transfer QC Request Error:", err);
+    return res.status(400).json({
+      message: err?.message || "Failed to transfer QC request",
+    });
+  }
+};
+
 exports.getDailyReport = async (req, res) => {
   try {
     const reportDate = resolveReportDate(req.query.date);
@@ -6339,6 +6758,7 @@ exports.getDailyReport = async (req, res) => {
             labelsAdded: latestInspection?.labels_added,
             labelRanges: latestInspection?.label_ranges,
             goodsNotReady: latestInspection?.goods_not_ready,
+            status: latestInspection?.status,
           });
           const shouldIncludeRequest = requestDateKey === reportDate;
 
@@ -6363,6 +6783,7 @@ exports.getDailyReport = async (req, res) => {
             labelsAdded: latestInspection?.labels_added,
             labelRanges: latestInspection?.label_ranges,
             goodsNotReady: latestInspection?.goods_not_ready,
+            explicitStatus: latestInspection?.status,
             requestType: requestEntry?.request_type || qc?.request_type,
           });
           const inspectionStatus = String(
@@ -6374,6 +6795,9 @@ exports.getDailyReport = async (req, res) => {
           const goodsNotReady =
             normalizedInspectionStatus ===
             normalizeInspectionStatus(INSPECTION_RECORD_STATUS.GOODS_NOT_READY);
+          const isTransferred =
+            normalizedInspectionStatus ===
+            normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED);
           const isInspectionDone =
             normalizedInspectionStatus ===
             normalizeInspectionStatus(INSPECTION_RECORD_STATUS.DONE);
@@ -6404,6 +6828,10 @@ exports.getDailyReport = async (req, res) => {
             is_inspection_done: isInspectionDone,
             request_pending_action: !hasInspectionActivity,
             goods_not_ready: goodsNotReady,
+            is_transferred: isTransferred,
+            transfer_note: isTransferred
+              ? normalizeText(latestInspection?.remarks || "")
+              : "",
             goods_not_ready_reason: goodsNotReady
               ? normalizeText(
                   latestInspection?.goods_not_ready?.reason ||
@@ -6470,6 +6898,14 @@ exports.getDailyReport = async (req, res) => {
       totalInspectedCbm += inspectedCbmTotal;
 
       entry.inspections_count += 1;
+      const inspectionStatus = resolveInspectionRecordStatus({
+        checked: inspection?.checked,
+        goodsNotReady: inspection?.goods_not_ready,
+        explicitStatus: inspection?.status,
+      });
+      const isTransferred =
+        normalizeInspectionStatus(inspectionStatus) ===
+        normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED);
       entry.inspections.push({
         inspection_id: inspection._id,
         inspection_date: inspection.inspection_date || null,
@@ -6485,6 +6921,11 @@ exports.getDailyReport = async (req, res) => {
         vendor_offered: Number(inspection?.vendor_offered || 0),
         pending_after: Number(inspection?.pending_after || 0),
         goods_not_ready: Boolean(inspection?.goods_not_ready?.ready),
+        inspection_status: inspectionStatus,
+        is_transferred: isTransferred,
+        transfer_note: isTransferred
+          ? normalizeText(inspection?.remarks || "")
+          : "",
         goods_not_ready_reason: normalizeText(
           inspection?.goods_not_ready?.reason || inspection?.remarks || "",
         ),

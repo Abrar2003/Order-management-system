@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "../api/axios";
 import {
   getTodayDDMMYYYY,
@@ -32,6 +33,7 @@ const AlignQCModal = ({
   initialRequestType = "FULL",
   openQuantity = null,
 }) => {
+  const navigate = useNavigate();
   const user = getUserFromToken();
   const normalizedRole = String(user?.role || "").trim().toLowerCase();
   const isManager = normalizedRole === "manager";
@@ -59,6 +61,7 @@ const AlignQCModal = ({
   const [selectedDateRequests, setSelectedDateRequests] = useState([]);
   const [selectedDateRequestsLoading, setSelectedDateRequestsLoading] = useState(false);
   const [selectedDateRequestsError, setSelectedDateRequestsError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   const parsedOpenQuantity = Number(openQuantity);
   const fallbackOpenQuantity = Number(order?.quantity);
@@ -156,6 +159,7 @@ const AlignQCModal = ({
   const handleSubmit = async () => {
     const token = localStorage.getItem("token");
     const requestDateIso = toISODateString(request_date);
+    let shouldResetSubmitting = true;
 
     if (
       !inspector ||
@@ -194,32 +198,88 @@ const AlignQCModal = ({
       return;
     }
 
+    const buildPayload = (ignoreUnworkedRequest = false) => ({
+      order: order._id,
+      item: order.item,
+      inspector,
+      request_type: requestType,
+      request_date: requestDateIso,
+      quantities: {
+        client_demand: order.quantity,
+        quantity_requested: requestedQuantityNumber,
+      },
+      ignore_unworked_request: ignoreUnworkedRequest,
+    });
+
+    const submitAlignmentRequest = async (ignoreUnworkedRequest = false) =>
+      axios.post("/qc/align-qc", buildPayload(ignoreUnworkedRequest), {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
     try {
-      await axios.post(
-        "/qc/align-qc",
-        {
-          order: order._id,
-          item: order.item,
-          inspector,
-          request_type: requestType,
-          request_date: requestDateIso,
-          quantities: {
-            client_demand: order.quantity,
-            quantity_requested: requestedQuantityNumber,
-          },
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      );
+      setSubmitting(true);
+      await submitAlignmentRequest(false);
 
       alert("QC alignment successful");
+      shouldResetSubmitting = false;
       onSuccess();
     } catch (err) {
       console.error(err);
-      alert("QC alignment failed");
+      const suggestionPayload = err?.response?.data;
+      const shouldSuggestTransfer =
+        err?.response?.status === 409 &&
+        suggestionPayload?.suggest_transfer &&
+        suggestionPayload?.data?.qc_id;
+
+      if (shouldSuggestTransfer) {
+        const latestRequestDate = suggestionPayload?.data?.latest_request?.request_date;
+        const latestRequestQuantity =
+          suggestionPayload?.data?.latest_request?.quantity_requested;
+        const transferPrompt = [
+          suggestionPayload?.message
+            || "The last request for this item has not been worked upon yet.",
+          latestRequestDate
+            ? `Last request date: ${latestRequestDate}.`
+            : "",
+          Number.isFinite(Number(latestRequestQuantity))
+            ? `Last request qty: ${Number(latestRequestQuantity)}.`
+            : "",
+          "Press OK to open QC Details and transfer that request.",
+          "Press Cancel to create a new request anyway.",
+        ]
+          .filter(Boolean)
+          .join("\n");
+
+        const shouldOpenTransferFlow = window.confirm(transferPrompt);
+        if (shouldOpenTransferFlow) {
+          shouldResetSubmitting = false;
+          onClose?.();
+          navigate(`/qc/${encodeURIComponent(suggestionPayload.data.qc_id)}`);
+          return;
+        }
+
+        try {
+          await submitAlignmentRequest(true);
+          alert("QC alignment successful");
+          shouldResetSubmitting = false;
+          onSuccess();
+          return;
+        } catch (retryError) {
+          console.error(retryError);
+          alert(
+            retryError?.response?.data?.message || "QC alignment failed",
+          );
+          return;
+        }
+      }
+
+      alert(err?.response?.data?.message || "QC alignment failed");
+    } finally {
+      if (shouldResetSubmitting) {
+        setSubmitting(false);
+      }
     }
   };
 
@@ -229,7 +289,13 @@ const AlignQCModal = ({
         <div className="modal-content">
           <div className="modal-header">
             <h5 className="modal-title">Align QC Request</h5>
-            <button type="button" className="btn-close" onClick={onClose} aria-label="Close" />
+            <button
+              type="button"
+              className="btn-close"
+              onClick={onClose}
+              aria-label="Close"
+              disabled={submitting}
+            />
           </div>
 
           <div className="modal-body d-grid gap-3">
@@ -262,6 +328,7 @@ const AlignQCModal = ({
                 className="form-select"
                 value={inspector}
                 onChange={(e) => setInspector(e.target.value)}
+                disabled={submitting}
               >
                 <option value="">Select Inspector</option>
                 {inspectors.map((qcInspector) => (
@@ -283,6 +350,7 @@ const AlignQCModal = ({
                     name="qc-request-type"
                     checked={requestType === "FULL"}
                     onChange={() => setRequestType("FULL")}
+                    disabled={submitting}
                   />
                   <label className="form-check-label" htmlFor="qc-request-type-full">
                     FULL
@@ -296,6 +364,7 @@ const AlignQCModal = ({
                     name="qc-request-type"
                     checked={requestType === "AQL"}
                     onChange={() => setRequestType("AQL")}
+                    disabled={submitting}
                   />
                   <label className="form-check-label" htmlFor="qc-request-type-aql">
                     AQL
@@ -314,6 +383,7 @@ const AlignQCModal = ({
                 min={isManager ? managerMinAllowedDateIso : undefined}
                 max={isManager ? todayIso : undefined}
                 onChange={(e) => setReqDate(toDDMMYYYYInputValue(e.target.value, ""))}
+                disabled={submitting}
               />
             </div>
 
@@ -330,6 +400,7 @@ const AlignQCModal = ({
                   }
                 }}
                 min="0"
+                disabled={submitting}
               />
               {requestType === "AQL" && (
                 <div className="small text-secondary mt-1">
@@ -397,11 +468,21 @@ const AlignQCModal = ({
           </div>
 
           <div className="modal-footer">
-            <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
+            <button
+              type="button"
+              className="btn btn-outline-secondary"
+              onClick={onClose}
+              disabled={submitting}
+            >
               Cancel
             </button>
-            <button type="button" className="btn btn-primary" onClick={handleSubmit}>
-              Align QC
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleSubmit}
+              disabled={submitting}
+            >
+              {submitting ? "Submitting..." : "Align QC"}
             </button>
           </div>
         </div>

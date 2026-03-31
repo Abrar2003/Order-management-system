@@ -8,6 +8,7 @@ import EditOrderModal from "../components/EditOrderModal";
 import EditInspectionRecordsModal from "../components/EditInspectionRecordsModal";
 import GoodsNotReadyModal from "../components/GoodsNotReadyModal";
 import PdfViewerModal from "../components/PdfViewerModal";
+import TransferQcRequestModal from "../components/TransferQcRequestModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { formatPositiveCbm } from "../utils/cbm";
@@ -341,6 +342,7 @@ const QcDetails = () => {
   const [showEditShippingModal, setShowEditShippingModal] = useState(false);
   const [showEditInspectionModal, setShowEditInspectionModal] = useState(false);
   const [showGoodsNotReadyModal, setShowGoodsNotReadyModal] = useState(false);
+  const [showTransferRequestModal, setShowTransferRequestModal] = useState(false);
   const [showQcImageGallery, setShowQcImageGallery] = useState(false);
   const [activeQcImageIndex, setActiveQcImageIndex] = useState(0);
   const [selectedQcImageIds, setSelectedQcImageIds] = useState([]);
@@ -1657,6 +1659,17 @@ const QcDetails = () => {
                   </button>
                 )}
 
+              {isAdmin && (
+                <button
+                  type="button"
+                  className="btn btn-outline-warning"
+                  onClick={() => setShowTransferRequestModal(true)}
+                  disabled={!Array.isArray(qc?.request_history) || qc.request_history.length === 0}
+                >
+                  Transfer Request
+                </button>
+              )}
+
               <button
                 type="button"
                 className="btn btn-outline-danger"
@@ -1750,6 +1763,17 @@ const QcDetails = () => {
           onSuccess={() => {
             setShowEditInspectionModal(false);
             fetchQcDetails();
+          }}
+        />
+      )}
+
+      {showTransferRequestModal && (
+        <TransferQcRequestModal
+          qc={qc}
+          onClose={() => setShowTransferRequestModal(false)}
+          onTransferred={() => {
+            setShowTransferRequestModal(false);
+            return fetchQcDetails();
           }}
         />
       )}

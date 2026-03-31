@@ -59,6 +59,9 @@ const normalizeInspectionStatus = (value) =>
 
 const renderInspectionStatus = (value) => {
   const normalized = normalizeInspectionStatus(value);
+  if (normalized === "transfered" || normalized === "transferred") {
+    return <span className="text-warning fw-semibold">Transferred</span>;
+  }
   if (normalized === "goods not ready") {
     return <span className="text-danger fw-semibold">Goods Not Ready</span>;
   }
@@ -71,6 +74,9 @@ const renderInspectionStatus = (value) => {
 const getAlignedRequestRowClassName = (request) => {
   if (request?.request_pending_action) return "om-report-danger-row";
   const normalizedStatus = normalizeInspectionStatus(request?.inspection_status);
+  if (normalizedStatus === "transfered" || normalizedStatus === "transferred") {
+    return "weekly-summary-warning-row";
+  }
   if (normalizedStatus === "goods not ready") return "weekly-summary-warning-row";
   if (normalizedStatus === "inspection done") return "om-report-success-row";
   return "";
@@ -436,8 +442,14 @@ const DailyReport = () => {
                       <td>{request.order_id || "N/A"}</td>
                       <td>
                         <div>{request.item_code || "N/A"}</div>
+                        {request?.is_transferred ? (
+                          <div className="small fw-semibold">Transferred</div>
+                        ) : null}
                         {request?.goods_not_ready ? (
                           <div className="small fw-semibold">Goods Not Ready</div>
+                        ) : null}
+                        {request?.transfer_note ? (
+                          <div className="small">{request.transfer_note}</div>
                         ) : null}
                         {request?.goods_not_ready_reason ? (
                           <div className="small">{request.goods_not_ready_reason}</div>
@@ -518,12 +530,19 @@ const DailyReport = () => {
                         {(entry?.inspections || []).map((inspection) => (
                           <tr
                             key={inspection.inspection_id}
-                            className={inspection?.goods_not_ready ? "weekly-summary-warning-row" : ""}
+                            className={
+                              inspection?.goods_not_ready || inspection?.is_transferred
+                                ? "weekly-summary-warning-row"
+                                : ""
+                            }
                           >
                             <td>{formatDateDDMMYYYY(inspection.inspection_date)}</td>
                             <td>{inspection.order_id || "N/A"}</td>
                             <td>
                               <div>{inspection.item_code || "N/A"}</div>
+                              {inspection?.is_transferred ? (
+                                <div className="small fw-semibold">Transferred</div>
+                              ) : null}
                               {inspection?.goods_not_ready ? (
                                 <div className="small fw-semibold">Goods Not Ready</div>
                               ) : null}
@@ -535,7 +554,12 @@ const DailyReport = () => {
                             <td>{inspection.passed_quantity ?? 0}</td>
                             <td>{renderResolvedCbm(inspection?.report_cbm_per_unit)}</td>
                             <td>{renderResolvedCbmTotal(inspection?.report_cbm_total)}</td>
-                            <td>{inspection?.remarks || inspection?.goods_not_ready_reason || "None"}</td>
+                            <td>
+                              {inspection?.remarks
+                                || inspection?.transfer_note
+                                || inspection?.goods_not_ready_reason
+                                || "None"}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
