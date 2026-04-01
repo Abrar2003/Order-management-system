@@ -399,6 +399,7 @@ exports.getItemOrdersHistory = async (req, res) => {
 
       const mappedInspections = inspectionRecords
         .map((record) => ({
+          qc_id: String(qcRecord?._id || ""),
           id: String(record?._id || ""),
           inspector_name: resolveInspectorName(record?.inspector) || "N/A",
           inspection_date: String(record?.inspection_date || "").trim(),

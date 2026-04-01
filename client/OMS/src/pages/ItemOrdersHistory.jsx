@@ -193,6 +193,13 @@ const ItemOrdersHistory = () => {
                           inspectionRows.map((inspection, index) => (
                             <tr
                               key={inspection?.id || `${order?.id || "order"}-inspection-${index}`}
+                              style={{ cursor: inspection?.id ? "pointer" : "default" }}
+                              onClick={() => {
+                                if (inspection?.id) {
+                                  navigate(`/qc/${inspection.qc_id}`);
+                                }
+                              }}
+                              className="table-hover-highlight"
                             >
                               <td colSpan={7} className="small">
                                 <div className="d-flex flex-wrap gap-3">
