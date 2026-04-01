@@ -34,6 +34,7 @@ import VendorWiseQAReport from "./pages/VendorWiseQAReport";
 import DelayedPoReports from "./pages/DelayedPoReports";
 import UpcomingEtdReports from "./pages/UpcomingEtdReports";
 import PoStatusReport from "./pages/PoStatusReport";
+import ProductAnalytics from "./pages/ProductAnalytics";
 import PIS from "./pages/PIS";
 import WeeklySummary from "./pages/WeeklySummary";
 import DailySummary from "./pages/DailySummary";
@@ -204,6 +205,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <PoStatusReport />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/reports/product-analytics"
+            element={
+              <ProtectedRoute>
+                <ProductAnalytics />
               </ProtectedRoute>
             }
           />

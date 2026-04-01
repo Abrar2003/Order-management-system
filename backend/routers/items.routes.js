@@ -13,6 +13,7 @@ const {
   uploadItemFile,
   deleteItemFile,
 } = require("../controllers/item.controller");
+const { getProductAnalytics } = require("../controllers/product.controller");
 
 const router = express.Router();
 
@@ -50,6 +51,8 @@ router.get(
   authorize("admin", "manager", "QC", "dev"),
   getItemFileUrl,
 );
+
+router.get("/product-analytics", auth, authorize("admin", "manager", "dev"), getProductAnalytics);
 
 router.patch(
   "/:id",

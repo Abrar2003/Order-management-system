@@ -39,6 +39,7 @@ const Navbar = () => {
   const canManageOrders = ["admin", "manager", "dev"].includes(normalizedRole);
   const canManageLabels = ["admin", "manager"].includes(normalizedRole);
   const canCreateUsers = normalizedRole === "admin";
+  const canAccessAnalytics = ["admin", "manager"].includes(normalizedRole);
 
   const navigate = useNavigate();
 
@@ -91,7 +92,7 @@ const Navbar = () => {
 
   const reportRouteLinks = useMemo(() => {
     if (!canAccessQc || isQcOnlyRole) return [];
-    return [
+    const links = [
       { label: "Inspector Reports", path: "/reports/inspectors" },
       { label: "Vendor Reports", path: "/reports/vendors" },
       { label: "Vendor Wise QA Report", path: "/reports/vendor-wise-qa" },
@@ -99,7 +100,13 @@ const Navbar = () => {
       { label: "Upcoming ETD Reports", path: "/reports/upcoming-etd" },
       { label: "PO Status Report", path: "/reports/po-status" },
     ];
-  }, [canAccessQc, isQcOnlyRole]);
+    
+    if (canAccessAnalytics) {
+      links.push({ label: "Product Analytics", path: "/reports/product-analytics" });
+    }
+    
+    return links;
+  }, [canAccessQc, isQcOnlyRole, canAccessAnalytics]);
 
   const logRouteLinks = useMemo(() => {
     if (!canManageOrders || isQcOnlyRole) return [];
