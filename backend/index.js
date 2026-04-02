@@ -55,14 +55,14 @@ const corsOptions = {
   },
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: isTruthy(process.env.CORS_ALLOW_CREDENTIALS || "https://oms.ghouse-sourcing.com,https://ghouse-sourcing.com"),
+  credentials: isTruthy(process.env.CORS_ALLOW_CREDENTIALS || "https://oms.ghouse-sourcing.com,https://ghouse-sourcing.com,http://localhost:5173,http://127.0.0.1:5173"),
 };
 
 app.use(cors(corsOptions));
 app.use(
   express.json({
     limit: String("30mb"),
-  }),s
+  }),
 );
 app.use(
   express.urlencoded({
