@@ -254,6 +254,17 @@ export const exportDelayedPoReport = async (params = {}) => {
   });
 };
 
+export const exportUpcomingEtdReport = async (params = {}) => {
+  const token = localStorage.getItem("token");
+  return axios.get("/orders/upcoming-etd-report/export", {
+    responseType: "blob",
+    params,
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+};
+
 export const editOrder = async (id, payload) => {
   if (!id) {
     throw new Error("Order id is required");

@@ -6690,6 +6690,95 @@ exports.getUpcomingEtdReport = async (req, res) => {
   }
 };
 
+exports.exportUpcomingEtdReport = async (req, res) => {
+  try {
+    const dataset = await buildUpcomingEtdReportDataset({
+      brand: req.query.brand,
+      vendor: req.query.vendor,
+      toDate:
+        req.query.to_date ??
+        req.query.toDate ??
+        req.query.date ??
+        req.query.end_date ??
+        req.query.endDate,
+    });
+
+    const columns = [
+      { key: "vendor", header: "Vendor" },
+      { key: "order_id", header: "PO" },
+      { key: "brand", header: "Brand" },
+      { key: "order_date", header: "Order Date" },
+      { key: "etd", header: "ETD" },
+      { key: "days_until_etd", header: "Days Until ETD" },
+      { key: "pending_count", header: "Pending" },
+      { key: "inspection_done_count", header: "Inspection Done" },
+      { key: "shipped_count", header: "Shipped" },
+      { key: "last_progress", header: "Last Progress" },
+    ];
+
+    const exportRows = [];
+
+    if (Array.isArray(dataset?.vendors)) {
+      dataset.vendors.forEach((vendorEntry) => {
+        const vendorName = String(vendorEntry?.vendor || "").trim();
+        const rows = Array.isArray(vendorEntry?.rows) ? vendorEntry.rows : [];
+
+        rows.forEach((row) => {
+          exportRows.push({
+            vendor: vendorName,
+            order_id: String(row?.order_id || "").trim(),
+            brand: String(row?.brand || "").trim(),
+            order_date: formatDateDDMMYYYY(row?.order_date, ""),
+            etd: formatDateDDMMYYYY(row?.effective_etd, ""),
+            days_until_etd: Number(row?.days_until_etd || 0),
+            pending_count: Number(row?.pending_count || 0),
+            inspection_done_count: Number(row?.inspection_done_count || 0),
+            shipped_count: Number(row?.shipped_count || 0),
+            last_progress: String(row?.last_progress || "").trim(),
+          });
+        });
+      });
+    }
+
+    const headerRow = columns.map((column) => column.header);
+    const dataRows = exportRows.map((row) =>
+      columns.map((column) => row[column.key] ?? ""),
+    );
+    const worksheet = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
+
+    worksheet["!cols"] = columns.map((column, columnIndex) => {
+      const maxDataLength = Math.max(
+        ...dataRows.map((row) => String(row[columnIndex] ?? "").length),
+        column.header.length,
+      );
+      return { wch: Math.min(40, Math.max(12, maxDataLength + 2)) };
+    });
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Upcoming ETD Report");
+    const fileBuffer = XLSX.write(workbook, {
+      type: "buffer",
+      bookType: "xlsx",
+    });
+    const fileDate = new Date().toISOString().slice(0, 10);
+    const fileName = `upcoming-etd-report-${fileDate}.xlsx`;
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    return res.status(200).send(fileBuffer);
+  } catch (error) {
+    console.error("Export Upcoming ETD Report Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to export upcoming ETD report",
+      error: error.message,
+    });
+  }
+};
+
 exports.exportDelayedPoReport = async (req, res) => {
   try {
     const dataset = await buildDelayedPoReportDataset({

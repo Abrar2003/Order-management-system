@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Navbar from "../components/Navbar";
+import UpcomingEtdExportModal from "../components/UpcomingEtdExportModal";
 import { getUpcomingEtdReport } from "../services/orders.service";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
@@ -71,6 +72,7 @@ const UpcomingEtdReports = () => {
   const [error, setError] = useState("");
   const [report, setReport] = useState(defaultReport);
   const [syncedQuery, setSyncedQuery] = useState(null);
+  const [showExportModal, setShowExportModal] = useState(false);
 
   const fetchReport = useCallback(async () => {
     try {
@@ -175,7 +177,13 @@ const UpcomingEtdReports = () => {
             Back
           </button>
           <h2 className="h4 mb-0">Upcoming ETD Reports</h2>
-          <span className="d-none d-md-inline" />
+          <button
+            type="button"
+            className="btn btn-outline-primary btn-sm"
+            onClick={() => setShowExportModal(true)}
+          >
+            Export Report
+          </button>
         </div>
 
         <div className="card om-card mb-3">
@@ -378,6 +386,18 @@ const UpcomingEtdReports = () => {
           )}
         </div>
       </div>
+
+      {showExportModal && (
+        <UpcomingEtdExportModal
+          onClose={() => setShowExportModal(false)}
+          filterOptions={filters}
+          defaultFilters={{
+            brand: brandFilter,
+            vendor: vendorFilter,
+            to_date: toDateFilter,
+          }}
+        />
+      )}
     </>
   );
 };

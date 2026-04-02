@@ -22,6 +22,7 @@ const {
   getDelayedPoReport,
   getUpcomingEtdReport,
   exportDelayedPoReport,
+  exportUpcomingEtdReport,
   exportOrdersDb,
   editOrder,
   bulkUpdateRevisedEtd,
@@ -124,6 +125,12 @@ router.get(
   authenticate,
   authorize("admin", "manager", "QC", "dev"),
   exportDelayedPoReport,
+);
+router.get(
+  "/upcoming-etd-report/export",
+  authenticate,
+  authorize("admin", "manager", "QC", "dev"),
+  exportUpcomingEtdReport,
 );
 router.get("/revised-etd-history", authenticate, getRevisedEtdHistory);
 
