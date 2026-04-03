@@ -1635,6 +1635,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       return;
     }
 
+    const barcodeValue = form.barcode.trim();
     const barcodeParsed = barcodeValue === "" ? null : Number(barcodeValue);
 
     if (
