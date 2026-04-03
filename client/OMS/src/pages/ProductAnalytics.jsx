@@ -235,8 +235,8 @@ const ProductAnalytics = () => {
                         </td>
                       </tr>
                     )}
-                    {rows.map((row) => (
-                      <tr key={row.orderId}>
+                    {rows.map((row, i) => (
+                      <tr key={i}>
                         <td>{row.orderId}</td>
                         <td>{row.itemCode}</td>
                         <td>{row.orderQuantity}</td>
