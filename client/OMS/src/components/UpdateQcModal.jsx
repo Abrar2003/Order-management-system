@@ -14,9 +14,6 @@ const NON_NEGATIVE_FIELDS = new Set([
   "qc_passed",
   "offeredQuantity",
   "barcode",
-  "CBM",
-  "CBM_top",
-  "CBM_bottom",
   "inspected_weight_top_net",
   "inspected_weight_top_gross",
   "inspected_weight_bottom_net",
@@ -641,9 +638,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     branding: false,
     labelRanges: [createEmptyLabelRange()],
     remarks: "",
-    CBM: "",
-    CBM_top: "",
-    CBM_bottom: "",
     inspected_weight_top_net: "",
     inspected_weight_top_gross: "",
     inspected_weight_bottom_net: "",
@@ -724,13 +718,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       adminRecord?.remarks !== undefined
         ? String(adminRecord.remarks || "")
         : String(qc?.remarks || "");
-    const initialCbmTop =
-      qc?.cbm?.top && qc.cbm.top !== "0" ? String(qc.cbm.top) : "";
-    const initialCbmBottom =
-      qc?.cbm?.bottom && qc.cbm.bottom !== "0" ? String(qc.cbm.bottom) : "";
-    const initialCbmTotal =
-      qc?.cbm?.total && qc.cbm.total !== "0" ? String(qc.cbm.total) : "";
-    const hasTopOrBottomCbm = initialCbmTop !== "" || initialCbmBottom !== "";
     const itemMaster = qc?.item_master || {};
     const inspectedItemLbh = itemMaster?.inspected_item_LBH || itemMaster?.item_LBH || {};
     const inspectedBoxLbh = itemMaster?.inspected_box_LBH || itemMaster?.box_LBH || {};
@@ -801,9 +788,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       branding: Boolean(qc?.branding),
       labelRanges: initialLabelRanges,
       remarks: canRewriteLatestInspectionRecord ? initialRemarks : "",
-      CBM: hasTopOrBottomCbm ? "" : initialCbmTotal,
-      CBM_top: initialCbmTop,
-      CBM_bottom: initialCbmBottom,
       inspected_weight_top_net: toDimensionInputValue(
         getWeightValueFromModel(inspectedWeight, "top_net"),
       ),
@@ -1097,27 +1081,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
           ...prev,
           [name]: safeCount,
           [entriesKey]: ensureMeasuredSizeEntryCount(prev[entriesKey], safeCount),
-          CBM: "",
-          CBM_top: "",
-          CBM_bottom: "",
-        };
-      }
-
-      if (name === "CBM") {
-        const hasTotalValue = String(nextValue).trim() !== "";
-        return {
-          ...prev,
-          CBM: nextValue,
-          ...(hasTotalValue ? { CBM_top: "", CBM_bottom: "" } : {}),
-        };
-      }
-
-      if (name === "CBM_top" || name === "CBM_bottom") {
-        const hasSegmentValue = String(nextValue).trim() !== "";
-        return {
-          ...prev,
-          [name]: nextValue,
-          ...(hasSegmentValue ? { CBM: "" } : {}),
         };
       }
 
@@ -1154,9 +1117,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         return {
           ...prev,
           [name]: nextValue,
-          CBM: "",
-          CBM_top: "",
-          CBM_bottom: "",
           ...(hasTotalItemLbhValue
             ? buildClearedFormFields([
                 ...INSPECTED_ITEM_TOP_LBH_FORM_KEYS,
@@ -1174,9 +1134,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         return {
           ...prev,
           [name]: nextValue,
-          CBM: "",
-          CBM_top: "",
-          CBM_bottom: "",
           ...(hasSplitItemLbhValue
             ? buildClearedFormFields(INSPECTED_ITEM_TOTAL_LBH_FORM_KEYS)
             : {}),
@@ -1188,9 +1145,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         return {
           ...prev,
           [name]: nextValue,
-          CBM: "",
-          CBM_top: "",
-          CBM_bottom: "",
           ...(hasTotalBoxLbhValue
             ? buildClearedFormFields([
                 ...INSPECTED_BOX_TOP_LBH_FORM_KEYS,
@@ -1208,9 +1162,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         return {
           ...prev,
           [name]: nextValue,
-          CBM: "",
-          CBM_top: "",
-          CBM_bottom: "",
           ...(hasSplitBoxLbhValue
             ? buildClearedFormFields(INSPECTED_BOX_TOTAL_LBH_FORM_KEYS)
             : {}),
@@ -1228,9 +1179,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         return {
           ...prev,
           [name]: nextValue,
-          CBM: "",
-          CBM_top: "",
-          CBM_bottom: "",
         };
       }
 
@@ -1265,9 +1213,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         ),
         prev[groupKey]?.length || 1,
       ),
-      CBM: "",
-      CBM_top: "",
-      CBM_bottom: "",
     }));
   };
 
@@ -1569,36 +1514,10 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         value: boxLegacyValues.totalWeight,
       },
     };
-    const cbmLockedByLbh =
-      inspectedItemSizePayload.hasMeaningfulInput || inspectedBoxSizePayload.hasMeaningfulInput;
 
-    const barcodeValue = form.barcode.trim();
-    const parseOptionalCbm = (value, label) => {
-      if (cbmLockedByLbh && !canEditLockedQcFields) {
-        return { hasValue: false, value: null };
-      }
-      const raw = value.trim();
-      if (raw === "") return { hasValue: false, value: null };
-      const parsed = Number(raw);
-      if (!Number.isFinite(parsed) || parsed < 0) {
-        return {
-          hasValue: true,
-          error: `${label} must be a valid non-negative number`,
-        };
-      }
-      return { hasValue: true, value: String(parsed) };
-    };
-
-    const cbmTotal = parseOptionalCbm(form.CBM, "CBM");
-    const cbmTop = parseOptionalCbm(form.CBM_top, "CBM top");
-    const cbmBottom = parseOptionalCbm(form.CBM_bottom, "CBM bottom");
     const lastInspectedDateValue = form.last_inspected_date.trim();
     const lastInspectedDateIso = toISODateString(lastInspectedDateValue);
 
-    if (cbmTotal.error || cbmTop.error || cbmBottom.error) {
-      setError(cbmTotal.error || cbmTop.error || cbmBottom.error);
-      return;
-    }
     if (lastInspectedDateValue && (!isValidDDMMYYYY(lastInspectedDateValue) || !lastInspectedDateIso)) {
       setError("Last inspected date must be in DD/MM/YYYY format.");
       return;
@@ -1648,13 +1567,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       }
     }
 
-    const hasTotalCbmValue = String(form.CBM || "").trim() !== "";
-    const existingCbmTopValue = Number(qc?.cbm?.top || 0);
-    const existingCbmBottomValue = Number(qc?.cbm?.bottom || 0);
-    const currentCbmTopValue = cbmTop.hasValue ? Number(cbmTop.value) : existingCbmTopValue;
-    const currentCbmBottomValue = cbmBottom.hasValue
-      ? Number(cbmBottom.value)
-      : existingCbmBottomValue;
     const existingBoxTopLbhForLabels =
       existingItemMaster?.inspected_box_top_LBH
       || existingItemMaster?.inspected_top_LBH
@@ -1689,10 +1601,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       && hasCompletePositiveLbh(currentItemBottomLbhForLabels);
     const hasTopBottomLbh =
       hasTopBottomBoxLbhForLabels || hasTopBottomItemLbhForLabels;
-    const hasTopBottomCbmForLabels =
-      !hasTotalCbmValue
-      && currentCbmTopValue > 0
-      && currentCbmBottomValue > 0;
     // Calculate size counts for label limit validation
     const itemSizesForLabelValidation = inspectedItemSizePayload.hasAnyInput
       ? inspectedItemSizePayload.value
@@ -1736,10 +1644,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       setError("Barcode must be a positive integer.");
       return;
     }
-    const hasTotalCbmInput = String(form.CBM || "").trim() !== "";
-    const hasTopOrBottomInput =
-      String(form.CBM_top || "").trim() !== "" ||
-      String(form.CBM_bottom || "").trim() !== "";
 
     const buildQcPayload = () => {
       const shouldSendAdminItemMasterFields =
@@ -1776,26 +1680,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         payload.inspector = selectedInspectorId;
       }
 
-      if (
-        (!cbmLockedByLbh || canEditLockedQcFields) &&
-        (isAdminRewriteMode || hasTotalCbmInput || hasTopOrBottomInput)
-      ) {
-        if (hasTotalCbmInput) {
-          payload.CBM = cbmTotal.value ?? "0";
-          payload.CBM_top = "0";
-          payload.CBM_bottom = "0";
-        } else if (hasTopOrBottomInput) {
-          payload.CBM = "0";
-          payload.CBM_top =
-            cbmTop.hasValue && cbmTop.value !== null ? cbmTop.value : "0";
-          payload.CBM_bottom =
-            cbmBottom.hasValue && cbmBottom.value !== null ? cbmBottom.value : "0";
-        } else if (isAdminRewriteMode) {
-          payload.CBM = "0";
-          payload.CBM_top = "0";
-          payload.CBM_bottom = "0";
-        }
-      }
+
 
       if (isAdminRewriteMode) {
         payload.barcode = barcodeParsed ?? 0;
@@ -2090,10 +1975,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   ).trim();
   const disableInspectorSelection =
     isQcUser || (!hasElevatedAccess && (qc?.quantities?.qc_checked || 0) > 0);
-  const hasTotalCbmInput = String(form.CBM || "").trim() !== "";
-  const hasTopOrBottomCbmInput =
-    String(form.CBM_top || "").trim() !== "" ||
-    String(form.CBM_bottom || "").trim() !== "";
   const existingItemMaster = qc?.item_master || {};
   const existingInspectedWeight = existingItemMaster?.inspected_weight || {};
   const existingItemSizeEntries = buildMeasuredSizeEntriesFromLegacy({
@@ -2136,15 +2017,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     form.inspected_box_sizes,
     form.inspected_box_count,
   );
-  const cbmLockedByLbh =
-    displayedItemEntries.some((entry) => hasMeaningfulMeasuredSize(entry)) ||
-    displayedBoxEntries.some((entry) => hasMeaningfulMeasuredSize(entry));
-  const disableCbmTotal =
-    hasTopOrBottomCbmInput ||
-    (cbmLockedByLbh && !canEditLockedQcFields);
-  const disableCbmTopBottom =
-    hasTotalCbmInput ||
-    (cbmLockedByLbh && !canEditLockedQcFields);
   const renderMeasuredSizeSection = ({
     title,
     countName,
@@ -2373,58 +2245,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   </select>
                 )}
               </div>
-
-              <div className="col-md-12">{"   "}</div>
-
-              <div className="col-md-4">
-                <label className="form-label">CBM Total</label>
-                <input
-                  type="number"
-                  className="form-control"
-                  name="CBM"
-                  value={form.CBM}
-                  onChange={handleChange}
-                  min="0"
-                  step="any"
-                  disabled={disableCbmTotal}
-                />
-              </div>
-
-              <div className="col-md-4">
-                <label className="form-label">CBM Top</label>
-                <input
-                  type="number"
-                  className="form-control"
-                  name="CBM_top"
-                  value={form.CBM_top}
-                  onChange={handleChange}
-                  min="0"
-                  step="any"
-                  disabled={disableCbmTopBottom}
-                />
-              </div>
-
-              <div className="col-md-4">
-                <label className="form-label">CBM Bottom</label>
-                <input
-                  type="number"
-                  className="form-control"
-                  name="CBM_bottom"
-                  value={form.CBM_bottom}
-                  onChange={handleChange}
-                  min="0"
-                  step="any"
-                  disabled={disableCbmTopBottom}
-                />
-              </div>
-
-              {cbmLockedByLbh && !canEditLockedQcFields && (
-                <div className="col-12">
-                  <div className="small text-secondary">
-                    CBM fields are locked because inspected sizes are present. Update the size entries to recalculate CBM.
-                  </div>
-                </div>
-              )}
 
               <div className="col-12">
                 <h6 className="mb-0">Inspected Measurements</h6>
