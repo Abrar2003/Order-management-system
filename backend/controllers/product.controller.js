@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const Order = require("../models/order.model");
 
 exports.getProductAnalytics = async (req, res) => {
+  console.log("🔥 NEW CONTROLLER v2");
   try {
     const { search = "", brand, vendor, page = 1, limit = 20 } = req.query;
 

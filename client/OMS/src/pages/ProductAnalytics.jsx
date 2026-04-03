@@ -85,7 +85,9 @@ const ProductAnalytics = () => {
           : [],
       });
     } catch (err) {
-      setError(err?.response?.data?.message || "Failed to load product analytics");
+      setError(
+        err?.response?.data?.message || "Failed to load product analytics",
+      );
       setRows([]);
       setTotalPages(1);
       setTotalRecords(0);
@@ -241,19 +243,21 @@ const ProductAnalytics = () => {
                         <td>{row.itemCode}</td>
                         <td>{row.orderQuantity}</td>
                         <td>
-                          {row.passedQuantity !== null ? row.passedQuantity : "-"}
+                          {row.passedQuantity !== null
+                            ? row.passedQuantity
+                            : "-"}
                         </td>
                         <td>
-  {!isNaN(row.inspectionTimeDays)
-    ? Number(row.inspectionTimeDays).toFixed(0)
-    : "-"}
-</td>
+                          {!isNaN(row.inspectionTimeDays)
+                            ? Number(row.inspectionTimeDays).toFixed(0)
+                            : "-"}
+                        </td>
 
-<td>
-  {!isNaN(row.rejectionPercent)
-    ? Number(row.rejectionPercent).toFixed(2)
-    : "-"}
-</td>
+                        <td>
+                          {!isNaN(row.rejectionPercent)
+                            ? Number(row.rejectionPercent).toFixed(2)
+                            : "-"}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
