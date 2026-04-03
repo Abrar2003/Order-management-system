@@ -244,15 +244,16 @@ const ProductAnalytics = () => {
                           {row.passedQuantity !== null ? row.passedQuantity : "-"}
                         </td>
                         <td>
-                          {row.inspectionTimeDays !== null
-                            ? row.inspectionTimeDays.toFixed(0)
-                            : "-"}
-                        </td>
-                        <td>
-                          {row.rejectionPercent !== null
-                            ? row.rejectionPercent.toFixed(2)
-                            : "-"}
-                        </td>
+  {!isNaN(row.inspectionTimeDays)
+    ? Number(row.inspectionTimeDays).toFixed(0)
+    : "-"}
+</td>
+
+<td>
+  {!isNaN(row.rejectionPercent)
+    ? Number(row.rejectionPercent).toFixed(2)
+    : "-"}
+</td>
                       </tr>
                     ))}
                   </tbody>
