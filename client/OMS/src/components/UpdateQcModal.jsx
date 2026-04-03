@@ -1693,8 +1693,28 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       !hasTotalCbmValue
       && currentCbmTopValue > 0
       && currentCbmBottomValue > 0;
-    const hasSplitTopBottomForLabels =
-      hasTopBottomCbmForLabels || hasTopBottomLbh;
+    // Calculate size counts for label limit validation
+    const itemSizesForLabelValidation = inspectedItemSizePayload.hasAnyInput
+      ? inspectedItemSizePayload.value
+      : existingItemSizeEntries;
+    const boxSizesForLabelValidation = inspectedBoxSizePayload.hasAnyInput
+      ? inspectedBoxSizePayload.value
+      : existingBoxSizeEntries;
+    const itemSizesCount = Array.isArray(itemSizesForLabelValidation) ? itemSizesForLabelValidation.length : 0;
+    const boxSizesCount = Array.isArray(boxSizesForLabelValidation) ? boxSizesForLabelValidation.length : 0;
+    const sizeMultiplier = Math.max(itemSizesCount, boxSizesCount);
+
+    // Validate sizes when labels are being added
+    if (hasLabelUpdate) {
+      if (itemSizesCount === 0) {
+        setError("At least 1 item size is required to add labels.");
+        return;
+      }
+      if (boxSizesCount === 0) {
+        setError("At least 1 box size is required to add labels.");
+        return;
+      }
+    }
 
     const isVisitUpdate = hasQuantityUpdate || hasLabelUpdate;
     if ((isVisitUpdate || isAdminRewriteMode) && !selectedInspectorId) {
@@ -1858,9 +1878,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         ? aqlRequestedQuantity
         : rawTotalPassedAfterRewrite;
       const totalLabelsAfterRewrite = allLabelsAfterRewrite.length;
-      const maxLabelsAllowed = hasSplitTopBottomForLabels
-        ? Math.max(0, totalCheckedAfterRewrite) * 2
-        : Math.max(0, totalCheckedAfterRewrite);
+      const maxLabelsAllowed = Math.max(0, totalCheckedAfterRewrite) * sizeMultiplier;
       const pendingAfterRewrite = Math.max(
         0,
         clientDemandQuantity - totalPassedAfterRewrite,
@@ -1901,9 +1919,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
       if (totalLabelsAfterRewrite > maxLabelsAllowed) {
         setError(
-          hasSplitTopBottomForLabels
-            ? `Total labels cannot exceed double inspected quantity (${maxLabelsAllowed}) when top and bottom CBM/LBH are set.`
-            : `Total labels cannot exceed inspected quantity (${maxLabelsAllowed}).`,
+          `Total labels cannot exceed inspected quantity × size count (${maxLabelsAllowed}). Expected: checked × max(item_sizes_count: ${itemSizesCount}, box_sizes_count: ${boxSizesCount})`,
         );
         return;
       }
@@ -2037,15 +2053,11 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     }
 
     const baseLabelLimit = Math.max(0, nextChecked);
-    const maxLabelsAllowed = hasSplitTopBottomForLabels
-      ? baseLabelLimit * 2
-      : baseLabelLimit;
+    const maxLabelsAllowed = baseLabelLimit * sizeMultiplier;
 
     if (totalLabelsAfterUpdate > maxLabelsAllowed) {
       setError(
-        hasSplitTopBottomForLabels
-          ? `Total labels cannot exceed double inspected quantity (${maxLabelsAllowed}) when top and bottom CBM/LBH are set.`
-          : `Total labels cannot exceed inspected quantity (${maxLabelsAllowed}).`,
+        `Total labels cannot exceed inspected quantity × size count (${maxLabelsAllowed}). Expected: checked × max(item_sizes_count: ${itemSizesCount}, box_sizes_count: ${boxSizesCount})`,
       );
       return;
     }

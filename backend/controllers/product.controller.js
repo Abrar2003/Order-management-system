@@ -34,233 +34,127 @@ exports.getProductAnalytics = async (req, res) => {
     // AGGREGATION PIPELINE
     // -------------------------------
     const pipeline = [
-  { $match: matchStage },
+      { $match: matchStage },
 
-  // -------------------------------
-  // JOIN QC
-  // -------------------------------
-  {
-    $lookup: {
-      from: "qcs",
-      localField: "qc_record",
-      foreignField: "_id",
-      as: "qc",
-    },
-  },
-  { $unwind: { path: "$qc", preserveNullAndEmptyArrays: true } },
+      // JOIN QC
+      {
+        $lookup: {
+          from: "qcs",
+          localField: "qc_record",
+          foreignField: "_id",
+          as: "qc",
+        },
+      },
+      { $unwind: { path: "$qc", preserveNullAndEmptyArrays: true } },
 
-  // -------------------------------
-  // JOIN INSPECTIONS
-  // -------------------------------
-  {
-    $lookup: {
-      from: "inspections",
-      localField: "qc._id",
-      foreignField: "qc",
-      as: "inspections",
-    },
-  },
-  {
-    $unwind: {
-      path: "$inspections",
-      preserveNullAndEmptyArrays: true,
-    },
-  },
-
-  // -------------------------------
-  // COMPUTE FIELDS
-  // -------------------------------
-  {
-    $addFields: {
-      // ✅ Delay (use earliest stuffing date)
-      delayDays: {
-        $cond: [
-          {
-            $and: [
-              { $ifNull: ["$ETD", false] },
-              { $gt: [{ $size: { $ifNull: ["$shipment", []] } }, 0] },
-            ],
-          },
-          {
-            $divide: [
-              {
-                $subtract: [
-                  { $min: "$shipment.stuffing_date" },
-                  "$ETD",
-                ],
-              },
-              1000 * 60 * 60 * 24,
-            ],
-          },
-          null,
-        ],
+      // JOIN INSPECTIONS (NO UNWIND)
+      {
+        $lookup: {
+          from: "inspections",
+          localField: "qc._id",
+          foreignField: "qc",
+          as: "inspections",
+        },
       },
 
-      // ✅ Inspection Time (earliest request_history date)
-      inspectionTimeDays: {
-        $let: {
-          vars: {
-            earliestRequestDate: {
-              $min: {
-                $map: {
-                  input: { $ifNull: ["$qc.request_history", []] },
-                  as: "rh",
-                  in: {
-                    $cond: [
-                      { $ifNull: ["$$rh.request_date", false] },
-                      { $toDate: "$$rh.request_date" },
-                      null,
-                    ],
-                  },
-                },
+      // KEEP ONLY REQUIRED FIELDS
+      {
+        $project: {
+          order_id: 1,
+          itemCode: "$item.item_code",
+          quantity: 1,
+          inspections: {
+            $map: {
+              input: "$inspections",
+              as: "insp",
+              in: {
+                passed: "$$insp.passed",
+                createdAt: "$$insp.createdAt",
               },
             },
           },
-          in: {
-            $cond: [
-              {
-                $and: [
-                  { $ifNull: ["$$earliestRequestDate", false] },
-                  { $ifNull: ["$order_date", false] },
-                ],
-              },
-              {
-                $divide: [
-                  {
-                    $subtract: ["$$earliestRequestDate", "$order_date"],
-                  },
-                  1000 * 60 * 60 * 24,
-                ],
-              },
-              null,
-            ],
-          },
         },
       },
 
-      // ✅ Rejection %
-      rejectionPercent: {
-        $cond: [
-          { $gt: ["$inspections.checked", 0] },
-          {
-            $multiply: [
-              {
-                $divide: [
-                  {
-                    $subtract: [
-                      "$inspections.checked",
-                      "$inspections.passed",
-                    ],
-                  },
-                  "$inspections.checked",
-                ],
-              },
-              100,
-            ],
-          },
-          null,
-        ],
-      },
-    },
-  },
+      { $sort: { quantity: -1 } },
 
-  // -------------------------------
-  // 🧠 LEVEL 1: GROUP PER ORDER (CRITICAL FIX)
-  // -------------------------------
-  {
-    $group: {
-      _id: "$order_id",
-
-      itemCode: { $first: "$item.item_code" },
-      quantity: { $first: "$quantity" },
-
-      delayDays: { $first: "$delayDays" },
-      inspectionTimeDays: { $first: "$inspectionTimeDays" },
-
-      rejectionPercent: { $avg: "$rejectionPercent" }, // avg per order
-    },
-  },
-
-  // -------------------------------
-  // 🧠 LEVEL 2: GROUP PER ITEM
-  // -------------------------------
-  {
-    $group: {
-      _id: "$itemCode",
-
-      orderedCount: { $sum: 1 },
-
-      totalOrderedQty: { $sum: "$quantity" },
-
-      avgDelay: {
-        $avg: {
-          $cond: [
-            { $ne: ["$delayDays", null] },
-            "$delayDays",
-            "$$REMOVE",
-          ],
+      {
+        $facet: {
+          data: [{ $skip: skip }, { $limit: Number(limit) }],
+          totalCount: [{ $count: "count" }],
         },
       },
-
-      avgInspectionTime: {
-        $avg: {
-          $cond: [
-            { $ne: ["$inspectionTimeDays", null] },
-            "$inspectionTimeDays",
-            "$$REMOVE",
-          ],
-        },
-      },
-
-      avgRejectionPercent: {
-        $avg: {
-          $cond: [
-            { $ne: ["$rejectionPercent", null] },
-            "$rejectionPercent",
-            "$$REMOVE",
-          ],
-        },
-      },
-    },
-  },
-
-  // -------------------------------
-  // FORMAT OUTPUT
-  // -------------------------------
-  {
-    $project: {
-      _id: 0,
-      itemCode: "$_id",
-      orderedCount: 1,
-      totalOrderedQty: 1,
-      avgDelay: { $round: ["$avgDelay", 2] },
-      avgInspectionTime: { $round: ["$avgInspectionTime", 2] },
-      avgRejectionPercent: { $round: ["$avgRejectionPercent", 2] },
-    },
-  },
-
-  { $sort: { totalOrderedQty: -1 } },
-
-  // -------------------------------
-  // ✅ PAGINATION
-  // -------------------------------
-  {
-    $facet: {
-      data: [
-        { $skip: skip },
-        { $limit: Number(limit) },
-      ],
-      totalCount: [{ $count: "count" }],
-    },
-  },
-];
+    ];
 
     const result = await Order.aggregate(pipeline);
-    console.log("Product Analytics Result:", result);
-    const data = result[0]?.data || [];
+    const processOrder = (order) => {
+      const inspections = (order.inspections || [])
+        .filter((i) => i?.createdAt)
+        .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+      // Calculate total passed quantity across all inspections
+      const totalPassed = inspections.reduce((sum, insp) => sum + (insp.passed || 0), 0);
+
+      if (inspections.length < 2) {
+        return {
+          orderId: order.order_id,
+          itemCode: order.itemCode,
+          orderQuantity: order.quantity,
+          passedQuantity: totalPassed,
+          inspectionTimeDays: null,
+          rejectionPercent: null,
+        };
+      }
+
+      // ✅ Inspection Time
+      const first = new Date(inspections[0].createdAt);
+      const last = new Date(inspections[inspections.length - 1].createdAt);
+
+      const inspectionTimeDays = (last - first) / (1000 * 60 * 60 * 24);
+
+      // ✅ Rejection Logic (your exact requirement)
+      let remaining = order.quantity;
+      const percentages = [];
+
+      for (const insp of inspections) {
+        if (!remaining || remaining <= 0) break;
+
+        const passed = insp.passed || 0;
+        const rejected = remaining - passed;
+
+        if (remaining >= 0) {
+          const percent = (rejected / remaining) * 100;
+
+          if (percent !== 0) {
+            percentages.push(percent);
+          }
+        }
+
+        remaining = rejected;
+      }
+
+      const rejectionPercent =
+        percentages.length > 0
+          ? percentages.reduce((a, b) => a + b, 0) / percentages.length
+          : null;
+
+      return {
+        orderId: order.order_id,
+        itemCode: order.itemCode,
+        orderQuantity: order.quantity,
+        passedQuantity: totalPassed,
+        inspectionTimeDays: Number(inspectionTimeDays.toFixed(2)),
+        rejectionPercent: rejectionPercent
+          ? Number(rejectionPercent.toFixed(2))
+          : null,
+      };
+    };
+    const rawData = result[0]?.data || [];
+const data = rawData.map(processOrder);
     const total = result[0]?.totalCount[0]?.count || 0;
     const totalPages = Math.ceil(total / Number(limit));
-
+    
+    console.log("Product Analytics Result:", data);
     return res.json({
       success: true,
       data,

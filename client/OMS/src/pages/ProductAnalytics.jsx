@@ -219,11 +219,11 @@ const ProductAnalytics = () => {
                 <table className="table table-striped table-hover align-middle om-table mb-0">
                   <thead className="table-primary">
                     <tr>
+                      <th>PO</th>
                       <th>Item Code</th>
-                      <th>Ordered Count</th>
-                      <th>Total Ordered Qty</th>
-                      <th>Average Delay (days)</th>
-                      <th>Average Inspection Time (days)</th>
+                      <th>Order Qty</th>
+                      <th>Passed</th>
+                      <th>Inspection Time (days)</th>
                       <th>Average Rejection (%)</th>
                     </tr>
                   </thead>
@@ -236,21 +236,21 @@ const ProductAnalytics = () => {
                       </tr>
                     )}
                     {rows.map((row) => (
-                      <tr key={row.itemCode}>
+                      <tr key={row.orderId}>
+                        <td>{row.orderId}</td>
                         <td>{row.itemCode}</td>
-                        <td>{row.orderedCount}</td>
-                        <td>{row.totalOrderedQty}</td>
+                        <td>{row.orderQuantity}</td>
                         <td>
-                          {row.avgDelay !== null ? row.avgDelay.toFixed(2) : "-"}
+                          {row.passedQuantity !== null ? row.passedQuantity : "-"}
                         </td>
                         <td>
-                          {row.avgInspectionTime !== null
-                            ? row.avgInspectionTime.toFixed(2)
+                          {row.inspectionTimeDays !== null
+                            ? row.inspectionTimeDays.toFixed(0)
                             : "-"}
                         </td>
                         <td>
-                          {row.avgRejectionPercent !== null
-                            ? row.avgRejectionPercent.toFixed(2)
+                          {row.rejectionPercent !== null
+                            ? row.rejectionPercent.toFixed(2)
                             : "-"}
                         </td>
                       </tr>

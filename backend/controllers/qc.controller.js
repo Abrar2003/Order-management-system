@@ -4178,22 +4178,36 @@ exports.updateQC = async (req, res) => {
     }
 
     const inspectedQuantityForLabels = Math.max(0, nextChecked);
-    const hasTopBottomBoxLbhForLabels =
-      hasCompletePositiveLbh(effectiveInspectedTopLbh) &&
-      hasCompletePositiveLbh(effectiveInspectedBottomLbh);
-    const hasTopBottomItemLbhForLabels =
-      hasCompletePositiveLbh(effectiveInspectedItemTopLbh) &&
-      hasCompletePositiveLbh(effectiveInspectedItemBottomLbh);
-    const hasTopBottomLbhForLabels =
-      hasTopBottomBoxLbhForLabels || hasTopBottomItemLbhForLabels;
-    const hasTopBottomCbmForLabels =
-      toNonNegativeNumber(qc?.cbm?.top, 0) > 0 &&
-      toNonNegativeNumber(qc?.cbm?.bottom, 0) > 0;
-    const hasTopBottomCapacityBoost =
-      hasTopBottomCbmForLabels || hasTopBottomLbhForLabels;
-    const maxLabelsAllowed = hasTopBottomCapacityBoost
-      ? inspectedQuantityForLabels * 2
-      : inspectedQuantityForLabels;
+    
+    // Calculate size counts for label limit
+    const itemSizesArray = parsedInspectedItemSizeEntries.hasInput
+      ? parsedInspectedItemSizeEntries.value
+      : (itemDocForInspectedLbhUpdate?.inspected_item_sizes ||
+         itemDocForInspectedLbhUpdate?.pis_item_sizes ||
+         []);
+    const boxSizesArray = parsedInspectedBoxSizeEntries.hasInput
+      ? parsedInspectedBoxSizeEntries.value
+      : (itemDocForInspectedLbhUpdate?.inspected_box_sizes ||
+         itemDocForInspectedLbhUpdate?.pis_box_sizes ||
+         []);
+    
+    const itemSizesCount = Array.isArray(itemSizesArray) ? itemSizesArray.length : 0;
+    const boxSizesCount = Array.isArray(boxSizesArray) ? boxSizesArray.length : 0;
+    
+    // Validate that both item and box sizes exist
+    if (itemSizesCount === 0) {
+      return res.status(400).json({
+        message: "At least 1 item size is required to add labels",
+      });
+    }
+    if (boxSizesCount === 0) {
+      return res.status(400).json({
+        message: "At least 1 box size is required to add labels",
+      });
+    }
+    
+    const sizeMultiplier = Math.max(itemSizesCount, boxSizesCount);
+    const maxLabelsAllowed = inspectedQuantityForLabels * sizeMultiplier;
 
     qc.quantities.vendor_provision = nextVendorProvision;
     qc.quantities.qc_checked = nextChecked;
@@ -4234,9 +4248,7 @@ exports.updateQC = async (req, res) => {
 
       if (normalizedReplacementLabels.length > maxLabelsAllowed) {
         return res.status(400).json({
-          message: hasTopBottomCapacityBoost
-            ? `Total labels cannot exceed double inspected quantity (${maxLabelsAllowed}) when both top and bottom CBM/LBH are available`
-            : `Total labels cannot exceed inspected quantity (${maxLabelsAllowed})`,
+          message: `Total labels cannot exceed inspected quantity × size count (${maxLabelsAllowed}). Expected: passed × max(item_sizes_count: ${itemSizesCount}, box_sizes_count: ${boxSizesCount})`,
         });
       }
 
@@ -4316,9 +4328,7 @@ exports.updateQC = async (req, res) => {
       });
       if (totalLabels > maxLabelsAllowed) {
         return res.status(400).json({
-          message: hasTopBottomCapacityBoost
-            ? `Total labels cannot exceed double inspected quantity (${maxLabelsAllowed}) when both top and bottom CBM/LBH are available`
-            : `Total labels cannot exceed inspected quantity (${maxLabelsAllowed})`,
+          message: `Total labels cannot exceed inspected quantity × size count (${maxLabelsAllowed}). Expected: passed × max(item_sizes_count: ${itemSizesCount}, box_sizes_count: ${boxSizesCount})`,
         });
       }
 
