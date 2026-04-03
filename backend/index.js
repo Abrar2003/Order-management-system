@@ -84,7 +84,7 @@ app.use("/reports", reportsRouter);
 app.use("/api/reports", reportsRouter);
 
 app.get("/", (req, res) => {
-  res.send({ message: "Server OK" });
+  res.send({ message: "Server OK v2" });
 });
 
 app.get("/healthz", (req, res) => {
