@@ -455,6 +455,50 @@ const toBrandLogoDataUrl = (logoObj) => {
   return `data:${logoObj?.contentType || "image/webp"};base64,${window.btoa(binary)}`;
 };
 
+const blobToDataUrl = (blob) =>
+  new Promise((resolve, reject) => {
+    if (!(blob instanceof Blob)) {
+      resolve("");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = () =>
+      resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => reject(new Error("Failed to read image blob"));
+    reader.readAsDataURL(blob);
+  });
+
+const waitForImageLoad = (image) =>
+  new Promise((resolve) => {
+    if (!image || image.complete) {
+      resolve();
+      return;
+    }
+
+    const handleDone = () => resolve();
+    image.addEventListener("load", handleDone, { once: true });
+    image.addEventListener("error", handleDone, { once: true });
+  });
+
+const waitForImagesToLoad = async (container) => {
+  if (!container) return;
+  const images = Array.from(container.querySelectorAll("img"));
+  await Promise.all(images.map((image) => waitForImageLoad(image)));
+};
+
+const fetchRemoteImageAsDataUrl = async (url) => {
+  const normalizedUrl = String(url || "").trim();
+  if (!normalizedUrl) return "";
+
+  const response = await fetch(normalizedUrl, { mode: "cors" });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch image: ${response.status}`);
+  }
+
+  return blobToDataUrl(await response.blob());
+};
+
 const toComparableValue = (value) =>
   String(value ?? "")
     .trim()
@@ -608,6 +652,9 @@ const InspectionReport = () => {
   const [loading, setLoading] = useState(true);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [brandLogoSrc, setBrandLogoSrc] = useState("");
+  const [brandLogoLoading, setBrandLogoLoading] = useState(false);
+  const [productImageSrc, setProductImageSrc] = useState("");
+  const [productImageLoading, setProductImageLoading] = useState(false);
 
   const backTarget = useMemo(() => {
     const fromQcDetails = String(location.state?.fromQcDetails || "").trim();
@@ -632,9 +679,12 @@ const InspectionReport = () => {
     };
   }, [qc]);
 
-  const productImageSrc = useMemo(
-    () => String(qc?.item_master?.image?.url || "").trim(),
-    [qc?.item_master?.image?.url],
+  const productImageUrl = useMemo(
+    () =>
+      String(
+        qc?.item_master?.image?.url || qc?.item_master?.image?.link || "",
+      ).trim(),
+    [qc?.item_master?.image?.link, qc?.item_master?.image?.url],
   );
 
   const inspectionRows = useMemo(() => {
@@ -867,11 +917,13 @@ const InspectionReport = () => {
     const checkedCbmTopRaw =
       itemMaster?.cbm?.inspected_top ??
       itemMaster?.cbm?.qc_top ??
+      qc?.cbm?.box1 ??
       qc?.cbm?.top ??
       "0";
     const checkedCbmBottomRaw =
       itemMaster?.cbm?.inspected_bottom ??
       itemMaster?.cbm?.qc_bottom ??
+      qc?.cbm?.box2 ??
       qc?.cbm?.bottom ??
       "0";
     const calculatedInspectedCbm = formatPositiveCbm(calculatedInspectedCbmRaw, "Not Set");
@@ -934,9 +986,13 @@ const InspectionReport = () => {
         checkedMeta: checkedGrossWeight,
         indexedRemarkOrder: BOX_INDEXED_REMARKS,
       }),
-      ...(showCbmTop ? [{ attribute: "CBM Top", pis: pisCbmTop, checked: checkedCbmTop }] : []),
-      ...(showCbmBottom ? [{ attribute: "CBM Bottom", pis: pisCbmBottom, checked: checkedCbmBottom }] : []),
-      { attribute: "CBM", pis: calculatedPisCbm, checked: checkedCbmTotal },
+      ...(showCbmTop
+        ? [{ attribute: "Box 1 CBM", pis: pisCbmTop, checked: checkedCbmTop }]
+        : []),
+      ...(showCbmBottom
+        ? [{ attribute: "Box 2 CBM", pis: pisCbmBottom, checked: checkedCbmBottom }]
+        : []),
+      { attribute: "Total Box CBM", pis: calculatedPisCbm, checked: checkedCbmTotal },
       { attribute: "Barcode", pis: pisBarcodeValue, checked: inspectedBarcodeValue },
     ];
 
@@ -1042,6 +1098,7 @@ const InspectionReport = () => {
     const brandName = String(qc?.order?.brand || "").trim();
     if (!brandName) {
       setBrandLogoSrc("");
+      setBrandLogoLoading(false);
       return;
     }
 
@@ -1049,6 +1106,7 @@ const InspectionReport = () => {
 
     const fetchBrandDetails = async () => {
       try {
+        setBrandLogoLoading(true);
         const response = await api.get("/brands/");
         if (!isMounted) return;
 
@@ -1056,10 +1114,29 @@ const InspectionReport = () => {
         const matchedBrand = brands.find(
           (brand) => getBrandKey(brand?.name) === getBrandKey(brandName),
         );
-        setBrandLogoSrc(toBrandLogoDataUrl(matchedBrand?.logo));
+        const resolvedLogoSrc = toBrandLogoDataUrl(matchedBrand?.logo);
+        if (!resolvedLogoSrc) {
+          setBrandLogoSrc("");
+          return;
+        }
+
+        if (resolvedLogoSrc.startsWith("data:image/")) {
+          setBrandLogoSrc(resolvedLogoSrc);
+          return;
+        }
+
+        try {
+          setBrandLogoSrc(await fetchRemoteImageAsDataUrl(resolvedLogoSrc));
+        } catch {
+          setBrandLogoSrc(resolvedLogoSrc);
+        }
       } catch (error) {
         if (isMounted) {
           setBrandLogoSrc("");
+        }
+      } finally {
+        if (isMounted) {
+          setBrandLogoLoading(false);
         }
       }
     };
@@ -1071,8 +1148,52 @@ const InspectionReport = () => {
     };
   }, [qc?.order?.brand]);
 
+  useEffect(() => {
+    if (!productImageUrl) {
+      setProductImageSrc("");
+      setProductImageLoading(false);
+      return;
+    }
+
+    let isMounted = true;
+    setProductImageLoading(true);
+
+    const loadProductImage = async () => {
+      try {
+        const nextImageSrc = productImageUrl.startsWith("data:image/")
+          ? productImageUrl
+          : await fetchRemoteImageAsDataUrl(productImageUrl);
+        if (isMounted) {
+          setProductImageSrc(nextImageSrc);
+        }
+      } catch {
+        if (isMounted) {
+          setProductImageSrc(productImageUrl);
+        }
+      } finally {
+        if (isMounted) {
+          setProductImageLoading(false);
+        }
+      }
+    };
+
+    loadProductImage();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [productImageUrl]);
+
   const handleConfirmAndExport = useCallback(async () => {
-    if (!reportRef.current || exportingPdf || !qc) return;
+    if (
+      !reportRef.current ||
+      exportingPdf ||
+      !qc ||
+      brandLogoLoading ||
+      productImageLoading
+    ) {
+      return;
+    }
 
     const confirmed = window.confirm(
       "Confirm export of this inspection report snapshot as PDF?",
@@ -1082,6 +1203,7 @@ const InspectionReport = () => {
     try {
       setExportingPdf(true);
       const target = reportRef.current;
+      await waitForImagesToLoad(target);
       const canvas = await html2canvas(target, {
         scale: 2,
         useCORS: true,
@@ -1146,7 +1268,7 @@ const InspectionReport = () => {
     } finally {
       setExportingPdf(false);
     }
-  }, [exportingPdf, id, qc]);
+  }, [brandLogoLoading, exportingPdf, id, productImageLoading, qc]);
 
   useEffect(() => {
     fetchQcDetails();
@@ -1187,9 +1309,13 @@ const InspectionReport = () => {
             type="button"
             className="btn btn-primary btn-sm"
             onClick={handleConfirmAndExport}
-            disabled={exportingPdf}
+            disabled={exportingPdf || brandLogoLoading || productImageLoading}
           >
-            {exportingPdf ? "Exporting..." : "Confirm & Export PDF"}
+            {exportingPdf
+              ? "Exporting..."
+              : brandLogoLoading || productImageLoading
+              ? "Loading images..."
+              : "Confirm & Export PDF"}
           </button>
         </div>
 

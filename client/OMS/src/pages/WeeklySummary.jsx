@@ -4,6 +4,7 @@ import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import { formatCbm } from "../utils/cbm";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -102,6 +103,11 @@ const fetchBrandLogoFallback = async (brandName) => {
 };
 
 const toReportQuantity = (value) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+};
+
+const toReportCbm = (value) => {
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
 };
@@ -248,6 +254,10 @@ const buildVendorDisplayRows = (
             (sum, item) => sum + toReportQuantity(item?.quantity_passed),
             0,
           ),
+          totalCbm: sortedItems.reduce(
+            (sum, item) => sum + toReportCbm(item?.total_cbm),
+            0,
+          ),
           pending: 0,
           packedSummary: true,
           lastInspector: latestOverallInspectionMeta.inspectorName,
@@ -261,6 +271,7 @@ const buildVendorDisplayRows = (
         itemLabel: item?.item_code || "N/A",
         totalOrderQuantity: toReportQuantity(item?.total_order_quantity),
         quantityPassed: toReportQuantity(item?.quantity_passed),
+        totalCbm: toReportCbm(item?.total_cbm),
         pending: toReportQuantity(item?.pending),
         goodsNotReady: Boolean(item?.goods_not_ready),
         goodsNotReadyReason: String(item?.goods_not_ready_reason || "").trim(),
@@ -717,6 +728,7 @@ const WeeklySummary = () => {
                             <th>Item Code</th>
                             <th>Total Order Quantity</th>
                             <th>Packed</th>
+                            <th>Total CBM</th>
                             <th>Open Quantity</th>
                             <th>Last Inspector</th>
                           </tr>
@@ -744,7 +756,7 @@ const WeeklySummary = () => {
                               {row.goodsNotReady ? (
                                 <>
                                   <td colSpan="1"></td>
-                                  <td colSpan="2">
+                                  <td colSpan="3">
                                     <div className="fw-semibold">
                                       {row.goodsNotReadyReason || "Reason not provided"}
                                     </div>
@@ -755,6 +767,7 @@ const WeeklySummary = () => {
                                 <>
                                   <td>{row.totalOrderQuantity ?? 0}</td>
                                   <td>{row.quantityPassed ?? 0}</td>
+                                  <td>{formatCbm(row.totalCbm ?? 0)}</td>
                                   <td>{row.pending ?? 0}</td>
                                   <td>{row.lastInspector || "-"}</td>
                                 </>

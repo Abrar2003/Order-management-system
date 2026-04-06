@@ -195,6 +195,45 @@ const resolveAqlBaseQuantity = (requestedQuantity, fallbackQuantity = 0) => {
 const normalizeInspectionStatus = (value) =>
   String(value || "").trim().toLowerCase();
 
+const isInspectionStatusMatching = (value, expectedStatus) =>
+  normalizeInspectionStatus(value) === normalizeInspectionStatus(expectedStatus);
+
+const isGoodsNotReadyMarked = (
+  goodsNotReady = null,
+  explicitStatus = "",
+) => {
+  if (isInspectionStatusMatching(explicitStatus, INSPECTION_RECORD_STATUS.GOODS_NOT_READY)) {
+    return true;
+  }
+
+  if (typeof goodsNotReady === "boolean") {
+    return goodsNotReady;
+  }
+
+  if (typeof goodsNotReady === "string") {
+    return normalizeActionBoolean(goodsNotReady, false);
+  }
+
+  if (!goodsNotReady || typeof goodsNotReady !== "object") {
+    return false;
+  }
+
+  if (goodsNotReady.ready !== undefined) {
+    return normalizeActionBoolean(goodsNotReady.ready, false);
+  }
+
+  return Boolean(normalizeText(goodsNotReady.reason || ""));
+};
+
+const getGoodsNotReadyReason = (goodsNotReady = null, fallback = "") => {
+  if (goodsNotReady && typeof goodsNotReady === "object") {
+    const reason = normalizeText(goodsNotReady.reason || "");
+    if (reason) return reason;
+  }
+
+  return normalizeText(fallback || "");
+};
+
 const normalizeRequestHistoryStatus = (value) =>
   String(value || "").trim().toLowerCase();
 
@@ -239,9 +278,10 @@ const hasInspectionRecordActivity = ({
   goodsNotReady = null,
   status = "",
 } = {}) =>
-  normalizeInspectionStatus(status) ===
-    normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED) ||
-  Boolean(goodsNotReady?.ready) ||
+  isInspectionStatusMatching(status, INSPECTION_RECORD_STATUS.TRANSFERRED) ||
+  isInspectionStatusMatching(status, INSPECTION_RECORD_STATUS.GOODS_NOT_READY) ||
+  isInspectionStatusMatching(status, INSPECTION_RECORD_STATUS.DONE) ||
+  isGoodsNotReadyMarked(goodsNotReady, status) ||
   toNonNegativeNumber(checked, 0) > 0 ||
   toNonNegativeNumber(passed, 0) > 0 ||
   toNonNegativeNumber(vendorOffered, 0) > 0 ||
@@ -253,18 +293,18 @@ const resolveInspectionRecordStatus = ({
   goodsNotReady = null,
   explicitStatus = "",
 } = {}) => {
-  if (
-    normalizeInspectionStatus(explicitStatus) ===
-    normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED)
-  ) {
+  if (isInspectionStatusMatching(explicitStatus, INSPECTION_RECORD_STATUS.TRANSFERRED)) {
     return INSPECTION_RECORD_STATUS.TRANSFERRED;
   }
 
-  if (Boolean(goodsNotReady?.ready)) {
+  if (isGoodsNotReadyMarked(goodsNotReady, explicitStatus)) {
     return INSPECTION_RECORD_STATUS.GOODS_NOT_READY;
   }
 
-  if (toNonNegativeNumber(checked, 0) > 0) {
+  if (
+    toNonNegativeNumber(checked, 0) > 0 ||
+    isInspectionStatusMatching(explicitStatus, INSPECTION_RECORD_STATUS.DONE)
+  ) {
     return INSPECTION_RECORD_STATUS.DONE;
   }
 
@@ -532,11 +572,15 @@ const buildQcEditLogSnapshot = (qcDoc = {}, inspectionRecords = []) => ({
   packed_size: formatAuditBoolean(qcDoc?.packed_size),
   finishing: formatAuditBoolean(qcDoc?.finishing),
   branding: formatAuditBoolean(qcDoc?.branding),
-  cbm: [
-    `top ${normalizeText(qcDoc?.cbm?.top) || "0"}`,
-    `bottom ${normalizeText(qcDoc?.cbm?.bottom) || "0"}`,
-    `total ${normalizeText(qcDoc?.cbm?.total) || "0"}`,
-  ].join(" | "),
+  cbm: (() => {
+    const cbmSnapshot = buildNormalizedCbmSnapshot(qcDoc?.cbm);
+    return [
+      `box1 ${normalizeText(cbmSnapshot?.box1) || "0"}`,
+      `box2 ${normalizeText(cbmSnapshot?.box2) || "0"}`,
+      `box3 ${normalizeText(cbmSnapshot?.box3) || "0"}`,
+      `total ${normalizeText(cbmSnapshot?.total) || "0"}`,
+    ].join(" | ");
+  })(),
   labels: formatAuditList(qcDoc?.labels),
   remarks: normalizeText(qcDoc?.remarks) || "None",
   request_history: formatRequestHistoryForAudit(qcDoc?.request_history),
@@ -795,6 +839,19 @@ const buildSizeEntriesFromLegacy = ({
   ];
 };
 
+const sortSizeEntriesByRemark = (entries = [], remarkOptions = []) =>
+  [...(Array.isArray(entries) ? entries : [])].sort((left, right) => {
+    const leftIndex = remarkOptions.indexOf(
+      normalizeText(left?.remark).toLowerCase(),
+    );
+    const rightIndex = remarkOptions.indexOf(
+      normalizeText(right?.remark).toLowerCase(),
+    );
+    const safeLeftIndex = leftIndex >= 0 ? leftIndex : SIZE_ENTRY_LIMIT + 1;
+    const safeRightIndex = rightIndex >= 0 ? rightIndex : SIZE_ENTRY_LIMIT + 1;
+    return safeLeftIndex - safeRightIndex;
+  });
+
 const calculateSizeEntriesCbmTotal = (entries = []) =>
   normalizeStoredSizeEntries(entries).reduce(
     (sum, entry) => sum + toPositiveCbmNumber(calculateCbmFromLbh(entry)),
@@ -963,6 +1020,105 @@ const resolveSplitOrSingleLbhCbmTotal = ({
   return toPositiveCbmNumber(calculateCbmFromLbh(singleLbh));
 };
 
+const buildNormalizedCbmSnapshot = (value = {}) => {
+  const box1 = toPositiveCbmNumber(value?.box1 ?? value?.top);
+  const box2 = toPositiveCbmNumber(value?.box2 ?? value?.bottom);
+  const box3 = toPositiveCbmNumber(value?.box3);
+  const totalFromBoxes = box1 + box2 + box3;
+  const total =
+    totalFromBoxes > 0
+      ? totalFromBoxes
+      : toPositiveCbmNumber(value?.total);
+
+  return {
+    box1: toNormalizedCbmString(box1),
+    box2: toNormalizedCbmString(box2),
+    box3: toNormalizedCbmString(box3),
+    total: toNormalizedCbmString(total),
+  };
+};
+
+const buildSingleBoxCbmSnapshot = (total = 0) => {
+  const normalizedTotal = toPositiveCbmNumber(total);
+  return buildNormalizedCbmSnapshot({
+    box1: normalizedTotal,
+    box2: 0,
+    box3: 0,
+    total: normalizedTotal,
+  });
+};
+
+const getNormalizedCbmTotalNumber = (value = {}) =>
+  toPositiveCbmNumber(buildNormalizedCbmSnapshot(value).total);
+
+const hasExplicitCbmBoxInput = (value = {}) =>
+  value?.box1 !== undefined ||
+  value?.box2 !== undefined ||
+  value?.box3 !== undefined ||
+  value?.top !== undefined ||
+  value?.bottom !== undefined;
+
+const buildCbmSnapshotFromBoxSizeSource = ({
+  sizes = [],
+  singleLbh = null,
+  topLbh = null,
+  bottomLbh = null,
+} = {}) => {
+  const normalizedEntries = sortSizeEntriesByRemark(
+    buildSizeEntriesFromLegacy({
+      sizes,
+      singleLbh,
+      topLbh,
+      bottomLbh,
+    }),
+    BOX_SIZE_REMARK_OPTIONS,
+  ).slice(0, SIZE_ENTRY_LIMIT);
+
+  return buildNormalizedCbmSnapshot({
+    box1: calculateCbmFromLbh(normalizedEntries[0] || {}),
+    box2: calculateCbmFromLbh(normalizedEntries[1] || {}),
+    box3: calculateCbmFromLbh(normalizedEntries[2] || {}),
+  });
+};
+
+const buildItemInspectedBoxCbmSnapshot = (itemDoc = null) =>
+  buildCbmSnapshotFromBoxSizeSource({
+    sizes: itemDoc?.inspected_box_sizes,
+    singleLbh: itemDoc?.inspected_box_LBH || itemDoc?.box_LBH,
+    topLbh: itemDoc?.inspected_box_top_LBH || itemDoc?.inspected_top_LBH,
+    bottomLbh:
+      itemDoc?.inspected_box_bottom_LBH || itemDoc?.inspected_bottom_LBH,
+  });
+
+const resolveItemInspectedCbmPerUnit = (itemDoc = null) => {
+  return getNormalizedCbmTotalNumber(buildItemInspectedBoxCbmSnapshot(itemDoc));
+};
+
+const resolveItemStoredCbmPerUnit = (itemDoc = null) =>
+  [
+    itemDoc?.cbm?.calculated_inspected_total,
+    itemDoc?.cbm?.inspected_total,
+    itemDoc?.cbm?.calculated_total,
+    itemDoc?.cbm?.qc_total,
+    itemDoc?.cbm?.total,
+  ]
+    .map((value) => toPositiveCbmNumber(value))
+    .find((value) => value > 0) || 0;
+
+const resolveWeeklySummaryCbmPerUnit = (itemDoc = null, qcDoc = null) => {
+  const sizeDerivedCbm = resolveItemInspectedCbmPerUnit(itemDoc);
+  if (sizeDerivedCbm > 0) {
+    return sizeDerivedCbm;
+  }
+
+  const qcCbmTotal = getNormalizedCbmTotalNumber(qcDoc?.cbm);
+  if (qcCbmTotal > 0) {
+    return qcCbmTotal;
+  }
+
+  return resolveItemStoredCbmPerUnit(itemDoc);
+};
+
 const resolveItemReportCbmPerUnit = (
   itemDoc = null,
   inspection = null,
@@ -1036,13 +1192,7 @@ const resolveItemReportCbmPerUnit = (
     return 0;
   }
 
-  const inspectionTopCbm = toPositiveCbmNumber(inspection?.cbm?.top);
-  const inspectionBottomCbm = toPositiveCbmNumber(inspection?.cbm?.bottom);
-  if (inspectionTopCbm > 0 && inspectionBottomCbm > 0) {
-    return inspectionTopCbm + inspectionBottomCbm;
-  }
-
-  return toPositiveCbmNumber(inspection?.cbm?.total);
+  return getNormalizedCbmTotalNumber(inspection?.cbm);
 };
 
 const hasMeaningfulItemQcDetails = (itemDoc) => {
@@ -1195,37 +1345,60 @@ const resolveLatestInspectionRecordForRequestEntry = (
     return latestRecord;
   };
 
+  const candidateRecords = [];
+
   if (requestHistoryId) {
-    const recordByRequestId = findLatestMatchingRecord(
-      (record) =>
-        String(record?.request_history_id || "").trim() === requestHistoryId,
+    candidateRecords.push(
+      findLatestMatchingRecord(
+        (record) =>
+          String(record?.request_history_id || "").trim() === requestHistoryId,
+      ),
     );
-    if (recordByRequestId) return recordByRequestId;
   }
 
-  if (!requestDateKey) return null;
+  if (requestDateKey) {
+    candidateRecords.push(
+      findLatestMatchingRecord((record) => {
+        const recordRequestedDate = toISODateString(
+          record?.requested_date || record?.inspection_date || record?.createdAt,
+        );
+        if (recordRequestedDate !== requestDateKey) return false;
 
-  return (
-    findLatestMatchingRecord((record) => {
-      const recordRequestedDate = toISODateString(
-        record?.requested_date || record?.inspection_date || record?.createdAt,
-      );
-      if (recordRequestedDate !== requestDateKey) return false;
+        if (!requestInspectorId) return true;
 
-      if (!requestInspectorId) return true;
+        const recordInspectorId = String(
+          record?.inspector?._id || record?.inspector || "",
+        ).trim();
+        return !recordInspectorId || recordInspectorId === requestInspectorId;
+      }),
+    );
+    candidateRecords.push(
+      findLatestMatchingRecord((record) => {
+        const recordRequestedDate = toISODateString(
+          record?.requested_date || record?.inspection_date || record?.createdAt,
+        );
+        return recordRequestedDate === requestDateKey;
+      }),
+    );
+  }
 
-      const recordInspectorId = String(
-        record?.inspector?._id || record?.inspector || "",
-      ).trim();
-      return !recordInspectorId || recordInspectorId === requestInspectorId;
-    }) ||
-    findLatestMatchingRecord((record) => {
-      const recordRequestedDate = toISODateString(
-        record?.requested_date || record?.inspection_date || record?.createdAt,
-      );
-      return recordRequestedDate === requestDateKey;
-    })
-  );
+  let latestRecord = null;
+  let latestTimestamp = 0;
+  for (const candidate of candidateRecords) {
+    if (!candidate) continue;
+
+    const candidateTimestamp = Math.max(
+      toSortableTimestamp(candidate?.inspection_date),
+      toSortableTimestamp(candidate?.requested_date),
+      toSortableTimestamp(candidate?.createdAt),
+    );
+    if (!latestRecord || candidateTimestamp >= latestTimestamp) {
+      latestRecord = candidate;
+      latestTimestamp = candidateTimestamp;
+    }
+  }
+
+  return latestRecord;
 };
 
 const resolveRequestedQuantityFromQc = (qcDoc = {}) => {
@@ -1427,6 +1600,7 @@ const upsertInspectionRecordForRequest = async ({
           reason: String(goodsNotReady.reason || "").trim(),
         }
       : null;
+  const qcCbmSnapshot = buildNormalizedCbmSnapshot(qcDoc?.cbm);
 
   if (!inspectionRecord) {
     inspectionRecord = await Inspection.create({
@@ -1449,11 +1623,7 @@ const upsertInspectionRecordForRequest = async ({
       vendor_requested: requestedQty,
       vendor_offered: toNonNegativeNumber(addProvision, 0),
       pending_after: pendingAfter,
-      cbm: {
-        top: String(qcDoc?.cbm?.top ?? "0"),
-        bottom: String(qcDoc?.cbm?.bottom ?? "0"),
-        total: String(qcDoc?.cbm?.total ?? "0"),
-      },
+      cbm: qcCbmSnapshot,
       label_ranges: labelRangesToAppend,
       labels_added: labelsToAppend,
       ...(normalizedGoodsNotReady
@@ -1499,11 +1669,7 @@ const upsertInspectionRecordForRequest = async ({
   inspectionRecord.pending_after = pendingAfter;
 
   if (replaceCbmSnapshot) {
-    inspectionRecord.cbm = {
-      top: String(qcDoc?.cbm?.top ?? "0"),
-      bottom: String(qcDoc?.cbm?.bottom ?? "0"),
-      total: String(qcDoc?.cbm?.total ?? "0"),
-    };
+    inspectionRecord.cbm = qcCbmSnapshot;
   }
 
   if (labelRangesToAppend.length > 0) {
@@ -2420,8 +2586,9 @@ exports.exportQCList = async (req, res) => {
       { key: "qc_passed", header: "QC Passed" },
       { key: "pending", header: "Pending" },
       { key: "qc_rejected", header: "QC Rejected" },
-      { key: "cbm_top", header: "CBM Top" },
-      { key: "cbm_bottom", header: "CBM Bottom" },
+      { key: "cbm_box1", header: "CBM Box 1" },
+      { key: "cbm_box2", header: "CBM Box 2" },
+      { key: "cbm_box3", header: "CBM Box 3" },
       { key: "cbm_total", header: "CBM Total" },
       { key: "barcode", header: "Barcode" },
       { key: "packed_size", header: "Packed Size" },
@@ -2551,9 +2718,18 @@ exports.exportQCList = async (req, res) => {
         qc_passed: toNonNegativeNumber(entry?.quantities?.qc_passed, 0),
         pending: toNonNegativeNumber(entry?.quantities?.pending, 0),
         qc_rejected: toNonNegativeNumber(entry?.quantities?.qc_rejected, 0),
-        cbm_top: normalizeText(entry?.cbm?.top || "0"),
-        cbm_bottom: normalizeText(entry?.cbm?.bottom || "0"),
-        cbm_total: normalizeText(entry?.cbm?.total || "0"),
+        cbm_box1: normalizeText(
+          buildNormalizedCbmSnapshot(entry?.cbm)?.box1 || "0",
+        ),
+        cbm_box2: normalizeText(
+          buildNormalizedCbmSnapshot(entry?.cbm)?.box2 || "0",
+        ),
+        cbm_box3: normalizeText(
+          buildNormalizedCbmSnapshot(entry?.cbm)?.box3 || "0",
+        ),
+        cbm_total: normalizeText(
+          buildNormalizedCbmSnapshot(entry?.cbm)?.total || "0",
+        ),
         barcode: toNonNegativeNumber(entry?.barcode, 0),
         packed_size: entry?.packed_size ? "Yes" : "No",
         finishing: entry?.finishing ? "Yes" : "No",
@@ -3138,6 +3314,9 @@ exports.updateQC = async (req, res) => {
       finishing,
       branding,
       last_inspected_date,
+      CBM_box1,
+      CBM_box2,
+      CBM_box3,
       CBM_top,
       CBM_bottom,
       CBM,
@@ -3319,7 +3498,12 @@ exports.updateQC = async (req, res) => {
       ──────────────────────── */
 
     const hasCbmUpdate =
-      CBM !== undefined || CBM_top !== undefined || CBM_bottom !== undefined;
+      CBM !== undefined ||
+      CBM_box1 !== undefined ||
+      CBM_box2 !== undefined ||
+      CBM_box3 !== undefined ||
+      CBM_top !== undefined ||
+      CBM_bottom !== undefined;
 
     const parseCbmField = (value, fieldName) => {
       if (value === undefined) return { hasInput: false, value: null };
@@ -3335,8 +3519,15 @@ exports.updateQC = async (req, res) => {
     };
 
     const parsedCbmTotal = parseCbmField(CBM, "CBM");
-    const parsedCbmTop = parseCbmField(CBM_top, "CBM top");
-    const parsedCbmBottom = parseCbmField(CBM_bottom, "CBM bottom");
+    const parsedCbmBox1 = parseCbmField(
+      CBM_box1 !== undefined ? CBM_box1 : CBM_top,
+      "CBM box1",
+    );
+    const parsedCbmBox2 = parseCbmField(
+      CBM_box2 !== undefined ? CBM_box2 : CBM_bottom,
+      "CBM box2",
+    );
+    const parsedCbmBox3 = parseCbmField(CBM_box3, "CBM box3");
 
     const parseSizeEntriesPayload = (
       value,
@@ -3860,9 +4051,11 @@ exports.updateQC = async (req, res) => {
         : itemDocForInspectedLbhUpdate?.inspected_box_bottom_LBH ||
           itemDocForInspectedLbhUpdate?.inspected_bottom_LBH ||
           {};
-    const existingCbmTotal = toNonNegativeNumber(qc?.cbm?.total, 0);
-    const existingCbmTop = toNonNegativeNumber(qc?.cbm?.top, 0);
-    const existingCbmBottom = toNonNegativeNumber(qc?.cbm?.bottom, 0);
+    const existingCbmSnapshot = buildNormalizedCbmSnapshot(qc?.cbm);
+    const existingCbmTotal = toNonNegativeNumber(existingCbmSnapshot?.total, 0);
+    const existingCbmBox1 = toNonNegativeNumber(existingCbmSnapshot?.box1, 0);
+    const existingCbmBox2 = toNonNegativeNumber(existingCbmSnapshot?.box2, 0);
+    const existingCbmBox3 = toNonNegativeNumber(existingCbmSnapshot?.box3, 0);
     const cbmLockedByLbh =
       hasCompletePositiveLbh(effectiveInspectedItemLbh) ||
       hasCompletePositiveLbh(effectiveInspectedItemTopLbh) ||
@@ -3879,24 +4072,21 @@ exports.updateQC = async (req, res) => {
     }
 
     if (hasCbmUpdate) {
-      let nextTotal = parsedCbmTotal.hasInput
-        ? parsedCbmTotal.value
-        : existingCbmTotal;
-      let nextTop = parsedCbmTop.hasInput ? parsedCbmTop.value : existingCbmTop;
-      let nextBottom = parsedCbmBottom.hasInput
-        ? parsedCbmBottom.value
-        : existingCbmBottom;
+      const hasExplicitBoxUpdate =
+        parsedCbmBox1.hasInput ||
+        parsedCbmBox2.hasInput ||
+        parsedCbmBox3.hasInput;
 
-      const hasTopAndBottom = nextTop > 0 && nextBottom > 0;
-      if (hasTopAndBottom) {
-        nextTotal = nextTop + nextBottom;
+      if (hasExplicitBoxUpdate) {
+        qc.cbm = buildNormalizedCbmSnapshot({
+          box1: parsedCbmBox1.hasInput ? parsedCbmBox1.value : existingCbmBox1,
+          box2: parsedCbmBox2.hasInput ? parsedCbmBox2.value : existingCbmBox2,
+          box3: parsedCbmBox3.hasInput ? parsedCbmBox3.value : existingCbmBox3,
+          total: parsedCbmTotal.hasInput ? parsedCbmTotal.value : existingCbmTotal,
+        });
+      } else if (parsedCbmTotal.hasInput) {
+        qc.cbm = buildSingleBoxCbmSnapshot(parsedCbmTotal.value);
       }
-
-      qc.cbm = {
-        top: toNormalizedCbmString(nextTop),
-        bottom: toNormalizedCbmString(nextBottom),
-        total: toNormalizedCbmString(nextTotal),
-      };
     }
 
     if (last_inspected_date !== undefined) {
@@ -4638,12 +4828,7 @@ exports.updateQC = async (req, res) => {
           nextInspectedTopLbh ||
           nextInspectedBottomLbh
         ) {
-          qc.cbm = {
-            ...(qc.cbm || {}),
-            top: calculatedInspectedTopCbm,
-            bottom: calculatedInspectedBottomCbm,
-            total: calculatedInspectedCbm,
-          };
+          qc.cbm = buildItemInspectedBoxCbmSnapshot(itemDoc);
         }
       }
 
@@ -5561,9 +5746,10 @@ exports.getWeeklyOrderSummary = async (req, res) => {
       includedPoMap.set(poKey, poMeta);
       inspectionInRangeByQcId.set(qcId, {
         inspection_date: resolveInspectionReportDateIso(snapshot),
-        goods_not_ready: Boolean(snapshot?.goods_not_ready?.ready),
-        goods_not_ready_reason: normalizeText(
-          snapshot?.goods_not_ready?.reason || snapshot?.remarks || "",
+        goods_not_ready: isGoodsNotReadyMarked(snapshot?.goods_not_ready),
+        goods_not_ready_reason: getGoodsNotReadyReason(
+          snapshot?.goods_not_ready,
+          snapshot?.remarks || "",
         ),
         inspector_id: String(snapshot?.inspector || "").trim(),
       });
@@ -5600,7 +5786,7 @@ exports.getWeeklyOrderSummary = async (req, res) => {
     const allPoQcDocs = await QC.find({
       "order_meta.order_id": { $in: includedOrderIds },
     })
-      .select("order order_meta item quantities")
+      .select("order order_meta item quantities cbm")
       .populate({
         path: "order",
         match: ACTIVE_ORDER_MATCH,
@@ -5619,6 +5805,29 @@ exports.getWeeklyOrderSummary = async (req, res) => {
       });
       return includedPoMap.has(poKey);
     });
+    const uniqueItemCodes = [
+      ...new Set(
+        includedQcDocs
+          .map((qcDoc) => normalizeText(qcDoc?.item?.item_code || ""))
+          .filter(Boolean),
+      ),
+    ];
+    const itemDocs = uniqueItemCodes.length > 0
+      ? await Item.find({
+          code: {
+            $in: uniqueItemCodes.map(
+              (itemCode) => new RegExp(`^${escapeRegex(itemCode)}$`, "i"),
+            ),
+          },
+        })
+          .select(
+            "code cbm inspected_item_LBH inspected_item_sizes inspected_item_top_LBH inspected_item_bottom_LBH inspected_box_LBH inspected_box_sizes inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH box_LBH pis_item_LBH pis_item_sizes pis_item_top_LBH pis_item_bottom_LBH pis_box_LBH pis_box_sizes pis_box_top_LBH pis_box_bottom_LBH",
+          )
+          .lean()
+      : [];
+    const itemDocByCodeKey = new Map(
+      itemDocs.map((itemDoc) => [normalizeItemCodeKey(itemDoc?.code), itemDoc]),
+    );
 
     const includedQcIds = includedQcDocs
       .map((entry) => entry?._id)
@@ -5696,18 +5905,27 @@ exports.getWeeklyOrderSummary = async (req, res) => {
       const poMeta = resolveWeeklySummaryPoMeta(qcDoc);
       const weeklyInspection = inspectionInRangeByQcId.get(qcId) || null;
       const latestOverallInspection = latestInspectionByQcId.get(qcId) || null;
+      const itemCode = normalizeText(qcDoc?.item?.item_code || "") || "N/A";
+      const itemDoc = itemDocByCodeKey.get(normalizeItemCodeKey(itemCode)) || null;
+      const quantityPassed = toNonNegativeNumber(qcDoc?.quantities?.qc_passed, 0);
+      const itemCbm = resolveWeeklySummaryCbmPerUnit(itemDoc, qcDoc);
+      const totalCbm = itemCbm > 0
+        ? toRoundedNumber(itemCbm * quantityPassed, 3)
+        : 0;
 
       return {
         order_id: poMeta.order_id || "N/A",
         vendor: poMeta.vendor || "N/A",
         brand: poMeta.brand || "N/A",
-        item_code: normalizeText(qcDoc?.item?.item_code || "") || "N/A",
+        item_code: itemCode,
         total_order_quantity: toNonNegativeNumber(
           qcDoc?.quantities?.client_demand ?? qcDoc?.order?.quantity,
           0,
         ),
         order_status: normalizeText(qcDoc?.order?.status || "") || "Pending",
-        quantity_passed: toNonNegativeNumber(qcDoc?.quantities?.qc_passed, 0),
+        quantity_passed: quantityPassed,
+        item_cbm: toRoundedNumber(itemCbm, 3),
+        total_cbm: totalCbm,
         pending: toNonNegativeNumber(qcDoc?.quantities?.pending, 0),
         goods_not_ready: Boolean(weeklyInspection?.goods_not_ready),
         goods_not_ready_reason: normalizeText(
@@ -5765,6 +5983,8 @@ exports.getWeeklyOrderSummary = async (req, res) => {
         total_order_quantity: row.total_order_quantity,
         order_status: row.order_status,
         quantity_passed: row.quantity_passed,
+        item_cbm: row.item_cbm,
+        total_cbm: row.total_cbm,
         pending: row.pending,
         goods_not_ready: row.goods_not_ready,
         goods_not_ready_reason: row.goods_not_ready_reason,
@@ -5861,6 +6081,7 @@ exports.getDailyOrderSummary = async (req, res) => {
           _id: "$qc",
           inspection_id: { $first: "$_id" },
           inspection_date: { $first: "$inspection_date" },
+          status: { $first: "$status" },
           requested_quantity: { $first: "$vendor_requested" },
           passed_quantity: { $first: "$passed" },
           open_quantity: { $first: "$pending_after" },
@@ -5927,6 +6148,7 @@ exports.getDailyOrderSummary = async (req, res) => {
           requested_quantity: 1,
           passed_quantity: 1,
           open_quantity: 1,
+          status: 1,
           goods_not_ready: 1,
           remarks: 1,
           inspection_date: 1,
@@ -5935,23 +6157,35 @@ exports.getDailyOrderSummary = async (req, res) => {
       },
     ]);
 
-    const normalizedRows = dailyRows.map((row) => ({
-      qc_id: String(row?.qc_id || "").trim(),
-      inspection_id: String(row?.inspection_id || "").trim(),
-      order_id: normalizeText(row?.order_id || "") || "N/A",
-      vendor: normalizeText(row?.vendor || "") || "N/A",
-      brand: normalizeText(row?.brand || "") || "N/A",
-      item_code: normalizeText(row?.item_code || "") || "N/A",
-      requested_quantity: toNonNegativeNumber(row?.requested_quantity, 0),
-      passed_quantity: toNonNegativeNumber(row?.passed_quantity, 0),
-      open_quantity: toNonNegativeNumber(row?.open_quantity, 0),
-      goods_not_ready: Boolean(row?.goods_not_ready?.ready),
-      goods_not_ready_reason: normalizeText(
-        row?.goods_not_ready?.reason || row?.remarks || "",
-      ),
-      inspector_name: normalizeText(row?.inspector_name || ""),
-      inspection_date: normalizeText(row?.inspection_date || ""),
-    }));
+    const normalizedRows = dailyRows.map((row) => {
+      const inspectionStatus = resolveInspectionRecordStatus({
+        goodsNotReady: row?.goods_not_ready,
+        explicitStatus: row?.status,
+      });
+      const isGoodsNotReady = isInspectionStatusMatching(
+        inspectionStatus,
+        INSPECTION_RECORD_STATUS.GOODS_NOT_READY,
+      );
+
+      return {
+        qc_id: String(row?.qc_id || "").trim(),
+        inspection_id: String(row?.inspection_id || "").trim(),
+        order_id: normalizeText(row?.order_id || "") || "N/A",
+        vendor: normalizeText(row?.vendor || "") || "N/A",
+        brand: normalizeText(row?.brand || "") || "N/A",
+        item_code: normalizeText(row?.item_code || "") || "N/A",
+        requested_quantity: toNonNegativeNumber(row?.requested_quantity, 0),
+        passed_quantity: toNonNegativeNumber(row?.passed_quantity, 0),
+        open_quantity: toNonNegativeNumber(row?.open_quantity, 0),
+        goods_not_ready: isGoodsNotReady,
+        goods_not_ready_reason: getGoodsNotReadyReason(
+          row?.goods_not_ready,
+          row?.remarks || "",
+        ),
+        inspector_name: normalizeText(row?.inspector_name || ""),
+        inspection_date: normalizeText(row?.inspection_date || ""),
+      };
+    });
 
     const brandOptions = normalizeDistinctValues(
       normalizedRows.map((row) => row?.brand || ""),
@@ -6578,12 +6812,6 @@ exports.getDailyReport = async (req, res) => {
       }
       return compareText(a?.item_code, b?.item_code);
     };
-    const getInspectionSortValue = (inspection = {}) =>
-      Math.max(
-        toSortableTimestamp(inspection?.inspection_date),
-        toSortableTimestamp(inspection?.createdAt),
-      );
-
     const [reportYear, reportMonth, reportDay] = String(reportDate).split("-");
     const inspectionDateVariants = [
       reportDate,
@@ -6687,26 +6915,19 @@ exports.getDailyReport = async (req, res) => {
         .lean()
       : [];
 
-    const latestInspectionByRequestKey = new Map();
+    const alignedRequestInspectionsByQcId = new Map();
     for (const inspection of alignedRequestInspections) {
       if (!isOnOrBeforeReportDate(inspection?.inspection_date || inspection?.createdAt)) {
         continue;
       }
 
-      const requestLookupKey = buildDailyRequestLookupKey({
-        qcId: inspection?.qc,
-        requestHistoryId: inspection?.request_history_id,
-        requestDate: inspection?.requested_date,
-      });
-      if (!requestLookupKey) continue;
+      const inspectionQcId = String(inspection?.qc || "").trim();
+      if (!inspectionQcId) continue;
 
-      const existingInspection = latestInspectionByRequestKey.get(requestLookupKey);
-      if (
-        !existingInspection ||
-        getInspectionSortValue(inspection) > getInspectionSortValue(existingInspection)
-      ) {
-        latestInspectionByRequestKey.set(requestLookupKey, inspection);
-      }
+      const groupedInspections =
+        alignedRequestInspectionsByQcId.get(inspectionQcId) || [];
+      groupedInspections.push(inspection);
+      alignedRequestInspectionsByQcId.set(inspectionQcId, groupedInspections);
     }
 
     const toInspectorSummary = (inspector = null) => {
@@ -6760,7 +6981,10 @@ exports.getDailyReport = async (req, res) => {
             requestHistoryId: requestEntry?.request_history_id,
             requestDate: requestDateKey,
           });
-          const latestInspection = latestInspectionByRequestKey.get(requestLookupKey);
+          const latestInspection = resolveLatestInspectionRecordForRequestEntry(
+            alignedRequestInspectionsByQcId.get(qcId) || [],
+            requestEntry,
+          );
           const hasInspectionActivity = hasInspectionRecordActivity({
             checked: latestInspection?.checked,
             passed: latestInspection?.passed,
@@ -6843,10 +7067,9 @@ exports.getDailyReport = async (req, res) => {
               ? normalizeText(latestInspection?.remarks || "")
               : "",
             goods_not_ready_reason: goodsNotReady
-              ? normalizeText(
-                  latestInspection?.goods_not_ready?.reason ||
-                    latestInspection?.remarks ||
-                    "",
+              ? getGoodsNotReadyReason(
+                  latestInspection?.goods_not_ready,
+                  latestInspection?.remarks || "",
                 )
               : "",
           };
@@ -6898,10 +7121,11 @@ exports.getDailyReport = async (req, res) => {
       );
       const hasReportCbm = reportCbmPerUnit > 0;
       const inspectedCbmTotal = hasReportCbm ? reportCbmPerUnit * inspectedQty : 0;
-      const cbmSnapshot =
+      const cbmSnapshot = buildNormalizedCbmSnapshot(
         inspection?.cbm && typeof inspection.cbm === "object"
           ? inspection.cbm
-          : qcRecord?.cbm || {};
+          : qcRecord?.cbm || {},
+      );
 
       entry.total_inspected_quantity += inspectedQty;
       entry.total_inspected_cbm += inspectedCbmTotal;
@@ -6930,14 +7154,18 @@ exports.getDailyReport = async (req, res) => {
         vendor_requested: Number(inspection?.vendor_requested || 0),
         vendor_offered: Number(inspection?.vendor_offered || 0),
         pending_after: Number(inspection?.pending_after || 0),
-        goods_not_ready: Boolean(inspection?.goods_not_ready?.ready),
+        goods_not_ready: isGoodsNotReadyMarked(
+          inspection?.goods_not_ready,
+          inspectionStatus,
+        ),
         inspection_status: inspectionStatus,
         is_transferred: isTransferred,
         transfer_note: isTransferred
           ? normalizeText(inspection?.remarks || "")
           : "",
-        goods_not_ready_reason: normalizeText(
-          inspection?.goods_not_ready?.reason || inspection?.remarks || "",
+        goods_not_ready_reason: getGoodsNotReadyReason(
+          inspection?.goods_not_ready,
+          inspection?.remarks || "",
         ),
         report_cbm_per_unit: hasReportCbm
           ? toRoundedNumber(reportCbmPerUnit, 3)
@@ -6945,11 +7173,7 @@ exports.getDailyReport = async (req, res) => {
         report_cbm_total: hasReportCbm
           ? toRoundedNumber(inspectedCbmTotal, 3)
           : null,
-        cbm: {
-          top: String(cbmSnapshot?.top ?? "0"),
-          bottom: String(cbmSnapshot?.bottom ?? "0"),
-          total: String(cbmSnapshot?.total ?? "0"),
-        },
+        cbm: cbmSnapshot,
         remarks: inspection?.remarks || "",
       });
     }
@@ -7884,18 +8108,43 @@ exports.editInspectionRecords = async (req, res) => {
       }
 
       const cbmInput = row?.cbm && typeof row.cbm === "object" ? row.cbm : null;
-      const cbmTop =
-        cbmInput?.top !== undefined
-          ? String(cbmInput.top ?? "0")
-          : String(record?.cbm?.top ?? "0");
-      const cbmBottom =
-        cbmInput?.bottom !== undefined
-          ? String(cbmInput.bottom ?? "0")
-          : String(record?.cbm?.bottom ?? "0");
-      const cbmTotal =
-        cbmInput?.total !== undefined
-          ? String(cbmInput.total ?? "0")
-          : String(record?.cbm?.total ?? "0");
+      const existingCbmSnapshot = buildNormalizedCbmSnapshot(record?.cbm);
+      const hasExplicitBoxUpdate = hasExplicitCbmBoxInput(cbmInput);
+      const hasExplicitTotalUpdate = cbmInput?.total !== undefined;
+      let nextCbmSnapshot = existingCbmSnapshot;
+
+      if (cbmInput) {
+        if (hasExplicitBoxUpdate) {
+          nextCbmSnapshot = buildNormalizedCbmSnapshot({
+            box1:
+              cbmInput?.box1 !== undefined
+                ? cbmInput.box1
+                : cbmInput?.top !== undefined
+                  ? cbmInput.top
+                  : existingCbmSnapshot.box1,
+            box2:
+              cbmInput?.box2 !== undefined
+                ? cbmInput.box2
+                : cbmInput?.bottom !== undefined
+                  ? cbmInput.bottom
+                  : existingCbmSnapshot.box2,
+            box3:
+              cbmInput?.box3 !== undefined
+                ? cbmInput.box3
+                : existingCbmSnapshot.box3,
+            total:
+              hasExplicitTotalUpdate
+                ? cbmInput.total
+                : existingCbmSnapshot.total,
+          });
+        } else if (hasExplicitTotalUpdate) {
+          nextCbmSnapshot =
+            toNonNegativeNumber(existingCbmSnapshot.total, 0) ===
+            toNonNegativeNumber(cbmInput.total, 0)
+              ? existingCbmSnapshot
+              : buildSingleBoxCbmSnapshot(cbmInput.total);
+        }
+      }
 
       const hasLabelRangesField = Array.isArray(row?.label_ranges);
       const labelsFieldInput = Array.isArray(row?.labels_added)
@@ -7973,11 +8222,7 @@ exports.editInspectionRecords = async (req, res) => {
       record.checked = checked;
       record.passed = passed;
       record.pending_after = pendingAfter;
-      record.cbm = {
-        top: cbmTop,
-        bottom: cbmBottom,
-        total: cbmTotal,
-      };
+      record.cbm = nextCbmSnapshot;
       record.status = resolveInspectionRecordStatus({
         checked,
         passed,

@@ -1,6 +1,7 @@
 const Item = require("../models/item.model");
 const Order = require("../models/order.model");
 const QC = require("../models/qc.model");
+const Inspection = require("../models/inspection.model");
 
 const normalizeText = (value) => String(value ?? "").trim();
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
@@ -19,13 +20,44 @@ const toDecimalString = (value, precision = 6) => {
   return fixed.replace(/\.?0+$/, "") || "0";
 };
 
-const resolveCbmTotal = (top, bottom, fallbackTotal) => {
-  const topValue = Math.max(0, toSafeNumber(top, 0));
-  const bottomValue = Math.max(0, toSafeNumber(bottom, 0));
-  if (topValue > 0 && bottomValue > 0) {
-    return toDecimalString(topValue + bottomValue, 6);
+const buildNormalizedCbmSnapshot = (value = {}) => {
+  const box1 = Math.max(0, toSafeNumber(value?.box1 ?? value?.top, 0));
+  const box2 = Math.max(0, toSafeNumber(value?.box2 ?? value?.bottom, 0));
+  const box3 = Math.max(0, toSafeNumber(value?.box3, 0));
+  const totalFromBoxes = box1 + box2 + box3;
+  const total =
+    totalFromBoxes > 0
+      ? totalFromBoxes
+      : Math.max(0, toSafeNumber(value?.total, 0));
+
+  return {
+    box1: toDecimalString(box1, 6),
+    box2: toDecimalString(box2, 6),
+    box3: toDecimalString(box3, 6),
+    total: toDecimalString(total, 6),
+  };
+};
+
+const buildMigratedCbmSnapshot = (value = {}) => {
+  const normalizedSnapshot = buildNormalizedCbmSnapshot(value);
+  const hasExplicitBoxes =
+    Math.max(0, toSafeNumber(normalizedSnapshot?.box1, 0)) > 0 ||
+    Math.max(0, toSafeNumber(normalizedSnapshot?.box2, 0)) > 0 ||
+    Math.max(0, toSafeNumber(normalizedSnapshot?.box3, 0)) > 0;
+
+  if (
+    !hasExplicitBoxes &&
+    Math.max(0, toSafeNumber(value?.total, 0)) > 0
+  ) {
+    return buildNormalizedCbmSnapshot({
+      box1: value?.total,
+      box2: 0,
+      box3: 0,
+      total: value?.total,
+    });
   }
-  return normalizeCbmText(fallbackTotal);
+
+  return normalizedSnapshot;
 };
 
 const calculateCbmFromBoxSize = (box = {}) => {
@@ -256,16 +288,15 @@ const applyQcSnapshot = (item, qcLike) => {
   }
 
   const currentCbm = item.cbm || {};
+  const normalizedQcCbm = buildNormalizedCbmSnapshot(qcLike?.cbm);
   const nextQcTop = normalizeCbmText(
-    qcLike?.cbm?.top ?? currentCbm.qc_top ?? "0",
+    normalizedQcCbm?.box1 ?? currentCbm.qc_top ?? "0",
   );
   const nextQcBottom = normalizeCbmText(
-    qcLike?.cbm?.bottom ?? currentCbm.qc_bottom ?? "0",
+    normalizedQcCbm?.box2 ?? currentCbm.qc_bottom ?? "0",
   );
-  const nextQcTotal = resolveCbmTotal(
-    nextQcTop,
-    nextQcBottom,
-    qcLike?.cbm?.total ?? currentCbm.qc_total ?? "0",
+  const nextQcTotal = normalizeCbmText(
+    normalizedQcCbm?.total ?? currentCbm.qc_total ?? "0",
   );
 
   if (
@@ -424,8 +455,8 @@ const upsertItemsFromQcs = async (qcs = []) => {
   };
 };
 
-const syncQCCbmTotalsFromTopBottom = async () => {
-  const qcs = await QC.find({
+const syncCbmSnapshotsForModel = async (Model) => {
+  const rows = await Model.find({
     cbm: { $exists: true, $ne: null },
   })
     .select("_id cbm")
@@ -436,29 +467,25 @@ const syncQCCbmTotalsFromTopBottom = async () => {
   let skipped = 0;
   const bulkOps = [];
 
-  for (const qcRow of qcs) {
+  for (const row of rows) {
     processed += 1;
 
-    const top = Math.max(0, toSafeNumber(qcRow?.cbm?.top, 0));
-    const bottom = Math.max(0, toSafeNumber(qcRow?.cbm?.bottom, 0));
-    const hasTopAndBottom = top > 0 && bottom > 0;
-    if (!hasTopAndBottom) {
-      skipped += 1;
-      continue;
-    }
+    const normalizedSnapshot = buildNormalizedCbmSnapshot(row?.cbm);
+    const hasLegacyTopBottom =
+      row?.cbm?.top !== undefined || row?.cbm?.bottom !== undefined;
+    const nextSnapshot = buildMigratedCbmSnapshot(row?.cbm);
 
-    const nextTop = toDecimalString(top, 6);
-    const nextBottom = toDecimalString(bottom, 6);
-    const nextTotal = toDecimalString(top + bottom, 6);
-
-    const currentTop = normalizeCbmText(qcRow?.cbm?.top ?? "0");
-    const currentBottom = normalizeCbmText(qcRow?.cbm?.bottom ?? "0");
-    const currentTotal = normalizeCbmText(qcRow?.cbm?.total ?? "0");
+    const currentBox1 = normalizeCbmText(row?.cbm?.box1 ?? "0");
+    const currentBox2 = normalizeCbmText(row?.cbm?.box2 ?? "0");
+    const currentBox3 = normalizeCbmText(row?.cbm?.box3 ?? "0");
+    const currentTotal = normalizeCbmText(row?.cbm?.total ?? "0");
 
     if (
-      currentTop === nextTop
-      && currentBottom === nextBottom
-      && currentTotal === nextTotal
+      !hasLegacyTopBottom &&
+      currentBox1 === nextSnapshot.box1
+      && currentBox2 === nextSnapshot.box2
+      && currentBox3 === nextSnapshot.box3
+      && currentTotal === nextSnapshot.total
     ) {
       skipped += 1;
       continue;
@@ -466,12 +493,17 @@ const syncQCCbmTotalsFromTopBottom = async () => {
 
     bulkOps.push({
       updateOne: {
-        filter: { _id: qcRow._id },
+        filter: { _id: row._id },
         update: {
           $set: {
-            "cbm.top": nextTop,
-            "cbm.bottom": nextBottom,
-            "cbm.total": nextTotal,
+            "cbm.box1": nextSnapshot.box1,
+            "cbm.box2": nextSnapshot.box2,
+            "cbm.box3": nextSnapshot.box3,
+            "cbm.total": nextSnapshot.total,
+          },
+          $unset: {
+            "cbm.top": "",
+            "cbm.bottom": "",
           },
         },
       },
@@ -480,7 +512,7 @@ const syncQCCbmTotalsFromTopBottom = async () => {
   }
 
   if (bulkOps.length > 0) {
-    await QC.bulkWrite(bulkOps, { ordered: false });
+    await Model.bulkWrite(bulkOps, { ordered: false });
   }
 
   return {
@@ -489,6 +521,9 @@ const syncQCCbmTotalsFromTopBottom = async () => {
     skipped,
   };
 };
+
+const syncQCCbmTotalsFromTopBottom = async () => syncCbmSnapshotsForModel(QC);
+const syncInspectionCbmSnapshots = async () => syncCbmSnapshotsForModel(Inspection);
 
 const syncDerivedFieldsForExistingItems = async () => {
   let processed = 0;
@@ -516,7 +551,10 @@ const syncDerivedFieldsForExistingItems = async () => {
 };
 
 const syncAllItemsFromOrdersAndQc = async () => {
-  const qcCbmSync = await syncQCCbmTotalsFromTopBottom();
+  const [qcCbmSync, inspectionCbmSync] = await Promise.all([
+    syncQCCbmTotalsFromTopBottom(),
+    syncInspectionCbmSnapshots(),
+  ]);
   const [orders, qcs] = await Promise.all([
     Order.find({ "item.item_code": { $exists: true, $ne: "" } })
       .select("item brand vendor")
@@ -537,6 +575,7 @@ const syncAllItemsFromOrdersAndQc = async () => {
   return {
     total_items: totalItems,
     qc_cbm_sync: qcCbmSync,
+    inspection_cbm_sync: inspectionCbmSync,
     order_sync: orderSync,
     qc_sync: qcSync,
     derived_sync: derivedSync,
@@ -549,5 +588,6 @@ module.exports = {
   upsertItemFromQc,
   upsertItemsFromQcs,
   syncQCCbmTotalsFromTopBottom,
+  syncInspectionCbmSnapshots,
   syncAllItemsFromOrdersAndQc,
 };

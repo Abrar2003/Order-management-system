@@ -51,8 +51,9 @@ const qcSchema = new mongoose.Schema(
     },
 
     cbm: {
-      top: { type: String, default: "0" },
-      bottom: { type: String, default: "0" },
+      box1: { type: String, default: "0" },
+      box2: { type: String, default: "0" },
+      box3: { type: String, default: "0" },
       total: { type: String, default: "0" },
     },
 

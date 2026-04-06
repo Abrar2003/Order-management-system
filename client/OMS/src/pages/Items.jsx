@@ -277,10 +277,13 @@ const Items = () => {
       const qcCreated = Number(res?.data?.summary?.qc_sync?.created || 0);
       const qcUpdated = Number(res?.data?.summary?.qc_sync?.updated || 0);
       const qcCbmUpdated = Number(res?.data?.summary?.qc_cbm_sync?.updated || 0);
+      const inspectionCbmUpdated = Number(
+        res?.data?.summary?.inspection_cbm_sync?.updated || 0,
+      );
       const derivedUpdated = Number(res?.data?.summary?.derived_sync?.updated || 0);
 
       setSuccess(
-        `Item sync complete. Total Items: ${totalItems}. QC CBM totals updated: ${qcCbmUpdated}. Orders created/updated: ${orderCreated}/${orderUpdated}. QC created/updated: ${qcCreated}/${qcUpdated}. Derived fields updated: ${derivedUpdated}.`,
+        `Item sync complete. Total Items: ${totalItems}. QC CBM updated: ${qcCbmUpdated}. Inspection CBM updated: ${inspectionCbmUpdated}. Orders created/updated: ${orderCreated}/${orderUpdated}. QC created/updated: ${qcCreated}/${qcUpdated}. Derived fields updated: ${derivedUpdated}.`,
       );
       await fetchItems();
     } catch (err) {

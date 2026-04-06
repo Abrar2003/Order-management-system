@@ -62,8 +62,9 @@ const InspectionSchema = new mongoose.Schema(
     pending_after: { type: Number, required: true, min: 0 },
 
     cbm: {
-      top: { type: String, default: "0" },
-      bottom: { type: String, default: "0" },
+      box1: { type: String, default: "0" },
+      box2: { type: String, default: "0" },
+      box3: { type: String, default: "0" },
       total: { type: String, default: "0" },
     },
 

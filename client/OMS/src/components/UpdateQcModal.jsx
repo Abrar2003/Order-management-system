@@ -1840,8 +1840,9 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   : qcPassed,
               pending_after: pendingAfterRewrite,
               cbm: {
-                top: String(updatedQc?.cbm?.top ?? "0"),
-                bottom: String(updatedQc?.cbm?.bottom ?? "0"),
+                box1: String(updatedQc?.cbm?.box1 ?? updatedQc?.cbm?.top ?? "0"),
+                box2: String(updatedQc?.cbm?.box2 ?? updatedQc?.cbm?.bottom ?? "0"),
+                box3: String(updatedQc?.cbm?.box3 ?? "0"),
                 total: String(updatedQc?.cbm?.total ?? "0"),
               },
               label_ranges: normalizedLabelRanges,
