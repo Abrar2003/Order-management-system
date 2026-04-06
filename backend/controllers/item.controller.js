@@ -88,45 +88,459 @@ const calculateCbmFromLbh = (box = {}) => {
   return fixed.replace(/\.?0+$/, "") || "0";
 };
 
+const toPositiveCbmNumber = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return parsed;
+};
+
+const SIZE_ENTRY_LIMIT = 3;
+const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
+  "top",
+  "base",
+  "item1",
+  "item2",
+  "item3",
+]);
+const BOX_SIZE_REMARK_OPTIONS = Object.freeze([
+  "top",
+  "base",
+  "box1",
+  "box2",
+  "box3",
+]);
+
+const WEIGHT_FIELD_KEYS = Object.freeze([
+  "top_net",
+  "top_gross",
+  "bottom_net",
+  "bottom_gross",
+  "total_net",
+  "total_gross",
+]);
+
+const LEGACY_WEIGHT_FALLBACK_BY_KEY = Object.freeze({
+  total_net: "net",
+  total_gross: "gross",
+});
+
+const hasCompletePositiveLbh = (dimensions = {}) =>
+  Number(dimensions?.L || 0) > 0 &&
+  Number(dimensions?.B || 0) > 0 &&
+  Number(dimensions?.H || 0) > 0;
+
+const normalizeStoredSizeEntries = (entries = [], { weightKey = "" } = {}) =>
+  (Array.isArray(entries) ? entries : [])
+    .map((entry) => {
+      const L = toSafeNumber(entry?.L, 0);
+      const B = toSafeNumber(entry?.B, 0);
+      const H = toSafeNumber(entry?.H, 0);
+      const remark = normalizeTextField(entry?.remark || entry?.type || "").toLowerCase();
+      const normalizedEntry = { L, B, H, remark };
+      if (weightKey) {
+        normalizedEntry[weightKey] = toSafeNumber(entry?.[weightKey], 0);
+      }
+      return normalizedEntry;
+    })
+    .filter((entry) => hasCompletePositiveLbh(entry))
+    .slice(0, SIZE_ENTRY_LIMIT);
+
+const sortSizeEntriesByRemark = (entries = [], remarkOptions = []) =>
+  [...(Array.isArray(entries) ? entries : [])].sort((left, right) => {
+    const leftIndex = remarkOptions.indexOf(
+      normalizeTextField(left?.remark || "").toLowerCase(),
+    );
+    const rightIndex = remarkOptions.indexOf(
+      normalizeTextField(right?.remark || "").toLowerCase(),
+    );
+    const safeLeftIndex = leftIndex >= 0 ? leftIndex : SIZE_ENTRY_LIMIT + 1;
+    const safeRightIndex = rightIndex >= 0 ? rightIndex : SIZE_ENTRY_LIMIT + 1;
+    return safeLeftIndex - safeRightIndex;
+  });
+
+const calculateSizeEntriesCbmTotal = (entries = []) =>
+  normalizeStoredSizeEntries(entries).reduce(
+    (sum, entry) => sum + toPositiveCbmNumber(calculateCbmFromLbh(entry)),
+    0,
+  );
+
+const buildSizeEntriesFromLegacy = ({
+  sizes = [],
+  singleLbh = null,
+  topLbh = null,
+  bottomLbh = null,
+  totalWeight = 0,
+  topWeight = 0,
+  bottomWeight = 0,
+  weightKey = "",
+  topRemark = "top",
+  bottomRemark = "base",
+} = {}) => {
+  const normalizedSizes = normalizeStoredSizeEntries(sizes, { weightKey });
+  if (normalizedSizes.length > 0) {
+    return normalizedSizes;
+  }
+
+  const legacyEntries = [];
+  if (hasCompletePositiveLbh(topLbh)) {
+    legacyEntries.push({
+      ...topLbh,
+      remark: topRemark,
+      ...(weightKey ? { [weightKey]: toSafeNumber(topWeight, 0) } : {}),
+    });
+  }
+  if (hasCompletePositiveLbh(bottomLbh)) {
+    legacyEntries.push({
+      ...bottomLbh,
+      remark: bottomRemark,
+      ...(weightKey ? { [weightKey]: toSafeNumber(bottomWeight, 0) } : {}),
+    });
+  }
+  if (legacyEntries.length > 0) {
+    return legacyEntries.slice(0, SIZE_ENTRY_LIMIT);
+  }
+
+  if (!hasCompletePositiveLbh(singleLbh)) {
+    return [];
+  }
+
+  return [
+    {
+      ...singleLbh,
+      remark: "",
+      ...(weightKey ? { [weightKey]: toSafeNumber(totalWeight, 0) } : {}),
+    },
+  ];
+};
+
+const buildLegacyLbhAndWeightFromSizeEntries = (
+  entries = [],
+  { weightKey = "", remarkOptions = [] } = {},
+) => {
+  const normalizedEntries = sortSizeEntriesByRemark(
+    normalizeStoredSizeEntries(entries, { weightKey }),
+    remarkOptions,
+  );
+
+  const toLbh = (entry = null) =>
+    hasCompletePositiveLbh(entry)
+      ? {
+          L: toSafeNumber(entry?.L, 0),
+          B: toSafeNumber(entry?.B, 0),
+          H: toSafeNumber(entry?.H, 0),
+        }
+      : { L: 0, B: 0, H: 0 };
+
+  const firstEntry = normalizedEntries[0] || null;
+  const secondEntry = normalizedEntries[1] || null;
+  const totalWeight = weightKey
+    ? normalizedEntries.reduce(
+        (sum, entry) => sum + toSafeNumber(entry?.[weightKey], 0),
+        0,
+      )
+    : 0;
+
+  if (normalizedEntries.length === 1) {
+    return {
+      single: toLbh(firstEntry),
+      top: { L: 0, B: 0, H: 0 },
+      bottom: { L: 0, B: 0, H: 0 },
+      totalWeight,
+      topWeight: 0,
+      bottomWeight: 0,
+    };
+  }
+
+  return {
+    single: { L: 0, B: 0, H: 0 },
+    top: toLbh(firstEntry),
+    bottom: toLbh(secondEntry),
+    totalWeight,
+    topWeight: weightKey ? toSafeNumber(firstEntry?.[weightKey], 0) : 0,
+    bottomWeight: weightKey ? toSafeNumber(secondEntry?.[weightKey], 0) : 0,
+  };
+};
+
+const buildWeightRecord = (weight = {}) =>
+  WEIGHT_FIELD_KEYS.reduce((accumulator, fieldKey) => {
+    const legacyKey = LEGACY_WEIGHT_FALLBACK_BY_KEY[fieldKey];
+    accumulator[fieldKey] = toSafeNumber(
+      weight?.[fieldKey] ?? (legacyKey ? weight?.[legacyKey] : undefined),
+      0,
+    );
+    return accumulator;
+  }, {});
+
+const buildLbhRecord = (dimensions = {}) => ({
+  L: toSafeNumber(dimensions?.L, 0),
+  B: toSafeNumber(dimensions?.B, 0),
+  H: toSafeNumber(dimensions?.H, 0),
+});
+
+const getPatchedLbhRecord = (currentValue = {}, payloadValue = {}, fieldLabelPrefix = "lbh") => {
+  const next = buildLbhRecord(currentValue);
+  let provided = false;
+
+  if (!payloadValue || typeof payloadValue !== "object") {
+    return { provided, value: next };
+  }
+
+  if (hasOwn(payloadValue, "L")) {
+    next.L = toNonNegativeNumber(payloadValue.L, `${fieldLabelPrefix}.L`);
+    provided = true;
+  }
+  if (hasOwn(payloadValue, "B")) {
+    next.B = toNonNegativeNumber(payloadValue.B, `${fieldLabelPrefix}.B`);
+    provided = true;
+  }
+  if (hasOwn(payloadValue, "H")) {
+    next.H = toNonNegativeNumber(payloadValue.H, `${fieldLabelPrefix}.H`);
+    provided = true;
+  }
+
+  return { provided, value: next };
+};
+
+const getPayloadWeightField = (payloadWeight = {}, fieldKey = "", fieldLabelPrefix = "weight") => {
+  if (!payloadWeight || typeof payloadWeight !== "object") {
+    return { provided: false, value: 0 };
+  }
+
+  if (hasOwn(payloadWeight, fieldKey)) {
+    return {
+      provided: true,
+      value: toNonNegativeNumber(payloadWeight[fieldKey], `${fieldLabelPrefix}.${fieldKey}`),
+    };
+  }
+
+  const legacyKey = LEGACY_WEIGHT_FALLBACK_BY_KEY[fieldKey];
+  if (legacyKey && hasOwn(payloadWeight, legacyKey)) {
+    return {
+      provided: true,
+      value: toNonNegativeNumber(payloadWeight[legacyKey], `${fieldLabelPrefix}.${legacyKey}`),
+    };
+  }
+
+  return { provided: false, value: 0 };
+};
+
+const buildMeasurementCbmSummary = ({
+  sizes = [],
+  singleLbh = null,
+  topLbh = null,
+  bottomLbh = null,
+  remarkOptions = [],
+} = {}) => {
+  const normalizedEntries = sortSizeEntriesByRemark(
+    buildSizeEntriesFromLegacy({
+      sizes,
+      singleLbh,
+      topLbh,
+      bottomLbh,
+    }),
+    remarkOptions,
+  ).slice(0, SIZE_ENTRY_LIMIT);
+
+  if (normalizedEntries.length > 0) {
+    const first = calculateCbmFromLbh(normalizedEntries[0] || {});
+    const second = calculateCbmFromLbh(normalizedEntries[1] || {});
+    const third = calculateCbmFromLbh(normalizedEntries[2] || {});
+    const total = normalizedEntries.reduce(
+      (sum, entry) => sum + toPositiveCbmNumber(calculateCbmFromLbh(entry)),
+      0,
+    );
+
+    return {
+      first,
+      second,
+      third,
+      total: toNormalizedDecimalText(total, "cbm.total"),
+    };
+  }
+
+  const first = calculateCbmFromLbh(topLbh || {});
+  const second = calculateCbmFromLbh(bottomLbh || {});
+  const topAndBottomTotal =
+    toPositiveCbmNumber(first) > 0 && toPositiveCbmNumber(second) > 0
+      ? toPositiveCbmNumber(first) + toPositiveCbmNumber(second)
+      : 0;
+
+  return {
+    first,
+    second,
+    third: "0",
+    total:
+      topAndBottomTotal > 0
+        ? toNormalizedDecimalText(topAndBottomTotal, "cbm.total")
+        : calculateCbmFromLbh(singleLbh || {}),
+  };
+};
+
+const parseSizeEntriesPayload = (
+  entries = [],
+  { fieldLabel = "size entries", remarkOptions = [], weightKey = "", weightLabel = "weight" } = {},
+) => {
+  if (!Array.isArray(entries)) {
+    throw new Error(`${fieldLabel} must be an array`);
+  }
+
+  if (entries.length > SIZE_ENTRY_LIMIT) {
+    throw new Error(`${fieldLabel} cannot exceed ${SIZE_ENTRY_LIMIT} entries`);
+  }
+
+  const allowedRemarks = Array.isArray(remarkOptions) ? remarkOptions : [];
+  const seenRemarks = new Set();
+
+  return entries.map((entry, index) => {
+    const entryLabel = `${fieldLabel} ${index + 1}`;
+    const L = toNonNegativeNumber(entry?.L, `${entryLabel}.L`);
+    const B = toNonNegativeNumber(entry?.B, `${entryLabel}.B`);
+    const H = toNonNegativeNumber(entry?.H, `${entryLabel}.H`);
+
+    if (L <= 0 || B <= 0 || H <= 0) {
+      throw new Error(`${entryLabel} must have positive L, B, and H values`);
+    }
+
+    const normalizedRemark = normalizeTextField(entry?.remark || "").toLowerCase();
+    if (entries.length > 1) {
+      if (!normalizedRemark) {
+        throw new Error(`${entryLabel}.remark is required`);
+      }
+      if (!allowedRemarks.includes(normalizedRemark)) {
+        throw new Error(`${entryLabel}.remark is invalid`);
+      }
+      if (seenRemarks.has(normalizedRemark)) {
+        throw new Error(`${fieldLabel} remarks must be unique`);
+      }
+      seenRemarks.add(normalizedRemark);
+    }
+
+    const parsedEntry = {
+      L,
+      B,
+      H,
+      remark: entries.length > 1 ? normalizedRemark : "",
+    };
+
+    if (weightKey) {
+      const parsedWeight = toNonNegativeNumber(
+        entry?.[weightKey],
+        `${entryLabel}.${weightLabel}`,
+      );
+      if (parsedWeight <= 0) {
+        throw new Error(`${entryLabel}.${weightLabel} must be greater than 0`);
+      }
+      parsedEntry[weightKey] = parsedWeight;
+    }
+
+    return parsedEntry;
+  });
+};
+
 const applyCalculatedCbmTotals = (item, setPath) => {
-  const inspectedTopCbm = calculateCbmFromLbh(
-    item?.inspected_box_top_LBH
-    || item?.inspected_top_LBH
-    || item?.inspected_item_top_LBH
-    || {},
-  );
-  const inspectedBottomCbm = calculateCbmFromLbh(
-    item?.inspected_box_bottom_LBH
-    || item?.inspected_bottom_LBH
-    || item?.inspected_item_bottom_LBH
-    || {},
-  );
-  const hasSplitInspected =
-    Number(inspectedTopCbm) > 0 && Number(inspectedBottomCbm) > 0;
-  const calculatedFromInspected = calculateCbmFromLbh(
-    item?.inspected_box_LBH
-    || item?.box_LBH
-    || item?.inspected_item_LBH
-    || {},
-  );
-  const inspectedTotal = hasSplitInspected
-    ? toNormalizedDecimalText(Number(inspectedTopCbm) + Number(inspectedBottomCbm), "cbm.inspected_total")
-    : calculatedFromInspected;
+  const inspectedSummary =
+    calculateSizeEntriesCbmTotal(item?.inspected_box_sizes) > 0
+      ? buildMeasurementCbmSummary({
+          sizes: item?.inspected_box_sizes,
+          singleLbh: item?.inspected_box_LBH || item?.box_LBH,
+          topLbh: item?.inspected_box_top_LBH || item?.inspected_top_LBH,
+          bottomLbh: item?.inspected_box_bottom_LBH || item?.inspected_bottom_LBH,
+          remarkOptions: BOX_SIZE_REMARK_OPTIONS,
+        })
+      : buildMeasurementCbmSummary({
+          sizes: item?.inspected_item_sizes,
+          singleLbh: item?.inspected_item_LBH || item?.item_LBH,
+          topLbh: item?.inspected_item_top_LBH,
+          bottomLbh: item?.inspected_item_bottom_LBH,
+          remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
+        });
 
-  const pisTopCbm = calculateCbmFromLbh(item?.pis_box_top_LBH || item?.pis_item_top_LBH || {});
-  const pisBottomCbm = calculateCbmFromLbh(item?.pis_box_bottom_LBH || item?.pis_item_bottom_LBH || {});
-  const hasSplitPis = Number(pisTopCbm) > 0 && Number(pisBottomCbm) > 0;
-  const calculatedFromPis = calculateCbmFromLbh(
-    item?.pis_box_LBH || item?.box_LBH || item?.pis_item_LBH || {},
-  );
-  const pisTotal = hasSplitPis
-    ? toNormalizedDecimalText(Number(pisTopCbm) + Number(pisBottomCbm), "cbm.calculated_pis_total")
-    : calculatedFromPis;
+  const pisSummary =
+    calculateSizeEntriesCbmTotal(item?.pis_box_sizes) > 0
+      ? buildMeasurementCbmSummary({
+          sizes: item?.pis_box_sizes,
+          singleLbh: item?.pis_box_LBH || item?.box_LBH,
+          topLbh: item?.pis_box_top_LBH,
+          bottomLbh: item?.pis_box_bottom_LBH,
+          remarkOptions: BOX_SIZE_REMARK_OPTIONS,
+        })
+      : buildMeasurementCbmSummary({
+          sizes: item?.pis_item_sizes,
+          singleLbh: item?.pis_item_LBH || item?.item_LBH,
+          topLbh: item?.pis_item_top_LBH,
+          bottomLbh: item?.pis_item_bottom_LBH,
+          remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
+        });
 
-  setPath("cbm.inspected_total", inspectedTotal);
-  setPath("cbm.calculated_inspected_total", inspectedTotal);
-  setPath("cbm.calculated_pis_total", pisTotal);
-  setPath("cbm.calculated_total", inspectedTotal);
+  const hasDerivedInspectedCbm = toPositiveCbmNumber(inspectedSummary.total) > 0;
+  const hasDerivedPisCbm = toPositiveCbmNumber(pisSummary.total) > 0;
+
+  setPath(
+    "cbm.inspected_top",
+    hasDerivedInspectedCbm
+      ? inspectedSummary.first
+      : toNormalizedDecimalText(item?.cbm?.inspected_top ?? 0, "cbm.inspected_top"),
+  );
+  setPath(
+    "cbm.inspected_bottom",
+    hasDerivedInspectedCbm
+      ? inspectedSummary.second
+      : toNormalizedDecimalText(item?.cbm?.inspected_bottom ?? 0, "cbm.inspected_bottom"),
+  );
+  setPath(
+    "cbm.inspected_total",
+    hasDerivedInspectedCbm
+      ? inspectedSummary.total
+      : toNormalizedDecimalText(item?.cbm?.inspected_total ?? 0, "cbm.inspected_total"),
+  );
+  setPath(
+    "cbm.calculated_inspected_total",
+    hasDerivedInspectedCbm
+      ? inspectedSummary.total
+      : toNormalizedDecimalText(
+          item?.cbm?.calculated_inspected_total ?? item?.cbm?.inspected_total ?? 0,
+          "cbm.calculated_inspected_total",
+        ),
+  );
+  setPath(
+    "cbm.top",
+    hasDerivedPisCbm
+      ? pisSummary.first
+      : toNormalizedDecimalText(item?.cbm?.top ?? 0, "cbm.top"),
+  );
+  setPath(
+    "cbm.bottom",
+    hasDerivedPisCbm
+      ? pisSummary.second
+      : toNormalizedDecimalText(item?.cbm?.bottom ?? 0, "cbm.bottom"),
+  );
+  setPath(
+    "cbm.total",
+    hasDerivedPisCbm
+      ? pisSummary.total
+      : toNormalizedDecimalText(item?.cbm?.total ?? 0, "cbm.total"),
+  );
+  setPath(
+    "cbm.calculated_pis_total",
+    hasDerivedPisCbm
+      ? pisSummary.total
+      : toNormalizedDecimalText(
+          item?.cbm?.calculated_pis_total ?? item?.cbm?.total ?? 0,
+          "cbm.calculated_pis_total",
+        ),
+  );
+  setPath(
+    "cbm.calculated_total",
+    hasDerivedInspectedCbm
+      ? inspectedSummary.total
+      : toNormalizedDecimalText(
+          item?.cbm?.calculated_total
+          ?? item?.cbm?.calculated_inspected_total
+          ?? item?.cbm?.inspected_total
+          ?? 0,
+          "cbm.calculated_total",
+        ),
+  );
 };
 
 const normalizeDistinctValues = (values = []) =>
@@ -591,9 +1005,11 @@ exports.updateItem = async (req, res) => {
       "pis_item_LBH",
       "pis_item_top_LBH",
       "pis_item_bottom_LBH",
+      "pis_item_sizes",
       "pis_box_LBH",
       "pis_box_top_LBH",
       "pis_box_bottom_LBH",
+      "pis_box_sizes",
     ];
     const touchedLockedFields = lockedFields.filter((field) => hasOwn(payload, field));
     if (touchedLockedFields.length > 0) {
@@ -616,6 +1032,8 @@ exports.updateItem = async (req, res) => {
       item.set(path, value);
       touched = true;
     };
+    const nextInspectedWeight = buildWeightRecord(item?.inspected_weight);
+    let inspectedWeightTouched = false;
 
     if (hasOwn(payload, "name")) {
       setPath("name", normalizeTextField(payload.name));
@@ -626,60 +1044,128 @@ exports.updateItem = async (req, res) => {
     }
 
     if (payload?.inspected_weight && typeof payload.inspected_weight === "object") {
-      if (hasOwn(payload.inspected_weight, "net")) {
-        setPath(
-          "inspected_weight.net",
-          toNonNegativeNumber(payload.inspected_weight.net, "inspected_weight.net"),
+      for (const fieldKey of WEIGHT_FIELD_KEYS) {
+        const parsedField = getPayloadWeightField(
+          payload.inspected_weight,
+          fieldKey,
+          "inspected_weight",
         );
-      }
-      if (hasOwn(payload.inspected_weight, "gross")) {
-        setPath(
-          "inspected_weight.gross",
-          toNonNegativeNumber(payload.inspected_weight.gross, "inspected_weight.gross"),
-        );
+        if (!parsedField.provided) continue;
+        nextInspectedWeight[fieldKey] = parsedField.value;
+        inspectedWeightTouched = true;
       }
     }
 
-    if (payload?.inspected_item_LBH && typeof payload.inspected_item_LBH === "object") {
-      if (hasOwn(payload.inspected_item_LBH, "L")) {
-        setPath(
-          "inspected_item_LBH.L",
-          toNonNegativeNumber(payload.inspected_item_LBH.L, "inspected_item_LBH.L"),
-        );
-      }
-      if (hasOwn(payload.inspected_item_LBH, "B")) {
-        setPath(
-          "inspected_item_LBH.B",
-          toNonNegativeNumber(payload.inspected_item_LBH.B, "inspected_item_LBH.B"),
-        );
-      }
-      if (hasOwn(payload.inspected_item_LBH, "H")) {
-        setPath(
-          "inspected_item_LBH.H",
-          toNonNegativeNumber(payload.inspected_item_LBH.H, "inspected_item_LBH.H"),
-        );
-      }
+    const patchedInspectedItemLbh = getPatchedLbhRecord(
+      item?.inspected_item_LBH,
+      payload?.inspected_item_LBH,
+      "inspected_item_LBH",
+    );
+    if (patchedInspectedItemLbh.provided) {
+      setPath("inspected_item_LBH", patchedInspectedItemLbh.value);
     }
 
-    if (payload?.inspected_box_LBH && typeof payload.inspected_box_LBH === "object") {
-      if (hasOwn(payload.inspected_box_LBH, "L")) {
-        setPath(
-          "inspected_box_LBH.L",
-          toNonNegativeNumber(payload.inspected_box_LBH.L, "inspected_box_LBH.L"),
-        );
-      }
-      if (hasOwn(payload.inspected_box_LBH, "B")) {
-        setPath(
-          "inspected_box_LBH.B",
-          toNonNegativeNumber(payload.inspected_box_LBH.B, "inspected_box_LBH.B"),
-        );
-      }
-      if (hasOwn(payload.inspected_box_LBH, "H")) {
-        setPath(
-          "inspected_box_LBH.H",
-          toNonNegativeNumber(payload.inspected_box_LBH.H, "inspected_box_LBH.H"),
-        );
-      }
+    const patchedInspectedItemTopLbh = getPatchedLbhRecord(
+      item?.inspected_item_top_LBH,
+      payload?.inspected_item_top_LBH,
+      "inspected_item_top_LBH",
+    );
+    if (patchedInspectedItemTopLbh.provided) {
+      setPath("inspected_item_top_LBH", patchedInspectedItemTopLbh.value);
+    }
+
+    const patchedInspectedItemBottomLbh = getPatchedLbhRecord(
+      item?.inspected_item_bottom_LBH,
+      payload?.inspected_item_bottom_LBH,
+      "inspected_item_bottom_LBH",
+    );
+    if (patchedInspectedItemBottomLbh.provided) {
+      setPath("inspected_item_bottom_LBH", patchedInspectedItemBottomLbh.value);
+    }
+
+    const patchedInspectedBoxLbh = getPatchedLbhRecord(
+      item?.inspected_box_LBH,
+      payload?.inspected_box_LBH,
+      "inspected_box_LBH",
+    );
+    if (patchedInspectedBoxLbh.provided) {
+      setPath("inspected_box_LBH", patchedInspectedBoxLbh.value);
+    }
+
+    const patchedInspectedBoxTopLbh = getPatchedLbhRecord(
+      item?.inspected_box_top_LBH || item?.inspected_top_LBH,
+      payload?.inspected_box_top_LBH || payload?.inspected_top_LBH,
+      hasOwn(payload || {}, "inspected_box_top_LBH")
+        ? "inspected_box_top_LBH"
+        : "inspected_top_LBH",
+    );
+    if (patchedInspectedBoxTopLbh.provided) {
+      setPath("inspected_box_top_LBH", patchedInspectedBoxTopLbh.value);
+      setPath("inspected_top_LBH", patchedInspectedBoxTopLbh.value);
+    }
+
+    const patchedInspectedBoxBottomLbh = getPatchedLbhRecord(
+      item?.inspected_box_bottom_LBH || item?.inspected_bottom_LBH,
+      payload?.inspected_box_bottom_LBH || payload?.inspected_bottom_LBH,
+      hasOwn(payload || {}, "inspected_box_bottom_LBH")
+        ? "inspected_box_bottom_LBH"
+        : "inspected_bottom_LBH",
+    );
+    if (patchedInspectedBoxBottomLbh.provided) {
+      setPath("inspected_box_bottom_LBH", patchedInspectedBoxBottomLbh.value);
+      setPath("inspected_bottom_LBH", patchedInspectedBoxBottomLbh.value);
+    }
+
+    if (hasOwn(payload, "inspected_item_sizes")) {
+      const parsedInspectedItemSizes = parseSizeEntriesPayload(payload.inspected_item_sizes, {
+        fieldLabel: "inspected_item_sizes",
+        remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
+        weightKey: "net_weight",
+        weightLabel: "net_weight",
+      });
+      const derivedItemLegacy = buildLegacyLbhAndWeightFromSizeEntries(
+        parsedInspectedItemSizes,
+        {
+          weightKey: "net_weight",
+          remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
+        },
+      );
+
+      setPath("inspected_item_sizes", parsedInspectedItemSizes);
+      setPath("inspected_item_LBH", derivedItemLegacy.single);
+      setPath("inspected_item_top_LBH", derivedItemLegacy.top);
+      setPath("inspected_item_bottom_LBH", derivedItemLegacy.bottom);
+      nextInspectedWeight.top_net = derivedItemLegacy.topWeight;
+      nextInspectedWeight.bottom_net = derivedItemLegacy.bottomWeight;
+      nextInspectedWeight.total_net = derivedItemLegacy.totalWeight;
+      inspectedWeightTouched = true;
+    }
+
+    if (hasOwn(payload, "inspected_box_sizes")) {
+      const parsedInspectedBoxSizes = parseSizeEntriesPayload(payload.inspected_box_sizes, {
+        fieldLabel: "inspected_box_sizes",
+        remarkOptions: BOX_SIZE_REMARK_OPTIONS,
+        weightKey: "gross_weight",
+        weightLabel: "gross_weight",
+      });
+      const derivedBoxLegacy = buildLegacyLbhAndWeightFromSizeEntries(
+        parsedInspectedBoxSizes,
+        {
+          weightKey: "gross_weight",
+          remarkOptions: BOX_SIZE_REMARK_OPTIONS,
+        },
+      );
+
+      setPath("inspected_box_sizes", parsedInspectedBoxSizes);
+      setPath("inspected_box_LBH", derivedBoxLegacy.single);
+      setPath("inspected_box_top_LBH", derivedBoxLegacy.top);
+      setPath("inspected_top_LBH", derivedBoxLegacy.top);
+      setPath("inspected_box_bottom_LBH", derivedBoxLegacy.bottom);
+      setPath("inspected_bottom_LBH", derivedBoxLegacy.bottom);
+      nextInspectedWeight.top_gross = derivedBoxLegacy.topWeight;
+      nextInspectedWeight.bottom_gross = derivedBoxLegacy.bottomWeight;
+      nextInspectedWeight.total_gross = derivedBoxLegacy.totalWeight;
+      inspectedWeightTouched = true;
     }
 
     if (payload?.cbm && typeof payload.cbm === "object") {
@@ -710,6 +1196,10 @@ exports.updateItem = async (req, res) => {
           toNormalizedDecimalText(payload.cbm.inspected_total, "cbm.inspected_total"),
         );
       }
+    }
+
+    if (inspectedWeightTouched) {
+      setPath("inspected_weight", nextInspectedWeight);
     }
 
     if (payload?.qc && typeof payload.qc === "object") {
@@ -817,19 +1307,19 @@ exports.updateItemPis = async (req, res) => {
       item.set(path, value);
       touched = true;
     };
+    const nextPisWeight = buildWeightRecord(item?.pis_weight);
+    let pisWeightTouched = false;
 
     if (payload?.pis_weight && typeof payload.pis_weight === "object") {
-      if (hasOwn(payload.pis_weight, "net")) {
-        setPath(
-          "pis_weight.net",
-          toNonNegativeNumber(payload.pis_weight.net, "pis_weight.net"),
+      for (const fieldKey of WEIGHT_FIELD_KEYS) {
+        const parsedField = getPayloadWeightField(
+          payload.pis_weight,
+          fieldKey,
+          "pis_weight",
         );
-      }
-      if (hasOwn(payload.pis_weight, "gross")) {
-        setPath(
-          "pis_weight.gross",
-          toNonNegativeNumber(payload.pis_weight.gross, "pis_weight.gross"),
-        );
+        if (!parsedField.provided) continue;
+        nextPisWeight[fieldKey] = parsedField.value;
+        pisWeightTouched = true;
       }
     }
 
@@ -837,130 +1327,112 @@ exports.updateItemPis = async (req, res) => {
       setPath("pis_barcode", normalizeTextField(payload.pis_barcode));
     }
 
-    if (payload?.pis_item_LBH && typeof payload.pis_item_LBH === "object") {
-      if (hasOwn(payload.pis_item_LBH, "L")) {
-        setPath(
-          "pis_item_LBH.L",
-          toNonNegativeNumber(payload.pis_item_LBH.L, "pis_item_LBH.L"),
-        );
-      }
-      if (hasOwn(payload.pis_item_LBH, "B")) {
-        setPath(
-          "pis_item_LBH.B",
-          toNonNegativeNumber(payload.pis_item_LBH.B, "pis_item_LBH.B"),
-        );
-      }
-      if (hasOwn(payload.pis_item_LBH, "H")) {
-        setPath(
-          "pis_item_LBH.H",
-          toNonNegativeNumber(payload.pis_item_LBH.H, "pis_item_LBH.H"),
-        );
-      }
+    const patchedPisItemLbh = getPatchedLbhRecord(
+      item?.pis_item_LBH,
+      payload?.pis_item_LBH,
+      "pis_item_LBH",
+    );
+    if (patchedPisItemLbh.provided) {
+      setPath("pis_item_LBH", patchedPisItemLbh.value);
     }
 
-    if (payload?.pis_item_top_LBH && typeof payload.pis_item_top_LBH === "object") {
-      if (hasOwn(payload.pis_item_top_LBH, "L")) {
-        setPath(
-          "pis_item_top_LBH.L",
-          toNonNegativeNumber(payload.pis_item_top_LBH.L, "pis_item_top_LBH.L"),
-        );
-      }
-      if (hasOwn(payload.pis_item_top_LBH, "B")) {
-        setPath(
-          "pis_item_top_LBH.B",
-          toNonNegativeNumber(payload.pis_item_top_LBH.B, "pis_item_top_LBH.B"),
-        );
-      }
-      if (hasOwn(payload.pis_item_top_LBH, "H")) {
-        setPath(
-          "pis_item_top_LBH.H",
-          toNonNegativeNumber(payload.pis_item_top_LBH.H, "pis_item_top_LBH.H"),
-        );
-      }
+    const patchedPisItemTopLbh = getPatchedLbhRecord(
+      item?.pis_item_top_LBH,
+      payload?.pis_item_top_LBH,
+      "pis_item_top_LBH",
+    );
+    if (patchedPisItemTopLbh.provided) {
+      setPath("pis_item_top_LBH", patchedPisItemTopLbh.value);
     }
 
-    if (payload?.pis_item_bottom_LBH && typeof payload.pis_item_bottom_LBH === "object") {
-      if (hasOwn(payload.pis_item_bottom_LBH, "L")) {
-        setPath(
-          "pis_item_bottom_LBH.L",
-          toNonNegativeNumber(payload.pis_item_bottom_LBH.L, "pis_item_bottom_LBH.L"),
-        );
-      }
-      if (hasOwn(payload.pis_item_bottom_LBH, "B")) {
-        setPath(
-          "pis_item_bottom_LBH.B",
-          toNonNegativeNumber(payload.pis_item_bottom_LBH.B, "pis_item_bottom_LBH.B"),
-        );
-      }
-      if (hasOwn(payload.pis_item_bottom_LBH, "H")) {
-        setPath(
-          "pis_item_bottom_LBH.H",
-          toNonNegativeNumber(payload.pis_item_bottom_LBH.H, "pis_item_bottom_LBH.H"),
-        );
-      }
+    const patchedPisItemBottomLbh = getPatchedLbhRecord(
+      item?.pis_item_bottom_LBH,
+      payload?.pis_item_bottom_LBH,
+      "pis_item_bottom_LBH",
+    );
+    if (patchedPisItemBottomLbh.provided) {
+      setPath("pis_item_bottom_LBH", patchedPisItemBottomLbh.value);
     }
 
-    if (payload?.pis_box_LBH && typeof payload.pis_box_LBH === "object") {
-      if (hasOwn(payload.pis_box_LBH, "L")) {
-        setPath(
-          "pis_box_LBH.L",
-          toNonNegativeNumber(payload.pis_box_LBH.L, "pis_box_LBH.L"),
-        );
-      }
-      if (hasOwn(payload.pis_box_LBH, "B")) {
-        setPath(
-          "pis_box_LBH.B",
-          toNonNegativeNumber(payload.pis_box_LBH.B, "pis_box_LBH.B"),
-        );
-      }
-      if (hasOwn(payload.pis_box_LBH, "H")) {
-        setPath(
-          "pis_box_LBH.H",
-          toNonNegativeNumber(payload.pis_box_LBH.H, "pis_box_LBH.H"),
-        );
-      }
+    const patchedPisBoxLbh = getPatchedLbhRecord(
+      item?.pis_box_LBH,
+      payload?.pis_box_LBH,
+      "pis_box_LBH",
+    );
+    if (patchedPisBoxLbh.provided) {
+      setPath("pis_box_LBH", patchedPisBoxLbh.value);
     }
 
-    if (payload?.pis_box_top_LBH && typeof payload.pis_box_top_LBH === "object") {
-      if (hasOwn(payload.pis_box_top_LBH, "L")) {
-        setPath(
-          "pis_box_top_LBH.L",
-          toNonNegativeNumber(payload.pis_box_top_LBH.L, "pis_box_top_LBH.L"),
-        );
-      }
-      if (hasOwn(payload.pis_box_top_LBH, "B")) {
-        setPath(
-          "pis_box_top_LBH.B",
-          toNonNegativeNumber(payload.pis_box_top_LBH.B, "pis_box_top_LBH.B"),
-        );
-      }
-      if (hasOwn(payload.pis_box_top_LBH, "H")) {
-        setPath(
-          "pis_box_top_LBH.H",
-          toNonNegativeNumber(payload.pis_box_top_LBH.H, "pis_box_top_LBH.H"),
-        );
-      }
+    const patchedPisBoxTopLbh = getPatchedLbhRecord(
+      item?.pis_box_top_LBH,
+      payload?.pis_box_top_LBH,
+      "pis_box_top_LBH",
+    );
+    if (patchedPisBoxTopLbh.provided) {
+      setPath("pis_box_top_LBH", patchedPisBoxTopLbh.value);
     }
 
-    if (payload?.pis_box_bottom_LBH && typeof payload.pis_box_bottom_LBH === "object") {
-      if (hasOwn(payload.pis_box_bottom_LBH, "L")) {
-        setPath(
-          "pis_box_bottom_LBH.L",
-          toNonNegativeNumber(payload.pis_box_bottom_LBH.L, "pis_box_bottom_LBH.L"),
-        );
-      }
-      if (hasOwn(payload.pis_box_bottom_LBH, "B")) {
-        setPath(
-          "pis_box_bottom_LBH.B",
-          toNonNegativeNumber(payload.pis_box_bottom_LBH.B, "pis_box_bottom_LBH.B"),
-        );
-      }
-      if (hasOwn(payload.pis_box_bottom_LBH, "H")) {
-        setPath(
-          "pis_box_bottom_LBH.H",
-          toNonNegativeNumber(payload.pis_box_bottom_LBH.H, "pis_box_bottom_LBH.H"),
-        );
-      }
+    const patchedPisBoxBottomLbh = getPatchedLbhRecord(
+      item?.pis_box_bottom_LBH,
+      payload?.pis_box_bottom_LBH,
+      "pis_box_bottom_LBH",
+    );
+    if (patchedPisBoxBottomLbh.provided) {
+      setPath("pis_box_bottom_LBH", patchedPisBoxBottomLbh.value);
+    }
+
+    if (hasOwn(payload, "pis_item_sizes")) {
+      const parsedPisItemSizes = parseSizeEntriesPayload(payload.pis_item_sizes, {
+        fieldLabel: "pis_item_sizes",
+        remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
+        weightKey: "net_weight",
+        weightLabel: "net_weight",
+      });
+      const derivedPisItemLegacy = buildLegacyLbhAndWeightFromSizeEntries(
+        parsedPisItemSizes,
+        {
+          weightKey: "net_weight",
+          remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
+        },
+      );
+
+      setPath("pis_item_sizes", parsedPisItemSizes);
+      setPath("pis_item_LBH", derivedPisItemLegacy.single);
+      setPath("pis_item_top_LBH", derivedPisItemLegacy.top);
+      setPath("pis_item_bottom_LBH", derivedPisItemLegacy.bottom);
+      nextPisWeight.top_net = derivedPisItemLegacy.topWeight;
+      nextPisWeight.bottom_net = derivedPisItemLegacy.bottomWeight;
+      nextPisWeight.total_net = derivedPisItemLegacy.totalWeight;
+      pisWeightTouched = true;
+    }
+
+    if (hasOwn(payload, "pis_box_sizes")) {
+      const parsedPisBoxSizes = parseSizeEntriesPayload(payload.pis_box_sizes, {
+        fieldLabel: "pis_box_sizes",
+        remarkOptions: BOX_SIZE_REMARK_OPTIONS,
+        weightKey: "gross_weight",
+        weightLabel: "gross_weight",
+      });
+      const derivedPisBoxLegacy = buildLegacyLbhAndWeightFromSizeEntries(
+        parsedPisBoxSizes,
+        {
+          weightKey: "gross_weight",
+          remarkOptions: BOX_SIZE_REMARK_OPTIONS,
+        },
+      );
+
+      setPath("pis_box_sizes", parsedPisBoxSizes);
+      setPath("pis_box_LBH", derivedPisBoxLegacy.single);
+      setPath("pis_box_top_LBH", derivedPisBoxLegacy.top);
+      setPath("pis_box_bottom_LBH", derivedPisBoxLegacy.bottom);
+      nextPisWeight.top_gross = derivedPisBoxLegacy.topWeight;
+      nextPisWeight.bottom_gross = derivedPisBoxLegacy.bottomWeight;
+      nextPisWeight.total_gross = derivedPisBoxLegacy.totalWeight;
+      pisWeightTouched = true;
+    }
+
+    if (pisWeightTouched) {
+      setPath("pis_weight", nextPisWeight);
     }
 
     if (!touched) {

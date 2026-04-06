@@ -202,7 +202,7 @@ const DailyReport = () => {
           ? res.data.inspector_compiled
           : [],
       });
-      console.log("Fetched daily report:", res.data.inspector_compiled);
+      console.log("Fetched daily report:", res.data);
     } catch (err) {
       setError(err?.response?.data?.message || "Failed to load daily report.");
       setReport((prev) => ({

@@ -1,37 +1,20 @@
 import { useMemo, useState } from "react";
 import api from "../api/axios";
-import { formatCbm } from "../utils/cbm";
+import MeasuredSizeSection from "./MeasuredSizeSection";
+import {
+  BOX_SIZE_REMARK_OPTIONS,
+  ITEM_SIZE_REMARK_OPTIONS,
+  buildMeasuredSizeEntriesFromLegacy,
+  calculateMeasuredSizeEntriesCbm,
+  ensureMeasuredSizeEntryCount,
+  getWeightValueFromModel,
+  hasMeaningfulMeasuredSize,
+  normalizeSizeCount,
+  parseMeasuredSizeEntries,
+} from "../utils/measuredSizeForm";
 import "../App.css";
 
 const toText = (value, fallback = "") => String(value ?? fallback).trim();
-
-const toNumberString = (value, fallback = "0") => {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return fallback;
-  return String(parsed);
-};
-
-const parseNonNegativeNumber = (value, label) => {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new Error(`${label} must be a non-negative number`);
-  }
-  return parsed;
-};
-
-const calculateCbmFromLbh = (box = {}) => {
-  const length = Number(box?.L || 0);
-  const breadth = Number(box?.B || 0);
-  const height = Number(box?.H || 0);
-
-  if (!Number.isFinite(length) || !Number.isFinite(breadth) || !Number.isFinite(height)) {
-    return "0.000";
-  }
-  if (length <= 0 || breadth <= 0 || height <= 0) return "0.000";
-
-  const cubicMeters = (length * breadth * height) / 1000000;
-  return formatCbm(cubicMeters);
-};
 
 const getBrandLabel = (item = {}) =>
   toText(
@@ -46,23 +29,50 @@ const getVendorsLabel = (item = {}) =>
     ? item.vendors.join(", ")
     : "N/A";
 
-const buildInitialForm = (item = {}) => ({
-  barcode: toText(item?.pis_barcode, ""),
-  pis_weight: {
-    net: toNumberString(item?.pis_weight?.net, "0"),
-    gross: toNumberString(item?.pis_weight?.gross, "0"),
-  },
-  pis_item_LBH: {
-    L: toNumberString(item?.pis_item_LBH?.L, "0"),
-    B: toNumberString(item?.pis_item_LBH?.B, "0"),
-    H: toNumberString(item?.pis_item_LBH?.H, "0"),
-  },
-  pis_box_LBH: {
-    L: toNumberString(item?.pis_box_LBH?.L, "0"),
-    B: toNumberString(item?.pis_box_LBH?.B, "0"),
-    H: toNumberString(item?.pis_box_LBH?.H, "0"),
-  },
-});
+const buildInitialForm = (item = {}) => {
+  const pisWeight = item?.pis_weight || {};
+  const pisItemEntries = buildMeasuredSizeEntriesFromLegacy({
+    primaryEntries: item?.pis_item_sizes,
+    singleLbh: item?.pis_item_LBH,
+    topLbh: item?.pis_item_top_LBH,
+    bottomLbh: item?.pis_item_bottom_LBH,
+    totalWeight: getWeightValueFromModel(pisWeight, "total_net"),
+    topWeight: getWeightValueFromModel(pisWeight, "top_net"),
+    bottomWeight: getWeightValueFromModel(pisWeight, "bottom_net"),
+    weightKey: "net_weight",
+    topRemark: "top",
+    bottomRemark: "base",
+  }).filter((entry) => hasMeaningfulMeasuredSize(entry));
+  const pisBoxEntries = buildMeasuredSizeEntriesFromLegacy({
+    primaryEntries: item?.pis_box_sizes,
+    singleLbh: item?.pis_box_LBH,
+    topLbh: item?.pis_box_top_LBH,
+    bottomLbh: item?.pis_box_bottom_LBH,
+    totalWeight: getWeightValueFromModel(pisWeight, "total_gross"),
+    topWeight: getWeightValueFromModel(pisWeight, "top_gross"),
+    bottomWeight: getWeightValueFromModel(pisWeight, "bottom_gross"),
+    weightKey: "gross_weight",
+    topRemark: "top",
+    bottomRemark: "base",
+  }).filter((entry) => hasMeaningfulMeasuredSize(entry));
+
+  const pisItemCount =
+    pisItemEntries.length > 0
+      ? normalizeSizeCount(pisItemEntries.length, 1)
+      : 1;
+  const pisBoxCount =
+    pisBoxEntries.length > 0
+      ? normalizeSizeCount(pisBoxEntries.length, 1)
+      : 1;
+
+  return {
+    barcode: toText(item?.pis_barcode),
+    pis_item_count: String(pisItemCount),
+    pis_box_count: String(pisBoxCount),
+    pis_item_sizes: ensureMeasuredSizeEntryCount(pisItemEntries, pisItemCount),
+    pis_box_sizes: ensureMeasuredSizeEntryCount(pisBoxEntries, pisBoxCount),
+  };
+};
 
 const EditPisModal = ({ item, onClose, onUpdated }) => {
   const [form, setForm] = useState(() => buildInitialForm(item));
@@ -76,10 +86,27 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
   );
   const brandLabel = useMemo(() => getBrandLabel(item), [item]);
   const vendorsLabel = useMemo(() => getVendorsLabel(item), [item]);
-  const calculatedPisCbm = useMemo(
-    () => calculateCbmFromLbh(form.pis_box_LBH),
-    [form.pis_box_LBH],
+  const displayedItemEntries = useMemo(
+    () => ensureMeasuredSizeEntryCount(form.pis_item_sizes, form.pis_item_count),
+    [form.pis_item_sizes, form.pis_item_count],
   );
+  const displayedBoxEntries = useMemo(
+    () => ensureMeasuredSizeEntryCount(form.pis_box_sizes, form.pis_box_count),
+    [form.pis_box_sizes, form.pis_box_count],
+  );
+  const calculatedPisItemCbm = useMemo(
+    () => calculateMeasuredSizeEntriesCbm(form.pis_item_sizes, form.pis_item_count),
+    [form.pis_item_sizes, form.pis_item_count],
+  );
+  const calculatedPisBoxCbm = useMemo(
+    () => calculateMeasuredSizeEntriesCbm(form.pis_box_sizes, form.pis_box_count),
+    [form.pis_box_sizes, form.pis_box_count],
+  );
+  const calculatedPisCbm = useMemo(() => {
+    const itemCbmValue = Number(calculatedPisItemCbm || 0);
+    const boxCbmValue = Number(calculatedPisBoxCbm || 0);
+    return boxCbmValue >= itemCbmValue ? calculatedPisBoxCbm : calculatedPisItemCbm;
+  }, [calculatedPisBoxCbm, calculatedPisItemCbm]);
 
   const updateField = (path, value) => {
     setForm((prev) => {
@@ -95,27 +122,75 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
     });
   };
 
+  const handleCountChange = (countKey, entriesKey, value) => {
+    const safeCount = String(normalizeSizeCount(value, 1));
+    setForm((prev) => ({
+      ...prev,
+      [countKey]: safeCount,
+      [entriesKey]: ensureMeasuredSizeEntryCount(prev[entriesKey], safeCount),
+    }));
+  };
+
+  const handleSizeEntryChange = (entriesKey, index, field, value) => {
+    if (field !== "remark" && value !== "") {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        return;
+      }
+    }
+
+    setForm((prev) => ({
+      ...prev,
+      [entriesKey]: ensureMeasuredSizeEntryCount(
+        prev[entriesKey].map((entry, entryIndex) =>
+          entryIndex === index
+            ? {
+                ...entry,
+                [field]:
+                  field === "remark"
+                    ? String(value || "").trim().toLowerCase()
+                    : value,
+              }
+            : entry,
+        ),
+        prev[entriesKey]?.length || 1,
+      ),
+    }));
+  };
+
   const handleSave = async () => {
     try {
       setSaving(true);
       setError("");
 
+      const pisItemPayload = parseMeasuredSizeEntries({
+        entries: form.pis_item_sizes,
+        count: form.pis_item_count,
+        groupLabel: "PIS item size",
+        remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
+        payloadWeightKey: "net_weight",
+        weightFieldLabel: "Net weight",
+      });
+      if (pisItemPayload.error) {
+        throw new Error(pisItemPayload.error);
+      }
+
+      const pisBoxPayload = parseMeasuredSizeEntries({
+        entries: form.pis_box_sizes,
+        count: form.pis_box_count,
+        groupLabel: "PIS box size",
+        remarkOptions: BOX_SIZE_REMARK_OPTIONS,
+        payloadWeightKey: "gross_weight",
+        weightFieldLabel: "Gross weight",
+      });
+      if (pisBoxPayload.error) {
+        throw new Error(pisBoxPayload.error);
+      }
+
       const payload = {
-        pis_barcode: toText(form.barcode, ""),
-        pis_weight: {
-          net: parseNonNegativeNumber(form.pis_weight.net, "PIS Weight Net"),
-          gross: parseNonNegativeNumber(form.pis_weight.gross, "PIS Weight Gross"),
-        },
-        pis_item_LBH: {
-          L: parseNonNegativeNumber(form.pis_item_LBH.L, "PIS Item L"),
-          B: parseNonNegativeNumber(form.pis_item_LBH.B, "PIS Item B"),
-          H: parseNonNegativeNumber(form.pis_item_LBH.H, "PIS Item H"),
-        },
-        pis_box_LBH: {
-          L: parseNonNegativeNumber(form.pis_box_LBH.L, "PIS Box L"),
-          B: parseNonNegativeNumber(form.pis_box_LBH.B, "PIS Box B"),
-          H: parseNonNegativeNumber(form.pis_box_LBH.H, "PIS Box H"),
-        },
+        pis_barcode: toText(form.barcode),
+        pis_item_sizes: pisItemPayload.value,
+        pis_box_sizes: pisBoxPayload.value,
       };
 
       await api.patch(`/items/${item?._id}/pis`, payload);
@@ -132,7 +207,7 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
 
   return (
     <div className="modal d-block om-modal-backdrop" tabIndex="-1" role="dialog">
-      <div className="modal-dialog modal-dialog-centered modal-lg" role="document">
+      <div className="modal-dialog modal-dialog-centered modal-xl" role="document">
         <div className="modal-content">
           <div className="modal-header">
             <h5 className="modal-title">Update PIS: {itemCode}</h5>
@@ -172,113 +247,60 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
                   type="text"
                   className="form-control"
                   value={form.barcode}
-                  onChange={(e) => updateField("barcode", e.target.value)}
+                  onChange={(event) => updateField("barcode", event.target.value)}
                   disabled={saving}
                 />
               </div>
             </div>
 
-            <div className="row g-2">
+            <div className="row g-3">
               <div className="col-12">
-                <h6 className="mb-1">PIS Weight</h6>
+                <h6 className="mb-0">PIS Measurements</h6>
               </div>
-              <div className="col-md-6">
-                <label className="form-label">Net</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  className="form-control"
-                  value={form.pis_weight.net}
-                  onChange={(e) => updateField("pis_weight.net", e.target.value)}
-                  disabled={saving}
-                />
-              </div>
-              <div className="col-md-6">
-                <label className="form-label">Gross</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  className="form-control"
-                  value={form.pis_weight.gross}
-                  onChange={(e) => updateField("pis_weight.gross", e.target.value)}
-                  disabled={saving}
-                />
-              </div>
-            </div>
 
-            <div className="row g-2">
-              <div className="col-12">
-                <h6 className="mb-1">PIS LBH (cm)</h6>
-              </div>
-              <div className="col-md-6">
-                <label className="form-label">Item LBH (L/B/H)</label>
-                <div className="input-group">
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    className="form-control"
-                    value={form.pis_item_LBH.L}
-                    onChange={(e) => updateField("pis_item_LBH.L", e.target.value)}
-                    disabled={saving}
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    className="form-control"
-                    value={form.pis_item_LBH.B}
-                    onChange={(e) => updateField("pis_item_LBH.B", e.target.value)}
-                    disabled={saving}
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    className="form-control"
-                    value={form.pis_item_LBH.H}
-                    onChange={(e) => updateField("pis_item_LBH.H", e.target.value)}
-                    disabled={saving}
-                  />
-                </div>
-              </div>
-              <div className="col-md-6">
-                <label className="form-label">Box LBH (L/B/H)</label>
-                <div className="input-group">
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    className="form-control"
-                    value={form.pis_box_LBH.L}
-                    onChange={(e) => updateField("pis_box_LBH.L", e.target.value)}
-                    disabled={saving}
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    className="form-control"
-                    value={form.pis_box_LBH.B}
-                    onChange={(e) => updateField("pis_box_LBH.B", e.target.value)}
-                    disabled={saving}
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    className="form-control"
-                    value={form.pis_box_LBH.H}
-                    onChange={(e) => updateField("pis_box_LBH.H", e.target.value)}
-                    disabled={saving}
-                  />
-                </div>
-              </div>
-              <div className="col-md-6">
+              <MeasuredSizeSection
+                sectionKey="pis-item"
+                title="PIS Item Sizes (cm) and Net Weight"
+                countLabel="Item Sets"
+                countValue={form.pis_item_count}
+                entries={displayedItemEntries}
+                remarkOptions={ITEM_SIZE_REMARK_OPTIONS}
+                weightLabel="Net Weight"
+                disabled={saving}
+                onCountChange={(value) =>
+                  handleCountChange("pis_item_count", "pis_item_sizes", value)
+                }
+                onEntryChange={(index, field, value) =>
+                  handleSizeEntryChange("pis_item_sizes", index, field, value)
+                }
+              />
+
+              <MeasuredSizeSection
+                sectionKey="pis-box"
+                title="PIS Box Sizes (cm) and Gross Weight"
+                countLabel="Box Sets"
+                countValue={form.pis_box_count}
+                entries={displayedBoxEntries}
+                remarkOptions={BOX_SIZE_REMARK_OPTIONS}
+                weightLabel="Gross Weight"
+                disabled={saving}
+                onCountChange={(value) =>
+                  handleCountChange("pis_box_count", "pis_box_sizes", value)
+                }
+                onEntryChange={(index, field, value) =>
+                  handleSizeEntryChange("pis_box_sizes", index, field, value)
+                }
+              />
+
+              <div className="col-md-4">
                 <label className="form-label">Calculated PIS CBM</label>
-                <input type="text" className="form-control" value={calculatedPisCbm} disabled />
+                <input
+                  type="text"
+                  className="form-control"
+                  value={calculatedPisCbm}
+                  disabled
+                  readOnly
+                />
               </div>
             </div>
 

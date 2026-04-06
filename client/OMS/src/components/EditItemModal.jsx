@@ -1,27 +1,33 @@
 import { useMemo, useState } from "react";
 import api from "../api/axios";
-import { formatCbm } from "../utils/cbm";
+import MeasuredSizeSection from "./MeasuredSizeSection";
+import {
+  BOX_SIZE_REMARK_OPTIONS,
+  ITEM_SIZE_REMARK_OPTIONS,
+  buildMeasuredSizeEntriesFromLegacy,
+  calculateMeasuredSizeEntriesCbm,
+  ensureMeasuredSizeEntryCount,
+  getWeightValueFromModel,
+  hasMeaningfulMeasuredSize,
+  normalizeSizeCount,
+  parseMeasuredSizeEntries,
+} from "../utils/measuredSizeForm";
 import "../App.css";
 
 const toText = (value, fallback = "") => String(value ?? fallback).trim();
+
 const toNumberString = (value, fallback = "0") => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return String(parsed);
 };
 
-const calculateCbmFromLbh = (box = {}) => {
-  const length = Number(box?.L || 0);
-  const breadth = Number(box?.B || 0);
-  const height = Number(box?.H || 0);
-
-  if (!Number.isFinite(length) || !Number.isFinite(breadth) || !Number.isFinite(height)) {
-    return "0.000";
+const parseNonNegativeNumber = (value, label) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`${label} must be a non-negative number`);
   }
-  if (length <= 0 || breadth <= 0 || height <= 0) return "0.000";
-
-  const cubicMeters = (length * breadth * height) / 1000000;
-  return formatCbm(cubicMeters);
+  return parsed;
 };
 
 const getBrandLabel = (item = {}) =>
@@ -37,55 +43,72 @@ const getVendorsLabel = (item = {}) =>
     ? item.vendors.join(", ")
     : "N/A";
 
-const buildInitialForm = (item = {}) => ({
-  name: toText(item?.name),
-  description: toText(item?.description),
-  inspected_weight: {
-    net: toNumberString(item?.inspected_weight?.net ?? item?.weight?.net, "0"),
-    gross: toNumberString(item?.inspected_weight?.gross ?? item?.weight?.gross, "0"),
-  },
-  inspected_item_LBH: {
-    L: toNumberString(item?.inspected_item_LBH?.L ?? item?.item_LBH?.L, "0"),
-    B: toNumberString(item?.inspected_item_LBH?.B ?? item?.item_LBH?.B, "0"),
-    H: toNumberString(item?.inspected_item_LBH?.H ?? item?.item_LBH?.H, "0"),
-  },
-  inspected_box_LBH: {
-    L: toNumberString(item?.inspected_box_LBH?.L ?? item?.box_LBH?.L, "0"),
-    B: toNumberString(item?.inspected_box_LBH?.B ?? item?.box_LBH?.B, "0"),
-    H: toNumberString(item?.inspected_box_LBH?.H ?? item?.box_LBH?.H, "0"),
-  },
-  cbm: {
-    top: toText(item?.cbm?.top, "0"),
-    bottom: toText(item?.cbm?.bottom, "0"),
-    total: toText(item?.cbm?.total, "0"),
-    inspected_top: toText(item?.cbm?.inspected_top, "0"),
-    inspected_bottom: toText(item?.cbm?.inspected_bottom, "0"),
-    inspected_total: toText(item?.cbm?.inspected_total, "0"),
-  },
-  qc: {
-    packed_size: Boolean(item?.qc?.packed_size),
-    finishing: Boolean(item?.qc?.finishing),
-    branding: Boolean(item?.qc?.branding),
-    barcode: toNumberString(item?.qc?.barcode, "0"),
-    last_inspected_date: toText(item?.qc?.last_inspected_date),
-    quantities: {
-      checked: toNumberString(item?.qc?.quantities?.checked, "0"),
-      passed: toNumberString(item?.qc?.quantities?.passed, "0"),
-      pending: toNumberString(item?.qc?.quantities?.pending, "0"),
-    },
-  },
-  source: {
-    from_orders: Boolean(item?.source?.from_orders),
-    from_qc: Boolean(item?.source?.from_qc),
-  },
-});
+const buildInitialForm = (item = {}) => {
+  const inspectedWeight = item?.inspected_weight || {};
+  const inspectedItemEntries = buildMeasuredSizeEntriesFromLegacy({
+    primaryEntries: item?.inspected_item_sizes,
+    singleLbh: item?.inspected_item_LBH ?? item?.item_LBH,
+    topLbh: item?.inspected_item_top_LBH,
+    bottomLbh: item?.inspected_item_bottom_LBH,
+    totalWeight: getWeightValueFromModel(inspectedWeight, "total_net"),
+    topWeight: getWeightValueFromModel(inspectedWeight, "top_net"),
+    bottomWeight: getWeightValueFromModel(inspectedWeight, "bottom_net"),
+    weightKey: "net_weight",
+    topRemark: "top",
+    bottomRemark: "base",
+  }).filter((entry) => hasMeaningfulMeasuredSize(entry));
+  const inspectedBoxEntries = buildMeasuredSizeEntriesFromLegacy({
+    primaryEntries: item?.inspected_box_sizes,
+    singleLbh: item?.inspected_box_LBH ?? item?.box_LBH,
+    topLbh: item?.inspected_box_top_LBH ?? item?.inspected_top_LBH,
+    bottomLbh: item?.inspected_box_bottom_LBH ?? item?.inspected_bottom_LBH,
+    totalWeight: getWeightValueFromModel(inspectedWeight, "total_gross"),
+    topWeight: getWeightValueFromModel(inspectedWeight, "top_gross"),
+    bottomWeight: getWeightValueFromModel(inspectedWeight, "bottom_gross"),
+    weightKey: "gross_weight",
+    topRemark: "top",
+    bottomRemark: "base",
+  }).filter((entry) => hasMeaningfulMeasuredSize(entry));
 
-const parseNonNegativeNumber = (value, label) => {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new Error(`${label} must be a non-negative number`);
-  }
-  return parsed;
+  const inspectedItemCount =
+    inspectedItemEntries.length > 0
+      ? normalizeSizeCount(inspectedItemEntries.length, 1)
+      : 1;
+  const inspectedBoxCount =
+    inspectedBoxEntries.length > 0
+      ? normalizeSizeCount(inspectedBoxEntries.length, 1)
+      : 1;
+
+  return {
+    name: toText(item?.name),
+    description: toText(item?.description),
+    inspected_item_count: String(inspectedItemCount),
+    inspected_box_count: String(inspectedBoxCount),
+    inspected_item_sizes: ensureMeasuredSizeEntryCount(
+      inspectedItemEntries,
+      inspectedItemCount,
+    ),
+    inspected_box_sizes: ensureMeasuredSizeEntryCount(
+      inspectedBoxEntries,
+      inspectedBoxCount,
+    ),
+    qc: {
+      packed_size: Boolean(item?.qc?.packed_size),
+      finishing: Boolean(item?.qc?.finishing),
+      branding: Boolean(item?.qc?.branding),
+      barcode: toNumberString(item?.qc?.barcode, "0"),
+      last_inspected_date: toText(item?.qc?.last_inspected_date),
+      quantities: {
+        checked: toNumberString(item?.qc?.quantities?.checked, "0"),
+        passed: toNumberString(item?.qc?.quantities?.passed, "0"),
+        pending: toNumberString(item?.qc?.quantities?.pending, "0"),
+      },
+    },
+    source: {
+      from_orders: Boolean(item?.source?.from_orders),
+      from_qc: Boolean(item?.source?.from_qc),
+    },
+  };
 };
 
 const EditItemModal = ({ item, onClose, onUpdated }) => {
@@ -96,10 +119,29 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
   const itemCode = useMemo(() => toText(item?.code, "N/A"), [item?.code]);
   const brandLabel = useMemo(() => getBrandLabel(item), [item]);
   const vendorsLabel = useMemo(() => getVendorsLabel(item), [item]);
-  const calculatedInspectedCbm = useMemo(
-    () => calculateCbmFromLbh(form.inspected_box_LBH),
-    [form.inspected_box_LBH],
+  const displayedItemEntries = useMemo(
+    () => ensureMeasuredSizeEntryCount(form.inspected_item_sizes, form.inspected_item_count),
+    [form.inspected_item_sizes, form.inspected_item_count],
   );
+  const displayedBoxEntries = useMemo(
+    () => ensureMeasuredSizeEntryCount(form.inspected_box_sizes, form.inspected_box_count),
+    [form.inspected_box_sizes, form.inspected_box_count],
+  );
+  const calculatedInspectedItemCbm = useMemo(
+    () => calculateMeasuredSizeEntriesCbm(form.inspected_item_sizes, form.inspected_item_count),
+    [form.inspected_item_sizes, form.inspected_item_count],
+  );
+  const calculatedInspectedBoxCbm = useMemo(
+    () => calculateMeasuredSizeEntriesCbm(form.inspected_box_sizes, form.inspected_box_count),
+    [form.inspected_box_sizes, form.inspected_box_count],
+  );
+  const calculatedInspectedCbm = useMemo(() => {
+    const itemCbmValue = Number(calculatedInspectedItemCbm || 0);
+    const boxCbmValue = Number(calculatedInspectedBoxCbm || 0);
+    return boxCbmValue >= itemCbmValue
+      ? calculatedInspectedBoxCbm
+      : calculatedInspectedItemCbm;
+  }, [calculatedInspectedBoxCbm, calculatedInspectedItemCbm]);
 
   const updateField = (path, value) => {
     setForm((prev) => {
@@ -115,46 +157,86 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
     });
   };
 
+  const handleCountChange = (countKey, entriesKey, value) => {
+    const safeCount = String(normalizeSizeCount(value, 1));
+    setForm((prev) => ({
+      ...prev,
+      [countKey]: safeCount,
+      [entriesKey]: ensureMeasuredSizeEntryCount(prev[entriesKey], safeCount),
+    }));
+  };
+
+  const handleSizeEntryChange = (entriesKey, index, field, value) => {
+    if (field !== "remark" && value !== "") {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        return;
+      }
+    }
+
+    setForm((prev) => ({
+      ...prev,
+      [entriesKey]: ensureMeasuredSizeEntryCount(
+        prev[entriesKey].map((entry, entryIndex) =>
+          entryIndex === index
+            ? {
+                ...entry,
+                [field]:
+                  field === "remark"
+                    ? String(value || "").trim().toLowerCase()
+                    : value,
+              }
+            : entry,
+        ),
+        prev[entriesKey]?.length || 1,
+      ),
+    }));
+  };
+
   const handleSave = async () => {
     try {
       setSaving(true);
       setError("");
 
+      const inspectedItemPayload = parseMeasuredSizeEntries({
+        entries: form.inspected_item_sizes,
+        count: form.inspected_item_count,
+        groupLabel: "Inspected item size",
+        remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
+        payloadWeightKey: "net_weight",
+        weightFieldLabel: "Net weight",
+      });
+      if (inspectedItemPayload.error) {
+        throw new Error(inspectedItemPayload.error);
+      }
+
+      const inspectedBoxPayload = parseMeasuredSizeEntries({
+        entries: form.inspected_box_sizes,
+        count: form.inspected_box_count,
+        groupLabel: "Inspected box size",
+        remarkOptions: BOX_SIZE_REMARK_OPTIONS,
+        payloadWeightKey: "gross_weight",
+        weightFieldLabel: "Gross weight",
+      });
+      if (inspectedBoxPayload.error) {
+        throw new Error(inspectedBoxPayload.error);
+      }
+
       const payload = {
         name: toText(form.name),
         description: toText(form.description),
-        inspected_weight: {
-          net: parseNonNegativeNumber(form.inspected_weight.net, "Inspected Weight Net"),
-          gross: parseNonNegativeNumber(form.inspected_weight.gross, "Inspected Weight Gross"),
-        },
-        inspected_item_LBH: {
-          L: parseNonNegativeNumber(form.inspected_item_LBH.L, "Inspected Item L"),
-          B: parseNonNegativeNumber(form.inspected_item_LBH.B, "Inspected Item B"),
-          H: parseNonNegativeNumber(form.inspected_item_LBH.H, "Inspected Item H"),
-        },
-        inspected_box_LBH: {
-          L: parseNonNegativeNumber(form.inspected_box_LBH.L, "Inspected Box L"),
-          B: parseNonNegativeNumber(form.inspected_box_LBH.B, "Inspected Box B"),
-          H: parseNonNegativeNumber(form.inspected_box_LBH.H, "Inspected Box H"),
-        },
-        cbm: {
-          top: toText(form.cbm.top || "0"),
-          bottom: toText(form.cbm.bottom || "0"),
-          total: toText(form.cbm.total || "0"),
-          inspected_top: toText(form.cbm.inspected_top || "0"),
-          inspected_bottom: toText(form.cbm.inspected_bottom || "0"),
-          inspected_total: toText(form.cbm.inspected_total || "0"),
-        },
+        inspected_item_sizes: inspectedItemPayload.value,
+        inspected_box_sizes: inspectedBoxPayload.value,
         qc: {
           packed_size: Boolean(form.qc.packed_size),
           finishing: Boolean(form.qc.finishing),
           branding: Boolean(form.qc.branding),
-          barcode: parseNonNegativeNumber(form.qc.barcode, "QC Barcode"),
+          barcode: parseNonNegativeNumber(form.qc.barcode, "QC barcode"),
           last_inspected_date: toText(form.qc.last_inspected_date),
           quantities: {
-            checked: parseNonNegativeNumber(form.qc.quantities.checked, "QC Checked"),
-            passed: parseNonNegativeNumber(form.qc.quantities.passed, "QC Passed"),
-            pending: parseNonNegativeNumber(form.qc.quantities.pending, "QC Pending"),
+            checked: parseNonNegativeNumber(form.qc.quantities.checked, "QC checked"),
+            passed: parseNonNegativeNumber(form.qc.quantities.passed, "QC passed"),
+            pending: parseNonNegativeNumber(form.qc.quantities.pending, "QC pending"),
           },
         },
         source: {
@@ -211,7 +293,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
                   type="text"
                   className="form-control"
                   value={form.name}
-                  onChange={(e) => updateField("name", e.target.value)}
+                  onChange={(event) => updateField("name", event.target.value)}
                   disabled={saving}
                 />
               </div>
@@ -221,147 +303,52 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
                   type="text"
                   className="form-control"
                   value={form.description}
-                  onChange={(e) => updateField("description", e.target.value)}
+                  onChange={(event) => updateField("description", event.target.value)}
                   disabled={saving}
                 />
               </div>
             </div>
 
-            <div className="row g-2">
+            <div className="row g-3">
               <div className="col-12">
-                <h6 className="mb-1">Weight</h6>
+                <h6 className="mb-0">Inspected Measurements</h6>
               </div>
-              <div className="col-md-6">
-                <label className="form-label">Inspected Net</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  className="form-control"
-                  value={form.inspected_weight.net}
-                  onChange={(e) => updateField("inspected_weight.net", e.target.value)}
-                  disabled={saving}
-                />
-              </div>
-              <div className="col-md-6">
-                <label className="form-label">Inspected Gross</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  className="form-control"
-                  value={form.inspected_weight.gross}
-                  onChange={(e) => updateField("inspected_weight.gross", e.target.value)}
-                  disabled={saving}
-                />
-              </div>
-            </div>
 
-            <div className="row g-2">
-              <div className="col-12">
-                <h6 className="mb-1">LBH</h6>
-              </div>
-              <div className="col-md-6">
-                <label className="form-label">Inspected Item LBH (L/B/H)</label>
-                <div className="input-group">
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    className="form-control"
-                    value={form.inspected_item_LBH.L}
-                    onChange={(e) => updateField("inspected_item_LBH.L", e.target.value)}
-                    disabled={saving}
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    className="form-control"
-                    value={form.inspected_item_LBH.B}
-                    onChange={(e) => updateField("inspected_item_LBH.B", e.target.value)}
-                    disabled={saving}
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    className="form-control"
-                    value={form.inspected_item_LBH.H}
-                    onChange={(e) => updateField("inspected_item_LBH.H", e.target.value)}
-                    disabled={saving}
-                  />
-                </div>
-              </div>
-              <div className="col-md-6">
-                <label className="form-label">Inspected Box LBH (L/B/H)</label>
-                <div className="input-group">
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    className="form-control"
-                    value={form.inspected_box_LBH.L}
-                    onChange={(e) => updateField("inspected_box_LBH.L", e.target.value)}
-                    disabled={saving}
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    className="form-control"
-                    value={form.inspected_box_LBH.B}
-                    onChange={(e) => updateField("inspected_box_LBH.B", e.target.value)}
-                    disabled={saving}
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    className="form-control"
-                    value={form.inspected_box_LBH.H}
-                    onChange={(e) => updateField("inspected_box_LBH.H", e.target.value)}
-                    disabled={saving}
-                  />
-                </div>
-              </div>
-            </div>
+              <MeasuredSizeSection
+                sectionKey="item-inspected-item"
+                title="Inspected Item Sizes (cm) and Net Weight"
+                countLabel="Item Sets"
+                countValue={form.inspected_item_count}
+                entries={displayedItemEntries}
+                remarkOptions={ITEM_SIZE_REMARK_OPTIONS}
+                weightLabel="Net Weight"
+                disabled={saving}
+                onCountChange={(value) =>
+                  handleCountChange("inspected_item_count", "inspected_item_sizes", value)
+                }
+                onEntryChange={(index, field, value) =>
+                  handleSizeEntryChange("inspected_item_sizes", index, field, value)
+                }
+              />
 
-            <div className="row g-2">
-              <div className="col-12">
-                <h6 className="mb-1">CBM</h6>
-              </div>
-              <div className="col-md-3">
-                <label className="form-label">Top</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={form.cbm.top}
-                  onChange={(e) => updateField("cbm.top", e.target.value)}
-                  disabled={saving}
-                />
-              </div>
-              <div className="col-md-3">
-                <label className="form-label">Bottom</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={form.cbm.bottom}
-                  onChange={(e) => updateField("cbm.bottom", e.target.value)}
-                  disabled={saving}
-                />
-              </div>
-              <div className="col-md-3">
-                <label className="form-label">Total</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={form.cbm.total}
-                  onChange={(e) => updateField("cbm.total", e.target.value)}
-                  disabled={saving}
-                />
-              </div>
-              <div className="col-md-3">
+              <MeasuredSizeSection
+                sectionKey="item-inspected-box"
+                title="Inspected Box Sizes (cm) and Gross Weight"
+                countLabel="Box Sets"
+                countValue={form.inspected_box_count}
+                entries={displayedBoxEntries}
+                remarkOptions={BOX_SIZE_REMARK_OPTIONS}
+                weightLabel="Gross Weight"
+                disabled={saving}
+                onCountChange={(value) =>
+                  handleCountChange("inspected_box_count", "inspected_box_sizes", value)
+                }
+                onEntryChange={(index, field, value) =>
+                  handleSizeEntryChange("inspected_box_sizes", index, field, value)
+                }
+              />
+
+              <div className="col-md-4">
                 <label className="form-label">Calculated Inspected CBM</label>
                 <input
                   type="text"
@@ -369,36 +356,6 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
                   value={calculatedInspectedCbm}
                   disabled
                   readOnly
-                />
-              </div>
-              <div className="col-md-4">
-                <label className="form-label">Inspected Top</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={form.cbm.inspected_top}
-                  onChange={(e) => updateField("cbm.inspected_top", e.target.value)}
-                  disabled={saving}
-                />
-              </div>
-              <div className="col-md-4">
-                <label className="form-label">Inspected Bottom</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={form.cbm.inspected_bottom}
-                  onChange={(e) => updateField("cbm.inspected_bottom", e.target.value)}
-                  disabled={saving}
-                />
-              </div>
-              <div className="col-md-4">
-                <label className="form-label">Inspected Total</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={form.cbm.inspected_total}
-                  onChange={(e) => updateField("cbm.inspected_total", e.target.value)}
-                  disabled={saving}
                 />
               </div>
             </div>
@@ -414,7 +371,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
                     className="form-check-input"
                     type="checkbox"
                     checked={form.qc.packed_size}
-                    onChange={(e) => updateField("qc.packed_size", e.target.checked)}
+                    onChange={(event) => updateField("qc.packed_size", event.target.checked)}
                     disabled={saving}
                   />
                   <label htmlFor="item-qc-packed-size" className="form-check-label">
@@ -429,7 +386,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
                     className="form-check-input"
                     type="checkbox"
                     checked={form.qc.finishing}
-                    onChange={(e) => updateField("qc.finishing", e.target.checked)}
+                    onChange={(event) => updateField("qc.finishing", event.target.checked)}
                     disabled={saving}
                   />
                   <label htmlFor="item-qc-finishing" className="form-check-label">
@@ -444,7 +401,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
                     className="form-check-input"
                     type="checkbox"
                     checked={form.qc.branding}
-                    onChange={(e) => updateField("qc.branding", e.target.checked)}
+                    onChange={(event) => updateField("qc.branding", event.target.checked)}
                     disabled={saving}
                   />
                   <label htmlFor="item-qc-branding" className="form-check-label">
@@ -460,7 +417,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
                   step="1"
                   className="form-control"
                   value={form.qc.barcode}
-                  onChange={(e) => updateField("qc.barcode", e.target.value)}
+                  onChange={(event) => updateField("qc.barcode", event.target.value)}
                   disabled={saving}
                 />
               </div>
@@ -471,7 +428,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
                   className="form-control"
                   placeholder="YYYY-MM-DD or DD/MM/YYYY"
                   value={form.qc.last_inspected_date}
-                  onChange={(e) => updateField("qc.last_inspected_date", e.target.value)}
+                  onChange={(event) => updateField("qc.last_inspected_date", event.target.value)}
                   disabled={saving}
                 />
               </div>
@@ -484,7 +441,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
                     step="1"
                     className="form-control"
                     value={form.qc.quantities.checked}
-                    onChange={(e) => updateField("qc.quantities.checked", e.target.value)}
+                    onChange={(event) => updateField("qc.quantities.checked", event.target.value)}
                     disabled={saving}
                   />
                   <input
@@ -493,7 +450,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
                     step="1"
                     className="form-control"
                     value={form.qc.quantities.passed}
-                    onChange={(e) => updateField("qc.quantities.passed", e.target.value)}
+                    onChange={(event) => updateField("qc.quantities.passed", event.target.value)}
                     disabled={saving}
                   />
                   <input
@@ -502,7 +459,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
                     step="1"
                     className="form-control"
                     value={form.qc.quantities.pending}
-                    onChange={(e) => updateField("qc.quantities.pending", e.target.value)}
+                    onChange={(event) => updateField("qc.quantities.pending", event.target.value)}
                     disabled={saving}
                   />
                 </div>
@@ -520,7 +477,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
                     className="form-check-input"
                     type="checkbox"
                     checked={form.source.from_orders}
-                    onChange={(e) => updateField("source.from_orders", e.target.checked)}
+                    onChange={(event) => updateField("source.from_orders", event.target.checked)}
                     disabled={saving}
                   />
                   <label htmlFor="item-source-orders" className="form-check-label">
@@ -535,7 +492,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
                     className="form-check-input"
                     type="checkbox"
                     checked={form.source.from_qc}
-                    onChange={(e) => updateField("source.from_qc", e.target.checked)}
+                    onChange={(event) => updateField("source.from_qc", event.target.checked)}
                     disabled={saving}
                   />
                   <label htmlFor="item-source-qc" className="form-check-label">
