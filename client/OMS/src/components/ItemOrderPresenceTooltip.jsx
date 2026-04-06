@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import api from "../api/axios";
-import HoverPortal from "./HoverPortal";
+import Tooltip from "./Tooltip";
+import "../App.css";
 
 const orderPresenceCache = new Map();
 const orderPresenceInflight = new Map();
@@ -26,7 +27,9 @@ const fetchOrderPresence = async (itemCode = "") => {
   const request = api
     .get(`/items/${encodeURIComponent(normalizedItemCode)}/order-presence`)
     .then((response) => {
-      const rows = Array.isArray(response?.data?.data) ? response.data.data : [];
+      const rows = Array.isArray(response?.data?.data)
+        ? response.data.data
+        : [];
       orderPresenceCache.set(normalizedItemCode, rows);
       orderPresenceInflight.delete(normalizedItemCode);
       return rows;
@@ -101,9 +104,9 @@ const ItemOrderPresenceTooltip = ({
       setRows(nextRows);
     } catch (fetchError) {
       setError(
-        fetchError?.response?.data?.message
-          || fetchError?.message
-          || "Failed to load PO details.",
+        fetchError?.response?.data?.message ||
+          fetchError?.message ||
+          "Failed to load PO details.",
       );
     } finally {
       setLoading(false);
@@ -117,72 +120,67 @@ const ItemOrderPresenceTooltip = ({
   const triggerLabel = label || normalizedItemCode;
 
   return (
-    <HoverPortal
-      className={`om-item-order-presence ${className}`.trim()}
-      panelClassName="om-item-order-presence-panel"
-      onOpen={loadTooltipData}
-      trigger={onClick ? (
-        <button
-          type="button"
-          className={buttonClassName || "btn btn-link btn-sm p-0 text-start"}
-          onClick={onClick}
-        >
-          {triggerLabel}
-        </button>
-      ) : (
-        <span className="om-item-order-presence-label" tabIndex={0}>
-          {triggerLabel}
-        </span>
-      )}
-    >
-      <span className="om-item-order-presence-title">
-        {excludeOrderId ? "Other Active POs" : "Active POs"}
-      </span>
+  <Tooltip
+    onOpen={loadTooltipData}
+    content={
+      <>
+        <div className="tooltip-title">
+          {excludeOrderId ? "Other Active POs" : "Active POs"}
+        </div>
 
-      {loading ? (
-        <span className="om-item-order-presence-empty">Loading...</span>
-      ) : error ? (
-        <span className="om-item-order-presence-empty">{error}</span>
-      ) : visibleRows.length === 0 ? (
-        <span className="om-item-order-presence-empty">
-          {excludeOrderId
-            ? "No other active POs found for this item."
-            : "No active POs found for this item."}
-        </span>
-      ) : (
-        visibleRows.map((row) => {
-          const detailText = formatPresenceSummary(row);
+        {loading ? (
+          <div className="tooltip-empty">Loading...</div>
+        ) : error ? (
+          <div className="tooltip-empty">{error}</div>
+        ) : visibleRows.length === 0 ? (
+          <div className="tooltip-empty">
+            {excludeOrderId
+              ? "No other active POs found."
+              : "No active POs found."}
+          </div>
+        ) : (
+          visibleRows.map((row) => {
+            const detailText = formatPresenceSummary(row);
 
-          return (
-            <span
-              key={`${normalizeText(row?.id)}-${normalizeText(row?.order_id)}`}
-              className="om-item-order-presence-entry"
-            >
-              <span className="om-item-order-presence-head">
-                <span className="om-item-order-presence-po">
-                  PO: {normalizeText(row?.order_id) || "N/A"}
-                </span>
-                <span className="om-item-order-presence-detail">
-                  Qty: {Number(row?.total_quantity || 0)}
-                </span>
-              </span>
-              {normalizeText(row?.description) ? (
-                <span className="om-item-order-presence-detail">
-                  {normalizeText(row?.description)}
-                </span>
-              ) : null}
-              <span className="om-item-order-presence-row">
-                Status: {normalizeText(row?.status) || "N/A"}
-              </span>
-              {detailText ? (
-                <span className="om-item-order-presence-detail">{detailText}</span>
-              ) : null}
-            </span>
-          );
-        })
-      )}
-    </HoverPortal>
-  );
+            return (
+              <div
+                key={`${row?.id}-${row?.order_id}`}
+                className="tooltip-entry"
+              >
+                <div className="tooltip-row">
+                  <span className="tooltip-po">
+                    PO: {row?.order_id || "N/A"}
+                  </span>
+                  <span className="tooltip-detail">
+                    Qty: {Number(row?.total_quantity || 0)}
+                  </span>
+                </div>
+
+                {row?.description && (
+                  <div className="tooltip-detail">
+                    {row.description}
+                  </div>
+                )}
+
+                <div className="tooltip-detail">
+                  Status: {row?.status || "N/A"}
+                </div>
+
+                {detailText && (
+                  <div className="tooltip-detail">{detailText}</div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </>
+    }
+  >
+    <span className="om-item-order-presence-label">
+      {label || itemCode}
+    </span>
+  </Tooltip>
+);
 };
 
 export default ItemOrderPresenceTooltip;

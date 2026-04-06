@@ -468,15 +468,15 @@ const Items = () => {
                     )}
                     {rows.map((item) => (
                       <tr key={item?._id || item?.code}>
-                        <td>
-                          <ItemOrderPresenceTooltip
-                            itemCode={item?.code}
-                            label={item?.code || "N/A"}
-                            onClick={
+                        <td onClick={
                               item?.code
                                 ? () => navigateToItemOrdersHistory(item)
                                 : undefined
-                            }
+                            }>
+                          <ItemOrderPresenceTooltip
+                            itemCode={item?.code}
+                            label={item?.code || "N/A"}
+                            
                             buttonClassName="btn btn-link btn-sm p-0 text-start"
                           />
                         </td>

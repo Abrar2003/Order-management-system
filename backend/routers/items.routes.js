@@ -20,7 +20,7 @@ const router = express.Router();
 router.get(
   "/",
   auth,
-  authorize("admin", "manager", "QC", "dev"),
+  authorize("admin", "manager", "QC", "dev", "user"),
   getItems,
 );
 
@@ -34,21 +34,21 @@ router.post(
 router.get(
   "/:itemCode/order-presence",
   auth,
-  authorize("admin", "manager", "QC", "dev"),
+  authorize("admin", "manager", "QC", "dev", "user"),
   getItemOrderPresence,
 );
 
 router.get(
   "/:itemCode/orders-history",
   auth,
-  authorize("admin", "manager", "QC", "dev"),
+  authorize("admin", "manager", "QC", "dev", "user"),
   getItemOrdersHistory,
 );
 
 router.get(
   "/:id/files/:fileType/url",
   auth,
-  authorize("admin", "manager", "QC", "dev"),
+  authorize("admin", "manager", "QC", "dev", "user"),
   getItemFileUrl,
 );
 

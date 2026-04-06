@@ -24,44 +24,64 @@ Generated on: 2026-02-26
 | `/orders/upload-orders` | `POST` | `admin`, `manager`, `dev` |
 | `/orders/manual-orders` | `POST` | `admin`, `manager`, `dev` |
 | `/orders/upload-logs` | `GET` | `admin`, `manager`, `dev` |
-| `/orders` | `GET` | `admin`, `manager`, `QC`, `dev` |
-| `/orders/brands-and-vendors` | `GET` | Any authenticated user |
-| `/orders/brand/:brand/vendor/:vendor/status/:status` | `GET` | Any authenticated user |
-| `/orders/filters` | `GET` | Any authenticated user |
-| `/orders/export` | `GET` | Any authenticated user |
-| `/orders/shipments/export` | `GET` | `admin`, `manager`, `QC`, `dev` |
-| `/orders/shipments` | `GET` | `admin`, `manager`, `QC`, `dev` |
+| `/orders` | `GET` | `admin`, `manager`, `QC`, `dev`, `user` |
+| `/orders/brands-and-vendors` | `GET` | `admin`, `manager`, `QC`, `dev`, `user` |
+| `/orders/brand/:brand/vendor/:vendor/status/:status` | `GET` | `admin`, `manager`, `QC`, `dev`, `user` |
+| `/orders/filters` | `GET` | `admin`, `manager`, `QC`, `dev`, `user` |
+| `/orders/export` | `GET` | `admin`, `manager`, `QC`, `dev`, `user` |
+| `/orders/po-status-report` | `GET` | `admin`, `manager`, `dev`, `user` |
+| `/orders/shipments/export` | `GET` | `admin`, `manager`, `QC`, `dev`, `user` |
+| `/orders/shipments` | `GET` | `admin`, `manager`, `QC`, `dev`, `user` |
 | `/orders/edit-order/:id` | `PATCH` | Route: `admin`, `manager` (controller adds admin-only restrictions for qty/shipment edits) |
 | `/orders/archive-order/:id` | `PATCH` | `admin` |
 | `/orders/archived` | `GET` | `admin` |
 | `/orders/sync-zero-quantity-archive` | `POST` | `admin` |
 | `/orders/finalize-order/:id` | `PATCH` | `admin`, `manager`, `dev` |
-| `/orders/today-etd-orders` | `GET` | Any authenticated user |
-| `/orders/:brand/vendor-summary` | `GET` | Any authenticated user |
-| `/orders/:brand/today-etd-orders` | `GET` | Any authenticated user |
-| `/orders/order-by-id/:id` | `GET` | Any authenticated user |
+| `/orders/today-etd-orders` | `GET` | `admin`, `manager`, `QC`, `dev`, `user` |
+| `/orders/:brand/vendor-summary` | `GET` | `admin`, `manager`, `QC`, `dev`, `user` |
+| `/orders/:brand/today-etd-orders` | `GET` | `admin`, `manager`, `QC`, `dev`, `user` |
+| `/orders/order-by-id/:id` | `GET` | `admin`, `manager`, `QC`, `dev`, `user` |
 | `/orders/re-sync` | `POST` | `admin`, `manager`, `dev` |
+| `/orders/delayed-po-report` | `GET` | `admin`, `manager`, `QC`, `dev`, `user` |
+| `/orders/delayed-po-report/export` | `GET` | `admin`, `manager`, `QC`, `dev`, `user` |
+| `/orders/upcoming-etd-report` | `GET` | `admin`, `manager`, `QC`, `dev`, `user` |
+| `/orders/upcoming-etd-report/export` | `GET` | `admin`, `manager`, `QC`, `dev`, `user` |
+| `/orders/revised-etd-history` | `GET` | `admin`, `manager`, `QC`, `dev`, `user` |
 
 ### QC routes (`backend/routers/qc.routes.js`)
 
 | Endpoint | Method | Allowed roles |
 |---|---|---|
-| `/qc/list` | `GET` | `admin`, `manager`, `QC`, `dev` |
+| `/qc/list` | `GET` | `admin`, `manager`, `QC`, `dev`, `user` |
 | `/qc/align-qc` | `POST` | `admin`, `manager` |
 | `/qc/update-qc/:id` | `PATCH` | `QC`, `admin` |
 | `/qc/sync-item-details` | `POST` | `admin`, `manager`, `dev` |
-| `/qc/daily-report` | `GET` | `admin`, `manager`, `QC`, `dev` |
-| `/qc/export` | `GET` | `admin`, `manager`, `QC`, `dev` |
+| `/qc/daily-report` | `GET` | `admin`, `manager`, `dev`, `user` |
+| `/qc/export` | `GET` | `admin`, `manager`, `dev`, `user` |
 | `/qc/:id/inspection-records` | `PATCH` | `admin`, `manager` |
 | `/qc/:id/inspection-record/:recordId` | `DELETE` | `admin` |
-| `/qc/:id` | `GET` | `admin`, `manager`, `QC`, `dev` |
+| `/qc/:id` | `GET` | `admin`, `manager`, `QC`, `dev`, `user` |
+| `/qc/reports/inspectors` | `GET` | `admin`, `manager`, `dev`, `user` |
+| `/qc/reports/vendors` | `GET` | `admin`, `manager`, `dev`, `user` |
+| `/qc/reports/weekly-summary` | `GET` | `admin`, `manager`, `dev`, `user` |
+| `/qc/reports/daily-summary` | `GET` | `admin`, `manager`, `dev`, `user` |
 
 ### Items routes (`backend/routers/items.routes.js`)
 
 | Endpoint | Method | Allowed roles |
 |---|---|---|
-| `/items` | `GET` | `admin`, `manager`, `QC`, `dev` |
+| `/items` | `GET` | `admin`, `manager`, `QC`, `dev`, `user` |
 | `/items/sync` | `POST` | `admin`, `manager`, `dev` |
+| `/items/:itemCode/order-presence` | `GET` | `admin`, `manager`, `QC`, `dev`, `user` |
+| `/items/:itemCode/orders-history` | `GET` | `admin`, `manager`, `QC`, `dev`, `user` |
+| `/items/:id/files/:fileType/url` | `GET` | `admin`, `manager`, `QC`, `dev`, `user` |
+
+### Reports routes (`backend/routers/reports.routes.js`)
+
+| Endpoint | Method | Allowed roles |
+|---|---|---|
+| `/reports/vendor-wise-qa/summary` | `GET` | `admin`, `manager`, `dev`, `user` |
+| `/reports/vendor-wise-qa/detailed` | `GET` | `admin`, `manager`, `dev`, `user` |
 
 ### Brand routes (`backend/routers/brand.route.js`)
 

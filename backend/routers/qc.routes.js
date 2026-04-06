@@ -10,7 +10,7 @@ const qcController = require("../controllers/qc.controller");
 router.get(
   "/list",
   auth,
-  authorize("admin", "manager", "QC", "dev"),
+  authorize("admin", "manager", "QC", "dev", "user"),
   qcController.getQCList
 );
 
@@ -76,42 +76,42 @@ router.post(
 router.get(
   "/daily-report",
   auth,
-  authorize("admin", "manager", "dev"),
+  authorize("admin", "manager", "dev", "user"),
   qcController.getDailyReport
 );
 
 router.get(
   "/reports/inspectors",
   auth,
-  authorize("admin", "manager", "dev"),
+  authorize("admin", "manager", "dev", "user"),
   qcController.getInspectorReports,
 );
 
 router.get(
   "/reports/vendors",
   auth,
-  authorize("admin", "manager", "dev"),
+  authorize("admin", "manager", "dev", "user"),
   qcController.getVendorReports,
 );
 
 router.get(
   "/reports/weekly-summary",
   auth,
-  authorize("admin", "manager", "dev"),
+  authorize("admin", "manager", "dev", "user"),
   qcController.getWeeklyOrderSummary,
 );
 
 router.get(
   "/reports/daily-summary",
   auth,
-  authorize("admin", "manager", "dev"),
+  authorize("admin", "manager", "dev", "user"),
   qcController.getDailyOrderSummary,
 );
 
 router.get(
   "/export",
   auth,
-  authorize("admin", "manager", "dev"),
+  authorize("admin", "manager", "dev", "user"),
   qcController.exportQCList,
 );
 
@@ -132,7 +132,7 @@ router.delete(
 router.get(
   "/:id",
   auth,
-  authorize("admin", "manager", "QC", "dev"),
+  authorize("admin", "manager", "QC", "dev", "user"),
   qcController.getQCById
 );
 

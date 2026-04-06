@@ -85,67 +85,68 @@ router.get(
 router.get(
   "/",
   authenticate,
-  authorize("admin", "manager", "QC", "dev"),
+  authorize("admin", "manager", "QC", "dev", "user"),
   getOrders,
 );
 
 // List order's brands and vendors
-router.get("/brands-and-vendors", authenticate, getOrderSummary);
+router.get("/brands-and-vendors", authenticate, authorize("admin", "manager", "QC", "dev", "user"), getOrderSummary);
 
 //get orders by brand and status
 router.get(
   "/brand/:brand/vendor/:vendor/status/:status",
   authenticate,
+  authorize("admin", "manager", "QC", "dev", "user"),
   getOrdersByBrandAndStatus,
 );
 
 // get orders with optional filters via query params
-router.get("/filters", authenticate, getOrdersByFiltersDb);
-router.get("/export", authenticate, exportOrdersDb);
+router.get("/filters", authenticate, authorize("admin", "manager", "QC", "dev", "user"), getOrdersByFiltersDb);
+router.get("/export", authenticate, authorize("admin", "manager", "QC", "dev", "user"), exportOrdersDb);
 router.get(
   "/po-status-report",
   authenticate,
-  authorize("admin", "manager", "dev"),
+  authorize("admin", "manager", "dev", "user"),
   getPoStatusReport,
 );
 router.get(
   "/delayed-po-report",
   authenticate,
-  authorize("admin", "manager", "QC", "dev"),
+  authorize("admin", "manager", "QC", "dev", "user"),
   getDelayedPoReport,
 );
 router.get(
   "/upcoming-etd-report",
   authenticate,
-  authorize("admin", "manager", "QC", "dev"),
+  authorize("admin", "manager", "QC", "dev", "user"),
   getUpcomingEtdReport,
 );
 router.get(
   "/delayed-po-report/export",
   authenticate,
-  authorize("admin", "manager", "QC", "dev"),
+  authorize("admin", "manager", "QC", "dev", "user"),
   exportDelayedPoReport,
 );
 router.get(
   "/upcoming-etd-report/export",
   authenticate,
-  authorize("admin", "manager", "QC", "dev"),
+  authorize("admin", "manager", "QC", "dev", "user"),
   exportUpcomingEtdReport,
 );
-router.get("/revised-etd-history", authenticate, getRevisedEtdHistory);
+router.get("/revised-etd-history", authenticate, authorize("admin", "manager", "QC", "dev", "user"), getRevisedEtdHistory);
 
 // List shipped/partially shipped/inspection-done items with latest shipment details
 router.get(
   "/shipments/export",
   authenticate,
-  authorize("admin", "manager", "QC", "dev"),
+  authorize("admin", "manager", "QC", "dev", "user"),
   exportShipmentsDb,
 );
 
 router.get(
   "/shipments",
   authenticate,
-  authorize("admin", "manager", "QC", "dev"),
+  authorize("admin", "manager", "QC", "dev", "user"),
   getShipmentsDb,
 );
 
@@ -199,14 +200,14 @@ router.patch(
   finalizeOrder,
 );
 
-router.get("/today-etd-orders", authenticate, getTodayEtdOrdersByBrand);
+router.get("/today-etd-orders", authenticate, authorize("admin", "manager", "QC", "dev", "user"), getTodayEtdOrdersByBrand);
 
 // Get vendor summary by brand
-router.get("/:brand/vendor-summary", authenticate, getVendorSummaryByBrand);
-router.get("/:brand/today-etd-orders", authenticate, getTodayEtdOrdersByBrand);
+router.get("/:brand/vendor-summary", authenticate, authorize("admin", "manager", "QC", "dev", "user"), getVendorSummaryByBrand);
+router.get("/:brand/today-etd-orders", authenticate, authorize("admin", "manager", "QC", "dev", "user"), getTodayEtdOrdersByBrand);
 
 // Get order by ID
-router.get("/order-by-id/:id", authenticate, getOrderById);
+router.get("/order-by-id/:id", authenticate, authorize("admin", "manager", "QC", "dev", "user"), getOrderById);
 
 // Resync the calendar
 router.post(

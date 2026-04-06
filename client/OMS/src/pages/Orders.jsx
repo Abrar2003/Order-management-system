@@ -24,7 +24,8 @@ const toSafeNumber = (value) => {
 
 const getShippedQuantity = (order) =>
   (Array.isArray(order?.shipment) ? order.shipment : []).reduce(
-    (sum, shipmentEntry) => sum + Math.max(0, toSafeNumber(shipmentEntry?.quantity)),
+    (sum, shipmentEntry) =>
+      sum + Math.max(0, toSafeNumber(shipmentEntry?.quantity)),
     0,
   );
 
@@ -85,11 +86,11 @@ const Orders = () => {
 
   const user = getUserFromToken();
   const role = user?.role;
-  const normalizedRole = String(role || "").trim().toLowerCase();
+  const normalizedRole = String(role || "")
+    .trim()
+    .toLowerCase();
   const canManageOrders = ["admin", "manager", "dev"].includes(normalizedRole);
-  const canAlignQc = ["admin", "manager"].includes(
-    normalizedRole,
-  );
+  const canAlignQc = ["admin", "manager"].includes(normalizedRole);
   const canEditOrder = normalizedRole === "admin";
   const canArchiveOrder = normalizedRole === "admin";
 
@@ -181,11 +182,25 @@ const Orders = () => {
       setArchiveTarget(null);
       await fetchOrders();
     } catch (err) {
-      setArchiveError(err?.response?.data?.message || "Failed to archive order.");
+      setArchiveError(
+        err?.response?.data?.message || "Failed to archive order.",
+      );
     } finally {
       setArchiving(false);
     }
   };
+  const navigateToItemOrdersHistory = useCallback(
+    (item) => {
+      const itemCode = String(item?.item_code || "").trim();
+      if (!itemCode) return;
+      navigate(`/items/${encodeURIComponent(itemCode)}/orders-history`, {
+        state: {
+          fromItems: `${location.pathname}${location.search}`,
+        },
+      });
+    },
+    [location.pathname, location.search, navigate],
+  );
 
   return (
     <>
@@ -193,7 +208,11 @@ const Orders = () => {
 
       <div className="page-shell py-3">
         <div className="d-flex justify-content-between align-items-center mb-3">
-          <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => navigate(-1)}>
+          <button
+            type="button"
+            className="btn btn-outline-secondary btn-sm"
+            onClick={() => navigate(-1)}
+          >
             Back
           </button>
           <h2 className="h4 mb-0">Orders</h2>
@@ -203,10 +222,18 @@ const Orders = () => {
         <div className="card om-card mb-3">
           <div className="card-body d-flex flex-wrap gap-2 justify-content-between align-items-start">
             <div className="d-flex flex-wrap gap-2">
-              <span className="om-summary-chip">Order: {primaryOrder?.order_id ?? "N/A"}</span>
-              <span className="om-summary-chip">Brand: {primaryOrder?.brand ?? "N/A"}</span>
-              <span className="om-summary-chip">Vendor: {primaryOrder?.vendor ?? "N/A"}</span>
-              <span className="om-summary-chip">Status: {primaryOrder?.status ?? "N/A"}</span>
+              <span className="om-summary-chip">
+                Order: {primaryOrder?.order_id ?? "N/A"}
+              </span>
+              <span className="om-summary-chip">
+                Brand: {primaryOrder?.brand ?? "N/A"}
+              </span>
+              <span className="om-summary-chip">
+                Vendor: {primaryOrder?.vendor ?? "N/A"}
+              </span>
+              <span className="om-summary-chip">
+                Status: {primaryOrder?.status ?? "N/A"}
+              </span>
               <span className="om-summary-chip">
                 Order Date: {formatDateDDMMYYYY(primaryOrder?.order_date)}
               </span>
@@ -270,13 +297,21 @@ const Orders = () => {
                       <th className="orders-cbm-col">CBM</th>
                       <th>Status</th>
                       <th>Revised ETD</th>
-                      {canManageOrders && <th className="orders-action-col">Action</th>}
+                      {canManageOrders && (
+                        <th className="orders-action-col">Action</th>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
                     {sortedOrders.map((order) => (
                       <tr key={order._id}>
-                        <td>
+                        <td
+                          onClick={
+                            order?.item.item_code
+                              ? () => navigateToItemOrdersHistory(order.item)
+                              :() => {console.log("clicked but no item code")}
+                          }
+                        >
                           <ItemOrderPresenceTooltip
                             itemCode={order?.item?.item_code}
                             excludeOrderId={order?.order_id}
@@ -293,7 +328,9 @@ const Orders = () => {
                         </td>
                         <td>{getOpenInspectionQuantity(order)}</td>
                         <td>{getPendingDisplayQuantity(order)}</td>
-                        <td className="orders-cbm-col">{renderOrderCbmCell(order)}</td>
+                        <td className="orders-cbm-col">
+                          {renderOrderCbmCell(order)}
+                        </td>
                         <td>{order.status}</td>
                         <td>{formatDateDDMMYYYY(order?.revised_ETD)}</td>
                         {canManageOrders && (
@@ -339,7 +376,10 @@ const Orders = () => {
                                   type="button"
                                   className="btn btn-link btn-sm p-0 text-start"
                                   onClick={() =>
-                                    navigateToQcForItem(order?.order_id, order?.item?.item_code)
+                                    navigateToQcForItem(
+                                      order?.order_id,
+                                      order?.item?.item_code,
+                                    )
                                   }
                                 >
                                   Inspection Requested / Check updates
@@ -358,7 +398,9 @@ const Orders = () => {
 
                               {canAlignQc &&
                                 order?.qc_record &&
-                                Number(order?.qc_record?.quantities?.pending || 0) > 0 && (
+                                Number(
+                                  order?.qc_record?.quantities?.pending || 0,
+                                ) > 0 && (
                                   <button
                                     type="button"
                                     className="btn btn-outline-primary btn-sm"
@@ -375,7 +417,10 @@ const Orders = () => {
 
                     {orders.length === 0 && (
                       <tr>
-                        <td colSpan={canManageOrders ? 9 : 8} className="text-center py-4">
+                        <td
+                          colSpan={canManageOrders ? 9 : 8}
+                          className="text-center py-4"
+                        >
                           No orders found
                         </td>
                       </tr>

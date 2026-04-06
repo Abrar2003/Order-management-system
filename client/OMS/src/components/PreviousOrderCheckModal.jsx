@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { checkPreviousOrder } from "../services/orders.service";
+import "../App.css";
 
 const KEEP_BOTH = "keep_both";
 const REPLACE_PREVIOUS = "replace_previous";

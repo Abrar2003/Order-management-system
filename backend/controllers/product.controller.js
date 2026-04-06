@@ -155,7 +155,6 @@ const data = rawData.map(processOrder);
     const total = result[0]?.totalCount[0]?.count || 0;
     const totalPages = Math.ceil(total / Number(limit));
     
-    console.log("Product Analytics Result:", data);
     return res.json({
       success: true,
       data,

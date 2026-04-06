@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import "../App.css";
 
 const VIEWPORT_PADDING = 8;
 const PANEL_GAP = 8;
@@ -131,6 +132,7 @@ const HoverPortal = ({
             <span
               ref={panelRef}
               className={panelClassName}
+              title="" 
               role="tooltip"
               style={{
                 position: "fixed",

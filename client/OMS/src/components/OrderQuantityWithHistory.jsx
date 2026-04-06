@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { getOrderEditLogs } from "../services/orders.service";
 import HoverPortal from "./HoverPortal";
+import Tooltip from "./Tooltip";
 import "../App.css";
 
 const historyCache = new Map();
@@ -139,45 +140,60 @@ const OrderQuantityWithHistory = ({
   }
 
   return (
-    <HoverPortal
-      className={`om-order-quantity-history ${className}`.trim()}
-      panelClassName="om-order-quantity-history-panel"
-      onOpen={loadHistory}
-      trigger={<span className="om-order-quantity-history-label" tabIndex={0}>{formattedQuantity}</span>}
+  <Tooltip
+    onOpen={loadHistory}
+    content={
+      <>
+        {historyState.status === "loading" ? (
+          <div className="tooltip-empty">
+            Loading order quantity history...
+          </div>
+        ) : historyState.status === "error" ? (
+          <div className="tooltip-empty">{historyState.error}</div>
+        ) : historyState.items.length === 0 ? (
+          <div className="tooltip-empty">
+            No order quantity history.
+          </div>
+        ) : (
+          <>
+            <div className="tooltip-title">
+              Order Quantity History
+            </div>
+
+            {historyState.items.map((entry) => (
+              <div key={entry.id} className="tooltip-entry">
+                <div className="tooltip-row">
+                  <span>{entry.before || "-"}</span>
+                  <span className="tooltip-detail">→</span>
+                  <span>{entry.after || "-"}</span>
+                </div>
+
+                <div className="tooltip-detail">
+                  {formatDateDDMMYYYY(entry.updated_at, "-")}
+                  {entry.updated_by_name
+                    ? ` | ${entry.updated_by_name}`
+                    : ""}
+                </div>
+
+                {entry.remarks && (
+                  <div className="tooltip-detail">
+                    {entry.remarks}
+                  </div>
+                )}
+              </div>
+            ))}
+          </>
+        )}
+      </>
+    }
+  >
+    <span
+      className={`om-order-quantity-history-label ${className}`}
     >
-      {historyState.status === "loading" ? (
-        <span className="om-order-quantity-history-empty">
-          Loading order quantity history...
-        </span>
-      ) : historyState.status === "error" ? (
-        <span className="om-order-quantity-history-empty">{historyState.error}</span>
-      ) : historyState.items.length === 0 ? (
-        <span className="om-order-quantity-history-empty">No order quantity history.</span>
-      ) : (
-        <>
-          <span className="om-order-quantity-history-title">Order Quantity History</span>
-          {historyState.items.map((entry) => (
-            <span key={entry.id} className="om-order-quantity-history-entry">
-              <span className="om-order-quantity-history-row">
-                <span>{entry.before || "-"}</span>
-                <span className="om-order-quantity-history-arrow">{"->"}</span>
-                <span>{entry.after || "-"}</span>
-              </span>
-              <span className="om-order-quantity-history-meta">
-                {formatDateDDMMYYYY(entry.updated_at, "-")}
-                {entry.updated_by_name ? ` | ${entry.updated_by_name}` : ""}
-              </span>
-              {entry.remarks ? (
-                <span className="om-order-quantity-history-remarks">
-                  {entry.remarks}
-                </span>
-              ) : null}
-            </span>
-          ))}
-        </>
-      )}
-    </HoverPortal>
-  );
+      {formattedQuantity}
+    </span>
+  </Tooltip>
+);
 };
 
 export default OrderQuantityWithHistory;
