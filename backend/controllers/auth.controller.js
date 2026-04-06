@@ -109,13 +109,23 @@ const signin = async (req, res) => {
 const getUsers = async (req, res) => {
   try {
     const { role } = req.query;
+    const requesterRole = normalizeRole(req.user?.role);
+    const normalizedRequestedRole = role ? normalizeRole(role) : "";
+
+    if (
+      requesterRole === "user"
+      && normalizedRequestedRole !== "QC"
+    ) {
+      return res.status(403).json({
+        message: "Access denied",
+      });
+    }
 
     const filter = {};
     if (role) {
-      const normalizedRole = normalizeRole(role);
-      filter.role = normalizedRole === "dev"
+      filter.role = normalizedRequestedRole === "dev"
         ? { $regex: "^dev$", $options: "i" }
-        : normalizedRole;
+        : normalizedRequestedRole;
     }
 
     const users = await User.find(filter)

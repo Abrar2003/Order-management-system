@@ -34,12 +34,13 @@ const Navbar = () => {
 
   const [theme, setTheme] = useState(getInitialTheme);
 
-  const canAccessQc = ["qc", "admin", "manager", "dev"].includes(normalizedRole);
+  const canAccessQc = ["qc", "admin", "manager", "dev", "user"].includes(normalizedRole);
   const isQcOnlyRole = normalizedRole === "qc";
   const canManageOrders = ["admin", "manager", "dev"].includes(normalizedRole);
+  const canViewOrderPages = ["admin", "manager", "dev", "user"].includes(normalizedRole);
   const canManageLabels = ["admin", "manager"].includes(normalizedRole);
   const canCreateUsers = normalizedRole === "admin";
-  const canAccessAnalytics = ["admin", "manager"].includes(normalizedRole);
+  const canAccessAnalytics = ["admin", "manager", "user"].includes(normalizedRole);
 
   const navigate = useNavigate();
 
@@ -61,12 +62,12 @@ const Navbar = () => {
       );
     }
 
-    if (canManageOrders) {
+    if (canViewOrderPages) {
       links.push({ label: "PIS", path: "/pis" });
     }
 
     return links;
-  }, [canAccessQc, canManageOrders, isQcOnlyRole]);
+  }, [canAccessQc, canViewOrderPages, isQcOnlyRole]);
 
   const secondaryRouteLinks = useMemo(() => {
     if (isQcOnlyRole) {
@@ -79,7 +80,7 @@ const Navbar = () => {
       links.push({ label: "Items", path: "/items" });
     }
 
-    if (canManageOrders) {
+    if (canViewOrderPages) {
       links.push({ label: "PIS", path: "/pis" });
     }
 
@@ -88,7 +89,7 @@ const Navbar = () => {
     }
 
     return links;
-  }, [canAccessQc, canManageOrders, canCreateUsers, isQcOnlyRole]);
+  }, [canAccessQc, canViewOrderPages, canCreateUsers, isQcOnlyRole]);
 
   const reportRouteLinks = useMemo(() => {
     if (!canAccessQc || isQcOnlyRole) return [];
@@ -109,13 +110,13 @@ const Navbar = () => {
   }, [canAccessQc, isQcOnlyRole, canAccessAnalytics]);
 
   const logRouteLinks = useMemo(() => {
-    if (!canManageOrders || isQcOnlyRole) return [];
+    if (!canViewOrderPages || isQcOnlyRole) return [];
     return [
       { label: "Upload Logs", path: "/upload-logs" },
       { label: "Order Edit Logs", path: "/order-edit-logs" },
       { label: "Email Logs", path: "/email-logs" },
     ];
-  }, [canManageOrders, isQcOnlyRole]);
+  }, [canViewOrderPages, isQcOnlyRole]);
 
   const summaryRouteLinks = useMemo(() => {
     if (!canAccessQc || isQcOnlyRole) return [];

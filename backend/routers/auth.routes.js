@@ -23,7 +23,7 @@ router.patch(
 router.get(
   "/",
   auth,
-  authorize("admin", "manager", "dev"),
+  authorize("admin", "manager", "dev", "user"),
   getUsers
 );
 

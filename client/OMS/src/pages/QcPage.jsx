@@ -167,7 +167,7 @@ const QCPage = () => {
     normalizedRole,
   );
   const canUseInspectorFilter = !isQcUser;
-  const canExportQcList = ["admin", "manager", "dev"].includes(normalizedRole);
+  const canExportQcList = ["admin", "manager", "dev", "user"].includes(normalizedRole);
 
   const fetchQC = useCallback(async () => {
     const fromIso = toISODateString(from);

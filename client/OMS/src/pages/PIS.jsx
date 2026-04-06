@@ -234,13 +234,17 @@ const PIS = () => {
       <div className="page-shell py-3">
         <div className="d-flex justify-content-between align-items-center mb-3">
           <h2 className="h4 mb-0">PIS</h2>
-          <button
-            type="button"
-            className="btn btn-outline-primary btn-sm"
-            onClick={() => alert("PIS file upload will be added in a later update.")}
-          >
-            Upload PIS File
-          </button>
+          {canEditPis ? (
+            <button
+              type="button"
+              className="btn btn-outline-primary btn-sm"
+              onClick={() => alert("PIS file upload will be added in a later update.")}
+            >
+              Upload PIS File
+            </button>
+          ) : (
+            <span className="d-none d-md-inline" />
+          )}
         </div>
 
         {!canEditPis && (

@@ -70,14 +70,14 @@ router.get(
 router.get(
   "/upload-logs",
   authenticate,
-  authorize("admin", "manager", "dev"),
+  authorize("admin", "manager", "dev", "user"),
   getUploadLogs,
 );
 
 router.get(
   "/edit-logs",
   authenticate,
-  authorize("admin", "manager", "dev"),
+  authorize("admin", "manager", "dev", "user"),
   getOrderEditLogs,
 );
 

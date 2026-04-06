@@ -52,7 +52,7 @@ router.get(
   getItemFileUrl,
 );
 
-router.get("/product-analytics", auth, authorize("admin", "manager", "dev"), getProductAnalytics);
+router.get("/product-analytics", auth, authorize("admin", "manager", "dev", "user"), getProductAnalytics);
 
 router.patch(
   "/:id",
