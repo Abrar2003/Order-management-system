@@ -16,7 +16,6 @@ import "../App.css";
 
 const DEFAULT_ALIGNED_SORT_BY = "request_date";
 const DEFAULT_INSPECTION_SORT_BY = "inspection_date";
-const DAILY_REPORT_DEBUG_PREFIX = "[DailyReportDebug]";
 
 const normalizeQueryText = (value) => String(value || "").trim();
 const getDefaultAlignedSortOrder = (sortBy) =>
@@ -58,15 +57,8 @@ const parseSortOrder = (value, sortBy) => {
 const normalizeInspectionStatus = (value) =>
   String(value || "").trim().toLowerCase();
 
-const renderInspectionStatus = (value, debugContext = null) => {
+const renderInspectionStatus = (value) => {
   const normalized = normalizeInspectionStatus(value);
-  if (debugContext) {
-    console.log(`${DAILY_REPORT_DEBUG_PREFIX} renderInspectionStatus`, {
-      rawValue: value,
-      normalizedValue: normalized || "(empty)",
-      ...debugContext,
-    });
-  }
   if (normalized === "transfered" || normalized === "transferred") {
     return <span className="text-warning fw-semibold">Transferred</span>;
   }
@@ -194,38 +186,6 @@ const DailyReport = () => {
         },
       });
 
-      console.log(`${DAILY_REPORT_DEBUG_PREFIX} raw /qc/daily-report response`, {
-        date: res?.data?.date,
-        summary: res?.data?.summary,
-        aligned_requests: Array.isArray(res?.data?.aligned_requests)
-          ? res.data.aligned_requests.map((request) => ({
-              request_row_id: request?.request_row_id,
-              qc_id: request?.qc_id,
-              order_id: request?.order_id,
-              item_code: request?.item_code,
-              inspection_status: request?.inspection_status,
-              goods_not_ready: request?.goods_not_ready,
-              request_pending_action: request?.request_pending_action,
-              goods_not_ready_reason: request?.goods_not_ready_reason,
-            }))
-          : [],
-        inspector_compiled: Array.isArray(res?.data?.inspector_compiled)
-          ? res.data.inspector_compiled.map((entry) => ({
-              inspector: entry?.inspector?.name || "Unassigned",
-              inspections: Array.isArray(entry?.inspections)
-                ? entry.inspections.map((inspection) => ({
-                    inspection_id: inspection?.inspection_id,
-                    order_id: inspection?.order_id,
-                    item_code: inspection?.item_code,
-                    inspection_status: inspection?.inspection_status,
-                    goods_not_ready: inspection?.goods_not_ready,
-                    goods_not_ready_reason: inspection?.goods_not_ready_reason,
-                  }))
-                : [],
-            }))
-          : [],
-      });
-
       setReport({
         date: toDDMMYYYYInputValue(res?.data?.date || selectedDate, selectedDate),
         summary: res?.data?.summary || {
@@ -264,40 +224,6 @@ const DailyReport = () => {
   useEffect(() => {
     fetchDailyReport();
   }, [fetchDailyReport]);
-
-  useEffect(() => {
-    console.log(`${DAILY_REPORT_DEBUG_PREFIX} normalized report state`, {
-      date: report?.date,
-      summary: report?.summary,
-      aligned_requests: Array.isArray(report?.aligned_requests)
-        ? report.aligned_requests.map((request) => ({
-            request_row_id: request?.request_row_id,
-            qc_id: request?.qc_id,
-            order_id: request?.order_id,
-            item_code: request?.item_code,
-            inspection_status: request?.inspection_status,
-            goods_not_ready: request?.goods_not_ready,
-            request_pending_action: request?.request_pending_action,
-            goods_not_ready_reason: request?.goods_not_ready_reason,
-          }))
-        : [],
-      inspector_compiled: Array.isArray(report?.inspector_compiled)
-        ? report.inspector_compiled.map((entry) => ({
-            inspector: entry?.inspector?.name || "Unassigned",
-            inspections: Array.isArray(entry?.inspections)
-              ? entry.inspections.map((inspection) => ({
-                  inspection_id: inspection?.inspection_id,
-                  order_id: inspection?.order_id,
-                  item_code: inspection?.item_code,
-                  inspection_status: inspection?.inspection_status,
-                  goods_not_ready: inspection?.goods_not_ready,
-                  goods_not_ready_reason: inspection?.goods_not_ready_reason,
-                }))
-              : [],
-          }))
-        : [],
-    });
-  }, [report]);
 
   useEffect(() => {
     const currentQuery = searchParams.toString();
@@ -535,18 +461,7 @@ const DailyReport = () => {
                       <td>{request.quantity_requested ?? 0}</td>
                       <td>{request.quantity_passed ?? 0}</td>
                       <td>{renderResolvedCbmTotal(request?.inspected_cbm_total)}</td>
-                      <td>
-                        {renderInspectionStatus(request?.inspection_status, {
-                          requestRowId: request?.request_row_id || "",
-                          qcId: request?.qc_id || "",
-                          orderId: request?.order_id || "",
-                          itemCode: request?.item_code || "",
-                          goodsNotReadyFlag: Boolean(request?.goods_not_ready),
-                          requestPendingAction: Boolean(
-                            request?.request_pending_action,
-                          ),
-                        })}
-                      </td>
+                      <td>{renderInspectionStatus(request?.inspection_status)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -471,17 +471,14 @@ const Items = () => {
                     )}
                     {rows.map((item) => (
                       <tr key={item?._id || item?.code}>
-                        <td onClick={
+                        <td 
+                          style={{ cursor: item?.code ? "pointer" : "default" }}
+                        onClick={
                               item?.code
                                 ? () => navigateToItemOrdersHistory(item)
                                 : undefined
                             }>
-                          <ItemOrderPresenceTooltip
-                            itemCode={item?.code}
-                            label={item?.code || "N/A"}
-                            
-                            buttonClassName="btn btn-link btn-sm p-0 text-start"
-                          />
+                          {item?.code || "N/A"}
                         </td>
                         <td>{item?.name || "N/A"}</td>
                         <td>

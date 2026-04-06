@@ -267,7 +267,7 @@ const buildVendorDisplayRows = (
 
       return inspectedItemsInRange.map((item, index) => ({
         key: `${orderId}-${item?.item_code || "item"}-${index}`,
-        po: index === 0 ? orderId : "",
+        po: orderId,
         itemLabel: item?.item_code || "N/A",
         totalOrderQuantity: toReportQuantity(item?.total_order_quantity),
         quantityPassed: toReportQuantity(item?.quantity_passed),

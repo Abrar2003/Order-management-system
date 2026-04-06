@@ -306,17 +306,14 @@ const Orders = () => {
                     {sortedOrders.map((order) => (
                       <tr key={order._id}>
                         <td
+                        style={{ cursor: order?.item?.item_code ? "pointer" : "default" }}
                           onClick={
                             order?.item.item_code
                               ? () => navigateToItemOrdersHistory(order.item)
                               :() => {console.log("clicked but no item code")}
                           }
                         >
-                          <ItemOrderPresenceTooltip
-                            itemCode={order?.item?.item_code}
-                            excludeOrderId={order?.order_id}
-                            label={order?.item?.item_code || "N/A"}
-                          />
+                          {order?.item?.item_code || "N/A"}
                         </td>
                         <td>{order.item?.description}</td>
                         <td>
