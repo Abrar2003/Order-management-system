@@ -33,8 +33,12 @@
   --om-radius-lg: 1.3rem;
   --om-radius-xl: 1.6rem;
   --om-page-width: min(1360px, 96%);
+  --om-font-size-body: 1rem;
+  --om-font-size-table: 0.98rem;
+  --om-font-size-table-head: 0.86rem;
+  --om-font-size-meta: 0.82rem;
   --bs-body-font-family: var(--om-font-sans);
-  --bs-body-font-size: 0.95rem;
+  --bs-body-font-size: var(--om-font-size-body);
   --bs-body-line-height: 1.55;
   --bs-body-bg: var(--om-color-bg);
   --bs-body-color: var(--om-color-text);
@@ -292,7 +296,7 @@ small,
   padding: 0.42rem 0.8rem;
   background-color: var(--om-color-surface-muted);
   color: var(--om-color-text-muted);
-  font-size: 0.78rem;
+  font-size: var(--om-font-size-meta);
   font-weight: 600;
   letter-spacing: 0.03em;
 }
@@ -334,7 +338,7 @@ small,
   --bs-table-color: var(--om-color-text);
   margin-bottom: 0;
   color: var(--om-color-text);
-  font-size: 0.94rem;
+  font-size: var(--om-font-size-table);
 }
 
 .table > :not(caption) > * > * {
@@ -355,11 +359,48 @@ small,
   z-index: 2;
   background: var(--om-color-surface-muted);
   color: var(--om-color-text-muted);
-  font-size: 0.72rem;
+  font-size: var(--om-font-size-table-head);
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  text-transform: none;
   border-bottom: 1px solid var(--om-color-border-strong);
+}
+
+.table thead th > .btn.btn-link {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.2rem;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit !important;
+  font: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: inherit;
+  white-space: normal;
+  text-decoration: none !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.table thead th > .btn.btn-link:hover,
+.table thead th > .btn.btn-link:focus-visible,
+.table thead th > .btn.btn-link:active {
+  background: transparent;
+  color: inherit !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.table thead th > .btn.btn-link.fw-semibold {
+  font-weight: inherit !important;
 }
 
 .table > thead.table-primary > tr > th,
@@ -781,11 +822,19 @@ small,
 }
 
 .brand-logo-btn.btn-primary {
-  border-color: rgba(124, 109, 89, 0.5);
+  --bs-btn-bg: var(--om-color-surface);
+  --bs-btn-border-color: var(--om-button-primary-border);
+  --bs-btn-color: var(--om-color-text);
+  --bs-btn-hover-bg: var(--om-color-surface);
+  --bs-btn-hover-border-color: var(--om-button-primary-border);
+  --bs-btn-hover-color: var(--om-color-text);
+  --bs-btn-active-bg: var(--om-color-surface);
+  --bs-btn-active-border-color: var(--om-button-primary-border);
+  --bs-btn-active-color: var(--om-color-text);
+  border-width: 2px;
   background: var(--om-color-surface);
-  box-shadow:
-    inset 0 0 0 1px rgba(124, 109, 89, 0.12),
-    var(--om-shadow-xs);
+  color: var(--om-color-text);
+  box-shadow: var(--om-shadow-xs);
 }
 
 .brand-logo-btn.btn-outline-secondary {
@@ -1266,6 +1315,109 @@ small,
   overflow: hidden;
 }
 
+.shipments-page-shell {
+  width: min(1520px, 99vw);
+}
+
+.shipments-table-wrap {
+  overflow-x: hidden;
+}
+
+.shipments-table {
+  table-layout: fixed;
+  width: 100%;
+  font-size: 0.84rem;
+}
+
+.shipments-table > :not(caption) > * > * {
+  padding: 0.65rem 0.55rem;
+  line-height: 1.25;
+}
+
+.shipments-table th,
+.shipments-table td {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  vertical-align: middle;
+}
+
+.shipments-table thead th {
+  font-size: 0.67rem;
+  letter-spacing: 0.05em;
+}
+
+.shipments-table th > .btn.btn-link {
+  width: 100%;
+  display: inline-flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  text-align: left;
+  white-space: normal;
+  line-height: 1.15;
+  font-size: inherit;
+}
+
+.shipments-col-po {
+  width: 6%;
+}
+
+.shipments-col-item {
+  width: 8%;
+}
+
+.shipments-col-vendor {
+  width: 8%;
+}
+
+.shipments-col-description {
+  width: 14%;
+}
+
+.shipments-col-order-qty {
+  width: 6%;
+  text-align: center;
+}
+
+.shipments-col-date {
+  width: 7%;
+  text-align: center;
+}
+
+.shipments-col-container {
+  width: 7.5%;
+}
+
+.shipments-col-invoice {
+  width: 7.5%;
+}
+
+.shipments-col-qty {
+  width: 4.5%;
+  text-align: center;
+}
+
+.shipments-col-pending {
+  width: 4.5%;
+  text-align: center;
+}
+
+.shipments-col-remarks {
+  width: 11.5%;
+}
+
+.shipments-col-action {
+  width: 5.5%;
+}
+
+.shipments-action-btn {
+  width: 100%;
+  min-width: 0;
+  padding-inline: 0.55rem;
+  white-space: normal;
+  line-height: 1.15;
+}
+
 .om-limit-control {
   max-width: 160px;
   border-radius: 999px;
@@ -1277,6 +1429,20 @@ small,
 .om-limit-control .form-select {
   border-radius: 0;
   min-height: 2.75rem;
+}
+
+@media (max-width: 1400px) {
+  .shipments-table {
+    font-size: 0.8rem;
+  }
+
+  .shipments-table > :not(caption) > * > * {
+    padding: 0.58rem 0.45rem;
+  }
+
+  .shipments-table thead th {
+    font-size: 0.64rem;
+  }
 }
 
 .open-orders-filter-row .form-label {

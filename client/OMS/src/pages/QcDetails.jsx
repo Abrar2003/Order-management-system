@@ -10,6 +10,7 @@ import GoodsNotReadyModal from "../components/GoodsNotReadyModal";
 import PdfViewerModal from "../components/PdfViewerModal";
 import TransferQcRequestModal from "../components/TransferQcRequestModal";
 import { getUserFromToken } from "../auth/auth.utils";
+import { isViewOnlyUser } from "../auth/permissions";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { formatPositiveCbm } from "../utils/cbm";
 import Barcode from "react-barcode";
@@ -355,6 +356,7 @@ const QcDetails = () => {
   const relatedFileUploadInFlightRef = useRef(false);
   const relatedFileUploadBatchKeyRef = useRef("");
   const user = getUserFromToken();
+  const isViewOnly = isViewOnlyUser(user);
   const normalizedRole = String(user?.role || "").trim().toLowerCase();
   const currentUserId = String(user?.id || user?._id || "").trim();
   const isQcUser = normalizedRole === "qc";
@@ -1238,77 +1240,81 @@ const QcDetails = () => {
           <h2 className="h4 mb-0">QC Details</h2>
           <div className="d-flex flex-column align-items-end gap-2">
             <div className="d-flex align-items-center flex-wrap justify-content-end gap-2">
-              <select
-                className="form-select form-select-sm"
-                style={{ width: "auto", minWidth: "160px" }}
-                value={relatedFileType}
-                onChange={(e) => setRelatedFileType(String(e.target.value || "product_image"))}
-                disabled={
-                  !canUploadRelatedFile ||
-                  uploadingRelatedFile ||
-                  deletingRelatedFile ||
-                  availableRelatedFileOptions.length <= 1
-                }
-                title={relatedFileUploadDisabledReason}
-              >
-                {availableRelatedFileOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-
-              {activeRelatedFileConfig?.value === "qc_images" && (
+              {!isViewOnly && (
                 <>
                   <select
                     className="form-select form-select-sm"
-                    style={{ width: "auto", minWidth: "140px" }}
-                    value={qcImageUploadMode}
-                    onChange={(e) => setQcImageUploadMode(String(e.target.value || "single"))}
-                    disabled={!canUploadActiveRelatedFile || uploadingRelatedFile || deletingRelatedFile}
+                    style={{ width: "auto", minWidth: "160px" }}
+                    value={relatedFileType}
+                    onChange={(e) => setRelatedFileType(String(e.target.value || "product_image"))}
+                    disabled={
+                      !canUploadRelatedFile ||
+                      uploadingRelatedFile ||
+                      deletingRelatedFile ||
+                      availableRelatedFileOptions.length <= 1
+                    }
+                    title={relatedFileUploadDisabledReason}
                   >
-                    <option value="single">Single Image</option>
-                    <option value="bulk">Bulk Images</option>
+                    {availableRelatedFileOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
                   </select>
 
-                  {qcImageUploadMode === "single" && (
-                    <input
-                      type="text"
-                      className="form-control form-control-sm"
-                      style={{ width: "220px" }}
-                      value={qcSingleImageComment}
-                      onChange={(e) => setQcSingleImageComment(String(e.target.value || ""))}
-                      placeholder="Comment (optional)"
-                      disabled={!canUploadActiveRelatedFile || uploadingRelatedFile || deletingRelatedFile}
-                    />
+                  {activeRelatedFileConfig?.value === "qc_images" && (
+                    <>
+                      <select
+                        className="form-select form-select-sm"
+                        style={{ width: "auto", minWidth: "140px" }}
+                        value={qcImageUploadMode}
+                        onChange={(e) => setQcImageUploadMode(String(e.target.value || "single"))}
+                        disabled={!canUploadActiveRelatedFile || uploadingRelatedFile || deletingRelatedFile}
+                      >
+                        <option value="single">Single Image</option>
+                        <option value="bulk">Bulk Images</option>
+                      </select>
+
+                      {qcImageUploadMode === "single" && (
+                        <input
+                          type="text"
+                          className="form-control form-control-sm"
+                          style={{ width: "220px" }}
+                          value={qcSingleImageComment}
+                          onChange={(e) => setQcSingleImageComment(String(e.target.value || ""))}
+                          placeholder="Comment (optional)"
+                          disabled={!canUploadActiveRelatedFile || uploadingRelatedFile || deletingRelatedFile}
+                        />
+                      )}
+                    </>
+                  )}
+
+                  <button
+                    type="button"
+                    className="btn btn-outline-primary btn-sm"
+                    onClick={handleOpenRelatedFilePicker}
+                    disabled={!canUploadActiveRelatedFile || uploadingRelatedFile || deletingRelatedFile}
+                    title={relatedFileUploadDisabledReason}
+                  >
+                    {uploadingRelatedFile
+                      ? "Uploading..."
+                      : activeRelatedFileConfig?.value === "qc_images"
+                      ? "Upload QC Images"
+                      : "Upload Related File"}
+                  </button>
+
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      className="btn btn-outline-danger btn-sm"
+                      onClick={handleDeleteRelatedFile}
+                      disabled={!canDeleteActiveRelatedFile || uploadingRelatedFile || deletingRelatedFile}
+                      title={relatedFileDeleteDisabledReason}
+                    >
+                      {deletingRelatedFile ? "Deleting..." : "Delete File"}
+                    </button>
                   )}
                 </>
-              )}
-
-              <button
-                type="button"
-                className="btn btn-outline-primary btn-sm"
-                onClick={handleOpenRelatedFilePicker}
-                disabled={!canUploadActiveRelatedFile || uploadingRelatedFile || deletingRelatedFile}
-                title={relatedFileUploadDisabledReason}
-              >
-                {uploadingRelatedFile
-                  ? "Uploading..."
-                  : activeRelatedFileConfig?.value === "qc_images"
-                  ? "Upload QC Images"
-                  : "Upload Related File"}
-              </button>
-
-              {isAdmin && (
-                <button
-                  type="button"
-                  className="btn btn-outline-danger btn-sm"
-                  onClick={handleDeleteRelatedFile}
-                  disabled={!canDeleteActiveRelatedFile || uploadingRelatedFile || deletingRelatedFile}
-                  title={relatedFileDeleteDisabledReason}
-                >
-                  {deletingRelatedFile ? "Deleting..." : "Delete File"}
-                </button>
               )}
 
               <button
@@ -1645,84 +1651,86 @@ const QcDetails = () => {
               </div>
             </section>
 
-            <div className="d-flex justify-content-end flex-wrap gap-2">
-              {canFinalizeShipping &&
-                ["Inspection Done", "Partial Shipped"].includes(
-                  qc?.order?.status,
-                ) && (
+            {!isViewOnly && (
+              <div className="d-flex justify-content-end flex-wrap gap-2">
+                {canFinalizeShipping &&
+                  ["Inspection Done", "Partial Shipped"].includes(
+                    qc?.order?.status,
+                  ) && (
+                    <button
+                      type="button"
+                      className="btn btn-outline-secondary"
+                      onClick={() => setShowShippingModal(true)}
+                    >
+                      Finalize Shipping
+                    </button>
+                  )}
+
+                {isAdmin && (
                   <button
                     type="button"
-                    className="btn btn-outline-secondary"
-                    onClick={() => setShowShippingModal(true)}
+                    className="btn btn-outline-warning"
+                    onClick={() => setShowTransferRequestModal(true)}
+                    disabled={!Array.isArray(qc?.request_history) || qc.request_history.length === 0}
                   >
-                    Finalize Shipping
+                    Transfer Request
                   </button>
                 )}
 
-              {isAdmin && (
                 <button
                   type="button"
-                  className="btn btn-outline-warning"
-                  onClick={() => setShowTransferRequestModal(true)}
-                  disabled={!Array.isArray(qc?.request_history) || qc.request_history.length === 0}
+                  className="btn btn-outline-danger"
+                  onClick={() => setShowGoodsNotReadyModal(true)}
+                  disabled={!canUpdateQc}
+                  title={
+                    !canUpdateQc
+                      ? !pendingAlignmentInfo.hasRequest
+                        ? "QC is not requested yet. Align QC request before updating."
+                        : !isQcAlignedRecord
+                        ? "QC can update only records aligned to them."
+                        : isInspectionDone
+                        ? "After inspection is done, only admin can update this record."
+                        : !isQcInspectionDateAllowed
+                        ? "QC date rule will be validated while submitting."
+                        : hasUsedOneDayBackdatedUpdate
+                        ? "Backdated one-time rule will be validated while submitting."
+                        : "Only admin, manager, or aligned QC can update this record."
+                      : ""
+                  }
                 >
-                  Transfer Request
+                  Goods Not Ready
                 </button>
-              )}
 
-              <button
-                type="button"
-                className="btn btn-outline-danger"
-                onClick={() => setShowGoodsNotReadyModal(true)}
-                disabled={!canUpdateQc}
-                title={
-                  !canUpdateQc
-                    ? !pendingAlignmentInfo.hasRequest
-                      ? "QC is not requested yet. Align QC request before updating."
-                      : !isQcAlignedRecord
-                      ? "QC can update only records aligned to them."
-                      : isInspectionDone
-                      ? "After inspection is done, only admin can update this record."
-                      : !isQcInspectionDateAllowed
-                      ? "QC date rule will be validated while submitting."
-                      : hasUsedOneDayBackdatedUpdate
-                      ? "Backdated one-time rule will be validated while submitting."
-                      : "Only admin, manager, or aligned QC can update this record."
-                    : ""
-                }
-              >
-                Goods Not Ready
-              </button>
-
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => setShowUpdateModal(true)}
-                disabled={!canUpdateQc}
-                title={
-                  !canUpdateQc
-                    ? !pendingAlignmentInfo.hasRequest
-                      ? "QC is not requested yet. Align QC request before updating."
-                      : !isQcAlignedRecord
-                      ? "QC can update only records aligned to them."
-                      : isInspectionDone
-                      ? "After inspection is done, only admin can update this record."
-                      : !isQcInspectionDateAllowed
-                      ? "QC date rule will be validated while submitting."
-                      : hasUsedOneDayBackdatedUpdate
-                      ? "Backdated one-time rule will be validated while submitting."
-                      : "Only admin, manager, or aligned QC can update this record."
-                    : ""
-                }
-              >
-                Update QC Record
-              </button>
-            </div>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => setShowUpdateModal(true)}
+                  disabled={!canUpdateQc}
+                  title={
+                    !canUpdateQc
+                      ? !pendingAlignmentInfo.hasRequest
+                        ? "QC is not requested yet. Align QC request before updating."
+                        : !isQcAlignedRecord
+                        ? "QC can update only records aligned to them."
+                        : isInspectionDone
+                        ? "After inspection is done, only admin can update this record."
+                        : !isQcInspectionDateAllowed
+                        ? "QC date rule will be validated while submitting."
+                        : hasUsedOneDayBackdatedUpdate
+                        ? "Backdated one-time rule will be validated while submitting."
+                        : "Only admin, manager, or aligned QC can update this record."
+                      : ""
+                  }
+                >
+                  Update QC Record
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
-      {showUpdateModal && (
+      {showUpdateModal && !isViewOnly && (
         <UpdateQcModal
           qc={qc}
           isAdmin={isOnlyAdmin}
@@ -1734,7 +1742,7 @@ const QcDetails = () => {
         />
       )}
 
-      {showShippingModal && (
+      {showShippingModal && canFinalizeShipping && !isViewOnly && (
         <ShippingModal
           order={qc?.order}
           onClose={() => setShowShippingModal(false)}
@@ -1756,7 +1764,7 @@ const QcDetails = () => {
         />
       )}
 
-      {showEditInspectionModal && (
+      {showEditInspectionModal && isAdmin && !isViewOnly && (
         <EditInspectionRecordsModal
           qc={qc}
           onClose={() => setShowEditInspectionModal(false)}
@@ -1767,7 +1775,7 @@ const QcDetails = () => {
         />
       )}
 
-      {showTransferRequestModal && (
+      {showTransferRequestModal && isAdmin && !isViewOnly && (
         <TransferQcRequestModal
           qc={qc}
           onClose={() => setShowTransferRequestModal(false)}
@@ -1778,7 +1786,7 @@ const QcDetails = () => {
         />
       )}
 
-      {showGoodsNotReadyModal && (
+      {showGoodsNotReadyModal && !isViewOnly && (
         <GoodsNotReadyModal
           qc={qc}
           onClose={() => setShowGoodsNotReadyModal(false)}

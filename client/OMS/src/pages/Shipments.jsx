@@ -52,7 +52,9 @@ const normalizeFilterParam = (value, fallback = "all") => {
 const normalizeSearchParam = (value) => String(value || "").trim();
 
 const parseSortBy = (value) => {
-  const normalized = String(value || "").trim().toLowerCase();
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
   const allowed = new Set([
     "order_id",
     "item_code",
@@ -68,7 +70,9 @@ const parseSortBy = (value) => {
 };
 
 const parseSortOrder = (value, sortBy = DEFAULT_SORT_BY) => {
-  const normalized = String(value || "").trim().toLowerCase();
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
   if (normalized === "asc" || normalized === "desc") return normalized;
   return sortBy === DEFAULT_SORT_BY ? "desc" : "asc";
 };
@@ -78,9 +82,9 @@ const isShipmentEditableStatus = (statusValue) => {
     .trim()
     .toLowerCase();
   return (
-    normalized === "partial shipped"
-    || normalized === "partially shipped"
-    || normalized === "shipped"
+    normalized === "partial shipped" ||
+    normalized === "partially shipped" ||
+    normalized === "shipped"
   );
 };
 
@@ -94,7 +98,9 @@ const Shipments = () => {
     initialSortBy,
   );
   const user = getUserFromToken();
-  const normalizedRole = String(user?.role || "").trim().toLowerCase();
+  const normalizedRole = String(user?.role || "")
+    .trim()
+    .toLowerCase();
   const isAdmin = normalizedRole === "admin";
   const canFinalizeShipping = ["admin", "manager", "dev"].includes(
     normalizedRole,
@@ -125,7 +131,9 @@ const Shipments = () => {
   const [page, setPage] = useState(() =>
     parsePositiveInt(searchParams.get("page"), 1),
   );
-  const [limit, setLimit] = useState(() => parseLimit(searchParams.get("limit")));
+  const [limit, setLimit] = useState(() =>
+    parseLimit(searchParams.get("limit")),
+  );
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
   const [summary, setSummary] = useState(EMPTY_SUMMARY);
@@ -164,7 +172,9 @@ const Shipments = () => {
       setRows(Array.isArray(res?.data?.data) ? res.data.data : []);
       setSummary(res?.data?.summary || EMPTY_SUMMARY);
       setPage(Math.max(1, Number(res?.data?.pagination?.page || 1)));
-      setTotalPages(Math.max(1, Number(res?.data?.pagination?.totalPages || 1)));
+      setTotalPages(
+        Math.max(1, Number(res?.data?.pagination?.totalPages || 1)),
+      );
       setTotalRecords(Number(res?.data?.pagination?.totalRecords || 0));
       setFilterOptions({
         vendors: Array.isArray(res?.data?.filters?.vendors)
@@ -213,11 +223,23 @@ const Shipments = () => {
 
   useEffect(() => {
     const currentQuery = searchParams.toString();
-    const nextOrderIdSearch = normalizeSearchParam(searchParams.get("order_id"));
-    const nextItemCodeSearch = normalizeSearchParam(searchParams.get("item_code"));
-    const nextContainerSearch = normalizeSearchParam(searchParams.get("container"));
-    const nextVendorFilter = normalizeFilterParam(searchParams.get("vendor"), "all");
-    const nextStatusFilter = normalizeFilterParam(searchParams.get("status"), "all");
+    const nextOrderIdSearch = normalizeSearchParam(
+      searchParams.get("order_id"),
+    );
+    const nextItemCodeSearch = normalizeSearchParam(
+      searchParams.get("item_code"),
+    );
+    const nextContainerSearch = normalizeSearchParam(
+      searchParams.get("container"),
+    );
+    const nextVendorFilter = normalizeFilterParam(
+      searchParams.get("vendor"),
+      "all",
+    );
+    const nextStatusFilter = normalizeFilterParam(
+      searchParams.get("status"),
+      "all",
+    );
     const nextSortBy = parseSortBy(searchParams.get("sort_by"));
     const nextSortOrder = parseSortOrder(
       searchParams.get("sort_order"),
@@ -226,11 +248,21 @@ const Shipments = () => {
     const nextPage = parsePositiveInt(searchParams.get("page"), 1);
     const nextLimit = parseLimit(searchParams.get("limit"));
 
-    setOrderIdSearch((prev) => (prev === nextOrderIdSearch ? prev : nextOrderIdSearch));
-    setItemCodeSearch((prev) => (prev === nextItemCodeSearch ? prev : nextItemCodeSearch));
-    setContainerSearch((prev) => (prev === nextContainerSearch ? prev : nextContainerSearch));
-    setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
-    setStatusFilter((prev) => (prev === nextStatusFilter ? prev : nextStatusFilter));
+    setOrderIdSearch((prev) =>
+      prev === nextOrderIdSearch ? prev : nextOrderIdSearch,
+    );
+    setItemCodeSearch((prev) =>
+      prev === nextItemCodeSearch ? prev : nextItemCodeSearch,
+    );
+    setContainerSearch((prev) =>
+      prev === nextContainerSearch ? prev : nextContainerSearch,
+    );
+    setVendorFilter((prev) =>
+      prev === nextVendorFilter ? prev : nextVendorFilter,
+    );
+    setStatusFilter((prev) =>
+      prev === nextStatusFilter ? prev : nextStatusFilter,
+    );
     setSortBy((prev) => (prev === nextSortBy ? prev : nextSortBy));
     setSortOrder((prev) => (prev === nextSortOrder ? prev : nextSortOrder));
     setPage((prev) => (prev === nextPage ? prev : nextPage));
@@ -250,8 +282,10 @@ const Shipments = () => {
     if (orderIdValue) next.set("order_id", orderIdValue);
     if (itemCodeValue) next.set("item_code", itemCodeValue);
     if (containerValue) next.set("container", containerValue);
-    if (vendorFilter && vendorFilter !== "all") next.set("vendor", vendorFilter);
-    if (statusFilter && statusFilter !== "all") next.set("status", statusFilter);
+    if (vendorFilter && vendorFilter !== "all")
+      next.set("vendor", vendorFilter);
+    if (statusFilter && statusFilter !== "all")
+      next.set("status", statusFilter);
     if (page > 1) next.set("page", String(page));
     if (limit !== DEFAULT_LIMIT) next.set("limit", String(limit));
     if (sortBy !== DEFAULT_SORT_BY) next.set("sort_by", sortBy);
@@ -306,9 +340,7 @@ const Shipments = () => {
   );
 
   const canShowEditAction = useCallback(
-    (row) =>
-      isAdmin &&
-      isShipmentEditableStatus(row?.status),
+    (row) => isAdmin && isShipmentEditableStatus(row?.status),
     [isAdmin],
   );
 
@@ -346,69 +378,75 @@ const Shipments = () => {
     setEditingOrder(normalizedOrder);
   }, []);
 
-  const handleExport = useCallback(async (format = "xlsx") => {
-    try {
-      setExporting(true);
-      const response = await api.get("/orders/shipments/export", {
-        responseType: "blob",
-        params: {
-          order_id: debouncedOrderSearch,
-          item_code: debouncedItemCodeSearch,
-          container: debouncedContainerSearch,
-          vendor: vendorFilter,
-          status: statusFilter,
-          sort_by: sortBy,
-          sort_order: sortOrder,
-          format,
-        },
-      });
+  const handleExport = useCallback(
+    async (format = "xlsx") => {
+      try {
+        setExporting(true);
+        const response = await api.get("/orders/shipments/export", {
+          responseType: "blob",
+          params: {
+            order_id: debouncedOrderSearch,
+            item_code: debouncedItemCodeSearch,
+            container: debouncedContainerSearch,
+            vendor: vendorFilter,
+            status: statusFilter,
+            sort_by: sortBy,
+            sort_order: sortOrder,
+            format,
+          },
+        });
 
-      const disposition = String(response?.headers?.["content-disposition"] || "");
-      const match = disposition.match(/filename\*?=(?:UTF-8''|\"?)([^\";]+)/i);
-      const fallbackName = `shipments-${new Date().toISOString().slice(0, 10)}.${format === "csv" ? "csv" : "xlsx"}`;
-      const fileName = match?.[1]
-        ? decodeURIComponent(match[1].trim())
-        : fallbackName;
+        const disposition = String(
+          response?.headers?.["content-disposition"] || "",
+        );
+        const match = disposition.match(
+          /filename\*?=(?:UTF-8''|\"?)([^\";]+)/i,
+        );
+        const fallbackName = `shipments-${new Date().toISOString().slice(0, 10)}.${format === "csv" ? "csv" : "xlsx"}`;
+        const fileName = match?.[1]
+          ? decodeURIComponent(match[1].trim())
+          : fallbackName;
 
-      const blob = new Blob(
-        [response.data],
-        {
+        const blob = new Blob([response.data], {
           type:
-            response?.headers?.["content-type"]
-            || (format === "csv"
+            response?.headers?.["content-type"] ||
+            (format === "csv"
               ? "text/csv; charset=utf-8"
               : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
-        },
-      );
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error(err);
-      alert(`Failed to export shipment records as ${String(format).toUpperCase()}.`);
-    } finally {
-      setExporting(false);
-    }
-  }, [
-    debouncedContainerSearch,
-    debouncedItemCodeSearch,
-    debouncedOrderSearch,
-    sortBy,
-    sortOrder,
-    statusFilter,
-    vendorFilter,
-  ]);
+        });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      } catch (err) {
+        console.error(err);
+        alert(
+          `Failed to export shipment records as ${String(format).toUpperCase()}.`,
+        );
+      } finally {
+        setExporting(false);
+      }
+    },
+    [
+      debouncedContainerSearch,
+      debouncedItemCodeSearch,
+      debouncedOrderSearch,
+      sortBy,
+      sortOrder,
+      statusFilter,
+      vendorFilter,
+    ],
+  );
 
   return (
     <>
       <Navbar />
 
-      <div className="page-shell py-3">
+      <div className="page-shell py-3 shipments-page-shell">
         <div className="d-flex justify-content-between align-items-center mb-3">
           <button
             type="button"
@@ -591,7 +629,9 @@ const Shipments = () => {
             <span className="om-summary-chip">
               Showing: {statusFilter === "all" ? "All" : statusFilter}
             </span>
-            <span className="om-summary-chip">Total Records: {totalRecords}</span>
+            <span className="om-summary-chip">
+              Total Records: {totalRecords}
+            </span>
           </div>
         </div>
 
@@ -606,11 +646,11 @@ const Shipments = () => {
             {loading ? (
               <div className="text-center py-4">Loading...</div>
             ) : (
-              <div className="table-responsive">
-                <table className="table table-striped table-hover align-middle om-table mb-0">
+              <div className="table-responsive shipments-table-wrap">
+                <table className="table table-striped table-hover align-middle om-table mb-0 shipments-table">
                   <thead className="table-primary">
                     <tr>
-                      <th>
+                      <th className="shipments-col-po">
                         <button
                           type="button"
                           className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
@@ -619,7 +659,7 @@ const Shipments = () => {
                           PO{sortIndicator("order_id")}
                         </button>
                       </th>
-                      <th>
+                      <th className="shipments-col-item">
                         <button
                           type="button"
                           className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
@@ -628,7 +668,7 @@ const Shipments = () => {
                           Item Code{sortIndicator("item_code")}
                         </button>
                       </th>
-                      <th>
+                      <th className="shipments-col-vendor">
                         <button
                           type="button"
                           className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
@@ -637,26 +677,37 @@ const Shipments = () => {
                           Vendor{sortIndicator("vendor")}
                         </button>
                       </th>
-                      <th>Description</th>
-                      <th>
+                      <th className="shipments-col-description">
                         <button
                           type="button"
                           className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
-                          onClick={() => handleSortColumn("order_quantity", "desc")}
+                        >
+                          Description
+                        </button>
+                      </th>
+                      <th className="shipments-col-order-qty">
+                        <button
+                          type="button"
+                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                          onClick={() =>
+                            handleSortColumn("order_quantity", "desc")
+                          }
                         >
                           Order Quantity{sortIndicator("order_quantity")}
                         </button>
                       </th>
-                      <th>
+                      <th className="shipments-col-date">
                         <button
                           type="button"
                           className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
-                          onClick={() => handleSortColumn("stuffing_date", "desc")}
+                          onClick={() =>
+                            handleSortColumn("stuffing_date", "desc")
+                          }
                         >
                           Stuffing Date{sortIndicator("stuffing_date")}
                         </button>
                       </th>
-                      <th>
+                      <th className="shipments-col-container">
                         <button
                           type="button"
                           className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
@@ -665,16 +716,18 @@ const Shipments = () => {
                           Container Number{sortIndicator("container")}
                         </button>
                       </th>
-                      <th>
+                      <th className="shipments-col-invoice">
                         <button
                           type="button"
                           className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
-                          onClick={() => handleSortColumn("invoice_number", "asc")}
+                          onClick={() =>
+                            handleSortColumn("invoice_number", "asc")
+                          }
                         >
                           Invoice Number{sortIndicator("invoice_number")}
                         </button>
                       </th>
-                      <th>
+                      <th className="shipments-col-qty">
                         <button
                           type="button"
                           className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
@@ -683,7 +736,7 @@ const Shipments = () => {
                           Quantity{sortIndicator("quantity")}
                         </button>
                       </th>
-                      <th>
+                      <th className="shipments-col-pending">
                         <button
                           type="button"
                           className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
@@ -692,9 +745,30 @@ const Shipments = () => {
                           Pending{sortIndicator("pending")}
                         </button>
                       </th>
-                      <th>Remarks</th>
-                      {canFinalizeShipping && <th>Finalize</th>}
-                      {isAdmin && <th>Edit</th>}
+                      <th className="shipments-col-remarks">
+                        <button
+                          type="button"
+                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                        >
+                          Remarks
+                        </button>
+                      </th>
+                      {canFinalizeShipping && <th className="shipments-col-action">
+                        <button
+                          type="button"
+                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                        >
+                          Finalize
+                        </button>
+                      </th>}
+                      {isAdmin && <th className="shipments-col-action">
+                        <button
+                          type="button"
+                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                        >
+                          Edit
+                        </button>
+                      </th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -712,27 +786,32 @@ const Shipments = () => {
                     )}
 
                     {rows.map((row, index) => (
-                      <tr key={row?.shipment_id || `${row.order_id}-${row.item_code}-${index}`}>
-                        <td>{row?.order_id || "N/A"}</td>
-                        <td>{row?.item_code || "N/A"}</td>
-                        <td>{row?.vendor || "N/A"}</td>
-                        <td>{row?.description || "N/A"}</td>
-                        <td>{row?.order_quantity || "N/A"}</td>
-                        <td>{formatDateDDMMYYYY(row?.stuffing_date)}</td>
-                        <td>{row?.container || "N/A"}</td>
-                        <td>{row?.invoice_number || "N/A"}</td>
-                        <td>{row?.quantity ?? "N/A"}</td>
-                        <td>{row?.pending ?? "N/A"}</td>
-                        <td>{row?.remaining_remarks || "N/A"}</td>
+                      <tr
+                        key={
+                          row?.shipment_id ||
+                          `${row.order_id}-${row.item_code}-${index}`
+                        }
+                      >
+                        <td className="shipments-col-po">{row?.order_id || "N/A"}</td>
+                        <td className="shipments-col-item">{row?.item_code || "N/A"}</td>
+                        <td className="shipments-col-vendor">{row?.vendor || "N/A"}</td>
+                        <td className="shipments-col-description">{row?.description || "N/A"}</td>
+                        <td className="shipments-col-order-qty">{row?.order_quantity || "N/A"}</td>
+                        <td className="shipments-col-date">{formatDateDDMMYYYY(row?.stuffing_date)}</td>
+                        <td className="shipments-col-container">{row?.container || "N/A"}</td>
+                        <td className="shipments-col-invoice">{row?.invoice_number || "N/A"}</td>
+                        <td className="shipments-col-qty">{row?.quantity ?? "N/A"}</td>
+                        <td className="shipments-col-pending">{row?.pending ?? "N/A"}</td>
+                        <td className="shipments-col-remarks">{row?.remaining_remarks || "N/A"}</td>
                         {canFinalizeShipping && (
-                          <td>
+                          <td className="shipments-col-action">
                             {canShowFinalizeAction(row) ? (
                               <button
                                 type="button"
-                                className="btn btn-outline-secondary"
+                                className="btn btn-outline-secondary btn-sm shipments-action-btn"
                                 onClick={() => handleOpenShippingModal(row)}
                               >
-                                Finalize Shipping
+                                Finalize
                               </button>
                             ) : (
                               <span className="text-secondary small">N/A</span>
@@ -740,14 +819,14 @@ const Shipments = () => {
                           </td>
                         )}
                         {isAdmin && (
-                          <td>
+                          <td className="shipments-col-action">
                             {canShowEditAction(row) ? (
                               <button
                                 type="button"
-                                className="btn btn-outline-primary btn-sm"
+                                className="btn btn-outline-primary btn-sm shipments-action-btn"
                                 onClick={() => handleOpenEditModal(row)}
                               >
-                                Edit Shipping
+                                Edit
                               </button>
                             ) : (
                               <span className="text-secondary small">N/A</span>

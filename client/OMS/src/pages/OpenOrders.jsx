@@ -61,6 +61,31 @@ const parseSortOrder = (value, sortBy) => {
   return sortBy === "order_id" ? "asc" : "desc";
 };
 
+const normalizePoBucket = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "inspected") return "inspected";
+  if (normalized === "shipped") return "shipped";
+  return "open";
+};
+
+const PO_BUCKET_META = {
+  open: {
+    title: "Open Orders",
+    storageKey: "open-orders",
+    emptyMessage: "No open orders found",
+  },
+  inspected: {
+    title: "Inspected Orders",
+    storageKey: "inspected-orders",
+    emptyMessage: "No inspected orders found",
+  },
+  shipped: {
+    title: "Shipped Orders",
+    storageKey: "shipped-orders",
+    emptyMessage: "No shipped orders found",
+  },
+};
+
 const normalizeStatus = (value) => {
   if (!value) return null;
   const cleaned = String(value).trim().toLowerCase();
@@ -96,9 +121,11 @@ const getStatus = (order) => {
   return STATUS_SEQUENCE[earliestStageIndex];
 };
 
-const OpenOrders = () => {
+const OpenOrders = ({ bucket = "open" }) => {
+  const poBucket = normalizePoBucket(bucket);
+  const pageMeta = PO_BUCKET_META[poBucket] || PO_BUCKET_META.open;
   const [searchParams, setSearchParams] = useSearchParams();
-  useRememberSearchParams(searchParams, setSearchParams, "open-orders");
+  useRememberSearchParams(searchParams, setSearchParams, pageMeta.storageKey);
   const initialSortBy = parseSortBy(searchParams.get("sort_by"));
   const initialSortOrder = parseSortOrder(
     searchParams.get("sort_order"),
@@ -153,6 +180,7 @@ const OpenOrders = () => {
     try {
       const res = await axios.get("/orders/filters", {
         params: {
+          po_bucket: poBucket,
           vendor: filters.vendor,
           brand: filters.brand,
           status: filters.status,
@@ -212,6 +240,7 @@ const OpenOrders = () => {
     sortBy,
     sortOrder,
     token,
+    poBucket,
   ]);
 
   useEffect(() => {
@@ -340,7 +369,7 @@ const OpenOrders = () => {
           <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => navigate(-1)}>
             Back
           </button>
-          <h2 className="h4 mb-0">Open Orders</h2>
+          <h2 className="h4 mb-0">{pageMeta.title}</h2>
           <button
             type="button"
             className="btn btn-outline-primary btn-sm"
@@ -352,6 +381,7 @@ const OpenOrders = () => {
 
         <div className="card om-card mb-3">
           <div className="card-body d-flex flex-wrap gap-2">
+            <span className="om-summary-chip">View: {pageMeta.title}</span>
             <span className="om-summary-chip">Brand: {filters.brand || "all"}</span>
             <span className="om-summary-chip">Vendor: {filters.vendor || "all"}</span>
             <span className="om-summary-chip">Status: {filters.status || "all"}</span>
@@ -521,7 +551,7 @@ const OpenOrders = () => {
                     {orders.length === 0 && (
                       <tr>
                         <td colSpan="8" className="text-center py-4">
-                          No orders found
+                          {pageMeta.emptyMessage}
                         </td>
                       </tr>
                     )}
@@ -601,6 +631,7 @@ const OpenOrders = () => {
           filterOptions={filterOptions}
           statusOptions={statusOptions}
           defaultFilters={filters}
+          extraParams={{ po_bucket: poBucket }}
         />
       )}
     </>

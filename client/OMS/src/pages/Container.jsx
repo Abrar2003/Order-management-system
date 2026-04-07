@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import { getUserFromToken } from "../auth/auth.utils";
+import { isViewOnlyUser } from "../auth/permissions";
 import {
   getTodayDDMMYYYY,
   isValidDDMMYYYY,
@@ -40,6 +41,7 @@ const Container = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "bulk-shipping");
   const user = getUserFromToken();
+  const isViewOnly = isViewOnlyUser(user);
   const normalizedRole = String(user?.role || "").trim().toLowerCase();
   const canFinalizeShipping = ["admin", "manager", "dev"].includes(
     normalizedRole,
@@ -451,42 +453,48 @@ const Container = () => {
         <div className="card om-card mb-3">
           <div className="card-body">
             <div className="row g-2 justify-content-center align-items-end">
-              <div className="col-md-3">
-                <label className="form-label">Container Number</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={containerNumber}
-                  onChange={(e) => setContainerNumber(e.target.value)}
-                  placeholder="Enter container number"
-                />
-              </div>
+              {!isViewOnly && (
+                <div className="col-md-3">
+                  <label className="form-label">Container Number</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={containerNumber}
+                    onChange={(e) => setContainerNumber(e.target.value)}
+                    placeholder="Enter container number"
+                  />
+                </div>
+              )}
 
-              <div className="col-md-3">
-                <label className="form-label">Invoice Number (Optional)</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={invoiceNumber}
-                  onChange={(e) => setInvoiceNumber(e.target.value)}
-                  placeholder="Enter invoice number"
-                />
-              </div>
+              {!isViewOnly && (
+                <div className="col-md-3">
+                  <label className="form-label">Invoice Number (Optional)</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={invoiceNumber}
+                    onChange={(e) => setInvoiceNumber(e.target.value)}
+                    placeholder="Enter invoice number"
+                  />
+                </div>
+              )}
 
-              <div className="col-md-2">
-                <label className="form-label">Shipping Date</label>
-                <input
-                  type="date"
-                  lang="en-GB"
-                  className="form-control"
-                  value={toISODateString(shippingDate)}
-                  onChange={(e) =>
-                    setShippingDate(toDDMMYYYYInputValue(e.target.value, ""))
-                  }
-                />
-              </div>
+              {!isViewOnly && (
+                <div className="col-md-2">
+                  <label className="form-label">Shipping Date</label>
+                  <input
+                    type="date"
+                    lang="en-GB"
+                    className="form-control"
+                    value={toISODateString(shippingDate)}
+                    onChange={(e) =>
+                      setShippingDate(toDDMMYYYYInputValue(e.target.value, ""))
+                    }
+                  />
+                </div>
+              )}
 
-              <div className="col-md-2">
+              <div className={isViewOnly ? "col-md-4" : "col-md-2"}>
                 <label className="form-label">Vendor</label>
                 <select
                   className="form-select"
@@ -509,21 +517,23 @@ const Container = () => {
                 </select>
               </div>
 
-              <div className="col-md-2 d-grid">
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={handleBulkFinalize}
-                  disabled={
-                    saving
-                    || loadingRows
-                    || selectedRows.length === 0
-                    || !canFinalizeShipping
-                  }
-                >
-                  {saving ? "Saving..." : "Finalize Bulk"}
-                </button>
-              </div>
+              {!isViewOnly && (
+                <div className="col-md-2 d-grid">
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={handleBulkFinalize}
+                    disabled={
+                      saving
+                      || loadingRows
+                      || selectedRows.length === 0
+                      || !canFinalizeShipping
+                    }
+                  >
+                    {saving ? "Saving..." : "Finalize Bulk"}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -536,9 +546,11 @@ const Container = () => {
               <span className="om-summary-chip">
                 Filtered Rows: {filteredRows.length}
               </span>
-              <span className="om-summary-chip">
-                Selected: {selectedRows.length}
-              </span>
+              {!isViewOnly && (
+                <span className="om-summary-chip">
+                  Selected: {selectedRows.length}
+                </span>
+              )}
             </div>
 
             <div className="row g-2 align-items-end">
@@ -609,14 +621,14 @@ const Container = () => {
                       <th>Passed</th>
                       <th>Pending</th>
                       <th>Status</th>
-                      <th>Check</th>
-                      <th>Quantity</th>
+                      {!isViewOnly && <th>Check</th>}
+                      {!isViewOnly && <th>Quantity</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {filteredRows.length === 0 && (
                       <tr>
-                        <td colSpan="8" className="text-center py-4">
+                        <td colSpan={isViewOnly ? "6" : "8"} className="text-center py-4">
                           No rows match the current filters.
                         </td>
                       </tr>
@@ -630,33 +642,37 @@ const Container = () => {
                         <td>{row.passed}</td>
                         <td>{row.pending}</td>
                         <td>{row.status}</td>
-                        <td>
-                          <input
-                            type="checkbox"
-                            checked={row.usePassed}
-                            onChange={(e) =>
-                              handleUsePassedToggle(row.id, e.target.checked)
-                            }
-                            disabled={row.maxQuantity <= 0}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            type="number"
-                            className="form-control form-control-sm"
-                            value={row.quantityInput}
-                            onChange={(e) =>
-                              handleQuantityChange(row.id, e.target.value)
-                            }
-                            min="0"
-                            max={row.maxQuantity}
-                            disabled={row.usePassed || row.maxQuantity <= 0}
-                            placeholder="0"
-                          />
-                          <div className="small text-secondary mt-1">
-                            Max: {row.maxQuantity}
-                          </div>
-                        </td>
+                        {!isViewOnly && (
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={row.usePassed}
+                              onChange={(e) =>
+                                handleUsePassedToggle(row.id, e.target.checked)
+                              }
+                              disabled={row.maxQuantity <= 0}
+                            />
+                          </td>
+                        )}
+                        {!isViewOnly && (
+                          <td>
+                            <input
+                              type="number"
+                              className="form-control form-control-sm"
+                              value={row.quantityInput}
+                              onChange={(e) =>
+                                handleQuantityChange(row.id, e.target.value)
+                              }
+                              min="0"
+                              max={row.maxQuantity}
+                              disabled={row.usePassed || row.maxQuantity <= 0}
+                              placeholder="0"
+                            />
+                            <div className="small text-secondary mt-1">
+                              Max: {row.maxQuantity}
+                            </div>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>

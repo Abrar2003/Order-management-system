@@ -141,7 +141,25 @@ const App = () => {
             path="/open-orders"
             element={
               <ProtectedRoute>
-                <OpenOrders />
+                <OpenOrders bucket="open" />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/inspected-orders"
+            element={
+              <ProtectedRoute>
+                <OpenOrders bucket="inspected" />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/shipped-orders"
+            element={
+              <ProtectedRoute>
+                <OpenOrders bucket="shipped" />
               </ProtectedRoute>
             }
           />

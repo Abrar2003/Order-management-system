@@ -4,6 +4,7 @@ import Navbar from "../components/Navbar";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import AlignQCModal from "../components/AlignQcModal";
 import { getUserFromToken } from "../auth/auth.utils";
+import { isViewOnlyUser } from "../auth/permissions";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import {
@@ -161,11 +162,14 @@ const QCPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const currentUser = getUserFromToken();
+  const isViewOnly = isViewOnlyUser(currentUser);
   const normalizedRole = String(currentUser?.role || "").trim().toLowerCase();
   const isQcUser = normalizedRole === "qc";
   const canRealign = ["admin", "manager"].includes(
     normalizedRole,
   );
+  const showActionColumn = !isViewOnly;
+  const tableColumnCount = showActionColumn ? TABLE_COLUMN_COUNT : TABLE_COLUMN_COUNT - 1;
   const canUseInspectorFilter = !isQcUser;
   const canExportQcList = ["admin", "manager", "dev", "user"].includes(normalizedRole);
 
@@ -521,7 +525,7 @@ const QCPage = () => {
                     <th>Pending</th>
                     <th>CBM</th>
                     <th>Inspector</th>
-                    <th>Actions</th>
+                    {showActionColumn && <th>Actions</th>}
                   </tr>
 
                   {/* Excel-like filters row (same table classes) */}
@@ -705,32 +709,34 @@ const QCPage = () => {
                     </th>
 
                     {/* Clear filters button area */}
-                    <th>
-                      <button
-                        type="button"
-                        className="btn btn-outline-secondary btn-sm w-100"
-                        onClick={() => {
-                          setSearch("");
-                          setInspector("");
-                          setVendor("");
-                          setOrder("");
-                          setFrom("");
-                          setTo("");
-                          setSortBy("request_date");
-                          setSortOrder("desc");
-                          setPage(1);
-                        }}
-                      >
-                        Clear
-                      </button>
-                    </th>
+                    {showActionColumn && (
+                      <th>
+                        <button
+                          type="button"
+                          className="btn btn-outline-secondary btn-sm w-100"
+                          onClick={() => {
+                            setSearch("");
+                            setInspector("");
+                            setVendor("");
+                            setOrder("");
+                            setFrom("");
+                            setTo("");
+                            setSortBy("request_date");
+                            setSortOrder("desc");
+                            setPage(1);
+                          }}
+                        >
+                          Clear
+                        </button>
+                      </th>
+                    )}
                   </tr>
                 </thead>
 
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={TABLE_COLUMN_COUNT} className="text-center py-4">
+                      <td colSpan={tableColumnCount} className="text-center py-4">
                         Loading...
                       </td>
                     </tr>
@@ -742,7 +748,11 @@ const QCPage = () => {
                         <tr key={qc._id}>
                           {/* Prefer order.order_id if you populate order.
                               Vendor should come from order_meta now */}
-                          <td>
+                          <td
+                            className={qc?._id ? "table-clickable" : undefined}
+                            onClick={() => handleDetailsClick(qc)}
+                            title={qc?._id ? "Open QC details" : undefined}
+                          >
                             {qc?.order_meta?.order_id ||
                               qc?.order?.order_id ||
                               "N/A"}
@@ -789,33 +799,35 @@ const QCPage = () => {
                           </td>
                           <td>{formatPositiveCbm(qc?.cbm?.total, "NA")}</td>
                           <td>{qc?.inspector?.name || "N/A"}</td>
-                          <td>
-                            <div className="d-flex flex-column gap-2">
-                              <button
-                                type="button"
-                                className="btn btn-outline-secondary btn-sm"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  handleDetailsClick(qc);
-                                }}
-                              >
-                                See Details
-                              </button>
-                              {canRealign &&
-                                toSafeNumber(qc?.quantities?.pending) > 0 && (
-                                  <button
-                                    type="button"
-                                    className="btn btn-outline-primary btn-sm"
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      openRealignModal(qc);
-                                    }}
-                                  >
-                                    Realign QC
-                                  </button>
-                                )}
-                            </div>
-                          </td>
+                          {showActionColumn && (
+                            <td>
+                              <div className="d-flex flex-column gap-2">
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-secondary btn-sm"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    handleDetailsClick(qc);
+                                  }}
+                                >
+                                  See Details
+                                </button>
+                                {canRealign &&
+                                  toSafeNumber(qc?.quantities?.pending) > 0 && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-outline-primary btn-sm"
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        openRealignModal(qc);
+                                      }}
+                                    >
+                                      Realign QC
+                                    </button>
+                                  )}
+                              </div>
+                            </td>
+                          )}
                         </tr>
                       );
                     })
@@ -823,7 +835,7 @@ const QCPage = () => {
 
                   {!loading && qcList.length === 0 && (
                     <tr>
-                      <td colSpan={TABLE_COLUMN_COUNT} className="text-center py-4">
+                      <td colSpan={tableColumnCount} className="text-center py-4">
                         No QC records found
                       </td>
                     </tr>

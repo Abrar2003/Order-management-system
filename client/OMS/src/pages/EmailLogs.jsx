@@ -222,11 +222,13 @@ const EmailLogs = () => {
   };
 
   const handleOpenCreateModal = () => {
+    if (!canManageEmailLogs) return;
     setEditingLog(null);
     setShowModal(true);
   };
 
   const handleOpenUpdateModal = (log) => {
+    if (!canManageEmailLogs) return;
     setEditingLog(log);
     setShowModal(true);
   };
@@ -273,13 +275,17 @@ const EmailLogs = () => {
             Back
           </button>
           <h2 className="h4 mb-0">Email Logs</h2>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={handleOpenCreateModal}
-          >
-            Add Log
-          </button>
+          {canManageEmailLogs ? (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={handleOpenCreateModal}
+            >
+              Add Log
+            </button>
+          ) : (
+            <span className="d-none d-md-inline" />
+          )}
         </div>
 
         <div className="card om-card mb-3">
@@ -477,7 +483,7 @@ const EmailLogs = () => {
         </div>
       </div>
 
-      {showModal && (
+      {showModal && canManageEmailLogs && (
         <EmailLogsModal
           onClose={handleCloseModal}
           onSuccess={handleModalSuccess}

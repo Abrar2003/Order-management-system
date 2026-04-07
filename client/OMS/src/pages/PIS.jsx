@@ -361,13 +361,13 @@ const PIS = () => {
                       <th>PIS Item LBH</th>
                       <th>PIS Box LBH</th>
                       <th>PIS CBM</th>
-                      <th>Action</th>
+                      {canEditPis && <th>Action</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {rows.length === 0 && (
                       <tr>
-                        <td colSpan="10" className="text-center py-4">
+                        <td colSpan={canEditPis ? "10" : "9"} className="text-center py-4">
                           No items found
                         </td>
                       </tr>
@@ -383,16 +383,17 @@ const PIS = () => {
                         <td>{formatLbh(getPrimaryMeasurementLbh(item?.pis_item_sizes, item?.pis_item_LBH || {}))}</td>
                         <td>{formatLbh(getPrimaryMeasurementLbh(item?.pis_box_sizes, item?.pis_box_LBH || {}))}</td>
                         <td>{formatCbm(item?.cbm?.calculated_pis_total)}</td>
-                        <td>
-                          <button
-                            type="button"
-                            className="btn btn-outline-primary btn-sm"
-                            disabled={!canEditPis}
-                            onClick={() => setSelectedItem(item)}
-                          >
-                            Update PIS
-                          </button>
-                        </td>
+                        {canEditPis && (
+                          <td>
+                            <button
+                              type="button"
+                              className="btn btn-outline-primary btn-sm"
+                              onClick={() => setSelectedItem(item)}
+                            >
+                              Update PIS
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>

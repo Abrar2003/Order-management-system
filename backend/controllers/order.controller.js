@@ -2368,6 +2368,378 @@ const computeOrderStatus = ({ orderQuantity, shippedQuantity, qcRecord }) => {
   return "Under Inspection";
 };
 
+const normalizePoBucket = (value = "") => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (
+    normalized === "inspected" ||
+    normalized === "inspected-orders" ||
+    normalized === "inspected_orders"
+  ) {
+    return "inspected";
+  }
+
+  if (
+    normalized === "shipped" ||
+    normalized === "shipped-orders" ||
+    normalized === "shipped_orders"
+  ) {
+    return "shipped";
+  }
+
+  return "open";
+};
+
+const derivePoLineProgress = ({ orderEntry = {}, qcRecord = null } = {}) => {
+  const orderQuantity = Math.max(
+    0,
+    Number(parseQuantityLike(orderEntry?.quantity) || 0),
+  );
+  const shippedQuantity = Math.min(
+    orderQuantity,
+    Math.max(0, Number(getShipmentQuantityTotal(orderEntry?.shipment) || 0)),
+  );
+  const passedQuantity = Math.min(
+    orderQuantity,
+    Math.max(
+      0,
+      Number(parseQuantityLike(qcRecord?.quantities?.qc_passed) || 0),
+    ),
+  );
+  const inspectedUnshippedQuantity = Math.max(
+    0,
+    Math.min(orderQuantity - shippedQuantity, passedQuantity - shippedQuantity),
+  );
+  const pendingInspectionQuantity = Math.max(
+    0,
+    orderQuantity - shippedQuantity - inspectedUnshippedQuantity,
+  );
+
+  let derivedStatus = "Pending";
+  if (shippedQuantity >= orderQuantity && orderQuantity > 0) {
+    derivedStatus = "Shipped";
+  } else if (shippedQuantity > 0) {
+    derivedStatus = "Partial Shipped";
+  } else if (
+    pendingInspectionQuantity <= 0 &&
+    inspectedUnshippedQuantity > 0
+  ) {
+    derivedStatus = "Inspection Done";
+  } else if (qcRecord) {
+    derivedStatus = "Under Inspection";
+  }
+
+  return {
+    order_quantity: orderQuantity,
+    shipped_quantity: shippedQuantity,
+    passed_quantity: passedQuantity,
+    inspected_unshipped_quantity: inspectedUnshippedQuantity,
+    pending_inspection_quantity: pendingInspectionQuantity,
+    status: derivedStatus,
+  };
+};
+
+const computeGroupedPoStatus = (statuses = []) => {
+  const normalizedStatuses = [
+    ...new Set(
+      (Array.isArray(statuses) ? statuses : [])
+        .map((statusValue) => normalizeLooseString(statusValue))
+        .filter(Boolean),
+    ),
+  ];
+
+  const hasPendingStatus = normalizedStatuses.includes("Pending");
+  const hasUnderInspectionStatus = normalizedStatuses.includes("Under Inspection");
+  const hasInspectionDoneStatus = normalizedStatuses.includes("Inspection Done");
+  const hasPartialShippedStatus = normalizedStatuses.includes("Partial Shipped");
+  const minStatusRank = normalizedStatuses.reduce((minimum, statusValue) => {
+    const index = ORDER_STATUS_SEQUENCE.indexOf(statusValue);
+    if (index === -1) return minimum;
+    return Math.min(minimum, index);
+  }, Number.POSITIVE_INFINITY);
+
+  if (
+    hasPartialShippedStatus &&
+    hasInspectionDoneStatus &&
+    !hasPendingStatus &&
+    !hasUnderInspectionStatus
+  ) {
+    return "Partial Shipped";
+  }
+
+  if (minStatusRank === 0) return "Pending";
+  if (minStatusRank === 1) return "Under Inspection";
+  if (minStatusRank === 2) return "Inspection Done";
+  if (minStatusRank === 3) return "Partial Shipped";
+  if (minStatusRank === 4) return "Shipped";
+  return "Pending";
+};
+
+const computePoBucketFromTotals = (groupedEntry = {}) => {
+  const totalQuantity = Math.max(
+    0,
+    Number(groupedEntry?.total_quantity || 0),
+  );
+  const totalShippedQuantity = Math.max(
+    0,
+    Number(groupedEntry?.total_shipped_quantity || 0),
+  );
+  const totalPendingInspectionQuantity = Math.max(
+    0,
+    Number(groupedEntry?.total_pending_inspection_quantity || 0),
+  );
+
+  if (totalQuantity > 0 && totalShippedQuantity >= totalQuantity) {
+    return "shipped";
+  }
+
+  if (totalPendingInspectionQuantity > 0) {
+    return "open";
+  }
+
+  return "inspected";
+};
+
+const comparePoBucketRows = (leftRow, rightRow, sortBy = "order_date", sortOrder = "desc") => {
+  const direction = sortOrder === "asc" ? 1 : -1;
+
+  const resolveSortValue = (row, key) => {
+    if (key === "order_id") {
+      return normalizeOrderKey(row?.order_id || "") || "";
+    }
+
+    if (key === "ETD") {
+      const parsedDate = parseDateLike(row?.ETD);
+      return parsedDate ? parsedDate.getTime() : 0;
+    }
+
+    if (key === "order_date") {
+      const parsedDate = parseDateLike(row?.order_date);
+      return parsedDate ? parsedDate.getTime() : 0;
+    }
+
+    return normalizeLooseString(row?.[key]);
+  };
+
+  const compareValues = (leftValue, rightValue) => {
+    if (typeof leftValue === "number" || typeof rightValue === "number") {
+      return Number(leftValue || 0) - Number(rightValue || 0);
+    }
+
+    return String(leftValue || "").localeCompare(String(rightValue || ""), undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
+  };
+
+  const primaryComparison = compareValues(
+    resolveSortValue(leftRow, sortBy),
+    resolveSortValue(rightRow, sortBy),
+  );
+  if (primaryComparison !== 0) {
+    return primaryComparison * direction;
+  }
+
+  const orderDateComparison = compareValues(
+    resolveSortValue(leftRow, "order_date"),
+    resolveSortValue(rightRow, "order_date"),
+  );
+  if (orderDateComparison !== 0) {
+    return orderDateComparison * -1;
+  }
+
+  return compareValues(
+    resolveSortValue(leftRow, "order_id"),
+    resolveSortValue(rightRow, "order_id"),
+  );
+};
+
+const buildPoBucketDataset = async ({
+  brand = "",
+  vendor = "",
+  order = "",
+  itemCode = "",
+  status = "",
+  poBucket = "open",
+  sortBy = "order_date",
+  sortOrder = "desc",
+  orderDateRange = null,
+  etdRange = null,
+} = {}) => {
+  const selectedBucket = normalizePoBucket(poBucket);
+  const matchStage = buildOrderListMatch({
+    brand,
+    vendor,
+    order,
+    itemCode,
+    includeStatus: false,
+  });
+
+  if (orderDateRange) {
+    matchStage.order_date = orderDateRange;
+  }
+
+  if (etdRange) {
+    matchStage.ETD = etdRange;
+  }
+
+  const sourceOrders = await Order.find(matchStage)
+    .select(
+      "_id order_id brand vendor ETD revised_ETD order_date quantity item shipment qc_record",
+    )
+    .populate({
+      path: "qc_record",
+      select: "order quantities",
+    })
+    .sort({ order_date: -1, order_id: 1 })
+    .lean();
+
+  const orderObjectIds = [
+    ...new Set(
+      sourceOrders
+        .map((orderEntry) => String(orderEntry?._id || "").trim())
+        .filter((value) => mongoose.Types.ObjectId.isValid(value)),
+    ),
+  ].map((value) => new mongoose.Types.ObjectId(value));
+
+  const fallbackQcRecords = orderObjectIds.length > 0
+    ? await QC.find({ order: { $in: orderObjectIds } })
+      .select("order quantities")
+      .lean()
+    : [];
+
+  const qcByOrderId = fallbackQcRecords.reduce((accumulator, qcRecord) => {
+    const orderKey = String(qcRecord?.order || "").trim();
+    if (orderKey && !accumulator.has(orderKey)) {
+      accumulator.set(orderKey, qcRecord);
+    }
+    return accumulator;
+  }, new Map());
+
+  const groupedOrders = new Map();
+
+  for (const orderEntry of sourceOrders) {
+    const orderKey =
+      normalizeOrderKey(orderEntry?.order_id) ||
+      normalizeLooseString(orderEntry?.order_id) ||
+      String(orderEntry?._id || "").trim();
+    if (!orderKey) continue;
+
+    const populatedQcRecord =
+      orderEntry?.qc_record &&
+      typeof orderEntry.qc_record === "object" &&
+      !Array.isArray(orderEntry.qc_record)
+        ? orderEntry.qc_record
+        : null;
+    const qcRecord =
+      populatedQcRecord ||
+      qcByOrderId.get(String(orderEntry?._id || "").trim()) ||
+      null;
+    const lineProgress = derivePoLineProgress({ orderEntry, qcRecord });
+
+    if (!groupedOrders.has(orderKey)) {
+      groupedOrders.set(orderKey, {
+        order_id: normalizeLooseString(orderEntry?.order_id) || orderKey,
+        brand: normalizeLooseString(orderEntry?.brand) || "N/A",
+        vendor: normalizeLooseString(orderEntry?.vendor) || "N/A",
+        ETD: null,
+        revised_ETD: null,
+        effective_ETD: null,
+        order_date: null,
+        items: 0,
+        statuses: [],
+        total_quantity: 0,
+        total_shipped_quantity: 0,
+        total_inspected_unshipped_quantity: 0,
+        total_pending_inspection_quantity: 0,
+        item_codes: new Set(),
+      });
+    }
+
+    const groupedEntry = groupedOrders.get(orderKey);
+    groupedEntry.items += 1;
+    groupedEntry.statuses.push(lineProgress.status);
+    groupedEntry.total_quantity += lineProgress.order_quantity;
+    groupedEntry.total_shipped_quantity += lineProgress.shipped_quantity;
+    groupedEntry.total_inspected_unshipped_quantity +=
+      lineProgress.inspected_unshipped_quantity;
+    groupedEntry.total_pending_inspection_quantity +=
+      lineProgress.pending_inspection_quantity;
+    groupedEntry.order_date = resolveEarlierDate(
+      groupedEntry.order_date,
+      orderEntry?.order_date,
+    );
+    groupedEntry.ETD = resolveEarlierDate(groupedEntry.ETD, orderEntry?.ETD);
+    groupedEntry.revised_ETD = resolveEarlierDate(
+      groupedEntry.revised_ETD,
+      orderEntry?.revised_ETD,
+    );
+    groupedEntry.effective_ETD = resolveEarlierDate(
+      groupedEntry.effective_ETD,
+      resolveEffectiveOrderEtdDate(orderEntry),
+    );
+
+    const itemCodeValue = normalizeLooseString(orderEntry?.item?.item_code);
+    if (itemCodeValue) {
+      groupedEntry.item_codes.add(itemCodeValue);
+    }
+  }
+
+  const groupedRows = [...groupedOrders.values()].map((groupedEntry) => {
+    const statuses = normalizeStatusList(groupedEntry.statuses);
+    const totalStatus = computeGroupedPoStatus(statuses);
+    return {
+      order_id: groupedEntry.order_id,
+      items: groupedEntry.items,
+      brand: groupedEntry.brand,
+      vendor: groupedEntry.vendor,
+      ETD: groupedEntry.ETD,
+      revised_ETD: groupedEntry.revised_ETD,
+      effective_ETD: groupedEntry.effective_ETD,
+      order_date: groupedEntry.order_date,
+      statuses,
+      totalStatus,
+      po_bucket: computePoBucketFromTotals(groupedEntry),
+      total_quantity: groupedEntry.total_quantity,
+      total_shipped_quantity: groupedEntry.total_shipped_quantity,
+      total_inspected_unshipped_quantity:
+        groupedEntry.total_inspected_unshipped_quantity,
+      total_pending_inspection_quantity:
+        groupedEntry.total_pending_inspection_quantity,
+      item_codes: [...groupedEntry.item_codes].sort((left, right) =>
+        left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" })),
+    };
+  });
+
+  const bucketRows = groupedRows.filter((row) => row.po_bucket === selectedBucket);
+  const normalizedStatus = normalizeFilterValue(status);
+  const exactStatus = ORDER_STATUS_SEQUENCE.find(
+    (statusValue) =>
+      statusValue.toLowerCase() === String(normalizedStatus || "").toLowerCase(),
+  ) || null;
+  const filteredRows = exactStatus
+    ? bucketRows.filter((row) => row.totalStatus === exactStatus)
+    : bucketRows;
+
+  filteredRows.sort((leftRow, rightRow) =>
+    comparePoBucketRows(leftRow, rightRow, sortBy, sortOrder));
+
+  return {
+    rows: filteredRows,
+    sourceOrders,
+    sort: {
+      sort_by: sortBy,
+      sort_order: sortOrder,
+    },
+    filters: {
+      vendors: normalizeDistinctValues(bucketRows.map((row) => row.vendor)),
+      brands: normalizeDistinctValues(bucketRows.map((row) => row.brand)),
+      statuses: normalizeStatusList(bucketRows.map((row) => row.totalStatus)),
+      order_ids: normalizeDistinctValues(bucketRows.map((row) => row.order_id)),
+      item_codes: normalizeDistinctValues(bucketRows.flatMap((row) => row.item_codes)),
+    },
+  };
+};
+
 const resolveShipmentSortConfig = ({
   sortToken = "",
   sortByInput = "",
@@ -5487,10 +5859,7 @@ exports.getOrdersByFiltersDb = async (req, res) => {
     const status = req.query.status;
     const order = req.query.order ?? req.query.order_id;
     const itemCode = req.query.item_code ?? req.query.itemCode;
-    const isDelayed =
-      String(req.query.isDelayed || "")
-        .trim()
-        .toLowerCase() === "true";
+    const poBucket = req.query.po_bucket ?? req.query.poBucket;
 
     const page = parsePositiveInt(req.query.page, 1);
     const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
@@ -5542,82 +5911,18 @@ exports.getOrdersByFiltersDb = async (req, res) => {
       ...(sortBy !== "order_id" ? { order_id: 1 } : {}),
     };
 
-    const filterInput = {
+    const dataset = await buildPoBucketDataset({
       brand,
       vendor,
       status,
       order,
       itemCode,
-      isDelayed,
-    };
-
-    const matchStage = buildOrderListMatch(filterInput);
-
-    const [
-      result,
-      vendorsRaw,
-      brandsRaw,
-      statusesRaw,
-      orderIdsRaw,
-      itemCodesRaw,
-    ] = await Promise.all([
-      Order.aggregate([
-        { $match: matchStage },
-        {
-          $group: {
-            _id: "$order_id",
-            items: { $sum: 1 },
-            brand: { $first: "$brand" },
-            vendor: { $first: "$vendor" },
-            ETD: { $first: "$ETD" },
-            order_date: { $first: "$order_date" },
-            statuses: { $addToSet: "$status" },
-          },
-        },
-        {
-          $project: {
-            _id: 0,
-            order_id: "$_id",
-            items: 1,
-            brand: 1,
-            vendor: 1,
-            ETD: 1,
-            order_date: 1,
-            statuses: 1,
-          },
-        },
-        { $sort: sortStage },
-        {
-          $facet: {
-            data: [{ $skip: skip }, { $limit: limit }],
-            totalCount: [{ $count: "count" }],
-          },
-        },
-      ]),
-      Order.distinct(
-        "vendor",
-        buildOrderListMatch({ ...filterInput, includeVendor: false }),
-      ),
-      Order.distinct(
-        "brand",
-        buildOrderListMatch({ ...filterInput, includeBrand: false }),
-      ),
-      Order.distinct(
-        "status",
-        buildOrderListMatch({ ...filterInput, includeStatus: false }),
-      ),
-      Order.distinct(
-        "order_id",
-        buildOrderListMatch({ ...filterInput, includeOrder: false }),
-      ),
-      Order.distinct(
-        "item.item_code",
-        buildOrderListMatch({ ...filterInput, includeItemCode: false }),
-      ),
-    ]);
-
-    const data = result?.[0]?.data || [];
-    const totalRecords = result?.[0]?.totalCount?.[0]?.count || 0;
+      poBucket,
+      sortBy,
+      sortOrder,
+    });
+    const totalRecords = dataset.rows.length;
+    const data = dataset.rows.slice(skip, skip + limit);
 
     return res.status(200).json({
       success: true,
@@ -5632,13 +5937,7 @@ exports.getOrdersByFiltersDb = async (req, res) => {
         sort_by: sortBy,
         sort_order: sortOrder,
       },
-      filters: {
-        vendors: normalizeDistinctValues(vendorsRaw),
-        brands: normalizeDistinctValues(brandsRaw),
-        statuses: normalizeStatusList(statusesRaw),
-        order_ids: normalizeDistinctValues(orderIdsRaw),
-        item_codes: normalizeDistinctValues(itemCodesRaw),
-      },
+      filters: dataset.filters,
     });
   } catch (error) {
     console.error("Get Orders By Filters DB Error:", error);
@@ -5656,6 +5955,8 @@ exports.exportOrdersDb = async (req, res) => {
     const vendor = req.query.vendor;
     const status = req.query.status;
     const order = req.query.order ?? req.query.order_id;
+    const itemCode = req.query.item_code ?? req.query.itemCode;
+    const poBucket = req.query.po_bucket ?? req.query.poBucket;
     const orderDateFrom = req.query.order_date_from ?? req.query.orderDateFrom;
     const orderDateTo = req.query.order_date_to ?? req.query.orderDateTo;
     const etdFrom = req.query.etd_from ?? req.query.etdFrom;
@@ -5716,13 +6017,6 @@ exports.exportOrdersDb = async (req, res) => {
       ...(sortBy !== "order_id" ? { order_id: 1 } : {}),
     };
 
-    const matchStage = buildOrderListMatch({
-      brand,
-      vendor,
-      status,
-      order,
-    });
-
     const orderDateRangeQuery = buildDateRangeQuery({
       fromValue: orderDateFrom,
       toValue: orderDateTo,
@@ -5734,9 +6028,6 @@ exports.exportOrdersDb = async (req, res) => {
         success: false,
         message: orderDateRangeQuery.error,
       });
-    }
-    if (orderDateRangeQuery.range) {
-      matchStage.order_date = orderDateRangeQuery.range;
     }
 
     const etdRangeQuery = buildDateRangeQuery({
@@ -5751,25 +6042,90 @@ exports.exportOrdersDb = async (req, res) => {
         message: etdRangeQuery.error,
       });
     }
-    if (etdRangeQuery.range) {
-      matchStage.ETD = etdRangeQuery.range;
-    }
 
-    const orders = await Order.find(matchStage)
-      .select(
-        "order_id brand vendor ETD order_date status quantity item shipment qc_record",
-      )
-      .populate({
-        path: "qc_record",
-        select:
-          "request_date request_type last_inspected_date item inspector cbm inspection_dates request_history inspection_record labels quantities remarks",
-        populate: {
-          path: "inspector",
-          select: "name email role",
-        },
-      })
-      .sort(sortStage)
-      .lean();
+    let orders = [];
+
+    if (normalizeFilterValue(poBucket)) {
+      const dataset = await buildPoBucketDataset({
+        brand,
+        vendor,
+        status,
+        order,
+        itemCode,
+        poBucket,
+        sortBy,
+        sortOrder,
+        orderDateRange: orderDateRangeQuery.range,
+        etdRange: etdRangeQuery.range,
+      });
+
+      const visibleOrderIds = new Set(
+        dataset.rows.map((row) =>
+          normalizeOrderKey(row?.order_id) || normalizeLooseString(row?.order_id)),
+      );
+      const visibleSourceOrderIds = [
+        ...new Set(
+          dataset.sourceOrders
+            .filter((orderEntry) =>
+              visibleOrderIds.has(
+                normalizeOrderKey(orderEntry?.order_id) ||
+                  normalizeLooseString(orderEntry?.order_id),
+              ))
+            .map((orderEntry) => String(orderEntry?._id || "").trim())
+            .filter((value) => mongoose.Types.ObjectId.isValid(value)),
+        ),
+      ];
+
+      orders = visibleSourceOrderIds.length > 0
+        ? await Order.find({ _id: { $in: visibleSourceOrderIds } })
+          .select(
+            "order_id brand vendor ETD order_date status quantity item shipment qc_record",
+          )
+          .populate({
+            path: "qc_record",
+            select:
+              "request_date request_type last_inspected_date item inspector cbm inspection_dates request_history inspection_record labels quantities remarks",
+            populate: {
+              path: "inspector",
+              select: "name email role",
+            },
+          })
+          .sort(sortStage)
+          .lean()
+        : [];
+    } else {
+      const matchStage = buildOrderListMatch({
+        brand,
+        vendor,
+        status,
+        order,
+        itemCode,
+      });
+
+      if (orderDateRangeQuery.range) {
+        matchStage.order_date = orderDateRangeQuery.range;
+      }
+
+      if (etdRangeQuery.range) {
+        matchStage.ETD = etdRangeQuery.range;
+      }
+
+      orders = await Order.find(matchStage)
+        .select(
+          "order_id brand vendor ETD order_date status quantity item shipment qc_record",
+        )
+        .populate({
+          path: "qc_record",
+          select:
+            "request_date request_type last_inspected_date item inspector cbm inspection_dates request_history inspection_record labels quantities remarks",
+          populate: {
+            path: "inspector",
+            select: "name email role",
+          },
+        })
+        .sort(sortStage)
+        .lean();
+    }
 
     const toSafeNumber = (value) => {
       const parsed = Number(value);

@@ -22,9 +22,12 @@ const Navbar = () => {
   const [showReportsMenu, setShowReportsMenu] = useState(false);
   const [showSummaryMenu, setShowSummaryMenu] = useState(false);
   const [showLogsMenu, setShowLogsMenu] = useState(false);
+  const [showOpenOrdersMenu, setShowOpenOrdersMenu] = useState(false);
   const mainMenuRef = useRef(null);
   const quickReportsMenuRef = useRef(null);
   const [showQuickReportsMenu, setShowQuickReportsMenu] = useState(false);
+  const quickOpenOrdersMenuRef = useRef(null);
+  const [showQuickOpenOrdersMenu, setShowQuickOpenOrdersMenu] = useState(false);
 
   const getInitialTheme = () => {
     const stored = localStorage.getItem("theme");
@@ -102,6 +105,8 @@ const Navbar = () => {
       { label: "Delayed PO Reports", path: "/reports/delayed-pos" },
       { label: "Upcoming ETD Reports", path: "/reports/upcoming-etd" },
       { label: "PO Status Report", path: "/reports/po-status" },
+      { label: "Weekly Summary", path: "/summary/weekly" },
+      { label: "Daily Summary", path: "/summary/daily" },
     ];
     
     if (canAccessAnalytics) {
@@ -116,6 +121,15 @@ const Navbar = () => {
     return [{ label: "Daily Reports", path: "/daily-reports" }, ...reportRouteLinks];
   }, [canAccessQc, isQcOnlyRole, reportRouteLinks]);
 
+  const openOrderRouteLinks = useMemo(() => {
+    if (!canAccessQc || isQcOnlyRole) return [];
+    return [
+      { label: "Open Orders", path: "/open-orders" },
+      { label: "Inspected Orders", path: "/inspected-orders" },
+      { label: "Shipped Orders", path: "/shipped-orders" },
+    ];
+  }, [canAccessQc, isQcOnlyRole]);
+
   const logRouteLinks = useMemo(() => {
     if (!canViewOrderPages || isQcOnlyRole) return [];
     return [
@@ -125,15 +139,7 @@ const Navbar = () => {
     ];
   }, [canViewOrderPages, isQcOnlyRole]);
 
-  const summaryRouteLinks = useMemo(() => {
-    if (!canAccessQc || isQcOnlyRole) return [];
-    return [
-      { label: "Weekly Summary", path: "/summary/weekly" },
-      { label: "Daily Summary", path: "/summary/daily" },
-    ];
-  }, [canAccessQc, isQcOnlyRole]);
-
-  const handleLogout = () => {
+  const handleLogout = () => {s
     logout();
     navigate("/signin");
   };
@@ -144,7 +150,9 @@ const Navbar = () => {
     setShowReportsMenu(false);
     setShowSummaryMenu(false);
     setShowLogsMenu(false);
+    setShowOpenOrdersMenu(false);
     setShowQuickReportsMenu(false);
+    setShowQuickOpenOrdersMenu(false);
   };
 
   useEffect(() => {
@@ -163,10 +171,15 @@ const Navbar = () => {
         setShowReportsMenu(false);
         setShowSummaryMenu(false);
         setShowLogsMenu(false);
+        setShowOpenOrdersMenu(false);
       }
 
       if (quickReportsMenuRef.current && !quickReportsMenuRef.current.contains(event.target)) {
         setShowQuickReportsMenu(false);
+      }
+
+      if (quickOpenOrdersMenuRef.current && !quickOpenOrdersMenuRef.current.contains(event.target)) {
+        setShowQuickOpenOrdersMenu(false);
       }
     };
 
@@ -207,6 +220,7 @@ const Navbar = () => {
                     onClick={() => {
                       setShowMainMenu((prev) => !prev);
                       setShowQuickReportsMenu(false);
+                      setShowQuickOpenOrdersMenu(false);
                     }}
                     title="Menu"
                   >
@@ -232,6 +246,37 @@ const Navbar = () => {
                           </button>
                         ))}
 
+                        {openOrderRouteLinks.length > 0 && (
+                          <>
+                            <button
+                              type="button"
+                              className="list-group-item list-group-item-action text-start d-flex justify-content-between align-items-center"
+                              aria-expanded={showOpenOrdersMenu}
+                              onClick={() => {
+                                setShowOpenOrdersMenu((prev) => !prev);
+                                setShowReportsMenu(false);
+                                setShowSummaryMenu(false);
+                                setShowLogsMenu(false);
+                              }}
+                            >
+                              <span>Orders</span>
+                              <span className="small text-secondary">
+                                {showOpenOrdersMenu ? "Hide" : "Show"}
+                              </span>
+                            </button>
+                            {showOpenOrdersMenu && openOrderRouteLinks.map((link) => (
+                              <button
+                                key={`mobile-open-orders-${link.path}`}
+                                type="button"
+                                className="list-group-item list-group-item-action text-start ps-4"
+                                onClick={() => handleNavigate(link.path)}
+                              >
+                                {link.label}
+                              </button>
+                            ))}
+                          </>
+                        )}
+
                         {reportRouteLinks.length > 0 && (
                           <>
                             <button
@@ -242,6 +287,7 @@ const Navbar = () => {
                                 setShowReportsMenu((prev) => !prev);
                                 setShowSummaryMenu(false);
                                 setShowLogsMenu(false);
+                                setShowOpenOrdersMenu(false);
                               }}
                             >
                               <span>Reports</span>
@@ -262,7 +308,7 @@ const Navbar = () => {
                           </>
                         )}
 
-                        {summaryRouteLinks.length > 0 && (
+                        {/* {summaryRouteLinks.length > 0 && (
                           <>
                             <button
                               type="button"
@@ -272,6 +318,7 @@ const Navbar = () => {
                                 setShowSummaryMenu((prev) => !prev);
                                 setShowReportsMenu(false);
                                 setShowLogsMenu(false);
+                                setShowOpenOrdersMenu(false);
                               }}
                             >
                               <span>Summary</span>
@@ -290,7 +337,7 @@ const Navbar = () => {
                               </button>
                             ))}
                           </>
-                        )}
+                        )} */}
 
                         {logRouteLinks.length > 0 && (
                           <>
@@ -302,6 +349,7 @@ const Navbar = () => {
                                 setShowLogsMenu((prev) => !prev);
                                 setShowReportsMenu(false);
                                 setShowSummaryMenu(false);
+                                setShowOpenOrdersMenu(false);
                               }}
                             >
                               <span>Logs</span>
@@ -323,14 +371,16 @@ const Navbar = () => {
                         )}
 
                         {primaryRouteLinks.map((link) => (
-                          <button
-                            key={`mobile-${link.path}`}
-                            type="button"
-                            className="list-group-item list-group-item-action text-start om-menu-mobile-only"
-                            onClick={() => handleNavigate(link.path)}
-                          >
-                            {link.label}
-                          </button>
+                          link.path === "/open-orders" && openOrderRouteLinks.length > 0 ? null : (
+                            <button
+                              key={`mobile-${link.path}`}
+                              type="button"
+                              className="list-group-item list-group-item-action text-start om-menu-mobile-only"
+                              onClick={() => handleNavigate(link.path)}
+                            >
+                              {link.label}
+                            </button>
+                          )
                         ))}
 
                         <button
@@ -342,6 +392,7 @@ const Navbar = () => {
                             setShowReportsMenu(false);
                             setShowSummaryMenu(false);
                             setShowLogsMenu(false);
+                            setShowOpenOrdersMenu(false);
                           }}
                         >
                           {theme === "system"
@@ -358,6 +409,7 @@ const Navbar = () => {
                             setShowChangePasswordModal(true);
                             setShowMainMenu(false);
                             setShowLogsMenu(false);
+                            setShowOpenOrdersMenu(false);
                           }}
                         >
                           Change Password
@@ -371,6 +423,7 @@ const Navbar = () => {
                               setShowCheckLabelsModal(true);
                               setShowMainMenu(false);
                               setShowLogsMenu(false);
+                              setShowOpenOrdersMenu(false);
                             }}
                           >
                             Check Labels
@@ -385,6 +438,7 @@ const Navbar = () => {
                               setShowAllocateModal(true);
                               setShowMainMenu(false);
                               setShowLogsMenu(false);
+                              setShowOpenOrdersMenu(false);
                             }}
                           >
                             Allocate Labels
@@ -408,6 +462,7 @@ const Navbar = () => {
                             onClick={() => {
                               setShowUploadModal(true);
                               setShowMainMenu(false);
+                              setShowOpenOrdersMenu(false);
                             }}
                           >
                             Update Orders
@@ -421,6 +476,7 @@ const Navbar = () => {
                             onClick={() => {
                               setShowRectifyPdfModal(true);
                               setShowMainMenu(false);
+                              setShowOpenOrdersMenu(false);
                             }}
                           >
                             Rectify PDF
@@ -445,7 +501,45 @@ const Navbar = () => {
           {primaryRouteLinks.length > 0 && (
             <div className="om-route-bar rounded-4 px-2 py-2 d-none d-lg-flex flex-wrap gap-2 mt-2">
               {primaryRouteLinks.map((link) => (
-                link.path === "/daily-reports" && quickReportRouteLinks.length > 0 ? (
+                link.path === "/open-orders" && openOrderRouteLinks.length > 0 ? (
+                  <div
+                    key="desktop-open-orders-menu"
+                    className="position-relative"
+                    ref={quickOpenOrdersMenuRef}
+                  >
+                    <button
+                      type="button"
+                      className="btn btn-outline-primary btn-sm rounded-pill"
+                      aria-expanded={showQuickOpenOrdersMenu}
+                      onClick={() => {
+                        setShowQuickOpenOrdersMenu((prev) => !prev);
+                        setShowQuickReportsMenu(false);
+                      }}
+                    >
+                      Orders
+                    </button>
+
+                    {showQuickOpenOrdersMenu && (
+                      <div
+                        className="card om-main-menu-dropdown shadow-sm"
+                        style={{ left: 0, right: "auto" }}
+                      >
+                        <div className="list-group list-group-flush">
+                          {openOrderRouteLinks.map((orderLink) => (
+                            <button
+                              key={orderLink.path}
+                              type="button"
+                              className="list-group-item list-group-item-action text-start"
+                              onClick={() => handleNavigate(orderLink.path)}
+                            >
+                              {orderLink.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : link.path === "/daily-reports" && quickReportRouteLinks.length > 0 ? (
                   <div
                     key="desktop-reports-menu"
                     className="position-relative"
@@ -455,7 +549,10 @@ const Navbar = () => {
                       type="button"
                       className="btn btn-outline-primary btn-sm rounded-pill"
                       aria-expanded={showQuickReportsMenu}
-                      onClick={() => setShowQuickReportsMenu((prev) => !prev)}
+                      onClick={() => {
+                        setShowQuickReportsMenu((prev) => !prev);
+                        setShowQuickOpenOrdersMenu(false);
+                      }}
                     >
                       Reports
                     </button>

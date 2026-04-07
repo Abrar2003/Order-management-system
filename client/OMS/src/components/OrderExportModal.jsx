@@ -43,6 +43,7 @@ const OrderExportModal = ({
   filterOptions = {},
   statusOptions = [],
   defaultFilters = {},
+  extraParams = {},
 }) => {
   const [form, setForm] = useState(() => buildInitialForm(defaultFilters));
   const [error, setError] = useState("");
@@ -82,6 +83,7 @@ const OrderExportModal = ({
 
       const response = await exportOrders(
         {
+          ...extraParams,
           brand: form.brand,
           vendor: form.vendor,
           status: form.status,
