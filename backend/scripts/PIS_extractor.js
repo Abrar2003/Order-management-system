@@ -2,8 +2,8 @@ const XLSX = require("xlsx");
 const fs = require("fs");
 const path = require("path");
 
-const INPUT_FILE = path.resolve(__dirname, "./data/96577_Coffee table.xlsx");
-const OUTPUT_FILE = path.resolve(__dirname, "./data/coffee-table.json");
+const INPUT_FILE = path.resolve(__dirname, "./data/96568_Kopie van Productsheet tables- SURAJ INT-109.xlsx");// backend\scripts\data\96568_Kopie van Productsheet tables- SURAJ INT-109.xlsx
+const OUTPUT_FILE = path.resolve(__dirname, "./data/96568_Kopie van Productsheet tables- SURAJ INT-109.json");
 
 function normalizeText(value) {
   if (value === undefined || value === null) return null;

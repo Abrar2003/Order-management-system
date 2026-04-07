@@ -23,6 +23,8 @@ const Navbar = () => {
   const [showSummaryMenu, setShowSummaryMenu] = useState(false);
   const [showLogsMenu, setShowLogsMenu] = useState(false);
   const mainMenuRef = useRef(null);
+  const quickReportsMenuRef = useRef(null);
+  const [showQuickReportsMenu, setShowQuickReportsMenu] = useState(false);
 
   const getInitialTheme = () => {
     const stored = localStorage.getItem("theme");
@@ -109,6 +111,11 @@ const Navbar = () => {
     return links;
   }, [canAccessQc, isQcOnlyRole, canAccessAnalytics]);
 
+  const quickReportRouteLinks = useMemo(() => {
+    if (!canAccessQc || isQcOnlyRole) return [];
+    return [{ label: "Daily Reports", path: "/daily-reports" }, ...reportRouteLinks];
+  }, [canAccessQc, isQcOnlyRole, reportRouteLinks]);
+
   const logRouteLinks = useMemo(() => {
     if (!canViewOrderPages || isQcOnlyRole) return [];
     return [
@@ -137,6 +144,7 @@ const Navbar = () => {
     setShowReportsMenu(false);
     setShowSummaryMenu(false);
     setShowLogsMenu(false);
+    setShowQuickReportsMenu(false);
   };
 
   useEffect(() => {
@@ -155,6 +163,10 @@ const Navbar = () => {
         setShowReportsMenu(false);
         setShowSummaryMenu(false);
         setShowLogsMenu(false);
+      }
+
+      if (quickReportsMenuRef.current && !quickReportsMenuRef.current.contains(event.target)) {
+        setShowQuickReportsMenu(false);
       }
     };
 
@@ -192,7 +204,10 @@ const Navbar = () => {
                     type="button"
                     className="btn btn-outline-primary btn-sm rounded-pill om-hamburger-btn"
                     aria-expanded={showMainMenu}
-                    onClick={() => setShowMainMenu((prev) => !prev)}
+                    onClick={() => {
+                      setShowMainMenu((prev) => !prev);
+                      setShowQuickReportsMenu(false);
+                    }}
                     title="Menu"
                   >
                     <span aria-hidden="true">&#9776;</span>
@@ -430,14 +445,51 @@ const Navbar = () => {
           {primaryRouteLinks.length > 0 && (
             <div className="om-route-bar rounded-4 px-2 py-2 d-none d-lg-flex flex-wrap gap-2 mt-2">
               {primaryRouteLinks.map((link) => (
-                <button
-                  key={link.path}
-                  type="button"
-                  className="btn btn-outline-primary btn-sm rounded-pill"
-                  onClick={() => handleNavigate(link.path)}
-                >
-                  {link.label}
-                </button>
+                link.path === "/daily-reports" && quickReportRouteLinks.length > 0 ? (
+                  <div
+                    key="desktop-reports-menu"
+                    className="position-relative"
+                    ref={quickReportsMenuRef}
+                  >
+                    <button
+                      type="button"
+                      className="btn btn-outline-primary btn-sm rounded-pill"
+                      aria-expanded={showQuickReportsMenu}
+                      onClick={() => setShowQuickReportsMenu((prev) => !prev)}
+                    >
+                      Reports
+                    </button>
+
+                    {showQuickReportsMenu && (
+                      <div
+                        className="card om-main-menu-dropdown shadow-sm"
+                        style={{ left: 0, right: "auto" }}
+                      >
+                        <div className="list-group list-group-flush">
+                          {quickReportRouteLinks.map((reportLink) => (
+                            <button
+                              key={reportLink.path}
+                              type="button"
+                              className="list-group-item list-group-item-action text-start"
+                              onClick={() => handleNavigate(reportLink.path)}
+                            >
+                              {reportLink.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    key={link.path}
+                    type="button"
+                    className="btn btn-outline-primary btn-sm rounded-pill"
+                    onClick={() => handleNavigate(link.path)}
+                  >
+                    {link.label}
+                  </button>
+                )
               ))}
             </div>
           )}
