@@ -63,12 +63,18 @@ const parseSortOrder = (value, sortBy) => {
 
 const normalizePoBucket = (value) => {
   const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "all") return "all";
   if (normalized === "inspected") return "inspected";
   if (normalized === "shipped") return "shipped";
   return "open";
 };
 
 const PO_BUCKET_META = {
+  all: {
+    title: "All Orders",
+    storageKey: "all-orders",
+    emptyMessage: "No orders found",
+  },
   open: {
     title: "Open Orders",
     storageKey: "open-orders",

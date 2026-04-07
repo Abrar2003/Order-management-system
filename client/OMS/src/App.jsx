@@ -138,6 +138,15 @@ const App = () => {
           />
 
           <Route
+            path="/all-orders"
+            element={
+              <ProtectedRoute>
+                <OpenOrders bucket="all" />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
             path="/open-orders"
             element={
               <ProtectedRoute>

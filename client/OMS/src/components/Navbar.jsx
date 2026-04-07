@@ -59,9 +59,8 @@ const Navbar = () => {
     if (canAccessQc) {
       links.push(
         { label: "QC", path: "/qc" },
-        { label: "Open Orders", path: "/open-orders" },
+        { label: "Orders", path: "/all-orders" },
         { label: "Shipments", path: "/shipments" },
-        { label: "Bulk Shipping", path: "/container" },
         { label: "Daily Reports", path: "/daily-reports" },
         { label: "Items", path: "/items" },
       );
@@ -124,6 +123,7 @@ const Navbar = () => {
   const openOrderRouteLinks = useMemo(() => {
     if (!canAccessQc || isQcOnlyRole) return [];
     return [
+      { label: "All Orders", path: "/all-orders" },
       { label: "Open Orders", path: "/open-orders" },
       { label: "Inspected Orders", path: "/inspected-orders" },
       { label: "Shipped Orders", path: "/shipped-orders" },
@@ -139,7 +139,7 @@ const Navbar = () => {
     ];
   }, [canViewOrderPages, isQcOnlyRole]);
 
-  const handleLogout = () => {s
+  const handleLogout = () => {
     logout();
     navigate("/signin");
   };
@@ -371,7 +371,7 @@ const Navbar = () => {
                         )}
 
                         {primaryRouteLinks.map((link) => (
-                          link.path === "/open-orders" && openOrderRouteLinks.length > 0 ? null : (
+                          link.path === "/all-orders" && openOrderRouteLinks.length > 0 ? null : (
                             <button
                               key={`mobile-${link.path}`}
                               type="button"
@@ -501,7 +501,7 @@ const Navbar = () => {
           {primaryRouteLinks.length > 0 && (
             <div className="om-route-bar rounded-4 px-2 py-2 d-none d-lg-flex flex-wrap gap-2 mt-2">
               {primaryRouteLinks.map((link) => (
-                link.path === "/open-orders" && openOrderRouteLinks.length > 0 ? (
+                link.path === "/all-orders" && openOrderRouteLinks.length > 0 ? (
                   <div
                     key="desktop-open-orders-menu"
                     className="position-relative"

@@ -2371,6 +2371,14 @@ const computeOrderStatus = ({ orderQuantity, shippedQuantity, qcRecord }) => {
 const normalizePoBucket = (value = "") => {
   const normalized = String(value || "").trim().toLowerCase();
   if (
+    normalized === "all" ||
+    normalized === "all-orders" ||
+    normalized === "all_orders"
+  ) {
+    return "all";
+  }
+
+  if (
     normalized === "inspected" ||
     normalized === "inspected-orders" ||
     normalized === "inspected_orders"
@@ -2710,7 +2718,9 @@ const buildPoBucketDataset = async ({
     };
   });
 
-  const bucketRows = groupedRows.filter((row) => row.po_bucket === selectedBucket);
+  const bucketRows = selectedBucket === "all"
+    ? groupedRows
+    : groupedRows.filter((row) => row.po_bucket === selectedBucket);
   const normalizedStatus = normalizeFilterValue(status);
   const exactStatus = ORDER_STATUS_SEQUENCE.find(
     (statusValue) =>
