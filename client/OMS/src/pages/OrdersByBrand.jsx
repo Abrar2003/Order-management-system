@@ -207,14 +207,16 @@ const OrdersByBrand = () => {
                         <td>{order.items}</td>
                         <td>{order?.totalStatus || "N/A"}</td>
                         <td>{formatDateDDMMYYYY(order.order_date)}</td>
+                        <td>{formatDateDDMMYYYY(order?.ETD)}</td>
                         <td>
                           <OrderEtdWithHistory
                             orderId={order?.order_id}
                             etd={order?.ETD}
                             revisedEtd={order?.effective_ETD || order?.revised_ETD}
+                            fallback="-"
+                            showOriginalWhenNoRevision={false}
                           />
                         </td>
-                        <td>{formatDateDDMMYYYY(order.revised_ETD)}</td>
                       </tr>
                     ))}
                   </tbody>

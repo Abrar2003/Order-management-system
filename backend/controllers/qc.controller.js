@@ -1318,10 +1318,20 @@ const resolveLatestInspectionRecordForRequestEntry = (
 ) => {
   if (!requestEntry) return null;
 
-  const requestHistoryId = String(requestEntry?._id || "").trim();
-  const requestDateKey = toISODateString(requestEntry?.request_date);
+  const requestHistoryId = String(
+    requestEntry?._id ||
+      requestEntry?.request_history_id ||
+      requestEntry?.id ||
+      "",
+  ).trim();
+  const requestDateKey = toISODateString(
+    requestEntry?.request_date || requestEntry?.requested_date,
+  );
   const requestInspectorId = String(
-    requestEntry?.inspector?._id || requestEntry?.inspector || "",
+    requestEntry?.inspector?._id ||
+      requestEntry?.inspector ||
+      requestEntry?.inspector_id ||
+      "",
   ).trim();
 
   const findLatestMatchingRecord = (matcher) => {
@@ -1348,12 +1358,13 @@ const resolveLatestInspectionRecordForRequestEntry = (
   const candidateRecords = [];
 
   if (requestHistoryId) {
-    candidateRecords.push(
-      findLatestMatchingRecord(
-        (record) =>
-          String(record?.request_history_id || "").trim() === requestHistoryId,
-      ),
+    const exactRequestHistoryMatch = findLatestMatchingRecord(
+      (record) =>
+        String(record?.request_history_id || "").trim() === requestHistoryId,
     );
+    if (exactRequestHistoryMatch) {
+      return exactRequestHistoryMatch;
+    }
   }
 
   if (requestDateKey) {
@@ -6909,7 +6920,7 @@ exports.getDailyReport = async (req, res) => {
     const alignedRequestInspections = alignedRequestQcIds.length > 0
       ? await Inspection.find({ qc: { $in: alignedRequestQcIds } })
         .select(
-          "inspection_date requested_date request_history_id status qc checked passed vendor_requested vendor_offered pending_after cbm labels_added label_ranges goods_not_ready remarks createdAt",
+          "inspection_date requested_date request_history_id status qc inspector checked passed vendor_requested vendor_offered pending_after cbm labels_added label_ranges goods_not_ready remarks createdAt",
         )
         .sort({ createdAt: -1 })
         .lean()

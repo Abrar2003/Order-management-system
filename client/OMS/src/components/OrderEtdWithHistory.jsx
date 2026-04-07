@@ -83,6 +83,7 @@ const OrderEtdWithHistory = ({
   itemCode = "",
   className = "",
   fallback = "N/A",
+  showOriginalWhenNoRevision = true,
 }) => {
   const cacheKey = useMemo(
     () => getCacheKey(orderId, itemCode),
@@ -181,7 +182,10 @@ const OrderEtdWithHistory = ({
     return candidates[0]?.value || null;
   }, [historyState.items]);
 
-  const displayValue = historyDisplayValue || revisedEtd || etd;
+  const displayValue =
+    historyDisplayValue ||
+    revisedEtd ||
+    (showOriginalWhenNoRevision ? etd : "");
   const formattedEtd = formatDateDDMMYYYY(displayValue, fallback);
 
   const tooltipHistoryItems = useMemo(() => {

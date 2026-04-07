@@ -238,13 +238,7 @@ const Orders = () => {
                 Order Date: {formatDateDDMMYYYY(primaryOrder?.order_date)}
               </span>
               <span className="om-summary-chip">
-                ETD:{" "}
-                <OrderEtdWithHistory
-                  orderId={primaryOrder?.order_id}
-                  etd={primaryOrder?.ETD}
-                  revisedEtd={primaryOrder?.revised_ETD}
-                  className="ms-1"
-                />
+                ETD: {formatDateDDMMYYYY(primaryOrder?.ETD)}
               </span>
             </div>
             {canEditOrder && primaryOrder ? (
@@ -296,6 +290,7 @@ const Orders = () => {
                       <th>Packed</th>
                       <th className="orders-cbm-col">CBM</th>
                       <th>Status</th>
+                      <th>ETD</th>
                       <th>Revised ETD</th>
                       {canManageOrders && (
                         <th className="orders-action-col">Action</th>
@@ -329,7 +324,17 @@ const Orders = () => {
                           {renderOrderCbmCell(order)}
                         </td>
                         <td>{order.status}</td>
-                        <td>{formatDateDDMMYYYY(order?.revised_ETD)}</td>
+                        <td>{formatDateDDMMYYYY(order?.ETD)}</td>
+                        <td>
+                          <OrderEtdWithHistory
+                            orderId={order?.order_id}
+                            itemCode={order?.item?.item_code}
+                            etd={order?.ETD}
+                            revisedEtd={order?.revised_ETD}
+                            fallback="-"
+                            showOriginalWhenNoRevision={false}
+                          />
+                        </td>
                         {canManageOrders && (
                           <td className="orders-action-col">
                             <div className="orders-action-stack">
@@ -415,7 +420,7 @@ const Orders = () => {
                     {orders.length === 0 && (
                       <tr>
                         <td
-                          colSpan={canManageOrders ? 9 : 8}
+                          colSpan={canManageOrders ? 10 : 9}
                           className="text-center py-4"
                         >
                           No orders found

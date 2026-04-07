@@ -514,12 +514,13 @@ const OpenOrders = () => {
                           ETD{sortIndicator("ETD")}
                         </button>
                       </th>
+                      <th>Revised ETD</th>
                     </tr>
                   </thead>
                   <tbody>
                     {orders.length === 0 && (
                       <tr>
-                        <td colSpan="7" className="text-center py-4">
+                        <td colSpan="8" className="text-center py-4">
                           No orders found
                         </td>
                       </tr>
@@ -537,11 +538,15 @@ const OpenOrders = () => {
                         <td>{getStatus(order)}</td>
                         <td>{order.items}</td>
                         <td>{formatDateDDMMYYYY(order.order_date)}</td>
+                        <td>{formatDateDDMMYYYY(order?.ETD)}</td>
                         <td>
                           <OrderEtdWithHistory
                             orderId={order?.order_id}
+                            itemCode={order?.item?.item_code}
                             etd={order?.ETD}
                             revisedEtd={order?.effective_ETD || order?.revised_ETD}
+                            fallback="-"
+                            showOriginalWhenNoRevision={false}
                           />
                         </td>
                       </tr>
