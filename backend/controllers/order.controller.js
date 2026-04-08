@@ -2603,7 +2603,7 @@ const buildPoBucketDataset = async ({
     )
     .populate({
       path: "qc_record",
-      select: "order quantities",
+      select: "order quantities last_inspected_date inspection_dates",
     })
     .sort({ order_date: -1, order_id: 1 })
     .lean();
@@ -2618,7 +2618,7 @@ const buildPoBucketDataset = async ({
 
   const fallbackQcRecords = orderObjectIds.length > 0
     ? await QC.find({ order: { $in: orderObjectIds } })
-      .select("order quantities")
+      .select("order quantities last_inspected_date inspection_dates")
       .lean()
     : [];
 
@@ -2660,6 +2660,8 @@ const buildPoBucketDataset = async ({
         revised_ETD: null,
         effective_ETD: null,
         order_date: null,
+        last_inspected_date: null,
+        latest_shipment_date: null,
         items: 0,
         statuses: [],
         total_quantity: 0,
@@ -2692,6 +2694,14 @@ const buildPoBucketDataset = async ({
       groupedEntry.effective_ETD,
       resolveEffectiveOrderEtdDate(orderEntry),
     );
+    groupedEntry.last_inspected_date = resolveLaterDate(
+      groupedEntry.last_inspected_date,
+      resolveLatestInspectionDate(qcRecord),
+    );
+    groupedEntry.latest_shipment_date = resolveLaterDate(
+      groupedEntry.latest_shipment_date,
+      resolveLatestShipmentDate(orderEntry?.shipment),
+    );
 
     const itemCodeValue = normalizeLooseString(orderEntry?.item?.item_code);
     if (itemCodeValue) {
@@ -2711,6 +2721,8 @@ const buildPoBucketDataset = async ({
       revised_ETD: groupedEntry.revised_ETD,
       effective_ETD: groupedEntry.effective_ETD,
       order_date: groupedEntry.order_date,
+      last_inspected_date: groupedEntry.last_inspected_date,
+      latest_shipment_date: groupedEntry.latest_shipment_date,
       statuses,
       totalStatus,
       po_bucket: computePoBucketFromTotals(groupedEntry),

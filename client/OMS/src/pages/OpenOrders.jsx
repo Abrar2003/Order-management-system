@@ -181,6 +181,12 @@ const OpenOrders = ({ bucket = "open" }) => {
     [filterOptions.statuses],
   );
 
+  const trailingColumnLabel = useMemo(() => {
+    if (poBucket === "inspected") return "Last Inspected Date";
+    if (poBucket === "shipped") return "Latest Shipment Date";
+    return "Revised ETD";
+  }, [poBucket]);
+
   const getOrdersByFilters = useCallback(async () => {
     setLoading(true);
 
@@ -543,7 +549,7 @@ const OpenOrders = ({ bucket = "open" }) => {
                           onClick={() => handleSortColumn("ETD", "desc")}
                         />
                       </th>
-                      <th>Revised ETD</th>
+                      <th>{trailingColumnLabel}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -569,14 +575,20 @@ const OpenOrders = ({ bucket = "open" }) => {
                         <td>{formatDateDDMMYYYY(order.order_date)}</td>
                         <td>{formatDateDDMMYYYY(order?.ETD)}</td>
                         <td>
-                          <OrderEtdWithHistory
-                            orderId={order?.order_id}
-                            itemCode={order?.item?.item_code}
-                            etd={order?.ETD}
-                            revisedEtd={order?.effective_ETD || order?.revised_ETD}
-                            fallback="-"
-                            showOriginalWhenNoRevision={false}
-                          />
+                          {poBucket === "inspected" ? (
+                            formatDateDDMMYYYY(order?.last_inspected_date) || "-"
+                          ) : poBucket === "shipped" ? (
+                            formatDateDDMMYYYY(order?.latest_shipment_date) || "-"
+                          ) : (
+                            <OrderEtdWithHistory
+                              orderId={order?.order_id}
+                              itemCode={order?.item?.item_code}
+                              etd={order?.ETD}
+                              revisedEtd={order?.effective_ETD || order?.revised_ETD}
+                              fallback="-"
+                              showOriginalWhenNoRevision={false}
+                            />
+                          )}
                         </td>
                       </tr>
                     ))}
