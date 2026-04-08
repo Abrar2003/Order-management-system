@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import AlignQCModal from "../components/AlignQcModal";
+import TransferQcRequestModal from "../components/TransferQcRequestModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import { isViewOnlyUser } from "../auth/permissions";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
@@ -153,7 +153,7 @@ const QCPage = () => {
     parsePositiveInt(searchParams.get("page"), DEFAULT_PAGE),
   );
   const [totalPages, setTotalPages] = useState(1);
-  const [realignContext, setRealignContext] = useState(null);
+  const [transferRequestQc, setTransferRequestQc] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [syncedQuery, setSyncedQuery] = useState(null);
@@ -165,7 +165,7 @@ const QCPage = () => {
   const isViewOnly = isViewOnlyUser(currentUser);
   const normalizedRole = String(currentUser?.role || "").trim().toLowerCase();
   const isQcUser = normalizedRole === "qc";
-  const canRealign = ["admin", "manager"].includes(
+  const canTransferRequest = ["admin", "manager"].includes(
     normalizedRole,
   );
   const showActionColumn = !isViewOnly;
@@ -327,40 +327,6 @@ const QCPage = () => {
     const fromQcList = `${location.pathname}${location.search || ""}`;
     navigate(`/qc/${encodeURIComponent(qcId)}`, {
       state: { fromQcList },
-    });
-  };
-
-  const openRealignModal = (qc) => {
-    const orderId = qc?.order?._id || qc?.order;
-    if (!orderId) {
-      alert("Cannot realign this QC record because order data is missing.");
-      return;
-    }
-
-    const orderForModal = {
-      ...(qc?.order || {}),
-      _id: orderId,
-      order_id: qc?.order_meta?.order_id || qc?.order?.order_id || "",
-      vendor: qc?.order_meta?.vendor || qc?.order?.vendor || "",
-      brand: qc?.order_meta?.brand || qc?.order?.brand || "",
-      item: {
-        item_code: qc?.item?.item_code || qc?.order?.item?.item_code || "",
-        description: qc?.item?.description || qc?.order?.item?.description || "",
-      },
-      quantity: toSafeNumber(
-        qc?.quantities?.client_demand ?? qc?.order?.quantity ?? 0,
-      ),
-    };
-
-    setRealignContext({
-      order: orderForModal,
-      initialInspector: String(qc?.inspector?._id || qc?.inspector || ""),
-      initialQuantityRequested: toSafeNumber(
-        qc?.quantities?.pending ?? orderForModal.quantity,
-      ),
-      initialRequestDate: qc?.request_date || "",
-      initialRequestType: String(qc?.request_type || "FULL"),
-      openQuantity: toSafeNumber(qc?.quantities?.pending ?? orderForModal.quantity),
     });
   };
 
@@ -812,17 +778,27 @@ const QCPage = () => {
                                 >
                                   See Details
                                 </button>
-                                {canRealign &&
+                                {canTransferRequest &&
                                   toSafeNumber(qc?.quantities?.pending) > 0 && (
                                     <button
                                       type="button"
-                                      className="btn btn-outline-primary btn-sm"
+                                      className="btn btn-outline-warning btn-sm"
                                       onClick={(e) => {
                                         e.preventDefault();
-                                        openRealignModal(qc);
+                                        setTransferRequestQc(qc);
                                       }}
+                                      disabled={
+                                        !Array.isArray(qc?.request_history) ||
+                                        qc.request_history.length === 0
+                                      }
+                                      title={
+                                        !Array.isArray(qc?.request_history) ||
+                                        qc.request_history.length === 0
+                                          ? "No QC request history is available for transfer."
+                                          : ""
+                                      }
                                     >
-                                      Realign QC
+                                      Transfer Request
                                     </button>
                                   )}
                               </div>
@@ -868,18 +844,13 @@ const QCPage = () => {
           </button>
         </div>
 
-        {realignContext && (
-          <AlignQCModal
-            order={realignContext.order}
-            initialInspector={realignContext.initialInspector}
-            initialQuantityRequested={realignContext.initialQuantityRequested}
-            initialRequestDate={realignContext.initialRequestDate}
-            initialRequestType={realignContext.initialRequestType}
-            openQuantity={realignContext.openQuantity}
-            onClose={() => setRealignContext(null)}
-            onSuccess={() => {
-              setRealignContext(null);
-              fetchQC();
+        {transferRequestQc && (
+          <TransferQcRequestModal
+            qc={transferRequestQc}
+            onClose={() => setTransferRequestQc(null)}
+            onTransferred={() => {
+              setTransferRequestQc(null);
+              return fetchQC();
             }}
           />
         )}

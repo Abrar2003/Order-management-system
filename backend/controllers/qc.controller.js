@@ -6553,12 +6553,8 @@ exports.transferQcRequest = async (req, res) => {
       });
     }
 
-    const transferDate = toISODateString(
-      requestEntry?.request_date ||
-        latestInspection?.requested_date ||
-        qc?.request_date ||
-        new Date(),
-    );
+    const auditTimestamp = new Date();
+    const transferDate = toISODateString(auditTimestamp);
     if (!transferDate) {
       return res.status(500).json({ message: "Failed to resolve transfer date" });
     }
@@ -6571,9 +6567,9 @@ exports.transferQcRequest = async (req, res) => {
     const newRequestRemarks = previousInspectorName
       ? `Transferred from ${previousInspectorName}`
       : "";
-    const auditTimestamp = new Date();
 
     latestInspection.status = INSPECTION_RECORD_STATUS.TRANSFERRED;
+    latestInspection.inspection_date = transferDate;
     latestInspection.remarks = transferNote;
     latestInspection.updated_by = buildAuditActor(req.user);
     await latestInspection.save();
@@ -6628,6 +6624,17 @@ exports.transferQcRequest = async (req, res) => {
       user: req.user,
       updatedAt: auditTimestamp,
     });
+    const transferredRequestEntry = qc.request_history.find(
+      (entry) => String(entry?._id || "").trim() === selectedRequestHistoryId,
+    );
+    if (transferredRequestEntry) {
+      transferredRequestEntry.status = REQUEST_HISTORY_STATUS.TRANSFERRED;
+      transferredRequestEntry.remarks = transferNote;
+      stampRequestHistoryEntry(transferredRequestEntry, {
+        user: req.user,
+        updatedAt: auditTimestamp,
+      });
+    }
     qc.updated_by = buildAuditActor(req.user);
 
     await qc.save();
@@ -6649,6 +6656,8 @@ exports.transferQcRequest = async (req, res) => {
           _id: targetInspector._id,
           name: targetInspector.name || "Selected Inspector",
         },
+        source_request_status: REQUEST_HISTORY_STATUS.TRANSFERRED,
+        source_inspection_status: INSPECTION_RECORD_STATUS.TRANSFERRED,
         transfer_quantity: requestedQuantity,
         pending_quantity: pendingQuantity,
       },
@@ -6829,10 +6838,46 @@ exports.getDailyReport = async (req, res) => {
       `${reportDay}/${reportMonth}/${reportYear}`,
       `${reportDay}-${reportMonth}-${reportYear}`,
     ];
+    const reportDateStart = parseIsoDateToUtcDate(reportDate);
+    const reportDateEnd = reportDateStart
+      ? new Date(reportDateStart.getTime() + (24 * 60 * 60 * 1000))
+      : null;
     const toReportDateKey = (value) => toISODateString(value) || "";
     const isOnOrBeforeReportDate = (value) => {
       const normalized = toReportDateKey(value);
       return Boolean(normalized) && normalized <= reportDate;
+    };
+    const isSameReportDateFromTimestamp = (value) => {
+      if (!reportDateStart || !reportDateEnd || !value) return false;
+      const timestamp = value instanceof Date ? value : new Date(value);
+      if (Number.isNaN(timestamp.getTime())) return false;
+      return timestamp >= reportDateStart && timestamp < reportDateEnd;
+    };
+    const resolveInspectionStatusForReport = (inspection = {}) =>
+      resolveInspectionRecordStatus({
+        checked: inspection?.checked,
+        passed: inspection?.passed,
+        vendorOffered: inspection?.vendor_offered,
+        labelsAdded: inspection?.labels_added,
+        labelRanges: inspection?.label_ranges,
+        goodsNotReady: inspection?.goods_not_ready,
+        explicitStatus: inspection?.status,
+      });
+    const isTransferredStatusValue = (value) =>
+      normalizeInspectionStatus(value) ===
+      normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED);
+    const isTransferredInspectionOnReportDate = (inspection = {}) =>
+      isTransferredStatusValue(resolveInspectionStatusForReport(inspection))
+      && isSameReportDateFromTimestamp(
+        inspection?.updatedAt || inspection?.createdAt,
+      );
+    const isInspectionVisibleForReportDate = (inspection = {}) => {
+      const effectiveDate = isTransferredStatusValue(
+        resolveInspectionStatusForReport(inspection),
+      )
+        ? inspection?.updatedAt || inspection?.createdAt || inspection?.inspection_date
+        : inspection?.inspection_date || inspection?.createdAt;
+      return isOnOrBeforeReportDate(effectiveDate);
     };
     const buildDailyRequestLookupKey = ({
       qcId = "",
@@ -6869,9 +6914,24 @@ exports.getDailyReport = async (req, res) => {
         })
         .sort({ createdAt: -1 })
         .lean(),
-      Inspection.find({ inspection_date: { $in: inspectionDateVariants } })
+      Inspection.find({
+        $or: [
+          { inspection_date: { $in: inspectionDateVariants } },
+          {
+            status: INSPECTION_RECORD_STATUS.TRANSFERRED,
+            ...(reportDateStart && reportDateEnd
+              ? {
+                  updatedAt: {
+                    $gte: reportDateStart,
+                    $lt: reportDateEnd,
+                  },
+                }
+              : {}),
+          },
+        ],
+      })
         .select(
-          "inspection_date status inspector qc checked passed vendor_requested vendor_offered pending_after cbm labels_added label_ranges goods_not_ready remarks createdAt",
+          "inspection_date status inspector qc checked passed vendor_requested vendor_offered pending_after cbm labels_added label_ranges goods_not_ready remarks createdAt updatedAt",
         )
         .populate("inspector", "name email role")
         .populate({
@@ -6920,7 +6980,7 @@ exports.getDailyReport = async (req, res) => {
     const alignedRequestInspections = alignedRequestQcIds.length > 0
       ? await Inspection.find({ qc: { $in: alignedRequestQcIds } })
         .select(
-          "inspection_date requested_date request_history_id status qc inspector checked passed vendor_requested vendor_offered pending_after cbm labels_added label_ranges goods_not_ready remarks createdAt",
+          "inspection_date requested_date request_history_id status qc inspector checked passed vendor_requested vendor_offered pending_after cbm labels_added label_ranges goods_not_ready remarks createdAt updatedAt",
         )
         .sort({ createdAt: -1 })
         .lean()
@@ -6928,7 +6988,7 @@ exports.getDailyReport = async (req, res) => {
 
     const alignedRequestInspectionsByQcId = new Map();
     for (const inspection of alignedRequestInspections) {
-      if (!isOnOrBeforeReportDate(inspection?.inspection_date || inspection?.createdAt)) {
+      if (!isInspectionVisibleForReportDate(inspection)) {
         continue;
       }
 
@@ -6971,6 +7031,9 @@ exports.getDailyReport = async (req, res) => {
               request_type: entry?.request_type || qc?.request_type,
               quantity_requested: entry?.quantity_requested,
               inspector: entry?.inspector || qc?.inspector || null,
+              status: entry?.status || REQUEST_HISTORY_STATUS.OPEN,
+              remarks: entry?.remarks || "",
+              updated_at: entry?.updatedAt || null,
             }))
           : [
               {
@@ -6979,6 +7042,9 @@ exports.getDailyReport = async (req, res) => {
                 request_type: qc?.request_type,
                 quantity_requested: qc?.quantities?.quantity_requested,
                 inspector: qc?.inspector || null,
+                status: REQUEST_HISTORY_STATUS.OPEN,
+                remarks: "",
+                updated_at: null,
               },
             ];
 
@@ -6986,6 +7052,10 @@ exports.getDailyReport = async (req, res) => {
         .map((requestEntry) => {
           const requestDateKey = toReportDateKey(requestEntry?.request_date);
           if (!requestDateKey || requestDateKey > reportDate) return null;
+          const isTransferredRequestOnReportDate =
+            normalizeRequestHistoryStatus(requestEntry?.status) ===
+              normalizeRequestHistoryStatus(REQUEST_HISTORY_STATUS.TRANSFERRED)
+            && isSameReportDateFromTimestamp(requestEntry?.updated_at);
 
           const requestLookupKey = buildDailyRequestLookupKey({
             qcId,
@@ -7003,9 +7073,10 @@ exports.getDailyReport = async (req, res) => {
             labelsAdded: latestInspection?.labels_added,
             labelRanges: latestInspection?.label_ranges,
             goodsNotReady: latestInspection?.goods_not_ready,
-            status: latestInspection?.status,
+            status: latestInspection?.status || requestEntry?.status,
           });
-          const shouldIncludeRequest = requestDateKey === reportDate;
+          const shouldIncludeRequest =
+            requestDateKey === reportDate || isTransferredRequestOnReportDate;
 
           if (!shouldIncludeRequest) return null;
 
@@ -7028,11 +7099,11 @@ exports.getDailyReport = async (req, res) => {
             labelsAdded: latestInspection?.labels_added,
             labelRanges: latestInspection?.label_ranges,
             goodsNotReady: latestInspection?.goods_not_ready,
-            explicitStatus: latestInspection?.status,
+            explicitStatus: latestInspection?.status || requestEntry?.status,
             requestType: requestEntry?.request_type || qc?.request_type,
           });
           const inspectionStatus = String(
-            derivedInspectionStatus || latestInspection?.status,
+            derivedInspectionStatus || latestInspection?.status || requestEntry?.status,
           ).trim() || INSPECTION_RECORD_STATUS.PENDING;
           const normalizedInspectionStatus = normalizeInspectionStatus(
             inspectionStatus,
@@ -7051,7 +7122,9 @@ exports.getDailyReport = async (req, res) => {
             request_row_id: requestLookupKey || `${qcId}:${requestDateKey}`,
             qc_id: qc._id,
             request_history_id: requestEntry?.request_history_id || null,
-            request_date: requestDateKey,
+            request_date: isTransferredRequestOnReportDate
+              ? reportDate
+              : requestDateKey,
             order_id: qc?.order_meta?.order_id || qc?.order?.order_id || "N/A",
             brand: qc?.order_meta?.brand || qc?.order?.brand || "N/A",
             vendor: qc?.order_meta?.vendor || qc?.order?.vendor || "N/A",
@@ -7075,7 +7148,7 @@ exports.getDailyReport = async (req, res) => {
             goods_not_ready: goodsNotReady,
             is_transferred: isTransferred,
             transfer_note: isTransferred
-              ? normalizeText(latestInspection?.remarks || "")
+              ? normalizeText(latestInspection?.remarks || requestEntry?.remarks || "")
               : "",
             goods_not_ready_reason: goodsNotReady
               ? getGoodsNotReadyReason(
@@ -7148,12 +7221,12 @@ exports.getDailyReport = async (req, res) => {
         goodsNotReady: inspection?.goods_not_ready,
         explicitStatus: inspection?.status,
       });
-      const isTransferred =
-        normalizeInspectionStatus(inspectionStatus) ===
-        normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED);
+      const isTransferred = isTransferredStatusValue(inspectionStatus);
       entry.inspections.push({
         inspection_id: inspection._id,
-        inspection_date: inspection.inspection_date || null,
+        inspection_date: isTransferredInspectionOnReportDate(inspection)
+          ? reportDate
+          : inspection.inspection_date || null,
         order_id:
           qcRecord?.order_meta?.order_id || qcRecord?.order?.order_id || "N/A",
         vendor: qcRecord?.order_meta?.vendor || qcRecord?.order?.vendor || "N/A",
