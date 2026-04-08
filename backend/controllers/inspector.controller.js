@@ -13,6 +13,71 @@ const normalizeInspectorLabels = (labels = []) =>
       .filter((label) => Number.isInteger(label) && label > 0),
   )].sort((left, right) => left - right);
 
+const parseRequestedInspectorLabels = (labels = []) => {
+  if (!Array.isArray(labels) || labels.length === 0) {
+    return {
+      labels: [],
+      error: "Labels must be a non-empty array of positive integers",
+    };
+  }
+
+  const hasInvalidLabel = labels.some(
+    (label) => !Number.isInteger(Number(label)) || Number(label) <= 0,
+  );
+  if (hasInvalidLabel) {
+    return {
+      labels: [],
+      error: "All labels must be positive integers",
+    };
+  }
+
+  return {
+    labels: normalizeInspectorLabels(labels),
+    error: "",
+  };
+};
+
+const getInspectorLabelState = (inspector = {}) => ({
+  allocated: normalizeInspectorLabels(inspector?.alloted_labels),
+  used: normalizeInspectorLabels(inspector?.used_labels),
+  rejected: normalizeInspectorLabels(inspector?.rejected_labels),
+});
+
+const collectGlobalInspectorLabelSets = async ({ excludeInspectorIds = [] } = {}) => {
+  const excludedIdSet = new Set(
+    (Array.isArray(excludeInspectorIds) ? excludeInspectorIds : [excludeInspectorIds])
+      .filter(Boolean)
+      .map((id) => String(id)),
+  );
+  const inspectors = await Inspector.find({})
+    .select("_id alloted_labels used_labels rejected_labels")
+    .lean();
+
+  const allocated = new Set();
+  const used = new Set();
+  const rejected = new Set();
+
+  inspectors.forEach((inspector) => {
+    const inspectorId = String(inspector?._id || "");
+    if (excludedIdSet.has(inspectorId)) return;
+
+    const labelState = getInspectorLabelState(inspector);
+    labelState.allocated.forEach((label) => allocated.add(label));
+    labelState.used.forEach((label) => used.add(label));
+    labelState.rejected.forEach((label) => rejected.add(label));
+  });
+
+  return { allocated, used, rejected };
+};
+
+const formatLabelPreview = (labels = [], limit = 10) => {
+  const normalized = normalizeInspectorLabels(labels);
+  if (normalized.length === 0) return "";
+
+  const preview = normalized.slice(0, limit).join(", ");
+  return normalized.length > limit ? `${preview}...` : preview;
+};
+
 const QC_USER_FILTER = {
   $and: [
     { role: { $regex: "^qc$", $options: "i" } },
@@ -67,6 +132,7 @@ const ensureInspectorRecordsForQcUsers = async ({ search = "" } = {}) => {
             assignedOrders: [],
             alloted_labels: [],
             used_labels: [],
+            rejected_labels: [],
           },
         },
         upsert: true,
@@ -207,16 +273,11 @@ exports.getInspectorById = async (req, res) => {
  */
 exports.allocateLabels = async (req, res) => {
   try {
-    const { labels } = req.body;
-
-    // Validate input
-    if (!labels || !Array.isArray(labels) || labels.length === 0) {
-      return res.status(400).json({ message: "Labels must be a non-empty array of numbers" });
-    }
-
-    // Validate that all labels are numbers
-    if (!labels.every(label => typeof label === "number")) {
-      return res.status(400).json({ message: "All labels must be numbers" });
+    const { labels: normalizedLabels, error } = parseRequestedInspectorLabels(
+      req.body?.labels,
+    );
+    if (error) {
+      return res.status(400).json({ message: error });
     }
 
     const inspector = await Inspector.findById(req.params.id);
@@ -225,19 +286,77 @@ exports.allocateLabels = async (req, res) => {
       return res.status(404).json({ message: "Inspector not found" });
     }
 
-    // Check for duplicate labels
-    const existingLabels = new Set(inspector.alloted_labels);
-    const newLabels = labels.filter(label => !existingLabels.has(label));
+    const {
+      allocated: allocatedLabels,
+      used: usedLabels,
+      rejected: rejectedLabels,
+    } = getInspectorLabelState(inspector);
+    const existingLabels = new Set(allocatedLabels);
+    const usedSet = new Set(usedLabels);
+    const rejectedSet = new Set(rejectedLabels);
 
-    if (newLabels.length === 0) {
-      return res.status(400).json({ 
-        message: "All provided labels are already allocated to this inspector",
-        already_allocated: inspector.alloted_labels
+    const ownUsedConflicts = normalizedLabels.filter((label) => usedSet.has(label));
+    if (ownUsedConflicts.length > 0) {
+      return res.status(400).json({
+        message: `Used labels cannot be reallocated: ${formatLabelPreview(ownUsedConflicts)}`,
+        used_labels: ownUsedConflicts,
       });
     }
 
-    // Merge with existing labels (avoid duplicates)
-    inspector.alloted_labels = [...new Set([...inspector.alloted_labels, ...newLabels])];
+    const ownRejectedConflicts = normalizedLabels.filter((label) => rejectedSet.has(label));
+    if (ownRejectedConflicts.length > 0) {
+      return res.status(400).json({
+        message: `Rejected labels cannot be reallocated: ${formatLabelPreview(ownRejectedConflicts)}`,
+        rejected_labels: ownRejectedConflicts,
+      });
+    }
+
+    const globalLabelSets = await collectGlobalInspectorLabelSets({
+      excludeInspectorIds: [req.params.id],
+    });
+    const allocatedElsewhere = normalizedLabels.filter((label) =>
+      globalLabelSets.allocated.has(label),
+    );
+    if (allocatedElsewhere.length > 0) {
+      return res.status(400).json({
+        message: `Some labels are already allocated to another inspector: ${formatLabelPreview(allocatedElsewhere)}`,
+        allocated_elsewhere: allocatedElsewhere,
+      });
+    }
+
+    const usedElsewhere = normalizedLabels.filter((label) =>
+      globalLabelSets.used.has(label),
+    );
+    if (usedElsewhere.length > 0) {
+      return res.status(400).json({
+        message: `Some labels are already used and cannot be reused: ${formatLabelPreview(usedElsewhere)}`,
+        used_elsewhere: usedElsewhere,
+      });
+    }
+
+    const rejectedElsewhere = normalizedLabels.filter((label) =>
+      globalLabelSets.rejected.has(label),
+    );
+    if (rejectedElsewhere.length > 0) {
+      return res.status(400).json({
+        message: `Rejected labels cannot be allocated again: ${formatLabelPreview(rejectedElsewhere)}`,
+        rejected_elsewhere: rejectedElsewhere,
+      });
+    }
+
+    const newLabels = normalizedLabels.filter((label) => !existingLabels.has(label));
+
+    if (newLabels.length === 0) {
+      return res.status(400).json({
+        message: "All provided labels are already allocated to this inspector",
+        already_allocated: allocatedLabels,
+      });
+    }
+
+    inspector.alloted_labels = normalizeInspectorLabels([
+      ...allocatedLabels,
+      ...newLabels,
+    ]);
     inspector.labels_allotted_by = req.user._id;
 
     await inspector.save();
@@ -266,11 +385,12 @@ exports.transferLabels = async (req, res) => {
       labels,
     } = req.body || {};
 
-    const normalizedLabels = normalizeInspectorLabels(labels);
-    if (normalizedLabels.length === 0) {
-      return res.status(400).json({
-        message: "Labels must be a non-empty array of positive integers",
-      });
+    const {
+      labels: normalizedLabels,
+      error,
+    } = parseRequestedInspectorLabels(labels);
+    if (error) {
+      return res.status(400).json({ message: error });
     }
 
     if (!fromInspectorId || !toInspectorId) {
@@ -298,10 +418,20 @@ exports.transferLabels = async (req, res) => {
       return res.status(404).json({ message: "Target inspector not found" });
     }
 
-    const sourceAllocated = normalizeInspectorLabels(sourceInspector.alloted_labels);
-    const sourceUsed = new Set(normalizeInspectorLabels(sourceInspector.used_labels));
-    const targetAllocated = normalizeInspectorLabels(targetInspector.alloted_labels);
-    const targetUsed = new Set(normalizeInspectorLabels(targetInspector.used_labels));
+    const {
+      allocated: sourceAllocated,
+      used: sourceUsedLabels,
+      rejected: sourceRejectedLabels,
+    } = getInspectorLabelState(sourceInspector);
+    const {
+      allocated: targetAllocated,
+      used: targetUsedLabels,
+      rejected: targetRejectedLabels,
+    } = getInspectorLabelState(targetInspector);
+    const sourceUsed = new Set(sourceUsedLabels);
+    const sourceRejected = new Set(sourceRejectedLabels);
+    const targetUsed = new Set(targetUsedLabels);
+    const targetRejected = new Set(targetRejectedLabels);
 
     const sourceAllocatedSet = new Set(sourceAllocated);
     const targetAllocatedSet = new Set(targetAllocated);
@@ -311,7 +441,14 @@ exports.transferLabels = async (req, res) => {
     );
     const usedInSource = normalizedLabels.filter((label) => sourceUsed.has(label));
     const alreadyInTarget = normalizedLabels.filter(
-      (label) => targetAllocatedSet.has(label) || targetUsed.has(label),
+      (label) => (
+        targetAllocatedSet.has(label)
+        || targetUsed.has(label)
+        || targetRejected.has(label)
+      ),
+    );
+    const rejectedInSource = normalizedLabels.filter((label) =>
+      sourceRejected.has(label),
     );
 
     if (missingFromSource.length > 0) {
@@ -328,10 +465,50 @@ exports.transferLabels = async (req, res) => {
       });
     }
 
+    if (rejectedInSource.length > 0) {
+      return res.status(400).json({
+        message: `Rejected labels cannot be transferred: ${formatLabelPreview(rejectedInSource)}`,
+        rejected_labels: rejectedInSource,
+      });
+    }
+
     if (alreadyInTarget.length > 0) {
       return res.status(400).json({
         message: "Some labels are already assigned to the target inspector",
         target_conflicts: alreadyInTarget,
+      });
+    }
+
+    const globalLabelSets = await collectGlobalInspectorLabelSets({
+      excludeInspectorIds: [fromInspectorId, toInspectorId],
+    });
+    const rejectedElsewhere = normalizedLabels.filter((label) =>
+      globalLabelSets.rejected.has(label),
+    );
+    if (rejectedElsewhere.length > 0) {
+      return res.status(400).json({
+        message: `Rejected labels cannot be transferred: ${formatLabelPreview(rejectedElsewhere)}`,
+        rejected_elsewhere: rejectedElsewhere,
+      });
+    }
+
+    const usedElsewhere = normalizedLabels.filter((label) =>
+      globalLabelSets.used.has(label),
+    );
+    if (usedElsewhere.length > 0) {
+      return res.status(400).json({
+        message: `Some labels are already used by another inspector: ${formatLabelPreview(usedElsewhere)}`,
+        used_elsewhere: usedElsewhere,
+      });
+    }
+
+    const allocatedElsewhere = normalizedLabels.filter((label) =>
+      globalLabelSets.allocated.has(label),
+    );
+    if (allocatedElsewhere.length > 0) {
+      return res.status(400).json({
+        message: `Some labels are already allocated to another inspector: ${formatLabelPreview(allocatedElsewhere)}`,
+        allocated_elsewhere: allocatedElsewhere,
       });
     }
 
@@ -362,22 +539,100 @@ exports.transferLabels = async (req, res) => {
 };
 
 /**
+ * PATCH /inspectors/:id/reject-labels
+ * Permanently reject unused QC labels for an inspector
+ * Only accessible to Manager and Admin
+ */
+exports.rejectLabels = async (req, res) => {
+  try {
+    const { labels: normalizedLabels, error } = parseRequestedInspectorLabels(
+      req.body?.labels,
+    );
+    if (error) {
+      return res.status(400).json({ message: error });
+    }
+
+    const inspector = await Inspector.findById(req.params.id)
+      .populate("user", "name email role");
+
+    if (!inspector) {
+      return res.status(404).json({ message: "Inspector not found" });
+    }
+
+    const {
+      allocated: allocatedLabels,
+      used: usedLabels,
+      rejected: rejectedLabels,
+    } = getInspectorLabelState(inspector);
+    const allocatedSet = new Set(allocatedLabels);
+    const usedSet = new Set(usedLabels);
+    const rejectedSet = new Set(rejectedLabels);
+
+    const alreadyRejected = normalizedLabels.filter((label) =>
+      rejectedSet.has(label),
+    );
+    if (alreadyRejected.length > 0) {
+      return res.status(400).json({
+        message: `Some labels are already rejected: ${formatLabelPreview(alreadyRejected)}`,
+        rejected_labels: alreadyRejected,
+      });
+    }
+
+    const missingFromAllocation = normalizedLabels.filter(
+      (label) => !allocatedSet.has(label),
+    );
+    if (missingFromAllocation.length > 0) {
+      return res.status(400).json({
+        message: `Some labels are not allocated to the selected inspector: ${formatLabelPreview(missingFromAllocation)}`,
+        labels_not_allocated: missingFromAllocation,
+      });
+    }
+
+    const usedInInspector = normalizedLabels.filter((label) =>
+      usedSet.has(label),
+    );
+    if (usedInInspector.length > 0) {
+      return res.status(400).json({
+        message: `Used labels cannot be rejected: ${formatLabelPreview(usedInInspector)}`,
+        used_labels: usedInInspector,
+      });
+    }
+
+    const rejectSet = new Set(normalizedLabels);
+    inspector.alloted_labels = allocatedLabels.filter(
+      (label) => !rejectSet.has(label),
+    );
+    inspector.rejected_labels = normalizeInspectorLabels([
+      ...rejectedLabels,
+      ...normalizedLabels,
+    ]);
+    inspector.labels_allotted_by =
+      req.user?._id || inspector.labels_allotted_by;
+
+    await inspector.save();
+
+    return res.json({
+      message: `${normalizedLabels.length} label(s) rejected successfully`,
+      rejected_labels: normalizedLabels,
+      data: inspector,
+    });
+  } catch (err) {
+    return res.status(400).json({ message: err.message });
+  }
+};
+
+/**
  * PATCH /inspectors/:id/replace-labels
  * Replace all allocated labels for an inspector
  * Only accessible to Manager and Admin
  */
 exports.replaceLabels = async (req, res) => {
   try {
-    const { labels } = req.body;
-
-    // Validate input
-    if (!labels || !Array.isArray(labels) || labels.length === 0) {
-      return res.status(400).json({ message: "Labels must be a non-empty array of numbers" });
-    }
-
-    // Validate that all labels are numbers
-    if (!labels.every(label => typeof label === "number")) {
-      return res.status(400).json({ message: "All labels must be numbers" });
+    const { labels: normalizedLabels, error } = parseRequestedInspectorLabels(
+      req.body?.labels,
+    );
+    if (error) {
+      return res.status(400).json({ message: error });
     }
 
     const inspector = await Inspector.findById(req.params.id);
@@ -386,8 +641,55 @@ exports.replaceLabels = async (req, res) => {
       return res.status(404).json({ message: "Inspector not found" });
     }
 
-    const oldLabels = inspector.alloted_labels;
-    inspector.alloted_labels = [...new Set(labels)]; // Remove duplicates
+    const {
+      allocated: oldLabels,
+      rejected: rejectedLabels,
+    } = getInspectorLabelState(inspector);
+    const rejectedSet = new Set(rejectedLabels);
+    const rejectedConflicts = normalizedLabels.filter((label) =>
+      rejectedSet.has(label),
+    );
+    if (rejectedConflicts.length > 0) {
+      return res.status(400).json({
+        message: `Rejected labels cannot be allocated again: ${formatLabelPreview(rejectedConflicts)}`,
+        rejected_labels: rejectedConflicts,
+      });
+    }
+
+    const globalLabelSets = await collectGlobalInspectorLabelSets({
+      excludeInspectorIds: [req.params.id],
+    });
+    const allocatedElsewhere = normalizedLabels.filter((label) =>
+      globalLabelSets.allocated.has(label),
+    );
+    if (allocatedElsewhere.length > 0) {
+      return res.status(400).json({
+        message: `Some labels are already allocated to another inspector: ${formatLabelPreview(allocatedElsewhere)}`,
+        allocated_elsewhere: allocatedElsewhere,
+      });
+    }
+
+    const usedElsewhere = normalizedLabels.filter((label) =>
+      globalLabelSets.used.has(label),
+    );
+    if (usedElsewhere.length > 0) {
+      return res.status(400).json({
+        message: `Some labels are already used and cannot be reused: ${formatLabelPreview(usedElsewhere)}`,
+        used_elsewhere: usedElsewhere,
+      });
+    }
+
+    const rejectedElsewhere = normalizedLabels.filter((label) =>
+      globalLabelSets.rejected.has(label),
+    );
+    if (rejectedElsewhere.length > 0) {
+      return res.status(400).json({
+        message: `Rejected labels cannot be allocated again: ${formatLabelPreview(rejectedElsewhere)}`,
+        rejected_elsewhere: rejectedElsewhere,
+      });
+    }
+
+    inspector.alloted_labels = normalizedLabels;
     inspector.labels_allotted_by = req.user._id;
     inspector.used_labels = []; // Reset used labels when replacing allocation
 
@@ -469,24 +771,31 @@ exports.getLabelUsageStats = async (req, res) => {
       return res.status(404).json({ message: "Inspector not found" });
     }
 
-    const allocatedSet = new Set(inspector.alloted_labels);
-    const usedSet = new Set(inspector.used_labels);
-    const unusedLabels = inspector.alloted_labels.filter(
-      label => !usedSet.has(label)
+    const {
+      allocated: allocatedLabels,
+      used: usedLabels,
+      rejected: rejectedLabels,
+    } = getInspectorLabelState(inspector);
+    const allocatedSet = new Set(allocatedLabels);
+    const usedSet = new Set(usedLabels);
+    const unusedLabels = allocatedLabels.filter(
+      (label) => !usedSet.has(label),
     );
 
     res.json({
       data: {
         inspector: inspector.user,
-        total_allocated: inspector.alloted_labels.length,
-        allocated_labels: inspector.alloted_labels,
-        total_used: inspector.used_labels.length,
-        used_labels: inspector.used_labels,
+        total_allocated: allocatedLabels.length,
+        allocated_labels: allocatedLabels,
+        total_used: usedLabels.length,
+        used_labels: usedLabels,
+        total_rejected: rejectedLabels.length,
+        rejected_labels: rejectedLabels,
         unused_labels: unusedLabels,
-        usage_percentage: inspector.alloted_labels.length > 0 
-          ? ((inspector.used_labels.length / inspector.alloted_labels.length) * 100).toFixed(2)
+        usage_percentage: allocatedLabels.length > 0
+          ? ((usedLabels.length / allocatedLabels.length) * 100).toFixed(2)
           : 0,
-      }
+      },
     });
   } catch (err) {
     res.status(500).json({ message: err.message });

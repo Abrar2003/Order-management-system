@@ -10,6 +10,7 @@ const inspectorSchema = new mongoose.Schema(
     assignedOrders: [{ type: mongoose.Schema.Types.ObjectId, ref: "orders" }],
     alloted_labels: { type: Array, default: [] },
     used_labels: { type: Array, default: [] },
+    rejected_labels: { type: Array, default: [] },
     labels_allotted_by: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "users",

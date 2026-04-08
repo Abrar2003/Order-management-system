@@ -4500,6 +4500,19 @@ exports.updateQC = async (req, res) => {
         normalizeLabels(inspector.alloted_labels || []),
       );
       const usedSet = new Set(normalizeLabels(inspector.used_labels || []));
+      const rejectedSet = new Set(
+        normalizeLabels(inspector.rejected_labels || []),
+      );
+
+      const rejectedIncoming = incomingNew.filter((label) =>
+        rejectedSet.has(label),
+      );
+      if (rejectedIncoming.length > 0) {
+        const preview = rejectedIncoming.slice(0, 10).join(", ");
+        return res.status(400).json({
+          message: `Rejected labels cannot be used: ${preview}${rejectedIncoming.length > 10 ? "..." : ""}`,
+        });
+      }
 
       const unallocatedIncoming = incomingNew.filter(
         (label) => !allocatedSet.has(label),

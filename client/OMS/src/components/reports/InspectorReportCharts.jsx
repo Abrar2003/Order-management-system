@@ -21,6 +21,8 @@ const AXIS_TICK = Object.freeze({ fontSize: 12 });
 const LINE_ACTIVE_DOT = Object.freeze({ r: 4 });
 const CHART_LABEL_DATA_KEY = "label";
 const CHART_CBM_DATA_KEY = "cbm";
+const CHART_PRIMARY_COLOR = "#0d6efd";
+const CHART_GRID_COLOR = "#d9dee3";
 const monthYearFormatter = new Intl.DateTimeFormat("en-GB", {
   month: "short",
   year: "numeric",
@@ -276,7 +278,7 @@ const InspectorReportChartsComponent = ({
       <div className="inspector-report-chart-wrap">
         <ResponsiveContainer width="100%" height={320}>
           <LineChart data={chartData} margin={CHART_MARGIN}>
-            <CartesianGrid strokeDasharray="3 3" />
+            <CartesianGrid stroke={CHART_GRID_COLOR} strokeDasharray="3 3" />
             <XAxis
               dataKey={CHART_LABEL_DATA_KEY}
               minTickGap={20}
@@ -293,7 +295,7 @@ const InspectorReportChartsComponent = ({
               type="linear"
               dataKey={CHART_CBM_DATA_KEY}
               name="CBM"
-              stroke="var(--bs-primary)"
+              stroke={CHART_PRIMARY_COLOR}
               strokeWidth={2}
               dot={false}
               activeDot={LINE_ACTIVE_DOT}
@@ -306,7 +308,7 @@ const InspectorReportChartsComponent = ({
       <div className="inspector-report-chart-wrap">
         <ResponsiveContainer width="100%" height={320}>
           <BarChart data={chartData} margin={CHART_MARGIN}>
-            <CartesianGrid strokeDasharray="3 3" />
+            <CartesianGrid stroke={CHART_GRID_COLOR} strokeDasharray="3 3" />
             <XAxis
               dataKey={CHART_LABEL_DATA_KEY}
               minTickGap={20}
@@ -322,7 +324,7 @@ const InspectorReportChartsComponent = ({
             <Bar
               dataKey={CHART_CBM_DATA_KEY}
               name="CBM"
-              fill="var(--bs-primary)"
+              fill={CHART_PRIMARY_COLOR}
               isAnimationActive={false}
             />
           </BarChart>

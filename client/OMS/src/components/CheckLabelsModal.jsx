@@ -88,6 +88,7 @@ const CheckLabelsModal = ({ onClose }) => {
       .map((inspector) => {
         const allocatedLabels = normalizeLabels(inspector?.alloted_labels);
         const usedLabels = normalizeLabels(inspector?.used_labels);
+        const rejectedLabels = normalizeLabels(inspector?.rejected_labels);
         const usedSet = new Set(usedLabels);
         const availableLabels = allocatedLabels.filter((label) => !usedSet.has(label));
 
@@ -105,6 +106,10 @@ const CheckLabelsModal = ({ onClose }) => {
           used: {
             count: usedLabels.length,
             ranges: normalizeLabelRanges(usedLabels),
+          },
+          rejected: {
+            count: rejectedLabels.length,
+            ranges: normalizeLabelRanges(rejectedLabels),
           },
         };
       })
@@ -135,6 +140,7 @@ const CheckLabelsModal = ({ onClose }) => {
                       <th style={{ minWidth: "240px" }}>Allocated Labels</th>
                       <th style={{ minWidth: "240px" }}>Available To Use</th>
                       <th style={{ minWidth: "240px" }}>Used Labels</th>
+                      <th style={{ minWidth: "240px" }}>Rejected Labels</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -158,6 +164,12 @@ const CheckLabelsModal = ({ onClose }) => {
                             Total: {row.used.count}
                           </div>
                           {renderRangeGroup(row.used.ranges, "No used labels")}
+                        </td>
+                        <td>
+                          <div className="small text-secondary mb-2">
+                            Total: {row.rejected.count}
+                          </div>
+                          {renderRangeGroup(row.rejected.ranges, "No rejected labels")}
                         </td>
                       </tr>
                     ))}

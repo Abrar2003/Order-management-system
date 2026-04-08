@@ -1,14 +1,7 @@
-import { Suspense, lazy, memo, useMemo } from "react";
+import { memo, useMemo } from "react";
 import { formatDateDDMMYYYY } from "../../utils/date";
 import { formatCbm } from "../../utils/cbm";
-
-const LazyInspectorReportCharts = lazy(() => import("./InspectorReportCharts"));
-
-const ChartLoadingFallback = () => (
-  <div className="inspector-report-chart-wrap d-flex align-items-center justify-content-center text-secondary">
-    Loading chart...
-  </div>
-);
+import InspectorReportCharts from "./InspectorReportCharts";
 
 const InspectorCardComponent = ({
   entry,
@@ -167,14 +160,12 @@ const InspectorCardComponent = ({
             </span>
           </div>
 
-          <Suspense fallback={<ChartLoadingFallback />}>
-            <LazyInspectorReportCharts
-              dailyRows={dailyRows}
-              fromDate={fromDate}
-              toDate={toDate}
-              chartStep={chartStep}
-            />
-          </Suspense>
+          <InspectorReportCharts
+            dailyRows={dailyRows}
+            fromDate={fromDate}
+            toDate={toDate}
+            chartStep={chartStep}
+          />
         </div>
       </div>
     </div>
