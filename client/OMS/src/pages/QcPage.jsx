@@ -29,7 +29,74 @@ const toSafeNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
-const isGoodsNotReady = (qc = {}) => Boolean(qc?.last_inspection?.goods_not_ready?.ready);
+const normalizeInspectionStatus = (value) =>
+  String(value || "").trim().toLowerCase();
+
+const isGoodsNotReady = (inspection = {}) => {
+  const explicitStatus = normalizeInspectionStatus(inspection?.status);
+  if (explicitStatus === "goods not ready") return true;
+
+  const goodsNotReady = inspection?.goods_not_ready;
+  if (typeof goodsNotReady === "boolean") return goodsNotReady;
+
+  if (typeof goodsNotReady === "string") {
+    return ["true", "1", "yes", "y"].includes(
+      String(goodsNotReady).trim().toLowerCase(),
+    );
+  }
+
+  if (!goodsNotReady || typeof goodsNotReady !== "object") {
+    return false;
+  }
+
+  if (goodsNotReady.ready !== undefined) {
+    return ["true", "1", "yes", "y"].includes(
+      String(goodsNotReady.ready).trim().toLowerCase(),
+    );
+  }
+
+  return Boolean(String(goodsNotReady.reason || "").trim());
+};
+
+const getQcInspectionStatus = (qc = {}) => {
+  const lastInspection = qc?.last_inspection || {};
+  const explicitStatus = normalizeInspectionStatus(lastInspection?.status);
+
+  if (explicitStatus === "transfered" || explicitStatus === "transferred") {
+    return "Transferred";
+  }
+
+  if (isGoodsNotReady(lastInspection)) {
+    return "Goods Not Ready";
+  }
+
+  if (
+    toSafeNumber(lastInspection?.checked) > 0 ||
+    explicitStatus === "inspection done"
+  ) {
+    return "Inspection Done";
+  }
+
+  return "Pending";
+};
+
+const renderInspectionStatus = (qc = {}) => {
+  const inspectionStatus = getQcInspectionStatus(qc);
+
+  if (inspectionStatus === "Transferred") {
+    return <span className="text-warning fw-semibold">Transferred</span>;
+  }
+
+  if (inspectionStatus === "Goods Not Ready") {
+    return <span className="text-danger fw-semibold">Goods Not Ready</span>;
+  }
+
+  if (inspectionStatus === "Inspection Done") {
+    return <span className="text-success fw-semibold">Inspection Done</span>;
+  }
+
+  return <span className="text-danger fw-semibold">Pending</span>;
+};
 
 const getPendingAlignmentInfo = (qc = {}) => {
   const pendingQty = Math.max(
@@ -486,7 +553,7 @@ const QCPage = () => {
                     {/* <th>Requested</th>
                     <th>Offered</th> */}
                     {/* <th>Last Inspection (O/C/P)</th> */}
-                    <th>Status</th>
+                    <th>Inspection Status</th>
                     <th>QC Passed</th>
                     <th>Pending</th>
                     <th>CBM</th>
@@ -738,13 +805,7 @@ const QCPage = () => {
                               : "N/A"}
                           </td> */}
                           <td>
-                            {isGoodsNotReady(qc) ? (
-                              <span className="text-danger fw-semibold">
-                                Goods Not Ready
-                              </span>
-                            ) : (
-                              qc?.order?.status || "N/A"
-                            )}
+                            {renderInspectionStatus(qc)}
                           </td>
                           <td>{toSafeNumber(qc?.last_inspection?.passed) ?? 0}</td>
                           <td>

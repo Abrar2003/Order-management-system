@@ -28,6 +28,7 @@ dist-ssr
 .env.testing
 .env.development.local
 .env.testing.local
+*update_vendor_name.js
 
 .env.production
 .env.development

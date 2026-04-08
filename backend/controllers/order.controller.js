@@ -501,11 +501,13 @@ const buildOrderListMatch = ({
 };
 
 const buildShipmentMatch = ({
+  brand,
   vendor,
   orderId,
   itemCode,
   container,
   status,
+  includeBrand = true,
   includeVendor = true,
   includeOrderId = true,
   includeItemCode = true,
@@ -517,11 +519,16 @@ const buildShipmentMatch = ({
     status: { $in: SHIPMENT_VISIBLE_STATUSES },
   };
 
+  const normalizedBrand = normalizeFilterValue(brand);
   const normalizedVendor = normalizeFilterValue(vendor);
   const normalizedOrderId = normalizeFilterValue(orderId);
   const normalizedItemCode = normalizeFilterValue(itemCode);
   const normalizedContainer = normalizeFilterValue(container);
   const normalizedStatus = normalizeFilterValue(status);
+
+  if (includeBrand && normalizedBrand) {
+    match.brand = normalizedBrand;
+  }
 
   if (includeVendor && normalizedVendor) {
     match.vendor = normalizedVendor;
@@ -2954,6 +2961,7 @@ const getShipmentSortValue = (row, sortBy) => {
 };
 
 const getShipmentDataset = async ({
+  brand,
   vendor,
   orderId,
   itemCode,
@@ -2970,13 +2978,14 @@ const getShipmentDataset = async ({
   });
 
   const filterInput = {
+    brand,
     vendor,
     orderId,
     itemCode,
     container,
   };
 
-  const [orders, vendorsRaw, orderIdsRaw, containersRaw, itemCodesRaw] =
+  const [orders, brandsRaw, vendorsRaw, orderIdsRaw, containersRaw, itemCodesRaw] =
     await Promise.all([
       Order.find(buildShipmentMatch(filterInput))
         .select(
@@ -2984,6 +2993,15 @@ const getShipmentDataset = async ({
         )
         .sort({ order_date: -1, updatedAt: -1, order_id: -1 })
         .lean(),
+      Order.distinct(
+        "brand",
+        buildShipmentMatch({
+          ...filterInput,
+          includeBrand: false,
+          includeContainer: false,
+          includeStatus: false,
+        }),
+      ),
       Order.distinct(
         "vendor",
         buildShipmentMatch({
@@ -3082,10 +3100,93 @@ const getShipmentDataset = async ({
       sort_order: sortOrder,
     },
     filters: {
+      brands: normalizeDistinctValues(brandsRaw),
       vendors: normalizeDistinctValues(vendorsRaw),
       order_ids: normalizeDistinctValues(orderIdsRaw),
       containers: normalizeDistinctValues(containersRaw),
       item_codes: normalizeDistinctValues(itemCodesRaw),
+    },
+  };
+};
+
+const getContainerDataset = async ({
+  brand,
+  vendor,
+  container,
+} = {}) => {
+  const shipmentData = await getShipmentDataset({
+    brand,
+    vendor,
+    container,
+    sortByInput: "stuffing_date",
+    sortOrderInput: "desc",
+  });
+
+  const groupedByContainer = new Map();
+
+  for (const row of shipmentData.rows) {
+    const containerNumber = String(row?.container || "").trim();
+    if (!containerNumber) continue;
+
+    const existingGroup = groupedByContainer.get(containerNumber) || {
+      container: containerNumber,
+      brandSet: new Set(),
+      vendorSet: new Set(),
+      shipping_date: null,
+      itemKeySet: new Set(),
+    };
+
+    const brandValue = String(row?.brand || "").trim();
+    const vendorValue = String(row?.vendor || "").trim();
+    const shippingDate = row?.stuffing_date || null;
+    const itemKey = String(
+      row?._id || `${row?.order_id || ""}::${row?.item_code || ""}`,
+    ).trim();
+
+    if (brandValue) existingGroup.brandSet.add(brandValue);
+    if (vendorValue) existingGroup.vendorSet.add(vendorValue);
+    if (
+      shippingDate
+      && (
+        !existingGroup.shipping_date
+        || toShipmentTimestamp(shippingDate)
+          > toShipmentTimestamp(existingGroup.shipping_date)
+      )
+    ) {
+      existingGroup.shipping_date = shippingDate;
+    }
+    if (itemKey) existingGroup.itemKeySet.add(itemKey);
+
+    groupedByContainer.set(containerNumber, existingGroup);
+  }
+
+  const rows = Array.from(groupedByContainer.values())
+    .map((group) => ({
+      container: group.container,
+      brand: normalizeDistinctValues(Array.from(group.brandSet)).join(", ") || "N/A",
+      vendor: normalizeDistinctValues(Array.from(group.vendorSet)).join(", ") || "N/A",
+      shipping_date: group.shipping_date || null,
+      item_count: group.itemKeySet.size,
+    }))
+    .sort((left, right) => {
+      const dateCompare =
+        toShipmentTimestamp(right?.shipping_date) -
+        toShipmentTimestamp(left?.shipping_date);
+      if (dateCompare !== 0) return dateCompare;
+      return String(left?.container || "").localeCompare(
+        String(right?.container || ""),
+      );
+    });
+
+  return {
+    rows,
+    summary: {
+      total: rows.length,
+    },
+    filters: {
+      brands: shipmentData.filters.brands,
+      vendors: shipmentData.filters.vendors,
+      containers: shipmentData.filters.containers,
     },
   };
 };
@@ -6409,10 +6510,15 @@ exports.exportOrdersDb = async (req, res) => {
 const buildDelayedPoReportDataset = async ({
   brand = "",
   vendor = "",
+  etdRange = null,
+  fromDate = "",
+  toDate = "",
 } = {}) => {
   const selectedBrand = normalizeFilterValue(brand) || "";
   const selectedVendor = normalizeFilterValue(vendor) || "";
   const todayUtc = toUtcDayStart(new Date());
+  const normalizedFromDate = fromDate ? toISODateString(fromDate) : "";
+  const normalizedToDate = toDate ? toISODateString(toDate) : "";
 
   const orders = await Order.find(ACTIVE_ORDER_MATCH)
     .select(
@@ -6545,8 +6651,14 @@ const buildDelayedPoReportDataset = async ({
         groupedEntry.inspection_done_count === 0 &&
         groupedEntry.shipped_count > 0;
       const etdCrossed = effectiveEtd.getTime() < todayUtc.getTime();
+      const isWithinSelectedEtdWindow =
+        !etdRange ||
+        (
+          (!etdRange.$gte || effectiveEtd.getTime() >= etdRange.$gte.getTime()) &&
+          (!etdRange.$lt || effectiveEtd.getTime() < etdRange.$lt.getTime())
+        );
 
-      if (isFullyShipped || !(hasOpenItems && etdCrossed)) {
+      if (isFullyShipped || !(hasOpenItems && etdCrossed) || !isWithinSelectedEtdWindow) {
         return null;
       }
 
@@ -6687,6 +6799,8 @@ const buildDelayedPoReportDataset = async ({
       vendor: selectedVendor,
       brand_options: brandOptions,
       vendor_options: vendorOptions,
+      from_date: normalizedFromDate,
+      to_date: normalizedToDate,
       report_date: toISODateString(todayUtc),
     },
     summary: {
@@ -6703,6 +6817,38 @@ const buildDelayedPoReportDataset = async ({
     },
     vendors,
     rows: filteredRows,
+  };
+};
+
+const resolveDelayedPoReportFilterParams = (req = {}) => {
+  const fromDate =
+    req.query.from_date ??
+    req.query.fromDate ??
+    req.query.start_date ??
+    req.query.startDate;
+  const toDate =
+    req.query.to_date ??
+    req.query.toDate ??
+    req.query.end_date ??
+    req.query.endDate;
+
+  const etdRangeResult = buildDateRangeQuery({
+    fromValue: fromDate,
+    toValue: toDate,
+    tzOffsetValue: req.query.tz_offset ?? req.query.tzOffset,
+    label: "ETD",
+  });
+
+  if (etdRangeResult.error) {
+    return { error: etdRangeResult.error };
+  }
+
+  return {
+    brand: req.query.brand,
+    vendor: req.query.vendor,
+    fromDate,
+    toDate,
+    etdRange: etdRangeResult.range,
   };
 };
 
@@ -7016,10 +7162,15 @@ const buildUpcomingEtdReportDataset = async ({
 
 exports.getDelayedPoReport = async (req, res) => {
   try {
-    const dataset = await buildDelayedPoReportDataset({
-      brand: req.query.brand,
-      vendor: req.query.vendor,
-    });
+    const filters = resolveDelayedPoReportFilterParams(req);
+    if (filters.error) {
+      return res.status(400).json({
+        success: false,
+        message: filters.error,
+      });
+    }
+
+    const dataset = await buildDelayedPoReportDataset(filters);
 
     return res.status(200).json(dataset);
   } catch (error) {
@@ -7147,10 +7298,15 @@ exports.exportUpcomingEtdReport = async (req, res) => {
 
 exports.exportDelayedPoReport = async (req, res) => {
   try {
-    const dataset = await buildDelayedPoReportDataset({
-      brand: req.query.brand,
-      vendor: req.query.vendor,
-    });
+    const filters = resolveDelayedPoReportFilterParams(req);
+    if (filters.error) {
+      return res.status(400).json({
+        success: false,
+        message: filters.error,
+      });
+    }
+
+    const dataset = await buildDelayedPoReportDataset(filters);
     const columns = [
       { key: "order_id", header: "PO" },
       { key: "brand", header: "Brand" },
@@ -7346,6 +7502,7 @@ exports.getOrderSummary = async (req, res) => {
 
 exports.getShipmentsDb = async (req, res) => {
   try {
+    const brand = req.query.brand;
     const vendor = req.query.vendor;
     const orderId = req.query.order_id ?? req.query.order;
     const itemCode = req.query.item_code;
@@ -7354,6 +7511,7 @@ exports.getShipmentsDb = async (req, res) => {
     const page = parsePositiveInt(req.query.page, 1);
     const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
     const shipmentData = await getShipmentDataset({
+      brand,
       vendor,
       orderId,
       itemCode,
@@ -7397,6 +7555,7 @@ exports.getShipmentsDb = async (req, res) => {
 
 exports.exportShipmentsDb = async (req, res) => {
   try {
+    const brand = req.query.brand;
     const vendor = req.query.vendor;
     const orderId = req.query.order_id ?? req.query.order;
     const itemCode = req.query.item_code;
@@ -7410,6 +7569,7 @@ exports.exportShipmentsDb = async (req, res) => {
         : "xlsx";
 
     const shipmentData = await getShipmentDataset({
+      brand,
       vendor,
       orderId,
       itemCode,
@@ -7517,6 +7677,31 @@ exports.exportShipmentsDb = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to export shipment list",
+      error: error.message,
+    });
+  }
+};
+
+exports.getContainersDb = async (req, res) => {
+  try {
+    const containerData = await getContainerDataset({
+      brand: req.query.brand,
+      vendor: req.query.vendor,
+      container: req.query.container ?? req.query.container_number,
+    });
+
+    return res.status(200).json({
+      success: true,
+      count: containerData.rows.length,
+      data: containerData.rows,
+      summary: containerData.summary,
+      filters: containerData.filters,
+    });
+  } catch (error) {
+    console.error("Get Containers DB Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch containers list",
       error: error.message,
     });
   }

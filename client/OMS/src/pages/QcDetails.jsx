@@ -13,6 +13,7 @@ import { getUserFromToken } from "../auth/auth.utils";
 import { isViewOnlyUser } from "../auth/permissions";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { formatPositiveCbm } from "../utils/cbm";
+import { formatFixedNumber, formatLbhValue } from "../utils/measurementDisplay";
 import Barcode from "react-barcode";
 import "../App.css";
 
@@ -44,18 +45,6 @@ const toTimestamp = (value) => {
   return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
 };
 
-const formatLbhValue = (value) => {
-  const length = Number(value?.L || 0);
-  const breadth = Number(value?.B || 0);
-  const height = Number(value?.H || 0);
-  const safeLength = Number.isFinite(length) ? length : 0;
-  const safeBreadth = Number.isFinite(breadth) ? breadth : 0;
-  const safeHeight = Number.isFinite(height) ? height : 0;
-  if (safeLength <= 0 && safeBreadth <= 0 && safeHeight <= 0) {
-    return "Not Set";
-  }
-  return `${safeLength} x ${safeBreadth} x ${safeHeight}`;
-};
 const normalizeMeasurementEntries = (entries = [], weightKey = "") =>
   (Array.isArray(entries) ? entries : [])
     .map((entry) => {
@@ -95,7 +84,7 @@ const formatMeasurementEntries = (
       if (remarkLabel) parts.push(remarkLabel);
       parts.push(formatLbhValue(entry));
       if (weightLabel && Number(entry?.weight || 0) > 0) {
-        parts.push(`${weightLabel}: ${Number(entry.weight)}`);
+        parts.push(`${weightLabel}: ${formatFixedNumber(entry.weight)}`);
       }
       return parts.join(" | ");
     })
@@ -256,6 +245,18 @@ const RELATED_FILE_OPTIONS = Object.freeze([
     extensions: [".pdf"],
     mimeTypes: ["application/pdf"],
     invalidMessage: "Only PDF files are allowed for PIS.",
+  },
+  {
+    value: "assembly_file",
+    label: "Assembly",
+    buttonLabel: "Assembly",
+    scope: "item_master",
+    field: "assembly_file",
+    previewMode: "pdf",
+    accept: ".pdf,application/pdf",
+    extensions: [".pdf"],
+    mimeTypes: ["application/pdf"],
+    invalidMessage: "Only PDF files are allowed for Assembly.",
   },
   {
     value: "qc_images",
@@ -527,12 +528,12 @@ const QcDetails = () => {
     if (!qc) return { top: "", bottom: "", total: "" };
     const cbmValue = qc.cbm;
     if (typeof cbmValue === "number" || typeof cbmValue === "string") {
-      return { top: "", bottom: "", total: String(cbmValue) };
+      return { top: "", bottom: "", total: toSafeNumber(cbmValue, 0) };
     }
     return {
-      top: cbmValue?.top ?? "",
-      bottom: cbmValue?.bottom ?? "",
-      total: cbmValue?.total ?? "",
+      top: toSafeNumber(cbmValue?.top ?? cbmValue?.box1, 0),
+      bottom: toSafeNumber(cbmValue?.bottom ?? cbmValue?.box2, 0),
+      total: toSafeNumber(cbmValue?.total, 0),
     };
   }, [qc]);
   const itemMasterDetails = useMemo(() => {
@@ -541,16 +542,14 @@ const QcDetails = () => {
       ? itemMaster.brands.find((brand) => String(brand || "").trim())
       : "";
     const brandName = String(itemMaster?.brand_name || fallbackBrand || "").trim();
-    const pisCbm = String(
+    const pisCbm =
       itemMaster?.cbm?.total
       ?? itemMaster?.cbm?.calculated_pis_total
-      ?? "0",
-    ).trim();
-    const calculatedPisCbm = String(
+      ?? 0;
+    const calculatedPisCbm =
       itemMaster?.cbm?.calculated_pis_total
       ?? itemMaster?.cbm?.total
-      ?? "0",
-    ).trim();
+      ?? 0;
     const pisItemSizeEntries = normalizeMeasurementEntries(
       itemMaster?.pis_item_sizes,
       "net_weight",
@@ -583,8 +582,8 @@ const QcDetails = () => {
       description:
         String(itemMaster?.description || itemMaster?.name || "N/A").trim() || "N/A",
       brandName: brandName || "N/A",
-      weightNet: Number.isFinite(netWeight) ? netWeight : 0,
-      weightGross: Number.isFinite(grossWeight) ? grossWeight : 0,
+      weightNet: formatFixedNumber(Number.isFinite(netWeight) ? netWeight : 0),
+      weightGross: formatFixedNumber(Number.isFinite(grossWeight) ? grossWeight : 0),
       itemLbh:
         pisItemSizeEntries.length > 0
           ? formatMeasurementEntries(pisItemSizeEntries, { weightLabel: "Net" })

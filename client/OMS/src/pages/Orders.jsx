@@ -408,7 +408,7 @@ const Orders = () => {
                                     className="btn btn-outline-primary btn-sm"
                                     onClick={() => openAlignModal(order, true)}
                                   >
-                                    Realign QC
+                                    Raise a request for pending status
                                   </button>
                                 )}
                             </div>

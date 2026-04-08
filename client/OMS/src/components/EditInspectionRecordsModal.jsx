@@ -5,6 +5,7 @@ import {
   toDDMMYYYYInputValue,
   toISODateString,
 } from "../utils/date";
+import { formatNumberInputValue } from "../utils/measurementDisplay";
 import "../App.css";
 
 const toSafeNumberString = (value) => {
@@ -41,7 +42,7 @@ const buildInitialRows = (qc) =>
       checked: toSafeNumberString(record?.checked),
       passed: toSafeNumberString(record?.passed),
       pending_after: toSafeNumberString(record?.pending_after),
-      cbm_total: String(record?.cbm?.total ?? "0"),
+      cbm_total: formatNumberInputValue(record?.cbm?.total, { allowZero: true }) || "0.00",
       remarks: String(record?.remarks || ""),
     }));
 
@@ -153,6 +154,7 @@ const EditInspectionRecordsModal = ({ qc, onClose, onSuccess }) => {
           "pending quantity",
           rowIndex,
         );
+        const cbmTotal = parseNonNegativeNumber(row.cbm_total, "cbm", rowIndex);
 
         if (passed > checked) {
           throw new Error(`Row ${rowIndex + 1}: passed quantity cannot exceed checked quantity`);
@@ -169,7 +171,7 @@ const EditInspectionRecordsModal = ({ qc, onClose, onSuccess }) => {
           passed,
           pending_after: pendingAfter,
           cbm: {
-            total: String(row.cbm_total || "0"),
+            total: cbmTotal,
           },
           remarks: String(row.remarks || "").trim(),
         };

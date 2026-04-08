@@ -208,6 +208,12 @@ const itemSchema = new mongoose.Schema(
       contentType: { type: String, default: "", trim: true },
       size: { type: Number, default: 0, min: 0 },
     },
+    assembly_file: {
+      key: { type: String, default: "", trim: true },
+      originalName: { type: String, default: "", trim: true },
+      contentType: { type: String, default: "", trim: true },
+      size: { type: Number, default: 0, min: 0 },
+    },
   },
   { timestamps: true },
 );

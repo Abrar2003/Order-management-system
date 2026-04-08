@@ -7,6 +7,7 @@ import ItemOrderPresenceTooltip from "../components/ItemOrderPresenceTooltip";
 import { getUserFromToken } from "../auth/auth.utils";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { formatCbm } from "../utils/cbm";
+import { formatFixedNumber, formatLbhValue } from "../utils/measurementDisplay";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
 
@@ -43,15 +44,6 @@ const useDebouncedValue = (value, delay = 300) => {
   return debounced;
 };
 
-const formatLbh = (value) => {
-  const l = Number(value?.L || 0);
-  const b = Number(value?.B || 0);
-  const h = Number(value?.H || 0);
-  const safeL = Number.isFinite(l) ? l : 0;
-  const safeB = Number.isFinite(b) ? b : 0;
-  const safeH = Number.isFinite(h) ? h : 0;
-  return `${safeL} x ${safeB} x ${safeH}`;
-};
 const normalizeMeasurementEntries = (entries = [], weightKey = "") =>
   (Array.isArray(entries) ? entries : [])
     .map((entry) => {
@@ -489,11 +481,11 @@ const Items = () => {
                         </td>
                         {/* <td>{Array.isArray(item?.brands) && item.brands.length > 0 ? item.brands.join(", ") : "N/A"}</td>
                         <td>{Array.isArray(item?.vendors) && item.vendors.length > 0 ? item.vendors.join(", ") : "N/A"}</td> */}
-                        <td>{getInspectedWeight(item, "net")}</td>
-                        <td>{getInspectedWeight(item, "gross")}</td>
+                        <td>{formatFixedNumber(getInspectedWeight(item, "net"))}</td>
+                        <td>{formatFixedNumber(getInspectedWeight(item, "gross"))}</td>
                         <td>{formatCbm(getCalculatedInspectedCbm(item))}</td>
-                        <td>{formatLbh(getInspectedItemLbh(item))}</td>
-                        <td>{formatLbh(getInspectedBoxLbh(item))}</td>
+                        <td>{formatLbhValue(getInspectedItemLbh(item), { fallback: "0.00 x 0.00 x 0.00" })}</td>
+                        <td>{formatLbhValue(getInspectedBoxLbh(item), { fallback: "0.00 x 0.00 x 0.00" })}</td>
                         {canEditItems && (
                           <td>
                             <button

@@ -7,6 +7,7 @@ import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { formatPositiveCbm } from "../utils/cbm";
+import { formatFixedNumber, formatLbhValue } from "../utils/measurementDisplay";
 import "../App.css";
 
 const SIZE_UNIT = "cm";
@@ -32,20 +33,8 @@ const toTimestamp = (value) => {
   return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
 };
 
-const formatLbhValue = (value) => {
-  const length = Number(value?.L || 0);
-  const breadth = Number(value?.B || 0);
-  const height = Number(value?.H || 0);
-  const safeLength = Number.isFinite(length) ? length : 0;
-  const safeBreadth = Number.isFinite(breadth) ? breadth : 0;
-  const safeHeight = Number.isFinite(height) ? height : 0;
-
-  if (safeLength <= 0 && safeBreadth <= 0 && safeHeight <= 0) {
-    return "Not Set";
-  }
-
-  return `${safeLength} x ${safeBreadth} x ${safeHeight} ${SIZE_UNIT}`;
-};
+const formatDisplayLbhValue = (value) =>
+  formatLbhValue(value, { fallback: "Not Set", suffix: SIZE_UNIT });
 
 const ITEM_INDEXED_REMARKS = ["item1", "item2", "item3"];
 const BOX_INDEXED_REMARKS = ["box1", "box2", "box3"];
@@ -125,8 +114,8 @@ const formatStructuredLbhValue = ({
       topLabel,
       bottomLabel,
       display: [
-        resolvedTop ? `${topLabel}: ${formatLbhValue(resolvedTop)}` : "",
-        resolvedBottom ? `${bottomLabel}: ${formatLbhValue(resolvedBottom)}` : "",
+        resolvedTop ? `${topLabel}: ${formatDisplayLbhValue(resolvedTop)}` : "",
+        resolvedBottom ? `${bottomLabel}: ${formatDisplayLbhValue(resolvedBottom)}` : "",
       ]
         .filter(Boolean)
         .join(" | "),
@@ -136,7 +125,7 @@ const formatStructuredLbhValue = ({
   return {
     mode: "single",
     value: resolvedSingle,
-    display: formatLbhValue(resolvedSingle || {}),
+    display: formatDisplayLbhValue(resolvedSingle || {}),
   };
 };
 
@@ -176,9 +165,7 @@ const pickFiniteWeightValue = (...values) => {
 const formatWeightValue = (value, fallback = "Not Set") => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
-  const formatted = Number.isInteger(parsed)
-    ? String(parsed)
-    : parsed.toFixed(3).replace(/\.?0+$/, "") || "0";
+  const formatted = formatFixedNumber(parsed);
   return `${formatted} ${WEIGHT_UNIT}`;
 };
 
@@ -265,7 +252,7 @@ const toStructuredLbhFromEntries = (
           entry,
           index,
           { L: entry.L, B: entry.B, H: entry.H },
-          formatLbhValue(entry),
+          formatDisplayLbhValue(entry),
         )),
     };
   }
@@ -506,9 +493,8 @@ const toComparableValue = (value) =>
 
 const formatDifferenceNumber = (value) => {
   const numeric = Math.abs(Number(value));
-  if (!Number.isFinite(numeric)) return "0";
-  if (Number.isInteger(numeric)) return String(numeric);
-  return numeric.toFixed(2).replace(/\.?0+$/, "");
+  if (!Number.isFinite(numeric)) return "0.00";
+  return formatFixedNumber(numeric);
 };
 
 const collectLbhDifferenceLogs = ({
@@ -532,14 +518,14 @@ const collectLbhDifferenceLogs = ({
 
     if (!hasPis && hasChecked) {
       logs.push(
-        `For ${labelPrefix}, inspected value is ${formatLbhValue(checkedLbh)} while PIS value is not set.`,
+        `For ${labelPrefix}, inspected value is ${formatDisplayLbhValue(checkedLbh)} while PIS value is not set.`,
       );
       return;
     }
 
     if (hasPis && !hasChecked) {
       logs.push(
-        `For ${labelPrefix}, PIS value is ${formatLbhValue(pisLbh)} while inspected value is not set.`,
+        `For ${labelPrefix}, PIS value is ${formatDisplayLbhValue(pisLbh)} while inspected value is not set.`,
       );
       return;
     }

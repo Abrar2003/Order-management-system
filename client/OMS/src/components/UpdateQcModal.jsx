@@ -6,6 +6,7 @@ import {
   toDDMMYYYYInputValue,
   toISODateString,
 } from "../utils/date";
+import { formatNumberInputValue } from "../utils/measurementDisplay";
 import "../App.css";
 import AllocateLabelsModal from "./AllocateLabelsModal";
 
@@ -151,11 +152,7 @@ const buildClearedFormFields = (fieldKeys = []) =>
     accumulator[fieldKey] = "";
     return accumulator;
   }, {});
-const toDimensionInputValue = (value) => {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return "";
-  return String(parsed);
-};
+const toDimensionInputValue = (value) => formatNumberInputValue(value);
 const getWeightValueFromModel = (weightData = {}, payloadKey = "") => {
   const normalizedPayloadKey = String(payloadKey || "").trim();
   if (!normalizedPayloadKey) return 0;
@@ -1840,10 +1837,10 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   : qcPassed,
               pending_after: pendingAfterRewrite,
               cbm: {
-                box1: String(updatedQc?.cbm?.box1 ?? updatedQc?.cbm?.top ?? "0"),
-                box2: String(updatedQc?.cbm?.box2 ?? updatedQc?.cbm?.bottom ?? "0"),
-                box3: String(updatedQc?.cbm?.box3 ?? "0"),
-                total: String(updatedQc?.cbm?.total ?? "0"),
+                box1: Number(updatedQc?.cbm?.box1 ?? updatedQc?.cbm?.top ?? 0) || 0,
+                box2: Number(updatedQc?.cbm?.box2 ?? updatedQc?.cbm?.bottom ?? 0) || 0,
+                box3: Number(updatedQc?.cbm?.box3 ?? 0) || 0,
+                total: Number(updatedQc?.cbm?.total ?? 0) || 0,
               },
               label_ranges: normalizedLabelRanges,
               labels_added: labelsForUpdate,

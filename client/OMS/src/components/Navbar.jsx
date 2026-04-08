@@ -61,14 +61,13 @@ const Navbar = () => {
         { label: "QC", path: "/qc" },
         { label: "Orders", path: "/all-orders" },
         { label: "Shipments", path: "/shipments" },
+        { label: "Containers", path: "/containers" },
         { label: "Daily Reports", path: "/daily-reports" },
         { label: "Items", path: "/items" },
       );
     }
 
-    if (canViewOrderPages) {
-      links.push({ label: "PIS", path: "/pis" });
-    }
+    
 
     return links;
   }, [canAccessQc, canViewOrderPages, isQcOnlyRole]);

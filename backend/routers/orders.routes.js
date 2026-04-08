@@ -17,6 +17,7 @@ const {
   getTodayEtdOrdersByBrand,
   getOrdersByBrandAndStatus,
   getOrderSummary,
+  getContainersDb,
   getShipmentsDb,
   exportShipmentsDb,
   getDelayedPoReport,
@@ -136,6 +137,13 @@ router.get(
 router.get("/revised-etd-history", authenticate, authorize("admin", "manager", "QC", "dev", "user"), getRevisedEtdHistory);
 
 // List shipped/partially shipped/inspection-done items with latest shipment details
+router.get(
+  "/containers",
+  authenticate,
+  authorize("admin", "manager", "QC", "dev", "user"),
+  getContainersDb,
+);
+
 router.get(
   "/shipments/export",
   authenticate,

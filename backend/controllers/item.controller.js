@@ -609,6 +609,15 @@ const ITEM_FILE_CONFIG = Object.freeze({
     defaultExtension: ".pdf",
     invalidTypeMessage: "Only PDF files are allowed for PIS files",
   },
+  assembly_file: {
+    field: "assembly_file",
+    folder: "item-assembly",
+    label: "Assembly file",
+    mimeTypes: ITEM_PDF_MIME_TYPES,
+    extensions: ITEM_PDF_EXTENSIONS,
+    defaultExtension: ".pdf",
+    invalidTypeMessage: "Only PDF files are allowed for Assembly files",
+  },
 });
 const ALLOWED_ITEM_FILE_TYPES = new Set(Object.keys(ITEM_FILE_CONFIG));
 

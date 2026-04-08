@@ -1,4 +1,5 @@
 import { formatCbm } from "./cbm";
+import { formatNumberInputValue } from "./measurementDisplay";
 
 export const SIZE_ENTRY_LIMIT = 3;
 
@@ -32,9 +33,7 @@ export const createEmptyMeasuredSizeEntry = () => ({
 });
 
 export const toDimensionInputValue = (value) => {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return "";
-  return String(parsed);
+  return formatNumberInputValue(value);
 };
 
 export const normalizeSizeCount = (value, fallback = 1) => {

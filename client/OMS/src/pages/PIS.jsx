@@ -6,6 +6,7 @@ import EditPisModal from "../components/EditPisModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { formatCbm } from "../utils/cbm";
+import { formatFixedNumber, formatLbhValue } from "../utils/measurementDisplay";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
 
@@ -42,15 +43,6 @@ const useDebouncedValue = (value, delay = 300) => {
   return debounced;
 };
 
-const formatLbh = (value) => {
-  const l = Number(value?.L || 0);
-  const b = Number(value?.B || 0);
-  const h = Number(value?.H || 0);
-  const safeL = Number.isFinite(l) ? l : 0;
-  const safeB = Number.isFinite(b) ? b : 0;
-  const safeH = Number.isFinite(h) ? h : 0;
-  return `${safeL} x ${safeB} x ${safeH}`;
-};
 const normalizeMeasurementEntries = (entries = [], weightKey = "") =>
   (Array.isArray(entries) ? entries : [])
     .map((entry) => {
@@ -378,10 +370,10 @@ const PIS = () => {
                         <td>{item?.description || item?.name || "N/A"}</td>
                         <td>{getBrand(item) || "N/A"}</td>
                         <td>{getVendors(item)}</td>
-                        <td>{getPisWeight(item, "net")}</td>
-                        <td>{getPisWeight(item, "gross")}</td>
-                        <td>{formatLbh(getPrimaryMeasurementLbh(item?.pis_item_sizes, item?.pis_item_LBH || {}))}</td>
-                        <td>{formatLbh(getPrimaryMeasurementLbh(item?.pis_box_sizes, item?.pis_box_LBH || {}))}</td>
+                        <td>{formatFixedNumber(getPisWeight(item, "net"))}</td>
+                        <td>{formatFixedNumber(getPisWeight(item, "gross"))}</td>
+                        <td>{formatLbhValue(getPrimaryMeasurementLbh(item?.pis_item_sizes, item?.pis_item_LBH || {}), { fallback: "0.00 x 0.00 x 0.00" })}</td>
+                        <td>{formatLbhValue(getPrimaryMeasurementLbh(item?.pis_box_sizes, item?.pis_box_LBH || {}), { fallback: "0.00 x 0.00 x 0.00" })}</td>
                         <td>{formatCbm(item?.cbm?.calculated_pis_total)}</td>
                         {canEditPis && (
                           <td>

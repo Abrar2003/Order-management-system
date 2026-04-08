@@ -5,7 +5,7 @@ import {
   exportDelayedPoReport,
   getDelayedPoReport,
 } from "../services/orders.service";
-import { formatDateDDMMYYYY } from "../utils/date";
+import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
@@ -28,6 +28,8 @@ const defaultReport = {
     vendor: "",
     brand_options: [],
     vendor_options: [],
+    from_date: "",
+    to_date: "",
     report_date: "",
   },
   summary: {
@@ -53,6 +55,20 @@ const DelayedPoReports = () => {
   const [vendorFilter, setVendorFilter] = useState(() =>
     normalizeEntityFilter(searchParams.get("vendor")),
   );
+  const [fromDateFilter, setFromDateFilter] = useState(() =>
+    String(
+      searchParams.get("from_date")
+      || searchParams.get("fromDate")
+      || "",
+    ).trim(),
+  );
+  const [toDateFilter, setToDateFilter] = useState(() =>
+    String(
+      searchParams.get("to_date")
+      || searchParams.get("toDate")
+      || "",
+    ).trim(),
+  );
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
@@ -63,6 +79,14 @@ const DelayedPoReports = () => {
     try {
       setLoading(true);
       setError("");
+      const normalizedFromDate = String(fromDateFilter || "").trim();
+      const normalizedToDate = String(toDateFilter || "").trim();
+
+      if (normalizedFromDate && normalizedToDate && normalizedFromDate > normalizedToDate) {
+        setReport(defaultReport);
+        setError("From date must be before or equal to To date.");
+        return;
+      }
 
       const params = {};
       if (brandFilter !== DEFAULT_ENTITY_FILTER) {
@@ -70,6 +94,12 @@ const DelayedPoReports = () => {
       }
       if (vendorFilter !== DEFAULT_ENTITY_FILTER) {
         params.vendor = vendorFilter;
+      }
+      if (normalizedFromDate) {
+        params.from_date = normalizedFromDate;
+      }
+      if (normalizedToDate) {
+        params.to_date = normalizedToDate;
       }
 
       const response = await getDelayedPoReport(params);
@@ -87,7 +117,7 @@ const DelayedPoReports = () => {
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, vendorFilter]);
+  }, [brandFilter, fromDateFilter, toDateFilter, vendorFilter]);
 
   useEffect(() => {
     fetchReport();
@@ -99,9 +129,21 @@ const DelayedPoReports = () => {
 
     const nextBrandFilter = normalizeEntityFilter(searchParams.get("brand"));
     const nextVendorFilter = normalizeEntityFilter(searchParams.get("vendor"));
+    const nextFromDate = String(
+      searchParams.get("from_date")
+      || searchParams.get("fromDate")
+      || "",
+    ).trim();
+    const nextToDate = String(
+      searchParams.get("to_date")
+      || searchParams.get("toDate")
+      || "",
+    ).trim();
 
     setBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
     setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
+    setFromDateFilter((prev) => (prev === nextFromDate ? prev : nextFromDate));
+    setToDateFilter((prev) => (prev === nextToDate ? prev : nextToDate));
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
   }, [searchParams, syncedQuery]);
 
@@ -116,11 +158,25 @@ const DelayedPoReports = () => {
     if (vendorFilter !== DEFAULT_ENTITY_FILTER) {
       next.set("vendor", vendorFilter);
     }
+    if (fromDateFilter) {
+      next.set("from_date", fromDateFilter);
+    }
+    if (toDateFilter) {
+      next.set("to_date", toDateFilter);
+    }
 
     if (!areSearchParamsEquivalent(next, searchParams)) {
       setSearchParams(next, { replace: true });
     }
-  }, [brandFilter, searchParams, setSearchParams, syncedQuery, vendorFilter]);
+  }, [
+    brandFilter,
+    fromDateFilter,
+    searchParams,
+    setSearchParams,
+    syncedQuery,
+    toDateFilter,
+    vendorFilter,
+  ]);
 
   const filters = useMemo(
     () => report?.filters || defaultReport.filters,
@@ -140,6 +196,13 @@ const DelayedPoReports = () => {
   const handleExport = useCallback(async () => {
     try {
       setExporting(true);
+      const normalizedFromDate = String(fromDateFilter || "").trim();
+      const normalizedToDate = String(toDateFilter || "").trim();
+
+      if (normalizedFromDate && normalizedToDate && normalizedFromDate > normalizedToDate) {
+        alert("From date must be before or equal to To date.");
+        return;
+      }
 
       const params = {};
       if (brandFilter !== DEFAULT_ENTITY_FILTER) {
@@ -147,6 +210,12 @@ const DelayedPoReports = () => {
       }
       if (vendorFilter !== DEFAULT_ENTITY_FILTER) {
         params.vendor = vendorFilter;
+      }
+      if (normalizedFromDate) {
+        params.from_date = normalizedFromDate;
+      }
+      if (normalizedToDate) {
+        params.to_date = normalizedToDate;
       }
 
       const response = await exportDelayedPoReport(params);
@@ -179,7 +248,28 @@ const DelayedPoReports = () => {
     } finally {
       setExporting(false);
     }
-  }, [brandFilter, vendorFilter]);
+  }, [brandFilter, fromDateFilter, toDateFilter, vendorFilter]);
+
+  const displayedFromDate = useMemo(
+    () => toISODateString(filters.from_date) || "",
+    [filters.from_date],
+  );
+  const displayedToDate = useMemo(
+    () => toISODateString(filters.to_date) || "",
+    [filters.to_date],
+  );
+  const etdWindowLabel = useMemo(() => {
+    if (displayedFromDate && displayedToDate) {
+      return `${formatDateDDMMYYYY(displayedFromDate)} - ${formatDateDDMMYYYY(displayedToDate)}`;
+    }
+    if (displayedFromDate) {
+      return `From ${formatDateDDMMYYYY(displayedFromDate)}`;
+    }
+    if (displayedToDate) {
+      return `Until ${formatDateDDMMYYYY(displayedToDate)}`;
+    }
+    return "All ETD Dates";
+  }, [displayedFromDate, displayedToDate]);
 
   return (
     <>
@@ -207,6 +297,32 @@ const DelayedPoReports = () => {
 
         <div className="card om-card mb-3">
           <div className="card-body d-flex flex-wrap gap-2 align-items-end">
+            <div>
+              <label className="form-label mb-1">From Date</label>
+              <input
+                type="date"
+                className="form-control"
+                value={fromDateFilter}
+                max={toDateFilter || undefined}
+                onChange={(event) =>
+                  setFromDateFilter(String(event.target.value || "").trim())
+                }
+              />
+            </div>
+
+            <div>
+              <label className="form-label mb-1">To Date</label>
+              <input
+                type="date"
+                className="form-control"
+                value={toDateFilter}
+                min={fromDateFilter || undefined}
+                onChange={(event) =>
+                  setToDateFilter(String(event.target.value || "").trim())
+                }
+              />
+            </div>
+
             <div>
               <label className="form-label mb-1">Brand</label>
               <select
@@ -256,6 +372,9 @@ const DelayedPoReports = () => {
 
         <div className="card om-card mb-3">
           <div className="card-body d-flex flex-wrap gap-2">
+            <span className="om-summary-chip">
+              ETD Window: {etdWindowLabel}
+            </span>
             <span className="om-summary-chip">
               Report Date: {formatDateDDMMYYYY(filters.report_date)}
             </span>

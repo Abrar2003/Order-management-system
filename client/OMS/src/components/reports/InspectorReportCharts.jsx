@@ -12,6 +12,7 @@ import {
 } from "recharts";
 import { formatDateDDMMYYYY, toISODateString } from "../../utils/date";
 import { formatCbm } from "../../utils/cbm";
+import { roundToFixedNumber } from "../../utils/measurementDisplay";
 
 const DEFAULT_CHART_STEP = "weekly";
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
@@ -145,7 +146,7 @@ const buildWeeklyChartData = ({ dailyRows = [], fromDate = "", toDate = "" } = {
       key: `${bucketStartIso}-${effectiveEndIso}`,
       label: formatShortDateLabel(bucketStartIso) || `W${weekIndex + 1}`,
       tooltipLabel: `${formatDateDDMMYYYY(bucketStartIso)} - ${formatDateDDMMYYYY(effectiveEndIso)}`,
-      cbm: Number(totalCbm.toFixed(3)),
+      cbm: roundToFixedNumber(totalCbm),
     });
     weekIndex += 1;
   }
@@ -195,7 +196,7 @@ const buildMonthlyChartData = ({ dailyRows = [], fromDate = "", toDate = "" } = 
       key: `${monthStartIso}-${monthEndIso}`,
       label: monthYearFormatter.format(monthCursor),
       tooltipLabel: `${formatDateDDMMYYYY(monthStartIso)} - ${formatDateDDMMYYYY(monthEndIso)}`,
-      cbm: Number(totalCbm.toFixed(3)),
+      cbm: roundToFixedNumber(totalCbm),
     });
   }
 
