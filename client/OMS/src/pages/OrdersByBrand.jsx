@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
 import OrderEtdWithHistory from "../components/OrderEtdWithHistory";
+import SortHeaderButton from "../components/SortHeaderButton";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -49,11 +50,6 @@ const OrdersByBrand = () => {
     }
     setSortBy(column);
     setSortOrder(defaultDirection);
-  };
-
-  const sortIndicator = (column) => {
-    if (sortBy !== column) return "";
-    return sortOrder === "asc" ? " (asc)" : " (desc)";
   };
 
   useEffect(() => {
@@ -157,33 +153,30 @@ const OrdersByBrand = () => {
                   <thead className="table-primary">
                     <tr>
                       <th>
-                        <button
-                          type="button"
-                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                        <SortHeaderButton
+                          label="Order ID"
+                          isActive={sortBy === "order_id"}
+                          direction={sortOrder}
                           onClick={() => handleSortColumn("order_id", "asc")}
-                        >
-                          Order ID{sortIndicator("order_id")}
-                        </button>
+                        />
                       </th>
                       <th>Items</th>
                       <th>Status</th>
                       <th>
-                        <button
-                          type="button"
-                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                        <SortHeaderButton
+                          label="Order Date"
+                          isActive={sortBy === "order_date"}
+                          direction={sortOrder}
                           onClick={() => handleSortColumn("order_date", "desc")}
-                        >
-                          Order Date{sortIndicator("order_date")}
-                        </button>
+                        />
                       </th>
                       <th>
-                        <button
-                          type="button"
-                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                        <SortHeaderButton
+                          label="ETD"
+                          isActive={sortBy === "ETD"}
+                          direction={sortOrder}
                           onClick={() => handleSortColumn("ETD", "desc")}
-                        >
-                          ETD{sortIndicator("ETD")}
-                        </button>
+                        />
                       </th>
                       <th>Revised ETD</th>
                     </tr>

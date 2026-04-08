@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
 import OrderEtdWithHistory from "../components/OrderEtdWithHistory";
+import SortHeaderButton from "../components/SortHeaderButton";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
@@ -168,11 +169,6 @@ const Home = () => {
     }
     setTodayEtdSortBy(column);
     setTodayEtdSortOrder(defaultDirection);
-  };
-
-  const todayEtdSortIndicator = (column) => {
-    if (todayEtdSortBy !== column) return "";
-    return todayEtdSortOrder === "asc" ? " (asc)" : " (desc)";
   };
 
   useEffect(() => {
@@ -541,22 +537,20 @@ const Home = () => {
                       <th>Brand</th>
                       <th>Vendor</th>
                       <th>
-                        <button
-                          type="button"
-                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                        <SortHeaderButton
+                          label="Order Number"
+                          isActive={todayEtdSortBy === "order_id"}
+                          direction={todayEtdSortOrder}
                           onClick={() => handleTodayEtdSort("order_id", "asc")}
-                        >
-                          Order Number{todayEtdSortIndicator("order_id")}
-                        </button>
+                        />
                       </th>
                       <th>
-                        <button
-                          type="button"
-                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                        <SortHeaderButton
+                          label="ETD"
+                          isActive={todayEtdSortBy === "ETD"}
+                          direction={todayEtdSortOrder}
                           onClick={() => handleTodayEtdSort("ETD", "desc")}
-                        >
-                          ETD{todayEtdSortIndicator("ETD")}
-                        </button>
+                        />
                       </th>
                       <th>Item Count</th>
                       <th>Status</th>

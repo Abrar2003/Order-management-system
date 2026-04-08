@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import SortHeaderButton from "../components/SortHeaderButton";
 import {
   formatDateDDMMYYYY,
   getTodayDDMMYYYY,
@@ -142,11 +143,6 @@ const DailyReport = () => {
     setAlignedSortOrder(defaultDirection);
   };
 
-  const alignedSortIndicator = (column) => {
-    if (alignedSortBy !== column) return "";
-    return alignedSortOrder === "asc" ? " (asc)" : " (desc)";
-  };
-
   const handleInspectionSort = (column, defaultDirection = "asc") => {
     if (inspectionSortBy === column) {
       setInspectionSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
@@ -154,11 +150,6 @@ const DailyReport = () => {
     }
     setInspectionSortBy(column);
     setInspectionSortOrder(defaultDirection);
-  };
-
-  const inspectionSortIndicator = (column) => {
-    if (inspectionSortBy !== column) return "";
-    return inspectionSortOrder === "asc" ? " (asc)" : " (desc)";
   };
 
   const fetchDailyReport = useCallback(async () => {
@@ -379,42 +370,38 @@ const DailyReport = () => {
                 <thead>
                   <tr>
                     <th>
-                      <button
-                        type="button"
-                        className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                      <SortHeaderButton
+                        label="Request Date"
+                        isActive={alignedSortBy === "request_date"}
+                        direction={alignedSortOrder}
                         onClick={() => handleAlignedSort("request_date", "desc")}
-                      >
-                        Request Date{alignedSortIndicator("request_date")}
-                      </button>
+                      />
                     </th>
                     <th>
-                      <button
-                        type="button"
-                        className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                      <SortHeaderButton
+                        label="Order ID"
+                        isActive={alignedSortBy === "order_id"}
+                        direction={alignedSortOrder}
                         onClick={() => handleAlignedSort("order_id", "asc")}
-                      >
-                        Order ID{alignedSortIndicator("order_id")}
-                      </button>
+                      />
                     </th>
                     <th>Item</th>
                     <th>
-                      <button
-                        type="button"
-                        className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                      <SortHeaderButton
+                        label="Vendor"
+                        isActive={alignedSortBy === "vendor"}
+                        direction={alignedSortOrder}
                         onClick={() => handleAlignedSort("vendor", "asc")}
-                      >
-                        Vendor{alignedSortIndicator("vendor")}
-                      </button>
+                      />
                     </th>
                     <th>Brand</th>
                     <th>
-                      <button
-                        type="button"
-                        className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                      <SortHeaderButton
+                        label="QC"
+                        isActive={alignedSortBy === "inspector_name"}
+                        direction={alignedSortOrder}
                         onClick={() => handleAlignedSort("inspector_name", "asc")}
-                      >
-                        QC{alignedSortIndicator("inspector_name")}
-                      </button>
+                      />
                     </th>
                     <th>Requested</th>
                     <th>Passed</th>
@@ -498,22 +485,20 @@ const DailyReport = () => {
                       <thead>
                         <tr>
                           <th>
-                            <button
-                              type="button"
-                              className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                            <SortHeaderButton
+                              label="Date"
+                              isActive={inspectionSortBy === "inspection_date"}
+                              direction={inspectionSortOrder}
                               onClick={() => handleInspectionSort("inspection_date", "desc")}
-                            >
-                              Date{inspectionSortIndicator("inspection_date")}
-                            </button>
+                            />
                           </th>
                           <th>
-                            <button
-                              type="button"
-                              className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                            <SortHeaderButton
+                              label="Order ID"
+                              isActive={inspectionSortBy === "order_id"}
+                              direction={inspectionSortOrder}
                               onClick={() => handleInspectionSort("order_id", "asc")}
-                            >
-                              Order ID{inspectionSortIndicator("order_id")}
-                            </button>
+                            />
                           </th>
                           <th>Item</th>
                           <th>Vendor</th>

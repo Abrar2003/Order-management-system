@@ -11,6 +11,7 @@ import BulkRevisedEtdModal from "../components/BulkRevisedEtdModal";
 import OrderEtdWithHistory from "../components/OrderEtdWithHistory";
 import OrderQuantityWithHistory from "../components/OrderQuantityWithHistory";
 import ItemOrderPresenceTooltip from "../components/ItemOrderPresenceTooltip";
+import SortHeaderButton from "../components/SortHeaderButton";
 import { archiveOrder } from "../services/orders.service";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatDateDDMMYYYY } from "../utils/date";
@@ -134,7 +135,6 @@ const Orders = () => {
   }, [itemCodeSortOrder, orders]);
 
   const primaryOrder = orders[0];
-  const itemSortIndicator = itemCodeSortOrder === "asc" ? " (asc)" : " (desc)";
   const navigateToQcForItem = (orderId, itemCode) => {
     const trimmedOrderId = String(orderId || "").trim();
     const trimmedItemCode = String(itemCode || "").trim();
@@ -272,17 +272,16 @@ const Orders = () => {
                   <thead className="table-primary">
                     <tr>
                       <th>
-                        <button
-                          type="button"
-                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                        <SortHeaderButton
+                          label="Item"
+                          isActive
+                          direction={itemCodeSortOrder}
                           onClick={() =>
                             setItemCodeSortOrder((prev) =>
                               prev === "asc" ? "desc" : "asc",
                             )
                           }
-                        >
-                          Item{itemSortIndicator}
-                        </button>
+                        />
                       </th>
                       <th>Description</th>
                       <th>Quantity</th>

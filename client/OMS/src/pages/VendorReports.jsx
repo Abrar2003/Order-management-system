@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import OrderEtdWithHistory from "../components/OrderEtdWithHistory";
+import SortHeaderButton from "../components/SortHeaderButton";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -112,6 +113,23 @@ const getVendorOrderRowClassName = (orderRow = {}) => {
   }
 
   return "";
+};
+
+const formatVendorOrderDifferenceInDays = (differenceInDays) => {
+  if (!Number.isFinite(differenceInDays)) return "N/A";
+
+  const absoluteDays = Math.abs(differenceInDays);
+  const dayLabel = absoluteDays === 1 ? "day" : "days";
+
+  if (differenceInDays < 0) {
+    return `${absoluteDays} ${dayLabel} Early`;
+  }
+
+  if (differenceInDays > 0) {
+    return `${absoluteDays} ${dayLabel} Delayed`;
+  }
+
+  return `0 days`;
 };
 
 const defaultReport = {
@@ -501,31 +519,28 @@ const VendorReports = () => {
                             <th>Brand</th>
                             <th>Status</th>
                             <th>
-                              <button
-                                type="button"
-                                className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                              <SortHeaderButton
+                                label="Order Date"
+                                isActive={activeSortField === "order_date"}
+                                direction={activeSortOrder}
                                 onClick={() => handleVendorTableSortToggle(vendorKey, "order_date")}
-                              >
-                                Order Date{activeSortField === "order_date" ? (activeSortOrder === "asc" ? " (asc)" : " (desc)") : ""}
-                              </button>
+                              />
                             </th>
                             <th>
-                              <button
-                                type="button"
-                                className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                              <SortHeaderButton
+                                label="ETD"
+                                isActive={activeSortField === "etd"}
+                                direction={activeSortOrder}
                                 onClick={() => handleVendorTableSortToggle(vendorKey, "etd")}
-                              >
-                                ETD{activeSortField === "etd" ? (activeSortOrder === "asc" ? " (asc)" : " (desc)") : ""}
-                              </button>
+                              />
                             </th>
                             <th>
-                              <button
-                                type="button"
-                                className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                              <SortHeaderButton
+                                label="Latest Shipment"
+                                isActive={activeSortField === "latest_shipment_date"}
+                                direction={activeSortOrder}
                                 onClick={() => handleVendorTableSortToggle(vendorKey, "latest_shipment_date")}
-                              >
-                                Latest Shipment{activeSortField === "latest_shipment_date" ? (activeSortOrder === "asc" ? " (asc)" : " (desc)") : ""}
-                              </button>
+                              />
                             </th>
                             <th>Difference in Days</th>
                             <th>Item Count</th>
@@ -576,9 +591,7 @@ const VendorReports = () => {
                                 </td>
                                 <td>{formatDateDDMMYYYY(orderRow.latest_shipment_date)}</td>
                                 <td>
-                                  {Number.isFinite(differenceInDays)
-                                    ? differenceInDays
-                                    : "N/A"}
+                                  {formatVendorOrderDifferenceInDays(differenceInDays)}
                                 </td>
                                 <td>{orderRow.item_count ?? 0}</td>
                                 <td>{orderRow.quantity_total ?? 0}</td>

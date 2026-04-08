@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
+import SortHeaderButton from "../components/SortHeaderButton";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import TransferQcRequestModal from "../components/TransferQcRequestModal";
 import { getUserFromToken } from "../auth/auth.utils";
@@ -410,11 +411,6 @@ const QCPage = () => {
     setSortOrder(defaultDirection);
   };
 
-  const sortIndicator = (column) => {
-    if (sortBy !== column) return "";
-    return sortOrder === "asc" ? " (asc)" : " (desc)";
-  };
-
   const handleExport = useCallback(async (format = "xlsx") => {
     try {
       setExporting(true);
@@ -529,24 +525,22 @@ const QCPage = () => {
                   {/* Column titles */}
                   <tr>
                     <th>
-                      <button
-                        type="button"
-                        className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                      <SortHeaderButton
+                        label="PO"
+                        isActive={sortBy === "order_id"}
+                        direction={sortOrder}
                         onClick={() => handleSortColumn("order_id", "asc")}
-                      >
-                        PO{sortIndicator("order_id")}
-                      </button>
+                      />
                     </th>
                     <th>Vendor</th>
                     <th>Item</th>
                     <th>
-                      <button
-                        type="button"
-                        className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                      <SortHeaderButton
+                        label="Request Date"
+                        isActive={sortBy === "request_date"}
+                        direction={sortOrder}
                         onClick={() => handleSortColumn("request_date", "desc")}
-                      >
-                        Request Date{sortIndicator("request_date")}
-                      </button>
+                      />
                     </th>
                     <th>Last Inspected Date</th>
                     <th>Order Quantity</th>

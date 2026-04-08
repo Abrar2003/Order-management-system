@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import SortHeaderButton from "../components/SortHeaderButton";
 import "../App.css";
 import ShippingModal from "../components/ShippingModal";
 import EditOrderModal from "../components/EditOrderModal";
@@ -324,14 +325,6 @@ const Shipments = () => {
     [sortBy],
   );
 
-  const sortIndicator = useCallback(
-    (column) => {
-      if (sortBy !== column) return "";
-      return sortOrder === "asc" ? " (asc)" : " (desc)";
-    },
-    [sortBy, sortOrder],
-  );
-
   const canShowFinalizeAction = useCallback(
     (row) =>
       canFinalizeShipping &&
@@ -651,31 +644,28 @@ const Shipments = () => {
                   <thead className="table-primary">
                     <tr>
                       <th className="shipments-col-po">
-                        <button
-                          type="button"
-                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                        <SortHeaderButton
+                          label="PO"
+                          isActive={sortBy === "order_id"}
+                          direction={sortOrder}
                           onClick={() => handleSortColumn("order_id", "asc")}
-                        >
-                          PO{sortIndicator("order_id")}
-                        </button>
+                        />
                       </th>
                       <th className="shipments-col-item">
-                        <button
-                          type="button"
-                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                        <SortHeaderButton
+                          label="Item Code"
+                          isActive={sortBy === "item_code"}
+                          direction={sortOrder}
                           onClick={() => handleSortColumn("item_code", "asc")}
-                        >
-                          Item Code{sortIndicator("item_code")}
-                        </button>
+                        />
                       </th>
                       <th className="shipments-col-vendor">
-                        <button
-                          type="button"
-                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                        <SortHeaderButton
+                          label="Vendor"
+                          isActive={sortBy === "vendor"}
+                          direction={sortOrder}
                           onClick={() => handleSortColumn("vendor", "asc")}
-                        >
-                          Vendor{sortIndicator("vendor")}
-                        </button>
+                        />
                       </th>
                       <th className="shipments-col-description">
                         <button
@@ -686,64 +676,58 @@ const Shipments = () => {
                         </button>
                       </th>
                       <th className="shipments-col-order-qty">
-                        <button
-                          type="button"
-                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                        <SortHeaderButton
+                          label="Order Quantity"
+                          isActive={sortBy === "order_quantity"}
+                          direction={sortOrder}
                           onClick={() =>
                             handleSortColumn("order_quantity", "desc")
                           }
-                        >
-                          Order Quantity{sortIndicator("order_quantity")}
-                        </button>
+                        />
                       </th>
                       <th className="shipments-col-date">
-                        <button
-                          type="button"
-                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                        <SortHeaderButton
+                          label="Stuffing Date"
+                          isActive={sortBy === "stuffing_date"}
+                          direction={sortOrder}
                           onClick={() =>
                             handleSortColumn("stuffing_date", "desc")
                           }
-                        >
-                          Stuffing Date{sortIndicator("stuffing_date")}
-                        </button>
+                        />
                       </th>
                       <th className="shipments-col-container">
-                        <button
-                          type="button"
-                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                        <SortHeaderButton
+                          label="Container Number"
+                          isActive={sortBy === "container"}
+                          direction={sortOrder}
                           onClick={() => handleSortColumn("container", "asc")}
-                        >
-                          Container Number{sortIndicator("container")}
-                        </button>
+                        />
                       </th>
                       <th className="shipments-col-invoice">
-                        <button
-                          type="button"
-                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                        <SortHeaderButton
+                          label="Invoice Number"
+                          isActive={sortBy === "invoice_number"}
+                          direction={sortOrder}
                           onClick={() =>
                             handleSortColumn("invoice_number", "asc")
                           }
-                        >
-                          Invoice Number{sortIndicator("invoice_number")}
-                        </button>
+                        />
                       </th>
                       <th className="shipments-col-qty">
-                        <button
-                          type="button"
-                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                        <SortHeaderButton
+                          label="Quantity"
+                          isActive={sortBy === "quantity"}
+                          direction={sortOrder}
                           onClick={() => handleSortColumn("quantity", "desc")}
-                        >
-                          Quantity{sortIndicator("quantity")}
-                        </button>
+                        />
                       </th>
                       <th className="shipments-col-pending">
-                        <button
-                          type="button"
-                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                        <SortHeaderButton
+                          label="Pending"
+                          isActive={sortBy === "pending"}
+                          direction={sortOrder}
                           onClick={() => handleSortColumn("pending", "desc")}
-                        >
-                          Pending{sortIndicator("pending")}
-                        </button>
+                        />
                       </th>
                       <th className="shipments-col-remarks">
                         <button

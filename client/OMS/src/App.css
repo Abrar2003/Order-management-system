@@ -2090,3 +2090,43 @@ small,
   color: rgba(255, 253, 250, 0.72);
   font-size: 11px;
 }
+
+.om-sort-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  line-height: 1.1;
+}
+
+.om-sort-header:hover,
+.om-sort-header:focus-visible {
+  color: var(--bs-primary) !important;
+}
+
+.om-sort-header-active {
+  color: var(--bs-primary) !important;
+}
+
+.om-sort-header-arrows {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  line-height: 0.7;
+}
+
+.om-sort-header-arrow {
+  font-size: 0.55rem;
+  color: #adb5bd;
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+
+.om-sort-header-active .om-sort-header-arrow {
+  color: #c0c6cc;
+}
+
+.om-sort-header-arrow.active {
+  color: var(--bs-primary);
+  transform: scale(1.06);
+}
