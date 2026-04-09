@@ -6758,6 +6758,8 @@ exports.getDailyReport = async (req, res) => {
     if (!reportDate) {
       return res.status(400).json({ message: "Invalid date format" });
     }
+    const selectedBrand = normalizeOptionalReportFilter(req.query.brand);
+    const selectedVendor = normalizeOptionalReportFilter(req.query.vendor);
     const normalizeSortKey = (value = "") =>
       String(value)
         .trim()
@@ -7242,40 +7244,7 @@ exports.getDailyReport = async (req, res) => {
         })
         .filter(Boolean);
     });
-    const sortedAlignedRequests = [...aligned_requests].sort(
-      compareAlignedRows,
-    );
-
-    const inspectorMap = new Map();
-    let totalInspectedCbm = 0;
-    for (const inspection of inspections) {
-      const inspectorId = String(
-        inspection?.inspector?._id || inspection?.inspector || "unassigned",
-      );
-
-      if (!inspectorMap.has(inspectorId)) {
-        inspectorMap.set(inspectorId, {
-          inspector: inspection?.inspector
-            ? {
-                _id: inspection.inspector._id,
-                name: inspection.inspector.name,
-                email: inspection.inspector.email,
-                role: inspection.inspector.role,
-              }
-            : {
-                _id: null,
-                name: "Unassigned",
-                email: "",
-                role: "",
-              },
-          total_inspected_quantity: 0,
-          total_inspected_cbm: 0,
-          inspections_count: 0,
-          inspections: [],
-        });
-      }
-
-      const entry = inspectorMap.get(inspectorId);
+    const inspection_rows = inspections.map((inspection) => {
       const inspectedQty = Number(inspection?.checked || 0);
       const qcRecord = inspection?.qc || {};
       const itemCodeKey = normalizeItemCodeKey(qcRecord?.item?.item_code || "");
@@ -7292,19 +7261,14 @@ exports.getDailyReport = async (req, res) => {
           ? inspection.cbm
           : qcRecord?.cbm || {},
       );
-
-      entry.total_inspected_quantity += inspectedQty;
-      entry.total_inspected_cbm += inspectedCbmTotal;
-      totalInspectedCbm += inspectedCbmTotal;
-
-      entry.inspections_count += 1;
       const inspectionStatus = resolveInspectionRecordStatus({
         checked: inspection?.checked,
         goodsNotReady: inspection?.goods_not_ready,
         explicitStatus: inspection?.status,
       });
       const isTransferred = isTransferredStatusValue(inspectionStatus);
-      entry.inspections.push({
+
+      return {
         inspection_id: inspection._id,
         inspection_date: isTransferredInspectionOnReportDate(inspection)
           ? reportDate
@@ -7339,9 +7303,82 @@ exports.getDailyReport = async (req, res) => {
         report_cbm_total: hasReportCbm
           ? toRoundedNumber(inspectedCbmTotal, 3)
           : null,
+        inspected_cbm_total: inspectedCbmTotal,
         cbm: cbmSnapshot,
         remarks: inspection?.remarks || "",
-      });
+        inspector: inspection?.inspector
+          ? {
+              _id: inspection.inspector._id,
+              name: inspection.inspector.name,
+              email: inspection.inspector.email,
+              role: inspection.inspector.role,
+            }
+          : {
+              _id: null,
+              name: "Unassigned",
+              email: "",
+              role: "",
+            },
+      };
+    });
+
+    const allFilterableRows = [...aligned_requests, ...inspection_rows];
+    const brandOptionsBase = selectedVendor
+      ? allFilterableRows.filter((row) => String(row?.vendor || "") === selectedVendor)
+      : allFilterableRows;
+    const vendorOptionsBase = selectedBrand
+      ? allFilterableRows.filter((row) => String(row?.brand || "") === selectedBrand)
+      : allFilterableRows;
+    const brand_options = normalizeDistinctValues(
+      brandOptionsBase.map((row) => row?.brand || ""),
+    );
+    const vendor_options = normalizeDistinctValues(
+      vendorOptionsBase.map((row) => row?.vendor || ""),
+    );
+    const matchesDailyReportFilters = (row = {}) => {
+      if (selectedBrand && String(row?.brand || "") !== selectedBrand) return false;
+      if (selectedVendor && String(row?.vendor || "") !== selectedVendor) return false;
+      return true;
+    };
+
+    const sortedAlignedRequests = [...aligned_requests]
+      .filter(matchesDailyReportFilters)
+      .sort(compareAlignedRows);
+
+    const filteredInspectionRows = inspection_rows.filter(matchesDailyReportFilters);
+
+    const inspectorMap = new Map();
+    let totalInspectedCbm = 0;
+    for (const inspectionRow of filteredInspectionRows) {
+      const inspectorId = String(
+        inspectionRow?.inspector?._id || "unassigned",
+      );
+
+      if (!inspectorMap.has(inspectorId)) {
+        inspectorMap.set(inspectorId, {
+          inspector: inspectionRow?.inspector || {
+            _id: null,
+            name: "Unassigned",
+            email: "",
+            role: "",
+          },
+          total_inspected_quantity: 0,
+          total_inspected_cbm: 0,
+          inspections_count: 0,
+          inspections: [],
+        });
+      }
+
+      const entry = inspectorMap.get(inspectorId);
+      entry.total_inspected_quantity += Number(
+        inspectionRow?.inspected_quantity || 0,
+      );
+      entry.total_inspected_cbm += Number(
+        inspectionRow?.inspected_cbm_total || 0,
+      );
+      totalInspectedCbm += Number(inspectionRow?.inspected_cbm_total || 0);
+      entry.inspections_count += 1;
+      entry.inspections.push(inspectionRow);
     }
 
     for (const inspectorEntry of inspectorMap.values()) {
@@ -7363,10 +7400,16 @@ exports.getDailyReport = async (req, res) => {
 
     res.json({
       date: reportDate,
+      filters: {
+        brand: selectedBrand,
+        vendor: selectedVendor,
+        brand_options,
+        vendor_options,
+      },
       summary: {
         aligned_requests_count: sortedAlignedRequests.length,
         inspectors_count: inspector_compiled.length,
-        inspections_count: inspections.length,
+        inspections_count: filteredInspectionRows.length,
         total_inspected_quantity: totalInspectedQty,
         total_inspected_cbm: toRoundedNumber(totalInspectedCbm, 3),
       },

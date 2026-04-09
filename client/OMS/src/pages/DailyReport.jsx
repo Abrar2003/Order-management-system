@@ -114,8 +114,12 @@ const DailyReport = () => {
     searchParams.get("inspection_sort_order"),
     initialInspectionSortBy,
   );
+  const initialBrandFilter = normalizeQueryText(searchParams.get("brand"));
+  const initialVendorFilter = normalizeQueryText(searchParams.get("vendor"));
 
   const [selectedDate, setSelectedDate] = useState(initialSelectedDate);
+  const [brandFilter, setBrandFilter] = useState(initialBrandFilter);
+  const [vendorFilter, setVendorFilter] = useState(initialVendorFilter);
   const [loading, setLoading] = useState(true);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [error, setError] = useState("");
@@ -133,6 +137,12 @@ const DailyReport = () => {
       inspections_count: 0,
       total_inspected_quantity: 0,
       total_inspected_cbm: 0,
+    },
+    filters: {
+      brand: "",
+      vendor: "",
+      brand_options: [],
+      vendor_options: [],
     },
     aligned_requests: [],
     inspector_compiled: [],
@@ -174,6 +184,8 @@ const DailyReport = () => {
       const res = await api.get("/qc/daily-report", {
         params: {
           date: reportDateIso,
+          brand: brandFilter,
+          vendor: vendorFilter,
           aligned_sort_by: alignedSortBy,
           aligned_sort_order: alignedSortOrder,
           inspection_sort_by: inspectionSortBy,
@@ -189,6 +201,12 @@ const DailyReport = () => {
           inspections_count: 0,
           total_inspected_quantity: 0,
           total_inspected_cbm: 0,
+        },
+        filters: res?.data?.filters || {
+          brand: brandFilter,
+          vendor: vendorFilter,
+          brand_options: [],
+          vendor_options: [],
         },
         aligned_requests: Array.isArray(res?.data?.aligned_requests)
           ? res.data.aligned_requests
@@ -210,6 +228,8 @@ const DailyReport = () => {
     }
   }, [
     selectedDate,
+    brandFilter,
+    vendorFilter,
     alignedSortBy,
     alignedSortOrder,
     inspectionSortBy,
@@ -242,8 +262,12 @@ const DailyReport = () => {
       searchParams.get("inspection_sort_order"),
       nextInspectionSortBy,
     );
+    const nextBrandFilter = normalizeQueryText(searchParams.get("brand"));
+    const nextVendorFilter = normalizeQueryText(searchParams.get("vendor"));
 
     setSelectedDate((prev) => (prev === nextSelectedDate ? prev : nextSelectedDate));
+    setBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
+    setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
     setAlignedSortBy((prev) => (prev === nextAlignedSortBy ? prev : nextAlignedSortBy));
     setAlignedSortOrder((prev) => (prev === nextAlignedSortOrder ? prev : nextAlignedSortOrder));
     setInspectionSortBy((prev) => (prev === nextInspectionSortBy ? prev : nextInspectionSortBy));
@@ -261,6 +285,8 @@ const DailyReport = () => {
     const dateValue = normalizeQueryText(selectedDate);
 
     if (dateValue) next.set("date", dateValue);
+    if (normalizeQueryText(brandFilter)) next.set("brand", normalizeQueryText(brandFilter));
+    if (normalizeQueryText(vendorFilter)) next.set("vendor", normalizeQueryText(vendorFilter));
     if (alignedSortBy !== DEFAULT_ALIGNED_SORT_BY) {
       next.set("aligned_sort_by", alignedSortBy);
     }
@@ -280,12 +306,14 @@ const DailyReport = () => {
   }, [
     alignedSortBy,
     alignedSortOrder,
+    brandFilter,
     inspectionSortBy,
     inspectionSortOrder,
     searchParams,
     selectedDate,
     setSearchParams,
     syncedQuery,
+    vendorFilter,
   ]);
 
   const summary = useMemo(
@@ -298,6 +326,16 @@ const DailyReport = () => {
         total_inspected_cbm: 0,
       },
     [report?.summary],
+  );
+  const reportFilters = useMemo(
+    () =>
+      report?.filters || {
+        brand: "",
+        vendor: "",
+        brand_options: [],
+        vendor_options: [],
+      },
+    [report?.filters],
   );
 
   const handleExportPdf = useCallback(async () => {
@@ -422,17 +460,51 @@ const DailyReport = () => {
         <div ref={reportRef}>
           <div className="card om-card mb-3">
             <div className="card-body d-flex flex-wrap gap-2 align-items-end">
-              <div>
-                <label className="form-label mb-1">Report Date</label>
-                <input
-                  type="date"
-                  lang="en-GB"
+            <div>
+              <label className="form-label mb-1">Report Date</label>
+              <input
+                type="date"
+                lang="en-GB"
                   className="form-control"
                   value={toISODateString(selectedDate)}
                   onChange={(e) =>
                     setSelectedDate(toDDMMYYYYInputValue(e.target.value, ""))
                   }
                 />
+              </div>
+              <div>
+                <label className="form-label mb-1">Brand</label>
+                <select
+                  className="form-select"
+                  value={brandFilter}
+                  onChange={(e) => setBrandFilter(e.target.value)}
+                >
+                  <option value="">All Brands</option>
+                  {(Array.isArray(reportFilters.brand_options)
+                    ? reportFilters.brand_options
+                    : []).map((brand) => (
+                    <option key={brand} value={brand}>
+                      {brand}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="form-label mb-1">Vendor</label>
+                <select
+                  className="form-select"
+                  value={vendorFilter}
+                  onChange={(e) => setVendorFilter(e.target.value)}
+                >
+                  <option value="">All Vendors</option>
+                  {(Array.isArray(reportFilters.vendor_options)
+                    ? reportFilters.vendor_options
+                    : []).map((vendor) => (
+                    <option key={vendor} value={vendor}>
+                      {vendor}
+                    </option>
+                  ))}
+                </select>
               </div>
               <button
                 type="button"
@@ -443,6 +515,12 @@ const DailyReport = () => {
                 {loading ? "Loading..." : "Refresh"}
               </button>
               <span className="om-summary-chip">Date: {formatDateDDMMYYYY(report?.date)}</span>
+              <span className="om-summary-chip">
+                Brand: {brandFilter || "all"}
+              </span>
+              <span className="om-summary-chip">
+                Vendor: {vendorFilter || "all"}
+              </span>
               <span className="om-summary-chip">
                 Aligned Requests: {summary?.aligned_requests_count ?? 0}
               </span>
