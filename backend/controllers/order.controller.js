@@ -374,6 +374,85 @@ const buildAuditActor = (user = null) => ({
   name: buildArchivedByName(user),
 });
 
+const normalizeRestorableArchivedStatus = (value) => {
+  const normalized = normalizeLooseString(value);
+  return ORDER_STATUS_SEQUENCE.includes(normalized) ? normalized : "";
+};
+
+const buildArchivedOrderLookupKey = (orderEntry = {}) =>
+  [
+    normalizeLooseString(orderEntry?.order_id),
+    normalizeLooseString(orderEntry?.brand),
+    normalizeLooseString(orderEntry?.vendor),
+    normalizeLooseString(orderEntry?.item_code ?? orderEntry?.item?.item_code),
+  ]
+    .join("__")
+    .toLowerCase();
+
+const resolveArchivedStatusFromLogEntry = (logEntry = {}) => {
+  const statusChange = (Array.isArray(logEntry?.changes) ? logEntry.changes : [])
+    .find(
+      (entry) => normalizeLooseString(entry?.field).toLowerCase() === "status",
+    );
+
+  return normalizeRestorableArchivedStatus(statusChange?.before);
+};
+
+const attachArchivedRestoreStatus = async (orderEntries = []) => {
+  const rows = Array.isArray(orderEntries) ? orderEntries : [];
+  if (rows.length === 0) return [];
+
+  const restoreStatusByKey = new Map();
+  const missingLogMatches = [];
+  const queuedKeys = new Set();
+
+  rows.forEach((row) => {
+    const lookupKey = buildArchivedOrderLookupKey(row);
+    if (!lookupKey) return;
+
+    const directStatus = normalizeRestorableArchivedStatus(
+      row?.archived_previous_status,
+    );
+    if (directStatus) {
+      restoreStatusByKey.set(lookupKey, directStatus);
+      return;
+    }
+
+    if (queuedKeys.has(lookupKey)) return;
+    queuedKeys.add(lookupKey);
+    missingLogMatches.push({
+      order_id: normalizeLooseString(row?.order_id),
+      brand: normalizeLooseString(row?.brand),
+      vendor: normalizeLooseString(row?.vendor),
+      item_code: normalizeLooseString(row?.item?.item_code),
+    });
+  });
+
+  if (missingLogMatches.length > 0) {
+    const archiveLogs = await OrderEditLog.find({
+      operation_type: "order_edit_archive",
+      $or: missingLogMatches,
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    archiveLogs.forEach((logEntry) => {
+      const lookupKey = buildArchivedOrderLookupKey(logEntry);
+      if (!lookupKey || restoreStatusByKey.has(lookupKey)) return;
+
+      const restoredStatus = resolveArchivedStatusFromLogEntry(logEntry);
+      if (restoredStatus) {
+        restoreStatusByKey.set(lookupKey, restoredStatus);
+      }
+    });
+  }
+
+  return rows.map((row) => ({
+    ...row,
+    restore_status: restoreStatusByKey.get(buildArchivedOrderLookupKey(row)) || "",
+  }));
+};
+
 const PREVIOUS_ORDER_ACTION_STRATEGY = Object.freeze({
   KEEP_BOTH: "keep_both",
   REPLACE_PREVIOUS: "replace_previous",
@@ -1878,6 +1957,8 @@ const applyNewOrderRows = async ({
         }
 
         previousOrder.archived = true;
+        previousOrder.archived_previous_status =
+          normalizeRestorableArchivedStatus(previousOrder.status) || null;
         previousOrder.status = "Cancelled";
         previousOrder.archived_remark = archiveRemark;
         previousOrder.archived_at = new Date();
@@ -7953,6 +8034,8 @@ exports.editOrder = async (req, res) => {
       order.item.description = nextDescription;
       order.quantity = 0;
       order.shipment = [];
+      order.archived_previous_status =
+        normalizeRestorableArchivedStatus(order.status) || null;
       order.status = "Cancelled";
       order.archived = true;
       order.archived_remark = archiveRemarkInput;
@@ -8534,6 +8617,8 @@ exports.archiveOrder = async (req, res) => {
     const beforeSnapshot = buildOrderEditLogSnapshot(order);
 
     order.archived = true;
+    order.archived_previous_status =
+      normalizeRestorableArchivedStatus(order.status) || null;
     order.status = "Cancelled";
     order.archived_remark = remark;
     order.archived_at = new Date();
@@ -8576,6 +8661,90 @@ exports.archiveOrder = async (req, res) => {
   }
 };
 
+exports.unarchiveOrder = async (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid order id" });
+    }
+
+    const order = await Order.findOne({ _id: id, archived: true });
+    if (!order) {
+      return res.status(404).json({ message: "Archived order not found" });
+    }
+
+    if (Number(order.quantity || 0) <= 0) {
+      return res.status(400).json({
+        message: "Zero-quantity archived orders cannot be unarchived",
+      });
+    }
+
+    const [orderWithRestoreStatus] = await attachArchivedRestoreStatus([
+      order.toObject(),
+    ]);
+    const restoredStatus = normalizeRestorableArchivedStatus(
+      orderWithRestoreStatus?.restore_status,
+    );
+    if (!restoredStatus) {
+      return res.status(400).json({
+        message: "Original status could not be determined for this archived order",
+      });
+    }
+
+    const group = {
+      order_id: order.order_id,
+      brand: order.brand,
+      vendor: order.vendor,
+    };
+    const beforeSnapshot = buildOrderEditLogSnapshot(order);
+
+    order.archived = false;
+    order.status = restoredStatus;
+    order.archived_remark = "";
+    order.archived_at = null;
+    order.archived_previous_status = null;
+    order.archived_by = {
+      user: null,
+      name: "",
+    };
+    order.updated_by = buildAuditActor(req.user);
+    await order.save();
+
+    try {
+      await syncOrderGroup(group);
+    } catch (syncErr) {
+      console.error("Google Calendar sync failed after unarchiving order:", {
+        group,
+        error: syncErr?.message || String(syncErr),
+      });
+    }
+
+    await createOrderEditLog({
+      reqUser: req.user,
+      operationType: "order_edit",
+      beforeSnapshot,
+      afterSnapshot: buildOrderEditLogSnapshot(order),
+      extraRemarks: [
+        `Order unarchived through archived-orders page. Restored status to ${restoredStatus}.`,
+      ],
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Order unarchived successfully. Restored status to ${restoredStatus}.`,
+      restored_status: restoredStatus,
+      data: order,
+    });
+  } catch (error) {
+    console.error("Unarchive Order Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to unarchive order",
+      error: error.message,
+    });
+  }
+};
+
 exports.getArchivedOrders = async (req, res) => {
   try {
     const page = parsePositiveInt(req.query.page, 1);
@@ -8601,7 +8770,7 @@ exports.getArchivedOrders = async (req, res) => {
     const [rows, totalRecords, vendorsRaw, brandsRaw] = await Promise.all([
       Order.find(match)
         .select(
-          "order_id item brand vendor quantity archived archived_remark archived_at archived_by updatedAt",
+          "order_id item brand vendor quantity archived archived_remark archived_at archived_by archived_previous_status updatedAt",
         )
         .sort({ archived_at: -1, updatedAt: -1, order_id: -1 })
         .skip(skip)
@@ -8611,10 +8780,11 @@ exports.getArchivedOrders = async (req, res) => {
       Order.distinct("vendor", { archived: true }),
       Order.distinct("brand", { archived: true }),
     ]);
+    const rowsWithRestoreStatus = await attachArchivedRestoreStatus(rows);
 
     return res.status(200).json({
       success: true,
-      data: rows,
+      data: rowsWithRestoreStatus,
       pagination: {
         page,
         limit,
@@ -8651,7 +8821,7 @@ exports.syncZeroQuantityOrdersArchive = async (req, res) => {
     };
 
     const candidates = await Order.find(archiveFilter)
-      .select("_id order_id brand vendor")
+      .select("_id order_id brand vendor status")
       .lean();
 
     if (candidates.length === 0) {
@@ -8700,25 +8870,30 @@ exports.syncZeroQuantityOrdersArchive = async (req, res) => {
       });
     }
 
-    const candidateIds = candidates.map((entry) => entry._id);
-    const archiveResult = await Order.updateMany(
-      { _id: { $in: candidateIds } },
-      {
-        $set: {
-          archived: true,
-          status: "Cancelled",
-          archived_remark: remark,
-          archived_at: now,
-          archived_by: {
-            user: req.user?._id || null,
-            name: actorName,
-          },
-          updated_by: {
-            user: req.user?._id || null,
-            name: actorName,
+    const archiveResult = await Order.bulkWrite(
+      candidates.map((entry) => ({
+        updateOne: {
+          filter: { _id: entry._id },
+          update: {
+            $set: {
+              archived: true,
+              status: "Cancelled",
+              archived_previous_status:
+                normalizeRestorableArchivedStatus(entry.status) || null,
+              archived_remark: remark,
+              archived_at: now,
+              archived_by: {
+                user: req.user?._id || null,
+                name: actorName,
+              },
+              updated_by: {
+                user: req.user?._id || null,
+                name: actorName,
+              },
+            },
           },
         },
-      },
+      })),
     );
 
     const groupMap = new Map();

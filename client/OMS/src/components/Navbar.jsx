@@ -62,6 +62,7 @@ const Navbar = () => {
         { label: "Orders", path: "/all-orders" },
         { label: "Shipments", path: "/shipments" },
         { label: "Containers", path: "/containers" },
+        { label: "Bulk Shipping", path: "/container" },
         { label: "Daily Reports", path: "/daily-reports" },
         { label: "Items", path: "/items" },
       );

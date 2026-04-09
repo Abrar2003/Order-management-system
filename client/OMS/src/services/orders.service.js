@@ -370,6 +370,25 @@ export const archiveOrder = async (id, remark) => {
   return res.data;
 };
 
+export const unarchiveOrder = async (id) => {
+  if (!id) {
+    throw new Error("Order id is required");
+  }
+
+  const token = localStorage.getItem("token");
+  const res = await axios.patch(
+    `/orders/unarchive-order/${id}`,
+    {},
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  return res.data;
+};
+
 export const getArchivedOrders = async (params = {}) => {
   const token = localStorage.getItem("token");
   const res = await axios.get("/orders/archived", {

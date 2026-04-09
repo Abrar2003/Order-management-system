@@ -5,6 +5,7 @@ import { getUserFromToken } from "../auth/auth.service";
 import {
   getArchivedOrders,
   syncZeroQuantityOrdersArchive,
+  unarchiveOrder,
 } from "../services/orders.service";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
@@ -36,6 +37,7 @@ const ArchivedOrders = () => {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [unarchivingId, setUnarchivingId] = useState("");
   const [error, setError] = useState("");
   const [filters, setFilters] = useState(() => ({
     order_id: normalizeSearchParam(searchParams.get("order_id")),
@@ -77,6 +79,10 @@ const ArchivedOrders = () => {
       setRows(Array.isArray(response?.data) ? response.data : []);
       setPagination((prev) => ({
         ...prev,
+        page: Math.min(
+          prev.page,
+          Math.max(1, Number(response?.pagination?.totalPages || 1)),
+        ),
         totalPages: Number(response?.pagination?.totalPages || 1),
         totalRecords: Number(response?.pagination?.totalRecords || 0),
       }));
@@ -160,6 +166,41 @@ const ArchivedOrders = () => {
       setError(err?.response?.data?.message || "Failed to sync zero-quantity orders.");
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleUnarchive = async (row) => {
+    const restoreStatus = String(row?.restore_status || "").trim();
+    if (!row?._id) return;
+
+    if (!restoreStatus) {
+      setError("Original status is not available for this archived order.");
+      return;
+    }
+
+    if (Number(row?.quantity || 0) <= 0) {
+      setError("Zero-quantity archived orders cannot be unarchived.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Unarchive order ${row?.order_id || "N/A"}? Status will be restored to ${restoreStatus}.`,
+    );
+    if (!confirmed) return;
+
+    try {
+      setUnarchivingId(String(row._id));
+      setError("");
+      const response = await unarchiveOrder(row._id);
+      await fetchArchivedOrders();
+      window.alert(
+        response?.message
+          || `Order unarchived successfully. Restored status to ${restoreStatus}.`,
+      );
+    } catch (err) {
+      setError(err?.response?.data?.message || "Failed to unarchive order.");
+    } finally {
+      setUnarchivingId("");
     }
   };
 
@@ -262,29 +303,57 @@ const ArchivedOrders = () => {
                       <th>Brand</th>
                       <th>Vendor</th>
                       <th>Quantity</th>
+                      <th>Restore Status</th>
                       <th>Archived At</th>
                       <th>Archived By</th>
                       <th>Remark</th>
+                      <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((row) => (
-                      <tr key={row?._id || `${row?.order_id}-${row?.item?.item_code}`}>
-                        <td>{row?.order_id || "N/A"}</td>
-                        <td>{row?.item?.item_code || "N/A"}</td>
-                        <td>{row?.item?.description || "-"}</td>
-                        <td>{row?.brand || "-"}</td>
-                        <td>{row?.vendor || "-"}</td>
-                        <td>{Number(row?.quantity || 0)}</td>
-                        <td>{formatDateDDMMYYYY(row?.archived_at)}</td>
-                        <td>{row?.archived_by?.name || "-"}</td>
-                        <td>{row?.archived_remark || "-"}</td>
-                      </tr>
-                    ))}
+                    {rows.map((row) => {
+                      const restoreStatus = String(row?.restore_status || "").trim();
+                      const canUnarchive =
+                        Boolean(row?._id)
+                        && Boolean(restoreStatus)
+                        && Number(row?.quantity || 0) > 0;
+                      const isUnarchiving = unarchivingId === String(row?._id || "");
+                      const actionTitle = !restoreStatus
+                        ? "Original status is not available for this archived order."
+                        : Number(row?.quantity || 0) <= 0
+                          ? "Zero-quantity archived orders cannot be restored."
+                          : `This will restore the order status to ${restoreStatus}.`;
+
+                      return (
+                        <tr key={row?._id || `${row?.order_id}-${row?.item?.item_code}`}>
+                          <td>{row?.order_id || "N/A"}</td>
+                          <td>{row?.item?.item_code || "N/A"}</td>
+                          <td>{row?.item?.description || "-"}</td>
+                          <td>{row?.brand || "-"}</td>
+                          <td>{row?.vendor || "-"}</td>
+                          <td>{Number(row?.quantity || 0)}</td>
+                          <td>{restoreStatus || "-"}</td>
+                          <td>{formatDateDDMMYYYY(row?.archived_at)}</td>
+                          <td>{row?.archived_by?.name || "-"}</td>
+                          <td>{row?.archived_remark || "-"}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="btn btn-outline-success btn-sm"
+                              disabled={!canUnarchive || Boolean(unarchivingId)}
+                              title={actionTitle}
+                              onClick={() => handleUnarchive(row)}
+                            >
+                              {isUnarchiving ? "Unarchiving..." : "Unarchive"}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
 
                     {rows.length === 0 && (
                       <tr>
-                        <td colSpan="9" className="text-center py-4">
+                        <td colSpan="11" className="text-center py-4">
                           No archived orders found
                         </td>
                       </tr>

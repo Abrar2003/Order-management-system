@@ -100,6 +100,11 @@ const Order_Schema = new mongoose.Schema(
     archived: { type: Boolean, default: false },
     archived_remark: { type: String, default: "" },
     archived_at: { type: Date, default: null },
+    archived_previous_status: {
+      type: String,
+      enum: ACTIVE_ORDER_STATUSES,
+      default: null,
+    },
     archived_by: {
       user: {
         type: mongoose.Schema.Types.ObjectId,

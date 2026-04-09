@@ -29,6 +29,7 @@ const {
   bulkUpdateRevisedEtd,
   editCompleteOrder,
   archiveOrder,
+  unarchiveOrder,
   getArchivedOrders,
   syncZeroQuantityOrdersArchive,
   finalizeOrder,
@@ -185,6 +186,13 @@ router.patch(
   authenticate,
   authorize("admin"),
   archiveOrder,
+);
+
+router.patch(
+  "/unarchive-order/:id",
+  authenticate,
+  authorize("admin"),
+  unarchiveOrder,
 );
 
 router.get(
