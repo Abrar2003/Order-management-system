@@ -4,16 +4,21 @@ import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import OrderEtdWithHistory from "../components/OrderEtdWithHistory";
 import SortHeaderButton from "../components/SortHeaderButton";
-import { formatDateDDMMYYYY } from "../utils/date";
+import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
 
 const DEFAULT_TIMELINE = "1m";
-const DEFAULT_CUSTOM_DAYS = 30;
 const DEFAULT_ENTITY_FILTER = "all";
 const DEFAULT_VENDOR_TABLE_SORT_FIELD = "latest_shipment_date";
 const DEFAULT_VENDOR_TABLE_SORT_ORDER = "desc";
+const REPORT_TIMELINE_DAYS = Object.freeze({
+  "1m": 30,
+  "3m": 90,
+  "6m": 180,
+});
+
 const normalizeTimeline = (value) => {
   const normalized = String(value || "").trim().toLowerCase();
   if (normalized === "1m" || normalized === "3m" || normalized === "6m") {
@@ -23,10 +28,35 @@ const normalizeTimeline = (value) => {
   return DEFAULT_TIMELINE;
 };
 
-const parseCustomDays = (value) => {
-  const parsed = Number.parseInt(String(value ?? "").trim(), 10);
-  if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_CUSTOM_DAYS;
-  return Math.min(parsed, 3650);
+const normalizeDateFilter = (value, fallback = "") => toISODateString(value) || fallback;
+
+const getDateRangeFromTimeline = (timelineValue) => {
+  const normalizedTimeline = normalizeTimeline(timelineValue);
+  const days = REPORT_TIMELINE_DAYS[normalizedTimeline] || REPORT_TIMELINE_DAYS[DEFAULT_TIMELINE];
+
+  const toDate = new Date();
+  const fromDate = new Date();
+  fromDate.setDate(fromDate.getDate() - (Math.max(1, days) - 1));
+
+  const toDateIso = toISODateString(toDate);
+  const fromDateIso = toISODateString(fromDate) || toDateIso;
+
+  return {
+    from_date: fromDateIso,
+    to_date: toDateIso,
+  };
+};
+
+const getDateRangeFromSearchParams = (searchParams, timelineValue) => {
+  const derivedRange = getDateRangeFromTimeline(timelineValue);
+
+  return {
+    from_date: normalizeDateFilter(
+      searchParams.get("from_date"),
+      derivedRange.from_date,
+    ),
+    to_date: normalizeDateFilter(searchParams.get("to_date"), derivedRange.to_date),
+  };
 };
 
 const normalizeEntityFilter = (value) => {
@@ -132,6 +162,18 @@ const formatVendorOrderDifferenceInDays = (differenceInDays) => {
   return `0 days`;
 };
 
+const formatAverageShippingTime = (averageDays, shippedCount) => {
+  const safeCount = Number(shippedCount || 0);
+  if (safeCount <= 0 || !Number.isFinite(Number(averageDays))) {
+    return "N/A (0 shipments)";
+  }
+
+  const normalizedDays = Number(averageDays);
+  const dayLabel = normalizedDays === 1 ? "day" : "days";
+  const shipmentLabel = safeCount === 1 ? "shipment" : "shipments";
+  return `${normalizedDays} ${dayLabel} (${safeCount} ${shipmentLabel})`;
+};
+
 const defaultReport = {
   filters: {
     timeline: DEFAULT_TIMELINE,
@@ -159,12 +201,15 @@ const VendorReports = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "vendor-reports");
 
-  const [timeline, setTimeline] = useState(() =>
-    normalizeTimeline(searchParams.get("timeline")),
+  const initialTimeline = normalizeTimeline(searchParams.get("timeline"));
+  const initialDateRange = getDateRangeFromSearchParams(
+    searchParams,
+    initialTimeline,
   );
-  const [customDays, setCustomDays] = useState(() =>
-    parseCustomDays(searchParams.get("custom_days")),
-  );
+
+  const [timeline, setTimeline] = useState(() => initialTimeline);
+  const [fromDate, setFromDate] = useState(() => initialDateRange.from_date);
+  const [toDate, setToDate] = useState(() => initialDateRange.to_date);
   const [brandFilter, setBrandFilter] = useState(() =>
     normalizeEntityFilter(searchParams.get("brand")),
   );
@@ -185,7 +230,13 @@ const VendorReports = () => {
 
       const params = { timeline };
       if (timeline === "custom") {
-        params.custom_days = customDays;
+        if (fromDate > toDate) {
+          setReport(defaultReport);
+          setError("From date cannot be later than To date.");
+          return;
+        }
+        params.from_date = fromDate;
+        params.to_date = toDate;
       }
       if (brandFilter !== DEFAULT_ENTITY_FILTER) {
         params.brand = brandFilter;
@@ -211,7 +262,7 @@ const VendorReports = () => {
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, customDays, timeline, vendorFilter]);
+  }, [brandFilter, fromDate, timeline, toDate, vendorFilter]);
 
   useEffect(() => {
     fetchReports();
@@ -222,12 +273,16 @@ const VendorReports = () => {
     if (syncedQuery === currentQuery) return;
 
     const nextTimeline = normalizeTimeline(searchParams.get("timeline"));
-    const nextCustomDays = parseCustomDays(searchParams.get("custom_days"));
+    const nextDateRange = getDateRangeFromSearchParams(
+      searchParams,
+      nextTimeline,
+    );
     const nextBrandFilter = normalizeEntityFilter(searchParams.get("brand"));
     const nextVendorFilter = normalizeEntityFilter(searchParams.get("vendor"));
 
     setTimeline((prev) => (prev === nextTimeline ? prev : nextTimeline));
-    setCustomDays((prev) => (prev === nextCustomDays ? prev : nextCustomDays));
+    setFromDate((prev) => (prev === nextDateRange.from_date ? prev : nextDateRange.from_date));
+    setToDate((prev) => (prev === nextDateRange.to_date ? prev : nextDateRange.to_date));
     setBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
     setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
@@ -242,7 +297,8 @@ const VendorReports = () => {
       next.set("timeline", timeline);
     }
     if (timeline === "custom") {
-      next.set("custom_days", String(customDays));
+      next.set("from_date", fromDate);
+      next.set("to_date", toDate);
     }
     if (brandFilter !== DEFAULT_ENTITY_FILTER) {
       next.set("brand", brandFilter);
@@ -253,7 +309,7 @@ const VendorReports = () => {
     if (!areSearchParamsEquivalent(next, searchParams)) {
       setSearchParams(next, { replace: true });
     }
-  }, [brandFilter, customDays, searchParams, setSearchParams, syncedQuery, timeline, vendorFilter]);
+  }, [brandFilter, fromDate, searchParams, setSearchParams, syncedQuery, timeline, toDate, vendorFilter]);
 
   const summary = useMemo(
     () => report?.summary || defaultReport.summary,
@@ -297,6 +353,27 @@ const VendorReports = () => {
     });
   }, []);
 
+  const handleTimelineChange = useCallback((event) => {
+    const nextTimeline = normalizeTimeline(event.target.value);
+    setTimeline(nextTimeline);
+
+    if (nextTimeline !== "custom") {
+      const nextRange = getDateRangeFromTimeline(nextTimeline);
+      setFromDate(nextRange.from_date);
+      setToDate(nextRange.to_date);
+    }
+  }, []);
+
+  const handleFromDateChange = useCallback((event) => {
+    setTimeline("custom");
+    setFromDate((prev) => normalizeDateFilter(event.target.value, prev));
+  }, []);
+
+  const handleToDateChange = useCallback((event) => {
+    setTimeline("custom");
+    setToDate((prev) => normalizeDateFilter(event.target.value, prev));
+  }, []);
+
   return (
     <>
       <Navbar />
@@ -321,27 +398,39 @@ const VendorReports = () => {
               <select
                 className="form-select"
                 value={timeline}
-                onChange={(e) => setTimeline(normalizeTimeline(e.target.value))}
+                onChange={handleTimelineChange}
               >
                 <option value="1m">Last 1 month</option>
                 <option value="3m">Last 3 months</option>
                 <option value="6m">Last 6 months</option>
-                <option value="custom">Last custom days</option>
+                <option value="custom">Custom date range</option>
               </select>
             </div>
 
             {timeline === "custom" && (
-              <div>
-                <label className="form-label mb-1">Custom Days</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={3650}
-                  className="form-control"
-                  value={customDays}
-                  onChange={(e) => setCustomDays(parseCustomDays(e.target.value))}
-                />
-              </div>
+              <>
+                <div>
+                  <label className="form-label mb-1">From</label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={fromDate}
+                    max={toDate}
+                    onChange={handleFromDateChange}
+                  />
+                </div>
+
+                <div>
+                  <label className="form-label mb-1">To</label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={toDate}
+                    min={fromDate}
+                    onChange={handleToDateChange}
+                  />
+                </div>
+              </>
             )}
 
             <div>
@@ -484,6 +573,12 @@ const VendorReports = () => {
                       <span className="om-summary-chip">
                         Avg Delay: {vendorEntry.average_delay_days ?? 0} days
                       </span>
+                      <span className="om-summary-chip">
+                        Avg Lead Time: {formatAverageShippingTime(
+                          vendorEntry.average_shipping_time_days,
+                          vendorEntry.shipped_in_range_count,
+                        )}
+                      </span>
                     </div>
 
                     <div className="px-3 py-2 border-bottom bg-body-tertiary">
@@ -544,7 +639,6 @@ const VendorReports = () => {
                             </th>
                             <th>Difference in Days</th>
                             <th>Item Count</th>
-                            <th>Qty</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -594,7 +688,6 @@ const VendorReports = () => {
                                   {formatVendorOrderDifferenceInDays(differenceInDays)}
                                 </td>
                                 <td>{orderRow.item_count ?? 0}</td>
-                                <td>{orderRow.quantity_total ?? 0}</td>
                               </tr>
                             );
                           })}

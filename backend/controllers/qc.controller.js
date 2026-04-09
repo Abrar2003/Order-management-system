@@ -5394,10 +5394,19 @@ exports.getVendorReports = async (req, res) => {
   try {
     const selectedBrand = normalizeOptionalReportFilter(req.query.brand);
     const selectedVendor = normalizeOptionalReportFilter(req.query.vendor);
-    const timelineRange = resolveTimelineRange({
-      timeline: req.query.timeline,
-      customDays: req.query.custom_days ?? req.query.customDays,
+    const normalizedTimeline = String(req.query.timeline || "")
+      .trim()
+      .toLowerCase();
+    const explicitRange = resolveExplicitDateRange({
+      fromDate: req.query.from_date ?? req.query.fromDate,
+      toDate: req.query.to_date ?? req.query.toDate,
     });
+    const timelineRange = normalizedTimeline === "custom"
+      ? explicitRange
+      : explicitRange || resolveTimelineRange({
+        timeline: req.query.timeline,
+        customDays: req.query.custom_days ?? req.query.customDays,
+      });
     if (!timelineRange) {
       return res.status(400).json({ message: "Invalid timeline filters" });
     }
@@ -5476,11 +5485,11 @@ exports.getVendorReports = async (req, res) => {
 
     const todayUtc = toUtcDayStart(new Date());
     const timelineOrders = [...orderGroupMap.values()].filter((entry) => {
-      if (!entry?.order_date_utc) return false;
+      if (!entry?.latest_shipment_utc) return false;
       return (
-        entry.order_date_utc.getTime() >=
+        entry.latest_shipment_utc.getTime() >=
           timelineRange.from_date_utc.getTime() &&
-        entry.order_date_utc.getTime() <
+        entry.latest_shipment_utc.getTime() <
           timelineRange.to_date_exclusive_utc.getTime()
       );
     });
@@ -5502,6 +5511,47 @@ exports.getVendorReports = async (req, res) => {
       if (selectedVendor && entry?.vendor !== selectedVendor) return false;
       return true;
     });
+
+    const vendorShippingStatsMap = new Map();
+    for (const orderEntry of orderGroupMap.values()) {
+      if (selectedBrand && orderEntry?.brand !== selectedBrand) continue;
+      if (selectedVendor && orderEntry?.vendor !== selectedVendor) continue;
+
+      const status = resolveOrderStatusFromSet([...orderEntry.statuses]);
+      const latestShipmentUtc = orderEntry.latest_shipment_utc;
+      const orderDateUtc = orderEntry.order_date_utc;
+      const isFullyShipped = String(status || "").trim() === "Shipped";
+
+      if (!isFullyShipped || !latestShipmentUtc || !orderDateUtc) {
+        continue;
+      }
+
+      if (
+        latestShipmentUtc.getTime() < timelineRange.from_date_utc.getTime()
+        || latestShipmentUtc.getTime() >= timelineRange.to_date_exclusive_utc.getTime()
+      ) {
+        continue;
+      }
+
+      const shippingTimeDays = Math.max(
+        0,
+        Math.floor(
+          (latestShipmentUtc.getTime() - orderDateUtc.getTime()) / MS_PER_DAY,
+        ),
+      );
+      const vendorKey = String(orderEntry.vendor || "").toLowerCase();
+
+      if (!vendorShippingStatsMap.has(vendorKey)) {
+        vendorShippingStatsMap.set(vendorKey, {
+          shipped_in_range_count: 0,
+          total_shipping_time_days: 0,
+        });
+      }
+
+      const shippingStatsEntry = vendorShippingStatsMap.get(vendorKey);
+      shippingStatsEntry.shipped_in_range_count += 1;
+      shippingStatsEntry.total_shipping_time_days += shippingTimeDays;
+    }
 
     const vendorMap = new Map();
     let delayedOrdersCount = 0;
@@ -5599,32 +5649,49 @@ exports.getVendorReports = async (req, res) => {
     }
 
     const vendors = Array.from(vendorMap.values())
-      .map((entry) => ({
-        vendor: entry.vendor,
-        brands: [...entry.brands].sort((a, b) =>
-          String(a || "").localeCompare(String(b || "")),
-        ),
-        orders_count: entry.orders_count,
-        delayed_orders_count: entry.delayed_orders_count,
-        orders_with_etd_count: entry.orders_with_etd_count,
-        total_delay_days: entry.total_delay_days,
-        average_delay_days:
-          entry.delayed_orders_count > 0
-            ? toRoundedNumber(
-                entry.total_delay_days / entry.delayed_orders_count,
-                2,
-              )
-            : 0,
-        orders: [...entry.orders].sort((a, b) => {
-          const aDelay = Number.isFinite(a?.delay_days) ? a.delay_days : -1;
-          const bDelay = Number.isFinite(b?.delay_days) ? b.delay_days : -1;
-          if (aDelay !== bDelay) return bDelay - aDelay;
-          return (
-            toSortableTimestamp(b?.order_date) -
-            toSortableTimestamp(a?.order_date)
-          );
-        }),
-      }))
+      .map((entry) => {
+        const vendorShippingStats =
+          vendorShippingStatsMap.get(String(entry.vendor || "").toLowerCase())
+          || null;
+        const shippedInRangeCount = Number(
+          vendorShippingStats?.shipped_in_range_count || 0,
+        );
+
+        return {
+          vendor: entry.vendor,
+          brands: [...entry.brands].sort((a, b) =>
+            String(a || "").localeCompare(String(b || "")),
+          ),
+          orders_count: entry.orders_count,
+          delayed_orders_count: entry.delayed_orders_count,
+          orders_with_etd_count: entry.orders_with_etd_count,
+          total_delay_days: entry.total_delay_days,
+          average_delay_days:
+            entry.delayed_orders_count > 0
+              ? toRoundedNumber(
+                  entry.total_delay_days / entry.delayed_orders_count,
+                  2,
+                )
+              : 0,
+          shipped_in_range_count: shippedInRangeCount,
+          average_shipping_time_days:
+            shippedInRangeCount > 0
+              ? toRoundedNumber(
+                  vendorShippingStats.total_shipping_time_days / shippedInRangeCount,
+                  2,
+                )
+              : null,
+          orders: [...entry.orders].sort((a, b) => {
+            const aDelay = Number.isFinite(a?.delay_days) ? a.delay_days : -1;
+            const bDelay = Number.isFinite(b?.delay_days) ? b.delay_days : -1;
+            if (aDelay !== bDelay) return bDelay - aDelay;
+            return (
+              toSortableTimestamp(b?.order_date) -
+              toSortableTimestamp(a?.order_date)
+            );
+          }),
+        };
+      })
       .sort((a, b) => {
         const avgDiff =
           Number(b?.average_delay_days || 0) -
@@ -5635,9 +5702,11 @@ exports.getVendorReports = async (req, res) => {
 
     return res.status(200).json({
       filters: {
-        timeline: timelineRange.timeline,
-        custom_days:
-          timelineRange.timeline === "custom" ? timelineRange.days : null,
+        timeline:
+          normalizedTimeline === "custom"
+            ? "custom"
+            : timelineRange.timeline,
+        custom_days: null,
         from_date: timelineRange.from_date_iso,
         to_date: timelineRange.to_date_iso,
         brand: selectedBrand,
