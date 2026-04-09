@@ -62,7 +62,7 @@ const Navbar = () => {
         { label: "Orders", path: "/all-orders" },
         { label: "Shipments", path: "/shipments" },
         { label: "Containers", path: "/containers" },
-        { label: "Daily Reports", path: "/daily-reports" },
+        { label: "Daily Inspection Reports", path: "/daily-reports" },
         { label: "Items", path: "/items" },
       );
     }
@@ -119,7 +119,7 @@ const Navbar = () => {
 
   const quickReportRouteLinks = useMemo(() => {
     if (!canAccessQc || isQcOnlyRole) return [];
-    return [{ label: "Daily Reports", path: "/daily-reports" }, ...reportRouteLinks];
+    return [{ label: "Daily Inspection Reports", path: "/daily-reports" }, ...reportRouteLinks];
   }, [canAccessQc, isQcOnlyRole, reportRouteLinks]);
 
   const openOrderRouteLinks = useMemo(() => {
