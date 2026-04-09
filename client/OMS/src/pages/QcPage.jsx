@@ -4,6 +4,7 @@ import Navbar from "../components/Navbar";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import TransferQcRequestModal from "../components/TransferQcRequestModal";
+import AlignQCModal from "../components/AlignQcModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import { isViewOnlyUser } from "../auth/permissions";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
@@ -14,6 +15,7 @@ import {
   toISODateString,
 } from "../utils/date";
 import { formatPositiveCbm } from "../utils/cbm";
+import { canTransferLatestRequestToday } from "../utils/qcRequests";
 import "../App.css";
 
 const toSafeNumber = (value) => {
@@ -213,6 +215,7 @@ const QCPage = () => {
   const isViewOnly = isViewOnlyUser(currentUser);
   const normalizedRole = String(currentUser?.role || "").trim().toLowerCase();
   const isQcUser = normalizedRole === "qc";
+  const canAlignQc = ["admin", "manager"].includes(normalizedRole);
   const canTransferRequest = ["admin", "manager"].includes(
     normalizedRole,
   );
@@ -248,6 +251,7 @@ const QCPage = () => {
     parsePositiveInt(searchParams.get("page"), DEFAULT_PAGE),
   );
   const [totalPages, setTotalPages] = useState(1);
+  const [alignContext, setAlignContext] = useState(null);
   const [transferRequestQc, setTransferRequestQc] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -408,6 +412,33 @@ const QCPage = () => {
       state: { fromQcList },
     });
   };
+
+  const openAlignModal = useCallback((qc) => {
+    const pendingQty = Math.max(0, toSafeNumber(qc?.quantities?.pending));
+    if (pendingQty <= 0) return;
+
+    const orderRecord = qc?.order || {};
+    const orderItem = orderRecord?.item || qc?.item || {};
+    const orderId = String(orderRecord?._id || "").trim();
+    const itemCode = String(orderItem?.item_code || "").trim();
+    if (!orderId || !itemCode) return;
+
+    setAlignContext({
+      order: {
+        _id: orderId,
+        item: orderItem,
+        quantity: Math.max(
+          0,
+          toSafeNumber(qc?.quantities?.client_demand ?? orderRecord?.quantity),
+        ),
+      },
+      initialInspector: String(qc?.inspector?._id || qc?.inspector || ""),
+      initialQuantityRequested: pendingQty,
+      initialRequestDate: "",
+      initialRequestType: String(qc?.request_type || "FULL"),
+      openQuantity: pendingQty,
+    });
+  }, []);
 
   // keep filter controls consistent: when filter changes, reset page 1
   const resetToFirstPage = useCallback(() => setPage(1), []);
@@ -803,6 +834,21 @@ const QCPage = () => {
                   ) : (
                     qcList.map((qc) => {
                       const pendingAlignmentInfo = getPendingAlignmentInfo(qc);
+                      const hasAlignTarget =
+                        Boolean(String(qc?.order?._id || "").trim()) &&
+                        Boolean(
+                          String(
+                            qc?.order?.item?.item_code ||
+                              qc?.item?.item_code ||
+                              "",
+                          ).trim(),
+                        );
+                      const canRaiseNewRequest =
+                        canAlignQc &&
+                        hasAlignTarget &&
+                        pendingAlignmentInfo.pendingQty > 0;
+                      const canShowTransferRequest =
+                        canTransferRequest && canTransferLatestRequestToday(qc);
 
                       return (
                         <tr key={qc._id}>
@@ -866,29 +912,30 @@ const QCPage = () => {
                                 >
                                   See Details
                                 </button>
-                                {canTransferRequest &&
-                                  toSafeNumber(qc?.quantities?.pending) > 0 && (
-                                    <button
-                                      type="button"
-                                      className="btn btn-outline-warning btn-sm"
-                                      onClick={(e) => {
-                                        e.preventDefault();
-                                        setTransferRequestQc(qc);
-                                      }}
-                                      disabled={
-                                        !Array.isArray(qc?.request_history) ||
-                                        qc.request_history.length === 0
-                                      }
-                                      title={
-                                        !Array.isArray(qc?.request_history) ||
-                                        qc.request_history.length === 0
-                                          ? "No QC request history is available for transfer."
-                                          : ""
-                                      }
-                                    >
-                                      Transfer Request
-                                    </button>
-                                  )}
+                                {canRaiseNewRequest && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-primary btn-sm"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      openAlignModal(qc);
+                                    }}
+                                  >
+                                    Raise New Request
+                                  </button>
+                                )}
+                                {canShowTransferRequest && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-warning btn-sm"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      setTransferRequestQc(qc);
+                                    }}
+                                  >
+                                    Transfer Request
+                                  </button>
+                                )}
                               </div>
                             </td>
                           )}
@@ -938,6 +985,22 @@ const QCPage = () => {
             onClose={() => setTransferRequestQc(null)}
             onTransferred={() => {
               setTransferRequestQc(null);
+              return fetchQC();
+            }}
+          />
+        )}
+
+        {alignContext?.order && (
+          <AlignQCModal
+            order={alignContext.order}
+            initialInspector={alignContext.initialInspector}
+            initialQuantityRequested={alignContext.initialQuantityRequested}
+            initialRequestDate={alignContext.initialRequestDate}
+            initialRequestType={alignContext.initialRequestType}
+            openQuantity={alignContext.openQuantity}
+            onClose={() => setAlignContext(null)}
+            onSuccess={() => {
+              setAlignContext(null);
               return fetchQC();
             }}
           />

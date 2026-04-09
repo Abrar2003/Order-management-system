@@ -348,6 +348,8 @@ const Orders = () => {
                   <tbody>
                     {sortedOrders.map((order) => {
                       const shippedOrder = isCompletelyShipped(order);
+                      const hasPendingOrderQuantity =
+                        getOpenInspectionQuantity(order) > 0;
                       const mainActionCount = [
                         canEditOrder,
                         canEditOrder && !shippedOrder,
@@ -459,28 +461,26 @@ const Orders = () => {
                                       Inspection Requested / Check updates
                                     </button>
                                 ) : (
-                                  canAlignQc && (
+                                  canAlignQc && hasPendingOrderQuantity && (
                                     <button
                                       type="button"
                                       className="btn btn-outline-secondary btn-sm"
                                       onClick={() => openAlignModal(order, false)}
                                     >
-                                      Add Inspection Request
+                                      Raise Request
                                     </button>
                                   )
                                 )}
 
                                 {canAlignQc &&
                                   order?.qc_record &&
-                                  Number(
-                                    order?.qc_record?.quantities?.pending || 0,
-                                  ) > 0 && (
+                                  hasPendingOrderQuantity && (
                                     <button
                                       type="button"
                                       className="btn btn-outline-primary btn-sm"
                                       onClick={() => openAlignModal(order, true)}
                                     >
-                                      Raise a request for pending status
+                                      Raise Request
                                     </button>
                                   )}
                               </div>

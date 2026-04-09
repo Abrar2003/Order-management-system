@@ -14,6 +14,7 @@ import { isViewOnlyUser } from "../auth/permissions";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { formatPositiveCbm } from "../utils/cbm";
 import { formatFixedNumber, formatLbhValue } from "../utils/measurementDisplay";
+import { canTransferLatestRequestToday } from "../utils/qcRequests";
 import Barcode from "react-barcode";
 import "../App.css";
 
@@ -377,6 +378,7 @@ const QcDetails = () => {
     () => getQcPendingAlignmentInfo(qc),
     [qc],
   );
+  const canShowTransferRequest = canTransferLatestRequestToday(qc);
   const canUpdateQcByRole =
     isAdmin ||
     (!isInspectionDone &&
@@ -1665,12 +1667,11 @@ const QcDetails = () => {
                     </button>
                   )}
 
-                {isAdmin && (
+                {isAdmin && canShowTransferRequest && (
                   <button
                     type="button"
                     className="btn btn-outline-warning"
                     onClick={() => setShowTransferRequestModal(true)}
-                    disabled={!Array.isArray(qc?.request_history) || qc.request_history.length === 0}
                   >
                     Transfer Request
                   </button>
@@ -1774,7 +1775,10 @@ const QcDetails = () => {
         />
       )}
 
-      {showTransferRequestModal && isAdmin && !isViewOnly && (
+      {showTransferRequestModal &&
+        isAdmin &&
+        canShowTransferRequest &&
+        !isViewOnly && (
         <TransferQcRequestModal
           qc={qc}
           onClose={() => setShowTransferRequestModal(false)}
