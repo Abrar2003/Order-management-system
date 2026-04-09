@@ -108,7 +108,7 @@ const Navbar = () => {
       { label: "PO Status Report", path: "/reports/po-status" },
       { label: "Weekly Summary", path: "/summary/weekly" },
       { label: "Daily Summary", path: "/summary/daily" },
-        { label: "Daily Inspection Reports", path: "/daily-reports" },
+      { label: "Daily Inspection Reports", path: "/daily-reports" },
     ];
     
     if (canAccessAnalytics) {

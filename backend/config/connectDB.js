@@ -1,7 +1,9 @@
 const mongoose = require("mongoose");
+require("dotenv").config();
 
 const connectDB = async () => {
   const mongoUri = String(process.env.MONGO_URI || "").trim();
+  console.log(mongoUri ? "MONGO_URI is configured" : "MONGO_URI is not configured", mongoUri);
   if (!mongoUri) {
     throw new Error("MONGO_URI is not configured");
   }

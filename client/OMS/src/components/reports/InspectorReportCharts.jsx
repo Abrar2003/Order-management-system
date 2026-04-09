@@ -1,11 +1,10 @@
-import { memo, useMemo } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bar,
   BarChart,
   CartesianGrid,
   Line,
   LineChart,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
@@ -253,6 +252,8 @@ const InspectorReportChartsComponent = ({
   toDate,
   chartStep,
 }) => {
+  const chartHostRef = useRef(null);
+  const [chartWidth, setChartWidth] = useState(0);
   const chartData = useMemo(() => buildInspectorChartData({
     dailyRows,
     fromDate,
@@ -265,71 +266,113 @@ const InspectorReportChartsComponent = ({
   );
   const chartAxisDomain = useMemo(() => [0, chartAxisMax], [chartAxisMax]);
 
-  if (chartData.length === 0) {
-    return (
-      <div className="inspector-report-chart-wrap d-flex align-items-center justify-content-center text-secondary">
-        No chart data available.
-      </div>
-    );
-  }
+  useEffect(() => {
+    const hostNode = chartHostRef.current;
+    if (!hostNode) return undefined;
+
+    let frameId = 0;
+    const updateWidth = () => {
+      frameId = 0;
+      const nextWidth = Math.max(
+        0,
+        Math.floor(hostNode.getBoundingClientRect().width),
+      );
+      setChartWidth((prev) => (prev === nextWidth ? prev : nextWidth));
+    };
+
+    updateWidth();
+
+    if (typeof ResizeObserver === "function") {
+      const observer = new ResizeObserver(() => {
+        if (frameId) {
+          window.cancelAnimationFrame(frameId);
+        }
+        frameId = window.requestAnimationFrame(updateWidth);
+      });
+      observer.observe(hostNode);
+
+      return () => {
+        if (frameId) {
+          window.cancelAnimationFrame(frameId);
+        }
+        observer.disconnect();
+      };
+    }
+
+    window.addEventListener("resize", updateWidth);
+    return () => {
+      if (frameId) {
+        window.cancelAnimationFrame(frameId);
+      }
+      window.removeEventListener("resize", updateWidth);
+    };
+  }, []);
 
   return (
-    <div className="d-grid gap-3">
-      <div className="inspector-report-chart-wrap">
-        <ResponsiveContainer width="100%" height={320}>
-          <LineChart data={chartData} margin={CHART_MARGIN}>
-            <CartesianGrid stroke={CHART_GRID_COLOR} strokeDasharray="3 3" />
-            <XAxis
-              dataKey={CHART_LABEL_DATA_KEY}
-              minTickGap={20}
-              tick={AXIS_TICK}
-            />
-            <YAxis
-              domain={chartAxisDomain}
-              tick={AXIS_TICK}
-              tickFormatter={formatChartAxisTick}
-              width={56}
-            />
-            <Tooltip content={InspectorCbmTooltip} />
-            <Line
-              type="linear"
-              dataKey={CHART_CBM_DATA_KEY}
-              name="CBM"
-              stroke={CHART_PRIMARY_COLOR}
-              strokeWidth={2}
-              dot={false}
-              activeDot={LINE_ACTIVE_DOT}
-              isAnimationActive={false}
-            />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
+    <div ref={chartHostRef} className="d-grid gap-3">
+      {chartData.length === 0 ? (
+        <div className="inspector-report-chart-wrap d-flex align-items-center justify-content-center text-secondary">
+          No chart data available.
+        </div>
+      ) : chartWidth <= 0 ? (
+        <div className="inspector-report-chart-wrap d-flex align-items-center justify-content-center text-secondary">
+          Preparing charts...
+        </div>
+      ) : (
+        <>
+          <div className="inspector-report-chart-wrap">
+            <LineChart width={chartWidth} height={320} data={chartData} margin={CHART_MARGIN}>
+              <CartesianGrid stroke={CHART_GRID_COLOR} strokeDasharray="3 3" />
+              <XAxis
+                dataKey={CHART_LABEL_DATA_KEY}
+                minTickGap={20}
+                tick={AXIS_TICK}
+              />
+              <YAxis
+                domain={chartAxisDomain}
+                tick={AXIS_TICK}
+                tickFormatter={formatChartAxisTick}
+                width={56}
+              />
+              <Tooltip content={InspectorCbmTooltip} />
+              <Line
+                type="linear"
+                dataKey={CHART_CBM_DATA_KEY}
+                name="CBM"
+                stroke={CHART_PRIMARY_COLOR}
+                strokeWidth={2}
+                dot={false}
+                activeDot={LINE_ACTIVE_DOT}
+                isAnimationActive={false}
+              />
+            </LineChart>
+          </div>
 
-      <div className="inspector-report-chart-wrap">
-        <ResponsiveContainer width="100%" height={320}>
-          <BarChart data={chartData} margin={CHART_MARGIN}>
-            <CartesianGrid stroke={CHART_GRID_COLOR} strokeDasharray="3 3" />
-            <XAxis
-              dataKey={CHART_LABEL_DATA_KEY}
-              minTickGap={20}
-              tick={AXIS_TICK}
-            />
-            <YAxis
-              domain={chartAxisDomain}
-              tick={AXIS_TICK}
-              tickFormatter={formatChartAxisTick}
-              width={56}
-            />
-            <Tooltip content={InspectorCbmTooltip} />
-            <Bar
-              dataKey={CHART_CBM_DATA_KEY}
-              name="CBM"
-              fill={CHART_PRIMARY_COLOR}
-              isAnimationActive={false}
-            />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
+          <div className="inspector-report-chart-wrap">
+            <BarChart width={chartWidth} height={320} data={chartData} margin={CHART_MARGIN}>
+              <CartesianGrid stroke={CHART_GRID_COLOR} strokeDasharray="3 3" />
+              <XAxis
+                dataKey={CHART_LABEL_DATA_KEY}
+                minTickGap={20}
+                tick={AXIS_TICK}
+              />
+              <YAxis
+                domain={chartAxisDomain}
+                tick={AXIS_TICK}
+                tickFormatter={formatChartAxisTick}
+                width={56}
+              />
+              <Tooltip content={InspectorCbmTooltip} />
+              <Bar
+                dataKey={CHART_CBM_DATA_KEY}
+                name="CBM"
+                fill={CHART_PRIMARY_COLOR}
+                isAnimationActive={false}
+              />
+            </BarChart>
+          </div>
+        </>
+      )}
     </div>
   );
 };

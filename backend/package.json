@@ -8,6 +8,8 @@
     "prestart": "npm run check:env",
     "start": "node index.js",
     "dev": "nodemon index.js",
+    "export:pis:pdf": "node scripts/exportPisPdfExample.js",
+    "sync:pis": "node scripts/syncPisWorkbooks.js",
     "test": "echo \"Error: no test specified\" && exit 1",
     "serve": "npm run dev"
   },
@@ -19,6 +21,7 @@
     "@aws-sdk/client-s3": "^3.1012.0",
     "@aws-sdk/lib-storage": "^3.1018.0",
     "@aws-sdk/s3-request-presigner": "^3.1012.0",
+    "adm-zip": "^0.5.17",
     "axios": "^1.13.5",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
@@ -29,6 +32,7 @@
     "mongoose": "^9.1.5",
     "multer": "^2.0.2",
     "nodemon": "^3.1.11",
+    "pdfkit": "^0.18.0",
     "sharp": "^0.34.5",
     "xlsx": "^0.18.5"
   }
