@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "../api/axios";
 import Navbar from "../components/Navbar";
 import { getUserFromToken } from "../auth/auth.utils";
+import { isViewOnlyUser } from "../auth/permissions";
 import AlignQCModal from "../components/AlignQcModal";
 import EditOrderModal from "../components/EditOrderModal";
 import EditCompleteOrderModal from "../components/EditCompleteOrderModal";
@@ -50,6 +51,29 @@ const getPendingDisplayQuantity = (order) => {
   return Math.max(0, inspectionDoneQuantity - shippedQuantity);
 };
 
+const isCompletelyShipped = (order) => {
+  const normalizedStatus = String(order?.status || "").trim().toLowerCase();
+  if (normalizedStatus === "shipped") return true;
+
+  const totalQuantity = Math.max(0, toSafeNumber(order?.quantity));
+  const shippedQuantity = getShippedQuantity(order);
+  return totalQuantity > 0 && shippedQuantity >= totalQuantity;
+};
+
+const getShipmentContainersDisplay = (order) => {
+  if (!isCompletelyShipped(order)) return "-";
+
+  const containers = [
+    ...new Set(
+      (Array.isArray(order?.shipment) ? order.shipment : [])
+        .map((shipmentEntry) => String(shipmentEntry?.container || "").trim())
+        .filter(Boolean),
+    ),
+  ];
+
+  return containers.join(", ") || "-";
+};
+
 const formatResolvedCbm = (value) => {
   if (value === null || value === undefined || value === "") return "N/A";
   const parsed = Number(value);
@@ -90,10 +114,12 @@ const Orders = () => {
   const normalizedRole = String(role || "")
     .trim()
     .toLowerCase();
+  const isViewOnly = isViewOnlyUser(user);
   const canManageOrders = ["admin", "manager", "dev"].includes(normalizedRole);
   const canAlignQc = ["admin", "manager"].includes(normalizedRole);
   const canEditOrder = normalizedRole === "admin";
   const canArchiveOrder = normalizedRole === "admin";
+  const showActionColumn = canManageOrders || isViewOnly;
 
   const orderId = searchParams.get("order_id");
 
@@ -135,6 +161,8 @@ const Orders = () => {
   }, [itemCodeSortOrder, orders]);
 
   const primaryOrder = orders[0];
+  const allOrdersCompletelyShipped =
+    orders.length > 0 && orders.every((order) => isCompletelyShipped(order));
   const navigateToQcForItem = (orderId, itemCode) => {
     const trimmedOrderId = String(orderId || "").trim();
     const trimmedItemCode = String(itemCode || "").trim();
@@ -150,6 +178,24 @@ const Orders = () => {
     const nextQuery = nextParams.toString();
     navigate(nextQuery ? `/qc?${nextQuery}` : "/qc");
   };
+
+  const navigateToQcDetails = useCallback(
+    (order) => {
+      const rawQcRecord = order?.qc_record;
+      const qcId =
+        typeof rawQcRecord === "string"
+          ? rawQcRecord.trim()
+          : String(rawQcRecord?._id || "").trim();
+
+      if (qcId) {
+        navigate(`/qc/${encodeURIComponent(qcId)}`);
+        return;
+      }
+
+      navigateToQcForItem(order?.order_id, order?.item?.item_code);
+    },
+    [navigate],
+  );
 
   const openAlignModal = (order, isRealign = false) => {
     const qcRecord = order?.qc_record || null;
@@ -250,13 +296,15 @@ const Orders = () => {
                 >
                   Update Complete Order
                 </button>
-                <button
-                  type="button"
-                  className="btn btn-outline-secondary btn-sm"
-                  onClick={() => setShowBulkRevisedEtdModal(true)}
-                >
-                  Bulk Revised ETD
-                </button>
+                {!allOrdersCompletelyShipped && (
+                  <button
+                    type="button"
+                    className="btn btn-outline-secondary btn-sm"
+                    onClick={() => setShowBulkRevisedEtdModal(true)}
+                  >
+                    Bulk Revised ETD
+                  </button>
+                )}
               </div>
             ) : null}
           </div>
@@ -291,13 +339,28 @@ const Orders = () => {
                       <th>Status</th>
                       <th>ETD</th>
                       <th>Revised ETD</th>
-                      {canManageOrders && (
+                      <th>Containers</th>
+                      {showActionColumn && (
                         <th className="orders-action-col">Action</th>
                       )}
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedOrders.map((order) => (
+                    {sortedOrders.map((order) => {
+                      const shippedOrder = isCompletelyShipped(order);
+                      const mainActionCount = [
+                        canEditOrder,
+                        canEditOrder && !shippedOrder,
+                        canArchiveOrder,
+                      ].filter(Boolean).length;
+                      const mainActionRowClassName =
+                        mainActionCount >= 3
+                          ? "orders-action-main-row equal-three"
+                          : mainActionCount === 2
+                            ? "orders-action-main-row equal-two"
+                            : "orders-action-main-row";
+
+                      return (
                       <tr key={order._id}>
                         <td
                         style={{ cursor: order?.item?.item_code ? "pointer" : "default" }}
@@ -332,94 +395,116 @@ const Orders = () => {
                             revisedEtd={order?.revised_ETD}
                             fallback="-"
                             showOriginalWhenNoRevision={false}
-                          />
+                            />
                         </td>
-                        {canManageOrders && (
+                        <td>{getShipmentContainersDisplay(order)}</td>
+                        {showActionColumn && (
                           <td className="orders-action-col">
-                            <div className="orders-action-stack">
-                              {(canEditOrder || canArchiveOrder) && (
-                                <div className="orders-action-main-row equal-three">
-                                  {canEditOrder && (
-                                    <button
-                                      type="button"
-                                      className="btn btn-outline-secondary btn-sm"
-                                      onClick={() => setEditingOrder(order)}
-                                    >
-                                      Edit Order
-                                    </button>
-                                  )}
-                                  {canEditOrder && (
-                                    <button
-                                      type="button"
-                                      className="btn btn-outline-secondary btn-sm"
-                                      onClick={() => setRevisedEtdTarget(order)}
-                                    >
-                                      Revised ETD
-                                    </button>
-                                  )}
-                                  {canArchiveOrder && (
-                                    <button
-                                      type="button"
-                                      className="btn btn-outline-secondary btn-sm"
-                                      onClick={() => {
-                                        setArchiveError("");
-                                        setArchiveTarget(order);
-                                      }}
-                                    >
-                                      Archive
-                                    </button>
-                                  )}
-                                </div>
-                              )}
+                            {canManageOrders ? (
+                              <div className="orders-action-stack">
+                                {(canEditOrder || canArchiveOrder) && (
+                                  <div className={mainActionRowClassName}>
+                                    {canEditOrder && (
+                                      <button
+                                        type="button"
+                                        className="btn btn-outline-secondary btn-sm"
+                                        onClick={() => setEditingOrder(order)}
+                                      >
+                                        Edit Order
+                                      </button>
+                                    )}
+                                    {canEditOrder && !shippedOrder && (
+                                      <button
+                                        type="button"
+                                        className="btn btn-outline-secondary btn-sm"
+                                        onClick={() => setRevisedEtdTarget(order)}
+                                      >
+                                        Revised ETD
+                                      </button>
+                                    )}
+                                    {canArchiveOrder && (
+                                      <button
+                                        type="button"
+                                        className="btn btn-outline-secondary btn-sm"
+                                        onClick={() => {
+                                          setArchiveError("");
+                                          setArchiveTarget(order);
+                                        }}
+                                      >
+                                        Archive
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
 
-                              {order.qc_record ? (
-                                <button
-                                  type="button"
-                                  className="btn btn-link btn-sm p-0 text-start"
-                                  onClick={() =>
-                                    navigateToQcForItem(
-                                      order?.order_id,
-                                      order?.item?.item_code,
-                                    )
-                                  }
-                                >
-                                  Inspection Requested / Check updates
-                                </button>
-                              ) : (
-                                canAlignQc && (
-                                  <button
-                                    type="button"
-                                    className="btn btn-outline-secondary btn-sm"
-                                    onClick={() => openAlignModal(order, false)}
-                                  >
-                                    Add Inspection Request
-                                  </button>
-                                )
-                              )}
-
-                              {canAlignQc &&
-                                order?.qc_record &&
-                                Number(
-                                  order?.qc_record?.quantities?.pending || 0,
-                                ) > 0 && (
+                                {shippedOrder ? (
                                   <button
                                     type="button"
                                     className="btn btn-outline-primary btn-sm"
-                                    onClick={() => openAlignModal(order, true)}
+                                    onClick={() => navigateToQcDetails(order)}
                                   >
-                                    Raise a request for pending status
+                                    See Details
                                   </button>
+                                ) : order.qc_record ? (
+                                    <button
+                                      type="button"
+                                      className="btn btn-link btn-sm p-0 text-start"
+                                      onClick={() =>
+                                        navigateToQcForItem(
+                                          order?.order_id,
+                                          order?.item?.item_code,
+                                        )
+                                      }
+                                    >
+                                      Inspection Requested / Check updates
+                                    </button>
+                                ) : (
+                                  canAlignQc && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-outline-secondary btn-sm"
+                                      onClick={() => openAlignModal(order, false)}
+                                    >
+                                      Add Inspection Request
+                                    </button>
+                                  )
                                 )}
-                            </div>
+
+                                {canAlignQc &&
+                                  order?.qc_record &&
+                                  Number(
+                                    order?.qc_record?.quantities?.pending || 0,
+                                  ) > 0 && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-outline-primary btn-sm"
+                                      onClick={() => openAlignModal(order, true)}
+                                    >
+                                      Raise a request for pending status
+                                    </button>
+                                  )}
+                              </div>
+                            ) : order?.qc_record ? (
+                              <button
+                                type="button"
+                                className="btn btn-outline-primary btn-sm w-100"
+                                onClick={() => navigateToQcDetails(order)}
+                              >
+                                See Details
+                              </button>
+                            ) : (
+                              <span className="text-secondary small">No QC details</span>
+                            )}
                           </td>
                         )}
                       </tr>
-                    ))}
+                    );
+                    })}
 
                     {orders.length === 0 && (
                       <tr>
                         <td
-                          colSpan={canManageOrders ? 10 : 9}
+                          colSpan={showActionColumn ? 11 : 10}
                           className="text-center py-4"
                         >
                           No orders found

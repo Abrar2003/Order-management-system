@@ -62,7 +62,6 @@ const Navbar = () => {
         { label: "Orders", path: "/all-orders" },
         { label: "Shipments", path: "/shipments" },
         { label: "Containers", path: "/containers" },
-        { label: "Bulk Shipping", path: "/container" },
         { label: "Daily Reports", path: "/daily-reports" },
         { label: "Items", path: "/items" },
       );
@@ -81,7 +80,10 @@ const Navbar = () => {
     const links = [{ label: "Home", path: "/" }];
 
     if (canAccessQc) {
-      links.push({ label: "Items", path: "/items" });
+      links.push(
+        { label: "Items", path: "/items" },
+        { label: "Bulk Shipping", path: "/container" },
+      );
     }
 
     if (canViewOrderPages) {

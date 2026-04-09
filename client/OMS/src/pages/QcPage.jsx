@@ -16,16 +16,6 @@ import {
 import { formatPositiveCbm } from "../utils/cbm";
 import "../App.css";
 
-// small helper: debounce without extra libs
-const useDebouncedValue = (value, delay = 300) => {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(t);
-  }, [value, delay]);
-  return debounced;
-};
-
 const toSafeNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -175,11 +165,40 @@ const parseSortOrder = (value, sortBy = DEFAULT_SORT_BY) => {
   return sortBy === "order_id" ? "asc" : "desc";
 };
 
+const buildQcFilterStateFromSearchParams = (
+  searchParams,
+  canUseInspectorFilter,
+  requestedItemCode = "",
+) => {
+  const nextSearch =
+    normalizeQueryText(searchParams.get("search")) || requestedItemCode;
+  const nextFromRaw = normalizeQueryText(searchParams.get("from"));
+  const nextToRaw = normalizeQueryText(searchParams.get("to"));
+
+  return {
+    search: nextSearch,
+    inspector: canUseInspectorFilter
+      ? normalizeQueryText(searchParams.get("inspector"))
+      : "",
+    vendor: normalizeQueryText(searchParams.get("vendor")),
+    from: toDDMMYYYYInputValue(nextFromRaw, nextFromRaw),
+    to: toDDMMYYYYInputValue(nextToRaw, nextToRaw),
+    order: normalizeQueryText(searchParams.get("order")),
+  };
+};
+
+const areQcFilterStatesEqual = (left = {}, right = {}) =>
+  normalizeQueryText(left.search) === normalizeQueryText(right.search)
+  && normalizeQueryText(left.inspector) === normalizeQueryText(right.inspector)
+  && normalizeQueryText(left.vendor) === normalizeQueryText(right.vendor)
+  && normalizeQueryText(left.from) === normalizeQueryText(right.from)
+  && normalizeQueryText(left.to) === normalizeQueryText(right.to)
+  && normalizeQueryText(left.order) === normalizeQueryText(right.order);
+
 const QCPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "qc-list");
   const requestedItemCode = normalizeQueryText(searchParams.get("item_code"));
-  const initialSearch = normalizeQueryText(searchParams.get("search")) || requestedItemCode;
   const initialSortBy = parseSortBy(
     searchParams.get("sort_by") ?? searchParams.get("sort"),
   );
@@ -187,45 +206,6 @@ const QCPage = () => {
     searchParams.get("sort_order"),
     initialSortBy,
   );
-  const [qcList, setQcList] = useState([]);
-  const [inspectors, setInspectors] = useState([]);
-  const [vendors, setVendors] = useState([]);
-  const [orders, setOrders] = useState([]);
-  const [itemCodes, setItemCodes] = useState([]);
-
-  // header filters (excel-like)
-  const [search, setSearch] = useState(initialSearch); // item_code search
-  const [inspector, setInspector] = useState(
-    normalizeQueryText(searchParams.get("inspector")),
-  );
-  const [vendor, setVendor] = useState(normalizeQueryText(searchParams.get("vendor")));
-  const [from, setFrom] = useState(
-    toDDMMYYYYInputValue(
-      normalizeQueryText(searchParams.get("from")),
-      normalizeQueryText(searchParams.get("from")),
-    ),
-  );
-  const [to, setTo] = useState(
-    toDDMMYYYYInputValue(
-      normalizeQueryText(searchParams.get("to")),
-      normalizeQueryText(searchParams.get("to")),
-    ),
-  );
-  const [sortBy, setSortBy] = useState(initialSortBy);
-  const [sortOrder, setSortOrder] = useState(initialSortOrder);
-  const [order, setOrder] = useState(normalizeQueryText(searchParams.get("order")));
-
-  const debouncedSearch = useDebouncedValue(search, 300);
-
-  const [page, setPage] = useState(() =>
-    parsePositiveInt(searchParams.get("page"), DEFAULT_PAGE),
-  );
-  const [totalPages, setTotalPages] = useState(1);
-  const [transferRequestQc, setTransferRequestQc] = useState(null);
-  const [exporting, setExporting] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [syncedQuery, setSyncedQuery] = useState(null);
-
   const token = localStorage.getItem("token");
   const navigate = useNavigate();
   const location = useLocation();
@@ -240,10 +220,42 @@ const QCPage = () => {
   const tableColumnCount = showActionColumn ? TABLE_COLUMN_COUNT : TABLE_COLUMN_COUNT - 1;
   const canUseInspectorFilter = !isQcUser;
   const canExportQcList = ["admin", "manager", "dev", "user"].includes(normalizedRole);
+  const initialFilters = buildQcFilterStateFromSearchParams(
+    searchParams,
+    canUseInspectorFilter,
+    requestedItemCode,
+  );
+  const [qcList, setQcList] = useState([]);
+  const [inspectors, setInspectors] = useState([]);
+  const [vendors, setVendors] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [itemCodes, setItemCodes] = useState([]);
+
+  // draft filters shown in inputs
+  const [search, setSearch] = useState(initialFilters.search);
+  const [inspector, setInspector] = useState(initialFilters.inspector);
+  const [vendor, setVendor] = useState(initialFilters.vendor);
+  const [from, setFrom] = useState(initialFilters.from);
+  const [to, setTo] = useState(initialFilters.to);
+  const [order, setOrder] = useState(initialFilters.order);
+
+  // applied filters used for API + URL sync
+  const [appliedFilters, setAppliedFilters] = useState(initialFilters);
+  const [sortBy, setSortBy] = useState(initialSortBy);
+  const [sortOrder, setSortOrder] = useState(initialSortOrder);
+
+  const [page, setPage] = useState(() =>
+    parsePositiveInt(searchParams.get("page"), DEFAULT_PAGE),
+  );
+  const [totalPages, setTotalPages] = useState(1);
+  const [transferRequestQc, setTransferRequestQc] = useState(null);
+  const [exporting, setExporting] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [syncedQuery, setSyncedQuery] = useState(null);
 
   const fetchQC = useCallback(async () => {
-    const fromIso = toISODateString(from);
-    const toIso = toISODateString(to);
+    const fromIso = toISODateString(appliedFilters.from);
+    const toIso = toISODateString(appliedFilters.to);
 
     setLoading(true);
 
@@ -251,12 +263,12 @@ const QCPage = () => {
       const res = await axios.get("/qc/list", {
         headers: { Authorization: `Bearer ${token}` },
         params: {
-          order,
+          order: appliedFilters.order,
           page,
           limit: 20,
-          search: debouncedSearch, // item_code
-          inspector: canUseInspectorFilter ? inspector : "",
-          vendor,
+          search: appliedFilters.search,
+          inspector: canUseInspectorFilter ? appliedFilters.inspector : "",
+          vendor: appliedFilters.vendor,
           from: fromIso || "",
           to: toIso || "",
           sort_by: sortBy,
@@ -282,17 +294,12 @@ const QCPage = () => {
       setLoading(false);
     }
   }, [
+    appliedFilters,
+    canUseInspectorFilter,
     token,
     page,
-    debouncedSearch,
-    inspector,
-    vendor,
-    from,
-    to,
     sortBy,
     sortOrder,
-    order,
-    canUseInspectorFilter,
   ]);
 
   const fetchInspectors = useCallback(async () => {
@@ -320,15 +327,11 @@ const QCPage = () => {
 
   useEffect(() => {
     const nextRequestedItemCode = normalizeQueryText(searchParams.get("item_code"));
-    const nextSearch = normalizeQueryText(searchParams.get("search")) || nextRequestedItemCode;
-    const nextInspector = canUseInspectorFilter
-      ? normalizeQueryText(searchParams.get("inspector"))
-      : "";
-    const nextVendor = normalizeQueryText(searchParams.get("vendor"));
-    const nextFromRaw = normalizeQueryText(searchParams.get("from"));
-    const nextToRaw = normalizeQueryText(searchParams.get("to"));
-    const nextFrom = toDDMMYYYYInputValue(nextFromRaw, nextFromRaw);
-    const nextTo = toDDMMYYYYInputValue(nextToRaw, nextToRaw);
+    const nextFilters = buildQcFilterStateFromSearchParams(
+      searchParams,
+      canUseInspectorFilter,
+      nextRequestedItemCode,
+    );
     const nextSortBy = parseSortBy(
       searchParams.get("sort_by") ?? searchParams.get("sort"),
     );
@@ -340,14 +343,17 @@ const QCPage = () => {
     const nextPage = parsePositiveInt(searchParams.get("page"), DEFAULT_PAGE);
     const currentQuery = searchParams.toString();
 
-    setSearch((prev) => (prev === nextSearch ? prev : nextSearch));
-    setInspector((prev) => (prev === nextInspector ? prev : nextInspector));
-    setVendor((prev) => (prev === nextVendor ? prev : nextVendor));
-    setFrom((prev) => (prev === nextFrom ? prev : nextFrom));
-    setTo((prev) => (prev === nextTo ? prev : nextTo));
+    setSearch((prev) => (prev === nextFilters.search ? prev : nextFilters.search));
+    setInspector((prev) => (prev === nextFilters.inspector ? prev : nextFilters.inspector));
+    setVendor((prev) => (prev === nextFilters.vendor ? prev : nextFilters.vendor));
+    setFrom((prev) => (prev === nextFilters.from ? prev : nextFilters.from));
+    setTo((prev) => (prev === nextFilters.to ? prev : nextFilters.to));
+    setOrder((prev) => (prev === nextFilters.order ? prev : nextFilters.order));
+    setAppliedFilters((prev) => (
+      areQcFilterStatesEqual(prev, nextFilters) ? prev : nextFilters
+    ));
     setSortBy((prev) => (prev === nextSortBy ? prev : nextSortBy));
     setSortOrder((prev) => (prev === nextSortOrder ? prev : nextSortOrder));
-    setOrder((prev) => (prev === nextOrder ? prev : nextOrder));
     setPage((prev) => (prev === nextPage ? prev : nextPage));
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
   }, [canUseInspectorFilter, searchParams]);
@@ -357,14 +363,24 @@ const QCPage = () => {
     if (syncedQuery !== currentQuery) return;
 
     const next = new URLSearchParams();
-    if (normalizeQueryText(search)) next.set("search", normalizeQueryText(search));
-    if (normalizeQueryText(order)) next.set("order", normalizeQueryText(order));
-    if (canUseInspectorFilter && normalizeQueryText(inspector)) {
-      next.set("inspector", normalizeQueryText(inspector));
+    if (normalizeQueryText(appliedFilters.search)) {
+      next.set("search", normalizeQueryText(appliedFilters.search));
     }
-    if (normalizeQueryText(vendor)) next.set("vendor", normalizeQueryText(vendor));
-    if (normalizeQueryText(from)) next.set("from", normalizeQueryText(from));
-    if (normalizeQueryText(to)) next.set("to", normalizeQueryText(to));
+    if (normalizeQueryText(appliedFilters.order)) {
+      next.set("order", normalizeQueryText(appliedFilters.order));
+    }
+    if (canUseInspectorFilter && normalizeQueryText(appliedFilters.inspector)) {
+      next.set("inspector", normalizeQueryText(appliedFilters.inspector));
+    }
+    if (normalizeQueryText(appliedFilters.vendor)) {
+      next.set("vendor", normalizeQueryText(appliedFilters.vendor));
+    }
+    if (normalizeQueryText(appliedFilters.from)) {
+      next.set("from", normalizeQueryText(appliedFilters.from));
+    }
+    if (normalizeQueryText(appliedFilters.to)) {
+      next.set("to", normalizeQueryText(appliedFilters.to));
+    }
     if (page > DEFAULT_PAGE) next.set("page", String(page));
     if (sortBy !== DEFAULT_SORT_BY) next.set("sort_by", sortBy);
     if (sortOrder !== parseSortOrder("", sortBy)) next.set("sort_order", sortOrder);
@@ -373,12 +389,7 @@ const QCPage = () => {
       setSearchParams(next, { replace: true });
     }
   }, [
-    search,
-    order,
-    inspector,
-    vendor,
-    from,
-    to,
+    appliedFilters,
     page,
     sortBy,
     sortOrder,
@@ -401,6 +412,46 @@ const QCPage = () => {
   // keep filter controls consistent: when filter changes, reset page 1
   const resetToFirstPage = useCallback(() => setPage(1), []);
 
+  const draftFilters = {
+    search: normalizeQueryText(search),
+    inspector: canUseInspectorFilter ? normalizeQueryText(inspector) : "",
+    vendor: normalizeQueryText(vendor),
+    from: normalizeQueryText(from),
+    to: normalizeQueryText(to),
+    order: normalizeQueryText(order),
+  };
+  const hasPendingFilterChanges = !areQcFilterStatesEqual(
+    appliedFilters,
+    draftFilters,
+  );
+
+  const handleApplyFilters = useCallback(() => {
+    setAppliedFilters((prev) => (
+      areQcFilterStatesEqual(prev, draftFilters) ? prev : draftFilters
+    ));
+    setPage(1);
+  }, [draftFilters]);
+
+  const handleClearFilters = useCallback(() => {
+    const emptyFilters = {
+      search: "",
+      inspector: "",
+      vendor: "",
+      from: "",
+      to: "",
+      order: "",
+    };
+
+    setSearch("");
+    setInspector("");
+    setVendor("");
+    setFrom("");
+    setTo("");
+    setOrder("");
+    setAppliedFilters(emptyFilters);
+    setPage(1);
+  }, []);
+
   const handleSortColumn = (column, defaultDirection = "asc") => {
     resetToFirstPage();
     if (sortBy === column) {
@@ -414,16 +465,16 @@ const QCPage = () => {
   const handleExport = useCallback(async (format = "xlsx") => {
     try {
       setExporting(true);
-      const fromIso = toISODateString(from);
-      const toIso = toISODateString(to);
+      const fromIso = toISODateString(appliedFilters.from);
+      const toIso = toISODateString(appliedFilters.to);
       const response = await axios.get("/qc/export", {
         headers: { Authorization: `Bearer ${token}` },
         responseType: "blob",
         params: {
-          order,
-          search: debouncedSearch,
-          inspector,
-          vendor,
+          order: appliedFilters.order,
+          search: appliedFilters.search,
+          inspector: canUseInspectorFilter ? appliedFilters.inspector : "",
+          vendor: appliedFilters.vendor,
           from: fromIso || "",
           to: toIso || "",
           sort_by: sortBy,
@@ -464,15 +515,11 @@ const QCPage = () => {
       setExporting(false);
     }
   }, [
-    from,
-    debouncedSearch,
-    inspector,
-    order,
+    appliedFilters,
+    canUseInspectorFilter,
     sortBy,
     sortOrder,
-    to,
     token,
-    vendor,
   ]);
 
   return (
@@ -519,6 +566,24 @@ const QCPage = () => {
 
         <div className="card om-card">
           <div className="card-body p-0">
+            <div className="d-flex justify-content-end gap-2 p-3 border-bottom bg-body-tertiary">
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={handleApplyFilters}
+                disabled={loading || !hasPendingFilterChanges}
+              >
+                Apply Filters
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline-secondary btn-sm"
+                onClick={handleClearFilters}
+                disabled={loading && !hasPendingFilterChanges}
+              >
+                Clear Filters
+              </button>
+            </div>
             <div className="table-responsive">
               <table className="table table-striped table-hover align-middle om-table mb-0">
                 <thead className="table-primary">
@@ -565,10 +630,7 @@ const QCPage = () => {
                         placeholder="PO"
                         list="qc-po-options"
                         value={order}
-                        onChange={(e) => {
-                          resetToFirstPage();
-                          setOrder(e.target.value);
-                        }}
+                        onChange={(e) => setOrder(e.target.value)}
                       />
                       <datalist id="qc-po-options">
                         {orders.map((o) => (
@@ -582,10 +644,7 @@ const QCPage = () => {
                       <select
                         className="form-select form-select-sm"
                         value={vendor}
-                        onChange={(e) => {
-                          resetToFirstPage();
-                          setVendor(e.target.value);
-                        }}
+                        onChange={(e) => setVendor(e.target.value)}
                       >
                         <option value="">All</option>
                         {vendors.map((v) => (
@@ -604,10 +663,7 @@ const QCPage = () => {
                         placeholder="Item code"
                         list="qc-item-code-options"
                         value={search}
-                        onChange={(e) => {
-                          resetToFirstPage();
-                          setSearch(e.target.value);
-                        }}
+                        onChange={(e) => setSearch(e.target.value)}
                       />
                       <datalist id="qc-item-code-options">
                         {itemCodes.map((itemCode) => (
@@ -627,7 +683,6 @@ const QCPage = () => {
                             className="form-control form-control-sm"
                             value={toISODateString(from)}
                             onChange={(e) => {
-                              resetToFirstPage();
                               setFrom(toDDMMYYYYInputValue(e.target.value, ""));
                             }}
                           />
@@ -640,7 +695,6 @@ const QCPage = () => {
                             className="form-control form-control-sm"
                             value={toISODateString(to)}
                             onChange={(e) => {
-                              resetToFirstPage();
                               setTo(toDDMMYYYYInputValue(e.target.value, ""));
                             }}
                           />
@@ -712,10 +766,7 @@ const QCPage = () => {
                         <select
                           className="form-select form-select-sm"
                           value={inspector}
-                          onChange={(e) => {
-                            resetToFirstPage();
-                            setInspector(e.target.value);
-                          }}
+                          onChange={(e) => setInspector(e.target.value)}
                         >
                           <option value="">All</option>
                           {inspectors.map((qc) => (
@@ -737,25 +788,7 @@ const QCPage = () => {
 
                     {/* Clear filters button area */}
                     {showActionColumn && (
-                      <th>
-                        <button
-                          type="button"
-                          className="btn btn-outline-secondary btn-sm w-100"
-                          onClick={() => {
-                            setSearch("");
-                            setInspector("");
-                            setVendor("");
-                            setOrder("");
-                            setFrom("");
-                            setTo("");
-                            setSortBy("request_date");
-                            setSortOrder("desc");
-                            setPage(1);
-                          }}
-                        >
-                          Clear
-                        </button>
-                      </th>
+                      <th />
                     )}
                   </tr>
                 </thead>

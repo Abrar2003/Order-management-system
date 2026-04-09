@@ -212,6 +212,9 @@ small,
 }
 
 .om-navbar {
+  position: relative;
+  z-index: 3;
+  overflow: visible !important;
   backdrop-filter: blur(18px);
   background: rgba(255, 253, 250, 0.82) !important;
   border-radius: var(--om-radius-lg) !important;
@@ -225,9 +228,12 @@ small,
   position: sticky;
   top: 0.75rem;
   z-index: 1030;
+  isolation: isolate;
 }
 
 .om-route-bar {
+  position: relative;
+  z-index: 1;
   background-color: rgba(255, 253, 250, 0.78);
   border: 1px solid rgba(203, 189, 170, 0.45);
   border-radius: var(--om-radius-lg);
@@ -264,7 +270,7 @@ small,
   width: min(18rem, calc(100vw - 1rem));
   max-width: calc(100vw - 1rem);
   box-sizing: border-box;
-  z-index: 1050;
+  z-index: 2005;
   border: 1px solid var(--om-color-border-strong);
   border-radius: var(--om-radius-md);
   background: var(--om-color-surface);
@@ -796,6 +802,10 @@ small,
 
 .orders-action-main-row.equal-three {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.orders-action-main-row.equal-two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .orders-action-main-row .btn {
