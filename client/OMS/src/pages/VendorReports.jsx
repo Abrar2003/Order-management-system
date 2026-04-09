@@ -645,7 +645,7 @@ const VendorReports = () => {
                           {filteredOrders.length === 0 && (
                             <tr>
                               <td colSpan="9" className="text-center py-3">
-                                {tableBrandFilter === DEFAULT_ENTITY_FILTER
+                                {tableBrandFilter === DEFAULT_ENTITY_FILTER0
                                   ? "No orders for this vendor."
                                   : "No orders found for the selected brand."}
                               </td>

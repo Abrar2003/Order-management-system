@@ -315,7 +315,7 @@ const Home = () => {
   }, [selectedBrand, token]);
 
   useEffect(() => {
-    if (!token) {
+    if (!token || !selectedBrand) {
       setTodayEtdOrders([]);
       setTodayEtdError("");
       return;
@@ -337,6 +337,7 @@ const Home = () => {
           "/orders/today-etd-orders",
           {
             params: {
+              brand: selectedBrand,
               sort_by: todayEtdSortBy,
               sort_order: todayEtdSortOrder,
               date: todayLocalIso,
@@ -369,7 +370,7 @@ const Home = () => {
     return () => {
       isMounted = false;
     };
-  }, [token, todayEtdSortBy, todayEtdSortOrder]);
+  }, [selectedBrand, token, todayEtdSortBy, todayEtdSortOrder]);
 
   return (
     <>
