@@ -4,6 +4,7 @@ import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import SortHeaderButton from "../components/SortHeaderButton";
 import { formatCbm } from "../utils/cbm";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
@@ -11,6 +12,7 @@ import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
 
 const DEFAULT_ENTITY_FILTER = "all";
+const DEFAULT_SORT_BY = "last_inspection_date";
 
 const normalizeEntityFilter = (value) => {
   const normalized = String(value || "").trim();
@@ -148,6 +150,87 @@ const toTimestamp = (value) => {
   return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
 };
 
+const parseSortBy = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  const allowed = new Set(["last_inspection_date", "po", "item_code"]);
+  return allowed.has(normalized) ? normalized : DEFAULT_SORT_BY;
+};
+
+const parseSortOrder = (value, sortBy = DEFAULT_SORT_BY) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "asc" || normalized === "desc") return normalized;
+  return sortBy === "last_inspection_date" ? "desc" : "asc";
+};
+
+const compareTextValues = (left, right) =>
+  String(left || "").localeCompare(String(right || ""), undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+
+const compareOptionalValues = (left, right, comparator) => {
+  const leftValue = String(left ?? "").trim();
+  const rightValue = String(right ?? "").trim();
+  const leftMissing = !leftValue;
+  const rightMissing = !rightValue;
+
+  if (leftMissing && rightMissing) return 0;
+  if (leftMissing) return 1;
+  if (rightMissing) return -1;
+  return comparator(leftValue, rightValue);
+};
+
+const buildWeeklySummaryRowComparator = ({
+  sortBy = DEFAULT_SORT_BY,
+  sortOrder = parseSortOrder("", sortBy),
+} = {}) => {
+  const direction = sortOrder === "desc" ? -1 : 1;
+
+  return (left, right) => {
+    let primaryComparison = 0;
+
+    if (sortBy === "last_inspection_date") {
+      primaryComparison = compareOptionalValues(
+        left?.lastInspectionDate,
+        right?.lastInspectionDate,
+        (leftValue, rightValue) => toTimestamp(leftValue) - toTimestamp(rightValue),
+      );
+    } else if (sortBy === "po") {
+      primaryComparison = compareOptionalValues(
+        left?.po,
+        right?.po,
+        compareTextValues,
+      );
+    } else if (sortBy === "item_code") {
+      primaryComparison = compareOptionalValues(
+        left?.itemLabel,
+        right?.itemLabel,
+        compareTextValues,
+      );
+    }
+
+    if (primaryComparison !== 0) {
+      return primaryComparison * direction;
+    }
+
+    const poComparison = compareOptionalValues(left?.po, right?.po, compareTextValues);
+    if (poComparison !== 0) return poComparison;
+
+    const itemComparison = compareOptionalValues(
+      left?.itemLabel,
+      right?.itemLabel,
+      compareTextValues,
+    );
+    if (itemComparison !== 0) return itemComparison;
+
+    return compareOptionalValues(
+      left?.lastInspectionDate,
+      right?.lastInspectionDate,
+      (leftValue, rightValue) => toTimestamp(rightValue) - toTimestamp(leftValue),
+    );
+  };
+};
+
 const isIsoDateWithinInclusiveRange = (
   isoDate = "",
   fromDate = "",
@@ -179,7 +262,12 @@ const isUnderInspectionStatus = (value) =>
 
 const buildVendorDisplayRows = (
   items = [],
-  { fromDate = "", toDate = "" } = {},
+  {
+    fromDate = "",
+    toDate = "",
+    sortBy = DEFAULT_SORT_BY,
+    sortOrder = parseSortOrder("", DEFAULT_SORT_BY),
+  } = {},
 ) => {
   const poMap = new Map();
 
@@ -192,7 +280,6 @@ const buildVendorDisplayRows = (
   }
 
   return Array.from(poMap.entries())
-    .sort((left, right) => String(left[0] || "").localeCompare(String(right[0] || "")))
     .flatMap(([orderId, poItems]) => {
       const sortedItems = [...poItems].sort((left, right) =>
         String(left?.item_code || "").localeCompare(String(right?.item_code || "")),
@@ -283,7 +370,8 @@ const buildVendorDisplayRows = (
         lastInspectionDate: getItemInspectionDateInRange(item),
         packedSummary: false,
       }));
-    });
+    })
+    .sort(buildWeeklySummaryRowComparator({ sortBy, sortOrder }));
 };
 
 const defaultReport = {
@@ -329,6 +417,12 @@ const WeeklySummary = () => {
   const [exportingPdf, setExportingPdf] = useState(false);
   const [brandLogoSrc, setBrandLogoSrc] = useState("");
   const [brandLogoLoading, setBrandLogoLoading] = useState(false);
+  const [sortBy, setSortBy] = useState(() =>
+    parseSortBy(searchParams.get("sort_by")),
+  );
+  const [sortOrder, setSortOrder] = useState(() =>
+    parseSortOrder(searchParams.get("sort_order"), parseSortBy(searchParams.get("sort_by"))),
+  );
 
   const fetchReport = useCallback(async () => {
     try {
@@ -383,10 +477,17 @@ const WeeklySummary = () => {
       || searchParams.get("toDate")
       || defaultDateRange.toDate,
     ).trim();
+    const nextSortBy = parseSortBy(searchParams.get("sort_by"));
+    const nextSortOrder = parseSortOrder(
+      searchParams.get("sort_order"),
+      nextSortBy,
+    );
 
     setBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
     setFromDateFilter((prev) => (prev === nextFromDate ? prev : nextFromDate));
     setToDateFilter((prev) => (prev === nextToDate ? prev : nextToDate));
+    setSortBy((prev) => (prev === nextSortBy ? prev : nextSortBy));
+    setSortOrder((prev) => (prev === nextSortOrder ? prev : nextSortOrder));
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
   }, [defaultDateRange.fromDate, defaultDateRange.toDate, searchParams, syncedQuery]);
 
@@ -404,6 +505,12 @@ const WeeklySummary = () => {
     if (toDateFilter) {
       next.set("to_date", toDateFilter);
     }
+    if (sortBy !== DEFAULT_SORT_BY) {
+      next.set("sort_by", sortBy);
+    }
+    if (sortOrder !== parseSortOrder("", sortBy)) {
+      next.set("sort_order", sortOrder);
+    }
 
     if (!areSearchParamsEquivalent(next, searchParams)) {
       setSearchParams(next, { replace: true });
@@ -413,6 +520,8 @@ const WeeklySummary = () => {
     fromDateFilter,
     searchParams,
     setSearchParams,
+    sortBy,
+    sortOrder,
     syncedQuery,
     toDateFilter,
   ]);
@@ -429,6 +538,8 @@ const WeeklySummary = () => {
           const vendorDisplayRows = buildVendorDisplayRows(vendorEntry?.items, {
             fromDate: filters.from_date || fromDateFilter,
             toDate: filters.to_date || toDateFilter,
+            sortBy,
+            sortOrder,
           });
           if (vendorDisplayRows.length === 0) {
             return null;
@@ -441,8 +552,22 @@ const WeeklySummary = () => {
           };
         })
         .filter(Boolean),
-    [filters.from_date, filters.to_date, fromDateFilter, report?.vendors, toDateFilter],
+    [filters.from_date, filters.to_date, fromDateFilter, report?.vendors, sortBy, sortOrder, toDateFilter],
   );
+
+  const handleSortColumn = useCallback((column, defaultDirection = "asc") => {
+    setSortBy((prevSortBy) => {
+      if (prevSortBy === column) {
+        setSortOrder((prevSortOrder) =>
+          prevSortOrder === "asc" ? "desc" : "asc",
+        );
+        return prevSortBy;
+      }
+
+      setSortOrder(defaultDirection);
+      return column;
+    });
+  }, []);
 
   useEffect(() => {
     const brandName = brandFilter === DEFAULT_ENTITY_FILTER ? "" : String(brandFilter || "").trim();
@@ -723,9 +848,30 @@ const WeeklySummary = () => {
                       <table className="table table-sm table-striped align-middle mb-0">
                         <thead>
                           <tr>
-                            <th>Last Inspection Date</th>
-                            <th>PO</th>
-                            <th>Item Code</th>
+                            <th>
+                              <SortHeaderButton
+                                label="Last Inspection Date"
+                                isActive={sortBy === "last_inspection_date"}
+                                direction={sortOrder}
+                                onClick={() => handleSortColumn("last_inspection_date", "desc")}
+                              />
+                            </th>
+                            <th>
+                              <SortHeaderButton
+                                label="PO"
+                                isActive={sortBy === "po"}
+                                direction={sortOrder}
+                                onClick={() => handleSortColumn("po", "asc")}
+                              />
+                            </th>
+                            <th>
+                              <SortHeaderButton
+                                label="Item Code"
+                                isActive={sortBy === "item_code"}
+                                direction={sortOrder}
+                                onClick={() => handleSortColumn("item_code", "asc")}
+                              />
+                            </th>
                             <th>Total Order Quantity</th>
                             <th>Packed</th>
                             <th>Total CBM</th>

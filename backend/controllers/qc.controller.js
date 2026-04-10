@@ -8549,6 +8549,7 @@ exports.getQCById = async (req, res) => {
 
         return {
           ...entry,
+          finish_id: matchedFinish?._id || null,
           image: matchedFinish?.image
             ? await buildSignedItemImage(matchedFinish.image)
             : null,

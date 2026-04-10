@@ -7,6 +7,7 @@ const {
   createStorageKey,
   uploadBuffer,
   deleteObject,
+  getObjectBuffer,
 } = require("../services/wasabiStorage.service");
 
 const normalizeText = (value) => String(value ?? "").trim();
@@ -180,6 +181,104 @@ exports.getVendorItemsForFinish = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error?.message || "Failed to load vendor items for finish",
+    });
+  }
+};
+
+exports.getFinishImage = async (req, res) => {
+  try {
+    const requestedUniqueCode = normalizeCode(
+      req.query.unique_code || req.query.uniqueCode || "",
+    );
+    const requestedIdentifier = String(req.params.id || "").trim();
+    const lookupConditions = [];
+
+    if (requestedUniqueCode) {
+      lookupConditions.push({ unique_code: requestedUniqueCode });
+    }
+    if (mongoose.Types.ObjectId.isValid(requestedIdentifier)) {
+      lookupConditions.push({
+        _id: new mongoose.Types.ObjectId(requestedIdentifier),
+      });
+    } else if (requestedIdentifier) {
+      const normalizedIdentifierCode = normalizeCode(requestedIdentifier);
+      if (normalizedIdentifierCode) {
+        lookupConditions.push({ unique_code: normalizedIdentifierCode });
+      }
+    }
+
+    if (lookupConditions.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "A valid finish id or unique code is required",
+      });
+    }
+
+    const finish = await Finish.findOne({
+      $or: lookupConditions,
+    })
+      .select("unique_code image")
+      .lean();
+    if (!finish) {
+      return res.status(404).json({
+        success: false,
+        message: "Finish not found",
+      });
+    }
+
+    const storedImage = toStoredImage(finish?.image);
+    if (!storedImage.key && !storedImage.link) {
+      return res.status(404).json({
+        success: false,
+        message: "Finish image not found",
+      });
+    }
+
+    let imageBuffer = null;
+    let contentType = storedImage.contentType || "image/webp";
+
+    if (storedImage.key) {
+      if (!isWasabiConfigured()) {
+        return res.status(500).json({
+          success: false,
+          message: "Wasabi storage is not configured",
+        });
+      }
+
+      const objectPayload = await getObjectBuffer(storedImage.key);
+      imageBuffer = objectPayload?.buffer || null;
+      contentType = normalizeText(objectPayload?.contentType) || contentType;
+    } else if (storedImage.link) {
+      const response = await fetch(storedImage.link);
+      if (!response.ok) {
+        return res.status(response.status).json({
+          success: false,
+          message: "Failed to fetch finish image",
+        });
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      imageBuffer = Buffer.from(arrayBuffer);
+      contentType =
+        normalizeText(response.headers.get("content-type")) || contentType;
+    }
+
+    if (!Buffer.isBuffer(imageBuffer) || imageBuffer.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Finish image not found",
+      });
+    }
+
+    res.setHeader("Content-Type", contentType || "image/webp");
+    res.setHeader("Content-Length", String(imageBuffer.length));
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    return res.status(200).send(imageBuffer);
+  } catch (error) {
+    console.error("Get Finish Image Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to fetch finish image",
     });
   }
 };

@@ -14,6 +14,20 @@ router.get(
   finishController.getVendorItemsForFinish,
 );
 
+router.get(
+  "/image",
+  auth,
+  authorize("admin", "manager", "QC", "dev", "user"),
+  finishController.getFinishImage,
+);
+
+router.get(
+  "/:id/image",
+  auth,
+  authorize("admin", "manager", "QC", "dev", "user"),
+  finishController.getFinishImage,
+);
+
 router.post(
   "/",
   auth,

@@ -1005,6 +1005,7 @@ const InspectionReport = () => {
     return finishEntries
       .map((entry, index) => ({
         key: String(entry?.finish_id || entry?.unique_code || `finish-${index}`),
+        finishId: String(entry?.finish_id || "").trim(),
         uniqueCode: toDisplayValue(entry?.unique_code),
         vendor: toDisplayValue(entry?.vendor),
         vendorCode: toDisplayValue(entry?.vendor_code),
@@ -1018,7 +1019,13 @@ const InspectionReport = () => {
   const bannerFinish = useMemo(
     () =>
       finishRows.find((row) =>
-        Boolean(finishImageSrcByKey[row.key] || row.imageUrl),
+        Boolean(
+          finishImageSrcByKey[row.key]
+          || (
+            String(row.imageUrl || "").trim().startsWith("data:image/")
+            && !String(row.finishId || "").trim()
+          ),
+        ),
       ) || null,
     [finishImageSrcByKey, finishRows],
   );
@@ -1204,7 +1211,9 @@ const InspectionReport = () => {
 
   useEffect(() => {
     let isMounted = true;
-    const rowsWithImages = finishRows.filter((row) => row.imageUrl);
+    const rowsWithImages = finishRows.filter(
+      (row) => row.finishId || row.imageUrl,
+    );
 
     if (rowsWithImages.length === 0) {
       setFinishImageSrcByKey({});
@@ -1217,17 +1226,34 @@ const InspectionReport = () => {
         setFinishImagesLoading(true);
         const resolvedEntries = await Promise.all(
           finishRows.map(async (row) => {
-            if (!row.imageUrl) {
+            const normalizedFinishId = String(row.finishId || "").trim();
+            const normalizedImageUrl = String(row.imageUrl || "").trim();
+
+            if (!normalizedFinishId && !normalizedImageUrl) {
               return [row.key, ""];
             }
 
             try {
-              const nextImageSrc = row.imageUrl.startsWith("data:image/")
-                ? row.imageUrl
-                : await fetchRemoteImageAsDataUrl(row.imageUrl);
-              return [row.key, nextImageSrc || row.imageUrl];
+              if (normalizedImageUrl && row.uniqueCode !== "N/A") {
+                const response = await api.get(
+                  "/finishes/image",
+                  {
+                    params: {
+                      unique_code: row.uniqueCode,
+                    },
+                    responseType: "blob",
+                  },
+                );
+                return [row.key, await blobToDataUrl(response?.data)];
+              }
+
+              if (normalizedImageUrl.startsWith("data:image/")) {
+                return [row.key, normalizedImageUrl];
+              }
+
+              return [row.key, ""];
             } catch {
-              return [row.key, row.imageUrl];
+              return [row.key, ""];
             }
           }),
         );
