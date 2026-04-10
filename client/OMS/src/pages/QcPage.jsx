@@ -55,6 +55,10 @@ const getQcInspectionStatus = (qc = {}) => {
   const lastInspection = qc?.last_inspection || {};
   const explicitStatus = normalizeInspectionStatus(lastInspection?.status);
 
+  if (explicitStatus === "rejected") {
+    return "Rejected";
+  }
+
   if (explicitStatus === "transfered" || explicitStatus === "transferred") {
     return "Transferred";
   }
@@ -75,6 +79,10 @@ const getQcInspectionStatus = (qc = {}) => {
 
 const renderInspectionStatus = (qc = {}) => {
   const inspectionStatus = getQcInspectionStatus(qc);
+
+  if (inspectionStatus === "Rejected") {
+    return <span className="text-danger fw-semibold">Rejected</span>;
+  }
 
   if (inspectionStatus === "Transferred") {
     return <span className="text-warning fw-semibold">Transferred</span>;

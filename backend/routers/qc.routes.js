@@ -37,6 +37,14 @@ router.patch(
   qcController.markGoodsNotReady
 );
 
+router.patch(
+  "/reject-all/:id",
+  auth,
+  authorize("QC", "admin", "manager"),
+  upload.single("image"),
+  qcController.rejectAllQc,
+);
+
 router.post(
   "/:id/transfer-request",
   auth,

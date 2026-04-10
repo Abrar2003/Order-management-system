@@ -7,6 +7,7 @@ import ShippingModal from "../components/ShippingModal";
 import EditOrderModal from "../components/EditOrderModal";
 import EditInspectionRecordsModal from "../components/EditInspectionRecordsModal";
 import GoodsNotReadyModal from "../components/GoodsNotReadyModal";
+import RejectAllModal from "../components/RejectAllModal";
 import PdfViewerModal from "../components/PdfViewerModal";
 import TransferQcRequestModal from "../components/TransferQcRequestModal";
 import { getUserFromToken } from "../auth/auth.utils";
@@ -345,6 +346,7 @@ const QcDetails = () => {
   const [showEditShippingModal, setShowEditShippingModal] = useState(false);
   const [showEditInspectionModal, setShowEditInspectionModal] = useState(false);
   const [showGoodsNotReadyModal, setShowGoodsNotReadyModal] = useState(false);
+  const [showRejectAllModal, setShowRejectAllModal] = useState(false);
   const [showTransferRequestModal, setShowTransferRequestModal] = useState(false);
   const [showQcImageGallery, setShowQcImageGallery] = useState(false);
   const [activeQcImageIndex, setActiveQcImageIndex] = useState(0);
@@ -1615,6 +1617,23 @@ const QcDetails = () => {
                 <InfoBox label="Label Ranges" value={labelRangesText} />
                 <InfoBox label="Remarks" value={qc.remarks || "None"} />
               </div>
+              {qc?.rejected_image?.url && (
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    className="btn btn-outline-danger btn-sm"
+                    onClick={() =>
+                      window.open(
+                        qc.rejected_image.url,
+                        "_blank",
+                        "noopener,noreferrer",
+                      )
+                    }
+                  >
+                    View Rejected Image
+                  </button>
+                </div>
+              )}
             </section>
 
             <section>
@@ -1699,6 +1718,30 @@ const QcDetails = () => {
                   }
                 >
                   Goods Not Ready
+                </button>
+
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  onClick={() => setShowRejectAllModal(true)}
+                  disabled={!canUpdateQc}
+                  title={
+                    !canUpdateQc
+                      ? !pendingAlignmentInfo.hasRequest
+                        ? "QC is not requested yet. Align QC request before updating."
+                        : !isQcAlignedRecord
+                        ? "QC can update only records aligned to them."
+                        : isInspectionDone
+                        ? "After inspection is done, only admin can update this record."
+                        : !isQcInspectionDateAllowed
+                        ? "QC date rule will be validated while submitting."
+                        : hasUsedOneDayBackdatedUpdate
+                        ? "Backdated one-time rule will be validated while submitting."
+                        : "Only admin, manager, or aligned QC can update this record."
+                      : ""
+                  }
+                >
+                  Reject All
                 </button>
 
                 <button
@@ -1795,6 +1838,17 @@ const QcDetails = () => {
           onClose={() => setShowGoodsNotReadyModal(false)}
           onSuccess={() => {
             setShowGoodsNotReadyModal(false);
+            fetchQcDetails();
+          }}
+        />
+      )}
+
+      {showRejectAllModal && !isViewOnly && (
+        <RejectAllModal
+          qc={qc}
+          onClose={() => setShowRejectAllModal(false)}
+          onSuccess={() => {
+            setShowRejectAllModal(false);
             fetchQcDetails();
           }}
         />

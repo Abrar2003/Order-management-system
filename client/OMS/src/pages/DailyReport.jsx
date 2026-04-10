@@ -62,6 +62,9 @@ const normalizeInspectionStatus = (value) =>
 
 const renderInspectionStatus = (value) => {
   const normalized = normalizeInspectionStatus(value);
+  if (normalized === "rejected") {
+    return <span className="text-danger fw-semibold">Rejected</span>;
+  }
   if (normalized === "transfered" || normalized === "transferred") {
     return <span className="text-warning fw-semibold">Transferred</span>;
   }
@@ -77,6 +80,7 @@ const renderInspectionStatus = (value) => {
 const getAlignedRequestRowClassName = (request) => {
   if (request?.request_pending_action) return "om-report-danger-row";
   const normalizedStatus = normalizeInspectionStatus(request?.inspection_status);
+  if (normalizedStatus === "rejected") return "om-report-danger-row";
   if (normalizedStatus === "transfered" || normalizedStatus === "transferred") {
     return "weekly-summary-warning-row";
   }
@@ -614,6 +618,10 @@ const DailyReport = () => {
                         <td>{request.order_id || "N/A"}</td>
                         <td>
                           <div>{request.item_code || "N/A"}</div>
+                          {normalizeInspectionStatus(request?.inspection_status) ===
+                          "rejected" ? (
+                            <div className="small fw-semibold text-danger">Rejected</div>
+                          ) : null}
                           {request?.is_transferred ? (
                             <div className="small fw-semibold">Transferred</div>
                           ) : null}
@@ -701,15 +709,21 @@ const DailyReport = () => {
                             <tr
                               key={inspection.inspection_id}
                               className={
-                                inspection?.goods_not_ready || inspection?.is_transferred
-                                  ? "weekly-summary-warning-row"
-                                  : ""
+                                inspection?.is_rejected
+                                  ? "om-report-danger-row"
+                                  : inspection?.goods_not_ready ||
+                                      inspection?.is_transferred
+                                    ? "weekly-summary-warning-row"
+                                    : ""
                               }
                             >
                               <td>{formatDateDDMMYYYY(inspection.inspection_date)}</td>
                               <td>{inspection.order_id || "N/A"}</td>
                               <td>
                                 <div>{inspection.item_code || "N/A"}</div>
+                                {inspection?.is_rejected ? (
+                                  <div className="small fw-semibold text-danger">Rejected</div>
+                                ) : null}
                                 {inspection?.is_transferred ? (
                                   <div className="small fw-semibold">Transferred</div>
                                 ) : null}

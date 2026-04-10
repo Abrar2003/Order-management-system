@@ -78,7 +78,12 @@ const qcSchema = new mongoose.Schema(
           ref: "users",
           default: null
         },
-        status: { type: String, enum: [ "open", "inspected", "transfered" ], required: true, default: "open" },
+        status: {
+          type: String,
+          enum: ["open", "inspected", "transfered", "rejected"],
+          required: true,
+          default: "open",
+        },
         remarks: { type: String, default: "" },
         createdBy: {
           type: mongoose.Schema.Types.ObjectId,
@@ -130,6 +135,16 @@ const qcSchema = new mongoose.Schema(
         uploaded_by: { type: AuditActorSchema, default: () => ({}) },
       },
     ],
+    rejected_image: {
+      key: { type: String, default: "", trim: true },
+      hash: { type: String, default: "", trim: true, lowercase: true },
+      originalName: { type: String, default: "", trim: true },
+      contentType: { type: String, default: "", trim: true },
+      size: { type: Number, default: 0, min: 0 },
+      comment: { type: String, default: "", trim: true },
+      uploadedAt: { type: Date, default: null },
+      uploaded_by: { type: AuditActorSchema, default: () => ({}) },
+    },
     labels: {
       type: [{ type: Number, min: 0 }],
       default: [],

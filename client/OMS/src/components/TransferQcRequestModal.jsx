@@ -3,6 +3,15 @@ import api from "../api/axios";
 import { formatDateDDMMYYYY } from "../utils/date";
 
 const normalizeStatus = (value) => String(value || "").trim().toLowerCase();
+const formatStatusLabel = (value) => {
+  const normalized = normalizeStatus(value);
+  if (normalized === "transfered" || normalized === "transferred") {
+    return "Transferred";
+  }
+  if (normalized === "rejected") return "Rejected";
+  if (normalized === "inspected") return "Inspected";
+  return "Open";
+};
 
 const TransferQcRequestModal = ({ qc, onClose, onTransferred }) => {
   const [inspectors, setInspectors] = useState([]);
@@ -48,6 +57,7 @@ const TransferQcRequestModal = ({ qc, onClose, onTransferred }) => {
       const requestedQuantity = Number(entry?.quantity_requested || 0);
       const status = normalizeStatus(entry?.status);
       const isTransferred = status === "transfered" || status === "transferred";
+      const isRejected = status === "rejected";
 
       return {
         id: requestHistoryId,
@@ -59,7 +69,7 @@ const TransferQcRequestModal = ({ qc, onClose, onTransferred }) => {
         quantity_transferable: requestedQuantity,
         status: entry?.status || "open",
         remarks: String(entry?.remarks || "").trim(),
-        selectable: !isTransferred && requestedQuantity > 0,
+        selectable: !isTransferred && !isRejected && requestedQuantity > 0,
       };
     });
   }, [qc?.request_history]);
@@ -175,7 +185,7 @@ const TransferQcRequestModal = ({ qc, onClose, onTransferred }) => {
                       <td>{row.inspector_name}</td>
                       <td>{row.quantity_requested}</td>
                       <td>{row.quantity_transferable}</td>
-                      <td>{row.status || "open"}</td>
+                      <td>{formatStatusLabel(row.status)}</td>
                       <td>{row.remarks || "None"}</td>
                     </tr>
                   ))}

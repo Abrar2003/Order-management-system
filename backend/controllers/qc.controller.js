@@ -78,12 +78,14 @@ const QC_REQUEST_TYPES = Object.freeze({
 const REQUEST_HISTORY_STATUS = Object.freeze({
   OPEN: "open",
   INSPECTED: "inspected",
+  REJECTED: "rejected",
   TRANSFERRED: "transfered",
 });
 const INSPECTION_RECORD_STATUS = Object.freeze({
   PENDING: "pending",
   DONE: "Inspection Done",
   GOODS_NOT_READY: "goods not ready",
+  REJECTED: "rejected",
   TRANSFERRED: "transfered",
 });
 const CLOSED_ORDER_STATUSES = ["Shipped", "Cancelled"];
@@ -279,6 +281,7 @@ const hasInspectionRecordActivity = ({
   status = "",
 } = {}) =>
   isInspectionStatusMatching(status, INSPECTION_RECORD_STATUS.TRANSFERRED) ||
+  isInspectionStatusMatching(status, INSPECTION_RECORD_STATUS.REJECTED) ||
   isInspectionStatusMatching(status, INSPECTION_RECORD_STATUS.GOODS_NOT_READY) ||
   isInspectionStatusMatching(status, INSPECTION_RECORD_STATUS.DONE) ||
   isGoodsNotReadyMarked(goodsNotReady, status) ||
@@ -295,6 +298,10 @@ const resolveInspectionRecordStatus = ({
 } = {}) => {
   if (isInspectionStatusMatching(explicitStatus, INSPECTION_RECORD_STATUS.TRANSFERRED)) {
     return INSPECTION_RECORD_STATUS.TRANSFERRED;
+  }
+
+  if (isInspectionStatusMatching(explicitStatus, INSPECTION_RECORD_STATUS.REJECTED)) {
+    return INSPECTION_RECORD_STATUS.REJECTED;
   }
 
   if (isGoodsNotReadyMarked(goodsNotReady, explicitStatus)) {
@@ -321,7 +328,8 @@ const syncQcRequestHistoryStatuses = (
   const statusPriority = {
     [REQUEST_HISTORY_STATUS.OPEN]: 0,
     [REQUEST_HISTORY_STATUS.INSPECTED]: 1,
-    [REQUEST_HISTORY_STATUS.TRANSFERRED]: 2,
+    [REQUEST_HISTORY_STATUS.REJECTED]: 2,
+    [REQUEST_HISTORY_STATUS.TRANSFERRED]: 3,
   };
   const mergeRequestHistoryStatus = (currentStatus, nextStatus) => {
     const normalizedCurrent = normalizeRequestHistoryStatus(
@@ -362,6 +370,9 @@ const syncQcRequestHistoryStatuses = (
       normalizeInspectionStatus(resolvedInspectionStatus) ===
       normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED)
         ? REQUEST_HISTORY_STATUS.TRANSFERRED
+        : normalizeInspectionStatus(resolvedInspectionStatus) ===
+            normalizeInspectionStatus(INSPECTION_RECORD_STATUS.REJECTED)
+          ? REQUEST_HISTORY_STATUS.REJECTED
         : hasActivity
           ? REQUEST_HISTORY_STATUS.INSPECTED
           : REQUEST_HISTORY_STATUS.OPEN;
@@ -1000,6 +1011,102 @@ const cleanupUploadedQcImageObjects = async (entries = []) => {
   );
 };
 
+const prepareSingleQcImageUpload = async ({
+  file = null,
+  fallbackOriginalName = "qc-image.jpg",
+} = {}) => {
+  const mimeType = normalizeText(file?.mimetype).toLowerCase();
+  const extension = path
+    .extname(String(file?.originalname || ""))
+    .toLowerCase();
+
+  if (
+    !QC_IMAGE_MIME_TYPES.has(mimeType) ||
+    !QC_IMAGE_EXTENSIONS.has(extension)
+  ) {
+    throw new Error("Only JPG, JPEG, and PNG files are allowed");
+  }
+
+  const optimizedImage = await optimizeImageForStorage({
+    buffer: file?.buffer,
+    contentType: mimeType || "application/octet-stream",
+    originalName: file?.originalname || fallbackOriginalName,
+  });
+
+  return {
+    buffer: optimizedImage.buffer,
+    hash: computeBufferSha256(optimizedImage.buffer),
+    originalName: optimizedImage.originalName || fallbackOriginalName,
+    contentType:
+      optimizedImage.contentType || mimeType || "application/octet-stream",
+    extension:
+      path.extname(String(optimizedImage?.originalName || "")).toLowerCase() ||
+      extension ||
+      ".jpg",
+  };
+};
+
+const uploadPreparedQcImage = async ({
+  preparedUpload = null,
+  folder = "qc-images",
+} = {}) => {
+  if (!preparedUpload?.buffer) {
+    throw new Error("Prepared QC image upload is required");
+  }
+
+  return uploadBuffer({
+    buffer: preparedUpload.buffer,
+    key: createStorageKey({
+      folder,
+      originalName: preparedUpload.originalName,
+      extension: preparedUpload.extension,
+    }),
+    originalName: preparedUpload.originalName,
+    contentType: preparedUpload.contentType,
+  });
+};
+
+const buildStoredQcImageEntry = ({
+  uploadResult = {},
+  hash = "",
+  comment = "",
+  uploadedAt = new Date(),
+  uploadedBy = null,
+} = {}) => ({
+  key: uploadResult?.key || "",
+  hash: normalizeQcImageHash(hash),
+  originalName: uploadResult?.originalName || "",
+  contentType: uploadResult?.contentType || "",
+  size: toNonNegativeNumber(uploadResult?.size, 0),
+  comment: normalizeText(comment),
+  uploadedAt,
+  uploaded_by: uploadedBy || buildAuditActor(),
+});
+
+const recalculateQcAggregateQuantities = (qcDoc, inspectionRecords = []) => {
+  if (!qcDoc?.quantities) return;
+
+  const totalChecked = (Array.isArray(inspectionRecords) ? inspectionRecords : []).reduce(
+    (sum, record) => sum + toNonNegativeNumber(record?.checked, 0),
+    0,
+  );
+  const totalPassed = (Array.isArray(inspectionRecords) ? inspectionRecords : []).reduce(
+    (sum, record) => sum + toNonNegativeNumber(record?.passed, 0),
+    0,
+  );
+  const totalVendorOffered = (Array.isArray(inspectionRecords) ? inspectionRecords : []).reduce(
+    (sum, record) => sum + toNonNegativeNumber(record?.vendor_offered, 0),
+    0,
+  );
+  const clientDemandQty = toNonNegativeNumber(qcDoc?.quantities?.client_demand, 0);
+
+  qcDoc.quantities.qc_checked = totalChecked;
+  qcDoc.quantities.qc_passed = totalPassed;
+  qcDoc.quantities.vendor_provision = totalVendorOffered;
+  qcDoc.quantities.pending = Math.max(0, clientDemandQty - totalPassed);
+  qcDoc.quantities.qc_rejected = Math.max(0, totalChecked - totalPassed);
+};
+
 const toPositiveCbmNumber = (value) => {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) return 0;
@@ -1560,6 +1667,7 @@ const upsertInspectionRecordForRequest = async ({
   replaceCbmSnapshot = false,
   allowRequestedDateFallback = true,
   goodsNotReady = null,
+  explicitStatus = "",
 }) => {
   if (!qcDoc?._id) return null;
 
@@ -1611,6 +1719,7 @@ const upsertInspectionRecordForRequest = async ({
           reason: String(goodsNotReady.reason || "").trim(),
         }
       : null;
+  const normalizedExplicitStatus = normalizeText(explicitStatus);
   const qcCbmSnapshot = buildNormalizedCbmSnapshot(qcDoc?.cbm);
 
   if (!inspectionRecord) {
@@ -1625,6 +1734,7 @@ const upsertInspectionRecordForRequest = async ({
         labelsAdded: labelsToAppend,
         labelRanges: labelRangesToAppend,
         goodsNotReady: normalizedGoodsNotReady,
+        explicitStatus: normalizedExplicitStatus,
         requestType: qcDoc?.request_type,
       }),
       request_history_id: requestHistoryId || null,
@@ -1723,6 +1833,7 @@ const upsertInspectionRecordForRequest = async ({
     labelsAdded: inspectionRecord.labels_added,
     labelRanges: inspectionRecord.label_ranges,
     goodsNotReady: inspectionRecord.goods_not_ready,
+    explicitStatus: normalizedExplicitStatus,
     requestType: qcDoc?.request_type,
   });
 
@@ -3010,6 +3121,7 @@ exports.alignQC = async (req, res) => {
         !ignoreUnworkedRequest &&
         latestRequestStatus !== REQUEST_HISTORY_STATUS.TRANSFERRED &&
         latestRequestStatus !== REQUEST_HISTORY_STATUS.INSPECTED &&
+        latestRequestStatus !== REQUEST_HISTORY_STATUS.REJECTED &&
         !latestRequestHasActivity
       ) {
         return res.status(409).json({
@@ -6510,6 +6622,321 @@ exports.markGoodsNotReady = async (req, res) => {
   }
 };
 
+exports.rejectAllQc = async (req, res) => {
+  let uploadedImageKey = "";
+  let shouldCleanupUploadedImage = false;
+
+  try {
+    const reason = String(req.body?.reason || "").trim();
+    if (!reason) {
+      return res.status(400).json({ message: "Reason is required" });
+    }
+
+    const imageFile = req.file;
+    if (!imageFile || !Buffer.isBuffer(imageFile.buffer) || imageFile.buffer.length === 0) {
+      return res.status(400).json({ message: "One rejection image is required" });
+    }
+
+    if (!isWasabiConfigured()) {
+      return res.status(503).json({
+        message: "Wasabi storage is not configured for rejected images",
+      });
+    }
+
+    const qc = await QC.findById(req.params.id)
+      .populate("inspector")
+      .populate("order");
+
+    if (!qc) {
+      return res.status(404).json({ message: "QC record not found" });
+    }
+
+    const beforeInspectionRecords = await Inspection.find({ qc: qc._id }).lean();
+    const beforeQcSnapshot = buildQcEditLogSnapshot(
+      qc.toObject(),
+      beforeInspectionRecords,
+    );
+    const beforeOrderSnapshot = buildOrderAuditSnapshotForQc(qc?.order || null);
+
+    const normalizedRole = String(req.user?.role || "")
+      .trim()
+      .toLowerCase();
+    const isAdmin = normalizedRole === "admin";
+    const isManager = normalizedRole === "manager";
+    const hasElevatedAccess = isAdmin || isManager;
+    const currentUserId = String(req.user?._id || req.user?.id || "").trim();
+    const isInspectionDone = qc?.order?.status === "Inspection Done";
+
+    if (!hasElevatedAccess && isInspectionDone) {
+      return res.status(403).json({
+        message:
+          "Only admin or manager can update this QC record after inspection is done",
+      });
+    }
+
+    const latestRequestEntry = resolveLatestRequestEntry(
+      qc?.request_history || [],
+    );
+    const latestRequestedQuantity = resolveRequestedQuantityFromQc(qc);
+    const hasQcRequest =
+      (Array.isArray(qc?.request_history) && qc.request_history.length > 0) ||
+      latestRequestedQuantity > 0;
+
+    if (!hasQcRequest || !latestRequestEntry) {
+      return res.status(400).json({
+        message: "QC request history is required before rejecting all",
+      });
+    }
+
+    if (!hasElevatedAccess) {
+      if (!currentUserId) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      const alignedInspectorId = String(
+        qc?.inspector?._id || qc?.inspector || "",
+      ).trim();
+      if (!alignedInspectorId || alignedInspectorId !== currentUserId) {
+        return res.status(403).json({
+          message: "QC can update only records aligned to them",
+        });
+      }
+    }
+
+    const inspectionInspectorId = qc?.inspector?._id
+      ? qc.inspector._id
+      : qc.inspector;
+    if (!inspectionInspectorId) {
+      return res.status(400).json({
+        message: "Inspector is required before rejecting this QC request",
+      });
+    }
+
+    const requestedQuantityForRecord = toNonNegativeNumber(
+      latestRequestedQuantity,
+      0,
+    );
+    if (requestedQuantityForRecord <= 0) {
+      return res.status(400).json({
+        message: "Latest request quantity must be greater than 0",
+      });
+    }
+
+    const inspectionDate = toISODateString(new Date());
+    if (!inspectionDate) {
+      return res
+        .status(500)
+        .json({ message: "Failed to resolve rejection date" });
+    }
+
+    const requestedDateForRecord = toISODateString(
+      latestRequestEntry?.request_date || qc?.request_date || inspectionDate,
+    );
+    if (!requestedDateForRecord) {
+      return res.status(400).json({
+        message: "request_date is invalid for inspection records",
+      });
+    }
+
+    const fallbackOriginalName = `${normalizeText(
+      qc?.order_meta?.order_id || qc?._id || "qc",
+    )}-rejected${path.extname(String(imageFile?.originalname || "")).toLowerCase() || ".jpg"}`;
+    const preparedUpload = await prepareSingleQcImageUpload({
+      file: imageFile,
+      fallbackOriginalName,
+    });
+    const uploadResult = await uploadPreparedQcImage({
+      preparedUpload,
+      folder: "qc-rejected-images",
+    });
+    uploadedImageKey = normalizeText(uploadResult?.key || "");
+    shouldCleanupUploadedImage = Boolean(uploadedImageKey);
+
+    const uploadedAt = new Date();
+    const uploadedBy = buildAuditActor(req.user);
+    const nextRejectedImageEntry = buildStoredQcImageEntry({
+      uploadResult,
+      hash: preparedUpload.hash,
+      comment: reason,
+      uploadedAt,
+      uploadedBy,
+    });
+    const previousRejectedImageKey = normalizeText(
+      qc?.rejected_image?.key || "",
+    );
+
+    const requestHistoryId = latestRequestEntry?._id || null;
+    let inspectionRecord = null;
+    if (requestHistoryId && mongoose.Types.ObjectId.isValid(requestHistoryId)) {
+      inspectionRecord = await Inspection.findOne({
+        qc: qc._id,
+        request_history_id: requestHistoryId,
+      }).sort({ createdAt: -1 });
+    }
+
+    if (!inspectionRecord) {
+      inspectionRecord = await Inspection.findOne({
+        qc: qc._id,
+        requested_date: requestedDateForRecord,
+      }).sort({ createdAt: -1 });
+    }
+
+    if (!inspectionRecord) {
+      inspectionRecord = new Inspection({
+        qc: qc._id,
+        inspector: inspectionInspectorId,
+        inspection_date: inspectionDate,
+        status: INSPECTION_RECORD_STATUS.REJECTED,
+        request_history_id: requestHistoryId || null,
+        requested_date: requestedDateForRecord,
+        vendor_requested: requestedQuantityForRecord,
+        vendor_offered: requestedQuantityForRecord,
+        checked: requestedQuantityForRecord,
+        passed: 0,
+        pending_after: 0,
+        cbm: buildNormalizedCbmSnapshot(qc?.cbm),
+        label_ranges: [],
+        labels_added: [],
+        goods_not_ready: {
+          ready: false,
+          reason: "",
+        },
+        remarks: reason,
+        createdBy: req.user._id,
+        updated_by: buildAuditActor(req.user),
+      });
+    } else {
+      inspectionRecord.inspector = inspectionInspectorId;
+      inspectionRecord.request_history_id =
+        requestHistoryId || inspectionRecord.request_history_id || null;
+      inspectionRecord.requested_date = requestedDateForRecord;
+      inspectionRecord.inspection_date = inspectionDate;
+      inspectionRecord.vendor_requested = requestedQuantityForRecord;
+      inspectionRecord.vendor_offered = requestedQuantityForRecord;
+      inspectionRecord.checked = requestedQuantityForRecord;
+      inspectionRecord.passed = 0;
+      inspectionRecord.status = INSPECTION_RECORD_STATUS.REJECTED;
+      inspectionRecord.goods_not_ready = {
+        ready: false,
+        reason: "",
+      };
+      inspectionRecord.remarks = reason;
+      inspectionRecord.updated_by = buildAuditActor(req.user);
+    }
+
+    await inspectionRecord.save();
+
+    qc.inspection_record = Array.isArray(qc.inspection_record)
+      ? qc.inspection_record
+      : [];
+    if (
+      !qc.inspection_record.some(
+        (entry) => String(entry) === String(inspectionRecord._id),
+      )
+    ) {
+      qc.inspection_record.push(inspectionRecord._id);
+    }
+
+    let afterInspectionRecords = await Inspection.find({ qc: qc._id }).lean();
+    recalculateQcAggregateQuantities(qc, afterInspectionRecords);
+
+    const nextPendingAfter = toNonNegativeNumber(qc?.quantities?.pending, 0);
+    if (toNonNegativeNumber(inspectionRecord.pending_after, 0) !== nextPendingAfter) {
+      inspectionRecord.pending_after = nextPendingAfter;
+      inspectionRecord.updated_by = buildAuditActor(req.user);
+      await inspectionRecord.save();
+      afterInspectionRecords = await Inspection.find({ qc: qc._id }).lean();
+    }
+
+    latestRequestEntry.status = REQUEST_HISTORY_STATUS.REJECTED;
+    latestRequestEntry.remarks = reason;
+    stampRequestHistoryEntry(latestRequestEntry, {
+      user: req.user,
+    });
+
+    syncQcRequestHistoryStatuses(qc, afterInspectionRecords, {
+      user: req.user,
+    });
+    syncQcCurrentRequestFieldsFromHistory(qc, afterInspectionRecords);
+
+    qc.last_inspected_date = inspectionDate;
+    qc.remarks = reason;
+    qc.rejected_image = nextRejectedImageEntry;
+    qc.updated_by = buildAuditActor(req.user);
+
+    if (qc?.order) {
+      const clientDemandQty = toNonNegativeNumber(
+        qc?.quantities?.client_demand,
+        0,
+      );
+      const passedQty = toNonNegativeNumber(qc?.quantities?.qc_passed, 0);
+      qc.order.status =
+        clientDemandQty > 0 && passedQty >= clientDemandQty
+          ? "Inspection Done"
+          : "Under Inspection";
+      qc.order.updated_by = buildAuditActor(req.user);
+    }
+
+    await qc.save();
+    shouldCleanupUploadedImage = false;
+    if (qc?.order) {
+      await qc.order.save();
+    }
+
+    await createQcEditLog({
+      reqUser: req.user,
+      qcDoc: qc,
+      beforeSnapshot: beforeQcSnapshot,
+      afterSnapshot: buildQcEditLogSnapshot(qc.toObject(), afterInspectionRecords),
+      operationType: "qc_reject_all",
+      extraRemarks: ["Latest request marked as rejected with a rejection image."],
+    });
+
+    if (qc?.order) {
+      await createOrderEditLogFromQc({
+        reqUser: req.user,
+        orderDoc: qc.order,
+        beforeSnapshot: beforeOrderSnapshot,
+        afterSnapshot: buildOrderAuditSnapshotForQc(qc.order),
+        extraRemarks: ["Order updated from QC reject-all flow."],
+      });
+    }
+
+    if (
+      previousRejectedImageKey &&
+      previousRejectedImageKey !== uploadedImageKey
+    ) {
+      await deleteObject(previousRejectedImageKey).catch(() => undefined);
+    }
+
+    try {
+      await upsertItemFromQc(qc);
+    } catch (itemSyncError) {
+      console.error("Item sync after reject-all update failed:", {
+        qcId: qc?._id,
+        error: itemSyncError?.message || String(itemSyncError),
+      });
+    }
+
+    return res.status(200).json({
+      message: "QC request rejected successfully",
+      data: {
+        qc_id: qc._id,
+        inspection_id: inspectionRecord._id,
+      },
+    });
+  } catch (err) {
+    if (shouldCleanupUploadedImage && uploadedImageKey) {
+      await deleteObject(uploadedImageKey).catch(() => undefined);
+    }
+
+    console.error("Reject All QC Error:", err);
+    return res.status(400).json({
+      message: err?.message || "Failed to reject this QC request",
+    });
+  }
+};
+
 exports.transferQcRequest = async (req, res) => {
   try {
     const qcId = String(req.params.id || "").trim();
@@ -6583,6 +7010,13 @@ exports.transferQcRequest = async (req, res) => {
       return res.status(400).json({ message: "This request is already transferred" });
     }
 
+    if (
+      normalizeRequestHistoryStatus(requestEntry?.status) ===
+      normalizeRequestHistoryStatus(REQUEST_HISTORY_STATUS.REJECTED)
+    ) {
+      return res.status(400).json({ message: "Rejected requests cannot be transferred" });
+    }
+
     const currentRequestInspectorId = String(
       requestEntry?.inspector?._id || requestEntry?.inspector || "",
     ).trim();
@@ -6614,6 +7048,15 @@ exports.transferQcRequest = async (req, res) => {
     ) {
       return res.status(400).json({
         message: "The latest inspection record is already transferred",
+      });
+    }
+
+    if (
+      normalizeInspectionStatus(latestInspectionStatus) ===
+      normalizeInspectionStatus(INSPECTION_RECORD_STATUS.REJECTED)
+    ) {
+      return res.status(400).json({
+        message: "Rejected requests cannot be transferred",
       });
     }
 
@@ -6950,15 +7393,20 @@ exports.getDailyReport = async (req, res) => {
     const isTransferredStatusValue = (value) =>
       normalizeInspectionStatus(value) ===
       normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED);
+    const isRejectedStatusValue = (value) =>
+      normalizeInspectionStatus(value) ===
+      normalizeInspectionStatus(INSPECTION_RECORD_STATUS.REJECTED);
     const isTransferredInspectionOnReportDate = (inspection = {}) =>
       isTransferredStatusValue(resolveInspectionStatusForReport(inspection))
       && isSameReportDateFromTimestamp(
         inspection?.updatedAt || inspection?.createdAt,
       );
     const isInspectionVisibleForReportDate = (inspection = {}) => {
-      const effectiveDate = isTransferredStatusValue(
-        resolveInspectionStatusForReport(inspection),
-      )
+      const resolvedInspectionStatus = resolveInspectionStatusForReport(inspection);
+      const shouldUseMutationTimestamp =
+        isTransferredStatusValue(resolvedInspectionStatus) ||
+        isRejectedStatusValue(resolvedInspectionStatus);
+      const effectiveDate = shouldUseMutationTimestamp
         ? inspection?.updatedAt || inspection?.createdAt || inspection?.inspection_date
         : inspection?.inspection_date || inspection?.createdAt;
       return isOnOrBeforeReportDate(effectiveDate);
@@ -7136,9 +7584,16 @@ exports.getDailyReport = async (req, res) => {
         .map((requestEntry) => {
           const requestDateKey = toReportDateKey(requestEntry?.request_date);
           if (!requestDateKey || requestDateKey > reportDate) return null;
+          const normalizedRequestEntryStatus = normalizeRequestHistoryStatus(
+            requestEntry?.status,
+          );
           const isTransferredRequestOnReportDate =
-            normalizeRequestHistoryStatus(requestEntry?.status) ===
+            normalizedRequestEntryStatus ===
               normalizeRequestHistoryStatus(REQUEST_HISTORY_STATUS.TRANSFERRED)
+            && isSameReportDateFromTimestamp(requestEntry?.updated_at);
+          const isRejectedRequestOnReportDate =
+            normalizedRequestEntryStatus ===
+              normalizeRequestHistoryStatus(REQUEST_HISTORY_STATUS.REJECTED)
             && isSameReportDateFromTimestamp(requestEntry?.updated_at);
 
           const requestLookupKey = buildDailyRequestLookupKey({
@@ -7160,7 +7615,9 @@ exports.getDailyReport = async (req, res) => {
             status: latestInspection?.status || requestEntry?.status,
           });
           const shouldIncludeRequest =
-            requestDateKey === reportDate || isTransferredRequestOnReportDate;
+            requestDateKey === reportDate ||
+            isTransferredRequestOnReportDate ||
+            isRejectedRequestOnReportDate;
 
           if (!shouldIncludeRequest) return null;
 
@@ -7198,6 +7655,9 @@ exports.getDailyReport = async (req, res) => {
           const isTransferred =
             normalizedInspectionStatus ===
             normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED);
+          const isRejected =
+            normalizedInspectionStatus ===
+            normalizeInspectionStatus(INSPECTION_RECORD_STATUS.REJECTED);
           const isInspectionDone =
             normalizedInspectionStatus ===
             normalizeInspectionStatus(INSPECTION_RECORD_STATUS.DONE);
@@ -7206,7 +7666,7 @@ exports.getDailyReport = async (req, res) => {
             request_row_id: requestLookupKey || `${qcId}:${requestDateKey}`,
             qc_id: qc._id,
             request_history_id: requestEntry?.request_history_id || null,
-            request_date: isTransferredRequestOnReportDate
+            request_date: isTransferredRequestOnReportDate || isRejectedRequestOnReportDate
               ? reportDate
               : requestDateKey,
             order_id: qc?.order_meta?.order_id || qc?.order?.order_id || "N/A",
@@ -7231,7 +7691,11 @@ exports.getDailyReport = async (req, res) => {
             request_pending_action: !hasInspectionActivity,
             goods_not_ready: goodsNotReady,
             is_transferred: isTransferred,
+            is_rejected: isRejected,
             transfer_note: isTransferred
+              ? normalizeText(latestInspection?.remarks || requestEntry?.remarks || "")
+              : "",
+            rejection_reason: isRejected
               ? normalizeText(latestInspection?.remarks || requestEntry?.remarks || "")
               : "",
             goods_not_ready_reason: goodsNotReady
@@ -7267,10 +7731,12 @@ exports.getDailyReport = async (req, res) => {
         explicitStatus: inspection?.status,
       });
       const isTransferred = isTransferredStatusValue(inspectionStatus);
+      const isRejected = isRejectedStatusValue(inspectionStatus);
 
       return {
         inspection_id: inspection._id,
-        inspection_date: isTransferredInspectionOnReportDate(inspection)
+        inspection_date:
+          isTransferredInspectionOnReportDate(inspection)
           ? reportDate
           : inspection.inspection_date || null,
         order_id:
@@ -7290,7 +7756,11 @@ exports.getDailyReport = async (req, res) => {
         ),
         inspection_status: inspectionStatus,
         is_transferred: isTransferred,
+        is_rejected: isRejected,
         transfer_note: isTransferred
+          ? normalizeText(inspection?.remarks || "")
+          : "",
+        rejection_reason: isRejected
           ? normalizeText(inspection?.remarks || "")
           : "",
         goods_not_ready_reason: getGoodsNotReadyReason(
@@ -8054,6 +8524,9 @@ exports.getQCById = async (req, res) => {
         },
       ),
     );
+    const rejectedImageWithSignedUrl = qcData?.rejected_image
+      ? await buildSignedQcImage(qcData.rejected_image)
+      : null;
     const sortedLabels = normalizeLabels(qcData.labels);
     const sortedRequestHistory = Array.isArray(qcData.request_history)
       ? [...qcData.request_history].sort((a, b) => {
@@ -8085,6 +8558,12 @@ exports.getQCById = async (req, res) => {
         ...qcData,
         item_master: itemMasterWithSignedUrls,
         qc_images: qcImagesWithSignedUrls,
+        rejected_image: rejectedImageWithSignedUrl
+          ? {
+              ...qcData.rejected_image,
+              ...rejectedImageWithSignedUrl,
+            }
+          : qcData?.rejected_image || null,
         labels: sortedLabels,
         request_history: sortedRequestHistory,
         inspection_record: sortedInspectionRecords,

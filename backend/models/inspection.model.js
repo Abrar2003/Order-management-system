@@ -35,7 +35,13 @@ const InspectionSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["pending", "Inspection Done", "goods not ready", "transfered"],
+      enum: [
+        "pending",
+        "Inspection Done",
+        "goods not ready",
+        "transfered",
+        "rejected",
+      ],
       default: "pending",
       index: true
     },
