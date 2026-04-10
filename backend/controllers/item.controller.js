@@ -1,5 +1,6 @@
 const Item = require("../models/item.model");
 const Order = require("../models/order.model");
+const QC = require("../models/qc.model");
 const mongoose = require("mongoose");
 const path = require("path");
 const { syncAllItemsFromOrdersAndQc } = require("../services/itemSync");
@@ -712,6 +713,58 @@ const buildItemMatch = ({ search, brand, vendor } = {}) => {
   return { $and: conditions };
 };
 
+const normalizeLookupKey = (value) => normalizeTextField(value).toLowerCase();
+
+const buildLatestInspectionReportLookup = async (itemCodes = []) => {
+  const normalizedCodes = [...new Set(
+    (Array.isArray(itemCodes) ? itemCodes : [])
+      .map((code) => normalizeTextField(code))
+      .filter(Boolean),
+  )];
+
+  if (normalizedCodes.length === 0) {
+    return new Map();
+  }
+
+  const qcRows = await QC.find({
+    $or: normalizedCodes.map((code) => ({
+      "item.item_code": new RegExp(`^\\s*${escapeRegex(code)}\\s*$`, "i"),
+    })),
+  })
+    .select("_id item.item_code last_inspected_date inspection_record updatedAt createdAt")
+    .lean();
+
+  const latestByItemCode = new Map();
+
+  (Array.isArray(qcRows) ? qcRows : []).forEach((qcDoc) => {
+    const itemCodeKey = normalizeLookupKey(qcDoc?.item?.item_code);
+    if (!itemCodeKey) return;
+
+    const hasInspectionReport =
+      Boolean(normalizeTextField(qcDoc?.last_inspected_date))
+      || (Array.isArray(qcDoc?.inspection_record) && qcDoc.inspection_record.length > 0);
+    if (!hasInspectionReport) return;
+
+    const sortTimestamp = Math.max(
+      toTimestamp(qcDoc?.last_inspected_date),
+      toTimestamp(qcDoc?.updatedAt),
+      toTimestamp(qcDoc?.createdAt),
+    );
+    const previousEntry = latestByItemCode.get(itemCodeKey);
+    if (previousEntry && previousEntry.sortTimestamp >= sortTimestamp) {
+      return;
+    }
+
+    latestByItemCode.set(itemCodeKey, {
+      qc_id: String(qcDoc?._id || "").trim(),
+      last_inspected_date: normalizeTextField(qcDoc?.last_inspected_date),
+      sortTimestamp,
+    });
+  });
+
+  return latestByItemCode;
+};
+
 exports.getItems = async (req, res) => {
   try {
     const search = req.query.search;
@@ -738,9 +791,25 @@ exports.getItems = async (req, res) => {
         Item.distinct("code", buildItemMatch({ brand, vendor })),
       ]);
 
+    const latestInspectionReportLookup = await buildLatestInspectionReportLookup(
+      (Array.isArray(items) ? items : []).map((item) => item?.code),
+    );
+    const itemsWithLatestInspectionReport = (Array.isArray(items) ? items : []).map((item) => {
+      const latestInspectionReport = latestInspectionReportLookup.get(
+        normalizeLookupKey(item?.code),
+      );
+
+      return {
+        ...item,
+        latest_inspection_report_qc_id: latestInspectionReport?.qc_id || "",
+        latest_inspection_report_date:
+          latestInspectionReport?.last_inspected_date || "",
+      };
+    });
+
     return res.status(200).json({
       success: true,
-      data: items,
+      data: itemsWithLatestInspectionReport,
       pagination: {
         page,
         limit,

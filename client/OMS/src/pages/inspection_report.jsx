@@ -643,6 +643,10 @@ const InspectionReport = () => {
   const [productImageLoading, setProductImageLoading] = useState(false);
 
   const backTarget = useMemo(() => {
+    const fromPreviousPage = String(location.state?.fromPreviousPage || "").trim();
+    if (fromPreviousPage.startsWith("/items") || fromPreviousPage.startsWith("/qc/")) {
+      return fromPreviousPage;
+    }
     const fromQcDetails = String(location.state?.fromQcDetails || "").trim();
     if (fromQcDetails.startsWith("/qc/")) {
       return fromQcDetails;

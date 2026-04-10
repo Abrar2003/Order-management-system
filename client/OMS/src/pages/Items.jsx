@@ -306,6 +306,20 @@ const Items = () => {
     [location.pathname, location.search, navigate],
   );
 
+  const navigateToLatestInspectionReport = useCallback(
+    (item) => {
+      const qcId = String(item?.latest_inspection_report_qc_id || "").trim();
+      if (!qcId) return;
+
+      navigate(`/qc/${encodeURIComponent(qcId)}/inspection-report`, {
+        state: {
+          fromPreviousPage: `${location.pathname}${location.search}`,
+        },
+      });
+    },
+    [location.pathname, location.search, navigate],
+  );
+
   return (
     <>
       <Navbar />
@@ -448,7 +462,7 @@ const Items = () => {
                       <th>CBM</th>
                       <th>Item LBH</th>
                       <th>Box LBH</th>
-                      {canEditItems && <th>Action</th>}
+                      <th>Action</th>
                       {/* <th>Source</th> */}
                       {/* <th>Updated At</th> */}
                     </tr>
@@ -456,7 +470,7 @@ const Items = () => {
                   <tbody>
                     {rows.length === 0 && (
                       <tr>
-                        <td colSpan={canEditItems ? "15" : "14"} className="text-center py-4">
+                        <td colSpan="9" className="text-center py-4">
                           No items found
                         </td>
                       </tr>
@@ -486,17 +500,32 @@ const Items = () => {
                         <td>{formatCbm(getCalculatedInspectedCbm(item))}</td>
                         <td>{formatLbhValue(getInspectedItemLbh(item), { fallback: "0.00 x 0.00 x 0.00" })}</td>
                         <td>{formatLbhValue(getInspectedBoxLbh(item), { fallback: "0.00 x 0.00 x 0.00" })}</td>
-                        {canEditItems && (
-                          <td>
+                        <td>
+                          <div className="d-flex flex-wrap gap-2">
                             <button
                               type="button"
-                              className="btn btn-outline-primary btn-sm"
-                              onClick={() => setSelectedItem(item)}
+                              className="btn btn-outline-secondary btn-sm"
+                              onClick={() => navigateToLatestInspectionReport(item)}
+                              disabled={!item?.latest_inspection_report_qc_id}
+                              title={
+                                item?.latest_inspection_report_qc_id
+                                  ? "Open latest inspection report"
+                                  : "No inspection report available yet"
+                              }
                             >
-                              Edit
+                              View Item
                             </button>
-                          </td>
-                        )}
+                            {canEditItems && (
+                              <button
+                                type="button"
+                                className="btn btn-outline-primary btn-sm"
+                                onClick={() => setSelectedItem(item)}
+                              >
+                                Edit
+                              </button>
+                            )}
+                          </div>
+                        </td>
                         {/* <td>
                           {item?.source?.from_orders ? "Orders" : ""}
                           {item?.source?.from_orders && item?.source?.from_qc ? " + " : ""}
