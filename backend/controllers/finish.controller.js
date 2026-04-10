@@ -8,6 +8,7 @@ const {
   uploadBuffer,
   deleteObject,
   getObjectBuffer,
+  getObjectUrl,
 } = require("../services/wasabiStorage.service");
 
 const normalizeText = (value) => String(value ?? "").trim();
@@ -23,14 +24,22 @@ const escapeRegex = (value = "") =>
     .trim()
     .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const toStoredImage = (image = {}) => ({
-  key: normalizeText(image?.key || image?.public_id),
-  originalName: normalizeText(image?.originalName),
-  contentType: normalizeText(image?.contentType),
-  size: Math.max(0, Number(image?.size || 0) || 0),
-  link: normalizeText(image?.link),
-  public_id: normalizeText(image?.public_id || image?.key),
-});
+const toStoredImage = (image = {}) => {
+  const key = normalizeText(image?.key || image?.public_id);
+  const link = normalizeText(image?.link);
+  
+  // If key exists but link is empty, generate link from key
+  const finalLink = link || (key && isWasabiConfigured() ? getObjectUrl(key) : "");
+  
+  return {
+    key,
+    originalName: normalizeText(image?.originalName),
+    contentType: normalizeText(image?.contentType),
+    size: Math.max(0, Number(image?.size || 0) || 0),
+    link: finalLink,
+    public_id: normalizeText(image?.public_id || image?.key),
+  };
+};
 
 const normalizeFinishSummary = ({
   finishId = null,
@@ -105,12 +114,14 @@ const uploadFinishImage = async (file, uniqueCode) => {
     contentType: mimeType || "application/octet-stream",
   });
 
+  const imageLink = isWasabiConfigured() ? getObjectUrl(uploadResult.key) : "";
+  
   return {
     key: uploadResult.key,
     originalName: uploadResult.originalName,
     contentType: uploadResult.contentType,
     size: uploadResult.size,
-    link: "",
+    link: imageLink,
     public_id: uploadResult.key,
   };
 };
@@ -190,12 +201,14 @@ exports.getFinishImage = async (req, res) => {
     const requestedUniqueCode = normalizeCode(
       req.query.unique_code || req.query.uniqueCode || "",
     );
-    const requestedIdentifier = String(req.params.id || "").trim();
+    const requestedIdentifier = String(req.query.unique_code || req.query.uniqueCode || "").trim();
     const lookupConditions = [];
 
     if (requestedUniqueCode) {
       lookupConditions.push({ unique_code: requestedUniqueCode });
     }
+    console.log("lookupConditions", lookupConditions)
+    console.log("requestedIdentifier", requestedIdentifier)
     if (mongoose.Types.ObjectId.isValid(requestedIdentifier)) {
       lookupConditions.push({
         _id: new mongoose.Types.ObjectId(requestedIdentifier),
@@ -219,6 +232,7 @@ exports.getFinishImage = async (req, res) => {
     })
       .select("unique_code image")
       .lean();
+      console.log("finish", finish)
     if (!finish) {
       return res.status(404).json({
         success: false,
@@ -227,6 +241,7 @@ exports.getFinishImage = async (req, res) => {
     }
 
     const storedImage = toStoredImage(finish?.image);
+    // console.log("storedImage", storedImage)
     if (!storedImage.key && !storedImage.link) {
       return res.status(404).json({
         success: false,
@@ -248,19 +263,21 @@ exports.getFinishImage = async (req, res) => {
       const objectPayload = await getObjectBuffer(storedImage.key);
       imageBuffer = objectPayload?.buffer || null;
       contentType = normalizeText(objectPayload?.contentType) || contentType;
-    } else if (storedImage.link) {
-      const response = await fetch(storedImage.link);
-      if (!response.ok) {
-        return res.status(response.status).json({
-          success: false,
-          message: "Failed to fetch finish image",
-        });
+    }
+    
+    // Fallback to link if key failed or link is available
+    if (!imageBuffer && storedImage.link) {
+      try {
+        const response = await fetch(storedImage.link);
+        if (response.ok) {
+          const arrayBuffer = await response.arrayBuffer();
+          imageBuffer = Buffer.from(arrayBuffer);
+          contentType = normalizeText(response.headers.get("content-type")) || contentType;
+        }
+      } catch (error) {
+        // Link fetch failed, but we'll handle it below
+        console.error("Failed to fetch finish image from link:", error?.message);
       }
-
-      const arrayBuffer = await response.arrayBuffer();
-      imageBuffer = Buffer.from(arrayBuffer);
-      contentType =
-        normalizeText(response.headers.get("content-type")) || contentType;
     }
 
     if (!Buffer.isBuffer(imageBuffer) || imageBuffer.length === 0) {

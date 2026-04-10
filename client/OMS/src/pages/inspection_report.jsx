@@ -478,12 +478,30 @@ const fetchRemoteImageAsDataUrl = async (url) => {
   const normalizedUrl = String(url || "").trim();
   if (!normalizedUrl) return "";
 
-  const response = await fetch(normalizedUrl, { mode: "cors" });
-  if (!response.ok) {
-    throw new Error(`Failed to fetch image: ${response.status}`);
+  // Handle relative API URLs by constructing proper URL
+  let finalUrl = normalizedUrl;
+  if (normalizedUrl.startsWith("/finishes/")) {
+    // For API relative URLs like /finishes/public/image, construct full URL
+    const apiBase = import.meta.env.VITE_API_BASE_URL || "";
+    if (apiBase && !normalizedUrl.startsWith(apiBase)) {
+      finalUrl = apiBase + normalizedUrl;
+    }
   }
 
-  return blobToDataUrl(await response.blob());
+  try {
+    const response = await fetch(finalUrl, { 
+      mode: "cors",
+      credentials: "omit"
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch image: ${response.status}`);
+    }
+
+    return blobToDataUrl(await response.blob());
+  } catch (error) {
+    // If fetch fails, rethrow to allow calling code to handle gracefully
+    throw error;
+  }
 };
 
 const toComparableValue = (value) =>
@@ -641,8 +659,8 @@ const InspectionReport = () => {
   const [brandLogoLoading, setBrandLogoLoading] = useState(false);
   const [productImageSrc, setProductImageSrc] = useState("");
   const [productImageLoading, setProductImageLoading] = useState(false);
-  const [finishImageSrcByKey, setFinishImageSrcByKey] = useState({});
-  const [finishImagesLoading, setFinishImagesLoading] = useState(false);
+  const [finishImageSrc, setFinishImageSrc] = useState("");
+  const [finishImageLoading, setFinishImageLoading] = useState(false);
 
   const backTarget = useMemo(() => {
     const fromPreviousPage = String(location.state?.fromPreviousPage || "").trim();
@@ -1019,15 +1037,14 @@ const InspectionReport = () => {
   const bannerFinish = useMemo(
     () =>
       finishRows.find((row) =>
-        Boolean(
-          finishImageSrcByKey[row.key]
-          || (
-            String(row.imageUrl || "").trim().startsWith("data:image/")
-            && !String(row.finishId || "").trim()
-          ),
-        ),
+        Boolean(String(row.imageUrl || "").trim()),
       ) || null,
-    [finishImageSrcByKey, finishRows],
+    [finishRows],
+  );
+
+  const bannerFinishImageUrl = useMemo(
+    () => String(bannerFinish?.imageUrl || "").trim(),
+    [bannerFinish?.imageUrl],
   );
 
   const differenceLogs = useMemo(() => {
@@ -1210,70 +1227,40 @@ const InspectionReport = () => {
   }, [productImageUrl]);
 
   useEffect(() => {
-    let isMounted = true;
-    const rowsWithImages = finishRows.filter(
-      (row) => row.finishId || row.imageUrl,
-    );
-
-    if (rowsWithImages.length === 0) {
-      setFinishImageSrcByKey({});
-      setFinishImagesLoading(false);
-      return undefined;
+    if (!bannerFinishImageUrl) {
+      setFinishImageSrc("");
+      setFinishImageLoading(false);
+      return;
     }
 
-    const loadFinishImages = async () => {
+    let isMounted = true;
+    setFinishImageLoading(true);
+
+    const loadFinishImage = async () => {
       try {
-        setFinishImagesLoading(true);
-        const resolvedEntries = await Promise.all(
-          finishRows.map(async (row) => {
-            const normalizedFinishId = String(row.finishId || "").trim();
-            const normalizedImageUrl = String(row.imageUrl || "").trim();
-
-            if (!normalizedFinishId && !normalizedImageUrl) {
-              return [row.key, ""];
-            }
-
-            try {
-              if (normalizedImageUrl && row.uniqueCode !== "N/A") {
-                const response = await api.get(
-                  "/finishes/image",
-                  {
-                    params: {
-                      unique_code: row.uniqueCode,
-                    },
-                    responseType: "blob",
-                  },
-                );
-                return [row.key, await blobToDataUrl(response?.data)];
-              }
-
-              if (normalizedImageUrl.startsWith("data:image/")) {
-                return [row.key, normalizedImageUrl];
-              }
-
-              return [row.key, ""];
-            } catch {
-              return [row.key, ""];
-            }
-          }),
-        );
-
+        const nextImageSrc = bannerFinishImageUrl.startsWith("data:image/")
+          ? bannerFinishImageUrl
+          : await fetchRemoteImageAsDataUrl(bannerFinishImageUrl);
         if (isMounted) {
-          setFinishImageSrcByKey(Object.fromEntries(resolvedEntries));
+          setFinishImageSrc(nextImageSrc);
+        }
+      } catch {
+        if (isMounted) {
+          setFinishImageSrc(bannerFinishImageUrl);
         }
       } finally {
         if (isMounted) {
-          setFinishImagesLoading(false);
+          setFinishImageLoading(false);
         }
       }
     };
 
-    loadFinishImages();
+    loadFinishImage();
 
     return () => {
       isMounted = false;
     };
-  }, [finishRows]);
+  }, [bannerFinishImageUrl]);
 
   const handleConfirmAndExport = useCallback(async () => {
     if (
@@ -1282,7 +1269,7 @@ const InspectionReport = () => {
       !qc ||
       brandLogoLoading ||
       productImageLoading ||
-      finishImagesLoading
+      finishImageLoading
     ) {
       return;
     }
@@ -1360,7 +1347,7 @@ const InspectionReport = () => {
     } finally {
       setExportingPdf(false);
     }
-  }, [brandLogoLoading, exportingPdf, finishImagesLoading, id, productImageLoading, qc]);
+  }, [brandLogoLoading, exportingPdf, finishImageLoading, id, productImageLoading, qc]);
 
   useEffect(() => {
     fetchQcDetails();
@@ -1405,12 +1392,12 @@ const InspectionReport = () => {
               exportingPdf ||
               brandLogoLoading ||
               productImageLoading ||
-              finishImagesLoading
+              finishImageLoading
             }
           >
             {exportingPdf
               ? "Exporting..."
-              : brandLogoLoading || productImageLoading || finishImagesLoading
+              : brandLogoLoading || productImageLoading || finishImageLoading
               ? "Loading images..."
               : "Confirm & Export PDF"}
           </button>
@@ -1460,7 +1447,7 @@ const InspectionReport = () => {
                   {bannerFinish && (
                     <div className="inspection-report-brand-panel inspection-report-finish-banner-panel">
                       <img
-                        src={finishImageSrcByKey[bannerFinish.key] || bannerFinish.imageUrl}
+                        src={finishImageSrc || bannerFinish.imageUrl}
                         alt={`${bannerFinish.uniqueCode} finish`}
                         className="inspection-report-brand-logo inspection-report-brand-logo--finish"
                       />

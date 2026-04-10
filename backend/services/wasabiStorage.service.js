@@ -4,6 +4,8 @@ const {
   S3Client,
   DeleteObjectCommand,
   GetObjectCommand,
+  GetBucketCorsCommand,
+  PutBucketCorsCommand,
 } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
@@ -321,12 +323,108 @@ const getObjectBuffer = async (key) => {
   }
 };
 
+const getBucketCors = async () => {
+  const client = getClient();
+  const config = getConfig();
+
+  try {
+    const response = await client.send(
+      new GetBucketCorsCommand({
+        Bucket: config.bucket,
+      }),
+    );
+
+    return Array.isArray(response?.CORSRules) ? response.CORSRules : [];
+  } catch (error) {
+    const errorName = String(error?.name || "").trim();
+    if (errorName === "NoSuchCORSConfiguration") {
+      return [];
+    }
+
+    throw new Error(
+      `Wasabi get bucket CORS failed: ${error?.message || String(error)}`,
+    );
+  }
+};
+
+const putBucketCors = async ({
+  allowedOrigins = [],
+  allowedMethods = ["GET", "HEAD"],
+  allowedHeaders = ["*"],
+  exposeHeaders = ["ETag", "Content-Length", "Content-Type"],
+  maxAgeSeconds = 3600,
+} = {}) => {
+  const client = getClient();
+  const config = getConfig();
+
+  const normalizedOrigins = [...new Set(
+    (Array.isArray(allowedOrigins) ? allowedOrigins : [])
+      .map((origin) => normalizeValue(origin))
+      .filter(Boolean),
+  )];
+
+  if (normalizedOrigins.length === 0) {
+    throw new Error("At least one allowed origin is required for bucket CORS");
+  }
+
+  const normalizedMethods = [...new Set(
+    (Array.isArray(allowedMethods) ? allowedMethods : [])
+      .map((method) => normalizeValue(method).toUpperCase())
+      .filter(Boolean),
+  )];
+
+  if (normalizedMethods.length === 0) {
+    throw new Error("At least one allowed method is required for bucket CORS");
+  }
+
+  const normalizedAllowedHeaders = [...new Set(
+    (Array.isArray(allowedHeaders) ? allowedHeaders : [])
+      .map((header) => normalizeValue(header))
+      .filter(Boolean),
+  )];
+
+  const normalizedExposeHeaders = [...new Set(
+    (Array.isArray(exposeHeaders) ? exposeHeaders : [])
+      .map((header) => normalizeValue(header))
+      .filter(Boolean),
+  )];
+
+  try {
+    await client.send(
+      new PutBucketCorsCommand({
+        Bucket: config.bucket,
+        CORSConfiguration: {
+          CORSRules: [
+            {
+              AllowedOrigins: normalizedOrigins,
+              AllowedMethods: normalizedMethods,
+              AllowedHeaders: normalizedAllowedHeaders,
+              ExposeHeaders: normalizedExposeHeaders,
+              MaxAgeSeconds: Number.isFinite(maxAgeSeconds) && maxAgeSeconds > 0
+                ? Number(maxAgeSeconds)
+                : 3600,
+            },
+          ],
+        },
+      }),
+    );
+
+    return getBucketCors();
+  } catch (error) {
+    throw new Error(
+      `Wasabi put bucket CORS failed: ${error?.message || String(error)}`,
+    );
+  }
+};
+
 module.exports = {
   isConfigured,
   createStorageKey,
   getObjectUrl,
   getSignedObjectUrl,
   getObjectBuffer,
+  getBucketCors,
+  putBucketCors,
   uploadBuffer,
   deleteObject,
 };

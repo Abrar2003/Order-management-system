@@ -977,6 +977,19 @@ const buildSignedItemImage = async (image = {}) =>
 const buildSignedQcImage = async (image = {}) =>
   buildSignedItemFile(image, { logLabel: "QC image" });
 
+const buildFinishImagePublicUrl = (finishEntry = {}) => {
+  const uniqueCode = String(finishEntry?.unique_code || "").trim().toUpperCase();
+  if (!uniqueCode) return null;
+  
+  return {
+    key: "",
+    originalName: "",
+    contentType: "",
+    size: 0,
+    url: `/finishes/public/image?unique_code=${encodeURIComponent(uniqueCode)}`,
+  };
+};
+
 const normalizeQcImageHash = (value) =>
   normalizeText(value).toLowerCase();
 
@@ -8551,7 +8564,7 @@ exports.getQCById = async (req, res) => {
           ...entry,
           finish_id: matchedFinish?._id || null,
           image: matchedFinish?.image
-            ? await buildSignedItemImage(matchedFinish.image)
+            ? buildFinishImagePublicUrl(entry)
             : null,
         };
       }),

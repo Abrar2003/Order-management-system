@@ -7,6 +7,12 @@ const finishController = require("../controllers/finish.controller");
 
 const router = express.Router();
 
+// Public endpoint for fetching finish images (no auth required)
+router.get(
+  "/public/image",
+  finishController.getFinishImage,
+);
+
 router.get(
   "/vendor-items",
   auth,

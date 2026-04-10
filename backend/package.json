@@ -8,6 +8,7 @@
     "prestart": "npm run check:env",
     "start": "node index.js",
     "dev": "nodemon index.js",
+    "wasabi:cors": "node scripts/setWasabiCors.js",
     "export:pis:pdf": "node scripts/exportPisPdfExample.js",
     "sync:pis": "node scripts/syncPisWorkbooks.js",
     "test": "echo \"Error: no test specified\" && exit 1",
