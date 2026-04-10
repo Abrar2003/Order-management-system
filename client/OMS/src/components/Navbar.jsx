@@ -42,6 +42,7 @@ const Navbar = () => {
   const canAccessQc = ["qc", "admin", "manager", "dev", "user"].includes(normalizedRole);
   const isQcOnlyRole = normalizedRole === "qc";
   const canManageOrders = ["admin", "manager", "dev"].includes(normalizedRole);
+  const canEditPis = ["admin", "manager", "dev"].includes(normalizedRole);
   const canViewOrderPages = ["admin", "manager", "dev", "user"].includes(normalizedRole);
   const canManageLabels = ["admin", "manager"].includes(normalizedRole);
   const canCreateUsers = normalizedRole === "admin";
@@ -90,12 +91,16 @@ const Navbar = () => {
       links.push({ label: "PIS", path: "/pis" });
     }
 
+    if (canEditPis) {
+      links.push({ label: "Upload Finish", path: "/pis?open_finish=1" });
+    }
+
     if (canCreateUsers) {
       links.push({ label: "Archived Orders", path: "/archived-orders" });
     }
 
     return links;
-  }, [canAccessQc, canViewOrderPages, canCreateUsers, isQcOnlyRole]);
+  }, [canAccessQc, canViewOrderPages, canEditPis, canCreateUsers, isQcOnlyRole]);
 
   const reportRouteLinks = useMemo(() => {
     if (!canAccessQc || isQcOnlyRole) return [];

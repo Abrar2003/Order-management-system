@@ -20,12 +20,38 @@ const AXIS_TICK = Object.freeze({ fontSize: 12 });
 const LINE_ACTIVE_DOT = Object.freeze({ r: 4 });
 const CHART_LABEL_DATA_KEY = "label";
 const CHART_CBM_DATA_KEY = "cbm";
-const CHART_PRIMARY_COLOR = "#0d6efd";
-const CHART_GRID_COLOR = "#d9dee3";
 const monthYearFormatter = new Intl.DateTimeFormat("en-GB", {
   month: "short",
   year: "numeric",
   timeZone: "UTC",
+});
+const CHART_THEME_FALLBACKS = Object.freeze({
+  line: "#615342",
+  bar: "#5d7354",
+  grid: "#cbbdaa",
+  axis: "#73685d",
+  surface: "#fffdfa",
+});
+
+const getThemeChartColor = (name, fallback) => {
+  if (typeof window === "undefined" || !window.document?.documentElement) {
+    return fallback;
+  }
+
+  const value = window
+    .getComputedStyle(window.document.documentElement)
+    .getPropertyValue(name)
+    .trim();
+
+  return value || fallback;
+};
+
+const readInspectorChartPalette = () => ({
+  line: getThemeChartColor("--om-chart-line", CHART_THEME_FALLBACKS.line),
+  bar: getThemeChartColor("--om-chart-bar", CHART_THEME_FALLBACKS.bar),
+  grid: getThemeChartColor("--om-chart-grid", CHART_THEME_FALLBACKS.grid),
+  axis: getThemeChartColor("--om-chart-axis", CHART_THEME_FALLBACKS.axis),
+  surface: getThemeChartColor("--om-chart-surface", CHART_THEME_FALLBACKS.surface),
 });
 
 const parseIsoDateUtc = (value) => {
@@ -254,6 +280,7 @@ const InspectorReportChartsComponent = ({
 }) => {
   const chartHostRef = useRef(null);
   const [chartWidth, setChartWidth] = useState(0);
+  const [chartPalette, setChartPalette] = useState(() => readInspectorChartPalette());
   const chartData = useMemo(() => buildInspectorChartData({
     dailyRows,
     fromDate,
@@ -265,6 +292,22 @@ const InspectorReportChartsComponent = ({
     [chartData],
   );
   const chartAxisDomain = useMemo(() => [0, chartAxisMax], [chartAxisMax]);
+  const axisTick = useMemo(
+    () => ({
+      ...AXIS_TICK,
+      fill: chartPalette.axis,
+    }),
+    [chartPalette.axis],
+  );
+  const lineActiveDot = useMemo(
+    () => ({
+      ...LINE_ACTIVE_DOT,
+      fill: chartPalette.line,
+      stroke: chartPalette.surface,
+      strokeWidth: 2,
+    }),
+    [chartPalette.line, chartPalette.surface],
+  );
 
   useEffect(() => {
     const hostNode = chartHostRef.current;
@@ -308,6 +351,43 @@ const InspectorReportChartsComponent = ({
     };
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.document?.documentElement) {
+      return undefined;
+    }
+
+    const rootNode = window.document.documentElement;
+    const updatePalette = () => {
+      setChartPalette((prev) => {
+        const next = readInspectorChartPalette();
+        if (
+          prev.line === next.line &&
+          prev.bar === next.bar &&
+          prev.grid === next.grid &&
+          prev.axis === next.axis &&
+          prev.surface === next.surface
+        ) {
+          return prev;
+        }
+        return next;
+      });
+    };
+
+    updatePalette();
+
+    if (typeof MutationObserver !== "function") {
+      return undefined;
+    }
+
+    const observer = new MutationObserver(updatePalette);
+    observer.observe(rootNode, {
+      attributes: true,
+      attributeFilter: ["data-theme", "style", "class"],
+    });
+
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <div ref={chartHostRef} className="d-grid gap-3">
       {chartData.length === 0 ? (
@@ -322,27 +402,31 @@ const InspectorReportChartsComponent = ({
         <>
           <div className="inspector-report-chart-wrap">
             <LineChart width={chartWidth} height={320} data={chartData} margin={CHART_MARGIN}>
-              <CartesianGrid stroke={CHART_GRID_COLOR} strokeDasharray="3 3" />
+              <CartesianGrid stroke={chartPalette.grid} strokeDasharray="3 3" />
               <XAxis
                 dataKey={CHART_LABEL_DATA_KEY}
                 minTickGap={20}
-                tick={AXIS_TICK}
+                tick={axisTick}
+                tickLine={{ stroke: chartPalette.grid }}
+                axisLine={{ stroke: chartPalette.grid }}
               />
               <YAxis
                 domain={chartAxisDomain}
-                tick={AXIS_TICK}
+                tick={axisTick}
                 tickFormatter={formatChartAxisTick}
                 width={56}
+                tickLine={{ stroke: chartPalette.grid }}
+                axisLine={{ stroke: chartPalette.grid }}
               />
               <Tooltip content={InspectorCbmTooltip} />
               <Line
                 type="linear"
                 dataKey={CHART_CBM_DATA_KEY}
                 name="CBM"
-                stroke={CHART_PRIMARY_COLOR}
+                stroke={chartPalette.line}
                 strokeWidth={2}
                 dot={false}
-                activeDot={LINE_ACTIVE_DOT}
+                activeDot={lineActiveDot}
                 isAnimationActive={false}
               />
             </LineChart>
@@ -350,23 +434,27 @@ const InspectorReportChartsComponent = ({
 
           <div className="inspector-report-chart-wrap">
             <BarChart width={chartWidth} height={320} data={chartData} margin={CHART_MARGIN}>
-              <CartesianGrid stroke={CHART_GRID_COLOR} strokeDasharray="3 3" />
+              <CartesianGrid stroke={chartPalette.grid} strokeDasharray="3 3" />
               <XAxis
                 dataKey={CHART_LABEL_DATA_KEY}
                 minTickGap={20}
-                tick={AXIS_TICK}
+                tick={axisTick}
+                tickLine={{ stroke: chartPalette.grid }}
+                axisLine={{ stroke: chartPalette.grid }}
               />
               <YAxis
                 domain={chartAxisDomain}
-                tick={AXIS_TICK}
+                tick={axisTick}
                 tickFormatter={formatChartAxisTick}
                 width={56}
+                tickLine={{ stroke: chartPalette.grid }}
+                axisLine={{ stroke: chartPalette.grid }}
               />
               <Tooltip content={InspectorCbmTooltip} />
               <Bar
                 dataKey={CHART_CBM_DATA_KEY}
                 name="CBM"
-                fill={CHART_PRIMARY_COLOR}
+                fill={chartPalette.bar}
                 isAnimationActive={false}
               />
             </BarChart>

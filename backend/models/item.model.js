@@ -23,6 +23,21 @@ const createSizeEntrySchema = (remarkEnum = []) =>
 
 const itemSizeEntrySchema = createSizeEntrySchema(ITEM_SIZE_REMARKS);
 const boxSizeEntrySchema = createSizeEntrySchema(BOX_SIZE_REMARKS);
+const finishAssignmentSchema = new mongoose.Schema(
+  {
+    finish_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "finish",
+      default: null,
+    },
+    unique_code: { type: String, default: "", trim: true, uppercase: true },
+    vendor: { type: String, default: "", trim: true },
+    vendor_code: { type: String, default: "", trim: true, uppercase: true },
+    color: { type: String, default: "", trim: true },
+    color_code: { type: String, default: "", trim: true, uppercase: true },
+  },
+  { _id: false },
+);
 
 const itemSchema = new mongoose.Schema(
   {
@@ -213,6 +228,10 @@ const itemSchema = new mongoose.Schema(
       originalName: { type: String, default: "", trim: true },
       contentType: { type: String, default: "", trim: true },
       size: { type: Number, default: 0, min: 0 },
+    },
+    finish: {
+      type: [finishAssignmentSchema],
+      default: [],
     },
   },
   { timestamps: true },

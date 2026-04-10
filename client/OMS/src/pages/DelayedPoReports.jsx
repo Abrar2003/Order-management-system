@@ -496,7 +496,7 @@ const DelayedPoReports = () => {
                               </td>
                               <td>{row.brand}</td>
                               <td>{formatDateDDMMYYYY(row.order_date)}</td>
-                              <td>{formatDateDDMMYYYY(row.effective_etd)}</td>
+                              <td>{formatDateDDMMYYYY(row.etd)}</td>
                               <td>{row.delay_days ?? 0}</td>
                               <td>{row.pending_count ?? 0}</td>
                               <td>{row.inspection_done_count ?? 0}</td>

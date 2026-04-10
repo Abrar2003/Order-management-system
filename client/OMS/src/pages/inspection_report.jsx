@@ -641,6 +641,8 @@ const InspectionReport = () => {
   const [brandLogoLoading, setBrandLogoLoading] = useState(false);
   const [productImageSrc, setProductImageSrc] = useState("");
   const [productImageLoading, setProductImageLoading] = useState(false);
+  const [finishImageSrcByKey, setFinishImageSrcByKey] = useState({});
+  const [finishImagesLoading, setFinishImagesLoading] = useState(false);
 
   const backTarget = useMemo(() => {
     const fromPreviousPage = String(location.state?.fromPreviousPage || "").trim();
@@ -995,6 +997,32 @@ const InspectionReport = () => {
     };
   }, [qc]);
 
+  const finishRows = useMemo(() => {
+    const finishEntries = Array.isArray(qc?.item_master?.finish)
+      ? qc.item_master.finish
+      : [];
+
+    return finishEntries
+      .map((entry, index) => ({
+        key: String(entry?.finish_id || entry?.unique_code || `finish-${index}`),
+        uniqueCode: toDisplayValue(entry?.unique_code),
+        vendor: toDisplayValue(entry?.vendor),
+        vendorCode: toDisplayValue(entry?.vendor_code),
+        color: toDisplayValue(entry?.color),
+        colorCode: toDisplayValue(entry?.color_code),
+        imageUrl: String(entry?.image?.url || entry?.image?.link || "").trim(),
+      }))
+      .sort((left, right) => left.uniqueCode.localeCompare(right.uniqueCode));
+  }, [qc?.item_master?.finish]);
+
+  const bannerFinish = useMemo(
+    () =>
+      finishRows.find((row) =>
+        Boolean(finishImageSrcByKey[row.key] || row.imageUrl),
+      ) || null,
+    [finishImageSrcByKey, finishRows],
+  );
+
   const differenceLogs = useMemo(() => {
     const rows = Array.isArray(itemMasterSummary?.rows) ? itemMasterSummary.rows : [];
     const logs = [];
@@ -1174,13 +1202,61 @@ const InspectionReport = () => {
     };
   }, [productImageUrl]);
 
+  useEffect(() => {
+    let isMounted = true;
+    const rowsWithImages = finishRows.filter((row) => row.imageUrl);
+
+    if (rowsWithImages.length === 0) {
+      setFinishImageSrcByKey({});
+      setFinishImagesLoading(false);
+      return undefined;
+    }
+
+    const loadFinishImages = async () => {
+      try {
+        setFinishImagesLoading(true);
+        const resolvedEntries = await Promise.all(
+          finishRows.map(async (row) => {
+            if (!row.imageUrl) {
+              return [row.key, ""];
+            }
+
+            try {
+              const nextImageSrc = row.imageUrl.startsWith("data:image/")
+                ? row.imageUrl
+                : await fetchRemoteImageAsDataUrl(row.imageUrl);
+              return [row.key, nextImageSrc || row.imageUrl];
+            } catch {
+              return [row.key, row.imageUrl];
+            }
+          }),
+        );
+
+        if (isMounted) {
+          setFinishImageSrcByKey(Object.fromEntries(resolvedEntries));
+        }
+      } finally {
+        if (isMounted) {
+          setFinishImagesLoading(false);
+        }
+      }
+    };
+
+    loadFinishImages();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [finishRows]);
+
   const handleConfirmAndExport = useCallback(async () => {
     if (
       !reportRef.current ||
       exportingPdf ||
       !qc ||
       brandLogoLoading ||
-      productImageLoading
+      productImageLoading ||
+      finishImagesLoading
     ) {
       return;
     }
@@ -1258,7 +1334,7 @@ const InspectionReport = () => {
     } finally {
       setExportingPdf(false);
     }
-  }, [brandLogoLoading, exportingPdf, id, productImageLoading, qc]);
+  }, [brandLogoLoading, exportingPdf, finishImagesLoading, id, productImageLoading, qc]);
 
   useEffect(() => {
     fetchQcDetails();
@@ -1299,11 +1375,16 @@ const InspectionReport = () => {
             type="button"
             className="btn btn-primary btn-sm"
             onClick={handleConfirmAndExport}
-            disabled={exportingPdf || brandLogoLoading || productImageLoading}
+            disabled={
+              exportingPdf ||
+              brandLogoLoading ||
+              productImageLoading ||
+              finishImagesLoading
+            }
           >
             {exportingPdf
               ? "Exporting..."
-              : brandLogoLoading || productImageLoading
+              : brandLogoLoading || productImageLoading || finishImagesLoading
               ? "Loading images..."
               : "Confirm & Export PDF"}
           </button>
@@ -1336,13 +1417,13 @@ const InspectionReport = () => {
                     <span><strong>Status:</strong> {orderInfo.status}</span>
                   </div>
                 </div>
-                <div className="inspection-report-summary-column inspection-report-summary-media">
+                <div className="inspection-report-summary-column inspection-report-summary-media inspection-report-summary-media--brand">
                   <div className="inspection-report-brand-panel">
                     {brandLogoSrc ? (
                       <img
                         src={brandLogoSrc}
                         alt={`${orderInfo.brand} logo`}
-                        className="inspection-report-brand-logo"
+                        className="inspection-report-brand-logo inspection-report-brand-logo--brand"
                       />
                     ) : (
                       <div className="inspection-report-media-empty">
@@ -1350,14 +1431,29 @@ const InspectionReport = () => {
                       </div>
                     )}
                   </div>
+                  {bannerFinish && (
+                    <div className="inspection-report-brand-panel inspection-report-finish-banner-panel">
+                      <img
+                        src={finishImageSrcByKey[bannerFinish.key] || bannerFinish.imageUrl}
+                        alt={`${bannerFinish.uniqueCode} finish`}
+                        className="inspection-report-brand-logo inspection-report-brand-logo--finish"
+                      />
+                      <div className="inspection-report-finish-banner-meta">
+                        <div className="fw-semibold">{bannerFinish.uniqueCode}</div>
+                        <div className="text-secondary small">
+                          {bannerFinish.color} ({bannerFinish.colorCode})
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <div className="inspection-report-summary-column inspection-report-summary-media">
+                <div className="inspection-report-summary-column inspection-report-summary-media inspection-report-summary-media--product">
                   <div className="inspection-report-brand-panel">
                     {productImageSrc ? (
                       <img
                         src={productImageSrc}
                         alt={`${orderInfo.itemDescription} product`}
-                        className="inspection-report-brand-logo"
+                        className="inspection-report-brand-logo inspection-report-brand-logo--product"
                       />
                     ) : (
                       <div className="inspection-report-image-skeleton">
@@ -1367,6 +1463,38 @@ const InspectionReport = () => {
                   </div>
                 </div>
               </div>
+            </section>
+
+            <section>
+              <h3 className="h6 mb-3">Finish Details</h3>
+              {finishRows.length > 0 ? (
+                <div className="table-responsive">
+                  <table className="table table-sm table-striped align-middle mb-0">
+                    <thead>
+                      <tr>
+                        <th>Unique Code</th>
+                        <th>Vendor</th>
+                        <th>Vendor Code</th>
+                        <th>Color</th>
+                        <th>Color Code</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {finishRows.map((row) => (
+                        <tr key={row.key}>
+                          <td>{row.uniqueCode}</td>
+                          <td>{row.vendor}</td>
+                          <td>{row.vendorCode}</td>
+                          <td>{row.color}</td>
+                          <td>{row.colorCode}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-secondary small">No finish details mapped for this item.</div>
+              )}
             </section>
 
             <section>

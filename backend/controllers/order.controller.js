@@ -6647,7 +6647,6 @@ const buildDelayedPoReportDataset = async ({
         order_date: null,
         etd: null,
         revised_etd: null,
-        effective_etd: null,
         pending_count: 0,
         inspection_done_count: 0,
         shipped_count: 0,
@@ -6672,7 +6671,6 @@ const buildDelayedPoReportDataset = async ({
     const orderDate = parseDateLike(orderEntry?.order_date);
     const etdDate = parseDateLike(orderEntry?.ETD);
     const revisedEtdDate = parseDateLike(orderEntry?.revised_ETD);
-    const effectiveEtdDate = resolveEffectiveOrderEtdDate(orderEntry);
     const latestShipmentDate = resolveLatestShipmentDate(orderEntry?.shipment);
     const latestInspectionDate = resolveLatestInspectionDate(
       orderEntry?.qc_record,
@@ -6686,10 +6684,6 @@ const buildDelayedPoReportDataset = async ({
     groupedEntry.revised_etd = resolveEarlierDate(
       groupedEntry.revised_etd,
       revisedEtdDate,
-    );
-    groupedEntry.effective_etd = resolveEarlierDate(
-      groupedEntry.effective_etd,
-      effectiveEtdDate,
     );
     groupedEntry.last_shipment_date = resolveLaterDate(
       groupedEntry.last_shipment_date,
@@ -6731,8 +6725,8 @@ const buildDelayedPoReportDataset = async ({
 
   const allRows = Array.from(groupedOrders.values())
     .map((groupedEntry) => {
-      const effectiveEtd = groupedEntry.effective_etd;
-      if (!effectiveEtd || !todayUtc) {
+      const originalEtd = groupedEntry.etd;
+      if (!originalEtd || !todayUtc) {
         return null;
       }
 
@@ -6743,19 +6737,19 @@ const buildDelayedPoReportDataset = async ({
         groupedEntry.pending_count === 0 &&
         groupedEntry.inspection_done_count === 0 &&
         groupedEntry.shipped_count > 0;
-      const etdCrossed = effectiveEtd.getTime() < todayUtc.getTime();
+      const etdCrossed = originalEtd.getTime() < todayUtc.getTime();
       const isWithinSelectedEtdWindow =
         !etdRange ||
         (
-          (!etdRange.$gte || effectiveEtd.getTime() >= etdRange.$gte.getTime()) &&
-          (!etdRange.$lt || effectiveEtd.getTime() < etdRange.$lt.getTime())
+          (!etdRange.$gte || originalEtd.getTime() >= etdRange.$gte.getTime()) &&
+          (!etdRange.$lt || originalEtd.getTime() < etdRange.$lt.getTime())
         );
 
       if (isFullyShipped || !(hasOpenItems && etdCrossed) || !isWithinSelectedEtdWindow) {
         return null;
       }
 
-      const delayDays = Math.max(0, diffUtcDays(todayUtc, effectiveEtd));
+      const delayDays = Math.max(0, diffUtcDays(todayUtc, originalEtd));
       const lastProgress = resolveDelayedPoLastProgress(groupedEntry);
 
       return {
@@ -6765,7 +6759,6 @@ const buildDelayedPoReportDataset = async ({
         order_date: toISODateString(groupedEntry.order_date),
         etd: toISODateString(groupedEntry.etd),
         revised_etd: toISODateString(groupedEntry.revised_etd),
-        effective_etd: toISODateString(groupedEntry.effective_etd),
         delay_days: delayDays,
         pending_count: groupedEntry.pending_count,
         inspection_done_count: groupedEntry.inspection_done_count,
@@ -6803,8 +6796,8 @@ const buildDelayedPoReportDataset = async ({
       if (delayCompare !== 0) return delayCompare;
 
       const etdCompare =
-        (parseDateLike(left?.effective_etd)?.getTime() || 0) -
-        (parseDateLike(right?.effective_etd)?.getTime() || 0);
+        (parseDateLike(left?.etd)?.getTime() || 0) -
+        (parseDateLike(right?.etd)?.getTime() || 0);
       if (etdCompare !== 0) return etdCompare;
 
       return String(left?.order_id || "").localeCompare(
@@ -7428,7 +7421,7 @@ exports.exportDelayedPoReport = async (req, res) => {
       brand: String(row?.brand || "").trim(),
       vendor: String(row?.vendor || "").trim(),
       order_date: formatDateDDMMYYYY(row?.order_date, ""),
-      etd: formatDateDDMMYYYY(row?.effective_etd, ""),
+      etd: formatDateDDMMYYYY(row?.etd, ""),
       delay_days: Number(row?.delay_days || 0),
       pending_count: Number(row?.pending_count || 0),
       inspection_done_count: Number(row?.inspection_done_count || 0),

@@ -3,6 +3,7 @@ const Inspection = require("../models/inspection.model");
 const Inspector = require("../models/inspector.model");
 const User = require("../models/user.model");
 const Item = require("../models/item.model");
+const Finish = require("../models/finish.model");
 const QcEditLog = require("../models/qcEditLog.model");
 const OrderEditLog = require("../models/orderEditLog.model");
 const XLSX = require("xlsx");
@@ -5597,7 +5598,10 @@ exports.getVendorReports = async (req, res) => {
 
     const todayUtc = toUtcDayStart(new Date());
     const timelineOrders = [...orderGroupMap.values()].filter((entry) => {
-      if (!entry?.latest_shipment_utc) return false;
+      const status = resolveOrderStatusFromSet([...entry?.statuses || []]);
+      const isFullyShipped = String(status || "").trim() === "Shipped";
+
+      if (!isFullyShipped || !entry?.latest_shipment_utc) return false;
       return (
         entry.latest_shipment_utc.getTime() >=
           timelineRange.from_date_utc.getTime() &&
@@ -5625,23 +5629,14 @@ exports.getVendorReports = async (req, res) => {
     });
 
     const vendorShippingStatsMap = new Map();
-    for (const orderEntry of orderGroupMap.values()) {
+    for (const orderEntry of timelineOrders) {
       if (selectedBrand && orderEntry?.brand !== selectedBrand) continue;
       if (selectedVendor && orderEntry?.vendor !== selectedVendor) continue;
 
-      const status = resolveOrderStatusFromSet([...orderEntry.statuses]);
       const latestShipmentUtc = orderEntry.latest_shipment_utc;
       const orderDateUtc = orderEntry.order_date_utc;
-      const isFullyShipped = String(status || "").trim() === "Shipped";
 
-      if (!isFullyShipped || !latestShipmentUtc || !orderDateUtc) {
-        continue;
-      }
-
-      if (
-        latestShipmentUtc.getTime() < timelineRange.from_date_utc.getTime()
-        || latestShipmentUtc.getTime() >= timelineRange.to_date_exclusive_utc.getTime()
-      ) {
+      if (!latestShipmentUtc || !orderDateUtc) {
         continue;
       }
 
@@ -8487,13 +8482,83 @@ exports.getQCById = async (req, res) => {
           },
         })
           .select(
-            "code name description brand_name brands vendors inspected_weight pis_weight weight cbm pis_barcode qc.barcode inspected_item_LBH inspected_item_sizes inspected_item_top_LBH inspected_item_bottom_LBH pis_item_LBH pis_item_sizes pis_item_top_LBH pis_item_bottom_LBH item_LBH inspected_box_LBH inspected_box_sizes inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_box_LBH pis_box_sizes pis_box_top_LBH pis_box_bottom_LBH box_LBH image cad_file pis_file assembly_file",
+            "code name description brand_name brands vendors finish inspected_weight pis_weight weight cbm pis_barcode qc.barcode inspected_item_LBH inspected_item_sizes inspected_item_top_LBH inspected_item_bottom_LBH pis_item_LBH pis_item_sizes pis_item_top_LBH pis_item_bottom_LBH item_LBH inspected_box_LBH inspected_box_sizes inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_box_LBH pis_box_sizes pis_box_top_LBH pis_box_bottom_LBH box_LBH image cad_file pis_file assembly_file",
           )
           .lean()
       : null;
+    const itemFinishEntries = Array.isArray(itemMaster?.finish)
+      ? itemMaster.finish
+      : [];
+    const finishIds = [
+      ...new Set(
+        itemFinishEntries
+          .map((entry) => String(entry?.finish_id || "").trim())
+          .filter((value) => mongoose.Types.ObjectId.isValid(value)),
+      ),
+    ];
+    const finishUniqueCodes = [
+      ...new Set(
+        itemFinishEntries
+          .map((entry) => String(entry?.unique_code || "").trim().toUpperCase())
+          .filter(Boolean),
+      ),
+    ];
+    const finishDocs =
+      finishIds.length > 0 || finishUniqueCodes.length > 0
+        ? await Finish.find({
+            $or: [
+              ...(finishIds.length > 0
+                ? [
+                    {
+                      _id: {
+                        $in: finishIds.map(
+                          (value) => new mongoose.Types.ObjectId(value),
+                        ),
+                      },
+                    },
+                  ]
+                : []),
+              ...(finishUniqueCodes.length > 0
+                ? [{ unique_code: { $in: finishUniqueCodes } }]
+                : []),
+            ],
+          })
+            .select("_id unique_code image")
+            .lean()
+        : [];
+    const finishDocById = new Map(
+      finishDocs.map((finishDoc) => [
+        String(finishDoc?._id || "").trim(),
+        finishDoc,
+      ]),
+    );
+    const finishDocByUniqueCode = new Map(
+      finishDocs.map((finishDoc) => [
+        String(finishDoc?.unique_code || "").trim().toUpperCase(),
+        finishDoc,
+      ]),
+    );
+    const signedFinishEntries = await Promise.all(
+      itemFinishEntries.map(async (entry) => {
+        const finishId = String(entry?.finish_id || "").trim();
+        const uniqueCode = String(entry?.unique_code || "").trim().toUpperCase();
+        const matchedFinish =
+          (finishId ? finishDocById.get(finishId) : null) ||
+          (uniqueCode ? finishDocByUniqueCode.get(uniqueCode) : null) ||
+          null;
+
+        return {
+          ...entry,
+          image: matchedFinish?.image
+            ? await buildSignedItemImage(matchedFinish.image)
+            : null,
+        };
+      }),
+    );
     const itemMasterWithSignedUrls = itemMaster
       ? {
           ...itemMaster,
+          finish: signedFinishEntries,
           image: await buildSignedItemImage(itemMaster?.image),
           cad_file: await buildSignedItemFile(itemMaster?.cad_file, {
             logLabel: "CAD file",

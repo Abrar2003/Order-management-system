@@ -22,6 +22,11 @@ const AUTO_WEEKLY_DAY_THRESHOLD = 90;
 const INITIAL_VISIBLE_INSPECTORS = 5;
 const LOAD_MORE_COUNT = 5;
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
+const CHART_STEP_OPTIONS = Object.freeze([
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+  { value: "monthly", label: "Monthly" },
+]);
 
 const normalizeTimeline = (value) => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -350,8 +355,8 @@ const InspectorReports = () => {
     setInspectorFilter(normalizeInspectorFilter(event.target.value));
   }, []);
 
-  const handleChartStepChange = useCallback((event) => {
-    const nextChartStep = normalizeChartStep(event.target.value);
+  const handleChartStepChange = useCallback((value) => {
+    const nextChartStep = normalizeChartStep(value);
     if (disableDailyStep && nextChartStep === "daily") {
       setChartStep("weekly");
       return;
@@ -457,17 +462,34 @@ const InspectorReports = () => {
 
             <div>
               <label className="form-label mb-1">Chart Step</label>
-              <select
-                className="form-select"
-                value={chartStep}
-                onChange={handleChartStepChange}
+              <div
+                className="om-report-step-group"
+                role="group"
+                aria-label="Inspector report chart step"
               >
-                <option value="daily" disabled={disableDailyStep}>
-                  Daily
-                </option>
-                <option value="weekly">Weekly</option>
-                <option value="monthly">Monthly</option>
-              </select>
+                {CHART_STEP_OPTIONS.map((option) => {
+                  const isDisabled = disableDailyStep && option.value === "daily";
+                  const isActive = chartStep === option.value;
+
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={`om-report-step-btn${isActive ? " is-active" : ""}`}
+                      onClick={() => handleChartStepChange(option.value)}
+                      disabled={isDisabled}
+                      aria-pressed={isActive}
+                      title={
+                        isDisabled
+                          ? "Daily step is available only for shorter date ranges."
+                          : `Show ${option.label.toLowerCase()} chart grouping`
+                      }
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <button

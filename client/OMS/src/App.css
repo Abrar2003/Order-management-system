@@ -19,6 +19,11 @@
   --om-color-warning-soft: #f3eadc;
   --om-color-danger: #8f6251;
   --om-color-danger-soft: #f4e6e0;
+  --om-chart-line: #615342;
+  --om-chart-bar: #5d7354;
+  --om-chart-grid: #cbbdaa;
+  --om-chart-axis: #73685d;
+  --om-chart-surface: #fffdfa;
   --om-button-primary-bg: #2f2a26;
   --om-button-primary-border: #2f2a26;
   --om-button-primary-text: #fffdfa;
@@ -96,6 +101,11 @@
   --om-color-warning-soft: #32271a;
   --om-color-danger: #d0a191;
   --om-color-danger-soft: #34231d;
+  --om-chart-line: #ddcfbc;
+  --om-chart-bar: #a9c39f;
+  --om-chart-grid: #685746;
+  --om-chart-axis: #c1b3a3;
+  --om-chart-surface: #241f1a;
   --om-button-primary-bg: #efe3d5;
   --om-button-primary-border: #efe3d5;
   --om-button-primary-text: #201b17;
@@ -716,6 +726,77 @@ small,
 .inspector-report-chart-wrap {
   width: 100%;
   min-height: 320px;
+  padding: 0.85rem;
+  border: 1px solid rgba(203, 189, 170, 0.48);
+  border-radius: var(--om-radius-md);
+  background:
+    linear-gradient(180deg, rgba(255, 253, 250, 0.72) 0%, rgba(248, 243, 235, 0.92) 100%);
+}
+
+:root[data-theme="dark"] .inspector-report-chart-wrap {
+  background:
+    linear-gradient(180deg, rgba(36, 31, 26, 0.94) 0%, rgba(42, 35, 29, 0.98) 100%);
+}
+
+.om-report-step-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem;
+  border: 1px solid rgba(203, 189, 170, 0.6);
+  border-radius: 999px;
+  background: var(--om-color-surface-muted);
+  box-shadow: inset 0 1px 0 rgba(255, 253, 250, 0.55);
+}
+
+.om-report-step-btn {
+  min-width: 5.4rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--om-color-text-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 0.62rem 0.95rem;
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+
+.om-report-step-btn:hover:not(:disabled),
+.om-report-step-btn:focus-visible:not(:disabled) {
+  color: var(--om-color-text);
+  border-color: rgba(124, 109, 89, 0.28);
+  background: rgba(233, 223, 210, 0.55);
+}
+
+.om-report-step-btn.is-active {
+  color: var(--om-button-primary-text);
+  background: linear-gradient(
+    135deg,
+    var(--om-color-accent-strong) 0%,
+    var(--om-button-primary-bg) 100%
+  );
+  border-color: rgba(97, 83, 66, 0.25);
+  box-shadow: var(--om-shadow-xs);
+}
+
+.om-report-step-btn:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+:root[data-theme="dark"] .om-report-step-group {
+  box-shadow: inset 0 1px 0 rgba(255, 253, 250, 0.04);
+}
+
+:root[data-theme="dark"] .om-report-step-btn:hover:not(:disabled),
+:root[data-theme="dark"] .om-report-step-btn:focus-visible:not(:disabled) {
+  background: rgba(59, 49, 41, 0.82);
 }
 
 .inspector-report-page {
@@ -1008,6 +1089,16 @@ small,
   gap: 0.5rem;
 }
 
+.inspection-report-summary-media--brand {
+  flex: 1 1 0;
+  max-width: none;
+}
+
+.inspection-report-summary-media--product {
+  flex: 1 1 0;
+  max-width: none;
+}
+
 .inspection-report-media-title {
   font-size: 0.875rem;
   font-weight: 700;
@@ -1031,6 +1122,16 @@ small,
   max-width: 80%;
   max-height: 80%;
   object-fit: contain;
+}
+
+.inspection-report-brand-logo--brand {
+  max-width: 80%;
+  max-height: 80%;
+}
+
+.inspection-report-brand-logo--product {
+  max-width: 80%;
+  max-height: 80%;
 }
 
 .inspection-report-media-empty {
@@ -1060,6 +1161,30 @@ small,
   );
   background-size: 200% 100%;
   animation: inspectionReportSkeletonPulse 1.6s linear infinite;
+}
+
+.inspection-report-finish-banner-panel {
+  gap: 0.5rem;
+  flex-direction: column;
+}
+
+.inspection-report-brand-logo--finish {
+  max-width: 80%;
+  max-height: 120px;
+}
+
+.inspection-report-finish-banner-meta {
+  text-align: center;
+}
+
+.inspection-report-finish-image {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  border-radius: var(--om-radius-sm);
+  border: 1px solid var(--om-color-border);
+  background: var(--om-color-surface-muted);
+  padding: 0.25rem;
 }
 
 @keyframes inspectionReportSkeletonPulse {
@@ -1167,6 +1292,79 @@ small,
   padding: 0.15rem 0.55rem;
   font-size: 0.8rem;
   background: var(--om-color-surface-muted);
+}
+
+.finish-code-preview {
+  min-height: 2.9rem;
+  display: flex;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--om-color-border);
+  border-radius: 0.95rem;
+  background: var(--om-color-surface-muted);
+  color: var(--om-color-text);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.finish-item-picker {
+  max-height: 24rem;
+  overflow-y: auto;
+  padding: 0.85rem;
+  border: 1px solid rgba(203, 189, 170, 0.52);
+  border-radius: var(--om-radius-md);
+  background: var(--om-color-surface-muted);
+}
+
+.finish-item-picker-empty {
+  min-height: 11rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--om-color-text-muted);
+  text-align: center;
+}
+
+.finish-item-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.85rem;
+  align-items: flex-start;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid rgba(203, 189, 170, 0.45);
+  border-radius: 1rem;
+  background: var(--om-color-surface);
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.finish-item-row:hover,
+.finish-item-row:focus-within {
+  border-color: rgba(124, 109, 89, 0.45);
+  box-shadow: var(--om-shadow-xs);
+}
+
+.finish-item-row.is-selected {
+  border-color: rgba(97, 83, 66, 0.42);
+  background: var(--om-color-accent-soft);
+}
+
+.finish-item-row .form-check-input {
+  margin-top: 0.2rem;
+}
+
+.finish-item-row-body {
+  min-width: 0;
+}
+
+.finish-item-meta {
+  margin-top: 0.25rem;
+  color: var(--om-color-text-muted);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
 }
 
 .inspection-report-table-dark,
@@ -1900,6 +2098,12 @@ small,
 
   .inspection-report-summary-media {
     min-height: 140px;
+  }
+
+  .inspection-report-summary-media--brand,
+  .inspection-report-summary-media--product {
+    flex: 1 1 auto;
+    max-width: none;
   }
 
   .inspection-report-summary-field {

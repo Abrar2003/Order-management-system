@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import EditPisModal from "../components/EditPisModal";
+import UploadFinishModal from "../components/UploadFinishModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { formatCbm } from "../utils/cbm";
@@ -96,8 +97,10 @@ const PIS = () => {
 
   const [rows, setRows] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
+  const [showUploadFinishModal, setShowUploadFinishModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [searchInput, setSearchInput] = useState(() =>
     normalizeSearchParam(searchParams.get("search")),
   );
@@ -171,6 +174,16 @@ const PIS = () => {
   }, [fetchItems]);
 
   useEffect(() => {
+    const shouldOpenFinishModal =
+      canEditPis &&
+      String(searchParams.get("open_finish") || "").trim().toLowerCase() === "1";
+
+    if (shouldOpenFinishModal) {
+      setShowUploadFinishModal(true);
+    }
+  }, [canEditPis, searchParams]);
+
+  useEffect(() => {
     const currentQuery = searchParams.toString();
     if (syncedQuery === currentQuery) return;
 
@@ -227,13 +240,22 @@ const PIS = () => {
         <div className="d-flex justify-content-between align-items-center mb-3">
           <h2 className="h4 mb-0">PIS</h2>
           {canEditPis ? (
-            <button
-              type="button"
-              className="btn btn-outline-primary btn-sm"
-              onClick={() => alert("PIS file upload will be added in a later update.")}
-            >
-              Upload PIS File
-            </button>
+            <div className="d-flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="btn btn-outline-primary btn-sm"
+                onClick={() => setShowUploadFinishModal(true)}
+              >
+                Upload Finish
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline-primary btn-sm"
+                onClick={() => alert("PIS file upload will be added in a later update.")}
+              >
+                Upload PIS File
+              </button>
+            </div>
           ) : (
             <span className="d-none d-md-inline" />
           )}
@@ -332,6 +354,12 @@ const PIS = () => {
         {error && (
           <div className="alert alert-danger mb-3" role="alert">
             {error}
+          </div>
+        )}
+
+        {success && (
+          <div className="alert alert-success mb-3" role="alert">
+            {success}
           </div>
         )}
 
@@ -443,6 +471,17 @@ const PIS = () => {
           onClose={() => setSelectedItem(null)}
           onUpdated={() => {
             setSelectedItem(null);
+            fetchItems();
+          }}
+        />
+      )}
+
+      {showUploadFinishModal && canEditPis && (
+        <UploadFinishModal
+          onClose={() => setShowUploadFinishModal(false)}
+          onSaved={(message) => {
+            setShowUploadFinishModal(false);
+            setSuccess(message);
             fetchItems();
           }}
         />

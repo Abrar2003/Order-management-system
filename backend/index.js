@@ -20,6 +20,7 @@ const inspectorRouter = require("./routers/inspector.routes");
 const userRouter = require("./routers/user.routes");
 const googleRouter = require("./routers/google.routes");
 const itemRouter = require("./routers/items.routes");
+const finishRouter = require("./routers/finish.routes");
 const emailLogsRouter = require("./routers/emailLogs.routes");
 const reportsRouter = require("./routers/reports.routes");
 
@@ -79,6 +80,7 @@ app.use("/inspectors", inspectorRouter);
 app.use("/users", userRouter);
 app.use("/google", googleRouter);
 app.use("/items", itemRouter);
+app.use("/finishes", finishRouter);
 app.use("/email-logs", emailLogsRouter);
 app.use("/reports", reportsRouter);
 app.use("/api/reports", reportsRouter);
