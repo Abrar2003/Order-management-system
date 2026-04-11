@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
@@ -13,6 +13,48 @@ import "../App.css";
 
 const DEFAULT_LIMIT = 20;
 const LIMIT_OPTIONS = [10, 20, 50, 100];
+const ITEM_FILE_OPTIONS = Object.freeze([
+  {
+    value: "product_image",
+    label: "Product Image",
+    accept: ".jpg,.jpeg,.png,image/jpeg,image/png",
+    extensions: [".jpg", ".jpeg", ".png"],
+    mimeTypes: ["image/jpeg", "image/png"],
+    invalidMessage:
+      "Only JPG, JPEG, or PNG files are allowed for product images.",
+  },
+  {
+    value: "cad_file",
+    label: "CAD File",
+    accept: ".pdf,application/pdf",
+    extensions: [".pdf"],
+    mimeTypes: ["application/pdf"],
+    invalidMessage: "Only PDF files are allowed for CAD files.",
+  },
+  {
+    value: "pis_file",
+    label: "PIS",
+    accept: ".pdf,application/pdf",
+    extensions: [".pdf"],
+    mimeTypes: ["application/pdf"],
+    invalidMessage: "Only PDF files are allowed for PIS.",
+  },
+  {
+    value: "assembly_file",
+    label: "Assembly",
+    accept: ".pdf,application/pdf",
+    extensions: [".pdf"],
+    mimeTypes: ["application/pdf"],
+    invalidMessage: "Only PDF files are allowed for Assembly.",
+  },
+]);
+const ITEM_FILE_OPTIONS_BY_VALUE = Object.freeze(
+  ITEM_FILE_OPTIONS.reduce((acc, option) => {
+    acc[option.value] = option;
+    return acc;
+  }, {}),
+);
+const DEFAULT_ITEM_FILE_TYPE = ITEM_FILE_OPTIONS[0]?.value || "product_image";
 
 const parsePositiveInt = (value, fallback = 1) => {
   const parsed = Number.parseInt(value, 10);
@@ -132,6 +174,7 @@ const Items = () => {
   const normalizedRole = String(user?.role || "").trim().toLowerCase();
   const canSyncItems = ["admin", "manager", "dev"].includes(normalizedRole);
   const canEditItems = ["admin", "manager", "dev"].includes(normalizedRole);
+  const canUploadItemFiles = ["admin", "manager"].includes(normalizedRole);
 
   const [rows, setRows] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
@@ -160,6 +203,10 @@ const Items = () => {
     item_codes: [],
   });
   const [syncedQuery, setSyncedQuery] = useState(null);
+  const [selectedItemFileTypes, setSelectedItemFileTypes] = useState({});
+  const [uploadingItemId, setUploadingItemId] = useState("");
+  const [itemFilePickerContext, setItemFilePickerContext] = useState(null);
+  const itemFileInputRef = useRef(null);
 
   const debouncedSearch = useDebouncedValue(searchInput, 300);
 
@@ -320,11 +367,129 @@ const Items = () => {
     [location.pathname, location.search, navigate],
   );
 
+  const activeItemFilePickerConfig = useMemo(
+    () =>
+      ITEM_FILE_OPTIONS_BY_VALUE[itemFilePickerContext?.fileType]
+      || ITEM_FILE_OPTIONS[0],
+    [itemFilePickerContext?.fileType],
+  );
+
+  const getSelectedItemFileType = useCallback(
+    (itemId) => {
+      const normalizedItemId = String(itemId || "").trim();
+      const selectedType = String(
+        selectedItemFileTypes[normalizedItemId] || DEFAULT_ITEM_FILE_TYPE,
+      ).trim();
+      return ITEM_FILE_OPTIONS_BY_VALUE[selectedType]
+        ? selectedType
+        : DEFAULT_ITEM_FILE_TYPE;
+    },
+    [selectedItemFileTypes],
+  );
+
+  const handleItemFileTypeChange = useCallback((itemId, nextFileType) => {
+    const normalizedItemId = String(itemId || "").trim();
+    const normalizedFileType = String(nextFileType || "").trim();
+    if (!normalizedItemId || !ITEM_FILE_OPTIONS_BY_VALUE[normalizedFileType]) {
+      return;
+    }
+
+    setSelectedItemFileTypes((prev) => ({
+      ...prev,
+      [normalizedItemId]: normalizedFileType,
+    }));
+  }, []);
+
+  const handleOpenItemFilePicker = useCallback(
+    (item) => {
+      if (!canUploadItemFiles || uploadingItemId) return;
+
+      const itemId = String(item?._id || "").trim();
+      if (!itemId || hasItemInspectionDone(item)) return;
+
+      const fileType = getSelectedItemFileType(itemId);
+      setItemFilePickerContext({
+        itemId,
+        fileType,
+      });
+
+      window.setTimeout(() => {
+        itemFileInputRef.current?.click();
+      }, 0);
+    },
+    [canUploadItemFiles, getSelectedItemFileType, uploadingItemId],
+  );
+
+  const handleItemFileChange = useCallback(async (event) => {
+    const inputElement = event.target;
+    const selectedFile = inputElement?.files?.[0];
+    const uploadContext = itemFilePickerContext;
+    const fileConfig =
+      ITEM_FILE_OPTIONS_BY_VALUE[uploadContext?.fileType]
+      || ITEM_FILE_OPTIONS[0];
+
+    if (!selectedFile || !uploadContext?.itemId) {
+      if (inputElement) inputElement.value = "";
+      return;
+    }
+
+    try {
+      setError("");
+      setSuccess("");
+      setUploadingItemId(uploadContext.itemId);
+
+      const normalizedName = String(selectedFile.name || "").toLowerCase();
+      const normalizedType = String(selectedFile.type || "").toLowerCase();
+      const hasAllowedExtension = fileConfig.extensions.some((extension) =>
+        normalizedName.endsWith(extension)
+      );
+      const hasAllowedMimeType =
+        !normalizedType || fileConfig.mimeTypes.includes(normalizedType);
+
+      if (!hasAllowedExtension || !hasAllowedMimeType) {
+        throw new Error(fileConfig.invalidMessage);
+      }
+
+      const formData = new FormData();
+      formData.append("file_type", uploadContext.fileType);
+      formData.append("file", selectedFile);
+
+      const response = await api.post(
+        `/items/${encodeURIComponent(uploadContext.itemId)}/files`,
+        formData,
+      );
+
+      setSuccess(
+        response?.data?.message || `${fileConfig.label} uploaded successfully.`,
+      );
+      await fetchItems();
+    } catch (err) {
+      setError(
+        err?.response?.data?.message
+          || err?.message
+          || `Failed to upload ${fileConfig.label}.`,
+      );
+    } finally {
+      setUploadingItemId("");
+      setItemFilePickerContext(null);
+      if (inputElement) inputElement.value = "";
+    }
+  }, [fetchItems, itemFilePickerContext]);
+
   return (
     <>
       <Navbar />
 
       <div className="page-shell py-3">
+        <input
+          ref={itemFileInputRef}
+          type="file"
+          className="d-none"
+          accept={activeItemFilePickerConfig.accept}
+          disabled={!canUploadItemFiles || Boolean(uploadingItemId)}
+          onChange={handleItemFileChange}
+        />
+
         <div className="d-flex justify-content-between align-items-center mb-3">
           <button
             type="button"
@@ -475,66 +640,100 @@ const Items = () => {
                         </td>
                       </tr>
                     )}
-                    {rows.map((item) => (
-                      <tr key={item?._id || item?.code}>
-                        <td 
-                          style={{ cursor: item?.code ? "pointer" : "default" }}
-                        onClick={
+                    {rows.map((item) => {
+                      const itemId = String(item?._id || "").trim();
+                      const selectedFileType = getSelectedItemFileType(itemId);
+                      const isUploadingThisItem = uploadingItemId === itemId;
+
+                      return (
+                        <tr key={item?._id || item?.code}>
+                          <td
+                            style={{ cursor: item?.code ? "pointer" : "default" }}
+                            onClick={
                               item?.code
                                 ? () => navigateToItemOrdersHistory(item)
                                 : undefined
-                            }>
-                          {item?.code || "N/A"}
-                        </td>
-                        <td>{item?.name || "N/A"}</td>
-                        <td>
-                          {item?.brand_name
-                            || (Array.isArray(item?.brands) && item.brands.length > 0
-                              ? item.brands[0]
-                              : "N/A")}
-                        </td>
-                        {/* <td>{Array.isArray(item?.brands) && item.brands.length > 0 ? item.brands.join(", ") : "N/A"}</td>
-                        <td>{Array.isArray(item?.vendors) && item.vendors.length > 0 ? item.vendors.join(", ") : "N/A"}</td> */}
-                        <td>{formatFixedNumber(getInspectedWeight(item, "net"))}</td>
-                        <td>{formatFixedNumber(getInspectedWeight(item, "gross"))}</td>
-                        <td>{formatCbm(getCalculatedInspectedCbm(item))}</td>
-                        <td>{formatLbhValue(getInspectedItemLbh(item), { fallback: "0.00 x 0.00 x 0.00" })}</td>
-                        <td>{formatLbhValue(getInspectedBoxLbh(item), { fallback: "0.00 x 0.00 x 0.00" })}</td>
-                        <td>
-                          <div className="d-flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              className="btn btn-outline-secondary btn-sm"
-                              onClick={() => navigateToLatestInspectionReport(item)}
-                              disabled={!item?.latest_inspection_report_qc_id}
-                              title={
-                                item?.latest_inspection_report_qc_id
-                                  ? "Open latest inspection report"
-                                  : "No inspection report available yet"
-                              }
-                            >
-                              View Item
-                            </button>
-                            {canEditItems && (
+                            }
+                          >
+                            {item?.code || "N/A"}
+                          </td>
+                          <td>{item?.name || "N/A"}</td>
+                          <td>
+                            {item?.brand_name
+                              || (Array.isArray(item?.brands) && item.brands.length > 0
+                                ? item.brands[0]
+                                : "N/A")}
+                          </td>
+                          {/* <td>{Array.isArray(item?.brands) && item.brands.length > 0 ? item.brands.join(", ") : "N/A"}</td>
+                          <td>{Array.isArray(item?.vendors) && item.vendors.length > 0 ? item.vendors.join(", ") : "N/A"}</td> */}
+                          <td>{formatFixedNumber(getInspectedWeight(item, "net"))}</td>
+                          <td>{formatFixedNumber(getInspectedWeight(item, "gross"))}</td>
+                          <td>{formatCbm(getCalculatedInspectedCbm(item))}</td>
+                          <td>{formatLbhValue(getInspectedItemLbh(item), { fallback: "0.00 x 0.00 x 0.00" })}</td>
+                          <td>{formatLbhValue(getInspectedBoxLbh(item), { fallback: "0.00 x 0.00 x 0.00" })}</td>
+                          <td>
+                            <div className="d-flex flex-wrap gap-2">
                               <button
                                 type="button"
-                                className="btn btn-outline-primary btn-sm"
-                                onClick={() => setSelectedItem(item)}
+                                className="btn btn-outline-secondary btn-sm"
+                                onClick={() => navigateToLatestInspectionReport(item)}
+                                disabled={!item?.latest_inspection_report_qc_id}
+                                title={
+                                  item?.latest_inspection_report_qc_id
+                                    ? "Open latest inspection report"
+                                    : "No inspection report available yet"
+                                }
                               >
-                                Edit
+                                View Item
                               </button>
-                            )}
-                          </div>
-                        </td>
-                        {/* <td>
-                          {item?.source?.from_orders ? "Orders" : ""}
-                          {item?.source?.from_orders && item?.source?.from_qc ? " + " : ""}
-                          {item?.source?.from_qc ? "QC" : ""}
-                          {!item?.source?.from_orders && !item?.source?.from_qc ? "N/A" : ""}
-                        </td> */}
-                        {/* <td>{formatDateLabel(item?.updatedAt)}</td> */}
-                      </tr>
-                    ))}
+                              {canEditItems && (
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-primary btn-sm"
+                                  onClick={() => setSelectedItem(item)}
+                                >
+                                  Edit
+                                </button>
+                              )}
+                              {canUploadItemFiles && itemId && (
+                                <>
+                                  <select
+                                    className="form-select form-select-sm"
+                                    style={{ width: "140px" }}
+                                    value={selectedFileType}
+                                    disabled={Boolean(uploadingItemId)}
+                                    onChange={(e) =>
+                                      handleItemFileTypeChange(itemId, e.target.value)
+                                    }
+                                  >
+                                    {ITEM_FILE_OPTIONS.map((option) => (
+                                      <option key={option.value} value={option.value}>
+                                        {option.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-primary btn-sm"
+                                    onClick={() => handleOpenItemFilePicker(item)}
+                                    disabled={Boolean(uploadingItemId)}
+                                  >
+                                    {isUploadingThisItem ? "Uploading..." : "Upload Files"}
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                          {/* <td>
+                            {item?.source?.from_orders ? "Orders" : ""}
+                            {item?.source?.from_orders && item?.source?.from_qc ? " + " : ""}
+                            {item?.source?.from_qc ? "QC" : ""}
+                            {!item?.source?.from_orders && !item?.source?.from_qc ? "N/A" : ""}
+                          </td> */}
+                          {/* <td>{formatDateLabel(item?.updatedAt)}</td> */}
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

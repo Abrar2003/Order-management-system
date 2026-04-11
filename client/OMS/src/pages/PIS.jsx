@@ -248,13 +248,6 @@ const PIS = () => {
               >
                 Upload Finish
               </button>
-              <button
-                type="button"
-                className="btn btn-outline-primary btn-sm"
-                onClick={() => alert("PIS file upload will be added in a later update.")}
-              >
-                Upload PIS File
-              </button>
             </div>
           ) : (
             <span className="d-none d-md-inline" />

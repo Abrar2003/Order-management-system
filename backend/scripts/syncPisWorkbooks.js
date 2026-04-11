@@ -14,6 +14,7 @@ const Item = require("../models/item.model");
 const {
   isConfigured: isWasabiConfigured,
   createStorageKey,
+  getObjectUrl,
   uploadBuffer,
   deleteObject,
 } = require("../services/wasabiStorage.service");
@@ -1063,6 +1064,8 @@ const uploadPisPdfSnapshot = async (item, parsedWorkbook) => {
     originalName: uploadResult.originalName,
     contentType: uploadResult.contentType,
     size: uploadResult.size,
+    link: getObjectUrl(uploadResult.key),
+    public_id: uploadResult.key,
   };
 
   return {
