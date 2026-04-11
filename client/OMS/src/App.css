@@ -1166,6 +1166,10 @@ small,
 .inspection-report-finish-banner-panel {
   gap: 0.5rem;
   flex-direction: column;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1rem;
 }
 
 .inspection-report-brand-logo--finish {

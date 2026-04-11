@@ -10,7 +10,9 @@ const {
   updateItem,
   updateItemPis,
   getItemFileUrl,
+  getItemPisFileUrl,
   uploadItemFile,
+  uploadItemPisFile,
   deleteItemFile,
 } = require("../controllers/item.controller");
 const { getProductAnalytics } = require("../controllers/product.controller");
@@ -52,6 +54,13 @@ router.get(
   getItemFileUrl,
 );
 
+router.get(
+  "/:itemId/pis-file-url",
+  auth,
+  authorize("admin", "manager", "QC", "dev", "user"),
+  getItemPisFileUrl,
+);
+
 router.get("/product-analytics", auth, authorize("admin", "manager", "dev", "user"), getProductAnalytics);
 
 router.patch(
@@ -66,6 +75,14 @@ router.patch(
   auth,
   authorize("admin", "manager", "dev"),
   updateItemPis,
+);
+
+router.post(
+  "/:itemId/pis-upload",
+  auth,
+  authorize("admin", "manager", "dev"),
+  upload.single("file"),
+  uploadItemPisFile,
 );
 
 router.post(

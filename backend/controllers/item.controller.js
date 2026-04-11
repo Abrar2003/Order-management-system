@@ -7,10 +7,12 @@ const { syncAllItemsFromOrdersAndQc } = require("../services/itemSync");
 const {
   isConfigured: isWasabiConfigured,
   createStorageKey,
+  getObjectUrl,
   getSignedObjectUrl,
   uploadBuffer,
   deleteObject,
 } = require("../services/wasabiStorage.service");
+const { convertExcelToPdf } = require("../services/convertXlsxToPDF.service");
 
 const escapeRegex = (value = "") =>
   String(value)
@@ -621,6 +623,17 @@ const ITEM_FILE_CONFIG = Object.freeze({
   },
 });
 const ALLOWED_ITEM_FILE_TYPES = new Set(Object.keys(ITEM_FILE_CONFIG));
+const ITEM_FILE_URL_EXPIRES_IN = 24 * 60 * 60;
+const PIS_SPREADSHEET_EXTENSIONS = new Set([".xlsx", ".xls"]);
+const PIS_SPREADSHEET_MIME_TYPES = new Set([
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+  "application/excel",
+  "application/x-excel",
+  "application/x-msexcel",
+  "application/xls",
+  "application/x-xls",
+]);
 
 const toSafeNumber = (value, fallback = 0) => {
   const parsed = Number(value);
@@ -633,13 +646,170 @@ const getItemFileConfig = (fileType = "") =>
 
 const normalizeStoredItemFile = (file = {}) => {
   const parsedSize = Number(file?.size || 0);
+  const key = normalizeTextField(file?.key || file?.public_id);
+  const link = normalizeTextField(file?.link || file?.url);
   return {
-    key: normalizeTextField(file?.key || file?.public_id),
+    key,
     originalName: normalizeTextField(file?.originalName),
     contentType: normalizeTextField(file?.contentType),
     size: Number.isFinite(parsedSize) && parsedSize > 0 ? parsedSize : 0,
-    url: normalizeTextField(file?.url || file?.link),
+    link,
+    public_id: normalizeTextField(file?.public_id || key),
+    url: link,
   };
+};
+
+const createHttpError = (statusCode, message) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
+
+const sanitizeBaseFilename = (value = "", fallback = "file") => {
+  const safeValue = normalizeTextField(value)
+    .replace(/\.[^.]+$/g, "")
+    .replace(/[<>:"/\\|?*\x00-\x1F]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120);
+
+  return safeValue || fallback;
+};
+
+const getRequestedItemId = (req) =>
+  normalizeTextField(req?.params?.itemId || req?.params?.id);
+
+const buildStoredWasabiItemFile = (file = {}) => {
+  const normalizedFile = normalizeStoredItemFile(file);
+  const link =
+    normalizedFile.link
+    || (
+      normalizedFile.key && isWasabiConfigured()
+        ? getObjectUrl(normalizedFile.key)
+        : ""
+    );
+
+  return {
+    key: normalizedFile.key,
+    originalName: normalizedFile.originalName,
+    contentType: normalizedFile.contentType,
+    size: normalizedFile.size,
+    link,
+    public_id: normalizedFile.public_id || normalizedFile.key,
+  };
+};
+
+const buildItemFileDownloadName = ({
+  file = {},
+  itemCode = "",
+  fallbackBaseName = "item-file",
+  extension = ".pdf",
+} = {}) => {
+  const normalizedFile = normalizeStoredItemFile(file);
+  if (normalizedFile.originalName) {
+    return normalizedFile.originalName;
+  }
+
+  return `${sanitizeBaseFilename(itemCode || fallbackBaseName, fallbackBaseName)}${extension}`;
+};
+
+const buildItemFileResponse = async (
+  file = {},
+  {
+    itemCode = "",
+    fallbackBaseName = "item-file",
+    extension = ".pdf",
+    requireStorageKey = false,
+  } = {},
+) => {
+  const normalizedFile = normalizeStoredItemFile(file);
+  if (requireStorageKey && !normalizedFile.key) {
+    return null;
+  }
+
+  if (!normalizedFile.key && !normalizedFile.link) {
+    return null;
+  }
+
+  let link = normalizedFile.link;
+  if (normalizedFile.key) {
+    if (!isWasabiConfigured()) {
+      throw createHttpError(500, "Wasabi storage is not configured");
+    }
+
+    link = await getSignedObjectUrl(normalizedFile.key, {
+      expiresIn: ITEM_FILE_URL_EXPIRES_IN,
+      filename: buildItemFileDownloadName({
+        file: normalizedFile,
+        itemCode,
+        fallbackBaseName,
+        extension,
+      }),
+    });
+  }
+
+  return {
+    key: normalizedFile.key,
+    originalName: buildItemFileDownloadName({
+      file: normalizedFile,
+      itemCode,
+      fallbackBaseName,
+      extension,
+    }),
+    contentType: normalizedFile.contentType,
+    size: normalizedFile.size,
+    link,
+    public_id: normalizedFile.public_id || normalizedFile.key,
+  };
+};
+
+const validatePisSpreadsheetUpload = (file) => {
+  if (!file) {
+    throw createHttpError(400, "No spreadsheet file uploaded");
+  }
+
+  if (!Buffer.isBuffer(file?.buffer)) {
+    throw createHttpError(400, "Uploaded spreadsheet file is invalid");
+  }
+
+  if (file.buffer.length <= 0) {
+    throw createHttpError(400, "Uploaded spreadsheet file is empty");
+  }
+
+  const originalName = normalizeTextField(file?.originalname);
+  const extension = path.extname(originalName).toLowerCase();
+  if (!PIS_SPREADSHEET_EXTENSIONS.has(extension)) {
+    throw createHttpError(400, "Only .xlsx and .xls files are allowed for PIS uploads");
+  }
+
+  const mimeType = normalizeTextField(file?.mimetype).toLowerCase();
+  if (
+    mimeType
+    && mimeType !== "application/octet-stream"
+    && !PIS_SPREADSHEET_MIME_TYPES.has(mimeType)
+  ) {
+    throw createHttpError(400, "Only .xlsx and .xls files are allowed for PIS uploads");
+  }
+
+  return {
+    originalName,
+    extension,
+    mimeType,
+  };
+};
+
+const buildPisPdfOriginalName = ({
+  spreadsheetOriginalName = "",
+  itemCode = "",
+  itemId = "",
+} = {}) => {
+  const spreadsheetBaseName = sanitizeBaseFilename(
+    path.parse(path.basename(spreadsheetOriginalName)).name,
+    sanitizeBaseFilename(itemCode || itemId || "item-pis", "item-pis"),
+  );
+
+  return `${spreadsheetBaseName}.pdf`;
 };
 
 const toTimestamp = (value) => {
@@ -1539,7 +1709,7 @@ exports.updateItemPis = async (req, res) => {
 
 exports.getItemFileUrl = async (req, res) => {
   try {
-    const itemId = String(req.params.id || "").trim();
+    const itemId = getRequestedItemId(req);
     if (!mongoose.Types.ObjectId.isValid(itemId)) {
       return res.status(400).json({
         success: false,
@@ -1568,28 +1738,16 @@ exports.getItemFileUrl = async (req, res) => {
       });
     }
 
-    const storedFile = normalizeStoredItemFile(item?.[fileConfig.field]);
-    if (!storedFile.key && !storedFile.url) {
+    const filePayload = await buildItemFileResponse(item?.[fileConfig.field], {
+      itemCode: normalizeTextField(item?.code || itemId),
+      fallbackBaseName: fileType,
+      extension: fileConfig.defaultExtension,
+    });
+
+    if (!filePayload) {
       return res.status(404).json({
         success: false,
         message: `${fileConfig.label} not found`,
-      });
-    }
-
-    let url = storedFile.url;
-    if (storedFile.key) {
-      if (!isWasabiConfigured()) {
-        return res.status(500).json({
-          success: false,
-          message: "Wasabi storage is not configured",
-        });
-      }
-
-      url = await getSignedObjectUrl(storedFile.key, {
-        expiresIn: 24 * 60 * 60,
-        filename:
-          storedFile.originalName ||
-          `${normalizeTextField(item?.code || itemId)}${fileConfig.defaultExtension}`,
       });
     }
 
@@ -1599,12 +1757,13 @@ exports.getItemFileUrl = async (req, res) => {
         item_id: item._id,
         file_type: fileType,
         file: {
-          key: storedFile.key,
-          originalName: storedFile.originalName,
-          contentType: storedFile.contentType,
-          size: storedFile.size,
+          key: filePayload.key,
+          originalName: filePayload.originalName,
+          contentType: filePayload.contentType,
+          size: filePayload.size,
+          public_id: filePayload.public_id,
         },
-        url,
+        url: filePayload.link,
       },
     });
   } catch (error) {
@@ -1618,7 +1777,7 @@ exports.getItemFileUrl = async (req, res) => {
 
 exports.uploadItemFile = async (req, res) => {
   try {
-    const itemId = String(req.params.id || "").trim();
+    const itemId = getRequestedItemId(req);
     if (!mongoose.Types.ObjectId.isValid(itemId)) {
       return res.status(400).json({
         success: false,
@@ -1676,24 +1835,38 @@ exports.uploadItemFile = async (req, res) => {
     const fallbackOriginalName =
       req.file.originalname ||
       `${normalizeTextField(item?.code || itemId)}${extension || fileConfig.defaultExtension}`;
-    const uploadResult = await uploadBuffer({
-      buffer: req.file.buffer,
-      key: createStorageKey({
-        folder: fileConfig.folder,
-        originalName: fallbackOriginalName,
-        extension: extension || fileConfig.defaultExtension,
-      }),
-      originalName: fallbackOriginalName,
-      contentType: mimeType || "application/octet-stream",
-    });
+    let uploadResult = null;
 
-    item[fileConfig.field] = {
-      key: uploadResult.key,
-      originalName: uploadResult.originalName,
-      contentType: uploadResult.contentType,
-      size: uploadResult.size,
-    };
-    await item.save();
+    try {
+      uploadResult = await uploadBuffer({
+        buffer: req.file.buffer,
+        key: createStorageKey({
+          folder: fileConfig.folder,
+          originalName: fallbackOriginalName,
+          extension: extension || fileConfig.defaultExtension,
+        }),
+        originalName: fallbackOriginalName,
+        contentType: mimeType || "application/octet-stream",
+      });
+
+      item[fileConfig.field] = buildStoredWasabiItemFile(uploadResult);
+      await item.save();
+    } catch (saveError) {
+      if (uploadResult?.key) {
+        try {
+          await deleteObject(uploadResult.key);
+        } catch (rollbackError) {
+          console.error("Rollback item file upload failed:", {
+            itemId,
+            fileType,
+            storageKey: uploadResult.key,
+            error: rollbackError?.message || String(rollbackError),
+          });
+        }
+      }
+
+      throw saveError;
+    }
 
     if (previousStorageKey && previousStorageKey !== uploadResult.key) {
       deleteObject(previousStorageKey).catch((error) => {
@@ -1712,7 +1885,7 @@ exports.uploadItemFile = async (req, res) => {
       data: {
         item_id: item._id,
         file_type: fileType,
-        file: normalizeStoredItemFile(item?.[fileConfig.field]),
+        file: buildStoredWasabiItemFile(item?.[fileConfig.field]),
       },
     });
   } catch (error) {
@@ -1724,9 +1897,250 @@ exports.uploadItemFile = async (req, res) => {
   }
 };
 
+exports.getItemPisFileUrl = async (req, res) => {
+  let itemId = "";
+
+  try {
+    itemId = getRequestedItemId(req);
+    if (!mongoose.Types.ObjectId.isValid(itemId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid item id",
+      });
+    }
+
+    const item = await Item.findById(itemId).select("code pis_file");
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: "Item not found",
+      });
+    }
+
+    const storedPisFile = normalizeStoredItemFile(item?.pis_file);
+    if (!storedPisFile.key) {
+      return res.status(404).json({
+        success: false,
+        message: "PIS file not found",
+      });
+    }
+
+    const pisFile = await buildItemFileResponse(item?.pis_file, {
+      itemCode: normalizeTextField(item?.code || itemId),
+      fallbackBaseName: "item-pis",
+      extension: ".pdf",
+      requireStorageKey: true,
+    });
+
+    if (!pisFile) {
+      return res.status(404).json({
+        success: false,
+        message: "PIS file not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: pisFile,
+    });
+  } catch (error) {
+    const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
+    console.error("Get Item PIS File URL Error:", {
+      itemId,
+      error: error?.message || String(error),
+      details: error?.details || "",
+    });
+    return res.status(statusCode).json({
+      success: false,
+      message: error.message || "Failed to get PIS file URL",
+    });
+  }
+};
+
+exports.uploadItemPisFile = async (req, res) => {
+  let itemId = "";
+  let convertedFile = null;
+
+  try {
+    itemId = getRequestedItemId(req);
+    if (!mongoose.Types.ObjectId.isValid(itemId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid item id",
+      });
+    }
+
+    const item = await Item.findById(itemId);
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: "Item not found",
+      });
+    }
+
+    const spreadsheetFile = validatePisSpreadsheetUpload(req.file);
+
+    if (!isWasabiConfigured()) {
+      return res.status(500).json({
+        success: false,
+        message: "Wasabi storage is not configured",
+      });
+    }
+
+    const previousPisFile = normalizeStoredItemFile(item?.pis_file);
+    const previousStorageKey = previousPisFile.key;
+    const pdfOriginalName = buildPisPdfOriginalName({
+      spreadsheetOriginalName: spreadsheetFile.originalName,
+      itemCode: normalizeTextField(item?.code),
+      itemId,
+    });
+
+    console.info("PIS spreadsheet conversion started", {
+      itemId,
+      originalName: spreadsheetFile.originalName,
+    });
+
+    convertedFile = await convertExcelToPdf({
+      buffer: req.file.buffer,
+      originalName: spreadsheetFile.originalName,
+    });
+
+    console.info("PIS spreadsheet conversion completed", {
+      itemId,
+      pdfFileName: convertedFile?.pdfFileName || pdfOriginalName,
+      size: convertedFile?.size || 0,
+    });
+
+    const uploadResult = await uploadBuffer({
+      buffer: convertedFile.pdfBuffer,
+      key: createStorageKey({
+        folder: ITEM_FILE_CONFIG.pis_file.folder,
+        originalName: pdfOriginalName,
+        extension: ".pdf",
+      }),
+      originalName: pdfOriginalName,
+      contentType: "application/pdf",
+    });
+
+    console.info("PIS PDF uploaded to Wasabi", {
+      itemId,
+      storageKey: uploadResult.key,
+      size: uploadResult.size,
+    });
+
+    item.pis_file = buildStoredWasabiItemFile({
+      ...uploadResult,
+      originalName: pdfOriginalName,
+      contentType: "application/pdf",
+    });
+
+    try {
+      await item.save();
+    } catch (saveError) {
+      try {
+        await deleteObject(uploadResult.key);
+        console.info("Rolled back uploaded PIS PDF after DB save failure", {
+          itemId,
+          storageKey: uploadResult.key,
+        });
+      } catch (rollbackError) {
+        console.error("Rollback uploaded PIS PDF failed:", {
+          itemId,
+          storageKey: uploadResult.key,
+          error: rollbackError?.message || String(rollbackError),
+        });
+      }
+
+      throw saveError;
+    }
+
+    console.info("PIS file metadata saved on item", {
+      itemId,
+      storageKey: uploadResult.key,
+      replaced: Boolean(previousStorageKey && previousStorageKey !== uploadResult.key),
+    });
+
+    if (previousStorageKey && previousStorageKey !== uploadResult.key) {
+      try {
+        await deleteObject(previousStorageKey);
+        console.info("Previous PIS PDF deleted from Wasabi", {
+          itemId,
+          storageKey: previousStorageKey,
+        });
+      } catch (deleteError) {
+        console.error("Delete previous PIS PDF failed:", {
+          itemId,
+          storageKey: previousStorageKey,
+          error: deleteError?.message || String(deleteError),
+        });
+      }
+    }
+
+    let responsePisFile = buildStoredWasabiItemFile(item?.pis_file);
+    try {
+      const freshPisFile = await buildItemFileResponse(item?.pis_file, {
+        itemCode: normalizeTextField(item?.code || itemId),
+        fallbackBaseName: "item-pis",
+        extension: ".pdf",
+        requireStorageKey: true,
+      });
+
+      if (freshPisFile) {
+        responsePisFile = freshPisFile;
+      }
+    } catch (responseError) {
+      console.error("Build PIS upload response link failed:", {
+        itemId,
+        storageKey: normalizeTextField(item?.pis_file?.key),
+        error: responseError?.message || String(responseError),
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "PIS spreadsheet uploaded successfully",
+      data: {
+        item_id: item._id,
+        pis_file: responsePisFile,
+      },
+    });
+  } catch (error) {
+    if (error?.cleanupError) {
+      console.error("PIS upload cleanup after failure failed:", {
+        itemId,
+        error: error.cleanupError?.details
+          || error.cleanupError?.message
+          || String(error.cleanupError),
+      });
+    }
+
+    const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
+    console.error("Upload Item PIS Spreadsheet Error:", {
+      itemId,
+      error: error?.message || String(error),
+      details: error?.details || "",
+    });
+    return res.status(statusCode).json({
+      success: false,
+      message: error.message || "Failed to upload PIS spreadsheet",
+    });
+  } finally {
+    if (convertedFile?.cleanup) {
+      try {
+        await convertedFile.cleanup();
+      } catch (cleanupError) {
+        console.error("PIS upload cleanup failed:", {
+          itemId,
+          error: cleanupError?.details || cleanupError?.message || String(cleanupError),
+        });
+      }
+    }
+  }
+};
+
 exports.deleteItemFile = async (req, res) => {
   try {
-    const itemId = String(req.params.id || "").trim();
+    const itemId = getRequestedItemId(req);
     if (!mongoose.Types.ObjectId.isValid(itemId)) {
       return res.status(400).json({
         success: false,

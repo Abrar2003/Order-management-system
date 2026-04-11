@@ -25,6 +25,7 @@ sudo apt install -y nginx git ufw curl
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt install -y nodejs
 sudo npm i -g pm2
+sudo apt install -y libreoffice libreoffice-calc
 ```
 
 Optional firewall:
@@ -88,6 +89,12 @@ Set real values for:
 - `JWT_SECRET`
 - `CORS_ORIGIN`
 - Google integration keys if those features are used
+
+If PIS spreadsheet uploads are enabled, make sure LibreOffice is installed on the VPS. If the executable is not on the default `PATH`, set:
+
+```env
+LIBREOFFICE_BIN=/usr/bin/soffice
+```
 
 ### Frontend env
 
