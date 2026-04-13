@@ -8,10 +8,50 @@ import {
 import { formatNumberInputValue } from "../utils/measurementDisplay";
 import "../App.css";
 
+const normalizeLabels = (labels = []) =>
+  [
+    ...new Set(
+      (Array.isArray(labels) ? labels : [])
+        .map((label) => Number(label))
+        .filter((label) => Number.isInteger(label) && label >= 0),
+    ),
+  ].sort((left, right) => left - right);
+
 const toSafeNumberString = (value) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return "0";
   return String(parsed);
+};
+
+const normalizeLabelRanges = (ranges = []) =>
+  (Array.isArray(ranges) ? ranges : [])
+    .map((range) => ({
+      start: Number(range?.start),
+      end: Number(range?.end),
+    }))
+    .filter(
+      (range) =>
+        Number.isInteger(range.start) &&
+        Number.isInteger(range.end) &&
+        range.start >= 0 &&
+        range.end >= 0 &&
+        range.start <= range.end,
+    )
+    .sort((left, right) => {
+      if (left.start !== right.start) return left.start - right.start;
+      return left.end - right.end;
+    });
+
+const formatLabelRanges = (ranges = []) => {
+  const normalizedRanges = normalizeLabelRanges(ranges);
+  if (normalizedRanges.length === 0) return "None";
+  return normalizedRanges
+    .map((range) =>
+      range.start === range.end
+        ? String(range.start)
+        : `${range.start}-${range.end}`,
+    )
+    .join(" | ");
 };
 
 const toTimestamp = (value) => {
@@ -44,6 +84,11 @@ const buildInitialRows = (qc) =>
       pending_after: toSafeNumberString(record?.pending_after),
       cbm_total: formatNumberInputValue(record?.cbm?.total, { allowZero: true }) || "0.00",
       remarks: String(record?.remarks || ""),
+      labels_added: normalizeLabels(record?.labels_added),
+      label_ranges: normalizeLabelRanges(record?.label_ranges),
+      original_labels_added: normalizeLabels(record?.labels_added),
+      original_label_ranges: normalizeLabelRanges(record?.label_ranges),
+      labels_removed: false,
     }));
 
 const parseNonNegativeNumber = (value, fieldName, rowIndex) => {
@@ -111,6 +156,29 @@ const EditInspectionRecordsModal = ({ qc, onClose, onSuccess }) => {
     );
   };
 
+  const toggleRemoveLabels = (index) => {
+    setRows((prev) =>
+      prev.map((row, rowIndex) => {
+        if (rowIndex !== index) return row;
+        if (row.labels_removed) {
+          return {
+            ...row,
+            labels_added: [...row.original_labels_added],
+            label_ranges: [...row.original_label_ranges],
+            labels_removed: false,
+          };
+        }
+
+        return {
+          ...row,
+          labels_added: [],
+          label_ranges: [],
+          labels_removed: true,
+        };
+      }),
+    );
+  };
+
   const handleSubmit = async () => {
     setError("");
 
@@ -173,6 +241,8 @@ const EditInspectionRecordsModal = ({ qc, onClose, onSuccess }) => {
           cbm: {
             total: cbmTotal,
           },
+          label_ranges: normalizeLabelRanges(row.label_ranges),
+          labels_added: normalizeLabels(row.labels_added),
           remarks: String(row.remarks || "").trim(),
         };
       });
@@ -193,11 +263,14 @@ const EditInspectionRecordsModal = ({ qc, onClose, onSuccess }) => {
       <div className="modal-dialog modal-dialog-centered modal-xl" role="document">
         <div className="modal-content">
           <div className="modal-header">
-            <h5 className="modal-title">Edit Inspection Records</h5>
+            <h5 className="modal-title">Edit Inspection Records And Labels</h5>
             <button type="button" className="btn-close" onClick={onClose} aria-label="Close" />
           </div>
 
           <div className="modal-body d-grid gap-3">
+            <div className="alert alert-info mb-0" role="alert">
+              Removing labels from a QC record here will free them for reuse after save.
+            </div>
             <div className="table-responsive">
               <table className="table table-sm table-striped align-middle mb-0">
                 <thead>
@@ -211,13 +284,14 @@ const EditInspectionRecordsModal = ({ qc, onClose, onSuccess }) => {
                     <th>Passed</th>
                     <th>Pending</th>
                     <th>CBM</th>
+                    <th>Labels</th>
                     <th>Remarks</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.length === 0 && (
                     <tr>
-                      <td colSpan="10" className="text-center text-secondary py-3">
+                      <td colSpan="11" className="text-center text-secondary py-3">
                         No inspection records found
                       </td>
                     </tr>
@@ -324,6 +398,28 @@ const EditInspectionRecordsModal = ({ qc, onClose, onSuccess }) => {
                         />
                       </td>
                       <td>
+                        <div className="d-flex flex-column gap-1">
+                          <span className="small">
+                            Count: {Array.isArray(row.labels_added) ? row.labels_added.length : 0}
+                          </span>
+                          <span className="small text-muted">
+                            Ranges: {formatLabelRanges(row.label_ranges)}
+                          </span>
+                          <button
+                            type="button"
+                            className={`btn btn-sm ${row.labels_removed ? "btn-outline-secondary" : "btn-outline-danger"}`}
+                            onClick={() => toggleRemoveLabels(index)}
+                            disabled={
+                              !row.labels_removed &&
+                              (!Array.isArray(row.original_labels_added) ||
+                                row.original_labels_added.length === 0)
+                            }
+                          >
+                            {row.labels_removed ? "Restore Labels" : "Remove Labels"}
+                          </button>
+                        </div>
+                      </td>
+                      <td>
                         <input
                           type="text"
                           className="form-control form-control-sm"
@@ -343,6 +439,7 @@ const EditInspectionRecordsModal = ({ qc, onClose, onSuccess }) => {
                       <td>{totals.checked}</td>
                       <td>{totals.passed}</td>
                       <td>{totals.pending_after}</td>
+                      <td>-</td>
                       <td>-</td>
                       <td>-</td>
                     </tr>

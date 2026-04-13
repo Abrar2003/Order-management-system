@@ -5520,15 +5520,15 @@ exports.getVendorSummaryByBrand = async (req, res) => {
           isDelayedOrder: {
             $and: [
               "$isActiveOrder",
-              { $ne: ["$effectiveEtd", null] },
-              { $lt: ["$effectiveEtd", today] },
+              { $ne: ["$etd", null] },
+              { $lt: ["$etd", today] },
             ],
           },
           isOnTimeOrder: {
             $and: [
               "$isActiveOrder",
-              { $ne: ["$effectiveEtd", null] },
-              { $gte: ["$effectiveEtd", today] },
+              { $ne: ["$etd", null] },
+              { $gte: ["$etd", today] },
             ],
           },
         },

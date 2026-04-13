@@ -600,6 +600,23 @@ const QcDetails = () => {
       calculatedPisCbm: formatPositiveCbm(calculatedPisCbm, "Not Set"),
     };
   }, [qc]);
+  const finishRows = useMemo(() => {
+    const finishEntries = Array.isArray(qc?.item_master?.finish)
+      ? qc.item_master.finish
+      : [];
+
+    return finishEntries
+      .map((entry, index) => ({
+        key: String(entry?.finish_id || entry?.unique_code || `finish-${index}`),
+        uniqueCode: String(entry?.unique_code || "").trim() || "N/A",
+        vendor: String(entry?.vendor || "").trim() || "N/A",
+        vendorCode: String(entry?.vendor_code || "").trim() || "N/A",
+        color: String(entry?.color || "").trim() || "N/A",
+        colorCode: String(entry?.color_code || "").trim() || "N/A",
+        imageUrl: String(entry?.image?.url || entry?.image?.link || "").trim(),
+      }))
+      .sort((left, right) => left.uniqueCode.localeCompare(right.uniqueCode));
+  }, [qc?.item_master?.finish]);
   const itemMasterFiles = useMemo(
     () =>
       ITEM_MASTER_FILE_OPTIONS.map((option) => ({
@@ -1455,6 +1472,85 @@ const QcDetails = () => {
             </section>
 
             <section>
+              <div className="d-flex justify-content-between align-items-center mb-3">
+                <h3 className="h6 mb-0">Finish Details</h3>
+                <span className="small text-secondary">
+                  {finishRows.length} {finishRows.length === 1 ? "finish" : "finishes"}
+                </span>
+              </div>
+              {finishRows.length === 0 ? (
+                <div className="text-secondary small">
+                  No finish details available for this item.
+                </div>
+              ) : (
+                <div className="row g-3">
+                  {finishRows.map((finish) => (
+                    <div key={finish.key} className="col-md-6 col-xl-4">
+                      <div className="card h-100 border-0 shadow-sm">
+                        <div className="card-body d-grid gap-3">
+                          {finish.imageUrl ? (
+                            <button
+                              type="button"
+                              className="btn btn-link p-0 text-decoration-none"
+                              onClick={() =>
+                                window.open(
+                                  finish.imageUrl,
+                                  "_blank",
+                                  "noopener,noreferrer",
+                                )
+                              }
+                            >
+                              <img
+                                src={finish.imageUrl}
+                                alt={`${finish.uniqueCode} finish`}
+                                className="img-fluid rounded border"
+                                style={{
+                                  width: "100%",
+                                  maxHeight: "220px",
+                                  objectFit: "contain",
+                                  backgroundColor: "#f8f9fa",
+                                }}
+                              />
+                            </button>
+                          ) : (
+                            <div
+                              className="border rounded d-flex align-items-center justify-content-center text-secondary small"
+                              style={{
+                                minHeight: "180px",
+                                backgroundColor: "#f8f9fa",
+                              }}
+                            >
+                              Finish image not available
+                            </div>
+                          )}
+
+                          <div className="d-grid gap-2">
+                            <div>
+                              <div className="qc-info-label">Unique Code</div>
+                              <div className="qc-info-value">{finish.uniqueCode}</div>
+                            </div>
+                            <div>
+                              <div className="qc-info-label">Vendor</div>
+                              <div className="qc-info-value">
+                                {finish.vendor} ({finish.vendorCode})
+                              </div>
+                            </div>
+                            <div>
+                              <div className="qc-info-label">Color</div>
+                              <div className="qc-info-value">
+                                {finish.color} ({finish.colorCode})
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section>
               <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
                 <h3 className="h6 mb-0">QC Images</h3>
                 <button
@@ -1492,7 +1588,7 @@ const QcDetails = () => {
                     onClick={() => setShowEditInspectionModal(true)}
                     disabled={!Array.isArray(qc?.inspection_record) || qc.inspection_record.length === 0}
                   >
-                    Edit Records
+                    Edit Records / Labels
                   </button>
                 )}
               </div>
