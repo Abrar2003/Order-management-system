@@ -1995,12 +1995,7 @@ exports.uploadItemPisFile = async (req, res) => {
       itemId,
     });
 
-    console.info("PIS spreadsheet conversion started", {
-      itemId,
-      originalName: spreadsheetFile.originalName,
-    });
-
-    convertedFile = await convertExcelToPdf({
+       convertedFile = await convertExcelToPdf({
       buffer: req.file.buffer,
       originalName: spreadsheetFile.originalName,
     });
@@ -2115,11 +2110,7 @@ exports.uploadItemPisFile = async (req, res) => {
     }
 
     const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
-    console.error("Upload Item PIS Spreadsheet Error:", {
-      itemId,
-      error: error?.message || String(error),
-      details: error?.details || "",
-    });
+    
     return res.status(statusCode).json({
       success: false,
       message: error.message || "Failed to upload PIS spreadsheet",
