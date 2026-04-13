@@ -885,6 +885,240 @@ const buildItemMatch = ({ search, brand, vendor } = {}) => {
 
 const normalizeLookupKey = (value) => normalizeTextField(value).toLowerCase();
 
+const MEASUREMENT_COMPARE_TOLERANCE = 0.0001;
+
+const buildMeasurementEntryKey = (entry = {}, index = 0) => {
+  const normalizedRemark = normalizeTextField(entry?.remark || entry?.type).toLowerCase();
+  return normalizedRemark || `entry${index + 1}`;
+};
+
+const hasAnyPositiveMeasurementLbh = (dimensions = {}) =>
+  Number(dimensions?.L || 0) > 0
+  || Number(dimensions?.B || 0) > 0
+  || Number(dimensions?.H || 0) > 0;
+
+const hasPositiveMeasurementWeight = (value) => Number(value || 0) > 0;
+
+const areMeasurementNumbersEqual = (left, right) =>
+  Math.abs(toSafeNumber(left, 0) - toSafeNumber(right, 0)) < MEASUREMENT_COMPARE_TOLERANCE;
+
+const getNormalizedWeightFieldValue = (weight = {}, fieldKey = "") =>
+  buildWeightRecord(weight)?.[fieldKey] ?? 0;
+
+const buildComparableMeasurementEntries = ({
+  sizes = [],
+  singleLbh = null,
+  topLbh = null,
+  bottomLbh = null,
+  weight = {},
+  totalWeightKey = "",
+  topWeightKey = "",
+  bottomWeightKey = "",
+  weightKey = "",
+  remarkOptions = [],
+  topRemark = "top",
+  bottomRemark = "base",
+} = {}) =>
+  sortSizeEntriesByRemark(
+    buildSizeEntriesFromLegacy({
+      sizes,
+      singleLbh,
+      topLbh,
+      bottomLbh,
+      totalWeight: getNormalizedWeightFieldValue(weight, totalWeightKey),
+      topWeight: getNormalizedWeightFieldValue(weight, topWeightKey),
+      bottomWeight: getNormalizedWeightFieldValue(weight, bottomWeightKey),
+      weightKey,
+      topRemark,
+      bottomRemark,
+    }).filter((entry) => {
+      const hasSize = hasAnyPositiveMeasurementLbh(entry);
+      const hasWeight = weightKey
+        ? hasPositiveMeasurementWeight(entry?.[weightKey])
+        : false;
+      return hasSize || hasWeight;
+    }),
+    remarkOptions,
+  ).slice(0, SIZE_ENTRY_LIMIT);
+
+const compareMeasurementEntryGroups = (
+  inspectedEntries = [],
+  pisEntries = [],
+  { weightKey = "" } = {},
+) => {
+  const inspectedNormalized = Array.isArray(inspectedEntries) ? inspectedEntries : [];
+  const pisNormalized = Array.isArray(pisEntries) ? pisEntries : [];
+
+  const inspectedEntriesWithKeys = inspectedNormalized.map((entry, index) => ({
+    ...entry,
+    __key: buildMeasurementEntryKey(entry, index),
+  }));
+  const pisEntriesWithKeys = pisNormalized.map((entry, index) => ({
+    ...entry,
+    __key: buildMeasurementEntryKey(entry, index),
+  }));
+
+  const inspectedMap = new Map(
+    inspectedEntriesWithKeys.map((entry) => [entry.__key, entry]),
+  );
+  const pisMap = new Map(pisEntriesWithKeys.map((entry) => [entry.__key, entry]));
+  const orderedKeys = [
+    ...new Set([
+      ...inspectedEntriesWithKeys.map((entry) => entry.__key),
+      ...pisEntriesWithKeys.map((entry) => entry.__key),
+    ]),
+  ];
+
+  let sizeMismatch = false;
+  let weightMismatch = false;
+
+  orderedKeys.forEach((key) => {
+    const inspectedEntry = inspectedMap.get(key) || null;
+    const pisEntry = pisMap.get(key) || null;
+    const hasInspectedSize = hasAnyPositiveMeasurementLbh(inspectedEntry || {});
+    const hasPisSize = hasAnyPositiveMeasurementLbh(pisEntry || {});
+
+    if (hasInspectedSize !== hasPisSize) {
+      sizeMismatch = true;
+    } else if (hasInspectedSize && hasPisSize) {
+      if (
+        !areMeasurementNumbersEqual(inspectedEntry?.L, pisEntry?.L)
+        || !areMeasurementNumbersEqual(inspectedEntry?.B, pisEntry?.B)
+        || !areMeasurementNumbersEqual(inspectedEntry?.H, pisEntry?.H)
+      ) {
+        sizeMismatch = true;
+      }
+    }
+
+    if (!weightKey) return;
+
+    const hasInspectedWeight = hasPositiveMeasurementWeight(inspectedEntry?.[weightKey]);
+    const hasPisWeight = hasPositiveMeasurementWeight(pisEntry?.[weightKey]);
+    if (hasInspectedWeight !== hasPisWeight) {
+      weightMismatch = true;
+    } else if (
+      hasInspectedWeight
+      && hasPisWeight
+      && !areMeasurementNumbersEqual(
+        inspectedEntry?.[weightKey],
+        pisEntry?.[weightKey],
+      )
+    ) {
+      weightMismatch = true;
+    }
+  });
+
+  return {
+    hasInspectedData: inspectedEntriesWithKeys.some(
+      (entry) =>
+        hasAnyPositiveMeasurementLbh(entry)
+        || (weightKey ? hasPositiveMeasurementWeight(entry?.[weightKey]) : false),
+    ),
+    sizeMismatch,
+    weightMismatch,
+  };
+};
+
+const buildPisDiffSummary = (item = {}) => {
+  const inspectedItemEntries = buildComparableMeasurementEntries({
+    sizes: item?.inspected_item_sizes,
+    singleLbh: item?.inspected_item_LBH,
+    topLbh: item?.inspected_item_top_LBH,
+    bottomLbh: item?.inspected_item_bottom_LBH,
+    weight: item?.inspected_weight,
+    totalWeightKey: "total_net",
+    topWeightKey: "top_net",
+    bottomWeightKey: "bottom_net",
+    weightKey: "net_weight",
+    remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
+  });
+  const pisItemEntries = buildComparableMeasurementEntries({
+    sizes: item?.pis_item_sizes,
+    singleLbh: item?.pis_item_LBH,
+    topLbh: item?.pis_item_top_LBH,
+    bottomLbh: item?.pis_item_bottom_LBH,
+    weight: item?.pis_weight,
+    totalWeightKey: "total_net",
+    topWeightKey: "top_net",
+    bottomWeightKey: "bottom_net",
+    weightKey: "net_weight",
+    remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
+  });
+  const inspectedBoxEntries = buildComparableMeasurementEntries({
+    sizes: item?.inspected_box_sizes,
+    singleLbh: item?.inspected_box_LBH,
+    topLbh: item?.inspected_box_top_LBH || item?.inspected_top_LBH,
+    bottomLbh: item?.inspected_box_bottom_LBH || item?.inspected_bottom_LBH,
+    weight: item?.inspected_weight,
+    totalWeightKey: "total_gross",
+    topWeightKey: "top_gross",
+    bottomWeightKey: "bottom_gross",
+    weightKey: "gross_weight",
+    remarkOptions: BOX_SIZE_REMARK_OPTIONS,
+  });
+  const pisBoxEntries = buildComparableMeasurementEntries({
+    sizes: item?.pis_box_sizes,
+    singleLbh: item?.pis_box_LBH,
+    topLbh: item?.pis_box_top_LBH,
+    bottomLbh: item?.pis_box_bottom_LBH,
+    weight: item?.pis_weight,
+    totalWeightKey: "total_gross",
+    topWeightKey: "top_gross",
+    bottomWeightKey: "bottom_gross",
+    weightKey: "gross_weight",
+    remarkOptions: BOX_SIZE_REMARK_OPTIONS,
+  });
+
+  const itemComparison = compareMeasurementEntryGroups(
+    inspectedItemEntries,
+    pisItemEntries,
+    { weightKey: "net_weight" },
+  );
+  const boxComparison = compareMeasurementEntryGroups(
+    inspectedBoxEntries,
+    pisBoxEntries,
+    { weightKey: "gross_weight" },
+  );
+
+  const pisBarcode = normalizeTextField(item?.pis_barcode);
+  const inspectedBarcode =
+    Number(item?.qc?.barcode || 0) > 0
+      ? String(item.qc.barcode).trim()
+      : "";
+  const barcodeMismatch =
+    Boolean(pisBarcode || inspectedBarcode) && pisBarcode !== inspectedBarcode;
+
+  const hasInspectedData =
+    itemComparison.hasInspectedData
+    || boxComparison.hasInspectedData
+    || Boolean(pisBarcode || inspectedBarcode);
+  if (!hasInspectedData) {
+    return null;
+  }
+
+  const diffFields = [];
+  if (barcodeMismatch) diffFields.push("Barcode");
+  if (itemComparison.sizeMismatch) diffFields.push("Item Size");
+  if (itemComparison.weightMismatch) diffFields.push("Item Weight");
+  if (boxComparison.sizeMismatch) diffFields.push("Box Size");
+  if (boxComparison.weightMismatch) diffFields.push("Box Weight");
+
+  if (diffFields.length === 0) {
+    return null;
+  }
+
+  return {
+    fields: diffFields,
+    flags: {
+      barcode: barcodeMismatch,
+      item_size: itemComparison.sizeMismatch,
+      item_weight: itemComparison.weightMismatch,
+      box_size: boxComparison.sizeMismatch,
+      box_weight: boxComparison.weightMismatch,
+    },
+  };
+};
+
 const buildLatestInspectionReportLookup = async (itemCodes = []) => {
   const normalizedCodes = [...new Set(
     (Array.isArray(itemCodes) ? itemCodes : [])
@@ -1001,6 +1235,105 @@ exports.getItems = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch items",
+      error: error.message,
+    });
+  }
+};
+
+exports.getPisDiffItems = async (req, res) => {
+  try {
+    const search = req.query.search;
+    const brand = req.query.brand;
+    const vendor = req.query.vendor;
+    const page = parsePositiveInt(req.query.page, 1);
+    const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
+    const skip = (page - 1) * limit;
+
+    const match = buildItemMatch({ search, brand, vendor });
+    const itemSelect = [
+      "code",
+      "name",
+      "description",
+      "brand",
+      "brand_name",
+      "brands",
+      "vendors",
+      "pis_barcode",
+      "pis_weight",
+      "inspected_weight",
+      "pis_item_LBH",
+      "pis_item_sizes",
+      "pis_item_top_LBH",
+      "pis_item_bottom_LBH",
+      "pis_box_LBH",
+      "pis_box_sizes",
+      "pis_box_top_LBH",
+      "pis_box_bottom_LBH",
+      "inspected_item_LBH",
+      "inspected_item_sizes",
+      "inspected_item_top_LBH",
+      "inspected_item_bottom_LBH",
+      "inspected_box_LBH",
+      "inspected_box_sizes",
+      "inspected_box_top_LBH",
+      "inspected_box_bottom_LBH",
+      "inspected_top_LBH",
+      "inspected_bottom_LBH",
+      "cbm",
+      "qc.barcode",
+      "updatedAt",
+    ].join(" ");
+
+    const [items, brandsRaw, brandNamesRaw, brandsPrimaryRaw, vendorsRaw, codesRaw] =
+      await Promise.all([
+        Item.find(match)
+          .select(itemSelect)
+          .sort({ updatedAt: -1, code: 1 })
+          .lean(),
+        Item.distinct("brands", buildItemMatch({ search, vendor })),
+        Item.distinct("brand_name", buildItemMatch({ search, vendor })),
+        Item.distinct("brand", buildItemMatch({ search, vendor })),
+        Item.distinct("vendors", buildItemMatch({ search, brand })),
+        Item.distinct("code", buildItemMatch({ brand, vendor })),
+      ]);
+
+    const diffRows = (Array.isArray(items) ? items : [])
+      .map((item) => {
+        const pisDiff = buildPisDiffSummary(item);
+        if (!pisDiff) return null;
+        return {
+          ...item,
+          pis_diff: pisDiff,
+        };
+      })
+      .filter(Boolean);
+
+    const paginatedRows = diffRows.slice(skip, skip + limit);
+
+    return res.status(200).json({
+      success: true,
+      data: paginatedRows,
+      pagination: {
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(diffRows.length / limit)),
+        totalRecords: diffRows.length,
+      },
+      filters: {
+        brands: normalizeDistinctValues([
+          ...(brandsPrimaryRaw || []),
+          ...(brandsRaw || []),
+          ...(brandNamesRaw || []),
+        ]),
+        vendors: normalizeDistinctValues(vendorsRaw),
+        item_codes: normalizeDistinctValues(codesRaw),
+      },
+    });
+  } catch (error) {
+    console.error("Get PIS Diff Items Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch PIS diff items",
       error: error.message,
     });
   }

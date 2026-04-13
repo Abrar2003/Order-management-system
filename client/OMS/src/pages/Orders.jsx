@@ -51,6 +51,64 @@ const getPendingDisplayQuantity = (order) => {
   return Math.max(0, inspectionDoneQuantity - shippedQuantity);
 };
 
+const getRequestedInspectionQuantity = (order) => {
+  const requestHistory = Array.isArray(order?.qc_record?.request_history)
+    ? order.qc_record.request_history
+    : [];
+
+  for (let index = requestHistory.length - 1; index >= 0; index -= 1) {
+    const requestedQuantity = toSafeNumber(
+      requestHistory[index]?.quantity_requested,
+    );
+    if (requestedQuantity > 0) {
+      return requestedQuantity;
+    }
+  }
+
+  return Math.max(
+    0,
+    toSafeNumber(order?.qc_record?.quantities?.quantity_requested),
+  );
+};
+
+const getDisplayedOrderStatus = (order) => {
+  const totalQuantity = Math.max(0, toSafeNumber(order?.quantity));
+  const shippedQuantity = getShippedQuantity(order);
+  const inspectionDoneQuantity = getInspectionDoneQuantity(order);
+  const pendingInspectionQuantity = getOpenInspectionQuantity(order);
+  const requestedInspectionQuantity = getRequestedInspectionQuantity(order);
+
+  if (totalQuantity > 0 && shippedQuantity >= totalQuantity) {
+    return "Shipped";
+  }
+
+  if (totalQuantity > 0 && inspectionDoneQuantity >= totalQuantity) {
+    return "Inspection Done";
+  }
+
+  if (
+    pendingInspectionQuantity > 0 &&
+    requestedInspectionQuantity >= pendingInspectionQuantity
+  ) {
+    return "Under Inspection";
+  }
+
+  return "Pending";
+};
+
+const getDisplayedOrderGroupStatus = (orders) => {
+  const displayStatuses = (Array.isArray(orders) ? orders : []).map(
+    getDisplayedOrderStatus,
+  );
+
+  if (displayStatuses.length === 0) return "N/A";
+  if (displayStatuses.includes("Pending")) return "Pending";
+  if (displayStatuses.includes("Under Inspection")) return "Under Inspection";
+  if (displayStatuses.includes("Inspection Done")) return "Inspection Done";
+  if (displayStatuses.every((status) => status === "Shipped")) return "Shipped";
+  return displayStatuses[0] || "N/A";
+};
+
 const isCompletelyShipped = (order) => {
   const normalizedStatus = String(order?.status || "").trim().toLowerCase();
   if (normalizedStatus === "shipped") return true;
@@ -278,7 +336,7 @@ const Orders = () => {
                 Vendor: {primaryOrder?.vendor ?? "N/A"}
               </span>
               <span className="om-summary-chip">
-                Status: {primaryOrder?.status ?? "N/A"}
+                Status: {getDisplayedOrderGroupStatus(orders)}
               </span>
               <span className="om-summary-chip">
                 Order Date: {formatDateDDMMYYYY(primaryOrder?.order_date)}
@@ -387,7 +445,7 @@ const Orders = () => {
                         <td className="orders-cbm-col">
                           {renderOrderCbmCell(order)}
                         </td>
-                        <td>{order.status}</td>
+                        <td>{getDisplayedOrderStatus(order)}</td>
                         <td>{formatDateDDMMYYYY(order?.ETD)}</td>
                         <td>
                           <OrderEtdWithHistory

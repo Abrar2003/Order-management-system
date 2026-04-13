@@ -37,6 +37,7 @@ import UpcomingEtdReports from "./pages/UpcomingEtdReports";
 import PoStatusReport from "./pages/PoStatusReport";
 import ProductAnalytics from "./pages/ProductAnalytics";
 import PIS from "./pages/PIS";
+import PISDiffs from "./pages/PISDiffs";
 import WeeklySummary from "./pages/WeeklySummary";
 import DailySummary from "./pages/DailySummary";
 import EmailLogs from "./pages/EmailLogs";
@@ -314,6 +315,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <PIS />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/pis-diffs"
+            element={
+              <ProtectedRoute>
+                <PISDiffs />
               </ProtectedRoute>
             }
           />

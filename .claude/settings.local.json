@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(set MONGO_ADMIN_PASSWORD=your_password_here)",
-      "Bash(node update_vendor_name.js)"
-    ]
-  }
-}

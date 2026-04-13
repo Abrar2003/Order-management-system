@@ -88,7 +88,10 @@ const Navbar = () => {
     }
 
     if (canViewOrderPages) {
-      links.push({ label: "PIS", path: "/pis" });
+      links.push(
+        { label: "PIS", path: "/pis" },
+        { label: "PIS Diffs", path: "/pis-diffs" },
+      );
     }
 
     if (canEditPis) {

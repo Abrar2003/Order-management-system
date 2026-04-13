@@ -4,6 +4,7 @@ const auth = require("../middlewares/auth.middleware");
 const authorize = require("../middlewares/authorize.middleware");
 const {
   getItems,
+  getPisDiffItems,
   getItemOrderPresence,
   getItemOrdersHistory,
   syncItemsFromOrders,
@@ -24,6 +25,13 @@ router.get(
   auth,
   authorize("admin", "manager", "QC", "dev", "user"),
   getItems,
+);
+
+router.get(
+  "/pis-diffs",
+  auth,
+  authorize("admin", "manager", "QC", "dev", "user"),
+  getPisDiffItems,
 );
 
 router.post(
