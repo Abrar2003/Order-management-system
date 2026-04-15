@@ -428,7 +428,7 @@ const AlignQCModal = ({
                   No QC requests found on this date.
                 </div>
               ) : (
-                <div className="table-responsive table-responsive-vertical align-qc-request-table-wrap">
+                <div className="table-responsive align-qc-request-table-wrap">
                   <table className="table table-sm table-striped align-middle mb-0 align-qc-request-table">
                     <thead className="table-light">
                       <tr>

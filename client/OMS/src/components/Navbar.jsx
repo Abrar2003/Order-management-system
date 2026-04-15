@@ -28,7 +28,6 @@ const Navbar = () => {
   const [showQuickReportsMenu, setShowQuickReportsMenu] = useState(false);
   const quickOpenOrdersMenuRef = useRef(null);
   const [showQuickOpenOrdersMenu, setShowQuickOpenOrdersMenu] = useState(false);
-  const navbarStackRef = useRef(null);
 
   const getInitialTheme = () => {
     const stored = localStorage.getItem("theme");
@@ -199,46 +198,6 @@ const Navbar = () => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  useEffect(() => {
-    if (!token) return undefined;
-
-    const root = document.documentElement;
-    let frameId = 0;
-    let resizeObserver;
-
-    const updateStickyStackOffset = () => {
-      window.cancelAnimationFrame(frameId);
-      frameId = window.requestAnimationFrame(() => {
-        const stack = navbarStackRef.current;
-        if (!stack) return;
-
-        const computedTop = Number.parseFloat(window.getComputedStyle(stack).top || "0");
-        const topOffset = Number.isFinite(computedTop) ? computedTop : 0;
-        const stackHeight = stack.getBoundingClientRect().height || stack.offsetHeight || 0;
-        const nextOffset = Math.ceil(topOffset + stackHeight + 8);
-
-        root.style.setProperty("--om-sticky-stack-offset", `${nextOffset}px`);
-      });
-    };
-
-    updateStickyStackOffset();
-    window.addEventListener("resize", updateStickyStackOffset);
-
-    if (typeof ResizeObserver !== "undefined" && navbarStackRef.current) {
-      resizeObserver = new ResizeObserver(() => {
-        updateStickyStackOffset();
-      });
-      resizeObserver.observe(navbarStackRef.current);
-    }
-
-    return () => {
-      window.removeEventListener("resize", updateStickyStackOffset);
-      if (resizeObserver) resizeObserver.disconnect();
-      window.cancelAnimationFrame(frameId);
-      root.style.removeProperty("--om-sticky-stack-offset");
-    };
-  }, [primaryRouteLinks.length, token]);
-
   const toggleTheme = () => {
     setTheme((prev) => {
       if (prev === "system") return "light";
@@ -252,7 +211,7 @@ const Navbar = () => {
   return (
     <>
       <div className="page-shell pt-3">
-        <div className="om-navbar-stack" ref={navbarStackRef}>
+        <div className="om-navbar-stack">
           <nav className="navbar bg-body-tertiary rounded-4 px-3 py-2 om-navbar om-card">
             <div className="container-fluid px-0 d-flex align-items-center gap-2">
               <button

@@ -3101,6 +3101,7 @@ const getContainerDataset = async ({
       vendorSet: new Set(),
       shipping_date: null,
       itemKeySet: new Set(),
+      total_quantity: 0,
     };
 
     const brandValue = String(row?.brand || "").trim();
@@ -3109,6 +3110,8 @@ const getContainerDataset = async ({
     const itemKey = String(
       row?._id || `${row?.order_id || ""}::${row?.item_code || ""}`,
     ).trim();
+
+    existingGroup.total_quantity += Number(row?.quantity || 0);
 
     if (brandValue) existingGroup.brandSet.add(brandValue);
     if (vendorValue) existingGroup.vendorSet.add(vendorValue);
@@ -3134,6 +3137,7 @@ const getContainerDataset = async ({
       vendor: normalizeDistinctValues(Array.from(group.vendorSet)).join(", ") || "N/A",
       shipping_date: group.shipping_date || null,
       item_count: group.itemKeySet.size,
+      total_quantity: group.total_quantity,
     }))
     .sort((left, right) => {
       const dateCompare =

@@ -4395,6 +4395,11 @@ exports.updateQC = async (req, res) => {
     const hasLabelsPayload =
       (Array.isArray(labels) && labels.length > 0) || hasLabelRangePayload;
 
+    // For QC role, labels are required in the update payload
+    if (isQcUser && !hasLabelsPayload) {
+      return res.status(400).json({ message: "Labels are required for QC updates" });
+    }
+
     const buildLabelsFromRanges = (ranges = []) => {
       const normalizedRanges = [];
       const generatedLabels = [];

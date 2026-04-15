@@ -65,7 +65,7 @@ const Containers = () => {
           brand: brandFilter,
         },
       });
-
+console.log("API response:", response);
       setRows(Array.isArray(response?.data?.data) ? response.data.data : []);
       setSummary(response?.data?.summary || { total: 0 });
       setFilterOptions({
@@ -270,12 +270,13 @@ const Containers = () => {
                       <th>Vendor</th>
                       <th>Shipping Date</th>
                       <th>Item Count</th>
+                      <th>Total Quantity</th>
                     </tr>
                   </thead>
                   <tbody>
                     {rows.length === 0 ? (
                       <tr>
-                        <td colSpan="5" className="text-center py-4">
+                        <td colSpan="6" className="text-center py-4">
                           No containers found
                         </td>
                       </tr>
@@ -292,6 +293,7 @@ const Containers = () => {
                           <td>{row.vendor || "N/A"}</td>
                           <td>{formatDateDDMMYYYY(row.shipping_date)}</td>
                           <td>{row.item_count ?? 0}</td>
+                          <td>{row.total_quantity ?? 0}</td>
                         </tr>
                       ))
                     )}

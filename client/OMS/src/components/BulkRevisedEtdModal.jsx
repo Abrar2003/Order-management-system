@@ -128,10 +128,7 @@ const BulkRevisedEtdModal = ({
                 </div>
               </div>
 
-              <div
-                className="table-responsive table-responsive-vertical"
-                style={{ maxHeight: "360px" }}
-              >
+              <div className="table-responsive" style={{ maxHeight: "360px" }}>
                 <table className="table table-sm table-striped align-middle mb-0">
                   <thead className="table-light">
                     <tr>
