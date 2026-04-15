@@ -528,6 +528,50 @@ const computeAqlSampleQuantity = (quantity) => {
   return Math.max(1, Math.ceil(parsed * 0.1));
 };
 
+const getQcLabelRequirement = ({
+  requestType = "",
+  totalPassed = 0,
+  boxSizesCount = 0,
+  requestedQuantity = 0,
+}) => {
+  const normalizedRequestType = String(requestType || "").trim().toUpperCase();
+  const safePassed = Math.max(0, Number(totalPassed) || 0);
+  const safeBoxSizesCount = Math.max(0, Number(boxSizesCount) || 0);
+  const safeRequestedQuantity = Math.max(0, Number(requestedQuantity) || 0);
+  const usesRequestedQuantity =
+    normalizedRequestType === "AQL" && safePassed > 0;
+  const basisQuantity = usesRequestedQuantity
+    ? safeRequestedQuantity
+    : safePassed;
+
+  return {
+    requiredCount: basisQuantity * safeBoxSizesCount,
+    basisQuantity,
+    boxSizesCount: safeBoxSizesCount,
+    usesRequestedQuantity,
+  };
+};
+
+const buildQcLabelRequirementMessage = ({
+  requestType = "",
+  totalPassed = 0,
+  boxSizesCount = 0,
+  requestedQuantity = 0,
+  actualCount = 0,
+}) => {
+  const requirement = getQcLabelRequirement({
+    requestType,
+    totalPassed,
+    boxSizesCount,
+    requestedQuantity,
+  });
+  const prefix = requirement.usesRequestedQuantity
+    ? "For AQL, total labels must equal requested quantity × box sizes count"
+    : "Total labels must equal passed quantity × box sizes count";
+
+  return `${prefix} (${requirement.requiredCount}). Actual total labels: ${Math.max(0, Number(actualCount) || 0)}. Expected: ${requirement.basisQuantity} × ${requirement.boxSizesCount}.`;
+};
+
 const getLatestRequestedQuantity = (qc = {}) => {
   const requestHistory = Array.isArray(qc?.request_history) ? qc.request_history : [];
   console.log("requestHistory", requestHistory);
@@ -1599,22 +1643,15 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     const hasTopBottomLbh =
       hasTopBottomBoxLbhForLabels || hasTopBottomItemLbhForLabels;
     // Calculate size counts for label limit validation
-    const itemSizesForLabelValidation = inspectedItemSizePayload.hasAnyInput
-      ? inspectedItemSizePayload.value
-      : existingItemSizeEntries;
     const boxSizesForLabelValidation = inspectedBoxSizePayload.hasAnyInput
       ? inspectedBoxSizePayload.value
       : existingBoxSizeEntries;
-    const itemSizesCount = Array.isArray(itemSizesForLabelValidation) ? itemSizesForLabelValidation.length : 0;
-    const boxSizesCount = Array.isArray(boxSizesForLabelValidation) ? boxSizesForLabelValidation.length : 0;
-    const sizeMultiplier = Math.max(itemSizesCount, boxSizesCount);
+    const boxSizesCount = Array.isArray(boxSizesForLabelValidation)
+      ? boxSizesForLabelValidation.length
+      : 0;
 
-    // Validate sizes when labels are being added
+    // Validate box sizes when labels are being added
     if (hasLabelUpdate) {
-      if (itemSizesCount === 0) {
-        setError("At least 1 item size is required to add labels.");
-        return;
-      }
       if (boxSizesCount === 0) {
         setError("At least 1 box size is required to add labels.");
         return;
@@ -1761,7 +1798,14 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         ? aqlRequestedQuantity
         : rawTotalPassedAfterRewrite;
       const totalLabelsAfterRewrite = allLabelsAfterRewrite.length;
-      const maxLabelsAllowed = Math.max(0, totalCheckedAfterRewrite) * sizeMultiplier;
+      const requiredLabelsAfterRewrite = getQcLabelRequirement({
+        requestType,
+        totalPassed: totalPassedAfterRewrite,
+        boxSizesCount,
+        requestedQuantity: aqlRequestedQuantity,
+      }).requiredCount;
+      const requiresBoxSizeForLabelsAfterRewrite =
+        totalPassedAfterRewrite > 0 || totalLabelsAfterRewrite > 0;
       const pendingAfterRewrite = Math.max(
         0,
         clientDemandQuantity - totalPassedAfterRewrite,
@@ -1800,9 +1844,20 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         return;
       }
 
-      if (totalLabelsAfterRewrite > maxLabelsAllowed) {
+      if (requiresBoxSizeForLabelsAfterRewrite && boxSizesCount === 0) {
+        setError("At least 1 box size is required to validate labels.");
+        return;
+      }
+
+      if (totalLabelsAfterRewrite !== requiredLabelsAfterRewrite) {
         setError(
-          `Total labels cannot exceed inspected quantity × size count (${maxLabelsAllowed}). Expected: checked × max(item_sizes_count: ${itemSizesCount}, box_sizes_count: ${boxSizesCount})`,
+          buildQcLabelRequirementMessage({
+            requestType,
+            totalPassed: totalPassedAfterRewrite,
+            boxSizesCount,
+            requestedQuantity: aqlRequestedQuantity,
+            actualCount: totalLabelsAfterRewrite,
+          }),
         );
         return;
       }
@@ -1936,12 +1991,29 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       return;
     }
 
-    const baseLabelLimit = Math.max(0, nextChecked);
-    const maxLabelsAllowed = baseLabelLimit * sizeMultiplier;
+    const requiredLabelsAfterUpdate = getQcLabelRequirement({
+      requestType,
+      totalPassed: nextPassed,
+      boxSizesCount,
+      requestedQuantity: aqlRequestedQuantity,
+    }).requiredCount;
+    const requiresBoxSizeForLabels =
+      nextPassed > 0 || totalLabelsAfterUpdate > 0;
 
-    if (totalLabelsAfterUpdate > maxLabelsAllowed) {
+    if (requiresBoxSizeForLabels && boxSizesCount === 0) {
+      setError("At least 1 box size is required to validate labels.");
+      return;
+    }
+
+    if (totalLabelsAfterUpdate !== requiredLabelsAfterUpdate) {
       setError(
-        `Total labels cannot exceed inspected quantity × size count (${maxLabelsAllowed}). Expected: checked × max(item_sizes_count: ${itemSizesCount}, box_sizes_count: ${boxSizesCount})`,
+        buildQcLabelRequirementMessage({
+          requestType,
+          totalPassed: nextPassed,
+          boxSizesCount,
+          requestedQuantity: aqlRequestedQuantity,
+          actualCount: totalLabelsAfterUpdate,
+        }),
       );
       return;
     }

@@ -38,6 +38,8 @@
   --om-radius-lg: 1.3rem;
   --om-radius-xl: 1.6rem;
   --om-page-width: min(1360px, 96%);
+  --om-sticky-stack-offset: 0px;
+  --om-sticky-table-first-row-height: 3.15rem;
   --om-font-size-body: 1rem;
   --om-font-size-table: 0.98rem;
   --om-font-size-table-head: 0.86rem;
@@ -342,8 +344,14 @@ small,
 
 .table-responsive {
   position: relative;
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: visible;
   scrollbar-color: var(--om-color-border-strong) transparent;
+}
+
+.table-responsive.table-responsive-vertical,
+.table-responsive[style*="max-height"] {
+  overflow-y: auto;
 }
 
 .table {
@@ -369,10 +377,10 @@ small,
   padding: 0.78rem 0.9rem;
 }
 
-.table thead th {
+.table > thead > tr > * {
   position: sticky;
-  top: 0;
-  z-index: 2;
+  top: var(--om-sticky-stack-offset, 0px);
+  z-index: 3;
   background: var(--om-color-surface-muted);
   color: var(--om-color-text-muted);
   font-size: var(--om-font-size-table-head);
@@ -381,6 +389,27 @@ small,
   line-height: 1.2;
   text-transform: none;
   border-bottom: 1px solid var(--om-color-border-strong);
+}
+
+.table > thead > tr:nth-child(2) > * {
+  top: calc(
+    var(--om-sticky-stack-offset, 0px) + var(--om-sticky-table-first-row-height)
+  );
+  z-index: 2;
+}
+
+.modal .table > thead > tr > *,
+.table-responsive.table-responsive-vertical .table > thead > tr > *,
+.table-responsive[style*="max-height"] .table > thead > tr > *,
+.align-qc-request-table-wrap .table > thead > tr > * {
+  top: 0;
+}
+
+.modal .table > thead > tr:nth-child(2) > *,
+.table-responsive.table-responsive-vertical .table > thead > tr:nth-child(2) > *,
+.table-responsive[style*="max-height"] .table > thead > tr:nth-child(2) > *,
+.align-qc-request-table-wrap .table > thead > tr:nth-child(2) > * {
+  top: var(--om-sticky-table-first-row-height);
 }
 
 .table thead th > .btn.btn-link {
@@ -419,7 +448,7 @@ small,
   font-weight: inherit !important;
 }
 
-.table > thead.table-primary > tr > th,
+.table > thead.table-primary > tr > *,
 .table-primary {
   background-color: var(--om-color-surface-alt) !important;
   color: var(--om-color-text) !important;
@@ -812,7 +841,8 @@ small,
 }
 
 .inspector-report-page .table-responsive {
-  overflow-x: hidden;
+  overflow-x: clip;
+  overflow-y: visible;
 }
 
 .inspector-report-page .table {
@@ -1547,7 +1577,7 @@ small,
 }
 
 .shipments-table-wrap {
-  overflow-x: hidden;
+  overflow: visible;
 }
 
 .shipments-table {

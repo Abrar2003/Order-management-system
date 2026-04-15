@@ -643,7 +643,10 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
                       </span>
                     </div>
                     <div className="card-body p-0">
-                      <div className="table-responsive" style={{ maxHeight: "320px" }}>
+                      <div
+                        className="table-responsive table-responsive-vertical"
+                        style={{ maxHeight: "320px" }}
+                      >
                         <table className="table table-sm table-hover align-middle mb-0">
                           <thead className="table-light">
                             <tr>

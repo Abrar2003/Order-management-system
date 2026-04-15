@@ -223,6 +223,50 @@ const resolveAqlBaseQuantity = (requestedQuantity, fallbackQuantity = 0) => {
   return toNonNegativeNumber(fallbackQuantity, 0);
 };
 
+const getQcLabelRequirement = ({
+  requestType = "",
+  totalPassed = 0,
+  boxSizesCount = 0,
+  requestedQuantity = 0,
+}) => {
+  const normalizedRequestType = normalizeQcRequestType(requestType);
+  const safePassed = toNonNegativeNumber(totalPassed, 0);
+  const safeBoxSizesCount = toNonNegativeNumber(boxSizesCount, 0);
+  const safeRequestedQuantity = toNonNegativeNumber(requestedQuantity, 0);
+  const usesRequestedQuantity =
+    normalizedRequestType === QC_REQUEST_TYPES.AQL && safePassed > 0;
+  const basisQuantity = usesRequestedQuantity
+    ? safeRequestedQuantity
+    : safePassed;
+
+  return {
+    requiredCount: basisQuantity * safeBoxSizesCount,
+    basisQuantity,
+    boxSizesCount: safeBoxSizesCount,
+    usesRequestedQuantity,
+  };
+};
+
+const buildQcLabelRequirementMessage = ({
+  requestType = "",
+  totalPassed = 0,
+  boxSizesCount = 0,
+  requestedQuantity = 0,
+  actualCount = 0,
+}) => {
+  const requirement = getQcLabelRequirement({
+    requestType,
+    totalPassed,
+    boxSizesCount,
+    requestedQuantity,
+  });
+  const prefix = requirement.usesRequestedQuantity
+    ? "For AQL, total labels must equal requested quantity × box sizes count"
+    : "Total labels must equal passed quantity × box sizes count";
+
+  return `${prefix} (${requirement.requiredCount}). Actual total labels: ${toNonNegativeNumber(actualCount, 0)}. Expected: ${requirement.basisQuantity} × ${requirement.boxSizesCount}.`;
+};
+
 const normalizeInspectionStatus = (value) =>
   String(value || "").trim().toLowerCase();
 
@@ -4518,37 +4562,27 @@ exports.updateQC = async (req, res) => {
       });
     }
 
-    const inspectedQuantityForLabels = Math.max(0, nextChecked);
-    
-    // Calculate size counts for label limit
-    const itemSizesArray = parsedInspectedItemSizeEntries.hasInput
-      ? parsedInspectedItemSizeEntries.value
-      : (itemDocForInspectedLbhUpdate?.inspected_item_sizes ||
-         itemDocForInspectedLbhUpdate?.pis_item_sizes ||
-         []);
+    // Calculate size counts for label validation
     const boxSizesArray = parsedInspectedBoxSizeEntries.hasInput
       ? parsedInspectedBoxSizeEntries.value
       : (itemDocForInspectedLbhUpdate?.inspected_box_sizes ||
          itemDocForInspectedLbhUpdate?.pis_box_sizes ||
          []);
-    
-    const itemSizesCount = Array.isArray(itemSizesArray) ? itemSizesArray.length : 0;
     const boxSizesCount = Array.isArray(boxSizesArray) ? boxSizesArray.length : 0;
-    
-    // Validate that both item and box sizes exist
-    if (itemSizesCount === 0) {
-      return res.status(400).json({
-        message: "At least 1 item size is required to add labels",
-      });
-    }
+
+    // Validate that box sizes exist for label calculations
     if (boxSizesCount === 0) {
       return res.status(400).json({
         message: "At least 1 box size is required to add labels",
       });
     }
-    
-    const sizeMultiplier = Math.max(itemSizesCount, boxSizesCount);
-    const maxLabelsAllowed = inspectedQuantityForLabels * sizeMultiplier;
+    const labelRequirement = getQcLabelRequirement({
+      requestType,
+      totalPassed: nextPassed,
+      boxSizesCount,
+      requestedQuantity: aqlBaseQuantity,
+    });
+    const existingNormalizedLabels = normalizeLabels(qc.labels || []);
 
     qc.quantities.vendor_provision = nextVendorProvision;
     qc.quantities.qc_checked = nextChecked;
@@ -4562,6 +4596,8 @@ exports.updateQC = async (req, res) => {
 
     let labelsAddedThisVisit = [];
     let labelRangesUsedThisVisit = [];
+    let nextLabels = existingNormalizedLabels;
+    let inspectorToSave = null;
     if (allowAdminRewrite && hasExplicitLabelsPayload) {
       const directLabels = Array.isArray(labels) ? labels : [];
       const parsedDirectLabels = directLabels.map(Number);
@@ -4586,14 +4622,7 @@ exports.updateQC = async (req, res) => {
           ? parsedDirectLabels
           : generatedFromRanges;
       const normalizedReplacementLabels = normalizeLabels(replacementLabels);
-
-      if (normalizedReplacementLabels.length > maxLabelsAllowed) {
-        return res.status(400).json({
-          message: `Total labels cannot exceed inspected quantity × size count (${maxLabelsAllowed}). Expected: passed × max(item_sizes_count: ${itemSizesCount}, box_sizes_count: ${boxSizesCount})`,
-        });
-      }
-
-      qc.labels = normalizedReplacementLabels;
+      nextLabels = normalizedReplacementLabels;
     } else if (hasLabelsPayload) {
       const inspectionInspectorUserId = qc.inspector?._id
         ? qc.inspector._id
@@ -4632,7 +4661,7 @@ exports.updateQC = async (req, res) => {
           ? parsedDirectLabels
           : generatedFromRanges;
       const uniqueIncoming = [...new Set(labelsForUpdate)];
-      const existingSet = new Set(normalizeLabels(qc.labels || []));
+      const existingSet = new Set(existingNormalizedLabels);
       const incomingNew = uniqueIncoming.filter(
         (label) => !existingSet.has(label),
       );
@@ -4674,27 +4703,41 @@ exports.updateQC = async (req, res) => {
         });
       }
 
-      const totalLabels = existingSet.size + incomingNew.length;
-      console.log("Total labels after update:", totalLabels, {
-        existing: existingSet.size,
-        incomingNew: incomingNew.length,
-        maxAllowed: maxLabelsAllowed,
-      });
-      if (totalLabels > maxLabelsAllowed) {
-        return res.status(400).json({
-          message: `Total labels cannot exceed inspected quantity × size count (${maxLabelsAllowed}). Expected: passed × max(item_sizes_count: ${itemSizesCount}, box_sizes_count: ${boxSizesCount})`,
-        });
-      }
-
-      qc.labels = [...new Set([...(qc.labels || []), ...incomingNew])];
+      nextLabels = normalizeLabels([...existingNormalizedLabels, ...incomingNew]);
 
       inspector.used_labels = [
         ...new Set([...(inspector.used_labels || []), ...incomingNew]),
       ];
 
-      await inspector.save();
-
+      inspectorToSave = inspector;
       labelsAddedThisVisit = incomingNew;
+    }
+
+    const totalLabelsAfterUpdate = nextLabels.length;
+    const requiresBoxSizeForLabels =
+      nextPassed > 0 || totalLabelsAfterUpdate > 0;
+    if (requiresBoxSizeForLabels && boxSizesCount === 0) {
+      return res.status(400).json({
+        message: "At least 1 box size is required to validate labels",
+      });
+    }
+
+    if (totalLabelsAfterUpdate !== labelRequirement.requiredCount) {
+      return res.status(400).json({
+        message: buildQcLabelRequirementMessage({
+          requestType,
+          totalPassed: nextPassed,
+          boxSizesCount,
+          requestedQuantity: aqlBaseQuantity,
+          actualCount: totalLabelsAfterUpdate,
+        }),
+      });
+    }
+
+    qc.labels = nextLabels;
+
+    if (inspectorToSave) {
+      await inspectorToSave.save();
     }
 
     if (remarks !== undefined) {
