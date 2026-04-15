@@ -1,7 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import SortHeaderButton from "../components/SortHeaderButton";
+import {
+  getNextClientSortState,
+  sortClientRows,
+} from "../utils/clientSort";
 import "../App.css";
 
 const DEFAULT_LIMIT = 20;
@@ -55,6 +60,8 @@ const ProductAnalytics = () => {
     brands: [],
     vendors: [],
   });
+  const [sortBy, setSortBy] = useState("orderId");
+  const [sortOrder, setSortOrder] = useState("asc");
 
   const debouncedSearch = useDebouncedValue(searchInput, 300);
 
@@ -103,6 +110,48 @@ const ProductAnalytics = () => {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  const handleSortColumn = useCallback(
+    (column, defaultDirection = "asc") => {
+      const nextSortState = getNextClientSortState(
+        sortBy,
+        sortOrder,
+        column,
+        defaultDirection,
+      );
+      setSortBy(nextSortState.sortBy);
+      setSortOrder(nextSortState.sortOrder);
+    },
+    [sortBy, sortOrder],
+  );
+
+  const sortedRows = useMemo(
+    () =>
+      sortClientRows(rows, {
+        sortBy,
+        sortOrder,
+        getSortValue: (row, column) => {
+          if (column === "orderId") return row?.orderId;
+          if (column === "itemCode") return row?.itemCode;
+          if (column === "orderQuantity") return Number(row?.orderQuantity || 0);
+          if (column === "passedQuantity") {
+            return row?.passedQuantity == null ? null : Number(row.passedQuantity);
+          }
+          if (column === "inspectionTimeDays") {
+            return Number.isFinite(Number(row?.inspectionTimeDays))
+              ? Number(row.inspectionTimeDays)
+              : null;
+          }
+          if (column === "rejectionPercent") {
+            return Number.isFinite(Number(row?.rejectionPercent))
+              ? Number(row.rejectionPercent)
+              : null;
+          }
+          return "";
+        },
+      }),
+    [rows, sortBy, sortOrder],
+  );
 
   return (
     <>
@@ -221,23 +270,67 @@ const ProductAnalytics = () => {
                 <table className="table table-striped table-hover align-middle om-table mb-0">
                   <thead className="table-primary">
                     <tr>
-                      <th>PO</th>
-                      <th>Item Code</th>
-                      <th>Order Qty</th>
-                      <th>Passed</th>
-                      <th>Inspection Time (days)</th>
-                      <th>Average Rejection (%)</th>
+                      <th>
+                        <SortHeaderButton
+                          label="PO"
+                          isActive={sortBy === "orderId"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("orderId", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Item Code"
+                          isActive={sortBy === "itemCode"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("itemCode", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Order Qty"
+                          isActive={sortBy === "orderQuantity"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("orderQuantity", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Passed"
+                          isActive={sortBy === "passedQuantity"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("passedQuantity", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Inspection Time (days)"
+                          isActive={sortBy === "inspectionTimeDays"}
+                          direction={sortOrder}
+                          onClick={() =>
+                            handleSortColumn("inspectionTimeDays", "desc")
+                          }
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Average Rejection (%)"
+                          isActive={sortBy === "rejectionPercent"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("rejectionPercent", "desc")}
+                        />
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.length === 0 && (
+                    {sortedRows.length === 0 && (
                       <tr>
                         <td colSpan="6" className="text-center py-4">
                           No data found
                         </td>
                       </tr>
                     )}
-                    {rows.map((row, i) => (
+                    {sortedRows.map((row, i) => (
                       <tr key={i}>
                         <td>{row.orderId}</td>
                         <td>{row.itemCode}</td>

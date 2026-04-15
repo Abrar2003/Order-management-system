@@ -1,7 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import SortHeaderButton from "../components/SortHeaderButton";
+import {
+  getNextClientSortState,
+  sortClientRows,
+} from "../utils/clientSort";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -50,6 +55,8 @@ const Containers = () => {
     vendors: [],
     containers: [],
   });
+  const [sortBy, setSortBy] = useState("container");
+  const [sortOrder, setSortOrder] = useState("asc");
 
   const debouncedContainerSearch = useDebouncedValue(containerSearch, 300);
 
@@ -149,6 +156,38 @@ console.log("API response:", response);
       });
     },
     [navigate],
+  );
+
+  const handleSortColumn = useCallback(
+    (column, defaultDirection = "asc") => {
+      const nextSortState = getNextClientSortState(
+        sortBy,
+        sortOrder,
+        column,
+        defaultDirection,
+      );
+      setSortBy(nextSortState.sortBy);
+      setSortOrder(nextSortState.sortOrder);
+    },
+    [sortBy, sortOrder],
+  );
+
+  const sortedRows = useMemo(
+    () =>
+      sortClientRows(rows, {
+        sortBy,
+        sortOrder,
+        getSortValue: (row, column) => {
+          if (column === "container") return row?.container;
+          if (column === "brand") return row?.brand;
+          if (column === "vendor") return row?.vendor;
+          if (column === "shippingDate") return new Date(row?.shipping_date || 0).getTime();
+          if (column === "itemCount") return Number(row?.item_count || 0);
+          if (column === "totalQuantity") return Number(row?.total_quantity || 0);
+          return "";
+        },
+      }),
+    [rows, sortBy, sortOrder],
   );
 
   return (
@@ -265,23 +304,65 @@ console.log("API response:", response);
                 <table className="table table-striped table-hover align-middle om-table mb-0">
                   <thead className="table-primary">
                     <tr>
-                      <th>Container</th>
-                      <th>Brand</th>
-                      <th>Vendor</th>
-                      <th>Shipping Date</th>
-                      <th>Item Count</th>
-                      <th>Total Quantity</th>
+                      <th>
+                        <SortHeaderButton
+                          label="Container"
+                          isActive={sortBy === "container"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("container", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Brand"
+                          isActive={sortBy === "brand"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("brand", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Vendor"
+                          isActive={sortBy === "vendor"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("vendor", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Shipping Date"
+                          isActive={sortBy === "shippingDate"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("shippingDate", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Item Count"
+                          isActive={sortBy === "itemCount"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("itemCount", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Total Quantity"
+                          isActive={sortBy === "totalQuantity"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("totalQuantity", "desc")}
+                        />
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.length === 0 ? (
+                    {sortedRows.length === 0 ? (
                       <tr>
                         <td colSpan="6" className="text-center py-4">
                           No containers found
                         </td>
                       </tr>
                     ) : (
-                      rows.map((row) => (
+                      sortedRows.map((row) => (
                         <tr
                           key={row.container}
                           className="table-clickable"

@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import Navbar from "../components/Navbar";
+import SortHeaderButton from "../components/SortHeaderButton";
 import { getUserFromToken } from "../auth/auth.service";
 import {
   getArchivedOrders,
   syncZeroQuantityOrdersArchive,
   unarchiveOrder,
 } from "../services/orders.service";
+import {
+  getNextClientSortState,
+  sortClientRows,
+} from "../utils/clientSort";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -51,6 +56,8 @@ const ArchivedOrders = () => {
     totalRecords: 0,
   }));
   const [syncedQuery, setSyncedQuery] = useState(null);
+  const [sortBy, setSortBy] = useState("archivedAt");
+  const [sortOrder, setSortOrder] = useState("desc");
 
   const canGoPrev = pagination.page > 1;
   const canGoNext = pagination.page < pagination.totalPages;
@@ -208,6 +215,35 @@ const ArchivedOrders = () => {
     return <Navigate to="/" replace />;
   }
 
+  const handleSortColumn = (column, defaultDirection = "asc") => {
+    const nextSortState = getNextClientSortState(
+      sortBy,
+      sortOrder,
+      column,
+      defaultDirection,
+    );
+    setSortBy(nextSortState.sortBy);
+    setSortOrder(nextSortState.sortOrder);
+  };
+
+  const sortedRows = sortClientRows(rows, {
+    sortBy,
+    sortOrder,
+    getSortValue: (row, column) => {
+      if (column === "orderId") return row?.order_id;
+      if (column === "itemCode") return row?.item?.item_code;
+      if (column === "description") return row?.item?.description;
+      if (column === "brand") return row?.brand;
+      if (column === "vendor") return row?.vendor;
+      if (column === "quantity") return Number(row?.quantity || 0);
+      if (column === "restoreStatus") return row?.restore_status;
+      if (column === "archivedAt") return new Date(row?.archived_at || 0).getTime();
+      if (column === "archivedBy") return row?.archived_by?.name;
+      if (column === "remark") return row?.archived_remark;
+      return "";
+    },
+  });
+
   return (
     <>
       <Navbar />
@@ -297,21 +333,91 @@ const ArchivedOrders = () => {
                 <table className="table table-striped table-hover align-middle om-table mb-0">
                   <thead className="table-primary">
                     <tr>
-                      <th>Order ID</th>
-                      <th>Item</th>
-                      <th>Description</th>
-                      <th>Brand</th>
-                      <th>Vendor</th>
-                      <th>Quantity</th>
-                      <th>Restore Status</th>
-                      <th>Archived At</th>
-                      <th>Archived By</th>
-                      <th>Remark</th>
+                      <th>
+                        <SortHeaderButton
+                          label="Order ID"
+                          isActive={sortBy === "orderId"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("orderId", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Item"
+                          isActive={sortBy === "itemCode"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("itemCode", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Description"
+                          isActive={sortBy === "description"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("description", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Brand"
+                          isActive={sortBy === "brand"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("brand", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Vendor"
+                          isActive={sortBy === "vendor"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("vendor", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Quantity"
+                          isActive={sortBy === "quantity"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("quantity", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Restore Status"
+                          isActive={sortBy === "restoreStatus"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("restoreStatus", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Archived At"
+                          isActive={sortBy === "archivedAt"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("archivedAt", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Archived By"
+                          isActive={sortBy === "archivedBy"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("archivedBy", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Remark"
+                          isActive={sortBy === "remark"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("remark", "asc")}
+                        />
+                      </th>
                       <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((row) => {
+                    {sortedRows.map((row) => {
                       const restoreStatus = String(row?.restore_status || "").trim();
                       const canUnarchive =
                         Boolean(row?._id)
@@ -351,7 +457,7 @@ const ArchivedOrders = () => {
                       );
                     })}
 
-                    {rows.length === 0 && (
+                    {sortedRows.length === 0 && (
                       <tr>
                         <td colSpan="11" className="text-center py-4">
                           No archived orders found

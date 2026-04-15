@@ -1,7 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Navbar from "../components/Navbar";
+import SortHeaderButton from "../components/SortHeaderButton";
 import { getUploadLogs } from "../services/orders.service";
+import {
+  getNextClientSortState,
+  sortClientRows,
+} from "../utils/clientSort";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -72,6 +77,8 @@ const UploadLogs = () => {
   );
   const [limit, setLimit] = useState(() => parseLimit(searchParams.get("limit")));
   const [syncedQuery, setSyncedQuery] = useState(null);
+  const [sortBy, setSortBy] = useState("uploadedAt");
+  const [sortOrder, setSortOrder] = useState("desc");
 
   const [filters, setFilters] = useState({
     brands: [],
@@ -196,6 +203,49 @@ const UploadLogs = () => {
     syncedQuery,
     vendorFilter,
   ]);
+
+  const handleSortColumn = useCallback(
+    (column, defaultDirection = "asc") => {
+      const nextSortState = getNextClientSortState(
+        sortBy,
+        sortOrder,
+        column,
+        defaultDirection,
+      );
+      setSortBy(nextSortState.sortBy);
+      setSortOrder(nextSortState.sortOrder);
+    },
+    [sortBy, sortOrder],
+  );
+
+  const sortedRows = useMemo(
+    () =>
+      sortClientRows(rows, {
+        sortBy,
+        sortOrder,
+        getSortValue: (log, column) => {
+          const vendors = Array.isArray(log?.uploaded_vendors)
+            ? log.uploaded_vendors
+            : [];
+          const conflicts = Array.isArray(log?.conflicts) ? log.conflicts : [];
+          const status = String(log?.status || "").trim();
+
+          if (column === "uploadedAt") return new Date(log?.createdAt || 0).getTime();
+          if (column === "uploadedBy") return log?.uploaded_by_name;
+          if (column === "file") return log?.source_filename;
+          if (column === "vendors") return vendors.join(", ");
+          if (column === "distinctOrders") {
+            return Number(log?.total_distinct_orders_uploaded || 0);
+          }
+          if (column === "insertedItems") return Number(log?.inserted_item_rows || 0);
+          if (column === "duplicates") return Number(log?.duplicate_count || 0);
+          if (column === "conflicts") return conflicts.length;
+          if (column === "status") return STATUS_LABELS[status] || status;
+          return "";
+        },
+      }),
+    [rows, sortBy, sortOrder],
+  );
 
   return (
     <>
@@ -329,20 +379,83 @@ const UploadLogs = () => {
                 <table className="table table-striped table-hover align-middle om-table mb-0">
                   <thead className="table-primary">
                     <tr>
-                      <th>Uploaded At</th>
-                      <th>Uploaded By</th>
-                      <th>File</th>
-                      <th>Vendors</th>
-                      <th>Distinct Orders</th>
-                      <th>Inserted Items</th>
-                      <th>Duplicates</th>
-                      <th>Conflicts</th>
-                      <th>Status</th>
+                      <th>
+                        <SortHeaderButton
+                          label="Uploaded At"
+                          isActive={sortBy === "uploadedAt"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("uploadedAt", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Uploaded By"
+                          isActive={sortBy === "uploadedBy"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("uploadedBy", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="File"
+                          isActive={sortBy === "file"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("file", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Vendors"
+                          isActive={sortBy === "vendors"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("vendors", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Distinct Orders"
+                          isActive={sortBy === "distinctOrders"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("distinctOrders", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Inserted Items"
+                          isActive={sortBy === "insertedItems"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("insertedItems", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Duplicates"
+                          isActive={sortBy === "duplicates"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("duplicates", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Conflicts"
+                          isActive={sortBy === "conflicts"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("conflicts", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Status"
+                          isActive={sortBy === "status"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("status", "asc")}
+                        />
+                      </th>
                       <th>Details</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.length === 0 && (
+                    {sortedRows.length === 0 && (
                       <tr>
                         <td colSpan="10" className="text-center py-4">
                           No logs found
@@ -350,7 +463,7 @@ const UploadLogs = () => {
                       </tr>
                     )}
 
-                    {rows.map((log) => {
+                    {sortedRows.map((log) => {
                       const vendors = Array.isArray(log?.uploaded_vendors)
                         ? log.uploaded_vendors
                         : [];

@@ -1,9 +1,14 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import EmailLogsModal from "../components/EmailLogsModal";
+import SortHeaderButton from "../components/SortHeaderButton";
 import api from "../api/axios";
 import { getUserFromToken } from "../auth/auth.utils";
+import {
+  getNextClientSortState,
+  sortClientRows,
+} from "../utils/clientSort";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -61,6 +66,8 @@ const EmailLogs = () => {
     parsePositiveInt(searchParams.get("page"), 1),
   );
   const [limit, setLimit] = useState(() => parseLimit(searchParams.get("limit")));
+  const [sortBy, setSortBy] = useState("creationDate");
+  const [sortOrder, setSortOrder] = useState("desc");
 
   const [filterOptions, setFilterOptions] = useState({
     brands: [],
@@ -220,6 +227,40 @@ const EmailLogs = () => {
     fetchLogs();
     fetchFilterOptions();
   };
+
+  const handleSortColumn = useCallback(
+    (column, defaultDirection = "asc") => {
+      const nextSortState = getNextClientSortState(
+        sortBy,
+        sortOrder,
+        column,
+        defaultDirection,
+      );
+      setSortBy(nextSortState.sortBy);
+      setSortOrder(nextSortState.sortOrder);
+    },
+    [sortBy, sortOrder],
+  );
+
+  const sortedEmailLogs = useMemo(
+    () =>
+      sortClientRows(emailLogs, {
+        sortBy,
+        sortOrder,
+        getSortValue: (log, column) => {
+          if (column === "creationDate") {
+            return new Date(log?.creation_date || 0).getTime();
+          }
+          if (column === "orderId") return log?.order_id?.order_id;
+          if (column === "brand") return log?.brand?.name;
+          if (column === "vendor") return log?.vendor?.name;
+          if (column === "logMatter") return log?.log;
+          if (column === "createdBy") return log?.created_by?.name;
+          return "";
+        },
+      }),
+    [emailLogs, sortBy, sortOrder],
+  );
 
   const handleOpenCreateModal = () => {
     if (!canManageEmailLogs) return;
@@ -387,17 +428,59 @@ const EmailLogs = () => {
                 <table className="table table-sm table-striped align-middle mb-0">
                   <thead>
                     <tr>
-                      <th>Creation Date</th>
-                      <th>PO Number</th>
-                      <th>Brand</th>
-                      <th>Vendor</th>
-                      <th>Log Matter</th>
-                      <th>Created By</th>
+                      <th>
+                        <SortHeaderButton
+                          label="Creation Date"
+                          isActive={sortBy === "creationDate"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("creationDate", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="PO Number"
+                          isActive={sortBy === "orderId"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("orderId", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Brand"
+                          isActive={sortBy === "brand"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("brand", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Vendor"
+                          isActive={sortBy === "vendor"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("vendor", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Log Matter"
+                          isActive={sortBy === "logMatter"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("logMatter", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Created By"
+                          isActive={sortBy === "createdBy"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("createdBy", "asc")}
+                        />
+                      </th>
                       {canManageEmailLogs && <th>Action</th>}
                     </tr>
                   </thead>
                   <tbody>
-                    {emailLogs.map((log) => (
+                    {sortedEmailLogs.map((log) => (
                       <tr key={log._id}>
                         <td>{formatDateDDMMYYYY(log.creation_date) || "-"}</td>
                         <td>{log.order_id?.order_id || "-"}</td>

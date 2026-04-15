@@ -2,6 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import SortHeaderButton from "../components/SortHeaderButton";
+import {
+  getNextClientSortState,
+  sortClientRows,
+} from "../utils/clientSort";
 import {
   formatDateDDMMYYYY,
   getTodayDDMMYYYY,
@@ -86,6 +91,8 @@ const DailySummary = () => {
   const [report, setReport] = useState(() => createDefaultReport(initialSelectedDate));
   const [syncedQuery, setSyncedQuery] = useState(null);
   const [brandLogoSrc, setBrandLogoSrc] = useState("");
+  const [sortBy, setSortBy] = useState("inspectionDate");
+  const [sortOrder, setSortOrder] = useState("desc");
 
   const fetchReport = useCallback(async () => {
     try {
@@ -192,6 +199,45 @@ const DailySummary = () => {
         }))
         .filter((vendorEntry) => vendorEntry.items.length > 0),
     [report?.vendors],
+  );
+
+  const handleSortColumn = useCallback(
+    (column, defaultDirection = "asc") => {
+      const nextSortState = getNextClientSortState(
+        sortBy,
+        sortOrder,
+        column,
+        defaultDirection,
+      );
+      setSortBy(nextSortState.sortBy);
+      setSortOrder(nextSortState.sortOrder);
+    },
+    [sortBy, sortOrder],
+  );
+
+  const sortedVisibleVendors = useMemo(
+    () =>
+      visibleVendors.map((vendorEntry) => ({
+        ...vendorEntry,
+        items: sortClientRows(vendorEntry.items, {
+          sortBy,
+          sortOrder,
+          getSortValue: (row, column) => {
+            if (column === "inspectionDate") {
+              return new Date(row?.inspection_date || 0).getTime();
+            }
+            if (column === "orderId") return row?.order_id;
+            if (column === "itemCode") return row?.item_code;
+            if (column === "requested") return Number(row?.requested_quantity || 0);
+            if (column === "passed") return Number(row?.passed_quantity || 0);
+            if (column === "openQuantity") return Number(row?.open_quantity || 0);
+            if (column === "inspector") return row?.inspector_name;
+            if (column === "remarks") return row?.goods_not_ready_reason;
+            return "";
+          },
+        }),
+      })),
+    [sortBy, sortOrder, visibleVendors],
   );
 
   useEffect(() => {
@@ -321,18 +367,18 @@ const DailySummary = () => {
             </div>
           </div>
 
-          {loading && visibleVendors.length === 0 ? (
+          {loading && sortedVisibleVendors.length === 0 ? (
             <div className="card om-card">
               <div className="card-body text-center py-4">Loading...</div>
             </div>
-          ) : visibleVendors.length === 0 ? (
+          ) : sortedVisibleVendors.length === 0 ? (
             <div className="card om-card">
               <div className="card-body text-secondary">
                 No inspection rows found for the selected date.
               </div>
             </div>
           ) : (
-            visibleVendors.map((vendorEntry) => (
+            sortedVisibleVendors.map((vendorEntry) => (
               <div key={vendorEntry.vendorKey} className="card om-card">
                 <div className="card-body p-0">
                   <div className="weekly-summary-vendor-header px-3 py-3 border-bottom">
@@ -343,14 +389,70 @@ const DailySummary = () => {
                     <table className="table table-sm table-striped align-middle mb-0">
                       <thead>
                         <tr>
-                          <th>Inspection Date</th>
-                          <th>PO</th>
-                          <th>Item Code</th>
-                          <th>Requested</th>
-                          <th>Passed</th>
-                          <th>Open Quantity</th>
-                          <th>Inspector</th>
-                          <th>Remarks</th>
+                          <th>
+                            <SortHeaderButton
+                              label="Inspection Date"
+                              isActive={sortBy === "inspectionDate"}
+                              direction={sortOrder}
+                              onClick={() => handleSortColumn("inspectionDate", "desc")}
+                            />
+                          </th>
+                          <th>
+                            <SortHeaderButton
+                              label="PO"
+                              isActive={sortBy === "orderId"}
+                              direction={sortOrder}
+                              onClick={() => handleSortColumn("orderId", "asc")}
+                            />
+                          </th>
+                          <th>
+                            <SortHeaderButton
+                              label="Item Code"
+                              isActive={sortBy === "itemCode"}
+                              direction={sortOrder}
+                              onClick={() => handleSortColumn("itemCode", "asc")}
+                            />
+                          </th>
+                          <th>
+                            <SortHeaderButton
+                              label="Requested"
+                              isActive={sortBy === "requested"}
+                              direction={sortOrder}
+                              onClick={() => handleSortColumn("requested", "desc")}
+                            />
+                          </th>
+                          <th>
+                            <SortHeaderButton
+                              label="Passed"
+                              isActive={sortBy === "passed"}
+                              direction={sortOrder}
+                              onClick={() => handleSortColumn("passed", "desc")}
+                            />
+                          </th>
+                          <th>
+                            <SortHeaderButton
+                              label="Open Quantity"
+                              isActive={sortBy === "openQuantity"}
+                              direction={sortOrder}
+                              onClick={() => handleSortColumn("openQuantity", "desc")}
+                            />
+                          </th>
+                          <th>
+                            <SortHeaderButton
+                              label="Inspector"
+                              isActive={sortBy === "inspector"}
+                              direction={sortOrder}
+                              onClick={() => handleSortColumn("inspector", "asc")}
+                            />
+                          </th>
+                          <th>
+                            <SortHeaderButton
+                              label="Remarks"
+                              isActive={sortBy === "remarks"}
+                              direction={sortOrder}
+                              onClick={() => handleSortColumn("remarks", "asc")}
+                            />
+                          </th>
                         </tr>
                       </thead>
                       <tbody>

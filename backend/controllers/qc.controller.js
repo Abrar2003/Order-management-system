@@ -212,59 +212,146 @@ const normalizeQcRequestType = (value) => {
   if (normalized === QC_REQUEST_TYPES.AQL) return QC_REQUEST_TYPES.AQL;
   return QC_REQUEST_TYPES.FULL;
 };
-const computeAqlSampleQuantity = (quantity) => {
-  const safeQuantity = toNonNegativeNumber(quantity, 0);
-  if (safeQuantity <= 0) return 0;
-  return Math.max(1, Math.ceil(safeQuantity * 0.1));
+const getEffectiveRequestPassedQuantity = ({
+  requestType = "",
+  samplePassed = 0,
+  requestedQuantity = 0,
+}) => {
+  const safeSamplePassed = toNonNegativeNumber(samplePassed, 0);
+  if (normalizeQcRequestType(requestType) !== QC_REQUEST_TYPES.AQL) {
+    return safeSamplePassed;
+  }
+
+  return safeSamplePassed > 0
+    ? toNonNegativeNumber(requestedQuantity, 0)
+    : 0;
 };
-const resolveAqlBaseQuantity = (requestedQuantity, fallbackQuantity = 0) => {
-  const normalizedRequestedQuantity = toNonNegativeNumber(requestedQuantity, 0);
-  if (normalizedRequestedQuantity > 0) return normalizedRequestedQuantity;
-  return toNonNegativeNumber(fallbackQuantity, 0);
+
+const resolveInspectionRequestGroupKey = (record = {}, fallbackKey = "") => {
+  const requestHistoryId = String(record?.request_history_id || "").trim();
+  if (requestHistoryId) return `request:${requestHistoryId}`;
+
+  const requestedDateKey = toISODateString(
+    record?.requested_date || record?.inspection_date || record?.createdAt,
+  );
+  const inspectorId = String(
+    record?.inspector?._id || record?.inspector || "",
+  ).trim();
+  if (requestedDateKey && inspectorId) {
+    return `date:${requestedDateKey}:inspector:${inspectorId}`;
+  }
+  if (requestedDateKey) {
+    return `date:${requestedDateKey}`;
+  }
+
+  const recordId = String(record?._id || "").trim();
+  if (recordId) return `record:${recordId}`;
+  return fallbackKey || "record:unknown";
+};
+
+const calculateQcAggregateMetrics = (qcDoc, inspectionRecords = []) => {
+  const safeInspectionRecords = Array.isArray(inspectionRecords)
+    ? inspectionRecords
+    : [];
+  const requestHistoryQuantityById = new Map(
+    (Array.isArray(qcDoc?.request_history) ? qcDoc.request_history : [])
+      .map((entry) => [
+        String(entry?._id || "").trim(),
+        toNonNegativeNumber(entry?.quantity_requested, 0),
+      ])
+      .filter(([requestHistoryId]) => requestHistoryId),
+  );
+  const requestType = normalizeQcRequestType(qcDoc?.request_type);
+  const fallbackRequestedQuantity = resolveRequestedQuantityFromQc(qcDoc);
+  const requestGroupMetrics = new Map();
+
+  const totalChecked = safeInspectionRecords.reduce(
+    (sum, record) => sum + toNonNegativeNumber(record?.checked, 0),
+    0,
+  );
+  const totalVendorOffered = safeInspectionRecords.reduce(
+    (sum, record) => sum + toNonNegativeNumber(record?.vendor_offered, 0),
+    0,
+  );
+  const totalSamplePassed = safeInspectionRecords.reduce(
+    (sum, record) => sum + toNonNegativeNumber(record?.passed, 0),
+    0,
+  );
+
+  safeInspectionRecords.forEach((record, index) => {
+    const requestGroupKey = resolveInspectionRequestGroupKey(
+      record,
+      `fallback:${index}`,
+    );
+    const requestHistoryId = String(record?.request_history_id || "").trim();
+    const recordRequestedQuantity = toNonNegativeNumber(
+      record?.vendor_requested,
+      0,
+    );
+    const historyRequestedQuantity = requestHistoryId
+      ? toNonNegativeNumber(requestHistoryQuantityById.get(requestHistoryId), 0)
+      : 0;
+    const requestMetrics = requestGroupMetrics.get(requestGroupKey) || {
+      requestedQuantity: 0,
+      samplePassed: 0,
+    };
+
+    requestMetrics.requestedQuantity = Math.max(
+      requestMetrics.requestedQuantity,
+      recordRequestedQuantity,
+      historyRequestedQuantity,
+    );
+    requestMetrics.samplePassed += toNonNegativeNumber(record?.passed, 0);
+    requestGroupMetrics.set(requestGroupKey, requestMetrics);
+  });
+
+  const totalEffectivePassed = Array.from(requestGroupMetrics.values()).reduce(
+    (sum, requestMetrics) =>
+      sum +
+      getEffectiveRequestPassedQuantity({
+        requestType,
+        samplePassed: requestMetrics.samplePassed,
+        requestedQuantity:
+          requestMetrics.requestedQuantity > 0
+            ? requestMetrics.requestedQuantity
+            : fallbackRequestedQuantity,
+      }),
+    0,
+  );
+
+  return {
+    totalChecked,
+    totalVendorOffered,
+    totalSamplePassed,
+    totalEffectivePassed,
+  };
 };
 
 const getQcLabelRequirement = ({
-  requestType = "",
   totalPassed = 0,
   boxSizesCount = 0,
-  requestedQuantity = 0,
 }) => {
-  const normalizedRequestType = normalizeQcRequestType(requestType);
   const safePassed = toNonNegativeNumber(totalPassed, 0);
   const safeBoxSizesCount = toNonNegativeNumber(boxSizesCount, 0);
-  const safeRequestedQuantity = toNonNegativeNumber(requestedQuantity, 0);
-  const usesRequestedQuantity =
-    normalizedRequestType === QC_REQUEST_TYPES.AQL && safePassed > 0;
-  const basisQuantity = usesRequestedQuantity
-    ? safeRequestedQuantity
-    : safePassed;
 
   return {
-    requiredCount: basisQuantity * safeBoxSizesCount,
-    basisQuantity,
+    requiredCount: safePassed * safeBoxSizesCount,
+    basisQuantity: safePassed,
     boxSizesCount: safeBoxSizesCount,
-    usesRequestedQuantity,
   };
 };
 
 const buildQcLabelRequirementMessage = ({
-  requestType = "",
   totalPassed = 0,
   boxSizesCount = 0,
-  requestedQuantity = 0,
   actualCount = 0,
 }) => {
   const requirement = getQcLabelRequirement({
-    requestType,
     totalPassed,
     boxSizesCount,
-    requestedQuantity,
   });
-  const prefix = requirement.usesRequestedQuantity
-    ? "For AQL, total labels must equal requested quantity × box sizes count"
-    : "Total labels must equal passed quantity × box sizes count";
 
-  return `${prefix} (${requirement.requiredCount}). Actual total labels: ${toNonNegativeNumber(actualCount, 0)}. Expected: ${requirement.basisQuantity} × ${requirement.boxSizesCount}.`;
+  return `Total labels must equal passed quantity × box sizes count (${requirement.requiredCount}). Actual total labels: ${toNonNegativeNumber(actualCount, 0)}. Expected: ${requirement.basisQuantity} × ${requirement.boxSizesCount}.`;
 };
 
 const normalizeInspectionStatus = (value) =>
@@ -1172,25 +1259,19 @@ const buildStoredQcImageEntry = ({
 const recalculateQcAggregateQuantities = (qcDoc, inspectionRecords = []) => {
   if (!qcDoc?.quantities) return;
 
-  const totalChecked = (Array.isArray(inspectionRecords) ? inspectionRecords : []).reduce(
-    (sum, record) => sum + toNonNegativeNumber(record?.checked, 0),
-    0,
-  );
-  const totalPassed = (Array.isArray(inspectionRecords) ? inspectionRecords : []).reduce(
-    (sum, record) => sum + toNonNegativeNumber(record?.passed, 0),
-    0,
-  );
-  const totalVendorOffered = (Array.isArray(inspectionRecords) ? inspectionRecords : []).reduce(
-    (sum, record) => sum + toNonNegativeNumber(record?.vendor_offered, 0),
-    0,
-  );
+  const {
+    totalChecked,
+    totalVendorOffered,
+    totalSamplePassed,
+    totalEffectivePassed,
+  } = calculateQcAggregateMetrics(qcDoc, inspectionRecords);
   const clientDemandQty = toNonNegativeNumber(qcDoc?.quantities?.client_demand, 0);
 
   qcDoc.quantities.qc_checked = totalChecked;
-  qcDoc.quantities.qc_passed = totalPassed;
+  qcDoc.quantities.qc_passed = totalEffectivePassed;
   qcDoc.quantities.vendor_provision = totalVendorOffered;
-  qcDoc.quantities.pending = Math.max(0, clientDemandQty - totalPassed);
-  qcDoc.quantities.qc_rejected = Math.max(0, totalChecked - totalPassed);
+  qcDoc.quantities.pending = Math.max(0, clientDemandQty - totalEffectivePassed);
+  qcDoc.quantities.qc_rejected = Math.max(0, totalChecked - totalSamplePassed);
 };
 
 const toPositiveCbmNumber = (value) => {
@@ -4362,17 +4443,53 @@ exports.updateQC = async (req, res) => {
       labels !== undefined ||
       label_ranges !== undefined;
     const requestType = normalizeQcRequestType(qc?.request_type);
-    const isAqlRequest = requestType === QC_REQUEST_TYPES.AQL;
     const quantityRequestedCap = latestRequestedQuantity;
     const clientDemandQuantity = toNonNegativeNumber(
       qc?.quantities?.client_demand,
       0,
     );
-    const aqlBaseQuantity = resolveAqlBaseQuantity(
-      quantityRequestedCap,
-      clientDemandQuantity,
+    const currentAggregateMetrics = calculateQcAggregateMetrics(
+      qc,
+      beforeInspectionRecords,
     );
-    const aqlSampleQuantity = computeAqlSampleQuantity(aqlBaseQuantity);
+    const currentCheckedTotal = currentAggregateMetrics.totalChecked;
+    const currentSamplePassedTotal = currentAggregateMetrics.totalSamplePassed;
+    const currentEffectivePassedTotal =
+      currentAggregateMetrics.totalEffectivePassed;
+    const currentVendorOfferedTotal =
+      currentAggregateMetrics.totalVendorOffered;
+    const currentRequestInspectionRecord =
+      resolveLatestInspectionRecordForRequestEntry(
+        beforeInspectionRecords,
+        latestRequestEntry,
+      );
+    const currentRequestRequestedQuantity =
+      [
+        currentRequestInspectionRecord?.vendor_requested,
+        latestRequestEntry?.quantity_requested,
+        quantityRequestedCap,
+        clientDemandQuantity,
+      ]
+        .map((value) => toNonNegativeNumber(value, 0))
+        .find((value) => value > 0) || 0;
+    const currentRequestCheckedBefore = toNonNegativeNumber(
+      currentRequestInspectionRecord?.checked,
+      0,
+    );
+    const currentRequestSamplePassedBefore = toNonNegativeNumber(
+      currentRequestInspectionRecord?.passed,
+      0,
+    );
+    const currentRequestOfferedBefore = toNonNegativeNumber(
+      currentRequestInspectionRecord?.vendor_offered,
+      0,
+    );
+    const currentRequestEffectivePassedBefore =
+      getEffectiveRequestPassedQuantity({
+        requestType,
+        samplePassed: currentRequestSamplePassedBefore,
+        requestedQuantity: currentRequestRequestedQuantity,
+      });
 
     if (
       [addChecked, addPassed, addProvision].some(
@@ -4457,50 +4574,53 @@ exports.updateQC = async (req, res) => {
       });
     }
 
-    if (isAqlRequest && addChecked > aqlSampleQuantity) {
-      return res.status(400).json({
-        message: `AQL checked quantity cannot exceed 10% sample (${aqlSampleQuantity})`,
-      });
-    }
-
-    if (
-      isAqlRequest &&
-      qc_passed !== undefined &&
-      addPassed > 0 &&
-      addPassed > aqlBaseQuantity
-    ) {
-      return res.status(400).json({
-        message: "For AQL, passed quantity cannot exceed quantity requested",
-      });
-    }
-
-    let nextVendorProvision = qc.quantities.vendor_provision;
-    let nextChecked = qc.quantities.qc_checked;
-    let nextPassedInput = qc.quantities.qc_passed;
-    let shouldAutoPassAql = false;
-    let nextPassed = qc.quantities.qc_passed;
+    let nextVendorProvision = currentVendorOfferedTotal;
+    let nextChecked = currentCheckedTotal;
+    let nextSamplePassedTotal = currentSamplePassedTotal;
+    let nextCurrentRequestChecked = currentRequestCheckedBefore;
+    let nextCurrentRequestSamplePassed = currentRequestSamplePassedBefore;
+    let nextCurrentRequestOffered = currentRequestOfferedBefore;
 
     if (allowAdminRewrite && hasExplicitQuantityPayload) {
       nextVendorProvision = toNonNegativeNumber(vendor_provision, 0);
       nextChecked = toNonNegativeNumber(qc_checked, 0);
-      nextPassedInput = toNonNegativeNumber(qc_passed, 0);
-    } else {
-      nextVendorProvision = qc.quantities.vendor_provision + addProvision;
-      nextChecked = qc.quantities.qc_checked + addChecked;
-      nextPassedInput = qc.quantities.qc_passed + addPassed;
-    }
+      nextSamplePassedTotal = toNonNegativeNumber(qc_passed, 0);
 
-    shouldAutoPassAql = isAqlRequest && nextPassedInput > 0;
-    nextPassed = shouldAutoPassAql
-      ? aqlBaseQuantity
-      : nextPassedInput;
-
-    if (shouldAutoPassAql) {
-      nextVendorProvision = Math.max(
-        toNonNegativeNumber(nextVendorProvision, 0),
-        aqlBaseQuantity,
+      const otherChecked = Math.max(
+        0,
+        currentCheckedTotal - currentRequestCheckedBefore,
       );
+      const otherOffered = Math.max(
+        0,
+        currentVendorOfferedTotal - currentRequestOfferedBefore,
+      );
+      const otherSamplePassed = Math.max(
+        0,
+        currentSamplePassedTotal - currentRequestSamplePassedBefore,
+      );
+
+      nextCurrentRequestChecked = Math.max(0, nextChecked - otherChecked);
+      nextCurrentRequestOffered = Math.max(0, nextVendorProvision - otherOffered);
+      nextCurrentRequestSamplePassed = Math.max(
+        0,
+        nextSamplePassedTotal - otherSamplePassed,
+      );
+    } else {
+      nextVendorProvision = currentVendorOfferedTotal + addProvision;
+      nextChecked = currentCheckedTotal + addChecked;
+      nextSamplePassedTotal = currentSamplePassedTotal + addPassed;
+      nextCurrentRequestChecked = currentRequestCheckedBefore + addChecked;
+      nextCurrentRequestSamplePassed = currentRequestSamplePassedBefore + addPassed;
+      nextCurrentRequestOffered = currentRequestOfferedBefore + addProvision;
     }
+
+    const nextEffectivePassed =
+      Math.max(0, currentEffectivePassedTotal - currentRequestEffectivePassedBefore) +
+      getEffectiveRequestPassedQuantity({
+        requestType,
+        samplePassed: nextCurrentRequestSamplePassed,
+        requestedQuantity: currentRequestRequestedQuantity,
+      });
 
     if (nextVendorProvision < 0) {
       return res
@@ -4508,19 +4628,10 @@ exports.updateQC = async (req, res) => {
         .json({ message: "offered quantity cannot be negative" });
     }
 
-    if (isAqlRequest && nextChecked > aqlSampleQuantity) {
-      return res.status(400).json({
-        message: `AQL checked quantity cannot exceed 10% sample (${aqlSampleQuantity})`,
-      });
-    }
-
-    const parsedPendingQuantityLimit = Number(
-      qc.quantities?.pending ??
-        (qc.quantities?.client_demand || 0) - (qc.quantities?.qc_passed || 0),
+    const pendingQuantityLimit = Math.max(
+      0,
+      clientDemandQuantity - currentEffectivePassedTotal,
     );
-    const pendingQuantityLimit = Number.isFinite(parsedPendingQuantityLimit)
-      ? Math.max(0, parsedPendingQuantityLimit)
-      : 0;
 
     if (allowAdminRewrite && hasExplicitQuantityPayload) {
       // Admin rewrite updates aggregate QC totals across inspection rows.
@@ -4541,27 +4652,19 @@ exports.updateQC = async (req, res) => {
       });
     }
 
-    if (!isAqlRequest && nextPassed > nextChecked) {
-      return res.status(400).json({
-        message: "qc_passed cannot exceed qc_checked",
-      });
-    }
-
-    if (
-      allowAdminRewrite &&
-      hasExplicitQuantityPayload &&
-      nextChecked > nextVendorProvision
-    ) {
+    if (nextCurrentRequestChecked > nextCurrentRequestOffered) {
       return res.status(400).json({
         message: "qc_checked cannot exceed offered quantity",
       });
     }
 
-    if (
-      allowAdminRewrite &&
-      hasExplicitQuantityPayload &&
-      nextPassed > nextVendorProvision
-    ) {
+    if (nextCurrentRequestSamplePassed > nextCurrentRequestChecked) {
+      return res.status(400).json({
+        message: "qc_passed cannot exceed qc_checked",
+      });
+    }
+
+    if (nextCurrentRequestSamplePassed > nextCurrentRequestOffered) {
       return res.status(400).json({
         message: "passed quantity cannot exceed offered quantity",
       });
@@ -4582,18 +4685,22 @@ exports.updateQC = async (req, res) => {
       });
     }
     const labelRequirement = getQcLabelRequirement({
-      requestType,
-      totalPassed: nextPassed,
+      totalPassed: nextSamplePassedTotal,
       boxSizesCount,
-      requestedQuantity: aqlBaseQuantity,
     });
     const existingNormalizedLabels = normalizeLabels(qc.labels || []);
 
     qc.quantities.vendor_provision = nextVendorProvision;
     qc.quantities.qc_checked = nextChecked;
-    qc.quantities.qc_passed = nextPassed;
-    qc.quantities.pending =
-      qc.quantities.client_demand - qc.quantities.qc_passed;
+    qc.quantities.qc_passed = nextEffectivePassed;
+    qc.quantities.pending = Math.max(
+      0,
+      clientDemandQuantity - nextEffectivePassed,
+    );
+    qc.quantities.qc_rejected = Math.max(
+      0,
+      nextChecked - nextSamplePassedTotal,
+    );
 
     /* ────────────────────────
          🏷️ LABELS (UNCHANGED LOGIC)
@@ -4720,7 +4827,7 @@ exports.updateQC = async (req, res) => {
 
     const totalLabelsAfterUpdate = nextLabels.length;
     const requiresBoxSizeForLabels =
-      nextPassed > 0 || totalLabelsAfterUpdate > 0;
+      nextSamplePassedTotal > 0 || totalLabelsAfterUpdate > 0;
     if (requiresBoxSizeForLabels && boxSizesCount === 0) {
       return res.status(400).json({
         message: "At least 1 box size is required to validate labels",
@@ -4730,10 +4837,8 @@ exports.updateQC = async (req, res) => {
     if (totalLabelsAfterUpdate !== labelRequirement.requiredCount) {
       return res.status(400).json({
         message: buildQcLabelRequirementMessage({
-          requestType,
-          totalPassed: nextPassed,
+          totalPassed: nextSamplePassedTotal,
           boxSizesCount,
-          requestedQuantity: aqlBaseQuantity,
           actualCount: totalLabelsAfterUpdate,
         }),
       });
@@ -4759,12 +4864,6 @@ exports.updateQC = async (req, res) => {
       addPassed > 0 ||
       addProvision > 0 ||
       (labelsAddedThisVisit && labelsAddedThisVisit.length > 0);
-    const addPassedForInspectionRecord = shouldAutoPassAql
-      ? Math.max(
-          0,
-          Math.min(addChecked, addPassed > 0 ? addPassed : addChecked),
-        )
-      : addPassed;
 
     const shouldUpdateInspectionRecord =
       !allowAdminRewrite &&
@@ -4838,7 +4937,7 @@ exports.updateQC = async (req, res) => {
         createdBy: req.user._id,
         auditUser: req.user,
         addChecked: isVisitUpdate ? addChecked : 0,
-        addPassed: isVisitUpdate ? addPassedForInspectionRecord : 0,
+        addPassed: isVisitUpdate ? addPassed : 0,
         addProvision: isVisitUpdate ? addProvision : 0,
         appendLabelRanges: isVisitUpdate ? labelRangesUsedThisVisit : [],
         appendLabels: isVisitUpdate ? labelsAddedThisVisit : [],
@@ -9085,33 +9184,13 @@ exports.editInspectionRecords = async (req, res) => {
       )
       .lean();
 
-    const totalChecked = refreshedInspections.reduce(
-      (sum, record) => sum + toNonNegativeNumber(record?.checked, 0),
-      0,
-    );
-    const totalPassed = refreshedInspections.reduce(
-      (sum, record) => sum + toNonNegativeNumber(record?.passed, 0),
-      0,
-    );
-    const totalVendorOffered = refreshedInspections.reduce(
-      (sum, record) => sum + toNonNegativeNumber(record?.vendor_offered, 0),
-      0,
-    );
     const mergedLabels = normalizeLabels(
       refreshedInspections.flatMap((record) =>
         Array.isArray(record?.labels_added) ? record.labels_added : [],
       ),
     );
 
-    const clientDemandQty = toNonNegativeNumber(
-      qc?.quantities?.client_demand,
-      0,
-    );
-    qc.quantities.qc_checked = totalChecked;
-    qc.quantities.qc_passed = totalPassed;
-    qc.quantities.vendor_provision = totalVendorOffered;
-    qc.quantities.pending = Math.max(0, clientDemandQty - totalPassed);
-    qc.quantities.qc_rejected = Math.max(0, totalChecked - totalPassed);
+    recalculateQcAggregateQuantities(qc, refreshedInspections);
     qc.labels = mergedLabels;
 
     syncQcRequestHistoryStatuses(qc, refreshedInspections, {
@@ -9254,28 +9333,9 @@ exports.deleteInspectionRecord = async (req, res) => {
       Array.isArray(qc.inspection_record) ? qc.inspection_record : []
     ).filter((entryId) => String(entryId) !== String(inspection._id));
 
-    const currentChecked = Number(qc?.quantities?.qc_checked || 0);
-    const currentPassed = Number(qc?.quantities?.qc_passed || 0);
-    const currentProvision = Number(qc?.quantities?.vendor_provision || 0);
-    const currentClientDemand = Number(qc?.quantities?.client_demand || 0);
-
-    const removedChecked = Number(inspection?.checked || 0);
-    const removedPassed = Number(inspection?.passed || 0);
-    const removedProvision = Number(inspection?.vendor_offered || 0);
     const deletedRequestHistoryId = String(
       inspection?.request_history_id || "",
     ).trim();
-
-    qc.quantities.qc_checked = Math.max(0, currentChecked - removedChecked);
-    qc.quantities.qc_passed = Math.max(0, currentPassed - removedPassed);
-    qc.quantities.vendor_provision = Math.max(
-      0,
-      currentProvision - removedProvision,
-    );
-    qc.quantities.pending = Math.max(
-      0,
-      currentClientDemand - qc.quantities.qc_passed,
-    );
 
     const remainingInspections = await Inspection.find({
       qc: qc._id,
@@ -9308,6 +9368,7 @@ exports.deleteInspectionRecord = async (req, res) => {
     const shouldDeleteQcRecord = remainingInspections.length === 0;
 
     if (!shouldDeleteQcRecord) {
+      recalculateQcAggregateQuantities(qc, remainingInspections);
       qc.labels = recalculatedLabels;
 
       syncQcRequestHistoryStatuses(qc, remainingInspections, {

@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import UpcomingEtdExportModal from "../components/UpcomingEtdExportModal";
+import SortHeaderButton from "../components/SortHeaderButton";
 import { getUpcomingEtdReport } from "../services/orders.service";
+import {
+  getNextClientSortState,
+  sortClientRows,
+} from "../utils/clientSort";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -73,6 +78,8 @@ const UpcomingEtdReports = () => {
   const [report, setReport] = useState(defaultReport);
   const [syncedQuery, setSyncedQuery] = useState(null);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [sortBy, setSortBy] = useState("daysUntilEtd");
+  const [sortOrder, setSortOrder] = useState("asc");
 
   const fetchReport = useCallback(async () => {
     try {
@@ -162,6 +169,20 @@ const UpcomingEtdReports = () => {
     if (!normalizedOrderId) return;
     navigate(`/orders?order_id=${encodeURIComponent(normalizedOrderId)}`);
   }, [navigate]);
+
+  const handleSortColumn = useCallback(
+    (column, defaultDirection = "asc") => {
+      const nextSortState = getNextClientSortState(
+        sortBy,
+        sortOrder,
+        column,
+        defaultDirection,
+      );
+      setSortBy(nextSortState.sortBy);
+      setSortOrder(nextSortState.sortOrder);
+    },
+    [sortBy, sortOrder],
+  );
 
   return (
     <>
@@ -297,6 +318,28 @@ const UpcomingEtdReports = () => {
           ) : (
             report.vendors.map((vendorEntry, index) => {
               const rows = Array.isArray(vendorEntry?.rows) ? vendorEntry.rows : [];
+              const sortedRows = sortClientRows(rows, {
+                sortBy,
+                sortOrder,
+                getSortValue: (row, column) => {
+                  if (column === "orderId") return row?.order_id;
+                  if (column === "brand") return row?.brand;
+                  if (column === "orderDate") return new Date(row?.order_date || 0).getTime();
+                  if (column === "etd") {
+                    return new Date(row?.effective_etd || 0).getTime();
+                  }
+                  if (column === "daysUntilEtd") {
+                    return Number(row?.days_until_etd || 0);
+                  }
+                  if (column === "pending") return Number(row?.pending_count || 0);
+                  if (column === "inspectionDone") {
+                    return Number(row?.inspection_done_count || 0);
+                  }
+                  if (column === "shipped") return Number(row?.shipped_count || 0);
+                  if (column === "lastProgress") return row?.last_progress;
+                  return "";
+                },
+              });
               const vendorKey = String(vendorEntry?.vendor || "").trim() || `vendor-${index}`;
 
               return (
@@ -328,19 +371,82 @@ const UpcomingEtdReports = () => {
                       <table className="table table-sm table-striped align-middle mb-0">
                         <thead>
                           <tr>
-                            <th>PO</th>
-                            <th>Brand</th>
-                            <th>Order Date</th>
-                            <th>ETD</th>
-                            <th>Days Until ETD</th>
-                            <th>Pending</th>
-                            <th>Inspection Done</th>
-                            <th>Shipped</th>
-                            <th>Last Progress</th>
+                            <th>
+                              <SortHeaderButton
+                                label="PO"
+                                isActive={sortBy === "orderId"}
+                                direction={sortOrder}
+                                onClick={() => handleSortColumn("orderId", "asc")}
+                              />
+                            </th>
+                            <th>
+                              <SortHeaderButton
+                                label="Brand"
+                                isActive={sortBy === "brand"}
+                                direction={sortOrder}
+                                onClick={() => handleSortColumn("brand", "asc")}
+                              />
+                            </th>
+                            <th>
+                              <SortHeaderButton
+                                label="Order Date"
+                                isActive={sortBy === "orderDate"}
+                                direction={sortOrder}
+                                onClick={() => handleSortColumn("orderDate", "desc")}
+                              />
+                            </th>
+                            <th>
+                              <SortHeaderButton
+                                label="ETD"
+                                isActive={sortBy === "etd"}
+                                direction={sortOrder}
+                                onClick={() => handleSortColumn("etd", "asc")}
+                              />
+                            </th>
+                            <th>
+                              <SortHeaderButton
+                                label="Days Until ETD"
+                                isActive={sortBy === "daysUntilEtd"}
+                                direction={sortOrder}
+                                onClick={() => handleSortColumn("daysUntilEtd", "asc")}
+                              />
+                            </th>
+                            <th>
+                              <SortHeaderButton
+                                label="Pending"
+                                isActive={sortBy === "pending"}
+                                direction={sortOrder}
+                                onClick={() => handleSortColumn("pending", "desc")}
+                              />
+                            </th>
+                            <th>
+                              <SortHeaderButton
+                                label="Inspection Done"
+                                isActive={sortBy === "inspectionDone"}
+                                direction={sortOrder}
+                                onClick={() => handleSortColumn("inspectionDone", "desc")}
+                              />
+                            </th>
+                            <th>
+                              <SortHeaderButton
+                                label="Shipped"
+                                isActive={sortBy === "shipped"}
+                                direction={sortOrder}
+                                onClick={() => handleSortColumn("shipped", "desc")}
+                              />
+                            </th>
+                            <th>
+                              <SortHeaderButton
+                                label="Last Progress"
+                                isActive={sortBy === "lastProgress"}
+                                direction={sortOrder}
+                                onClick={() => handleSortColumn("lastProgress", "asc")}
+                              />
+                            </th>
                           </tr>
                         </thead>
                         <tbody>
-                          {rows.length === 0 && (
+                          {sortedRows.length === 0 && (
                             <tr>
                               <td colSpan="9" className="text-center py-3">
                                 No upcoming ETD POs for this vendor.
@@ -348,7 +454,7 @@ const UpcomingEtdReports = () => {
                             </tr>
                           )}
 
-                          {rows.map((row) => (
+                          {sortedRows.map((row) => (
                             <tr
                               key={`${vendorKey}-${row.order_id}`}
                               className="table-clickable"

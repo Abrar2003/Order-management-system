@@ -17,12 +17,6 @@ const normalizeRequestType = (value) =>
 const normalizeInspectionStatus = (value) =>
   String(value || "").trim().toLowerCase();
 
-const computeAqlSampleQuantity = (quantity) => {
-  const parsedQuantity = Number(quantity);
-  if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) return 0;
-  return Math.max(1, Math.ceil(parsedQuantity * 0.1));
-};
-
 const AlignQCModal = ({
   order,
   onClose,
@@ -74,7 +68,6 @@ const AlignQCModal = ({
   const requestedQuantityNumber = Number.isFinite(parsedRequestedQuantity)
     ? Math.max(0, parsedRequestedQuantity)
     : 0;
-  const aqlSampleQuantity = computeAqlSampleQuantity(requestedQuantityNumber);
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -405,8 +398,8 @@ const AlignQCModal = ({
               {requestType === "AQL" && (
                 <div className="small text-secondary mt-1">
                   {quantityRequested === ""
-                    ? "Enter requested quantity to calculate the AQL sample."
-                    : `AQL sample uses 10% of requested quantity (${aqlSampleQuantity}). Any positive AQL pass will complete the full requested quantity.`}
+                    ? "Enter requested quantity for this AQL request."
+                    : "Any positive AQL pass will complete the full requested quantity. Label validation will still use the actual passed sample quantity."}
                 </div>
               )}
             </div>

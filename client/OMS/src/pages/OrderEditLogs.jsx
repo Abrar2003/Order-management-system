@@ -1,7 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Navbar from "../components/Navbar";
+import SortHeaderButton from "../components/SortHeaderButton";
 import { getOrderEditLogs } from "../services/orders.service";
+import {
+  getNextClientSortState,
+  sortClientRows,
+} from "../utils/clientSort";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -71,6 +76,8 @@ const OrderEditLogs = () => {
   );
   const [limit, setLimit] = useState(() => parseLimit(searchParams.get("limit")));
   const [syncedQuery, setSyncedQuery] = useState(null);
+  const [sortBy, setSortBy] = useState("editedAt");
+  const [sortOrder, setSortOrder] = useState("desc");
 
   const [filters, setFilters] = useState({
     brands: [],
@@ -197,6 +204,51 @@ const OrderEditLogs = () => {
     syncedQuery,
     vendorFilter,
   ]);
+
+  const handleSortColumn = useCallback(
+    (column, defaultDirection = "asc") => {
+      const nextSortState = getNextClientSortState(
+        sortBy,
+        sortOrder,
+        column,
+        defaultDirection,
+      );
+      setSortBy(nextSortState.sortBy);
+      setSortOrder(nextSortState.sortOrder);
+    },
+    [sortBy, sortOrder],
+  );
+
+  const sortedRows = useMemo(
+    () =>
+      sortClientRows(rows, {
+        sortBy,
+        sortOrder,
+        getSortValue: (log, column) => {
+          const changes = Array.isArray(log?.changes) ? log.changes : [];
+          const changedFields = Array.isArray(log?.changed_fields)
+            ? log.changed_fields
+            : [];
+          const remarks = Array.isArray(log?.remarks) ? log.remarks : [];
+
+          if (column === "editedAt") return new Date(log?.createdAt || 0).getTime();
+          if (column === "editedBy") return log?.edited_by_name;
+          if (column === "orderId") return log?.order_id;
+          if (column === "brand") return log?.brand;
+          if (column === "vendor") return log?.vendor;
+          if (column === "type") {
+            return OPERATION_LABELS[log?.operation_type] || log?.operation_type;
+          }
+          if (column === "changedCount") {
+            return Number(log?.changed_fields_count || changes.length || 0);
+          }
+          if (column === "fieldsUpdated") return changedFields.join(", ");
+          if (column === "remarks") return remarks.join(" | ");
+          return "";
+        },
+      }),
+    [rows, sortBy, sortOrder],
+  );
 
   return (
     <>
@@ -328,20 +380,83 @@ const OrderEditLogs = () => {
                 <table className="table table-striped table-hover align-middle om-table mb-0">
                   <thead className="table-primary">
                     <tr>
-                      <th>Edited At</th>
-                      <th>Edited By</th>
-                      <th>Order ID</th>
-                      <th>Brand</th>
-                      <th>Vendor</th>
-                      <th>Type</th>
-                      <th>Changed Fields</th>
-                      <th>Fields Updated</th>
-                      <th>Remarks</th>
+                      <th>
+                        <SortHeaderButton
+                          label="Edited At"
+                          isActive={sortBy === "editedAt"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("editedAt", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Edited By"
+                          isActive={sortBy === "editedBy"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("editedBy", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Order ID"
+                          isActive={sortBy === "orderId"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("orderId", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Brand"
+                          isActive={sortBy === "brand"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("brand", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Vendor"
+                          isActive={sortBy === "vendor"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("vendor", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Type"
+                          isActive={sortBy === "type"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("type", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Changed Fields"
+                          isActive={sortBy === "changedCount"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("changedCount", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Fields Updated"
+                          isActive={sortBy === "fieldsUpdated"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("fieldsUpdated", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Remarks"
+                          isActive={sortBy === "remarks"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("remarks", "asc")}
+                        />
+                      </th>
                       <th>Details</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.length === 0 && (
+                    {sortedRows.length === 0 && (
                       <tr>
                         <td colSpan="10" className="text-center py-4">
                           No edit logs found
@@ -349,7 +464,7 @@ const OrderEditLogs = () => {
                       </tr>
                     )}
 
-                    {rows.map((log) => {
+                    {sortedRows.map((log) => {
                       const changedFields = Array.isArray(log?.changed_fields)
                         ? log.changed_fields
                         : [];

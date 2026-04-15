@@ -2,10 +2,15 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import SortHeaderButton from "../components/SortHeaderButton";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { formatCbm } from "../utils/cbm";
+import {
+  getNextClientSortState,
+  sortClientRows,
+} from "../utils/clientSort";
 import "../App.css";
 
 const DEFAULT_TAB = "summary";
@@ -183,6 +188,10 @@ const VendorWiseQAReport = () => {
     ),
   );
   const [syncedQuery, setSyncedQuery] = useState(null);
+  const [summarySortBy, setSummarySortBy] = useState("inspector");
+  const [summarySortOrder, setSummarySortOrder] = useState("asc");
+  const [detailSortBy, setDetailSortBy] = useState("inspectionDate");
+  const [detailSortOrder, setDetailSortOrder] = useState("desc");
 
   const fetchVendorOptions = useCallback(async () => {
     try {
@@ -410,6 +419,52 @@ const VendorWiseQAReport = () => {
   }, [inspectorFilter, inspectorOptions]);
 
   const activeError = activeTab === "summary" ? summaryError : detailedError;
+
+  const handleSummarySortColumn = useCallback(
+    (column, defaultDirection = "asc") => {
+      const nextSortState = getNextClientSortState(
+        summarySortBy,
+        summarySortOrder,
+        column,
+        defaultDirection,
+      );
+      setSummarySortBy(nextSortState.sortBy);
+      setSummarySortOrder(nextSortState.sortOrder);
+    },
+    [summarySortBy, summarySortOrder],
+  );
+
+  const handleDetailSortColumn = useCallback(
+    (column, defaultDirection = "asc") => {
+      const nextSortState = getNextClientSortState(
+        detailSortBy,
+        detailSortOrder,
+        column,
+        defaultDirection,
+      );
+      setDetailSortBy(nextSortState.sortBy);
+      setDetailSortOrder(nextSortState.sortOrder);
+    },
+    [detailSortBy, detailSortOrder],
+  );
+
+  const sortedSummaryInspectors = useMemo(
+    () =>
+      sortClientRows(summaryReport.inspectors, {
+        sortBy: summarySortBy,
+        sortOrder: summarySortOrder,
+        getSortValue: (entry, column) => {
+          if (column === "inspector") return entry?.inspector_name;
+          if (column === "inspectionCount") return Number(entry?.inspection_count || 0);
+          if (column === "passedQuantity") {
+            return Number(entry?.inspected_quantity || 0);
+          }
+          if (column === "cbm") return Number(entry?.inspected_cbm || 0);
+          return "";
+        },
+      }),
+    [summaryReport.inspectors, summarySortBy, summarySortOrder],
+  );
   const activeLoading = activeTab === "summary" ? loadingSummary : loadingDetailed;
 
   const handleTimelineChange = (nextTimelineValue) => {
@@ -647,14 +702,42 @@ const VendorWiseQAReport = () => {
                   <table className="table table-sm table-striped align-middle mb-0 vendor-wise-qa-table">
                     <thead>
                       <tr>
-                        <th>Inspector</th>
-                        <th>Inspection Count</th>
-                        <th>Passed Quantity</th>
-                        <th>CBM</th>
+                        <th>
+                          <SortHeaderButton
+                            label="Inspector"
+                            isActive={summarySortBy === "inspector"}
+                            direction={summarySortOrder}
+                            onClick={() => handleSummarySortColumn("inspector", "asc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Inspection Count"
+                            isActive={summarySortBy === "inspectionCount"}
+                            direction={summarySortOrder}
+                            onClick={() => handleSummarySortColumn("inspectionCount", "desc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Passed Quantity"
+                            isActive={summarySortBy === "passedQuantity"}
+                            direction={summarySortOrder}
+                            onClick={() => handleSummarySortColumn("passedQuantity", "desc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="CBM"
+                            isActive={summarySortBy === "cbm"}
+                            direction={summarySortOrder}
+                            onClick={() => handleSummarySortColumn("cbm", "desc")}
+                          />
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {summaryReport.inspectors.map((entry) => (
+                      {sortedSummaryInspectors.map((entry) => (
                         <tr key={entry?.inspector_id || entry?.inspector_name || "inspector"}>
                           <td>{entry?.inspector_name || "Unassigned"}</td>
                           <td>{entry?.inspection_count ?? 0}</td>
@@ -700,6 +783,30 @@ const VendorWiseQAReport = () => {
                         brandTables.map((brandTable, brandIndex) => {
                           const brandKey = `${vendorKey}-${String(brandTable?.brand || "").trim() || brandIndex}`;
                           const rows = Array.isArray(brandTable?.rows) ? brandTable.rows : [];
+                          const sortedRows = sortClientRows(rows, {
+                            sortBy: detailSortBy,
+                            sortOrder: detailSortOrder,
+                            getSortValue: (row, column) => {
+                              if (column === "inspector") return row?.inspector_name;
+                              if (column === "requestDate") {
+                                return new Date(row?.request_date || 0).getTime();
+                              }
+                              if (column === "inspectionDate") {
+                                return new Date(row?.inspection_date || 0).getTime();
+                              }
+                              if (column === "orderId") return row?.order_id;
+                              if (column === "itemCode") return row?.item_code;
+                              if (column === "requestedQuantity") {
+                                return Number(row?.requested_quantity || 0);
+                              }
+                              if (column === "passedQuantity") {
+                                return Number(row?.passed_quantity || 0);
+                              }
+                              if (column === "itemCbm") return Number(row?.item_cbm || 0);
+                              if (column === "packedCbm") return Number(row?.packed_cbm || 0);
+                              return "";
+                            },
+                          });
 
                           return (
                             <div key={brandKey} className="border rounded-3 overflow-hidden">
@@ -714,26 +821,89 @@ const VendorWiseQAReport = () => {
                                 <table className="table table-sm table-striped align-middle mb-0 vendor-wise-qa-table">
                                   <thead>
                                     <tr>
-                                      <th>Inspector</th>
-                                      <th>Request Date</th>
-                                      <th>Inspection Date</th>
-                                      <th>PO</th>
-                                      <th>Item Code</th>
-                                      <th>Req Qty</th>
-                                      <th>Passed Qty</th>
-                                      <th>Item CBM</th>
-                                      <th>Packed CBM</th>
+                                      <th>
+                                        <SortHeaderButton
+                                          label="Inspector"
+                                          isActive={detailSortBy === "inspector"}
+                                          direction={detailSortOrder}
+                                          onClick={() => handleDetailSortColumn("inspector", "asc")}
+                                        />
+                                      </th>
+                                      <th>
+                                        <SortHeaderButton
+                                          label="Request Date"
+                                          isActive={detailSortBy === "requestDate"}
+                                          direction={detailSortOrder}
+                                          onClick={() => handleDetailSortColumn("requestDate", "desc")}
+                                        />
+                                      </th>
+                                      <th>
+                                        <SortHeaderButton
+                                          label="Inspection Date"
+                                          isActive={detailSortBy === "inspectionDate"}
+                                          direction={detailSortOrder}
+                                          onClick={() => handleDetailSortColumn("inspectionDate", "desc")}
+                                        />
+                                      </th>
+                                      <th>
+                                        <SortHeaderButton
+                                          label="PO"
+                                          isActive={detailSortBy === "orderId"}
+                                          direction={detailSortOrder}
+                                          onClick={() => handleDetailSortColumn("orderId", "asc")}
+                                        />
+                                      </th>
+                                      <th>
+                                        <SortHeaderButton
+                                          label="Item Code"
+                                          isActive={detailSortBy === "itemCode"}
+                                          direction={detailSortOrder}
+                                          onClick={() => handleDetailSortColumn("itemCode", "asc")}
+                                        />
+                                      </th>
+                                      <th>
+                                        <SortHeaderButton
+                                          label="Req Qty"
+                                          isActive={detailSortBy === "requestedQuantity"}
+                                          direction={detailSortOrder}
+                                          onClick={() => handleDetailSortColumn("requestedQuantity", "desc")}
+                                        />
+                                      </th>
+                                      <th>
+                                        <SortHeaderButton
+                                          label="Passed Qty"
+                                          isActive={detailSortBy === "passedQuantity"}
+                                          direction={detailSortOrder}
+                                          onClick={() => handleDetailSortColumn("passedQuantity", "desc")}
+                                        />
+                                      </th>
+                                      <th>
+                                        <SortHeaderButton
+                                          label="Item CBM"
+                                          isActive={detailSortBy === "itemCbm"}
+                                          direction={detailSortOrder}
+                                          onClick={() => handleDetailSortColumn("itemCbm", "desc")}
+                                        />
+                                      </th>
+                                      <th>
+                                        <SortHeaderButton
+                                          label="Packed CBM"
+                                          isActive={detailSortBy === "packedCbm"}
+                                          direction={detailSortOrder}
+                                          onClick={() => handleDetailSortColumn("packedCbm", "desc")}
+                                        />
+                                      </th>
                                     </tr>
                                   </thead>
                                   <tbody>
-                                    {rows.length === 0 && (
+                                    {sortedRows.length === 0 && (
                                       <tr>
                                         <td colSpan="9" className="text-center py-3">
                                           No rows found for this brand.
                                         </td>
                                       </tr>
                                     )}
-                                    {rows.map((row, rowIndex) => (
+                                    {sortedRows.map((row, rowIndex) => (
                                       <tr key={`${brandKey}-${row?.order_id || "po"}-${row?.item_code || "item"}-${rowIndex}`}>
                                         <td>{row?.inspector_name || "Unassigned"}</td>
                                         <td>{formatDateDDMMYYYY(row?.request_date)}</td>

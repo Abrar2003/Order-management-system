@@ -9,9 +9,14 @@ import EditInspectionRecordsModal from "../components/EditInspectionRecordsModal
 import GoodsNotReadyModal from "../components/GoodsNotReadyModal";
 import RejectAllModal from "../components/RejectAllModal";
 import PdfViewerModal from "../components/PdfViewerModal";
+import SortHeaderButton from "../components/SortHeaderButton";
 import TransferQcRequestModal from "../components/TransferQcRequestModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import { isViewOnlyUser } from "../auth/permissions";
+import {
+  getNextClientSortState,
+  sortClientRows,
+} from "../utils/clientSort";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { formatPositiveCbm } from "../utils/cbm";
 import { formatFixedNumber, formatLbhValue } from "../utils/measurementDisplay";
@@ -345,6 +350,10 @@ const QcDetails = () => {
   const [showQcImageGallery, setShowQcImageGallery] = useState(false);
   const [activeQcImageIndex, setActiveQcImageIndex] = useState(0);
   const [selectedQcImageIds, setSelectedQcImageIds] = useState([]);
+  const [timelineSortBy, setTimelineSortBy] = useState("inspectionDate");
+  const [timelineSortOrder, setTimelineSortOrder] = useState("desc");
+  const [shippingSortBy, setShippingSortBy] = useState("stuffingDate");
+  const [shippingSortOrder, setShippingSortOrder] = useState("desc");
   const [deletingQcImages, setDeletingQcImages] = useState(false);
   const [deletingInspectionId, setDeletingInspectionId] = useState("");
 
@@ -766,6 +775,76 @@ const QcDetails = () => {
       (a, b) => (b.sortTime || 0) - (a.sortTime || 0),
     );
   }, [qc?.request_history, qc?.inspection_record]);
+
+  const handleTimelineSortColumn = useCallback(
+    (column, defaultDirection = "asc") => {
+      const nextSortState = getNextClientSortState(
+        timelineSortBy,
+        timelineSortOrder,
+        column,
+        defaultDirection,
+      );
+      setTimelineSortBy(nextSortState.sortBy);
+      setTimelineSortOrder(nextSortState.sortOrder);
+    },
+    [timelineSortBy, timelineSortOrder],
+  );
+
+  const sortedRequestInspectionTimeline = useMemo(
+    () =>
+      sortClientRows(requestInspectionTimeline, {
+        sortBy: timelineSortBy,
+        sortOrder: timelineSortOrder,
+        getSortValue: (row, column) => {
+          if (column === "requestDate") return toTimestamp(row?.requestDate);
+          if (column === "inspectionDate") return toTimestamp(row?.inspectionDate);
+          if (column === "inspector") return row?.inspectorName;
+          if (column === "requested") return Number(row?.requestedQty || 0);
+          if (column === "offered") return Number(row?.offeredQty || 0);
+          if (column === "inspected") return Number(row?.inspectedQty || 0);
+          if (column === "passed") return Number(row?.passedQty || 0);
+          if (column === "cbm") return row?.cbmTotal;
+          if (column === "pending") return Number(row?.pendingAfter || 0);
+          if (column === "remarks") return row?.remarks;
+          return "";
+        },
+      }),
+    [requestInspectionTimeline, timelineSortBy, timelineSortOrder],
+  );
+
+  const handleShippingSortColumn = useCallback(
+    (column, defaultDirection = "asc") => {
+      const nextSortState = getNextClientSortState(
+        shippingSortBy,
+        shippingSortOrder,
+        column,
+        defaultDirection,
+      );
+      setShippingSortBy(nextSortState.sortBy);
+      setShippingSortOrder(nextSortState.sortOrder);
+    },
+    [shippingSortBy, shippingSortOrder],
+  );
+
+  const sortedShippingRecords = useMemo(
+    () =>
+      sortClientRows(Array.isArray(qc?.order?.shipment) ? qc.order.shipment : [], {
+        sortBy: shippingSortBy,
+        sortOrder: shippingSortOrder,
+        getSortValue: (record, column) => {
+          if (column === "stuffingDate") {
+            return toTimestamp(record?.stuffing_date || record?.createdAt);
+          }
+          if (column === "container") return record?.container;
+          if (column === "invoice") return record?.invoice_number;
+          if (column === "quantity") return Number(record?.quantity || 0);
+          if (column === "remaining") return Number(record?.pending || 0);
+          if (column === "remarks") return record?.remaining_remarks;
+          return "";
+        },
+      }),
+    [qc?.order?.shipment, shippingSortBy, shippingSortOrder],
+  );
 
   const fetchQcDetails = useCallback(async () => {
     try {
@@ -1592,26 +1671,96 @@ const QcDetails = () => {
                   </button>
                 )}
               </div>
-              {requestInspectionTimeline.length > 0 ? (
+              {sortedRequestInspectionTimeline.length > 0 ? (
                 <div className="table-responsive">
                   <table className="table table-sm table-striped align-middle mb-0">
                     <thead>
                       <tr>
-                        <th>Request Date</th>
-                        <th>Inspection Date</th>
-                        <th>Inspector</th>
-                        <th>Requested</th>
-                        <th>Offered</th>
-                        <th>Inspected</th>
-                        <th>Passed</th>
-                        <th>CBM</th>
-                        <th>Pending</th>
-                        <th>Remarks</th>
+                        <th>
+                          <SortHeaderButton
+                            label="Request Date"
+                            isActive={timelineSortBy === "requestDate"}
+                            direction={timelineSortOrder}
+                            onClick={() => handleTimelineSortColumn("requestDate", "desc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Inspection Date"
+                            isActive={timelineSortBy === "inspectionDate"}
+                            direction={timelineSortOrder}
+                            onClick={() => handleTimelineSortColumn("inspectionDate", "desc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Inspector"
+                            isActive={timelineSortBy === "inspector"}
+                            direction={timelineSortOrder}
+                            onClick={() => handleTimelineSortColumn("inspector", "asc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Requested"
+                            isActive={timelineSortBy === "requested"}
+                            direction={timelineSortOrder}
+                            onClick={() => handleTimelineSortColumn("requested", "desc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Offered"
+                            isActive={timelineSortBy === "offered"}
+                            direction={timelineSortOrder}
+                            onClick={() => handleTimelineSortColumn("offered", "desc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Inspected"
+                            isActive={timelineSortBy === "inspected"}
+                            direction={timelineSortOrder}
+                            onClick={() => handleTimelineSortColumn("inspected", "desc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Passed"
+                            isActive={timelineSortBy === "passed"}
+                            direction={timelineSortOrder}
+                            onClick={() => handleTimelineSortColumn("passed", "desc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="CBM"
+                            isActive={timelineSortBy === "cbm"}
+                            direction={timelineSortOrder}
+                            onClick={() => handleTimelineSortColumn("cbm", "desc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Pending"
+                            isActive={timelineSortBy === "pending"}
+                            direction={timelineSortOrder}
+                            onClick={() => handleTimelineSortColumn("pending", "desc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Remarks"
+                            isActive={timelineSortBy === "remarks"}
+                            direction={timelineSortOrder}
+                            onClick={() => handleTimelineSortColumn("remarks", "asc")}
+                          />
+                        </th>
                         {isOnlyAdmin && <th>Action</th>}
                       </tr>
                     </thead>
                     <tbody>
-                      {requestInspectionTimeline.map((row) => (
+                      {sortedRequestInspectionTimeline.map((row) => (
                         <tr key={row.key}>
                           <td>{formatDateDDMMYYYY(row.requestDate)}</td>
                           <td>{formatDateDDMMYYYY(row.inspectionDate)}</td>
@@ -1677,16 +1826,58 @@ const QcDetails = () => {
                   <table className="table table-sm table-striped align-middle mb-0">
                     <thead>
                       <tr>
-                        <th>Stuffing Date</th>
-                        <th>Container Number</th>
-                        <th>Invoice Number</th>
-                        <th>Quantity</th>
-                        <th>Remaining</th>
-                        <th>Remaining Remarks</th>
+                        <th>
+                          <SortHeaderButton
+                            label="Stuffing Date"
+                            isActive={shippingSortBy === "stuffingDate"}
+                            direction={shippingSortOrder}
+                            onClick={() => handleShippingSortColumn("stuffingDate", "desc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Container Number"
+                            isActive={shippingSortBy === "container"}
+                            direction={shippingSortOrder}
+                            onClick={() => handleShippingSortColumn("container", "asc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Invoice Number"
+                            isActive={shippingSortBy === "invoice"}
+                            direction={shippingSortOrder}
+                            onClick={() => handleShippingSortColumn("invoice", "asc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Quantity"
+                            isActive={shippingSortBy === "quantity"}
+                            direction={shippingSortOrder}
+                            onClick={() => handleShippingSortColumn("quantity", "desc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Remaining"
+                            isActive={shippingSortBy === "remaining"}
+                            direction={shippingSortOrder}
+                            onClick={() => handleShippingSortColumn("remaining", "desc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Remaining Remarks"
+                            isActive={shippingSortBy === "remarks"}
+                            direction={shippingSortOrder}
+                            onClick={() => handleShippingSortColumn("remarks", "asc")}
+                          />
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {qc.order.shipment.map((record) => (
+                      {sortedShippingRecords.map((record) => (
                         <tr key={record._id}>
                           <td>
                             {formatDateDDMMYYYY(

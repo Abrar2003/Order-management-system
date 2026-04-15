@@ -5,10 +5,15 @@ import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import SortHeaderButton from "../components/SortHeaderButton";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { getDerivedOrderStatus } from "../utils/orderStatus";
 import { formatPositiveCbm } from "../utils/cbm";
 import { formatFixedNumber, formatLbhValue } from "../utils/measurementDisplay";
+import {
+  getNextClientSortState,
+  sortClientRows,
+} from "../utils/clientSort";
 import "../App.css";
 
 const SIZE_UNIT = "cm";
@@ -662,6 +667,12 @@ const InspectionReport = () => {
   const [productImageLoading, setProductImageLoading] = useState(false);
   const [finishImageSrc, setFinishImageSrc] = useState("");
   const [finishImageLoading, setFinishImageLoading] = useState(false);
+  const [finishSortBy, setFinishSortBy] = useState("uniqueCode");
+  const [finishSortOrder, setFinishSortOrder] = useState("asc");
+  const [inspectionSortBy, setInspectionSortBy] = useState("inspectionDate");
+  const [inspectionSortOrder, setInspectionSortOrder] = useState("desc");
+  const [remarkSortBy, setRemarkSortBy] = useState("inspectionDate");
+  const [remarkSortOrder, setRemarkSortOrder] = useState("desc");
 
   const backTarget = useMemo(() => {
     const fromPreviousPage = String(location.state?.fromPreviousPage || "").trim();
@@ -732,6 +743,100 @@ const InspectionReport = () => {
         return remark && remark.toLowerCase() !== "none";
       }),
     [inspectionRows],
+  );
+
+  const handleFinishSortColumn = useCallback(
+    (column, defaultDirection = "asc") => {
+      const nextSortState = getNextClientSortState(
+        finishSortBy,
+        finishSortOrder,
+        column,
+        defaultDirection,
+      );
+      setFinishSortBy(nextSortState.sortBy);
+      setFinishSortOrder(nextSortState.sortOrder);
+    },
+    [finishSortBy, finishSortOrder],
+  );
+
+  const sortedFinishRows = useMemo(
+    () =>
+      sortClientRows(finishRows, {
+        sortBy: finishSortBy,
+        sortOrder: finishSortOrder,
+        getSortValue: (row, column) => {
+          if (column === "uniqueCode") return row?.uniqueCode;
+          if (column === "vendor") return row?.vendor;
+          if (column === "vendorCode") return row?.vendorCode;
+          if (column === "color") return row?.color;
+          if (column === "colorCode") return row?.colorCode;
+          return "";
+        },
+      }),
+    [finishRows, finishSortBy, finishSortOrder],
+  );
+
+  const handleInspectionSortColumn = useCallback(
+    (column, defaultDirection = "asc") => {
+      const nextSortState = getNextClientSortState(
+        inspectionSortBy,
+        inspectionSortOrder,
+        column,
+        defaultDirection,
+      );
+      setInspectionSortBy(nextSortState.sortBy);
+      setInspectionSortOrder(nextSortState.sortOrder);
+    },
+    [inspectionSortBy, inspectionSortOrder],
+  );
+
+  const sortedInspectionRows = useMemo(
+    () =>
+      sortClientRows(inspectionRows, {
+        sortBy: inspectionSortBy,
+        sortOrder: inspectionSortOrder,
+        getSortValue: (row, column) => {
+          if (column === "requestDate") return toTimestamp(row?.requestDate);
+          if (column === "inspectionDate") return toTimestamp(row?.inspectionDate);
+          if (column === "inspector") return row?.inspectorName;
+          if (column === "requested") return Number(row?.requestedQty || 0);
+          if (column === "offered") return Number(row?.offeredQty || 0);
+          if (column === "inspected") return Number(row?.inspectedQty || 0);
+          if (column === "passed") return Number(row?.passedQty || 0);
+          if (column === "pending") return Number(row?.pendingAfter || 0);
+          return "";
+        },
+      }),
+    [inspectionRows, inspectionSortBy, inspectionSortOrder],
+  );
+
+  const handleRemarkSortColumn = useCallback(
+    (column, defaultDirection = "asc") => {
+      const nextSortState = getNextClientSortState(
+        remarkSortBy,
+        remarkSortOrder,
+        column,
+        defaultDirection,
+      );
+      setRemarkSortBy(nextSortState.sortBy);
+      setRemarkSortOrder(nextSortState.sortOrder);
+    },
+    [remarkSortBy, remarkSortOrder],
+  );
+
+  const sortedInspectionRemarkRows = useMemo(
+    () =>
+      sortClientRows(inspectionRemarkRows, {
+        sortBy: remarkSortBy,
+        sortOrder: remarkSortOrder,
+        getSortValue: (row, column) => {
+          if (column === "inspectionDate") return toTimestamp(row?.inspectionDate);
+          if (column === "inspector") return row?.inspectorName;
+          if (column === "remark") return row?.remarks;
+          return "";
+        },
+      }),
+    [inspectionRemarkRows, remarkSortBy, remarkSortOrder],
   );
 
   const labelRanges = useMemo(() => {
@@ -1485,20 +1590,55 @@ const InspectionReport = () => {
 
             <section>
               <h3 className="h6 mb-3">Finish Details</h3>
-              {finishRows.length > 0 ? (
+              {sortedFinishRows.length > 0 ? (
                 <div className="table-responsive">
                   <table className="table table-sm table-striped align-middle mb-0">
                     <thead>
                       <tr>
-                        <th>Unique Code</th>
-                        <th>Vendor</th>
-                        <th>Vendor Code</th>
-                        <th>Color</th>
-                        <th>Color Code</th>
+                        <th>
+                          <SortHeaderButton
+                            label="Unique Code"
+                            isActive={finishSortBy === "uniqueCode"}
+                            direction={finishSortOrder}
+                            onClick={() => handleFinishSortColumn("uniqueCode", "asc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Vendor"
+                            isActive={finishSortBy === "vendor"}
+                            direction={finishSortOrder}
+                            onClick={() => handleFinishSortColumn("vendor", "asc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Vendor Code"
+                            isActive={finishSortBy === "vendorCode"}
+                            direction={finishSortOrder}
+                            onClick={() => handleFinishSortColumn("vendorCode", "asc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Color"
+                            isActive={finishSortBy === "color"}
+                            direction={finishSortOrder}
+                            onClick={() => handleFinishSortColumn("color", "asc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Color Code"
+                            isActive={finishSortBy === "colorCode"}
+                            direction={finishSortOrder}
+                            onClick={() => handleFinishSortColumn("colorCode", "asc")}
+                          />
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {finishRows.map((row) => (
+                      {sortedFinishRows.map((row) => (
                         <tr key={row.key}>
                           <td>{row.uniqueCode}</td>
                           <td>{row.vendor}</td>
@@ -1517,23 +1657,79 @@ const InspectionReport = () => {
 
             <section>
               <h3 className="h6 mb-3">Inspection Records</h3>
-              {inspectionRows.length > 0 ? (
+              {sortedInspectionRows.length > 0 ? (
                 <div className="table-responsive">
                   <table className="table table-sm table-striped align-middle mb-0">
                     <thead>
                       <tr>
-                        <th>Request Date</th>
-                        <th>Inspection Date</th>
-                        <th>Inspector</th>
-                        <th>Requested</th>
-                        <th>Offered</th>
-                        <th>Inspected</th>
-                        <th>Passed</th>
-                        <th>Pending</th>
+                        <th>
+                          <SortHeaderButton
+                            label="Request Date"
+                            isActive={inspectionSortBy === "requestDate"}
+                            direction={inspectionSortOrder}
+                            onClick={() => handleInspectionSortColumn("requestDate", "desc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Inspection Date"
+                            isActive={inspectionSortBy === "inspectionDate"}
+                            direction={inspectionSortOrder}
+                            onClick={() => handleInspectionSortColumn("inspectionDate", "desc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Inspector"
+                            isActive={inspectionSortBy === "inspector"}
+                            direction={inspectionSortOrder}
+                            onClick={() => handleInspectionSortColumn("inspector", "asc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Requested"
+                            isActive={inspectionSortBy === "requested"}
+                            direction={inspectionSortOrder}
+                            onClick={() => handleInspectionSortColumn("requested", "desc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Offered"
+                            isActive={inspectionSortBy === "offered"}
+                            direction={inspectionSortOrder}
+                            onClick={() => handleInspectionSortColumn("offered", "desc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Inspected"
+                            isActive={inspectionSortBy === "inspected"}
+                            direction={inspectionSortOrder}
+                            onClick={() => handleInspectionSortColumn("inspected", "desc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Passed"
+                            isActive={inspectionSortBy === "passed"}
+                            direction={inspectionSortOrder}
+                            onClick={() => handleInspectionSortColumn("passed", "desc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Pending"
+                            isActive={inspectionSortBy === "pending"}
+                            direction={inspectionSortOrder}
+                            onClick={() => handleInspectionSortColumn("pending", "desc")}
+                          />
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {inspectionRows.map((row) => (
+                      {sortedInspectionRows.map((row) => (
                         <tr key={row.key}>
                           <td>{formatDateDDMMYYYY(row.requestDate)}</td>
                           <td>{formatDateDDMMYYYY(row.inspectionDate)}</td>
@@ -1659,18 +1855,39 @@ const InspectionReport = () => {
 
                 <div>
                   <div className="fw-semibold mb-2">Inspection Remarks</div>
-                  {inspectionRemarkRows.length > 0 ? (
+                  {sortedInspectionRemarkRows.length > 0 ? (
                     <div className="table-responsive">
                       <table className="table table-sm table-striped align-middle mb-0">
                         <thead>
                           <tr>
-                            <th>Inspection Date</th>
-                            <th>Inspector</th>
-                            <th>Remark</th>
+                            <th>
+                              <SortHeaderButton
+                                label="Inspection Date"
+                                isActive={remarkSortBy === "inspectionDate"}
+                                direction={remarkSortOrder}
+                                onClick={() => handleRemarkSortColumn("inspectionDate", "desc")}
+                              />
+                            </th>
+                            <th>
+                              <SortHeaderButton
+                                label="Inspector"
+                                isActive={remarkSortBy === "inspector"}
+                                direction={remarkSortOrder}
+                                onClick={() => handleRemarkSortColumn("inspector", "asc")}
+                              />
+                            </th>
+                            <th>
+                              <SortHeaderButton
+                                label="Remark"
+                                isActive={remarkSortBy === "remark"}
+                                direction={remarkSortOrder}
+                                onClick={() => handleRemarkSortColumn("remark", "asc")}
+                              />
+                            </th>
                           </tr>
                         </thead>
                         <tbody>
-                          {inspectionRemarkRows.map((row) => (
+                          {sortedInspectionRemarkRows.map((row) => (
                             <tr key={`remark-${row.key}`}>
                               <td>{formatDateDDMMYYYY(row.inspectionDate)}</td>
                               <td>{row.inspectorName}</td>

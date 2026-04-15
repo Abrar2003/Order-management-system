@@ -3,8 +3,13 @@ import { useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import EditPisModal from "../components/EditPisModal";
+import SortHeaderButton from "../components/SortHeaderButton";
 import { getUserFromToken } from "../auth/auth.utils";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
+import {
+  getNextClientSortState,
+  sortClientRows,
+} from "../utils/clientSort";
 import {
   buildMeasuredSizeEntriesFromLegacy,
   getWeightValueFromModel,
@@ -203,6 +208,8 @@ const PISDiffs = () => {
     item_codes: [],
   });
   const [syncedQuery, setSyncedQuery] = useState(null);
+  const [sortBy, setSortBy] = useState("code");
+  const [sortOrder, setSortOrder] = useState("asc");
 
   const debouncedSearch = useDebouncedValue(searchInput, 300);
 
@@ -302,6 +309,54 @@ const PISDiffs = () => {
   const itemCodeOptions = useMemo(
     () => (Array.isArray(filters.item_codes) ? filters.item_codes : []),
     [filters.item_codes],
+  );
+
+  const getMeasurementSortValue = useCallback((item, source, group) => {
+    const { sizeDisplay, weightDisplay } = formatMeasurementBlock(
+      buildMeasurementEntries({ item, source, group }),
+    );
+    return `${sizeDisplay} | ${weightDisplay}`;
+  }, []);
+
+  const handleSortColumn = useCallback(
+    (column, defaultDirection = "asc") => {
+      const nextSortState = getNextClientSortState(
+        sortBy,
+        sortOrder,
+        column,
+        defaultDirection,
+      );
+      setSortBy(nextSortState.sortBy);
+      setSortOrder(nextSortState.sortOrder);
+    },
+    [sortBy, sortOrder],
+  );
+
+  const sortedRows = useMemo(
+    () =>
+      sortClientRows(rows, {
+        sortBy,
+        sortOrder,
+        getSortValue: (item, column) => {
+          if (column === "code") return item?.code;
+          if (column === "description") return item?.description || item?.name;
+          if (column === "brand") return getBrand(item);
+          if (column === "vendors") return getVendors(item);
+          if (column === "diffs") {
+            return (Array.isArray(item?.pis_diff?.fields) ? item.pis_diff.fields : []).join(", ");
+          }
+          if (column === "inspectedItem") {
+            return getMeasurementSortValue(item, "inspected", "item");
+          }
+          if (column === "pisItem") return getMeasurementSortValue(item, "pis", "item");
+          if (column === "inspectedBox") {
+            return getMeasurementSortValue(item, "inspected", "box");
+          }
+          if (column === "pisBox") return getMeasurementSortValue(item, "pis", "box");
+          return "";
+        },
+      }),
+    [getMeasurementSortValue, rows, sortBy, sortOrder],
   );
 
   return (
@@ -418,20 +473,83 @@ const PISDiffs = () => {
                 <table className="table table-striped table-hover align-middle om-table mb-0">
                   <thead className="table-primary">
                     <tr>
-                      <th>Item Code</th>
-                      <th>Description</th>
-                      <th>Brand</th>
-                      <th>Vendors</th>
-                      <th>Diffs</th>
-                      <th>Inspected Item</th>
-                      <th>PIS Item</th>
-                      <th>Inspected Box</th>
-                      <th>PIS Box</th>
+                      <th>
+                        <SortHeaderButton
+                          label="Item Code"
+                          isActive={sortBy === "code"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("code", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Description"
+                          isActive={sortBy === "description"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("description", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Brand"
+                          isActive={sortBy === "brand"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("brand", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Vendors"
+                          isActive={sortBy === "vendors"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("vendors", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Diffs"
+                          isActive={sortBy === "diffs"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("diffs", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Inspected Item"
+                          isActive={sortBy === "inspectedItem"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("inspectedItem", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="PIS Item"
+                          isActive={sortBy === "pisItem"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("pisItem", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Inspected Box"
+                          isActive={sortBy === "inspectedBox"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("inspectedBox", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="PIS Box"
+                          isActive={sortBy === "pisBox"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("pisBox", "asc")}
+                        />
+                      </th>
                       {canEditPis && <th>Action</th>}
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.length === 0 && (
+                    {sortedRows.length === 0 && (
                       <tr>
                         <td colSpan={canEditPis ? 10 : 9} className="text-center py-4">
                           No PIS diffs found
@@ -439,7 +557,7 @@ const PISDiffs = () => {
                       </tr>
                     )}
 
-                    {rows.map((item) => (
+                    {sortedRows.map((item) => (
                       <tr key={item?._id || item?.code}>
                         <td>{item?.code || "N/A"}</td>
                         <td>{item?.description || item?.name || "N/A"}</td>

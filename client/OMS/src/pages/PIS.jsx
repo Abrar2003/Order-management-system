@@ -3,9 +3,14 @@ import { useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import EditPisModal from "../components/EditPisModal";
+import SortHeaderButton from "../components/SortHeaderButton";
 import UploadFinishModal from "../components/UploadFinishModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
+import {
+  getNextClientSortState,
+  sortClientRows,
+} from "../utils/clientSort";
 import { formatCbm } from "../utils/cbm";
 import { formatFixedNumber, formatLbhValue } from "../utils/measurementDisplay";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -122,6 +127,8 @@ const PIS = () => {
     item_codes: [],
   });
   const [syncedQuery, setSyncedQuery] = useState(null);
+  const [sortBy, setSortBy] = useState("code");
+  const [sortOrder, setSortOrder] = useState("asc");
 
   const debouncedSearch = useDebouncedValue(searchInput, 300);
 
@@ -231,6 +238,53 @@ const PIS = () => {
   const itemCodeOptions = useMemo(
     () => (Array.isArray(filters.item_codes) ? filters.item_codes : []),
     [filters.item_codes],
+  );
+
+  const handleSortColumn = useCallback(
+    (column, defaultDirection = "asc") => {
+      const nextSortState = getNextClientSortState(
+        sortBy,
+        sortOrder,
+        column,
+        defaultDirection,
+      );
+      setSortBy(nextSortState.sortBy);
+      setSortOrder(nextSortState.sortOrder);
+    },
+    [sortBy, sortOrder],
+  );
+
+  const sortedRows = useMemo(
+    () =>
+      sortClientRows(rows, {
+        sortBy,
+        sortOrder,
+        getSortValue: (item, column) => {
+          if (column === "code") return item?.code;
+          if (column === "description") return item?.description || item?.name;
+          if (column === "brand") return getBrand(item);
+          if (column === "vendors") return getVendors(item);
+          if (column === "pisNet") return getPisWeight(item, "net");
+          if (column === "pisGross") return getPisWeight(item, "gross");
+          if (column === "itemLbh") {
+            const value = getPrimaryMeasurementLbh(
+              item?.pis_item_sizes,
+              item?.pis_item_LBH || {},
+            );
+            return [value?.L || 0, value?.B || 0, value?.H || 0];
+          }
+          if (column === "boxLbh") {
+            const value = getPrimaryMeasurementLbh(
+              item?.pis_box_sizes,
+              item?.pis_box_LBH || {},
+            );
+            return [value?.L || 0, value?.B || 0, value?.H || 0];
+          }
+          if (column === "cbm") return Number(item?.cbm?.calculated_pis_total || 0);
+          return "";
+        },
+      }),
+    [rows, sortBy, sortOrder],
   );
 
   return (
@@ -365,27 +419,90 @@ const PIS = () => {
                 <table className="table table-striped table-hover align-middle om-table mb-0">
                   <thead className="table-primary">
                     <tr>
-                      <th>Item Code</th>
-                      <th>Description</th>
-                      <th>Brand</th>
-                      <th>Vendors</th>
-                      <th>PIS Net</th>
-                      <th>PIS Gross</th>
-                      <th>PIS Item LBH</th>
-                      <th>PIS Box LBH</th>
-                      <th>PIS CBM</th>
+                      <th>
+                        <SortHeaderButton
+                          label="Item Code"
+                          isActive={sortBy === "code"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("code", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Description"
+                          isActive={sortBy === "description"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("description", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Brand"
+                          isActive={sortBy === "brand"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("brand", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Vendors"
+                          isActive={sortBy === "vendors"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("vendors", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="PIS Net"
+                          isActive={sortBy === "pisNet"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("pisNet", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="PIS Gross"
+                          isActive={sortBy === "pisGross"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("pisGross", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="PIS Item LBH"
+                          isActive={sortBy === "itemLbh"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("itemLbh", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="PIS Box LBH"
+                          isActive={sortBy === "boxLbh"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("boxLbh", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="PIS CBM"
+                          isActive={sortBy === "cbm"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("cbm", "desc")}
+                        />
+                      </th>
                       {canEditPis && <th>Action</th>}
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.length === 0 && (
+                    {sortedRows.length === 0 && (
                       <tr>
                         <td colSpan={canEditPis ? "10" : "9"} className="text-center py-4">
                           No items found
                         </td>
                       </tr>
                     )}
-                    {rows.map((item) => (
+                    {sortedRows.map((item) => (
                       <tr key={item?._id || item?.code}>
                         <td>{item?.code || "N/A"}</td>
                         <td>{item?.description || item?.name || "N/A"}</td>

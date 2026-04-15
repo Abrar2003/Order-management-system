@@ -516,67 +516,150 @@ const getLatestInspectionRecord = (qc = {}) =>
       return rightTime - leftTime;
     })[0] || null;
 
+const getLatestRequestEntry = (qc = {}) =>
+  (Array.isArray(qc?.request_history) ? [...qc.request_history] : [])
+    .sort((left, right) => {
+      const leftTime = Math.max(
+        toSortableTimestamp(left?.request_date),
+        toSortableTimestamp(left?.updatedAt),
+        toSortableTimestamp(left?.createdAt),
+      );
+      const rightTime = Math.max(
+        toSortableTimestamp(right?.request_date),
+        toSortableTimestamp(right?.updatedAt),
+        toSortableTimestamp(right?.createdAt),
+      );
+      return rightTime - leftTime;
+    })[0] || null;
+
+const resolveLatestInspectionRecordForRequestEntry = (
+  inspectionRecords = [],
+  requestEntry = null,
+) => {
+  if (!requestEntry) return null;
+
+  const requestHistoryId = String(
+    requestEntry?._id ||
+      requestEntry?.request_history_id ||
+      requestEntry?.id ||
+      "",
+  ).trim();
+  const requestDateKey = toISODateString(
+    requestEntry?.request_date || requestEntry?.requested_date,
+  );
+  const requestInspectorId = String(
+    requestEntry?.inspector?._id ||
+      requestEntry?.inspector ||
+      requestEntry?.inspector_id ||
+      "",
+  ).trim();
+
+  const findLatestMatchingRecord = (matcher) => {
+    let latestRecord = null;
+    let latestTimestamp = 0;
+
+    for (const record of Array.isArray(inspectionRecords) ? inspectionRecords : []) {
+      if (!matcher(record)) continue;
+
+      const recordTimestamp = Math.max(
+        toSortableTimestamp(record?.inspection_date),
+        toSortableTimestamp(record?.requested_date),
+        toSortableTimestamp(record?.createdAt),
+      );
+      if (!latestRecord || recordTimestamp >= latestTimestamp) {
+        latestRecord = record;
+        latestTimestamp = recordTimestamp;
+      }
+    }
+
+    return latestRecord;
+  };
+
+  if (requestHistoryId) {
+    const exactRequestHistoryMatch = findLatestMatchingRecord(
+      (record) =>
+        String(record?.request_history_id || "").trim() === requestHistoryId,
+    );
+    if (exactRequestHistoryMatch) {
+      return exactRequestHistoryMatch;
+    }
+  }
+
+  if (!requestDateKey) return null;
+
+  return (
+    findLatestMatchingRecord((record) => {
+      const recordRequestedDate = toISODateString(
+        record?.requested_date || record?.inspection_date || record?.createdAt,
+      );
+      if (recordRequestedDate !== requestDateKey) return false;
+
+      if (!requestInspectorId) return true;
+
+      const recordInspectorId = String(
+        record?.inspector?._id || record?.inspector || "",
+      ).trim();
+      return !recordInspectorId || recordInspectorId === requestInspectorId;
+    }) ||
+    findLatestMatchingRecord((record) => {
+      const recordRequestedDate = toISODateString(
+        record?.requested_date || record?.inspection_date || record?.createdAt,
+      );
+      return recordRequestedDate === requestDateKey;
+    }) ||
+    null
+  );
+};
+
 const toQuantityInputValue = (value) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) return "";
   return String(parsed);
 };
 
-const computeAqlSampleQuantity = (quantity) => {
-  const parsed = Number(quantity);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
-  return Math.max(1, Math.ceil(parsed * 0.1));
+const getEffectiveRequestPassedQuantity = ({
+  requestType = "",
+  samplePassed = 0,
+  requestedQuantity = 0,
+}) => {
+  const safeSamplePassed = Math.max(0, Number(samplePassed) || 0);
+  if (String(requestType || "").trim().toUpperCase() !== "AQL") {
+    return safeSamplePassed;
+  }
+
+  return safeSamplePassed > 0 ? Math.max(0, Number(requestedQuantity) || 0) : 0;
 };
 
 const getQcLabelRequirement = ({
-  requestType = "",
   totalPassed = 0,
   boxSizesCount = 0,
-  requestedQuantity = 0,
 }) => {
-  const normalizedRequestType = String(requestType || "").trim().toUpperCase();
   const safePassed = Math.max(0, Number(totalPassed) || 0);
   const safeBoxSizesCount = Math.max(0, Number(boxSizesCount) || 0);
-  const safeRequestedQuantity = Math.max(0, Number(requestedQuantity) || 0);
-  const usesRequestedQuantity =
-    normalizedRequestType === "AQL" && safePassed > 0;
-  const basisQuantity = usesRequestedQuantity
-    ? safeRequestedQuantity
-    : safePassed;
 
   return {
-    requiredCount: basisQuantity * safeBoxSizesCount,
-    basisQuantity,
+    requiredCount: safePassed * safeBoxSizesCount,
+    basisQuantity: safePassed,
     boxSizesCount: safeBoxSizesCount,
-    usesRequestedQuantity,
   };
 };
 
 const buildQcLabelRequirementMessage = ({
-  requestType = "",
   totalPassed = 0,
   boxSizesCount = 0,
-  requestedQuantity = 0,
   actualCount = 0,
 }) => {
   const requirement = getQcLabelRequirement({
-    requestType,
     totalPassed,
     boxSizesCount,
-    requestedQuantity,
   });
-  const prefix = requirement.usesRequestedQuantity
-    ? "For AQL, total labels must equal requested quantity × box sizes count"
-    : "Total labels must equal passed quantity × box sizes count";
 
-  return `${prefix} (${requirement.requiredCount}). Actual total labels: ${Math.max(0, Number(actualCount) || 0)}. Expected: ${requirement.basisQuantity} × ${requirement.boxSizesCount}.`;
+  return `Total labels must equal passed quantity × box sizes count (${requirement.requiredCount}). Actual total labels: ${Math.max(0, Number(actualCount) || 0)}. Expected: ${requirement.basisQuantity} × ${requirement.boxSizesCount}.`;
 };
 
 const getLatestRequestedQuantity = (qc = {}) => {
   const requestHistory = Array.isArray(qc?.request_history) ? qc.request_history : [];
-  console.log("requestHistory", requestHistory);
-  const latestRequestEntry =
-    requestHistory.length > 0 ? requestHistory[0] : null;
+  const latestRequestEntry = getLatestRequestEntry(qc);
   const latestRequestedQuantity = Number(latestRequestEntry?.quantity_requested);
   if (Number.isFinite(latestRequestedQuantity) && latestRequestedQuantity > 0) {
     return latestRequestedQuantity;
@@ -1401,31 +1484,61 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     const normalizedRemarks = String(form.remarks || "").trim();
     const clientDemandQuantity = Number(qc?.quantities?.client_demand || 0) || 0;
     const requestType = String(qc?.request_type || "").trim().toUpperCase();
-    const isAqlRequest = requestType === "AQL";
+    const inspectionRecords = Array.isArray(qc?.inspection_record)
+      ? qc.inspection_record
+      : [];
+    const latestRequestEntry = getLatestRequestEntry(qc);
+    const currentRequestInspectionRecord = resolveLatestInspectionRecordForRequestEntry(
+      inspectionRecords,
+      latestRequestEntry,
+    );
     const requestedQuantityLimit = getLatestRequestedQuantity(qc);
     const aqlRequestedQuantity =
       requestedQuantityLimit > 0 ? requestedQuantityLimit : clientDemandQuantity;
-    const aqlSampleQuantity = computeAqlSampleQuantity(aqlRequestedQuantity);
+    const currentRequestRequestedQuantity = Math.max(
+      0,
+      Number(
+        currentRequestInspectionRecord?.vendor_requested ||
+          latestRequestEntry?.quantity_requested ||
+          requestedQuantityLimit ||
+          aqlRequestedQuantity ||
+          0,
+      ) || 0,
+    );
+    const currentRequestCheckedBefore = Math.max(
+      0,
+      Number(currentRequestInspectionRecord?.checked || 0) || 0,
+    );
+    const currentRequestPassedBefore = Math.max(
+      0,
+      Number(currentRequestInspectionRecord?.passed || 0) || 0,
+    );
+    const currentRequestOfferedBefore = Math.max(
+      0,
+      Number(currentRequestInspectionRecord?.vendor_offered || 0) || 0,
+    );
+    const currentSamplePassedTotal = inspectionRecords.reduce(
+      (sum, record) => sum + (Number(record?.passed || 0) || 0),
+      0,
+    );
+    const currentEffectivePassedTotal = Math.max(
+      0,
+      Number(qc?.quantities?.qc_passed || 0) || 0,
+    );
+    const currentRequestEffectivePassedBefore = getEffectiveRequestPassedQuantity({
+      requestType,
+      samplePassed: currentRequestPassedBefore,
+      requestedQuantity: currentRequestRequestedQuantity,
+    });
 
     if ((qcPassed > 0 || hasLabelUpdate) && qcChecked <= 0) {
       setError("QC checked must be greater than 0 for updates.");
       return;
     }
 
-    if (!isAqlRequest && qcPassed > qcChecked && qcChecked > 0) {
+    if (qcPassed > qcChecked && qcChecked > 0) {
       setError("Passed cannot exceed checked quantity.");
       return;
-    }
-
-    if (isAqlRequest && form.qc_passed !== "") {
-      if (qcPassed < 1) {
-        setError("For AQL, passed quantity must be at least 1.");
-        return;
-      }
-      if (qcPassed > aqlRequestedQuantity) {
-        setError("For AQL, passed quantity cannot exceed requested quantity.");
-        return;
-      }
     }
 
     const existingItemMaster = qc?.item_master || {};
@@ -1758,12 +1871,17 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     };
 
     if (isAdminRewriteMode) {
+      const rewriteTargetRecord = currentRequestInspectionRecord || latestInspectionRecord;
+      if (!rewriteTargetRecord?._id) {
+        setError("Latest inspection record could not be resolved for rewrite.");
+        return;
+      }
       const otherInspectionRecords = (Array.isArray(qc?.inspection_record)
         ? qc.inspection_record
         : []
       ).filter(
         (record) =>
-          String(record?._id || "") !== String(latestInspectionRecord?._id || ""),
+          String(record?._id || "") !== String(rewriteTargetRecord?._id || ""),
       );
       const otherChecked = otherInspectionRecords.reduce(
         (sum, record) => sum + (Number(record?.checked || 0) || 0),
@@ -1772,6 +1890,10 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       const otherPassed = otherInspectionRecords.reduce(
         (sum, record) => sum + (Number(record?.passed || 0) || 0),
         0,
+      );
+      const otherEffectivePassed = Math.max(
+        0,
+        currentEffectivePassedTotal - currentRequestEffectivePassedBefore,
       );
       const otherOffered = otherInspectionRecords.reduce(
         (sum, record) => sum + (Number(record?.vendor_offered || 0) || 0),
@@ -1788,31 +1910,29 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       ]);
       const rawTotalOfferedAfterRewrite = otherOffered + offeredQuantity;
       const totalCheckedAfterRewrite = otherChecked + qcChecked;
-      const rawTotalPassedAfterRewrite = otherPassed + qcPassed;
-      const shouldAutoCompleteAqlAfterRewrite =
-        isAqlRequest && rawTotalPassedAfterRewrite > 0;
-      const totalOfferedAfterRewrite = shouldAutoCompleteAqlAfterRewrite
-        ? Math.max(rawTotalOfferedAfterRewrite, aqlRequestedQuantity)
-        : rawTotalOfferedAfterRewrite;
-      const totalPassedAfterRewrite = shouldAutoCompleteAqlAfterRewrite
-        ? aqlRequestedQuantity
-        : rawTotalPassedAfterRewrite;
+      const totalOfferedAfterRewrite = rawTotalOfferedAfterRewrite;
+      const totalSamplePassedAfterRewrite = otherPassed + qcPassed;
+      const currentRequestEffectivePassedAfterRewrite = getEffectiveRequestPassedQuantity({
+        requestType,
+        samplePassed: qcPassed,
+        requestedQuantity: currentRequestRequestedQuantity,
+      });
+      const totalEffectivePassedAfterRewrite =
+        otherEffectivePassed + currentRequestEffectivePassedAfterRewrite;
       const totalLabelsAfterRewrite = allLabelsAfterRewrite.length;
       const requiredLabelsAfterRewrite = getQcLabelRequirement({
-        requestType,
-        totalPassed: totalPassedAfterRewrite,
+        totalPassed: totalSamplePassedAfterRewrite,
         boxSizesCount,
-        requestedQuantity: aqlRequestedQuantity,
       }).requiredCount;
       const requiresBoxSizeForLabelsAfterRewrite =
-        totalPassedAfterRewrite > 0 || totalLabelsAfterRewrite > 0;
+        totalSamplePassedAfterRewrite > 0 || totalLabelsAfterRewrite > 0;
       const pendingAfterRewrite = Math.max(
         0,
-        clientDemandQuantity - totalPassedAfterRewrite,
+        clientDemandQuantity - totalEffectivePassedAfterRewrite,
       );
       const requestedDateIso = toISODateString(
-        latestInspectionRecord?.requested_date ||
-          latestInspectionRecord?.request_date ||
+        rewriteTargetRecord?.requested_date ||
+          rewriteTargetRecord?.request_date ||
           qc?.request_date ||
           lastInspectedDateIso,
       );
@@ -1827,19 +1947,12 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         return;
       }
 
-      if (isAqlRequest && totalCheckedAfterRewrite > aqlSampleQuantity) {
-        setError(
-          `AQL checked quantity cannot exceed 10% sample (${aqlSampleQuantity}).`,
-        );
-        return;
-      }
-
       if (totalCheckedAfterRewrite > totalOfferedAfterRewrite) {
         setError("QC checked cannot exceed offered quantity.");
         return;
       }
 
-      if (totalPassedAfterRewrite > totalOfferedAfterRewrite) {
+      if (totalSamplePassedAfterRewrite > totalOfferedAfterRewrite) {
         setError("Passed quantity cannot exceed offered quantity.");
         return;
       }
@@ -1852,10 +1965,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       if (totalLabelsAfterRewrite !== requiredLabelsAfterRewrite) {
         setError(
           buildQcLabelRequirementMessage({
-            requestType,
-            totalPassed: totalPassedAfterRewrite,
+            totalPassed: totalSamplePassedAfterRewrite,
             boxSizesCount,
-            requestedQuantity: aqlRequestedQuantity,
             actualCount: totalLabelsAfterRewrite,
           }),
         );
@@ -1865,7 +1976,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       const qcPayload = buildQcPayload();
       qcPayload.vendor_provision = totalOfferedAfterRewrite;
       qcPayload.qc_checked = totalCheckedAfterRewrite;
-      qcPayload.qc_passed = totalPassedAfterRewrite;
+      qcPayload.qc_passed = totalSamplePassedAfterRewrite;
       qcPayload.labels = allLabelsAfterRewrite;
 
       try {
@@ -1875,21 +1986,18 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         await api.patch(`/qc/${qc._id}/inspection-records`, {
           records: [
             {
-              _id: latestInspectionRecord._id,
+              _id: rewriteTargetRecord._id,
               requested_date: requestedDateIso,
               inspection_date: lastInspectedDateIso,
               inspector: selectedInspectorId,
               vendor_requested:
-                Number(latestInspectionRecord?.vendor_requested || 0)
+                Number(rewriteTargetRecord?.vendor_requested || 0)
                 || requestedQuantityLimit
                 || aqlRequestedQuantity
                 || 0,
               vendor_offered: offeredQuantity,
               checked: qcChecked,
-              passed:
-                isAqlRequest && qcPassed > 0
-                  ? Math.max(1, Math.min(qcPassed, qcChecked > 0 ? qcChecked : qcPassed))
-                  : qcPassed,
+              passed: qcPassed,
               pending_after: pendingAfterRewrite,
               cbm: {
                 box1: Number(updatedQc?.cbm?.box1 ?? updatedQc?.cbm?.top ?? 0) || 0,
@@ -1916,15 +2024,15 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
     const rawNextNetOffered =
       (qc.quantities?.vendor_provision || 0) + offeredQuantity;
-    const nextPassedRaw = (qc.quantities?.qc_passed || 0) + qcPassed;
-    const shouldAutoCompleteAql = isAqlRequest && nextPassedRaw > 0;
-    const totalOfferedNext = shouldAutoCompleteAql
-      ? Math.max(rawNextNetOffered, aqlRequestedQuantity)
-      : rawNextNetOffered;
+    const totalOfferedNext = rawNextNetOffered;
     const nextChecked = (qc.quantities?.qc_checked || 0) + qcChecked;
-    const nextPassed = shouldAutoCompleteAql
-      ? aqlRequestedQuantity
-      : nextPassedRaw;
+    const nextCurrentRequestChecked =
+      currentRequestCheckedBefore + qcChecked;
+    const nextCurrentRequestSamplePassed =
+      currentRequestPassedBefore + qcPassed;
+    const nextCurrentRequestOffered =
+      currentRequestOfferedBefore + offeredQuantity;
+    const nextSamplePassedTotal = currentSamplePassedTotal + qcPassed;
     const existingLabelsSet = new Set(normalizeLabels(qc?.labels));
     const incomingNewLabels = labelsForUpdate.filter(
       (label) => !existingLabelsSet.has(label),
@@ -1953,13 +2061,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       ? Math.max(0, parsedPendingQuantityLimit)
       : 0;
 
-    if (isAqlRequest && nextChecked > aqlSampleQuantity) {
-      setError(
-        `AQL checked quantity cannot exceed 10% sample (${aqlSampleQuantity}).`,
-      );
-      return;
-    }
-
     if (hasStartedInspection) {
       if (offeredQuantity > pendingQuantityLimit) {
         setError("Offered quantity cannot exceed pending quantity.");
@@ -1978,27 +2079,27 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       return;
     }
 
-    if (nextChecked > totalOfferedNext) {
+    if (nextCurrentRequestChecked > nextCurrentRequestOffered) {
       setError("QC checked cannot exceed offered quantity.");
       return;
     }
 
-    if (
-      qc.quantities?.vendor_provision !== undefined &&
-      nextPassed > totalOfferedNext
-    ) {
+    if (nextCurrentRequestSamplePassed > nextCurrentRequestChecked) {
+      setError("Passed cannot exceed checked quantity.");
+      return;
+    }
+
+    if (nextCurrentRequestSamplePassed > nextCurrentRequestOffered) {
       setError("Passed quantity cannot exceed offered quantity.");
       return;
     }
 
     const requiredLabelsAfterUpdate = getQcLabelRequirement({
-      requestType,
-      totalPassed: nextPassed,
+      totalPassed: nextSamplePassedTotal,
       boxSizesCount,
-      requestedQuantity: aqlRequestedQuantity,
     }).requiredCount;
     const requiresBoxSizeForLabels =
-      nextPassed > 0 || totalLabelsAfterUpdate > 0;
+      nextSamplePassedTotal > 0 || totalLabelsAfterUpdate > 0;
 
     if (requiresBoxSizeForLabels && boxSizesCount === 0) {
       setError("At least 1 box size is required to validate labels.");
@@ -2008,10 +2109,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     if (totalLabelsAfterUpdate !== requiredLabelsAfterUpdate) {
       setError(
         buildQcLabelRequirementMessage({
-          requestType,
-          totalPassed: nextPassed,
+          totalPassed: nextSamplePassedTotal,
           boxSizesCount,
-          requestedQuantity: aqlRequestedQuantity,
           actualCount: totalLabelsAfterUpdate,
         }),
       );

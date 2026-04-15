@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Navbar from "../components/Navbar";
+import SortHeaderButton from "../components/SortHeaderButton";
 import {
   exportDelayedPoReport,
   getDelayedPoReport,
 } from "../services/orders.service";
+import {
+  getNextClientSortState,
+  sortClientRows,
+} from "../utils/clientSort";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -74,6 +79,8 @@ const DelayedPoReports = () => {
   const [error, setError] = useState("");
   const [report, setReport] = useState(defaultReport);
   const [syncedQuery, setSyncedQuery] = useState(null);
+  const [sortBy, setSortBy] = useState("delayDays");
+  const [sortOrder, setSortOrder] = useState("desc");
 
   const fetchReport = useCallback(async () => {
     try {
@@ -271,6 +278,20 @@ const DelayedPoReports = () => {
     return "All ETD Dates";
   }, [displayedFromDate, displayedToDate]);
 
+  const handleSortColumn = useCallback(
+    (column, defaultDirection = "asc") => {
+      const nextSortState = getNextClientSortState(
+        sortBy,
+        sortOrder,
+        column,
+        defaultDirection,
+      );
+      setSortBy(nextSortState.sortBy);
+      setSortOrder(nextSortState.sortOrder);
+    },
+    [sortBy, sortOrder],
+  );
+
   return (
     <>
       <Navbar />
@@ -425,6 +446,24 @@ const DelayedPoReports = () => {
           ) : (
             report.vendors.map((vendorEntry, index) => {
               const rows = Array.isArray(vendorEntry?.rows) ? vendorEntry.rows : [];
+              const sortedRows = sortClientRows(rows, {
+                sortBy,
+                sortOrder,
+                getSortValue: (row, column) => {
+                  if (column === "orderId") return row?.order_id;
+                  if (column === "brand") return row?.brand;
+                  if (column === "orderDate") return new Date(row?.order_date || 0).getTime();
+                  if (column === "etd") return new Date(row?.etd || 0).getTime();
+                  if (column === "delayDays") return Number(row?.delay_days || 0);
+                  if (column === "pending") return Number(row?.pending_count || 0);
+                  if (column === "inspectionDone") {
+                    return Number(row?.inspection_done_count || 0);
+                  }
+                  if (column === "shipped") return Number(row?.shipped_count || 0);
+                  if (column === "lastProgress") return row?.last_progress;
+                  return "";
+                },
+              });
               const vendorKey = String(vendorEntry?.vendor || "").trim() || `vendor-${index}`;
 
               return (
@@ -456,19 +495,82 @@ const DelayedPoReports = () => {
                       <table className="table table-sm table-striped align-middle mb-0">
                         <thead>
                           <tr>
-                            <th>PO</th>
-                            <th>Brand</th>
-                            <th>Order Date</th>
-                            <th>ETD</th>
-                            <th>Delay Days</th>
-                            <th>Pending</th>
-                            <th>Inspection Done</th>
-                            <th>Shipped</th>
-                            <th>Last Progress</th>
+                            <th>
+                              <SortHeaderButton
+                                label="PO"
+                                isActive={sortBy === "orderId"}
+                                direction={sortOrder}
+                                onClick={() => handleSortColumn("orderId", "asc")}
+                              />
+                            </th>
+                            <th>
+                              <SortHeaderButton
+                                label="Brand"
+                                isActive={sortBy === "brand"}
+                                direction={sortOrder}
+                                onClick={() => handleSortColumn("brand", "asc")}
+                              />
+                            </th>
+                            <th>
+                              <SortHeaderButton
+                                label="Order Date"
+                                isActive={sortBy === "orderDate"}
+                                direction={sortOrder}
+                                onClick={() => handleSortColumn("orderDate", "desc")}
+                              />
+                            </th>
+                            <th>
+                              <SortHeaderButton
+                                label="ETD"
+                                isActive={sortBy === "etd"}
+                                direction={sortOrder}
+                                onClick={() => handleSortColumn("etd", "desc")}
+                              />
+                            </th>
+                            <th>
+                              <SortHeaderButton
+                                label="Delay Days"
+                                isActive={sortBy === "delayDays"}
+                                direction={sortOrder}
+                                onClick={() => handleSortColumn("delayDays", "desc")}
+                              />
+                            </th>
+                            <th>
+                              <SortHeaderButton
+                                label="Pending"
+                                isActive={sortBy === "pending"}
+                                direction={sortOrder}
+                                onClick={() => handleSortColumn("pending", "desc")}
+                              />
+                            </th>
+                            <th>
+                              <SortHeaderButton
+                                label="Inspection Done"
+                                isActive={sortBy === "inspectionDone"}
+                                direction={sortOrder}
+                                onClick={() => handleSortColumn("inspectionDone", "desc")}
+                              />
+                            </th>
+                            <th>
+                              <SortHeaderButton
+                                label="Shipped"
+                                isActive={sortBy === "shipped"}
+                                direction={sortOrder}
+                                onClick={() => handleSortColumn("shipped", "desc")}
+                              />
+                            </th>
+                            <th>
+                              <SortHeaderButton
+                                label="Last Progress"
+                                isActive={sortBy === "lastProgress"}
+                                direction={sortOrder}
+                                onClick={() => handleSortColumn("lastProgress", "asc")}
+                              />
+                            </th>
                           </tr>
                         </thead>
                         <tbody>
-                          {rows.length === 0 && (
+                          {sortedRows.length === 0 && (
                             <tr>
                               <td colSpan="9" className="text-center py-3">
                                 No delayed POs for this vendor.
@@ -476,7 +578,7 @@ const DelayedPoReports = () => {
                             </tr>
                           )}
 
-                          {rows.map((row) => (
+                          {sortedRows.map((row) => (
                             <tr
                               key={`${vendorKey}-${row.order_id}`}
                               className="table-clickable"

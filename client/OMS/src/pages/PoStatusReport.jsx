@@ -3,10 +3,15 @@ import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import Navbar from "../components/Navbar";
+import SortHeaderButton from "../components/SortHeaderButton";
 import { getPoStatusReport } from "../services/orders.service";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import { formatDateDDMMYYYY } from "../utils/date";
+import {
+  getNextClientSortState,
+  sortClientRows,
+} from "../utils/clientSort";
 import "../App.css";
 
 const DEFAULT_ENTITY_FILTER = "all";
@@ -43,6 +48,17 @@ const normalizeStatusCounts = (value = {}) => ({
   partially_shipped: Number(value?.partially_shipped || 0),
   shipped: Number(value?.shipped || 0),
 });
+
+const getTotalStatusCounts = (value = {}) => {
+  const normalizedCounts = normalizeStatusCounts(value);
+  return (
+    normalizedCounts.pending
+    + normalizedCounts.under_inspection
+    + normalizedCounts.inspection_done
+    + normalizedCounts.partially_shipped
+    + normalizedCounts.shipped
+  );
+};
 
 const defaultReport = {
   filters: {
@@ -114,6 +130,8 @@ const PoStatusReport = () => {
   const [report, setReport] = useState(defaultReport);
   const [syncedQuery, setSyncedQuery] = useState(null);
   const reportRef = useRef(null);
+  const [sortBy, setSortBy] = useState("orderId");
+  const [sortOrder, setSortOrder] = useState("asc");
 
   const fetchReport = useCallback(async () => {
     try {
@@ -244,6 +262,20 @@ const PoStatusReport = () => {
       handleOpenOrder(orderId);
     },
     [handleOpenOrder, location.pathname, location.search, navigate],
+  );
+
+  const handleSortColumn = useCallback(
+    (column, defaultDirection = "asc") => {
+      const nextSortState = getNextClientSortState(
+        sortBy,
+        sortOrder,
+        column,
+        defaultDirection,
+      );
+      setSortBy(nextSortState.sortBy);
+      setSortOrder(nextSortState.sortOrder);
+    },
+    [sortBy, sortOrder],
   );
 
   const handleExportPdf = useCallback(async () => {
@@ -480,6 +512,33 @@ const PoStatusReport = () => {
             ) : (
               report.vendors.map((vendorEntry, index) => {
                 const pos = Array.isArray(vendorEntry?.pos) ? vendorEntry.pos : [];
+                const sortedPos = sortClientRows(pos, {
+                  sortBy,
+                  sortOrder,
+                  getSortValue: (row, column) => {
+                    if (column === "brand") return row?.brand;
+                    if (column === "orderId") return row?.order_id;
+                    if (column === "itemCode") {
+                      const items = Array.isArray(row?.inspected_items)
+                        ? row.inspected_items
+                        : Array.isArray(row?.open_items)
+                          ? row.open_items
+                          : [];
+                      return items
+                        .map((item) => String(item?.item_code || "").trim())
+                        .filter(Boolean)
+                        .join(", ");
+                    }
+                    if (column === "orderDate") {
+                      return new Date(row?.order_date || 0).getTime();
+                    }
+                    if (column === "etd") {
+                      return new Date(row?.effective_etd || 0).getTime();
+                    }
+                    if (column === "itemCount") return getTotalStatusCounts(row?.item_counts);
+                    return "";
+                  },
+                });
                 const vendorKey = String(vendorEntry?.vendor || "").trim() || `vendor-${index}`;
                 const vendorCounts = normalizeStatusCounts(vendorEntry?.status_counts);
 
@@ -517,22 +576,57 @@ const PoStatusReport = () => {
                           <table className="table table-sm table-striped align-middle mb-0 po-status-report-table">
                             <thead>
                               <tr>
-                                <th>Brand</th>
-                                <th>PO</th>
-                                <th>Order Date</th>
-                                <th>ETD</th>
-                                <th className="po-status-item-count-column">Item Count</th>
+                                <th>
+                                  <SortHeaderButton
+                                    label="Brand"
+                                    isActive={sortBy === "brand"}
+                                    direction={sortOrder}
+                                    onClick={() => handleSortColumn("brand", "asc")}
+                                  />
+                                </th>
+                                <th>
+                                  <SortHeaderButton
+                                    label="PO"
+                                    isActive={sortBy === "orderId"}
+                                    direction={sortOrder}
+                                    onClick={() => handleSortColumn("orderId", "asc")}
+                                  />
+                                </th>
+                                <th>
+                                  <SortHeaderButton
+                                    label="Order Date"
+                                    isActive={sortBy === "orderDate"}
+                                    direction={sortOrder}
+                                    onClick={() => handleSortColumn("orderDate", "desc")}
+                                  />
+                                </th>
+                                <th>
+                                  <SortHeaderButton
+                                    label="ETD"
+                                    isActive={sortBy === "etd"}
+                                    direction={sortOrder}
+                                    onClick={() => handleSortColumn("etd", "desc")}
+                                  />
+                                </th>
+                                <th className="po-status-item-count-column">
+                                  <SortHeaderButton
+                                    label="Item Count"
+                                    isActive={sortBy === "itemCount"}
+                                    direction={sortOrder}
+                                    onClick={() => handleSortColumn("itemCount", "desc")}
+                                  />
+                                </th>
                               </tr>
                             </thead>
                             <tbody>
-                              {pos.length === 0 ? (
+                              {sortedPos.length === 0 ? (
                                 <tr>
                                   <td colSpan="5" className="text-center py-3">
                                     No POs for this vendor.
                                   </td>
                                 </tr>
                               ) : (
-                                pos.map((row) => (
+                                sortedPos.map((row) => (
                                   <tr
                                     key={`${vendorKey}-${row.key || row.order_id}`}
                                     className="table-clickable"
@@ -565,23 +659,58 @@ const PoStatusReport = () => {
                           <table className="table table-sm table-striped align-middle mb-0 po-status-report-table">
                             <thead>
                               <tr>
-                                <th>Brand</th>
-                                <th>PO</th>
-                                <th>Item Code</th>
-                                <th>Order Date</th>
-                                <th>ETD</th>
+                                <th>
+                                  <SortHeaderButton
+                                    label="Brand"
+                                    isActive={sortBy === "brand"}
+                                    direction={sortOrder}
+                                    onClick={() => handleSortColumn("brand", "asc")}
+                                  />
+                                </th>
+                                <th>
+                                  <SortHeaderButton
+                                    label="PO"
+                                    isActive={sortBy === "orderId"}
+                                    direction={sortOrder}
+                                    onClick={() => handleSortColumn("orderId", "asc")}
+                                  />
+                                </th>
+                                <th>
+                                  <SortHeaderButton
+                                    label="Item Code"
+                                    isActive={sortBy === "itemCode"}
+                                    direction={sortOrder}
+                                    onClick={() => handleSortColumn("itemCode", "asc")}
+                                  />
+                                </th>
+                                <th>
+                                  <SortHeaderButton
+                                    label="Order Date"
+                                    isActive={sortBy === "orderDate"}
+                                    direction={sortOrder}
+                                    onClick={() => handleSortColumn("orderDate", "desc")}
+                                  />
+                                </th>
+                                <th>
+                                  <SortHeaderButton
+                                    label="ETD"
+                                    isActive={sortBy === "etd"}
+                                    direction={sortOrder}
+                                    onClick={() => handleSortColumn("etd", "desc")}
+                                  />
+                                </th>
                                 <th className="po-status-item-count-column">Item Count / Order Qty</th>
                               </tr>
                             </thead>
                             <tbody>
-                              {pos.length === 0 ? (
+                              {sortedPos.length === 0 ? (
                                 <tr>
                                   <td colSpan="6" className="text-center py-3">
                                     No partially inspected POs for this vendor.
                                   </td>
                                 </tr>
                               ) : (
-                                pos.map((row) => (
+                                sortedPos.map((row) => (
                                   <FragmentLikeGroup
                                     key={`${vendorKey}-${row.key || row.order_id}`}
                                     row={row}

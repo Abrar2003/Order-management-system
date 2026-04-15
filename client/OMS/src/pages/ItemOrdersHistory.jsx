@@ -3,6 +3,11 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import OrderEtdWithHistory from "../components/OrderEtdWithHistory";
+import SortHeaderButton from "../components/SortHeaderButton";
+import {
+  getNextClientSortState,
+  sortClientRows,
+} from "../utils/clientSort";
 import { formatDateDDMMYYYY } from "../utils/date";
 import "../App.css";
 
@@ -47,6 +52,8 @@ const ItemOrdersHistory = () => {
     total_orders: 0,
     total_inspection_rows: 0,
   });
+  const [sortBy, setSortBy] = useState("orderId");
+  const [sortOrder, setSortOrder] = useState("asc");
 
   const fetchItemOrdersHistory = useCallback(async () => {
     try {
@@ -88,6 +95,41 @@ const ItemOrdersHistory = () => {
     }
     fetchItemOrdersHistory();
   }, [fetchItemOrdersHistory, resolvedItemCode]);
+
+  const handleSortColumn = useCallback(
+    (column, defaultDirection = "asc") => {
+      const nextSortState = getNextClientSortState(
+        sortBy,
+        sortOrder,
+        column,
+        defaultDirection,
+      );
+      setSortBy(nextSortState.sortBy);
+      setSortOrder(nextSortState.sortOrder);
+    },
+    [sortBy, sortOrder],
+  );
+
+  const sortedOrders = useMemo(
+    () =>
+      sortClientRows(orders, {
+        sortBy,
+        sortOrder,
+        getSortValue: (order, column) => {
+          if (column === "orderId") return order?.order_id;
+          if (column === "brand") return order?.brand;
+          if (column === "vendor") return order?.vendor;
+          if (column === "orderDate") return new Date(order?.order_date || 0).getTime();
+          if (column === "etd") {
+            return new Date(order?.revised_ETD || order?.ETD || 0).getTime();
+          }
+          if (column === "status") return order?.status;
+          if (column === "quantity") return toSafeNumber(order?.quantity);
+          return "";
+        },
+      }),
+    [orders, sortBy, sortOrder],
+  );
 
   return (
     <>
@@ -142,16 +184,65 @@ const ItemOrdersHistory = () => {
                 <table className="table table-striped table-hover align-middle om-table mb-0">
                   <thead className="table-primary">
                     <tr>
-                      <th>Order ID</th>
-                      <th>Brand</th>
-                      <th>Vendor</th>
-                      <th>Order Date</th>
-                      <th>ETD</th>
-                      <th>Status</th>
-                      <th>Order Qty</th>
+                      <th>
+                        <SortHeaderButton
+                          label="Order ID"
+                          isActive={sortBy === "orderId"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("orderId", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Brand"
+                          isActive={sortBy === "brand"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("brand", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Vendor"
+                          isActive={sortBy === "vendor"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("vendor", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Order Date"
+                          isActive={sortBy === "orderDate"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("orderDate", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="ETD"
+                          isActive={sortBy === "etd"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("etd", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Status"
+                          isActive={sortBy === "status"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("status", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Order Qty"
+                          isActive={sortBy === "quantity"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("quantity", "desc")}
+                        />
+                      </th>
                     </tr>
                   </thead>
-                  {orders.length === 0 && (
+                  {sortedOrders.length === 0 && (
                     <tbody>
                       <tr>
                         <td colSpan={7} className="text-center py-4">
@@ -160,7 +251,7 @@ const ItemOrdersHistory = () => {
                       </tr>
                     </tbody>
                   )}
-                  {orders.map((order) => {
+                  {sortedOrders.map((order) => {
                     const inspectionRows = Array.isArray(order?.inspections)
                       ? order.inspections
                       : [];

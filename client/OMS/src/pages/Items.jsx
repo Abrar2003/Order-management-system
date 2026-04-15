@@ -4,8 +4,13 @@ import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import EditItemModal from "../components/EditItemModal";
 import ItemOrderPresenceTooltip from "../components/ItemOrderPresenceTooltip";
+import SortHeaderButton from "../components/SortHeaderButton";
 import { getUserFromToken } from "../auth/auth.utils";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
+import {
+  getNextClientSortState,
+  sortClientRows,
+} from "../utils/clientSort";
 import { formatCbm } from "../utils/cbm";
 import { formatFixedNumber, formatLbhValue } from "../utils/measurementDisplay";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -207,6 +212,8 @@ const Items = () => {
   const [uploadingItemId, setUploadingItemId] = useState("");
   const [itemFilePickerContext, setItemFilePickerContext] = useState(null);
   const itemFileInputRef = useRef(null);
+  const [sortBy, setSortBy] = useState("code");
+  const [sortOrder, setSortOrder] = useState("asc");
 
   const debouncedSearch = useDebouncedValue(searchInput, 300);
 
@@ -335,6 +342,46 @@ const Items = () => {
   const itemCodeOptions = useMemo(
     () => (Array.isArray(filters.item_codes) ? filters.item_codes : []),
     [filters.item_codes],
+  );
+
+  const handleSortColumn = useCallback(
+    (column, defaultDirection = "asc") => {
+      const nextSortState = getNextClientSortState(
+        sortBy,
+        sortOrder,
+        column,
+        defaultDirection,
+      );
+      setSortBy(nextSortState.sortBy);
+      setSortOrder(nextSortState.sortOrder);
+    },
+    [sortBy, sortOrder],
+  );
+
+  const sortedRows = useMemo(
+    () =>
+      sortClientRows(rows, {
+        sortBy,
+        sortOrder,
+        getSortValue: (item, column) => {
+          if (column === "code") return item?.code;
+          if (column === "name") return item?.name;
+          if (column === "brand") return item?.brand_name || item?.brand;
+          if (column === "netWeight") return getInspectedWeight(item, "net");
+          if (column === "grossWeight") return getInspectedWeight(item, "gross");
+          if (column === "cbm") return Number(getCalculatedInspectedCbm(item) || 0);
+          if (column === "itemLbh") {
+            const value = getInspectedItemLbh(item);
+            return [value?.L || 0, value?.B || 0, value?.H || 0];
+          }
+          if (column === "boxLbh") {
+            const value = getInspectedBoxLbh(item);
+            return [value?.L || 0, value?.B || 0, value?.H || 0];
+          }
+          return "";
+        },
+      }),
+    [rows, sortBy, sortOrder],
   );
 
   const navigateToItemOrdersHistory = useCallback(
@@ -619,28 +666,84 @@ const Items = () => {
                 <table className="table table-striped table-hover align-middle om-table mb-0">
                   <thead className="table-primary">
                     <tr>
-                      <th>Item Code</th>
-                      <th>Name</th>
-                      <th>Brand Name</th>
-                      <th>Net Weight</th>
-                      <th>Gross Weight</th>
-                      <th>CBM</th>
-                      <th>Item LBH</th>
-                      <th>Box LBH</th>
+                      <th>
+                        <SortHeaderButton
+                          label="Item Code"
+                          isActive={sortBy === "code"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("code", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Name"
+                          isActive={sortBy === "name"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("name", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Brand Name"
+                          isActive={sortBy === "brand"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("brand", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Net Weight"
+                          isActive={sortBy === "netWeight"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("netWeight", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Gross Weight"
+                          isActive={sortBy === "grossWeight"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("grossWeight", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="CBM"
+                          isActive={sortBy === "cbm"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("cbm", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Item LBH"
+                          isActive={sortBy === "itemLbh"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("itemLbh", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Box LBH"
+                          isActive={sortBy === "boxLbh"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("boxLbh", "asc")}
+                        />
+                      </th>
                       <th>Action</th>
                       {/* <th>Source</th> */}
                       {/* <th>Updated At</th> */}
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.length === 0 && (
+                    {sortedRows.length === 0 && (
                       <tr>
                         <td colSpan="9" className="text-center py-4">
                           No items found
                         </td>
                       </tr>
                     )}
-                    {rows.map((item) => {
+                    {sortedRows.map((item) => {
                       const itemId = String(item?._id || "").trim();
                       const selectedFileType = getSelectedItemFileType(itemId);
                       const isUploadingThisItem = uploadingItemId === itemId;

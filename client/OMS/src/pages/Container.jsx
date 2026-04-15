@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import SortHeaderButton from "../components/SortHeaderButton";
 import { getUserFromToken } from "../auth/auth.utils";
 import { isViewOnlyUser } from "../auth/permissions";
 import {
@@ -11,6 +12,10 @@ import {
   toISODateString,
 } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
+import {
+  getNextClientSortState,
+  sortClientRows,
+} from "../utils/clientSort";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
 
@@ -73,6 +78,8 @@ const Container = () => {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [syncedQuery, setSyncedQuery] = useState(null);
+  const [sortBy, setSortBy] = useState("orderId");
+  const [sortOrder, setSortOrder] = useState("asc");
 
   const fetchVendors = useCallback(async () => {
     try {
@@ -275,6 +282,38 @@ const Container = () => {
       return matchesOrderId && matchesStatus;
     });
   }, [orderIdFilter, rows, statusFilter]);
+
+  const handleSortColumn = useCallback(
+    (column, defaultDirection = "asc") => {
+      const nextSortState = getNextClientSortState(
+        sortBy,
+        sortOrder,
+        column,
+        defaultDirection,
+      );
+      setSortBy(nextSortState.sortBy);
+      setSortOrder(nextSortState.sortOrder);
+    },
+    [sortBy, sortOrder],
+  );
+
+  const sortedRows = useMemo(
+    () =>
+      sortClientRows(filteredRows, {
+        sortBy,
+        sortOrder,
+        getSortValue: (row, column) => {
+          if (column === "orderId") return row?.orderId;
+          if (column === "itemCode") return row?.itemCode;
+          if (column === "orderQuantity") return Number(row?.orderQuantity || 0);
+          if (column === "passed") return Number(row?.passed || 0);
+          if (column === "pending") return Number(row?.pending || 0);
+          if (column === "status") return row?.status;
+          return "";
+        },
+      }),
+    [filteredRows, sortBy, sortOrder],
+  );
 
   const handleUsePassedToggle = (rowId, checked) => {
     setRows((prevRows) =>
@@ -615,18 +654,60 @@ const Container = () => {
                 <table className="table table-striped table-hover align-middle om-table mb-0">
                   <thead className="table-primary">
                     <tr>
-                      <th>Order ID</th>
-                      <th>Item Code</th>
-                      <th>Order Quantity</th>
-                      <th>Passed</th>
-                      <th>Pending</th>
-                      <th>Status</th>
+                      <th>
+                        <SortHeaderButton
+                          label="Order ID"
+                          isActive={sortBy === "orderId"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("orderId", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Item Code"
+                          isActive={sortBy === "itemCode"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("itemCode", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Order Quantity"
+                          isActive={sortBy === "orderQuantity"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("orderQuantity", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Passed"
+                          isActive={sortBy === "passed"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("passed", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Pending"
+                          isActive={sortBy === "pending"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("pending", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Status"
+                          isActive={sortBy === "status"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("status", "asc")}
+                        />
+                      </th>
                       {!isViewOnly && <th>Check</th>}
                       {!isViewOnly && <th>Quantity</th>}
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredRows.length === 0 && (
+                    {sortedRows.length === 0 && (
                       <tr>
                         <td colSpan={isViewOnly ? "6" : "8"} className="text-center py-4">
                           No rows match the current filters.
@@ -634,7 +715,7 @@ const Container = () => {
                       </tr>
                     )}
 
-                    {filteredRows.map((row) => (
+                    {sortedRows.map((row) => (
                       <tr key={row.id}>
                         <td>{row.orderId}</td>
                         <td>{row.itemCode}</td>
