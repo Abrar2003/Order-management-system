@@ -16,6 +16,11 @@ import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { formatPositiveCbm } from "../utils/cbm";
 import { formatFixedNumber, formatLbhValue } from "../utils/measurementDisplay";
 import { canTransferLatestRequestToday } from "../utils/qcRequests";
+import {
+  getDerivedOrderStatus,
+  hasShipmentRecords as getHasShipmentRecords,
+  hasShippableQuantity,
+} from "../utils/orderStatus";
 import Barcode from "react-barcode";
 import "../App.css";
 
@@ -199,17 +204,6 @@ const InfoBox = ({ label, value, compact = false }) => (
   </div>
 );
 
-const isShipmentEditableStatus = (statusValue) => {
-  const normalized = String(statusValue || "")
-    .trim()
-    .toLowerCase();
-  return (
-    normalized === "partial shipped"
-    || normalized === "partially shipped"
-    || normalized === "shipped"
-  );
-};
-
 const RELATED_FILE_OPTIONS = Object.freeze([
   {
     value: "product_image",
@@ -369,13 +363,19 @@ const QcDetails = () => {
   const canFinalizeShipping = ["admin", "manager", "dev"].includes(
     normalizedRole,
   );
-  const hasShippingRecords =
-    Array.isArray(qc?.order?.shipment) && qc.order.shipment.length > 0;
+  const derivedOrderStatus = useMemo(
+    () => getDerivedOrderStatus({ order: qc?.order || {}, qc }),
+    [qc],
+  );
+  const hasShippingRecords = getHasShipmentRecords(qc?.order || {});
+  const canFinalizeMoreShipping = hasShippableQuantity({
+    order: qc?.order || {},
+    qc,
+  });
   const canShowEditShippingButton =
-    isOnlyAdmin &&
-    (hasShippingRecords || isShipmentEditableStatus(qc?.order?.status));
+    isOnlyAdmin && hasShippingRecords;
 
-  const isInspectionDone = qc?.order?.status === "Inspection Done";
+  const isInspectionDone = derivedOrderStatus === "Inspection Done";
   const pendingAlignmentInfo = useMemo(
     () => getQcPendingAlignmentInfo(qc),
     [qc],
@@ -1383,7 +1383,7 @@ const QcDetails = () => {
           <div className="card-body d-grid gap-4">
             <section>
               <h3 className="h6 mb-3">{`Order Information | ${qc.order.order_id} | ${qc.order.brand} | ${qc.order.vendor} |  Request Date: ${formatDateDDMMYYYY(qc.request_date)}`}</h3>
-              <h3 className="h6 mb-3">{`Status: ${qc.order.status} | Inspector: ${qc?.inspector?.name}`}</h3>
+              <h3 className="h6 mb-3">{`Status: ${derivedOrderStatus} | Inspector: ${qc?.inspector?.name}`}</h3>
               <div className="qc-order-inline-grid">
                 <InfoBox compact label="Item Code" value={qc.item.item_code} />
                 <InfoBox
@@ -1770,9 +1770,7 @@ const QcDetails = () => {
             {!isViewOnly && (
               <div className="d-flex justify-content-end flex-wrap gap-2">
                 {canFinalizeShipping &&
-                  ["Inspection Done", "Partial Shipped"].includes(
-                    qc?.order?.status,
-                  ) && (
+                  canFinalizeMoreShipping && (
                     <button
                       type="button"
                       className="btn btn-outline-secondary"

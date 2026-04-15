@@ -17,104 +17,36 @@ import { archiveOrder } from "../services/orders.service";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { formatCbm } from "../utils/cbm";
+import {
+  getDerivedOrderStatus,
+  getGroupedOrderStatus,
+  getOrderProgress,
+} from "../utils/orderStatus";
 import "../App.css";
 
-const toSafeNumber = (value) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-};
-
-const getShippedQuantity = (order) =>
-  (Array.isArray(order?.shipment) ? order.shipment : []).reduce(
-    (sum, shipmentEntry) =>
-      sum + Math.max(0, toSafeNumber(shipmentEntry?.quantity)),
-    0,
-  );
-
-const getInspectionDoneQuantity = (order) =>
-  Math.max(0, toSafeNumber(order?.qc_record?.quantities?.qc_passed));
-
-const getOpenInspectionQuantity = (order) => {
-  const hasQcRecord = Boolean(order?.qc_record);
-  if (hasQcRecord) {
-    return Math.max(0, toSafeNumber(order?.qc_record?.quantities?.pending));
-  }
-
-  const totalQuantity = Math.max(0, toSafeNumber(order?.quantity));
-  const inspectionDoneQuantity = getInspectionDoneQuantity(order);
-  return Math.max(0, totalQuantity - inspectionDoneQuantity);
-};
-
 const getPendingDisplayQuantity = (order) => {
-  const inspectionDoneQuantity = getInspectionDoneQuantity(order);
-  const shippedQuantity = getShippedQuantity(order);
-  return Math.max(0, inspectionDoneQuantity - shippedQuantity);
+  return getOrderProgress({ order }).inspected_unshipped_quantity;
 };
 
-const getRequestedInspectionQuantity = (order) => {
-  const requestHistory = Array.isArray(order?.qc_record?.request_history)
-    ? order.qc_record.request_history
-    : [];
-
-  for (let index = requestHistory.length - 1; index >= 0; index -= 1) {
-    const requestedQuantity = toSafeNumber(
-      requestHistory[index]?.quantity_requested,
-    );
-    if (requestedQuantity > 0) {
-      return requestedQuantity;
-    }
-  }
-
-  return Math.max(
-    0,
-    toSafeNumber(order?.qc_record?.quantities?.quantity_requested),
-  );
-};
+const getOpenInspectionQuantity = (order) =>
+  getOrderProgress({ order }).pending_inspection_quantity;
 
 const getDisplayedOrderStatus = (order) => {
-  const totalQuantity = Math.max(0, toSafeNumber(order?.quantity));
-  const shippedQuantity = getShippedQuantity(order);
-  const inspectionDoneQuantity = getInspectionDoneQuantity(order);
-  const pendingInspectionQuantity = getOpenInspectionQuantity(order);
-  const requestedInspectionQuantity = getRequestedInspectionQuantity(order);
-
-  if (totalQuantity > 0 && shippedQuantity >= totalQuantity) {
-    return "Shipped";
-  }
-
-  if (totalQuantity > 0 && inspectionDoneQuantity >= totalQuantity) {
-    return "Inspection Done";
-  }
-
-  if (
-    pendingInspectionQuantity > 0 &&
-    requestedInspectionQuantity >= pendingInspectionQuantity
-  ) {
-    return "Under Inspection";
-  }
-
-  return "Pending";
+  return getDerivedOrderStatus({ order });
 };
 
 const getDisplayedOrderGroupStatus = (orders) => {
-  const displayStatuses = (Array.isArray(orders) ? orders : []).map(
-    getDisplayedOrderStatus,
-  );
-
+  const displayStatuses = (Array.isArray(orders) ? orders : []).map(getDisplayedOrderStatus);
   if (displayStatuses.length === 0) return "N/A";
-  if (displayStatuses.includes("Pending")) return "Pending";
-  if (displayStatuses.includes("Under Inspection")) return "Under Inspection";
-  if (displayStatuses.includes("Inspection Done")) return "Inspection Done";
-  if (displayStatuses.every((status) => status === "Shipped")) return "Shipped";
-  return displayStatuses[0] || "N/A";
+  return getGroupedOrderStatus(displayStatuses);
 };
 
 const isCompletelyShipped = (order) => {
   const normalizedStatus = String(order?.status || "").trim().toLowerCase();
   if (normalizedStatus === "shipped") return true;
 
-  const totalQuantity = Math.max(0, toSafeNumber(order?.quantity));
-  const shippedQuantity = getShippedQuantity(order);
+  const { order_quantity: totalQuantity, shipped_quantity: shippedQuantity } =
+    getOrderProgress({ order });
   return totalQuantity > 0 && shippedQuantity >= totalQuantity;
 };
 

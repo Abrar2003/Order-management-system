@@ -8,6 +8,11 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
+import {
+  getGroupedOrderStatus,
+  ORDER_STATUS_SEQUENCE,
+  normalizeOrderStatus,
+} from "../utils/orderStatus";
 import "../App.css";
 
 const defaultFilters = {
@@ -17,14 +22,6 @@ const defaultFilters = {
   order: "",
   item_code: "",
 };
-
-const STATUS_SEQUENCE = [
-  "Pending",
-  "Under Inspection",
-  "Inspection Done",
-  "Partial Shipped",
-  "Shipped",
-];
 
 const DEFAULT_LIMIT = 20;
 const LIMIT_OPTIONS = [10, 20, 50, 100];
@@ -94,15 +91,7 @@ const PO_BUCKET_META = {
 };
 
 const normalizeStatus = (value) => {
-  if (!value) return null;
-  const cleaned = String(value).trim().toLowerCase();
-  if (!cleaned) return null;
-
-  if (cleaned === "finalized") return "Inspection Done";
-
-  return (
-    STATUS_SEQUENCE.find((status) => status.toLowerCase() === cleaned) || null
-  );
+  return normalizeOrderStatus(value) || null;
 };
 
 const getStatus = (order) => {
@@ -114,18 +103,7 @@ const getStatus = (order) => {
     ...new Set(incomingStatuses.map(normalizeStatus).filter(Boolean)),
   ];
 
-  if (normalizedUniqueStatuses.length === 0) return "Pending";
-  if (normalizedUniqueStatuses.length === 1) return normalizedUniqueStatuses[0];
-
-  const indexes = normalizedUniqueStatuses.map((status) =>
-    STATUS_SEQUENCE.indexOf(status),
-  );
-  const validIndexes = indexes.filter((index) => index >= 0);
-
-  if (validIndexes.length === 0) return "Pending";
-
-  const earliestStageIndex = Math.min(...validIndexes);
-  return STATUS_SEQUENCE[earliestStageIndex];
+  return getGroupedOrderStatus(normalizedUniqueStatuses);
 };
 
 const OpenOrders = ({ bucket = "open" }) => {
@@ -177,7 +155,7 @@ const OpenOrders = ({ bucket = "open" }) => {
     () =>
       Array.isArray(filterOptions.statuses) && filterOptions.statuses.length > 0
         ? filterOptions.statuses
-        : STATUS_SEQUENCE,
+        : ORDER_STATUS_SEQUENCE,
     [filterOptions.statuses],
   );
 

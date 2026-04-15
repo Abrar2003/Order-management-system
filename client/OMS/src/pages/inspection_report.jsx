@@ -6,6 +6,7 @@ import { jsPDF } from "jspdf";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import { formatDateDDMMYYYY } from "../utils/date";
+import { getDerivedOrderStatus } from "../utils/orderStatus";
 import { formatPositiveCbm } from "../utils/cbm";
 import { formatFixedNumber, formatLbhValue } from "../utils/measurementDisplay";
 import "../App.css";
@@ -676,6 +677,10 @@ const InspectionReport = () => {
 
   const orderInfo = useMemo(() => {
     const orderQuantity = Number(qc?.order?.quantity ?? qc?.quantities?.client_demand ?? 0);
+    const derivedOrderStatus = getDerivedOrderStatus({
+      order: qc?.order || {},
+      qc,
+    });
     return {
       orderId: toDisplayValue(qc?.order?.order_id),
       brand: toDisplayValue(qc?.order?.brand),
@@ -683,7 +688,7 @@ const InspectionReport = () => {
       requestDate: formatDateDDMMYYYY(qc?.request_date),
       requestType: toDisplayValue(qc?.request_type, "N/A"),
       orderQuantity: Number.isFinite(orderQuantity) ? String(orderQuantity) : "0",
-      status: toDisplayValue(qc?.order?.status),
+      status: toDisplayValue(derivedOrderStatus),
       itemCode: toDisplayValue(qc?.item?.item_code),
       itemDescription: toDisplayValue(qc?.item?.description),
     };

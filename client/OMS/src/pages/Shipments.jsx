@@ -10,6 +10,7 @@ import { getUserFromToken } from "../auth/auth.utils";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
+import { hasShipmentRecords } from "../utils/orderStatus";
 
 const useDebouncedValue = (value, delay = 300) => {
   const [debounced, setDebounced] = useState(value);
@@ -24,6 +25,8 @@ const useDebouncedValue = (value, delay = 300) => {
 
 const EMPTY_SUMMARY = {
   total: 0,
+  pending: 0,
+  underInspection: 0,
   inspectionDone: 0,
   partialShipped: 0,
   shipped: 0,
@@ -60,6 +63,7 @@ const parseSortBy = (value) => {
     "order_id",
     "item_code",
     "vendor",
+    "status",
     "order_quantity",
     "stuffing_date",
     "container",
@@ -76,17 +80,6 @@ const parseSortOrder = (value, sortBy = DEFAULT_SORT_BY) => {
     .toLowerCase();
   if (normalized === "asc" || normalized === "desc") return normalized;
   return sortBy === DEFAULT_SORT_BY ? "desc" : "asc";
-};
-
-const isShipmentEditableStatus = (statusValue) => {
-  const normalized = String(statusValue || "")
-    .trim()
-    .toLowerCase();
-  return (
-    normalized === "partial shipped" ||
-    normalized === "partially shipped" ||
-    normalized === "shipped"
-  );
 };
 
 const Shipments = () => {
@@ -328,12 +321,12 @@ const Shipments = () => {
   const canShowFinalizeAction = useCallback(
     (row) =>
       canFinalizeShipping &&
-      ["Inspection Done", "Partial Shipped"].includes(row?.status),
+      Number(row?.shippable_quantity || 0) > 0,
     [canFinalizeShipping],
   );
 
   const canShowEditAction = useCallback(
-    (row) => isAdmin && isShipmentEditableStatus(row?.status),
+    (row) => isAdmin && hasShipmentRecords({ shipment: row?.shipment }),
     [isAdmin],
   );
 
@@ -591,6 +584,26 @@ const Shipments = () => {
             </button>
             <button
               type="button"
+              className={`btn btn-sm ${statusFilter === "Pending" ? "btn-primary" : "btn-outline-secondary"}`}
+              onClick={() => {
+                setStatusFilter("Pending");
+                setPage(1);
+              }}
+            >
+              Pending: {summary.pending ?? 0}
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${statusFilter === "Under Inspection" ? "btn-primary" : "btn-outline-secondary"}`}
+              onClick={() => {
+                setStatusFilter("Under Inspection");
+                setPage(1);
+              }}
+            >
+              Under Inspection: {summary.underInspection ?? 0}
+            </button>
+            <button
+              type="button"
               className={`btn btn-sm ${statusFilter === "Inspection Done" ? "btn-primary" : "btn-outline-secondary"}`}
               onClick={() => {
                 setStatusFilter("Inspection Done");
@@ -685,6 +698,14 @@ const Shipments = () => {
                           }
                         />
                       </th>
+                      <th className="shipments-col-status">
+                        <SortHeaderButton
+                          label="Status"
+                          isActive={sortBy === "status"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("status", "asc")}
+                        />
+                      </th>
                       <th className="shipments-col-date">
                         <SortHeaderButton
                           label="Stuffing Date"
@@ -760,7 +781,7 @@ const Shipments = () => {
                       <tr>
                         <td
                           colSpan={
-                            (canFinalizeShipping ? 12 : 11) + (isAdmin ? 1 : 0)
+                            (canFinalizeShipping ? 13 : 12) + (isAdmin ? 1 : 0)
                           }
                           className="text-center py-4"
                         >
@@ -781,6 +802,7 @@ const Shipments = () => {
                         <td className="shipments-col-vendor">{row?.vendor || "N/A"}</td>
                         <td className="shipments-col-description">{row?.description || "N/A"}</td>
                         <td className="shipments-col-order-qty">{row?.order_quantity || "N/A"}</td>
+                        <td className="shipments-col-status">{row?.status || "N/A"}</td>
                         <td className="shipments-col-date">{formatDateDDMMYYYY(row?.stuffing_date)}</td>
                         <td className="shipments-col-container">{row?.container || "N/A"}</td>
                         <td className="shipments-col-invoice">{row?.invoice_number || "N/A"}</td>

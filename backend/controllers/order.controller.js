@@ -13,6 +13,13 @@ const {
   toDateOnlyIso,
 } = require("../helpers/dateOnly");
 const {
+  ORDER_STATUS_SEQUENCE,
+  deriveGroupedOrderStatus,
+  deriveOrderProgress,
+  deriveOrderStatus,
+  normalizeOrderStatus,
+} = require("../helpers/orderStatus");
+const {
   syncOrderGroup,
   purgeOmsEventsForConfiguredBrandCalendars,
 } = require("../services/gcalSync");
@@ -29,13 +36,6 @@ const {
   uploadBuffer,
 } = require("../services/wasabiStorage.service");
 
-const ORDER_STATUS_SEQUENCE = [
-  "Pending",
-  "Under Inspection",
-  "Inspection Done",
-  "Partial Shipped",
-  "Shipped",
-];
 const DEFAULT_PO_STATUS_REPORT_STATUS = "Inspection Done";
 const PO_STATUS_REPORT_STATUS_OPTIONS = [
   "Partially Inspected",
@@ -329,37 +329,26 @@ const getPoStatusTooltipShippedQuantity = (shipmentEntries = []) =>
   Math.max(0, Number(getShipmentQuantityTotal(shipmentEntries) || 0));
 
 const getPoStatusTooltipOpenQuantity = (orderEntry = {}) => {
-  const totalQuantity = Math.max(0, Number(parseQuantityLike(orderEntry?.quantity) || 0));
-  const qcPendingQuantity = Math.max(
-    0,
-    Number(parseQuantityLike(orderEntry?.qc_record?.quantities?.pending) || 0),
-  );
-
-  if (qcPendingQuantity > 0) {
-    return qcPendingQuantity;
-  }
-
-  return Math.max(
-    0,
-    totalQuantity - getPoStatusTooltipShippedQuantity(orderEntry?.shipment),
-  );
+  return deriveOrderProgress({ orderEntry }).pending_inspection_quantity;
 };
 
-const buildPoStatusTooltipItem = (orderEntry = {}) => ({
-  _id: String(orderEntry?._id || ""),
-  order_id: normalizeOrderKey(orderEntry?.order_id || "") || "N/A",
-  qc_id: String(orderEntry?.qc_record?._id || orderEntry?.qc_record || "").trim() || null,
-  item_code: normalizeLooseString(orderEntry?.item?.item_code || "") || "N/A",
-  status: normalizeLooseString(orderEntry?.status || "") || "N/A",
-  order_quantity: Number.isFinite(Number(orderEntry?.quantity))
-    ? Math.max(0, Number(orderEntry.quantity))
-    : 0,
-  total_quantity: Number.isFinite(Number(orderEntry?.quantity))
-    ? Math.max(0, Number(orderEntry.quantity))
-    : 0,
-  open_quantity: getPoStatusTooltipOpenQuantity(orderEntry),
-  shipped_quantity: getPoStatusTooltipShippedQuantity(orderEntry?.shipment),
-});
+const buildPoStatusTooltipItem = (orderEntry = {}) => {
+  const progress = deriveOrderProgress({ orderEntry });
+
+  return {
+    _id: String(orderEntry?._id || ""),
+    order_id: normalizeOrderKey(orderEntry?.order_id || "") || "N/A",
+    qc_id:
+      String(orderEntry?.qc_record?._id || orderEntry?.qc_record || "").trim() ||
+      null,
+    item_code: normalizeLooseString(orderEntry?.item?.item_code || "") || "N/A",
+    status: progress.status,
+    order_quantity: progress.order_quantity,
+    total_quantity: progress.order_quantity,
+    open_quantity: getPoStatusTooltipOpenQuantity(orderEntry),
+    shipped_quantity: getPoStatusTooltipShippedQuantity(orderEntry?.shipment),
+  };
+};
 
 const ACTIVE_ORDER_MATCH = {
   $and: [{ archived: { $ne: true } }, { status: { $ne: "Cancelled" } }],
@@ -595,7 +584,6 @@ const buildShipmentMatch = ({
 } = {}) => {
   const match = {
     ...ACTIVE_ORDER_MATCH,
-    status: { $in: SHIPMENT_VISIBLE_STATUSES },
   };
 
   const normalizedBrand = normalizeFilterValue(brand);
@@ -628,13 +616,8 @@ const buildShipmentMatch = ({
     match["shipment.container"] = { $regex: escaped, $options: "i" };
   }
 
-  if (
-    includeStatus &&
-    normalizedStatus &&
-    SHIPMENT_VISIBLE_STATUSES.includes(normalizedStatus)
-  ) {
-    match.status = normalizedStatus;
-  }
+  void includeStatus;
+  void normalizedStatus;
 
   return match;
 };
@@ -1080,43 +1063,31 @@ const loadLinkedQcForOrder = async (orderDoc, { session = null } = {}) => {
 };
 
 const buildPreviousOrderMetrics = ({ orderDoc = null, qcDoc = null } = {}) => {
-  const orderQuantity = Math.max(
-    0,
-    Number(parseQuantityLike(orderDoc?.quantity) || 0),
-  );
-  const shippedQuantity = Math.max(
-    0,
-    Number(getShipmentQuantityTotal(orderDoc?.shipment) || 0),
-  );
-  const passedQuantity = Math.max(
-    0,
-    Number(parseQuantityLike(qcDoc?.quantities?.qc_passed) || 0),
-  );
-  const qcPendingQuantity = Math.max(
-    0,
-    Number(parseQuantityLike(qcDoc?.quantities?.pending) || 0),
-  );
-  const pendingQuantity = qcDoc
-    ? qcPendingQuantity
-    : Math.max(0, orderQuantity - shippedQuantity);
+  const progress = deriveOrderProgress({
+    orderEntry: orderDoc,
+    qcRecord: qcDoc,
+  });
 
   return {
-    order_quantity: orderQuantity,
-    shipped_quantity: shippedQuantity,
-    passed_quantity: passedQuantity,
-    pending_quantity: pendingQuantity,
+    order_quantity: progress.order_quantity,
+    shipped_quantity: progress.shipped_quantity,
+    passed_quantity: progress.passed_quantity,
+    pending_quantity: progress.pending_inspection_quantity,
     has_qc_record: Boolean(qcDoc?._id),
   };
 };
 
 const isPartialShippedStatus = (statusValue = "") => {
-  const normalized = normalizeLooseString(statusValue).toLowerCase();
-  return normalized === "partial shipped" || normalized === "partially shipped";
+  return normalizeOrderStatus(statusValue) === "Partial Shipped";
 };
 
 const buildPreviousOrderResponse = ({ orderDoc = null, qcDoc = null } = {}) => {
   const metrics = buildPreviousOrderMetrics({ orderDoc, qcDoc });
-  const isPartialShipped = isPartialShippedStatus(orderDoc?.status);
+  const derivedStatus = deriveOrderStatus({
+    orderEntry: orderDoc,
+    qcRecord: qcDoc,
+  });
+  const isPartialShipped = isPartialShippedStatus(derivedStatus);
 
   return {
     order: {
@@ -1126,7 +1097,7 @@ const buildPreviousOrderResponse = ({ orderDoc = null, qcDoc = null } = {}) => {
       description: normalizeRectifyText(orderDoc?.item?.description),
       brand: normalizeLooseString(orderDoc?.brand),
       vendor: normalizeLooseString(orderDoc?.vendor),
-      status: normalizeLooseString(orderDoc?.status) || "Pending",
+      status: derivedStatus,
       quantity: metrics.order_quantity,
       ETD: orderDoc?.ETD || null,
       order_date: orderDoc?.order_date || null,
@@ -1333,7 +1304,9 @@ const getRectifiedChangedFields = (incomingRow, existingOrder) => {
 
 const getExistingOrderPreviewMeta = (existingOrder = null) => ({
   existing_order_id: String(existingOrder?._id || "").trim() || null,
-  existing_order_status: normalizeLooseString(existingOrder?.status) || null,
+  existing_order_status: existingOrder
+    ? deriveOrderStatus({ orderEntry: existingOrder })
+    : null,
 });
 
 const buildBrandVendorPairsFromRows = (rows = []) => {
@@ -1375,7 +1348,7 @@ const loadExistingOrdersForBrandVendorPairs = async (pairs = []) => {
     )
     .populate({
       path: "qc_record",
-      select: "quantities",
+      select: "quantities request_history",
     })
     .sort({ updatedAt: -1, createdAt: -1 })
     .lean();
@@ -2430,30 +2403,12 @@ const fitShipmentEntriesToOrderQuantity = (
 };
 
 const computeOrderStatus = ({ orderQuantity, shippedQuantity, qcRecord }) => {
-  if (orderQuantity <= 0) {
-    return "Cancelled";
-  }
-
-  if (shippedQuantity >= orderQuantity && orderQuantity > 0) {
-    return "Shipped";
-  }
-
-  if (shippedQuantity > 0) {
-    return "Partial Shipped";
-  }
-
-  if (!qcRecord) {
-    return "Pending";
-  }
-
-  const passedQuantity = Number(qcRecord?.quantities?.qc_passed || 0);
-  const clientDemandQuantity = Number(qcRecord?.quantities?.client_demand || 0);
-
-  if (clientDemandQuantity > 0 && passedQuantity >= clientDemandQuantity) {
-    return "Inspection Done";
-  }
-
-  return "Under Inspection";
+  return deriveOrderStatus({
+    orderQuantity,
+    shippedQuantity,
+    qcRecord,
+    allowCancelledOnZero: true,
+  });
 };
 
 const normalizePoBucket = (value = "") => {
@@ -2486,89 +2441,11 @@ const normalizePoBucket = (value = "") => {
 };
 
 const derivePoLineProgress = ({ orderEntry = {}, qcRecord = null } = {}) => {
-  const orderQuantity = Math.max(
-    0,
-    Number(parseQuantityLike(orderEntry?.quantity) || 0),
-  );
-  const shippedQuantity = Math.min(
-    orderQuantity,
-    Math.max(0, Number(getShipmentQuantityTotal(orderEntry?.shipment) || 0)),
-  );
-  const passedQuantity = Math.min(
-    orderQuantity,
-    Math.max(
-      0,
-      Number(parseQuantityLike(qcRecord?.quantities?.qc_passed) || 0),
-    ),
-  );
-  const inspectedUnshippedQuantity = Math.max(
-    0,
-    Math.min(orderQuantity - shippedQuantity, passedQuantity - shippedQuantity),
-  );
-  const pendingInspectionQuantity = Math.max(
-    0,
-    orderQuantity - shippedQuantity - inspectedUnshippedQuantity,
-  );
-
-  let derivedStatus = "Pending";
-  if (shippedQuantity >= orderQuantity && orderQuantity > 0) {
-    derivedStatus = "Shipped";
-  } else if (shippedQuantity > 0) {
-    derivedStatus = "Partial Shipped";
-  } else if (
-    pendingInspectionQuantity <= 0 &&
-    inspectedUnshippedQuantity > 0
-  ) {
-    derivedStatus = "Inspection Done";
-  } else if (qcRecord) {
-    derivedStatus = "Under Inspection";
-  }
-
-  return {
-    order_quantity: orderQuantity,
-    shipped_quantity: shippedQuantity,
-    passed_quantity: passedQuantity,
-    inspected_unshipped_quantity: inspectedUnshippedQuantity,
-    pending_inspection_quantity: pendingInspectionQuantity,
-    status: derivedStatus,
-  };
+  return deriveOrderProgress({ orderEntry, qcRecord });
 };
 
-const computeGroupedPoStatus = (statuses = []) => {
-  const normalizedStatuses = [
-    ...new Set(
-      (Array.isArray(statuses) ? statuses : [])
-        .map((statusValue) => normalizeLooseString(statusValue))
-        .filter(Boolean),
-    ),
-  ];
-
-  const hasPendingStatus = normalizedStatuses.includes("Pending");
-  const hasUnderInspectionStatus = normalizedStatuses.includes("Under Inspection");
-  const hasInspectionDoneStatus = normalizedStatuses.includes("Inspection Done");
-  const hasPartialShippedStatus = normalizedStatuses.includes("Partial Shipped");
-  const minStatusRank = normalizedStatuses.reduce((minimum, statusValue) => {
-    const index = ORDER_STATUS_SEQUENCE.indexOf(statusValue);
-    if (index === -1) return minimum;
-    return Math.min(minimum, index);
-  }, Number.POSITIVE_INFINITY);
-
-  if (
-    hasPartialShippedStatus &&
-    hasInspectionDoneStatus &&
-    !hasPendingStatus &&
-    !hasUnderInspectionStatus
-  ) {
-    return "Partial Shipped";
-  }
-
-  if (minStatusRank === 0) return "Pending";
-  if (minStatusRank === 1) return "Under Inspection";
-  if (minStatusRank === 2) return "Inspection Done";
-  if (minStatusRank === 3) return "Partial Shipped";
-  if (minStatusRank === 4) return "Shipped";
-  return "Pending";
-};
+const computeGroupedPoStatus = (statuses = []) =>
+  deriveGroupedOrderStatus(statuses);
 
 const computePoBucketFromTotals = (groupedEntry = {}) => {
   const totalQuantity = Math.max(
@@ -2684,7 +2561,7 @@ const buildPoBucketDataset = async ({
     )
     .populate({
       path: "qc_record",
-      select: "order quantities last_inspected_date inspection_dates",
+      select: "order quantities request_history last_inspected_date inspection_dates",
     })
     .sort({ order_date: -1, order_id: 1 })
     .lean();
@@ -2699,7 +2576,7 @@ const buildPoBucketDataset = async ({
 
   const fallbackQcRecords = orderObjectIds.length > 0
     ? await QC.find({ order: { $in: orderObjectIds } })
-      .select("order quantities last_inspected_date inspection_dates")
+      .select("order quantities request_history last_inspected_date inspection_dates")
       .lean()
     : [];
 
@@ -2793,6 +2670,9 @@ const buildPoBucketDataset = async ({
   const groupedRows = [...groupedOrders.values()].map((groupedEntry) => {
     const statuses = normalizeStatusList(groupedEntry.statuses);
     const totalStatus = computeGroupedPoStatus(statuses);
+    const statusCounts = createPoStatusCounts();
+    groupedEntry.statuses.forEach((statusValue) =>
+      incrementPoStatusCounts(statusCounts, statusValue));
     return {
       order_id: groupedEntry.order_id,
       items: groupedEntry.items,
@@ -2805,6 +2685,7 @@ const buildPoBucketDataset = async ({
       last_inspected_date: groupedEntry.last_inspected_date,
       latest_shipment_date: groupedEntry.latest_shipment_date,
       statuses,
+      status_counts: statusCounts,
       totalStatus,
       po_bucket: computePoBucketFromTotals(groupedEntry),
       total_quantity: groupedEntry.total_quantity,
@@ -2966,6 +2847,8 @@ const mapOrdersToShipmentRows = (orders = []) =>
       order_quantity: normalizedOrderQuantity,
       shipment: shipmentEntries,
       status: order?.status || "",
+      passed_quantity: Number(order?.passed_quantity || 0),
+      shippable_quantity: Number(order?.shippable_quantity || 0),
     };
 
     if (shipmentEntries.length === 0) {
@@ -3078,61 +2961,44 @@ const getShipmentDataset = async ({
     container,
   };
 
-  const [orders, brandsRaw, vendorsRaw, orderIdsRaw, containersRaw, itemCodesRaw] =
-    await Promise.all([
-      Order.find(buildShipmentMatch(filterInput))
-        .select(
-          "order_id item brand vendor ETD status quantity shipment order_date updatedAt",
-        )
-        .sort({ order_date: -1, updatedAt: -1, order_id: -1 })
-        .lean(),
-      Order.distinct(
-        "brand",
-        buildShipmentMatch({
-          ...filterInput,
-          includeBrand: false,
-          includeContainer: false,
-          includeStatus: false,
-        }),
-      ),
-      Order.distinct(
-        "vendor",
-        buildShipmentMatch({
-          ...filterInput,
-          includeVendor: false,
-          includeContainer: false,
-          includeStatus: false,
-        }),
-      ),
-      Order.distinct(
-        "order_id",
-        buildShipmentMatch({
-          ...filterInput,
-          includeOrderId: false,
-          includeContainer: false,
-          includeStatus: false,
-        }),
-      ),
-      Order.distinct(
-        "shipment.container",
-        buildShipmentMatch({
-          ...filterInput,
-          includeContainer: false,
-          includeStatus: false,
-        }),
-      ),
-      Order.distinct(
-        "item.item_code",
-        buildShipmentMatch({
-          ...filterInput,
-          includeItemCode: false,
-          includeContainer: false,
-          includeStatus: false,
-        }),
-      ),
-    ]);
+  const orders = await Order.find(buildShipmentMatch(filterInput))
+    .select(
+      "order_id item brand vendor ETD status quantity shipment order_date updatedAt qc_record",
+    )
+    .populate({
+      path: "qc_record",
+      select: "quantities request_history",
+    })
+    .sort({ order_date: -1, updatedAt: -1, order_id: -1 })
+    .lean();
 
-  const rows = mapOrdersToShipmentRows(orders);
+  // Remove duplicate orders by order_id
+  const uniqueOrders = orders;
+
+  const derivedOrders = uniqueOrders
+    .map((orderEntry) => {
+      const progress = deriveOrderProgress({ orderEntry });
+      return {
+        ...orderEntry,
+        status: progress.status,
+        passed_quantity: progress.passed_quantity,
+        shippable_quantity: Math.max(
+          0,
+          progress.passed_quantity - progress.shipped_quantity,
+        ),
+      };
+    })
+    .filter((orderEntry) => {
+      const shipmentEntries = Array.isArray(orderEntry?.shipment)
+        ? orderEntry.shipment
+        : [];
+      return (
+        shipmentEntries.length > 0 ||
+        SHIPMENT_VISIBLE_STATUSES.includes(orderEntry?.status)
+      );
+    });
+
+  const rows = mapOrdersToShipmentRows(derivedOrders);
 
   const normalizedContainer = normalizeFilterValue(container);
   const containerNeedle = normalizedContainer
@@ -3150,6 +3016,8 @@ const getShipmentDataset = async ({
   const summary = containerFilteredRows.reduce(
     (acc, row) => {
       acc.total += 1;
+      if (row?.status === "Pending") acc.pending += 1;
+      if (row?.status === "Under Inspection") acc.underInspection += 1;
       if (row?.status === "Inspection Done") acc.inspectionDone += 1;
       if (row?.status === "Partial Shipped") acc.partialShipped += 1;
       if (row?.status === "Shipped") acc.shipped += 1;
@@ -3157,6 +3025,8 @@ const getShipmentDataset = async ({
     },
     {
       total: 0,
+      pending: 0,
+      underInspection: 0,
       inspectionDone: 0,
       partialShipped: 0,
       shipped: 0,
@@ -3164,7 +3034,7 @@ const getShipmentDataset = async ({
   );
 
   const statusScopedRows =
-    statusFilter && SHIPMENT_VISIBLE_STATUSES.includes(statusFilter)
+    statusFilter && ORDER_STATUS_SEQUENCE.includes(statusFilter)
       ? containerFilteredRows.filter((row) => row?.status === statusFilter)
       : containerFilteredRows;
 
@@ -3193,11 +3063,15 @@ const getShipmentDataset = async ({
       sort_order: sortOrder,
     },
     filters: {
-      brands: normalizeDistinctValues(brandsRaw),
-      vendors: normalizeDistinctValues(vendorsRaw),
-      order_ids: normalizeDistinctValues(orderIdsRaw),
-      containers: normalizeDistinctValues(containersRaw),
-      item_codes: normalizeDistinctValues(itemCodesRaw),
+      brands: normalizeDistinctValues(derivedOrders.map((row) => row?.brand)),
+      vendors: normalizeDistinctValues(derivedOrders.map((row) => row?.vendor)),
+      order_ids: normalizeDistinctValues(
+        derivedOrders.map((row) => row?.order_id),
+      ),
+      containers: normalizeDistinctValues(rows.map((row) => row?.container)),
+      item_codes: normalizeDistinctValues(
+        derivedOrders.map((row) => row?.item?.item_code),
+      ),
     },
   };
 };
@@ -5079,7 +4953,15 @@ exports.getOrders = async (req, res) => {
     const total = await Order.countDocuments(match);
 
     res.json({
-      data: orders,
+      data: orders.map((orderEntry) => {
+        const orderDoc = typeof orderEntry?.toObject === "function"
+          ? orderEntry.toObject()
+          : orderEntry;
+        return {
+          ...orderDoc,
+          status: deriveOrderStatus({ orderEntry: orderDoc }),
+        };
+      }),
       pagination: {
         page: Number(page),
         totalPages: Math.ceil(total / limit),
@@ -5114,7 +4996,7 @@ exports.getPoStatusReport = async (req, res) => {
         .select("_id brand vendor order_id status quantity order_date ETD revised_ETD item qc_record shipment")
         .populate({
           path: "qc_record",
-          select: "quantities",
+          select: "quantities request_history",
         })
         .lean(),
     ]);
@@ -5156,12 +5038,11 @@ exports.getPoStatusReport = async (req, res) => {
         effectiveEtd,
       );
 
-      incrementPoStatusCounts(poEntry.item_counts, orderEntry?.status);
-
       const tooltipItem = buildPoStatusTooltipItem(orderEntry);
+      incrementPoStatusCounts(poEntry.item_counts, tooltipItem.status);
       poEntry.status_items.push(tooltipItem);
 
-      if (!isPendingOrderStatus(orderEntry?.status)) {
+      if (!isPendingOrderStatus(tooltipItem.status)) {
         poEntry.inspected_items.push({ ...tooltipItem });
       }
     }
@@ -5386,6 +5267,7 @@ exports.getOrderById = async (req, res) => {
       const itemDoc = itemMap.get(itemCodeKey) || null;
       return {
         ...orderRow,
+        status: deriveOrderStatus({ orderEntry: orderRow }),
         cbm_summary: resolveOrderRowCbmSummary(itemDoc, orderRow?.quantity),
       };
     });
@@ -5468,122 +5350,74 @@ exports.getVendorSummaryByBrand = async (req, res) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const result = await Order.aggregate([
-      {
-        $match: {
-          ...ACTIVE_ORDER_MATCH,
-          brand,
-        },
-      },
-      {
-        $addFields: {
-          statusRank: {
-            $switch: {
-              branches: [
-                { case: { $eq: ["$status", "Pending"] }, then: 0 },
-                { case: { $eq: ["$status", "Under Inspection"] }, then: 1 },
-                { case: { $eq: ["$status", "Inspection Done"] }, then: 2 },
-                { case: { $eq: ["$status", "Partial Shipped"] }, then: 3 },
-                { case: { $eq: ["$status", "Shipped"] }, then: 4 },
-              ],
-              default: 99,
-            },
-          },
-        },
-      },
-      {
-        $group: {
-          _id: {
-            vendor: "$vendor",
-            order_id: "$order_id",
-          },
-          vendor: { $first: "$vendor" },
-          order_id: { $first: "$order_id" },
-          etd: { $min: "$ETD" },
-          effectiveEtd: { $min: buildEffectiveEtdExpression() },
-          minStatusRank: { $min: "$statusRank" },
-        },
-      },
-      {
-        $addFields: {
-          // "Pending" bucket on Home combines pre-shipment states.
-          isPendingOrder: { $in: ["$minStatusRank", [0, 1, 2]] },
-          isPartialShippedOrder: { $eq: ["$minStatusRank", 3] },
-          isShippedOrder: {
-            $eq: ["$minStatusRank", 4],
-          },
-          isActiveOrder: { $not: [{ $in: ["$minStatusRank", [4]] }] },
-        },
-      },
-      {
-        $addFields: {
-          isDelayedOrder: {
-            $and: [
-              "$isActiveOrder",
-              { $ne: ["$etd", null] },
-              { $lt: ["$etd", today] },
-            ],
-          },
-          isOnTimeOrder: {
-            $and: [
-              "$isActiveOrder",
-              { $ne: ["$etd", null] },
-              { $gte: ["$etd", today] },
-            ],
-          },
-        },
-      },
-      {
-        $group: {
-          _id: "$vendor",
-          orders: {
-            $addToSet: "$order_id",
-          },
-          delayedOrders: {
-            $addToSet: {
-              $cond: ["$isDelayedOrder", "$order_id", "$$REMOVE"],
-            },
-          },
-          pendingOrders: {
-            $addToSet: {
-              $cond: ["$isPendingOrder", "$order_id", "$$REMOVE"],
-            },
-          },
-          partialShippedOrders: {
-            $addToSet: {
-              $cond: ["$isPartialShippedOrder", "$order_id", "$$REMOVE"],
-            },
-          },
-          shippedOrders: {
-            $addToSet: {
-              $cond: ["$isShippedOrder", "$order_id", "$$REMOVE"],
-            },
-          },
-          onTimeOrders: {
-            $addToSet: {
-              $cond: ["$isOnTimeOrder", "$order_id", "$$REMOVE"],
-            },
-          },
-        },
-      },
-      {
-        $project: {
-          _id: 0,
-          vendor: "$_id",
-          orders: 1,
-          delayedOrders: 1,
-          totalOrders: { $size: "$orders" },
-          totalDelayedOrders: { $size: "$delayedOrders" },
-          totalPending: { $size: "$pendingOrders" },
-          totalPartialShipped: { $size: "$partialShippedOrders" },
-          totalShipped: { $size: "$shippedOrders" },
-          totalOnTime: { $size: "$onTimeOrders" },
-        },
-      },
-      {
-        $sort: { totalDelayedOrders: -1, vendor: 1 },
-      },
-    ]);
+    const dataset = await buildPoBucketDataset({
+      brand,
+      poBucket: "all",
+      sortBy: "order_date",
+      sortOrder: "desc",
+    });
+
+    const vendorMap = new Map();
+
+    for (const row of dataset.rows) {
+      const vendorName = normalizeLooseString(row?.vendor) || "N/A";
+      const vendorKey = normalizeVendorKey(vendorName);
+      if (!vendorMap.has(vendorKey)) {
+        vendorMap.set(vendorKey, {
+          vendor: vendorName,
+          orders: new Set(),
+          delayedOrders: new Set(),
+          pendingOrders: new Set(),
+          partialShippedOrders: new Set(),
+          shippedOrders: new Set(),
+          onTimeOrders: new Set(),
+        });
+      }
+
+      const vendorEntry = vendorMap.get(vendorKey);
+      const orderId = normalizeOrderKey(row?.order_id) || row?.order_id;
+      const totalStatus = normalizeOrderStatus(row?.totalStatus) || "Pending";
+      const originalEtd = parseDateLike(row?.ETD);
+      const isActiveOrder = totalStatus !== "Shipped";
+
+      vendorEntry.orders.add(orderId);
+
+      if (["Pending", "Under Inspection", "Inspection Done"].includes(totalStatus)) {
+        vendorEntry.pendingOrders.add(orderId);
+      } else if (totalStatus === "Partial Shipped") {
+        vendorEntry.partialShippedOrders.add(orderId);
+      } else if (totalStatus === "Shipped") {
+        vendorEntry.shippedOrders.add(orderId);
+      }
+
+      if (isActiveOrder && originalEtd instanceof Date && !Number.isNaN(originalEtd.getTime())) {
+        if (originalEtd.getTime() < today.getTime()) {
+          vendorEntry.delayedOrders.add(orderId);
+        } else {
+          vendorEntry.onTimeOrders.add(orderId);
+        }
+      }
+    }
+
+    const result = Array.from(vendorMap.values())
+      .map((entry) => ({
+        vendor: entry.vendor,
+        orders: [...entry.orders],
+        delayedOrders: [...entry.delayedOrders],
+        totalOrders: entry.orders.size,
+        totalDelayedOrders: entry.delayedOrders.size,
+        totalPending: entry.pendingOrders.size,
+        totalPartialShipped: entry.partialShippedOrders.size,
+        totalShipped: entry.shippedOrders.size,
+        totalOnTime: entry.onTimeOrders.size,
+      }))
+      .sort((left, right) => {
+        const delayedCompare =
+          Number(right?.totalDelayedOrders || 0) -
+          Number(left?.totalDelayedOrders || 0);
+        if (delayedCompare !== 0) return delayedCompare;
+        return String(left?.vendor || "").localeCompare(String(right?.vendor || ""));
+      });
 
     if (!result.length) {
       return res.status(404).json({
@@ -5643,12 +5477,6 @@ exports.getTodayEtdOrdersByBrand = async (req, res) => {
       sortOrder = explicitSortOrder;
     }
     const sortDirection = sortOrder === "asc" ? 1 : -1;
-    const sortStage = {
-      [sortBy]: sortDirection,
-      ...(sortBy !== "order_id" ? { order_id: 1 } : {}),
-      latestUpdatedAt: -1,
-    };
-
     const clientDayRange = resolveClientDayRange(
       req.query.date,
       req.query.tz_offset_minutes ?? req.query.tzOffset ?? req.query.tz_offset,
@@ -5665,127 +5493,85 @@ exports.getTodayEtdOrdersByBrand = async (req, res) => {
       dayEnd.setDate(dayEnd.getDate() + 1);
     }
 
-    const matchStage = {
-      ...ACTIVE_ORDER_MATCH,
-      ETD: {
-        $gte: dayStart,
-        $lt: dayEnd,
-      },
+    const dataset = await buildPoBucketDataset({
+      brand,
+      poBucket: "all",
+      sortBy,
+      sortOrder,
+    });
+
+    const resolveTodaySortValue = (row, key) => {
+      if (key === "order_id") {
+        return normalizeOrderKey(row?.order_id || "") || "";
+      }
+
+      if (key === "ETD") {
+        const parsedDate = parseDateLike(row?.ETD);
+        return parsedDate ? parsedDate.getTime() : 0;
+      }
+
+      return parseDateLike(row?.order_date)?.getTime() || 0;
     };
 
-    if (brand) {
-      matchStage.brand = brand;
-    }
+    const compareTodayValues = (leftValue, rightValue) => {
+      if (typeof leftValue === "number" || typeof rightValue === "number") {
+        return Number(leftValue || 0) - Number(rightValue || 0);
+      }
 
-    const data = await Order.aggregate([
-      {
-        $match: matchStage,
-      },
-      {
-        $addFields: {
-          statusRank: {
-            $switch: {
-              branches: [
-                { case: { $eq: ["$status", "Pending"] }, then: 0 },
-                { case: { $eq: ["$status", "Under Inspection"] }, then: 1 },
-                { case: { $eq: ["$status", "Inspection Done"] }, then: 2 },
-                { case: { $eq: ["$status", "Partial Shipped"] }, then: 3 },
-                { case: { $eq: ["$status", "Shipped"] }, then: 4 },
-              ],
-              default: 99,
-            },
-          },
-        },
-      },
-      {
-        $group: {
-          _id: "$order_id",
-          order_id: { $first: "$order_id" },
-          brand: { $first: "$brand" },
-          vendor: { $first: "$vendor" },
-          ETD: { $first: "$ETD" },
-          revised_ETD: { $min: "$revised_ETD" },
-          effective_ETD: { $min: buildEffectiveEtdExpression() },
-          itemCount: { $sum: 1 },
-          pendingCount: {
-            $sum: {
-              $cond: [{ $eq: ["$status", "Pending"] }, 1, 0],
-            },
-          },
-          underInspectionCount: {
-            $sum: {
-              $cond: [{ $eq: ["$status", "Under Inspection"] }, 1, 0],
-            },
-          },
-          inspectionDoneCount: {
-            $sum: {
-              $cond: [{ $eq: ["$status", "Inspection Done"] }, 1, 0],
-            },
-          },
-          partialShippedCount: {
-            $sum: {
-              $cond: [{ $eq: ["$status", "Partial Shipped"] }, 1, 0],
-            },
-          },
-          shippedCount: {
-            $sum: {
-              $cond: [{ $eq: ["$status", "Shipped"] }, 1, 0],
-            },
-          },
-          minStatusRank: { $min: "$statusRank" },
-          latestUpdatedAt: { $max: "$updatedAt" },
-        },
-      },
-      {
-        $addFields: {
-          status: {
-            $switch: {
-              branches: [
-                { case: { $eq: ["$minStatusRank", 0] }, then: "Pending" },
-                {
-                  case: { $eq: ["$minStatusRank", 1] },
-                  then: "Under Inspection",
-                },
-                {
-                  case: { $eq: ["$minStatusRank", 2] },
-                  then: "Inspection Done",
-                },
-                {
-                  case: { $eq: ["$minStatusRank", 3] },
-                  then: "Partial Shipped",
-                },
-                { case: { $eq: ["$minStatusRank", 4] }, then: "Shipped" },
-              ],
-              default: "Pending",
-            },
-          },
-        },
-      },
-      {
-        $project: {
-          _id: 0,
-          order_id: 1,
-          brand: 1,
-          vendor: 1,
-          ETD: 1,
-          revised_ETD: 1,
-          effective_ETD: 1,
-          itemCount: 1,
-          status: 1,
-          inspectionDoneCount: 1,
-          partialShippedCount: 1,
-          shippedCount: 1,
-          pendingCount: 1,
-          underInspectionCount: 1,
-          latestUpdatedAt: 1,
-        },
-      },
-      {
-        $sort: {
-          ...sortStage,
-        },
-      },
-    ]);
+      return String(leftValue || "").localeCompare(
+        String(rightValue || ""),
+        undefined,
+        { numeric: true },
+      );
+    };
+
+    const data = dataset.rows
+      .filter((row) => {
+        const etdDate = parseDateLike(row?.ETD);
+        if (!(etdDate instanceof Date) || Number.isNaN(etdDate.getTime())) {
+          return false;
+        }
+
+        return etdDate.getTime() >= dayStart.getTime() && etdDate.getTime() < dayEnd.getTime();
+      })
+      .map((row) => ({
+        order_id: row.order_id,
+        brand: row.brand,
+        vendor: row.vendor,
+        ETD: row.ETD,
+        revised_ETD: row.revised_ETD,
+        effective_ETD: row.effective_ETD,
+        itemCount: Number(row?.items || 0),
+        status: row.totalStatus,
+        inspectionDoneCount: Number(row?.status_counts?.inspection_done || 0),
+        partialShippedCount: Number(row?.status_counts?.partially_shipped || 0),
+        shippedCount: Number(row?.status_counts?.shipped || 0),
+        pendingCount: Number(row?.status_counts?.pending || 0),
+        underInspectionCount: Number(row?.status_counts?.under_inspection || 0),
+        latestUpdatedAt:
+          row.latest_shipment_date || row.last_inspected_date || row.order_date || null,
+        order_date: row.order_date,
+      }))
+      .sort((left, right) => {
+        const primaryComparison = compareTodayValues(
+          resolveTodaySortValue(left, sortBy),
+          resolveTodaySortValue(right, sortBy),
+        );
+        if (primaryComparison !== 0) {
+          return primaryComparison * sortDirection;
+        }
+
+        const orderCompare = String(left?.order_id || "").localeCompare(
+          String(right?.order_id || ""),
+          undefined,
+          { numeric: true },
+        );
+        if (orderCompare !== 0) return orderCompare;
+
+        return (parseDateLike(right?.latestUpdatedAt)?.getTime() || 0)
+          - (parseDateLike(left?.latestUpdatedAt)?.getTime() || 0);
+      })
+      .map(({ order_date, ...row }) => row);
 
     return res.status(200).json({
       success: true,
@@ -5865,13 +5651,6 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
     if (explicitSortOrder === "asc" || explicitSortOrder === "desc") {
       sortOrder = explicitSortOrder;
     }
-    const sortDirection = sortOrder === "asc" ? 1 : -1;
-    const sortStage = {
-      [sortBy]: sortDirection,
-      ...(sortBy !== "order_date" ? { order_date: -1 } : {}),
-      ...(sortBy !== "order_id" ? { order_id: 1 } : {}),
-    };
-
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -5892,150 +5671,38 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
         (statusValue) => statusValue.toLowerCase() === normalizedStatus,
       ) || null;
 
-    const matchStage = { ...ACTIVE_ORDER_MATCH };
+    const dataset = await buildPoBucketDataset({
+      brand,
+      vendor,
+      poBucket: "all",
+      sortBy,
+      sortOrder,
+    });
 
-    if (brand) {
-      matchStage.brand = brand;
-    }
+    const orders = dataset.rows.filter((row) => {
+      const totalStatus = normalizeOrderStatus(row?.totalStatus) || "Pending";
+      const effectiveEtd = parseDateLike(row?.effective_ETD);
+      const hasEffectiveEtd =
+        effectiveEtd instanceof Date && !Number.isNaN(effectiveEtd.getTime());
 
-    if (vendor) {
-      matchStage.vendor = vendor;
-    }
+      if (normalizedStatus === "pending") {
+        if (!["Pending", "Under Inspection", "Inspection Done"].includes(totalStatus)) {
+          return false;
+        }
+      } else if (exactOrderStatus && totalStatus !== exactOrderStatus) {
+        return false;
+      }
 
-    const postGroupMatch = {};
-    if (normalizedStatus === "pending") {
-      postGroupMatch.totalStatus = {
-        $in: [
-          "Pending",
-          "Under Inspection",
-          "Inspection Done",
-          "Partial Shipped",
-        ],
-      };
-    } else if (exactOrderStatus) {
-      postGroupMatch.totalStatus = exactOrderStatus;
-    }
+      if (isOnTimeStatus) {
+        return totalStatus !== "Shipped" && hasEffectiveEtd && effectiveEtd >= today;
+      }
 
-    if (isOnTimeStatus) {
-      postGroupMatch.effective_ETD = { $ne: null, $gte: today };
-      postGroupMatch.totalStatus = { $nin: ["Shipped"] };
-    }
+      if (isDelayedFilter) {
+        return totalStatus !== "Shipped" && hasEffectiveEtd && effectiveEtd < today;
+      }
 
-    if (isDelayedFilter) {
-      postGroupMatch.effective_ETD = { $ne: null, $lt: today };
-      postGroupMatch.totalStatus = { $nin: ["Shipped"] };
-    }
-
-    const aggregationPipeline = [
-      { $match: matchStage },
-      {
-        $group: {
-          _id: "$order_id",
-          items: { $sum: 1 },
-          brand: { $first: "$brand" },
-          vendor: { $first: "$vendor" },
-          ETD: { $min: "$ETD" },
-          revised_ETD: { $min: "$revised_ETD" },
-          effective_ETD: { $min: buildEffectiveEtdExpression() },
-          order_date: { $first: "$order_date" },
-          statuses: { $addToSet: "$status" },
-        },
-      },
-      {
-        $addFields: {
-          hasPendingStatus: { $in: ["Pending", "$statuses"] },
-          hasUnderInspectionStatus: { $in: ["Under Inspection", "$statuses"] },
-          hasInspectionDoneStatus: { $in: ["Inspection Done", "$statuses"] },
-          hasPartialShippedStatus: { $in: ["Partial Shipped", "$statuses"] },
-          minStatusRank: {
-            $min: {
-              $map: {
-                input: "$statuses",
-                as: "statusValue",
-                in: {
-                  $switch: {
-                    branches: [
-                      { case: { $eq: ["$$statusValue", "Pending"] }, then: 0 },
-                      {
-                        case: { $eq: ["$$statusValue", "Under Inspection"] },
-                        then: 1,
-                      },
-                      {
-                        case: { $eq: ["$$statusValue", "Inspection Done"] },
-                        then: 2,
-                      },
-                      {
-                        case: { $eq: ["$$statusValue", "Partial Shipped"] },
-                        then: 3,
-                      },
-                      { case: { $eq: ["$$statusValue", "Shipped"] }, then: 4 },
-                    ],
-                    default: 99,
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-      {
-        $addFields: {
-          totalStatus: {
-            $switch: {
-              branches: [
-                {
-                  case: {
-                    $and: [
-                      "$hasPartialShippedStatus",
-                      "$hasInspectionDoneStatus",
-                      { $not: ["$hasPendingStatus"] },
-                      { $not: ["$hasUnderInspectionStatus"] },
-                    ],
-                  },
-                  then: "Partial Shipped",
-                },
-                { case: { $eq: ["$minStatusRank", 0] }, then: "Pending" },
-                {
-                  case: { $eq: ["$minStatusRank", 1] },
-                  then: "Under Inspection",
-                },
-                {
-                  case: { $eq: ["$minStatusRank", 2] },
-                  then: "Inspection Done",
-                },
-                {
-                  case: { $eq: ["$minStatusRank", 3] },
-                  then: "Partial Shipped",
-                },
-                { case: { $eq: ["$minStatusRank", 4] }, then: "Shipped" },
-              ],
-              default: "Pending",
-            },
-          },
-        },
-      },
-      ...(Object.keys(postGroupMatch).length > 0
-        ? [{ $match: postGroupMatch }]
-        : []),
-      {
-        $project: {
-          _id: 0,
-          order_id: "$_id",
-          items: 1,
-          brand: 1,
-          vendor: 1,
-          ETD: 1,
-          revised_ETD: 1,
-          effective_ETD: 1,
-          order_date: 1,
-          statuses: 1,
-          totalStatus: 1,
-        },
-      },
-      { $sort: sortStage },
-    ];
-
-    const orders = await Order.aggregate(aggregationPipeline);
+      return true;
+    });
 
     return res.status(200).json({
       success: true,
@@ -6446,7 +6113,7 @@ exports.exportOrdersDb = async (req, res) => {
         order_id: normalizeText(orderEntry?.order_id),
         brand: normalizeText(orderEntry?.brand),
         vendor: normalizeText(orderEntry?.vendor),
-        status: normalizeText(orderEntry?.status),
+        status: deriveOrderStatus({ orderEntry, qcRecord }),
         order_quantity: orderQuantity,
         order_date: formatDateDDMMYYYY(orderEntry?.order_date, ""),
         etd: formatDateDDMMYYYY(orderEntry?.ETD, ""),
@@ -6619,7 +6286,7 @@ const buildDelayedPoReportDataset = async ({
     )
     .populate({
       path: "qc_record",
-      select: "last_inspected_date inspection_dates",
+      select: "quantities request_history last_inspected_date inspection_dates",
     })
     .sort({ vendor: 1, brand: 1, order_id: 1, order_date: -1 })
     .lean();
@@ -6662,7 +6329,7 @@ const buildDelayedPoReportDataset = async ({
     }
 
     const groupedEntry = groupedOrders.get(groupKey);
-    const status = normalizeLooseString(orderEntry?.status);
+    const status = deriveOrderStatus({ orderEntry });
     const itemCode = normalizeLooseString(orderEntry?.item?.item_code);
     const quantity = Math.max(
       0,
@@ -6957,7 +6624,7 @@ const buildUpcomingEtdReportDataset = async ({
     )
     .populate({
       path: "qc_record",
-      select: "last_inspected_date inspection_dates",
+      select: "quantities request_history last_inspected_date inspection_dates",
     })
     .sort({ vendor: 1, brand: 1, order_id: 1, order_date: -1 })
     .lean();
@@ -7001,7 +6668,7 @@ const buildUpcomingEtdReportDataset = async ({
     }
 
     const groupedEntry = groupedOrders.get(groupKey);
-    const status = normalizeLooseString(orderEntry?.status);
+    const status = deriveOrderStatus({ orderEntry });
     const itemCode = normalizeLooseString(orderEntry?.item?.item_code);
     const quantity = Math.max(
       0,
@@ -9042,8 +8709,11 @@ exports.finalizeOrder = async (req, res) => {
     });
 
     const shippedAfter = shippedAlready + parsedQuantity;
-    order.status =
-      shippedAfter >= orderQuantity ? "Shipped" : "Partial Shipped";
+    order.status = computeOrderStatus({
+      orderQuantity,
+      shippedQuantity: shippedAfter,
+      qcRecord,
+    });
     order.updated_by = buildAuditActor(req.user);
 
     await order.save();

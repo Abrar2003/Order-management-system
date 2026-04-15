@@ -13,6 +13,10 @@ const {
   deleteObject,
 } = require("../services/wasabiStorage.service");
 const { convertExcelToPdf } = require("../services/convertXlsxToPDF.service");
+const {
+  deriveOrderProgress,
+  deriveOrderStatus,
+} = require("../helpers/orderStatus");
 
 const escapeRegex = (value = "") =>
   String(value)
@@ -564,19 +568,8 @@ const getShippedQuantity = (shipmentEntries = []) =>
     0,
   );
 
-const getPassedQuantity = (qcRecord = null) =>
-  Math.max(0, toSafeNumber(qcRecord?.quantities?.qc_passed, 0));
-
 const getOpenQuantity = (order = {}) => {
-  const totalQuantity = Math.max(0, toSafeNumber(order?.quantity, 0));
-  const qcRecord =
-    order?.qc_record && typeof order.qc_record === "object" ? order.qc_record : null;
-
-  if (qcRecord) {
-    return Math.max(0, toSafeNumber(qcRecord?.quantities?.pending, 0));
-  }
-
-  return Math.max(0, totalQuantity - getPassedQuantity(qcRecord));
+  return deriveOrderProgress({ orderEntry: order }).pending_inspection_quantity;
 };
 
 const ITEM_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png"]);
@@ -1362,7 +1355,7 @@ exports.getItemOrdersHistory = async (req, res) => {
         )
         .populate({
           path: "qc_record",
-          select: "inspector last_inspected_date quantities inspection_record",
+          select: "inspector last_inspected_date quantities request_history inspection_record",
           populate: [
             {
               path: "inspector",
@@ -1444,7 +1437,7 @@ exports.getItemOrdersHistory = async (req, res) => {
         order_id: String(order?.order_id || "").trim(),
         brand: String(order?.brand || "").trim(),
         vendor: String(order?.vendor || "").trim(),
-        status: String(order?.status || "").trim(),
+        status: deriveOrderStatus({ orderEntry: order }),
         order_date: order?.order_date || null,
         ETD: order?.ETD || null,
         revised_ETD: order?.revised_ETD || null,
@@ -1501,7 +1494,7 @@ exports.getItemOrderPresence = async (req, res) => {
       )
       .populate({
         path: "qc_record",
-        select: "quantities",
+        select: "quantities request_history",
       })
       .sort({ order_date: -1, ETD: -1, updatedAt: -1, order_id: 1 })
       .lean();
@@ -1518,7 +1511,7 @@ exports.getItemOrderPresence = async (req, res) => {
         id: String(order?._id || ""),
         order_id: String(order?.order_id || "").trim(),
         description: String(order?.item?.description || "").trim(),
-        status: String(order?.status || "").trim(),
+        status: deriveOrderStatus({ orderEntry: order }),
         total_quantity: totalQuantity,
         open_quantity: getOpenQuantity(order),
         shipped_quantity: shippedQuantity,

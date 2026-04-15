@@ -30,6 +30,14 @@ const ItemOrdersHistory = () => {
     if (fromItems.startsWith("/items")) return fromItems;
     return "/items";
   }, [location.state]);
+  const viewItemTarget = useMemo(() => {
+    const params = new URLSearchParams();
+    if (resolvedItemCode) {
+      params.set("search", resolvedItemCode);
+    }
+    const query = params.toString();
+    return query ? `/items?${query}` : "/items";
+  }, [resolvedItemCode]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -95,7 +103,14 @@ const ItemOrdersHistory = () => {
             Back
           </button>
           <h2 className="h4 mb-0">Item Order History</h2>
-          <span className="d-none d-md-inline" />
+          <button
+            type="button"
+            className="btn btn-outline-primary btn-sm"
+            disabled={!resolvedItemCode}
+            onClick={() => navigate(viewItemTarget)}
+          >
+            View Item
+          </button>
         </div>
 
         <div className="card om-card mb-3">
@@ -217,7 +232,7 @@ const ItemOrdersHistory = () => {
                                   <span>Offered: {toSafeNumber(inspection?.vendor_offered)}</span>
                                   <span>Checked: {toSafeNumber(inspection?.checked)}</span>
                                   <span>Passed: {toSafeNumber(inspection?.passed)}</span>
-                                  <span>Pending After: {toSafeNumber(inspection?.pending_after)}</span>
+                                  <span>Pending: {toSafeNumber(inspection?.pending_after)}</span>
                                 </div>
                               </td>
                             </tr>

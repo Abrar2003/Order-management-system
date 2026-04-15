@@ -53,6 +53,14 @@ const formatPresenceSummary = (row = {}) => {
     return `Open: ${openQuantity}`;
   }
 
+  if (status === "pending") {
+    return `Pending: ${openQuantity}`;
+  }
+
+  if (status === "inspection done") {
+    return `Ready: ${Math.max(0, totalQuantity - shippedQuantity)}`;
+  }
+
   if (status === "partial shipped") {
     return `Shipped: ${shippedQuantity}`;
   }

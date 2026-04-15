@@ -26,6 +26,11 @@ const {
   parseDateOnly,
   toDateOnlyIso,
 } = require("../helpers/dateOnly");
+const {
+  deriveGroupedOrderStatus,
+  deriveOrderStatus,
+  normalizeOrderStatus,
+} = require("../helpers/orderStatus");
 
 const normalizeLabels = (labels = []) => {
   if (!Array.isArray(labels)) return [];
@@ -127,6 +132,29 @@ const BOX_SIZE_REMARK_OPTIONS = Object.freeze([
   "box2",
   "box3",
 ]);
+const resolveQcOrderStatus = (qcDoc = null, orderDoc = null) => {
+  const resolvedOrder = orderDoc || qcDoc?.order || null;
+  if (!resolvedOrder) return "Pending";
+
+  return deriveOrderStatus({
+    orderEntry: resolvedOrder,
+    qcRecord: qcDoc,
+  });
+};
+
+const applyQcOrderStatus = (qcDoc = null, orderDoc = null) => {
+  const resolvedOrder = orderDoc || qcDoc?.order || null;
+  if (!resolvedOrder) return "Pending";
+
+  const nextStatus = resolveQcOrderStatus(qcDoc, resolvedOrder);
+  resolvedOrder.status = nextStatus;
+  return nextStatus;
+};
+
+const isQcOrderInspectionDone = (qcDoc = null, orderDoc = null) =>
+  normalizeOrderStatus(resolveQcOrderStatus(qcDoc, orderDoc)) ===
+  "Inspection Done";
+
 const mapWithConcurrencyLimit = async (
   items = [],
   concurrencyLimit = 1,
@@ -2087,30 +2115,7 @@ const toRoundedNumber = (value, decimals = 3) => {
 };
 
 const resolveOrderStatusFromSet = (statuses = []) => {
-  const ORDER_STATUS_SEQUENCE = [
-    "Pending",
-    "Under Inspection",
-    "Inspection Done",
-    "Partial Shipped",
-    "Shipped",
-  ];
-  const normalizedStatuses = [
-    ...new Set(
-      (Array.isArray(statuses) ? statuses : [])
-        .map((status) => String(status || "").trim())
-        .filter(Boolean),
-    ),
-  ];
-
-  if (normalizedStatuses.length === 0) return "Pending";
-  if (normalizedStatuses.length === 1) return normalizedStatuses[0];
-
-  const indexes = normalizedStatuses
-    .map((status) => ORDER_STATUS_SEQUENCE.indexOf(status))
-    .filter((index) => index >= 0);
-  if (indexes.length === 0) return normalizedStatuses[0];
-  const earliestIndex = Math.min(...indexes);
-  return ORDER_STATUS_SEQUENCE[earliestIndex] || normalizedStatuses[0];
+  return deriveGroupedOrderStatus(statuses);
 };
 
 const normalizeOptionalReportFilter = (value) => {
@@ -2506,7 +2511,15 @@ exports.getQCList = async (req, res) => {
       ]).allowDiskUse(true),
     ]);
 
-    const data = result?.[0]?.data || [];
+    const data = (result?.[0]?.data || []).map((entry) => ({
+      ...entry,
+      order: entry?.order
+        ? {
+            ...entry.order,
+            status: resolveQcOrderStatus(entry, entry.order),
+          }
+        : entry?.order || null,
+    }));
     const totalRecords = result?.[0]?.totalCount?.[0]?.count || 0;
 
     res.json({
@@ -2620,7 +2633,15 @@ exports.exportQCList = async (req, res) => {
       },
     ];
 
-    const qcRows = await QC.aggregate(pipeline).allowDiskUse(true);
+    const qcRows = (await QC.aggregate(pipeline).allowDiskUse(true)).map((entry) => ({
+      ...entry,
+      order: entry?.order
+        ? {
+            ...entry.order,
+            status: resolveQcOrderStatus(entry, entry.order),
+          }
+        : entry?.order || null,
+    }));
     const itemCodeKeys = [
       ...new Set(
         qcRows
@@ -2840,7 +2861,7 @@ exports.exportQCList = async (req, res) => {
         last_inspected_date: formatDateDDMMYYYY(entry?.last_inspected_date, ""),
         order_date: formatDateDDMMYYYY(entry?.order?.order_date, ""),
         etd: formatDateDDMMYYYY(entry?.order?.ETD, ""),
-        order_status: normalizeText(entry?.order?.status || ""),
+        order_status: resolveQcOrderStatus(entry, entry?.order),
         order_quantity: toNonNegativeNumber(entry?.order?.quantity, 0),
         quantity_requested: toNonNegativeNumber(
           entry?.quantities?.quantity_requested,
@@ -3271,14 +3292,7 @@ exports.alignQC = async (req, res) => {
       await existingQC.save();
 
       if (orderRecord) {
-        const passedQty = Number(existingQC.quantities?.qc_passed || 0);
-        const clientDemandQty = Number(
-          existingQC.quantities?.client_demand || 0,
-        );
-        orderRecord.status =
-          clientDemandQty > 0 && passedQty >= clientDemandQty
-            ? "Inspection Done"
-            : "Under Inspection";
+        applyQcOrderStatus(existingQC, orderRecord);
         orderRecord.qc_record = existingQC._id;
         orderRecord.updated_by = buildAuditActor(req.user);
         await orderRecord.save();
@@ -3390,7 +3404,7 @@ exports.alignQC = async (req, res) => {
       allowRequestedDateFallback: false,
     });
 
-    orderRecord.status = "Under Inspection";
+    applyQcOrderStatus(qc, orderRecord);
     orderRecord.qc_record = qc._id;
     orderRecord.updated_by = buildAuditActor(req.user);
 
@@ -3472,7 +3486,7 @@ exports.updateQC = async (req, res) => {
 
     const qc = await QC.findById(req.params.id)
       .populate("inspector")
-      .populate("order", "status");
+      .populate("order", "status quantity shipment order_id brand vendor");
 
     if (!qc) {
       return res.status(404).json({ message: "QC record not found" });
@@ -3509,7 +3523,7 @@ exports.updateQC = async (req, res) => {
           .toLowerCase() === "true");
     const allowAdminRewrite = adminRewriteLatestRecord;
     const allowQcFieldEdits = allowAdminRewrite || isQcUser;
-    const isInspectionDone = qc?.order?.status === "Inspection Done";
+    const isInspectionDone = isQcOrderInspectionDone(qc, qc?.order);
 
     if (!hasElevatedAccess && isInspectionDone) {
       return res.status(403).json({
@@ -4993,13 +5007,7 @@ exports.updateQC = async (req, res) => {
     const orderId = qc?.order?._id || qc.order;
     const orderRecord = await Order.findById(orderId);
     if (orderRecord && !CLOSED_ORDER_STATUSES.includes(orderRecord.status)) {
-      const passedQty = Number(qc.quantities?.qc_passed || 0);
-      const clientDemandQty = Number(qc.quantities?.client_demand || 0);
-
-      orderRecord.status =
-        clientDemandQty > 0 && passedQty >= clientDemandQty
-          ? "Inspection Done"
-          : "Under Inspection";
+      applyQcOrderStatus(qc, orderRecord);
       orderRecord.updated_by = buildAuditActor(req.user);
       await orderRecord.save();
     }
@@ -5199,15 +5207,15 @@ exports.getInspectorReports = async (req, res) => {
           "inspector inspection_date createdAt checked passed vendor_requested cbm qc",
         )
       .populate("inspector", "name email")
-      .populate({
-        path: "qc",
-        select: "order_meta item order",
-        populate: {
-          path: "order",
-          select: "order_id brand vendor status archived",
-          match: ACTIVE_ORDER_MATCH,
-        },
-      })
+        .populate({
+          path: "qc",
+          select: "order_meta item order",
+          populate: {
+            path: "order",
+            select: "order_id brand vendor status quantity shipment archived",
+            match: ACTIVE_ORDER_MATCH,
+          },
+        })
       .sort({ createdAt: -1 })
         .lean(),
     ]);
@@ -5926,11 +5934,11 @@ exports.getWeeklyOrderSummary = async (req, res) => {
     }
 
     const touchedQcDocs = await QC.find({ _id: { $in: touchedQcIds } })
-      .select("order order_meta item quantities")
+      .select("order order_meta item quantities request_history")
       .populate({
         path: "order",
         match: ACTIVE_ORDER_MATCH,
-        select: "order_id vendor brand quantity status",
+        select: "order_id vendor brand quantity status shipment",
       })
       .lean();
 
@@ -5999,11 +6007,11 @@ exports.getWeeklyOrderSummary = async (req, res) => {
     const allPoQcDocs = await QC.find({
       "order_meta.order_id": { $in: includedOrderIds },
     })
-      .select("order order_meta item quantities cbm")
+      .select("order order_meta item quantities request_history cbm")
       .populate({
         path: "order",
         match: ACTIVE_ORDER_MATCH,
-        select: "order_id vendor brand quantity status",
+        select: "order_id vendor brand quantity status shipment",
       })
       .lean();
 
@@ -6135,7 +6143,7 @@ exports.getWeeklyOrderSummary = async (req, res) => {
           qcDoc?.quantities?.client_demand ?? qcDoc?.order?.quantity,
           0,
         ),
-        order_status: normalizeText(qcDoc?.order?.status || "") || "Pending",
+        order_status: resolveQcOrderStatus(qcDoc, qcDoc?.order),
         quantity_passed: quantityPassed,
         item_cbm: toRoundedNumber(itemCbm, 3),
         total_cbm: totalCbm,
@@ -6480,7 +6488,7 @@ exports.markGoodsNotReady = async (req, res) => {
 
     const qc = await QC.findById(req.params.id)
       .populate("inspector")
-      .populate("order", "status");
+      .populate("order", "status quantity shipment order_id brand vendor");
 
     if (!qc) {
       return res.status(404).json({ message: "QC record not found" });
@@ -6498,7 +6506,7 @@ exports.markGoodsNotReady = async (req, res) => {
     const isManager = normalizedRole === "manager";
     const hasElevatedAccess = isAdmin || isManager;
     const currentUserId = String(req.user?._id || req.user?.id || "").trim();
-    const isInspectionDone = qc?.order?.status === "Inspection Done";
+    const isInspectionDone = isQcOrderInspectionDone(qc, qc?.order);
 
     if (!hasElevatedAccess && isInspectionDone) {
       return res.status(403).json({
@@ -6673,7 +6681,7 @@ exports.rejectAllQc = async (req, res) => {
     const isManager = normalizedRole === "manager";
     const hasElevatedAccess = isAdmin || isManager;
     const currentUserId = String(req.user?._id || req.user?.id || "").trim();
-    const isInspectionDone = qc?.order?.status === "Inspection Done";
+    const isInspectionDone = isQcOrderInspectionDone(qc, qc?.order);
 
     if (!hasElevatedAccess && isInspectionDone) {
       return res.status(403).json({
@@ -6873,15 +6881,7 @@ exports.rejectAllQc = async (req, res) => {
     qc.updated_by = buildAuditActor(req.user);
 
     if (qc?.order) {
-      const clientDemandQty = toNonNegativeNumber(
-        qc?.quantities?.client_demand,
-        0,
-      );
-      const passedQty = toNonNegativeNumber(qc?.quantities?.qc_passed, 0);
-      qc.order.status =
-        clientDemandQty > 0 && passedQty >= clientDemandQty
-          ? "Inspection Done"
-          : "Under Inspection";
+      applyQcOrderStatus(qc, qc.order);
       qc.order.updated_by = buildAuditActor(req.user);
     }
 
@@ -6977,7 +6977,7 @@ exports.transferQcRequest = async (req, res) => {
     const qc = await QC.findById(qcId)
       .populate("inspector", "name email role")
       .populate("request_history.inspector", "name email role")
-      .populate("order", "status");
+      .populate("order", "status quantity shipment order_id brand vendor");
 
     if (!qc) {
       return res.status(404).json({ message: "QC record not found" });
@@ -7449,7 +7449,7 @@ exports.getDailyReport = async (req, res) => {
         .populate("request_history.inspector", "name email role")
         .populate({
           path: "order",
-          select: "order_id status quantity brand vendor archived",
+          select: "order_id status quantity shipment brand vendor archived",
           match: ACTIVE_ORDER_MATCH,
         })
         .sort({ createdAt: -1 })
@@ -7479,7 +7479,7 @@ exports.getDailyReport = async (req, res) => {
           select: "item order_meta order cbm request_date request_type",
           populate: {
             path: "order",
-            select: "order_id status quantity brand vendor archived",
+            select: "order_id status quantity shipment brand vendor archived",
             match: ACTIVE_ORDER_MATCH,
           },
         })
@@ -7694,7 +7694,7 @@ exports.getDailyReport = async (req, res) => {
               : null,
             inspected_cbm_total: inspectedCbmTotal,
             inspection_status: inspectionStatus,
-            order_status: qc?.order?.status || "N/A",
+            order_status: resolveQcOrderStatus(qc, qc?.order),
             is_inspection_done: isInspectionDone,
             request_pending_action: !hasInspectionActivity,
             goods_not_ready: goodsNotReady,
@@ -7919,7 +7919,7 @@ exports.uploadQcImages = async (req, res) => {
 
     const qc = await QC.findById(qcId)
       .populate("inspector")
-      .populate("order", "status");
+      .populate("order", "status quantity shipment order_id brand vendor");
 
     if (!qc) {
       return res.status(404).json({ success: false, message: "QC record not found" });
@@ -8290,7 +8290,7 @@ exports.deleteQcImages = async (req, res) => {
 
     const qc = await QC.findById(qcId)
       .populate("inspector")
-      .populate("order", "status");
+      .populate("order", "status quantity shipment order_id brand vendor");
 
     if (!qc) {
       return res.status(404).json({ success: false, message: "QC record not found" });
@@ -8303,7 +8303,7 @@ exports.deleteQcImages = async (req, res) => {
     const isManager = normalizedRole === "manager";
     const hasElevatedAccess = isAdmin || isManager;
     const currentUserId = String(req.user?._id || req.user?.id || "").trim();
-    const isInspectionDone = qc?.order?.status === "Inspection Done";
+    const isInspectionDone = isQcOrderInspectionDone(qc, qc?.order);
 
     if (!hasElevatedAccess && isInspectionDone) {
       return res.status(403).json({
@@ -8631,6 +8631,13 @@ exports.getQCById = async (req, res) => {
           return bTime - aTime;
         })
       : [];
+
+    if (qcData?.order) {
+      qcData.order = {
+        ...qcData.order,
+        status: resolveQcOrderStatus(qcData, qcData.order),
+      };
+    }
 
     res.json({
       data: {
@@ -9096,10 +9103,7 @@ exports.editInspectionRecords = async (req, res) => {
     const orderId = qc?.order?._id || qc.order;
     const orderRecord = await Order.findById(orderId);
     if (orderRecord && !CLOSED_ORDER_STATUSES.includes(orderRecord.status)) {
-      orderRecord.status =
-        clientDemandQty > 0 && totalPassed >= clientDemandQty
-          ? "Inspection Done"
-          : "Under Inspection";
+      applyQcOrderStatus(qc, orderRecord);
       orderRecord.updated_by = buildAuditActor(req.user);
       await orderRecord.save();
     }
@@ -9364,13 +9368,7 @@ exports.deleteInspectionRecord = async (req, res) => {
     }
 
     if (orderRecord && !CLOSED_ORDER_STATUSES.includes(orderRecord.status)) {
-      const passedQty = Number(qc.quantities?.qc_passed || 0);
-      const clientDemandQty = Number(qc.quantities?.client_demand || 0);
-
-      orderRecord.status =
-        clientDemandQty > 0 && passedQty >= clientDemandQty
-          ? "Inspection Done"
-          : "Under Inspection";
+      applyQcOrderStatus(qc, orderRecord);
       orderRecord.updated_by = buildAuditActor(req.user);
       await orderRecord.save();
     }
