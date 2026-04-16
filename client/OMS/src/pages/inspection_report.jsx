@@ -139,6 +139,42 @@ const toDisplayValue = (value, fallback = "N/A") => {
   const normalized = String(value ?? "").trim();
   return normalized || fallback;
 };
+
+const toOptionalArray = (value) => {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === "object") {
+    if (Array.isArray(value.data)) return value.data;
+    if (Array.isArray(value.rows)) return value.rows;
+    if (Array.isArray(value.items)) return value.items;
+    return [value];
+  }
+  return [];
+};
+
+const getFinishImageUrl = (entry = {}) =>
+  String(
+    entry?.image?.url
+      || entry?.image?.link
+      || entry?.imageUrl
+      || entry?.image_url
+      || "",
+  ).trim();
+
+const hasFinishContent = (entry = {}) =>
+  [
+    entry?.finish_id,
+    entry?._id,
+    entry?.unique_code,
+    entry?.uniqueCode,
+    entry?.vendor,
+    entry?.vendor_code,
+    entry?.vendorCode,
+    entry?.color,
+    entry?.color_code,
+    entry?.colorCode,
+    getFinishImageUrl(entry),
+  ].some((value) => String(value ?? "").trim());
+
 const getWeightValue = (weight = {}, key = "") => {
   const normalizedKey = String(key || "").trim();
   if (!normalizedKey) return 0;
@@ -667,6 +703,7 @@ const InspectionReport = () => {
   const [productImageLoading, setProductImageLoading] = useState(false);
   const [finishImageSrc, setFinishImageSrc] = useState("");
   const [finishImageLoading, setFinishImageLoading] = useState(false);
+  const [finishImageError, setFinishImageError] = useState(false);
   const [finishSortBy, setFinishSortBy] = useState("uniqueCode");
   const [finishSortOrder, setFinishSortOrder] = useState("asc");
   const [inspectionSortBy, setInspectionSortBy] = useState("inspectionDate");
@@ -744,6 +781,87 @@ const InspectionReport = () => {
       }),
     [inspectionRows],
   );
+
+  const finishRows = useMemo(() => {
+    const finishRowsByKey = new Map();
+
+    toOptionalArray(qc?.item_master?.finish).forEach((entry, index) => {
+      if (!entry || typeof entry !== "object" || !hasFinishContent(entry)) {
+        return;
+      }
+
+      const finishId = String(entry?.finish_id || entry?._id || "").trim();
+      const uniqueCodeValue = String(
+        entry?.unique_code || entry?.uniqueCode || "",
+      ).trim();
+      const vendorValue = String(entry?.vendor || "").trim();
+      const vendorCodeValue = String(
+        entry?.vendor_code || entry?.vendorCode || "",
+      ).trim();
+      const colorValue = String(entry?.color || "").trim();
+      const colorCodeValue = String(
+        entry?.color_code || entry?.colorCode || "",
+      ).trim();
+      const imageUrl = getFinishImageUrl(entry);
+      const identityKey =
+        [
+          finishId,
+          uniqueCodeValue.toUpperCase(),
+          vendorCodeValue.toUpperCase(),
+          colorCodeValue.toUpperCase(),
+        ]
+          .filter(Boolean)
+          .join("|")
+        || [vendorValue.toLowerCase(), colorValue.toLowerCase()]
+          .filter(Boolean)
+          .join("|")
+        || `finish-${index}`;
+      const completenessScore = [
+        finishId,
+        uniqueCodeValue,
+        vendorValue,
+        vendorCodeValue,
+        colorValue,
+        colorCodeValue,
+        imageUrl,
+      ].filter(Boolean).length;
+      const nextRow = {
+        key: finishId || uniqueCodeValue || identityKey,
+        finishId,
+        uniqueCode: toDisplayValue(uniqueCodeValue),
+        vendor: toDisplayValue(vendorValue),
+        vendorCode: toDisplayValue(vendorCodeValue),
+        color: toDisplayValue(colorValue),
+        colorCode: toDisplayValue(colorCodeValue),
+        imageUrl,
+        hasImage: Boolean(imageUrl),
+        sortLabel:
+          uniqueCodeValue
+          || vendorCodeValue
+          || colorCodeValue
+          || vendorValue
+          || colorValue
+          || finishId
+          || `finish-${index}`,
+        completenessScore,
+      };
+      const existingRow = finishRowsByKey.get(identityKey);
+
+      if (
+        !existingRow
+        || nextRow.completenessScore > existingRow.completenessScore
+      ) {
+        finishRowsByKey.set(identityKey, nextRow);
+      }
+    });
+
+    return Array.from(finishRowsByKey.values()).sort((left, right) =>
+      left.sortLabel.localeCompare(right.sortLabel, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      }),
+    );
+  }, [qc?.item_master?.finish]);
 
   const handleFinishSortColumn = useCallback(
     (column, defaultDirection = "asc") => {
@@ -1125,29 +1243,10 @@ const InspectionReport = () => {
     };
   }, [qc]);
 
-  const finishRows = useMemo(() => {
-    const finishEntries = Array.isArray(qc?.item_master?.finish)
-      ? qc.item_master.finish
-      : [];
-
-    return finishEntries
-      .map((entry, index) => ({
-        key: String(entry?.finish_id || entry?.unique_code || `finish-${index}`),
-        finishId: String(entry?.finish_id || "").trim(),
-        uniqueCode: toDisplayValue(entry?.unique_code),
-        vendor: toDisplayValue(entry?.vendor),
-        vendorCode: toDisplayValue(entry?.vendor_code),
-        color: toDisplayValue(entry?.color),
-        colorCode: toDisplayValue(entry?.color_code),
-        imageUrl: String(entry?.image?.url || entry?.image?.link || "").trim(),
-      }))
-      .sort((left, right) => left.uniqueCode.localeCompare(right.uniqueCode));
-  }, [qc?.item_master?.finish]);
-
   const bannerFinish = useMemo(
     () =>
       finishRows.find((row) =>
-        Boolean(String(row.imageUrl || "").trim()),
+        row?.hasImage,
       ) || null,
     [finishRows],
   );
@@ -1156,6 +1255,35 @@ const InspectionReport = () => {
     () => String(bannerFinish?.imageUrl || "").trim(),
     [bannerFinish?.imageUrl],
   );
+
+  const bannerFinishTitle = useMemo(() => {
+    if (!bannerFinish) return "Finish";
+    if (bannerFinish.uniqueCode !== "N/A") return bannerFinish.uniqueCode;
+    if (bannerFinish.color !== "N/A") return bannerFinish.color;
+    if (bannerFinish.vendor !== "N/A") return bannerFinish.vendor;
+    if (bannerFinish.finishId) return bannerFinish.finishId;
+    return "Finish";
+  }, [bannerFinish]);
+
+  const bannerFinishSubtitle = useMemo(() => {
+    if (!bannerFinish) return "Finish details not available";
+    if (bannerFinish.color !== "N/A" && bannerFinish.colorCode !== "N/A") {
+      return `${bannerFinish.color} (${bannerFinish.colorCode})`;
+    }
+    if (bannerFinish.color !== "N/A") return bannerFinish.color;
+    if (bannerFinish.colorCode !== "N/A") return bannerFinish.colorCode;
+    if (bannerFinish.vendor !== "N/A" && bannerFinish.vendorCode !== "N/A") {
+      return `${bannerFinish.vendor} (${bannerFinish.vendorCode})`;
+    }
+    if (bannerFinish.vendor !== "N/A") return bannerFinish.vendor;
+    if (bannerFinish.vendorCode !== "N/A") return bannerFinish.vendorCode;
+    return "Finish details available";
+  }, [bannerFinish]);
+
+  const bannerFinishSrc = useMemo(() => {
+    if (finishImageError) return "";
+    return String(finishImageSrc || bannerFinishImageUrl || "").trim();
+  }, [bannerFinishImageUrl, finishImageError, finishImageSrc]);
 
   const differenceLogs = useMemo(() => {
     const rows = Array.isArray(itemMasterSummary?.rows) ? itemMasterSummary.rows : [];
@@ -1337,6 +1465,8 @@ const InspectionReport = () => {
   }, [productImageUrl]);
 
   useEffect(() => {
+    setFinishImageError(false);
+
     if (!bannerFinishImageUrl) {
       setFinishImageSrc("");
       setFinishImageLoading(false);
@@ -1556,16 +1686,21 @@ const InspectionReport = () => {
                   </div>
                   {bannerFinish && (
                     <div className="inspection-report-brand-panel inspection-report-finish-banner-panel">
-                      <img
-                        src={finishImageSrc || bannerFinish.imageUrl}
-                        alt={`${bannerFinish.uniqueCode} finish`}
-                        className="inspection-report-brand-logo inspection-report-brand-logo--finish"
-                      />
-                      <div className="inspection-report-finish-banner-meta">
-                        <div className="fw-semibold">{bannerFinish.uniqueCode}</div>
-                        <div className="text-secondary small">
-                          {bannerFinish.color} ({bannerFinish.colorCode})
+                      {bannerFinishSrc ? (
+                        <img
+                          src={bannerFinishSrc}
+                          alt={`${bannerFinishTitle} finish`}
+                          className="inspection-report-brand-logo inspection-report-brand-logo--finish"
+                          onError={() => setFinishImageError(true)}
+                        />
+                      ) : (
+                        <div className="inspection-report-media-empty">
+                          Finish image not available
                         </div>
+                      )}
+                      <div className="inspection-report-finish-banner-meta">
+                        <div className="fw-semibold">{bannerFinishTitle}</div>
+                        <div className="text-secondary small">{bannerFinishSubtitle}</div>
                       </div>
                     </div>
                   )}
