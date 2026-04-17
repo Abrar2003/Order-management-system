@@ -117,6 +117,7 @@ const Navbar = () => {
       { label: "Weekly Summary", path: "/summary/weekly" },
       { label: "Daily Summary", path: "/summary/daily" },
       { label: "Daily Inspection Reports", path: "/daily-reports" },
+      { label: "Packed Goods", path: "/packed-goods" },
     ];
     
     if (canAccessAnalytics) {

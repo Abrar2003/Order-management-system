@@ -19,6 +19,7 @@ import QcDetails from "./pages/QcDetails";
 import OrdersByBrand from "./pages/OrdersByBrand";
 import Signup from "./pages/Signup";
 import OpenOrders from "./pages/OpenOrders";
+import PackedGoods from "./pages/PackedGoods";
 import DailyReport from "./pages/DailyReport";
 import Shipments from "./pages/Shipments";
 import Container from "./pages/Container";
@@ -171,6 +172,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <OpenOrders bucket="shipped" />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/packed-goods"
+            element={
+              <ProtectedRoute>
+                <PackedGoods />
               </ProtectedRoute>
             }
           />

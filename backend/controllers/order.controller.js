@@ -7257,6 +7257,159 @@ exports.getOrderSummary = async (req, res) => {
   }
 };
 
+exports.getPackedGoods = async (req, res) => {
+  try {
+    const selectedBrand = normalizeFilterValue(req.query.brand);
+    const selectedVendor = normalizeFilterValue(req.query.vendor);
+
+    const orders = await Order.find(ACTIVE_ORDER_MATCH)
+      .select(
+        "order_id item brand vendor quantity shipment qc_record order_date updatedAt",
+      )
+      .populate({
+        path: "qc_record",
+        select: "quantities request_history last_inspected_date inspection_dates",
+      })
+      .sort({ order_date: -1, updatedAt: -1, order_id: 1 })
+      .lean();
+
+    const itemCodes = [
+      ...new Set(
+        orders
+          .map((orderEntry) => normalizeLooseString(orderEntry?.item?.item_code))
+          .filter(Boolean),
+      ),
+    ];
+
+    const itemDocs = itemCodes.length > 0
+      ? await Item.find({ code: { $in: itemCodes } })
+        .select(
+          [
+            "code",
+            "cbm",
+            "inspected_item_LBH",
+            "inspected_item_top_LBH",
+            "inspected_item_bottom_LBH",
+            "inspected_box_LBH",
+            "inspected_box_top_LBH",
+            "inspected_box_bottom_LBH",
+            "inspected_top_LBH",
+            "inspected_bottom_LBH",
+            "pis_item_LBH",
+            "pis_item_top_LBH",
+            "pis_item_bottom_LBH",
+            "pis_box_LBH",
+            "pis_box_top_LBH",
+            "pis_box_bottom_LBH",
+          ].join(" "),
+        )
+        .lean()
+      : [];
+
+    const itemMap = new Map(
+      itemDocs.map((itemDoc) => [
+        normalizeLooseString(itemDoc?.code).toLowerCase(),
+        itemDoc,
+      ]),
+    );
+
+    const poPendingQuantityMap = new Map();
+
+    for (const orderEntry of Array.isArray(orders) ? orders : []) {
+      const progress = deriveOrderProgress({ orderEntry });
+      const poKey = [
+        normalizeOrderKey(orderEntry?.order_id) || "N/A",
+        normalizeLooseString(orderEntry?.brand) || "N/A",
+        normalizeLooseString(orderEntry?.vendor) || "N/A",
+      ].join("__");
+
+      poPendingQuantityMap.set(
+        poKey,
+        (poPendingQuantityMap.get(poKey) || 0)
+          + Math.max(0, Number(progress?.pending_inspection_quantity || 0)),
+      );
+    }
+
+    const rows = (Array.isArray(orders) ? orders : [])
+      .map((orderEntry) => {
+        const progress = deriveOrderProgress({ orderEntry });
+        const packedQuantity = Math.max(
+          0,
+          Number(progress?.inspected_unshipped_quantity || 0),
+        );
+        if (packedQuantity <= 0) {
+          return null;
+        }
+
+        const brand = normalizeLooseString(orderEntry?.brand);
+        const vendor = normalizeLooseString(orderEntry?.vendor);
+        if (selectedBrand && brand !== selectedBrand) {
+          return null;
+        }
+        if (selectedVendor && vendor !== selectedVendor) {
+          return null;
+        }
+
+        const itemCode = normalizeLooseString(orderEntry?.item?.item_code);
+        const itemDoc = itemMap.get(itemCode.toLowerCase()) || null;
+        const cbmSummary = resolveOrderRowCbmSummary(itemDoc, packedQuantity);
+        const perItemCbm = Number(cbmSummary?.per_item || 0);
+        const totalCbm = Number(cbmSummary?.total || 0);
+        const normalizedOrderId = normalizeOrderKey(orderEntry?.order_id) || "N/A";
+        const poKey = [
+          normalizedOrderId,
+          brand || "N/A",
+          vendor || "N/A",
+        ].join("__");
+
+        return {
+          id: String(orderEntry?._id || ""),
+          order_id: normalizedOrderId,
+          item_code: itemCode || "N/A",
+          brand: brand || "N/A",
+          vendor: vendor || "N/A",
+          order_quantity: Math.max(0, Number(orderEntry?.quantity || 0)),
+          packed_quantity: packedQuantity,
+          pending_quantity: Math.max(
+            0,
+            Number(progress?.pending_inspection_quantity || 0),
+          ),
+          po_has_no_pending_quantity: Number(poPendingQuantityMap.get(poKey) || 0) <= 0,
+          total_cbm: Number.isFinite(totalCbm) ? totalCbm : 0,
+          per_item_cbm: Number.isFinite(perItemCbm) ? perItemCbm : 0,
+          cbm_source: cbmSummary?.source || null,
+        };
+      })
+      .filter(Boolean);
+
+    return res.status(200).json({
+      success: true,
+      data: rows,
+      filters: {
+        brands: normalizeDistinctValues(rows.map((row) => row?.brand)),
+        vendors: normalizeDistinctValues(rows.map((row) => row?.vendor)),
+      },
+      summary: {
+        total_rows: rows.length,
+        total_packed_quantity: rows.reduce(
+          (sum, row) => sum + Number(row?.packed_quantity || 0),
+          0,
+        ),
+        total_cbm: toRoundedCbmValue(
+          rows.reduce((sum, row) => sum + Number(row?.total_cbm || 0), 0),
+        ),
+      },
+    });
+  } catch (error) {
+    console.error("Get Packed Goods Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch packed goods",
+      error: error.message,
+    });
+  }
+};
+
 exports.getShipmentsDb = async (req, res) => {
   try {
     const brand = req.query.brand;

@@ -17,6 +17,7 @@ const {
   getTodayEtdOrdersByBrand,
   getOrdersByBrandAndStatus,
   getOrderSummary,
+  getPackedGoods,
   getContainersDb,
   getShipmentsDb,
   exportShipmentsDb,
@@ -93,6 +94,7 @@ router.get(
 
 // List order's brands and vendors
 router.get("/brands-and-vendors", authenticate, authorize("admin", "manager", "QC", "dev", "user"), getOrderSummary);
+router.get("/packed-goods", authenticate, authorize("admin", "manager", "QC", "dev", "user"), getPackedGoods);
 
 //get orders by brand and status
 router.get(
