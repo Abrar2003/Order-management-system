@@ -2829,6 +2829,8 @@ const mapOrdersToShipmentRows = (orders = []) =>
     const normalizedOrderQuantity = Number.isFinite(parsedOrderQuantity)
       ? parsedOrderQuantity
       : 0;
+    const cbmSummary = resolveOrderRowCbmSummary(order?.itemDoc, 1);
+    const perItemCbm = Number(cbmSummary?.per_item || 0);
 
     const baseRow = {
       _id: order?._id || null,
@@ -2849,6 +2851,8 @@ const mapOrdersToShipmentRows = (orders = []) =>
       status: order?.status || "",
       passed_quantity: Number(order?.passed_quantity || 0),
       shippable_quantity: Number(order?.shippable_quantity || 0),
+      per_item_cbm: Number.isFinite(perItemCbm) ? perItemCbm : 0,
+      cbm_source: cbmSummary?.source || null,
     };
 
     if (shipmentEntries.length === 0) {
@@ -2881,6 +2885,10 @@ const mapOrdersToShipmentRows = (orders = []) =>
           : 0,
         pending: Number.isFinite(parsedPending) ? parsedPending : 0,
         remaining_remarks: entry?.remaining_remarks || "",
+        shipment_cbm: toRoundedCbmValue(
+          (Number.isFinite(perItemCbm) ? perItemCbm : 0)
+          * (Number.isFinite(parsedShipmentQuantity) ? parsedShipmentQuantity : 0),
+        ),
       };
     });
   });
@@ -2972,6 +2980,46 @@ const getShipmentDataset = async ({
     .sort({ order_date: -1, updatedAt: -1, order_id: -1 })
     .lean();
 
+  const itemCodes = [
+    ...new Set(
+      orders
+        .map((orderEntry) => normalizeLooseString(orderEntry?.item?.item_code))
+        .filter(Boolean),
+    ),
+  ];
+
+  const itemDocs = itemCodes.length > 0
+    ? await Item.find({ code: { $in: itemCodes } })
+      .select(
+        [
+          "code",
+          "cbm",
+          "inspected_item_LBH",
+          "inspected_item_top_LBH",
+          "inspected_item_bottom_LBH",
+          "inspected_box_LBH",
+          "inspected_box_top_LBH",
+          "inspected_box_bottom_LBH",
+          "inspected_top_LBH",
+          "inspected_bottom_LBH",
+          "pis_item_LBH",
+          "pis_item_top_LBH",
+          "pis_item_bottom_LBH",
+          "pis_box_LBH",
+          "pis_box_top_LBH",
+          "pis_box_bottom_LBH",
+        ].join(" "),
+      )
+      .lean()
+    : [];
+
+  const itemMap = new Map(
+    itemDocs.map((itemDoc) => [
+      normalizeLooseString(itemDoc?.code).toLowerCase(),
+      itemDoc,
+    ]),
+  );
+
   // Remove duplicate orders by order_id
   const uniqueOrders = orders;
 
@@ -2986,6 +3034,10 @@ const getShipmentDataset = async ({
           0,
           progress.passed_quantity - progress.shipped_quantity,
         ),
+        itemDoc:
+          itemMap.get(
+            normalizeLooseString(orderEntry?.item?.item_code).toLowerCase(),
+          ) || null,
       };
     })
     .filter((orderEntry) => {
@@ -3102,6 +3154,7 @@ const getContainerDataset = async ({
       shipping_date: null,
       itemKeySet: new Set(),
       total_quantity: 0,
+      total_cbm: 0,
     };
 
     const brandValue = String(row?.brand || "").trim();
@@ -3112,6 +3165,7 @@ const getContainerDataset = async ({
     ).trim();
 
     existingGroup.total_quantity += Number(row?.quantity || 0);
+    existingGroup.total_cbm += Number(row?.shipment_cbm || 0);
 
     if (brandValue) existingGroup.brandSet.add(brandValue);
     if (vendorValue) existingGroup.vendorSet.add(vendorValue);
@@ -3138,6 +3192,7 @@ const getContainerDataset = async ({
       shipping_date: group.shipping_date || null,
       item_count: group.itemKeySet.size,
       total_quantity: group.total_quantity,
+      total_cbm: toRoundedCbmValue(group.total_cbm),
     }))
     .sort((left, right) => {
       const dateCompare =
@@ -3153,6 +3208,9 @@ const getContainerDataset = async ({
     rows,
     summary: {
       total: rows.length,
+      total_cbm: toRoundedCbmValue(
+        rows.reduce((sum, row) => sum + Number(row?.total_cbm || 0), 0),
+      ),
     },
     filters: {
       brands: shipmentData.filters.brands,

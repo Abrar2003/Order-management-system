@@ -59,6 +59,7 @@ const ShipmentEntrySchema = new mongoose.Schema(
     stuffing_date: { type: Date },
     quantity: { type: Number },
     pending: { type: Number },
+    cases: [ {type: Number, requried: true} ],
     remaining_remarks: { type: String },
     updated_at: { type: Date, default: Date.now },
     updated_by: { type: AuditActorSchema, default: () => ({}) },

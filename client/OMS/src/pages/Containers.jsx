@@ -72,7 +72,7 @@ const Containers = () => {
           brand: brandFilter,
         },
       });
-console.log("API response:", response);
+
       setRows(Array.isArray(response?.data?.data) ? response.data.data : []);
       setSummary(response?.data?.summary || { total: 0 });
       setFilterOptions({
@@ -184,6 +184,7 @@ console.log("API response:", response);
           if (column === "shippingDate") return new Date(row?.shipping_date || 0).getTime();
           if (column === "itemCount") return Number(row?.item_count || 0);
           if (column === "totalQuantity") return Number(row?.total_quantity || 0);
+          if (column === "totalCbm") return Number(row?.total_cbm || 0);
           return "";
         },
       }),
@@ -283,6 +284,7 @@ console.log("API response:", response);
         <div className="card om-card mb-3">
           <div className="card-body d-flex flex-wrap gap-2">
             <span className="om-summary-chip">Total Containers: {summary?.total ?? 0}</span>
+            <span className="om-summary-chip">Total CBM: {summary?.total_cbm ?? 0}</span>
             <span className="om-summary-chip">
               Showing: {rows.length} {rows.length === 1 ? "container" : "containers"}
             </span>
@@ -352,12 +354,20 @@ console.log("API response:", response);
                           onClick={() => handleSortColumn("totalQuantity", "desc")}
                         />
                       </th>
+                      <th>
+                        <SortHeaderButton
+                          label="Total CBM"
+                          isActive={sortBy === "totalCbm"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("totalCbm", "desc")}
+                        />
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
                     {sortedRows.length === 0 ? (
                       <tr>
-                        <td colSpan="6" className="text-center py-4">
+                        <td colSpan="7" className="text-center py-4">
                           No containers found
                         </td>
                       </tr>
@@ -375,6 +385,7 @@ console.log("API response:", response);
                           <td>{formatDateDDMMYYYY(row.shipping_date)}</td>
                           <td>{row.item_count ?? 0}</td>
                           <td>{row.total_quantity ?? 0}</td>
+                          <td>{(Number(row.total_cbm) ?? 0).toFixed(2)}</td>
                         </tr>
                       ))
                     )}
