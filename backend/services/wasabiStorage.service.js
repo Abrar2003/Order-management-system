@@ -1,4 +1,6 @@
 const crypto = require("crypto");
+const fs = require("fs");
+const fsp = require("fs/promises");
 const { Upload } = require("@aws-sdk/lib-storage");
 const {
   S3Client,
@@ -103,8 +105,14 @@ const createStorageKey = ({
 
 let cachedClient = null;
 let cachedClientKey = "";
-const DEFAULT_UPLOAD_QUEUE_SIZE = 4;
-const DEFAULT_UPLOAD_PART_SIZE = 8 * 1024 * 1024;
+const DEFAULT_UPLOAD_QUEUE_SIZE = Math.max(
+  1,
+  Number(pickFirstDefinedEnvValue("WASABI_UPLOAD_QUEUE_SIZE") || 1),
+);
+const DEFAULT_UPLOAD_PART_SIZE = Math.max(
+  5 * 1024 * 1024,
+  Number(pickFirstDefinedEnvValue("WASABI_UPLOAD_PART_SIZE") || 5 * 1024 * 1024),
+);
 
 const getClient = () => {
   if (!isConfigured()) {
@@ -244,6 +252,70 @@ const uploadBuffer = async ({
     originalName: normalizeValue(originalName),
     contentType,
     size: Buffer.byteLength(buffer),
+  };
+};
+
+const uploadFile = async ({
+  filePath,
+  key,
+  originalName = "",
+  contentType = "application/octet-stream",
+  queueSize = DEFAULT_UPLOAD_QUEUE_SIZE,
+  partSize = DEFAULT_UPLOAD_PART_SIZE,
+}) => {
+  const normalizedPath = normalizeValue(filePath);
+  if (!normalizedPath) {
+    throw new Error("uploadFile requires a file path");
+  }
+
+  if (!normalizeValue(key)) {
+    throw new Error("uploadFile requires a storage key");
+  }
+
+  const client = getClient();
+  const config = getConfig();
+  const safeQueueSize = Math.max(1, Number(queueSize) || DEFAULT_UPLOAD_QUEUE_SIZE);
+  const safePartSize = Math.max(
+    5 * 1024 * 1024,
+    Number(partSize) || DEFAULT_UPLOAD_PART_SIZE,
+  );
+
+  let fileSize = 0;
+  try {
+    const stats = await fsp.stat(normalizedPath);
+    fileSize = Number(stats?.size || 0);
+  } catch (error) {
+    throw new Error(
+      `Wasabi upload file stat failed: ${error?.message || String(error)}`,
+    );
+  }
+
+  try {
+    const uploader = new Upload({
+      client,
+      queueSize: safeQueueSize,
+      partSize: safePartSize,
+      leavePartsOnError: false,
+      params: {
+        Bucket: config.bucket,
+        Key: key,
+        Body: fs.createReadStream(normalizedPath),
+        ContentType: contentType,
+      },
+    });
+
+    await uploader.done();
+  } catch (error) {
+    throw new Error(
+      `Wasabi upload failed: ${error?.message || String(error)}`,
+    );
+  }
+
+  return {
+    key,
+    originalName: normalizeValue(originalName),
+    contentType,
+    size: fileSize,
   };
 };
 
@@ -426,5 +498,6 @@ module.exports = {
   getBucketCors,
   putBucketCors,
   uploadBuffer,
+  uploadFile,
   deleteObject,
 };

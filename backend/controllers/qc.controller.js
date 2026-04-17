@@ -13,14 +13,15 @@ const crypto = require("crypto");
 const Order = require("../models/order.model");
 const mongoose = require("mongoose");
 const { upsertItemFromQc } = require("../services/itemSync");
-const { optimizeImageForStorage } = require("../services/imageOptimization.service");
+const { optimizeImageFileForStorage } = require("../services/imageOptimization.service");
 const {
   createStorageKey,
   getSignedObjectUrl,
   isConfigured: isWasabiConfigured,
-  uploadBuffer,
+  uploadFile,
   deleteObject,
 } = require("../services/wasabiStorage.service");
+const { safeDeleteFile } = require("../helpers/fileCleanup");
 const {
   formatDateOnlyDDMMYYYY,
   parseDateOnly,
@@ -111,7 +112,21 @@ const QC_IMAGE_UPLOAD_MODES = Object.freeze({
   BULK: "bulk",
 });
 const MAX_QC_IMAGE_UPLOAD_COUNT = 100;
-const QC_IMAGE_UPLOAD_CONCURRENCY = 4;
+const QC_IMAGE_PROCESSING_CHUNK_SIZE = Math.max(
+  1,
+  Math.min(
+    MAX_QC_IMAGE_UPLOAD_COUNT,
+    Number(process.env.QC_IMAGE_PROCESSING_CHUNK_SIZE || 5),
+  ),
+);
+const QC_IMAGE_OPTIMIZE_CONCURRENCY = Math.max(
+  1,
+  Number(process.env.QC_IMAGE_OPTIMIZE_CONCURRENCY || 1),
+);
+const QC_IMAGE_UPLOAD_CONCURRENCY = Math.max(
+  1,
+  Number(process.env.QC_IMAGE_UPLOAD_CONCURRENCY || 1),
+);
 const EMPTY_LBH = Object.freeze({
   L: 0,
   B: 0,
@@ -1152,13 +1167,21 @@ const buildFinishImagePublicUrl = (finishEntry = {}) => {
 const normalizeQcImageHash = (value) =>
   normalizeText(value).toLowerCase();
 
-const computeBufferSha256 = (buffer) => {
-  if (!Buffer.isBuffer(buffer)) {
-    throw new Error("Hashing requires a Buffer");
-  }
+const computeFileSha256 = async (filePath = "") =>
+  new Promise((resolve, reject) => {
+    const normalizedPath = normalizeText(filePath);
+    if (!normalizedPath) {
+      reject(new Error("File path is required to compute sha256"));
+      return;
+    }
 
-  return crypto.createHash("sha256").update(buffer).digest("hex");
-};
+    const hash = crypto.createHash("sha256");
+    const stream = require("fs").createReadStream(normalizedPath);
+
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("error", reject);
+    stream.on("end", () => resolve(hash.digest("hex")));
+  });
 
 const buildQcImageDuplicateEntry = ({
   originalName = "",
@@ -1184,11 +1207,58 @@ const cleanupUploadedQcImageObjects = async (entries = []) => {
   );
 };
 
+const cleanupLocalQcImageFiles = async (paths = []) => {
+  await Promise.allSettled(
+    (Array.isArray(paths) ? paths : [])
+      .map((filePath) => normalizeText(filePath))
+      .filter(Boolean)
+      .map((filePath) => safeDeleteFile(filePath)),
+  );
+};
+
+const buildQcImageFailureEntry = ({
+  originalName = "",
+  reason = "",
+  stage = "",
+} = {}) => ({
+  originalName: normalizeText(originalName) || "unknown-file",
+  reason: normalizeText(reason) || "Unknown error",
+  ...(normalizeText(stage) ? { stage: normalizeText(stage) } : {}),
+});
+
+const getQcImageMemorySnapshot = () => {
+  const usage = process.memoryUsage();
+  return {
+    rss: Number(usage?.rss || 0),
+    heapUsed: Number(usage?.heapUsed || 0),
+  };
+};
+
+const logQcImageUploadEvent = (event, payload = {}) => {
+  console.info(`[qc-image-upload] ${event}`, {
+    ...payload,
+    memory: getQcImageMemorySnapshot(),
+  });
+};
+
+const chunkItems = (items = [], chunkSize = 1) => {
+  const safeItems = Array.isArray(items) ? items : [];
+  const safeChunkSize = Math.max(1, Number(chunkSize) || 1);
+  const chunks = [];
+
+  for (let index = 0; index < safeItems.length; index += safeChunkSize) {
+    chunks.push(safeItems.slice(index, index + safeChunkSize));
+  }
+
+  return chunks;
+};
+
 const prepareSingleQcImageUpload = async ({
   file = null,
   fallbackOriginalName = "qc-image.jpg",
 } = {}) => {
   const mimeType = normalizeText(file?.mimetype).toLowerCase();
+  const sourcePath = normalizeText(file?.path);
   const extension = path
     .extname(String(file?.originalname || ""))
     .toLowerCase();
@@ -1200,15 +1270,25 @@ const prepareSingleQcImageUpload = async ({
     throw new Error("Only JPG, JPEG, and PNG files are allowed");
   }
 
-  const optimizedImage = await optimizeImageForStorage({
-    buffer: file?.buffer,
+  if (!sourcePath) {
+    throw new Error("QC image temp file is missing");
+  }
+
+  const optimizedImage = await optimizeImageFileForStorage({
+    inputPath: sourcePath,
     contentType: mimeType || "application/octet-stream",
     originalName: file?.originalname || fallbackOriginalName,
   });
 
   return {
-    buffer: optimizedImage.buffer,
-    hash: computeBufferSha256(optimizedImage.buffer),
+    filePath: optimizedImage.path,
+    cleanupPaths: [
+      sourcePath,
+      ...(Array.isArray(optimizedImage?.cleanupPaths)
+        ? optimizedImage.cleanupPaths
+        : []),
+    ],
+    hash: await computeFileSha256(optimizedImage.path),
     originalName: optimizedImage.originalName || fallbackOriginalName,
     contentType:
       optimizedImage.contentType || mimeType || "application/octet-stream",
@@ -1216,6 +1296,10 @@ const prepareSingleQcImageUpload = async ({
       path.extname(String(optimizedImage?.originalName || "")).toLowerCase() ||
       extension ||
       ".jpg",
+    size: toNonNegativeNumber(optimizedImage?.size, 0),
+    optimized: Boolean(optimizedImage?.optimized),
+    bytesSaved: toNonNegativeNumber(optimizedImage?.bytesSaved, 0),
+    optimizationError: normalizeText(optimizedImage?.optimizationError || ""),
   };
 };
 
@@ -1223,12 +1307,12 @@ const uploadPreparedQcImage = async ({
   preparedUpload = null,
   folder = "qc-images",
 } = {}) => {
-  if (!preparedUpload?.buffer) {
+  if (!normalizeText(preparedUpload?.filePath)) {
     throw new Error("Prepared QC image upload is required");
   }
 
-  return uploadBuffer({
-    buffer: preparedUpload.buffer,
+  return uploadFile({
+    filePath: preparedUpload.filePath,
     key: createStorageKey({
       folder,
       originalName: preparedUpload.originalName,
@@ -1237,6 +1321,158 @@ const uploadPreparedQcImage = async ({
     originalName: preparedUpload.originalName,
     contentType: preparedUpload.contentType,
   });
+};
+
+const persistSingleQcImageEntry = async ({
+  qcId = "",
+  imageEntry = null,
+  hash = "",
+  uploadedBy = null,
+} = {}) => {
+  const normalizedHash = normalizeQcImageHash(hash);
+  if (!qcId || !imageEntry || !normalizedHash) {
+    throw new Error("QC image persistence requires qcId, imageEntry, and hash");
+  }
+
+  return QC.updateOne(
+    {
+      _id: qcId,
+      "qc_images.hash": { $ne: normalizedHash },
+    },
+    {
+      $push: {
+        qc_images: imageEntry,
+      },
+      $set: {
+        updated_by: uploadedBy || buildAuditActor(),
+      },
+    },
+  );
+};
+
+const processSingleQcImageFile = async ({
+  file = null,
+  qc = null,
+  singleImageComment = "",
+  uploadedBy = null,
+  uploadedAt = null,
+  existingHashes = new Set(),
+  requestHashes = new Set(),
+} = {}) => {
+  const fallbackOriginalName =
+    file?.originalname ||
+    `${normalizeText(qc?.order_meta?.order_id || qc?._id || "qc")}${
+      path.extname(String(file?.originalname || "")).toLowerCase() || ".jpg"
+    }`;
+  let preparedUpload = null;
+  let uploadResult = null;
+
+  try {
+    preparedUpload = await prepareSingleQcImageUpload({
+      file,
+      fallbackOriginalName,
+    });
+
+    const normalizedHash = normalizeQcImageHash(preparedUpload?.hash);
+    if (!normalizedHash) {
+      return {
+        status: "failed",
+        failure: buildQcImageFailureEntry({
+          originalName: preparedUpload?.originalName || fallbackOriginalName,
+          reason: "Unable to compute image hash",
+          stage: "validation",
+        }),
+      };
+    }
+
+    if (requestHashes.has(normalizedHash)) {
+      return {
+        status: "duplicate",
+        duplicate: buildQcImageDuplicateEntry({
+          originalName: preparedUpload?.originalName || fallbackOriginalName,
+          hash: normalizedHash,
+          reason: "duplicate_in_request",
+        }),
+      };
+    }
+
+    if (existingHashes.has(normalizedHash)) {
+      return {
+        status: "duplicate",
+        duplicate: buildQcImageDuplicateEntry({
+          originalName: preparedUpload?.originalName || fallbackOriginalName,
+          hash: normalizedHash,
+          reason: "already_uploaded",
+        }),
+      };
+    }
+
+    requestHashes.add(normalizedHash);
+
+    uploadResult = await uploadPreparedQcImage({
+      preparedUpload,
+      folder: "qc-images",
+    });
+
+    const imageEntry = buildStoredQcImageEntry({
+      uploadResult,
+      hash: normalizedHash,
+      comment: singleImageComment,
+      uploadedAt: uploadedAt || new Date(),
+      uploadedBy,
+    });
+
+    const persistResult = await persistSingleQcImageEntry({
+      qcId: String(qc?._id || ""),
+      imageEntry,
+      hash: normalizedHash,
+      uploadedBy,
+    });
+
+    if (Number(persistResult?.modifiedCount || 0) <= 0) {
+      await cleanupUploadedQcImageObjects([{ uploadResult }]);
+      existingHashes.add(normalizedHash);
+      return {
+        status: "duplicate",
+        duplicate: buildQcImageDuplicateEntry({
+          originalName: preparedUpload?.originalName || fallbackOriginalName,
+          hash: normalizedHash,
+          reason: "already_uploaded",
+        }),
+      };
+    }
+
+    existingHashes.add(normalizedHash);
+    return {
+      status: "uploaded",
+      uploadedImage: imageEntry,
+      optimized: Boolean(preparedUpload?.optimized),
+      bytesSaved: toNonNegativeNumber(preparedUpload?.bytesSaved, 0),
+      optimizationError: normalizeText(preparedUpload?.optimizationError || ""),
+    };
+  } catch (error) {
+    if (uploadResult?.key) {
+      await cleanupUploadedQcImageObjects([{ uploadResult }]);
+    }
+
+    return {
+      status: "failed",
+      failure: buildQcImageFailureEntry({
+        originalName:
+          normalizeText(preparedUpload?.originalName || file?.originalname) ||
+          fallbackOriginalName,
+        reason: error?.message || String(error),
+        stage:
+          uploadResult?.key
+            ? "persist"
+            : preparedUpload
+              ? "upload"
+              : "optimization",
+      }),
+    };
+  } finally {
+    await cleanupLocalQcImageFiles(preparedUpload?.cleanupPaths || [file?.path]);
+  }
 };
 
 const buildStoredQcImageEntry = ({
@@ -6803,6 +7039,7 @@ exports.markGoodsNotReady = async (req, res) => {
 exports.rejectAllQc = async (req, res) => {
   let uploadedImageKey = "";
   let shouldCleanupUploadedImage = false;
+  let preparedUpload = null;
 
   try {
     const reason = String(req.body?.reason || "").trim();
@@ -6811,7 +7048,7 @@ exports.rejectAllQc = async (req, res) => {
     }
 
     const imageFile = req.file;
-    if (!imageFile || !Buffer.isBuffer(imageFile.buffer) || imageFile.buffer.length === 0) {
+    if (!imageFile || !normalizeText(imageFile.path)) {
       return res.status(400).json({ message: "One rejection image is required" });
     }
 
@@ -6919,7 +7156,7 @@ exports.rejectAllQc = async (req, res) => {
     const fallbackOriginalName = `${normalizeText(
       qc?.order_meta?.order_id || qc?._id || "qc",
     )}-rejected${path.extname(String(imageFile?.originalname || "")).toLowerCase() || ".jpg"}`;
-    const preparedUpload = await prepareSingleQcImageUpload({
+    preparedUpload = await prepareSingleQcImageUpload({
       file: imageFile,
       fallbackOriginalName,
     });
@@ -7104,6 +7341,8 @@ exports.rejectAllQc = async (req, res) => {
     return res.status(400).json({
       message: err?.message || "Failed to reject this QC request",
     });
+  } finally {
+    await cleanupLocalQcImageFiles(preparedUpload?.cleanupPaths || [req.file?.path]);
   }
 };
 
@@ -8073,6 +8312,7 @@ exports.getDailyReport = async (req, res) => {
 };
 
 exports.uploadQcImages = async (req, res) => {
+  const requestStartedAt = Date.now();
   try {
     const qcId = String(req.params.id || "").trim();
     if (!mongoose.Types.ObjectId.isValid(qcId)) {
@@ -8171,7 +8411,6 @@ exports.uploadQcImages = async (req, res) => {
       uploadMode === QC_IMAGE_UPLOAD_MODES.SINGLE
         ? normalizeText(req.body?.comment || "")
         : "";
-    const uploadedAt = new Date();
     const uploadedBy = buildAuditActor(req.user);
     const existingHashes = new Set(
       (Array.isArray(qc?.qc_images) ? qc.qc_images : [])
@@ -8179,6 +8418,11 @@ exports.uploadQcImages = async (req, res) => {
         .filter(Boolean),
     );
     const skippedDuplicates = [];
+    const failures = [];
+    let uploadedCount = 0;
+    let optimizedCount = 0;
+    let bytesSaved = 0;
+    const requestHashes = new Set();
 
     for (const file of files) {
       const mimeType = normalizeText(file?.mimetype).toLowerCase();
@@ -8190,6 +8434,7 @@ exports.uploadQcImages = async (req, res) => {
         !QC_IMAGE_MIME_TYPES.has(mimeType) ||
         !QC_IMAGE_EXTENSIONS.has(extension)
       ) {
+        await cleanupLocalQcImageFiles([file?.path]);
         return res.status(400).json({
           success: false,
           message: "Only JPG, JPEG, and PNG files are allowed for QC images",
@@ -8197,241 +8442,118 @@ exports.uploadQcImages = async (req, res) => {
       }
     }
 
-    const preparedUploads = await mapWithConcurrencyLimit(
-      files,
-      QC_IMAGE_UPLOAD_CONCURRENCY,
-      async (file) => {
-        const mimeType = normalizeText(file?.mimetype).toLowerCase();
-        const extension = path
-          .extname(String(file?.originalname || ""))
-          .toLowerCase();
-        const fallbackOriginalName =
-          file?.originalname ||
-          `${normalizeText(qc?.order_meta?.order_id || qcId)}${extension || ".jpg"}`;
-        const optimizedImage = await optimizeImageForStorage({
-          buffer: file.buffer,
-          contentType: mimeType || "application/octet-stream",
-          originalName: fallbackOriginalName,
-        });
-
-        return {
-          buffer: optimizedImage.buffer,
-          hash: computeBufferSha256(optimizedImage.buffer),
-          originalName: optimizedImage.originalName || fallbackOriginalName,
-          contentType:
-            optimizedImage.contentType || mimeType || "application/octet-stream",
-          extension:
-            path
-              .extname(String(optimizedImage?.originalName || ""))
-              .toLowerCase() || extension || ".jpg",
-          size: Buffer.byteLength(optimizedImage.buffer),
-          optimized: Boolean(optimizedImage?.optimized),
-          bytesSaved: toNonNegativeNumber(optimizedImage?.bytesSaved, 0),
-          optimizationError: normalizeText(optimizedImage?.optimizationError || ""),
-        };
-      },
+    const chunkSize = Math.max(1, QC_IMAGE_PROCESSING_CHUNK_SIZE);
+    const processingConcurrency = Math.max(
+      1,
+      Math.min(QC_IMAGE_OPTIMIZE_CONCURRENCY, QC_IMAGE_UPLOAD_CONCURRENCY),
     );
+    const fileChunks = chunkItems(files, chunkSize);
 
-    const requestHashes = new Set();
-    const uniquePreparedUploads = [];
+    logQcImageUploadEvent("start", {
+      qcId,
+      uploadMode,
+      fileCount: files.length,
+      chunkCount: fileChunks.length,
+      chunkSize,
+      processingConcurrency,
+    });
 
-    for (const preparedUpload of preparedUploads) {
-      const normalizedHash = normalizeQcImageHash(preparedUpload?.hash);
-      if (!normalizedHash) continue;
-
-      if (requestHashes.has(normalizedHash)) {
-        skippedDuplicates.push(
-          buildQcImageDuplicateEntry({
-            originalName: preparedUpload?.originalName,
-            hash: normalizedHash,
-            reason: "duplicate_in_request",
+    for (let chunkIndex = 0; chunkIndex < fileChunks.length; chunkIndex += 1) {
+      const chunk = fileChunks[chunkIndex];
+      const chunkResults = await mapWithConcurrencyLimit(
+        chunk,
+        processingConcurrency,
+        async (file) =>
+          processSingleQcImageFile({
+            file,
+            qc,
+            singleImageComment,
+            uploadedBy,
+            uploadedAt: new Date(),
+            existingHashes,
+            requestHashes,
           }),
-        );
-        continue;
-      }
+      );
 
-      if (existingHashes.has(normalizedHash)) {
-        skippedDuplicates.push(
-          buildQcImageDuplicateEntry({
-            originalName: preparedUpload?.originalName,
-            hash: normalizedHash,
-            reason: "already_uploaded",
-          }),
-        );
-        continue;
-      }
+      chunkResults.forEach((result) => {
+        if (result?.status === "uploaded") {
+          uploadedCount += 1;
+          if (result?.optimized) {
+            optimizedCount += 1;
+          }
+          bytesSaved += toNonNegativeNumber(result?.bytesSaved, 0);
+          return;
+        }
 
-      requestHashes.add(normalizedHash);
-      uniquePreparedUploads.push(preparedUpload);
-    }
+        if (result?.status === "duplicate" && result?.duplicate) {
+          skippedDuplicates.push(result.duplicate);
+          return;
+        }
 
-    if (uniquePreparedUploads.length === 0) {
-      const skippedDuplicateCount = skippedDuplicates.length;
-      return res.status(200).json({
-        success: true,
-        message:
-          skippedDuplicateCount > 0
-            ? "All selected QC images were duplicates and were skipped"
-            : "No QC images uploaded",
-        data: {
-          qc_id: qc._id,
-          uploaded_count: 0,
-          skipped_duplicate_count: skippedDuplicateCount,
-          skipped_duplicates: skippedDuplicates,
-          optimized_count: 0,
-          bytes_saved: 0,
-        },
+        if (result?.failure) {
+          failures.push(result.failure);
+        }
+      });
+
+      logQcImageUploadEvent("chunk_complete", {
+        qcId,
+        chunkIndex: chunkIndex + 1,
+        chunkCount: fileChunks.length,
+        uploadedCount,
+        duplicateCount: skippedDuplicates.length,
+        failedCount: failures.length,
+        optimizedCount,
+        bytesSaved,
       });
     }
 
-    const settledUploadResults = await mapWithConcurrencyLimit(
-      uniquePreparedUploads,
-      QC_IMAGE_UPLOAD_CONCURRENCY,
-      async (preparedUpload) => {
-        try {
-          const uploadResult = await uploadBuffer({
-            buffer: preparedUpload.buffer,
-            key: createStorageKey({
-              folder: "qc-images",
-              originalName: preparedUpload.originalName,
-              extension: preparedUpload.extension,
-            }),
-            originalName: preparedUpload.originalName,
-            contentType: preparedUpload.contentType,
-          });
-
-          return {
-            ok: true,
-            preparedUpload,
-            uploadResult,
-          };
-        } catch (uploadError) {
-          return {
-            ok: false,
-            preparedUpload,
-            error: uploadError,
-          };
-        }
-      },
-    );
-
-    const failedUploads = settledUploadResults.filter((entry) => !entry?.ok);
-    const successfulUploads = settledUploadResults.filter((entry) => entry?.ok);
-
-    if (failedUploads.length > 0) {
-      await cleanupUploadedQcImageObjects(successfulUploads);
-
-      throw new Error(
-        failedUploads[0]?.error?.message || "Failed to upload QC images",
-      );
-    }
-
-    const uploadedImages = [];
-    const duplicateUploadsAfterPersist = [];
-    const persistFailures = [];
-    const uploadedImageHashes = new Set();
-
-    for (const successfulUpload of successfulUploads) {
-      const normalizedHash = normalizeQcImageHash(
-        successfulUpload?.preparedUpload?.hash,
-      );
-      const nextImageEntry = {
-        key: successfulUpload?.uploadResult?.key || "",
-        hash: normalizedHash,
-        originalName: successfulUpload?.uploadResult?.originalName || "",
-        contentType: successfulUpload?.uploadResult?.contentType || "",
-        size: toNonNegativeNumber(successfulUpload?.uploadResult?.size, 0),
-        comment: singleImageComment,
-        uploadedAt,
-        uploaded_by: uploadedBy,
-      };
-
-      try {
-        const persistResult = await QC.updateOne(
-          {
-            _id: qc._id,
-            "qc_images.hash": { $ne: normalizedHash },
-          },
-          {
-            $push: {
-              qc_images: nextImageEntry,
-            },
-            $set: {
-              updated_by: uploadedBy,
-            },
-          },
-        );
-
-        if (Number(persistResult?.modifiedCount || 0) > 0) {
-          uploadedImages.push(nextImageEntry);
-          uploadedImageHashes.add(normalizedHash);
-          continue;
-        }
-      } catch (persistError) {
-        persistFailures.push({
-          successfulUpload,
-          persistError,
-        });
-        continue;
-      }
-
-      duplicateUploadsAfterPersist.push(successfulUpload);
-      skippedDuplicates.push(
-        buildQcImageDuplicateEntry({
-          originalName: successfulUpload?.preparedUpload?.originalName,
-          hash: normalizedHash,
-          reason: "already_uploaded",
-        }),
-      );
-    }
-
-    if (duplicateUploadsAfterPersist.length > 0) {
-      await cleanupUploadedQcImageObjects(duplicateUploadsAfterPersist);
-    }
-
-    if (persistFailures.length > 0) {
-      await cleanupUploadedQcImageObjects(
-        persistFailures.map((entry) => entry?.successfulUpload),
-      );
-      throw new Error(
-        persistFailures[0]?.persistError?.message || "Failed to save QC images",
-      );
-    }
-
-    const uploadedCount = uploadedImages.length;
     const skippedDuplicateCount = skippedDuplicates.length;
-    const optimizedUploadCount = successfulUploads.reduce(
-      (sum, entry) =>
-        uploadedImageHashes.has(
-          normalizeQcImageHash(entry?.preparedUpload?.hash),
-        ) && entry?.preparedUpload?.optimized
-          ? sum + 1
-          : sum,
-      0,
-    );
-    const totalBytesSaved = successfulUploads.reduce(
-      (sum, entry) =>
-        uploadedImageHashes.has(
-          normalizeQcImageHash(entry?.preparedUpload?.hash),
-        )
-          ? sum + toNonNegativeNumber(entry?.preparedUpload?.bytesSaved, 0)
-          : sum,
-      0,
-    );
+    const failedCount = failures.length;
+    const processedCount = uploadedCount + skippedDuplicateCount + failedCount;
+    const durationMs = Date.now() - requestStartedAt;
+
+    logQcImageUploadEvent("complete", {
+      qcId,
+      fileCount: files.length,
+      chunkCount: fileChunks.length,
+      uploadedCount,
+      duplicateCount: skippedDuplicateCount,
+      failedCount,
+      optimizedCount,
+      bytesSaved,
+      durationMs,
+    });
+
+    let message = "QC image upload request processed";
+    if (uploadedCount > 0) {
+      message = `${uploadedCount} QC image${uploadedCount === 1 ? "" : "s"} uploaded successfully`;
+    } else if (skippedDuplicateCount > 0 && failedCount === 0) {
+      message = "All selected QC images were duplicates and were skipped";
+    } else if (failedCount > 0 && uploadedCount === 0 && skippedDuplicateCount === 0) {
+      message = "No QC images were uploaded";
+    }
+
+    if (skippedDuplicateCount > 0 && uploadedCount > 0) {
+      message += `. ${skippedDuplicateCount} duplicate${skippedDuplicateCount === 1 ? "" : "s"} skipped.`;
+    }
+    if (failedCount > 0) {
+      message += `${message.endsWith(".") ? "" : "."} ${failedCount} file${failedCount === 1 ? "" : "s"} failed.`;
+    }
 
     return res.status(200).json({
       success: true,
-      message:
-        uploadedCount > 0
-          ? `${uploadedCount} QC image${uploadedCount === 1 ? "" : "s"} uploaded successfully${skippedDuplicateCount > 0 ? `. ${skippedDuplicateCount} duplicate${skippedDuplicateCount === 1 ? "" : "s"} skipped.` : ""}`
-          : "All selected QC images were duplicates and were skipped",
+      message,
       data: {
         qc_id: qc._id,
         uploaded_count: uploadedCount,
         skipped_duplicate_count: skippedDuplicateCount,
         skipped_duplicates: skippedDuplicates,
-        optimized_count: optimizedUploadCount,
-        bytes_saved: totalBytesSaved,
+        failed_count: failedCount,
+        failures,
+        optimized_count: optimizedCount,
+        bytes_saved: bytesSaved,
+        processed_count: processedCount,
+        total_requested_count: files.length,
       },
     });
   } catch (error) {
@@ -8440,6 +8562,14 @@ exports.uploadQcImages = async (req, res) => {
       success: false,
       message: error.message || "Failed to upload QC images",
     });
+  } finally {
+    const files = Array.isArray(req.files)
+      ? req.files.filter(Boolean)
+      : Object.values(req.files || {})
+        .flatMap((entry) => (Array.isArray(entry) ? entry : []))
+        .filter(Boolean);
+
+    await cleanupLocalQcImageFiles(files.map((file) => file?.path));
   }
 };
 

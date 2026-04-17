@@ -2,6 +2,8 @@ const express = require("express");
 const router = express.Router();
 
 const upload = require("../config/multer.config");
+const qcImageUpload = upload.qcImageUpload;
+const handleQcImageUploadErrors = upload.handleQcImageUploadErrors;
 const auth = require("../middlewares/auth.middleware");
 const authorize = require("../middlewares/authorize.middleware");
 const qcController = require("../controllers/qc.controller");
@@ -41,8 +43,9 @@ router.patch(
   "/reject-all/:id",
   auth,
   authorize("QC", "admin", "manager"),
-  upload.single("image"),
+  qcImageUpload.single("image"),
   qcController.rejectAllQc,
+  handleQcImageUploadErrors,
 );
 
 router.post(
@@ -56,8 +59,9 @@ router.post(
   "/:id/images",
   auth,
   authorize("QC", "admin", "manager"),
-  upload.any(),
+  qcImageUpload.any(),
   qcController.uploadQcImages,
+  handleQcImageUploadErrors,
 );
 
 router.delete(
