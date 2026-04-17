@@ -159,6 +159,8 @@ const Container = () => {
           orderDocumentId,
           orderId: qc?.order_meta?.order_id || order?.order_id || "N/A",
           itemCode: qc?.item?.item_code || order?.item?.item_code || "N/A",
+          itemDescription:
+            qc?.item?.description || order?.item?.description || "N/A",
           orderQuantity,
           passed,
           pending,
@@ -305,6 +307,7 @@ const Container = () => {
         getSortValue: (row, column) => {
           if (column === "orderId") return row?.orderId;
           if (column === "itemCode") return row?.itemCode;
+          if (column === "itemDescription") return row?.itemDescription;
           if (column === "orderQuantity") return Number(row?.orderQuantity || 0);
           if (column === "passed") return Number(row?.passed || 0);
           if (column === "pending") return Number(row?.pending || 0);
@@ -672,6 +675,14 @@ const Container = () => {
                       </th>
                       <th>
                         <SortHeaderButton
+                          label="Item Description"
+                          isActive={sortBy === "itemDescription"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("itemDescription", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
                           label="Order Quantity"
                           isActive={sortBy === "orderQuantity"}
                           direction={sortOrder}
@@ -709,7 +720,7 @@ const Container = () => {
                   <tbody>
                     {sortedRows.length === 0 && (
                       <tr>
-                        <td colSpan={isViewOnly ? "6" : "8"} className="text-center py-4">
+                        <td colSpan={isViewOnly ? "7" : "9"} className="text-center py-4">
                           No rows match the current filters.
                         </td>
                       </tr>
@@ -719,6 +730,7 @@ const Container = () => {
                       <tr key={row.id}>
                         <td>{row.orderId}</td>
                         <td>{row.itemCode}</td>
+                        <td>{row.itemDescription}</td>
                         <td>{row.orderQuantity}</td>
                         <td>{row.passed}</td>
                         <td>{row.pending}</td>
