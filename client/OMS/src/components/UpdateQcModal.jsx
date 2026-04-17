@@ -1919,13 +1919,13 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       });
       const totalEffectivePassedAfterRewrite =
         otherEffectivePassed + currentRequestEffectivePassedAfterRewrite;
-      const totalLabelsAfterRewrite = allLabelsAfterRewrite.length;
+      const rewriteRecordLabelsAfter = normalizeLabels(labelsForUpdate);
       const requiredLabelsAfterRewrite = getQcLabelRequirement({
-        totalPassed: totalSamplePassedAfterRewrite,
+        totalPassed: qcPassed,
         boxSizesCount,
       }).requiredCount;
       const requiresBoxSizeForLabelsAfterRewrite =
-        totalSamplePassedAfterRewrite > 0 || totalLabelsAfterRewrite > 0;
+        qcPassed > 0 || rewriteRecordLabelsAfter.length > 0;
       const pendingAfterRewrite = Math.max(
         0,
         clientDemandQuantity - totalEffectivePassedAfterRewrite,
@@ -1962,12 +1962,12 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         return;
       }
 
-      if (totalLabelsAfterRewrite !== requiredLabelsAfterRewrite) {
+      if (rewriteRecordLabelsAfter.length !== requiredLabelsAfterRewrite) {
         setError(
           buildQcLabelRequirementMessage({
-            totalPassed: totalSamplePassedAfterRewrite,
+            totalPassed: qcPassed,
             boxSizesCount,
-            actualCount: totalLabelsAfterRewrite,
+            actualCount: rewriteRecordLabelsAfter.length,
           }),
         );
         return;
@@ -2037,8 +2037,13 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     const incomingNewLabels = labelsForUpdate.filter(
       (label) => !existingLabelsSet.has(label),
     );
-    const totalLabelsAfterUpdate =
-      existingLabelsSet.size + incomingNewLabels.length;
+    const currentRequestLabelsBefore = normalizeLabels(
+      currentRequestInspectionRecord?.labels_added || [],
+    );
+    const currentRequestLabelsAfterUpdate = normalizeLabels([
+      ...currentRequestLabelsBefore,
+      ...incomingNewLabels,
+    ]);
     const hasStartedInspection =
       (qc.quantities?.qc_checked || 0) > 0 ||
       Number(qc?.quantities?.qc_passed || 0) > 0 ||
@@ -2095,23 +2100,23 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     }
 
     const requiredLabelsAfterUpdate = getQcLabelRequirement({
-      totalPassed: nextSamplePassedTotal,
+      totalPassed: nextCurrentRequestSamplePassed,
       boxSizesCount,
     }).requiredCount;
     const requiresBoxSizeForLabels =
-      nextSamplePassedTotal > 0 || totalLabelsAfterUpdate > 0;
+      nextCurrentRequestSamplePassed > 0 || currentRequestLabelsAfterUpdate.length > 0;
 
     if (requiresBoxSizeForLabels && boxSizesCount === 0) {
       setError("At least 1 box size is required to validate labels.");
       return;
     }
 
-    if (totalLabelsAfterUpdate !== requiredLabelsAfterUpdate) {
+    if (currentRequestLabelsAfterUpdate.length !== requiredLabelsAfterUpdate) {
       setError(
         buildQcLabelRequirementMessage({
-          totalPassed: nextSamplePassedTotal,
+          totalPassed: nextCurrentRequestSamplePassed,
           boxSizesCount,
-          actualCount: totalLabelsAfterUpdate,
+          actualCount: currentRequestLabelsAfterUpdate.length,
         }),
       );
       return;

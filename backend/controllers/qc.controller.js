@@ -4684,8 +4684,11 @@ exports.updateQC = async (req, res) => {
         message: "At least 1 box size is required to add labels",
       });
     }
+    const currentRequestLabelsBefore = normalizeLabels(
+      currentRequestInspectionRecord?.labels_added || [],
+    );
     const labelRequirement = getQcLabelRequirement({
-      totalPassed: nextSamplePassedTotal,
+      totalPassed: nextCurrentRequestSamplePassed,
       boxSizesCount,
     });
     const existingNormalizedLabels = normalizeLabels(qc.labels || []);
@@ -4825,22 +4828,34 @@ exports.updateQC = async (req, res) => {
       labelsAddedThisVisit = incomingNew;
     }
 
-    const totalLabelsAfterUpdate = nextLabels.length;
-    const requiresBoxSizeForLabels =
-      nextSamplePassedTotal > 0 || totalLabelsAfterUpdate > 0;
-    if (requiresBoxSizeForLabels && boxSizesCount === 0) {
+    if (!(allowAdminRewrite && hasExplicitLabelsPayload)) {
+      const currentRequestLabelsAfterUpdate = normalizeLabels([
+        ...currentRequestLabelsBefore,
+        ...labelsAddedThisVisit,
+      ]);
+      const currentRequestLabelsCountAfterUpdate =
+        currentRequestLabelsAfterUpdate.length;
+      const requiresBoxSizeForLabels =
+        nextCurrentRequestSamplePassed > 0 ||
+        currentRequestLabelsCountAfterUpdate > 0;
+      if (requiresBoxSizeForLabels && boxSizesCount === 0) {
+        return res.status(400).json({
+          message: "At least 1 box size is required to validate labels",
+        });
+      }
+
+      if (currentRequestLabelsCountAfterUpdate !== labelRequirement.requiredCount) {
+        return res.status(400).json({
+          message: buildQcLabelRequirementMessage({
+            totalPassed: nextCurrentRequestSamplePassed,
+            boxSizesCount,
+            actualCount: currentRequestLabelsCountAfterUpdate,
+          }),
+        });
+      }
+    } else if (boxSizesCount === 0) {
       return res.status(400).json({
         message: "At least 1 box size is required to validate labels",
-      });
-    }
-
-    if (totalLabelsAfterUpdate !== labelRequirement.requiredCount) {
-      return res.status(400).json({
-        message: buildQcLabelRequirementMessage({
-          totalPassed: nextSamplePassedTotal,
-          boxSizesCount,
-          actualCount: totalLabelsAfterUpdate,
-        }),
       });
     }
 
