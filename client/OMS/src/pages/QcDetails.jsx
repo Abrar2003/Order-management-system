@@ -21,11 +21,13 @@ import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { formatPositiveCbm } from "../utils/cbm";
 import { formatFixedNumber, formatLbhValue } from "../utils/measurementDisplay";
 import { canTransferLatestRequestToday } from "../utils/qcRequests";
+import useBulkQcImageUpload from "../hooks/useBulkQcImageUpload";
 import {
   getDerivedOrderStatus,
   hasShipmentRecords as getHasShipmentRecords,
   hasShippableQuantity,
 } from "../utils/orderStatus";
+import { MAX_QC_IMAGE_UPLOAD_COUNT } from "../services/qcImages.service";
 import Barcode from "react-barcode";
 import "../App.css";
 
@@ -280,7 +282,6 @@ const RELATED_FILE_OPTIONS_BY_VALUE = Object.freeze(
     return acc;
   }, {}),
 );
-const MAX_QC_IMAGE_UPLOAD_COUNT = 100;
 
 const ITEM_MASTER_FILE_OPTIONS = Object.freeze(
   RELATED_FILE_OPTIONS.filter((option) => option.scope === "item_master"),
@@ -362,6 +363,14 @@ const QcDetails = () => {
   const relatedFileInputRef = useRef(null);
   const relatedFileUploadInFlightRef = useRef(false);
   const relatedFileUploadBatchKeyRef = useRef("");
+  const {
+    state: qcImageUploadState,
+    canRetryFailedFiles: canRetryQcImageUpload,
+    selectFiles: selectQcImageFiles,
+    startUpload: startQcImageUpload,
+    retryFailedFiles: retryFailedQcImageFiles,
+    reset: resetQcImageUpload,
+  } = useBulkQcImageUpload({ qcId: id });
   const user = getUserFromToken();
   const isViewOnly = isViewOnlyUser(user);
   const normalizedRole = String(user?.role || "").trim().toLowerCase();
@@ -463,6 +472,20 @@ const QcDetails = () => {
     (
       activeRelatedFileConfig?.scope === "qc" ||
       Boolean(qc?.item_master?._id)
+    );
+  const isQcImageUploadType = activeRelatedFileConfig?.value === "qc_images";
+  const isRelatedUploadBusy = uploadingRelatedFile || qcImageUploadState.isUploading;
+  const activeRelatedUploadProgress = isQcImageUploadType
+    ? qcImageUploadState.progressPercent
+    : relatedFileUploadProgress;
+  const hasQueuedQcImageFiles = qcImageUploadState.selectedFiles.length > 0;
+  const showQcImageUploadPanel =
+    isQcImageUploadType &&
+    (
+      hasQueuedQcImageFiles ||
+      qcImageUploadState.batchStatuses.length > 0 ||
+      Boolean(qcImageUploadState.summary) ||
+      Boolean(qcImageUploadState.selectionMessage)
     );
   const relatedFileUploadDisabledReason = !canUploadActiveRelatedFile
     ? activeRelatedFileConfig?.scope === "item_master" && !qc?.item_master?._id
@@ -865,13 +888,13 @@ const QcDetails = () => {
   const handleOpenRelatedFilePicker = useCallback(() => {
     if (
       !canUploadActiveRelatedFile ||
-      uploadingRelatedFile ||
+      isRelatedUploadBusy ||
       relatedFileUploadInFlightRef.current
     ) {
       return;
     }
     relatedFileInputRef.current?.click();
-  }, [canUploadActiveRelatedFile, uploadingRelatedFile]);
+  }, [canUploadActiveRelatedFile, isRelatedUploadBusy]);
 
   const handleOpenRelatedFile = useCallback(async (fileType) => {
     const fileConfig =
@@ -1050,31 +1073,12 @@ const QcDetails = () => {
       let response;
 
       if (fileConfig.value === "qc_images") {
-        if (selectedFiles.length > MAX_QC_IMAGE_UPLOAD_COUNT) {
-          throw new Error(
-            `You can upload up to ${MAX_QC_IMAGE_UPLOAD_COUNT} QC images at once.`,
-          );
-        }
-
-        const formData = new FormData();
-
-        formData.append("upload_mode", qcImageUploadMode);
-
-        if (qcImageUploadMode === "single") {
-          formData.append("comment", qcSingleImageComment);
-        }
-
-        selectedFiles.forEach((file) => {
-          formData.append("files", file);
-        });
-
-        response = await api.post(
-          `/qc/${encodeURIComponent(id)}/images`,
-          formData,
-          {
-            onUploadProgress: handleRelatedFileUploadProgress,
-          },
-        );
+        relatedFileUploadInFlightRef.current = false;
+        relatedFileUploadBatchKeyRef.current = "";
+        setUploadingRelatedFile(false);
+        setRelatedFileUploadProgress(0);
+        selectQcImageFiles(selectedFiles, { uploadMode: qcImageUploadMode });
+        return;
       } else {
         if (!qc?.item_master?._id) {
           throw new Error("Item master record not found for this QC.");
@@ -1098,10 +1102,6 @@ const QcDetails = () => {
         response?.data?.message || `${fileConfig.label} uploaded successfully.`,
       );
 
-      if (fileConfig.value === "qc_images") {
-        setQcSingleImageComment("");
-      }
-
       await fetchQcDetails();
     } catch (error) {
       console.error(error);
@@ -1123,10 +1123,65 @@ const QcDetails = () => {
     id,
     qc?.item_master?._id,
     qcImageUploadMode,
-    qcSingleImageComment,
     activeRelatedFileConfig,
     relatedFileType,
+    selectQcImageFiles,
   ]);
+
+  const handleStartQcImageUpload = useCallback(async () => {
+    const result = await startQcImageUpload({
+      uploadMode: qcImageUploadMode,
+      comment: qcImageUploadMode === "single" ? qcSingleImageComment : "",
+    });
+
+    if (result?.uploadedCount > 0) {
+      if (qcImageUploadMode === "single") {
+        setQcSingleImageComment("");
+      }
+      await fetchQcDetails();
+    }
+  }, [
+    fetchQcDetails,
+    qcImageUploadMode,
+    qcSingleImageComment,
+    startQcImageUpload,
+  ]);
+
+  const handleRetryQcImageUpload = useCallback(async () => {
+    const result = await retryFailedQcImageFiles({
+      uploadMode: qcImageUploadMode,
+      comment: qcImageUploadMode === "single" ? qcSingleImageComment : "",
+    });
+
+    if (result?.uploadedCount > 0) {
+      if (qcImageUploadMode === "single") {
+        setQcSingleImageComment("");
+      }
+      await fetchQcDetails();
+    }
+  }, [
+    fetchQcDetails,
+    qcImageUploadMode,
+    qcSingleImageComment,
+    retryFailedQcImageFiles,
+  ]);
+
+  const handleResetQcImageUpload = useCallback(() => {
+    resetQcImageUpload();
+    if (relatedFileInputRef.current) {
+      relatedFileInputRef.current.value = "";
+    }
+  }, [resetQcImageUpload]);
+
+  useEffect(() => {
+    if (isQcImageUploadType) return;
+    handleResetQcImageUpload();
+  }, [handleResetQcImageUpload, isQcImageUploadType]);
+
+  useEffect(() => {
+    if (!isQcImageUploadType) return;
+    handleResetQcImageUpload();
+  }, [handleResetQcImageUpload, isQcImageUploadType, qcImageUploadMode]);
 
   const handleDeleteInspectionRecord = useCallback(
     async (recordId) => {
@@ -1319,7 +1374,7 @@ const QcDetails = () => {
           ref={relatedFileInputRef}
           type="file"
           className="d-none"
-          disabled={!canUploadActiveRelatedFile || uploadingRelatedFile}
+          disabled={!canUploadActiveRelatedFile || isRelatedUploadBusy}
           accept={activeRelatedFileConfig.accept}
           multiple={
             activeRelatedFileConfig?.value === "qc_images" &&
@@ -1348,7 +1403,7 @@ const QcDetails = () => {
                     onChange={(e) => setRelatedFileType(String(e.target.value || "product_image"))}
                     disabled={
                       !canUploadRelatedFile ||
-                      uploadingRelatedFile ||
+                      isRelatedUploadBusy ||
                       deletingRelatedFile ||
                       availableRelatedFileOptions.length <= 1
                     }
@@ -1368,7 +1423,7 @@ const QcDetails = () => {
                         style={{ width: "auto", minWidth: "140px" }}
                         value={qcImageUploadMode}
                         onChange={(e) => setQcImageUploadMode(String(e.target.value || "single"))}
-                        disabled={!canUploadActiveRelatedFile || uploadingRelatedFile || deletingRelatedFile}
+                        disabled={!canUploadActiveRelatedFile || isRelatedUploadBusy || deletingRelatedFile}
                       >
                         <option value="single">Single Image</option>
                         <option value="bulk">Bulk Images</option>
@@ -1382,7 +1437,7 @@ const QcDetails = () => {
                           value={qcSingleImageComment}
                           onChange={(e) => setQcSingleImageComment(String(e.target.value || ""))}
                           placeholder="Comment (optional)"
-                          disabled={!canUploadActiveRelatedFile || uploadingRelatedFile || deletingRelatedFile}
+                          disabled={!canUploadActiveRelatedFile || isRelatedUploadBusy || deletingRelatedFile}
                         />
                       )}
                     </>
@@ -1392,22 +1447,57 @@ const QcDetails = () => {
                     type="button"
                     className="btn btn-outline-primary btn-sm"
                     onClick={handleOpenRelatedFilePicker}
-                    disabled={!canUploadActiveRelatedFile || uploadingRelatedFile || deletingRelatedFile}
+                    disabled={!canUploadActiveRelatedFile || isRelatedUploadBusy || deletingRelatedFile}
                     title={relatedFileUploadDisabledReason}
                   >
-                    {uploadingRelatedFile
+                    {isRelatedUploadBusy
                       ? "Uploading..."
                       : activeRelatedFileConfig?.value === "qc_images"
-                      ? "Upload QC Images"
+                      ? hasQueuedQcImageFiles
+                        ? "Change Selection"
+                        : "Select QC Images"
                       : "Upload Related File"}
                   </button>
+
+                  {isQcImageUploadType && hasQueuedQcImageFiles && (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={handleStartQcImageUpload}
+                      disabled={!canUploadActiveRelatedFile || isRelatedUploadBusy || deletingRelatedFile}
+                    >
+                      {qcImageUploadState.isUploading ? "Uploading..." : "Start Upload"}
+                    </button>
+                  )}
+
+                  {isQcImageUploadType && canRetryQcImageUpload && !qcImageUploadState.isUploading && (
+                    <button
+                      type="button"
+                      className="btn btn-outline-warning btn-sm"
+                      onClick={handleRetryQcImageUpload}
+                      disabled={!canUploadActiveRelatedFile || deletingRelatedFile}
+                    >
+                      Retry Failed
+                    </button>
+                  )}
+
+                  {isQcImageUploadType && showQcImageUploadPanel && !qcImageUploadState.isUploading && (
+                    <button
+                      type="button"
+                      className="btn btn-outline-secondary btn-sm"
+                      onClick={handleResetQcImageUpload}
+                      disabled={deletingRelatedFile}
+                    >
+                      Clear
+                    </button>
+                  )}
 
                   {isAdmin && (
                     <button
                       type="button"
                       className="btn btn-outline-danger btn-sm"
                       onClick={handleDeleteRelatedFile}
-                      disabled={!canDeleteActiveRelatedFile || uploadingRelatedFile || deletingRelatedFile}
+                      disabled={!canDeleteActiveRelatedFile || isRelatedUploadBusy || deletingRelatedFile}
                       title={relatedFileDeleteDisabledReason}
                     >
                       {deletingRelatedFile ? "Deleting..." : "Delete File"}
@@ -1429,7 +1519,7 @@ const QcDetails = () => {
               </button>
             </div>
 
-            {uploadingRelatedFile && (
+            {isRelatedUploadBusy && (
               <div
                 className="d-flex flex-column align-items-end"
                 style={{ width: "min(100%, 260px)" }}
@@ -1438,7 +1528,7 @@ const QcDetails = () => {
                   className="progress w-100"
                   role="progressbar"
                   aria-label="Related file upload progress"
-                  aria-valuenow={Math.max(0, Math.min(100, relatedFileUploadProgress))}
+                  aria-valuenow={Math.max(0, Math.min(100, activeRelatedUploadProgress))}
                   aria-valuemin="0"
                   aria-valuemax="100"
                   style={{ height: "6px" }}
@@ -1446,17 +1536,168 @@ const QcDetails = () => {
                   <div
                     className="progress-bar progress-bar-striped progress-bar-animated"
                     style={{
-                      width: `${Math.max(3, Math.min(100, relatedFileUploadProgress))}%`,
+                      width: `${Math.max(3, Math.min(100, activeRelatedUploadProgress))}%`,
                     }}
                   />
                 </div>
                 <small className="text-muted mt-1">
-                  Upload progress: {Math.max(0, Math.min(100, relatedFileUploadProgress))}%
+                  Upload progress: {Math.max(0, Math.min(100, activeRelatedUploadProgress))}%
                 </small>
               </div>
             )}
           </div>
         </div>
+
+        {showQcImageUploadPanel && (
+          <div className="card om-card mb-3">
+            <div className="card-body d-grid gap-3">
+              <div className="d-flex justify-content-between align-items-start flex-wrap gap-3">
+                <div>
+                  <h3 className="h6 mb-1">QC Image Batch Upload</h3>
+                  <div className="small text-muted">
+                    {qcImageUploadState.summary?.totalSelectedCount || qcImageUploadState.selectedFiles.length || 0} selected
+                    {" | "}
+                    {qcImageUploadMode === "single" ? "Single mode" : "Bulk mode"}
+                    {" | "}
+                    Up to {MAX_QC_IMAGE_UPLOAD_COUNT} images total, 10 per request
+                  </div>
+                </div>
+                <div className="text-end small text-muted">
+                  <div>
+                    Batch {Math.max(0, qcImageUploadState.currentBatchIndex)} of {Math.max(0, qcImageUploadState.totalBatches)}
+                  </div>
+                  <div>
+                    Uploaded {qcImageUploadState.uploadedCount}
+                    {" | "}
+                    Duplicates {qcImageUploadState.duplicateCount}
+                    {" | "}
+                    Failed {qcImageUploadState.failedCount}
+                  </div>
+                </div>
+              </div>
+
+              {qcImageUploadState.selectionMessage && (
+                <div className="alert alert-secondary mb-0 py-2">
+                  {qcImageUploadState.selectionMessage}
+                </div>
+              )}
+
+              <div>
+                <div
+                  className="progress"
+                  role="progressbar"
+                  aria-label="QC image upload progress"
+                  aria-valuenow={Math.max(0, Math.min(100, qcImageUploadState.progressPercent))}
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  style={{ height: "8px" }}
+                >
+                  <div
+                    className={`progress-bar ${qcImageUploadState.isUploading ? "progress-bar-striped progress-bar-animated" : ""}`}
+                    style={{
+                      width: `${Math.max(3, Math.min(100, qcImageUploadState.progressPercent || 0))}%`,
+                    }}
+                  />
+                </div>
+                <div className="d-flex justify-content-between align-items-center mt-1 small text-muted flex-wrap gap-2">
+                  <span>Overall progress: {Math.max(0, Math.min(100, qcImageUploadState.progressPercent))}%</span>
+                  <span>
+                    {qcImageUploadState.isUploading
+                      ? `Uploading batch ${Math.max(1, qcImageUploadState.currentBatchIndex)} of ${Math.max(1, qcImageUploadState.totalBatches)}`
+                      : "Ready for upload or retry"}
+                  </span>
+                </div>
+              </div>
+
+              {qcImageUploadState.batchStatuses.length > 0 && (
+                <div className="table-responsive">
+                  <table className="table table-sm align-middle mb-0">
+                    <thead>
+                      <tr>
+                        <th>Batch</th>
+                        <th>Status</th>
+                        <th>Files</th>
+                        <th>Progress</th>
+                        <th>Result</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {qcImageUploadState.batchStatuses.map((batchStatus) => (
+                        <tr key={batchStatus.batchId}>
+                          <td>Batch {batchStatus.batchNumber}</td>
+                          <td>
+                            <span
+                              className={`badge text-uppercase ${
+                                batchStatus.status === "success"
+                                  ? "bg-success"
+                                  : batchStatus.status === "partial"
+                                    ? "bg-warning text-dark"
+                                    : batchStatus.status === "failed"
+                                      ? "bg-danger"
+                                      : batchStatus.status === "uploading"
+                                        ? "bg-primary"
+                                        : "bg-secondary"
+                              }`}
+                            >
+                              {batchStatus.status}
+                            </span>
+                          </td>
+                          <td>{batchStatus.fileCount}</td>
+                          <td>{Math.max(0, Math.min(100, batchStatus.progressPercent || 0))}%</td>
+                          <td className="small">
+                            {batchStatus.uploadedCount} uploaded
+                            {" | "}
+                            {batchStatus.duplicateCount} duplicates
+                            {" | "}
+                            {batchStatus.failedCount} failed
+                            {batchStatus.attempts > 1 && ` | retry ${batchStatus.attempts - 1}`}
+                            {batchStatus.errorMessage && ` | ${batchStatus.errorMessage}`}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {qcImageUploadState.summary && (
+                <div className="alert alert-info mb-0">
+                  <div className="fw-semibold mb-1">Final Summary</div>
+                  <div>{qcImageUploadState.summary.message}</div>
+                  <div className="small mt-2">
+                    Total selected: {qcImageUploadState.summary.totalSelectedCount}
+                    {" | "}
+                    Uploaded: {qcImageUploadState.summary.uploadedCount}
+                    {" | "}
+                    Duplicates skipped: {qcImageUploadState.summary.duplicateCount}
+                    {" | "}
+                    Failed: {qcImageUploadState.summary.failedCount}
+                    {" | "}
+                    Optimized: {qcImageUploadState.summary.optimizedCount}
+                    {" | "}
+                    Bytes saved: {qcImageUploadState.summary.bytesSaved}
+                  </div>
+                </div>
+              )}
+
+              {qcImageUploadState.failedFiles.length > 0 && (
+                <div>
+                  <div className="fw-semibold small mb-2">Failed Files</div>
+                  <div className="border rounded p-2 bg-light" style={{ maxHeight: "180px", overflowY: "auto" }}>
+                    <ul className="mb-0 small ps-3">
+                      {qcImageUploadState.failedFiles.map((failure, index) => (
+                        <li key={`${failure?.originalName || "failed-file"}-${index}`}>
+                          <strong>{failure?.originalName || "Unknown file"}</strong>
+                          {`: ${failure?.reason || "Upload failed"}`}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="card om-card">
           <div className="card-body d-grid gap-4">

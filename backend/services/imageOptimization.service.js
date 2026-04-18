@@ -1,18 +1,17 @@
 const path = require("path");
 const fs = require("fs/promises");
-const os = require("os");
 const sharp = require("sharp");
 const { ensureDirectory, safeDeleteFile } = require("../helpers/fileCleanup");
+const {
+  QC_IMAGE_MIME_TYPES,
+  QC_IMAGE_MAX_WIDTH,
+  QC_IMAGE_JPEG_QUALITY,
+  QC_IMAGE_WEBP_QUALITY,
+  QC_IMAGE_MAX_INPUT_PIXELS,
+  QC_IMAGE_OPTIMIZATION_TEMP_DIR,
+} = require("../config/qcImageUpload.config");
 
-const SUPPORTED_SOURCE_MIME_TYPES = new Set(["image/jpeg", "image/png"]);
-const MAX_IMAGE_WIDTH = 2200;
-const JPEG_QUALITY = 78;
-const PNG_WEBP_QUALITY = 78;
-const DEFAULT_TEMP_OUTPUT_DIR = path.join(
-  process.env.OMS_TEMP_DIR || os.tmpdir(),
-  "oms",
-  "image-optimization",
-);
+const SUPPORTED_SOURCE_MIME_TYPES = QC_IMAGE_MIME_TYPES;
 
 const normalizeText = (value) => String(value || "").trim();
 
@@ -31,7 +30,7 @@ const getFileSize = async (filePath) => {
 };
 
 const buildTempOutputPath = async (originalName = "", extension = ".jpg") => {
-  await ensureDirectory(DEFAULT_TEMP_OUTPUT_DIR);
+  await ensureDirectory(QC_IMAGE_OPTIMIZATION_TEMP_DIR);
   const parsed = path.parse(normalizeText(originalName) || "qc-image");
   const safeBaseName =
     normalizeText(parsed.name)
@@ -41,10 +40,17 @@ const buildTempOutputPath = async (originalName = "", extension = ".jpg") => {
       .slice(0, 60) || "qc-image";
 
   return path.join(
-    DEFAULT_TEMP_OUTPUT_DIR,
+    QC_IMAGE_OPTIMIZATION_TEMP_DIR,
     `${Date.now()}-${Math.random().toString(36).slice(2, 10)}-${safeBaseName}${extension}`,
   );
 };
+
+const buildSharpPipeline = (input) =>
+  sharp(input, {
+    failOn: "none",
+    sequentialRead: true,
+    limitInputPixels: QC_IMAGE_MAX_INPUT_PIXELS,
+  }).rotate();
 
 const optimizeImageForStorage = async ({
   buffer,
@@ -72,17 +78,15 @@ const optimizeImageForStorage = async ({
   }
 
   try {
-    let image = sharp(buffer, {
-      failOn: "none",
-      sequentialRead: true,
-    }).rotate();
+    let image = buildSharpPipeline(buffer);
 
     const metadata = await image.metadata();
     const width = Number(metadata?.width || 0);
-    if (Number.isFinite(width) && width > MAX_IMAGE_WIDTH) {
+    if (Number.isFinite(width) && width > QC_IMAGE_MAX_WIDTH) {
       image = image.resize({
-        width: MAX_IMAGE_WIDTH,
+        width: QC_IMAGE_MAX_WIDTH,
         withoutEnlargement: true,
+        fit: "inside",
       });
     }
 
@@ -94,22 +98,22 @@ const optimizeImageForStorage = async ({
     if (normalizedContentType === "image/jpeg") {
       optimizedBuffer = await image
         .jpeg({
-          quality: JPEG_QUALITY,
+          quality: QC_IMAGE_JPEG_QUALITY,
           mozjpeg: true,
         })
         .toBuffer();
       optimizedContentType = "image/jpeg";
       optimizedOriginalName = ensureFileNameWithExtension(normalizedOriginalName, ".jpg");
-      optimizedFormat = "jpeg-q78";
+      optimizedFormat = `jpeg-q${QC_IMAGE_JPEG_QUALITY}`;
     } else {
       optimizedBuffer = await image
         .webp({
-          quality: PNG_WEBP_QUALITY,
+          quality: QC_IMAGE_WEBP_QUALITY,
         })
         .toBuffer();
       optimizedContentType = "image/webp";
       optimizedOriginalName = ensureFileNameWithExtension(normalizedOriginalName, ".webp");
-      optimizedFormat = "webp-q78";
+      optimizedFormat = `webp-q${QC_IMAGE_WEBP_QUALITY}`;
     }
 
     const optimizedSize = Buffer.byteLength(optimizedBuffer);
@@ -182,17 +186,15 @@ const optimizeImageFileForStorage = async ({
   let optimizedOutputPath = "";
 
   try {
-    let image = sharp(normalizedInputPath, {
-      failOn: "none",
-      sequentialRead: true,
-    }).rotate();
+    let image = buildSharpPipeline(normalizedInputPath);
 
     const metadata = await image.metadata();
     const width = Number(metadata?.width || 0);
-    if (Number.isFinite(width) && width > MAX_IMAGE_WIDTH) {
+    if (Number.isFinite(width) && width > QC_IMAGE_MAX_WIDTH) {
       image = image.resize({
-        width: MAX_IMAGE_WIDTH,
+        width: QC_IMAGE_MAX_WIDTH,
         withoutEnlargement: true,
+        fit: "inside",
       });
     }
 
@@ -204,23 +206,23 @@ const optimizeImageFileForStorage = async ({
       optimizedOutputPath = await buildTempOutputPath(normalizedOriginalName, ".jpg");
       await image
         .jpeg({
-          quality: JPEG_QUALITY,
+          quality: QC_IMAGE_JPEG_QUALITY,
           mozjpeg: true,
         })
         .toFile(optimizedOutputPath);
       optimizedContentType = "image/jpeg";
       optimizedOriginalName = ensureFileNameWithExtension(normalizedOriginalName, ".jpg");
-      optimizedFormat = "jpeg-q78";
+      optimizedFormat = `jpeg-q${QC_IMAGE_JPEG_QUALITY}`;
     } else {
       optimizedOutputPath = await buildTempOutputPath(normalizedOriginalName, ".webp");
       await image
         .webp({
-          quality: PNG_WEBP_QUALITY,
+          quality: QC_IMAGE_WEBP_QUALITY,
         })
         .toFile(optimizedOutputPath);
       optimizedContentType = "image/webp";
       optimizedOriginalName = ensureFileNameWithExtension(normalizedOriginalName, ".webp");
-      optimizedFormat = "webp-q78";
+      optimizedFormat = `webp-q${QC_IMAGE_WEBP_QUALITY}`;
     }
 
     const optimizedSize = await getFileSize(optimizedOutputPath);

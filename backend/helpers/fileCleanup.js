@@ -25,6 +25,20 @@ const safeDeleteFile = async (filePath) => {
   }
 };
 
+const safeDeleteFiles = async (filePaths = []) => {
+  const normalizedPaths = [...new Set(
+    (Array.isArray(filePaths) ? filePaths : [filePaths]).filter(Boolean),
+  )];
+
+  const results = await Promise.allSettled(
+    normalizedPaths.map((filePath) => safeDeleteFile(filePath)),
+  );
+
+  return results.map((result) =>
+    result.status === "fulfilled" ? Boolean(result.value) : false,
+  );
+};
+
 const ensureDirectory = async (dirPath) => {
   if (!dirPath) return;
   await fsp.mkdir(dirPath, { recursive: true });
@@ -32,4 +46,5 @@ const ensureDirectory = async (dirPath) => {
 
 module.exports = deleteFile;
 module.exports.safeDeleteFile = safeDeleteFile;
+module.exports.safeDeleteFiles = safeDeleteFiles;
 module.exports.ensureDirectory = ensureDirectory;

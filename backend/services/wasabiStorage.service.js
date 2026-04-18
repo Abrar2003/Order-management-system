@@ -7,6 +7,7 @@ const {
   DeleteObjectCommand,
   GetObjectCommand,
   GetBucketCorsCommand,
+  PutObjectCommand,
   PutBucketCorsCommand,
 } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
@@ -255,6 +256,72 @@ const uploadBuffer = async ({
   };
 };
 
+const uploadStream = async ({
+  stream,
+  key,
+  originalName = "",
+  contentType = "application/octet-stream",
+  queueSize = DEFAULT_UPLOAD_QUEUE_SIZE,
+  partSize = DEFAULT_UPLOAD_PART_SIZE,
+  size = 0,
+}) => {
+  if (!stream || typeof stream.pipe !== "function") {
+    throw new Error("uploadStream requires a readable stream");
+  }
+
+  if (!normalizeValue(key)) {
+    throw new Error("uploadStream requires a storage key");
+  }
+
+  const client = getClient();
+  const config = getConfig();
+  const safeQueueSize = Math.max(1, Number(queueSize) || DEFAULT_UPLOAD_QUEUE_SIZE);
+  const safePartSize = Math.max(
+    5 * 1024 * 1024,
+    Number(partSize) || DEFAULT_UPLOAD_PART_SIZE,
+  );
+  const safeSize = Math.max(0, Number(size) || 0);
+
+  try {
+    if (safeSize > 0 && safeSize < safePartSize) {
+      await client.send(
+        new PutObjectCommand({
+          Bucket: config.bucket,
+          Key: key,
+          Body: stream,
+          ContentType: contentType,
+        }),
+      );
+    } else {
+      const uploader = new Upload({
+        client,
+        queueSize: safeQueueSize,
+        partSize: safePartSize,
+        leavePartsOnError: false,
+        params: {
+          Bucket: config.bucket,
+          Key: key,
+          Body: stream,
+          ContentType: contentType,
+        },
+      });
+
+      await uploader.done();
+    }
+  } catch (error) {
+    throw new Error(
+      `Wasabi upload failed: ${error?.message || String(error)}`,
+    );
+  }
+
+  return {
+    key,
+    originalName: normalizeValue(originalName),
+    contentType,
+    size: safeSize,
+  };
+};
+
 const uploadFile = async ({
   filePath,
   key,
@@ -272,8 +339,6 @@ const uploadFile = async ({
     throw new Error("uploadFile requires a storage key");
   }
 
-  const client = getClient();
-  const config = getConfig();
   const safeQueueSize = Math.max(1, Number(queueSize) || DEFAULT_UPLOAD_QUEUE_SIZE);
   const safePartSize = Math.max(
     5 * 1024 * 1024,
@@ -290,33 +355,15 @@ const uploadFile = async ({
     );
   }
 
-  try {
-    const uploader = new Upload({
-      client,
-      queueSize: safeQueueSize,
-      partSize: safePartSize,
-      leavePartsOnError: false,
-      params: {
-        Bucket: config.bucket,
-        Key: key,
-        Body: fs.createReadStream(normalizedPath),
-        ContentType: contentType,
-      },
-    });
-
-    await uploader.done();
-  } catch (error) {
-    throw new Error(
-      `Wasabi upload failed: ${error?.message || String(error)}`,
-    );
-  }
-
-  return {
+  return uploadStream({
+    stream: fs.createReadStream(normalizedPath),
     key,
-    originalName: normalizeValue(originalName),
+    originalName,
     contentType,
+    queueSize: safeQueueSize,
+    partSize: safePartSize,
     size: fileSize,
-  };
+  });
 };
 
 const deleteObject = async (key) => {
@@ -498,6 +545,7 @@ module.exports = {
   getBucketCors,
   putBucketCors,
   uploadBuffer,
+  uploadStream,
   uploadFile,
   deleteObject,
 };

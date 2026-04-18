@@ -1,29 +1,27 @@
-const fs = require("fs");
-const os = require("os");
 const path = require("path");
 const multer = require("multer");
+const {
+  QC_IMAGE_MIME_TYPES,
+  QC_IMAGE_EXTENSIONS,
+  MAX_QC_IMAGE_UPLOAD_COUNT,
+  QC_IMAGE_MAX_FILE_SIZE,
+  QC_IMAGE_TEMP_DIR,
+  ensureQcImageTempDirectories,
+} = require("./qcImageUpload.config");
 
-const QC_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png"]);
-const QC_IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png"]);
-const MAX_QC_IMAGE_UPLOAD_COUNT = 100;
-const DEFAULT_QC_IMAGE_MAX_FILE_SIZE = 12 * 1024 * 1024;
-const QC_IMAGE_MAX_FILE_SIZE = Math.max(
-  1,
-  Number(process.env.QC_IMAGE_MAX_FILE_SIZE || DEFAULT_QC_IMAGE_MAX_FILE_SIZE),
-);
-const QC_IMAGE_TEMP_DIR = path.join(
-  process.env.OMS_TEMP_DIR || os.tmpdir(),
-  "oms",
-  "qc-image-uploads",
-);
-
-fs.mkdirSync(QC_IMAGE_TEMP_DIR, { recursive: true });
-
+// Legacy non-QC uploads still use the generic middleware; QC image routes must
+// use the dedicated disk-backed middleware exported below.
 const upload = multer({ storage: multer.memoryStorage() });
+ensureQcImageTempDirectories();
 
 const qcImageStorage = multer.diskStorage({
   destination: (_req, _file, cb) => {
-    cb(null, QC_IMAGE_TEMP_DIR);
+    try {
+      ensureQcImageTempDirectories();
+      cb(null, QC_IMAGE_TEMP_DIR);
+    } catch (error) {
+      cb(error);
+    }
   },
   filename: (_req, file, cb) => {
     const originalName = String(file?.originalname || "").trim();
@@ -59,6 +57,9 @@ const qcImageUpload = multer({
   },
   fileFilter: qcImageFileFilter,
 });
+
+const applyMulterMiddleware = (middleware) => (req, res, next) =>
+  middleware(req, res, (err) => handleQcImageUploadErrors(err, req, res, next));
 
 const handleQcImageUploadErrors = (err, _req, res, next) => {
   if (!err) {
@@ -102,6 +103,9 @@ const handleQcImageUploadErrors = (err, _req, res, next) => {
 
 module.exports = upload;
 module.exports.qcImageUpload = qcImageUpload;
+module.exports.qcImageAnyUpload = applyMulterMiddleware(qcImageUpload.any());
+module.exports.qcImageSingleUpload = (fieldName = "image") =>
+  applyMulterMiddleware(qcImageUpload.single(fieldName));
 module.exports.handleQcImageUploadErrors = handleQcImageUploadErrors;
 module.exports.QC_IMAGE_TEMP_DIR = QC_IMAGE_TEMP_DIR;
 module.exports.MAX_QC_IMAGE_UPLOAD_COUNT = MAX_QC_IMAGE_UPLOAD_COUNT;
