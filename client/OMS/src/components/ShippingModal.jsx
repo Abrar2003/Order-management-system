@@ -6,6 +6,7 @@ import {
   toDDMMYYYYInputValue,
   toISODateString,
 } from "../utils/date";
+import { useShippingInspectors } from "../hooks/useShippingInspectors";
 import "../App.css";
 
 const ShippingModal = ({ order, onClose, onSuccess }) => {
@@ -14,10 +15,17 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
   );
   const [containerNumber, setContainerNumber] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [stuffedById, setStuffedById] = useState("");
   const [shipmentQuantity, setShipmentQuantity] = useState("");
   const [remarks, setRemarks] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const {
+    inspectors,
+    inspectorById,
+    loadingInspectors,
+    inspectorError,
+  } = useShippingInspectors();
 
   const shippedAlready = useMemo(
     () =>
@@ -47,9 +55,14 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
     const parsedContainer = containerNumber.trim();
     const parsedInvoiceNumber = invoiceNumber.trim();
     const parsedQuantity = Number(shipmentQuantity);
+    const stuffedBy = inspectorById.get(String(stuffedById || "").trim());
 
     if (!parsedContainer) {
       setError("Container number must be a non-empty value.");
+      return;
+    }
+    if (!stuffedBy) {
+      setError("Select the inspector who was present during stuffing.");
       return;
     }
 
@@ -69,6 +82,7 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
         stuffing_date: stuffingDateIso,
         container: parsedContainer,
         invoice_number: parsedInvoiceNumber,
+        stuffed_by: stuffedBy,
         quantity: parsedQuantity,
         remarks
       });
@@ -142,6 +156,25 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
             </div>
 
             <div>
+              <label className="form-label">Stuffed By</label>
+              <select
+                className="form-select"
+                value={stuffedById}
+                onChange={(e) => setStuffedById(e.target.value)}
+                disabled={loadingInspectors}
+              >
+                <option value="">
+                  {loadingInspectors ? "Loading inspectors..." : "Select inspector"}
+                </option>
+                {inspectors.map((inspector) => (
+                  <option key={inspector.id} value={inspector.id}>
+                    {inspector.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
               <label className="form-label">Stuffing Date</label>
               <input
                 type="date"
@@ -180,6 +213,7 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
               />
             </div>
 
+            {inspectorError && <div className="alert alert-warning mb-0">{inspectorError}</div>}
             {error && <div className="alert alert-danger mb-0">{error}</div>}
           </div>
 
@@ -187,7 +221,12 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
             <button type="button" className="btn btn-outline-secondary" onClick={onClose} disabled={saving}>
               Cancel
             </button>
-            <button type="button" className="btn btn-primary" onClick={handleSubmit} disabled={saving}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleSubmit}
+              disabled={saving || loadingInspectors}
+            >
               {saving ? "Saving..." : "Finalize"}
             </button>
           </div>

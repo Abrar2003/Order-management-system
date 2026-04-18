@@ -174,6 +174,51 @@ const ensureInspectorRecordsForQcUsers = async ({ search = "" } = {}) => {
   };
 };
 
+const buildInspectorOption = (inspector = {}) => {
+  const inspectorId = String(inspector?._id || "").trim();
+  const displayName = String(
+    inspector?.user?.name || inspector?.user?.email || inspectorId,
+  ).trim();
+
+  return {
+    id: inspectorId,
+    name: displayName,
+    email: String(inspector?.user?.email || "").trim(),
+  };
+};
+
+exports.getInspectorOptions = async (req, res) => {
+  try {
+    const search = String(req.query.search || "").trim();
+    const syncResult = await ensureInspectorRecordsForQcUsers({ search });
+    const { userIds } = syncResult;
+
+    const inspectors = userIds.length
+      ? await Inspector.find({ user: { $in: userIds } })
+          .populate("user", "name email role")
+          .sort({ createdAt: -1 })
+          .lean()
+      : [];
+
+    const inspectorByUser = new Map();
+    inspectors.forEach((inspector) => {
+      const userId = String(inspector?.user?._id || inspector?.user || "");
+      if (!userId || inspectorByUser.has(userId)) return;
+      inspectorByUser.set(userId, inspector);
+    });
+
+    const data = Array.from(inspectorByUser.values())
+      .map((inspector) => buildInspectorOption(inspector))
+      .filter((option) => option.id && option.name)
+      .sort((left, right) => left.name.localeCompare(right.name));
+
+    return res.json({ data });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: err.message });
+  }
+};
+
 /**
  * GET /inspectors
  * Get all inspectors with pagination
@@ -801,4 +846,3 @@ exports.getLabelUsageStats = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-

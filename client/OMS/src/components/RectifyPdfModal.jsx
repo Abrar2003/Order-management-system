@@ -122,6 +122,8 @@ const RectifyPdfModal = ({ onClose, onSuccess }) => {
         return {
           ...row,
           row_id: String(row?.row_id || fallbackId),
+          merged: Boolean(row?.merged),
+          merged_row_count: Math.max(1, Number(row?.merged_row_count || 1)),
           changed_fields: Array.isArray(row?.changed_fields)
             ? row.changed_fields
             : String(row?.changed_fields || "")
@@ -256,7 +258,8 @@ const RectifyPdfModal = ({ onClose, onSuccess }) => {
                   <div className="small">Extracted: {Number(summary.extracted_rows || 0)}</div>
                   <div className="small">Valid: {Number(summary.valid_rows || 0)}</div>
                   <div className="small">Invalid: {Number(summary.invalid_rows || 0)}</div>
-                  <div className="small">Duplicates in PDF: {Number(summary.duplicate_keys_in_pdf || 0)}</div>
+                  <div className="small">Merged Input Rows: {Number(summary.merged_input_rows || summary.duplicate_keys_in_pdf || 0)}</div>
+                  <div className="small">Merged Row Groups: {Number(summary.merged_row_groups || 0)}</div>
                   <div className="small">Unchanged: {Number(summary.unchanged_rows || 0)}</div>
                   <div className="small">Changed: {Number(summary.changed_rows || 0)}</div>
                   <div className="small">New: {Number(summary.new_rows || 0)}</div>
@@ -332,7 +335,14 @@ const RectifyPdfModal = ({ onClose, onSuccess }) => {
                                   }
                                 />
                               </td>
-                              <td>{row.change_type || "-"}</td>
+                              <td>
+                                <div>{row.change_type || "-"}</div>
+                                {row.merged && (
+                                  <span className="badge text-bg-warning mt-1">
+                                    Merged ({row.merged_row_count} rows)
+                                  </span>
+                                )}
+                              </td>
                               <td>{row.order_id || "-"}</td>
                               <td>{row.item_code || "-"}</td>
                               <td>{row.description || "-"}</td>

@@ -170,6 +170,16 @@ const getCalculatedInspectedCbm = (item) =>
   ?? item?.cbm?.total
   ?? "0";
 
+const hasItemQcRecord = (item = {}) =>
+  Boolean(
+    String(
+      item?.latest_inspection_report_qc_id
+      || item?.qc?._id
+      || item?.qc?.id
+      || "",
+    ).trim(),
+  );
+
 const Items = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -452,9 +462,14 @@ const Items = () => {
       if (!canUploadItemFiles || uploadingItemId) return;
 
       const itemId = String(item?._id || "").trim();
-      if (!itemId || hasItemInspectionDone(item)) return;
-
+      if (!itemId) return;
       const fileType = getSelectedItemFileType(itemId);
+      if (fileType === "qc_images" && !hasItemQcRecord(item)) {
+        setSuccess("");
+        setError("QC images can only be uploaded after a QC record exists for this item.");
+        return;
+      }
+
       setItemFilePickerContext({
         itemId,
         fileType,
@@ -747,6 +762,8 @@ const Items = () => {
                       const itemId = String(item?._id || "").trim();
                       const selectedFileType = getSelectedItemFileType(itemId);
                       const isUploadingThisItem = uploadingItemId === itemId;
+                      const isQcImageLocked =
+                        selectedFileType === "qc_images" && !hasItemQcRecord(item);
 
                       return (
                         <tr key={item?._id || item?.code}>
@@ -819,7 +836,12 @@ const Items = () => {
                                     type="button"
                                     className="btn btn-outline-primary btn-sm"
                                     onClick={() => handleOpenItemFilePicker(item)}
-                                    disabled={Boolean(uploadingItemId)}
+                                    disabled={Boolean(uploadingItemId) || isQcImageLocked}
+                                    title={
+                                      isQcImageLocked
+                                        ? "QC images can only be uploaded after a QC record exists for this item."
+                                        : ""
+                                    }
                                   >
                                     {isUploadingThisItem ? "Uploading..." : "Upload Files"}
                                   </button>

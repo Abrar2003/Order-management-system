@@ -12,6 +12,7 @@ import {
   toISODateString,
 } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
+import { useShippingInspectors } from "../hooks/useShippingInspectors";
 import {
   getNextClientSortState,
   sortClientRows,
@@ -64,6 +65,7 @@ const Container = () => {
   const [vendor, setVendor] = useState(() =>
     normalizeSearchParam(searchParams.get("vendor")),
   );
+  const [stuffedById, setStuffedById] = useState("");
   const [vendors, setVendors] = useState([]);
   const [rows, setRows] = useState([]);
   const [orderIdFilter, setOrderIdFilter] = useState(() =>
@@ -80,6 +82,12 @@ const Container = () => {
   const [syncedQuery, setSyncedQuery] = useState(null);
   const [sortBy, setSortBy] = useState("orderId");
   const [sortOrder, setSortOrder] = useState("asc");
+  const {
+    inspectors,
+    inspectorById,
+    loadingInspectors,
+    inspectorError,
+  } = useShippingInspectors();
 
   const fetchVendors = useCallback(async () => {
     try {
@@ -385,6 +393,7 @@ const Container = () => {
     }
 
     const invoiceNumberValue = String(invoiceNumber || "").trim();
+    const stuffedBy = inspectorById.get(String(stuffedById || "").trim());
 
     if (!shippingDate) {
       setError("Shipping date is required.");
@@ -398,6 +407,10 @@ const Container = () => {
 
     if (!vendor) {
       setError("Please select a vendor.");
+      return;
+    }
+    if (!stuffedBy) {
+      setError("Please select the inspector who was present during stuffing.");
       return;
     }
 
@@ -425,6 +438,7 @@ const Container = () => {
             stuffing_date: shippingDateIso,
             container,
             invoice_number: invoiceNumberValue,
+            stuffed_by: stuffedBy,
             quantity: row.quantity,
             remarks: "Bulk container shipment",
           }),
@@ -523,6 +537,27 @@ const Container = () => {
 
               {!isViewOnly && (
                 <div className="col-md-2">
+                  <label className="form-label">Stuffed By</label>
+                  <select
+                    className="form-select"
+                    value={stuffedById}
+                    onChange={(e) => setStuffedById(e.target.value)}
+                    disabled={loadingInspectors}
+                  >
+                    <option value="">
+                      {loadingInspectors ? "Loading inspectors..." : "Select inspector"}
+                    </option>
+                    {inspectors.map((inspector) => (
+                      <option key={inspector.id} value={inspector.id}>
+                        {inspector.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {!isViewOnly && (
+                <div className="col-md-2">
                   <label className="form-label">Shipping Date</label>
                   <input
                     type="date"
@@ -568,6 +603,7 @@ const Container = () => {
                     disabled={
                       saving
                       || loadingRows
+                      || loadingInspectors
                       || selectedRows.length === 0
                       || !canFinalizeShipping
                     }
@@ -577,6 +613,9 @@ const Container = () => {
                 </div>
               )}
             </div>
+            {inspectorError && !isViewOnly && (
+              <div className="alert alert-warning mt-3 mb-0">{inspectorError}</div>
+            )}
           </div>
         </div>
 

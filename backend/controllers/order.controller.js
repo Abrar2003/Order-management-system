@@ -48,7 +48,7 @@ const SHIPMENT_VISIBLE_STATUSES = [
   "Shipped",
 ];
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
-const RECTIFY_DEFAULT_ETD_OFFSET_DAYS = 60;
+const RECTIFY_DEFAULT_ETD_OFFSET_DAYS = 90;
 const INVALID_DATE_RANGE = Symbol("invalid-date-range");
 
 const escapeRegex = (value = "") =>
@@ -105,6 +105,25 @@ const normalizeShipmentInvoiceNumber = (value, fallback = "N/A") => {
   if (normalized) return normalized;
   return String(fallback ?? "").trim();
 };
+
+const normalizeShipmentStuffedBy = (value = null) => {
+  const idValue = value?.id ?? value?._id ?? value?.inspector_id ?? value?.inspectorId;
+  const normalizedId = String(idValue ?? "").trim();
+  const normalizedName = String(value?.name ?? value?.label ?? "").trim();
+
+  if (!normalizedId || !mongoose.Types.ObjectId.isValid(normalizedId)) {
+    throw new Error("stuffed_by.id must be a valid inspector id");
+  }
+  if (!normalizedName) {
+    throw new Error("stuffed_by.name is required");
+  }
+
+  return {
+    id: new mongoose.Types.ObjectId(normalizedId),
+    name: normalizedName,
+  };
+};
+
 const toPositiveCbmNumber = (value) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return 0;
@@ -1396,6 +1415,7 @@ const buildRectifyWorkbookBuffer = (rows = []) => {
     order_date: formatDateForUploadSheet(entry?.order_date),
     change_type: entry?.change_type || "",
     changedType: entry?.change_type || "",
+    merged_tag: entry?.merged ? `Merged (${Number(entry?.merged_row_count || 1)} rows)` : "",
     existing_status: entry?.existing_order_status || "",
     changed_fields: Array.isArray(entry?.changed_fields)
       ? entry.changed_fields.join(", ")
@@ -1416,6 +1436,7 @@ const buildRectifyWorkbookBuffer = (rows = []) => {
       "order_date",
       "change_type",
       "changedType",
+      "merged_tag",
       "existing_status",
       "changed_fields",
       "source_refer",
@@ -1443,6 +1464,7 @@ const normalizeRectifyChangeType = (value) => {
     .trim()
     .toLowerCase();
   if (
+    normalized === "unchanged" ||
     normalized === "new" ||
     normalized === "modified" ||
     normalized === "closed"
@@ -1480,6 +1502,8 @@ const normalizeRectifiedSelectionRow = (row = {}, defaults = {}) => {
     ...normalizedRow,
     change_type: changeType,
     changed_fields: changedFields,
+    merged: Boolean(row?.merged),
+    merged_row_count: Math.max(1, Number(row?.merged_row_count || 1)),
     existing_order_id: existingOrderId || null,
     existing_order_status: existingOrderStatus || null,
     previous_order_action: normalizePreviousOrderActionInput(
@@ -1501,6 +1525,8 @@ const buildRectifyRowsForResponse = (rows = []) =>
     order_date: row?.order_date || null,
     change_type: normalizeRectifyChangeType(row?.change_type),
     changed_fields: normalizeRectifyChangedFields(row?.changed_fields),
+    merged: Boolean(row?.merged),
+    merged_row_count: Math.max(1, Number(row?.merged_row_count || 1)),
     existing_order_id: String(row?.existing_order_id || "").trim() || null,
     existing_order_status:
       normalizeLooseString(row?.existing_order_status) || null,
@@ -1508,6 +1534,142 @@ const buildRectifyRowsForResponse = (rows = []) =>
       row?.previous_order_action || row?.previousOrderAction,
     ),
   }));
+
+const pickPreferredRectifyText = (...values) => {
+  const normalizedValues = values
+    .map((value) => normalizeRectifyText(value))
+    .filter(Boolean);
+  if (normalizedValues.length === 0) return "";
+
+  return normalizedValues.sort((left, right) => {
+    const lengthCompare = right.length - left.length;
+    if (lengthCompare !== 0) return lengthCompare;
+    return left.localeCompare(right);
+  })[0];
+};
+
+const mergeRectifySourceField = (leftValue = "", rightValue = "", separator = " | ") => {
+  const values = [leftValue, rightValue]
+    .map((value) => normalizeRectifyText(value))
+    .filter(Boolean);
+  if (values.length === 0) return "";
+  return [...new Set(values)].join(separator);
+};
+
+const mergeRectifyDuplicateRows = (rows = []) => {
+  const grouped = new Map();
+  let mergedInputRowCount = 0;
+  let mergedGroupCount = 0;
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const key = makeRectifyKey(row?.order_id, row?.item_code);
+    if (!key) continue;
+
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        ...row,
+        merged: false,
+        merged_row_count: 1,
+      });
+      continue;
+    }
+
+    mergedInputRowCount += 1;
+    const existing = grouped.get(key);
+    const nextMergedRowCount = Number(existing?.merged_row_count || 1) + 1;
+
+    grouped.set(key, {
+      ...existing,
+      description: pickPreferredRectifyText(
+        existing?.description,
+        row?.description,
+      ),
+      brand: pickPreferredRectifyText(existing?.brand, row?.brand),
+      vendor: pickPreferredRectifyText(existing?.vendor, row?.vendor),
+      quantity:
+        Number(parseQuantityLike(existing?.quantity) || 0)
+        + Number(parseQuantityLike(row?.quantity) || 0),
+      ETD: existing?.ETD || row?.ETD || null,
+      order_date: existing?.order_date || row?.order_date || null,
+      source: {
+        refer: mergeRectifySourceField(
+          existing?.source?.refer,
+          row?.source?.refer,
+        ),
+        raw_quantity: mergeRectifySourceField(
+          existing?.source?.raw_quantity,
+          row?.source?.raw_quantity,
+          " + ",
+        ),
+      },
+      merged: true,
+      merged_row_count: nextMergedRowCount,
+    });
+  }
+
+  for (const row of grouped.values()) {
+    if (Boolean(row?.merged)) {
+      mergedGroupCount += 1;
+    }
+  }
+
+  return {
+    rows: Array.from(grouped.values()),
+    merged_input_rows: mergedInputRowCount,
+    merged_row_groups: mergedGroupCount,
+  };
+};
+
+const hydrateRectifyRowsWithFallbackDescriptions = async ({
+  rows = [],
+  existingByKey = new Map(),
+} = {}) => {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const missingDescriptionCodes = [
+    ...new Set(
+      safeRows
+        .filter((row) => !normalizeRectifyText(row?.description))
+        .map((row) => normalizeRectifyText(row?.item_code).toLowerCase())
+        .filter(Boolean),
+    ),
+  ];
+
+  const itemDescriptionByCode = new Map();
+  if (missingDescriptionCodes.length > 0) {
+    const itemDocs = await Item.find({
+      code: { $in: missingDescriptionCodes },
+    })
+      .select("code description name")
+      .lean();
+
+    itemDocs.forEach((itemDoc) => {
+      const codeKey = normalizeRectifyText(itemDoc?.code).toLowerCase();
+      const description = normalizeRectifyText(
+        itemDoc?.description || itemDoc?.name || "",
+      );
+      if (!codeKey || !description || itemDescriptionByCode.has(codeKey)) return;
+      itemDescriptionByCode.set(codeKey, description);
+    });
+  }
+
+  return safeRows.map((row) => {
+    const currentDescription = normalizeRectifyText(row?.description);
+    if (currentDescription) return row;
+
+    const rectifyKey = makeRectifyKey(row?.order_id, row?.item_code);
+    const existingDescription = normalizeRectifyText(
+      existingByKey.get(rectifyKey)?.item?.description,
+    );
+    const itemMasterDescription = itemDescriptionByCode.get(
+      normalizeRectifyText(row?.item_code).toLowerCase(),
+    ) || "";
+
+    return {
+      ...row,
+      description: existingDescription || itemMasterDescription || "",
+    };
+  });
+};
 
 const createRectifyUploadLog = async ({
   reqUser = null,
@@ -1672,7 +1834,8 @@ const formatShipmentEntriesForUploadLog = (shipmentEntries = []) => {
       const quantity = Number(entry?.quantity || 0);
       const pending = Number(entry?.pending || 0);
       const remarks = String(entry?.remaining_remarks || "").trim() || "None";
-      return `${index + 1}) ${stuffingDate} | ${container} | invoice ${invoiceNumber} | qty ${Number.isFinite(quantity) ? quantity : 0} | pending ${Number.isFinite(pending) ? pending : 0} | remarks: ${remarks}`;
+      const stuffedBy = String(entry?.stuffed_by?.name || "").trim() || "Unknown";
+      return `${index + 1}) ${stuffingDate} | ${container} | invoice ${invoiceNumber} | stuffed by ${stuffedBy} | qty ${Number.isFinite(quantity) ? quantity : 0} | pending ${Number.isFinite(pending) ? pending : 0} | remarks: ${remarks}`;
     })
     .join(" || ");
 };
@@ -2341,6 +2504,9 @@ const normalizeShipmentEntries = (shipmentPayload) => {
     }
 
     const remarks = String(entry?.remaining_remarks ?? "").trim();
+    const stuffedBy = normalizeShipmentStuffedBy(
+      entry?.stuffed_by ?? entry?.stuffedBy,
+    );
 
     return {
       container,
@@ -2348,6 +2514,7 @@ const normalizeShipmentEntries = (shipmentPayload) => {
       stuffing_date: stuffingDate,
       quantity,
       remaining_remarks: remarks,
+      stuffed_by: stuffedBy,
       updated_at: entry?.updated_at
         ? parseTimestampLike(entry.updated_at)
         : null,
@@ -2389,6 +2556,9 @@ const fitShipmentEntriesToOrderQuantity = (
       quantity: adjustedQuantity,
       pending: Math.max(0, normalizedQuantity - cumulativeShipped),
       remaining_remarks: String(entry?.remaining_remarks ?? "").trim(),
+      stuffed_by: normalizeShipmentStuffedBy(
+        entry?.stuffed_by ?? entry?.stuffedBy,
+      ),
       updated_at: user
         ? updatedAt
         : (entry?.updated_at ? parseTimestampLike(entry.updated_at) : null) ||
@@ -3234,6 +3404,9 @@ const buildUploadOrderRowId = (row = {}, index = 0) => {
 const normalizeUploadedSelectionRow = (row = {}, index = 0) => {
   const quantityRaw = row?.quantity;
   const parsedQuantity = Number(quantityRaw);
+  const orderDate = dateParser(row?.order_date ?? row?.orderDate);
+  const parsedEtd = dateParser(row?.ETD ?? row?.etd);
+  const normalizedEtd = parsedEtd || deriveRectifyDefaultEtd(orderDate);
   const previousOrderAction = normalizePreviousOrderActionInput(
     row?.previous_order_action || row?.previousOrderAction,
   );
@@ -3248,8 +3421,8 @@ const normalizeUploadedSelectionRow = (row = {}, index = 0) => {
     quantity: Number.isFinite(parsedQuantity)
       ? parsedQuantity
       : (quantityRaw ?? ""),
-    ETD: dateParser(row?.ETD ?? row?.etd),
-    order_date: dateParser(row?.order_date ?? row?.orderDate),
+    ETD: normalizedEtd,
+    order_date: orderDate,
     change_type: "",
     reason: "",
     changed_fields: [],
@@ -3268,7 +3441,7 @@ const buildUploadedOrderDocument = (row = {}) => ({
   },
   brand: row.brand,
   vendor: row.vendor,
-  ETD: row.ETD || undefined,
+  ETD: row.ETD || deriveRectifyDefaultEtd(row.order_date) || undefined,
   order_date: row.order_date || undefined,
   status: "Pending",
   quantity: Number(row.quantity),
@@ -4346,9 +4519,7 @@ exports.rectifyPdfOrders = async (req, res) => {
 
     if (Array.isArray(selectedRowsPayload) && selectedRowsPayload.length > 0) {
       const invalidEntries = [];
-      const dedupedRows = [];
-      const seenKeys = new Set();
-      let duplicateInSelectionCount = 0;
+      const candidateRows = [];
 
       for (let index = 0; index < selectedRowsPayload.length; index += 1) {
         const normalizedRow = normalizeRectifiedSelectionRow(
@@ -4360,15 +4531,6 @@ exports.rectifyPdfOrders = async (req, res) => {
           invalidEntries.push({
             row_index: index + 1,
             reason: "missing_order_or_item_code",
-            source: selectedRowsPayload[index],
-          });
-          continue;
-        }
-
-        if (!normalizedRow.description) {
-          invalidEntries.push({
-            row_index: index + 1,
-            reason: "missing_description",
             source: selectedRowsPayload[index],
           });
           continue;
@@ -4394,18 +4556,12 @@ exports.rectifyPdfOrders = async (req, res) => {
           });
           continue;
         }
-
-        const key = makeRectifyKey(
-          normalizedRow.order_id,
-          normalizedRow.item_code,
-        );
-        if (seenKeys.has(key)) {
-          duplicateInSelectionCount += 1;
-          continue;
-        }
-        seenKeys.add(key);
-        dedupedRows.push(normalizedRow);
+        candidateRows.push(normalizedRow);
       }
+
+      const mergedSelection = mergeRectifyDuplicateRows(candidateRows);
+      let dedupedRows = mergedSelection.rows;
+      const duplicateInSelectionCount = mergedSelection.merged_input_rows;
 
       if (dedupedRows.length === 0) {
         return res.status(400).json({
@@ -4437,6 +4593,10 @@ exports.rectifyPdfOrders = async (req, res) => {
           existingByKey.set(key, existingOrder);
         }
       }
+      dedupedRows = await hydrateRectifyRowsWithFallbackDescriptions({
+        rows: dedupedRows,
+        existingByKey,
+      });
 
       const rowsEligibleForApply = dedupedRows.filter(
         (row) => normalizeRectifyChangeType(row?.change_type) !== "closed",
@@ -4493,6 +4653,9 @@ exports.rectifyPdfOrders = async (req, res) => {
       const closedCount = dedupedRows.filter(
         (row) => normalizeRectifyChangeType(row?.change_type) === "closed",
       ).length;
+      const unchangedCount = dedupedRows.filter(
+        (row) => normalizeRectifyChangeType(row?.change_type) === "unchanged",
+      ).length;
 
       return res.status(200).json({
         success: true,
@@ -4504,8 +4667,10 @@ exports.rectifyPdfOrders = async (req, res) => {
           valid_rows: dedupedRows.length,
           invalid_rows: invalidEntries.length,
           duplicate_keys_in_pdf: duplicateInSelectionCount,
-          unchanged_rows: 0,
-          changed_rows: dedupedRows.length,
+          merged_input_rows: duplicateInSelectionCount,
+          merged_row_groups: mergedSelection.merged_row_groups,
+          unchanged_rows: unchangedCount,
+          changed_rows: dedupedRows.length - unchangedCount,
           new_rows: newCount,
           modified_rows: modifiedCount,
           closed_rows: closedCount,
@@ -4550,10 +4715,8 @@ exports.rectifyPdfOrders = async (req, res) => {
     const extractedRows = extractTableRowsFromPdfBuffer(pdfBuffer);
 
     const invalidEntries = [];
-    const dedupedRows = [];
-    const seenPdfKeys = new Set();
+    const candidateRows = [];
     const presentPdfKeys = new Set();
-    let duplicateInPdfCount = 0;
 
     for (let index = 0; index < extractedRows.length; index += 1) {
       const normalizedRow = normalizeRectifiedPdfRow(extractedRows[index], {
@@ -4576,15 +4739,6 @@ exports.rectifyPdfOrders = async (req, res) => {
       );
       presentPdfKeys.add(key);
 
-      if (!normalizedRow.description) {
-        invalidEntries.push({
-          row_index: index + 1,
-          reason: "missing_description",
-          source: extractedRows[index],
-        });
-        continue;
-      }
-
       if (
         !Number.isFinite(Number(normalizedRow.quantity)) ||
         Number(normalizedRow.quantity) <= 0
@@ -4596,21 +4750,24 @@ exports.rectifyPdfOrders = async (req, res) => {
         });
         continue;
       }
-
-      if (seenPdfKeys.has(key)) {
-        duplicateInPdfCount += 1;
-        continue;
-      }
-      seenPdfKeys.add(key);
-      dedupedRows.push(normalizedRow);
+      candidateRows.push(normalizedRow);
     }
+
+    const mergedPdfRows = mergeRectifyDuplicateRows(candidateRows);
+    let dedupedRows = mergedPdfRows.rows;
+    const duplicateInPdfCount = mergedPdfRows.merged_input_rows;
 
     const { existingByKey, openOrdersByKey } =
       await loadExistingOrdersForBrandVendorPairs([
         { brand: brandInput, vendor: vendorInput },
       ]);
+    dedupedRows = await hydrateRectifyRowsWithFallbackDescriptions({
+      rows: dedupedRows,
+      existingByKey,
+    });
 
     const changedRows = [];
+    const unchangedRows = [];
     let unchangedCount = 0;
     let newCount = 0;
     let modifiedCount = 0;
@@ -4634,6 +4791,12 @@ exports.rectifyPdfOrders = async (req, res) => {
       const changedFields = getRectifiedChangedFields(row, existing);
       if (changedFields.length === 0) {
         unchangedCount += 1;
+        unchangedRows.push({
+          ...row,
+          change_type: "unchanged",
+          changed_fields: [],
+          ...getExistingOrderPreviewMeta(existing),
+        });
         continue;
       }
 
@@ -4646,6 +4809,8 @@ exports.rectifyPdfOrders = async (req, res) => {
       });
     }
 
+    const previewRows = [...unchangedRows, ...changedRows];
+
     for (const [openKey, openOrder] of openOrdersByKey.entries()) {
       if (presentPdfKeys.has(openKey)) continue;
 
@@ -4653,7 +4818,7 @@ exports.rectifyPdfOrders = async (req, res) => {
       if (!Number.isFinite(openQuantity) || openQuantity <= 0) continue;
 
       closedCount += 1;
-      changedRows.push({
+      previewRows.push({
         order_id: normalizeOrderKey(openOrder?.order_id),
         item_code: normalizeRectifyText(openOrder?.item?.item_code),
         description: normalizeRectifyText(openOrder?.item?.description),
@@ -4675,7 +4840,7 @@ exports.rectifyPdfOrders = async (req, res) => {
       });
     }
 
-    const workbookBuffer = buildRectifyWorkbookBuffer(changedRows);
+    const workbookBuffer = buildRectifyWorkbookBuffer(previewRows);
     const sanitizeFileNamePart = (value) =>
       String(value || "")
         .replace(/[<>:"/\\|?*\x00-\x1F]/g, " ")
@@ -4697,7 +4862,7 @@ exports.rectifyPdfOrders = async (req, res) => {
       (row) => row?.change_type !== "closed",
     );
     applySummary.skipped_closed_count =
-      changedRows.length - rowsEligibleForApply.length;
+      previewRows.length - unchangedRows.length - rowsEligibleForApply.length;
 
     if (shouldApplyChanges && rowsEligibleForApply.length > 0) {
       applySummary = await applyRectifiedOrderRows({
@@ -4706,7 +4871,7 @@ exports.rectifyPdfOrders = async (req, res) => {
         reqUser: req.user,
       });
       applySummary.skipped_closed_count =
-        changedRows.length - rowsEligibleForApply.length;
+        previewRows.length - unchangedRows.length - rowsEligibleForApply.length;
     }
 
     const uploadLogId = shouldApplyChanges
@@ -4743,6 +4908,8 @@ exports.rectifyPdfOrders = async (req, res) => {
         valid_rows: dedupedRows.length,
         invalid_rows: invalidEntries.length,
         duplicate_keys_in_pdf: duplicateInPdfCount,
+        merged_input_rows: duplicateInPdfCount,
+        merged_row_groups: mergedPdfRows.merged_row_groups,
         unchanged_rows: unchangedCount,
         changed_rows: changedRows.length,
         new_rows: newCount,
@@ -4756,7 +4923,7 @@ exports.rectifyPdfOrders = async (req, res) => {
       upload_log_id: uploadLogId,
       file_name: outputFileName,
       file_base64: workbookBuffer.toString("base64"),
-      changed_rows_data: buildRectifyRowsForResponse(changedRows),
+      changed_rows_data: buildRectifyRowsForResponse(previewRows),
       invalid_entries: invalidEntries.slice(0, 100),
     });
   } catch (error) {
@@ -7971,7 +8138,14 @@ exports.editOrder = async (req, res) => {
       const shipmentSource = hasShipment
         ? payload.shipment
         : order.shipment || [];
-      const normalizedShipmentSource = normalizeShipmentEntries(shipmentSource);
+      let normalizedShipmentSource;
+      try {
+        normalizedShipmentSource = normalizeShipmentEntries(shipmentSource);
+      } catch (shipmentError) {
+        return res.status(400).json({
+          message: shipmentError?.message || "Invalid shipment payload",
+        });
+      }
       adjustedShipment = fitShipmentEntriesToOrderQuantity(
         normalizedShipmentSource,
         nextQuantity,
@@ -8822,6 +8996,8 @@ exports.finalizeOrder = async (req, res) => {
       container,
       quantity,
       remarks,
+      stuffed_by,
+      stuffedBy,
       invoice_number,
       invoiceNumber,
       invoice,
@@ -8867,6 +9043,12 @@ exports.finalizeOrder = async (req, res) => {
       invoice_number ?? invoiceNumber ?? invoice,
       "",
     );
+    let parsedStuffedBy;
+    try {
+      parsedStuffedBy = normalizeShipmentStuffedBy(stuffed_by ?? stuffedBy);
+    } catch (error) {
+      return res.status(400).json({ message: error.message });
+    }
 
     const parsedQuantity = Number(quantity);
     if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) {
@@ -8919,6 +9101,7 @@ exports.finalizeOrder = async (req, res) => {
       quantity: parsedQuantity,
       pending,
       remaining_remarks: remarks,
+      stuffed_by: parsedStuffedBy,
       updated_at: updatedAt,
       updated_by: buildAuditActor(req.user),
     });

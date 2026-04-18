@@ -465,11 +465,35 @@ function normalizeAndGroupRowsByOrder(rows) {
   }));
 
   let currentOrder = "";
+  let currentOrderDate = "";
+  let currentEtd = "";
+  let currentDaysTillEtd = "";
   for (const row of normalized) {
     if (row.orderNumber) {
       currentOrder = row.orderNumber;
+      currentOrderDate = row.orderDate || "";
+      currentEtd = row.etd || "";
+      currentDaysTillEtd = row.daysTillEtd || "";
     } else if (currentOrder) {
       row.orderNumber = currentOrder;
+    }
+
+    if (row.orderDate) {
+      currentOrderDate = row.orderDate;
+    } else if (currentOrderDate) {
+      row.orderDate = currentOrderDate;
+    }
+
+    if (row.etd) {
+      currentEtd = row.etd;
+    } else if (currentEtd) {
+      row.etd = currentEtd;
+    }
+
+    if (row.daysTillEtd) {
+      currentDaysTillEtd = row.daysTillEtd;
+    } else if (currentDaysTillEtd) {
+      row.daysTillEtd = currentDaysTillEtd;
     }
   }
 
@@ -521,4 +545,3 @@ function extractTableRowsFromPdfBuffer(pdfBuffer) {
 module.exports = {
   extractTableRowsFromPdfBuffer,
 };
-

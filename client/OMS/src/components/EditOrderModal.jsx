@@ -8,6 +8,7 @@ import {
   toDDMMYYYYInputValue,
   toISODateString,
 } from "../utils/date";
+import { useShippingInspectors } from "../hooks/useShippingInspectors";
 import "../App.css";
 
 const normalizeShipmentDraftInvoiceNumber = (value) => {
@@ -22,6 +23,8 @@ const makeInitialShipmentRows = (shipment = []) =>
     stuffing_date: toDDMMYYYYInputValue(entry?.stuffing_date, ""),
     quantity: String(entry?.quantity ?? ""),
     remaining_remarks: String(entry?.remaining_remarks ?? ""),
+    stuffed_by_id: String(entry?.stuffed_by?.id ?? ""),
+    stuffed_by_name: String(entry?.stuffed_by?.name ?? ""),
   }));
 
 const createEmptyShipmentRow = () => ({
@@ -30,6 +33,8 @@ const createEmptyShipmentRow = () => ({
   stuffing_date: getTodayDDMMYYYY(),
   quantity: "",
   remaining_remarks: "",
+  stuffed_by_id: "",
+  stuffed_by_name: "",
 });
 
 const toSafeNumber = (value) => {
@@ -62,6 +67,7 @@ const buildAdjustedShipmentPreview = (shipmentRows, targetQuantity) => {
       quantity: adjustedQty,
       pending: Math.max(0, normalizedTarget - cumulative),
       remaining_remarks: String(row?.remaining_remarks || "").trim(),
+      stuffed_by_name: String(row?.stuffed_by_name || "").trim(),
     });
   }
 
@@ -83,6 +89,12 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const {
+    inspectors,
+    inspectorById,
+    loadingInspectors,
+    inspectorError,
+  } = useShippingInspectors();
 
   const targetQuantity = Number(form.quantity);
   const inputTotalShipped = useMemo(
@@ -109,14 +121,38 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
   const adjustedRemaining = Number.isFinite(targetQuantity)
     ? Math.max(0, targetQuantity - adjustedShippedTotal)
     : 0;
+  const shipmentInspectorOptions = useMemo(() => {
+    const optionMap = new Map(inspectors.map((entry) => [entry.id, entry]));
+
+    (form.shipment || []).forEach((entry) => {
+      const inspectorId = String(entry?.stuffed_by_id || "").trim();
+      const inspectorName = String(entry?.stuffed_by_name || "").trim();
+      if (!inspectorId || optionMap.has(inspectorId)) return;
+      optionMap.set(inspectorId, {
+        id: inspectorId,
+        name: inspectorName || inspectorId,
+      });
+    });
+
+    return Array.from(optionMap.values()).sort((left, right) =>
+      left.name.localeCompare(right.name),
+    );
+  }, [form.shipment, inspectors]);
 
   const updateShipmentRow = (index, field, value) => {
     setForm((prev) => {
       const shipment = [...prev.shipment];
-      shipment[index] = {
+      const nextEntry = {
         ...shipment[index],
         [field]: value,
       };
+
+      if (field === "stuffed_by_id") {
+        nextEntry.stuffed_by_name =
+          inspectorById.get(String(value || "").trim())?.name || "";
+      }
+
+      shipment[index] = nextEntry;
       return { ...prev, shipment };
     });
   };
@@ -158,10 +194,14 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
         const stuffingDate = String(row.stuffing_date || "").trim();
         const stuffingDateIso = toISODateString(stuffingDate);
         const shipmentQty = Number(row.quantity);
+        const stuffedById = String(row.stuffed_by_id || "").trim();
 
         if (!container) return `shipment row ${i + 1}: container is required`;
         if (!stuffingDateIso || !isValidDDMMYYYY(stuffingDate)) {
           return `shipment row ${i + 1}: stuffing date must be in DD/MM/YYYY format`;
+        }
+        if (!stuffedById) {
+          return `shipment row ${i + 1}: stuffed by is required`;
         }
         if (!Number.isFinite(shipmentQty) || shipmentQty <= 0) {
           return `shipment row ${i + 1}: quantity must be a positive number`;
@@ -202,7 +242,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
       } else {
         adjustedShipmentPreview.forEach((entry, idx) => {
           lines.push(
-            `${idx + 1}) ${entry.container} | invoice ${entry.invoice_number || "N/A"} | ${formatDateDDMMYYYY(entry.stuffing_date, "-")} | qty ${entry.quantity} | pending ${entry.pending} | remarks ${entry.remaining_remarks || "-"}`,
+            `${idx + 1}) ${entry.container} | invoice ${entry.invoice_number || "N/A"} | stuffed by ${entry.stuffed_by_name || "-"} | ${formatDateDDMMYYYY(entry.stuffing_date, "-")} | qty ${entry.quantity} | pending ${entry.pending} | remarks ${entry.remaining_remarks || "-"}`,
           );
         });
       }
@@ -230,6 +270,12 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
     if (isAdmin) {
       payload.quantity = Number(form.quantity);
       payload.shipment = form.shipment.map((entry) => ({
+        stuffed_by: {
+          id: String(entry?.stuffed_by_id || "").trim(),
+          name:
+            inspectorById.get(String(entry?.stuffed_by_id || "").trim())?.name
+            || String(entry?.stuffed_by_name || "").trim(),
+        },
         container: String(entry?.container || "").trim(),
         invoice_number: String(entry?.invoice_number || "").trim(),
         stuffing_date: toISODateString(entry?.stuffing_date),
@@ -358,24 +404,44 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
               <table className="table table-sm table-striped align-middle mb-0">
                 <thead>
                   <tr>
+                    <th style={{ width: "16%" }}>Stuffed By</th>
                     <th style={{ width: "16%" }}>Container</th>
-                    <th style={{ width: "18%" }}>Invoice Number (Optional)</th>
-                    <th style={{ width: "16%" }}>Stuffing Date</th>
-                    <th style={{ width: "12%" }}>Quantity</th>
-                    <th style={{ width: "28%" }}>Remarks</th>
+                    <th style={{ width: "16%" }}>Invoice Number (Optional)</th>
+                    <th style={{ width: "14%" }}>Stuffing Date</th>
+                    <th style={{ width: "10%" }}>Quantity</th>
+                    <th style={{ width: "24%" }}>Remarks</th>
                     <th style={{ width: "10%" }}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {form.shipment.length === 0 && (
                     <tr>
-                      <td colSpan="6" className="text-center text-secondary py-3">
+                      <td colSpan="7" className="text-center text-secondary py-3">
                         No shipment rows
                       </td>
                     </tr>
                   )}
                   {form.shipment.map((entry, index) => (
                     <tr key={`shipment-row-${index}`}>
+                      <td>
+                        <select
+                          className="form-select form-select-sm"
+                          value={entry.stuffed_by_id}
+                          disabled={!isAdmin || loadingInspectors}
+                          onChange={(e) =>
+                            updateShipmentRow(index, "stuffed_by_id", e.target.value)
+                          }
+                        >
+                          <option value="">
+                            {loadingInspectors ? "Loading inspectors..." : "Select inspector"}
+                          </option>
+                          {shipmentInspectorOptions.map((inspector) => (
+                            <option key={inspector.id} value={inspector.id}>
+                              {inspector.name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
                       <td>
                         <input
                           type="text"
@@ -478,6 +544,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
               </div>
             )}
 
+            {inspectorError && <div className="alert alert-warning mb-0">{inspectorError}</div>}
             {error && <div className="alert alert-danger mb-0">{error}</div>}
           </div>
 
