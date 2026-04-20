@@ -2,6 +2,11 @@ const Item = require("../models/item.model");
 const Order = require("../models/order.model");
 const QC = require("../models/qc.model");
 const Inspection = require("../models/inspection.model");
+const {
+  BOX_PACKAGING_MODES,
+  buildBoxMeasurementCbmSummary,
+  detectBoxPackagingMode,
+} = require("../helpers/boxMeasurement");
 
 const normalizeText = (value) => String(value ?? "").trim();
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
@@ -25,8 +30,11 @@ const buildNormalizedCbmSnapshot = (value = {}) => {
   const box2 = Math.max(0, toSafeNumber(value?.box2 ?? value?.bottom, 0));
   const box3 = Math.max(0, toSafeNumber(value?.box3, 0));
   const totalFromBoxes = box1 + box2 + box3;
+  const explicitTotal = Math.max(0, toSafeNumber(value?.total, 0));
   const total =
-    totalFromBoxes > 0
+    explicitTotal > 0
+      ? explicitTotal
+      : totalFromBoxes > 0
       ? totalFromBoxes
       : Math.max(0, toSafeNumber(value?.total, 0));
 
@@ -131,28 +139,35 @@ const applyDerivedItemFields = (item, { preferredBrand = "" } = {}) => {
     }
   }
 
-  const nextInspectedTop = calculateCbmFromBoxSize(
-    item?.inspected_box_top_LBH
-    || item?.inspected_top_LBH
-    || item?.inspected_item_top_LBH,
+  const inspectedBoxMode = detectBoxPackagingMode(
+    item?.inspected_box_mode,
+    item?.inspected_box_sizes,
   );
-  const nextInspectedBottom = calculateCbmFromBoxSize(
-    item?.inspected_box_bottom_LBH
-    || item?.inspected_bottom_LBH
-    || item?.inspected_item_bottom_LBH,
-  );
-  const hasSplitInspectedCbm =
-    Math.max(0, toSafeNumber(nextInspectedTop, 0)) > 0
-    && Math.max(0, toSafeNumber(nextInspectedBottom, 0)) > 0;
-  const nextCalculatedInspectedTotal = hasSplitInspectedCbm
-    ? toDecimalString(
-        Math.max(0, toSafeNumber(nextInspectedTop, 0))
-        + Math.max(0, toSafeNumber(nextInspectedBottom, 0)),
-        6,
-      )
-    : calculateCbmFromBoxSize(
-      item?.inspected_box_LBH || item?.box_LBH || item?.inspected_item_LBH,
-    );
+  const inspectedBoxSummary = buildBoxMeasurementCbmSummary({
+    sizes: item?.inspected_box_sizes,
+    mode: inspectedBoxMode,
+    singleLbh: item?.inspected_box_LBH || item?.box_LBH || item?.inspected_item_LBH,
+    topLbh:
+      inspectedBoxMode === BOX_PACKAGING_MODES.CARTON
+        ? null
+        : item?.inspected_box_top_LBH ||
+          item?.inspected_top_LBH ||
+          item?.inspected_item_top_LBH,
+    bottomLbh:
+      inspectedBoxMode === BOX_PACKAGING_MODES.CARTON
+        ? null
+        : item?.inspected_box_bottom_LBH ||
+          item?.inspected_bottom_LBH ||
+          item?.inspected_item_bottom_LBH,
+  });
+  const nextInspectedTop = inspectedBoxSummary.first;
+  const nextInspectedBottom = inspectedBoxSummary.second;
+  const nextCalculatedInspectedTotal =
+    Math.max(0, toSafeNumber(inspectedBoxSummary.total, 0)) > 0
+      ? inspectedBoxSummary.total
+      : calculateCbmFromBoxSize(
+          item?.inspected_box_LBH || item?.box_LBH || item?.inspected_item_LBH,
+        );
   const nextPisTop = calculateCbmFromBoxSize(
     item?.pis_box_top_LBH || item?.pis_item_top_LBH,
   );
@@ -320,7 +335,11 @@ const applyQcSnapshot = (item, qcLike) => {
   const packedSize = Boolean(qcLike?.packed_size);
   const finishing = Boolean(qcLike?.finishing);
   const branding = Boolean(qcLike?.branding);
-  const barcode = Math.max(0, toSafeNumber(qcLike?.barcode, 0));
+  const masterBarcode = Math.max(
+    0,
+    toSafeNumber(qcLike?.master_barcode ?? qcLike?.barcode, 0),
+  );
+  const innerBarcode = Math.max(0, toSafeNumber(qcLike?.inner_barcode, 0));
   const lastInspectedDate = normalizeText(qcLike?.last_inspected_date ?? "");
   const checked = Math.max(0, toSafeNumber(qcLike?.quantities?.qc_checked, 0));
   const passed = Math.max(0, toSafeNumber(qcLike?.quantities?.qc_passed, 0));
@@ -332,7 +351,9 @@ const applyQcSnapshot = (item, qcLike) => {
     qcSnapshot.packed_size !== packedSize
     || qcSnapshot.finishing !== finishing
     || qcSnapshot.branding !== branding
-    || Number(qcSnapshot.barcode || 0) !== barcode
+    || Number(qcSnapshot.barcode || 0) !== masterBarcode
+    || Number(qcSnapshot.master_barcode || 0) !== masterBarcode
+    || Number(qcSnapshot.inner_barcode || 0) !== innerBarcode
     || String(qcSnapshot.last_inspected_date || "") !== lastInspectedDate
     || Number(qtySnapshot.checked || 0) !== checked
     || Number(qtySnapshot.passed || 0) !== passed
@@ -342,7 +363,9 @@ const applyQcSnapshot = (item, qcLike) => {
       packed_size: packedSize,
       finishing,
       branding,
-      barcode,
+      barcode: masterBarcode,
+      master_barcode: masterBarcode,
+      inner_barcode: innerBarcode,
       last_inspected_date: lastInspectedDate,
       quantities: {
         checked,
@@ -561,7 +584,7 @@ const syncAllItemsFromOrdersAndQc = async () => {
       .lean(),
     QC.find({ "item.item_code": { $exists: true, $ne: "" } })
       .select(
-        "item order_meta cbm packed_size finishing branding barcode last_inspected_date request_date quantities createdAt updatedAt",
+        "item order_meta cbm packed_size finishing branding barcode master_barcode inner_barcode last_inspected_date request_date quantities createdAt updatedAt",
       )
       .lean(),
   ]);

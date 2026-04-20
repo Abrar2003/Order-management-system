@@ -17,6 +17,14 @@ const {
   deriveOrderProgress,
   deriveOrderStatus,
 } = require("../helpers/orderStatus");
+const {
+  BOX_PACKAGING_MODES,
+  BOX_SIZE_REMARK_OPTIONS,
+  buildBoxLegacyFieldsFromEntries,
+  buildBoxMeasurementCbmSummary,
+  calculateEffectiveBoxEntriesCbmTotal,
+  detectBoxPackagingMode,
+} = require("../helpers/boxMeasurement");
 
 const escapeRegex = (value = "") =>
   String(value)
@@ -109,14 +117,6 @@ const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
   "item2",
   "item3",
 ]);
-const BOX_SIZE_REMARK_OPTIONS = Object.freeze([
-  "top",
-  "base",
-  "box1",
-  "box2",
-  "box3",
-]);
-
 const WEIGHT_FIELD_KEYS = Object.freeze([
   "top_net",
   "top_gross",
@@ -222,8 +222,12 @@ const buildSizeEntriesFromLegacy = ({
 
 const buildLegacyLbhAndWeightFromSizeEntries = (
   entries = [],
-  { weightKey = "", remarkOptions = [] } = {},
+  { weightKey = "", remarkOptions = [], mode = "" } = {},
 ) => {
+  if (Array.isArray(remarkOptions) && remarkOptions === BOX_SIZE_REMARK_OPTIONS) {
+    return buildBoxLegacyFieldsFromEntries(entries, { weightKey, mode });
+  }
+
   const normalizedEntries = sortSizeEntriesByRemark(
     normalizeStoredSizeEntries(entries, { weightKey }),
     remarkOptions,
@@ -385,7 +389,13 @@ const buildMeasurementCbmSummary = ({
 
 const parseSizeEntriesPayload = (
   entries = [],
-  { fieldLabel = "size entries", remarkOptions = [], weightKey = "", weightLabel = "weight" } = {},
+  {
+    fieldLabel = "size entries",
+    remarkOptions = [],
+    weightKey = "",
+    weightLabel = "weight",
+    mode = "",
+  } = {},
 ) => {
   if (!Array.isArray(entries)) {
     throw new Error(`${fieldLabel} must be an array`);
@@ -397,6 +407,10 @@ const parseSizeEntriesPayload = (
 
   const allowedRemarks = Array.isArray(remarkOptions) ? remarkOptions : [];
   const seenRemarks = new Set();
+  const resolvedBoxMode =
+    fieldLabel === "inspected_box_sizes"
+      ? detectBoxPackagingMode(mode, entries)
+      : BOX_PACKAGING_MODES.INDIVIDUAL;
 
   return entries.map((entry, index) => {
     const entryLabel = `${fieldLabel} ${index + 1}`;
@@ -440,20 +454,61 @@ const parseSizeEntriesPayload = (
       parsedEntry[weightKey] = parsedWeight;
     }
 
+    if (fieldLabel === "inspected_box_sizes") {
+      if (resolvedBoxMode === BOX_PACKAGING_MODES.CARTON) {
+        const entryType = index === 0 ? "inner" : "master";
+        parsedEntry.remark = entryType;
+        parsedEntry.box_type = entryType;
+        parsedEntry.item_count_in_inner =
+          entryType === "inner"
+            ? toNonNegativeNumber(entry?.item_count_in_inner, `${entryLabel}.item_count_in_inner`)
+            : 0;
+        parsedEntry.box_count_in_master =
+          entryType === "master"
+            ? toNonNegativeNumber(
+                entry?.box_count_in_master,
+                `${entryLabel}.box_count_in_master`,
+              )
+            : 0;
+
+        if (entryType === "inner" && parsedEntry.item_count_in_inner <= 0) {
+          throw new Error(`${entryLabel}.item_count_in_inner must be greater than 0`);
+        }
+        if (entryType === "master" && parsedEntry.box_count_in_master <= 0) {
+          throw new Error(`${entryLabel}.box_count_in_master must be greater than 0`);
+        }
+      } else {
+        parsedEntry.box_type = "individual";
+        parsedEntry.item_count_in_inner = 0;
+        parsedEntry.box_count_in_master = 0;
+      }
+    }
+
     return parsedEntry;
   });
 };
 
 const applyCalculatedCbmTotals = (item, setPath) => {
+  const inspectedBoxMode = detectBoxPackagingMode(
+    item?.inspected_box_mode,
+    item?.inspected_box_sizes,
+  );
+  const inspectedBoxSummary = buildBoxMeasurementCbmSummary({
+    sizes: item?.inspected_box_sizes,
+    mode: inspectedBoxMode,
+    singleLbh: item?.inspected_box_LBH || item?.box_LBH,
+    topLbh:
+      inspectedBoxMode === BOX_PACKAGING_MODES.CARTON
+        ? null
+        : item?.inspected_box_top_LBH || item?.inspected_top_LBH,
+    bottomLbh:
+      inspectedBoxMode === BOX_PACKAGING_MODES.CARTON
+        ? null
+        : item?.inspected_box_bottom_LBH || item?.inspected_bottom_LBH,
+  });
   const inspectedSummary =
-    calculateSizeEntriesCbmTotal(item?.inspected_box_sizes) > 0
-      ? buildMeasurementCbmSummary({
-          sizes: item?.inspected_box_sizes,
-          singleLbh: item?.inspected_box_LBH || item?.box_LBH,
-          topLbh: item?.inspected_box_top_LBH || item?.inspected_top_LBH,
-          bottomLbh: item?.inspected_box_bottom_LBH || item?.inspected_bottom_LBH,
-          remarkOptions: BOX_SIZE_REMARK_OPTIONS,
-        })
+    toPositiveCbmNumber(inspectedBoxSummary.total) > 0
+      ? inspectedBoxSummary
       : buildMeasurementCbmSummary({
           sizes: item?.inspected_item_sizes,
           singleLbh: item?.inspected_item_LBH || item?.item_LBH,
@@ -805,6 +860,89 @@ const buildPisPdfOriginalName = ({
   return `${spreadsheetBaseName}.pdf`;
 };
 
+const parseJsonBodyField = (value, fieldLabel) => {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return undefined;
+  if (typeof value === "object") return value;
+
+  try {
+    return JSON.parse(String(value));
+  } catch (error) {
+    throw createHttpError(400, `${fieldLabel} must be valid JSON`);
+  }
+};
+
+const uploadPisSpreadsheetForItem = async ({
+  itemCode = "",
+  itemId = "",
+  file,
+}) => {
+  const spreadsheetFile = validatePisSpreadsheetUpload(file);
+
+  if (!isWasabiConfigured()) {
+    throw createHttpError(500, "Wasabi storage is not configured");
+  }
+
+  const pdfOriginalName = buildPisPdfOriginalName({
+    spreadsheetOriginalName: spreadsheetFile.originalName,
+    itemCode,
+    itemId,
+  });
+
+  let convertedFile = null;
+  let uploadResult = null;
+
+  try {
+    convertedFile = await convertExcelToPdf({
+      buffer: file.buffer,
+      originalName: spreadsheetFile.originalName,
+    });
+
+    uploadResult = await uploadBuffer({
+      buffer: convertedFile.pdfBuffer,
+      key: createStorageKey({
+        folder: ITEM_FILE_CONFIG.pis_file.folder,
+        originalName: pdfOriginalName,
+        extension: ".pdf",
+      }),
+      originalName: pdfOriginalName,
+      contentType: "application/pdf",
+    });
+
+    return buildStoredWasabiItemFile({
+      ...uploadResult,
+      originalName: pdfOriginalName,
+      contentType: "application/pdf",
+    });
+  } catch (error) {
+    if (uploadResult?.key) {
+      try {
+        await deleteObject(uploadResult.key);
+      } catch (rollbackError) {
+        console.error("Rollback uploaded PIS PDF failed:", {
+          itemId,
+          itemCode,
+          storageKey: uploadResult.key,
+          error: rollbackError?.message || String(rollbackError),
+        });
+      }
+    }
+    throw error;
+  } finally {
+    if (convertedFile?.cleanup) {
+      try {
+        await convertedFile.cleanup();
+      } catch (cleanupError) {
+        console.error("PIS upload cleanup failed:", {
+          itemId,
+          itemCode,
+          error: cleanupError?.details || cleanupError?.message || String(cleanupError),
+        });
+      }
+    }
+  }
+};
+
 const toTimestamp = (value) => {
   if (!value) return 0;
   if (value instanceof Date) {
@@ -1073,10 +1211,12 @@ const buildPisDiffSummary = (item = {}) => {
     { weightKey: "gross_weight" },
   );
 
-  const pisBarcode = normalizeTextField(item?.pis_barcode);
+  const pisBarcode = normalizeTextField(
+    item?.pis_master_barcode || item?.pis_barcode,
+  );
   const inspectedBarcode =
-    Number(item?.qc?.barcode || 0) > 0
-      ? String(item.qc.barcode).trim()
+    Number(item?.qc?.master_barcode || item?.qc?.barcode || 0) > 0
+      ? String(item?.qc?.master_barcode || item?.qc?.barcode).trim()
       : "";
   const barcodeMismatch =
     Boolean(pisBarcode || inspectedBarcode) && pisBarcode !== inspectedBarcode;
@@ -1252,6 +1392,8 @@ exports.getPisDiffItems = async (req, res) => {
       "brands",
       "vendors",
       "pis_barcode",
+      "pis_master_barcode",
+      "pis_inner_barcode",
       "pis_weight",
       "inspected_weight",
       "pis_item_LBH",
@@ -1274,6 +1416,8 @@ exports.getPisDiffItems = async (req, res) => {
       "inspected_bottom_LBH",
       "cbm",
       "qc.barcode",
+      "qc.master_barcode",
+      "qc.inner_barcode",
       "updatedAt",
     ].join(" ");
 
@@ -1538,6 +1682,178 @@ exports.getItemOrderPresence = async (req, res) => {
   }
 };
 
+exports.createItem = async (req, res) => {
+  try {
+    const payload = req.body && typeof req.body === "object" ? req.body : {};
+    const code = normalizeTextField(payload.code).toUpperCase();
+    const name = normalizeTextField(payload.name);
+    const description = normalizeTextField(payload.description);
+    const brand = normalizeTextField(payload.brand);
+    const vendor = normalizeTextField(payload.vendor);
+
+    if (!code) {
+      return res.status(400).json({
+        success: false,
+        message: "code is required",
+      });
+    }
+    if (!name) {
+      return res.status(400).json({
+        success: false,
+        message: "name is required",
+      });
+    }
+    if (!description) {
+      return res.status(400).json({
+        success: false,
+        message: "description is required",
+      });
+    }
+    if (!brand) {
+      return res.status(400).json({
+        success: false,
+        message: "brand is required",
+      });
+    }
+    if (!vendor) {
+      return res.status(400).json({
+        success: false,
+        message: "vendor is required",
+      });
+    }
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "PIS sheet is required",
+      });
+    }
+
+    const existingItem = await Item.findOne({
+      code: { $regex: `^${escapeRegex(code)}$`, $options: "i" },
+    }).select("_id code");
+    if (existingItem) {
+      return res.status(400).json({
+        success: false,
+        message: `Item code ${existingItem.code || code} already exists`,
+      });
+    }
+
+    const pisItemSizesInput = parseJsonBodyField(
+      payload.pis_item_sizes,
+      "pis_item_sizes",
+    );
+    const pisBoxSizesInput = parseJsonBodyField(
+      payload.pis_box_sizes,
+      "pis_box_sizes",
+    );
+
+    const parsedPisItemSizes = parseSizeEntriesPayload(
+      Array.isArray(pisItemSizesInput) ? pisItemSizesInput : [],
+      {
+        fieldLabel: "pis_item_sizes",
+        remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
+        weightKey: "net_weight",
+        weightLabel: "net_weight",
+      },
+    );
+    const parsedPisBoxSizes = parseSizeEntriesPayload(
+      Array.isArray(pisBoxSizesInput) ? pisBoxSizesInput : [],
+      {
+        fieldLabel: "pis_box_sizes",
+        remarkOptions: BOX_SIZE_REMARK_OPTIONS,
+        weightKey: "gross_weight",
+        weightLabel: "gross_weight",
+      },
+    );
+
+    const derivedPisItemLegacy = buildLegacyLbhAndWeightFromSizeEntries(
+      parsedPisItemSizes,
+      {
+        weightKey: "net_weight",
+        remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
+      },
+    );
+    const derivedPisBoxLegacy = buildLegacyLbhAndWeightFromSizeEntries(
+      parsedPisBoxSizes,
+      {
+        weightKey: "gross_weight",
+        remarkOptions: BOX_SIZE_REMARK_OPTIONS,
+      },
+    );
+
+    const item = new Item({
+      code,
+      name,
+      description,
+      brand,
+      brand_name: brand,
+      brands: [brand],
+      vendors: [vendor],
+      pis_item_sizes: parsedPisItemSizes,
+      pis_box_sizes: parsedPisBoxSizes,
+      pis_item_LBH: derivedPisItemLegacy.single,
+      pis_item_top_LBH: derivedPisItemLegacy.top,
+      pis_item_bottom_LBH: derivedPisItemLegacy.bottom,
+      pis_box_LBH: derivedPisBoxLegacy.single,
+      pis_box_top_LBH: derivedPisBoxLegacy.top,
+      pis_box_bottom_LBH: derivedPisBoxLegacy.bottom,
+      pis_weight: {
+        top_net: derivedPisItemLegacy.topWeight,
+        bottom_net: derivedPisItemLegacy.bottomWeight,
+        total_net: derivedPisItemLegacy.totalWeight,
+        top_gross: derivedPisBoxLegacy.topWeight,
+        bottom_gross: derivedPisBoxLegacy.bottomWeight,
+        total_gross: derivedPisBoxLegacy.totalWeight,
+      },
+      source: {
+        from_orders: false,
+        from_qc: false,
+      },
+    });
+
+    applyCalculatedCbmTotals(item, (pathKey, pathValue) => {
+      item.set(pathKey, pathValue);
+    });
+
+    const storedPisFile = await uploadPisSpreadsheetForItem({
+      itemCode: code,
+      itemId: String(item._id || ""),
+      file: req.file,
+    });
+    item.pis_file = storedPisFile;
+
+    try {
+      await item.save();
+    } catch (saveError) {
+      if (storedPisFile?.key) {
+        try {
+          await deleteObject(storedPisFile.key);
+        } catch (rollbackError) {
+          console.error("Rollback created item PIS file failed:", {
+            code,
+            storageKey: storedPisFile.key,
+            error: rollbackError?.message || String(rollbackError),
+          });
+        }
+      }
+      throw saveError;
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: "Item created successfully",
+      data: item.toObject(),
+    });
+  } catch (error) {
+    const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 400;
+    console.error("Create Item Error:", error);
+    return res.status(statusCode).json({
+      success: false,
+      message: error.message || "Failed to create item",
+    });
+  }
+};
+
 exports.syncItemsFromOrders = async (req, res) => {
   try {
     const summary = await syncAllItemsFromOrdersAndQc();
@@ -1690,6 +2006,13 @@ exports.updateItem = async (req, res) => {
       setPath("inspected_bottom_LBH", patchedInspectedBoxBottomLbh.value);
     }
 
+    if (hasOwn(payload, "inspected_box_mode") && !hasOwn(payload, "inspected_box_sizes")) {
+      setPath(
+        "inspected_box_mode",
+        detectBoxPackagingMode(payload?.inspected_box_mode, item?.inspected_box_sizes),
+      );
+    }
+
     if (hasOwn(payload, "inspected_item_sizes")) {
       const parsedInspectedItemSizes = parseSizeEntriesPayload(payload.inspected_item_sizes, {
         fieldLabel: "inspected_item_sizes",
@@ -1716,21 +2039,28 @@ exports.updateItem = async (req, res) => {
     }
 
     if (hasOwn(payload, "inspected_box_sizes")) {
+      const parsedInspectedBoxMode = detectBoxPackagingMode(
+        payload?.inspected_box_mode,
+        payload.inspected_box_sizes,
+      );
       const parsedInspectedBoxSizes = parseSizeEntriesPayload(payload.inspected_box_sizes, {
         fieldLabel: "inspected_box_sizes",
         remarkOptions: BOX_SIZE_REMARK_OPTIONS,
         weightKey: "gross_weight",
         weightLabel: "gross_weight",
+        mode: parsedInspectedBoxMode,
       });
       const derivedBoxLegacy = buildLegacyLbhAndWeightFromSizeEntries(
         parsedInspectedBoxSizes,
         {
           weightKey: "gross_weight",
           remarkOptions: BOX_SIZE_REMARK_OPTIONS,
+          mode: parsedInspectedBoxMode,
         },
       );
 
       setPath("inspected_box_sizes", parsedInspectedBoxSizes);
+      setPath("inspected_box_mode", parsedInspectedBoxMode);
       setPath("inspected_box_LBH", derivedBoxLegacy.single);
       setPath("inspected_box_top_LBH", derivedBoxLegacy.top);
       setPath("inspected_top_LBH", derivedBoxLegacy.top);
@@ -1790,7 +2120,23 @@ exports.updateItem = async (req, res) => {
         setPath("qc.branding", toBooleanValue(payload.qc.branding, "qc.branding"));
       }
       if (hasOwn(payload.qc, "barcode")) {
-        setPath("qc.barcode", toNonNegativeNumber(payload.qc.barcode, "qc.barcode"));
+        const nextMasterBarcode = toNonNegativeNumber(payload.qc.barcode, "qc.barcode");
+        setPath("qc.barcode", nextMasterBarcode);
+        setPath("qc.master_barcode", nextMasterBarcode);
+      }
+      if (hasOwn(payload.qc, "master_barcode")) {
+        const nextMasterBarcode = toNonNegativeNumber(
+          payload.qc.master_barcode,
+          "qc.master_barcode",
+        );
+        setPath("qc.master_barcode", nextMasterBarcode);
+        setPath("qc.barcode", nextMasterBarcode);
+      }
+      if (hasOwn(payload.qc, "inner_barcode")) {
+        setPath(
+          "qc.inner_barcode",
+          toNonNegativeNumber(payload.qc.inner_barcode, "qc.inner_barcode"),
+        );
       }
       if (hasOwn(payload.qc, "last_inspected_date")) {
         setPath("qc.last_inspected_date", normalizeTextField(payload.qc.last_inspected_date));
@@ -1898,7 +2244,17 @@ exports.updateItemPis = async (req, res) => {
     }
 
     if (hasOwn(payload, "pis_barcode")) {
-      setPath("pis_barcode", normalizeTextField(payload.pis_barcode));
+      const nextMasterBarcode = normalizeTextField(payload.pis_barcode);
+      setPath("pis_barcode", nextMasterBarcode);
+      setPath("pis_master_barcode", nextMasterBarcode);
+    }
+    if (hasOwn(payload, "pis_master_barcode")) {
+      const nextMasterBarcode = normalizeTextField(payload.pis_master_barcode);
+      setPath("pis_master_barcode", nextMasterBarcode);
+      setPath("pis_barcode", nextMasterBarcode);
+    }
+    if (hasOwn(payload, "pis_inner_barcode")) {
+      setPath("pis_inner_barcode", normalizeTextField(payload.pis_inner_barcode));
     }
 
     const patchedPisItemLbh = getPatchedLbhRecord(
@@ -2285,7 +2641,6 @@ exports.getItemPisFileUrl = async (req, res) => {
 
 exports.uploadItemPisFile = async (req, res) => {
   let itemId = "";
-  let convertedFile = null;
 
   try {
     itemId = getRequestedItemId(req);
@@ -2304,75 +2659,27 @@ exports.uploadItemPisFile = async (req, res) => {
       });
     }
 
-    const spreadsheetFile = validatePisSpreadsheetUpload(req.file);
-
-    if (!isWasabiConfigured()) {
-      return res.status(500).json({
-        success: false,
-        message: "Wasabi storage is not configured",
-      });
-    }
-
     const previousPisFile = normalizeStoredItemFile(item?.pis_file);
     const previousStorageKey = previousPisFile.key;
-    const pdfOriginalName = buildPisPdfOriginalName({
-      spreadsheetOriginalName: spreadsheetFile.originalName,
+    item.pis_file = await uploadPisSpreadsheetForItem({
       itemCode: normalizeTextField(item?.code),
       itemId,
-    });
-
-    console.info("PIS spreadsheet conversion started", {
-      itemId,
-      originalName: spreadsheetFile.originalName,
-    });
-
-    convertedFile = await convertExcelToPdf({
-      buffer: req.file.buffer,
-      originalName: spreadsheetFile.originalName,
-    });
-
-    console.info("PIS spreadsheet conversion completed", {
-      itemId,
-      pdfFileName: convertedFile?.pdfFileName || pdfOriginalName,
-      size: convertedFile?.size || 0,
-    });
-
-    const uploadResult = await uploadBuffer({
-      buffer: convertedFile.pdfBuffer,
-      key: createStorageKey({
-        folder: ITEM_FILE_CONFIG.pis_file.folder,
-        originalName: pdfOriginalName,
-        extension: ".pdf",
-      }),
-      originalName: pdfOriginalName,
-      contentType: "application/pdf",
-    });
-
-    console.info("PIS PDF uploaded to Wasabi", {
-      itemId,
-      storageKey: uploadResult.key,
-      size: uploadResult.size,
-    });
-
-    item.pis_file = buildStoredWasabiItemFile({
-      ...uploadResult,
-      originalName: pdfOriginalName,
-      contentType: "application/pdf",
+      file: req.file,
     });
 
     try {
       await item.save();
     } catch (saveError) {
       try {
-        await deleteObject(uploadResult.key);
+        await deleteObject(item?.pis_file?.key);
         console.info("Rolled back uploaded PIS PDF after DB save failure", {
           itemId,
-          storageKey: uploadResult.key,
+          storageKey: item?.pis_file?.key,
         });
       } catch (rollbackError) {
         console.error("Rollback uploaded PIS PDF failed:", {
           itemId,
-          storageKey: uploadResult.key,
+          storageKey: item?.pis_file?.key,
           error: rollbackError?.message || String(rollbackError),
         });
       }
@@ -2382,11 +2689,17 @@ exports.uploadItemPisFile = async (req, res) => {
 
     console.info("PIS file metadata saved on item", {
       itemId,
-      storageKey: uploadResult.key,
-      replaced: Boolean(previousStorageKey && previousStorageKey !== uploadResult.key),
+      storageKey: item?.pis_file?.key,
+      replaced: Boolean(
+        previousStorageKey &&
+        previousStorageKey !== normalizeTextField(item?.pis_file?.key),
+      ),
     });
 
-    if (previousStorageKey && previousStorageKey !== uploadResult.key) {
+    if (
+      previousStorageKey &&
+      previousStorageKey !== normalizeTextField(item?.pis_file?.key)
+    ) {
       try {
         await deleteObject(previousStorageKey);
         console.info("Previous PIS PDF deleted from Wasabi", {
@@ -2450,17 +2763,6 @@ exports.uploadItemPisFile = async (req, res) => {
       success: false,
       message: error.message || "Failed to upload PIS spreadsheet",
     });
-  } finally {
-    if (convertedFile?.cleanup) {
-      try {
-        await convertedFile.cleanup();
-      } catch (cleanupError) {
-        console.error("PIS upload cleanup failed:", {
-          itemId,
-          error: cleanupError?.details || cleanupError?.message || String(cleanupError),
-        });
-      }
-    }
   }
 };
 

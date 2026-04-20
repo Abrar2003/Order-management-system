@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import CreateItemModal from "../components/CreateItemModal";
 import EditItemModal from "../components/EditItemModal";
 import ItemOrderPresenceTooltip from "../components/ItemOrderPresenceTooltip";
 import SortHeaderButton from "../components/SortHeaderButton";
@@ -189,10 +190,12 @@ const Items = () => {
   const normalizedRole = String(user?.role || "").trim().toLowerCase();
   const canSyncItems = ["admin", "manager", "dev"].includes(normalizedRole);
   const canEditItems = ["admin", "manager", "dev"].includes(normalizedRole);
+  const canCreateItems = ["admin", "manager", "dev"].includes(normalizedRole);
   const canUploadItemFiles = ["admin", "manager"].includes(normalizedRole);
 
   const [rows, setRows] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
@@ -561,15 +564,32 @@ const Items = () => {
             Back
           </button>
           <h2 className="h4 mb-0">Items</h2>
-          {canSyncItems ? (
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              disabled={syncing}
-              onClick={handleSync}
-            >
-              {syncing ? "Syncing..." : "Sync Items"}
-            </button>
+          {canSyncItems || canCreateItems ? (
+            <div className="d-flex gap-2">
+              {canCreateItems && (
+                <button
+                  type="button"
+                  className="btn btn-outline-primary btn-sm"
+                  onClick={() => {
+                    setError("");
+                    setSuccess("");
+                    setShowCreateModal(true);
+                  }}
+                >
+                  Create Item
+                </button>
+              )}
+              {canSyncItems && (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  disabled={syncing}
+                  onClick={handleSync}
+                >
+                  {syncing ? "Syncing..." : "Sync Items"}
+                </button>
+              )}
+            </div>
           ) : (
             <span className="d-none d-md-inline" />
           )}
@@ -914,6 +934,24 @@ const Items = () => {
           onClose={() => setSelectedItem(null)}
           onUpdated={() => {
             setSelectedItem(null);
+            fetchItems();
+          }}
+        />
+      )}
+
+      {showCreateModal && canCreateItems && (
+        <CreateItemModal
+          brandOptions={Array.isArray(filters.brands) ? filters.brands : []}
+          vendorOptions={Array.isArray(filters.vendors) ? filters.vendors : []}
+          onClose={() => setShowCreateModal(false)}
+          onCreated={(createdItem) => {
+            setShowCreateModal(false);
+            const createdCode = String(createdItem?.code || "").trim();
+            setSuccess(
+              createdCode
+                ? `Item ${createdCode} created successfully.`
+                : "Item created successfully.",
+            );
             fetchItems();
           }}
         />

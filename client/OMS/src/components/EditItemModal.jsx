@@ -96,7 +96,11 @@ const buildInitialForm = (item = {}) => {
       packed_size: Boolean(item?.qc?.packed_size),
       finishing: Boolean(item?.qc?.finishing),
       branding: Boolean(item?.qc?.branding),
-      barcode: toNumberString(item?.qc?.barcode, "0"),
+      master_barcode: toNumberString(
+        item?.qc?.master_barcode ?? item?.qc?.barcode,
+        "0",
+      ),
+      inner_barcode: toNumberString(item?.qc?.inner_barcode, "0"),
       last_inspected_date: toText(item?.qc?.last_inspected_date),
       quantities: {
         checked: toNumberString(item?.qc?.quantities?.checked, "0"),
@@ -231,7 +235,18 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
           packed_size: Boolean(form.qc.packed_size),
           finishing: Boolean(form.qc.finishing),
           branding: Boolean(form.qc.branding),
-          barcode: parseNonNegativeNumber(form.qc.barcode, "QC barcode"),
+          barcode: parseNonNegativeNumber(
+            form.qc.master_barcode,
+            "QC master barcode",
+          ),
+          master_barcode: parseNonNegativeNumber(
+            form.qc.master_barcode,
+            "QC master barcode",
+          ),
+          inner_barcode: parseNonNegativeNumber(
+            form.qc.inner_barcode,
+            "QC inner barcode",
+          ),
           last_inspected_date: toText(form.qc.last_inspected_date),
           quantities: {
             checked: parseNonNegativeNumber(form.qc.quantities.checked, "QC checked"),
@@ -410,14 +425,26 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
                 </div>
               </div>
               <div className="col-md-3">
-                <label className="form-label">Barcode</label>
+                <label className="form-label">Master Barcode</label>
                 <input
                   type="number"
                   min="0"
                   step="1"
                   className="form-control"
-                  value={form.qc.barcode}
-                  onChange={(event) => updateField("qc.barcode", event.target.value)}
+                  value={form.qc.master_barcode}
+                  onChange={(event) => updateField("qc.master_barcode", event.target.value)}
+                  disabled={saving}
+                />
+              </div>
+              <div className="col-md-3">
+                <label className="form-label">Inner Barcode</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  className="form-control"
+                  value={form.qc.inner_barcode}
+                  onChange={(event) => updateField("qc.inner_barcode", event.target.value)}
                   disabled={saving}
                 />
               </div>

@@ -4,89 +4,39 @@ import MeasuredSizeSection from "./MeasuredSizeSection";
 import {
   BOX_SIZE_REMARK_OPTIONS,
   ITEM_SIZE_REMARK_OPTIONS,
-  buildMeasuredSizeEntriesFromLegacy,
   calculateMeasuredSizeEntriesCbm,
+  createEmptyMeasuredSizeEntry,
   ensureMeasuredSizeEntryCount,
-  getWeightValueFromModel,
-  hasMeaningfulMeasuredSize,
   normalizeSizeCount,
   parseMeasuredSizeEntries,
 } from "../utils/measuredSizeForm";
 import "../App.css";
 
-const toText = (value, fallback = "") => String(value ?? fallback).trim();
+const ACCEPTED_PIS_SHEET = ".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel";
 
-const getBrandLabel = (item = {}) =>
-  toText(
-    item?.brand
-    || item?.brand_name
-    || (Array.isArray(item?.brands) && item.brands.length > 0 ? item.brands[0] : "")
-    || "N/A",
-  );
+const createInitialForm = () => ({
+  code: "",
+  name: "",
+  description: "",
+  brand: "",
+  vendor: "",
+  pis_item_count: "1",
+  pis_box_count: "1",
+  pis_item_sizes: [createEmptyMeasuredSizeEntry()],
+  pis_box_sizes: [createEmptyMeasuredSizeEntry()],
+});
 
-const getVendorsLabel = (item = {}) =>
-  Array.isArray(item?.vendors) && item.vendors.length > 0
-    ? item.vendors.join(", ")
-    : "N/A";
-
-const buildInitialForm = (item = {}) => {
-  const pisWeight = item?.pis_weight || {};
-  const pisItemEntries = buildMeasuredSizeEntriesFromLegacy({
-    primaryEntries: item?.pis_item_sizes,
-    singleLbh: item?.pis_item_LBH,
-    topLbh: item?.pis_item_top_LBH,
-    bottomLbh: item?.pis_item_bottom_LBH,
-    totalWeight: getWeightValueFromModel(pisWeight, "total_net"),
-    topWeight: getWeightValueFromModel(pisWeight, "top_net"),
-    bottomWeight: getWeightValueFromModel(pisWeight, "bottom_net"),
-    weightKey: "net_weight",
-    topRemark: "top",
-    bottomRemark: "base",
-  }).filter((entry) => hasMeaningfulMeasuredSize(entry));
-  const pisBoxEntries = buildMeasuredSizeEntriesFromLegacy({
-    primaryEntries: item?.pis_box_sizes,
-    singleLbh: item?.pis_box_LBH,
-    topLbh: item?.pis_box_top_LBH,
-    bottomLbh: item?.pis_box_bottom_LBH,
-    totalWeight: getWeightValueFromModel(pisWeight, "total_gross"),
-    topWeight: getWeightValueFromModel(pisWeight, "top_gross"),
-    bottomWeight: getWeightValueFromModel(pisWeight, "bottom_gross"),
-    weightKey: "gross_weight",
-    topRemark: "top",
-    bottomRemark: "base",
-  }).filter((entry) => hasMeaningfulMeasuredSize(entry));
-
-  const pisItemCount =
-    pisItemEntries.length > 0
-      ? normalizeSizeCount(pisItemEntries.length, 1)
-      : 1;
-  const pisBoxCount =
-    pisBoxEntries.length > 0
-      ? normalizeSizeCount(pisBoxEntries.length, 1)
-      : 1;
-
-  return {
-    master_barcode: toText(item?.pis_master_barcode || item?.pis_barcode),
-    inner_barcode: toText(item?.pis_inner_barcode),
-    pis_item_count: String(pisItemCount),
-    pis_box_count: String(pisBoxCount),
-    pis_item_sizes: ensureMeasuredSizeEntryCount(pisItemEntries, pisItemCount),
-    pis_box_sizes: ensureMeasuredSizeEntryCount(pisBoxEntries, pisBoxCount),
-  };
-};
-
-const EditPisModal = ({ item, onClose, onUpdated }) => {
-  const [form, setForm] = useState(() => buildInitialForm(item));
+const CreateItemModal = ({
+  onClose,
+  onCreated,
+  brandOptions = [],
+  vendorOptions = [],
+}) => {
+  const [form, setForm] = useState(createInitialForm);
+  const [pisSheetFile, setPisSheetFile] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const itemCode = useMemo(() => toText(item?.code, "N/A"), [item?.code]);
-  const itemDescription = useMemo(
-    () => toText(item?.description || item?.name, "N/A"),
-    [item?.description, item?.name],
-  );
-  const brandLabel = useMemo(() => getBrandLabel(item), [item]);
-  const vendorsLabel = useMemo(() => getVendorsLabel(item), [item]);
   const displayedItemEntries = useMemo(
     () => ensureMeasuredSizeEntryCount(form.pis_item_sizes, form.pis_item_count),
     [form.pis_item_sizes, form.pis_item_count],
@@ -109,18 +59,11 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
     return boxCbmValue >= itemCbmValue ? calculatedPisBoxCbm : calculatedPisItemCbm;
   }, [calculatedPisBoxCbm, calculatedPisItemCbm]);
 
-  const updateField = (path, value) => {
-    setForm((prev) => {
-      const next = { ...prev };
-      const chunks = path.split(".");
-      let cursor = next;
-      for (let i = 0; i < chunks.length - 1; i += 1) {
-        cursor[chunks[i]] = { ...cursor[chunks[i]] };
-        cursor = cursor[chunks[i]];
-      }
-      cursor[chunks[chunks.length - 1]] = value;
-      return next;
-    });
+  const handleFieldChange = (name, value) => {
+    setForm((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
   };
 
   const handleCountChange = (countKey, entriesKey, value) => {
@@ -164,6 +107,27 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
       setSaving(true);
       setError("");
 
+      const code = String(form.code || "").trim().toUpperCase();
+      const name = String(form.name || "").trim();
+      const description = String(form.description || "").trim();
+      const brand = String(form.brand || "").trim();
+      const vendor = String(form.vendor || "").trim();
+
+      if (!code) throw new Error("Item code is required.");
+      if (!name) throw new Error("Item name is required.");
+      if (!description) throw new Error("Description is required.");
+      if (!brand) throw new Error("Brand is required.");
+      if (!vendor) throw new Error("Vendor is required.");
+      if (!pisSheetFile) throw new Error("PIS sheet is required.");
+
+      const normalizedFileName = String(pisSheetFile.name || "").toLowerCase();
+      if (
+        !normalizedFileName.endsWith(".xlsx") &&
+        !normalizedFileName.endsWith(".xls")
+      ) {
+        throw new Error("Only .xlsx and .xls files are allowed for the PIS sheet.");
+      }
+
       const pisItemPayload = parseMeasuredSizeEntries({
         entries: form.pis_item_sizes,
         count: form.pis_item_count,
@@ -188,20 +152,27 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
         throw new Error(pisBoxPayload.error);
       }
 
-      const payload = {
-        pis_barcode: toText(form.master_barcode),
-        pis_master_barcode: toText(form.master_barcode),
-        pis_inner_barcode: toText(form.inner_barcode),
-        pis_item_sizes: pisItemPayload.value,
-        pis_box_sizes: pisBoxPayload.value,
-      };
+      const formData = new FormData();
+      formData.append("code", code);
+      formData.append("name", name);
+      formData.append("description", description);
+      formData.append("brand", brand);
+      formData.append("vendor", vendor);
+      formData.append("pis_item_sizes", JSON.stringify(pisItemPayload.value));
+      formData.append("pis_box_sizes", JSON.stringify(pisBoxPayload.value));
+      formData.append("pis_file", pisSheetFile);
 
-      await api.patch(`/items/${item?._id}/pis`, payload);
-      onUpdated?.();
+      const response = await api.post("/items", formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      });
+
+      onCreated?.(response?.data?.data || null);
       onClose?.();
     } catch (saveError) {
       setError(
-        saveError?.response?.data?.message || saveError?.message || "Failed to update PIS values.",
+        saveError?.response?.data?.message || saveError?.message || "Failed to create item.",
       );
     } finally {
       setSaving(false);
@@ -213,7 +184,7 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
       <div className="modal-dialog modal-dialog-centered modal-xl" role="document">
         <div className="modal-content">
           <div className="modal-header">
-            <h5 className="modal-title">Update PIS: {itemCode}</h5>
+            <h5 className="modal-title">Create Item</h5>
             <button
               type="button"
               className="btn-close"
@@ -225,44 +196,80 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
 
           <div className="modal-body d-grid gap-3">
             <div className="row g-2">
-              <div className="col-md-4">
-                <label className="form-label">Code (Read Only)</label>
-                <input type="text" className="form-control" value={itemCode} disabled />
+              <div className="col-md-6">
+                <label className="form-label">Item Code</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={form.code}
+                  onChange={(event) => handleFieldChange("code", event.target.value.toUpperCase())}
+                  disabled={saving}
+                />
               </div>
-              <div className="col-md-4">
-                <label className="form-label">Brand (Read Only)</label>
-                <input type="text" className="form-control" value={brandLabel} disabled />
+              <div className="col-md-6">
+                <label className="form-label">Item Name</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={form.name}
+                  onChange={(event) => handleFieldChange("name", event.target.value)}
+                  disabled={saving}
+                />
               </div>
-              <div className="col-md-4">
-                <label className="form-label">Vendors (Read Only)</label>
-                <input type="text" className="form-control" value={vendorsLabel} disabled />
+              <div className="col-md-6">
+                <label className="form-label">Brand</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  list="create-item-brand-options"
+                  value={form.brand}
+                  onChange={(event) => handleFieldChange("brand", event.target.value)}
+                  disabled={saving}
+                />
+                <datalist id="create-item-brand-options">
+                  {brandOptions.map((option) => (
+                    <option key={option} value={option} />
+                  ))}
+                </datalist>
+              </div>
+              <div className="col-md-6">
+                <label className="form-label">Vendor</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  list="create-item-vendor-options"
+                  value={form.vendor}
+                  onChange={(event) => handleFieldChange("vendor", event.target.value)}
+                  disabled={saving}
+                />
+                <datalist id="create-item-vendor-options">
+                  {vendorOptions.map((option) => (
+                    <option key={option} value={option} />
+                  ))}
+                </datalist>
               </div>
               <div className="col-12">
-                <label className="form-label">Description (Read Only)</label>
-                <input type="text" className="form-control" value={itemDescription} disabled />
-              </div>
-            </div>
-
-            <div className="row g-2">
-              <div className="col-md-6">
-                <label className="form-label">Master Carton Barcode</label>
-                <input
-                  type="text"
+                <label className="form-label">Description</label>
+                <textarea
                   className="form-control"
-                  value={form.master_barcode}
-                  onChange={(event) => updateField("master_barcode", event.target.value)}
+                  rows="3"
+                  value={form.description}
+                  onChange={(event) => handleFieldChange("description", event.target.value)}
                   disabled={saving}
                 />
               </div>
-              <div className="col-md-6">
-                <label className="form-label">Inner Carton Barcode</label>
+              <div className="col-12">
+                <label className="form-label">PIS Sheet</label>
                 <input
-                  type="text"
+                  type="file"
                   className="form-control"
-                  value={form.inner_barcode}
-                  onChange={(event) => updateField("inner_barcode", event.target.value)}
+                  accept={ACCEPTED_PIS_SHEET}
+                  onChange={(event) => setPisSheetFile(event.target.files?.[0] || null)}
                   disabled={saving}
                 />
+                <div className="small text-secondary mt-1">
+                  Upload the source PIS spreadsheet in `.xlsx` or `.xls` format.
+                </div>
               </div>
             </div>
 
@@ -272,7 +279,7 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
               </div>
 
               <MeasuredSizeSection
-                sectionKey="pis-item"
+                sectionKey="create-pis-item"
                 title="PIS Item Sizes (cm) and Net Weight"
                 countLabel="Item Sets"
                 countValue={form.pis_item_count}
@@ -289,7 +296,7 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
               />
 
               <MeasuredSizeSection
-                sectionKey="pis-box"
+                sectionKey="create-pis-box"
                 title="PIS Box Sizes (cm) and Gross Weight"
                 countLabel="Box Sets"
                 countValue={form.pis_box_count}
@@ -335,7 +342,7 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
               onClick={handleSave}
               disabled={saving}
             >
-              {saving ? "Saving..." : "Save PIS"}
+              {saving ? "Creating..." : "Create Item"}
             </button>
           </div>
         </div>
@@ -344,4 +351,4 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
   );
 };
 
-export default EditPisModal;
+export default CreateItemModal;

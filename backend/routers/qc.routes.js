@@ -132,6 +132,20 @@ router.patch(
   qcController.editInspectionRecords,
 );
 
+router.get(
+  "/:id/inspection-record/:recordId/transfer-target",
+  auth,
+  authorize("admin", "manager"),
+  qcController.lookupInspectionTransferTarget,
+);
+
+router.post(
+  "/:id/inspection-record/:recordId/transfer",
+  auth,
+  authorize("admin", "manager"),
+  qcController.transferInspectionRecord,
+);
+
 router.delete(
   "/:id/inspection-record/:recordId",
   auth,

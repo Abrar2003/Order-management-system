@@ -23,6 +23,15 @@ const {
   toDateOnlyIso,
 } = require("../helpers/dateOnly");
 const {
+  BOX_PACKAGING_MODES,
+  BOX_SIZE_REMARK_OPTIONS,
+  buildBoxLegacyFieldsFromEntries,
+  buildBoxMeasurementCbmSummary,
+  calculateEffectiveBoxEntriesCbmTotal,
+  detectBoxPackagingMode,
+  normalizeStoredBoxEntries,
+} = require("../helpers/boxMeasurement");
+const {
   deriveGroupedOrderStatus,
   deriveOrderStatus,
   normalizeOrderStatus,
@@ -46,6 +55,67 @@ const normalizeLabels = (labels = []) => {
     .map((label) => Number(label))
     .filter((label) => Number.isFinite(label));
   return [...new Set(numericLabels)].sort((a, b) => a - b);
+};
+
+const buildLabelRangesFromLabels = (labels = []) => {
+  const normalizedLabels = normalizeLabels(labels);
+  if (normalizedLabels.length === 0) return [];
+
+  const ranges = [];
+  let start = normalizedLabels[0];
+  let end = normalizedLabels[0];
+
+  for (let index = 1; index < normalizedLabels.length; index += 1) {
+    const label = normalizedLabels[index];
+    if (label === end + 1) {
+      end = label;
+      continue;
+    }
+
+    ranges.push({ start, end });
+    start = label;
+    end = label;
+  }
+
+  ranges.push({ start, end });
+  return ranges;
+};
+
+const parseTransferLabelsInput = (value) => {
+  if (Array.isArray(value)) {
+    return normalizeLabels(value);
+  }
+
+  const normalized = String(value || "").trim();
+  if (!normalized) return [];
+
+  const labels = [];
+  const segments = normalized.split(",").map((segment) => segment.trim()).filter(Boolean);
+  for (const segment of segments) {
+    if (/^\d+$/.test(segment)) {
+      labels.push(Number(segment));
+      continue;
+    }
+
+    const rangeMatch = segment.match(/^(\d+)\s*-\s*(\d+)$/);
+    if (!rangeMatch) {
+      throw new Error(
+        "labels must be a comma-separated list like 101,102 or ranges like 101-105",
+      );
+    }
+
+    const start = Number(rangeMatch[1]);
+    const end = Number(rangeMatch[2]);
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start > end) {
+      throw new Error("labels contains an invalid range");
+    }
+
+    for (let label = start; label <= end; label += 1) {
+      labels.push(label);
+    }
+  }
+
+  return normalizeLabels(labels);
 };
 
 const toNonNegativeNumber = (value, fallback = 0) => {
@@ -124,13 +194,6 @@ const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
   "item1",
   "item2",
   "item3",
-]);
-const BOX_SIZE_REMARK_OPTIONS = Object.freeze([
-  "top",
-  "base",
-  "box1",
-  "box2",
-  "box3",
 ]);
 const resolveQcOrderStatus = (qcDoc = null, orderDoc = null) => {
   const resolvedOrder = orderDoc || qcDoc?.order || null;
@@ -706,7 +769,10 @@ const buildQcEditLogSnapshot = (qcDoc = {}, inspectionRecords = []) => ({
   qc_passed: String(toNonNegativeNumber(qcDoc?.quantities?.qc_passed, 0)),
   pending: String(toNonNegativeNumber(qcDoc?.quantities?.pending, 0)),
   qc_rejected: String(toNonNegativeNumber(qcDoc?.quantities?.qc_rejected, 0)),
-  barcode: String(toNonNegativeNumber(qcDoc?.barcode, 0)),
+  barcode: [
+    `master ${toNonNegativeNumber(qcDoc?.master_barcode ?? qcDoc?.barcode, 0)}`,
+    `inner ${toNonNegativeNumber(qcDoc?.inner_barcode, 0)}`,
+  ].join(" | "),
   packed_size: formatAuditBoolean(qcDoc?.packed_size),
   finishing: formatAuditBoolean(qcDoc?.finishing),
   branding: formatAuditBoolean(qcDoc?.branding),
@@ -829,6 +895,86 @@ const buildOrderAuditSnapshotForQc = (orderDoc = {}) => ({
   status: normalizeText(orderDoc?.status) || "Not Set",
   qc_record: normalizeText(orderDoc?.qc_record) || "Not Set",
 });
+
+const recalculateInspectorUsedLabels = async (inspectorIds = []) => {
+  const normalizedInspectorIds = [...new Set(
+    (Array.isArray(inspectorIds) ? inspectorIds : [])
+      .map((value) => String(value || "").trim())
+      .filter((value) => mongoose.Types.ObjectId.isValid(value)),
+  )];
+
+  for (const inspectorUserId of normalizedInspectorIds) {
+    const inspectorDoc = await Inspector.findOne({ user: inspectorUserId });
+    if (!inspectorDoc) continue;
+
+    const labelUsageRecords = await Inspection.find({
+      inspector: inspectorUserId,
+    })
+      .select("labels_added")
+      .lean();
+
+    inspectorDoc.used_labels = normalizeLabels(
+      labelUsageRecords.flatMap((entry) =>
+        Array.isArray(entry?.labels_added) ? entry.labels_added : [],
+      ),
+    );
+    await inspectorDoc.save();
+  }
+};
+
+const refreshQcAggregateState = async (qcDoc, reqUser) => {
+  if (!qcDoc?._id) return [];
+
+  const refreshedInspections = await Inspection.find({ qc: qcDoc._id })
+    .select(
+      "inspection_date requested_date request_history_id inspector checked passed vendor_requested vendor_offered labels_added label_ranges goods_not_ready status createdAt",
+    )
+    .lean();
+
+  const mergedLabels = normalizeLabels(
+    refreshedInspections.flatMap((record) =>
+      Array.isArray(record?.labels_added) ? record.labels_added : [],
+    ),
+  );
+
+  recalculateQcAggregateQuantities(qcDoc, refreshedInspections);
+  qcDoc.labels = mergedLabels;
+  syncQcRequestHistoryStatuses(qcDoc, refreshedInspections, {
+    user: reqUser,
+  });
+  syncQcCurrentRequestFieldsFromHistory(qcDoc, refreshedInspections);
+
+  if (refreshedInspections.length > 0) {
+    const latestRecord = [...refreshedInspections].sort((a, b) => {
+      const aTime = Math.max(
+        toSortableTimestamp(a?.inspection_date),
+        toSortableTimestamp(a?.createdAt),
+      );
+      const bTime = Math.max(
+        toSortableTimestamp(b?.inspection_date),
+        toSortableTimestamp(b?.createdAt),
+      );
+      return bTime - aTime;
+    })[0];
+
+    qcDoc.last_inspected_date = String(
+      latestRecord?.inspection_date ||
+        toDateInputValue(latestRecord?.createdAt) ||
+        qcDoc.request_date ||
+        qcDoc.last_inspected_date ||
+        "",
+    );
+  } else {
+    qcDoc.last_inspected_date = String(
+      qcDoc.request_date || qcDoc.last_inspected_date || "",
+    );
+  }
+
+  qcDoc.updated_by = buildAuditActor(reqUser);
+  await qcDoc.save();
+
+  return refreshedInspections;
+};
 
 const createOrderEditLogFromQc = async ({
   reqUser = null,
@@ -1052,10 +1198,13 @@ const getItemItemLbh = (itemDoc = {}) =>
       {},
   );
 const getItemBoxLbh = (itemDoc = {}) =>
-  getPrimaryLbhFromSizeEntries(
-    itemDoc?.inspected_box_sizes || itemDoc?.pis_box_sizes,
-    itemDoc?.inspected_box_LBH || itemDoc?.pis_box_LBH || itemDoc?.box_LBH || {},
-  );
+  detectBoxPackagingMode(itemDoc?.inspected_box_mode, itemDoc?.inspected_box_sizes) ===
+  BOX_PACKAGING_MODES.CARTON
+    ? itemDoc?.inspected_box_LBH || itemDoc?.pis_box_LBH || itemDoc?.box_LBH || {}
+    : getPrimaryLbhFromSizeEntries(
+        itemDoc?.inspected_box_sizes || itemDoc?.pis_box_sizes,
+        itemDoc?.inspected_box_LBH || itemDoc?.pis_box_LBH || itemDoc?.box_LBH || {},
+      );
 
 const buildSignedItemFile = async (file = {}, { logLabel = "Item file" } = {}) => {
   const key = normalizeText(file?.key || file?.public_id || "");
@@ -1159,8 +1308,11 @@ const buildNormalizedCbmSnapshot = (value = {}) => {
   const box2 = toPositiveCbmNumber(value?.box2 ?? value?.bottom);
   const box3 = toPositiveCbmNumber(value?.box3);
   const totalFromBoxes = box1 + box2 + box3;
+  const explicitTotal = toPositiveCbmNumber(value?.total);
   const total =
-    totalFromBoxes > 0
+    explicitTotal > 0
+      ? explicitTotal
+      : totalFromBoxes > 0
       ? totalFromBoxes
       : toPositiveCbmNumber(value?.total);
 
@@ -1194,30 +1346,33 @@ const hasExplicitCbmBoxInput = (value = {}) =>
 
 const buildCbmSnapshotFromBoxSizeSource = ({
   sizes = [],
+  mode = BOX_PACKAGING_MODES.INDIVIDUAL,
   singleLbh = null,
   topLbh = null,
   bottomLbh = null,
 } = {}) => {
-  const normalizedEntries = sortSizeEntriesByRemark(
-    buildSizeEntriesFromLegacy({
-      sizes,
-      singleLbh,
-      topLbh,
-      bottomLbh,
-    }),
-    BOX_SIZE_REMARK_OPTIONS,
-  ).slice(0, SIZE_ENTRY_LIMIT);
-
+  const summary = buildBoxMeasurementCbmSummary({
+    sizes,
+    mode,
+    singleLbh,
+    topLbh,
+    bottomLbh,
+  });
   return buildNormalizedCbmSnapshot({
-    box1: calculateCbmFromLbh(normalizedEntries[0] || {}),
-    box2: calculateCbmFromLbh(normalizedEntries[1] || {}),
-    box3: calculateCbmFromLbh(normalizedEntries[2] || {}),
+    box1: summary.first,
+    box2: summary.second,
+    box3: summary.third,
+    total: summary.total,
   });
 };
 
 const buildItemInspectedBoxCbmSnapshot = (itemDoc = null) =>
   buildCbmSnapshotFromBoxSizeSource({
     sizes: itemDoc?.inspected_box_sizes,
+    mode: detectBoxPackagingMode(
+      itemDoc?.inspected_box_mode,
+      itemDoc?.inspected_box_sizes,
+    ),
     singleLbh: itemDoc?.inspected_box_LBH || itemDoc?.box_LBH,
     topLbh: itemDoc?.inspected_box_top_LBH || itemDoc?.inspected_top_LBH,
     bottomLbh:
@@ -1337,13 +1492,15 @@ const hasMeaningfulItemQcDetails = (itemDoc) => {
   );
   const cbmTotal = getItemInspectedCbmTotal(itemDoc);
   const itemQc = itemDoc?.qc || {};
-  const barcode = Number(itemQc?.barcode || 0);
+  const barcode = Number(itemQc?.master_barcode || itemQc?.barcode || 0);
+  const innerBarcode = Number(itemQc?.inner_barcode || 0);
   const lastInspectedDate = normalizeText(itemQc?.last_inspected_date || "");
 
   return Boolean(
     itemDescription ||
     (cbmTotal && cbmTotal !== "0") ||
     barcode > 0 ||
+    innerBarcode > 0 ||
     itemQc?.packed_size === true ||
     itemQc?.finishing === true ||
     itemQc?.branding === true ||
@@ -1373,7 +1530,8 @@ const buildQcItemDetailsPatch = ({
   );
   const cbmTotal = getItemInspectedCbmTotal(itemDoc);
   const itemQc = itemDoc?.qc || {};
-  const barcode = Math.max(0, Number(itemQc?.barcode || 0));
+  const barcode = Math.max(0, Number(itemQc?.master_barcode || itemQc?.barcode || 0));
+  const innerBarcode = Math.max(0, Number(itemQc?.inner_barcode || 0));
   const lastInspectedDate = normalizeText(itemQc?.last_inspected_date || "");
 
   if (
@@ -1397,6 +1555,12 @@ const buildQcItemDetailsPatch = ({
 
   if (barcode > 0 && Number(qcSnapshot?.barcode || 0) !== barcode) {
     set.barcode = barcode;
+  }
+  if (barcode > 0 && Number(qcSnapshot?.master_barcode || 0) !== barcode) {
+    set.master_barcode = barcode;
+  }
+  if (innerBarcode > 0 && Number(qcSnapshot?.inner_barcode || 0) !== innerBarcode) {
+    set.inner_barcode = innerBarcode;
   }
 
   if (itemQc?.packed_size === true && qcSnapshot?.packed_size !== true) {
@@ -1582,6 +1746,70 @@ const resolveRequestedQuantityFromQc = (qcDoc = {}) => {
   }
 
   return 0;
+};
+
+const getQcUserLatestRequestAvailability = (
+  qcDoc = {},
+  inspectionRecords = [],
+) => {
+  const latestRequestEntry = resolveLatestRequestEntry(qcDoc?.request_history || []);
+  if (!latestRequestEntry) {
+    return {
+      isAvailable: false,
+      latestRequestEntry: null,
+      latestInspectionRecord: null,
+      reason: "A new QC request is required before QC can update this record.",
+    };
+  }
+
+  const latestRequestStatus = normalizeRequestHistoryStatus(
+    latestRequestEntry?.status || REQUEST_HISTORY_STATUS.OPEN,
+  );
+  if (latestRequestStatus !== REQUEST_HISTORY_STATUS.OPEN) {
+    return {
+      isAvailable: false,
+      latestRequestEntry,
+      latestInspectionRecord: resolveLatestInspectionRecordForRequestEntry(
+        inspectionRecords,
+        latestRequestEntry,
+      ),
+      reason:
+        "The latest QC request is already closed. Align a new QC request before updating again.",
+    };
+  }
+
+  const latestInspectionRecord = resolveLatestInspectionRecordForRequestEntry(
+    inspectionRecords,
+    latestRequestEntry,
+  );
+  const latestRequestHasActivity = latestInspectionRecord
+    ? hasInspectionRecordActivity({
+      checked: latestInspectionRecord?.checked,
+      passed: latestInspectionRecord?.passed,
+      vendorOffered: latestInspectionRecord?.vendor_offered,
+      labelsAdded: latestInspectionRecord?.labels_added,
+      labelRanges: latestInspectionRecord?.label_ranges,
+      goodsNotReady: latestInspectionRecord?.goods_not_ready,
+      status: latestInspectionRecord?.status,
+    })
+    : false;
+
+  if (latestRequestHasActivity) {
+    return {
+      isAvailable: false,
+      latestRequestEntry,
+      latestInspectionRecord,
+      reason:
+        "The latest QC request is already worked upon. Align a new QC request before updating again.",
+    };
+  }
+
+  return {
+    isAvailable: true,
+    latestRequestEntry,
+    latestInspectionRecord,
+    reason: "",
+  };
 };
 
 const syncQcCurrentRequestFieldsFromHistory = (
@@ -1881,6 +2109,64 @@ const upsertInspectionRecordForRequest = async ({
   }
 
   return inspectionRecord;
+};
+
+const findTransferTargetOrderAndQc = async ({
+  poNumber = "",
+  itemCode = "",
+  sourceOrderId = "",
+} = {}) => {
+  const normalizedPoNumber = normalizeText(poNumber);
+  const normalizedItemCode = normalizeText(itemCode);
+  if (!normalizedPoNumber || !normalizedItemCode) {
+    return {
+      targetOrder: null,
+      targetQc: null,
+      openQuantity: 0,
+    };
+  }
+
+  const targetOrder = await Order.findOne({
+    ...ACTIVE_ORDER_MATCH,
+    ...(sourceOrderId && mongoose.Types.ObjectId.isValid(sourceOrderId)
+      ? { _id: { $ne: new mongoose.Types.ObjectId(sourceOrderId) } }
+      : {}),
+    order_id: {
+      $regex: `^${escapeRegex(normalizedPoNumber)}$`,
+      $options: "i",
+    },
+    "item.item_code": {
+      $regex: `^${escapeRegex(normalizedItemCode)}$`,
+      $options: "i",
+    },
+  });
+
+  if (!targetOrder) {
+    return {
+      targetOrder: null,
+      targetQc: null,
+      openQuantity: 0,
+    };
+  }
+
+  let targetQc = null;
+  if (targetOrder.qc_record && mongoose.Types.ObjectId.isValid(targetOrder.qc_record)) {
+    targetQc = await QC.findById(targetOrder.qc_record);
+  }
+  if (!targetQc) {
+    targetQc = await QC.findOne({ order: targetOrder._id });
+  }
+
+  const orderProgress = deriveOrderProgress({
+    orderEntry: targetOrder,
+    qcRecord: targetQc,
+  });
+
+  return {
+    targetOrder,
+    targetQc,
+    openQuantity: toNonNegativeNumber(orderProgress?.pending_inspection_quantity, 0),
+  };
 };
 
 /**
@@ -3446,6 +3732,8 @@ exports.updateQC = async (req, res) => {
       inspector,
       vendor_provision,
       barcode,
+      master_barcode,
+      inner_barcode,
       packed_size,
       finishing,
       branding,
@@ -3457,6 +3745,7 @@ exports.updateQC = async (req, res) => {
       CBM_bottom,
       CBM,
       inspected_item_sizes,
+      inspected_box_mode,
       inspected_box_sizes,
       inspected_item_LBH,
       inspected_item_top_LBH,
@@ -3542,6 +3831,18 @@ exports.updateQC = async (req, res) => {
       return res.status(400).json({
         message: "QC is not requested yet. Align QC request before updating.",
       });
+    }
+
+    if (isQcUser && !hasElevatedAccess) {
+      const qcUserRequestAvailability = getQcUserLatestRequestAvailability(
+        qc,
+        beforeInspectionRecords,
+      );
+      if (!qcUserRequestAvailability.isAvailable) {
+        return res.status(403).json({
+          message: qcUserRequestAvailability.reason,
+        });
+      }
     }
 
     const inspectionDateForPermissionRaw =
@@ -3668,7 +3969,7 @@ exports.updateQC = async (req, res) => {
     const parseSizeEntriesPayload = (
       value,
       fieldName,
-      { remarkOptions = [], weightKey = "" } = {},
+      { remarkOptions = [], weightKey = "", mode = "" } = {},
     ) => {
       if (value === undefined) return { hasInput: false, value: null };
       if (value === null) {
@@ -3701,6 +4002,19 @@ exports.updateQC = async (req, res) => {
 
       if (nonEmptyEntries.length > SIZE_ENTRY_LIMIT) {
         throw new Error(`${fieldName} cannot exceed ${SIZE_ENTRY_LIMIT} entries`);
+      }
+
+      const resolvedBoxMode =
+        fieldName === "inspected_box_sizes"
+          ? detectBoxPackagingMode(mode, nonEmptyEntries)
+          : BOX_PACKAGING_MODES.INDIVIDUAL;
+
+      if (
+        fieldName === "inspected_box_sizes" &&
+        resolvedBoxMode === BOX_PACKAGING_MODES.CARTON &&
+        nonEmptyEntries.length !== 2
+      ) {
+        throw new Error(`${fieldName} must contain exactly 2 entries in carton mode`);
       }
 
       const seenRemarks = new Set();
@@ -3751,12 +4065,55 @@ exports.updateQC = async (req, res) => {
 
         if (weightKey) {
           parsedEntry[weightKey] = toNonNegativeNumber(entry?.[weightKey], 0);
+          if (parsedEntry[weightKey] <= 0) {
+            throw new Error(
+              `${fieldName}[${entryIndex}].${weightKey} must be greater than 0`,
+            );
+          }
+        }
+
+        if (fieldName === "inspected_box_sizes") {
+          if (resolvedBoxMode === BOX_PACKAGING_MODES.CARTON) {
+            const boxType = entryIndex === 0 ? "inner" : "master";
+            parsedEntry.remark = boxType;
+            parsedEntry.box_type = boxType;
+            parsedEntry.item_count_in_inner =
+              boxType === "inner"
+                ? toNonNegativeNumber(entry?.item_count_in_inner, 0)
+                : 0;
+            parsedEntry.box_count_in_master =
+              boxType === "master"
+                ? toNonNegativeNumber(entry?.box_count_in_master, 0)
+                : 0;
+
+            if (boxType === "inner" && parsedEntry.item_count_in_inner <= 0) {
+              throw new Error(
+                `${fieldName}[${entryIndex}].item_count_in_inner must be greater than 0`,
+              );
+            }
+            if (boxType === "master" && parsedEntry.box_count_in_master <= 0) {
+              throw new Error(
+                `${fieldName}[${entryIndex}].box_count_in_master must be greater than 0`,
+              );
+            }
+          } else {
+            parsedEntry.box_type = "individual";
+            parsedEntry.item_count_in_inner = 0;
+            parsedEntry.box_count_in_master = 0;
+          }
         }
 
         return parsedEntry;
       });
 
-      return { hasInput: true, value: parsedEntries };
+      return {
+        hasInput: true,
+        value: parsedEntries,
+        mode:
+          fieldName === "inspected_box_sizes"
+            ? resolvedBoxMode
+            : BOX_PACKAGING_MODES.INDIVIDUAL,
+      };
     };
     const sortSizeEntriesForLegacy = (entries = [], remarkOptions = []) =>
       [...(Array.isArray(entries) ? entries : [])].sort((left, right) => {
@@ -3776,8 +4133,12 @@ exports.updateQC = async (req, res) => {
         : { ...EMPTY_LBH };
     const deriveLegacySizeFields = (
       entries = [],
-      { remarkOptions = [], weightKey = "" } = {},
+      { remarkOptions = [], weightKey = "", mode = "" } = {},
     ) => {
+      if (Array.isArray(remarkOptions) && remarkOptions === BOX_SIZE_REMARK_OPTIONS) {
+        return buildBoxLegacyFieldsFromEntries(entries, { weightKey, mode });
+      }
+
       const sortedEntries = sortSizeEntriesForLegacy(entries, remarkOptions);
       const totalWeight = weightKey
         ? sortedEntries.reduce(
@@ -3906,12 +4267,17 @@ exports.updateQC = async (req, res) => {
         weightKey: "net_weight",
       },
     );
+    const parsedInspectedBoxMode = detectBoxPackagingMode(
+      inspected_box_mode,
+      inspected_box_sizes,
+    );
     const parsedInspectedBoxSizeEntries = parseSizeEntriesPayload(
       inspected_box_sizes,
       "inspected_box_sizes",
       {
         remarkOptions: BOX_SIZE_REMARK_OPTIONS,
         weightKey: "gross_weight",
+        mode: parsedInspectedBoxMode,
       },
     );
     const derivedLegacyItemSizeFields = parsedInspectedItemSizeEntries.hasInput
@@ -3924,6 +4290,7 @@ exports.updateQC = async (req, res) => {
       ? deriveLegacySizeFields(parsedInspectedBoxSizeEntries.value || [], {
           remarkOptions: BOX_SIZE_REMARK_OPTIONS,
           weightKey: "gross_weight",
+          mode: parsedInspectedBoxSizeEntries.mode || parsedInspectedBoxMode,
         })
       : null;
 
@@ -4057,9 +4424,10 @@ exports.updateQC = async (req, res) => {
     const hasInspectedWeightUpdate = INSPECTED_WEIGHT_FIELD_KEYS.some(
       (fieldKey) => parsedInspectedWeightFields[fieldKey]?.hasInput,
     );
+    const hasInspectedBoxModeUpdate = inspected_box_mode !== undefined;
 
     const hasItemMasterUpdate =
-      hasInspectedLbhUpdate || hasInspectedWeightUpdate;
+      hasInspectedLbhUpdate || hasInspectedWeightUpdate || hasInspectedBoxModeUpdate;
     const itemCodeForInspectedLbhUpdate =
       hasItemMasterUpdate || hasCbmUpdate
         ? normalizeText(qc?.item?.item_code || "")
@@ -4254,13 +4622,43 @@ exports.updateQC = async (req, res) => {
          🔢 BARCODE
       ──────────────────────── */
 
-    if (barcode !== undefined) {
-      if (!allowQcFieldEdits && !isAdmin && qc.barcode > 0 && Number(barcode) !== qc.barcode) {
-        return res
-          .status(400)
-          .json({ message: "barcode can only be set once" });
+    const nextMasterBarcodeRaw =
+      master_barcode !== undefined ? master_barcode : barcode;
+    if (nextMasterBarcodeRaw !== undefined) {
+      const nextMasterBarcode = Number(nextMasterBarcodeRaw);
+      if (!Number.isFinite(nextMasterBarcode) || nextMasterBarcode < 0) {
+        return res.status(400).json({
+          message: "master_barcode must be a non-negative number",
+        });
       }
-      qc.barcode = Number(barcode);
+      if (!allowQcFieldEdits && !isAdmin) {
+        const currentMasterBarcode = Number(qc?.master_barcode || qc?.barcode || 0);
+        if (currentMasterBarcode > 0 && nextMasterBarcode !== currentMasterBarcode) {
+          return res
+            .status(400)
+            .json({ message: "master barcode can only be set once" });
+        }
+      }
+      qc.master_barcode = nextMasterBarcode;
+      qc.barcode = nextMasterBarcode;
+    }
+
+    if (inner_barcode !== undefined) {
+      const nextInnerBarcode = Number(inner_barcode);
+      if (!Number.isFinite(nextInnerBarcode) || nextInnerBarcode < 0) {
+        return res.status(400).json({
+          message: "inner_barcode must be a non-negative number",
+        });
+      }
+      if (!allowQcFieldEdits && !isAdmin) {
+        const currentInnerBarcode = Number(qc?.inner_barcode || 0);
+        if (currentInnerBarcode > 0 && nextInnerBarcode !== currentInnerBarcode) {
+          return res
+            .status(400)
+            .json({ message: "inner barcode can only be set once" });
+        }
+      }
+      qc.inner_barcode = nextInnerBarcode;
     }
 
     /* ────────────────────────
@@ -4833,20 +5231,46 @@ exports.updateQC = async (req, res) => {
       const setSizeEntriesPath = (
         path,
         parsedEntries,
-        { weightKey = "" } = {},
+        { weightKey = "", mode = "" } = {},
       ) => {
         if (!parsedEntries?.hasInput) return false;
-        const nextEntries = normalizeStoredSizeEntries(parsedEntries.value || [], {
-          weightKey,
-        });
-        const existingEntries = normalizeStoredSizeEntries(itemDoc?.[path] || [], {
-          weightKey,
-        });
+        const nextEntries =
+          path === "inspected_box_sizes"
+            ? normalizeStoredBoxEntries(parsedEntries.value || [], {
+                weightKey,
+                mode: mode || parsedEntries.mode,
+              })
+            : normalizeStoredSizeEntries(parsedEntries.value || [], {
+                weightKey,
+              });
+        const existingEntries =
+          path === "inspected_box_sizes"
+            ? normalizeStoredBoxEntries(itemDoc?.[path] || [], {
+                weightKey,
+                mode: itemDoc?.inspected_box_mode,
+              })
+            : normalizeStoredSizeEntries(itemDoc?.[path] || [], {
+                weightKey,
+              });
         if (JSON.stringify(existingEntries) === JSON.stringify(nextEntries)) {
           return false;
         }
         itemDoc.set(path, nextEntries);
         itemDoc.markModified(path);
+        return true;
+      };
+      const setBoxModePath = (nextMode) => {
+        const resolvedNextMode = detectBoxPackagingMode(
+          nextMode,
+          parsedInspectedBoxSizeEntries.value || itemDoc?.inspected_box_sizes,
+        );
+        const existingMode = detectBoxPackagingMode(
+          itemDoc?.inspected_box_mode,
+          itemDoc?.inspected_box_sizes,
+        );
+        if (existingMode === resolvedNextMode) return false;
+        itemDoc.set("inspected_box_mode", resolvedNextMode);
+        itemDoc.markModified("inspected_box_mode");
         return true;
       };
       const setLbhPath = (path, parsedUpdate) => {
@@ -4874,7 +5298,15 @@ exports.updateQC = async (req, res) => {
         setSizeEntriesPath(
           "inspected_box_sizes",
           parsedInspectedBoxSizeEntries,
-          { weightKey: "gross_weight" },
+          {
+            weightKey: "gross_weight",
+            mode: parsedInspectedBoxSizeEntries.mode || parsedInspectedBoxMode,
+          },
+        ) || hasItemDocChanges;
+      hasItemDocChanges =
+        (
+          (hasInspectedBoxModeUpdate || parsedInspectedBoxSizeEntries.hasInput) &&
+          setBoxModePath(parsedInspectedBoxSizeEntries.mode || parsedInspectedBoxMode)
         ) || hasItemDocChanges;
 
       if (hasInspectedLbhUpdate) {
@@ -4942,27 +5374,35 @@ exports.updateQC = async (req, res) => {
         }
       }
 
-      if (hasInspectedLbhUpdate) {
+      if (hasInspectedLbhUpdate || hasInspectedBoxModeUpdate) {
+        const inspectedBoxMode = detectBoxPackagingMode(
+          itemDoc?.inspected_box_mode,
+          itemDoc?.inspected_box_sizes,
+        );
+        const inspectedBoxSummary = buildBoxMeasurementCbmSummary({
+          sizes: itemDoc?.inspected_box_sizes,
+          mode: inspectedBoxMode,
+          singleLbh: itemDoc?.inspected_box_LBH || itemDoc?.box_LBH,
+          topLbh:
+            inspectedBoxMode === BOX_PACKAGING_MODES.CARTON
+              ? null
+              : itemDoc?.inspected_box_top_LBH ||
+                itemDoc?.inspected_top_LBH,
+          bottomLbh:
+            inspectedBoxMode === BOX_PACKAGING_MODES.CARTON
+              ? null
+              : itemDoc?.inspected_box_bottom_LBH ||
+                itemDoc?.inspected_bottom_LBH,
+        });
         const calculatedInspectedSizeEntriesCbm = Math.max(
-          calculateSizeEntriesCbmTotal(itemDoc?.inspected_box_sizes),
+          calculateEffectiveBoxEntriesCbmTotal(
+            itemDoc?.inspected_box_sizes,
+            inspectedBoxMode,
+          ),
           calculateSizeEntriesCbmTotal(itemDoc?.inspected_item_sizes),
         );
-        const calculatedInspectedTopCbm = calculateCbmFromLbh(
-          itemDoc?.inspected_box_top_LBH ||
-            itemDoc?.inspected_top_LBH ||
-            itemDoc?.inspected_item_top_LBH ||
-            {},
-        );
-        const calculatedInspectedBottomCbm = calculateCbmFromLbh(
-          itemDoc?.inspected_box_bottom_LBH ||
-            itemDoc?.inspected_bottom_LBH ||
-            itemDoc?.inspected_item_bottom_LBH ||
-            {},
-        );
-        const hasTopAndBottomInspectedCbm =
-          toNonNegativeNumber(calculatedInspectedTopCbm, 0) > 0 &&
-          toNonNegativeNumber(calculatedInspectedBottomCbm, 0) > 0;
-
+        const calculatedInspectedTopCbm = inspectedBoxSummary.first;
+        const calculatedInspectedBottomCbm = inspectedBoxSummary.second;
         const calculatedInspectedCbmFromBox = calculateCbmFromLbh(
           itemDoc?.inspected_box_LBH ||
             itemDoc?.box_LBH ||
@@ -4970,11 +5410,9 @@ exports.updateQC = async (req, res) => {
             itemDoc?.item_LBH ||
             {},
         );
-        const calculatedInspectedCbm = hasTopAndBottomInspectedCbm
-          ? toNormalizedCbmString(
-              toNonNegativeNumber(calculatedInspectedTopCbm, 0) +
-                toNonNegativeNumber(calculatedInspectedBottomCbm, 0),
-            )
+        const calculatedInspectedCbm =
+          toNonNegativeNumber(inspectedBoxSummary.total, 0) > 0
+            ? inspectedBoxSummary.total
           : calculatedInspectedSizeEntriesCbm > 0
             ? toNormalizedCbmString(calculatedInspectedSizeEntriesCbm)
             : calculatedInspectedCbmFromBox;
@@ -5012,7 +5450,8 @@ exports.updateQC = async (req, res) => {
           nextInspectedItemBottomLbh ||
           nextInspectedBoxLbh ||
           nextInspectedTopLbh ||
-          nextInspectedBottomLbh
+          nextInspectedBottomLbh ||
+          hasInspectedBoxModeUpdate
         ) {
           qc.cbm = buildItemInspectedBoxCbmSnapshot(itemDoc);
         }
@@ -6551,6 +6990,18 @@ exports.markGoodsNotReady = async (req, res) => {
       });
     }
 
+    if (!hasElevatedAccess && normalizedRole === "qc") {
+      const qcUserRequestAvailability = getQcUserLatestRequestAvailability(
+        qc,
+        beforeInspectionRecords,
+      );
+      if (!qcUserRequestAvailability.isAvailable) {
+        return res.status(403).json({
+          message: qcUserRequestAvailability.reason,
+        });
+      }
+    }
+
     if (!hasElevatedAccess) {
       if (!currentUserId) {
         return res.status(401).json({ message: "Unauthorized" });
@@ -6725,6 +7176,18 @@ exports.rejectAllQc = async (req, res) => {
       return res.status(400).json({
         message: "QC request history is required before rejecting all",
       });
+    }
+
+    if (!hasElevatedAccess && normalizedRole === "qc") {
+      const qcUserRequestAvailability = getQcUserLatestRequestAvailability(
+        qc,
+        beforeInspectionRecords,
+      );
+      if (!qcUserRequestAvailability.isAvailable) {
+        return res.status(403).json({
+          message: qcUserRequestAvailability.reason,
+        });
+      }
     }
 
     if (!hasElevatedAccess) {
@@ -7224,6 +7687,498 @@ exports.transferQcRequest = async (req, res) => {
     console.error("Transfer QC Request Error:", err);
     return res.status(400).json({
       message: err?.message || "Failed to transfer QC request",
+    });
+  }
+};
+
+exports.lookupInspectionTransferTarget = async (req, res) => {
+  try {
+    const qcId = String(req.params.id || "").trim();
+    const recordId = String(req.params.recordId || "").trim();
+    const poNumber = normalizeText(req.query?.po || req.query?.order_id || req.query?.orderId);
+
+    if (!mongoose.Types.ObjectId.isValid(qcId)) {
+      return res.status(400).json({ message: "Invalid QC id" });
+    }
+    if (!mongoose.Types.ObjectId.isValid(recordId)) {
+      return res.status(400).json({ message: "Invalid inspection record id" });
+    }
+    if (!poNumber) {
+      return res.status(400).json({ message: "PO is required" });
+    }
+
+    const qc = await QC.findById(qcId)
+      .select("order item order_meta")
+      .populate("order", "order_id brand vendor item quantity status shipment qc_record");
+    if (!qc || !qc.order) {
+      return res.status(404).json({ message: "QC record not found" });
+    }
+
+    const sourceInspection = await Inspection.findOne({
+      _id: recordId,
+      qc: qc._id,
+    }).select(
+      "qc inspection_date requested_date status checked passed vendor_requested vendor_offered labels_added goods_not_ready",
+    );
+    if (!sourceInspection) {
+      return res.status(404).json({ message: "Inspection record not found" });
+    }
+
+    const sourceStatus = resolveInspectionRecordStatus({
+      checked: sourceInspection?.checked,
+      passed: sourceInspection?.passed,
+      vendorOffered: sourceInspection?.vendor_offered,
+      labelsAdded: sourceInspection?.labels_added,
+      goodsNotReady: sourceInspection?.goods_not_ready,
+      explicitStatus: sourceInspection?.status,
+      requestType: qc?.request_type,
+    });
+    if (
+      normalizeInspectionStatus(sourceStatus) ===
+        normalizeInspectionStatus(INSPECTION_RECORD_STATUS.REJECTED) ||
+      normalizeInspectionStatus(sourceStatus) ===
+        normalizeInspectionStatus(INSPECTION_RECORD_STATUS.GOODS_NOT_READY)
+    ) {
+      return res.status(400).json({
+        message: "Rejected or goods-not-ready inspection records cannot be transferred",
+      });
+    }
+
+    const sourcePassed = toNonNegativeNumber(sourceInspection?.passed, 0);
+    if (sourcePassed <= 0) {
+      return res.status(400).json({
+        message: "This inspection record has no passed quantity available to transfer",
+      });
+    }
+
+    const sourceLabels = normalizeLabels(sourceInspection?.labels_added);
+    const {
+      targetOrder,
+      targetQc,
+      openQuantity,
+    } = await findTransferTargetOrderAndQc({
+      poNumber,
+      itemCode: qc?.item?.item_code || qc?.order?.item?.item_code || "",
+      sourceOrderId: qc?.order?._id || qc?.order || "",
+    });
+
+    if (!targetOrder) {
+      return res.status(404).json({
+        message: "No active order with open quantity was found for this PO and item",
+      });
+    }
+
+    if (openQuantity <= 0) {
+      return res.status(400).json({
+        message: "The selected PO has no open quantity available for transfer",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        source: {
+          qc_id: qc._id,
+          order_id: qc?.order?.order_id || qc?.order_meta?.order_id || "",
+          item_code: qc?.item?.item_code || "",
+          passed_quantity: sourcePassed,
+          available_labels: sourceLabels,
+          available_labels_count: sourceLabels.length,
+        },
+        target: {
+          order_id: targetOrder?.order_id || "",
+          brand: targetOrder?.brand || "",
+          vendor: targetOrder?.vendor || "",
+          item_code: targetOrder?.item?.item_code || "",
+          open_quantity: openQuantity,
+          qc_id: targetQc?._id || null,
+        },
+      },
+    });
+  } catch (err) {
+    console.error("Lookup Inspection Transfer Target Error:", err);
+    return res.status(400).json({
+      message: err?.message || "Failed to lookup transfer target",
+    });
+  }
+};
+
+exports.transferInspectionRecord = async (req, res) => {
+  try {
+    const qcId = String(req.params.id || "").trim();
+    const recordId = String(req.params.recordId || "").trim();
+    const poNumber = normalizeText(req.body?.po || req.body?.order_id || req.body?.orderId);
+    const transferQuantityRaw = Number(req.body?.quantity);
+    const transferLabels = parseTransferLabelsInput(
+      req.body?.labels ?? req.body?.labels_added,
+    );
+
+    if (!mongoose.Types.ObjectId.isValid(qcId)) {
+      return res.status(400).json({ message: "Invalid QC id" });
+    }
+    if (!mongoose.Types.ObjectId.isValid(recordId)) {
+      return res.status(400).json({ message: "Invalid inspection record id" });
+    }
+    if (!poNumber) {
+      return res.status(400).json({ message: "PO is required" });
+    }
+    if (!Number.isInteger(transferQuantityRaw) || transferQuantityRaw <= 0) {
+      return res.status(400).json({
+        message: "quantity must be a positive integer",
+      });
+    }
+
+    const sourceQc = await QC.findById(qcId)
+      .populate("order", "order_id brand vendor item quantity status shipment qc_record")
+      .populate("inspector", "name email role");
+    if (!sourceQc || !sourceQc.order) {
+      return res.status(404).json({ message: "QC record not found" });
+    }
+
+    const sourceInspection = await Inspection.findOne({
+      _id: recordId,
+      qc: sourceQc._id,
+    });
+    if (!sourceInspection) {
+      return res.status(404).json({ message: "Inspection record not found" });
+    }
+
+    const sourcePassed = toNonNegativeNumber(sourceInspection?.passed, 0);
+    if (transferQuantityRaw > sourcePassed) {
+      return res.status(400).json({
+        message: "Transfer quantity cannot be greater than the passed quantity of this inspection record",
+      });
+    }
+
+    const sourceLabels = normalizeLabels(sourceInspection?.labels_added);
+    const invalidTransferLabels = transferLabels.filter(
+      (label) => !sourceLabels.includes(label),
+    );
+    if (invalidTransferLabels.length > 0) {
+      return res.status(400).json({
+        message: `Selected labels are not available on this inspection record: ${invalidTransferLabels.join(", ")}`,
+      });
+    }
+
+    const sourceStatus = resolveInspectionRecordStatus({
+      checked: sourceInspection?.checked,
+      passed: sourceInspection?.passed,
+      vendorOffered: sourceInspection?.vendor_offered,
+      labelsAdded: sourceInspection?.labels_added,
+      goodsNotReady: sourceInspection?.goods_not_ready,
+      explicitStatus: sourceInspection?.status,
+      requestType: sourceQc?.request_type,
+    });
+    if (
+      normalizeInspectionStatus(sourceStatus) ===
+        normalizeInspectionStatus(INSPECTION_RECORD_STATUS.REJECTED) ||
+      normalizeInspectionStatus(sourceStatus) ===
+        normalizeInspectionStatus(INSPECTION_RECORD_STATUS.GOODS_NOT_READY)
+    ) {
+      return res.status(400).json({
+        message: "Rejected or goods-not-ready inspection records cannot be transferred",
+      });
+    }
+
+    const {
+      targetOrder,
+      targetQc: existingTargetQc,
+      openQuantity,
+    } = await findTransferTargetOrderAndQc({
+      poNumber,
+      itemCode: sourceQc?.item?.item_code || sourceQc?.order?.item?.item_code || "",
+      sourceOrderId: sourceQc?.order?._id || sourceQc?.order || "",
+    });
+
+    if (!targetOrder) {
+      return res.status(404).json({
+        message: "No active order with open quantity was found for this PO and item",
+      });
+    }
+    if (openQuantity <= 0) {
+      return res.status(400).json({
+        message: "The selected PO has no open quantity available for transfer",
+      });
+    }
+    if (transferQuantityRaw > openQuantity) {
+      return res.status(400).json({
+        message: "Transfer quantity cannot exceed the open quantity on the selected PO",
+      });
+    }
+
+    const itemCode = normalizeText(
+      sourceQc?.item?.item_code || targetOrder?.item?.item_code || "",
+    );
+    const matchedItem = itemCode
+      ? await Item.findOne({
+          code: {
+            $regex: `^${escapeRegex(itemCode)}$`,
+            $options: "i",
+          },
+        })
+          .select("code name description cbm qc")
+          .lean()
+      : null;
+
+    const transferDate = toISODateString(new Date()) || sourceInspection?.inspection_date || sourceQc?.request_date || "";
+    const requestedDate = String(
+      sourceInspection?.requested_date ||
+        sourceInspection?.inspection_date ||
+        sourceQc?.request_date ||
+        transferDate,
+    );
+    const inspectionDate = String(
+      sourceInspection?.inspection_date || transferDate,
+    );
+    const transferNoteSource = `Transferred ${transferQuantityRaw} to PO ${targetOrder.order_id}`;
+    const transferNoteTarget =
+      `Transferred from PO ${sourceQc?.order?.order_id || sourceQc?.order_meta?.order_id || "N/A"}`;
+
+    const sourceBeforeInspections = await Inspection.find({ qc: sourceQc._id }).lean();
+    const sourceBeforeSnapshot = buildQcEditLogSnapshot(
+      sourceQc.toObject(),
+      sourceBeforeInspections,
+    );
+    const sourceOrderBeforeSnapshot = buildOrderAuditSnapshotForQc(sourceQc?.order);
+
+    let targetQc = existingTargetQc;
+    const targetBeforeInspections = targetQc
+      ? await Inspection.find({ qc: targetQc._id }).lean()
+      : [];
+    const targetBeforeSnapshot = targetQc
+      ? buildQcEditLogSnapshot(targetQc.toObject(), targetBeforeInspections)
+      : {};
+    const targetOrderBeforeSnapshot = buildOrderAuditSnapshotForQc(targetOrder);
+
+    const targetRequestHistoryEntry = {
+      request_date: requestedDate,
+      request_type: normalizeQcRequestType(sourceQc?.request_type),
+      quantity_requested: transferQuantityRaw,
+      inspector: sourceInspection?.inspector || sourceQc?.inspector?._id || sourceQc?.inspector || null,
+      status: REQUEST_HISTORY_STATUS.INSPECTED,
+      remarks: transferNoteTarget,
+      createdBy: req.user._id,
+      updatedAt: new Date(),
+      updated_by: buildAuditActor(req.user),
+    };
+
+    if (!targetQc) {
+      targetQc = new QC({
+        order: targetOrder._id,
+        item: {
+          item_code: targetOrder?.item?.item_code || sourceQc?.item?.item_code || "",
+          description: targetOrder?.item?.description || sourceQc?.item?.description || "",
+        },
+        inspector:
+          sourceInspection?.inspector || sourceQc?.inspector?._id || sourceQc?.inspector || null,
+        request_type: normalizeQcRequestType(sourceQc?.request_type),
+        order_meta: {
+          order_id: targetOrder.order_id,
+          vendor: targetOrder.vendor,
+          brand: targetOrder.brand,
+        },
+        request_date: requestedDate,
+        last_inspected_date: inspectionDate,
+        quantities: {
+          client_demand: toNonNegativeNumber(targetOrder?.quantity, 0),
+          quantity_requested: transferQuantityRaw,
+          vendor_provision: transferQuantityRaw,
+          qc_checked: transferQuantityRaw,
+          qc_passed: transferQuantityRaw,
+          pending: Math.max(
+            0,
+            toNonNegativeNumber(targetOrder?.quantity, 0) - transferQuantityRaw,
+          ),
+          qc_rejected: 0,
+        },
+        request_history: [targetRequestHistoryEntry],
+        remarks: transferNoteTarget,
+        createdBy: req.user._id,
+        updated_by: buildAuditActor(req.user),
+      });
+
+      const createPatchResult = buildQcItemDetailsPatch({
+        qcSnapshot: targetQc,
+        itemDoc: matchedItem,
+        onlyUpdatedItems: true,
+      });
+      if (createPatchResult?.set) {
+        applyQcItemDetailsPatch(targetQc, createPatchResult.set);
+      }
+    } else {
+      targetQc.request_history = Array.isArray(targetQc.request_history)
+        ? targetQc.request_history
+        : [];
+      targetQc.request_history.push(targetRequestHistoryEntry);
+      targetQc.updated_by = buildAuditActor(req.user);
+    }
+
+    const sourceCheckedBefore = toNonNegativeNumber(sourceInspection?.checked, 0);
+    const sourceRequestedBefore = toNonNegativeNumber(sourceInspection?.vendor_requested, 0);
+    const sourceOfferedBefore = toNonNegativeNumber(sourceInspection?.vendor_offered, 0);
+    const sourcePassedBefore = toNonNegativeNumber(sourceInspection?.passed, 0);
+    const sourcePendingBefore = toNonNegativeNumber(sourceInspection?.pending_after, 0);
+    const sourceCbmBefore = getNormalizedCbmTotalNumber(sourceInspection?.cbm);
+    const transferCbmTotal =
+      sourceCheckedBefore > 0
+        ? (sourceCbmBefore / sourceCheckedBefore) * transferQuantityRaw
+        : 0;
+
+    sourceInspection.vendor_requested = Math.max(
+      0,
+      sourceRequestedBefore - transferQuantityRaw,
+    );
+    sourceInspection.vendor_offered = Math.max(
+      0,
+      sourceOfferedBefore - transferQuantityRaw,
+    );
+    sourceInspection.checked = Math.max(0, sourceCheckedBefore - transferQuantityRaw);
+    sourceInspection.passed = Math.max(0, sourcePassedBefore - transferQuantityRaw);
+    sourceInspection.pending_after = sourcePendingBefore + transferQuantityRaw;
+    sourceInspection.labels_added = normalizeLabels(
+      sourceLabels.filter((label) => !transferLabels.includes(label)),
+    );
+    sourceInspection.label_ranges = buildLabelRangesFromLabels(
+      sourceInspection.labels_added,
+    );
+    sourceInspection.cbm = buildSingleBoxCbmSnapshot(
+      Math.max(0, sourceCbmBefore - transferCbmTotal),
+    );
+    sourceInspection.status = resolveInspectionRecordStatus({
+      checked: sourceInspection.checked,
+      passed: sourceInspection.passed,
+      vendorOffered: sourceInspection.vendor_offered,
+      labelsAdded: sourceInspection.labels_added,
+      labelRanges: sourceInspection.label_ranges,
+      goodsNotReady: sourceInspection.goods_not_ready,
+      explicitStatus:
+        sourceInspection.checked <= 0 &&
+        sourceInspection.passed <= 0 &&
+        sourceInspection.vendor_offered <= 0 &&
+        sourceInspection.labels_added.length === 0
+          ? INSPECTION_RECORD_STATUS.TRANSFERRED
+          : "",
+      requestType: sourceQc?.request_type,
+    });
+    sourceInspection.remarks = normalizeText(
+      [sourceInspection.remarks, transferNoteSource].filter(Boolean).join(" | "),
+    );
+    sourceInspection.updated_by = buildAuditActor(req.user);
+    await sourceInspection.save();
+
+    if (!targetQc._id) {
+      await targetQc.save();
+    }
+
+    const latestTargetRequestEntry =
+      Array.isArray(targetQc.request_history) && targetQc.request_history.length > 0
+        ? targetQc.request_history[targetQc.request_history.length - 1]
+        : null;
+    const targetInspection = await upsertInspectionRecordForRequest({
+      qcDoc: targetQc,
+      inspectorId:
+        sourceInspection?.inspector || sourceQc?.inspector?._id || sourceQc?.inspector || "",
+      requestDate: requestedDate,
+      requestHistoryId: latestTargetRequestEntry?._id || null,
+      requestedQuantity: transferQuantityRaw,
+      inspectionDate,
+      remarks: transferNoteTarget,
+      createdBy: req.user._id,
+      auditUser: req.user,
+      addChecked: transferQuantityRaw,
+      addPassed: transferQuantityRaw,
+      addProvision: transferQuantityRaw,
+      appendLabelRanges: buildLabelRangesFromLabels(transferLabels),
+      appendLabels: transferLabels,
+      replaceCbmSnapshot: false,
+      allowRequestedDateFallback: false,
+      explicitStatus: INSPECTION_RECORD_STATUS.DONE,
+    });
+    if (targetInspection) {
+      targetInspection.cbm = buildSingleBoxCbmSnapshot(transferCbmTotal);
+      targetInspection.updated_by = buildAuditActor(req.user);
+      await targetInspection.save();
+    }
+
+    const sourceAfterInspections = await refreshQcAggregateState(sourceQc, req.user);
+    const targetAfterInspections = await refreshQcAggregateState(targetQc, req.user);
+
+    applyQcOrderStatus(sourceQc, sourceQc.order);
+    sourceQc.order.updated_by = buildAuditActor(req.user);
+    await sourceQc.order.save();
+
+    applyQcOrderStatus(targetQc, targetOrder);
+    targetOrder.qc_record = targetQc._id;
+    targetOrder.updated_by = buildAuditActor(req.user);
+    await targetOrder.save();
+
+    await recalculateInspectorUsedLabels([
+      sourceInspection?.inspector,
+      sourceQc?.inspector?._id || sourceQc?.inspector,
+      targetQc?.inspector?._id || targetQc?.inspector,
+    ]);
+
+    await createQcEditLog({
+      reqUser: req.user,
+      qcDoc: sourceQc,
+      beforeSnapshot: sourceBeforeSnapshot,
+      afterSnapshot: buildQcEditLogSnapshot(sourceQc.toObject(), sourceAfterInspections),
+      operationType: "qc_update",
+      extraRemarks: [transferNoteSource],
+    });
+    await createOrderEditLogFromQc({
+      reqUser: req.user,
+      orderDoc: sourceQc.order,
+      beforeSnapshot: sourceOrderBeforeSnapshot,
+      afterSnapshot: buildOrderAuditSnapshotForQc(sourceQc.order),
+      extraRemarks: ["Order recalculated after inspection transfer."],
+    });
+
+    await createQcEditLog({
+      reqUser: req.user,
+      qcDoc: targetQc,
+      beforeSnapshot: targetBeforeSnapshot,
+      afterSnapshot: buildQcEditLogSnapshot(targetQc.toObject(), targetAfterInspections),
+      operationType: "qc_update",
+      extraRemarks: [transferNoteTarget],
+    });
+    await createOrderEditLogFromQc({
+      reqUser: req.user,
+      orderDoc: targetOrder,
+      beforeSnapshot: targetOrderBeforeSnapshot,
+      afterSnapshot: buildOrderAuditSnapshotForQc(targetOrder),
+      extraRemarks: ["Order recalculated after receiving transferred inspection quantity."],
+    });
+
+    try {
+      await upsertItemFromQc(sourceQc);
+      if (String(targetQc?._id || "") !== String(sourceQc?._id || "")) {
+        await upsertItemFromQc(targetQc);
+      }
+    } catch (itemSyncError) {
+      console.error("Item sync after inspection transfer failed:", {
+        sourceQcId: sourceQc?._id,
+        targetQcId: targetQc?._id,
+        error: itemSyncError?.message || String(itemSyncError),
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Transferred ${transferQuantityRaw} to PO ${targetOrder.order_id}`,
+      data: {
+        source_qc_id: sourceQc._id,
+        source_order_id: sourceQc?.order?.order_id || sourceQc?.order_meta?.order_id || "",
+        target_qc_id: targetQc._id,
+        target_order_id: targetOrder.order_id,
+        transferred_quantity: transferQuantityRaw,
+        transferred_labels: transferLabels,
+      },
+    });
+  } catch (err) {
+    console.error("Transfer Inspection Record Error:", err);
+    return res.status(400).json({
+      message: err?.message || "Failed to transfer inspection record",
     });
   }
 };
@@ -8309,7 +9264,7 @@ exports.getQCById = async (req, res) => {
           },
         })
           .select(
-            "code name description brand_name brands vendors finish inspected_weight pis_weight weight cbm pis_barcode qc.barcode inspected_item_LBH inspected_item_sizes inspected_item_top_LBH inspected_item_bottom_LBH pis_item_LBH pis_item_sizes pis_item_top_LBH pis_item_bottom_LBH item_LBH inspected_box_LBH inspected_box_sizes inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_box_LBH pis_box_sizes pis_box_top_LBH pis_box_bottom_LBH box_LBH image cad_file pis_file assembly_file",
+            "code name description brand_name brands vendors finish inspected_weight pis_weight weight cbm pis_barcode pis_master_barcode pis_inner_barcode qc.barcode qc.master_barcode qc.inner_barcode inspected_item_LBH inspected_item_sizes inspected_item_top_LBH inspected_item_bottom_LBH pis_item_LBH pis_item_sizes pis_item_top_LBH pis_item_bottom_LBH item_LBH inspected_box_LBH inspected_box_sizes inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_box_LBH pis_box_sizes pis_box_top_LBH pis_box_bottom_LBH box_LBH image cad_file pis_file assembly_file",
           )
           .lean()
       : null;

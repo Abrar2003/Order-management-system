@@ -11,6 +11,7 @@ import RejectAllModal from "../components/RejectAllModal";
 import PdfViewerModal from "../components/PdfViewerModal";
 import SortHeaderButton from "../components/SortHeaderButton";
 import TransferQcRequestModal from "../components/TransferQcRequestModal";
+import TransferInspectionModal from "../components/TransferInspectionModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import { isViewOnlyUser } from "../auth/permissions";
 import {
@@ -20,7 +21,10 @@ import {
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { formatPositiveCbm } from "../utils/cbm";
 import { formatFixedNumber, formatLbhValue } from "../utils/measurementDisplay";
-import { canTransferLatestRequestToday } from "../utils/qcRequests";
+import {
+  canTransferLatestRequestToday,
+  getQcUserUpdateRequestAvailability,
+} from "../utils/qcRequests";
 import useBulkQcImageUpload from "../hooks/useBulkQcImageUpload";
 import {
   getDerivedOrderStatus,
@@ -348,6 +352,7 @@ const QcDetails = () => {
   const [showGoodsNotReadyModal, setShowGoodsNotReadyModal] = useState(false);
   const [showRejectAllModal, setShowRejectAllModal] = useState(false);
   const [showTransferRequestModal, setShowTransferRequestModal] = useState(false);
+  const [transferInspectionRecord, setTransferInspectionRecord] = useState(null);
   const [showQcImageGallery, setShowQcImageGallery] = useState(false);
   const [activeQcImageIndex, setActiveQcImageIndex] = useState(0);
   const [selectedQcImageIds, setSelectedQcImageIds] = useState([]);
@@ -378,6 +383,8 @@ const QcDetails = () => {
   const isQcUser = normalizedRole === "qc";
   const isAdmin = normalizedRole === "admin" || normalizedRole === "manager";
   const isOnlyAdmin = normalizedRole === "admin";
+  const canTransferInspectionRecords = isAdmin;
+  const showInspectionActions = canTransferInspectionRecords || isOnlyAdmin;
   const canFinalizeShipping = ["admin", "manager", "dev"].includes(
     normalizedRole,
   );
@@ -403,6 +410,10 @@ const QcDetails = () => {
     isAdmin ||
     (!isInspectionDone &&
       normalizedRole === "qc");
+  const qcUserRequestAvailability = useMemo(
+    () => getQcUserUpdateRequestAvailability(qc),
+    [qc],
+  );
   const alignedInspectorId = String(qc?.inspector?._id || qc?.inspector || "").trim();
   const isQcAlignedRecord = !isQcUser || (
     Boolean(currentUserId) &&
@@ -440,7 +451,23 @@ const QcDetails = () => {
   const canUpdateQc =
     canUpdateQcByRole &&
     pendingAlignmentInfo.hasRequest &&
-    isQcAlignedRecord;
+    isQcAlignedRecord &&
+    (!isQcUser || qcUserRequestAvailability.isAvailable);
+  const qcUpdateDisabledReason = !canUpdateQc
+    ? !pendingAlignmentInfo.hasRequest
+      ? "QC is not requested yet. Align QC request before updating."
+      : !isQcAlignedRecord
+      ? "QC can update only records aligned to them."
+      : isInspectionDone
+      ? "After inspection is done, only admin can update this record."
+      : isQcUser && !qcUserRequestAvailability.isAvailable
+      ? qcUserRequestAvailability.reason
+      : !isQcInspectionDateAllowed
+      ? "QC date rule will be validated while submitting."
+      : hasUsedOneDayBackdatedUpdate
+      ? "Backdated one-time rule will be validated while submitting."
+      : "Only admin, manager, or aligned QC can update this record."
+    : "";
   const availableRelatedFileOptions = useMemo(
     () =>
       isQcUser
@@ -558,7 +585,12 @@ const QcDetails = () => {
 
     return ranges.length > 0 ? ranges.join(" | ") : "None";
   }, [qc?.inspection_record]);
-  const barcodeValue = qc?.barcode > 0 ? String(qc.barcode) : "";
+  const barcodeValue =
+    (qc?.master_barcode || qc?.barcode) > 0
+      ? String(qc?.master_barcode || qc?.barcode)
+      : "";
+  const innerBarcodeValue =
+    qc?.inner_barcode > 0 ? String(qc.inner_barcode) : "";
 
   const cbmData = useMemo(() => {
     if (!qc) return { top: "", bottom: "", total: "" };
@@ -776,6 +808,7 @@ const QcDetails = () => {
       return {
         key: `inspection-${record?._id || index}`,
         recordId: record?._id || null,
+        inspectionRecord: record,
         rowType: "Inspection",
         sortTime:
           toTimestamp(record?.inspection_date) ||
@@ -1997,7 +2030,7 @@ const QcDetails = () => {
                             onClick={() => handleTimelineSortColumn("remarks", "asc")}
                           />
                         </th>
-                        {isOnlyAdmin && <th>Action</th>}
+                        {showInspectionActions && <th>Action</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -2013,19 +2046,38 @@ const QcDetails = () => {
                           <td>{row.cbmTotal}</td>
                           <td>{row.pendingAfter}</td>
                           <td>{row.remarks}</td>
-                          {isOnlyAdmin && (
+                          {showInspectionActions && (
                             <td>
                               {row.rowType === "Inspection" && row.recordId ? (
-                                <button
-                                  type="button"
-                                  className="btn btn-outline-danger btn-sm"
-                                  disabled={deletingInspectionId === String(row.recordId)}
-                                  onClick={() => handleDeleteInspectionRecord(row.recordId)}
-                                >
-                                  {deletingInspectionId === String(row.recordId)
-                                    ? "Deleting..."
-                                    : "Delete"}
-                                </button>
+                                <div className="d-flex flex-wrap gap-2">
+                                  {canTransferInspectionRecords && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-outline-primary btn-sm"
+                                      disabled={Number(row?.passedQty || 0) <= 0}
+                                      title={
+                                        Number(row?.passedQty || 0) <= 0
+                                          ? "Only inspection rows with passed quantity can be transferred."
+                                          : "Transfer this inspection record"
+                                      }
+                                      onClick={() => setTransferInspectionRecord(row.inspectionRecord)}
+                                    >
+                                      Transfer
+                                    </button>
+                                  )}
+                                  {isOnlyAdmin && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-outline-danger btn-sm"
+                                      disabled={deletingInspectionId === String(row.recordId)}
+                                      onClick={() => handleDeleteInspectionRecord(row.recordId)}
+                                    >
+                                      {deletingInspectionId === String(row.recordId)
+                                        ? "Deleting..."
+                                        : "Delete"}
+                                    </button>
+                                  )}
+                                </div>
                               ) : (
                                 <span className="text-secondary small">N/A</span>
                               )}
@@ -2184,7 +2236,7 @@ const QcDetails = () => {
 
               <div className="row g-3">
                 <div className="col-lg-6">
-                  <div className="qc-info-label">Barcode</div>
+                  <div className="qc-info-label">Master Barcode</div>
                   <div className="qc-info-value">
                     {barcodeValue || "Not Set"}
                   </div>
@@ -2194,6 +2246,12 @@ const QcDetails = () => {
                     <div className="qc-barcode-wrapper">
                       <Barcode value={barcodeValue} />
                     </div>
+                  </div>
+                )}
+                {innerBarcodeValue && (
+                  <div className="col-lg-6">
+                    <div className="qc-info-label">Inner Carton Barcode</div>
+                    <div className="qc-info-value">{innerBarcodeValue}</div>
                   </div>
                 )}
               </div>
@@ -2227,21 +2285,7 @@ const QcDetails = () => {
                   className="btn btn-outline-danger"
                   onClick={() => setShowGoodsNotReadyModal(true)}
                   disabled={!canUpdateQc}
-                  title={
-                    !canUpdateQc
-                      ? !pendingAlignmentInfo.hasRequest
-                        ? "QC is not requested yet. Align QC request before updating."
-                        : !isQcAlignedRecord
-                        ? "QC can update only records aligned to them."
-                        : isInspectionDone
-                        ? "After inspection is done, only admin can update this record."
-                        : !isQcInspectionDateAllowed
-                        ? "QC date rule will be validated while submitting."
-                        : hasUsedOneDayBackdatedUpdate
-                        ? "Backdated one-time rule will be validated while submitting."
-                        : "Only admin, manager, or aligned QC can update this record."
-                      : ""
-                  }
+                  title={!canUpdateQc ? qcUpdateDisabledReason : ""}
                 >
                   Goods Not Ready
                 </button>
@@ -2251,21 +2295,7 @@ const QcDetails = () => {
                   className="btn btn-danger"
                   onClick={() => setShowRejectAllModal(true)}
                   disabled={!canUpdateQc}
-                  title={
-                    !canUpdateQc
-                      ? !pendingAlignmentInfo.hasRequest
-                        ? "QC is not requested yet. Align QC request before updating."
-                        : !isQcAlignedRecord
-                        ? "QC can update only records aligned to them."
-                        : isInspectionDone
-                        ? "After inspection is done, only admin can update this record."
-                        : !isQcInspectionDateAllowed
-                        ? "QC date rule will be validated while submitting."
-                        : hasUsedOneDayBackdatedUpdate
-                        ? "Backdated one-time rule will be validated while submitting."
-                        : "Only admin, manager, or aligned QC can update this record."
-                      : ""
-                  }
+                  title={!canUpdateQc ? qcUpdateDisabledReason : ""}
                 >
                   Reject All
                 </button>
@@ -2275,21 +2305,7 @@ const QcDetails = () => {
                   className="btn btn-primary"
                   onClick={() => setShowUpdateModal(true)}
                   disabled={!canUpdateQc}
-                  title={
-                    !canUpdateQc
-                      ? !pendingAlignmentInfo.hasRequest
-                        ? "QC is not requested yet. Align QC request before updating."
-                        : !isQcAlignedRecord
-                        ? "QC can update only records aligned to them."
-                        : isInspectionDone
-                        ? "After inspection is done, only admin can update this record."
-                        : !isQcInspectionDateAllowed
-                        ? "QC date rule will be validated while submitting."
-                        : hasUsedOneDayBackdatedUpdate
-                        ? "Backdated one-time rule will be validated while submitting."
-                        : "Only admin, manager, or aligned QC can update this record."
-                      : ""
-                  }
+                  title={!canUpdateQc ? qcUpdateDisabledReason : ""}
                 >
                   Update QC Record
                 </button>
@@ -2299,7 +2315,7 @@ const QcDetails = () => {
         </div>
       </div>
 
-      {showUpdateModal && !isViewOnly && (
+      {showUpdateModal && !isViewOnly && canUpdateQc && (
         <UpdateQcModal
           qc={qc}
           isAdmin={isOnlyAdmin}
@@ -2353,6 +2369,20 @@ const QcDetails = () => {
           onClose={() => setShowTransferRequestModal(false)}
           onTransferred={() => {
             setShowTransferRequestModal(false);
+            return fetchQcDetails();
+          }}
+        />
+      )}
+
+      {transferInspectionRecord &&
+        canTransferInspectionRecords &&
+        !isViewOnly && (
+        <TransferInspectionModal
+          qc={qc}
+          inspectionRecord={transferInspectionRecord}
+          onClose={() => setTransferInspectionRecord(null)}
+          onTransferred={() => {
+            setTransferInspectionRecord(null);
             return fetchQcDetails();
           }}
         />

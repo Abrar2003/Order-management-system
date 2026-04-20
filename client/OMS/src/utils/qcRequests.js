@@ -45,6 +45,167 @@ export const resolveLatestRequestEntry = (requestHistory = []) => {
 export const isPendingRequestHistoryStatus = (value) =>
   normalizeRequestHistoryStatus(value) === "open";
 
+const isInspectionStatusMatching = (value = "", expected = "") =>
+  normalizeRequestHistoryStatus(value) === normalizeRequestHistoryStatus(expected);
+
+const hasInspectionRecordActivity = ({
+  checked = 0,
+  passed = 0,
+  vendorOffered = 0,
+  labelsAdded = [],
+  labelRanges = [],
+  goodsNotReady = null,
+  status = "",
+} = {}) =>
+  isInspectionStatusMatching(status, "transfered") ||
+  isInspectionStatusMatching(status, "rejected") ||
+  isInspectionStatusMatching(status, "goods not ready") ||
+  isInspectionStatusMatching(status, "Inspection Done") ||
+  Boolean(goodsNotReady?.ready) ||
+  Number(checked || 0) > 0 ||
+  Number(passed || 0) > 0 ||
+  Number(vendorOffered || 0) > 0 ||
+  (Array.isArray(labelsAdded) && labelsAdded.length > 0) ||
+  (Array.isArray(labelRanges) && labelRanges.length > 0);
+
+export const resolveLatestInspectionRecordForRequestEntry = (
+  inspectionRecords = [],
+  requestEntry = null,
+) => {
+  if (!requestEntry) return null;
+
+  const requestHistoryId = String(
+    requestEntry?._id ||
+      requestEntry?.request_history_id ||
+      requestEntry?.id ||
+      "",
+  ).trim();
+  const requestDateKey = toISODateString(
+    requestEntry?.request_date || requestEntry?.requested_date,
+  );
+  const requestInspectorId = String(
+    requestEntry?.inspector?._id ||
+      requestEntry?.inspector ||
+      requestEntry?.inspector_id ||
+      "",
+  ).trim();
+
+  const findLatestMatchingRecord = (matcher) => {
+    let latestRecord = null;
+    let latestTimestamp = 0;
+
+    for (const record of Array.isArray(inspectionRecords) ? inspectionRecords : []) {
+      if (!matcher(record)) continue;
+
+      const recordTimestamp = Math.max(
+        toSortableTimestamp(record?.inspection_date),
+        toSortableTimestamp(record?.requested_date),
+        toSortableTimestamp(record?.createdAt),
+      );
+      if (!latestRecord || recordTimestamp >= latestTimestamp) {
+        latestRecord = record;
+        latestTimestamp = recordTimestamp;
+      }
+    }
+
+    return latestRecord;
+  };
+
+  if (requestHistoryId) {
+    const exactMatch = findLatestMatchingRecord(
+      (record) => String(record?.request_history_id || "").trim() === requestHistoryId,
+    );
+    if (exactMatch) {
+      return exactMatch;
+    }
+  }
+
+  if (!requestDateKey) return null;
+
+  return (
+    findLatestMatchingRecord((record) => {
+      const recordRequestedDate = toISODateString(
+        record?.requested_date || record?.inspection_date || record?.createdAt,
+      );
+      if (recordRequestedDate !== requestDateKey) return false;
+
+      if (!requestInspectorId) return true;
+
+      const recordInspectorId = String(
+        record?.inspector?._id || record?.inspector || "",
+      ).trim();
+      return !recordInspectorId || recordInspectorId === requestInspectorId;
+    }) ||
+    findLatestMatchingRecord((record) => {
+      const recordRequestedDate = toISODateString(
+        record?.requested_date || record?.inspection_date || record?.createdAt,
+      );
+      return recordRequestedDate === requestDateKey;
+    }) ||
+    null
+  );
+};
+
+export const getQcUserUpdateRequestAvailability = (qc = {}) => {
+  const latestRequestEntry = resolveLatestRequestEntry(qc?.request_history);
+
+  if (!latestRequestEntry) {
+    return {
+      isAvailable: false,
+      reason: "A new QC request is required before QC can update this record.",
+      latestRequestEntry: null,
+      latestInspectionRecord: null,
+    };
+  }
+
+  const latestRequestStatus = normalizeRequestHistoryStatus(
+    latestRequestEntry?.status || "open",
+  );
+  if (latestRequestStatus !== "open") {
+    return {
+      isAvailable: false,
+      reason: "The latest QC request is already closed. Align a new QC request before updating again.",
+      latestRequestEntry,
+      latestInspectionRecord: resolveLatestInspectionRecordForRequestEntry(
+        qc?.inspection_record,
+        latestRequestEntry,
+      ),
+    };
+  }
+
+  const latestInspectionRecord = resolveLatestInspectionRecordForRequestEntry(
+    qc?.inspection_record,
+    latestRequestEntry,
+  );
+  const latestRequestHasActivity = latestInspectionRecord
+    ? hasInspectionRecordActivity({
+      checked: latestInspectionRecord?.checked,
+      passed: latestInspectionRecord?.passed,
+      vendorOffered: latestInspectionRecord?.vendor_offered,
+      labelsAdded: latestInspectionRecord?.labels_added,
+      labelRanges: latestInspectionRecord?.label_ranges,
+      goodsNotReady: latestInspectionRecord?.goods_not_ready,
+      status: latestInspectionRecord?.status,
+    })
+    : false;
+
+  if (latestRequestHasActivity) {
+    return {
+      isAvailable: false,
+      reason: "The latest QC request is already worked upon. Align a new QC request before updating again.",
+      latestRequestEntry,
+      latestInspectionRecord,
+    };
+  }
+
+  return {
+    isAvailable: true,
+    reason: "",
+    latestRequestEntry,
+    latestInspectionRecord,
+  };
+};
+
 const getPendingQuantity = (qc = {}) => {
   const parsed = Number(qc?.quantities?.pending);
   return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;

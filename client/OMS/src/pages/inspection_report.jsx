@@ -1178,16 +1178,22 @@ const InspectionReport = () => {
       ? calculatedInspectedCbm
       : (inspectedTotalCbm !== "Not Set" ? inspectedTotalCbm : baseTotalCbm);
     const inspectedBarcodeRaw =
-      Number(qc?.barcode || 0) > 0 ? String(qc.barcode).trim() : "";
+      Number(qc?.master_barcode || qc?.barcode || 0) > 0
+        ? String(qc?.master_barcode || qc?.barcode).trim()
+        : "";
+    const inspectedInnerBarcodeRaw =
+      Number(qc?.inner_barcode || 0) > 0 ? String(qc.inner_barcode).trim() : "";
     const pisBarcodeRaw = String(
-      itemMaster?.pis_barcode
+      itemMaster?.pis_master_barcode
+      || itemMaster?.pis_barcode
       || (
-        Number(itemMaster?.qc?.barcode || 0) > 0
-          ? String(itemMaster.qc.barcode).trim()
+        Number(itemMaster?.qc?.master_barcode || itemMaster?.qc?.barcode || 0) > 0
+          ? String(itemMaster?.qc?.master_barcode || itemMaster.qc.barcode).trim()
           : ""
       )
       || "",
     ).trim();
+    const pisInnerBarcodeRaw = String(itemMaster?.pis_inner_barcode || "").trim();
     const pisBarcodeValue = pisBarcodeRaw || "Not Set";
     const inspectedBarcodeValue = inspectedBarcodeRaw || "Not Set";
     const barcodeMismatch =
@@ -1239,6 +1245,8 @@ const InspectionReport = () => {
       inspectedBarcodeValue,
       barcodeMismatch,
       unifiedBarcodeValue,
+      pisInnerBarcodeValue: pisInnerBarcodeRaw || "Not Set",
+      inspectedInnerBarcodeValue: inspectedInnerBarcodeRaw || "Not Set",
       rows,
     };
   }, [qc]);
@@ -1948,9 +1956,24 @@ const InspectionReport = () => {
                   )}
                 </div>
               )}
+              {(itemMasterSummary.pisInnerBarcodeValue !== "Not Set" ||
+                itemMasterSummary.inspectedInnerBarcodeValue !== "Not Set") && (
+                <div className="row g-3 mt-3">
+                  <div className="col-md-6">
+                    <div className="fw-semibold mb-1">
+                      PIS Inner Carton Barcode: {itemMasterSummary.pisInnerBarcodeValue}
+                    </div>
+                  </div>
+                  <div className="col-md-6">
+                    <div className="fw-semibold mb-1">
+                      QC Inner Carton Barcode: {itemMasterSummary.inspectedInnerBarcodeValue}
+                    </div>
+                  </div>
+                </div>
+              )}
               {itemMasterSummary.barcodeMismatch && (
                 <div className="alert alert-warning py-2 mb-0 mt-3">
-                  Barcode mismatch detected between PIS barcode and QC barcode.
+                  Barcode mismatch detected between PIS master barcode and QC master barcode.
                 </div>
               )}
             </section>

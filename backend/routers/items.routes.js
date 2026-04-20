@@ -7,6 +7,7 @@ const {
   getPisDiffItems,
   getItemOrderPresence,
   getItemOrdersHistory,
+  createItem,
   syncItemsFromOrders,
   updateItem,
   updateItemPis,
@@ -32,6 +33,14 @@ router.get(
   auth,
   authorize("admin", "manager", "QC", "dev", "user"),
   getPisDiffItems,
+);
+
+router.post(
+  "/",
+  auth,
+  authorize("admin", "manager", "dev"),
+  upload.single("pis_file"),
+  createItem,
 );
 
 router.post(

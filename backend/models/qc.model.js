@@ -101,6 +101,16 @@ const qcSchema = new mongoose.Schema(
       required: true,
       default: 0,
     },
+    master_barcode: {
+      type: Number,
+      required: true,
+      default: 0,
+    },
+    inner_barcode: {
+      type: Number,
+      required: true,
+      default: 0,
+    },
     packed_size: {
       type: Boolean,
       required: true,
@@ -224,5 +234,23 @@ qcSchema.index({
   "order_meta.order_id": 1,
   request_date: -1,
 }); // optional if you often filter both
+
+qcSchema.pre("validate", function syncPrimaryBarcode() {
+  const masterBarcode = Number(this.master_barcode || 0);
+  const legacyBarcode = Number(this.barcode || 0);
+  const resolvedMasterBarcode =
+    Number.isFinite(masterBarcode) && masterBarcode > 0
+      ? masterBarcode
+      : Number.isFinite(legacyBarcode) && legacyBarcode > 0
+        ? legacyBarcode
+        : 0;
+
+  this.master_barcode = resolvedMasterBarcode;
+  this.barcode = resolvedMasterBarcode;
+  this.inner_barcode =
+    Number.isFinite(Number(this.inner_barcode || 0)) && Number(this.inner_barcode || 0) > 0
+      ? Number(this.inner_barcode)
+      : 0;
+});
 
 module.exports = mongoose.model("qc", qcSchema);

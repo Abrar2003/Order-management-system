@@ -1,7 +1,12 @@
 const mongoose = require("mongoose");
+const {
+  BOX_PACKAGING_MODES,
+  BOX_ENTRY_TYPES,
+  BOX_SIZE_REMARK_OPTIONS,
+} = require("../helpers/boxMeasurement");
 
 const ITEM_SIZE_REMARKS = ["", "top", "base", "item1", "item2", "item3"];
-const BOX_SIZE_REMARKS = ["", "top", "base", "box1", "box2", "box3"];
+const BOX_SIZE_REMARKS = ["", ...BOX_SIZE_REMARK_OPTIONS];
 
 const createSizeEntrySchema = (remarkEnum = []) =>
   new mongoose.Schema(
@@ -22,7 +27,30 @@ const createSizeEntrySchema = (remarkEnum = []) =>
   );
 
 const itemSizeEntrySchema = createSizeEntrySchema(ITEM_SIZE_REMARKS);
-const boxSizeEntrySchema = createSizeEntrySchema(BOX_SIZE_REMARKS);
+const boxSizeEntrySchema = new mongoose.Schema(
+  {
+    L: { type: Number, default: 0, min: 0 },
+    B: { type: Number, default: 0, min: 0 },
+    H: { type: Number, default: 0, min: 0 },
+    remark: {
+      type: String,
+      enum: BOX_SIZE_REMARKS,
+      default: "",
+      trim: true,
+    },
+    net_weight: { type: Number, default: 0, min: 0 },
+    gross_weight: { type: Number, default: 0, min: 0 },
+    box_type: {
+      type: String,
+      enum: Object.values(BOX_ENTRY_TYPES),
+      default: BOX_ENTRY_TYPES.INDIVIDUAL,
+      trim: true,
+    },
+    item_count_in_inner: { type: Number, default: 0, min: 0 },
+    box_count_in_master: { type: Number, default: 0, min: 0 },
+  },
+  { _id: false },
+);
 const finishAssignmentSchema = new mongoose.Schema(
   {
     finish_id: {
@@ -120,6 +148,12 @@ const itemSchema = new mongoose.Schema(
         message: "inspected_box_sizes cannot exceed 3 entries",
       },
     },
+    inspected_box_mode: {
+      type: String,
+      enum: Object.values(BOX_PACKAGING_MODES),
+      default: BOX_PACKAGING_MODES.INDIVIDUAL,
+      trim: true,
+    },
     inspected_box_top_LBH: {
       L: { type: Number, default: 0, min: 0 },
       B: { type: Number, default: 0, min: 0 },
@@ -187,11 +221,15 @@ const itemSchema = new mongoose.Schema(
       H: { type: Number, default: 0, min: 0 },
     },
     pis_barcode: { type: String, default: "", trim: true },
+    pis_master_barcode: { type: String, default: "", trim: true },
+    pis_inner_barcode: { type: String, default: "", trim: true },
     qc: {
       packed_size: { type: Boolean, default: false },
       finishing: { type: Boolean, default: false },
       branding: { type: Boolean, default: false },
       barcode: { type: Number, default: 0, min: 0 },
+      master_barcode: { type: Number, default: 0, min: 0 },
+      inner_barcode: { type: Number, default: 0, min: 0 },
       last_inspected_date: { type: String, default: "", trim: true },
       quantities: {
         checked: { type: Number, default: 0, min: 0 },
@@ -249,5 +287,33 @@ itemSchema.index({ brand: 1 });
 itemSchema.index({ brand_name: 1 });
 itemSchema.index({ brands: 1 });
 itemSchema.index({ vendors: 1 });
+
+itemSchema.pre("validate", function syncBarcodeAliases() {
+  const normalizedPisMasterBarcode = String(
+    this.pis_master_barcode || this.pis_barcode || "",
+  ).trim();
+  this.pis_master_barcode = normalizedPisMasterBarcode;
+  this.pis_barcode = normalizedPisMasterBarcode;
+  this.pis_inner_barcode = String(this.pis_inner_barcode || "").trim();
+
+  if (!this.qc || typeof this.qc !== "object") {
+    this.qc = {};
+  }
+
+  const resolvedQcMasterBarcode = Number(
+    this.qc.master_barcode || this.qc.barcode || 0,
+  );
+  this.qc.master_barcode =
+    Number.isFinite(resolvedQcMasterBarcode) && resolvedQcMasterBarcode > 0
+      ? resolvedQcMasterBarcode
+      : 0;
+  this.qc.barcode = this.qc.master_barcode;
+
+  const resolvedQcInnerBarcode = Number(this.qc.inner_barcode || 0);
+  this.qc.inner_barcode =
+    Number.isFinite(resolvedQcInnerBarcode) && resolvedQcInnerBarcode > 0
+      ? resolvedQcInnerBarcode
+      : 0;
+});
 
 module.exports = mongoose.model("items", itemSchema);

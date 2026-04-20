@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import api from "../api/axios";
 import { getUserFromToken } from "../auth/auth.utils";
 import {
@@ -6,6 +6,20 @@ import {
   toDDMMYYYYInputValue,
   toISODateString,
 } from "../utils/date";
+import {
+  BOX_CARTON_REMARK_OPTIONS as BOX_CARTON_REMARK_OPTIONS_UTIL,
+  BOX_ENTRY_TYPES as BOX_ENTRY_TYPES_UTIL,
+  BOX_PACKAGING_MODES as BOX_PACKAGING_MODES_UTIL,
+  BOX_SIZE_REMARK_OPTIONS as BOX_SIZE_REMARK_OPTIONS_UTIL,
+  buildMeasuredSizeEntriesFromLegacy as buildMeasuredSizeEntriesFromLegacyUtil,
+  convertMeasuredBoxEntriesMode as convertMeasuredBoxEntriesModeUtil,
+  createEmptyMeasuredSizeEntry as createEmptyMeasuredSizeEntryUtil,
+  deriveLegacyFromMeasuredSizeEntries as deriveLegacyFromMeasuredSizeEntriesUtil,
+  detectBoxPackagingMode as detectBoxPackagingModeUtil,
+  ensureMeasuredSizeEntryCount as ensureMeasuredSizeEntryCountUtil,
+  parseMeasuredSizeEntries as parseMeasuredSizeEntriesUtil,
+} from "../utils/measuredSizeForm";
+import { getQcUserUpdateRequestAvailability } from "../utils/qcRequests";
 import { formatNumberInputValue } from "../utils/measurementDisplay";
 import "../App.css";
 import AllocateLabelsModal from "./AllocateLabelsModal";
@@ -15,6 +29,7 @@ const NON_NEGATIVE_FIELDS = new Set([
   "qc_passed",
   "offeredQuantity",
   "barcode",
+  "inner_barcode",
   "inspected_weight_top_net",
   "inspected_weight_top_gross",
   "inspected_weight_bottom_net",
@@ -188,20 +203,12 @@ const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
   { value: "item2", label: "Item 2" },
   { value: "item3", label: "Item 3" },
 ]);
-const BOX_SIZE_REMARK_OPTIONS = Object.freeze([
-  { value: "top", label: "Top" },
-  { value: "base", label: "Base" },
-  { value: "box1", label: "Box 1" },
-  { value: "box2", label: "Box 2" },
-  { value: "box3", label: "Box 3" },
-]);
-const createEmptyMeasuredSizeEntry = () => ({
-  remark: "",
-  L: "",
-  B: "",
-  H: "",
-  weight: "",
-});
+const BOX_PACKAGING_MODES = BOX_PACKAGING_MODES_UTIL;
+const BOX_ENTRY_TYPES = BOX_ENTRY_TYPES_UTIL;
+const BOX_SIZE_REMARK_OPTIONS = BOX_SIZE_REMARK_OPTIONS_UTIL;
+const BOX_CARTON_REMARK_OPTIONS = BOX_CARTON_REMARK_OPTIONS_UTIL;
+const createEmptyMeasuredSizeEntry = (options = {}) =>
+  createEmptyMeasuredSizeEntryUtil(options);
 const normalizeSizeCount = (value, fallback = 1) => {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > SIZE_ENTRY_LIMIT) {
@@ -209,43 +216,19 @@ const normalizeSizeCount = (value, fallback = 1) => {
   }
   return parsed;
 };
-const ensureMeasuredSizeEntryCount = (entries = [], count = 1) => {
-  const safeCount = normalizeSizeCount(count, 1);
-  const nextEntries = Array.isArray(entries)
-    ? entries.slice(0, safeCount).map((entry) => ({
-        remark: String(entry?.remark || "").trim().toLowerCase(),
-        L: String(entry?.L || ""),
-        B: String(entry?.B || ""),
-        H: String(entry?.H || ""),
-        weight: String(entry?.weight || ""),
-      }))
-    : [];
-
-  while (nextEntries.length < safeCount) {
-    nextEntries.push(createEmptyMeasuredSizeEntry());
-  }
-
-  if (safeCount === 1 && nextEntries[0]) {
-    nextEntries[0].remark = "";
-  }
-
-  return nextEntries;
-};
-const toMeasuredSizeEntryValue = (entry = {}, weightKey = "") => ({
-  remark: String(entry?.remark || entry?.type || "").trim().toLowerCase(),
-  L: toDimensionInputValue(entry?.L),
-  B: toDimensionInputValue(entry?.B),
-  H: toDimensionInputValue(entry?.H),
-  weight: toDimensionInputValue(weightKey ? entry?.[weightKey] : ""),
-});
+const ensureMeasuredSizeEntryCount = (entries = [], count = 1, options = {}) =>
+  ensureMeasuredSizeEntryCountUtil(entries, count, options);
 const hasMeaningfulMeasuredSize = (entry = {}) =>
   String(entry?.L || "").trim() !== "" ||
   String(entry?.B || "").trim() !== "" ||
   String(entry?.H || "").trim() !== "" ||
   String(entry?.weight || "").trim() !== "" ||
-  String(entry?.remark || "").trim() !== "";
+  String(entry?.remark || "").trim() !== "" ||
+  String(entry?.item_count_in_inner || "").trim() !== "" ||
+  String(entry?.box_count_in_master || "").trim() !== "";
 const buildMeasuredSizeEntriesFromLegacy = ({
   primaryEntries = [],
+  mode = BOX_PACKAGING_MODES.INDIVIDUAL,
   singleLbh = {},
   topLbh = {},
   bottomLbh = {},
@@ -255,88 +238,24 @@ const buildMeasuredSizeEntriesFromLegacy = ({
   weightKey = "",
   topRemark = "top",
   bottomRemark = "base",
-} = {}) => {
-  const normalizedPrimaryEntries = Array.isArray(primaryEntries)
-    ? primaryEntries
-        .map((entry) => toMeasuredSizeEntryValue(entry, weightKey))
-        .filter((entry) => hasMeaningfulMeasuredSize(entry))
-        .slice(0, SIZE_ENTRY_LIMIT)
-    : [];
-  if (normalizedPrimaryEntries.length > 0) {
-    return normalizedPrimaryEntries;
-  }
-
-  const topEntry = toMeasuredSizeEntryValue(
-    { ...topLbh, remark: topRemark, [weightKey]: topWeight },
+} = {}) =>
+  buildMeasuredSizeEntriesFromLegacyUtil({
+    primaryEntries,
+    mode,
+    singleLbh,
+    topLbh,
+    bottomLbh,
+    totalWeight,
+    topWeight,
+    bottomWeight,
     weightKey,
-  );
-  const bottomEntry = toMeasuredSizeEntryValue(
-    { ...bottomLbh, remark: bottomRemark, [weightKey]: bottomWeight },
-    weightKey,
-  );
-  if (hasMeaningfulMeasuredSize(topEntry) || hasMeaningfulMeasuredSize(bottomEntry)) {
-    return [topEntry, bottomEntry].filter((entry) => hasMeaningfulMeasuredSize(entry));
-  }
-
-  const singleEntry = toMeasuredSizeEntryValue(
-    { ...singleLbh, [weightKey]: totalWeight },
-    weightKey,
-  );
-  return hasMeaningfulMeasuredSize(singleEntry) ? [singleEntry] : [createEmptyMeasuredSizeEntry()];
-};
+    topRemark,
+    bottomRemark,
+  });
 const deriveLegacyFromMeasuredSizeEntries = (
   entries = [],
-  { count = 1, weightKey = "weight", remarkOrder = [] } = {},
-) => {
-  const safeCount = normalizeSizeCount(count, 1);
-  const safeEntries = ensureMeasuredSizeEntryCount(entries, safeCount);
-  const normalizedEntries = safeEntries
-    .map((entry) => ({
-      remark: String(entry?.remark || "").trim().toLowerCase(),
-      L: toDimensionInputValue(entry?.L),
-      B: toDimensionInputValue(entry?.B),
-      H: toDimensionInputValue(entry?.H),
-      weight: toDimensionInputValue(entry?.[weightKey] ?? entry?.weight),
-    }))
-    .sort((left, right) => {
-      if (!Array.isArray(remarkOrder) || remarkOrder.length === 0) return 0;
-      const leftIndex = remarkOrder.indexOf(left.remark);
-      const rightIndex = remarkOrder.indexOf(right.remark);
-      const safeLeftIndex = leftIndex >= 0 ? leftIndex : remarkOrder.length + 1;
-      const safeRightIndex = rightIndex >= 0 ? rightIndex : remarkOrder.length + 1;
-      return safeLeftIndex - safeRightIndex;
-    });
-  const toLegacyLbh = (entry = null) =>
-    entry &&
-    entry.L &&
-    entry.B &&
-    entry.H
-      ? {
-          L: Number(entry.L),
-          B: Number(entry.B),
-          H: Number(entry.H),
-        }
-      : null;
-  const totalWeight = normalizedEntries.reduce(
-    (sum, entry) => sum + (Number(entry?.weight || 0) || 0),
-    0,
-  );
-
-  return {
-    single: safeCount === 1 ? toLegacyLbh(normalizedEntries[0]) : null,
-    top: safeCount >= 2 ? toLegacyLbh(normalizedEntries[0]) : null,
-    bottom: safeCount >= 2 ? toLegacyLbh(normalizedEntries[1]) : null,
-    totalWeight: totalWeight > 0 ? totalWeight : null,
-    topWeight:
-      safeCount >= 2 && Number(normalizedEntries[0]?.weight || 0) > 0
-        ? Number(normalizedEntries[0].weight)
-        : null,
-    bottomWeight:
-      safeCount >= 2 && Number(normalizedEntries[1]?.weight || 0) > 0
-        ? Number(normalizedEntries[1].weight)
-        : null,
-  };
-};
+  options = {},
+) => deriveLegacyFromMeasuredSizeEntriesUtil(entries, options);
 const getRemarkValues = (options = []) =>
   options.map((option) => String(option?.value || "").trim().toLowerCase()).filter(Boolean);
 const getRemarkLabel = (options = [], remark = "") =>
@@ -349,83 +268,35 @@ const parseMeasuredSizeEntries = ({
   payloadWeightKey = "",
   weightFieldLabel = "Weight",
   treatEmptyAsInput = false,
+  mode = BOX_PACKAGING_MODES.INDIVIDUAL,
 } = {}) => {
-  const safeCount = normalizeSizeCount(count, 1);
-  const scopedEntries = ensureMeasuredSizeEntryCount(entries, safeCount).slice(0, safeCount);
-  const hasMeaningfulInput = scopedEntries.some((entry) => hasMeaningfulMeasuredSize(entry));
+  const parsed = parseMeasuredSizeEntriesUtil({
+    entries,
+    count,
+    groupLabel,
+    remarkOptions,
+    payloadWeightKey,
+    weightFieldLabel,
+    mode,
+  });
 
-  if (!hasMeaningfulInput) {
+  if (!parsed.hasAnyInput && treatEmptyAsInput) {
     return {
-      count: safeCount,
-      hasAnyInput: Boolean(treatEmptyAsInput),
+      ...parsed,
+      hasAnyInput: true,
       hasMeaningfulInput: false,
-      value: [],
     };
-  }
-
-  const allowedRemarks = getRemarkValues(remarkOptions);
-  const seenRemarks = new Set();
-  const parsedEntries = [];
-
-  for (let index = 0; index < scopedEntries.length; index += 1) {
-    const entry = scopedEntries[index] || {};
-    const entryLabel = `${groupLabel} ${index + 1}`;
-    const L = Number(String(entry?.L ?? "").trim());
-    const B = Number(String(entry?.B ?? "").trim());
-    const H = Number(String(entry?.H ?? "").trim());
-
-    if (!Number.isFinite(L) || L <= 0) {
-      return { error: `${entryLabel} length must be greater than 0.` };
-    }
-    if (!Number.isFinite(B) || B <= 0) {
-      return { error: `${entryLabel} breadth must be greater than 0.` };
-    }
-    if (!Number.isFinite(H) || H <= 0) {
-      return { error: `${entryLabel} height must be greater than 0.` };
-    }
-
-    let normalizedRemark = "";
-    if (safeCount > 1) {
-      normalizedRemark = String(entry?.remark || "").trim().toLowerCase();
-      if (!normalizedRemark) {
-        return { error: `${entryLabel} remark is required.` };
-      }
-      if (!allowedRemarks.includes(normalizedRemark)) {
-        return { error: `${entryLabel} remark is invalid.` };
-      }
-      if (seenRemarks.has(normalizedRemark)) {
-        return { error: `${groupLabel} remarks must be unique.` };
-      }
-      seenRemarks.add(normalizedRemark);
-    }
-
-    const parsedEntry = {
-      remark: normalizedRemark,
-      L,
-      B,
-      H,
-    };
-
-    if (payloadWeightKey) {
-      const parsedWeight = Number(String(entry?.weight ?? "").trim());
-      if (!Number.isFinite(parsedWeight) || parsedWeight <= 0) {
-        return {
-          error: `${entryLabel} ${weightFieldLabel.toLowerCase()} must be greater than 0.`,
-        };
-      }
-      parsedEntry[payloadWeightKey] = parsedWeight;
-    }
-
-    parsedEntries.push(parsedEntry);
   }
 
   return {
-    count: safeCount,
-    hasAnyInput: true,
-    hasMeaningfulInput: true,
-    value: parsedEntries,
+    ...parsed,
+    hasMeaningfulInput: parsed.hasAnyInput,
   };
 };
+const detectBoxPackagingMode = (mode = "", entries = []) =>
+  detectBoxPackagingModeUtil(mode, entries);
+const convertMeasuredBoxEntriesMode = (entries = [], nextMode = BOX_PACKAGING_MODES.INDIVIDUAL) =>
+  convertMeasuredBoxEntriesModeUtil(entries, nextMode);
 
 const getUtcDayOffsetFromToday = (isoDateValue) => {
   const normalizedIso = toISODateString(isoDateValue);
@@ -757,6 +628,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     qc_passed: "",
     offeredQuantity: "",
     barcode: "",
+    inner_barcode: "",
     packed_size: false,
     finishing: false,
     branding: false,
@@ -787,6 +659,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     inspected_item_bottom_B: "",
     inspected_item_bottom_H: "",
     inspected_item_count: "1",
+    inspected_box_mode: BOX_PACKAGING_MODES.INDIVIDUAL,
     inspected_box_count: "1",
     inspected_item_sizes: [createEmptyMeasuredSizeEntry()],
     inspected_box_sizes: [createEmptyMeasuredSizeEntry()],
@@ -805,8 +678,16 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const barcodeReaderRef = useRef(null);
   const barcodeReaderControlsRef = useRef(null);
   const canEditLockedQcFields = canRewriteLatestInspectionRecord || isQcUser;
-  const lockBarcodeField = qc?.barcode > 0 && !canEditLockedQcFields;
+  const lockBarcodeField =
+    (qc?.master_barcode || qc?.barcode) > 0 && !canEditLockedQcFields;
+  const lockInnerBarcodeField = qc?.inner_barcode > 0 && !canEditLockedQcFields;
   const latestInspectionRecord = getLatestInspectionRecord(qc);
+  const qcUserRequestAvailability = useMemo(
+    () => getQcUserUpdateRequestAvailability(qc),
+    [qc],
+  );
+  const isQcUpdateBlockedByMissingRequest =
+    isQcUser && !qcUserRequestAvailability.isAvailable;
 
   useEffect(() => {
     if (isQcUser) {
@@ -856,6 +737,10 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     const inspectedItemTopLbh = itemMaster?.inspected_item_top_LBH || {};
     const inspectedItemBottomLbh = itemMaster?.inspected_item_bottom_LBH || {};
     const inspectedWeight = itemMaster?.inspected_weight || {};
+    const inspectedBoxMode = detectBoxPackagingMode(
+      itemMaster?.inspected_box_mode,
+      itemMaster?.inspected_box_sizes,
+    );
     const strictInspectedItemLbh = toStrictLbhInputGroup(inspectedItemLbh);
     const strictInspectedBoxLbh = toStrictLbhInputGroup(inspectedBoxLbh);
     const strictInspectedTopLbh = toStrictLbhInputGroup(inspectedTopLbh);
@@ -876,6 +761,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     });
     const inspectedBoxSizeEntries = buildMeasuredSizeEntriesFromLegacy({
       primaryEntries: itemMaster?.inspected_box_sizes,
+      mode: inspectedBoxMode,
       singleLbh: inspectedBoxLbh,
       topLbh: inspectedTopLbh,
       bottomLbh: inspectedBottomLbh,
@@ -895,9 +781,12 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     const initialInspectedItemCount = hasStoredInspectedItemSizes
       ? normalizeSizeCount(inspectedItemSizeEntries.length, 1)
       : 1;
-    const initialInspectedBoxCount = hasStoredInspectedBoxSizes
-      ? normalizeSizeCount(inspectedBoxSizeEntries.length, 1)
-      : 1;
+    const initialInspectedBoxCount =
+      inspectedBoxMode === BOX_PACKAGING_MODES.CARTON
+        ? 2
+        : hasStoredInspectedBoxSizes
+          ? normalizeSizeCount(inspectedBoxSizeEntries.length, 1)
+          : 1;
 
     setForm({
       inspector: defaultInspectorId,
@@ -906,7 +795,11 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       offeredQuantity: adminRecord
         ? toQuantityInputValue(adminRecord?.vendor_offered)
         : "",
-      barcode: qc.barcode > 0 ? String(qc.barcode) : "",
+      barcode:
+        (qc?.master_barcode || qc?.barcode) > 0
+          ? String(qc?.master_barcode || qc?.barcode)
+          : "",
+      inner_barcode: qc?.inner_barcode > 0 ? String(qc.inner_barcode) : "",
       packed_size: Boolean(qc?.packed_size),
       finishing: Boolean(qc?.finishing),
       branding: Boolean(qc?.branding),
@@ -949,6 +842,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       inspected_item_bottom_B: strictInspectedItemBottomLbh.B,
       inspected_item_bottom_H: strictInspectedItemBottomLbh.H,
       inspected_item_count: String(initialInspectedItemCount),
+      inspected_box_mode: inspectedBoxMode,
       inspected_box_count: String(initialInspectedBoxCount),
       inspected_item_sizes: ensureMeasuredSizeEntryCount(
         inspectedItemSizeEntries,
@@ -957,6 +851,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       inspected_box_sizes: ensureMeasuredSizeEntryCount(
         inspectedBoxSizeEntries,
         initialInspectedBoxCount,
+        { mode: inspectedBoxMode },
       ),
       last_inspected_date: toDDMMYYYYInputValue(
         adminRecord?.inspection_date || qc.last_inspected_date,
@@ -1195,16 +1090,39 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     setForm((prev) => {
       const nextValue = type === "checkbox" ? checked : value;
 
+      if (name === "inspected_box_mode") {
+        const nextMode = detectBoxPackagingMode(nextValue, prev.inspected_box_sizes);
+        return {
+          ...prev,
+          inspected_box_mode: nextMode,
+          inner_barcode:
+            nextMode === BOX_PACKAGING_MODES.CARTON ? prev.inner_barcode : "",
+          inspected_box_count:
+            nextMode === BOX_PACKAGING_MODES.CARTON
+              ? "2"
+              : String(normalizeSizeCount(prev.inspected_box_count, 1)),
+          inspected_box_sizes: ensureMeasuredSizeEntryCount(
+            convertMeasuredBoxEntriesMode(prev.inspected_box_sizes, nextMode),
+            nextMode === BOX_PACKAGING_MODES.CARTON ? 2 : prev.inspected_box_count,
+            { mode: nextMode },
+          ),
+        };
+      }
+
       if (name === "inspected_item_count" || name === "inspected_box_count") {
         const safeCount = String(normalizeSizeCount(nextValue, 1));
         const entriesKey =
           name === "inspected_item_count"
             ? "inspected_item_sizes"
             : "inspected_box_sizes";
+        const modeOption =
+          name === "inspected_box_count"
+            ? { mode: prev.inspected_box_mode }
+            : {};
         return {
           ...prev,
           [name]: safeCount,
-          [entriesKey]: ensureMeasuredSizeEntryCount(prev[entriesKey], safeCount),
+          [entriesKey]: ensureMeasuredSizeEntryCount(prev[entriesKey], safeCount, modeOption),
         };
       }
 
@@ -1336,6 +1254,9 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
             : entry,
         ),
         prev[groupKey]?.length || 1,
+        groupKey === "inspected_box_sizes"
+          ? { mode: prev.inspected_box_mode }
+          : {},
       ),
     }));
   };
@@ -1434,6 +1355,14 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const handleSubmit = async () => {
     if (!qc) return;
     setError("");
+
+    if (isQcUpdateBlockedByMissingRequest) {
+      setError(
+        qcUserRequestAvailability.reason ||
+          "A new QC request is required before QC can update this record.",
+      );
+      return;
+    }
 
     const qcChecked = form.qc_checked === "" ? 0 : Number(form.qc_checked);
     const qcPassed = form.qc_passed === "" ? 0 : Number(form.qc_passed);
@@ -1543,6 +1472,10 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
     const existingItemMaster = qc?.item_master || {};
     const existingInspectedWeight = existingItemMaster?.inspected_weight || {};
+    const existingInspectedBoxMode = detectBoxPackagingMode(
+      existingItemMaster?.inspected_box_mode,
+      existingItemMaster?.inspected_box_sizes,
+    );
     const existingItemSizeEntries = buildMeasuredSizeEntriesFromLegacy({
       primaryEntries: existingItemMaster?.inspected_item_sizes,
       singleLbh: existingItemMaster?.inspected_item_LBH || existingItemMaster?.item_LBH,
@@ -1557,6 +1490,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     }).filter((entry) => hasMeaningfulMeasuredSize(entry));
     const existingBoxSizeEntries = buildMeasuredSizeEntriesFromLegacy({
       primaryEntries: existingItemMaster?.inspected_box_sizes,
+      mode: existingInspectedBoxMode,
       singleLbh: existingItemMaster?.inspected_box_LBH || existingItemMaster?.box_LBH,
       topLbh:
         existingItemMaster?.inspected_box_top_LBH || existingItemMaster?.inspected_top_LBH,
@@ -1595,6 +1529,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       payloadWeightKey: "gross_weight",
       weightFieldLabel: "Gross weight",
       treatEmptyAsInput: isAdminRewriteMode,
+      mode: form.inspected_box_mode,
     });
     if (inspectedBoxSizePayload.error) {
       setError(inspectedBoxSizePayload.error);
@@ -1615,6 +1550,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         count: inspectedBoxSizePayload.count,
         weightKey: "gross_weight",
         remarkOrder: getRemarkValues(BOX_SIZE_REMARK_OPTIONS),
+        mode: inspectedBoxSizePayload.mode || form.inspected_box_mode,
       },
     );
 
@@ -1782,14 +1718,29 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       return;
     }
 
+    const isCartonPackagingMode =
+      form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON;
     const barcodeValue = form.barcode.trim();
+    const innerBarcodeValue = isCartonPackagingMode
+      ? form.inner_barcode.trim()
+      : "";
     const barcodeParsed = barcodeValue === "" ? null : Number(barcodeValue);
+    const innerBarcodeParsed =
+      innerBarcodeValue === "" ? null : Number(innerBarcodeValue);
 
     if (
       barcodeParsed !== null &&
       (!Number.isInteger(barcodeParsed) || barcodeParsed <= 0)
     ) {
-      setError("Barcode must be a positive integer.");
+      setError("Master barcode must be a positive integer.");
+      return;
+    }
+
+    if (
+      innerBarcodeParsed !== null &&
+      (!Number.isInteger(innerBarcodeParsed) || innerBarcodeParsed <= 0)
+    ) {
+      setError("Inner carton barcode must be a positive integer.");
       return;
     }
 
@@ -1832,8 +1783,17 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
       if (isAdminRewriteMode) {
         payload.barcode = barcodeParsed ?? 0;
+        payload.master_barcode = barcodeParsed ?? 0;
+        if (isCartonPackagingMode) {
+          payload.inner_barcode = innerBarcodeParsed ?? 0;
+        }
       } else if (barcodeParsed !== null) {
         payload.barcode = barcodeParsed;
+        payload.master_barcode = barcodeParsed;
+      }
+
+      if (isCartonPackagingMode && innerBarcodeParsed !== null) {
+        payload.inner_barcode = innerBarcodeParsed;
       }
 
       if (lastInspectedDateValue && !isAdminRewriteMode) {
@@ -1852,6 +1812,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       }
 
       if (shouldSendBoxSizeFields) {
+        payload.inspected_box_mode = form.inspected_box_mode;
         payload.inspected_box_sizes = inspectedBoxSizePayload.value;
       }
 
@@ -2152,6 +2113,10 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     isQcUser || (!hasElevatedAccess && (qc?.quantities?.qc_checked || 0) > 0);
   const existingItemMaster = qc?.item_master || {};
   const existingInspectedWeight = existingItemMaster?.inspected_weight || {};
+  const existingInspectedBoxMode = detectBoxPackagingMode(
+    existingItemMaster?.inspected_box_mode,
+    existingItemMaster?.inspected_box_sizes,
+  );
   const existingItemSizeEntries = buildMeasuredSizeEntriesFromLegacy({
     primaryEntries: existingItemMaster?.inspected_item_sizes,
     singleLbh: existingItemMaster?.inspected_item_LBH || existingItemMaster?.item_LBH,
@@ -2166,6 +2131,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   }).filter((entry) => hasMeaningfulMeasuredSize(entry));
   const existingBoxSizeEntries = buildMeasuredSizeEntriesFromLegacy({
     primaryEntries: existingItemMaster?.inspected_box_sizes,
+    mode: existingInspectedBoxMode,
     singleLbh: existingItemMaster?.inspected_box_LBH || existingItemMaster?.box_LBH,
     topLbh:
       existingItemMaster?.inspected_box_top_LBH || existingItemMaster?.inspected_top_LBH,
@@ -2191,6 +2157,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const displayedBoxEntries = ensureMeasuredSizeEntryCount(
     form.inspected_box_sizes,
     form.inspected_box_count,
+    { mode: form.inspected_box_mode },
   );
   const renderMeasuredSizeSection = ({
     title,
@@ -2202,25 +2169,73 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     weightLabel,
     locked,
     countLabel,
+    mode = BOX_PACKAGING_MODES.INDIVIDUAL,
+    modeName = "",
+    showModeSelector = false,
   }) => {
-    const safeCount = normalizeSizeCount(countValue, 1);
+    const isCartonMode = mode === BOX_PACKAGING_MODES.CARTON;
+    const safeCount = isCartonMode ? 2 : normalizeSizeCount(countValue, 1);
     const entryColumnClass = safeCount > 1 ? "col-md-2" : "col-md-3";
 
     return (
       <>
         <div className="col-md-2">
-          <label className="form-label">{countLabel}</label>
-          <select
-            className="form-select"
-            name={countName}
-            value={String(safeCount)}
-            onChange={handleChange}
-            disabled={locked}
-          >
-            <option value="1">1</option>
-            <option value="2">2</option>
-            <option value="3">3</option>
-          </select>
+          {showModeSelector ? (
+            <>
+              <label className="form-label">Packaging Mode</label>
+              <select
+                className="form-select"
+                name={modeName}
+                value={mode}
+                onChange={handleChange}
+                disabled={locked}
+              >
+                <option value={BOX_PACKAGING_MODES.INDIVIDUAL}>Individual Boxes</option>
+                <option value={BOX_PACKAGING_MODES.CARTON}>Inner + Master Carton</option>
+              </select>
+            </>
+          ) : (
+            <>
+              <label className="form-label">{countLabel}</label>
+              <select
+                className="form-select"
+                name={countName}
+                value={String(safeCount)}
+                onChange={handleChange}
+                disabled={locked}
+              >
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+              </select>
+            </>
+          )}
+          {showModeSelector && countName && (
+            <>
+              <label className="form-label mt-3">{countLabel}</label>
+              {isCartonMode ? (
+                <input
+                  type="text"
+                  className="form-control"
+                  value="2"
+                  disabled
+                  readOnly
+                />
+              ) : (
+                <select
+                  className="form-select"
+                  name={countName}
+                  value={String(safeCount)}
+                  onChange={handleChange}
+                  disabled={locked}
+                >
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                </select>
+              )}
+            </>
+          )}
         </div>
         <div className="col-md-10">
           <label className="form-label">{title}</label>
@@ -2228,7 +2243,11 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
             {entries.slice(0, safeCount).map((entry, index) => (
               <div key={`${entriesKey}-${index}`} className="border rounded p-3">
                 <div className="small text-secondary mb-2">
-                  {safeCount === 1
+                  {isCartonMode
+                    ? index === 0
+                      ? "Inner carton"
+                      : "Master carton"
+                    : safeCount === 1
                     ? "Single entry"
                     : `Entry ${index + 1}${entry.remark ? ` | ${getRemarkLabel(remarkOptions, entry.remark)}` : ""}`}
                 </div>
@@ -2236,26 +2255,36 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   {safeCount > 1 && (
                     <div className="col-md-3">
                       <label className="form-label small text-secondary">Remark</label>
-                      <select
-                        className="form-select"
-                        value={entry.remark}
-                        onChange={(event) =>
-                          handleSizeEntryChange(
-                            entriesKey,
-                            index,
-                            "remark",
-                            event.target.value,
-                          )
-                        }
-                        disabled={locked}
-                      >
-                        <option value="">Select remark</option>
-                        {remarkOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
+                      {isCartonMode ? (
+                        <input
+                          type="text"
+                          className="form-control"
+                          value={getRemarkLabel(remarkOptions, entry.remark)}
+                          disabled
+                          readOnly
+                        />
+                      ) : (
+                        <select
+                          className="form-select"
+                          value={entry.remark}
+                          onChange={(event) =>
+                            handleSizeEntryChange(
+                              entriesKey,
+                              index,
+                              "remark",
+                              event.target.value,
+                            )
+                          }
+                          disabled={locked}
+                        >
+                          <option value="">Select remark</option>
+                          {remarkOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                     </div>
                   )}
                   <div className={entryColumnClass}>
@@ -2314,13 +2343,60 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                       disabled={locked}
                     />
                   </div>
+                  {isCartonMode && index === 0 && (
+                    <div className="col-md-3">
+                      <label className="form-label small text-secondary">Item Count In Inner</label>
+                      <input
+                        type="number"
+                        className="form-control"
+                        value={entry.item_count_in_inner}
+                        onChange={(event) =>
+                          handleSizeEntryChange(
+                            entriesKey,
+                            index,
+                            "item_count_in_inner",
+                            event.target.value,
+                          )
+                        }
+                        min="0"
+                        step="1"
+                        disabled={locked}
+                      />
+                    </div>
+                  )}
+                  {isCartonMode && index === 1 && (
+                    <div className="col-md-3">
+                      <label className="form-label small text-secondary">Box Count In Master</label>
+                      <input
+                        type="number"
+                        className="form-control"
+                        value={entry.box_count_in_master}
+                        onChange={(event) =>
+                          handleSizeEntryChange(
+                            entriesKey,
+                            index,
+                            "box_count_in_master",
+                            event.target.value,
+                          )
+                        }
+                        min="0"
+                        step="1"
+                        disabled={locked}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
           </div>
-          {safeCount === 1 && (
+          {safeCount === 1 && !isCartonMode && (
             <div className="small text-secondary mt-2">
               Single-entry measurements do not use remarks.
+            </div>
+          )}
+          {isCartonMode && (
+            <div className="small text-secondary mt-2">
+              Master carton CBM is treated as the final effective box CBM.
             </div>
           )}
         </div>
@@ -2392,6 +2468,13 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
               </div>
             )}
 
+            {isQcUpdateBlockedByMissingRequest && (
+              <div className="alert alert-warning mb-0">
+                {qcUserRequestAvailability.reason ||
+                  "A new QC request is required before QC can update this record."}
+              </div>
+            )}
+
             <div className="row g-3">
               <div className="col-md-12">
                 <label className="form-label">QC Inspector</label>
@@ -2451,10 +2534,16 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 countValue: form.inspected_box_count,
                 entriesKey: "inspected_box_sizes",
                 entries: displayedBoxEntries,
-                remarkOptions: BOX_SIZE_REMARK_OPTIONS,
+                remarkOptions:
+                  form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON
+                    ? BOX_CARTON_REMARK_OPTIONS
+                    : BOX_SIZE_REMARK_OPTIONS,
                 weightLabel: "Gross Weight",
                 locked: lockInspectedBoxSection,
                 countLabel: "Box Sets",
+                mode: form.inspected_box_mode,
+                modeName: "inspected_box_mode",
+                showModeSelector: true,
               })}
 
               <div className="col-md-6">
@@ -2477,7 +2566,11 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
               </div>
 
               <div className="col-md-6">
-                <label className="form-label">Barcode</label>
+                <label className="form-label">
+                  {form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON
+                    ? "Master Carton Barcode"
+                    : "Barcode"}
+                </label>
                 <div className="input-group">
                   <input
                     type="number"
@@ -2489,7 +2582,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     step="1"
                     disabled={lockBarcodeField}
                     placeholder={
-                      lockBarcodeField ? "Already set" : "Enter barcode"
+                      lockBarcodeField ? "Already set" : "Enter master barcode"
                     }
                   />
                   <button
@@ -2524,6 +2617,24 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   </div>
                 )}
               </div>
+              {form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON && (
+                <div className="col-md-6">
+                  <label className="form-label">Inner Carton Barcode</label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    name="inner_barcode"
+                    value={form.inner_barcode}
+                    onChange={handleChange}
+                    min="1"
+                    step="1"
+                    disabled={lockInnerBarcodeField}
+                    placeholder={
+                      lockInnerBarcodeField ? "Already set" : "Enter inner carton barcode"
+                    }
+                  />
+                </div>
+              )}
 
               <div className="col-md-12">{"   "}</div>
 
@@ -2739,7 +2850,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
               type="button"
               className="btn btn-primary"
               onClick={handleSubmit}
-              disabled={saving}
+              disabled={saving || isQcUpdateBlockedByMissingRequest}
             >
               {saving ? "Updating..." : "Update"}
             </button>
