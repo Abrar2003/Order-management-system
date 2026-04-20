@@ -61,10 +61,13 @@ const ShipmentEntrySchema = new mongoose.Schema(
     pending: { type: Number },
     cases: [ {type: Number, required: true} ],
     remaining_remarks: { type: String },
-    stuffed_by : { 
-      name: {type: String, required: true }, 
-      id: {type: mongoose.Schema.Types.ObjectId, required: true}
-  },
+    stuffed_by: {
+      // Keep legacy shipment rows saveable even if they were created before
+      // stuffed_by was introduced. New shipment writes are still validated
+      // at the controller layer before they reach the model.
+      name: { type: String, default: "", trim: true },
+      id: { type: mongoose.Schema.Types.ObjectId, default: null },
+    },
     updated_at: { type: Date, default: Date.now },
     updated_by: { type: AuditActorSchema, default: () => ({}) },
   },
@@ -182,6 +185,18 @@ Order_Schema.pre("validate", function backfillLegacyShipmentInvoices() {
       entry.invoice_number,
       "",
     );
+
+    if (!entry.stuffed_by || typeof entry.stuffed_by !== "object") {
+      entry.stuffed_by = {};
+    }
+
+    if (!String(entry.stuffed_by.name || "").trim()) {
+      entry.stuffed_by.name = String(entry.updated_by?.name || "").trim();
+    }
+
+    if (!entry.stuffed_by.id && entry.updated_by?.user) {
+      entry.stuffed_by.id = entry.updated_by.user;
+    }
   });
 });
 
