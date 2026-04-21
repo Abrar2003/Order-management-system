@@ -47,6 +47,7 @@ const SHIPMENT_VISIBLE_STATUSES = [
   "Partial Shipped",
   "Shipped",
 ];
+const DELAY_ELIGIBLE_STATUSES = new Set(["Pending", "Under Inspection"]);
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const RECTIFY_DEFAULT_ETD_OFFSET_DAYS = 90;
 const INVALID_DATE_RANGE = Symbol("invalid-date-range");
@@ -3343,6 +3344,8 @@ const getContainerDataset = async ({
       itemKeySet: new Set(),
       total_quantity: 0,
       total_cbm: 0,
+      shipment_count: 0,
+      checked_count: 0,
     };
 
     const brandValue = String(row?.brand || "").trim();
@@ -3354,6 +3357,10 @@ const getContainerDataset = async ({
 
     existingGroup.total_quantity += Number(row?.quantity || 0);
     existingGroup.total_cbm += Number(row?.shipment_cbm || 0);
+    existingGroup.shipment_count += 1;
+    if (row?.shipment_checked) {
+      existingGroup.checked_count += 1;
+    }
 
     if (brandValue) existingGroup.brandSet.add(brandValue);
     if (vendorValue) existingGroup.vendorSet.add(vendorValue);
@@ -3373,15 +3380,29 @@ const getContainerDataset = async ({
   }
 
   const rows = Array.from(groupedByContainer.values())
-    .map((group) => ({
-      container: group.container,
-      brand: normalizeDistinctValues(Array.from(group.brandSet)).join(", ") || "N/A",
-      vendor: normalizeDistinctValues(Array.from(group.vendorSet)).join(", ") || "N/A",
-      shipping_date: group.shipping_date || null,
-      item_count: group.itemKeySet.size,
-      total_quantity: group.total_quantity,
-      total_cbm: toRoundedCbmValue(group.total_cbm),
-    }))
+    .map((group) => {
+      const shipmentCount = Number(group.shipment_count || 0);
+      const checkedCount = Number(group.checked_count || 0);
+      const checkedStatus =
+        shipmentCount > 0 && checkedCount >= shipmentCount
+          ? "Checked"
+          : checkedCount > 0
+            ? "Partially Checked"
+            : "Checking Pending";
+
+      return {
+        container: group.container,
+        brand: normalizeDistinctValues(Array.from(group.brandSet)).join(", ") || "N/A",
+        vendor: normalizeDistinctValues(Array.from(group.vendorSet)).join(", ") || "N/A",
+        shipping_date: group.shipping_date || null,
+        item_count: group.itemKeySet.size,
+        shipment_count: shipmentCount,
+        checked_count: checkedCount,
+        checked_status: checkedStatus,
+        total_quantity: group.total_quantity,
+        total_cbm: toRoundedCbmValue(group.total_cbm),
+      };
+    })
     .sort((left, right) => {
       const dateCompare =
         toShipmentTimestamp(right?.shipping_date) -
@@ -3396,6 +3417,13 @@ const getContainerDataset = async ({
     rows,
     summary: {
       total: rows.length,
+      checked: rows.filter((row) => row?.checked_status === "Checked").length,
+      partially_checked: rows.filter(
+        (row) => row?.checked_status === "Partially Checked",
+      ).length,
+      checking_pending: rows.filter(
+        (row) => row?.checked_status === "Checking Pending",
+      ).length,
       total_cbm: toRoundedCbmValue(
         rows.reduce((sum, row) => sum + Number(row?.total_cbm || 0), 0),
       ),
@@ -5624,8 +5652,9 @@ exports.getVendorSummaryByBrand = async (req, res) => {
       const vendorEntry = vendorMap.get(vendorKey);
       const orderId = normalizeOrderKey(row?.order_id) || row?.order_id;
       const totalStatus = normalizeOrderStatus(row?.totalStatus) || "Pending";
-      const originalEtd = parseDateLike(row?.ETD);
+      const effectiveEtd = parseDateLike(row?.effective_ETD);
       const isActiveOrder = totalStatus !== "Shipped";
+      const isDelayEligible = DELAY_ELIGIBLE_STATUSES.has(totalStatus);
 
       vendorEntry.orders.add(orderId);
 
@@ -5637,9 +5666,11 @@ exports.getVendorSummaryByBrand = async (req, res) => {
         vendorEntry.shippedOrders.add(orderId);
       }
 
-      if (isActiveOrder && originalEtd instanceof Date && !Number.isNaN(originalEtd.getTime())) {
-        if (originalEtd.getTime() < today.getTime()) {
-          vendorEntry.delayedOrders.add(orderId);
+      if (isActiveOrder && effectiveEtd instanceof Date && !Number.isNaN(effectiveEtd.getTime())) {
+        if (effectiveEtd.getTime() < today.getTime()) {
+          if (isDelayEligible) {
+            vendorEntry.delayedOrders.add(orderId);
+          }
         } else {
           vendorEntry.onTimeOrders.add(orderId);
         }
@@ -5945,7 +5976,11 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
       }
 
       if (isDelayedFilter) {
-        return totalStatus !== "Shipped" && hasEffectiveEtd && effectiveEtd < today;
+        return (
+          DELAY_ELIGIBLE_STATUSES.has(totalStatus) &&
+          hasEffectiveEtd &&
+          effectiveEtd < today
+        );
       }
 
       return true;

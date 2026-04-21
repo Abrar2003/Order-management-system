@@ -31,6 +31,18 @@ const normalizeFilterParam = (value, fallback = "all") => {
   return cleaned;
 };
 
+const CHECKED_STATUS_SORT_ORDER = {
+  Checked: 0,
+  "Partially Checked": 1,
+  "Checking Pending": 2,
+};
+
+const getCheckedStatusClassName = (status) => {
+  if (status === "Checked") return "text-success fw-semibold";
+  if (status === "Partially Checked") return "text-warning fw-semibold";
+  return "text-secondary fw-semibold";
+};
+
 const Containers = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -182,6 +194,9 @@ const Containers = () => {
           if (column === "brand") return row?.brand;
           if (column === "vendor") return row?.vendor;
           if (column === "shippingDate") return new Date(row?.shipping_date || 0).getTime();
+          if (column === "checkedStatus") {
+            return CHECKED_STATUS_SORT_ORDER[row?.checked_status] ?? 99;
+          }
           if (column === "itemCount") return Number(row?.item_count || 0);
           if (column === "totalQuantity") return Number(row?.total_quantity || 0);
           if (column === "totalCbm") return Number(row?.total_cbm || 0);
@@ -284,6 +299,13 @@ const Containers = () => {
         <div className="card om-card mb-3">
           <div className="card-body d-flex flex-wrap gap-2">
             <span className="om-summary-chip">Total Containers: {summary?.total ?? 0}</span>
+            <span className="om-summary-chip">Checked: {summary?.checked ?? 0}</span>
+            <span className="om-summary-chip">
+              Partially Checked: {summary?.partially_checked ?? 0}
+            </span>
+            <span className="om-summary-chip">
+              Checking Pending: {summary?.checking_pending ?? 0}
+            </span>
             <span className="om-summary-chip">Total CBM: {summary?.total_cbm ?? 0}</span>
             <span className="om-summary-chip">
               Showing: {rows.length} {rows.length === 1 ? "container" : "containers"}
@@ -340,6 +362,14 @@ const Containers = () => {
                       </th>
                       <th>
                         <SortHeaderButton
+                          label="Checked Status"
+                          isActive={sortBy === "checkedStatus"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("checkedStatus", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
                           label="Item Count"
                           isActive={sortBy === "itemCount"}
                           direction={sortOrder}
@@ -367,7 +397,7 @@ const Containers = () => {
                   <tbody>
                     {sortedRows.length === 0 ? (
                       <tr>
-                        <td colSpan="7" className="text-center py-4">
+                        <td colSpan="8" className="text-center py-4">
                           No containers found
                         </td>
                       </tr>
@@ -383,6 +413,11 @@ const Containers = () => {
                           <td>{row.brand || "N/A"}</td>
                           <td>{row.vendor || "N/A"}</td>
                           <td>{formatDateDDMMYYYY(row.shipping_date)}</td>
+                          <td>
+                            <span className={getCheckedStatusClassName(row.checked_status)}>
+                              {row.checked_status || "Checking Pending"}
+                            </span>
+                          </td>
                           <td>{row.item_count ?? 0}</td>
                           <td>{row.total_quantity ?? 0}</td>
                           <td>{(Number(row.total_cbm) ?? 0).toFixed(2)}</td>
