@@ -1,15 +1,24 @@
 import { useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
 import { formatDateDDMMYYYY } from "../utils/date";
+import {
+  buildMeasuredSizeEntriesFromLegacy,
+  hasMeaningfulMeasuredSize,
+} from "../utils/measuredSizeForm";
 
 const normalizeLabels = (labels = []) =>
   [
     ...new Set(
       (Array.isArray(labels) ? labels : [])
         .map((label) => Number(label))
-        .filter((label) => Number.isInteger(label) && label > 0),
+        .filter((label) => Number.isInteger(label) && label >= 0),
     ),
   ].sort((left, right) => left - right);
+
+const createEmptyLabelRange = () => ({
+  start: "",
+  end: "",
+});
 
 const buildLabelRanges = (labels = []) => {
   const sortedLabels = normalizeLabels(labels);
@@ -47,53 +56,88 @@ const formatLabelRanges = (labels = [], maxRanges = 8) => {
   return `${visibleRanges} | +${ranges.length - maxRanges} more`;
 };
 
-const parseLabelsInput = (value) => {
-  const normalized = String(value || "").trim();
-  if (!normalized) return { labels: [], error: "" };
+const getQcLabelRequirement = ({
+  totalPassed = 0,
+  boxSizesCount = 0,
+}) => {
+  const safePassed = Math.max(0, Number(totalPassed) || 0);
+  const safeBoxSizesCount = Math.max(0, Number(boxSizesCount) || 0);
 
-  const parsedLabels = [];
-  const parts = normalized
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
+  return {
+    requiredCount: safePassed * safeBoxSizesCount,
+    basisQuantity: safePassed,
+    boxSizesCount: safeBoxSizesCount,
+  };
+};
 
-  for (const part of parts) {
-    if (/^\d+$/.test(part)) {
-      parsedLabels.push(Number(part));
-      continue;
-    }
+const buildQcLabelRequirementMessage = ({
+  totalPassed = 0,
+  boxSizesCount = 0,
+  actualCount = 0,
+}) => {
+  const requirement = getQcLabelRequirement({
+    totalPassed,
+    boxSizesCount,
+  });
 
-    const rangeMatch = part.match(/^(\d+)\s*-\s*(\d+)$/);
-    if (!rangeMatch) {
+  return `Total labels must equal passed quantity × box sizes count (${requirement.requiredCount}). Actual total labels: ${Math.max(0, Number(actualCount) || 0)}. Expected: ${requirement.basisQuantity} × ${requirement.boxSizesCount}.`;
+};
+
+const parseLabelRanges = (ranges = []) => {
+  const enteredRanges = ranges.filter((range) => {
+    const hasStart = String(range?.start ?? "").trim() !== "";
+    const hasEnd = String(range?.end ?? "").trim() !== "";
+    return hasStart || hasEnd;
+  });
+
+  if (enteredRanges.length === 0) {
+    return { ranges: [], labels: [] };
+  }
+
+  const labels = [];
+  const normalizedRanges = [];
+
+  for (let index = 0; index < enteredRanges.length; index += 1) {
+    const range = enteredRanges[index];
+    const hasStart = String(range?.start ?? "").trim() !== "";
+    const hasEnd = String(range?.end ?? "").trim() !== "";
+
+    if (!hasStart || !hasEnd) {
       return {
-        labels: [],
-        error: "Labels must be a comma-separated list like 101,102 or ranges like 101-105.",
+        error: `Both start and end are required for range ${index + 1}.`,
       };
     }
 
-    const start = Number(rangeMatch[1]);
-    const end = Number(rangeMatch[2]);
-    if (!Number.isInteger(start) || !Number.isInteger(end) || start <= 0 || end <= 0) {
+    const startNum = Number(range.start);
+    const endNum = Number(range.end);
+
+    if (!Number.isInteger(startNum) || !Number.isInteger(endNum)) {
       return {
-        labels: [],
-        error: "Label numbers must be positive integers.",
-      };
-    }
-    if (start > end) {
-      return {
-        labels: [],
-        error: "Start label cannot be greater than end label.",
+        error: `Range ${index + 1} must use integer values.`,
       };
     }
 
-    for (let label = start; label <= end; label += 1) {
-      parsedLabels.push(label);
+    if (startNum < 0 || endNum < 0) {
+      return {
+        error: `Range ${index + 1} cannot contain negative values.`,
+      };
+    }
+
+    if (startNum > endNum) {
+      return {
+        error: `Start label cannot be greater than end label in range ${index + 1}.`,
+      };
+    }
+
+    normalizedRanges.push({ start: startNum, end: endNum });
+    for (let label = startNum; label <= endNum; label += 1) {
+      labels.push(label);
     }
   }
 
   return {
-    labels: normalizeLabels(parsedLabels),
-    error: "",
+    ranges: normalizedRanges,
+    labels,
   };
 };
 
@@ -120,7 +164,7 @@ const TransferInspectionModal = ({
   const [quantity, setQuantity] = useState(
     sourcePassedQuantity > 0 ? String(sourcePassedQuantity) : "",
   );
-  const [labelsInput, setLabelsInput] = useState("");
+  const [labelRanges, setLabelRanges] = useState([createEmptyLabelRange()]);
   const [lookupResult, setLookupResult] = useState(null);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupError, setLookupError] = useState("");
@@ -130,7 +174,7 @@ const TransferInspectionModal = ({
   useEffect(() => {
     setPo("");
     setQuantity(sourcePassedQuantity > 0 ? String(sourcePassedQuantity) : "");
-    setLabelsInput("");
+    setLabelRanges([createEmptyLabelRange()]);
     setLookupResult(null);
     setLookupLoading(false);
     setLookupError("");
@@ -138,10 +182,24 @@ const TransferInspectionModal = ({
     setError("");
   }, [inspectionRecordId, sourcePassedQuantity]);
 
-  const parsedLabels = useMemo(
-    () => parseLabelsInput(labelsInput),
-    [labelsInput],
+  const parsedLabelRangeData = useMemo(
+    () => parseLabelRanges(labelRanges),
+    [labelRanges],
   );
+
+  const existingBoxSizeEntries = useMemo(() => {
+    const itemMaster = qc?.item_master || {};
+    return buildMeasuredSizeEntriesFromLegacy({
+      primaryEntries: itemMaster?.inspected_box_sizes,
+      mode: itemMaster?.inspected_box_mode,
+      singleLbh: itemMaster?.inspected_box_LBH || itemMaster?.box_LBH,
+      topLbh: itemMaster?.inspected_box_top_LBH || itemMaster?.inspected_top_LBH,
+      bottomLbh:
+        itemMaster?.inspected_box_bottom_LBH || itemMaster?.inspected_bottom_LBH,
+    }).filter((entry) => hasMeaningfulMeasuredSize(entry));
+  }, [qc?.item_master]);
+
+  const boxSizesCount = existingBoxSizeEntries.length;
 
   const maxTransferQuantity = useMemo(() => {
     const targetOpenQuantity = Number(lookupResult?.target?.open_quantity || 0) || 0;
@@ -150,6 +208,40 @@ const TransferInspectionModal = ({
     }
     return sourcePassedQuantity;
   }, [lookupResult?.target?.open_quantity, sourcePassedQuantity]);
+
+  const requiredLabelsCount = useMemo(
+    () =>
+      getQcLabelRequirement({
+        totalPassed: toPositiveInteger(quantity) || 0,
+        boxSizesCount,
+      }).requiredCount,
+    [boxSizesCount, quantity],
+  );
+
+  const handleLabelRangeChange = (index, field, value) => {
+    setLabelRanges((previous) =>
+      previous.map((range, rangeIndex) =>
+        rangeIndex === index ? { ...range, [field]: value } : range,
+      ),
+    );
+    setError("");
+  };
+
+  const addLabelRange = () => {
+    setLabelRanges((previous) => [...previous, createEmptyLabelRange()]);
+    setError("");
+  };
+
+  const removeLabelRange = (index) => {
+    setLabelRanges((previous) => {
+      if (previous.length <= 1) {
+        return [createEmptyLabelRange()];
+      }
+
+      return previous.filter((_, rangeIndex) => rangeIndex !== index);
+    });
+    setError("");
+  };
 
   const handleLookup = async () => {
     const trimmedPo = String(po || "").trim();
@@ -195,6 +287,7 @@ const TransferInspectionModal = ({
     const trimmedPo = String(po || "").trim();
     const transferQuantity = toPositiveInteger(quantity);
     const sourceAvailableLabelSet = new Set(sourceLabels);
+    const selectedLabels = normalizeLabels(parsedLabelRangeData.labels);
 
     setError("");
 
@@ -223,22 +316,33 @@ const TransferInspectionModal = ({
       return;
     }
 
-    if (parsedLabels.error) {
-      setError(parsedLabels.error);
+    if (parsedLabelRangeData.error) {
+      setError(parsedLabelRangeData.error);
       return;
     }
 
-    if (parsedLabels.labels.length > transferQuantity) {
-      setError("Labels count cannot be greater than the transfer quantity.");
+    if (transferQuantity > 0 && boxSizesCount === 0) {
+      setError("At least 1 box size is required to validate labels.");
       return;
     }
 
-    if (parsedLabels.labels.length > sourceLabels.length) {
+    if (selectedLabels.length !== requiredLabelsCount) {
+      setError(
+        buildQcLabelRequirementMessage({
+          totalPassed: transferQuantity,
+          boxSizesCount,
+          actualCount: selectedLabels.length,
+        }),
+      );
+      return;
+    }
+
+    if (selectedLabels.length > sourceLabels.length) {
       setError("Labels count cannot be greater than the labels available on this inspection record.");
       return;
     }
 
-    const invalidLabels = parsedLabels.labels.filter((label) => !sourceAvailableLabelSet.has(label));
+    const invalidLabels = selectedLabels.filter((label) => !sourceAvailableLabelSet.has(label));
     if (invalidLabels.length > 0) {
       setError(`Some labels are not available on this inspection record: ${invalidLabels.join(", ")}`);
       return;
@@ -251,7 +355,7 @@ const TransferInspectionModal = ({
         {
           po: trimmedPo,
           quantity: transferQuantity,
-          labels: labelsInput,
+          labels: selectedLabels,
         },
       );
 
@@ -378,35 +482,96 @@ const TransferInspectionModal = ({
                 </div>
               </div>
               <div className="col-md-6">
-                <label className="form-label">Labels</label>
+                <label className="form-label">Box Sizes Count</label>
                 <input
                   type="text"
                   className="form-control"
-                  value={labelsInput}
-                  onChange={(event) => {
-                    setLabelsInput(event.target.value);
-                    setError("");
-                  }}
-                  placeholder="101,102 or 101-105"
-                  disabled={!lookupResult || saving}
+                  value={boxSizesCount}
+                  disabled
                 />
                 <div className="form-text">
-                  Enter labels to move. Selected labels cannot exceed the quantity.
+                  Label requirement uses transfer quantity × box sizes count.
                 </div>
               </div>
             </div>
 
-            {!parsedLabels.error && parsedLabels.labels.length > 0 && (
+            <div>
+              <label className="form-label d-block">Label Ranges</label>
+              <div className="d-grid gap-2">
+                {labelRanges.map((range, index) => (
+                  <div
+                    key={`transfer-label-range-${index}`}
+                    className="row g-2 align-items-end"
+                  >
+                    <div className="col-sm-5">
+                      <input
+                        type="number"
+                        className="form-control"
+                        value={range.start}
+                        onChange={(event) =>
+                          handleLabelRangeChange(index, "start", event.target.value)
+                        }
+                        min="0"
+                        step="1"
+                        placeholder={`Start label ${index + 1}`}
+                        disabled={!lookupResult || saving}
+                      />
+                    </div>
+                    <div className="col-sm-5">
+                      <input
+                        type="number"
+                        className="form-control"
+                        value={range.end}
+                        onChange={(event) =>
+                          handleLabelRangeChange(index, "end", event.target.value)
+                        }
+                        min="0"
+                        step="1"
+                        placeholder={`End label ${index + 1}`}
+                        disabled={!lookupResult || saving}
+                      />
+                    </div>
+                    <div className="col-sm-2 d-flex gap-2">
+                      <button
+                        type="button"
+                        className="btn btn-outline-secondary btn-sm"
+                        onClick={addLabelRange}
+                        title="Add another range"
+                        disabled={!lookupResult || saving}
+                      >
+                        +
+                      </button>
+                      {labelRanges.length > 1 && (
+                        <button
+                          type="button"
+                          className="btn btn-outline-danger btn-sm"
+                          onClick={() => removeLabelRange(index)}
+                          title="Remove this range"
+                          disabled={!lookupResult || saving}
+                        >
+                          -
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="form-text">
+                Required labels: {requiredLabelsCount} = {(toPositiveInteger(quantity) || 0)} × {boxSizesCount}
+              </div>
+            </div>
+
+            {!parsedLabelRangeData.error && parsedLabelRangeData.labels.length > 0 && (
               <div className="border rounded p-3">
                 <div className="small text-secondary mb-1">Selected Labels</div>
-                <div className="fw-semibold mb-1">{parsedLabels.labels.length}</div>
-                <div className="small">{formatLabelRanges(parsedLabels.labels)}</div>
+                <div className="fw-semibold mb-1">{parsedLabelRangeData.labels.length}</div>
+                <div className="small">{formatLabelRanges(parsedLabelRangeData.labels)}</div>
               </div>
             )}
 
-            {(error || parsedLabels.error) && (
+            {(error || parsedLabelRangeData.error) && (
               <div className="alert alert-danger mb-0">
-                {error || parsedLabels.error}
+                {error || parsedLabelRangeData.error}
               </div>
             )}
           </div>
