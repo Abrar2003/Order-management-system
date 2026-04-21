@@ -53,6 +53,7 @@ const parseLimit = (value) => {
 const buildFilterStateFromSearchParams = (params) => ({
   brand: normalizeFilterValue(params.get("brand")),
   vendor: normalizeFilterValue(params.get("vendor")),
+  po: normalizeFilterValue(params.get("po")),
 });
 
 const PackedGoods = () => {
@@ -67,6 +68,7 @@ const PackedGoods = () => {
   const [filterOptions, setFilterOptions] = useState({
     brands: [],
     vendors: [],
+    order_ids: [],
   });
   const [summary, setSummary] = useState({
     total_rows: 0,
@@ -75,6 +77,7 @@ const PackedGoods = () => {
   });
   const [draftBrand, setDraftBrand] = useState(initialFilters.brand);
   const [draftVendor, setDraftVendor] = useState(initialFilters.vendor);
+  const [draftPo, setDraftPo] = useState(initialFilters.po);
   const [appliedFilters, setAppliedFilters] = useState(initialFilters);
   const [sortBy, setSortBy] = useState(initialSortBy);
   const [sortOrder, setSortOrder] = useState(initialSortOrder);
@@ -97,6 +100,7 @@ const PackedGoods = () => {
         params: {
           brand: appliedFilters.brand === "all" ? "" : appliedFilters.brand,
           vendor: appliedFilters.vendor === "all" ? "" : appliedFilters.vendor,
+          order_id: appliedFilters.po === "all" ? "" : appliedFilters.po,
         },
       });
 
@@ -107,6 +111,9 @@ const PackedGoods = () => {
           : [],
         vendors: Array.isArray(response?.data?.filters?.vendors)
           ? response.data.filters.vendors
+          : [],
+        order_ids: Array.isArray(response?.data?.filters?.order_ids)
+          ? response.data.filters.order_ids
           : [],
       });
       setSummary({
@@ -121,7 +128,7 @@ const PackedGoods = () => {
         fetchError?.response?.data?.message || "Failed to load packed goods.",
       );
       setRows([]);
-      setFilterOptions({ brands: [], vendors: [] });
+      setFilterOptions({ brands: [], vendors: [], order_ids: [] });
       setSummary({
         total_rows: 0,
         total_packed_quantity: 0,
@@ -130,7 +137,7 @@ const PackedGoods = () => {
     } finally {
       setLoading(false);
     }
-  }, [appliedFilters.brand, appliedFilters.vendor]);
+  }, [appliedFilters.brand, appliedFilters.po, appliedFilters.vendor]);
 
   useEffect(() => {
     fetchPackedGoods();
@@ -146,8 +153,11 @@ const PackedGoods = () => {
 
     setDraftBrand((prev) => (prev === nextFilters.brand ? prev : nextFilters.brand));
     setDraftVendor((prev) => (prev === nextFilters.vendor ? prev : nextFilters.vendor));
+    setDraftPo((prev) => (prev === nextFilters.po ? prev : nextFilters.po));
     setAppliedFilters((prev) =>
-      prev.brand === nextFilters.brand && prev.vendor === nextFilters.vendor
+      prev.brand === nextFilters.brand &&
+      prev.vendor === nextFilters.vendor &&
+      prev.po === nextFilters.po
         ? prev
         : nextFilters,
     );
@@ -165,6 +175,7 @@ const PackedGoods = () => {
     const next = new URLSearchParams();
     if (appliedFilters.brand !== "all") next.set("brand", appliedFilters.brand);
     if (appliedFilters.vendor !== "all") next.set("vendor", appliedFilters.vendor);
+    if (appliedFilters.po !== "all") next.set("po", appliedFilters.po);
     if (sortBy !== DEFAULT_SORT_BY) next.set("sort_by", sortBy);
     if (sortOrder !== DEFAULT_SORT_ORDER) next.set("sort_order", sortOrder);
     if (page > 1) next.set("page", String(page));
@@ -175,6 +186,7 @@ const PackedGoods = () => {
     }
   }, [
     appliedFilters.brand,
+    appliedFilters.po,
     appliedFilters.vendor,
     searchParams,
     setSearchParams,
@@ -199,6 +211,47 @@ const PackedGoods = () => {
       ),
     ).sort((left, right) => left.localeCompare(right));
   }, [draftBrand, filterOptions.vendors, rows]);
+
+  const availableDraftPos = useMemo(() => {
+    if (
+      draftBrand === appliedFilters.brand &&
+      draftVendor === appliedFilters.vendor
+    ) {
+      return [...filterOptions.order_ids].sort((left, right) =>
+        left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }),
+      );
+    }
+
+    const matchesDraftFilters = (row) => {
+      const rowBrand = String(row?.brand || "").trim();
+      const rowVendor = String(row?.vendor || "").trim();
+      if (draftBrand !== "all" && rowBrand !== draftBrand) return false;
+      if (draftVendor !== "all" && rowVendor !== draftVendor) return false;
+      return true;
+    };
+
+    const rowOptions = Array.from(
+      new Set(
+        rows
+          .filter(matchesDraftFilters)
+          .map((row) => String(row?.order_id || "").trim())
+          .filter(Boolean),
+      ),
+    );
+
+    const sourceOptions = rowOptions.length > 0 ? rowOptions : filterOptions.order_ids;
+
+    return [...sourceOptions].sort((left, right) =>
+      left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }),
+    );
+  }, [
+    appliedFilters.brand,
+    appliedFilters.vendor,
+    draftBrand,
+    draftVendor,
+    filterOptions.order_ids,
+    rows,
+  ]);
 
   const sortedRows = useMemo(
     () =>
@@ -234,7 +287,9 @@ const PackedGoods = () => {
   }, [limit, page, sortedRows]);
 
   const hasPendingFilterChanges =
-    draftBrand !== appliedFilters.brand || draftVendor !== appliedFilters.vendor;
+    draftBrand !== appliedFilters.brand ||
+    draftVendor !== appliedFilters.vendor ||
+    draftPo !== appliedFilters.po;
 
   const handleSortColumn = useCallback(
     (column, defaultDirection = "asc") => {
@@ -254,6 +309,12 @@ const PackedGoods = () => {
   const handleDraftBrandChange = useCallback((event) => {
     setDraftBrand(event.target.value);
     setDraftVendor("all");
+    setDraftPo("all");
+  }, []);
+
+  const handleDraftVendorChange = useCallback((event) => {
+    setDraftVendor(event.target.value);
+    setDraftPo("all");
   }, []);
 
   const handleApplyFilters = useCallback(() => {
@@ -264,14 +325,19 @@ const PackedGoods = () => {
         draftVendor !== "all" && !availableDraftVendors.includes(draftVendor)
           ? "all"
           : draftVendor,
+      po:
+        draftPo !== "all" && !availableDraftPos.includes(draftPo)
+          ? "all"
+          : draftPo,
     });
-  }, [availableDraftVendors, draftBrand, draftVendor]);
+  }, [availableDraftPos, availableDraftVendors, draftBrand, draftPo, draftVendor]);
 
   const handleClearFilters = useCallback(() => {
-    const clearedFilters = { brand: "all", vendor: "all" };
+    const clearedFilters = { brand: "all", vendor: "all", po: "all" };
     setPage(1);
     setDraftBrand(clearedFilters.brand);
     setDraftVendor(clearedFilters.vendor);
+    setDraftPo(clearedFilters.po);
     setAppliedFilters(clearedFilters);
   }, []);
 
@@ -300,11 +366,11 @@ const PackedGoods = () => {
 
         <div className="card om-card mb-3">
           <div className="card-body">
-            <div className="row g-3 align-items-end">
-              <div className="col-12 col-md-6 col-lg-3">
-                <label className="form-label">Brand</label>
+            <div className="packed-goods-filter-bar">
+              <div className="packed-goods-filter-field">
+                <label className="form-label small mb-1">Brand</label>
                 <select
-                  className="form-select"
+                  className="form-select form-select-sm"
                   value={draftBrand}
                   onChange={handleDraftBrandChange}
                 >
@@ -317,12 +383,12 @@ const PackedGoods = () => {
                 </select>
               </div>
 
-              <div className="col-12 col-md-6 col-lg-3">
-                <label className="form-label">Vendor</label>
+              <div className="packed-goods-filter-field">
+                <label className="form-label small mb-1">Vendor</label>
                 <select
-                  className="form-select"
+                  className="form-select form-select-sm"
                   value={draftVendor}
-                  onChange={(event) => setDraftVendor(event.target.value)}
+                  onChange={handleDraftVendorChange}
                 >
                   <option value="all">All Vendors</option>
                   {availableDraftVendors.map((vendor) => (
@@ -333,52 +399,67 @@ const PackedGoods = () => {
                 </select>
               </div>
 
-              <div className="col-12 col-lg-6">
-                <div className="d-flex flex-wrap gap-2 align-items-end">
-                  <div>
-                    <label className="form-label">Rows per page</label>
-                    <select
-                      className="form-select"
-                      value={limit}
-                      onChange={(event) => {
-                        setLimit(parseLimit(event.target.value));
-                        setPage(1);
-                      }}
-                      disabled={loading}
-                    >
-                      {LIMIT_OPTIONS.map((limitOption) => (
-                        <option key={limitOption} value={limitOption}>
-                          {limitOption}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    onClick={handleApplyFilters}
-                    disabled={loading || !hasPendingFilterChanges}
-                  >
-                    Apply Filters
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-outline-secondary"
-                    onClick={handleClearFilters}
-                    disabled={
-                      loading
-                      || (
-                        draftBrand === "all"
-                        && draftVendor === "all"
-                        && appliedFilters.brand === "all"
-                        && appliedFilters.vendor === "all"
-                      )
-                    }
-                  >
-                    Clear Filters
-                  </button>
-                </div>
+              <div className="packed-goods-filter-field packed-goods-filter-field--po">
+                <label className="form-label small mb-1">PO</label>
+                <select
+                  className="form-select form-select-sm"
+                  value={draftPo}
+                  onChange={(event) => setDraftPo(event.target.value)}
+                >
+                  <option value="all">All POs</option>
+                  {availableDraftPos.map((po) => (
+                    <option key={po} value={po}>
+                      {po}
+                    </option>
+                  ))}
+                </select>
               </div>
+
+              <div className="packed-goods-filter-field packed-goods-filter-field--limit">
+                <label className="form-label small mb-1">Rows</label>
+                <select
+                  className="form-select form-select-sm"
+                  value={limit}
+                  onChange={(event) => {
+                    setLimit(parseLimit(event.target.value));
+                    setPage(1);
+                  }}
+                  disabled={loading}
+                >
+                  {LIMIT_OPTIONS.map((limitOption) => (
+                    <option key={limitOption} value={limitOption}>
+                      {limitOption}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <button
+                type="button"
+                className="btn btn-primary btn-sm packed-goods-filter-button"
+                onClick={handleApplyFilters}
+                disabled={loading || !hasPendingFilterChanges}
+              >
+                Apply Filters
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline-secondary btn-sm packed-goods-filter-button"
+                onClick={handleClearFilters}
+                disabled={
+                  loading
+                  || (
+                    draftBrand === "all"
+                    && draftVendor === "all"
+                    && draftPo === "all"
+                    && appliedFilters.brand === "all"
+                    && appliedFilters.vendor === "all"
+                    && appliedFilters.po === "all"
+                  )
+                }
+              >
+                Clear Filters
+              </button>
             </div>
           </div>
         </div>

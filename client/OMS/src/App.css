@@ -2375,3 +2375,43 @@ small,
   color: var(--bs-primary);
   transform: scale(1.06);
 }
+
+.packed-goods-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.65rem;
+}
+
+.packed-goods-filter-field {
+  flex: 1 1 150px;
+  min-width: 130px;
+}
+
+.packed-goods-filter-field--po {
+  flex-basis: 140px;
+}
+
+.packed-goods-filter-field--limit {
+  flex: 0 0 84px;
+  min-width: 84px;
+}
+
+.packed-goods-filter-button {
+  flex: 0 0 auto;
+  min-width: 106px;
+}
+
+@media (min-width: 1200px) {
+  .packed-goods-filter-bar {
+    flex-wrap: nowrap;
+  }
+
+  .packed-goods-filter-field {
+    max-width: 190px;
+  }
+
+  .packed-goods-filter-field--po {
+    max-width: 160px;
+  }
+}

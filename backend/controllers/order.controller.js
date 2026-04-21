@@ -7539,6 +7539,9 @@ exports.getPackedGoods = async (req, res) => {
   try {
     const selectedBrand = normalizeFilterValue(req.query.brand);
     const selectedVendor = normalizeFilterValue(req.query.vendor);
+    const selectedOrderId = normalizeFilterValue(
+      req.query.order_id ?? req.query.order ?? req.query.po,
+    );
 
     const orders = await Order.find(ACTIVE_ORDER_MATCH)
       .select(
@@ -7608,7 +7611,7 @@ exports.getPackedGoods = async (req, res) => {
       );
     }
 
-    const rows = (Array.isArray(orders) ? orders : [])
+    const brandVendorFilteredRows = (Array.isArray(orders) ? orders : [])
       .map((orderEntry) => {
         const progress = deriveOrderProgress({ orderEntry });
         const packedQuantity = Math.max(
@@ -7659,13 +7662,22 @@ exports.getPackedGoods = async (req, res) => {
         };
       })
       .filter(Boolean);
+    const rows = selectedOrderId
+      ? brandVendorFilteredRows.filter(
+          (row) =>
+            normalizeOrderKey(row?.order_id) === normalizeOrderKey(selectedOrderId),
+        )
+      : brandVendorFilteredRows;
 
     return res.status(200).json({
       success: true,
       data: rows,
       filters: {
-        brands: normalizeDistinctValues(rows.map((row) => row?.brand)),
-        vendors: normalizeDistinctValues(rows.map((row) => row?.vendor)),
+        brands: normalizeDistinctValues(brandVendorFilteredRows.map((row) => row?.brand)),
+        vendors: normalizeDistinctValues(brandVendorFilteredRows.map((row) => row?.vendor)),
+        order_ids: normalizeDistinctValues(
+          brandVendorFilteredRows.map((row) => row?.order_id),
+        ),
       },
       summary: {
         total_rows: rows.length,
