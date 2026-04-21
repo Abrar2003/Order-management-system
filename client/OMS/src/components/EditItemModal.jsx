@@ -2,10 +2,12 @@ import { useMemo, useState } from "react";
 import api from "../api/axios";
 import MeasuredSizeSection from "./MeasuredSizeSection";
 import {
+  BOX_PACKAGING_MODES,
   BOX_SIZE_REMARK_OPTIONS,
   ITEM_SIZE_REMARK_OPTIONS,
   buildMeasuredSizeEntriesFromLegacy,
   calculateMeasuredSizeEntriesCbm,
+  detectBoxPackagingMode,
   ensureMeasuredSizeEntryCount,
   getWeightValueFromModel,
   hasMeaningfulMeasuredSize,
@@ -45,6 +47,10 @@ const getVendorsLabel = (item = {}) =>
 
 const buildInitialForm = (item = {}) => {
   const inspectedWeight = item?.inspected_weight || {};
+  const inspectedBoxMode = detectBoxPackagingMode(
+    item?.inspected_box_mode,
+    item?.inspected_box_sizes,
+  );
   const inspectedItemEntries = buildMeasuredSizeEntriesFromLegacy({
     primaryEntries: item?.inspected_item_sizes,
     singleLbh: item?.inspected_item_LBH ?? item?.item_LBH,
@@ -59,6 +65,7 @@ const buildInitialForm = (item = {}) => {
   }).filter((entry) => hasMeaningfulMeasuredSize(entry));
   const inspectedBoxEntries = buildMeasuredSizeEntriesFromLegacy({
     primaryEntries: item?.inspected_box_sizes,
+    mode: inspectedBoxMode,
     singleLbh: item?.inspected_box_LBH ?? item?.box_LBH,
     topLbh: item?.inspected_box_top_LBH ?? item?.inspected_top_LBH,
     bottomLbh: item?.inspected_box_bottom_LBH ?? item?.inspected_bottom_LBH,
@@ -75,7 +82,9 @@ const buildInitialForm = (item = {}) => {
       ? normalizeSizeCount(inspectedItemEntries.length, 1)
       : 1;
   const inspectedBoxCount =
-    inspectedBoxEntries.length > 0
+    inspectedBoxMode === BOX_PACKAGING_MODES.CARTON
+      ? 2
+      : inspectedBoxEntries.length > 0
       ? normalizeSizeCount(inspectedBoxEntries.length, 1)
       : 1;
 
@@ -83,6 +92,7 @@ const buildInitialForm = (item = {}) => {
     name: toText(item?.name),
     description: toText(item?.description),
     inspected_item_count: String(inspectedItemCount),
+    inspected_box_mode: inspectedBoxMode,
     inspected_box_count: String(inspectedBoxCount),
     inspected_item_sizes: ensureMeasuredSizeEntryCount(
       inspectedItemEntries,
@@ -91,6 +101,7 @@ const buildInitialForm = (item = {}) => {
     inspected_box_sizes: ensureMeasuredSizeEntryCount(
       inspectedBoxEntries,
       inspectedBoxCount,
+      { mode: inspectedBoxMode },
     ),
     qc: {
       packed_size: Boolean(item?.qc?.packed_size),
@@ -128,16 +139,24 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
     [form.inspected_item_sizes, form.inspected_item_count],
   );
   const displayedBoxEntries = useMemo(
-    () => ensureMeasuredSizeEntryCount(form.inspected_box_sizes, form.inspected_box_count),
-    [form.inspected_box_sizes, form.inspected_box_count],
+    () =>
+      ensureMeasuredSizeEntryCount(form.inspected_box_sizes, form.inspected_box_count, {
+        mode: form.inspected_box_mode,
+      }),
+    [form.inspected_box_count, form.inspected_box_mode, form.inspected_box_sizes],
   );
   const calculatedInspectedItemCbm = useMemo(
     () => calculateMeasuredSizeEntriesCbm(form.inspected_item_sizes, form.inspected_item_count),
     [form.inspected_item_sizes, form.inspected_item_count],
   );
   const calculatedInspectedBoxCbm = useMemo(
-    () => calculateMeasuredSizeEntriesCbm(form.inspected_box_sizes, form.inspected_box_count),
-    [form.inspected_box_sizes, form.inspected_box_count],
+    () =>
+      calculateMeasuredSizeEntriesCbm(
+        form.inspected_box_sizes,
+        form.inspected_box_count,
+        { mode: form.inspected_box_mode },
+      ),
+    [form.inspected_box_count, form.inspected_box_mode, form.inspected_box_sizes],
   );
   const calculatedInspectedCbm = useMemo(() => {
     const itemCbmValue = Number(calculatedInspectedItemCbm || 0);
@@ -170,6 +189,22 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
     }));
   };
 
+  const handleInspectedBoxModeChange = (value) => {
+    const nextMode = detectBoxPackagingMode(value, form.inspected_box_sizes);
+    const nextCount =
+      nextMode === BOX_PACKAGING_MODES.CARTON ? "2" : form.inspected_box_count;
+    setForm((prev) => ({
+      ...prev,
+      inspected_box_mode: nextMode,
+      inspected_box_count: nextCount,
+      inspected_box_sizes: ensureMeasuredSizeEntryCount(
+        prev.inspected_box_sizes,
+        nextCount,
+        { mode: nextMode },
+      ),
+    }));
+  };
+
   const handleSizeEntryChange = (entriesKey, index, field, value) => {
     if (field !== "remark" && value !== "") {
       const parsed = Number(value);
@@ -193,6 +228,9 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
             : entry,
         ),
         prev[entriesKey]?.length || 1,
+        entriesKey === "inspected_box_sizes"
+          ? { mode: prev.inspected_box_mode }
+          : {},
       ),
     }));
   };
@@ -221,6 +259,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
         remarkOptions: BOX_SIZE_REMARK_OPTIONS,
         payloadWeightKey: "gross_weight",
         weightFieldLabel: "Gross weight",
+        mode: form.inspected_box_mode,
       });
       if (inspectedBoxPayload.error) {
         throw new Error(inspectedBoxPayload.error);
@@ -230,6 +269,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
         name: toText(form.name),
         description: toText(form.description),
         inspected_item_sizes: inspectedItemPayload.value,
+        inspected_box_mode: form.inspected_box_mode,
         inspected_box_sizes: inspectedBoxPayload.value,
         qc: {
           packed_size: Boolean(form.qc.packed_size),
@@ -354,7 +394,10 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
                 entries={displayedBoxEntries}
                 remarkOptions={BOX_SIZE_REMARK_OPTIONS}
                 weightLabel="Gross Weight"
+                mode={form.inspected_box_mode}
+                showModeSelector
                 disabled={saving}
+                onModeChange={handleInspectedBoxModeChange}
                 onCountChange={(value) =>
                   handleCountChange("inspected_box_count", "inspected_box_sizes", value)
                 }

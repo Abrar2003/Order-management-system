@@ -59,7 +59,7 @@ const ShipmentEntrySchema = new mongoose.Schema(
     stuffing_date: { type: Date },
     quantity: { type: Number },
     pending: { type: Number },
-    cases: [ {type: Number, required: true} ],
+    cases: [{ type: Number, required: true }],
     remaining_remarks: { type: String },
     stuffed_by: {
       // Keep legacy shipment rows saveable even if they were created before
@@ -67,6 +67,10 @@ const ShipmentEntrySchema = new mongoose.Schema(
       // at the controller layer before they reach the model.
       name: { type: String, default: "", trim: true },
       id: { type: mongoose.Schema.Types.ObjectId, default: null },
+    },
+    checked: {
+      checked_by: { type: mongoose.Schema.Types.ObjectId, default: null },
+      checked: { type: Boolean, required: true, default: false },
     },
     updated_at: { type: Date, default: Date.now },
     updated_by: { type: AuditActorSchema, default: () => ({}) },

@@ -407,8 +407,10 @@ const parseSizeEntriesPayload = (
 
   const allowedRemarks = Array.isArray(remarkOptions) ? remarkOptions : [];
   const seenRemarks = new Set();
+  const isBoxSizeField =
+    fieldLabel === "inspected_box_sizes" || fieldLabel === "pis_box_sizes";
   const resolvedBoxMode =
-    fieldLabel === "inspected_box_sizes"
+    isBoxSizeField
       ? detectBoxPackagingMode(mode, entries)
       : BOX_PACKAGING_MODES.INDIVIDUAL;
 
@@ -454,7 +456,7 @@ const parseSizeEntriesPayload = (
       parsedEntry[weightKey] = parsedWeight;
     }
 
-    if (fieldLabel === "inspected_box_sizes") {
+    if (isBoxSizeField) {
       if (resolvedBoxMode === BOX_PACKAGING_MODES.CARTON) {
         const entryType = index === 0 ? "inner" : "master";
         parsedEntry.remark = entryType;
@@ -1402,6 +1404,7 @@ exports.getPisDiffItems = async (req, res) => {
       "pis_item_bottom_LBH",
       "pis_box_LBH",
       "pis_box_sizes",
+      "pis_box_mode",
       "pis_box_top_LBH",
       "pis_box_bottom_LBH",
       "inspected_item_LBH",
@@ -1410,6 +1413,7 @@ exports.getPisDiffItems = async (req, res) => {
       "inspected_item_bottom_LBH",
       "inspected_box_LBH",
       "inspected_box_sizes",
+      "inspected_box_mode",
       "inspected_box_top_LBH",
       "inspected_box_bottom_LBH",
       "inspected_top_LBH",
@@ -1746,6 +1750,10 @@ exports.createItem = async (req, res) => {
       payload.pis_box_sizes,
       "pis_box_sizes",
     );
+    const parsedPisBoxMode = detectBoxPackagingMode(
+      payload?.pis_box_mode,
+      Array.isArray(pisBoxSizesInput) ? pisBoxSizesInput : [],
+    );
 
     const parsedPisItemSizes = parseSizeEntriesPayload(
       Array.isArray(pisItemSizesInput) ? pisItemSizesInput : [],
@@ -1763,6 +1771,7 @@ exports.createItem = async (req, res) => {
         remarkOptions: BOX_SIZE_REMARK_OPTIONS,
         weightKey: "gross_weight",
         weightLabel: "gross_weight",
+        mode: parsedPisBoxMode,
       },
     );
 
@@ -1778,6 +1787,7 @@ exports.createItem = async (req, res) => {
       {
         weightKey: "gross_weight",
         remarkOptions: BOX_SIZE_REMARK_OPTIONS,
+        mode: parsedPisBoxMode,
       },
     );
 
@@ -1791,6 +1801,7 @@ exports.createItem = async (req, res) => {
       vendors: [vendor],
       pis_item_sizes: parsedPisItemSizes,
       pis_box_sizes: parsedPisBoxSizes,
+      pis_box_mode: parsedPisBoxMode,
       pis_item_LBH: derivedPisItemLegacy.single,
       pis_item_top_LBH: derivedPisItemLegacy.top,
       pis_item_bottom_LBH: derivedPisItemLegacy.bottom,
@@ -2337,21 +2348,28 @@ exports.updateItemPis = async (req, res) => {
     }
 
     if (hasOwn(payload, "pis_box_sizes")) {
+      const parsedPisBoxMode = detectBoxPackagingMode(
+        payload?.pis_box_mode,
+        payload.pis_box_sizes,
+      );
       const parsedPisBoxSizes = parseSizeEntriesPayload(payload.pis_box_sizes, {
         fieldLabel: "pis_box_sizes",
         remarkOptions: BOX_SIZE_REMARK_OPTIONS,
         weightKey: "gross_weight",
         weightLabel: "gross_weight",
+        mode: parsedPisBoxMode,
       });
       const derivedPisBoxLegacy = buildLegacyLbhAndWeightFromSizeEntries(
         parsedPisBoxSizes,
         {
           weightKey: "gross_weight",
           remarkOptions: BOX_SIZE_REMARK_OPTIONS,
+          mode: parsedPisBoxMode,
         },
       );
 
       setPath("pis_box_sizes", parsedPisBoxSizes);
+      setPath("pis_box_mode", parsedPisBoxMode);
       setPath("pis_box_LBH", derivedPisBoxLegacy.single);
       setPath("pis_box_top_LBH", derivedPisBoxLegacy.top);
       setPath("pis_box_bottom_LBH", derivedPisBoxLegacy.bottom);
@@ -2359,6 +2377,13 @@ exports.updateItemPis = async (req, res) => {
       nextPisWeight.bottom_gross = derivedPisBoxLegacy.bottomWeight;
       nextPisWeight.total_gross = derivedPisBoxLegacy.totalWeight;
       pisWeightTouched = true;
+    }
+
+    if (hasOwn(payload, "pis_box_mode") && !hasOwn(payload, "pis_box_sizes")) {
+      setPath(
+        "pis_box_mode",
+        detectBoxPackagingMode(payload?.pis_box_mode, item?.pis_box_sizes),
+      );
     }
 
     if (pisWeightTouched) {

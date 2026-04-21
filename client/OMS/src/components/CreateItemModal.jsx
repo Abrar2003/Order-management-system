@@ -2,10 +2,12 @@ import { useMemo, useState } from "react";
 import api from "../api/axios";
 import MeasuredSizeSection from "./MeasuredSizeSection";
 import {
+  BOX_PACKAGING_MODES,
   BOX_SIZE_REMARK_OPTIONS,
   ITEM_SIZE_REMARK_OPTIONS,
   calculateMeasuredSizeEntriesCbm,
   createEmptyMeasuredSizeEntry,
+  detectBoxPackagingMode,
   ensureMeasuredSizeEntryCount,
   normalizeSizeCount,
   parseMeasuredSizeEntries,
@@ -21,9 +23,12 @@ const createInitialForm = () => ({
   brand: "",
   vendor: "",
   pis_item_count: "1",
+  pis_box_mode: BOX_PACKAGING_MODES.INDIVIDUAL,
   pis_box_count: "1",
   pis_item_sizes: [createEmptyMeasuredSizeEntry()],
-  pis_box_sizes: [createEmptyMeasuredSizeEntry()],
+  pis_box_sizes: [
+    createEmptyMeasuredSizeEntry({ mode: BOX_PACKAGING_MODES.INDIVIDUAL }),
+  ],
 });
 
 const CreateItemModal = ({
@@ -42,16 +47,22 @@ const CreateItemModal = ({
     [form.pis_item_sizes, form.pis_item_count],
   );
   const displayedBoxEntries = useMemo(
-    () => ensureMeasuredSizeEntryCount(form.pis_box_sizes, form.pis_box_count),
-    [form.pis_box_sizes, form.pis_box_count],
+    () =>
+      ensureMeasuredSizeEntryCount(form.pis_box_sizes, form.pis_box_count, {
+        mode: form.pis_box_mode,
+      }),
+    [form.pis_box_count, form.pis_box_mode, form.pis_box_sizes],
   );
   const calculatedPisItemCbm = useMemo(
     () => calculateMeasuredSizeEntriesCbm(form.pis_item_sizes, form.pis_item_count),
     [form.pis_item_sizes, form.pis_item_count],
   );
   const calculatedPisBoxCbm = useMemo(
-    () => calculateMeasuredSizeEntriesCbm(form.pis_box_sizes, form.pis_box_count),
-    [form.pis_box_sizes, form.pis_box_count],
+    () =>
+      calculateMeasuredSizeEntriesCbm(form.pis_box_sizes, form.pis_box_count, {
+        mode: form.pis_box_mode,
+      }),
+    [form.pis_box_count, form.pis_box_mode, form.pis_box_sizes],
   );
   const calculatedPisCbm = useMemo(() => {
     const itemCbmValue = Number(calculatedPisItemCbm || 0);
@@ -72,6 +83,19 @@ const CreateItemModal = ({
       ...prev,
       [countKey]: safeCount,
       [entriesKey]: ensureMeasuredSizeEntryCount(prev[entriesKey], safeCount),
+    }));
+  };
+
+  const handleBoxModeChange = (value) => {
+    const nextMode = detectBoxPackagingMode(value, form.pis_box_sizes);
+    const nextCount = nextMode === BOX_PACKAGING_MODES.CARTON ? "2" : form.pis_box_count;
+    setForm((prev) => ({
+      ...prev,
+      pis_box_mode: nextMode,
+      pis_box_count: nextCount,
+      pis_box_sizes: ensureMeasuredSizeEntryCount(prev.pis_box_sizes, nextCount, {
+        mode: nextMode,
+      }),
     }));
   };
 
@@ -98,6 +122,7 @@ const CreateItemModal = ({
             : entry,
         ),
         prev[entriesKey]?.length || 1,
+        entriesKey === "pis_box_sizes" ? { mode: prev.pis_box_mode } : {},
       ),
     }));
   };
@@ -147,6 +172,7 @@ const CreateItemModal = ({
         remarkOptions: BOX_SIZE_REMARK_OPTIONS,
         payloadWeightKey: "gross_weight",
         weightFieldLabel: "Gross weight",
+        mode: form.pis_box_mode,
       });
       if (pisBoxPayload.error) {
         throw new Error(pisBoxPayload.error);
@@ -158,6 +184,7 @@ const CreateItemModal = ({
       formData.append("description", description);
       formData.append("brand", brand);
       formData.append("vendor", vendor);
+      formData.append("pis_box_mode", form.pis_box_mode);
       formData.append("pis_item_sizes", JSON.stringify(pisItemPayload.value));
       formData.append("pis_box_sizes", JSON.stringify(pisBoxPayload.value));
       formData.append("pis_file", pisSheetFile);
@@ -303,7 +330,10 @@ const CreateItemModal = ({
                 entries={displayedBoxEntries}
                 remarkOptions={BOX_SIZE_REMARK_OPTIONS}
                 weightLabel="Gross Weight"
+                mode={form.pis_box_mode}
+                showModeSelector
                 disabled={saving}
+                onModeChange={handleBoxModeChange}
                 onCountChange={(value) =>
                   handleCountChange("pis_box_count", "pis_box_sizes", value)
                 }

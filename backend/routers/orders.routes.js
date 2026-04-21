@@ -21,6 +21,7 @@ const {
   getContainersDb,
   getShipmentsDb,
   exportShipmentsDb,
+  checkShipmentRows,
   getDelayedPoReport,
   getUpcomingEtdReport,
   exportDelayedPoReport,
@@ -159,6 +160,13 @@ router.get(
   authenticate,
   authorize("admin", "manager", "QC", "dev", "user"),
   getShipmentsDb,
+);
+
+router.patch(
+  "/shipments/check",
+  authenticate,
+  authorize("admin", "manager", "dev"),
+  checkShipmentRows,
 );
 
 // Finalize shipping / add shipment entry

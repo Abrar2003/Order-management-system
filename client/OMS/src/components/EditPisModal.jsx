@@ -2,10 +2,12 @@ import { useMemo, useState } from "react";
 import api from "../api/axios";
 import MeasuredSizeSection from "./MeasuredSizeSection";
 import {
+  BOX_PACKAGING_MODES,
   BOX_SIZE_REMARK_OPTIONS,
   ITEM_SIZE_REMARK_OPTIONS,
   buildMeasuredSizeEntriesFromLegacy,
   calculateMeasuredSizeEntriesCbm,
+  detectBoxPackagingMode,
   ensureMeasuredSizeEntryCount,
   getWeightValueFromModel,
   hasMeaningfulMeasuredSize,
@@ -31,6 +33,7 @@ const getVendorsLabel = (item = {}) =>
 
 const buildInitialForm = (item = {}) => {
   const pisWeight = item?.pis_weight || {};
+  const pisBoxMode = detectBoxPackagingMode(item?.pis_box_mode, item?.pis_box_sizes);
   const pisItemEntries = buildMeasuredSizeEntriesFromLegacy({
     primaryEntries: item?.pis_item_sizes,
     singleLbh: item?.pis_item_LBH,
@@ -45,6 +48,7 @@ const buildInitialForm = (item = {}) => {
   }).filter((entry) => hasMeaningfulMeasuredSize(entry));
   const pisBoxEntries = buildMeasuredSizeEntriesFromLegacy({
     primaryEntries: item?.pis_box_sizes,
+    mode: pisBoxMode,
     singleLbh: item?.pis_box_LBH,
     topLbh: item?.pis_box_top_LBH,
     bottomLbh: item?.pis_box_bottom_LBH,
@@ -61,7 +65,9 @@ const buildInitialForm = (item = {}) => {
       ? normalizeSizeCount(pisItemEntries.length, 1)
       : 1;
   const pisBoxCount =
-    pisBoxEntries.length > 0
+    pisBoxMode === BOX_PACKAGING_MODES.CARTON
+      ? 2
+      : pisBoxEntries.length > 0
       ? normalizeSizeCount(pisBoxEntries.length, 1)
       : 1;
 
@@ -69,9 +75,12 @@ const buildInitialForm = (item = {}) => {
     master_barcode: toText(item?.pis_master_barcode || item?.pis_barcode),
     inner_barcode: toText(item?.pis_inner_barcode),
     pis_item_count: String(pisItemCount),
+    pis_box_mode: pisBoxMode,
     pis_box_count: String(pisBoxCount),
     pis_item_sizes: ensureMeasuredSizeEntryCount(pisItemEntries, pisItemCount),
-    pis_box_sizes: ensureMeasuredSizeEntryCount(pisBoxEntries, pisBoxCount),
+    pis_box_sizes: ensureMeasuredSizeEntryCount(pisBoxEntries, pisBoxCount, {
+      mode: pisBoxMode,
+    }),
   };
 };
 
@@ -92,16 +101,22 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
     [form.pis_item_sizes, form.pis_item_count],
   );
   const displayedBoxEntries = useMemo(
-    () => ensureMeasuredSizeEntryCount(form.pis_box_sizes, form.pis_box_count),
-    [form.pis_box_sizes, form.pis_box_count],
+    () =>
+      ensureMeasuredSizeEntryCount(form.pis_box_sizes, form.pis_box_count, {
+        mode: form.pis_box_mode,
+      }),
+    [form.pis_box_count, form.pis_box_mode, form.pis_box_sizes],
   );
   const calculatedPisItemCbm = useMemo(
     () => calculateMeasuredSizeEntriesCbm(form.pis_item_sizes, form.pis_item_count),
     [form.pis_item_sizes, form.pis_item_count],
   );
   const calculatedPisBoxCbm = useMemo(
-    () => calculateMeasuredSizeEntriesCbm(form.pis_box_sizes, form.pis_box_count),
-    [form.pis_box_sizes, form.pis_box_count],
+    () =>
+      calculateMeasuredSizeEntriesCbm(form.pis_box_sizes, form.pis_box_count, {
+        mode: form.pis_box_mode,
+      }),
+    [form.pis_box_count, form.pis_box_mode, form.pis_box_sizes],
   );
   const calculatedPisCbm = useMemo(() => {
     const itemCbmValue = Number(calculatedPisItemCbm || 0);
@@ -132,6 +147,19 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
     }));
   };
 
+  const handleBoxModeChange = (value) => {
+    const nextMode = detectBoxPackagingMode(value, form.pis_box_sizes);
+    const nextCount = nextMode === BOX_PACKAGING_MODES.CARTON ? "2" : form.pis_box_count;
+    setForm((prev) => ({
+      ...prev,
+      pis_box_mode: nextMode,
+      pis_box_count: nextCount,
+      pis_box_sizes: ensureMeasuredSizeEntryCount(prev.pis_box_sizes, nextCount, {
+        mode: nextMode,
+      }),
+    }));
+  };
+
   const handleSizeEntryChange = (entriesKey, index, field, value) => {
     if (field !== "remark" && value !== "") {
       const parsed = Number(value);
@@ -155,6 +183,7 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
             : entry,
         ),
         prev[entriesKey]?.length || 1,
+        entriesKey === "pis_box_sizes" ? { mode: prev.pis_box_mode } : {},
       ),
     }));
   };
@@ -183,6 +212,7 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
         remarkOptions: BOX_SIZE_REMARK_OPTIONS,
         payloadWeightKey: "gross_weight",
         weightFieldLabel: "Gross weight",
+        mode: form.pis_box_mode,
       });
       if (pisBoxPayload.error) {
         throw new Error(pisBoxPayload.error);
@@ -192,6 +222,7 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
         pis_barcode: toText(form.master_barcode),
         pis_master_barcode: toText(form.master_barcode),
         pis_inner_barcode: toText(form.inner_barcode),
+        pis_box_mode: form.pis_box_mode,
         pis_item_sizes: pisItemPayload.value,
         pis_box_sizes: pisBoxPayload.value,
       };
@@ -296,7 +327,10 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
                 entries={displayedBoxEntries}
                 remarkOptions={BOX_SIZE_REMARK_OPTIONS}
                 weightLabel="Gross Weight"
+                mode={form.pis_box_mode}
+                showModeSelector
                 disabled={saving}
+                onModeChange={handleBoxModeChange}
                 onCountChange={(value) =>
                   handleCountChange("pis_box_count", "pis_box_sizes", value)
                 }

@@ -124,6 +124,19 @@ const normalizeShipmentStuffedBy = (value = null) => {
   };
 };
 
+const normalizeShipmentChecked = (value = null) => {
+  const isChecked = Boolean(value?.checked);
+  const checkedBy = String(value?.checked_by || value?.checkedBy || "").trim();
+
+  return {
+    checked: isChecked,
+    checked_by:
+      isChecked && mongoose.Types.ObjectId.isValid(checkedBy)
+        ? new mongoose.Types.ObjectId(checkedBy)
+        : null,
+  };
+};
+
 const toPositiveCbmNumber = (value) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return 0;
@@ -1835,7 +1848,8 @@ const formatShipmentEntriesForUploadLog = (shipmentEntries = []) => {
       const pending = Number(entry?.pending || 0);
       const remarks = String(entry?.remaining_remarks || "").trim() || "None";
       const stuffedBy = String(entry?.stuffed_by?.name || "").trim() || "Unknown";
-      return `${index + 1}) ${stuffingDate} | ${container} | invoice ${invoiceNumber} | stuffed by ${stuffedBy} | qty ${Number.isFinite(quantity) ? quantity : 0} | pending ${Number.isFinite(pending) ? pending : 0} | remarks: ${remarks}`;
+      const checked = entry?.checked?.checked ? "Yes" : "No";
+      return `${index + 1}) ${stuffingDate} | ${container} | invoice ${invoiceNumber} | stuffed by ${stuffedBy} | checked ${checked} | qty ${Number.isFinite(quantity) ? quantity : 0} | pending ${Number.isFinite(pending) ? pending : 0} | remarks: ${remarks}`;
     })
     .join(" || ");
 };
@@ -2515,6 +2529,7 @@ const normalizeShipmentEntries = (shipmentPayload) => {
       quantity,
       remaining_remarks: remarks,
       stuffed_by: stuffedBy,
+      checked: normalizeShipmentChecked(entry?.checked),
       updated_at: entry?.updated_at
         ? parseTimestampLike(entry.updated_at)
         : null,
@@ -2559,6 +2574,7 @@ const fitShipmentEntriesToOrderQuantity = (
       stuffed_by: normalizeShipmentStuffedBy(
         entry?.stuffed_by ?? entry?.stuffedBy,
       ),
+      checked: normalizeShipmentChecked(entry?.checked),
       updated_at: user
         ? updatedAt
         : (entry?.updated_at ? parseTimestampLike(entry.updated_at) : null) ||
@@ -3055,6 +3071,8 @@ const mapOrdersToShipmentRows = (orders = []) =>
           : 0,
         pending: Number.isFinite(parsedPending) ? parsedPending : 0,
         remaining_remarks: entry?.remaining_remarks || "",
+        shipment_checked: Boolean(entry?.checked?.checked),
+        shipment_checked_by: entry?.checked?.checked_by || null,
         shipment_cbm: toRoundedCbmValue(
           (Number.isFinite(perItemCbm) ? perItemCbm : 0)
           * (Number.isFinite(parsedShipmentQuantity) ? parsedShipmentQuantity : 0),
@@ -7683,6 +7701,146 @@ exports.getShipmentsDb = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch shipment list",
+      error: error.message,
+    });
+  }
+};
+
+exports.checkShipmentRows = async (req, res) => {
+  try {
+    const rawShipments = Array.isArray(req.body?.shipments)
+      ? req.body.shipments
+      : [];
+
+    const shipmentRefs = rawShipments
+      .map((entry) => ({
+        orderId: String(entry?.order_id || entry?.orderId || entry?._id || "").trim(),
+        shipmentId: String(
+          entry?.shipment_id || entry?.shipmentId || entry?._shipment_id || "",
+        ).trim(),
+      }))
+      .filter((entry) => entry.orderId || entry.shipmentId);
+
+    if (shipmentRefs.length === 0) {
+      return res.status(400).json({
+        message: "Select at least one shipment row to check",
+      });
+    }
+
+    const invalidRef = shipmentRefs.find(
+      (entry) =>
+        !mongoose.Types.ObjectId.isValid(entry.orderId) ||
+        !mongoose.Types.ObjectId.isValid(entry.shipmentId),
+    );
+    if (invalidRef) {
+      return res.status(400).json({
+        message: "Invalid order or shipment row selected",
+      });
+    }
+
+    const orderIds = [
+      ...new Set(shipmentRefs.map((entry) => entry.orderId)),
+    ];
+    const orders = await Order.find({ _id: { $in: orderIds } });
+    const ordersById = new Map(
+      orders.map((orderDoc) => [String(orderDoc._id), orderDoc]),
+    );
+    const selectedRows = [];
+
+    for (const ref of shipmentRefs) {
+      const orderDoc = ordersById.get(ref.orderId);
+      if (!orderDoc) {
+        return res.status(404).json({
+          message: "One or more selected orders were not found",
+        });
+      }
+
+      const shipmentEntry = orderDoc.shipment?.id(ref.shipmentId);
+      if (!shipmentEntry) {
+        return res.status(404).json({
+          message: "One or more selected shipment rows were not found",
+        });
+      }
+
+      if (shipmentEntry?.checked?.checked) {
+        return res.status(400).json({
+          message: "One or more selected shipment rows are already checked",
+        });
+      }
+
+      const container = String(shipmentEntry?.container || "").trim();
+      if (!container) {
+        return res.status(400).json({
+          message: "Selected shipment rows must have a container number",
+        });
+      }
+
+      selectedRows.push({ orderDoc, shipmentEntry, container });
+    }
+
+    const selectedContainers = [
+      ...new Set(selectedRows.map((entry) => entry.container.toLowerCase())),
+    ];
+    if (selectedContainers.length !== 1) {
+      return res.status(400).json({
+        message: "Shipment rows can be checked for only one selected container at a time",
+      });
+    }
+
+    const updatedAt = new Date();
+    const actor = buildAuditActor(req.user);
+    const orderSnapshots = new Map();
+
+    selectedRows.forEach(({ orderDoc, shipmentEntry }) => {
+      const orderKey = String(orderDoc._id);
+      if (!orderSnapshots.has(orderKey)) {
+        orderSnapshots.set(orderKey, {
+          orderDoc,
+          beforeSnapshot: buildOrderEditLogSnapshot(orderDoc),
+        });
+      }
+
+      shipmentEntry.checked = {
+        checked: true,
+        checked_by: req.user?._id || null,
+      };
+      shipmentEntry.updated_at = updatedAt;
+      shipmentEntry.updated_by = actor;
+      orderDoc.updated_by = actor;
+    });
+
+    await Promise.all(
+      [...orderSnapshots.values()].map(async ({ orderDoc }) => {
+        await orderDoc.save();
+      }),
+    );
+
+    await Promise.all(
+      [...orderSnapshots.values()].map(({ orderDoc, beforeSnapshot }) =>
+        createOrderEditLog({
+          reqUser: req.user,
+          operationType: "order_edit",
+          beforeSnapshot,
+          afterSnapshot: buildOrderEditLogSnapshot(orderDoc),
+          extraRemarks: [
+            `Shipment rows checked for container ${selectedRows[0]?.container || ""}.`,
+          ],
+        }),
+      ),
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: `${selectedRows.length} shipment row${selectedRows.length === 1 ? "" : "s"} checked successfully`,
+      data: {
+        checked_count: selectedRows.length,
+        container: selectedRows[0]?.container || "",
+      },
+    });
+  } catch (error) {
+    console.error("Check Shipment Rows Error:", error);
+    return res.status(500).json({
+      message: "Failed to check shipment rows",
       error: error.message,
     });
   }

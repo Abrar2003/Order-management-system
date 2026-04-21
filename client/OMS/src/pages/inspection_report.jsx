@@ -140,6 +140,11 @@ const toDisplayValue = (value, fallback = "N/A") => {
   return normalized || fallback;
 };
 
+const toFilenameSegment = (value, fallback = "unknown") => {
+  const normalized = String(value ?? "").trim();
+  return (normalized || fallback).replace(/[^a-zA-Z0-9_-]+/g, "_");
+};
+
 const toOptionalArray = (value) => {
   if (Array.isArray(value)) return value;
   if (value && typeof value === "object") {
@@ -1586,9 +1591,9 @@ const InspectionReport = () => {
         remainingHeight -= printableHeight;
       }
 
-      const orderId = toDisplayValue(qc?.order?.order_id, id || "inspection");
-      const safeOrderId = orderId.replace(/[^a-zA-Z0-9_-]/g, "_");
-      pdf.save(`inspection-report-${safeOrderId}.pdf`);
+      const safePo = toFilenameSegment(qc?.order?.order_id, id || "po");
+      const safeItemCode = toFilenameSegment(qc?.item?.item_code, "item");
+      pdf.save(`inspection_report_${safePo}_${safeItemCode}.pdf`);
     } catch (error) {
       console.error("Inspection report export failed:", error);
       alert("Failed to export inspection report PDF.");

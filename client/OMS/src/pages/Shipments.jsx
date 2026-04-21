@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
@@ -55,6 +55,14 @@ const normalizeFilterParam = (value, fallback = "all") => {
 
 const normalizeSearchParam = (value) => String(value || "").trim();
 
+const getShipmentSelectionKey = (row = {}) =>
+  `${String(row?._id || "").trim()}:${String(row?.shipment_id || "").trim()}`;
+
+const canSelectShipmentRow = (row = {}) =>
+  Boolean(row?.shipment_id) &&
+  !row?.shipment_checked &&
+  Boolean(String(row?.container || "").trim());
+
 const parseSortBy = (value) => {
   const normalized = String(value || "")
     .trim()
@@ -99,6 +107,7 @@ const Shipments = () => {
   const canFinalizeShipping = ["admin", "manager", "dev"].includes(
     normalizedRole,
   );
+  const canCheckShipments = canFinalizeShipping;
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -132,6 +141,8 @@ const Shipments = () => {
   const [totalRecords, setTotalRecords] = useState(0);
   const [summary, setSummary] = useState(EMPTY_SUMMARY);
   const [exporting, setExporting] = useState(false);
+  const [submittingChecked, setSubmittingChecked] = useState(false);
+  const [selectedShipmentKeys, setSelectedShipmentKeys] = useState(new Set());
   const [syncedQuery, setSyncedQuery] = useState(null);
   const [filterOptions, setFilterOptions] = useState({
     vendors: [],
@@ -164,6 +175,7 @@ const Shipments = () => {
       });
 
       setRows(Array.isArray(res?.data?.data) ? res.data.data : []);
+      setSelectedShipmentKeys(new Set());
       setSummary(res?.data?.summary || EMPTY_SUMMARY);
       setPage(Math.max(1, Number(res?.data?.pagination?.page || 1)));
       setTotalPages(
@@ -330,6 +342,114 @@ const Shipments = () => {
     [isAdmin],
   );
 
+  const selectedShipmentRows = useMemo(
+    () =>
+      rows.filter((row) =>
+        selectedShipmentKeys.has(getShipmentSelectionKey(row)),
+      ),
+    [rows, selectedShipmentKeys],
+  );
+
+  const selectedContainerValues = useMemo(
+    () =>
+      [
+        ...new Set(
+          selectedShipmentRows
+            .map((row) => String(row?.container || "").trim())
+            .filter(Boolean)
+            .map((containerValue) => containerValue.toLowerCase()),
+        ),
+      ],
+    [selectedShipmentRows],
+  );
+
+  const selectableShipmentRows = useMemo(
+    () => rows.filter((row) => canSelectShipmentRow(row)),
+    [rows],
+  );
+
+  const areAllVisibleShipmentsSelected =
+    selectableShipmentRows.length > 0 &&
+    selectableShipmentRows.every((row) =>
+      selectedShipmentKeys.has(getShipmentSelectionKey(row)),
+    );
+
+  const isSomeVisibleShipmentSelected =
+    selectableShipmentRows.some((row) =>
+      selectedShipmentKeys.has(getShipmentSelectionKey(row)),
+    );
+
+  const checkSubmitDisabledReason = !canCheckShipments
+    ? "Only admin, manager, or dev can submit shipment checks."
+    : selectedShipmentRows.length === 0
+      ? "Select at least one shipment row."
+      : selectedContainerValues.length > 1
+        ? "Select rows from only one container before submitting."
+        : selectedContainerValues.length === 0
+          ? "Selected shipment rows must have a container number."
+          : "";
+
+  const handleToggleShipmentSelection = useCallback((row) => {
+    const rowKey = getShipmentSelectionKey(row);
+    if (!rowKey || !canSelectShipmentRow(row)) return;
+
+    setSelectedShipmentKeys((previous) => {
+      const next = new Set(previous);
+      if (next.has(rowKey)) {
+        next.delete(rowKey);
+      } else {
+        next.add(rowKey);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleToggleAllVisibleShipments = useCallback(() => {
+    if (selectableShipmentRows.length === 0) return;
+
+    setSelectedShipmentKeys((previous) => {
+      const next = new Set(previous);
+      const shouldSelectAll = !selectableShipmentRows.every((row) =>
+        next.has(getShipmentSelectionKey(row)),
+      );
+
+      selectableShipmentRows.forEach((row) => {
+        const rowKey = getShipmentSelectionKey(row);
+        if (shouldSelectAll) {
+          next.add(rowKey);
+        } else {
+          next.delete(rowKey);
+        }
+      });
+
+      return next;
+    });
+  }, [selectableShipmentRows]);
+
+  const handleSubmitCheckedShipments = useCallback(async () => {
+    if (checkSubmitDisabledReason || selectedShipmentRows.length === 0) return;
+
+    try {
+      setSubmittingChecked(true);
+      const response = await api.patch("/orders/shipments/check", {
+        shipments: selectedShipmentRows.map((row) => ({
+          order_id: row?._id,
+          shipment_id: row?.shipment_id,
+        })),
+      });
+
+      alert(response?.data?.message || "Shipment rows checked successfully.");
+      setSelectedShipmentKeys(new Set());
+      await fetchShipments();
+    } catch (err) {
+      alert(
+        err?.response?.data?.message || "Failed to submit checked shipment rows.",
+      );
+    } finally {
+      setSubmittingChecked(false);
+    }
+  }, [checkSubmitDisabledReason, fetchShipments, selectedShipmentRows]);
+
   const handleOpenShippingModal = useCallback((row) => {
     const normalizedOrder = {
       _id: row?._id,
@@ -443,6 +563,23 @@ const Shipments = () => {
           </button>
           <h2 className="h4 mb-0">Shipments</h2>
           <div className="d-flex gap-2">
+            {canCheckShipments && (
+              <button
+                type="button"
+                className="btn btn-success btn-sm"
+                onClick={handleSubmitCheckedShipments}
+                disabled={
+                  submittingChecked ||
+                  loading ||
+                  Boolean(checkSubmitDisabledReason)
+                }
+                title={checkSubmitDisabledReason}
+              >
+                {submittingChecked
+                  ? "Submitting..."
+                  : `Submit Checked${selectedShipmentRows.length ? ` (${selectedShipmentRows.length})` : ""}`}
+              </button>
+            )}
             <button
               type="button"
               className="btn btn-outline-primary btn-sm"
@@ -656,6 +793,28 @@ const Shipments = () => {
                 <table className="table table-striped table-hover align-middle om-table mb-0 shipments-table">
                   <thead className="table-primary">
                     <tr>
+                      {canCheckShipments && (
+                        <th className="shipments-col-check">
+                          <input
+                            type="checkbox"
+                            className="form-check-input"
+                            checked={areAllVisibleShipmentsSelected}
+                            ref={(element) => {
+                              if (element) {
+                                element.indeterminate =
+                                  !areAllVisibleShipmentsSelected &&
+                                  isSomeVisibleShipmentSelected;
+                              }
+                            }}
+                            onChange={handleToggleAllVisibleShipments}
+                            disabled={
+                              submittingChecked ||
+                              selectableShipmentRows.length === 0
+                            }
+                            title="Select all eligible shipment rows on this page"
+                          />
+                        </th>
+                      )}
                       <th className="shipments-col-po">
                         <SortHeaderButton
                           label="PO"
@@ -781,7 +940,9 @@ const Shipments = () => {
                       <tr>
                         <td
                           colSpan={
-                            (canFinalizeShipping ? 13 : 12) + (isAdmin ? 1 : 0)
+                            (canCheckShipments ? 1 : 0) +
+                            (canFinalizeShipping ? 13 : 12) +
+                            (isAdmin ? 1 : 0)
                           }
                           className="text-center py-4"
                         >
@@ -797,6 +958,32 @@ const Shipments = () => {
                           `${row.order_id}-${row.item_code}-${index}`
                         }
                       >
+                        {canCheckShipments && (
+                          <td className="shipments-col-check">
+                            <input
+                              type="checkbox"
+                              className="form-check-input"
+                              checked={
+                                Boolean(row?.shipment_checked) ||
+                                selectedShipmentKeys.has(getShipmentSelectionKey(row))
+                              }
+                              onChange={() => handleToggleShipmentSelection(row)}
+                              disabled={
+                                submittingChecked ||
+                                !canSelectShipmentRow(row)
+                              }
+                              title={
+                                row?.shipment_checked
+                                  ? "This shipment row is already checked."
+                                  : !row?.shipment_id
+                                    ? "No shipment row is available to check."
+                                    : !String(row?.container || "").trim()
+                                      ? "Container number is required before checking."
+                                      : "Select this shipment row"
+                              }
+                            />
+                          </td>
+                        )}
                         <td className="shipments-col-po">{row?.order_id || "N/A"}</td>
                         <td className="shipments-col-item">{row?.item_code || "N/A"}</td>
                         <td className="shipments-col-vendor">{row?.vendor || "N/A"}</td>

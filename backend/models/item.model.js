@@ -210,6 +210,12 @@ const itemSchema = new mongoose.Schema(
         message: "pis_box_sizes cannot exceed 3 entries",
       },
     },
+    pis_box_mode: {
+      type: String,
+      enum: Object.values(BOX_PACKAGING_MODES),
+      default: BOX_PACKAGING_MODES.INDIVIDUAL,
+      trim: true,
+    },
     pis_box_top_LBH: {
       L: { type: Number, default: 0, min: 0 },
       B: { type: Number, default: 0, min: 0 },
