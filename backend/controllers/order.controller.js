@@ -7373,11 +7373,35 @@ const buildPendingPoReportDataset = async ({
   brand = "",
   vendor = "",
   orderId = "",
+  sortBy = "order_id",
+  sortOrder = "asc",
 } = {}) => {
   const selectedBrand = normalizeFilterValue(brand) || "";
   const selectedVendor = normalizeFilterValue(vendor) || "";
   const selectedOrderId = normalizeFilterValue(orderId) || "";
   const selectedOrderNeedle = selectedOrderId.toLowerCase();
+  const normalizedSortKey = String(sortBy || "order_id")
+    .trim()
+    .replace(/[^a-zA-Z0-9_]/g, "")
+    .toLowerCase();
+  const sortAliases = {
+    po: "order_id",
+    order: "order_id",
+    orderid: "order_id",
+    order_id: "order_id",
+    item: "item_code",
+    itemcode: "item_code",
+    item_code: "item_code",
+    description: "description",
+    orderquantity: "order_quantity",
+    order_quantity: "order_quantity",
+    pendingquantity: "pending_quantity",
+    pending_quantity: "pending_quantity",
+  };
+  const selectedSortBy = sortAliases[normalizedSortKey] || "order_id";
+  const selectedSortOrder =
+    String(sortOrder || "").trim().toLowerCase() === "desc" ? "desc" : "asc";
+  const sortDirection = selectedSortOrder === "desc" ? -1 : 1;
 
   const orders = await Order.find(ACTIVE_ORDER_MATCH)
     .select(
@@ -7430,6 +7454,33 @@ const buildPendingPoReportDataset = async ({
     }
     return true;
   });
+  const numericSortColumns = new Set(["order_quantity", "pending_quantity"]);
+  const sortedRows = [...filteredRows].sort((left, right) => {
+    const isNumeric = numericSortColumns.has(selectedSortBy);
+    const leftValue = left?.[selectedSortBy];
+    const rightValue = right?.[selectedSortBy];
+
+    let comparison = 0;
+    if (isNumeric) {
+      comparison = Number(leftValue || 0) - Number(rightValue || 0);
+    } else {
+      comparison = String(leftValue || "").localeCompare(
+        String(rightValue || ""),
+        undefined,
+        { numeric: true, sensitivity: "base" },
+      );
+    }
+
+    if (comparison === 0 && selectedSortBy !== "order_id") {
+      comparison = String(left?.order_id || "").localeCompare(
+        String(right?.order_id || ""),
+        undefined,
+        { numeric: true, sensitivity: "base" },
+      );
+    }
+
+    return comparison * sortDirection;
+  });
 
   const poKeys = new Set(
     filteredRows.map((row) =>
@@ -7466,19 +7517,47 @@ const buildPendingPoReportDataset = async ({
         0,
       ),
     },
-    rows: filteredRows,
+    sort: {
+      sort_by: selectedSortBy,
+      sort_order: selectedSortOrder,
+    },
+    rows: sortedRows,
   };
 };
 
 exports.getPendingPoReport = async (req, res) => {
   try {
+    const shouldPaginate =
+      req.query.page !== undefined || req.query.limit !== undefined;
+    const requestedPage = parsePositiveInt(req.query.page, 1);
+    const requestedLimit = Math.min(200, parsePositiveInt(req.query.limit, 50));
     const dataset = await buildPendingPoReportDataset({
       brand: req.query.brand,
       vendor: req.query.vendor,
       orderId: req.query.order_id ?? req.query.order ?? req.query.po,
+      sortBy: req.query.sort_by ?? req.query.sortBy,
+      sortOrder: req.query.sort_order ?? req.query.sortOrder,
     });
+    const totalRecords = dataset.rows.length;
+    const page = shouldPaginate ? requestedPage : 1;
+    const limit = shouldPaginate ? requestedLimit : Math.max(1, totalRecords);
+    const totalPages = Math.max(1, Math.ceil(totalRecords / limit));
+    const safePage = Math.min(page, totalPages);
+    const skip = (safePage - 1) * limit;
+    const paginatedRows = dataset.rows.slice(skip, skip + limit);
 
-    return res.status(200).json(dataset);
+    return res.status(200).json({
+      ...dataset,
+      count: totalRecords,
+      page_count: paginatedRows.length,
+      rows: paginatedRows,
+      pagination: {
+        page: safePage,
+        limit,
+        totalPages,
+        totalRecords,
+      },
+    });
   } catch (error) {
     console.error("Get Pending PO Report Error:", error);
     return res.status(500).json({
@@ -7501,6 +7580,8 @@ exports.exportPendingPoReport = async (req, res) => {
       brand: req.query.brand,
       vendor: req.query.vendor,
       orderId: req.query.order_id ?? req.query.order ?? req.query.po,
+      sortBy: req.query.sort_by ?? req.query.sortBy,
+      sortOrder: req.query.sort_order ?? req.query.sortOrder,
     });
 
     const columns = [

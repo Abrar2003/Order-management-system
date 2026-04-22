@@ -52,6 +52,15 @@ const isGoodsNotReady = (inspection = {}) => {
 };
 
 const getQcInspectionStatus = (qc = {}) => {
+  const derivedStatus = normalizeInspectionStatus(qc?.inspection_status);
+  if (derivedStatus === "rejected") return "Rejected";
+  if (derivedStatus === "transfered" || derivedStatus === "transferred") {
+    return "Transferred";
+  }
+  if (derivedStatus === "goods not ready") return "Goods Not Ready";
+  if (derivedStatus === "inspection done") return "Inspection Done";
+  if (derivedStatus === "pending") return "Pending";
+
   const lastInspection = qc?.last_inspection || {};
   const explicitStatus = normalizeInspectionStatus(lastInspection?.status);
 
@@ -76,6 +85,14 @@ const getQcInspectionStatus = (qc = {}) => {
 
   return "Pending";
 };
+
+const INSPECTION_STATUS_OPTIONS = [
+  "Pending",
+  "Inspection Done",
+  "Goods Not Ready",
+  "Rejected",
+  "Transferred",
+];
 
 const renderInspectionStatus = (qc = {}) => {
   const inspectionStatus = getQcInspectionStatus(qc);
@@ -194,6 +211,7 @@ const buildQcFilterStateFromSearchParams = (
     from: toDDMMYYYYInputValue(nextFromRaw, nextFromRaw),
     to: toDDMMYYYYInputValue(nextToRaw, nextToRaw),
     order: normalizeQueryText(searchParams.get("order")),
+    inspectionStatus: normalizeQueryText(searchParams.get("inspection_status")),
   };
 };
 
@@ -203,7 +221,8 @@ const areQcFilterStatesEqual = (left = {}, right = {}) =>
   && normalizeQueryText(left.vendor) === normalizeQueryText(right.vendor)
   && normalizeQueryText(left.from) === normalizeQueryText(right.from)
   && normalizeQueryText(left.to) === normalizeQueryText(right.to)
-  && normalizeQueryText(left.order) === normalizeQueryText(right.order);
+  && normalizeQueryText(left.order) === normalizeQueryText(right.order)
+  && normalizeQueryText(left.inspectionStatus) === normalizeQueryText(right.inspectionStatus);
 
 const QCPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -249,6 +268,9 @@ const QCPage = () => {
   const [from, setFrom] = useState(initialFilters.from);
   const [to, setTo] = useState(initialFilters.to);
   const [order, setOrder] = useState(initialFilters.order);
+  const [inspectionStatus, setInspectionStatus] = useState(
+    initialFilters.inspectionStatus,
+  );
 
   // applied filters used for API + URL sync
   const [appliedFilters, setAppliedFilters] = useState(initialFilters);
@@ -281,6 +303,7 @@ const QCPage = () => {
           search: appliedFilters.search,
           inspector: canUseInspectorFilter ? appliedFilters.inspector : "",
           vendor: appliedFilters.vendor,
+          inspection_status: appliedFilters.inspectionStatus,
           from: fromIso || "",
           to: toIso || "",
           sort_by: sortBy,
@@ -361,6 +384,9 @@ const QCPage = () => {
     setFrom((prev) => (prev === nextFilters.from ? prev : nextFilters.from));
     setTo((prev) => (prev === nextFilters.to ? prev : nextFilters.to));
     setOrder((prev) => (prev === nextFilters.order ? prev : nextFilters.order));
+    setInspectionStatus((prev) => (
+      prev === nextFilters.inspectionStatus ? prev : nextFilters.inspectionStatus
+    ));
     setAppliedFilters((prev) => (
       areQcFilterStatesEqual(prev, nextFilters) ? prev : nextFilters
     ));
@@ -386,6 +412,12 @@ const QCPage = () => {
     }
     if (normalizeQueryText(appliedFilters.vendor)) {
       next.set("vendor", normalizeQueryText(appliedFilters.vendor));
+    }
+    if (normalizeQueryText(appliedFilters.inspectionStatus)) {
+      next.set(
+        "inspection_status",
+        normalizeQueryText(appliedFilters.inspectionStatus),
+      );
     }
     if (normalizeQueryText(appliedFilters.from)) {
       next.set("from", normalizeQueryText(appliedFilters.from));
@@ -458,6 +490,7 @@ const QCPage = () => {
     from: normalizeQueryText(from),
     to: normalizeQueryText(to),
     order: normalizeQueryText(order),
+    inspectionStatus: normalizeQueryText(inspectionStatus),
   };
   const hasPendingFilterChanges = !areQcFilterStatesEqual(
     appliedFilters,
@@ -479,6 +512,7 @@ const QCPage = () => {
       from: "",
       to: "",
       order: "",
+      inspectionStatus: "",
     };
 
     setSearch("");
@@ -487,6 +521,7 @@ const QCPage = () => {
     setFrom("");
     setTo("");
     setOrder("");
+    setInspectionStatus("");
     setAppliedFilters(emptyFilters);
     setPage(1);
   }, []);
@@ -514,6 +549,7 @@ const QCPage = () => {
           search: appliedFilters.search,
           inspector: canUseInspectorFilter ? appliedFilters.inspector : "",
           vendor: appliedFilters.vendor,
+          inspection_status: appliedFilters.inspectionStatus,
           from: fromIso || "",
           to: toIso || "",
           sort_by: sortBy,
@@ -767,12 +803,18 @@ const QCPage = () => {
                       />
                     </th>
                     <th>
-                      <input
-                        type="text"
-                        className="form-control form-control-sm"
-                        placeholder="-"
-                        disabled
-                      />
+                      <select
+                        className="form-select form-select-sm"
+                        value={inspectionStatus}
+                        onChange={(e) => setInspectionStatus(e.target.value)}
+                      >
+                        <option value="">All</option>
+                        {INSPECTION_STATUS_OPTIONS.map((status) => (
+                          <option key={status} value={status}>
+                            {status}
+                          </option>
+                        ))}
+                      </select>
                     </th>
                     <th>
                       <input

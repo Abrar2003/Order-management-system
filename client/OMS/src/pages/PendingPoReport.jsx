@@ -17,6 +17,19 @@ import {
 import "../App.css";
 
 const DEFAULT_ENTITY_FILTER = "all";
+const DEFAULT_LIMIT = 50;
+const LIMIT_OPTIONS = [20, 50, 100, 200];
+
+const parsePositiveInt = (value, fallback = 1) => {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return parsed;
+};
+
+const parseLimit = (value) => {
+  const parsed = parsePositiveInt(value, DEFAULT_LIMIT);
+  return LIMIT_OPTIONS.includes(parsed) ? parsed : DEFAULT_LIMIT;
+};
 
 const normalizeEntityFilter = (value) => {
   const normalized = String(value || "").trim();
@@ -44,6 +57,12 @@ const defaultReport = {
     po_count: 0,
     total_order_quantity: 0,
     total_pending_quantity: 0,
+  },
+  pagination: {
+    page: 1,
+    limit: DEFAULT_LIMIT,
+    totalPages: 1,
+    totalRecords: 0,
   },
   rows: [],
 };
@@ -99,14 +118,36 @@ const PendingPoReport = () => {
   const [syncedQuery, setSyncedQuery] = useState(null);
   const [sortBy, setSortBy] = useState("order_id");
   const [sortOrder, setSortOrder] = useState("asc");
+  const [pagination, setPagination] = useState(() => ({
+    page: parsePositiveInt(searchParams.get("page"), 1),
+    limit: parseLimit(searchParams.get("limit")),
+    totalPages: 1,
+    totalRecords: 0,
+  }));
+
+  const canGoPrev = pagination.page > 1;
+  const canGoNext = pagination.page < pagination.totalPages;
 
   const buildParams = useCallback(() => {
-    const params = {};
+    const params = {
+      page: pagination.page,
+      limit: pagination.limit,
+      sort_by: sortBy,
+      sort_order: sortOrder,
+    };
     if (brandFilter !== DEFAULT_ENTITY_FILTER) params.brand = brandFilter;
     if (vendorFilter !== DEFAULT_ENTITY_FILTER) params.vendor = vendorFilter;
     if (poFilter) params.order_id = poFilter;
     return params;
-  }, [brandFilter, poFilter, vendorFilter]);
+  }, [
+    brandFilter,
+    pagination.limit,
+    pagination.page,
+    poFilter,
+    sortBy,
+    sortOrder,
+    vendorFilter,
+  ]);
 
   const fetchReport = useCallback(async () => {
     try {
@@ -124,8 +165,27 @@ const PendingPoReport = () => {
         },
         rows: Array.isArray(response?.rows) ? response.rows : [],
       });
+      const nextTotalPages = Math.max(
+        1,
+        Number(response?.pagination?.totalPages || 1),
+      );
+      setPagination((prev) => ({
+        ...prev,
+        page: Math.min(
+          Math.max(1, Number(response?.pagination?.page || prev.page || 1)),
+          nextTotalPages,
+        ),
+        limit: parseLimit(response?.pagination?.limit || prev.limit),
+        totalPages: nextTotalPages,
+        totalRecords: Number(response?.pagination?.totalRecords || 0),
+      }));
     } catch (err) {
       setReport(defaultReport);
+      setPagination((prev) => ({
+        ...prev,
+        totalPages: 1,
+        totalRecords: 0,
+      }));
       setError(err?.response?.data?.message || "Failed to load pending PO report.");
     } finally {
       setLoading(false);
@@ -145,6 +205,8 @@ const PendingPoReport = () => {
     const nextPoFilter = normalizeSearchValue(
       searchParams.get("order_id") || searchParams.get("po"),
     );
+    const nextPage = parsePositiveInt(searchParams.get("page"), 1);
+    const nextLimit = parseLimit(searchParams.get("limit"));
 
     setBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
     setDraftBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
@@ -152,6 +214,11 @@ const PendingPoReport = () => {
     setDraftVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
     setPoFilter((prev) => (prev === nextPoFilter ? prev : nextPoFilter));
     setDraftPoFilter((prev) => (prev === nextPoFilter ? prev : nextPoFilter));
+    setPagination((prev) => ({
+      ...prev,
+      page: prev.page === nextPage ? prev.page : nextPage,
+      limit: prev.limit === nextLimit ? prev.limit : nextLimit,
+    }));
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
   }, [searchParams, syncedQuery]);
 
@@ -163,12 +230,18 @@ const PendingPoReport = () => {
     if (brandFilter !== DEFAULT_ENTITY_FILTER) next.set("brand", brandFilter);
     if (vendorFilter !== DEFAULT_ENTITY_FILTER) next.set("vendor", vendorFilter);
     if (poFilter) next.set("order_id", poFilter);
+    if (pagination.page > 1) next.set("page", String(pagination.page));
+    if (pagination.limit !== DEFAULT_LIMIT) {
+      next.set("limit", String(pagination.limit));
+    }
 
     if (!areSearchParamsEquivalent(next, searchParams)) {
       setSearchParams(next, { replace: true });
     }
   }, [
     brandFilter,
+    pagination.limit,
+    pagination.page,
     poFilter,
     searchParams,
     setSearchParams,
@@ -209,6 +282,7 @@ const PendingPoReport = () => {
     setBrandFilter(normalizeEntityFilter(draftBrandFilter));
     setVendorFilter(normalizeEntityFilter(draftVendorFilter));
     setPoFilter(normalizeSearchValue(draftPoFilter));
+    setPagination((prev) => ({ ...prev, page: 1 }));
   }, [draftBrandFilter, draftPoFilter, draftVendorFilter]);
 
   const handleClearFilters = useCallback(() => {
@@ -218,6 +292,7 @@ const PendingPoReport = () => {
     setBrandFilter(DEFAULT_ENTITY_FILTER);
     setVendorFilter(DEFAULT_ENTITY_FILTER);
     setPoFilter("");
+    setPagination((prev) => ({ ...prev, page: 1 }));
   }, []);
 
   const handleSortColumn = useCallback(
@@ -230,6 +305,7 @@ const PendingPoReport = () => {
       );
       setSortBy(nextSortState.sortBy);
       setSortOrder(nextSortState.sortOrder);
+      setPagination((prev) => ({ ...prev, page: 1 }));
     },
     [sortBy, sortOrder],
   );
@@ -429,6 +505,9 @@ const PendingPoReport = () => {
               <span className="om-summary-chip">POs: {summary.po_count ?? 0}</span>
               <span className="om-summary-chip">Rows: {summary.row_count ?? 0}</span>
               <span className="om-summary-chip">
+                Showing: {sortedRows.length} of {pagination.totalRecords}
+              </span>
+              <span className="om-summary-chip">
                 Order Qty: {summary.total_order_quantity ?? 0}
               </span>
               <span className="om-summary-chip">
@@ -514,6 +593,58 @@ const PendingPoReport = () => {
               )}
             </div>
           </div>
+        </div>
+
+        <div className="d-flex flex-wrap justify-content-center align-items-center gap-3 mt-3">
+          <div className="d-flex align-items-center gap-2">
+            <label htmlFor="pending-po-page-size" className="small fw-semibold mb-0">
+              Rows per page
+            </label>
+            <select
+              id="pending-po-page-size"
+              className="form-select form-select-sm w-auto"
+              value={pagination.limit}
+              disabled={loading}
+              onChange={(event) => {
+                const nextLimit = parseLimit(event.target.value);
+                setPagination((prev) => ({
+                  ...prev,
+                  page: 1,
+                  limit: nextLimit,
+                }));
+              }}
+            >
+              {LIMIT_OPTIONS.map((limit) => (
+                <option key={limit} value={limit}>
+                  {limit}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            type="button"
+            className="btn btn-outline-secondary btn-sm"
+            disabled={!canGoPrev || loading}
+            onClick={() =>
+              setPagination((prev) => ({ ...prev, page: Math.max(1, prev.page - 1) }))}
+          >
+            Prev
+          </button>
+          <span className="small fw-semibold">
+            Page {pagination.page} of {pagination.totalPages}
+          </span>
+          <button
+            type="button"
+            className="btn btn-outline-secondary btn-sm"
+            disabled={!canGoNext || loading}
+            onClick={() =>
+              setPagination((prev) => ({
+                ...prev,
+                page: Math.min(prev.totalPages, prev.page + 1),
+              }))}
+          >
+            Next
+          </button>
         </div>
       </div>
     </>

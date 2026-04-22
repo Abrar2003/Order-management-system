@@ -177,6 +177,13 @@ const INSPECTION_RECORD_STATUS = Object.freeze({
   REJECTED: "rejected",
   TRANSFERRED: "transfered",
 });
+const QC_INSPECTION_STATUS_LABEL = Object.freeze({
+  PENDING: "Pending",
+  DONE: "Inspection Done",
+  GOODS_NOT_READY: "Goods Not Ready",
+  REJECTED: "Rejected",
+  TRANSFERRED: "Transferred",
+});
 const CLOSED_ORDER_STATUSES = ["Shipped", "Cancelled"];
 const MANAGER_ALLOWED_PAST_DAYS = 2;
 const QC_ALLOWED_PAST_DAYS = 1;
@@ -2657,6 +2664,231 @@ const resolveQcListSortConfig = ({
   };
 };
 
+const normalizeQcInspectionStatusFilter = (value = "") => {
+  const normalized = normalizeInspectionStatus(value);
+  if (!normalized || normalized === "all") return "";
+  if (normalized === "pending") return QC_INSPECTION_STATUS_LABEL.PENDING;
+  if (normalized === "inspection done") return QC_INSPECTION_STATUS_LABEL.DONE;
+  if (normalized === "goods not ready") {
+    return QC_INSPECTION_STATUS_LABEL.GOODS_NOT_READY;
+  }
+  if (normalized === "rejected") return QC_INSPECTION_STATUS_LABEL.REJECTED;
+  if (normalized === "transfered" || normalized === "transferred") {
+    return QC_INSPECTION_STATUS_LABEL.TRANSFERRED;
+  }
+  return "";
+};
+
+const buildLatestInspectionLookupStages = () => [
+  {
+    $lookup: {
+      from: "inspections",
+      let: { qcId: "$_id" },
+      pipeline: [
+        {
+          $match: {
+            $expr: { $eq: ["$qc", "$$qcId"] },
+          },
+        },
+        {
+          $addFields: {
+            inspection_date_sort_key: {
+              $ifNull: [inspectionDateToDateExpression, "$createdAt"],
+            },
+          },
+        },
+        { $sort: { inspection_date_sort_key: -1, createdAt: -1 } },
+        { $limit: 1 },
+        {
+          $project: {
+            inspection_date_sort_key: 0,
+            __v: 0,
+          },
+        },
+      ],
+      as: "last_inspection",
+    },
+  },
+  {
+    $addFields: {
+      last_inspection: { $arrayElemAt: ["$last_inspection", 0] },
+    },
+  },
+];
+
+const buildQcInspectionStatusExpression = () => {
+  const truthyStrings = ["true", "1", "yes", "y"];
+  const goodsNotReadyFlagExpression = {
+    $let: {
+      vars: {
+        goodsNotReady: "$last_inspection.goods_not_ready",
+        goodsNotReadyType: { $type: "$last_inspection.goods_not_ready" },
+      },
+      in: {
+        $or: [
+          { $eq: ["$$goodsNotReady", true] },
+          {
+            $and: [
+              { $eq: ["$$goodsNotReadyType", "string"] },
+              {
+                $in: [
+                  {
+                    $toLower: {
+                      $trim: {
+                        input: {
+                          $cond: [
+                            { $eq: ["$$goodsNotReadyType", "string"] },
+                            "$$goodsNotReady",
+                            "",
+                          ],
+                        },
+                      },
+                    },
+                  },
+                  truthyStrings,
+                ],
+              },
+            ],
+          },
+          {
+            $and: [
+              { $eq: ["$$goodsNotReadyType", "object"] },
+              {
+                $or: [
+                  {
+                    $in: [
+                      {
+                        $toLower: {
+                          $trim: {
+                            input: {
+                              $toString: {
+                                $ifNull: ["$$goodsNotReady.ready", ""],
+                              },
+                            },
+                          },
+                        },
+                      },
+                      truthyStrings,
+                    ],
+                  },
+                  {
+                    $gt: [
+                      {
+                        $strLenCP: {
+                          $trim: {
+                            input: {
+                              $toString: {
+                                $ifNull: ["$$goodsNotReady.reason", ""],
+                              },
+                            },
+                          },
+                        },
+                      },
+                      0,
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    },
+  };
+
+  return {
+    $let: {
+      vars: {
+        explicitStatus: {
+          $toLower: {
+            $trim: {
+              input: {
+                $toString: { $ifNull: ["$last_inspection.status", ""] },
+              },
+            },
+          },
+        },
+        checkedQuantity: {
+          $convert: {
+            input: "$last_inspection.checked",
+            to: "double",
+            onError: 0,
+            onNull: 0,
+          },
+        },
+      },
+      in: {
+        $switch: {
+          branches: [
+            {
+              case: {
+                $eq: [
+                  "$$explicitStatus",
+                  normalizeInspectionStatus(INSPECTION_RECORD_STATUS.REJECTED),
+                ],
+              },
+              then: QC_INSPECTION_STATUS_LABEL.REJECTED,
+            },
+            {
+              case: {
+                $in: [
+                  "$$explicitStatus",
+                  [
+                    normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED),
+                    "transferred",
+                  ],
+                ],
+              },
+              then: QC_INSPECTION_STATUS_LABEL.TRANSFERRED,
+            },
+            {
+              case: {
+                $or: [
+                  {
+                    $eq: [
+                      "$$explicitStatus",
+                      normalizeInspectionStatus(
+                        INSPECTION_RECORD_STATUS.GOODS_NOT_READY,
+                      ),
+                    ],
+                  },
+                  goodsNotReadyFlagExpression,
+                ],
+              },
+              then: QC_INSPECTION_STATUS_LABEL.GOODS_NOT_READY,
+            },
+            {
+              case: {
+                $or: [
+                  { $gt: ["$$checkedQuantity", 0] },
+                  {
+                    $eq: [
+                      "$$explicitStatus",
+                      normalizeInspectionStatus(INSPECTION_RECORD_STATUS.DONE),
+                    ],
+                  },
+                ],
+              },
+              then: QC_INSPECTION_STATUS_LABEL.DONE,
+            },
+          ],
+          default: QC_INSPECTION_STATUS_LABEL.PENDING,
+        },
+      },
+    },
+  };
+};
+
+const buildQcInspectionStatusStages = (selectedStatus = "") => [
+  ...buildLatestInspectionLookupStages(),
+  {
+    $addFields: {
+      inspection_status: buildQcInspectionStatusExpression(),
+    },
+  },
+  ...(selectedStatus ? [{ $match: { inspection_status: selectedStatus } }] : []),
+];
+
 exports.getQCList = async (req, res) => {
   await QC.createIndexes();
   try {
@@ -2672,6 +2904,9 @@ exports.getQCList = async (req, res) => {
       to = "",
       sort = "-request_date",
     } = req.query;
+    const selectedInspectionStatus = normalizeQcInspectionStatusFilter(
+      req.query.inspection_status ?? req.query.inspectionStatus,
+    );
     const requestedInspectorId = String(inspector || "").trim();
     const normalizedRole = String(req.user?.role || "")
       .trim()
@@ -2706,6 +2941,11 @@ exports.getQCList = async (req, res) => {
       to,
     };
     const match = buildQcListMatch(filterInput);
+    const inspectionStatusStages =
+      buildQcInspectionStatusStages(selectedInspectionStatus);
+    const optionInspectionStatusStages = selectedInspectionStatus
+      ? buildQcInspectionStatusStages(selectedInspectionStatus)
+      : [];
 
     const pipeline = [
       { $match: match },
@@ -2718,6 +2958,7 @@ exports.getQCList = async (req, res) => {
           },
         },
       },
+      ...inspectionStatusStages,
       { $sort: sortStage },
       {
         $facet: {
@@ -2736,40 +2977,6 @@ exports.getQCList = async (req, res) => {
             {
               $unwind: { path: "$inspector", preserveNullAndEmptyArrays: true },
             },
-            {
-              $lookup: {
-                from: "inspections",
-                let: { qcId: "$_id" },
-                pipeline: [
-                  {
-                    $match: {
-                      $expr: { $eq: ["$qc", "$$qcId"] },
-                    },
-                  },
-                  {
-                    $addFields: {
-                      inspection_date_sort_key: {
-                        $ifNull: [inspectionDateToDateExpression, "$createdAt"],
-                      },
-                    },
-                  },
-                  { $sort: { inspection_date_sort_key: -1, createdAt: -1 } },
-                  { $limit: 1 },
-                  {
-                    $project: {
-                      inspection_date_sort_key: 0,
-                      __v: 0,
-                    },
-                  },
-                ],
-                as: "last_inspection",
-              },
-            },
-            {
-              $addFields: {
-                last_inspection: { $arrayElemAt: ["$last_inspection", 0] },
-              },
-            },
             { $project: { request_date_sort_key: 0 } },
           ],
           totalCount: [{ $count: "count" }],
@@ -2783,6 +2990,7 @@ exports.getQCList = async (req, res) => {
         { $match: buildQcListMatch({ ...filterInput, includeVendor: false }) },
         buildActiveOrderLookupStage("order"),
         { $unwind: { path: "$order", preserveNullAndEmptyArrays: false } },
+        ...optionInspectionStatusStages,
         { $group: { _id: "$order_meta.vendor" } },
         { $project: { _id: 0, value: "$_id" } },
       ]).allowDiskUse(true),
@@ -2790,6 +2998,7 @@ exports.getQCList = async (req, res) => {
         { $match: buildQcListMatch({ ...filterInput, includeOrder: false }) },
         buildActiveOrderLookupStage("order"),
         { $unwind: { path: "$order", preserveNullAndEmptyArrays: false } },
+        ...optionInspectionStatusStages,
         { $group: { _id: "$order_meta.order_id" } },
         { $project: { _id: 0, value: "$_id" } },
       ]).allowDiskUse(true),
@@ -2797,6 +3006,7 @@ exports.getQCList = async (req, res) => {
         { $match: buildQcListMatch({ ...filterInput, includeSearch: false }) },
         buildActiveOrderLookupStage("order"),
         { $unwind: { path: "$order", preserveNullAndEmptyArrays: false } },
+        ...optionInspectionStatusStages,
         { $group: { _id: "$item.item_code" } },
         { $project: { _id: 0, value: "$_id" } },
       ]).allowDiskUse(true),
@@ -2832,6 +3042,7 @@ exports.getQCList = async (req, res) => {
         item_codes: normalizeDistinctValues(
           itemCodesRaw.map((entry) => entry?.value),
         ),
+        inspection_status_options: Object.values(QC_INSPECTION_STATUS_LABEL),
       },
     });
   } catch (err) {
@@ -2860,6 +3071,9 @@ exports.exportQCList = async (req, res) => {
         .toLowerCase() === "csv"
         ? "csv"
         : "xlsx";
+    const selectedInspectionStatus = normalizeQcInspectionStatusFilter(
+      req.query.inspection_status ?? req.query.inspectionStatus,
+    );
 
     const inspectorId = String(inspector || "").trim();
     if (inspectorId && !mongoose.Types.ObjectId.isValid(inspectorId)) {
@@ -2876,6 +3090,8 @@ exports.exportQCList = async (req, res) => {
       to,
     };
     const match = buildQcListMatch(filterInput);
+    const inspectionStatusStages =
+      buildQcInspectionStatusStages(selectedInspectionStatus);
     const { sortStage } = resolveQcListSortConfig({
       sortToken: sort,
       sortByInput: req.query.sort_by ?? req.query.sortBy ?? "",
@@ -2891,6 +3107,7 @@ exports.exportQCList = async (req, res) => {
           },
         },
       },
+      ...inspectionStatusStages,
       { $sort: sortStage },
       {
         $lookup: {
@@ -3024,6 +3241,7 @@ exports.exportQCList = async (req, res) => {
       { key: "item_master_box_lbh", header: "Item Master Box LBH" },
       { key: "request_date", header: "Request Date" },
       { key: "last_inspected_date", header: "Last Inspected Date" },
+      { key: "inspection_status", header: "Inspection Status" },
       { key: "order_date", header: "Order Date" },
       { key: "etd", header: "ETD" },
       { key: "order_status", header: "Order Status" },
@@ -3150,6 +3368,7 @@ exports.exportQCList = async (req, res) => {
         item_master_box_lbh: formatLbh(getItemBoxLbh(itemMaster)),
         request_date: formatDateDDMMYYYY(entry?.request_date, ""),
         last_inspected_date: formatDateDDMMYYYY(entry?.last_inspected_date, ""),
+        inspection_status: normalizeText(entry?.inspection_status || ""),
         order_date: formatDateDDMMYYYY(entry?.order?.order_date, ""),
         etd: formatDateDDMMYYYY(entry?.order?.ETD, ""),
         order_status: resolveQcOrderStatus(entry, entry?.order),
