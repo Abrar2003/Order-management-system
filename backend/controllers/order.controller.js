@@ -5576,10 +5576,19 @@ exports.getOrderById = async (req, res) => {
     })
       .populate({
         path: "qc_record",
-        populate: {
-          path: "inspector",
-          select: "name role",
-        },
+        select:
+          "quantities request_history request_date request_type inspection_record inspector",
+        populate: [
+          {
+            path: "inspector",
+            select: "name role",
+          },
+          {
+            path: "inspection_record",
+            select:
+              "request_history_id requested_date inspection_date checked passed createdAt inspector",
+          },
+        ],
       })
       .lean();
 
