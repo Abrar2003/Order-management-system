@@ -13,6 +13,10 @@ const Order = require("../models/order.model");
 const mongoose = require("mongoose");
 const { upsertItemFromQc } = require("../services/itemSync");
 const {
+  applyTotalPoCbmToOrder,
+  syncTotalPoCbmForItem,
+} = require("../services/orderCbm.service");
+const {
   getSignedObjectUrl,
   isConfigured: isWasabiConfigured,
   deleteObject,
@@ -213,6 +217,21 @@ const applyQcOrderStatus = (qcDoc = null, orderDoc = null) => {
   const nextStatus = resolveQcOrderStatus(qcDoc, resolvedOrder);
   resolvedOrder.status = nextStatus;
   return nextStatus;
+};
+
+const applyQcOrderPoCbm = async (orderDoc = null) => {
+  if (!orderDoc) return null;
+  try {
+    return await applyTotalPoCbmToOrder(orderDoc);
+  } catch (error) {
+    console.error("Order total_po_cbm recalculation failed:", {
+      orderId: orderDoc?._id,
+      order_id: orderDoc?.order_id,
+      item_code: orderDoc?.item?.item_code,
+      error: error?.message || String(error),
+    });
+    return null;
+  }
 };
 
 const isQcOrderInspectionDone = (qcDoc = null, orderDoc = null) =>
@@ -3567,6 +3586,7 @@ exports.alignQC = async (req, res) => {
         applyQcOrderStatus(existingQC, orderRecord);
         orderRecord.qc_record = existingQC._id;
         orderRecord.updated_by = buildAuditActor(req.user);
+        await applyQcOrderPoCbm(orderRecord);
         await orderRecord.save();
       }
 
@@ -3681,6 +3701,7 @@ exports.alignQC = async (req, res) => {
     orderRecord.updated_by = buildAuditActor(req.user);
 
     await qc.save();
+    await applyQcOrderPoCbm(orderRecord);
     await orderRecord.save();
 
     const afterQcInspectionRecords = await Inspection.find({ qc: qc._id }).lean();
@@ -5229,6 +5250,13 @@ exports.updateQC = async (req, res) => {
     if (hasItemMasterUpdate) {
       const itemDoc = itemDocForInspectedLbhUpdate;
       let hasItemDocChanges = false;
+      const hasPoCbmRelevantItemChanges = Boolean(
+        parsedInspectedBoxSizeEntries.hasInput ||
+          parsedInspectedBoxLbh.hasInput ||
+          parsedInspectedTopLbh.hasInput ||
+          parsedInspectedBottomLbh.hasInput ||
+          hasInspectedBoxModeUpdate,
+      );
       const setSizeEntriesPath = (
         path,
         parsedEntries,
@@ -5460,6 +5488,17 @@ exports.updateQC = async (req, res) => {
 
       if (hasItemDocChanges) {
         await itemDoc.save();
+        if (hasPoCbmRelevantItemChanges) {
+          try {
+            await syncTotalPoCbmForItem(itemDoc.toObject());
+          } catch (syncError) {
+            console.error("QC inspected box PO CBM sync failed:", {
+              itemId: itemDoc?._id,
+              code: itemDoc?.code,
+              error: syncError?.message || String(syncError),
+            });
+          }
+        }
       }
     }
 
@@ -5471,6 +5510,7 @@ exports.updateQC = async (req, res) => {
     if (orderRecord && !CLOSED_ORDER_STATUSES.includes(orderRecord.status)) {
       applyQcOrderStatus(qc, orderRecord);
       orderRecord.updated_by = buildAuditActor(req.user);
+      await applyQcOrderPoCbm(orderRecord);
       await orderRecord.save();
     }
 
@@ -7375,6 +7415,7 @@ exports.rejectAllQc = async (req, res) => {
     await qc.save();
     shouldCleanupUploadedImage = false;
     if (qc?.order) {
+      await applyQcOrderPoCbm(qc.order);
       await qc.order.save();
     }
 
@@ -8106,11 +8147,13 @@ exports.transferInspectionRecord = async (req, res) => {
 
     applyQcOrderStatus(sourceQc, sourceQc.order);
     sourceQc.order.updated_by = buildAuditActor(req.user);
+    await applyQcOrderPoCbm(sourceQc.order);
     await sourceQc.order.save();
 
     applyQcOrderStatus(targetQc, targetOrder);
     targetOrder.qc_record = targetQc._id;
     targetOrder.updated_by = buildAuditActor(req.user);
+    await applyQcOrderPoCbm(targetOrder);
     await targetOrder.save();
 
     await recalculateInspectorUsedLabels([
@@ -9855,6 +9898,7 @@ exports.editInspectionRecords = async (req, res) => {
     if (orderRecord && !CLOSED_ORDER_STATUSES.includes(orderRecord.status)) {
       applyQcOrderStatus(qc, orderRecord);
       orderRecord.updated_by = buildAuditActor(req.user);
+      await applyQcOrderPoCbm(orderRecord);
       await orderRecord.save();
     }
 
@@ -10065,6 +10109,7 @@ exports.deleteInspectionRecord = async (req, res) => {
       if (orderRecord) {
         orderRecord.qc_record = null;
         orderRecord.status = "Pending";
+        orderRecord.total_po_cbm = 0;
         orderRecord.updated_by = buildAuditActor(req.user);
         await orderRecord.save();
       }
@@ -10102,6 +10147,7 @@ exports.deleteInspectionRecord = async (req, res) => {
     if (orderRecord && !CLOSED_ORDER_STATUSES.includes(orderRecord.status)) {
       applyQcOrderStatus(qc, orderRecord);
       orderRecord.updated_by = buildAuditActor(req.user);
+      await applyQcOrderPoCbm(orderRecord);
       await orderRecord.save();
     }
 

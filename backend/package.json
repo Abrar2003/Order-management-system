@@ -11,6 +11,7 @@
     "wasabi:cors": "node scripts/setWasabiCors.js",
     "export:pis:pdf": "node scripts/exportPisPdfExample.js",
     "sync:pis": "node scripts/syncPisWorkbooks.js",
+    "backfill:po-cbm": "node scripts/backfillTotalPoCbm.js",
     "upload:pis:folder": "node scripts/uploadPisFolderViaApi.js",
     "test": "echo \"Error: no test specified\" && exit 1",
     "serve": "npm run dev"

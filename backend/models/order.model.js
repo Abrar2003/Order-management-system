@@ -96,6 +96,7 @@ const Order_Schema = new mongoose.Schema(
       enum: [...ACTIVE_ORDER_STATUSES, "Cancelled"],
       default: "Pending",
     },
+    total_po_cbm: { type: Number, default: 0, min: 0 },
     quantity: { type: Number, required: true },
     shipment: { type: [ShipmentEntrySchema], default: [] },
     gcal: {

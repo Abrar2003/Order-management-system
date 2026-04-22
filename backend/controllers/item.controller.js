@@ -4,6 +4,7 @@ const QC = require("../models/qc.model");
 const mongoose = require("mongoose");
 const path = require("path");
 const { syncAllItemsFromOrdersAndQc } = require("../services/itemSync");
+const { syncTotalPoCbmForItem } = require("../services/orderCbm.service");
 const {
   isConfigured: isWasabiConfigured,
   createStorageKey,
@@ -1935,6 +1936,7 @@ exports.updateItem = async (req, res) => {
     };
     const nextInspectedWeight = buildWeightRecord(item?.inspected_weight);
     let inspectedWeightTouched = false;
+    let inspectedBoxTouched = false;
 
     if (hasOwn(payload, "name")) {
       setPath("name", normalizeTextField(payload.name));
@@ -1991,6 +1993,7 @@ exports.updateItem = async (req, res) => {
     );
     if (patchedInspectedBoxLbh.provided) {
       setPath("inspected_box_LBH", patchedInspectedBoxLbh.value);
+      inspectedBoxTouched = true;
     }
 
     const patchedInspectedBoxTopLbh = getPatchedLbhRecord(
@@ -2003,6 +2006,7 @@ exports.updateItem = async (req, res) => {
     if (patchedInspectedBoxTopLbh.provided) {
       setPath("inspected_box_top_LBH", patchedInspectedBoxTopLbh.value);
       setPath("inspected_top_LBH", patchedInspectedBoxTopLbh.value);
+      inspectedBoxTouched = true;
     }
 
     const patchedInspectedBoxBottomLbh = getPatchedLbhRecord(
@@ -2015,6 +2019,7 @@ exports.updateItem = async (req, res) => {
     if (patchedInspectedBoxBottomLbh.provided) {
       setPath("inspected_box_bottom_LBH", patchedInspectedBoxBottomLbh.value);
       setPath("inspected_bottom_LBH", patchedInspectedBoxBottomLbh.value);
+      inspectedBoxTouched = true;
     }
 
     if (hasOwn(payload, "inspected_box_mode") && !hasOwn(payload, "inspected_box_sizes")) {
@@ -2022,6 +2027,7 @@ exports.updateItem = async (req, res) => {
         "inspected_box_mode",
         detectBoxPackagingMode(payload?.inspected_box_mode, item?.inspected_box_sizes),
       );
+      inspectedBoxTouched = true;
     }
 
     if (hasOwn(payload, "inspected_item_sizes")) {
@@ -2081,6 +2087,7 @@ exports.updateItem = async (req, res) => {
       nextInspectedWeight.bottom_gross = derivedBoxLegacy.bottomWeight;
       nextInspectedWeight.total_gross = derivedBoxLegacy.totalWeight;
       inspectedWeightTouched = true;
+      inspectedBoxTouched = true;
     }
 
     if (payload?.cbm && typeof payload.cbm === "object") {
@@ -2200,10 +2207,24 @@ exports.updateItem = async (req, res) => {
 
     await item.save();
 
+    let poCbmSync = null;
+    if (inspectedBoxTouched) {
+      try {
+        poCbmSync = await syncTotalPoCbmForItem(item.toObject());
+      } catch (syncError) {
+        console.error("Item inspected box PO CBM sync failed:", {
+          itemId: item._id,
+          code: item.code,
+          error: syncError?.message || String(syncError),
+        });
+      }
+    }
+
     return res.status(200).json({
       success: true,
       message: "Item updated successfully",
       data: item.toObject(),
+      po_cbm_sync: poCbmSync,
     });
   } catch (error) {
     console.error("Update Item Error:", error);

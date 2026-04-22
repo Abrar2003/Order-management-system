@@ -28,6 +28,10 @@ const {
   upsertItemFromOrder,
 } = require("../services/itemSync");
 const {
+  applyTotalPoCbmToOrder,
+  calculateTotalPoCbm,
+} = require("../services/orderCbm.service");
+const {
   extractTableRowsFromPdfBuffer,
 } = require("../services/pdfRectifyParser.service");
 const {
@@ -181,6 +185,24 @@ const resolveOrderRowCbmSummary = (itemDoc = null, orderQuantity = 0) => {
       source: null,
       per_item: null,
       total: null,
+    };
+  }
+
+  const inspectedBoxPoCbm = calculateTotalPoCbm({
+    orderQuantity,
+    inspectedBoxSizes: itemDoc?.inspected_box_sizes,
+    inspectedBoxMode: itemDoc?.inspected_box_mode,
+    inspectedBoxLbh: itemDoc?.inspected_box_LBH,
+    inspectedBoxTopLbh: itemDoc?.inspected_box_top_LBH || itemDoc?.inspected_top_LBH,
+    inspectedBoxBottomLbh:
+      itemDoc?.inspected_box_bottom_LBH || itemDoc?.inspected_bottom_LBH,
+  });
+  if (inspectedBoxPoCbm > 0) {
+    const quantity = Math.max(0, Number(orderQuantity || 0));
+    return {
+      source: "inspected_box",
+      per_item: quantity > 0 ? toRoundedCbmValue(inspectedBoxPoCbm / quantity) : 0,
+      total: inspectedBoxPoCbm,
     };
   }
 
@@ -2111,6 +2133,7 @@ const applyNewOrderRows = async ({
         previousOrder.archived_previous_status =
           normalizeRestorableArchivedStatus(previousOrder.status) || null;
         previousOrder.status = "Cancelled";
+        previousOrder.total_po_cbm = 0;
         previousOrder.archived_remark = archiveRemark;
         previousOrder.archived_at = new Date();
         previousOrder.archived_by = {
@@ -2149,6 +2172,7 @@ const applyNewOrderRows = async ({
         );
       }
 
+      await applyTotalPoCbmToOrder(newOrder);
       await newOrder.save();
 
       postCommitNewOrder = newOrder.toObject();
@@ -2330,6 +2354,7 @@ const applyRectifiedOrderRows = async ({
       }
     }
 
+    await applyTotalPoCbmToOrder(orderDoc);
     await orderDoc.save();
     updatedCount += 1;
 
@@ -2677,6 +2702,10 @@ const comparePoBucketRows = (leftRow, rightRow, sortBy = "order_date", sortOrder
       return parsedDate ? parsedDate.getTime() : 0;
     }
 
+    if (key === "total_cbm") {
+      return Number(row?.total_cbm || 0);
+    }
+
     return normalizeLooseString(row?.[key]);
   };
 
@@ -2744,7 +2773,7 @@ const buildPoBucketDataset = async ({
 
   const sourceOrders = await Order.find(matchStage)
     .select(
-      "_id order_id brand vendor ETD revised_ETD order_date quantity item shipment qc_record",
+      "_id order_id brand vendor ETD revised_ETD order_date quantity item shipment qc_record total_po_cbm",
     )
     .populate({
       path: "qc_record",
@@ -2766,6 +2795,48 @@ const buildPoBucketDataset = async ({
       .select("order quantities request_history last_inspected_date inspection_dates")
       .lean()
     : [];
+
+  const itemCodes = [
+    ...new Set(
+      sourceOrders
+        .map((orderEntry) => normalizeLooseString(orderEntry?.item?.item_code))
+        .filter(Boolean),
+    ),
+  ];
+
+  const itemDocs = itemCodes.length > 0
+    ? await Item.find({ code: { $in: itemCodes } })
+      .select(
+        [
+          "code",
+          "cbm",
+          "inspected_item_LBH",
+          "inspected_item_top_LBH",
+          "inspected_item_bottom_LBH",
+          "inspected_box_sizes",
+          "inspected_box_mode",
+          "inspected_box_LBH",
+          "inspected_box_top_LBH",
+          "inspected_box_bottom_LBH",
+          "inspected_top_LBH",
+          "inspected_bottom_LBH",
+          "pis_item_LBH",
+          "pis_item_top_LBH",
+          "pis_item_bottom_LBH",
+          "pis_box_LBH",
+          "pis_box_top_LBH",
+          "pis_box_bottom_LBH",
+        ].join(" "),
+      )
+      .lean()
+    : [];
+
+  const itemMap = new Map(
+    itemDocs.map((itemDoc) => [
+      normalizeLooseString(itemDoc?.code).toLowerCase(),
+      itemDoc,
+    ]),
+  );
 
   const qcByOrderId = fallbackQcRecords.reduce((accumulator, qcRecord) => {
     const orderKey = String(qcRecord?.order || "").trim();
@@ -2813,6 +2884,7 @@ const buildPoBucketDataset = async ({
         total_shipped_quantity: 0,
         total_inspected_unshipped_quantity: 0,
         total_pending_inspection_quantity: 0,
+        total_cbm: 0,
         item_codes: new Set(),
       });
     }
@@ -2826,6 +2898,14 @@ const buildPoBucketDataset = async ({
       lineProgress.inspected_unshipped_quantity;
     groupedEntry.total_pending_inspection_quantity +=
       lineProgress.pending_inspection_quantity;
+    const itemCodeValue = normalizeLooseString(orderEntry?.item?.item_code);
+    const itemDoc = itemMap.get(itemCodeValue.toLowerCase()) || null;
+    const storedPoCbm = toPositiveCbmNumber(orderEntry?.total_po_cbm);
+    const cbmSummary =
+      storedPoCbm > 0
+        ? { total: storedPoCbm }
+        : resolveOrderRowCbmSummary(itemDoc, lineProgress.order_quantity);
+    groupedEntry.total_cbm += Number(cbmSummary?.total || 0);
     groupedEntry.order_date = resolveEarlierDate(
       groupedEntry.order_date,
       orderEntry?.order_date,
@@ -2848,7 +2928,6 @@ const buildPoBucketDataset = async ({
       resolveLatestShipmentDate(orderEntry?.shipment),
     );
 
-    const itemCodeValue = normalizeLooseString(orderEntry?.item?.item_code);
     if (itemCodeValue) {
       groupedEntry.item_codes.add(itemCodeValue);
     }
@@ -2860,6 +2939,7 @@ const buildPoBucketDataset = async ({
     const statusCounts = createPoStatusCounts();
     groupedEntry.statuses.forEach((statusValue) =>
       incrementPoStatusCounts(statusCounts, statusValue));
+    const resolvedTotalCbm = toRoundedCbmValue(groupedEntry.total_cbm);
     return {
       order_id: groupedEntry.order_id,
       items: groupedEntry.items,
@@ -2881,6 +2961,8 @@ const buildPoBucketDataset = async ({
         groupedEntry.total_inspected_unshipped_quantity,
       total_pending_inspection_quantity:
         groupedEntry.total_pending_inspection_quantity,
+      total_cbm: resolvedTotalCbm,
+      total_po_cbm: resolvedTotalCbm,
       item_codes: [...groupedEntry.item_codes].sort((left, right) =>
         left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" })),
     };
@@ -3016,8 +3098,12 @@ const mapOrdersToShipmentRows = (orders = []) =>
     const normalizedOrderQuantity = Number.isFinite(parsedOrderQuantity)
       ? parsedOrderQuantity
       : 0;
+    const storedPoCbm = toPositiveCbmNumber(order?.total_po_cbm);
     const cbmSummary = resolveOrderRowCbmSummary(order?.itemDoc, 1);
-    const perItemCbm = Number(cbmSummary?.per_item || 0);
+    const perItemCbm =
+      storedPoCbm > 0 && normalizedOrderQuantity > 0
+        ? toRoundedCbmValue(storedPoCbm / normalizedOrderQuantity)
+        : Number(cbmSummary?.per_item || 0);
 
     const baseRow = {
       _id: order?._id || null,
@@ -3160,7 +3246,7 @@ const getShipmentDataset = async ({
 
   const orders = await Order.find(buildShipmentMatch(filterInput))
     .select(
-      "order_id item brand vendor ETD status quantity shipment order_date updatedAt qc_record",
+      "order_id item brand vendor ETD status quantity shipment order_date updatedAt qc_record total_po_cbm",
     )
     .populate({
       path: "qc_record",
@@ -3186,6 +3272,8 @@ const getShipmentDataset = async ({
           "inspected_item_LBH",
           "inspected_item_top_LBH",
           "inspected_item_bottom_LBH",
+          "inspected_box_sizes",
+          "inspected_box_mode",
           "inspected_box_LBH",
           "inspected_box_top_LBH",
           "inspected_box_bottom_LBH",
@@ -5268,7 +5356,7 @@ exports.getPoStatusReport = async (req, res) => {
       Order.distinct("brand", activeMatch),
       Order.distinct("vendor", activeMatch),
       Order.find(reportMatch)
-        .select("_id brand vendor order_id status quantity order_date ETD revised_ETD item qc_record shipment")
+        .select("_id brand vendor order_id status quantity order_date ETD revised_ETD item qc_record shipment total_po_cbm")
         .populate({
           path: "qc_record",
           select: "quantities request_history",
@@ -5515,6 +5603,8 @@ exports.getOrderById = async (req, res) => {
             "inspected_item_LBH",
             "inspected_item_top_LBH",
             "inspected_item_bottom_LBH",
+            "inspected_box_sizes",
+            "inspected_box_mode",
             "inspected_box_LBH",
             "inspected_box_top_LBH",
             "inspected_box_bottom_LBH",
@@ -5540,10 +5630,22 @@ exports.getOrderById = async (req, res) => {
     const enrichedOrders = orders.map((orderRow) => {
       const itemCodeKey = normalizeLooseString(orderRow?.item?.item_code).toLowerCase();
       const itemDoc = itemMap.get(itemCodeKey) || null;
+      const storedPoCbm = toPositiveCbmNumber(orderRow?.total_po_cbm);
+      const fallbackCbmSummary = resolveOrderRowCbmSummary(itemDoc, orderRow?.quantity);
       return {
         ...orderRow,
         status: deriveOrderStatus({ orderEntry: orderRow }),
-        cbm_summary: resolveOrderRowCbmSummary(itemDoc, orderRow?.quantity),
+        cbm_summary:
+          storedPoCbm > 0
+            ? {
+                source: "total_po_cbm",
+                per_item:
+                  Number(orderRow?.quantity || 0) > 0
+                    ? toRoundedCbmValue(storedPoCbm / Number(orderRow.quantity || 0))
+                    : 0,
+                total: storedPoCbm,
+              }
+            : fallbackCbmSummary,
       };
     });
 
@@ -5914,6 +6016,9 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
       etd: "ETD",
       revisedetd: "revised_ETD",
       revised_etd: "revised_ETD",
+      totalcbm: "total_cbm",
+      total_cbm: "total_cbm",
+      cbm: "total_cbm",
       date: "order_date",
     };
     const sortBy = sortAliases[normalizedSortKey] || "order_date";
@@ -6042,6 +6147,9 @@ exports.getOrdersByFiltersDb = async (req, res) => {
       orderdate: "order_date",
       order_date: "order_date",
       etd: "ETD",
+      totalcbm: "total_cbm",
+      total_cbm: "total_cbm",
+      cbm: "total_cbm",
       date: "order_date",
     };
     const sortBy = sortAliases[normalizedSortKey] || "order_date";
@@ -7545,7 +7653,7 @@ exports.getPackedGoods = async (req, res) => {
 
     const orders = await Order.find(ACTIVE_ORDER_MATCH)
       .select(
-        "order_id item brand vendor quantity shipment qc_record order_date updatedAt",
+        "order_id item brand vendor quantity shipment qc_record order_date updatedAt total_po_cbm",
       )
       .populate({
         path: "qc_record",
@@ -7571,6 +7679,8 @@ exports.getPackedGoods = async (req, res) => {
             "inspected_item_LBH",
             "inspected_item_top_LBH",
             "inspected_item_bottom_LBH",
+            "inspected_box_sizes",
+            "inspected_box_mode",
             "inspected_box_LBH",
             "inspected_box_top_LBH",
             "inspected_box_bottom_LBH",
@@ -7633,9 +7743,14 @@ exports.getPackedGoods = async (req, res) => {
 
         const itemCode = normalizeLooseString(orderEntry?.item?.item_code);
         const itemDoc = itemMap.get(itemCode.toLowerCase()) || null;
+        const storedPoCbm = toPositiveCbmNumber(orderEntry?.total_po_cbm);
+        const orderQuantity = Math.max(0, Number(orderEntry?.quantity || 0));
         const cbmSummary = resolveOrderRowCbmSummary(itemDoc, packedQuantity);
-        const perItemCbm = Number(cbmSummary?.per_item || 0);
-        const totalCbm = Number(cbmSummary?.total || 0);
+        const perItemCbm =
+          storedPoCbm > 0 && orderQuantity > 0
+            ? toRoundedCbmValue(storedPoCbm / orderQuantity)
+            : Number(cbmSummary?.per_item || 0);
+        const totalCbm = toRoundedCbmValue(perItemCbm * packedQuantity);
         const normalizedOrderId = normalizeOrderKey(orderEntry?.order_id) || "N/A";
         const poKey = [
           normalizedOrderId,
@@ -7649,7 +7764,7 @@ exports.getPackedGoods = async (req, res) => {
           item_code: itemCode || "N/A",
           brand: brand || "N/A",
           vendor: vendor || "N/A",
-          order_quantity: Math.max(0, Number(orderEntry?.quantity || 0)),
+          order_quantity: orderQuantity,
           packed_quantity: packedQuantity,
           pending_quantity: Math.max(
             0,
@@ -7658,7 +7773,7 @@ exports.getPackedGoods = async (req, res) => {
           po_has_no_pending_quantity: Number(poPendingQuantityMap.get(poKey) || 0) <= 0,
           total_cbm: Number.isFinite(totalCbm) ? totalCbm : 0,
           per_item_cbm: Number.isFinite(perItemCbm) ? perItemCbm : 0,
-          cbm_source: cbmSummary?.source || null,
+          cbm_source: storedPoCbm > 0 ? "total_po_cbm" : cbmSummary?.source || null,
         };
       })
       .filter(Boolean);
@@ -8284,6 +8399,7 @@ exports.editOrder = async (req, res) => {
       order.archived_previous_status =
         normalizeRestorableArchivedStatus(order.status) || null;
       order.status = "Cancelled";
+      order.total_po_cbm = 0;
       order.archived = true;
       order.archived_remark = archiveRemarkInput;
       order.archived_at = new Date();
@@ -8434,6 +8550,7 @@ exports.editOrder = async (req, res) => {
       order.qc_record = qcRecord._id;
     }
 
+    await applyTotalPoCbmToOrder(order);
     await order.save();
     if (qcRecord) {
       await qcRecord.save();
@@ -9319,6 +9436,7 @@ exports.finalizeOrder = async (req, res) => {
     });
     order.updated_by = buildAuditActor(req.user);
 
+    await applyTotalPoCbmToOrder(order);
     await order.save();
 
     await createOrderEditLog({
