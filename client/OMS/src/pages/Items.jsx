@@ -81,17 +81,6 @@ const normalizeFilterParam = (value, fallback = "all") => {
 
 const normalizeSearchParam = (value) => String(value || "").trim();
 
-const useDebouncedValue = (value, delay = 300) => {
-  const [debounced, setDebounced] = useState(value);
-
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(t);
-  }, [value, delay]);
-
-  return debounced;
-};
-
 const normalizeMeasurementEntries = (entries = [], weightKey = "") =>
   (Array.isArray(entries) ? entries : [])
     .map((entry) => {
@@ -203,10 +192,19 @@ const Items = () => {
   const [searchInput, setSearchInput] = useState(() =>
     normalizeSearchParam(searchParams.get("search")),
   );
+  const [draftSearchInput, setDraftSearchInput] = useState(() =>
+    normalizeSearchParam(searchParams.get("search")),
+  );
   const [brandFilter, setBrandFilter] = useState(() =>
     normalizeFilterParam(searchParams.get("brand"), "all"),
   );
+  const [draftBrandFilter, setDraftBrandFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("brand"), "all"),
+  );
   const [vendorFilter, setVendorFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("vendor"), "all"),
+  );
+  const [draftVendorFilter, setDraftVendorFilter] = useState(() =>
     normalizeFilterParam(searchParams.get("vendor"), "all"),
   );
   const [page, setPage] = useState(() =>
@@ -228,8 +226,6 @@ const Items = () => {
   const [sortBy, setSortBy] = useState("code");
   const [sortOrder, setSortOrder] = useState("asc");
 
-  const debouncedSearch = useDebouncedValue(searchInput, 300);
-
   const fetchItems = useCallback(async () => {
     try {
       setLoading(true);
@@ -237,7 +233,7 @@ const Items = () => {
 
       const res = await api.get("/items", {
         params: {
-          search: debouncedSearch,
+          search: searchInput,
           brand: brandFilter,
           vendor: vendorFilter,
           page,
@@ -272,7 +268,7 @@ const Items = () => {
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, debouncedSearch, limit, page, vendorFilter]);
+  }, [brandFilter, limit, page, searchInput, vendorFilter]);
 
   useEffect(() => {
     fetchItems();
@@ -289,8 +285,11 @@ const Items = () => {
     const nextLimit = parseLimit(searchParams.get("limit"));
 
     setSearchInput((prev) => (prev === nextSearchInput ? prev : nextSearchInput));
+    setDraftSearchInput((prev) => (prev === nextSearchInput ? prev : nextSearchInput));
     setBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
+    setDraftBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
     setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
+    setDraftVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
     setPage((prev) => (prev === nextPage ? prev : nextPage));
     setLimit((prev) => (prev === nextLimit ? prev : nextLimit));
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
@@ -351,6 +350,26 @@ const Items = () => {
       setSyncing(false);
     }
   };
+
+  const handleApplyFilters = useCallback((event) => {
+    event?.preventDefault();
+    setPage(1);
+    setSearchInput(normalizeSearchParam(draftSearchInput));
+    setBrandFilter(normalizeFilterParam(draftBrandFilter, "all"));
+    setVendorFilter(normalizeFilterParam(draftVendorFilter, "all"));
+    setSuccess("");
+  }, [draftBrandFilter, draftSearchInput, draftVendorFilter]);
+
+  const handleClearFilters = useCallback(() => {
+    setPage(1);
+    setDraftSearchInput("");
+    setDraftBrandFilter("all");
+    setDraftVendorFilter("all");
+    setSearchInput("");
+    setBrandFilter("all");
+    setVendorFilter("all");
+    setSuccess("");
+  }, []);
 
   const itemCodeOptions = useMemo(
     () => (Array.isArray(filters.item_codes) ? filters.item_codes : []),
@@ -597,19 +616,16 @@ const Items = () => {
 
         <div className="card om-card mb-3">
           <div className="card-body">
-            <div className="row g-2 align-items-end">
+            <form className="row g-2 align-items-end" onSubmit={handleApplyFilters}>
               <div className="col-md-4">
                 <label className="form-label">Search (Code / Name / Description)</label>
                 <input
                   type="text"
                   className="form-control"
-                  value={searchInput}
+                  value={draftSearchInput}
                   list="item-code-options"
                   placeholder="Search items"
-                  onChange={(e) => {
-                    setPage(1);
-                    setSearchInput(e.target.value);
-                  }}
+                  onChange={(e) => setDraftSearchInput(e.target.value)}
                 />
                 <datalist id="item-code-options">
                   {itemCodeOptions.map((code) => (
@@ -621,11 +637,8 @@ const Items = () => {
                 <label className="form-label">Brand</label>
                 <select
                   className="form-select"
-                  value={brandFilter}
-                  onChange={(e) => {
-                    setPage(1);
-                    setBrandFilter(e.target.value);
-                  }}
+                  value={draftBrandFilter}
+                  onChange={(e) => setDraftBrandFilter(e.target.value)}
                 >
                   <option value="all">All Brands</option>
                   {filters.brands.map((brand) => (
@@ -639,11 +652,8 @@ const Items = () => {
                 <label className="form-label">Vendor</label>
                 <select
                   className="form-select"
-                  value={vendorFilter}
-                  onChange={(e) => {
-                    setPage(1);
-                    setVendorFilter(e.target.value);
-                  }}
+                  value={draftVendorFilter}
+                  onChange={(e) => setDraftVendorFilter(e.target.value)}
                 >
                   <option value="all">All Vendors</option>
                   {filters.vendors.map((vendor) => (
@@ -653,22 +663,20 @@ const Items = () => {
                   ))}
                 </select>
               </div>
-              <div className="col-md-2 d-grid">
+              <div className="col-md-2 d-grid gap-2">
+                <button type="submit" className="btn btn-primary" disabled={loading}>
+                  Apply
+                </button>
                 <button
                   type="button"
                   className="btn btn-outline-secondary"
-                  onClick={() => {
-                    setPage(1);
-                    setSearchInput("");
-                    setBrandFilter("all");
-                    setVendorFilter("all");
-                    setSuccess("");
-                  }}
+                  onClick={handleClearFilters}
+                  disabled={loading}
                 >
                   Clear
                 </button>
               </div>
-            </div>
+            </form>
           </div>
         </div>
 

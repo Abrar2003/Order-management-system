@@ -12,17 +12,6 @@ import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
 
-const useDebouncedValue = (value, delay = 300) => {
-  const [debounced, setDebounced] = useState(value);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(timer);
-  }, [value, delay]);
-
-  return debounced;
-};
-
 const normalizeSearchParam = (value) => String(value || "").trim();
 
 const normalizeFilterParam = (value, fallback = "all") => {
@@ -54,10 +43,19 @@ const Containers = () => {
   const [containerSearch, setContainerSearch] = useState(() =>
     normalizeSearchParam(searchParams.get("container")),
   );
+  const [draftContainerSearch, setDraftContainerSearch] = useState(() =>
+    normalizeSearchParam(searchParams.get("container")),
+  );
   const [vendorFilter, setVendorFilter] = useState(() =>
     normalizeFilterParam(searchParams.get("vendor"), "all"),
   );
+  const [draftVendorFilter, setDraftVendorFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("vendor"), "all"),
+  );
   const [brandFilter, setBrandFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("brand"), "all"),
+  );
+  const [draftBrandFilter, setDraftBrandFilter] = useState(() =>
     normalizeFilterParam(searchParams.get("brand"), "all"),
   );
   const [summary, setSummary] = useState({ total: 0 });
@@ -70,8 +68,6 @@ const Containers = () => {
   const [sortBy, setSortBy] = useState("container");
   const [sortOrder, setSortOrder] = useState("asc");
 
-  const debouncedContainerSearch = useDebouncedValue(containerSearch, 300);
-
   const fetchContainers = useCallback(async () => {
     try {
       setLoading(true);
@@ -79,7 +75,7 @@ const Containers = () => {
 
       const response = await api.get("/orders/containers", {
         params: {
-          container: debouncedContainerSearch,
+          container: containerSearch,
           vendor: vendorFilter,
           brand: brandFilter,
         },
@@ -110,7 +106,7 @@ const Containers = () => {
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, debouncedContainerSearch, vendorFilter]);
+  }, [brandFilter, containerSearch, vendorFilter]);
 
   useEffect(() => {
     fetchContainers();
@@ -125,10 +121,19 @@ const Containers = () => {
     setContainerSearch((prev) =>
       prev === nextContainerSearch ? prev : nextContainerSearch,
     );
+    setDraftContainerSearch((prev) =>
+      prev === nextContainerSearch ? prev : nextContainerSearch,
+    );
     setVendorFilter((prev) =>
       prev === nextVendorFilter ? prev : nextVendorFilter,
     );
+    setDraftVendorFilter((prev) =>
+      prev === nextVendorFilter ? prev : nextVendorFilter,
+    );
     setBrandFilter((prev) =>
+      prev === nextBrandFilter ? prev : nextBrandFilter,
+    );
+    setDraftBrandFilter((prev) =>
       prev === nextBrandFilter ? prev : nextBrandFilter,
     );
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
@@ -184,6 +189,22 @@ const Containers = () => {
     [sortBy, sortOrder],
   );
 
+  const handleApplyFilters = (event) => {
+    event?.preventDefault();
+    setContainerSearch(normalizeSearchParam(draftContainerSearch));
+    setVendorFilter(normalizeFilterParam(draftVendorFilter, "all"));
+    setBrandFilter(normalizeFilterParam(draftBrandFilter, "all"));
+  };
+
+  const handleClearFilters = () => {
+    setDraftContainerSearch("");
+    setDraftVendorFilter("all");
+    setDraftBrandFilter("all");
+    setContainerSearch("");
+    setVendorFilter("all");
+    setBrandFilter("all");
+  };
+
   const sortedRows = useMemo(
     () =>
       sortClientRows(rows, {
@@ -232,15 +253,15 @@ const Containers = () => {
 
         <div className="card om-card mb-3">
           <div className="card-body">
-            <div className="row g-2 align-items-end">
+            <form className="row g-2 align-items-end" onSubmit={handleApplyFilters}>
               <div className="col-md-4">
                 <label className="form-label">Search by Container</label>
                 <input
                   type="text"
                   className="form-control"
-                  value={containerSearch}
+                  value={draftContainerSearch}
                   list="containers-page-container-options"
-                  onChange={(event) => setContainerSearch(event.target.value)}
+                  onChange={(event) => setDraftContainerSearch(event.target.value)}
                   placeholder="Enter container number"
                 />
                 <datalist id="containers-page-container-options">
@@ -253,8 +274,8 @@ const Containers = () => {
                 <label className="form-label">Filter by Vendor</label>
                 <select
                   className="form-select"
-                  value={vendorFilter}
-                  onChange={(event) => setVendorFilter(event.target.value)}
+                  value={draftVendorFilter}
+                  onChange={(event) => setDraftVendorFilter(event.target.value)}
                 >
                   <option value="all">All Vendors</option>
                   {filterOptions.vendors.map((vendor) => (
@@ -268,8 +289,8 @@ const Containers = () => {
                 <label className="form-label">Filter by Brand</label>
                 <select
                   className="form-select"
-                  value={brandFilter}
-                  onChange={(event) => setBrandFilter(event.target.value)}
+                  value={draftBrandFilter}
+                  onChange={(event) => setDraftBrandFilter(event.target.value)}
                 >
                   <option value="all">All Brands</option>
                   {filterOptions.brands.map((brand) => (
@@ -279,20 +300,19 @@ const Containers = () => {
                   ))}
                 </select>
               </div>
-              <div className="col-md-2 d-grid">
+              <div className="col-md-2 d-flex gap-2">
+                <button type="submit" className="btn btn-primary flex-fill">
+                  Apply
+                </button>
                 <button
                   type="button"
-                  className="btn btn-outline-secondary"
-                  onClick={() => {
-                    setContainerSearch("");
-                    setVendorFilter("all");
-                    setBrandFilter("all");
-                  }}
+                  className="btn btn-outline-secondary flex-fill"
+                  onClick={handleClearFilters}
                 >
                   Clear
                 </button>
               </div>
-            </div>
+            </form>
           </div>
         </div>
 

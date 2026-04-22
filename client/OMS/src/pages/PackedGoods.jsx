@@ -9,7 +9,7 @@ import {
 } from "../utils/clientSort";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
-import { formatCbm } from "../utils/cbm";
+import { formatCbm, resolvePreferredCbm } from "../utils/cbm";
 import "../App.css";
 
 const DEFAULT_SORT_BY = "po";
@@ -556,7 +556,15 @@ const PackedGoods = () => {
                           <td>{row?.item_code || "N/A"}</td>
                           <td>{Number(row?.order_quantity || 0)}</td>
                           <td>{Number(row?.packed_quantity || 0)}</td>
-                          <td>{formatCbm(row?.total_cbm)}</td>
+                          <td>
+                            {formatCbm(
+                              resolvePreferredCbm(
+                                row?.total_po_cbm,
+                                row?.top_po_cbm,
+                                row?.total_cbm,
+                              ),
+                            )}
+                          </td>
                         </tr>
                       ))
                     )}

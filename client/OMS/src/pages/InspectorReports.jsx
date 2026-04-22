@@ -149,10 +149,17 @@ const InspectorReports = () => {
   );
 
   const [timeline, setTimeline] = useState(() => initialTimeline);
+  const [draftTimeline, setDraftTimeline] = useState(() => initialTimeline);
   const [customDays, setCustomDays] = useState(() => initialCustomDays);
+  const [draftCustomDays, setDraftCustomDays] = useState(() => initialCustomDays);
   const [fromDate, setFromDate] = useState(() => initialDateRange.from_date);
+  const [draftFromDate, setDraftFromDate] = useState(() => initialDateRange.from_date);
   const [toDate, setToDate] = useState(() => initialDateRange.to_date);
+  const [draftToDate, setDraftToDate] = useState(() => initialDateRange.to_date);
   const [inspectorFilter, setInspectorFilter] = useState(() =>
+    normalizeInspectorFilter(searchParams.get("inspector")),
+  );
+  const [draftInspectorFilter, setDraftInspectorFilter] = useState(() =>
     normalizeInspectorFilter(searchParams.get("inspector")),
   );
   const [chartStep, setChartStep] = useState(() =>
@@ -229,10 +236,17 @@ const InspectorReports = () => {
     const nextChartStep = normalizeChartStep(searchParams.get("chart_step"));
 
     setTimeline((prev) => (prev === nextTimeline ? prev : nextTimeline));
+    setDraftTimeline((prev) => (prev === nextTimeline ? prev : nextTimeline));
     setCustomDays((prev) => (prev === nextCustomDays ? prev : nextCustomDays));
+    setDraftCustomDays((prev) => (prev === nextCustomDays ? prev : nextCustomDays));
     setFromDate((prev) => (prev === nextDateRange.from_date ? prev : nextDateRange.from_date));
+    setDraftFromDate((prev) => (prev === nextDateRange.from_date ? prev : nextDateRange.from_date));
     setToDate((prev) => (prev === nextDateRange.to_date ? prev : nextDateRange.to_date));
+    setDraftToDate((prev) => (prev === nextDateRange.to_date ? prev : nextDateRange.to_date));
     setInspectorFilter((prev) => (
+      prev === nextInspectorFilter ? prev : nextInspectorFilter
+    ));
+    setDraftInspectorFilter((prev) => (
       prev === nextInspectorFilter ? prev : nextInspectorFilter
     ));
     setChartStep((prev) => (prev === nextChartStep ? prev : nextChartStep));
@@ -327,32 +341,64 @@ const InspectorReports = () => {
 
   const handleTimelineChange = useCallback((event) => {
     const nextTimeline = normalizeTimeline(event.target.value);
-    const nextRange = getDateRangeFromTimeline(nextTimeline, customDays);
-    setTimeline(nextTimeline);
-    setFromDate(nextRange.from_date);
-    setToDate(nextRange.to_date);
-  }, [customDays]);
+    const nextRange = getDateRangeFromTimeline(nextTimeline, draftCustomDays);
+    setDraftTimeline(nextTimeline);
+    setDraftFromDate(nextRange.from_date);
+    setDraftToDate(nextRange.to_date);
+  }, [draftCustomDays]);
 
   const handleCustomDaysChange = useCallback((event) => {
     const nextCustomDays = parseCustomDays(event.target.value);
-    setCustomDays(nextCustomDays);
-    if (timeline === "custom") {
+    setDraftCustomDays(nextCustomDays);
+    if (draftTimeline === "custom") {
       const nextRange = getDateRangeFromTimeline("custom", nextCustomDays);
-      setFromDate(nextRange.from_date);
-      setToDate(nextRange.to_date);
+      setDraftFromDate(nextRange.from_date);
+      setDraftToDate(nextRange.to_date);
     }
-  }, [timeline]);
+  }, [draftTimeline]);
 
   const handleFromDateChange = useCallback((event) => {
-    setFromDate((prev) => normalizeDateFilter(event.target.value, prev));
+    setDraftFromDate((prev) => normalizeDateFilter(event.target.value, prev));
   }, []);
 
   const handleToDateChange = useCallback((event) => {
-    setToDate((prev) => normalizeDateFilter(event.target.value, prev));
+    setDraftToDate((prev) => normalizeDateFilter(event.target.value, prev));
   }, []);
 
   const handleInspectorChange = useCallback((event) => {
-    setInspectorFilter(normalizeInspectorFilter(event.target.value));
+    setDraftInspectorFilter(normalizeInspectorFilter(event.target.value));
+  }, []);
+
+  const handleApplyFilters = useCallback((event) => {
+    event?.preventDefault();
+    setTimeline(normalizeTimeline(draftTimeline));
+    setCustomDays(parseCustomDays(draftCustomDays));
+    setFromDate(normalizeDateFilter(draftFromDate, fromDate));
+    setToDate(normalizeDateFilter(draftToDate, toDate));
+    setInspectorFilter(normalizeInspectorFilter(draftInspectorFilter));
+  }, [
+    draftCustomDays,
+    draftFromDate,
+    draftInspectorFilter,
+    draftTimeline,
+    draftToDate,
+    fromDate,
+    toDate,
+  ]);
+
+  const handleClearFilters = useCallback(() => {
+    const defaultCustomDays = DEFAULT_CUSTOM_DAYS;
+    const defaultRange = getDateRangeFromTimeline(DEFAULT_TIMELINE, defaultCustomDays);
+    setDraftTimeline(DEFAULT_TIMELINE);
+    setDraftCustomDays(defaultCustomDays);
+    setDraftFromDate(defaultRange.from_date);
+    setDraftToDate(defaultRange.to_date);
+    setDraftInspectorFilter(DEFAULT_INSPECTOR_FILTER);
+    setTimeline(DEFAULT_TIMELINE);
+    setCustomDays(defaultCustomDays);
+    setFromDate(defaultRange.from_date);
+    setToDate(defaultRange.to_date);
+    setInspectorFilter(DEFAULT_INSPECTOR_FILTER);
   }, []);
 
   const handleChartStepChange = useCallback((value) => {
@@ -393,12 +439,12 @@ const InspectorReports = () => {
         </div>
 
         <div className="card om-card mb-3">
-          <div className="card-body d-flex flex-wrap gap-2 align-items-end">
+          <form className="card-body d-flex flex-wrap gap-2 align-items-end" onSubmit={handleApplyFilters}>
             <div>
               <label className="form-label mb-1">Timeline</label>
               <select
                 className="form-select"
-                value={timeline}
+                value={draftTimeline}
                 onChange={handleTimelineChange}
               >
                 <option value="1m">Last 1 month</option>
@@ -408,7 +454,7 @@ const InspectorReports = () => {
               </select>
             </div>
 
-            {timeline === "custom" && (
+            {draftTimeline === "custom" && (
               <div>
                 <label className="form-label mb-1">Custom Days</label>
                 <input
@@ -416,7 +462,7 @@ const InspectorReports = () => {
                   min={1}
                   max={3650}
                   className="form-control"
-                  value={customDays}
+                  value={draftCustomDays}
                   onChange={handleCustomDaysChange}
                 />
               </div>
@@ -427,8 +473,8 @@ const InspectorReports = () => {
               <input
                 type="date"
                 className="form-control"
-                value={fromDate}
-                max={toDate}
+                value={draftFromDate}
+                max={draftToDate}
                 onChange={handleFromDateChange}
               />
             </div>
@@ -438,8 +484,8 @@ const InspectorReports = () => {
               <input
                 type="date"
                 className="form-control"
-                value={toDate}
-                min={fromDate}
+                value={draftToDate}
+                min={draftFromDate}
                 onChange={handleToDateChange}
               />
             </div>
@@ -448,7 +494,7 @@ const InspectorReports = () => {
               <label className="form-label mb-1">Inspector</label>
               <select
                 className="form-select"
-                value={inspectorFilter}
+                value={draftInspectorFilter}
                 onChange={handleInspectorChange}
               >
                 <option value={DEFAULT_INSPECTOR_FILTER}>All Inspectors</option>
@@ -493,14 +539,21 @@ const InspectorReports = () => {
             </div>
 
             <button
-              type="button"
+              type="submit"
               className="btn btn-primary btn-sm"
-              onClick={fetchReports}
               disabled={loading}
             >
-              {loading ? "Loading..." : "Refresh"}
+              {loading ? "Loading..." : "Apply"}
             </button>
-          </div>
+            <button
+              type="button"
+              className="btn btn-outline-secondary btn-sm"
+              onClick={handleClearFilters}
+              disabled={loading}
+            >
+              Clear
+            </button>
+          </form>
         </div>
 
         <div className="card om-card mb-3">

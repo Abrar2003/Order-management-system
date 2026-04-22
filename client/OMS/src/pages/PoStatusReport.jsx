@@ -118,10 +118,19 @@ const PoStatusReport = () => {
   const [brandFilter, setBrandFilter] = useState(() =>
     normalizeEntityFilter(searchParams.get("brand")),
   );
+  const [draftBrandFilter, setDraftBrandFilter] = useState(() =>
+    normalizeEntityFilter(searchParams.get("brand")),
+  );
   const [vendorFilter, setVendorFilter] = useState(() =>
     normalizeEntityFilter(searchParams.get("vendor")),
   );
+  const [draftVendorFilter, setDraftVendorFilter] = useState(() =>
+    normalizeEntityFilter(searchParams.get("vendor")),
+  );
   const [statusFilter, setStatusFilter] = useState(() =>
+    normalizeStatusFilter(searchParams.get("status")),
+  );
+  const [draftStatusFilter, setDraftStatusFilter] = useState(() =>
     normalizeStatusFilter(searchParams.get("status")),
   );
   const [loading, setLoading] = useState(true);
@@ -182,8 +191,11 @@ const PoStatusReport = () => {
     const nextStatusFilter = normalizeStatusFilter(searchParams.get("status"));
 
     setBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
+    setDraftBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
     setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
+    setDraftVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
     setStatusFilter((prev) => (prev === nextStatusFilter ? prev : nextStatusFilter));
+    setDraftStatusFilter((prev) => (prev === nextStatusFilter ? prev : nextStatusFilter));
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
   }, [searchParams, syncedQuery]);
 
@@ -277,6 +289,22 @@ const PoStatusReport = () => {
     },
     [sortBy, sortOrder],
   );
+
+  const handleApplyFilters = useCallback((event) => {
+    event?.preventDefault();
+    setBrandFilter(normalizeEntityFilter(draftBrandFilter));
+    setVendorFilter(normalizeEntityFilter(draftVendorFilter));
+    setStatusFilter(normalizeStatusFilter(draftStatusFilter));
+  }, [draftBrandFilter, draftStatusFilter, draftVendorFilter]);
+
+  const handleClearFilters = useCallback(() => {
+    setDraftBrandFilter(DEFAULT_ENTITY_FILTER);
+    setDraftVendorFilter(DEFAULT_ENTITY_FILTER);
+    setDraftStatusFilter(DEFAULT_STATUS_FILTER);
+    setBrandFilter(DEFAULT_ENTITY_FILTER);
+    setVendorFilter(DEFAULT_ENTITY_FILTER);
+    setStatusFilter(DEFAULT_STATUS_FILTER);
+  }, []);
 
   const handleExportPdf = useCallback(async () => {
     if (!reportRef.current || loading || exportingPdf || report.vendors.length === 0) {
@@ -382,14 +410,14 @@ const PoStatusReport = () => {
         </div>
 
         <div className="card om-card mb-3">
-          <div className="card-body d-flex flex-wrap gap-2 align-items-end">
+          <form className="card-body d-flex flex-wrap gap-2 align-items-end" onSubmit={handleApplyFilters}>
             <div>
               <label className="form-label mb-1">Vendor</label>
               <select
                 className="form-select"
-                value={vendorFilter}
+                value={draftVendorFilter}
                 onChange={(event) =>
-                  setVendorFilter(normalizeEntityFilter(event.target.value))
+                  setDraftVendorFilter(normalizeEntityFilter(event.target.value))
                 }
               >
                 <option value={DEFAULT_ENTITY_FILTER}>All Vendors</option>
@@ -405,9 +433,9 @@ const PoStatusReport = () => {
               <label className="form-label mb-1">Brand</label>
               <select
                 className="form-select"
-                value={brandFilter}
+                value={draftBrandFilter}
                 onChange={(event) =>
-                  setBrandFilter(normalizeEntityFilter(event.target.value))
+                  setDraftBrandFilter(normalizeEntityFilter(event.target.value))
                 }
               >
                 <option value={DEFAULT_ENTITY_FILTER}>All Brands</option>
@@ -423,9 +451,9 @@ const PoStatusReport = () => {
               <label className="form-label mb-1">Status</label>
               <select
                 className="form-select"
-                value={statusFilter}
+                value={draftStatusFilter}
                 onChange={(event) =>
-                  setStatusFilter(normalizeStatusFilter(event.target.value))
+                  setDraftStatusFilter(normalizeStatusFilter(event.target.value))
                 }
               >
                 {statusOptions.map((status) => (
@@ -437,14 +465,21 @@ const PoStatusReport = () => {
             </div>
 
             <button
-              type="button"
+              type="submit"
               className="btn btn-primary btn-sm"
-              onClick={fetchReport}
               disabled={loading}
             >
-              {loading ? "Loading..." : "Refresh"}
+              {loading ? "Loading..." : "Apply"}
             </button>
-          </div>
+            <button
+              type="button"
+              className="btn btn-outline-secondary btn-sm"
+              onClick={handleClearFilters}
+              disabled={loading}
+            >
+              Clear
+            </button>
+          </form>
         </div>
 
         <div ref={reportRef}>

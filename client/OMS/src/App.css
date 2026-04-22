@@ -707,6 +707,17 @@ small,
   white-space: nowrap;
 }
 
+.pending-po-report-table {
+  table-layout: auto !important;
+  min-width: 760px;
+}
+
+.pending-po-report-table th,
+.pending-po-report-table td {
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
 .vendor-wise-qa-tabs .nav-link {
   font-weight: 600;
 }
@@ -1553,7 +1564,7 @@ small,
 .shipments-table {
   table-layout: auto;
   width: 100%;
-  min-width: 1540px;
+  min-width: 1600px;
   font-size: 0.84rem;
 }
 

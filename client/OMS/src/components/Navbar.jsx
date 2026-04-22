@@ -114,6 +114,7 @@ const Navbar = () => {
       { label: "Delayed PO Reports", path: "/reports/delayed-pos" },
       { label: "Upcoming ETD Reports", path: "/reports/upcoming-etd" },
       { label: "PO Status Report", path: "/reports/po-status" },
+      { label: "Pending PO Report", path: "/reports/pending-po" },
       { label: "Weekly Summary", path: "/summary/weekly" },
       { label: "Daily Summary", path: "/summary/daily" },
       { label: "Daily Inspection Reports", path: "/daily-reports" },

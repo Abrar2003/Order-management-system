@@ -231,6 +231,18 @@ export const getPoStatusReport = async (params = {}) => {
   return res.data;
 };
 
+export const getPendingPoReport = async (params = {}) => {
+  const token = localStorage.getItem("token");
+  const res = await axios.get("/orders/pending-po-report", {
+    params,
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return res.data;
+};
+
 export const getUpcomingEtdReport = async (params = {}) => {
   const token = localStorage.getItem("token");
   const res = await axios.get("/orders/upcoming-etd-report", {
@@ -246,6 +258,17 @@ export const getUpcomingEtdReport = async (params = {}) => {
 export const exportDelayedPoReport = async (params = {}) => {
   const token = localStorage.getItem("token");
   return axios.get("/orders/delayed-po-report/export", {
+    responseType: "blob",
+    params,
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+};
+
+export const exportPendingPoReport = async (params = {}) => {
+  const token = localStorage.getItem("token");
+  return axios.get("/orders/pending-po-report/export", {
     responseType: "blob",
     params,
     headers: {

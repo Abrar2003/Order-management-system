@@ -49,6 +49,11 @@ const ArchivedOrders = () => {
     vendor: normalizeSearchParam(searchParams.get("vendor")),
     brand: normalizeSearchParam(searchParams.get("brand")),
   }));
+  const [draftFilters, setDraftFilters] = useState(() => ({
+    order_id: normalizeSearchParam(searchParams.get("order_id")),
+    vendor: normalizeSearchParam(searchParams.get("vendor")),
+    brand: normalizeSearchParam(searchParams.get("brand")),
+  }));
   const [pagination, setPagination] = useState(() => ({
     page: parsePositiveInt(searchParams.get("page"), 1),
     limit: parseLimit(searchParams.get("limit")),
@@ -125,6 +130,13 @@ const ArchivedOrders = () => {
         ? prev
         : nextFilters,
     );
+    setDraftFilters((prev) =>
+      prev.order_id === nextFilters.order_id
+      && prev.vendor === nextFilters.vendor
+      && prev.brand === nextFilters.brand
+        ? prev
+        : nextFilters,
+    );
     setPagination((prev) => ({
       ...prev,
       page: prev.page === nextPage ? prev.page : nextPage,
@@ -174,6 +186,25 @@ const ArchivedOrders = () => {
     } finally {
       setSyncing(false);
     }
+  };
+
+  const handleApplyFilters = () => {
+    setFilters({
+      order_id: normalizeSearchParam(draftFilters.order_id),
+      vendor: normalizeSearchParam(draftFilters.vendor),
+      brand: normalizeSearchParam(draftFilters.brand),
+    });
+    setPagination((prev) => ({
+      ...prev,
+      page: 1,
+    }));
+  };
+
+  const handleClearFilters = () => {
+    const emptyFilters = { order_id: "", vendor: "", brand: "" };
+    setDraftFilters(emptyFilters);
+    setFilters(emptyFilters);
+    setPagination((prev) => ({ ...prev, page: 1 }));
   };
 
   const handleUnarchive = async (row) => {
@@ -266,14 +297,21 @@ const ArchivedOrders = () => {
 
         <div className="card om-card mb-3">
           <div className="card-body">
-            <div className="row g-2">
+            <form
+              className="row g-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                handleApplyFilters();
+              }}
+            >
               <div className="col-md-4">
                 <label className="form-label mb-1">Order ID</label>
                 <input
                   type="text"
                   className="form-control form-control-sm"
-                  value={filters.order_id}
-                  onChange={(e) => setFilters((prev) => ({ ...prev, order_id: e.target.value }))}
+                  value={draftFilters.order_id}
+                  onChange={(e) =>
+                    setDraftFilters((prev) => ({ ...prev, order_id: e.target.value }))}
                 />
               </div>
               <div className="col-md-4">
@@ -281,8 +319,9 @@ const ArchivedOrders = () => {
                 <input
                   type="text"
                   className="form-control form-control-sm"
-                  value={filters.vendor}
-                  onChange={(e) => setFilters((prev) => ({ ...prev, vendor: e.target.value }))}
+                  value={draftFilters.vendor}
+                  onChange={(e) =>
+                    setDraftFilters((prev) => ({ ...prev, vendor: e.target.value }))}
                 />
               </div>
               <div className="col-md-4">
@@ -290,35 +329,25 @@ const ArchivedOrders = () => {
                 <input
                   type="text"
                   className="form-control form-control-sm"
-                  value={filters.brand}
-                  onChange={(e) => setFilters((prev) => ({ ...prev, brand: e.target.value }))}
+                  value={draftFilters.brand}
+                  onChange={(e) =>
+                    setDraftFilters((prev) => ({ ...prev, brand: e.target.value }))}
                 />
               </div>
-            </div>
 
-            <div className="d-flex gap-2 mt-3">
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={() =>
-                  setPagination((prev) => ({
-                    ...prev,
-                    page: 1,
-                  }))}
-              >
-                Apply Filters
-              </button>
-              <button
-                type="button"
-                className="btn btn-outline-secondary btn-sm"
-                onClick={() => {
-                  setFilters({ order_id: "", vendor: "", brand: "" });
-                  setPagination((prev) => ({ ...prev, page: 1 }));
-                }}
-              >
-                Reset
-              </button>
-            </div>
+              <div className="col-12 d-flex gap-2">
+                <button type="submit" className="btn btn-primary btn-sm">
+                  Apply Filters
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary btn-sm"
+                  onClick={handleClearFilters}
+                >
+                  Clear
+                </button>
+              </div>
+            </form>
           </div>
         </div>
 

@@ -396,6 +396,9 @@ const WeeklySummary = () => {
   const [brandFilter, setBrandFilter] = useState(() =>
     normalizeEntityFilter(searchParams.get("brand")),
   );
+  const [draftBrandFilter, setDraftBrandFilter] = useState(() =>
+    normalizeEntityFilter(searchParams.get("brand")),
+  );
   const [fromDateFilter, setFromDateFilter] = useState(() =>
     String(
       searchParams.get("from_date")
@@ -403,7 +406,21 @@ const WeeklySummary = () => {
       || defaultDateRange.fromDate,
     ).trim(),
   );
+  const [draftFromDateFilter, setDraftFromDateFilter] = useState(() =>
+    String(
+      searchParams.get("from_date")
+      || searchParams.get("fromDate")
+      || defaultDateRange.fromDate,
+    ).trim(),
+  );
   const [toDateFilter, setToDateFilter] = useState(() =>
+    String(
+      searchParams.get("to_date")
+      || searchParams.get("toDate")
+      || defaultDateRange.toDate,
+    ).trim(),
+  );
+  const [draftToDateFilter, setDraftToDateFilter] = useState(() =>
     String(
       searchParams.get("to_date")
       || searchParams.get("toDate")
@@ -484,8 +501,11 @@ const WeeklySummary = () => {
     );
 
     setBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
+    setDraftBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
     setFromDateFilter((prev) => (prev === nextFromDate ? prev : nextFromDate));
+    setDraftFromDateFilter((prev) => (prev === nextFromDate ? prev : nextFromDate));
     setToDateFilter((prev) => (prev === nextToDate ? prev : nextToDate));
+    setDraftToDateFilter((prev) => (prev === nextToDate ? prev : nextToDate));
     setSortBy((prev) => (prev === nextSortBy ? prev : nextSortBy));
     setSortOrder((prev) => (prev === nextSortOrder ? prev : nextSortOrder));
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
@@ -568,6 +588,22 @@ const WeeklySummary = () => {
       return column;
     });
   }, []);
+
+  const handleApplyFilters = useCallback((event) => {
+    event?.preventDefault();
+    setBrandFilter(normalizeEntityFilter(draftBrandFilter));
+    setFromDateFilter(String(draftFromDateFilter || "").trim());
+    setToDateFilter(String(draftToDateFilter || "").trim());
+  }, [draftBrandFilter, draftFromDateFilter, draftToDateFilter]);
+
+  const handleClearFilters = useCallback(() => {
+    setDraftBrandFilter(DEFAULT_ENTITY_FILTER);
+    setDraftFromDateFilter(defaultDateRange.fromDate);
+    setDraftToDateFilter(defaultDateRange.toDate);
+    setBrandFilter(DEFAULT_ENTITY_FILTER);
+    setFromDateFilter(defaultDateRange.fromDate);
+    setToDateFilter(defaultDateRange.toDate);
+  }, [defaultDateRange.fromDate, defaultDateRange.toDate]);
 
   useEffect(() => {
     const brandName = brandFilter === DEFAULT_ENTITY_FILTER ? "" : String(brandFilter || "").trim();
@@ -742,13 +778,13 @@ const WeeklySummary = () => {
         </div>
 
         <div className="card om-card mb-3">
-          <div className="card-body d-flex flex-wrap gap-2 align-items-end">
+          <form className="card-body d-flex flex-wrap gap-2 align-items-end" onSubmit={handleApplyFilters}>
             <div>
               <label className="form-label mb-1">Brand</label>
               <select
                 className="form-select"
-                value={brandFilter}
-                onChange={(e) => setBrandFilter(normalizeEntityFilter(e.target.value))}
+                value={draftBrandFilter}
+                onChange={(e) => setDraftBrandFilter(normalizeEntityFilter(e.target.value))}
               >
                 <option value={DEFAULT_ENTITY_FILTER}>All Brands</option>
                 {(Array.isArray(filters.brand_options) ? filters.brand_options : []).map((brand) => (
@@ -764,8 +800,8 @@ const WeeklySummary = () => {
               <input
                 type="date"
                 className="form-control"
-                value={fromDateFilter}
-                onChange={(e) => setFromDateFilter(String(e.target.value || "").trim())}
+                value={draftFromDateFilter}
+                onChange={(e) => setDraftFromDateFilter(String(e.target.value || "").trim())}
               />
             </div>
 
@@ -774,20 +810,27 @@ const WeeklySummary = () => {
               <input
                 type="date"
                 className="form-control"
-                value={toDateFilter}
-                onChange={(e) => setToDateFilter(String(e.target.value || "").trim())}
+                value={draftToDateFilter}
+                onChange={(e) => setDraftToDateFilter(String(e.target.value || "").trim())}
               />
             </div>
 
             <button
-              type="button"
+              type="submit"
               className="btn btn-primary btn-sm"
-              onClick={fetchReport}
               disabled={loading}
             >
-              {loading ? "Loading..." : "Refresh"}
+              {loading ? "Loading..." : "Apply"}
             </button>
-          </div>
+            <button
+              type="button"
+              className="btn btn-outline-secondary btn-sm"
+              onClick={handleClearFilters}
+              disabled={loading}
+            >
+              Clear
+            </button>
+          </form>
         </div>
 
         {error && (

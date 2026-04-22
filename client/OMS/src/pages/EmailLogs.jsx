@@ -56,10 +56,19 @@ const EmailLogs = () => {
   const [orderIdInput, setOrderIdInput] = useState(() =>
     normalizeSearchParam(searchParams.get("order_id")),
   );
+  const [draftOrderIdInput, setDraftOrderIdInput] = useState(() =>
+    normalizeSearchParam(searchParams.get("order_id")),
+  );
   const [brandFilter, setBrandFilter] = useState(() =>
     normalizeFilterParam(searchParams.get("brand"), "all"),
   );
+  const [draftBrandFilter, setDraftBrandFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("brand"), "all"),
+  );
   const [vendorFilter, setVendorFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("vendor"), "all"),
+  );
+  const [draftVendorFilter, setDraftVendorFilter] = useState(() =>
     normalizeFilterParam(searchParams.get("vendor"), "all"),
   );
   const [page, setPage] = useState(() =>
@@ -159,8 +168,11 @@ const EmailLogs = () => {
     const nextLimit = parseLimit(searchParams.get("limit"));
 
     setOrderIdInput((prev) => (prev === nextOrderIdInput ? prev : nextOrderIdInput));
+    setDraftOrderIdInput((prev) => (prev === nextOrderIdInput ? prev : nextOrderIdInput));
     setBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
+    setDraftBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
     setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
+    setDraftVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
     setPage((prev) => (prev === nextPage ? prev : nextPage));
     setLimit((prev) => (prev === nextLimit ? prev : nextLimit));
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
@@ -197,23 +209,34 @@ const EmailLogs = () => {
   ]);
 
   const handleSearchChange = (e) => {
-    setPage(1);
-    setOrderIdInput(e.target.value);
+    setDraftOrderIdInput(e.target.value);
   };
 
   const handleBrandFilterChange = (e) => {
-    setPage(1);
-    setBrandFilter(e.target.value);
+    setDraftBrandFilter(e.target.value);
   };
 
   const handleVendorFilterChange = (e) => {
-    setPage(1);
-    setVendorFilter(e.target.value);
+    setDraftVendorFilter(e.target.value);
   };
 
-  const handleRefresh = () => {
+  const handleApplyFilters = (event) => {
+    event?.preventDefault();
+    setPage(1);
+    setOrderIdInput(normalizeSearchParam(draftOrderIdInput));
+    setBrandFilter(normalizeFilterParam(draftBrandFilter, "all"));
+    setVendorFilter(normalizeFilterParam(draftVendorFilter, "all"));
+  };
+
+  const handleClearFilters = () => {
+    setPage(1);
+    setDraftOrderIdInput("");
+    setDraftBrandFilter("all");
+    setDraftVendorFilter("all");
+    setOrderIdInput("");
+    setBrandFilter("all");
+    setVendorFilter("all");
     setSuccess("");
-    fetchLogs();
   };
 
   const handleCloseModal = () => {
@@ -331,14 +354,14 @@ const EmailLogs = () => {
 
         <div className="card om-card mb-3">
           <div className="card-body">
-            <div className="row g-3">
+            <form className="row g-3" onSubmit={handleApplyFilters}>
               <div className="col-md-6">
                 <label className="form-label">Search by PO Number</label>
                 <input
                   type="text"
                   className="form-control"
                   placeholder="Enter PO number..."
-                  value={orderIdInput}
+                  value={draftOrderIdInput}
                   onChange={handleSearchChange}
                   disabled={loading}
                 />
@@ -348,7 +371,7 @@ const EmailLogs = () => {
                 <label className="form-label">Brand</label>
                 <select
                   className="form-select"
-                  value={brandFilter}
+                  value={draftBrandFilter}
                   onChange={handleBrandFilterChange}
                   disabled={loading}
                 >
@@ -365,7 +388,7 @@ const EmailLogs = () => {
                 <label className="form-label">Vendor</label>
                 <select
                   className="form-select"
-                  value={vendorFilter}
+                  value={draftVendorFilter}
                   onChange={handleVendorFilterChange}
                   disabled={loading}
                 >
@@ -380,15 +403,22 @@ const EmailLogs = () => {
 
               <div className="col-md-2 d-flex gap-2">
                 <button
-                  type="button"
+                  type="submit"
                   className="btn btn-primary btn-sm align-self-end"
-                  onClick={handleRefresh}
                   disabled={loading}
                 >
-                  {loading ? "Loading..." : "Refresh"}
+                  Apply
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary btn-sm align-self-end"
+                  onClick={handleClearFilters}
+                  disabled={loading}
+                >
+                  Clear
                 </button>
               </div>
-            </div>
+            </form>
           </div>
         </div>
 

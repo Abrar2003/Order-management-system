@@ -71,7 +71,13 @@ const Container = () => {
   const [orderIdFilter, setOrderIdFilter] = useState(() =>
     normalizeSearchParam(searchParams.get("order_id")),
   );
+  const [draftOrderIdFilter, setDraftOrderIdFilter] = useState(() =>
+    normalizeSearchParam(searchParams.get("order_id")),
+  );
   const [statusFilter, setStatusFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("status"), "all"),
+  );
+  const [draftStatusFilter, setDraftStatusFilter] = useState(() =>
     normalizeFilterParam(searchParams.get("status"), "all"),
   );
   const [loadingVendors, setLoadingVendors] = useState(true);
@@ -225,7 +231,9 @@ const Container = () => {
     setShippingDate((prev) => (prev === nextShippingDate ? prev : nextShippingDate));
     setVendor((prev) => (prev === nextVendor ? prev : nextVendor));
     setOrderIdFilter((prev) => (prev === nextOrderIdFilter ? prev : nextOrderIdFilter));
+    setDraftOrderIdFilter((prev) => (prev === nextOrderIdFilter ? prev : nextOrderIdFilter));
     setStatusFilter((prev) => (prev === nextStatusFilter ? prev : nextStatusFilter));
+    setDraftStatusFilter((prev) => (prev === nextStatusFilter ? prev : nextStatusFilter));
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
   }, [searchParams, syncedQuery]);
 
@@ -306,6 +314,19 @@ const Container = () => {
     },
     [sortBy, sortOrder],
   );
+
+  const handleApplyFilters = useCallback((event) => {
+    event?.preventDefault();
+    setOrderIdFilter(normalizeSearchParam(draftOrderIdFilter));
+    setStatusFilter(normalizeFilterParam(draftStatusFilter, "all"));
+  }, [draftOrderIdFilter, draftStatusFilter]);
+
+  const handleClearFilters = useCallback(() => {
+    setDraftOrderIdFilter("");
+    setDraftStatusFilter("all");
+    setOrderIdFilter("");
+    setStatusFilter("all");
+  }, []);
 
   const sortedRows = useMemo(
     () =>
@@ -634,15 +655,15 @@ const Container = () => {
               )}
             </div>
 
-            <div className="row g-2 align-items-end">
+            <form className="row g-2 align-items-end" onSubmit={handleApplyFilters}>
               <div className="col-md-4">
                 <label className="form-label">Filter by Order ID</label>
                 <input
                   type="text"
                   className="form-control"
-                  value={orderIdFilter}
+                  value={draftOrderIdFilter}
                   list="bulk-container-order-id-options"
-                  onChange={(e) => setOrderIdFilter(e.target.value)}
+                  onChange={(e) => setDraftOrderIdFilter(e.target.value)}
                   placeholder="Type order ID"
                 />
                 <datalist id="bulk-container-order-id-options">
@@ -655,8 +676,8 @@ const Container = () => {
                 <label className="form-label">Filter by Status</label>
                 <select
                   className="form-select"
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
+                  value={draftStatusFilter}
+                  onChange={(e) => setDraftStatusFilter(e.target.value)}
                 >
                   <option value="all">All Status</option>
                   {statusOptions.map((status) => (
@@ -666,19 +687,19 @@ const Container = () => {
                   ))}
                 </select>
               </div>
-              <div className="col-md-2 d-grid">
+              <div className="col-md-2 d-grid gap-2">
+                <button type="submit" className="btn btn-primary">
+                  Apply
+                </button>
                 <button
                   type="button"
                   className="btn btn-outline-secondary"
-                  onClick={() => {
-                    setOrderIdFilter("");
-                    setStatusFilter("all");
-                  }}
+                  onClick={handleClearFilters}
                 >
                   Clear Filters
                 </button>
               </div>
-            </div>
+            </form>
           </div>
         </div>
 

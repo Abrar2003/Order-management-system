@@ -63,10 +63,23 @@ const UpcomingEtdReports = () => {
   const [brandFilter, setBrandFilter] = useState(() =>
     normalizeEntityFilter(searchParams.get("brand")),
   );
+  const [draftBrandFilter, setDraftBrandFilter] = useState(() =>
+    normalizeEntityFilter(searchParams.get("brand")),
+  );
   const [vendorFilter, setVendorFilter] = useState(() =>
     normalizeEntityFilter(searchParams.get("vendor")),
   );
+  const [draftVendorFilter, setDraftVendorFilter] = useState(() =>
+    normalizeEntityFilter(searchParams.get("vendor")),
+  );
   const [toDateFilter, setToDateFilter] = useState(() =>
+    String(
+      searchParams.get("to_date")
+      || searchParams.get("toDate")
+      || defaultToDate,
+    ).trim(),
+  );
+  const [draftToDateFilter, setDraftToDateFilter] = useState(() =>
     String(
       searchParams.get("to_date")
       || searchParams.get("toDate")
@@ -130,8 +143,11 @@ const UpcomingEtdReports = () => {
     ).trim();
 
     setBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
+    setDraftBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
     setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
+    setDraftVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
     setToDateFilter((prev) => (prev === nextToDate ? prev : nextToDate));
+    setDraftToDateFilter((prev) => (prev === nextToDate ? prev : nextToDate));
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
   }, [defaultToDate, searchParams, syncedQuery]);
 
@@ -159,6 +175,22 @@ const UpcomingEtdReports = () => {
     () => report?.filters || defaultReport.filters,
     [report?.filters],
   );
+
+  const handleApplyFilters = (event) => {
+    event?.preventDefault();
+    setBrandFilter(normalizeEntityFilter(draftBrandFilter));
+    setVendorFilter(normalizeEntityFilter(draftVendorFilter));
+    setToDateFilter(String(draftToDateFilter || "").trim() || defaultToDate);
+  };
+
+  const handleClearFilters = () => {
+    setDraftBrandFilter(DEFAULT_ENTITY_FILTER);
+    setDraftVendorFilter(DEFAULT_ENTITY_FILTER);
+    setDraftToDateFilter(defaultToDate);
+    setBrandFilter(DEFAULT_ENTITY_FILTER);
+    setVendorFilter(DEFAULT_ENTITY_FILTER);
+    setToDateFilter(defaultToDate);
+  };
   const summary = useMemo(
     () => report?.summary || defaultReport.summary,
     [report?.summary],
@@ -208,14 +240,14 @@ const UpcomingEtdReports = () => {
         </div>
 
         <div className="card om-card mb-3">
-          <div className="card-body d-flex flex-wrap gap-2 align-items-end">
+          <form className="card-body d-flex flex-wrap gap-2 align-items-end" onSubmit={handleApplyFilters}>
             <div>
               <label className="form-label mb-1">Until Date</label>
               <input
                 type="date"
                 className="form-control"
-                value={toDateFilter}
-                onChange={(event) => setToDateFilter(String(event.target.value || "").trim())}
+                value={draftToDateFilter}
+                onChange={(event) => setDraftToDateFilter(String(event.target.value || "").trim())}
               />
             </div>
 
@@ -223,9 +255,9 @@ const UpcomingEtdReports = () => {
               <label className="form-label mb-1">Brand</label>
               <select
                 className="form-select"
-                value={brandFilter}
+                value={draftBrandFilter}
                 onChange={(event) =>
-                  setBrandFilter(normalizeEntityFilter(event.target.value))
+                  setDraftBrandFilter(normalizeEntityFilter(event.target.value))
                 }
               >
                 <option value={DEFAULT_ENTITY_FILTER}>All Brands</option>
@@ -241,9 +273,9 @@ const UpcomingEtdReports = () => {
               <label className="form-label mb-1">Vendor</label>
               <select
                 className="form-select"
-                value={vendorFilter}
+                value={draftVendorFilter}
                 onChange={(event) =>
-                  setVendorFilter(normalizeEntityFilter(event.target.value))
+                  setDraftVendorFilter(normalizeEntityFilter(event.target.value))
                 }
               >
                 <option value={DEFAULT_ENTITY_FILTER}>All Vendors</option>
@@ -256,14 +288,21 @@ const UpcomingEtdReports = () => {
             </div>
 
             <button
-              type="button"
+              type="submit"
               className="btn btn-primary btn-sm"
-              onClick={fetchReport}
               disabled={loading}
             >
-              {loading ? "Loading..." : "Refresh"}
+              Apply
             </button>
-          </div>
+            <button
+              type="button"
+              className="btn btn-outline-secondary btn-sm"
+              onClick={handleClearFilters}
+              disabled={loading}
+            >
+              Clear
+            </button>
+          </form>
         </div>
 
         <div className="card om-card mb-3">

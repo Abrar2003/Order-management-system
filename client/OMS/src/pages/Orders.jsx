@@ -15,12 +15,12 @@ import ItemOrderPresenceTooltip from "../components/ItemOrderPresenceTooltip";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { archiveOrder } from "../services/orders.service";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { formatDateDDMMYYYY } from "../utils/date";
-import { formatCbm } from "../utils/cbm";
+import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
+import { formatCbm, resolvePreferredCbm } from "../utils/cbm";
 import {
-  getDerivedOrderStatus,
   getGroupedOrderStatus,
   getOrderProgress,
+  toSafeOrderNumber,
 } from "../utils/orderStatus";
 import "../App.css";
 
@@ -31,8 +31,193 @@ const getPendingDisplayQuantity = (order) => {
 const getOpenInspectionQuantity = (order) =>
   getOrderProgress({ order }).pending_inspection_quantity;
 
+const toStatusTimestamp = (value) => {
+  if (!value) return 0;
+  const parsed = new Date(value).getTime();
+  return Number.isNaN(parsed) ? 0 : parsed;
+};
+
+const isOpenRequestStatus = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return true;
+  if (normalized === "pending") return true;
+  if (normalized === "open") return true;
+  if (normalized === "requested") return true;
+  if (normalized === "under inspection") return true;
+  if (normalized === "in progress" || normalized === "in_progress") return true;
+  return false;
+};
+
+const getLatestRequestEntry = (qcRecord = {}) =>
+  (Array.isArray(qcRecord?.request_history) ? [...qcRecord.request_history] : [])
+    .sort((left, right) => {
+      const leftTime = Math.max(
+        toStatusTimestamp(left?.request_date),
+        toStatusTimestamp(left?.updatedAt),
+        toStatusTimestamp(left?.createdAt),
+      );
+      const rightTime = Math.max(
+        toStatusTimestamp(right?.request_date),
+        toStatusTimestamp(right?.updatedAt),
+        toStatusTimestamp(right?.createdAt),
+      );
+      return rightTime - leftTime;
+    })[0] || null;
+
+const resolveLatestInspectionRecordForRequest = (
+  inspectionRecords = [],
+  requestEntry = null,
+) => {
+  if (!requestEntry) return null;
+
+  const requestHistoryId = String(
+    requestEntry?._id ||
+      requestEntry?.request_history_id ||
+      requestEntry?.id ||
+      "",
+  ).trim();
+  const requestDateKey = toISODateString(
+    requestEntry?.request_date || requestEntry?.requested_date,
+  );
+  const requestInspectorId = String(
+    requestEntry?.inspector?._id ||
+      requestEntry?.inspector ||
+      requestEntry?.inspector_id ||
+      "",
+  ).trim();
+
+  const findLatestMatchingRecord = (matcher) => {
+    let latestRecord = null;
+    let latestTimestamp = 0;
+
+    for (const record of Array.isArray(inspectionRecords) ? inspectionRecords : []) {
+      if (!matcher(record)) continue;
+
+      const recordTimestamp = Math.max(
+        toStatusTimestamp(record?.inspection_date),
+        toStatusTimestamp(record?.requested_date),
+        toStatusTimestamp(record?.createdAt),
+      );
+      if (!latestRecord || recordTimestamp >= latestTimestamp) {
+        latestRecord = record;
+        latestTimestamp = recordTimestamp;
+      }
+    }
+
+    return latestRecord;
+  };
+
+  if (requestHistoryId) {
+    const exactRequestHistoryMatch = findLatestMatchingRecord(
+      (record) => String(record?.request_history_id || "").trim() === requestHistoryId,
+    );
+    if (exactRequestHistoryMatch) return exactRequestHistoryMatch;
+  }
+
+  if (!requestDateKey) return null;
+
+  return (
+    findLatestMatchingRecord((record) => {
+      const recordRequestedDate = toISODateString(
+        record?.requested_date || record?.inspection_date || record?.createdAt,
+      );
+      if (recordRequestedDate !== requestDateKey) return false;
+
+      if (!requestInspectorId) return true;
+
+      const recordInspectorId = String(
+        record?.inspector?._id || record?.inspector || "",
+      ).trim();
+      return !recordInspectorId || recordInspectorId === requestInspectorId;
+    }) ||
+    findLatestMatchingRecord((record) => {
+      const recordRequestedDate = toISODateString(
+        record?.requested_date || record?.inspection_date || record?.createdAt,
+      );
+      return recordRequestedDate === requestDateKey;
+    }) ||
+    null
+  );
+};
+
+const hasRaisedInspectionRequest = (order, pendingInspectionQuantity = 0) => {
+  if (pendingInspectionQuantity <= 0) return false;
+
+  const qcRecord = order?.qc_record;
+  if (!qcRecord || typeof qcRecord !== "object") return false;
+
+  const requestHistory = Array.isArray(qcRecord?.request_history)
+    ? qcRecord.request_history
+    : [];
+  const inspectionRecords = Array.isArray(qcRecord?.inspection_record)
+    ? qcRecord.inspection_record
+    : [];
+
+  if (requestHistory.length > 0) {
+    const latestRequest = getLatestRequestEntry(qcRecord);
+    const requestedQuantity = toSafeOrderNumber(
+      latestRequest?.quantity_requested,
+      0,
+    );
+    if (requestedQuantity <= 0 || !isOpenRequestStatus(latestRequest?.status)) {
+      return false;
+    }
+
+    const latestInspectionRecord = resolveLatestInspectionRecordForRequest(
+      inspectionRecords,
+      latestRequest,
+    );
+
+    return toSafeOrderNumber(latestInspectionRecord?.checked, 0) <= 0;
+  }
+
+  const latestLegacyInspectionRecord = [...inspectionRecords]
+    .sort((left, right) => {
+      const leftTime = Math.max(
+        toStatusTimestamp(left?.inspection_date),
+        toStatusTimestamp(left?.requested_date),
+        toStatusTimestamp(left?.createdAt),
+      );
+      const rightTime = Math.max(
+        toStatusTimestamp(right?.inspection_date),
+        toStatusTimestamp(right?.requested_date),
+        toStatusTimestamp(right?.createdAt),
+      );
+      return rightTime - leftTime;
+    })[0] || null;
+  if (toSafeOrderNumber(latestLegacyInspectionRecord?.checked, 0) > 0) {
+    return false;
+  }
+
+  return (
+    toSafeOrderNumber(qcRecord?.quantities?.quantity_requested, 0) > 0 ||
+    Boolean(String(qcRecord?.request_date || "").trim())
+  );
+};
+
 const getDisplayedOrderStatus = (order) => {
-  return getDerivedOrderStatus({ order });
+  const progress = getOrderProgress({ order });
+  const {
+    order_quantity: orderQuantity,
+    shipped_quantity: shippedQuantity,
+    passed_quantity: passedQuantity,
+    pending_inspection_quantity: pendingInspectionQuantity,
+  } = progress;
+
+  if (orderQuantity > 0 && shippedQuantity >= orderQuantity) {
+    return "Shipped";
+  }
+  if (orderQuantity > 0 && passedQuantity >= orderQuantity && shippedQuantity > 0) {
+    return "Partial Shipped";
+  }
+  if (orderQuantity > 0 && passedQuantity >= orderQuantity) {
+    return "Inspection Done";
+  }
+  if (hasRaisedInspectionRequest(order, pendingInspectionQuantity)) {
+    return "Under Inspection";
+  }
+
+  return "Pending";
 };
 
 const getDisplayedOrderGroupStatus = (orders) => {
@@ -72,8 +257,12 @@ const formatResolvedCbm = (value) => {
 };
 
 const renderOrderCbmCell = (order) => {
+  const storedTotalCbm = resolvePreferredCbm(
+    order?.total_po_cbm,
+    order?.top_po_cbm,
+  );
   const perItemCbm = order?.cbm_summary?.per_item;
-  const totalCbm = order?.cbm_summary?.total;
+  const totalCbm = storedTotalCbm > 0 ? storedTotalCbm : order?.cbm_summary?.total;
 
   return (
     <div className="d-flex flex-column gap-1">

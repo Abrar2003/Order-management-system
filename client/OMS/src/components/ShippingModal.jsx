@@ -62,7 +62,7 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
       return;
     }
     if (!stuffedBy) {
-      setError("Select the inspector who was present during stuffing.");
+      setError("Select who shipped this order.");
       return;
     }
 
@@ -156,7 +156,7 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
             </div>
 
             <div>
-              <label className="form-label">Stuffed By</label>
+              <label className="form-label">Shipped By</label>
               <select
                 className="form-select"
                 value={stuffedById}
@@ -164,7 +164,7 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
                 disabled={loadingInspectors}
               >
                 <option value="">
-                  {loadingInspectors ? "Loading inspectors..." : "Select inspector"}
+                  {loadingInspectors ? "Loading inspectors..." : "Select shipped by"}
                 </option>
                 {inspectors.map((inspector) => (
                   <option key={inspector.id} value={inspector.id}>

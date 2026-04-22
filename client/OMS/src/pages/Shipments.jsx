@@ -11,17 +11,7 @@ import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import { hasShipmentRecords } from "../utils/orderStatus";
-
-const useDebouncedValue = (value, delay = 300) => {
-  const [debounced, setDebounced] = useState(value);
-
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(t);
-  }, [value, delay]);
-
-  return debounced;
-};
+import { formatCbm } from "../utils/cbm";
 
 const EMPTY_SUMMARY = {
   total: 0,
@@ -30,6 +20,8 @@ const EMPTY_SUMMARY = {
   inspectionDone: 0,
   partialShipped: 0,
   shipped: 0,
+  totalStuffedCbm: 0,
+  filteredStuffedCbm: 0,
 };
 
 const DEFAULT_LIMIT = 20;
@@ -76,6 +68,7 @@ const parseSortBy = (value) => {
     "stuffing_date",
     "container",
     "invoice_number",
+    "shipment_cbm",
     "quantity",
     "pending",
   ]);
@@ -117,13 +110,25 @@ const Shipments = () => {
   const [orderIdSearch, setOrderIdSearch] = useState(() =>
     normalizeSearchParam(searchParams.get("order_id")),
   );
+  const [draftOrderIdSearch, setDraftOrderIdSearch] = useState(() =>
+    normalizeSearchParam(searchParams.get("order_id")),
+  );
   const [itemCodeSearch, setItemCodeSearch] = useState(() =>
+    normalizeSearchParam(searchParams.get("item_code")),
+  );
+  const [draftItemCodeSearch, setDraftItemCodeSearch] = useState(() =>
     normalizeSearchParam(searchParams.get("item_code")),
   );
   const [containerSearch, setContainerSearch] = useState(() =>
     normalizeSearchParam(searchParams.get("container")),
   );
+  const [draftContainerSearch, setDraftContainerSearch] = useState(() =>
+    normalizeSearchParam(searchParams.get("container")),
+  );
   const [vendorFilter, setVendorFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("vendor"), "all"),
+  );
+  const [draftVendorFilter, setDraftVendorFilter] = useState(() =>
     normalizeFilterParam(searchParams.get("vendor"), "all"),
   );
   const [statusFilter, setStatusFilter] = useState(() =>
@@ -151,10 +156,6 @@ const Shipments = () => {
     item_codes: [],
   });
 
-  const debouncedOrderSearch = useDebouncedValue(orderIdSearch, 300);
-  const debouncedItemCodeSearch = useDebouncedValue(itemCodeSearch, 300);
-  const debouncedContainerSearch = useDebouncedValue(containerSearch, 300);
-
   const fetchShipments = useCallback(async () => {
     try {
       setLoading(true);
@@ -162,9 +163,9 @@ const Shipments = () => {
 
       const res = await api.get("/orders/shipments", {
         params: {
-          order_id: debouncedOrderSearch,
-          item_code: debouncedItemCodeSearch,
-          container: debouncedContainerSearch,
+          order_id: orderIdSearch,
+          item_code: itemCodeSearch,
+          container: containerSearch,
           vendor: vendorFilter,
           status: statusFilter,
           page,
@@ -212,11 +213,11 @@ const Shipments = () => {
       setLoading(false);
     }
   }, [
-    debouncedContainerSearch,
-    debouncedItemCodeSearch,
-    debouncedOrderSearch,
+    containerSearch,
+    itemCodeSearch,
     limit,
     page,
+    orderIdSearch,
     sortBy,
     sortOrder,
     statusFilter,
@@ -257,13 +258,25 @@ const Shipments = () => {
     setOrderIdSearch((prev) =>
       prev === nextOrderIdSearch ? prev : nextOrderIdSearch,
     );
+    setDraftOrderIdSearch((prev) =>
+      prev === nextOrderIdSearch ? prev : nextOrderIdSearch,
+    );
     setItemCodeSearch((prev) =>
+      prev === nextItemCodeSearch ? prev : nextItemCodeSearch,
+    );
+    setDraftItemCodeSearch((prev) =>
       prev === nextItemCodeSearch ? prev : nextItemCodeSearch,
     );
     setContainerSearch((prev) =>
       prev === nextContainerSearch ? prev : nextContainerSearch,
     );
+    setDraftContainerSearch((prev) =>
+      prev === nextContainerSearch ? prev : nextContainerSearch,
+    );
     setVendorFilter((prev) =>
+      prev === nextVendorFilter ? prev : nextVendorFilter,
+    );
+    setDraftVendorFilter((prev) =>
       prev === nextVendorFilter ? prev : nextVendorFilter,
     );
     setStatusFilter((prev) =>
@@ -329,6 +342,30 @@ const Shipments = () => {
     },
     [sortBy],
   );
+
+  const handleApplyFilters = (event) => {
+    event?.preventDefault();
+    setPage(1);
+    setOrderIdSearch(normalizeSearchParam(draftOrderIdSearch));
+    setItemCodeSearch(normalizeSearchParam(draftItemCodeSearch));
+    setContainerSearch(normalizeSearchParam(draftContainerSearch));
+    setVendorFilter(normalizeFilterParam(draftVendorFilter, "all"));
+  };
+
+  const handleClearFilters = () => {
+    setDraftOrderIdSearch("");
+    setDraftItemCodeSearch("");
+    setDraftContainerSearch("");
+    setDraftVendorFilter("all");
+    setOrderIdSearch("");
+    setItemCodeSearch("");
+    setContainerSearch("");
+    setVendorFilter("all");
+    setStatusFilter("all");
+    setSortBy(DEFAULT_SORT_BY);
+    setSortOrder(parseSortOrder("", DEFAULT_SORT_BY));
+    setPage(1);
+  };
 
   const canShowFinalizeAction = useCallback(
     (row) =>
@@ -491,9 +528,9 @@ const Shipments = () => {
         const response = await api.get("/orders/shipments/export", {
           responseType: "blob",
           params: {
-            order_id: debouncedOrderSearch,
-            item_code: debouncedItemCodeSearch,
-            container: debouncedContainerSearch,
+            order_id: orderIdSearch,
+            item_code: itemCodeSearch,
+            container: containerSearch,
             vendor: vendorFilter,
             status: statusFilter,
             sort_by: sortBy,
@@ -538,9 +575,9 @@ const Shipments = () => {
       }
     },
     [
-      debouncedContainerSearch,
-      debouncedItemCodeSearch,
-      debouncedOrderSearch,
+      containerSearch,
+      itemCodeSearch,
+      orderIdSearch,
       sortBy,
       sortOrder,
       statusFilter,
@@ -609,18 +646,15 @@ const Shipments = () => {
 
         <div className="card om-card mb-3">
           <div className="card-body">
-            <div className="row g-2 align-items-end">
+            <form className="row g-2 align-items-end" onSubmit={handleApplyFilters}>
               <div className="col-md-3">
                 <label className="form-label">Search by Order ID</label>
                 <input
                   type="text"
                   className="form-control"
-                  value={orderIdSearch}
+                  value={draftOrderIdSearch}
                   list="shipment-order-options"
-                  onChange={(e) => {
-                    setOrderIdSearch(e.target.value);
-                    setPage(1);
-                  }}
+                  onChange={(e) => setDraftOrderIdSearch(e.target.value)}
                   placeholder="Enter order ID"
                 />
                 <datalist id="shipment-order-options">
@@ -634,12 +668,9 @@ const Shipments = () => {
                 <input
                   type="text"
                   className="form-control"
-                  value={itemCodeSearch}
+                  value={draftItemCodeSearch}
                   list="shipment-item-code-options"
-                  onChange={(e) => {
-                    setItemCodeSearch(e.target.value);
-                    setPage(1);
-                  }}
+                  onChange={(e) => setDraftItemCodeSearch(e.target.value)}
                   placeholder="Enter item code"
                 />
                 <datalist id="shipment-item-code-options">
@@ -653,12 +684,9 @@ const Shipments = () => {
                 <input
                   type="text"
                   className="form-control"
-                  value={containerSearch}
+                  value={draftContainerSearch}
                   list="shipment-container-options"
-                  onChange={(e) => {
-                    setContainerSearch(e.target.value);
-                    setPage(1);
-                  }}
+                  onChange={(e) => setDraftContainerSearch(e.target.value)}
                   placeholder="Enter container number"
                 />
                 <datalist id="shipment-container-options">
@@ -671,11 +699,8 @@ const Shipments = () => {
                 <label className="form-label">Filter by Vendor</label>
                 <select
                   className="form-select"
-                  value={vendorFilter}
-                  onChange={(e) => {
-                    setVendorFilter(e.target.value);
-                    setPage(1);
-                  }}
+                  value={draftVendorFilter}
+                  onChange={(e) => setDraftVendorFilter(e.target.value)}
                 >
                   <option value="all">All Vendors</option>
                   {filterOptions.vendors.map((vendor) => (
@@ -685,25 +710,19 @@ const Shipments = () => {
                   ))}
                 </select>
               </div>
-              <div className="col-md-1 d-grid">
+              <div className="col-md-1 d-flex gap-2">
+                <button type="submit" className="btn btn-primary">
+                  Apply
+                </button>
                 <button
                   type="button"
                   className="btn btn-outline-secondary"
-                  onClick={() => {
-                    setOrderIdSearch("");
-                    setItemCodeSearch("");
-                    setContainerSearch("");
-                    setVendorFilter("all");
-                    setStatusFilter("all");
-                    setSortBy(DEFAULT_SORT_BY);
-                    setSortOrder(parseSortOrder("", DEFAULT_SORT_BY));
-                    setPage(1);
-                  }}
+                  onClick={handleClearFilters}
                 >
                   Clear
                 </button>
               </div>
-            </div>
+            </form>
           </div>
         </div>
 
@@ -774,6 +793,11 @@ const Shipments = () => {
             </span>
             <span className="om-summary-chip">
               Total Records: {totalRecords}
+            </span>
+            <span className="om-summary-chip">
+              Total Stuffed CBM: {formatCbm(
+                summary.filteredStuffedCbm ?? summary.totalStuffedCbm,
+              )}
             </span>
           </div>
         </div>
@@ -901,6 +925,14 @@ const Shipments = () => {
                           onClick={() => handleSortColumn("quantity", "desc")}
                         />
                       </th>
+                      <th className="shipments-col-qty">
+                        <SortHeaderButton
+                          label="Stuffed CBM"
+                          isActive={sortBy === "shipment_cbm"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("shipment_cbm", "desc")}
+                        />
+                      </th>
                       <th className="shipments-col-pending">
                         <SortHeaderButton
                           label="Pending"
@@ -941,7 +973,7 @@ const Shipments = () => {
                         <td
                           colSpan={
                             (canCheckShipments ? 1 : 0) +
-                            (canFinalizeShipping ? 13 : 12) +
+                            (canFinalizeShipping ? 14 : 13) +
                             (isAdmin ? 1 : 0)
                           }
                           className="text-center py-4"
@@ -994,6 +1026,7 @@ const Shipments = () => {
                         <td className="shipments-col-container">{row?.container || "N/A"}</td>
                         <td className="shipments-col-invoice">{row?.invoice_number || "N/A"}</td>
                         <td className="shipments-col-qty">{row?.quantity ?? "N/A"}</td>
+                        <td className="shipments-col-qty">{formatCbm(row?.shipment_cbm)}</td>
                         <td className="shipments-col-pending">{row?.pending ?? "N/A"}</td>
                         <td className="shipments-col-remarks">{row?.remaining_remarks || "N/A"}</td>
                         {canFinalizeShipping && (

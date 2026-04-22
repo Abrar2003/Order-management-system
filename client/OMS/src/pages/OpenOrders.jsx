@@ -6,6 +6,7 @@ import OrderEtdWithHistory from "../components/OrderEtdWithHistory";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { formatDateDDMMYYYY } from "../utils/date";
+import { formatCbm, resolvePreferredCbm } from "../utils/cbm";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import {
@@ -50,6 +51,7 @@ const parseSortBy = (value) => {
   if (lowered === "order_id") return "order_id";
   if (lowered === "order_date") return "order_date";
   if (lowered === "etd") return "ETD";
+  if (lowered === "totalcbm" || lowered === "total_cbm") return "totalCbm";
   return DEFAULT_SORT_BY;
 };
 
@@ -131,6 +133,11 @@ const OpenOrders = ({ bucket = "open" }) => {
     status: normalizeFilterParam(searchParams.get("status"), "all"),
     order: String(searchParams.get("order") || "").trim(),
     item_code: String(searchParams.get("item_code") || "").trim(),
+  }));
+  const [draftFilters, setDraftFilters] = useState(() => ({
+    vendor: normalizeFilterParam(searchParams.get("vendor"), "all"),
+    brand: normalizeFilterParam(searchParams.get("brand"), "all"),
+    status: normalizeFilterParam(searchParams.get("status"), "all"),
   }));
   const [orderSearchInput, setOrderSearchInput] = useState(() =>
     String(searchParams.get("order") || "").trim(),
@@ -264,6 +271,17 @@ const OpenOrders = ({ bucket = "open" }) => {
         ? prev
         : nextFilters,
     );
+    setDraftFilters((prev) =>
+      prev.vendor === nextFilters.vendor
+      && prev.brand === nextFilters.brand
+      && prev.status === nextFilters.status
+        ? prev
+        : {
+            vendor: nextFilters.vendor,
+            brand: nextFilters.brand,
+            status: nextFilters.status,
+          },
+    );
     setPage((prev) => (prev === nextPage ? prev : nextPage));
     setLimit((prev) => (prev === nextLimit ? prev : nextLimit));
     setSortBy((prev) => (prev === nextSortBy ? prev : nextSortBy));
@@ -333,6 +351,11 @@ const OpenOrders = ({ bucket = "open" }) => {
     setSortOrder("desc");
     setOrderSearchInput("");
     setItemCodeSearchInput("");
+    setDraftFilters({
+      vendor: defaultFilters.vendor,
+      brand: defaultFilters.brand,
+      status: defaultFilters.status,
+    });
     setFilters(defaultFilters);
   };
 
@@ -341,6 +364,9 @@ const OpenOrders = ({ bucket = "open" }) => {
     setPage(1);
     setFilters((prev) => ({
       ...prev,
+      vendor: draftFilters.vendor,
+      brand: draftFilters.brand,
+      status: draftFilters.status,
       order: String(orderSearchInput || "").trim(),
       item_code: String(itemCodeSearchInput || "").trim(),
     }));
@@ -383,11 +409,10 @@ const OpenOrders = ({ bucket = "open" }) => {
                 <label className="form-label">Vendor</label>
                 <select
                   className="form-select"
-                  value={filters.vendor}
-                  onChange={(e) => {
-                    setPage(1);
-                    setFilters((prev) => ({ ...prev, vendor: e.target.value }));
-                  }}
+                  value={draftFilters.vendor}
+                  onChange={(e) =>
+                    setDraftFilters((prev) => ({ ...prev, vendor: e.target.value }))
+                  }
                 >
                   <option value="all">Select Vendor</option>
                   {filterOptions.vendors.map((vendor) => (
@@ -402,11 +427,10 @@ const OpenOrders = ({ bucket = "open" }) => {
                 <label className="form-label">Brand</label>
                 <select
                   className="form-select"
-                  value={filters.brand}
-                  onChange={(e) => {
-                    setPage(1);
-                    setFilters((prev) => ({ ...prev, brand: e.target.value }));
-                  }}
+                  value={draftFilters.brand}
+                  onChange={(e) =>
+                    setDraftFilters((prev) => ({ ...prev, brand: e.target.value }))
+                  }
                 >
                   <option value="all">Select Brand</option>
                   {filterOptions.brands.map((brand) => (
@@ -421,11 +445,10 @@ const OpenOrders = ({ bucket = "open" }) => {
                 <label className="form-label">Status</label>
                 <select
                   className="form-select"
-                  value={filters.status}
-                  onChange={(e) => {
-                    setPage(1);
-                    setFilters((prev) => ({ ...prev, status: e.target.value }));
-                  }}
+                  value={draftFilters.status}
+                  onChange={(e) =>
+                    setDraftFilters((prev) => ({ ...prev, status: e.target.value }))
+                  }
                 >
                   <option value="all">Select Status</option>
                   {statusOptions.map((status) => (
@@ -475,7 +498,7 @@ const OpenOrders = ({ bucket = "open" }) => {
               <div className="col-xl-2 col-lg-2 col-md-12">
                 <div className="open-orders-filter-actions">
                   <button type="submit" className="btn btn-primary">
-                    Search
+                    Apply
                   </button>
                   <button
                     type="button"
@@ -513,6 +536,14 @@ const OpenOrders = ({ bucket = "open" }) => {
                       <th>Items</th>
                       <th>
                         <SortHeaderButton
+                          label="Total CBM"
+                          isActive={sortBy === "totalCbm"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("totalCbm", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
                           label="Order Date"
                           isActive={sortBy === "order_date"}
                           direction={sortOrder}
@@ -533,7 +564,7 @@ const OpenOrders = ({ bucket = "open" }) => {
                   <tbody>
                     {orders.length === 0 && (
                       <tr>
-                        <td colSpan="8" className="text-center py-4">
+                        <td colSpan="9" className="text-center py-4">
                           {pageMeta.emptyMessage}
                         </td>
                       </tr>
@@ -550,6 +581,15 @@ const OpenOrders = ({ bucket = "open" }) => {
                         <td>{order.vendor}</td>
                         <td>{getStatus(order)}</td>
                         <td>{order.items}</td>
+                        <td>
+                          {formatCbm(
+                            resolvePreferredCbm(
+                              order?.total_po_cbm,
+                              order?.top_po_cbm,
+                              order?.total_cbm,
+                            ),
+                          )}
+                        </td>
                         <td>{formatDateDDMMYYYY(order.order_date)}</td>
                         <td>{formatDateDDMMYYYY(order?.ETD)}</td>
                         <td>

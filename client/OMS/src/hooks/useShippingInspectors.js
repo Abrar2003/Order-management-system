@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
 
+export const SHIPPED_BY_VENDOR_OPTION = Object.freeze({
+  id: "shipped_by_vendor",
+  name: "Shipped By Vendor",
+});
+
 const normalizeInspectorOption = (entry = {}) => {
   const id = String(entry?.id || entry?._id || "").trim();
   const name = String(entry?.name || entry?.user?.name || entry?.user?.email || "").trim();
@@ -32,11 +37,11 @@ export const useShippingInspectors = () => {
           : [];
 
         if (!ignore) {
-          setInspectors(nextInspectors);
+          setInspectors([SHIPPED_BY_VENDOR_OPTION, ...nextInspectors]);
         }
       } catch (err) {
         if (!ignore) {
-          setInspectors([]);
+          setInspectors([SHIPPED_BY_VENDOR_OPTION]);
           setInspectorError(
             err?.response?.data?.message || "Failed to load inspectors.",
           );
@@ -70,4 +75,3 @@ export const useShippingInspectors = () => {
     inspectorError,
   };
 };
-

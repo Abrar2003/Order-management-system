@@ -83,7 +83,11 @@ const DailySummary = () => {
   );
 
   const [selectedDate, setSelectedDate] = useState(initialSelectedDate);
+  const [draftSelectedDate, setDraftSelectedDate] = useState(initialSelectedDate);
   const [brandFilter, setBrandFilter] = useState(() =>
+    normalizeEntityFilter(searchParams.get("brand")),
+  );
+  const [draftBrandFilter, setDraftBrandFilter] = useState(() =>
     normalizeEntityFilter(searchParams.get("brand")),
   );
   const [loading, setLoading] = useState(true);
@@ -148,7 +152,9 @@ const DailySummary = () => {
     const nextBrandFilter = normalizeEntityFilter(searchParams.get("brand"));
 
     setSelectedDate((prev) => (prev === nextSelectedDate ? prev : nextSelectedDate));
+    setDraftSelectedDate((prev) => (prev === nextSelectedDate ? prev : nextSelectedDate));
     setBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
+    setDraftBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
   }, [searchParams, syncedQuery]);
 
@@ -168,6 +174,20 @@ const DailySummary = () => {
       setSearchParams(next, { replace: true });
     }
   }, [brandFilter, searchParams, selectedDate, setSearchParams, syncedQuery]);
+
+  const handleApplyFilters = (event) => {
+    event?.preventDefault();
+    setSelectedDate(draftSelectedDate || getDefaultDailySummaryDate());
+    setBrandFilter(normalizeEntityFilter(draftBrandFilter));
+  };
+
+  const handleClearFilters = () => {
+    const defaultDate = getDefaultDailySummaryDate();
+    setDraftSelectedDate(defaultDate);
+    setDraftBrandFilter(DEFAULT_ENTITY_FILTER);
+    setSelectedDate(defaultDate);
+    setBrandFilter(DEFAULT_ENTITY_FILTER);
+  };
 
   const filters = useMemo(
     () => report?.filters || createDefaultReport(selectedDate).filters,
@@ -292,15 +312,15 @@ const DailySummary = () => {
         </div>
 
         <div className="card om-card mb-3">
-          <div className="card-body d-flex flex-wrap gap-2 align-items-end">
+          <form className="card-body d-flex flex-wrap gap-2 align-items-end" onSubmit={handleApplyFilters}>
             <div>
               <label className="form-label mb-1">Report Date</label>
               <input
                 type="date"
                 lang="en-GB"
                 className="form-control"
-                value={toISODateString(selectedDate)}
-                onChange={(e) => setSelectedDate(toDDMMYYYYInputValue(e.target.value, ""))}
+                value={toISODateString(draftSelectedDate)}
+                onChange={(e) => setDraftSelectedDate(toDDMMYYYYInputValue(e.target.value, ""))}
               />
             </div>
 
@@ -308,8 +328,8 @@ const DailySummary = () => {
               <label className="form-label mb-1">Brand</label>
               <select
                 className="form-select"
-                value={brandFilter}
-                onChange={(e) => setBrandFilter(normalizeEntityFilter(e.target.value))}
+                value={draftBrandFilter}
+                onChange={(e) => setDraftBrandFilter(normalizeEntityFilter(e.target.value))}
               >
                 <option value={DEFAULT_ENTITY_FILTER}>All Brands</option>
                 {brandOptions.map((brand) => (
@@ -321,17 +341,24 @@ const DailySummary = () => {
             </div>
 
             <button
-              type="button"
+              type="submit"
               className="btn btn-primary btn-sm"
-              onClick={fetchReport}
               disabled={loading}
             >
-              {loading ? "Loading..." : "Refresh"}
+              {loading ? "Loading..." : "Apply"}
+            </button>
+            <button
+              type="button"
+              className="btn btn-outline-secondary btn-sm"
+              onClick={handleClearFilters}
+              disabled={loading}
+            >
+              Clear
             </button>
 
             <span className="om-summary-chip">Vendors: {summary?.vendors_count ?? 0}</span>
             <span className="om-summary-chip">Items: {summary?.items_count ?? 0}</span>
-          </div>
+          </form>
         </div>
 
         {error && (

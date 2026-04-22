@@ -34,17 +34,6 @@ const normalizeFilterParam = (value, fallback = "all") => {
 
 const normalizeSearchParam = (value) => String(value || "").trim();
 
-const useDebouncedValue = (value, delay = 300) => {
-  const [debounced, setDebounced] = useState(value);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(timer);
-  }, [value, delay]);
-
-  return debounced;
-};
-
 const STATUS_LABELS = {
   success: "Success",
   success_with_conflicts: "Success + Conflicts",
@@ -63,13 +52,25 @@ const UploadLogs = () => {
   const [vendorFilter, setVendorFilter] = useState(() =>
     normalizeFilterParam(searchParams.get("vendor"), "all"),
   );
+  const [draftVendorFilter, setDraftVendorFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("vendor"), "all"),
+  );
   const [brandFilter, setBrandFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("brand"), "all"),
+  );
+  const [draftBrandFilter, setDraftBrandFilter] = useState(() =>
     normalizeFilterParam(searchParams.get("brand"), "all"),
   );
   const [statusFilter, setStatusFilter] = useState(() =>
     normalizeFilterParam(searchParams.get("status"), "all"),
   );
+  const [draftStatusFilter, setDraftStatusFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("status"), "all"),
+  );
   const [orderIdInput, setOrderIdInput] = useState(() =>
+    normalizeSearchParam(searchParams.get("order_id")),
+  );
+  const [draftOrderIdInput, setDraftOrderIdInput] = useState(() =>
     normalizeSearchParam(searchParams.get("order_id")),
   );
   const [page, setPage] = useState(() =>
@@ -99,8 +100,6 @@ const UploadLogs = () => {
     totalRecords: 0,
   });
 
-  const debouncedOrderId = useDebouncedValue(orderIdInput, 300);
-
   const fetchLogs = useCallback(async () => {
     try {
       setLoading(true);
@@ -112,7 +111,7 @@ const UploadLogs = () => {
         brand: brandFilter,
         vendor: vendorFilter,
         status: statusFilter,
-        order_id: debouncedOrderId,
+        order_id: orderIdInput,
       });
 
       setRows(Array.isArray(res?.data) ? res.data : []);
@@ -149,7 +148,7 @@ const UploadLogs = () => {
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, debouncedOrderId, limit, page, statusFilter, vendorFilter]);
+  }, [brandFilter, limit, orderIdInput, page, statusFilter, vendorFilter]);
 
   useEffect(() => {
     fetchLogs();
@@ -167,9 +166,13 @@ const UploadLogs = () => {
     const nextLimit = parseLimit(searchParams.get("limit"));
 
     setBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
+    setDraftBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
     setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
+    setDraftVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
     setStatusFilter((prev) => (prev === nextStatusFilter ? prev : nextStatusFilter));
+    setDraftStatusFilter((prev) => (prev === nextStatusFilter ? prev : nextStatusFilter));
     setOrderIdInput((prev) => (prev === nextOrderIdInput ? prev : nextOrderIdInput));
+    setDraftOrderIdInput((prev) => (prev === nextOrderIdInput ? prev : nextOrderIdInput));
     setPage((prev) => (prev === nextPage ? prev : nextPage));
     setLimit((prev) => (prev === nextLimit ? prev : nextLimit));
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
@@ -217,6 +220,32 @@ const UploadLogs = () => {
     },
     [sortBy, sortOrder],
   );
+
+  const handleApplyFilters = useCallback((event) => {
+    event?.preventDefault();
+    setPage(1);
+    setOrderIdInput(normalizeSearchParam(draftOrderIdInput));
+    setBrandFilter(normalizeFilterParam(draftBrandFilter, "all"));
+    setVendorFilter(normalizeFilterParam(draftVendorFilter, "all"));
+    setStatusFilter(normalizeFilterParam(draftStatusFilter, "all"));
+  }, [
+    draftBrandFilter,
+    draftOrderIdInput,
+    draftStatusFilter,
+    draftVendorFilter,
+  ]);
+
+  const handleClearFilters = useCallback(() => {
+    setPage(1);
+    setDraftBrandFilter("all");
+    setDraftVendorFilter("all");
+    setDraftStatusFilter("all");
+    setDraftOrderIdInput("");
+    setBrandFilter("all");
+    setVendorFilter("all");
+    setStatusFilter("all");
+    setOrderIdInput("");
+  }, []);
 
   const sortedRows = useMemo(
     () =>
@@ -266,29 +295,23 @@ const UploadLogs = () => {
 
         <div className="card om-card mb-3">
           <div className="card-body">
-            <div className="row g-2 align-items-end">
+            <form className="row g-2 align-items-end" onSubmit={handleApplyFilters}>
               <div className="col-md-4">
                 <label className="form-label">Order ID</label>
                 <input
                   type="text"
                   className="form-control"
-                  value={orderIdInput}
+                  value={draftOrderIdInput}
                   placeholder="Search order id"
-                  onChange={(e) => {
-                    setPage(1);
-                    setOrderIdInput(e.target.value);
-                  }}
+                  onChange={(e) => setDraftOrderIdInput(e.target.value)}
                 />
               </div>
               <div className="col-md-2">
                 <label className="form-label">Brand</label>
                 <select
                   className="form-select"
-                  value={brandFilter}
-                  onChange={(e) => {
-                    setPage(1);
-                    setBrandFilter(e.target.value);
-                  }}
+                  value={draftBrandFilter}
+                  onChange={(e) => setDraftBrandFilter(e.target.value)}
                 >
                   <option value="all">All Brands</option>
                   {filters.brands.map((brand) => (
@@ -302,11 +325,8 @@ const UploadLogs = () => {
                 <label className="form-label">Vendor</label>
                 <select
                   className="form-select"
-                  value={vendorFilter}
-                  onChange={(e) => {
-                    setPage(1);
-                    setVendorFilter(e.target.value);
-                  }}
+                  value={draftVendorFilter}
+                  onChange={(e) => setDraftVendorFilter(e.target.value)}
                 >
                   <option value="all">All Vendors</option>
                   {filters.vendors.map((vendor) => (
@@ -320,11 +340,8 @@ const UploadLogs = () => {
                 <label className="form-label">Status</label>
                 <select
                   className="form-select"
-                  value={statusFilter}
-                  onChange={(e) => {
-                    setPage(1);
-                    setStatusFilter(e.target.value);
-                  }}
+                  value={draftStatusFilter}
+                  onChange={(e) => setDraftStatusFilter(e.target.value)}
                 >
                   <option value="all">All Statuses</option>
                   {filters.statuses.map((status) => (
@@ -334,22 +351,20 @@ const UploadLogs = () => {
                   ))}
                 </select>
               </div>
-              <div className="col-md-2 d-grid">
+              <div className="col-md-2 d-grid gap-2">
+                <button type="submit" className="btn btn-primary" disabled={loading}>
+                  Apply
+                </button>
                 <button
                   type="button"
                   className="btn btn-outline-secondary"
-                  onClick={() => {
-                    setPage(1);
-                    setBrandFilter("all");
-                    setVendorFilter("all");
-                    setStatusFilter("all");
-                    setOrderIdInput("");
-                  }}
+                  onClick={handleClearFilters}
+                  disabled={loading}
                 >
                   Clear
                 </button>
               </div>
-            </div>
+            </form>
           </div>
         </div>
 

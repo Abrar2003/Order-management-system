@@ -31,17 +31,6 @@ const normalizeFilterParam = (value, fallback = "all") => {
 
 const normalizeSearchParam = (value) => String(value || "").trim();
 
-const useDebouncedValue = (value, delay = 300) => {
-  const [debounced, setDebounced] = useState(value);
-
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(t);
-  }, [value, delay]);
-
-  return debounced;
-};
-
 const ProductAnalytics = () => {
   const navigate = useNavigate();
 
@@ -50,8 +39,11 @@ const ProductAnalytics = () => {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [searchInput, setSearchInput] = useState("");
+  const [draftSearchInput, setDraftSearchInput] = useState("");
   const [brandFilter, setBrandFilter] = useState("all");
+  const [draftBrandFilter, setDraftBrandFilter] = useState("all");
   const [vendorFilter, setVendorFilter] = useState("all");
+  const [draftVendorFilter, setDraftVendorFilter] = useState("all");
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(DEFAULT_LIMIT);
   const [totalPages, setTotalPages] = useState(1);
@@ -63,8 +55,6 @@ const ProductAnalytics = () => {
   const [sortBy, setSortBy] = useState("orderId");
   const [sortOrder, setSortOrder] = useState("asc");
 
-  const debouncedSearch = useDebouncedValue(searchInput, 300);
-
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
@@ -72,7 +62,7 @@ const ProductAnalytics = () => {
 
       const res = await api.get("/items/product-analytics", {
         params: {
-          search: debouncedSearch,
+          search: searchInput,
           brand: brandFilter,
           vendor: vendorFilter,
           page,
@@ -105,11 +95,30 @@ const ProductAnalytics = () => {
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, debouncedSearch, limit, page, vendorFilter]);
+  }, [brandFilter, limit, page, searchInput, vendorFilter]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  const handleApplyFilters = (event) => {
+    event?.preventDefault();
+    setPage(1);
+    setSearchInput(normalizeSearchParam(draftSearchInput));
+    setBrandFilter(normalizeFilterParam(draftBrandFilter, "all"));
+    setVendorFilter(normalizeFilterParam(draftVendorFilter, "all"));
+  };
+
+  const handleClearFilters = () => {
+    setPage(1);
+    setDraftSearchInput("");
+    setDraftBrandFilter("all");
+    setDraftVendorFilter("all");
+    setSearchInput("");
+    setBrandFilter("all");
+    setVendorFilter("all");
+    setSuccess("");
+  };
 
   const handleSortColumn = useCallback(
     (column, defaultDirection = "asc") => {
@@ -172,29 +181,23 @@ const ProductAnalytics = () => {
 
         <div className="card om-card mb-3">
           <div className="card-body">
-            <div className="row g-2 align-items-end">
+            <form className="row g-2 align-items-end" onSubmit={handleApplyFilters}>
               <div className="col-md-4">
                 <label className="form-label">Search Item Code</label>
                 <input
                   type="text"
                   className="form-control"
-                  value={searchInput}
+                  value={draftSearchInput}
                   placeholder="Search items"
-                  onChange={(e) => {
-                    setPage(1);
-                    setSearchInput(e.target.value);
-                  }}
+                  onChange={(e) => setDraftSearchInput(e.target.value)}
                 />
               </div>
               <div className="col-md-3">
                 <label className="form-label">Brand</label>
                 <select
                   className="form-select"
-                  value={brandFilter}
-                  onChange={(e) => {
-                    setPage(1);
-                    setBrandFilter(e.target.value);
-                  }}
+                  value={draftBrandFilter}
+                  onChange={(e) => setDraftBrandFilter(e.target.value)}
                 >
                   <option value="all">All Brands</option>
                   {filters.brands.map((brand) => (
@@ -208,11 +211,8 @@ const ProductAnalytics = () => {
                 <label className="form-label">Vendor</label>
                 <select
                   className="form-select"
-                  value={vendorFilter}
-                  onChange={(e) => {
-                    setPage(1);
-                    setVendorFilter(e.target.value);
-                  }}
+                  value={draftVendorFilter}
+                  onChange={(e) => setDraftVendorFilter(e.target.value)}
                 >
                   <option value="all">All Vendors</option>
                   {filters.vendors.map((vendor) => (
@@ -222,22 +222,19 @@ const ProductAnalytics = () => {
                   ))}
                 </select>
               </div>
-              <div className="col-md-2 d-grid">
+              <div className="col-md-2 d-flex gap-2">
+                <button type="submit" className="btn btn-primary flex-fill">
+                  Apply
+                </button>
                 <button
                   type="button"
-                  className="btn btn-outline-secondary"
-                  onClick={() => {
-                    setPage(1);
-                    setSearchInput("");
-                    setBrandFilter("all");
-                    setVendorFilter("all");
-                    setSuccess("");
-                  }}
+                  className="btn btn-outline-secondary flex-fill"
+                  onClick={handleClearFilters}
                 >
                   Clear
                 </button>
               </div>
-            </div>
+            </form>
           </div>
         </div>
 

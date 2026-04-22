@@ -208,12 +208,21 @@ const VendorReports = () => {
   );
 
   const [timeline, setTimeline] = useState(() => initialTimeline);
+  const [draftTimeline, setDraftTimeline] = useState(() => initialTimeline);
   const [fromDate, setFromDate] = useState(() => initialDateRange.from_date);
+  const [draftFromDate, setDraftFromDate] = useState(() => initialDateRange.from_date);
   const [toDate, setToDate] = useState(() => initialDateRange.to_date);
+  const [draftToDate, setDraftToDate] = useState(() => initialDateRange.to_date);
   const [brandFilter, setBrandFilter] = useState(() =>
     normalizeEntityFilter(searchParams.get("brand")),
   );
+  const [draftBrandFilter, setDraftBrandFilter] = useState(() =>
+    normalizeEntityFilter(searchParams.get("brand")),
+  );
   const [vendorFilter, setVendorFilter] = useState(() =>
+    normalizeEntityFilter(searchParams.get("vendor")),
+  );
+  const [draftVendorFilter, setDraftVendorFilter] = useState(() =>
     normalizeEntityFilter(searchParams.get("vendor")),
   );
   const [loading, setLoading] = useState(true);
@@ -281,10 +290,15 @@ const VendorReports = () => {
     const nextVendorFilter = normalizeEntityFilter(searchParams.get("vendor"));
 
     setTimeline((prev) => (prev === nextTimeline ? prev : nextTimeline));
+    setDraftTimeline((prev) => (prev === nextTimeline ? prev : nextTimeline));
     setFromDate((prev) => (prev === nextDateRange.from_date ? prev : nextDateRange.from_date));
+    setDraftFromDate((prev) => (prev === nextDateRange.from_date ? prev : nextDateRange.from_date));
     setToDate((prev) => (prev === nextDateRange.to_date ? prev : nextDateRange.to_date));
+    setDraftToDate((prev) => (prev === nextDateRange.to_date ? prev : nextDateRange.to_date));
     setBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
+    setDraftBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
     setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
+    setDraftVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
   }, [searchParams, syncedQuery]);
 
@@ -355,23 +369,54 @@ const VendorReports = () => {
 
   const handleTimelineChange = useCallback((event) => {
     const nextTimeline = normalizeTimeline(event.target.value);
-    setTimeline(nextTimeline);
+    setDraftTimeline(nextTimeline);
 
     if (nextTimeline !== "custom") {
       const nextRange = getDateRangeFromTimeline(nextTimeline);
-      setFromDate(nextRange.from_date);
-      setToDate(nextRange.to_date);
+      setDraftFromDate(nextRange.from_date);
+      setDraftToDate(nextRange.to_date);
     }
   }, []);
 
   const handleFromDateChange = useCallback((event) => {
-    setTimeline("custom");
-    setFromDate((prev) => normalizeDateFilter(event.target.value, prev));
+    setDraftTimeline("custom");
+    setDraftFromDate((prev) => normalizeDateFilter(event.target.value, prev));
   }, []);
 
   const handleToDateChange = useCallback((event) => {
-    setTimeline("custom");
-    setToDate((prev) => normalizeDateFilter(event.target.value, prev));
+    setDraftTimeline("custom");
+    setDraftToDate((prev) => normalizeDateFilter(event.target.value, prev));
+  }, []);
+
+  const handleApplyFilters = useCallback((event) => {
+    event?.preventDefault();
+    setTimeline(normalizeTimeline(draftTimeline));
+    setFromDate(normalizeDateFilter(draftFromDate, fromDate));
+    setToDate(normalizeDateFilter(draftToDate, toDate));
+    setBrandFilter(normalizeEntityFilter(draftBrandFilter));
+    setVendorFilter(normalizeEntityFilter(draftVendorFilter));
+  }, [
+    draftBrandFilter,
+    draftFromDate,
+    draftTimeline,
+    draftToDate,
+    draftVendorFilter,
+    fromDate,
+    toDate,
+  ]);
+
+  const handleClearFilters = useCallback(() => {
+    const defaultRange = getDateRangeFromTimeline(DEFAULT_TIMELINE);
+    setDraftTimeline(DEFAULT_TIMELINE);
+    setDraftFromDate(defaultRange.from_date);
+    setDraftToDate(defaultRange.to_date);
+    setDraftBrandFilter(DEFAULT_ENTITY_FILTER);
+    setDraftVendorFilter(DEFAULT_ENTITY_FILTER);
+    setTimeline(DEFAULT_TIMELINE);
+    setFromDate(defaultRange.from_date);
+    setToDate(defaultRange.to_date);
+    setBrandFilter(DEFAULT_ENTITY_FILTER);
+    setVendorFilter(DEFAULT_ENTITY_FILTER);
   }, []);
 
   return (
@@ -392,12 +437,12 @@ const VendorReports = () => {
         </div>
 
         <div className="card om-card mb-3">
-          <div className="card-body d-flex flex-wrap gap-2 align-items-end">
+          <form className="card-body d-flex flex-wrap gap-2 align-items-end" onSubmit={handleApplyFilters}>
             <div>
               <label className="form-label mb-1">Timeline</label>
               <select
                 className="form-select"
-                value={timeline}
+                value={draftTimeline}
                 onChange={handleTimelineChange}
               >
                 <option value="1m">Last 1 month</option>
@@ -407,15 +452,15 @@ const VendorReports = () => {
               </select>
             </div>
 
-            {timeline === "custom" && (
+            {draftTimeline === "custom" && (
               <>
                 <div>
                   <label className="form-label mb-1">From</label>
                   <input
                     type="date"
                     className="form-control"
-                    value={fromDate}
-                    max={toDate}
+                    value={draftFromDate}
+                    max={draftToDate}
                     onChange={handleFromDateChange}
                   />
                 </div>
@@ -425,8 +470,8 @@ const VendorReports = () => {
                   <input
                     type="date"
                     className="form-control"
-                    value={toDate}
-                    min={fromDate}
+                    value={draftToDate}
+                    min={draftFromDate}
                     onChange={handleToDateChange}
                   />
                 </div>
@@ -437,8 +482,8 @@ const VendorReports = () => {
               <label className="form-label mb-1">Brand</label>
               <select
                 className="form-select"
-                value={brandFilter}
-                onChange={(e) => setBrandFilter(normalizeEntityFilter(e.target.value))}
+                value={draftBrandFilter}
+                onChange={(e) => setDraftBrandFilter(normalizeEntityFilter(e.target.value))}
               >
                 <option value={DEFAULT_ENTITY_FILTER}>All Brands</option>
                 {(Array.isArray(filters.brand_options) ? filters.brand_options : []).map((brand) => (
@@ -453,8 +498,8 @@ const VendorReports = () => {
               <label className="form-label mb-1">Vendor</label>
               <select
                 className="form-select"
-                value={vendorFilter}
-                onChange={(e) => setVendorFilter(normalizeEntityFilter(e.target.value))}
+                value={draftVendorFilter}
+                onChange={(e) => setDraftVendorFilter(normalizeEntityFilter(e.target.value))}
               >
                 <option value={DEFAULT_ENTITY_FILTER}>All Vendors</option>
                 {(Array.isArray(filters.vendor_options) ? filters.vendor_options : []).map((vendor) => (
@@ -466,14 +511,21 @@ const VendorReports = () => {
             </div>
 
             <button
-              type="button"
+              type="submit"
               className="btn btn-primary btn-sm"
-              onClick={fetchReports}
               disabled={loading}
             >
-              {loading ? "Loading..." : "Refresh"}
+              {loading ? "Loading..." : "Apply"}
             </button>
-          </div>
+            <button
+              type="button"
+              className="btn btn-outline-secondary btn-sm"
+              onClick={handleClearFilters}
+              disabled={loading}
+            >
+              Clear
+            </button>
+          </form>
         </div>
 
         <div className="card om-card mb-3">

@@ -41,17 +41,6 @@ const normalizeFilterParam = (value, fallback = "all") => {
 
 const normalizeSearchParam = (value) => String(value || "").trim();
 
-const useDebouncedValue = (value, delay = 300) => {
-  const [debounced, setDebounced] = useState(value);
-
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => setDebounced(value), delay);
-    return () => window.clearTimeout(timeoutId);
-  }, [delay, value]);
-
-  return debounced;
-};
-
 const getBrand = (item = {}) =>
   item?.brand_name
   || item?.brand
@@ -190,10 +179,19 @@ const PISDiffs = () => {
   const [searchInput, setSearchInput] = useState(() =>
     normalizeSearchParam(searchParams.get("search")),
   );
+  const [draftSearchInput, setDraftSearchInput] = useState(() =>
+    normalizeSearchParam(searchParams.get("search")),
+  );
   const [brandFilter, setBrandFilter] = useState(() =>
     normalizeFilterParam(searchParams.get("brand"), "all"),
   );
+  const [draftBrandFilter, setDraftBrandFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("brand"), "all"),
+  );
   const [vendorFilter, setVendorFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("vendor"), "all"),
+  );
+  const [draftVendorFilter, setDraftVendorFilter] = useState(() =>
     normalizeFilterParam(searchParams.get("vendor"), "all"),
   );
   const [page, setPage] = useState(() =>
@@ -211,8 +209,6 @@ const PISDiffs = () => {
   const [sortBy, setSortBy] = useState("code");
   const [sortOrder, setSortOrder] = useState("asc");
 
-  const debouncedSearch = useDebouncedValue(searchInput, 300);
-
   const fetchDiffItems = useCallback(async () => {
     try {
       setLoading(true);
@@ -220,7 +216,7 @@ const PISDiffs = () => {
 
       const response = await api.get("/items/pis-diffs", {
         params: {
-          search: debouncedSearch,
+          search: searchInput,
           brand: brandFilter,
           vendor: vendorFilter,
           page,
@@ -255,7 +251,7 @@ const PISDiffs = () => {
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, debouncedSearch, limit, page, vendorFilter]);
+  }, [brandFilter, limit, page, searchInput, vendorFilter]);
 
   useEffect(() => {
     fetchDiffItems();
@@ -272,8 +268,11 @@ const PISDiffs = () => {
     const nextLimit = parseLimit(searchParams.get("limit"));
 
     setSearchInput((prev) => (prev === nextSearchInput ? prev : nextSearchInput));
+    setDraftSearchInput((prev) => (prev === nextSearchInput ? prev : nextSearchInput));
     setBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
+    setDraftBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
     setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
+    setDraftVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
     setPage((prev) => (prev === nextPage ? prev : nextPage));
     setLimit((prev) => (prev === nextLimit ? prev : nextLimit));
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
@@ -332,6 +331,24 @@ const PISDiffs = () => {
     [sortBy, sortOrder],
   );
 
+  const handleApplyFilters = useCallback((event) => {
+    event?.preventDefault();
+    setPage(1);
+    setSearchInput(normalizeSearchParam(draftSearchInput));
+    setBrandFilter(normalizeFilterParam(draftBrandFilter, "all"));
+    setVendorFilter(normalizeFilterParam(draftVendorFilter, "all"));
+  }, [draftBrandFilter, draftSearchInput, draftVendorFilter]);
+
+  const handleClearFilters = useCallback(() => {
+    setPage(1);
+    setDraftSearchInput("");
+    setDraftBrandFilter("all");
+    setDraftVendorFilter("all");
+    setSearchInput("");
+    setBrandFilter("all");
+    setVendorFilter("all");
+  }, []);
+
   const sortedRows = useMemo(
     () =>
       sortClientRows(rows, {
@@ -373,19 +390,16 @@ const PISDiffs = () => {
 
         <div className="card om-card mb-3">
           <div className="card-body">
-            <div className="row g-2 align-items-end">
+            <form className="row g-2 align-items-end" onSubmit={handleApplyFilters}>
               <div className="col-md-4">
                 <label className="form-label">Search (Code / Name / Description)</label>
                 <input
                   type="text"
                   className="form-control"
-                  value={searchInput}
+                  value={draftSearchInput}
                   list="pis-diff-item-code-options"
                   placeholder="Search items"
-                  onChange={(event) => {
-                    setPage(1);
-                    setSearchInput(event.target.value);
-                  }}
+                  onChange={(event) => setDraftSearchInput(event.target.value)}
                 />
                 <datalist id="pis-diff-item-code-options">
                   {itemCodeOptions.map((code) => (
@@ -398,11 +412,8 @@ const PISDiffs = () => {
                 <label className="form-label">Brand</label>
                 <select
                   className="form-select"
-                  value={brandFilter}
-                  onChange={(event) => {
-                    setPage(1);
-                    setBrandFilter(event.target.value);
-                  }}
+                  value={draftBrandFilter}
+                  onChange={(event) => setDraftBrandFilter(event.target.value)}
                 >
                   <option value="all">All Brands</option>
                   {filters.brands.map((brand) => (
@@ -417,11 +428,8 @@ const PISDiffs = () => {
                 <label className="form-label">Vendor</label>
                 <select
                   className="form-select"
-                  value={vendorFilter}
-                  onChange={(event) => {
-                    setPage(1);
-                    setVendorFilter(event.target.value);
-                  }}
+                  value={draftVendorFilter}
+                  onChange={(event) => setDraftVendorFilter(event.target.value)}
                 >
                   <option value="all">All Vendors</option>
                   {filters.vendors.map((vendor) => (
@@ -432,21 +440,24 @@ const PISDiffs = () => {
                 </select>
               </div>
 
-              <div className="col-md-2 d-grid">
+              <div className="col-md-2 d-grid gap-2">
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={loading}
+                >
+                  Apply
+                </button>
                 <button
                   type="button"
                   className="btn btn-outline-secondary"
-                  onClick={() => {
-                    setPage(1);
-                    setSearchInput("");
-                    setBrandFilter("all");
-                    setVendorFilter("all");
-                  }}
+                  onClick={handleClearFilters}
+                  disabled={loading}
                 >
                   Clear
                 </button>
               </div>
-            </div>
+            </form>
           </div>
         </div>
 

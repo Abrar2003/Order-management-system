@@ -8,12 +8,24 @@ import {
   toDDMMYYYYInputValue,
   toISODateString,
 } from "../utils/date";
-import { useShippingInspectors } from "../hooks/useShippingInspectors";
+import {
+  SHIPPED_BY_VENDOR_OPTION,
+  useShippingInspectors,
+} from "../hooks/useShippingInspectors";
 import "../App.css";
 
 const normalizeShipmentDraftInvoiceNumber = (value) => {
   const normalized = String(value ?? "").trim();
   return normalized && normalized !== "N/A" ? normalized : "";
+};
+
+const normalizeStuffedById = (entry = {}) => {
+  const id = String(entry?.stuffed_by?.id ?? "").trim();
+  const name = String(entry?.stuffed_by?.name ?? "").trim();
+  if (name.toLowerCase() === SHIPPED_BY_VENDOR_OPTION.name.toLowerCase()) {
+    return SHIPPED_BY_VENDOR_OPTION.id;
+  }
+  return id;
 };
 
 const makeInitialShipmentRows = (shipment = []) =>
@@ -23,7 +35,7 @@ const makeInitialShipmentRows = (shipment = []) =>
     stuffing_date: toDDMMYYYYInputValue(entry?.stuffing_date, ""),
     quantity: String(entry?.quantity ?? ""),
     remaining_remarks: String(entry?.remaining_remarks ?? ""),
-    stuffed_by_id: String(entry?.stuffed_by?.id ?? ""),
+    stuffed_by_id: normalizeStuffedById(entry),
     stuffed_by_name: String(entry?.stuffed_by?.name ?? ""),
   }));
 
@@ -404,7 +416,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
               <table className="table table-sm table-striped align-middle mb-0">
                 <thead>
                   <tr>
-                    <th style={{ width: "16%" }}>Stuffed By</th>
+                    <th style={{ width: "16%" }}>Shipped By</th>
                     <th style={{ width: "16%" }}>Container</th>
                     <th style={{ width: "16%" }}>Invoice Number (Optional)</th>
                     <th style={{ width: "14%" }}>Stuffing Date</th>
@@ -433,7 +445,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                           }
                         >
                           <option value="">
-                            {loadingInspectors ? "Loading inspectors..." : "Select inspector"}
+                            {loadingInspectors ? "Loading inspectors..." : "Select shipped by"}
                           </option>
                           {shipmentInspectorOptions.map((inspector) => (
                             <option key={inspector.id} value={inspector.id}>

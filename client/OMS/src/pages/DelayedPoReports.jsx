@@ -57,7 +57,13 @@ const DelayedPoReports = () => {
   const [brandFilter, setBrandFilter] = useState(() =>
     normalizeEntityFilter(searchParams.get("brand")),
   );
+  const [draftBrandFilter, setDraftBrandFilter] = useState(() =>
+    normalizeEntityFilter(searchParams.get("brand")),
+  );
   const [vendorFilter, setVendorFilter] = useState(() =>
+    normalizeEntityFilter(searchParams.get("vendor")),
+  );
+  const [draftVendorFilter, setDraftVendorFilter] = useState(() =>
     normalizeEntityFilter(searchParams.get("vendor")),
   );
   const [fromDateFilter, setFromDateFilter] = useState(() =>
@@ -67,7 +73,21 @@ const DelayedPoReports = () => {
       || "",
     ).trim(),
   );
+  const [draftFromDateFilter, setDraftFromDateFilter] = useState(() =>
+    String(
+      searchParams.get("from_date")
+      || searchParams.get("fromDate")
+      || "",
+    ).trim(),
+  );
   const [toDateFilter, setToDateFilter] = useState(() =>
+    String(
+      searchParams.get("to_date")
+      || searchParams.get("toDate")
+      || "",
+    ).trim(),
+  );
+  const [draftToDateFilter, setDraftToDateFilter] = useState(() =>
     String(
       searchParams.get("to_date")
       || searchParams.get("toDate")
@@ -148,9 +168,13 @@ const DelayedPoReports = () => {
     ).trim();
 
     setBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
+    setDraftBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
     setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
+    setDraftVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
     setFromDateFilter((prev) => (prev === nextFromDate ? prev : nextFromDate));
+    setDraftFromDateFilter((prev) => (prev === nextFromDate ? prev : nextFromDate));
     setToDateFilter((prev) => (prev === nextToDate ? prev : nextToDate));
+    setDraftToDateFilter((prev) => (prev === nextToDate ? prev : nextToDate));
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
   }, [searchParams, syncedQuery]);
 
@@ -199,6 +223,30 @@ const DelayedPoReports = () => {
     if (!normalizedOrderId) return;
     navigate(`/orders?order_id=${encodeURIComponent(normalizedOrderId)}`);
   }, [navigate]);
+
+  const handleApplyFilters = useCallback((event) => {
+    event?.preventDefault();
+    setBrandFilter(normalizeEntityFilter(draftBrandFilter));
+    setVendorFilter(normalizeEntityFilter(draftVendorFilter));
+    setFromDateFilter(String(draftFromDateFilter || "").trim());
+    setToDateFilter(String(draftToDateFilter || "").trim());
+  }, [
+    draftBrandFilter,
+    draftFromDateFilter,
+    draftToDateFilter,
+    draftVendorFilter,
+  ]);
+
+  const handleClearFilters = useCallback(() => {
+    setDraftBrandFilter(DEFAULT_ENTITY_FILTER);
+    setDraftVendorFilter(DEFAULT_ENTITY_FILTER);
+    setDraftFromDateFilter("");
+    setDraftToDateFilter("");
+    setBrandFilter(DEFAULT_ENTITY_FILTER);
+    setVendorFilter(DEFAULT_ENTITY_FILTER);
+    setFromDateFilter("");
+    setToDateFilter("");
+  }, []);
 
   const handleExport = useCallback(async () => {
     try {
@@ -317,16 +365,16 @@ const DelayedPoReports = () => {
         </div>
 
         <div className="card om-card mb-3">
-          <div className="card-body d-flex flex-wrap gap-2 align-items-end">
+          <form className="card-body d-flex flex-wrap gap-2 align-items-end" onSubmit={handleApplyFilters}>
             <div>
               <label className="form-label mb-1">From Date</label>
               <input
                 type="date"
                 className="form-control"
-                value={fromDateFilter}
-                max={toDateFilter || undefined}
+                value={draftFromDateFilter}
+                max={draftToDateFilter || undefined}
                 onChange={(event) =>
-                  setFromDateFilter(String(event.target.value || "").trim())
+                  setDraftFromDateFilter(String(event.target.value || "").trim())
                 }
               />
             </div>
@@ -336,10 +384,10 @@ const DelayedPoReports = () => {
               <input
                 type="date"
                 className="form-control"
-                value={toDateFilter}
-                min={fromDateFilter || undefined}
+                value={draftToDateFilter}
+                min={draftFromDateFilter || undefined}
                 onChange={(event) =>
-                  setToDateFilter(String(event.target.value || "").trim())
+                  setDraftToDateFilter(String(event.target.value || "").trim())
                 }
               />
             </div>
@@ -348,9 +396,9 @@ const DelayedPoReports = () => {
               <label className="form-label mb-1">Brand</label>
               <select
                 className="form-select"
-                value={brandFilter}
+                value={draftBrandFilter}
                 onChange={(event) =>
-                  setBrandFilter(normalizeEntityFilter(event.target.value))
+                  setDraftBrandFilter(normalizeEntityFilter(event.target.value))
                 }
               >
                 <option value={DEFAULT_ENTITY_FILTER}>All Brands</option>
@@ -366,9 +414,9 @@ const DelayedPoReports = () => {
               <label className="form-label mb-1">Vendor</label>
               <select
                 className="form-select"
-                value={vendorFilter}
+                value={draftVendorFilter}
                 onChange={(event) =>
-                  setVendorFilter(normalizeEntityFilter(event.target.value))
+                  setDraftVendorFilter(normalizeEntityFilter(event.target.value))
                 }
               >
                 <option value={DEFAULT_ENTITY_FILTER}>All Vendors</option>
@@ -381,14 +429,21 @@ const DelayedPoReports = () => {
             </div>
 
             <button
-              type="button"
+              type="submit"
               className="btn btn-primary btn-sm"
-              onClick={fetchReport}
               disabled={loading}
             >
-              {loading ? "Loading..." : "Refresh"}
+              {loading ? "Loading..." : "Apply"}
             </button>
-          </div>
+            <button
+              type="button"
+              className="btn btn-outline-secondary btn-sm"
+              onClick={handleClearFilters}
+              disabled={loading}
+            >
+              Clear
+            </button>
+          </form>
         </div>
 
         <div className="card om-card mb-3">

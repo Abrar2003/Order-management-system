@@ -166,10 +166,15 @@ const VendorWiseQAReport = () => {
 
   const [activeTab, setActiveTab] = useState(() => initialTab);
   const [timeline, setTimeline] = useState(() => initialTimeline);
+  const [draftTimeline, setDraftTimeline] = useState(() => initialTimeline);
   const [fromDate, setFromDate] = useState(() => initialDateRange.from_date);
+  const [draftFromDate, setDraftFromDate] = useState(() => initialDateRange.from_date);
   const [toDate, setToDate] = useState(() => initialDateRange.to_date);
+  const [draftToDate, setDraftToDate] = useState(() => initialDateRange.to_date);
   const [vendorFilter, setVendorFilter] = useState(() => initialVendor);
+  const [draftVendorFilter, setDraftVendorFilter] = useState(() => initialVendor);
   const [inspectorFilter, setInspectorFilter] = useState(() => initialInspector);
+  const [draftInspectorFilter, setDraftInspectorFilter] = useState(() => initialInspector);
   const [vendorOptions, setVendorOptions] = useState([]);
   const [loadingVendorOptions, setLoadingVendorOptions] = useState(true);
   const [loadingSummary, setLoadingSummary] = useState(false);
@@ -333,10 +338,15 @@ const VendorWiseQAReport = () => {
 
     setActiveTab((prev) => (prev === nextTab ? prev : nextTab));
     setTimeline((prev) => (prev === nextTimeline ? prev : nextTimeline));
+    setDraftTimeline((prev) => (prev === nextTimeline ? prev : nextTimeline));
     setFromDate((prev) => (prev === nextDateRange.from_date ? prev : nextDateRange.from_date));
+    setDraftFromDate((prev) => (prev === nextDateRange.from_date ? prev : nextDateRange.from_date));
     setToDate((prev) => (prev === nextDateRange.to_date ? prev : nextDateRange.to_date));
+    setDraftToDate((prev) => (prev === nextDateRange.to_date ? prev : nextDateRange.to_date));
     setVendorFilter((prev) => (prev === nextVendor ? prev : nextVendor));
+    setDraftVendorFilter((prev) => (prev === nextVendor ? prev : nextVendor));
     setInspectorFilter((prev) => (prev === nextInspector ? prev : nextInspector));
+    setDraftInspectorFilter((prev) => (prev === nextInspector ? prev : nextInspector));
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
   }, [searchParams, syncedQuery]);
 
@@ -469,32 +479,46 @@ const VendorWiseQAReport = () => {
 
   const handleTimelineChange = (nextTimelineValue) => {
     const normalizedTimeline = normalizeTimeline(nextTimelineValue);
-    setTimeline(normalizedTimeline);
+    setDraftTimeline(normalizedTimeline);
 
     if (normalizedTimeline !== "custom") {
       const nextRange = getDateRangeFromTimeline(normalizedTimeline);
-      setFromDate(nextRange.from_date);
-      setToDate(nextRange.to_date);
+      setDraftFromDate(nextRange.from_date);
+      setDraftToDate(nextRange.to_date);
     }
   };
 
   const handleCustomFromDateChange = (value) => {
-    setTimeline("custom");
-    setFromDate(normalizeDateFilter(value, fromDate));
+    setDraftTimeline("custom");
+    setDraftFromDate(normalizeDateFilter(value, draftFromDate));
   };
 
   const handleCustomToDateChange = (value) => {
-    setTimeline("custom");
-    setToDate(normalizeDateFilter(value, toDate));
+    setDraftTimeline("custom");
+    setDraftToDate(normalizeDateFilter(value, draftToDate));
   };
 
-  const handleRefresh = () => {
-    if (activeTab === "summary") {
-      fetchSummaryReport();
-      return;
-    }
+  const handleApplyFilters = (event) => {
+    event?.preventDefault();
+    setTimeline(normalizeTimeline(draftTimeline));
+    setFromDate(normalizeDateFilter(draftFromDate, fromDate));
+    setToDate(normalizeDateFilter(draftToDate, toDate));
+    setVendorFilter(normalizeEntityFilter(draftVendorFilter));
+    setInspectorFilter(normalizeEntityFilter(draftInspectorFilter));
+  };
 
-    fetchDetailedReport();
+  const handleClearFilters = () => {
+    const defaultRange = getDateRangeFromTimeline(DEFAULT_TIMELINE);
+    setDraftTimeline(DEFAULT_TIMELINE);
+    setDraftFromDate(defaultRange.from_date);
+    setDraftToDate(defaultRange.to_date);
+    setDraftVendorFilter("");
+    setDraftInspectorFilter("");
+    setTimeline(DEFAULT_TIMELINE);
+    setFromDate(defaultRange.from_date);
+    setToDate(defaultRange.to_date);
+    setVendorFilter("");
+    setInspectorFilter("");
   };
 
   return (
@@ -537,12 +561,12 @@ const VendorWiseQAReport = () => {
               </li>
             </ul>
 
-            <div className="d-flex flex-wrap gap-2 align-items-end">
+            <form className="d-flex flex-wrap gap-2 align-items-end" onSubmit={handleApplyFilters}>
               <div>
                 <label className="form-label mb-1">Timeline</label>
                 <select
                   className="form-select"
-                  value={timeline}
+                  value={draftTimeline}
                   onChange={(e) => handleTimelineChange(e.target.value)}
                 >
                   <option value="1m">Last 1 month</option>
@@ -557,8 +581,8 @@ const VendorWiseQAReport = () => {
                 <input
                   type="date"
                   className="form-control"
-                  value={fromDate}
-                  max={toDate}
+                  value={draftFromDate}
+                  max={draftToDate}
                   onChange={(e) => handleCustomFromDateChange(e.target.value)}
                 />
               </div>
@@ -568,8 +592,8 @@ const VendorWiseQAReport = () => {
                 <input
                   type="date"
                   className="form-control"
-                  value={toDate}
-                  min={fromDate}
+                  value={draftToDate}
+                  min={draftFromDate}
                   onChange={(e) => handleCustomToDateChange(e.target.value)}
                 />
               </div>
@@ -578,8 +602,8 @@ const VendorWiseQAReport = () => {
                 <label className="form-label mb-1">Vendor</label>
                 <select
                   className="form-select"
-                  value={vendorFilter}
-                  onChange={(e) => setVendorFilter(normalizeEntityFilter(e.target.value))}
+                  value={draftVendorFilter}
+                  onChange={(e) => setDraftVendorFilter(normalizeEntityFilter(e.target.value))}
                   disabled={loadingVendorOptions}
                 >
                   <option value="">
@@ -598,8 +622,8 @@ const VendorWiseQAReport = () => {
                   <label className="form-label mb-1">Inspector</label>
                   <select
                     className="form-select"
-                    value={inspectorFilter}
-                    onChange={(e) => setInspectorFilter(normalizeEntityFilter(e.target.value))}
+                    value={draftInspectorFilter}
+                    onChange={(e) => setDraftInspectorFilter(normalizeEntityFilter(e.target.value))}
                   >
                     <option value="">All Inspectors</option>
                     {inspectorOptions.map((option) => (
@@ -612,14 +636,21 @@ const VendorWiseQAReport = () => {
               )}
 
               <button
-                type="button"
+                type="submit"
                 className="btn btn-primary btn-sm"
-                onClick={handleRefresh}
                 disabled={activeLoading}
               >
-                {activeLoading ? "Loading..." : "Refresh"}
+                {activeLoading ? "Loading..." : "Apply"}
               </button>
-            </div>
+              <button
+                type="button"
+                className="btn btn-outline-secondary btn-sm"
+                onClick={handleClearFilters}
+                disabled={activeLoading}
+              >
+                Clear
+              </button>
+            </form>
           </div>
         </div>
 

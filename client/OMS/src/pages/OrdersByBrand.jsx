@@ -5,6 +5,7 @@ import Navbar from "../components/Navbar";
 import OrderEtdWithHistory from "../components/OrderEtdWithHistory";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { formatDateDDMMYYYY } from "../utils/date";
+import { formatCbm, resolvePreferredCbm } from "../utils/cbm";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
@@ -16,6 +17,7 @@ const parseSortBy = (value) => {
   if (normalized === "order_id") return "order_id";
   if (normalized === "order_date") return "order_date";
   if (normalized === "etd") return "ETD";
+  if (normalized === "totalcbm" || normalized === "total_cbm") return "totalCbm";
   return DEFAULT_SORT_BY;
 };
 
@@ -164,6 +166,14 @@ const OrdersByBrand = () => {
                       <th>Status</th>
                       <th>
                         <SortHeaderButton
+                          label="Total CBM"
+                          isActive={sortBy === "totalCbm"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("totalCbm", "desc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
                           label="Order Date"
                           isActive={sortBy === "order_date"}
                           direction={sortOrder}
@@ -184,7 +194,7 @@ const OrdersByBrand = () => {
                   <tbody>
                     {orders.length === 0 && (
                       <tr>
-                        <td colSpan="6" className="text-center py-4">
+                        <td colSpan="7" className="text-center py-4">
                           No orders found
                         </td>
                       </tr>
@@ -199,6 +209,15 @@ const OrdersByBrand = () => {
                         <td>{order.order_id}</td>
                         <td>{order.items}</td>
                         <td>{order?.totalStatus || "N/A"}</td>
+                        <td>
+                          {formatCbm(
+                            resolvePreferredCbm(
+                              order?.total_po_cbm,
+                              order?.top_po_cbm,
+                              order?.total_cbm,
+                            ),
+                          )}
+                        </td>
                         <td>{formatDateDDMMYYYY(order.order_date)}</td>
                         <td>{formatDateDDMMYYYY(order?.ETD)}</td>
                         <td>

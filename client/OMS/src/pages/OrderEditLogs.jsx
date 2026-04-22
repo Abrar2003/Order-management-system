@@ -34,17 +34,6 @@ const normalizeFilterParam = (value, fallback = "all") => {
 
 const normalizeSearchParam = (value) => String(value || "").trim();
 
-const useDebouncedValue = (value, delay = 300) => {
-  const [debounced, setDebounced] = useState(value);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(timer);
-  }, [value, delay]);
-
-  return debounced;
-};
-
 const OPERATION_LABELS = {
   order_edit: "Order Edit",
   order_edit_archive: "Archived By Edit",
@@ -62,13 +51,25 @@ const OrderEditLogs = () => {
   const [vendorFilter, setVendorFilter] = useState(() =>
     normalizeFilterParam(searchParams.get("vendor"), "all"),
   );
+  const [draftVendorFilter, setDraftVendorFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("vendor"), "all"),
+  );
   const [brandFilter, setBrandFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("brand"), "all"),
+  );
+  const [draftBrandFilter, setDraftBrandFilter] = useState(() =>
     normalizeFilterParam(searchParams.get("brand"), "all"),
   );
   const [operationFilter, setOperationFilter] = useState(() =>
     normalizeFilterParam(searchParams.get("operation_type"), "all"),
   );
+  const [draftOperationFilter, setDraftOperationFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("operation_type"), "all"),
+  );
   const [orderIdInput, setOrderIdInput] = useState(() =>
+    normalizeSearchParam(searchParams.get("order_id")),
+  );
+  const [draftOrderIdInput, setDraftOrderIdInput] = useState(() =>
     normalizeSearchParam(searchParams.get("order_id")),
   );
   const [page, setPage] = useState(() =>
@@ -96,8 +97,6 @@ const OrderEditLogs = () => {
     totalRecords: 0,
   });
 
-  const debouncedOrderId = useDebouncedValue(orderIdInput, 300);
-
   const fetchLogs = useCallback(async () => {
     try {
       setLoading(true);
@@ -109,7 +108,7 @@ const OrderEditLogs = () => {
         brand: brandFilter,
         vendor: vendorFilter,
         operation_type: operationFilter,
-        order_id: debouncedOrderId,
+        order_id: orderIdInput,
       });
 
       setRows(Array.isArray(res?.data) ? res.data : []);
@@ -144,7 +143,7 @@ const OrderEditLogs = () => {
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, debouncedOrderId, limit, operationFilter, page, vendorFilter]);
+  }, [brandFilter, limit, operationFilter, orderIdInput, page, vendorFilter]);
 
   useEffect(() => {
     fetchLogs();
@@ -165,10 +164,15 @@ const OrderEditLogs = () => {
     const nextLimit = parseLimit(searchParams.get("limit"));
 
     setBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
+    setDraftBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
     setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
+    setDraftVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
     setOperationFilter((prev) =>
       (prev === nextOperationFilter ? prev : nextOperationFilter));
+    setDraftOperationFilter((prev) =>
+      (prev === nextOperationFilter ? prev : nextOperationFilter));
     setOrderIdInput((prev) => (prev === nextOrderIdInput ? prev : nextOrderIdInput));
+    setDraftOrderIdInput((prev) => (prev === nextOrderIdInput ? prev : nextOrderIdInput));
     setPage((prev) => (prev === nextPage ? prev : nextPage));
     setLimit((prev) => (prev === nextLimit ? prev : nextLimit));
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
@@ -218,6 +222,32 @@ const OrderEditLogs = () => {
     },
     [sortBy, sortOrder],
   );
+
+  const handleApplyFilters = useCallback((event) => {
+    event?.preventDefault();
+    setPage(1);
+    setOrderIdInput(normalizeSearchParam(draftOrderIdInput));
+    setBrandFilter(normalizeFilterParam(draftBrandFilter, "all"));
+    setVendorFilter(normalizeFilterParam(draftVendorFilter, "all"));
+    setOperationFilter(normalizeFilterParam(draftOperationFilter, "all"));
+  }, [
+    draftBrandFilter,
+    draftOperationFilter,
+    draftOrderIdInput,
+    draftVendorFilter,
+  ]);
+
+  const handleClearFilters = useCallback(() => {
+    setPage(1);
+    setDraftBrandFilter("all");
+    setDraftVendorFilter("all");
+    setDraftOperationFilter("all");
+    setDraftOrderIdInput("");
+    setBrandFilter("all");
+    setVendorFilter("all");
+    setOperationFilter("all");
+    setOrderIdInput("");
+  }, []);
 
   const sortedRows = useMemo(
     () =>
@@ -269,29 +299,23 @@ const OrderEditLogs = () => {
 
         <div className="card om-card mb-3">
           <div className="card-body">
-            <div className="row g-2 align-items-end">
+            <form className="row g-2 align-items-end" onSubmit={handleApplyFilters}>
               <div className="col-md-3">
                 <label className="form-label">Order ID</label>
                 <input
                   type="text"
                   className="form-control"
-                  value={orderIdInput}
+                  value={draftOrderIdInput}
                   placeholder="Search order id"
-                  onChange={(e) => {
-                    setPage(1);
-                    setOrderIdInput(e.target.value);
-                  }}
+                  onChange={(e) => setDraftOrderIdInput(e.target.value)}
                 />
               </div>
               <div className="col-md-3">
                 <label className="form-label">Brand</label>
                 <select
                   className="form-select"
-                  value={brandFilter}
-                  onChange={(e) => {
-                    setPage(1);
-                    setBrandFilter(e.target.value);
-                  }}
+                  value={draftBrandFilter}
+                  onChange={(e) => setDraftBrandFilter(e.target.value)}
                 >
                   <option value="all">All Brands</option>
                   {filters.brands.map((brand) => (
@@ -305,11 +329,8 @@ const OrderEditLogs = () => {
                 <label className="form-label">Vendor</label>
                 <select
                   className="form-select"
-                  value={vendorFilter}
-                  onChange={(e) => {
-                    setPage(1);
-                    setVendorFilter(e.target.value);
-                  }}
+                  value={draftVendorFilter}
+                  onChange={(e) => setDraftVendorFilter(e.target.value)}
                 >
                   <option value="all">All Vendors</option>
                   {filters.vendors.map((vendor) => (
@@ -323,11 +344,8 @@ const OrderEditLogs = () => {
                 <label className="form-label">Type</label>
                 <select
                   className="form-select"
-                  value={operationFilter}
-                  onChange={(e) => {
-                    setPage(1);
-                    setOperationFilter(e.target.value);
-                  }}
+                  value={draftOperationFilter}
+                  onChange={(e) => setDraftOperationFilter(e.target.value)}
                 >
                   <option value="all">All Types</option>
                   {filters.operation_types.map((operationType) => (
@@ -337,22 +355,20 @@ const OrderEditLogs = () => {
                   ))}
                 </select>
               </div>
-              <div className="col-md-1 d-grid">
+              <div className="col-md-1 d-grid gap-2">
+                <button type="submit" className="btn btn-primary" disabled={loading}>
+                  Apply
+                </button>
                 <button
                   type="button"
                   className="btn btn-outline-secondary"
-                  onClick={() => {
-                    setPage(1);
-                    setBrandFilter("all");
-                    setVendorFilter("all");
-                    setOperationFilter("all");
-                    setOrderIdInput("");
-                  }}
+                  onClick={handleClearFilters}
+                  disabled={loading}
                 >
                   Clear
                 </button>
               </div>
-            </div>
+            </form>
           </div>
         </div>
 

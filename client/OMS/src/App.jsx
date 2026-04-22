@@ -36,6 +36,7 @@ import VendorWiseQAReport from "./pages/VendorWiseQAReport";
 import DelayedPoReports from "./pages/DelayedPoReports";
 import UpcomingEtdReports from "./pages/UpcomingEtdReports";
 import PoStatusReport from "./pages/PoStatusReport";
+import PendingPoReport from "./pages/PendingPoReport";
 import ProductAnalytics from "./pages/ProductAnalytics";
 import PIS from "./pages/PIS";
 import PISDiffs from "./pages/PISDiffs";
@@ -244,6 +245,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <PoStatusReport />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/reports/pending-po"
+            element={
+              <ProtectedRoute>
+                <PendingPoReport />
               </ProtectedRoute>
             }
           />
