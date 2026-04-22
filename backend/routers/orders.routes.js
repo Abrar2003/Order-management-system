@@ -11,6 +11,7 @@ const {
   lookupPreviousOrder,
   getOrders,
   getPoStatusReport,
+  getPendingPoReport,
   getOrdersByFiltersDb,
   getOrderById,
   getVendorSummaryByBrand,
@@ -25,6 +26,7 @@ const {
   getDelayedPoReport,
   getUpcomingEtdReport,
   exportDelayedPoReport,
+  exportPendingPoReport,
   exportUpcomingEtdReport,
   exportOrdersDb,
   editOrder,
@@ -115,6 +117,12 @@ router.get(
   getPoStatusReport,
 );
 router.get(
+  "/pending-po-report",
+  authenticate,
+  authorize("admin", "manager", "QC", "dev", "user"),
+  getPendingPoReport,
+);
+router.get(
   "/delayed-po-report",
   authenticate,
   authorize("admin", "manager", "QC", "dev", "user"),
@@ -131,6 +139,12 @@ router.get(
   authenticate,
   authorize("admin", "manager", "QC", "dev", "user"),
   exportDelayedPoReport,
+);
+router.get(
+  "/pending-po-report/export",
+  authenticate,
+  authorize("admin", "manager", "QC", "dev", "user"),
+  exportPendingPoReport,
 );
 router.get(
   "/upcoming-etd-report/export",

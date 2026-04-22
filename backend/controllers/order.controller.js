@@ -45,6 +45,8 @@ const PO_STATUS_REPORT_STATUS_OPTIONS = [
   "Partially Inspected",
   "Inspection Done",
 ];
+const SHIPPED_BY_VENDOR_ID = "shipped_by_vendor";
+const SHIPPED_BY_VENDOR_NAME = "Shipped By Vendor";
 
 const SHIPMENT_VISIBLE_STATUSES = [
   "Inspection Done",
@@ -115,6 +117,16 @@ const normalizeShipmentStuffedBy = (value = null) => {
   const idValue = value?.id ?? value?._id ?? value?.inspector_id ?? value?.inspectorId;
   const normalizedId = String(idValue ?? "").trim();
   const normalizedName = String(value?.name ?? value?.label ?? "").trim();
+
+  if (
+    normalizedId.toLowerCase() === SHIPPED_BY_VENDOR_ID ||
+    normalizedName.toLowerCase() === SHIPPED_BY_VENDOR_NAME.toLowerCase()
+  ) {
+    return {
+      id: null,
+      name: SHIPPED_BY_VENDOR_NAME,
+    };
+  }
 
   if (!normalizedId || !mongoose.Types.ObjectId.isValid(normalizedId)) {
     throw new Error("stuffed_by.id must be a valid inspector id");
@@ -3024,6 +3036,10 @@ const resolveShipmentSortConfig = ({
     invoice: "invoice_number",
     invoicenumber: "invoice_number",
     invoice_number: "invoice_number",
+    stuffedcbm: "shipment_cbm",
+    stuffed_cbm: "shipment_cbm",
+    shipmentcbm: "shipment_cbm",
+    shipment_cbm: "shipment_cbm",
     quantity: "quantity",
     pending: "pending",
     orderquantity: "order_quantity",
@@ -3040,6 +3056,7 @@ const resolveShipmentSortConfig = ({
     "stuffing_date",
     "container",
     "invoice_number",
+    "shipment_cbm",
     "quantity",
     "pending",
   ]);
@@ -3087,6 +3104,31 @@ const resolveShipmentSortConfig = ({
     sortOrder,
     sortDirection,
   };
+};
+
+const resolveShipmentRowCbm = ({
+  itemDoc = null,
+  orderQuantity = 0,
+  storedPoCbm = 0,
+  shipmentQuantity = 0,
+} = {}) => {
+  const shippedQuantity = Math.max(0, Number(shipmentQuantity || 0));
+  if (shippedQuantity <= 0) return 0;
+
+  const shipmentCbmSummary = resolveOrderRowCbmSummary(itemDoc, shippedQuantity);
+  if (Number(shipmentCbmSummary?.total || 0) > 0) {
+    return toRoundedCbmValue(shipmentCbmSummary.total);
+  }
+
+  const orderQuantityValue = Math.max(0, Number(orderQuantity || 0));
+  const storedTotalPoCbm = toPositiveCbmNumber(storedPoCbm);
+  if (storedTotalPoCbm > 0 && orderQuantityValue > 0) {
+    return toRoundedCbmValue(
+      (storedTotalPoCbm / orderQuantityValue) * shippedQuantity,
+    );
+  }
+
+  return 0;
 };
 
 const mapOrdersToShipmentRows = (orders = []) =>
@@ -3160,10 +3202,14 @@ const mapOrdersToShipmentRows = (orders = []) =>
         remaining_remarks: entry?.remaining_remarks || "",
         shipment_checked: Boolean(entry?.checked?.checked),
         shipment_checked_by: entry?.checked?.checked_by || null,
-        shipment_cbm: toRoundedCbmValue(
-          (Number.isFinite(perItemCbm) ? perItemCbm : 0)
-          * (Number.isFinite(parsedShipmentQuantity) ? parsedShipmentQuantity : 0),
-        ),
+        shipment_cbm: resolveShipmentRowCbm({
+          itemDoc: order?.itemDoc,
+          orderQuantity: normalizedOrderQuantity,
+          storedPoCbm,
+          shipmentQuantity: Number.isFinite(parsedShipmentQuantity)
+            ? parsedShipmentQuantity
+            : 0,
+        }),
       };
     });
   });
@@ -3210,6 +3256,8 @@ const getShipmentSortValue = (row, sortBy) => {
       return String(row?.container || "");
     case "invoice_number":
       return normalizeShipmentInvoiceNumber(row?.invoice_number);
+    case "shipment_cbm":
+      return toShipmentNumber(row?.shipment_cbm);
     case "quantity":
       return toShipmentNumber(row?.quantity);
     case "pending":
@@ -3350,6 +3398,7 @@ const getShipmentDataset = async ({
       if (row?.status === "Inspection Done") acc.inspectionDone += 1;
       if (row?.status === "Partial Shipped") acc.partialShipped += 1;
       if (row?.status === "Shipped") acc.shipped += 1;
+      acc.totalStuffedCbm += Number(row?.shipment_cbm || 0);
       return acc;
     },
     {
@@ -3359,13 +3408,21 @@ const getShipmentDataset = async ({
       inspectionDone: 0,
       partialShipped: 0,
       shipped: 0,
+      totalStuffedCbm: 0,
     },
   );
+  summary.totalStuffedCbm = toRoundedCbmValue(summary.totalStuffedCbm);
 
   const statusScopedRows =
     statusFilter && ORDER_STATUS_SEQUENCE.includes(statusFilter)
       ? containerFilteredRows.filter((row) => row?.status === statusFilter)
       : containerFilteredRows;
+  summary.filteredStuffedCbm = toRoundedCbmValue(
+    statusScopedRows.reduce(
+      (sum, row) => sum + Number(row?.shipment_cbm || 0),
+      0,
+    ),
+  );
 
   const sortedRows = [...statusScopedRows].sort((a, b) => {
     const primaryComparison = compareShipmentValues(
@@ -7312,6 +7369,223 @@ const buildUpcomingEtdReportDataset = async ({
   };
 };
 
+const buildPendingPoReportDataset = async ({
+  brand = "",
+  vendor = "",
+  orderId = "",
+} = {}) => {
+  const selectedBrand = normalizeFilterValue(brand) || "";
+  const selectedVendor = normalizeFilterValue(vendor) || "";
+  const selectedOrderId = normalizeFilterValue(orderId) || "";
+  const selectedOrderNeedle = selectedOrderId.toLowerCase();
+
+  const orders = await Order.find(ACTIVE_ORDER_MATCH)
+    .select(
+      "_id order_id item brand vendor quantity status shipment qc_record order_date ETD revised_ETD",
+    )
+    .populate({
+      path: "qc_record",
+      select: "quantities request_history",
+    })
+    .sort({ vendor: 1, brand: 1, order_id: 1, "item.item_code": 1 })
+    .lean();
+
+  const allRows = orders
+    .map((orderEntry) => {
+      const progress = deriveOrderProgress({ orderEntry });
+      const orderQuantity = Number(progress.order_quantity || 0);
+      const shippedQuantity = Number(progress.shipped_quantity || 0);
+      const pendingQuantity = Math.max(0, orderQuantity - shippedQuantity);
+
+      if (pendingQuantity <= 0) return null;
+
+      return {
+        _id: String(orderEntry?._id || ""),
+        order_id:
+          normalizeOrderKey(orderEntry?.order_id) ||
+          normalizeLooseString(orderEntry?.order_id) ||
+          "N/A",
+        brand: normalizeLooseString(orderEntry?.brand) || "N/A",
+        vendor: normalizeLooseString(orderEntry?.vendor) || "N/A",
+        item_code: normalizeLooseString(orderEntry?.item?.item_code) || "N/A",
+        description: normalizeLooseString(orderEntry?.item?.description),
+        order_quantity: orderQuantity,
+        shipped_quantity: shippedQuantity,
+        pending_quantity: pendingQuantity,
+        status: progress.status,
+        order_date: toISODateString(orderEntry?.order_date),
+        etd: toISODateString(resolveEffectiveOrderEtdDate(orderEntry)),
+      };
+    })
+    .filter(Boolean);
+
+  const filteredRows = allRows.filter((row) => {
+    if (selectedBrand && row?.brand !== selectedBrand) return false;
+    if (selectedVendor && row?.vendor !== selectedVendor) return false;
+    if (
+      selectedOrderNeedle &&
+      !String(row?.order_id || "").toLowerCase().includes(selectedOrderNeedle)
+    ) {
+      return false;
+    }
+    return true;
+  });
+
+  const poKeys = new Set(
+    filteredRows.map((row) =>
+      [
+        normalizeOrderKey(row?.order_id),
+        normalizeBrandKey(row?.brand),
+        normalizeVendorKey(row?.vendor),
+      ].join("__")),
+  );
+
+  return {
+    success: true,
+    filters: {
+      brand: selectedBrand,
+      vendor: selectedVendor,
+      order_id: selectedOrderId,
+      brand_options: normalizeDistinctValues(allRows.map((row) => row?.brand)),
+      vendor_options: normalizeDistinctValues(allRows.map((row) => row?.vendor)),
+      po_options: normalizeDistinctValues(allRows.map((row) => row?.order_id)),
+    },
+    summary: {
+      row_count: filteredRows.length,
+      po_count: poKeys.size,
+      total_order_quantity: filteredRows.reduce(
+        (sum, row) => sum + Number(row?.order_quantity || 0),
+        0,
+      ),
+      total_shipped_quantity: filteredRows.reduce(
+        (sum, row) => sum + Number(row?.shipped_quantity || 0),
+        0,
+      ),
+      total_pending_quantity: filteredRows.reduce(
+        (sum, row) => sum + Number(row?.pending_quantity || 0),
+        0,
+      ),
+    },
+    rows: filteredRows,
+  };
+};
+
+exports.getPendingPoReport = async (req, res) => {
+  try {
+    const dataset = await buildPendingPoReportDataset({
+      brand: req.query.brand,
+      vendor: req.query.vendor,
+      orderId: req.query.order_id ?? req.query.order ?? req.query.po,
+    });
+
+    return res.status(200).json(dataset);
+  } catch (error) {
+    console.error("Get Pending PO Report Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to load pending PO report",
+      error: error.message,
+    });
+  }
+};
+
+exports.exportPendingPoReport = async (req, res) => {
+  try {
+    const exportFormat =
+      String(req.query.format || "")
+        .trim()
+        .toLowerCase() === "csv"
+        ? "csv"
+        : "xlsx";
+    const dataset = await buildPendingPoReportDataset({
+      brand: req.query.brand,
+      vendor: req.query.vendor,
+      orderId: req.query.order_id ?? req.query.order ?? req.query.po,
+    });
+
+    const columns = [
+      { key: "order_id", header: "PO" },
+      { key: "item_code", header: "Item Code" },
+      { key: "description", header: "Description" },
+      { key: "order_quantity", header: "Order Quantity" },
+      { key: "pending_quantity", header: "Pending Quantity" },
+    ];
+    const exportRows = (Array.isArray(dataset?.rows) ? dataset.rows : []).map(
+      (row) => ({
+        order_id: String(row?.order_id || "").trim(),
+        item_code: String(row?.item_code || "").trim(),
+        description: String(row?.description || "").trim(),
+        order_quantity: Number(row?.order_quantity || 0),
+        pending_quantity: Number(row?.pending_quantity || 0),
+      }),
+    );
+
+    const headerRow = columns.map((column) => column.header);
+    const dataRows = exportRows.map((row) =>
+      columns.map((column) => row[column.key] ?? ""),
+    );
+    const fileDate = new Date().toISOString().slice(0, 10);
+    const baseFileName = `pending-po-report-${fileDate}`;
+
+    if (exportFormat === "csv") {
+      const escapeCsvValue = (value) => {
+        const normalized = String(value ?? "")
+          .replace(/\r\n/g, "\n")
+          .replace(/\r/g, "\n");
+        if (/["\n,]/.test(normalized)) {
+          return `"${normalized.replace(/"/g, '""')}"`;
+        }
+        return normalized;
+      };
+
+      const csvLines = [headerRow, ...dataRows].map((row) =>
+        row.map((cell) => escapeCsvValue(cell)).join(","),
+      );
+      const csvContent = `\uFEFF${csvLines.join("\r\n")}`;
+
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${baseFileName}.csv"`,
+      );
+      return res.status(200).send(csvContent);
+    }
+
+    const worksheet = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
+    worksheet["!cols"] = columns.map((column, columnIndex) => {
+      const maxDataLength = Math.max(
+        ...dataRows.map((row) => String(row[columnIndex] ?? "").length),
+        column.header.length,
+      );
+      return { wch: Math.min(50, Math.max(12, maxDataLength + 2)) };
+    });
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Pending PO Report");
+    const fileBuffer = XLSX.write(workbook, {
+      type: "buffer",
+      bookType: "xlsx",
+    });
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${baseFileName}.xlsx"`,
+    );
+    return res.status(200).send(fileBuffer);
+  } catch (error) {
+    console.error("Export Pending PO Report Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to export pending PO report",
+      error: error.message,
+    });
+  }
+};
+
 exports.getDelayedPoReport = async (req, res) => {
   try {
     const filters = resolveDelayedPoReportFilterParams(req);
@@ -8058,6 +8332,7 @@ exports.exportShipmentsDb = async (req, res) => {
       { key: "container", header: "Container Number" },
       { key: "invoice_number", header: "Invoice Number" },
       { key: "quantity", header: "Shipment Quantity" },
+      { key: "shipment_cbm", header: "Stuffed CBM" },
       { key: "pending", header: "Pending" },
       { key: "remaining_remarks", header: "Remarks" },
     ];
@@ -8076,6 +8351,7 @@ exports.exportShipmentsDb = async (req, res) => {
       container: String(row?.container || "").trim(),
       invoice_number: normalizeShipmentInvoiceNumber(row?.invoice_number),
       quantity: Number(row?.quantity || 0),
+      shipment_cbm: Number(row?.shipment_cbm || 0),
       pending: Number(row?.pending || 0),
       remaining_remarks: String(row?.remaining_remarks || "").trim(),
     }));
