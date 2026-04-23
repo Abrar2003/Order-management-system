@@ -2,21 +2,26 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const User = require("../models/user.model");
+const { normalizeUserRole } = require("../helpers/userRole");
 
-const normalizeRole = (value) => {
-  const normalizedRole = String(value || "").trim();
-  if (!normalizedRole) return normalizedRole;
+const isTruthy = (value) =>
+  ["1", "true", "yes", "y", "on"].includes(
+    String(value ?? "").trim().toLowerCase(),
+  );
 
-  const canonicalRoles = {
-    admin: "admin",
-    manager: "manager",
-    qc: "QC",
-    dev: "dev",
-    user: "user",
-  };
+const getStringField = (source = {}, key) => {
+  const value = source?.[key];
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "string" && typeof value !== "number") return "";
+  return String(value).trim();
+};
 
-  const byLowerCase = canonicalRoles[normalizedRole.toLowerCase()];
-  return byLowerCase || normalizedRole;
+const getRequiredJwtSecret = () => {
+  const secret = String(process.env.JWT_SECRET || "").trim();
+  if (!secret) {
+    throw new Error("JWT_SECRET is not configured");
+  }
+  return secret;
 };
 
 /**
@@ -24,10 +29,26 @@ const normalizeRole = (value) => {
  */
 const signup = async (req, res) => {
   try {
-    const { username, password, email, phone, name } = req.body;
+    if (!isTruthy(process.env.ALLOW_PUBLIC_SIGNUP)) {
+      return res.status(403).json({
+        message: "Public signup is disabled. Ask an administrator to create the user.",
+      });
+    }
+
+    const username = getStringField(req.body, "username");
+    const password = getStringField(req.body, "password");
+    const email = getStringField(req.body, "email").toLowerCase();
+    const phone = getStringField(req.body, "phone");
+    const name = getStringField(req.body, "name");
 
     if (!username || !password || !email || !name) {
       return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({
+        message: "Password must be at least 6 characters",
+      });
     }
 
     const existingUser = await User.findOne({
@@ -53,7 +74,8 @@ const signup = async (req, res) => {
       message: "User registered successfully",
     });
   } catch (err) {
-    return res.status(500).json({ message: err.message });
+    console.error("Signup Error:", err);
+    return res.status(500).json({ message: "Failed to register user" });
   }
 };
 
@@ -62,7 +84,8 @@ const signup = async (req, res) => {
  */
 const signin = async (req, res) => {
   try {
-    const { username, password } = req.body;
+    const username = getStringField(req.body, "username");
+    const password = getStringField(req.body, "password");
 
     if (!username || !password) {
       return res.status(400).json({ message: "Missing credentials" });
@@ -78,7 +101,7 @@ const signin = async (req, res) => {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    const normalizedRole = normalizeRole(user.role);
+    const normalizedRole = normalizeUserRole(user.role, String(user.role || "").trim());
 
     const token = jwt.sign(
       {
@@ -87,7 +110,7 @@ const signin = async (req, res) => {
         email: user.email,
         name: user.name,
       },
-      process.env.JWT_SECRET,
+      getRequiredJwtSecret(),
       { expiresIn: "1d" },
     );
 
@@ -101,7 +124,8 @@ const signin = async (req, res) => {
       },
     });
   } catch (err) {
-    return res.status(500).json({ message: err.message });
+    console.error("Signin Error:", err);
+    return res.status(500).json({ message: "Failed to sign in" });
   }
 };
 
@@ -109,8 +133,8 @@ const signin = async (req, res) => {
 const getUsers = async (req, res) => {
   try {
     const { role } = req.query;
-    const requesterRole = normalizeRole(req.user?.role);
-    const normalizedRequestedRole = role ? normalizeRole(role) : "";
+    const requesterRole = normalizeUserRole(req.user?.role);
+    const normalizedRequestedRole = role ? normalizeUserRole(role) : "";
 
     if (
       requesterRole === "user"
@@ -136,11 +160,12 @@ const getUsers = async (req, res) => {
     res.json(
       users.map((user) => ({
         ...user,
-        role: normalizeRole(user.role),
+        role: normalizeUserRole(user.role, String(user.role || "").trim()),
       })),
     );
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("Get Users Error:", err);
+    res.status(500).json({ message: "Failed to fetch users" });
   }
 };
 
@@ -209,7 +234,8 @@ const changePassword = async (req, res) => {
 
     return res.status(200).json({ message: "Password updated successfully" });
   } catch (err) {
-    return res.status(500).json({ message: err.message });
+    console.error("Change Password Error:", err);
+    return res.status(500).json({ message: "Failed to update password" });
   }
 };
 
@@ -283,7 +309,8 @@ const forceChangeUserPassword = async (req, res) => {
       },
     });
   } catch (err) {
-    return res.status(500).json({ message: err.message });
+    console.error("Force Change Password Error:", err);
+    return res.status(500).json({ message: "Failed to force change password" });
   }
 };
 

@@ -24,6 +24,19 @@ const upload = multer({
   dest: "uploads/",
 });
 
+const uploadBrandLogo = (req, res, next) =>
+  upload.single("logo")(req, res, (error) => {
+    if (!error) return next();
+
+    if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE") {
+      return res.status(400).json({ message: "Brand logo exceeds the 5MB limit" });
+    }
+
+    return res.status(400).json({
+      message: error?.message || "Invalid brand logo upload",
+    });
+  });
+
 // Get all brands
 router.get(
   "/",
@@ -57,7 +70,7 @@ router.post(
     "/create-brand",
     auth,
     authorize("admin", "manager", "dev"),
-    upload.single("logo"),
+    uploadBrandLogo,
     brandController.createBrand
 )
 

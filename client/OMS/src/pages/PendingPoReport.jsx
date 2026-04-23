@@ -57,6 +57,8 @@ const defaultReport = {
     po_count: 0,
     total_order_quantity: 0,
     total_pending_quantity: 0,
+    total_inspection_pending_quantity: 0,
+    total_shipping_pending_quantity: 0,
   },
   pagination: {
     page: 1,
@@ -270,7 +272,12 @@ const PendingPoReport = () => {
           if (column === "item_code") return row?.item_code;
           if (column === "description") return row?.description;
           if (column === "order_quantity") return Number(row?.order_quantity || 0);
-          if (column === "pending_quantity") return Number(row?.pending_quantity || 0);
+          if (column === "inspection_pending_quantity") {
+            return Number(row?.inspection_pending_quantity || 0);
+          }
+          if (column === "shipping_pending_quantity") {
+            return Number(row?.shipping_pending_quantity || 0);
+          }
           return "";
         },
       }),
@@ -511,7 +518,10 @@ const PendingPoReport = () => {
                 Order Qty: {summary.total_order_quantity ?? 0}
               </span>
               <span className="om-summary-chip">
-                Pending Qty: {summary.total_pending_quantity ?? 0}
+                Inspection Pending: {summary.total_inspection_pending_quantity ?? 0}
+              </span>
+              <span className="om-summary-chip">
+                Shipping Pending: {summary.total_shipping_pending_quantity ?? 0}
               </span>
             </div>
           </div>
@@ -569,10 +579,20 @@ const PendingPoReport = () => {
                         </th>
                         <th>
                           <SortHeaderButton
-                            label="Pending Quantity"
-                            isActive={sortBy === "pending_quantity"}
+                            label="Inspection Pending"
+                            isActive={sortBy === "inspection_pending_quantity"}
                             direction={sortOrder}
-                            onClick={() => handleSortColumn("pending_quantity", "desc")}
+                            onClick={() =>
+                              handleSortColumn("inspection_pending_quantity", "desc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
+                            label="Shipping Pending"
+                            isActive={sortBy === "shipping_pending_quantity"}
+                            direction={sortOrder}
+                            onClick={() =>
+                              handleSortColumn("shipping_pending_quantity", "desc")}
                           />
                         </th>
                       </tr>
@@ -584,7 +604,8 @@ const PendingPoReport = () => {
                           <td>{row?.item_code || "N/A"}</td>
                           <td>{row?.description || "N/A"}</td>
                           <td>{row?.order_quantity ?? 0}</td>
-                          <td>{row?.pending_quantity ?? 0}</td>
+                          <td>{row?.inspection_pending_quantity ?? 0}</td>
+                          <td>{row?.shipping_pending_quantity ?? 0}</td>
                         </tr>
                       ))}
                     </tbody>

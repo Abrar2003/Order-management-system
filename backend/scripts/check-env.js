@@ -69,7 +69,7 @@ if (
   && isMissing("CORS_ORIGIN")
 ) {
   console.warn(
-    "CORS_ORIGIN is not set. Backend will accept requests from any origin.",
+    "CORS_ORIGIN is not set. Browser requests with an Origin header will be rejected in production.",
   );
 }
 

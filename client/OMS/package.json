@@ -11,11 +11,11 @@
   },
   "dependencies": {
     "@zxing/browser": "^0.1.5",
-    "axios": "^1.13.4",
+    "axios": "^1.15.2",
     "bootstrap": "^5.3.8",
     "html2canvas": "^1.4.1",
     "jsbarcode": "^3.12.3",
-    "jspdf": "^4.2.0",
+    "jspdf": "^4.2.1",
     "jwt-decode": "^4.0.0",
     "react": "^19.2.0",
     "react-barcode": "^1.6.1",

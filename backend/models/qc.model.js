@@ -21,8 +21,8 @@ const qcSchema = new mongoose.Schema(
       index: true,
     },
     order_meta: {
-      order_id: { type: String, requried: true },
-      vendor: { type: String, requried: true },
+      order_id: { type: String, required: true },
+      vendor: { type: String, required: true },
       brand: { type: String, required: true },
     },
     request_date: {
@@ -167,7 +167,7 @@ const qcSchema = new mongoose.Schema(
       },
       quantity_requested: {
         type: Number,
-        requried: true,
+        required: true,
         default: 0,
       },
       vendor_provision: {

@@ -1,4 +1,5 @@
 const XLSX = require("xlsx");
+const path = require("path");
 const Order = require("../models/order.model");
 const QC = require("../models/qc.model");
 const Item = require("../models/item.model");
@@ -57,6 +58,17 @@ const DELAY_ELIGIBLE_STATUSES = new Set(["Pending", "Under Inspection"]);
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const RECTIFY_DEFAULT_ETD_OFFSET_DAYS = 90;
 const INVALID_DATE_RANGE = Symbol("invalid-date-range");
+const SPREADSHEET_UPLOAD_EXTENSIONS = new Set([".xlsx", ".xls"]);
+const SPREADSHEET_UPLOAD_MIME_TYPES = new Set([
+  "application/octet-stream",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/excel",
+  "application/x-excel",
+  "application/x-msexcel",
+  "application/xls",
+  "application/x-xls",
+]);
 
 const escapeRegex = (value = "") =>
   String(value)
@@ -107,6 +119,23 @@ const normalizeDistinctValues = (values = []) =>
   ].sort((a, b) => a.localeCompare(b));
 
 const normalizeLooseString = (value) => String(value ?? "").trim();
+const validateSpreadsheetUpload = (file) => {
+  if (!file?.buffer || !Buffer.isBuffer(file.buffer)) {
+    throw new Error("Uploaded spreadsheet file is invalid");
+  }
+  if (file.buffer.length <= 0) {
+    throw new Error("Uploaded spreadsheet file is empty");
+  }
+
+  const extension = path.extname(String(file?.originalname || "")).toLowerCase();
+  const mimeType = String(file?.mimetype || "").trim().toLowerCase();
+  if (!SPREADSHEET_UPLOAD_EXTENSIONS.has(extension)) {
+    throw new Error("Only .xlsx and .xls files are allowed for order uploads");
+  }
+  if (mimeType && !SPREADSHEET_UPLOAD_MIME_TYPES.has(mimeType)) {
+    throw new Error("Only .xlsx and .xls files are allowed for order uploads");
+  }
+};
 const normalizeShipmentInvoiceNumber = (value, fallback = "N/A") => {
   const normalized = String(value ?? "").trim();
   if (normalized) return normalized;
@@ -3931,6 +3960,12 @@ exports.uploadOrders = async (req, res) => {
         return res.status(400).json({ message: "No file uploaded" });
       }
 
+      try {
+        validateSpreadsheetUpload(req.file);
+      } catch (validationError) {
+        return res.status(400).json({ message: validationError.message });
+      }
+
       uploadMeta.source_file_storage = await uploadSourceFileToWasabi(
         req.file,
         "orders/uploads",
@@ -7397,6 +7432,14 @@ const buildPendingPoReportDataset = async ({
     order_quantity: "order_quantity",
     pendingquantity: "pending_quantity",
     pending_quantity: "pending_quantity",
+    inspectionpending: "inspection_pending_quantity",
+    inspection_pending: "inspection_pending_quantity",
+    inspectionpendingquantity: "inspection_pending_quantity",
+    inspection_pending_quantity: "inspection_pending_quantity",
+    shippingpending: "shipping_pending_quantity",
+    shipping_pending: "shipping_pending_quantity",
+    shippingpendingquantity: "shipping_pending_quantity",
+    shipping_pending_quantity: "shipping_pending_quantity",
   };
   const selectedSortBy = sortAliases[normalizedSortKey] || "order_id";
   const selectedSortOrder =
@@ -7420,6 +7463,12 @@ const buildPendingPoReportDataset = async ({
       const orderQuantity = Number(progress.order_quantity || 0);
       const shippedQuantity = Number(progress.shipped_quantity || 0);
       const pendingQuantity = Math.max(0, orderQuantity - shippedQuantity);
+      const inspectionPendingQuantity = Number(
+        progress.pending_inspection_quantity || 0,
+      );
+      const shippingPendingQuantity = Number(
+        progress.inspected_unshipped_quantity || 0,
+      );
 
       if (pendingQuantity <= 0) return null;
 
@@ -7436,6 +7485,8 @@ const buildPendingPoReportDataset = async ({
         order_quantity: orderQuantity,
         shipped_quantity: shippedQuantity,
         pending_quantity: pendingQuantity,
+        inspection_pending_quantity: inspectionPendingQuantity,
+        shipping_pending_quantity: shippingPendingQuantity,
         status: progress.status,
         order_date: toISODateString(orderEntry?.order_date),
         etd: toISODateString(resolveEffectiveOrderEtdDate(orderEntry)),
@@ -7454,7 +7505,12 @@ const buildPendingPoReportDataset = async ({
     }
     return true;
   });
-  const numericSortColumns = new Set(["order_quantity", "pending_quantity"]);
+  const numericSortColumns = new Set([
+    "order_quantity",
+    "pending_quantity",
+    "inspection_pending_quantity",
+    "shipping_pending_quantity",
+  ]);
   const sortedRows = [...filteredRows].sort((left, right) => {
     const isNumeric = numericSortColumns.has(selectedSortBy);
     const leftValue = left?.[selectedSortBy];
@@ -7514,6 +7570,14 @@ const buildPendingPoReportDataset = async ({
       ),
       total_pending_quantity: filteredRows.reduce(
         (sum, row) => sum + Number(row?.pending_quantity || 0),
+        0,
+      ),
+      total_inspection_pending_quantity: filteredRows.reduce(
+        (sum, row) => sum + Number(row?.inspection_pending_quantity || 0),
+        0,
+      ),
+      total_shipping_pending_quantity: filteredRows.reduce(
+        (sum, row) => sum + Number(row?.shipping_pending_quantity || 0),
         0,
       ),
     },
@@ -7589,7 +7653,8 @@ exports.exportPendingPoReport = async (req, res) => {
       { key: "item_code", header: "Item Code" },
       { key: "description", header: "Description" },
       { key: "order_quantity", header: "Order Quantity" },
-      { key: "pending_quantity", header: "Pending Quantity" },
+      { key: "inspection_pending_quantity", header: "Inspection Pending" },
+      { key: "shipping_pending_quantity", header: "Shipping Pending" },
     ];
     const exportRows = (Array.isArray(dataset?.rows) ? dataset.rows : []).map(
       (row) => ({
@@ -7597,7 +7662,10 @@ exports.exportPendingPoReport = async (req, res) => {
         item_code: String(row?.item_code || "").trim(),
         description: String(row?.description || "").trim(),
         order_quantity: Number(row?.order_quantity || 0),
-        pending_quantity: Number(row?.pending_quantity || 0),
+        inspection_pending_quantity: Number(
+          row?.inspection_pending_quantity || 0,
+        ),
+        shipping_pending_quantity: Number(row?.shipping_pending_quantity || 0),
       }),
     );
 

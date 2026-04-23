@@ -1,30 +1,15 @@
 const mongoose = require("mongoose");
-
-const normalizeRole = (value) => {
-    const normalizedRole = String(value || "").trim();
-    if (!normalizedRole) return normalizedRole;
-
-    const canonicalRoles = {
-        admin: "admin",
-        manager: "manager",
-        qc: "QC",
-        dev: "dev",
-        user: "user",
-    };
-
-    const byLowerCase = canonicalRoles[normalizedRole.toLowerCase()];
-    return byLowerCase || normalizedRole;
-};
+const { USER_ROLES, normalizeUserRole } = require("../helpers/userRole");
 
 const user_Schema = new mongoose.Schema({
     username: { type: String, required: true, unique: true },
     password: { type: String, required: true },
     role: {
         type: String,
-        enum: ["admin", "manager", "QC", "dev", "user"],
+        enum: USER_ROLES,
         required: true,
         default: "user",
-        set: normalizeRole,
+        set: (value) => normalizeUserRole(value, value),
     },
     email: { type: String, required: true, unique: true },
     phone: { type: String },
@@ -34,8 +19,8 @@ const user_Schema = new mongoose.Schema({
 
 }, { timestamps: true });
 
-user_Schema.pre("validate", function normalizeUserRole() {
-    this.role = normalizeRole(this.role);
+user_Schema.pre("validate", function normalizeRoleBeforeValidate() {
+    this.role = normalizeUserRole(this.role, this.role);
 });
 
 module.exports = mongoose.model("users", user_Schema);

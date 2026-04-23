@@ -1,13 +1,9 @@
+const { normalizeUserRoleKey } = require("../helpers/userRole");
+
 const authorize = (...allowedRoles) => {
   return (req, res, next) => {
-    const normalizedUserRole = String(req.user?.role || "")
-      .trim()
-      .toLowerCase();
-    const normalizedAllowedRoles = allowedRoles.map((role) =>
-      String(role || "")
-        .trim()
-        .toLowerCase(),
-    );
+    const normalizedUserRole = normalizeUserRoleKey(req.user?.role);
+    const normalizedAllowedRoles = allowedRoles.map((role) => normalizeUserRoleKey(role));
 
     if (!normalizedAllowedRoles.includes(normalizedUserRole)) {
       return res.status(403).json({ message: "Access denied" });

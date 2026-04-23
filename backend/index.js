@@ -26,6 +26,8 @@ const reportsRouter = require("./routers/reports.routes");
 
 const app = express();
 const PORT = Number.parseInt(String(process.env.PORT || "8008"), 10) || 8008;
+const isProduction =
+  String(process.env.NODE_ENV || "").trim().toLowerCase() === "production";
 
 const isTruthy = (value) =>
   String(value || "")
@@ -46,29 +48,44 @@ if (isTruthy(process.env.TRUST_PROXY)) {
   app.set("trust proxy", 1);
 }
 
+app.disable("x-powered-by");
+
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "same-origin");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  next();
+});
+
+const defaultDevOrigins = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+];
 const allowedOrigins = toList(process.env.CORS_ORIGIN || process.env.CORS_ORIGINS);
+const effectiveAllowedOrigins =
+  allowedOrigins.length > 0 || isProduction ? allowedOrigins : defaultDevOrigins;
 const corsOptions = {
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
-    if (allowedOrigins.length === 0) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
+    if (effectiveAllowedOrigins.includes(origin)) return callback(null, true);
     return callback(new Error("Not allowed by CORS"));
   },
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: isTruthy(process.env.CORS_ALLOW_CREDENTIALS || "https://oms.ghouse-sourcing.com,https://ghouse-sourcing.com,http://localhost:5173,http://127.0.0.1:5173"),
+  credentials: isTruthy(process.env.CORS_ALLOW_CREDENTIALS),
 };
 
 app.use(cors(corsOptions));
 app.use(
   express.json({
-    limit: String("30mb"),
+    limit: String(process.env.JSON_BODY_LIMIT || "10mb"),
   }),
 );
 app.use(
   express.urlencoded({
     extended: true,
-    limit: String("30mb"),
+    limit: String(process.env.URLENCODED_BODY_LIMIT || "10mb"),
   }),
 );
 
@@ -114,6 +131,18 @@ app.use((error, req, res, next) => {
     return res.status(403).json({ message: error.message });
   }
   return next(error);
+});
+
+app.use((error, req, res, _next) => {
+  console.error("Unhandled request error:", {
+    method: req.method,
+    path: req.originalUrl,
+    message: error?.message || String(error),
+  });
+
+  return res.status(500).json({
+    message: "Internal server error",
+  });
 });
 
 const startServer = async () => {

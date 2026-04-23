@@ -47,7 +47,7 @@ router.post(
   "/upload-orders",
   authenticate,
   authorize("admin", "manager", "dev"),
-  upload.single("file"),
+  upload.safeSingle("file"),
   uploadOrders,
 );
 
@@ -62,7 +62,7 @@ router.post(
   "/rectify-pdf",
   authenticate,
   authorize("admin", "manager", "dev"),
-  upload.single("file"),
+  upload.safeSingle("file"),
   rectifyPdfOrders,
 );
 

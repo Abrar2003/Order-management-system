@@ -90,7 +90,7 @@ const Order_Schema = new mongoose.Schema(
     ETD: { type: Date },
     revised_ETD: { type: Date },
     revised_etd_history: { type: [RevisedEtdHistorySchema], default: [] },
-    order_date: { type: Date, default: Date.now() },
+    order_date: { type: Date, default: Date.now },
     status: {
       type: String,
       enum: [...ACTIVE_ORDER_STATUSES, "Cancelled"],

@@ -38,7 +38,7 @@ router.post(
   "/",
   auth,
   authorize("admin", "manager", "dev"),
-  upload.single("image"),
+  upload.safeSingle("image"),
   finishController.upsertFinish,
 );
 

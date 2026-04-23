@@ -67,9 +67,11 @@ export const getUserFromToken = () => {
     }
 
     const decoded = jwtDecode(token);
+    const userId = decoded.id || decoded._id || decoded.sub || "";
 
     return {
-      _id: decoded._id,
+      id: userId,
+      _id: userId,
       name: decoded.name,
       role: decoded.role,
       email: decoded.email,

@@ -39,7 +39,7 @@ router.post(
   "/",
   auth,
   authorize("admin", "manager", "dev"),
-  upload.single("pis_file"),
+  upload.safeSingle("pis_file"),
   createItem,
 );
 
@@ -98,7 +98,7 @@ router.post(
   "/:itemId/pis-upload",
   auth,
   authorize("admin", "manager", "dev"),
-  upload.single("file"),
+  upload.safeSingle("file"),
   uploadItemPisFile,
 );
 
@@ -106,7 +106,7 @@ router.post(
   "/:id/files",
   auth,
   authorize("admin", "manager"),
-  upload.single("file"),
+  upload.safeSingle("file"),
   uploadItemFile,
 );
 
