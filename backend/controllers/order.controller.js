@@ -915,6 +915,157 @@ const parseQuantityLike = (value) => {
   return Number.isFinite(parsedFromMatch) ? parsedFromMatch : null;
 };
 
+const toDelayedReportNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const normalizeDelayedReportText = (value) => String(value ?? "").trim();
+
+const formatDelayedReportDate = (value) => formatDateDDMMYYYY(value, "");
+
+const stringifyDelayedReportList = (values = [], formatter = normalizeDelayedReportText) =>
+  (Array.isArray(values) ? values : [])
+    .map((value) => formatter(value))
+    .filter(Boolean)
+    .join(" | ");
+
+const resolveDelayedReportUserLabel = (value) => {
+  if (!value) return "";
+  if (typeof value === "string") return value.trim();
+  return normalizeDelayedReportText(value?.name || value?.email || value?._id);
+};
+
+const stringifyDelayedRequestHistory = (history = []) =>
+  (Array.isArray(history) ? history : [])
+    .map((entry) => {
+      const parts = [
+        formatDelayedReportDate(entry?.request_date || entry?.requested_date),
+        normalizeDelayedReportText(entry?.request_type),
+        entry?.quantity_requested !== undefined
+          ? `qty ${toDelayedReportNumber(entry.quantity_requested)}`
+          : "",
+        normalizeDelayedReportText(entry?.status),
+        resolveDelayedReportUserLabel(entry?.inspector),
+        normalizeDelayedReportText(entry?.remarks),
+      ].filter(Boolean);
+
+      return parts.join(" / ");
+    })
+    .filter(Boolean)
+    .join(" | ");
+
+const stringifyDelayedLabels = (labels = []) =>
+  (Array.isArray(labels) ? labels : [])
+    .map((label) => Number(label))
+    .filter((label) => Number.isFinite(label))
+    .join(", ");
+
+const stringifyDelayedShipmentEntries = (shipmentEntries = []) =>
+  (Array.isArray(shipmentEntries) ? shipmentEntries : [])
+    .map((shipmentEntry, index) => {
+      const stuffedBy = normalizeDelayedReportText(
+        shipmentEntry?.stuffed_by?.name || shipmentEntry?.updated_by?.name,
+      );
+      const checked = shipmentEntry?.checked?.checked ? "checked" : "unchecked";
+      return [
+        `${index + 1}) ${formatDelayedReportDate(shipmentEntry?.stuffing_date) || "No date"}`,
+        normalizeDelayedReportText(shipmentEntry?.container),
+        `invoice ${normalizeShipmentInvoiceNumber(shipmentEntry?.invoice_number)}`,
+        `qty ${toDelayedReportNumber(shipmentEntry?.quantity)}`,
+        shipmentEntry?.pending !== undefined
+          ? `pending ${toDelayedReportNumber(shipmentEntry.pending)}`
+          : "",
+        stuffedBy ? `stuffed by ${stuffedBy}` : "",
+        checked,
+        normalizeDelayedReportText(shipmentEntry?.remaining_remarks),
+      ]
+        .filter(Boolean)
+        .join(" / ");
+    })
+    .filter(Boolean)
+    .join(" | ");
+
+const buildDelayedPoItemDetail = ({
+  orderEntry = {},
+  progress = {},
+  status = "",
+} = {}) => {
+  const qcRecord = orderEntry?.qc_record || null;
+  const hasQcRecord = Boolean(qcRecord && typeof qcRecord === "object");
+  const qcQuantities = hasQcRecord ? qcRecord?.quantities || {} : {};
+  const shipmentEntries = Array.isArray(orderEntry?.shipment)
+    ? orderEntry.shipment
+    : [];
+  const latestShipmentDate = resolveLatestShipmentDate(shipmentEntries);
+  const latestInspectionDate = resolveLatestInspectionDate(qcRecord);
+
+  return {
+    order_id:
+      normalizeOrderKey(orderEntry?.order_id) ||
+      normalizeDelayedReportText(orderEntry?.order_id),
+    brand: normalizeDelayedReportText(orderEntry?.brand),
+    vendor: normalizeDelayedReportText(orderEntry?.vendor),
+    order_date: toISODateString(orderEntry?.order_date),
+    etd: toISODateString(orderEntry?.ETD),
+    revised_etd: toISODateString(orderEntry?.revised_ETD),
+    item_code: normalizeDelayedReportText(orderEntry?.item?.item_code),
+    item_description: normalizeDelayedReportText(orderEntry?.item?.description),
+    order_status: status || progress.status || "",
+    order_quantity: toDelayedReportNumber(progress?.order_quantity),
+    shipped_quantity: toDelayedReportNumber(progress?.shipped_quantity),
+    inspection_pending_quantity: toDelayedReportNumber(
+      progress?.pending_inspection_quantity,
+    ),
+    shipping_pending_quantity: toDelayedReportNumber(
+      progress?.inspected_unshipped_quantity,
+    ),
+    qc_available: hasQcRecord ? "Yes" : "No",
+    qc_request_date: hasQcRecord ? normalizeDelayedReportText(qcRecord?.request_date) : "",
+    qc_request_type: hasQcRecord ? normalizeDelayedReportText(qcRecord?.request_type) : "",
+    qc_last_inspected_date: hasQcRecord
+      ? toISODateString(latestInspectionDate || qcRecord?.last_inspected_date)
+      : "",
+    qc_inspector: hasQcRecord ? resolveDelayedReportUserLabel(qcRecord?.inspector) : "",
+    qc_client_demand: hasQcRecord
+      ? toDelayedReportNumber(qcQuantities?.client_demand)
+      : "",
+    qc_quantity_requested: hasQcRecord
+      ? toDelayedReportNumber(qcQuantities?.quantity_requested)
+      : "",
+    qc_vendor_provision: hasQcRecord
+      ? toDelayedReportNumber(qcQuantities?.vendor_provision)
+      : "",
+    qc_checked: hasQcRecord ? toDelayedReportNumber(qcQuantities?.qc_checked) : "",
+    qc_passed: hasQcRecord ? toDelayedReportNumber(qcQuantities?.qc_passed) : "",
+    qc_pending: hasQcRecord ? toDelayedReportNumber(qcQuantities?.pending) : "",
+    qc_rejected: hasQcRecord
+      ? toDelayedReportNumber(qcQuantities?.qc_rejected)
+      : "",
+    qc_labels: hasQcRecord ? stringifyDelayedLabels(qcRecord?.labels) : "",
+    qc_inspection_dates: hasQcRecord
+      ? stringifyDelayedReportList(qcRecord?.inspection_dates, formatDelayedReportDate)
+      : "",
+    qc_request_history: hasQcRecord
+      ? stringifyDelayedRequestHistory(qcRecord?.request_history)
+      : "",
+    qc_inspection_records_count:
+      hasQcRecord && Array.isArray(qcRecord?.inspection_record)
+        ? qcRecord.inspection_record.length
+        : hasQcRecord
+          ? 0
+          : "",
+    qc_cbm_box1: hasQcRecord ? normalizeDelayedReportText(qcRecord?.cbm?.box1) : "",
+    qc_cbm_box2: hasQcRecord ? normalizeDelayedReportText(qcRecord?.cbm?.box2) : "",
+    qc_cbm_box3: hasQcRecord ? normalizeDelayedReportText(qcRecord?.cbm?.box3) : "",
+    qc_cbm_total: hasQcRecord ? normalizeDelayedReportText(qcRecord?.cbm?.total) : "",
+    qc_remarks: hasQcRecord ? normalizeDelayedReportText(qcRecord?.remarks) : "",
+    shipment_count: shipmentEntries.length,
+    latest_shipment_date: toISODateString(latestShipmentDate),
+    shipment_details: stringifyDelayedShipmentEntries(shipmentEntries),
+  };
+};
+
 const normalizeRectifyText = (value) => normalizeLooseString(value);
 
 const addDaysToUtcDate = (value, daysToAdd = 0) => {
@@ -6764,21 +6915,33 @@ const buildDelayedPoReportDataset = async ({
   etdRange = null,
   fromDate = "",
   toDate = "",
+  includeDetails = false,
 } = {}) => {
   const selectedBrand = normalizeFilterValue(brand) || "";
   const selectedVendor = normalizeFilterValue(vendor) || "";
   const todayUtc = toUtcDayStart(new Date());
   const normalizedFromDate = fromDate ? toISODateString(fromDate) : "";
   const normalizedToDate = toDate ? toISODateString(toDate) : "";
+  const qcRecordPopulate = includeDetails
+    ? {
+        path: "qc_record",
+        select:
+          "request_date request_type item inspector cbm inspection_dates request_history inspection_record labels quantities remarks last_inspected_date",
+        populate: {
+          path: "inspector",
+          select: "name email role",
+        },
+      }
+    : {
+        path: "qc_record",
+        select: "quantities request_history last_inspected_date inspection_dates",
+      };
 
   const orders = await Order.find(ACTIVE_ORDER_MATCH)
     .select(
       "order_id item brand vendor quantity status ETD revised_ETD order_date shipment qc_record",
     )
-    .populate({
-      path: "qc_record",
-      select: "quantities request_history last_inspected_date inspection_dates",
-    })
+    .populate(qcRecordPopulate)
     .sort({ vendor: 1, brand: 1, order_id: 1, order_date: -1 })
     .lean();
 
@@ -6816,11 +6979,13 @@ const buildDelayedPoReportDataset = async ({
         shipped_item_codes: new Set(),
         last_shipment_date: null,
         last_inspected_date: null,
+        item_details: [],
       });
     }
 
     const groupedEntry = groupedOrders.get(groupKey);
-    const status = deriveOrderStatus({ orderEntry });
+    const progress = deriveOrderProgress({ orderEntry });
+    const status = progress.status;
     const itemCode = normalizeLooseString(orderEntry?.item?.item_code);
     const quantity = Math.max(
       0,
@@ -6879,6 +7044,16 @@ const buildDelayedPoReportDataset = async ({
         groupedEntry.pending_item_codes.add(itemCode);
       }
     }
+
+    if (includeDetails) {
+      groupedEntry.item_details.push(
+        buildDelayedPoItemDetail({
+          orderEntry,
+          progress,
+          status,
+        }),
+      );
+    }
   }
 
   const allRows = Array.from(groupedOrders.values())
@@ -6909,6 +7084,14 @@ const buildDelayedPoReportDataset = async ({
 
       const delayDays = Math.max(0, diffUtcDays(todayUtc, originalEtd));
       const lastProgress = resolveDelayedPoLastProgress(groupedEntry);
+      const itemDetails = includeDetails
+        ? groupedEntry.item_details.map((detail) => ({
+            ...detail,
+            po_delay_days: delayDays,
+            po_last_progress: lastProgress.display,
+            po_last_progress_type: lastProgress.type,
+          }))
+        : [];
 
       return {
         order_id: groupedEntry.order_id,
@@ -6940,6 +7123,7 @@ const buildDelayedPoReportDataset = async ({
         last_progress: lastProgress.display,
         last_progress_type: lastProgress.type,
         last_progress_value: lastProgress.value,
+        ...(includeDetails ? { item_details: itemDetails } : {}),
       };
     })
     .filter(Boolean)
