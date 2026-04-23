@@ -276,7 +276,7 @@ const DelayedPoReports = () => {
       const response = await exportDelayedPoReport(params);
       const disposition = String(response?.headers?.["content-disposition"] || "");
       const match = disposition.match(/filename\*?=(?:UTF-8''|\"?)([^\";]+)/i);
-      const fallbackName = `delayed-po-report-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const fallbackName = `delayed-po-item-report-${new Date().toISOString().slice(0, 10)}.xlsx`;
       const fileName = match?.[1]
         ? decodeURIComponent(match[1].trim())
         : fallbackName;

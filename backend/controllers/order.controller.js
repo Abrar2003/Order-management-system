@@ -992,7 +992,9 @@ const buildDelayedPoItemDetail = ({
   status = "",
 } = {}) => {
   const qcRecord = orderEntry?.qc_record || null;
-  const hasQcRecord = Boolean(qcRecord && typeof qcRecord === "object");
+  const hasQcRecord = Boolean(
+    qcRecord && typeof qcRecord === "object" && !qcRecord?._bsontype,
+  );
   const qcQuantities = hasQcRecord ? qcRecord?.quantities || {} : {};
   const shipmentEntries = Array.isArray(orderEntry?.shipment)
     ? orderEntry.shipment
@@ -8065,8 +8067,58 @@ exports.exportDelayedPoReport = async (req, res) => {
       });
     }
 
-    const dataset = await buildDelayedPoReportDataset(filters);
-    const columns = [
+    const dataset = await buildDelayedPoReportDataset({
+      ...filters,
+      includeDetails: true,
+    });
+    const detailColumns = [
+      { key: "order_id", header: "PO" },
+      { key: "brand", header: "Brand" },
+      { key: "vendor", header: "Vendor" },
+      { key: "item_code", header: "Item Code" },
+      { key: "item_description", header: "Item Description" },
+      { key: "order_status", header: "Inspection / Order Status" },
+      { key: "order_quantity", header: "Order Quantity" },
+      { key: "shipped_quantity", header: "Shipped Quantity" },
+      {
+        key: "inspection_pending_quantity",
+        header: "Inspection Pending Quantity",
+      },
+      { key: "shipping_pending_quantity", header: "Shipping Pending Quantity" },
+      { key: "qc_available", header: "QC Available" },
+      { key: "qc_request_date", header: "QC Request Date" },
+      { key: "qc_request_type", header: "QC Request Type" },
+      { key: "qc_last_inspected_date", header: "QC Last Inspected Date" },
+      { key: "qc_inspector", header: "QC Inspector" },
+      { key: "qc_client_demand", header: "QC Client Demand" },
+      { key: "qc_quantity_requested", header: "QC Quantity Requested" },
+      { key: "qc_vendor_provision", header: "QC Vendor Provision" },
+      { key: "qc_checked", header: "QC Checked" },
+      { key: "qc_passed", header: "QC Passed" },
+      { key: "qc_pending", header: "QC Pending" },
+      { key: "qc_rejected", header: "QC Rejected" },
+      { key: "qc_labels", header: "QC Labels" },
+      { key: "qc_inspection_dates", header: "QC Inspection Dates" },
+      { key: "qc_request_history", header: "QC Request History" },
+      {
+        key: "qc_inspection_records_count",
+        header: "QC Inspection Records Count",
+      },
+      { key: "qc_cbm_box1", header: "QC CBM Box 1" },
+      { key: "qc_cbm_box2", header: "QC CBM Box 2" },
+      { key: "qc_cbm_box3", header: "QC CBM Box 3" },
+      { key: "qc_cbm_total", header: "QC CBM Total" },
+      { key: "qc_remarks", header: "QC Remarks" },
+      { key: "shipment_count", header: "Shipment Count" },
+      { key: "latest_shipment_date", header: "Latest Shipment Date" },
+      { key: "shipment_details", header: "Shipment Details" },
+      { key: "order_date", header: "Order Date" },
+      { key: "etd", header: "ETD" },
+      { key: "revised_etd", header: "Revised ETD" },
+      { key: "po_delay_days", header: "Delay Days" },
+      { key: "po_last_progress", header: "PO Last Progress" },
+    ];
+    const summaryColumns = [
       { key: "order_id", header: "PO" },
       { key: "brand", header: "Brand" },
       { key: "vendor", header: "Vendor" },
@@ -8089,7 +8141,81 @@ exports.exportDelayedPoReport = async (req, res) => {
       { key: "shipped_item_codes", header: "Shipped Item Codes" },
     ];
 
-    const exportRows = dataset.rows.map((row) => ({
+    const detailRows = (Array.isArray(dataset?.rows) ? dataset.rows : [])
+      .flatMap((row) => (Array.isArray(row?.item_details) ? row.item_details : []))
+      .map((detail) => ({
+        order_id: String(detail?.order_id || "").trim(),
+        brand: String(detail?.brand || "").trim(),
+        vendor: String(detail?.vendor || "").trim(),
+        item_code: String(detail?.item_code || "").trim(),
+        item_description: String(detail?.item_description || "").trim(),
+        order_status: String(detail?.order_status || "").trim(),
+        order_quantity: Number(detail?.order_quantity || 0),
+        shipped_quantity: Number(detail?.shipped_quantity || 0),
+        inspection_pending_quantity: Number(
+          detail?.inspection_pending_quantity || 0,
+        ),
+        shipping_pending_quantity: Number(detail?.shipping_pending_quantity || 0),
+        qc_available: String(detail?.qc_available || "").trim(),
+        qc_request_date: formatDateDDMMYYYY(detail?.qc_request_date, ""),
+        qc_request_type: String(detail?.qc_request_type || "").trim(),
+        qc_last_inspected_date: formatDateDDMMYYYY(
+          detail?.qc_last_inspected_date,
+          "",
+        ),
+        qc_inspector: String(detail?.qc_inspector || "").trim(),
+        qc_client_demand: detail?.qc_client_demand ?? "",
+        qc_quantity_requested: detail?.qc_quantity_requested ?? "",
+        qc_vendor_provision: detail?.qc_vendor_provision ?? "",
+        qc_checked: detail?.qc_checked ?? "",
+        qc_passed: detail?.qc_passed ?? "",
+        qc_pending: detail?.qc_pending ?? "",
+        qc_rejected: detail?.qc_rejected ?? "",
+        qc_labels: String(detail?.qc_labels || "").trim(),
+        qc_inspection_dates: String(detail?.qc_inspection_dates || "").trim(),
+        qc_request_history: String(detail?.qc_request_history || "").trim(),
+        qc_inspection_records_count:
+          detail?.qc_inspection_records_count ?? "",
+        qc_cbm_box1: String(detail?.qc_cbm_box1 || "").trim(),
+        qc_cbm_box2: String(detail?.qc_cbm_box2 || "").trim(),
+        qc_cbm_box3: String(detail?.qc_cbm_box3 || "").trim(),
+        qc_cbm_total: String(detail?.qc_cbm_total || "").trim(),
+        qc_remarks: String(detail?.qc_remarks || "").trim(),
+        shipment_count: Number(detail?.shipment_count || 0),
+        latest_shipment_date: formatDateDDMMYYYY(
+          detail?.latest_shipment_date,
+          "",
+        ),
+        shipment_details: String(detail?.shipment_details || "").trim(),
+        order_date: formatDateDDMMYYYY(detail?.order_date, ""),
+        etd: formatDateDDMMYYYY(detail?.etd, ""),
+        revised_etd: formatDateDDMMYYYY(detail?.revised_etd, ""),
+        po_delay_days: Number(detail?.po_delay_days || 0),
+        po_last_progress: String(detail?.po_last_progress || "").trim(),
+      }))
+      .sort((left, right) => {
+        const vendorCompare = String(left?.vendor || "").localeCompare(
+          String(right?.vendor || ""),
+          undefined,
+          { numeric: true, sensitivity: "base" },
+        );
+        if (vendorCompare !== 0) return vendorCompare;
+
+        const poCompare = String(left?.order_id || "").localeCompare(
+          String(right?.order_id || ""),
+          undefined,
+          { numeric: true, sensitivity: "base" },
+        );
+        if (poCompare !== 0) return poCompare;
+
+        return String(left?.item_code || "").localeCompare(
+          String(right?.item_code || ""),
+          undefined,
+          { numeric: true, sensitivity: "base" },
+        );
+      });
+
+    const summaryRows = (Array.isArray(dataset?.rows) ? dataset.rows : []).map((row) => ({
       order_id: String(row?.order_id || "").trim(),
       brand: String(row?.brand || "").trim(),
       vendor: String(row?.vendor || "").trim(),
@@ -8115,28 +8241,36 @@ exports.exportDelayedPoReport = async (req, res) => {
         : "",
     }));
 
-    const headerRow = columns.map((column) => column.header);
-    const dataRows = exportRows.map((row) =>
-      columns.map((column) => row[column.key] ?? ""),
-    );
-    const worksheet = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
-
-    worksheet["!cols"] = columns.map((column, columnIndex) => {
-      const maxDataLength = Math.max(
-        ...dataRows.map((row) => String(row[columnIndex] ?? "").length),
-        column.header.length,
+    const buildWorksheet = (columns, rows) => {
+      const headerRow = columns.map((column) => column.header);
+      const dataRows = rows.map((row) =>
+        columns.map((column) => row[column.key] ?? ""),
       );
-      return { wch: Math.min(40, Math.max(12, maxDataLength + 2)) };
-    });
+      const worksheet = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
+
+      worksheet["!cols"] = columns.map((column, columnIndex) => {
+        const maxDataLength = Math.max(
+          ...dataRows.map((row) => String(row[columnIndex] ?? "").length),
+          column.header.length,
+        );
+        return { wch: Math.min(60, Math.max(12, maxDataLength + 2)) };
+      });
+
+      return worksheet;
+    };
+
+    const detailWorksheet = buildWorksheet(detailColumns, detailRows);
+    const summaryWorksheet = buildWorksheet(summaryColumns, summaryRows);
 
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Delayed PO Report");
+    XLSX.utils.book_append_sheet(workbook, detailWorksheet, "Delayed Item Details");
+    XLSX.utils.book_append_sheet(workbook, summaryWorksheet, "PO Summary");
     const fileBuffer = XLSX.write(workbook, {
       type: "buffer",
       bookType: "xlsx",
     });
     const fileDate = new Date().toISOString().slice(0, 10);
-    const fileName = `delayed-po-report-${fileDate}.xlsx`;
+    const fileName = `delayed-po-item-report-${fileDate}.xlsx`;
 
     res.setHeader(
       "Content-Type",
