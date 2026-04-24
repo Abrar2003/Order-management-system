@@ -6344,11 +6344,24 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
 
       return true;
     });
+    const totalCbm = toRoundedCbmValue(
+      orders.reduce((sum, row) => {
+        const rowCbm =
+          toPositiveCbmNumber(row?.total_po_cbm) ||
+          toPositiveCbmNumber(row?.top_po_cbm) ||
+          toPositiveCbmNumber(row?.total_cbm);
+        return sum + rowCbm;
+      }, 0),
+    );
 
     return res.status(200).json({
       success: true,
       count: orders.length,
       data: orders,
+      summary: {
+        total_cbm: totalCbm,
+        total_po_cbm: totalCbm,
+      },
       sort: {
         sort_by: sortBy,
         sort_order: sortOrder,
@@ -7610,6 +7623,7 @@ const buildPendingPoReportDataset = async ({
     order: "order_id",
     orderid: "order_id",
     order_id: "order_id",
+    vendor: "vendor",
     item: "item_code",
     itemcode: "item_code",
     item_code: "item_code",
@@ -7836,6 +7850,7 @@ exports.exportPendingPoReport = async (req, res) => {
 
     const columns = [
       { key: "order_id", header: "PO" },
+      { key: "vendor", header: "Vendor" },
       { key: "item_code", header: "Item Code" },
       { key: "description", header: "Description" },
       { key: "order_quantity", header: "Order Quantity" },
@@ -7845,6 +7860,7 @@ exports.exportPendingPoReport = async (req, res) => {
     const exportRows = (Array.isArray(dataset?.rows) ? dataset.rows : []).map(
       (row) => ({
         order_id: String(row?.order_id || "").trim(),
+        vendor: String(row?.vendor || "").trim(),
         item_code: String(row?.item_code || "").trim(),
         description: String(row?.description || "").trim(),
         order_quantity: Number(row?.order_quantity || 0),

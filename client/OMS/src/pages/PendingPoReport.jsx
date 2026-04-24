@@ -269,6 +269,7 @@ const PendingPoReport = () => {
         sortOrder,
         getSortValue: (row, column) => {
           if (column === "order_id") return row?.order_id;
+          if (column === "vendor") return row?.vendor;
           if (column === "item_code") return row?.item_code;
           if (column === "description") return row?.description;
           if (column === "order_quantity") return Number(row?.order_quantity || 0);
@@ -555,6 +556,14 @@ const PendingPoReport = () => {
                         </th>
                         <th>
                           <SortHeaderButton
+                            label="Vendor"
+                            isActive={sortBy === "vendor"}
+                            direction={sortOrder}
+                            onClick={() => handleSortColumn("vendor", "asc")}
+                          />
+                        </th>
+                        <th>
+                          <SortHeaderButton
                             label="Item Code"
                             isActive={sortBy === "item_code"}
                             direction={sortOrder}
@@ -601,6 +610,7 @@ const PendingPoReport = () => {
                       {sortedRows.map((row, index) => (
                         <tr key={`${row?._id || row?.order_id}-${row?.item_code}-${index}`}>
                           <td>{row?.order_id || "N/A"}</td>
+                          <td>{row?.vendor || "N/A"}</td>
                           <td>{row?.item_code || "N/A"}</td>
                           <td>{row?.description || "N/A"}</td>
                           <td>{row?.order_quantity ?? 0}</td>

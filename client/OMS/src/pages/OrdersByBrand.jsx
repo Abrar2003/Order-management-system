@@ -11,6 +11,7 @@ import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
 
 const DEFAULT_SORT_BY = "order_date";
+const EMPTY_SUMMARY = { total_cbm: 0, total_po_cbm: 0 };
 
 const parseSortBy = (value) => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -27,6 +28,18 @@ const parseSortOrder = (value, sortBy = DEFAULT_SORT_BY) => {
   return sortBy === "order_id" ? "asc" : "desc";
 };
 
+const calculateOrdersTotalCbm = (orders = []) =>
+  orders.reduce(
+    (sum, order) =>
+      sum +
+      resolvePreferredCbm(
+        order?.total_po_cbm,
+        order?.top_po_cbm,
+        order?.total_cbm,
+      ),
+    0,
+  );
+
 const OrdersByBrand = () => {
   const { brand, vendor, status } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -39,6 +52,7 @@ const OrdersByBrand = () => {
 
   const navigate = useNavigate();
   const [orders, setOrders] = useState([]);
+  const [summary, setSummary] = useState(EMPTY_SUMMARY);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [sortBy, setSortBy] = useState(initialSortBy);
@@ -76,9 +90,23 @@ const OrdersByBrand = () => {
             },
           },
         );
-        setOrders(res.data.data);
+        const responseOrders = Array.isArray(res.data?.data) ? res.data.data : [];
+        const responseSummary = res.data?.summary || {};
+        const totalCbm =
+          resolvePreferredCbm(
+            responseSummary?.total_po_cbm,
+            responseSummary?.total_cbm,
+          ) || calculateOrdersTotalCbm(responseOrders);
+
+        setOrders(responseOrders);
+        setSummary({
+          total_cbm: totalCbm,
+          total_po_cbm: totalCbm,
+        });
       } catch (err) {
         console.error(err);
+        setOrders([]);
+        setSummary(EMPTY_SUMMARY);
         setError("Failed to fetch orders");
       } finally {
         setLoading(false);
@@ -142,6 +170,9 @@ const OrdersByBrand = () => {
             <span className="om-summary-chip">Brand: {brand}</span>
             <span className="om-summary-chip">Vendor: {vendor}</span>
             <span className="om-summary-chip">Status: {status ?? "all"}</span>
+            <span className="om-summary-chip">
+              Total CBM: {formatCbm(summary.total_cbm)}
+            </span>
           </div>
         </div>
 
