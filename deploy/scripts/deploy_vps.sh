@@ -113,10 +113,37 @@ npm run build
 log "Publishing frontend build"
 sync_frontend_build
 
-log "Restarting backend via PM2"
+log "Restarting backend via PM2 cluster mode"
 cd "$APP_DIR"
-pm2 startOrRestart "$PM2_CONFIG" --update-env
+
+pm2 startOrReload "$PM2_CONFIG" --update-env
 pm2 save
+
+log "Verifying PM2 cluster instances"
+
+EXPECTED_PM2_INSTANCES="${EXPECTED_PM2_INSTANCES:-2}"
+RUNNING_PM2_INSTANCES="$(pm2 jlist | node -e '
+let input = "";
+process.stdin.on("data", chunk => input += chunk);
+process.stdin.on("end", () => {
+  const apps = JSON.parse(input || "[]");
+  const count = apps.filter(app =>
+    app.name === "oms-backend" &&
+    app.pm2_env &&
+    app.pm2_env.status === "online"
+  ).length;
+  console.log(count);
+});
+')"
+
+if [[ "$RUNNING_PM2_INSTANCES" -ne "$EXPECTED_PM2_INSTANCES" ]]; then
+  echo "Expected $EXPECTED_PM2_INSTANCES oms-backend PM2 instances, but found $RUNNING_PM2_INSTANCES"
+  pm2 list
+  exit 1
+fi
+
+echo "PM2 cluster is running with $RUNNING_PM2_INSTANCES instances"
+pm2 list
 
 if is_truthy "$VALIDATE_NGINX" && command -v nginx >/dev/null 2>&1; then
   log "Validating nginx config"
