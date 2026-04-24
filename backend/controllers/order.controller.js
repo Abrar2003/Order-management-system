@@ -3455,6 +3455,8 @@ const getShipmentDataset = async ({
   orderId,
   itemCode,
   container,
+  fromDate,
+  toDate,
   statusFilter,
   sortToken,
   sortByInput,
@@ -3563,6 +3565,15 @@ const getShipmentDataset = async ({
   const containerNeedle = normalizedContainer
     ? normalizedContainer.toLowerCase()
     : null;
+  const stuffingDateRangeResult = buildDateRangeQuery({
+    fromValue: fromDate,
+    toValue: toDate,
+    label: "Shipping",
+  });
+  if (stuffingDateRangeResult.error) {
+    throw new Error(stuffingDateRangeResult.error);
+  }
+  const stuffingDateRange = stuffingDateRangeResult.range;
 
   const containerFilteredRows = containerNeedle
     ? rows.filter((row) =>
@@ -3571,8 +3582,29 @@ const getShipmentDataset = async ({
           .includes(containerNeedle),
       )
     : rows;
+  const dateFilteredRows = stuffingDateRange
+    ? containerFilteredRows.filter((row) => {
+        const stuffingDate = parseDateLike(row?.stuffing_date);
+        if (!(stuffingDate instanceof Date) || Number.isNaN(stuffingDate.getTime())) {
+          return false;
+        }
+        if (
+          stuffingDateRange.$gte instanceof Date
+          && stuffingDate < stuffingDateRange.$gte
+        ) {
+          return false;
+        }
+        if (
+          stuffingDateRange.$lt instanceof Date
+          && stuffingDate >= stuffingDateRange.$lt
+        ) {
+          return false;
+        }
+        return true;
+      })
+    : containerFilteredRows;
 
-  const summary = containerFilteredRows.reduce(
+  const summary = dateFilteredRows.reduce(
     (acc, row) => {
       acc.total += 1;
       if (row?.status === "Pending") acc.pending += 1;
@@ -3597,8 +3629,8 @@ const getShipmentDataset = async ({
 
   const statusScopedRows =
     statusFilter && ORDER_STATUS_SEQUENCE.includes(statusFilter)
-      ? containerFilteredRows.filter((row) => row?.status === statusFilter)
-      : containerFilteredRows;
+      ? dateFilteredRows.filter((row) => row?.status === statusFilter)
+      : dateFilteredRows;
   summary.filteredStuffedCbm = toRoundedCbmValue(
     statusScopedRows.reduce(
       (sum, row) => sum + Number(row?.shipment_cbm || 0),
@@ -3640,6 +3672,8 @@ const getShipmentDataset = async ({
       item_codes: normalizeDistinctValues(
         derivedOrders.map((row) => row?.item?.item_code),
       ),
+      from_date: fromDate ? toISODateString(fromDate) : "",
+      to_date: toDate ? toISODateString(toDate) : "",
     },
   };
 };
@@ -3648,11 +3682,15 @@ const getContainerDataset = async ({
   brand,
   vendor,
   container,
+  fromDate,
+  toDate,
 } = {}) => {
   const shipmentData = await getShipmentDataset({
     brand,
     vendor,
     container,
+    fromDate,
+    toDate,
     sortByInput: "stuffing_date",
     sortOrderInput: "desc",
   });
@@ -3759,6 +3797,8 @@ const getContainerDataset = async ({
       brands: shipmentData.filters.brands,
       vendors: shipmentData.filters.vendors,
       containers: shipmentData.filters.containers,
+      from_date: shipmentData.filters.from_date,
+      to_date: shipmentData.filters.to_date,
     },
   };
 };
@@ -8911,6 +8951,16 @@ exports.getContainersDb = async (req, res) => {
       brand: req.query.brand,
       vendor: req.query.vendor,
       container: req.query.container ?? req.query.container_number,
+      fromDate:
+        req.query.from_date ??
+        req.query.fromDate ??
+        req.query.start_date ??
+        req.query.startDate,
+      toDate:
+        req.query.to_date ??
+        req.query.toDate ??
+        req.query.end_date ??
+        req.query.endDate,
     });
 
     return res.status(200).json({

@@ -7,7 +7,7 @@ import {
   getNextClientSortState,
   sortClientRows,
 } from "../utils/clientSort";
-import { formatDateDDMMYYYY } from "../utils/date";
+import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
@@ -19,6 +19,8 @@ const normalizeFilterParam = (value, fallback = "all") => {
   if (!cleaned) return fallback;
   return cleaned;
 };
+
+const normalizeDateParam = (value) => toISODateString(value) || "";
 
 const CHECKED_STATUS_SORT_ORDER = {
   Checked: 0,
@@ -58,6 +60,18 @@ const Containers = () => {
   const [draftBrandFilter, setDraftBrandFilter] = useState(() =>
     normalizeFilterParam(searchParams.get("brand"), "all"),
   );
+  const [fromDateFilter, setFromDateFilter] = useState(() =>
+    normalizeDateParam(searchParams.get("from_date") || searchParams.get("fromDate")),
+  );
+  const [draftFromDateFilter, setDraftFromDateFilter] = useState(() =>
+    normalizeDateParam(searchParams.get("from_date") || searchParams.get("fromDate")),
+  );
+  const [toDateFilter, setToDateFilter] = useState(() =>
+    normalizeDateParam(searchParams.get("to_date") || searchParams.get("toDate")),
+  );
+  const [draftToDateFilter, setDraftToDateFilter] = useState(() =>
+    normalizeDateParam(searchParams.get("to_date") || searchParams.get("toDate")),
+  );
   const [summary, setSummary] = useState({ total: 0 });
   const [syncedQuery, setSyncedQuery] = useState(null);
   const [filterOptions, setFilterOptions] = useState({
@@ -78,6 +92,8 @@ const Containers = () => {
           container: containerSearch,
           vendor: vendorFilter,
           brand: brandFilter,
+          from_date: fromDateFilter,
+          to_date: toDateFilter,
         },
       });
 
@@ -106,7 +122,7 @@ const Containers = () => {
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, containerSearch, vendorFilter]);
+  }, [brandFilter, containerSearch, fromDateFilter, toDateFilter, vendorFilter]);
 
   useEffect(() => {
     fetchContainers();
@@ -117,6 +133,12 @@ const Containers = () => {
     const nextContainerSearch = normalizeSearchParam(searchParams.get("container"));
     const nextVendorFilter = normalizeFilterParam(searchParams.get("vendor"), "all");
     const nextBrandFilter = normalizeFilterParam(searchParams.get("brand"), "all");
+    const nextFromDateFilter = normalizeDateParam(
+      searchParams.get("from_date") || searchParams.get("fromDate"),
+    );
+    const nextToDateFilter = normalizeDateParam(
+      searchParams.get("to_date") || searchParams.get("toDate"),
+    );
 
     setContainerSearch((prev) =>
       prev === nextContainerSearch ? prev : nextContainerSearch,
@@ -136,6 +158,18 @@ const Containers = () => {
     setDraftBrandFilter((prev) =>
       prev === nextBrandFilter ? prev : nextBrandFilter,
     );
+    setFromDateFilter((prev) =>
+      prev === nextFromDateFilter ? prev : nextFromDateFilter,
+    );
+    setDraftFromDateFilter((prev) =>
+      prev === nextFromDateFilter ? prev : nextFromDateFilter,
+    );
+    setToDateFilter((prev) =>
+      prev === nextToDateFilter ? prev : nextToDateFilter,
+    );
+    setDraftToDateFilter((prev) =>
+      prev === nextToDateFilter ? prev : nextToDateFilter,
+    );
     setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
   }, [searchParams]);
 
@@ -149,6 +183,8 @@ const Containers = () => {
     if (containerValue) next.set("container", containerValue);
     if (vendorFilter && vendorFilter !== "all") next.set("vendor", vendorFilter);
     if (brandFilter && brandFilter !== "all") next.set("brand", brandFilter);
+    if (fromDateFilter) next.set("from_date", fromDateFilter);
+    if (toDateFilter) next.set("to_date", toDateFilter);
 
     if (!areSearchParamsEquivalent(next, searchParams)) {
       setSearchParams(next, { replace: true });
@@ -156,9 +192,11 @@ const Containers = () => {
   }, [
     brandFilter,
     containerSearch,
+    fromDateFilter,
     searchParams,
     setSearchParams,
     syncedQuery,
+    toDateFilter,
     vendorFilter,
   ]);
 
@@ -194,15 +232,21 @@ const Containers = () => {
     setContainerSearch(normalizeSearchParam(draftContainerSearch));
     setVendorFilter(normalizeFilterParam(draftVendorFilter, "all"));
     setBrandFilter(normalizeFilterParam(draftBrandFilter, "all"));
+    setFromDateFilter(normalizeDateParam(draftFromDateFilter));
+    setToDateFilter(normalizeDateParam(draftToDateFilter));
   };
 
   const handleClearFilters = () => {
     setDraftContainerSearch("");
     setDraftVendorFilter("all");
     setDraftBrandFilter("all");
+    setDraftFromDateFilter("");
+    setDraftToDateFilter("");
     setContainerSearch("");
     setVendorFilter("all");
     setBrandFilter("all");
+    setFromDateFilter("");
+    setToDateFilter("");
   };
 
   const sortedRows = useMemo(
@@ -254,7 +298,7 @@ const Containers = () => {
         <div className="card om-card mb-3">
           <div className="card-body">
             <form className="row g-2 align-items-end" onSubmit={handleApplyFilters}>
-              <div className="col-md-4">
+              <div className="col-md-2">
                 <label className="form-label">Search by Container</label>
                 <input
                   type="text"
@@ -270,7 +314,7 @@ const Containers = () => {
                   ))}
                 </datalist>
               </div>
-              <div className="col-md-3">
+              <div className="col-md-2">
                 <label className="form-label">Filter by Vendor</label>
                 <select
                   className="form-select"
@@ -285,7 +329,7 @@ const Containers = () => {
                   ))}
                 </select>
               </div>
-              <div className="col-md-3">
+              <div className="col-md-2">
                 <label className="form-label">Filter by Brand</label>
                 <select
                   className="form-select"
@@ -299,6 +343,28 @@ const Containers = () => {
                     </option>
                   ))}
                 </select>
+              </div>
+              <div className="col-md-2">
+                <label className="form-label">From Date</label>
+                <input
+                  type="date"
+                  className="form-control"
+                  value={draftFromDateFilter}
+                  onChange={(event) =>
+                    setDraftFromDateFilter(normalizeDateParam(event.target.value))
+                  }
+                />
+              </div>
+              <div className="col-md-2">
+                <label className="form-label">To Date</label>
+                <input
+                  type="date"
+                  className="form-control"
+                  value={draftToDateFilter}
+                  onChange={(event) =>
+                    setDraftToDateFilter(normalizeDateParam(event.target.value))
+                  }
+                />
               </div>
               <div className="col-md-2 d-flex gap-2">
                 <button type="submit" className="btn btn-primary flex-fill">
@@ -319,6 +385,12 @@ const Containers = () => {
         <div className="card om-card mb-3">
           <div className="card-body d-flex flex-wrap gap-2">
             <span className="om-summary-chip">Total Containers: {summary?.total ?? 0}</span>
+            <span className="om-summary-chip">
+              From: {fromDateFilter ? formatDateDDMMYYYY(fromDateFilter, fromDateFilter) : "all"}
+            </span>
+            <span className="om-summary-chip">
+              To: {toDateFilter ? formatDateDDMMYYYY(toDateFilter, toDateFilter) : "all"}
+            </span>
             <span className="om-summary-chip">Checked: {summary?.checked ?? 0}</span>
             <span className="om-summary-chip">
               Partially Checked: {summary?.partially_checked ?? 0}
