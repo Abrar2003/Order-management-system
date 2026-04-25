@@ -498,10 +498,8 @@ const hasInspectionRecordActivity = ({
   goodsNotReady = null,
   status = "",
 } = {}) =>
-  isInspectionStatusMatching(status, INSPECTION_RECORD_STATUS.TRANSFERRED) ||
   isInspectionStatusMatching(status, INSPECTION_RECORD_STATUS.REJECTED) ||
   isInspectionStatusMatching(status, INSPECTION_RECORD_STATUS.GOODS_NOT_READY) ||
-  isInspectionStatusMatching(status, INSPECTION_RECORD_STATUS.DONE) ||
   isGoodsNotReadyMarked(goodsNotReady, status) ||
   toNonNegativeNumber(checked, 0) > 0 ||
   toNonNegativeNumber(passed, 0) > 0 ||
@@ -605,7 +603,7 @@ const syncQcRequestHistoryStatuses = (
       );
     }
 
-    if (requestedDateKey) {
+    if (requestedDateKey && !requestHistoryId) {
       const dateOnlyKey = `date:${requestedDateKey}`;
       const dateInspectorKey = inspectorId
         ? `${dateOnlyKey}:inspector:${inspectorId}`
@@ -1725,6 +1723,9 @@ const resolveLatestInspectionRecordForRequestEntry = (
   if (requestDateKey) {
     candidateRecords.push(
       findLatestMatchingRecord((record) => {
+        const linkedRequestHistoryId = String(record?.request_history_id || "").trim();
+        if (requestHistoryId && linkedRequestHistoryId) return false;
+
         const recordRequestedDate = toISODateString(
           record?.requested_date || record?.inspection_date || record?.createdAt,
         );
@@ -1740,6 +1741,9 @@ const resolveLatestInspectionRecordForRequestEntry = (
     );
     candidateRecords.push(
       findLatestMatchingRecord((record) => {
+        const linkedRequestHistoryId = String(record?.request_history_id || "").trim();
+        if (requestHistoryId && linkedRequestHistoryId) return false;
+
         const recordRequestedDate = toISODateString(
           record?.requested_date || record?.inspection_date || record?.createdAt,
         );
@@ -1819,26 +1823,35 @@ const getQcUserLatestRequestAvailability = (
     };
   }
 
+  const latestInspectionRecord = resolveLatestInspectionRecordForRequestEntry(
+    inspectionRecords,
+    latestRequestEntry,
+  );
+  const latestInspectionHasZeroChecked =
+    Boolean(latestInspectionRecord) &&
+    toNonNegativeNumber(latestInspectionRecord?.checked, 0) <= 0;
   const latestRequestStatus = normalizeRequestHistoryStatus(
     latestRequestEntry?.status || REQUEST_HISTORY_STATUS.OPEN,
   );
   if (latestRequestStatus !== REQUEST_HISTORY_STATUS.OPEN) {
+    if (latestInspectionHasZeroChecked) {
+      return {
+        isAvailable: true,
+        latestRequestEntry,
+        latestInspectionRecord,
+        reason: "",
+      };
+    }
+
     return {
       isAvailable: false,
       latestRequestEntry,
-      latestInspectionRecord: resolveLatestInspectionRecordForRequestEntry(
-        inspectionRecords,
-        latestRequestEntry,
-      ),
+      latestInspectionRecord,
       reason:
         "The latest QC request is already closed. Align a new QC request before updating again.",
     };
   }
 
-  const latestInspectionRecord = resolveLatestInspectionRecordForRequestEntry(
-    inspectionRecords,
-    latestRequestEntry,
-  );
   const latestRequestHasActivity = latestInspectionRecord
     ? hasInspectionRecordActivity({
       checked: latestInspectionRecord?.checked,
@@ -1852,6 +1865,15 @@ const getQcUserLatestRequestAvailability = (
     : false;
 
   if (latestRequestHasActivity) {
+    if (latestInspectionHasZeroChecked) {
+      return {
+        isAvailable: true,
+        latestRequestEntry,
+        latestInspectionRecord,
+        reason: "",
+      };
+    }
+
     return {
       isAvailable: false,
       latestRequestEntry,

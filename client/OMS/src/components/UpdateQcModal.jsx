@@ -465,6 +465,9 @@ const resolveLatestInspectionRecordForRequestEntry = (
 
   return (
     findLatestMatchingRecord((record) => {
+      const linkedRequestHistoryId = String(record?.request_history_id || "").trim();
+      if (requestHistoryId && linkedRequestHistoryId) return false;
+
       const recordRequestedDate = toISODateString(
         record?.requested_date || record?.inspection_date || record?.createdAt,
       );
@@ -478,6 +481,9 @@ const resolveLatestInspectionRecordForRequestEntry = (
       return !recordInspectorId || recordInspectorId === requestInspectorId;
     }) ||
     findLatestMatchingRecord((record) => {
+      const linkedRequestHistoryId = String(record?.request_history_id || "").trim();
+      if (requestHistoryId && linkedRequestHistoryId) return false;
+
       const recordRequestedDate = toISODateString(
         record?.requested_date || record?.inspection_date || record?.createdAt,
       );
