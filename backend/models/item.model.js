@@ -5,7 +5,17 @@ const {
   BOX_SIZE_REMARK_OPTIONS,
 } = require("../helpers/boxMeasurement");
 
-const ITEM_SIZE_REMARKS = ["", "top", "base", "item1", "item2", "item3"];
+const SIZE_ENTRY_LIMIT = 4;
+const ITEM_SIZE_REMARKS = [
+  "",
+  "item",
+  "top",
+  "base",
+  "item1",
+  "item2",
+  "item3",
+  "item4",
+];
 const BOX_SIZE_REMARKS = ["", ...BOX_SIZE_REMARK_OPTIONS];
 
 const createSizeEntrySchema = (remarkEnum = []) =>
@@ -121,8 +131,9 @@ const itemSchema = new mongoose.Schema(
       type: [itemSizeEntrySchema],
       default: [],
       validate: {
-        validator: (entries) => !Array.isArray(entries) || entries.length <= 3,
-        message: "inspected_item_sizes cannot exceed 3 entries",
+        validator: (entries) =>
+          !Array.isArray(entries) || entries.length <= SIZE_ENTRY_LIMIT,
+        message: `inspected_item_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
       },
     },
     inspected_item_top_LBH: {
@@ -144,8 +155,9 @@ const itemSchema = new mongoose.Schema(
       type: [boxSizeEntrySchema],
       default: [],
       validate: {
-        validator: (entries) => !Array.isArray(entries) || entries.length <= 3,
-        message: "inspected_box_sizes cannot exceed 3 entries",
+        validator: (entries) =>
+          !Array.isArray(entries) || entries.length <= SIZE_ENTRY_LIMIT,
+        message: `inspected_box_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
       },
     },
     inspected_box_mode: {
@@ -183,8 +195,9 @@ const itemSchema = new mongoose.Schema(
       type: [itemSizeEntrySchema],
       default: [],
       validate: {
-        validator: (entries) => !Array.isArray(entries) || entries.length <= 3,
-        message: "pis_item_sizes cannot exceed 3 entries",
+        validator: (entries) =>
+          !Array.isArray(entries) || entries.length <= SIZE_ENTRY_LIMIT,
+        message: `pis_item_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
       },
     },
     pis_item_top_LBH: {
@@ -206,8 +219,9 @@ const itemSchema = new mongoose.Schema(
       type: [boxSizeEntrySchema],
       default: [],
       validate: {
-        validator: (entries) => !Array.isArray(entries) || entries.length <= 3,
-        message: "pis_box_sizes cannot exceed 3 entries",
+        validator: (entries) =>
+          !Array.isArray(entries) || entries.length <= SIZE_ENTRY_LIMIT,
+        message: `pis_box_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
       },
     },
     pis_box_mode: {
@@ -279,6 +293,7 @@ const itemSchema = new mongoose.Schema(
       link: { type: String, default: "", trim: true },
       public_id: { type: String, default: "", trim: true },
     },
+    pis_checked_flag: { type: Boolean, default: false },
     finish: {
       type: [finishAssignmentSchema],
       default: [],

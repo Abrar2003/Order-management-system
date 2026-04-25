@@ -199,13 +199,14 @@ const EMPTY_LBH = Object.freeze({
   B: 0,
   H: 0,
 });
-const SIZE_ENTRY_LIMIT = 3;
+const SIZE_ENTRY_LIMIT = 4;
 const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
   "top",
   "base",
   "item1",
   "item2",
   "item3",
+  "item4",
 ]);
 const resolveQcOrderStatus = (qcDoc = null, orderDoc = null) => {
   const resolvedOrder = orderDoc || qcDoc?.order || null;
@@ -937,7 +938,8 @@ const recalculateInspectorUsedLabels = async (inspectorIds = []) => {
     const labelUsageRecords = await Inspection.find({
       inspector: inspectorUserId,
     })
-      .select("labels_added")
+      .select("qc request_history_id inspection_date labels_added createdAt updatedAt")
+      .populate("qc", "order_meta item request_date last_inspected_date")
       .lean();
 
     inspectorDoc.used_labels = normalizeLabels(
@@ -945,6 +947,34 @@ const recalculateInspectorUsedLabels = async (inspectorIds = []) => {
         Array.isArray(entry?.labels_added) ? entry.labels_added : [],
       ),
     );
+    inspectorDoc.label_used_history = labelUsageRecords
+      .map((entry) => {
+        const labels = normalizeLabels(entry?.labels_added || []);
+        if (labels.length === 0) return null;
+        const qcDoc = entry?.qc && typeof entry.qc === "object" ? entry.qc : null;
+
+        return {
+          labels,
+          inspection_record: entry?._id,
+          qc: qcDoc?._id || entry?.qc || null,
+          request_history_id: entry?.request_history_id || null,
+          qc_meta: {
+            order_id: String(qcDoc?.order_meta?.order_id || ""),
+            brand: String(qcDoc?.order_meta?.brand || ""),
+            vendor: String(qcDoc?.order_meta?.vendor || ""),
+            item_code: String(qcDoc?.item?.item_code || ""),
+            description: String(qcDoc?.item?.description || ""),
+          },
+          inspection_date: String(entry?.inspection_date || ""),
+          used_at: entry?.createdAt || new Date(),
+          updated_at: entry?.updatedAt || entry?.createdAt || new Date(),
+        };
+      })
+      .filter(Boolean)
+      .sort(
+        (left, right) =>
+          new Date(right?.used_at || 0) - new Date(left?.used_at || 0),
+      );
     await inspectorDoc.save();
   }
 };
@@ -2046,6 +2076,10 @@ const upsertInspectionRecordForRequest = async ({
       qcDoc.inspection_record.push(inspectionRecord._id);
     }
 
+    if (labelsToAppend.length > 0) {
+      await recalculateInspectorUsedLabels([resolvedInspectorId]);
+    }
+
     return inspectionRecord;
   }
 
@@ -2133,6 +2167,10 @@ const upsertInspectionRecordForRequest = async ({
     )
   ) {
     qcDoc.inspection_record.push(inspectionRecord._id);
+  }
+
+  if (labelsToAppend.length > 0) {
+    await recalculateInspectorUsedLabels([resolvedInspectorId]);
   }
 
   return inspectionRecord;
@@ -5463,6 +5501,10 @@ exports.updateQC = async (req, res) => {
         stampRequestHistoryEntry(latestRequestEntry, {
           user: req.user,
         });
+      }
+
+      if (inspectionRecord) {
+        await recalculateInspectorUsedLabels([inspectionInspectorId]);
       }
     }
 
@@ -10125,23 +10167,7 @@ exports.editInspectionRecords = async (req, res) => {
       .map((value) => String(value || "").trim())
       .filter((value) => mongoose.Types.ObjectId.isValid(value));
 
-    for (const inspectorUserId of inspectorIdsToRecalculate) {
-      const inspectorDoc = await Inspector.findOne({ user: inspectorUserId });
-      if (!inspectorDoc) continue;
-
-      const labelUsageRecords = await Inspection.find({
-        inspector: inspectorUserId,
-      })
-        .select("labels_added")
-        .lean();
-
-      inspectorDoc.used_labels = normalizeLabels(
-        labelUsageRecords.flatMap((entry) =>
-          Array.isArray(entry?.labels_added) ? entry.labels_added : [],
-        ),
-      );
-      await inspectorDoc.save();
-    }
+    await recalculateInspectorUsedLabels(inspectorIdsToRecalculate);
 
     await createQcEditLog({
       reqUser: req.user,
@@ -10288,38 +10314,7 @@ exports.deleteInspectionRecord = async (req, res) => {
 
     await Inspection.deleteOne({ _id: inspection._id });
 
-    const inspectorDoc = await Inspector.findOne({
-      user: inspection.inspector,
-    });
-    if (inspectorDoc) {
-      const stillUsedRecords = await Inspection.find({
-        inspector: inspection.inspector,
-      })
-        .select("labels_added")
-        .lean();
-
-      const stillUsedLabels = new Set(
-        stillUsedRecords.flatMap((entry) =>
-          (Array.isArray(entry?.labels_added) ? entry.labels_added : [])
-            .map((label) => Number(label))
-            .filter((label) => Number.isFinite(label)),
-        ),
-      );
-
-      const nextUsedLabels = normalizeLabels(
-        (Array.isArray(inspectorDoc.used_labels)
-          ? inspectorDoc.used_labels
-          : []
-        )
-          .map((label) => Number(label))
-          .filter(
-            (label) => Number.isFinite(label) && stillUsedLabels.has(label),
-          ),
-      );
-
-      inspectorDoc.used_labels = nextUsedLabels;
-      await inspectorDoc.save();
-    }
+    await recalculateInspectorUsedLabels([inspection.inspector]);
 
     const orderId = qc?.order?._id || qc.order;
     const orderRecord = await Order.findById(orderId);

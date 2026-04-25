@@ -51,6 +51,8 @@ const getVendors = (item = {}) =>
     ? item.vendors.join(", ")
     : "N/A";
 
+const isPisChecked = (item = {}) => item?.pis_checked_flag === true;
+
 const formatRemarkLabel = (remark = "", fallback = "Value") => {
   const normalized = String(remark || "").trim().toLowerCase();
   if (!normalized) return fallback;
@@ -360,7 +362,11 @@ const PISDiffs = () => {
           if (column === "brand") return getBrand(item);
           if (column === "vendors") return getVendors(item);
           if (column === "diffs") {
-            return (Array.isArray(item?.pis_diff?.fields) ? item.pis_diff.fields : []).join(", ");
+            const statusLabel = isPisChecked(item) ? "PIS Checked" : "Needs PIS Check";
+            const diffFields = Array.isArray(item?.pis_diff?.fields)
+              ? item.pis_diff.fields
+              : [];
+            return `${statusLabel} | ${diffFields.join(", ")}`;
           }
           if (column === "inspectedItem") {
             return getMeasurementSortValue(item, "inspected", "item");
@@ -374,6 +380,31 @@ const PISDiffs = () => {
         },
       }),
     [getMeasurementSortValue, rows, sortBy, sortOrder],
+  );
+
+  const handlePisUpdated = useCallback(
+    (updatedItem = {}) => {
+      const nextItem = {
+        ...(selectedItem || {}),
+        ...(updatedItem && typeof updatedItem === "object" ? updatedItem : {}),
+        pis_checked_flag: true,
+      };
+      const nextItemId = String(nextItem?._id || "");
+
+      if (nextItemId) {
+        setRows((prevRows) =>
+          prevRows.map((row) =>
+            String(row?._id || "") === nextItemId
+              ? { ...row, ...nextItem, pis_checked_flag: true }
+              : row,
+          ),
+        );
+      }
+
+      setSelectedItem(null);
+      fetchDiffItems();
+    },
+    [fetchDiffItems, selectedItem],
   );
 
   return (
@@ -568,68 +599,82 @@ const PISDiffs = () => {
                       </tr>
                     )}
 
-                    {sortedRows.map((item) => (
-                      <tr key={item?._id || item?.code}>
-                        <td>{item?.code || "N/A"}</td>
-                        <td>{item?.description || item?.name || "N/A"}</td>
-                        <td>{getBrand(item)}</td>
-                        <td>{getVendors(item)}</td>
-                        <td>
-                          <div className="d-flex flex-wrap gap-1">
-                            {(Array.isArray(item?.pis_diff?.fields) ? item.pis_diff.fields : []).map(
-                              (field) => (
-                                <span key={field} className="badge text-bg-warning">
-                                  {field}
-                                </span>
-                              ),
-                            )}
-                          </div>
-                        </td>
-                        <td>
-                          <MeasurementCell
-                            item={item}
-                            source="inspected"
-                            group="item"
-                            weightLabel="Net"
-                          />
-                        </td>
-                        <td>
-                          <MeasurementCell
-                            item={item}
-                            source="pis"
-                            group="item"
-                            weightLabel="Net"
-                          />
-                        </td>
-                        <td>
-                          <MeasurementCell
-                            item={item}
-                            source="inspected"
-                            group="box"
-                            weightLabel="Gross"
-                          />
-                        </td>
-                        <td>
-                          <MeasurementCell
-                            item={item}
-                            source="pis"
-                            group="box"
-                            weightLabel="Gross"
-                          />
-                        </td>
-                        {canEditPis && (
+                    {sortedRows.map((item) => {
+                      const isCheckedWithDiff = isPisChecked(item);
+
+                      return (
+                        <tr
+                          key={item?._id || item?.code}
+                          className={isCheckedWithDiff ? "table-danger" : ""}
+                        >
+                          <td>{item?.code || "N/A"}</td>
+                          <td>{item?.description || item?.name || "N/A"}</td>
+                          <td>{getBrand(item)}</td>
+                          <td>{getVendors(item)}</td>
                           <td>
-                            <button
-                              type="button"
-                              className="btn btn-outline-primary btn-sm"
-                              onClick={() => setSelectedItem(item)}
-                            >
-                              Update PIS
-                            </button>
+                            <div className="d-flex flex-wrap gap-1">
+                              <span
+                                className={`badge ${
+                                  isCheckedWithDiff ? "text-bg-danger" : "text-bg-warning"
+                                }`}
+                              >
+                                {isCheckedWithDiff ? "PIS Checked" : "Needs PIS Check"}
+                              </span>
+                              {(Array.isArray(item?.pis_diff?.fields) ? item.pis_diff.fields : []).map(
+                                (field) => (
+                                  <span key={field} className="badge text-bg-warning">
+                                    {field}
+                                  </span>
+                                ),
+                              )}
+                            </div>
                           </td>
-                        )}
-                      </tr>
-                    ))}
+                          <td>
+                            <MeasurementCell
+                              item={item}
+                              source="inspected"
+                              group="item"
+                              weightLabel="Net"
+                            />
+                          </td>
+                          <td>
+                            <MeasurementCell
+                              item={item}
+                              source="pis"
+                              group="item"
+                              weightLabel="Net"
+                            />
+                          </td>
+                          <td>
+                            <MeasurementCell
+                              item={item}
+                              source="inspected"
+                              group="box"
+                              weightLabel="Gross"
+                            />
+                          </td>
+                          <td>
+                            <MeasurementCell
+                              item={item}
+                              source="pis"
+                              group="box"
+                              weightLabel="Gross"
+                            />
+                          </td>
+                          {canEditPis && (
+                            <td>
+                              <button
+                                type="button"
+                                className="btn btn-outline-primary btn-sm"
+                                onClick={() => setSelectedItem(item)}
+                              >
+                                Update PIS
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -684,10 +729,7 @@ const PISDiffs = () => {
         <EditPisModal
           item={selectedItem}
           onClose={() => setSelectedItem(null)}
-          onUpdated={() => {
-            setSelectedItem(null);
-            fetchDiffItems();
-          }}
+          onUpdated={handlePisUpdated}
         />
       )}
     </>

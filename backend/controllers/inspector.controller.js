@@ -1,5 +1,6 @@
 const Inspector = require("../models/inspector.model");
 const User = require("../models/user.model");
+const Inspection = require("../models/inspection.model");
 const parsePositiveInteger = (value, fallback) => {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed < 1) return fallback;
@@ -43,6 +44,143 @@ const getInspectorLabelState = (inspector = {}) => ({
   rejected: normalizeInspectorLabels(inspector?.rejected_labels),
 });
 
+const buildLabelHistoryActor = (user = null) => ({
+  user: user?._id || null,
+  name: String(user?.name || user?.username || user?.email || "").trim(),
+});
+
+const appendLabelAllocationHistory = (
+  inspector,
+  {
+    action,
+    labels = [],
+    previousLabels = [],
+    nextLabels = [],
+    fromInspector = null,
+    toInspector = null,
+    actor = null,
+    remarks = "",
+  } = {},
+) => {
+  if (!inspector || !action) return;
+
+  inspector.label_allocation_history = Array.isArray(inspector.label_allocation_history)
+    ? inspector.label_allocation_history
+    : [];
+
+  inspector.label_allocation_history.push({
+    action,
+    labels: normalizeInspectorLabels(labels),
+    previous_labels: normalizeInspectorLabels(previousLabels),
+    next_labels: normalizeInspectorLabels(nextLabels),
+    from_inspector: fromInspector || null,
+    to_inspector: toInspector || null,
+    actor: buildLabelHistoryActor(actor),
+    recorded_at: new Date(),
+    remarks: String(remarks || "").trim(),
+  });
+};
+
+const buildLabelUsedHistoryFromInspectionRecords = (records = []) =>
+  (Array.isArray(records) ? records : [])
+    .map((entry) => {
+      const labels = normalizeInspectorLabels(entry?.labels_added || []);
+      if (labels.length === 0) return null;
+
+      const qcDoc = entry?.qc && typeof entry.qc === "object" ? entry.qc : null;
+
+      return {
+        labels,
+        inspection_record: entry?._id,
+        qc: qcDoc?._id || entry?.qc || null,
+        request_history_id: entry?.request_history_id || null,
+        qc_meta: {
+          order_id: String(qcDoc?.order_meta?.order_id || ""),
+          brand: String(qcDoc?.order_meta?.brand || ""),
+          vendor: String(qcDoc?.order_meta?.vendor || ""),
+          item_code: String(qcDoc?.item?.item_code || ""),
+          description: String(qcDoc?.item?.description || ""),
+        },
+        inspection_date: String(entry?.inspection_date || ""),
+        used_at: entry?.createdAt || new Date(),
+        updated_at: entry?.updatedAt || entry?.createdAt || new Date(),
+      };
+    })
+    .filter(Boolean)
+    .sort(
+      (left, right) =>
+        new Date(right?.used_at || 0) - new Date(left?.used_at || 0),
+    );
+
+const syncInspectorUsedLabelsFromInspectionRecords = async (inspector) => {
+  if (!inspector?.user) return inspector;
+
+  const inspectorUserId = String(inspector?.user?._id || inspector.user || "").trim();
+  if (!inspectorUserId) return inspector;
+
+  const labelUsageRecords = await Inspection.find({
+    inspector: inspectorUserId,
+  })
+    .select("qc request_history_id inspection_date labels_added createdAt updatedAt")
+    .populate("qc", "order_meta item request_date last_inspected_date")
+    .lean();
+
+  inspector.used_labels = normalizeInspectorLabels(
+    labelUsageRecords.flatMap((entry) =>
+      Array.isArray(entry?.labels_added) ? entry.labels_added : [],
+    ),
+  );
+  inspector.label_used_history =
+    buildLabelUsedHistoryFromInspectionRecords(labelUsageRecords);
+
+  await inspector.save();
+  return inspector;
+};
+
+const attachUsedLabelHistoryToInspectorRows = async (inspectors = []) => {
+  const rows = Array.isArray(inspectors) ? inspectors : [];
+  const userIds = [
+    ...new Set(
+      rows
+        .map((inspector) => String(inspector?.user?._id || inspector?.user || "").trim())
+        .filter(Boolean),
+    ),
+  ];
+
+  if (userIds.length === 0) return rows;
+
+  const labelUsageRecords = await Inspection.find({
+    inspector: { $in: userIds },
+  })
+    .select("qc request_history_id inspection_date inspector labels_added createdAt updatedAt")
+    .populate("qc", "order_meta item request_date last_inspected_date")
+    .lean();
+  const recordsByInspectorId = new Map();
+
+  labelUsageRecords.forEach((record) => {
+    const inspectorId = String(record?.inspector || "").trim();
+    if (!inspectorId) return;
+    if (!recordsByInspectorId.has(inspectorId)) {
+      recordsByInspectorId.set(inspectorId, []);
+    }
+    recordsByInspectorId.get(inspectorId).push(record);
+  });
+
+  rows.forEach((inspector) => {
+    const inspectorId = String(inspector?.user?._id || inspector?.user || "").trim();
+    const records = recordsByInspectorId.get(inspectorId) || [];
+    inspector.used_labels = normalizeInspectorLabels(
+      records.flatMap((entry) =>
+        Array.isArray(entry?.labels_added) ? entry.labels_added : [],
+      ),
+    );
+    inspector.label_used_history =
+      buildLabelUsedHistoryFromInspectionRecords(records);
+  });
+
+  return rows;
+};
+
 const collectGlobalInspectorLabelSets = async ({ excludeInspectorIds = [] } = {}) => {
   const excludedIdSet = new Set(
     (Array.isArray(excludeInspectorIds) ? excludeInspectorIds : [excludeInspectorIds])
@@ -50,21 +188,35 @@ const collectGlobalInspectorLabelSets = async ({ excludeInspectorIds = [] } = {}
       .map((id) => String(id)),
   );
   const inspectors = await Inspector.find({})
-    .select("_id alloted_labels used_labels rejected_labels")
+    .select("_id user alloted_labels rejected_labels")
     .lean();
 
   const allocated = new Set();
   const used = new Set();
   const rejected = new Set();
+  const excludedUserIdSet = new Set();
 
   inspectors.forEach((inspector) => {
     const inspectorId = String(inspector?._id || "");
-    if (excludedIdSet.has(inspectorId)) return;
+    if (excludedIdSet.has(inspectorId)) {
+      const userId = String(inspector?.user || "").trim();
+      if (userId) excludedUserIdSet.add(userId);
+      return;
+    }
 
     const labelState = getInspectorLabelState(inspector);
     labelState.allocated.forEach((label) => allocated.add(label));
-    labelState.used.forEach((label) => used.add(label));
     labelState.rejected.forEach((label) => rejected.add(label));
+  });
+
+  const usedLabelMatch = excludedUserIdSet.size > 0
+    ? { inspector: { $nin: [...excludedUserIdSet] } }
+    : {};
+  const usedLabelRecords = await Inspection.find(usedLabelMatch)
+    .select("labels_added")
+    .lean();
+  usedLabelRecords.forEach((record) => {
+    normalizeInspectorLabels(record?.labels_added || []).forEach((label) => used.add(label));
   });
 
   return { allocated, used, rejected };
@@ -133,6 +285,8 @@ const ensureInspectorRecordsForQcUsers = async ({ search = "" } = {}) => {
             alloted_labels: [],
             used_labels: [],
             rejected_labels: [],
+            label_allocation_history: [],
+            label_used_history: [],
           },
         },
         upsert: true,
@@ -251,6 +405,7 @@ exports.getAllInspectors = async (req, res) => {
     const mergedInspectors = Array.from(inspectorByUser.values());
     const totalRecords = mergedInspectors.length;
     const data = mergedInspectors.slice(skip, skip + limit);
+    await attachUsedLabelHistoryToInspectorRows(data);
 
     res.json({
       data,
@@ -305,6 +460,8 @@ exports.getInspectorById = async (req, res) => {
       return res.status(404).json({ message: "Inspector not found" });
     }
 
+    await syncInspectorUsedLabelsFromInspectionRecords(inspector);
+
     res.json({ data: inspector });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -330,6 +487,8 @@ exports.allocateLabels = async (req, res) => {
     if (!inspector) {
       return res.status(404).json({ message: "Inspector not found" });
     }
+
+    await syncInspectorUsedLabelsFromInspectionRecords(inspector);
 
     const {
       allocated: allocatedLabels,
@@ -403,6 +562,13 @@ exports.allocateLabels = async (req, res) => {
       ...newLabels,
     ]);
     inspector.labels_allotted_by = req.user._id;
+    appendLabelAllocationHistory(inspector, {
+      action: "allocate",
+      labels: newLabels,
+      previousLabels: allocatedLabels,
+      nextLabels: inspector.alloted_labels,
+      actor: req.user,
+    });
 
     await inspector.save();
 
@@ -462,6 +628,11 @@ exports.transferLabels = async (req, res) => {
     if (!targetInspector) {
       return res.status(404).json({ message: "Target inspector not found" });
     }
+
+    await Promise.all([
+      syncInspectorUsedLabelsFromInspectionRecords(sourceInspector),
+      syncInspectorUsedLabelsFromInspectionRecords(targetInspector),
+    ]);
 
     const {
       allocated: sourceAllocated,
@@ -567,6 +738,22 @@ exports.transferLabels = async (req, res) => {
     ]);
     sourceInspector.labels_allotted_by = req.user?._id || sourceInspector.labels_allotted_by;
     targetInspector.labels_allotted_by = req.user?._id || targetInspector.labels_allotted_by;
+    appendLabelAllocationHistory(sourceInspector, {
+      action: "transfer_out",
+      labels: normalizedLabels,
+      previousLabels: sourceAllocated,
+      nextLabels: sourceInspector.alloted_labels,
+      toInspector: targetInspector._id,
+      actor: req.user,
+    });
+    appendLabelAllocationHistory(targetInspector, {
+      action: "transfer_in",
+      labels: normalizedLabels,
+      previousLabels: targetAllocated,
+      nextLabels: targetInspector.alloted_labels,
+      fromInspector: sourceInspector._id,
+      actor: req.user,
+    });
 
     await Promise.all([sourceInspector.save(), targetInspector.save()]);
 
@@ -603,6 +790,8 @@ exports.rejectLabels = async (req, res) => {
     if (!inspector) {
       return res.status(404).json({ message: "Inspector not found" });
     }
+
+    await syncInspectorUsedLabelsFromInspectionRecords(inspector);
 
     const {
       allocated: allocatedLabels,
@@ -653,6 +842,13 @@ exports.rejectLabels = async (req, res) => {
     ]);
     inspector.labels_allotted_by =
       req.user?._id || inspector.labels_allotted_by;
+    appendLabelAllocationHistory(inspector, {
+      action: "reject",
+      labels: normalizedLabels,
+      previousLabels: allocatedLabels,
+      nextLabels: inspector.alloted_labels,
+      actor: req.user,
+    });
 
     await inspector.save();
 
@@ -685,6 +881,8 @@ exports.replaceLabels = async (req, res) => {
     if (!inspector) {
       return res.status(404).json({ message: "Inspector not found" });
     }
+
+    await syncInspectorUsedLabelsFromInspectionRecords(inspector);
 
     const {
       allocated: oldLabels,
@@ -736,7 +934,13 @@ exports.replaceLabels = async (req, res) => {
 
     inspector.alloted_labels = normalizedLabels;
     inspector.labels_allotted_by = req.user._id;
-    inspector.used_labels = []; // Reset used labels when replacing allocation
+    appendLabelAllocationHistory(inspector, {
+      action: "replace",
+      labels: normalizedLabels,
+      previousLabels: oldLabels,
+      nextLabels: inspector.alloted_labels,
+      actor: req.user,
+    });
 
     await inspector.save();
 
@@ -788,6 +992,16 @@ exports.removeLabels = async (req, res) => {
         allocated_labels: inspector.alloted_labels
       });
     }
+    appendLabelAllocationHistory(inspector, {
+      action: "remove",
+      labels: removedLabels,
+      previousLabels: normalizeInspectorLabels([
+        ...(inspector.alloted_labels || []),
+        ...removedLabels,
+      ]),
+      nextLabels: inspector.alloted_labels,
+      actor: req.user,
+    });
 
     await inspector.save();
 
@@ -816,6 +1030,8 @@ exports.getLabelUsageStats = async (req, res) => {
       return res.status(404).json({ message: "Inspector not found" });
     }
 
+    await syncInspectorUsedLabelsFromInspectionRecords(inspector);
+
     const {
       allocated: allocatedLabels,
       used: usedLabels,
@@ -826,6 +1042,16 @@ exports.getLabelUsageStats = async (req, res) => {
     const unusedLabels = allocatedLabels.filter(
       (label) => !usedSet.has(label),
     );
+    const labelAllocationHistory = Array.isArray(inspector.label_allocation_history)
+      ? inspector.label_allocation_history
+          .map((entry) => (typeof entry?.toObject === "function" ? entry.toObject() : entry))
+          .sort((left, right) => new Date(right?.recorded_at || 0) - new Date(left?.recorded_at || 0))
+      : [];
+    const labelUsedHistory = Array.isArray(inspector.label_used_history)
+      ? inspector.label_used_history
+          .map((entry) => (typeof entry?.toObject === "function" ? entry.toObject() : entry))
+          .sort((left, right) => new Date(right?.used_at || 0) - new Date(left?.used_at || 0))
+      : [];
 
     res.json({
       data: {
@@ -837,6 +1063,8 @@ exports.getLabelUsageStats = async (req, res) => {
         total_rejected: rejectedLabels.length,
         rejected_labels: rejectedLabels,
         unused_labels: unusedLabels,
+        label_allocation_history: labelAllocationHistory,
+        label_used_history: labelUsedHistory,
         usage_percentage: allocatedLabels.length > 0
           ? ((usedLabels.length / allocatedLabels.length) * 100).toFixed(2)
           : 0,

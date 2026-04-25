@@ -1,9 +1,14 @@
 import {
   BOX_ENTRY_TYPES,
   BOX_PACKAGING_MODES,
+  SIZE_ENTRY_LIMIT,
   getRemarkLabel,
   normalizeSizeCount,
 } from "../utils/measuredSizeForm";
+
+const SIZE_COUNT_OPTIONS = Array.from({ length: SIZE_ENTRY_LIMIT }, (_, index) =>
+  String(index + 1),
+);
 
 const MeasuredSizeSection = ({
   sectionKey,
@@ -49,9 +54,11 @@ const MeasuredSizeSection = ({
                 onChange={(event) => onCountChange?.(event.target.value)}
                 disabled={disabled}
               >
-                <option value="1">1</option>
-                <option value="2">2</option>
-                <option value="3">3</option>
+                {SIZE_COUNT_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
               </select>
             )}
           </>
@@ -64,9 +71,11 @@ const MeasuredSizeSection = ({
               onChange={(event) => onCountChange?.(event.target.value)}
               disabled={disabled}
             >
-              <option value="1">1</option>
-              <option value="2">2</option>
-              <option value="3">3</option>
+              {SIZE_COUNT_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
             </select>
           </>
         )}

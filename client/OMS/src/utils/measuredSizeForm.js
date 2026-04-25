@@ -1,7 +1,7 @@
 import { formatCbm } from "./cbm";
 import { formatNumberInputValue } from "./measurementDisplay";
 
-export const SIZE_ENTRY_LIMIT = 3;
+export const SIZE_ENTRY_LIMIT = 4;
 export const BOX_PACKAGING_MODES = Object.freeze({
   INDIVIDUAL: "individual",
   CARTON: "carton",
@@ -13,11 +13,12 @@ export const BOX_ENTRY_TYPES = Object.freeze({
 });
 
 export const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
+  { value: "item", label: "Item" },
   { value: "top", label: "Top" },
   { value: "base", label: "Base" },
-  { value: "item1", label: "Item 1" },
   { value: "item2", label: "Item 2" },
   { value: "item3", label: "Item 3" },
+  { value: "item4", label: "Item 4" },
 ]);
 
 export const BOX_SIZE_REMARK_OPTIONS = Object.freeze([
@@ -26,6 +27,7 @@ export const BOX_SIZE_REMARK_OPTIONS = Object.freeze([
   { value: "box1", label: "Box 1" },
   { value: "box2", label: "Box 2" },
   { value: "box3", label: "Box 3" },
+  { value: "box4", label: "Box 4" },
   { value: "inner", label: "Inner Carton" },
   { value: "master", label: "Master Carton" },
 ]);

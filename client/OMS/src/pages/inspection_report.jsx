@@ -42,8 +42,8 @@ const toTimestamp = (value) => {
 const formatDisplayLbhValue = (value) =>
   formatLbhValue(value, { fallback: "Not Set", suffix: SIZE_UNIT });
 
-const ITEM_INDEXED_REMARKS = ["item1", "item2", "item3"];
-const BOX_INDEXED_REMARKS = ["box1", "box2", "box3"];
+const ITEM_INDEXED_REMARKS = ["item1", "item2", "item3", "item4"];
+const BOX_INDEXED_REMARKS = ["box1", "box2", "box3", "box4"];
 
 const formatMeasurementRemark = (remark = "") => {
   const normalized = String(remark || "").trim().toLowerCase();

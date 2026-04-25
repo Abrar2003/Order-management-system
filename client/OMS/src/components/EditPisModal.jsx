@@ -17,6 +17,46 @@ import {
 import "../App.css";
 
 const toText = (value, fallback = "") => String(value ?? fallback).trim();
+const isPisChecked = (item = {}) => item?.pis_checked_flag === true;
+const formatFallback = (value, fallback = "Not Set") => {
+  const text = toText(value);
+  return text && text !== "0" ? text : fallback;
+};
+const formatBoxMode = (mode = "") => (
+  detectBoxPackagingMode(mode) === BOX_PACKAGING_MODES.CARTON
+    ? "Inner / Master Carton"
+    : "Individual Boxes"
+);
+const formatRemarkLabel = (remark = "", fallback = "Entry") => {
+  const normalized = toText(remark).toLowerCase();
+  if (!normalized) return fallback;
+  if (normalized === "top") return "Top";
+  if (normalized === "base") return "Base";
+  if (normalized === "inner") return "Inner Carton";
+  if (normalized === "master") return "Master Carton";
+  return normalized.replace(/([a-z]+)(\d+)/i, (_, prefix, number) =>
+    `${prefix.charAt(0).toUpperCase()}${prefix.slice(1)} ${number}`,
+  );
+};
+const formatEntrySize = (entry = {}) => {
+  const parts = [entry?.L, entry?.B, entry?.H].map((value) => formatFallback(value, ""));
+  return parts.every(Boolean) ? parts.join(" x ") : "Not Set";
+};
+const formatEntryWeight = (entry = {}, label = "Weight") => (
+  formatFallback(entry?.weight, "") ? `${label}: ${formatFallback(entry.weight)}` : `${label}: Not Set`
+);
+const formatEntries = (entries = [], weightLabel = "Weight") => {
+  const meaningfulEntries = (Array.isArray(entries) ? entries : [])
+    .filter((entry) => hasMeaningfulMeasuredSize(entry));
+  if (meaningfulEntries.length === 0) return "Not Set";
+
+  return meaningfulEntries
+    .map((entry, index) => {
+      const label = formatRemarkLabel(entry?.remark, `Entry ${index + 1}`);
+      return `${label}: ${formatEntrySize(entry)} (${formatEntryWeight(entry, weightLabel)})`;
+    })
+    .join(" | ");
+};
 
 const getBrandLabel = (item = {}) =>
   toText(
@@ -84,6 +124,53 @@ const buildInitialForm = (item = {}) => {
   };
 };
 
+const buildInspectedReference = (item = {}) => {
+  const inspectedWeight = item?.inspected_weight || {};
+  const inspectedBoxMode = detectBoxPackagingMode(
+    item?.inspected_box_mode,
+    item?.inspected_box_sizes,
+  );
+  const inspectedItemEntries = buildMeasuredSizeEntriesFromLegacy({
+    primaryEntries: item?.inspected_item_sizes,
+    singleLbh: item?.inspected_item_LBH,
+    topLbh: item?.inspected_item_top_LBH,
+    bottomLbh: item?.inspected_item_bottom_LBH,
+    totalWeight: getWeightValueFromModel(inspectedWeight, "total_net"),
+    topWeight: getWeightValueFromModel(inspectedWeight, "top_net"),
+    bottomWeight: getWeightValueFromModel(inspectedWeight, "bottom_net"),
+    weightKey: "net_weight",
+    topRemark: "top",
+    bottomRemark: "base",
+  });
+  const inspectedBoxEntries = buildMeasuredSizeEntriesFromLegacy({
+    primaryEntries: item?.inspected_box_sizes,
+    mode: inspectedBoxMode,
+    singleLbh: item?.inspected_box_LBH,
+    topLbh: item?.inspected_box_top_LBH || item?.inspected_top_LBH,
+    bottomLbh: item?.inspected_box_bottom_LBH || item?.inspected_bottom_LBH,
+    totalWeight: getWeightValueFromModel(inspectedWeight, "total_gross"),
+    topWeight: getWeightValueFromModel(inspectedWeight, "top_gross"),
+    bottomWeight: getWeightValueFromModel(inspectedWeight, "bottom_gross"),
+    weightKey: "gross_weight",
+    topRemark: "top",
+    bottomRemark: "base",
+  });
+
+  return {
+    masterBarcode: formatFallback(item?.qc?.master_barcode || item?.qc?.barcode),
+    innerBarcode: formatFallback(item?.qc?.inner_barcode),
+    boxMode: formatBoxMode(inspectedBoxMode),
+    itemSizes: formatEntries(inspectedItemEntries, "Net"),
+    boxSizes: formatEntries(inspectedBoxEntries, "Gross"),
+    cbm: [
+      `Top: ${formatFallback(item?.cbm?.inspected_top)}`,
+      `Bottom: ${formatFallback(item?.cbm?.inspected_bottom)}`,
+      `Total: ${formatFallback(item?.cbm?.inspected_total)}`,
+      `Calculated: ${formatFallback(item?.cbm?.calculated_inspected_total)}`,
+    ].join(" | "),
+  };
+};
+
 const EditPisModal = ({ item, onClose, onUpdated }) => {
   const [form, setForm] = useState(() => buildInitialForm(item));
   const [saving, setSaving] = useState(false);
@@ -96,6 +183,8 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
   );
   const brandLabel = useMemo(() => getBrandLabel(item), [item]);
   const vendorsLabel = useMemo(() => getVendorsLabel(item), [item]);
+  const showInspectedReference = !isPisChecked(item);
+  const inspectedReference = useMemo(() => buildInspectedReference(item), [item]);
   const displayedItemEntries = useMemo(
     () => ensureMeasuredSizeEntryCount(form.pis_item_sizes, form.pis_item_count),
     [form.pis_item_sizes, form.pis_item_count],
@@ -227,8 +316,8 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
         pis_box_sizes: pisBoxPayload.value,
       };
 
-      await api.patch(`/items/${item?._id}/pis`, payload);
-      onUpdated?.();
+      const response = await api.patch(`/items/${item?._id}/pis`, payload);
+      onUpdated?.(response?.data?.data || { ...item, pis_checked_flag: true });
       onClose?.();
     } catch (saveError) {
       setError(
@@ -296,6 +385,41 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
                 />
               </div>
             </div>
+
+            {showInspectedReference && (
+              <div className="border rounded p-3">
+                <div className="d-flex flex-wrap justify-content-between gap-2 align-items-center mb-3">
+                  <h6 className="mb-0">Latest Inspected Reference</h6>
+                  <span className="badge text-bg-warning">Needs PIS Check</span>
+                </div>
+                <div className="row g-3 small">
+                  <div className="col-md-6">
+                    <div className="text-secondary">Master Carton Barcode</div>
+                    <div className="fw-semibold">{inspectedReference.masterBarcode}</div>
+                  </div>
+                  <div className="col-md-6">
+                    <div className="text-secondary">Inner Carton Barcode</div>
+                    <div className="fw-semibold">{inspectedReference.innerBarcode}</div>
+                  </div>
+                  <div className="col-md-6">
+                    <div className="text-secondary">Inspected Item Sizes and Net Weight</div>
+                    <div>{inspectedReference.itemSizes}</div>
+                  </div>
+                  <div className="col-md-6">
+                    <div className="text-secondary">Inspected Box Sizes and Gross Weight</div>
+                    <div>{inspectedReference.boxSizes}</div>
+                  </div>
+                  <div className="col-md-4">
+                    <div className="text-secondary">Inspected Box Mode</div>
+                    <div>{inspectedReference.boxMode}</div>
+                  </div>
+                  <div className="col-md-8">
+                    <div className="text-secondary">Inspected CBM</div>
+                    <div>{inspectedReference.cbm}</div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="row g-3">
               <div className="col-12">

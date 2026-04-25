@@ -110,13 +110,14 @@ const toPositiveCbmNumber = (value) => {
   return parsed;
 };
 
-const SIZE_ENTRY_LIMIT = 3;
+const SIZE_ENTRY_LIMIT = 4;
 const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
   "top",
   "base",
   "item1",
   "item2",
   "item3",
+  "item4",
 ]);
 const WEIGHT_FIELD_KEYS = Object.freeze([
   "top_net",
@@ -1420,6 +1421,7 @@ exports.getPisDiffItems = async (req, res) => {
       "inspected_top_LBH",
       "inspected_bottom_LBH",
       "cbm",
+      "pis_checked_flag",
       "qc.barcode",
       "qc.master_barcode",
       "qc.inner_barcode",
@@ -1929,10 +1931,8 @@ exports.updateItem = async (req, res) => {
       });
     }
 
-    let touched = false;
     const setPath = (path, value) => {
       item.set(path, value);
-      touched = true;
     };
     const nextInspectedWeight = buildWeightRecord(item?.inspected_weight);
     let inspectedWeightTouched = false;
@@ -2254,10 +2254,13 @@ exports.updateItemPis = async (req, res) => {
       });
     }
 
-    let touched = false;
     const setPath = (path, value) => {
       item.set(path, value);
-      touched = true;
+    };
+    let pisFieldsTouched = false;
+    const setPisPath = (path, value) => {
+      setPath(path, value);
+      pisFieldsTouched = true;
     };
     const nextPisWeight = buildWeightRecord(item?.pis_weight);
     let pisWeightTouched = false;
@@ -2272,21 +2275,22 @@ exports.updateItemPis = async (req, res) => {
         if (!parsedField.provided) continue;
         nextPisWeight[fieldKey] = parsedField.value;
         pisWeightTouched = true;
+        pisFieldsTouched = true;
       }
     }
 
     if (hasOwn(payload, "pis_barcode")) {
       const nextMasterBarcode = normalizeTextField(payload.pis_barcode);
-      setPath("pis_barcode", nextMasterBarcode);
-      setPath("pis_master_barcode", nextMasterBarcode);
+      setPisPath("pis_barcode", nextMasterBarcode);
+      setPisPath("pis_master_barcode", nextMasterBarcode);
     }
     if (hasOwn(payload, "pis_master_barcode")) {
       const nextMasterBarcode = normalizeTextField(payload.pis_master_barcode);
-      setPath("pis_master_barcode", nextMasterBarcode);
-      setPath("pis_barcode", nextMasterBarcode);
+      setPisPath("pis_master_barcode", nextMasterBarcode);
+      setPisPath("pis_barcode", nextMasterBarcode);
     }
     if (hasOwn(payload, "pis_inner_barcode")) {
-      setPath("pis_inner_barcode", normalizeTextField(payload.pis_inner_barcode));
+      setPisPath("pis_inner_barcode", normalizeTextField(payload.pis_inner_barcode));
     }
 
     const patchedPisItemLbh = getPatchedLbhRecord(
@@ -2295,7 +2299,7 @@ exports.updateItemPis = async (req, res) => {
       "pis_item_LBH",
     );
     if (patchedPisItemLbh.provided) {
-      setPath("pis_item_LBH", patchedPisItemLbh.value);
+      setPisPath("pis_item_LBH", patchedPisItemLbh.value);
     }
 
     const patchedPisItemTopLbh = getPatchedLbhRecord(
@@ -2304,7 +2308,7 @@ exports.updateItemPis = async (req, res) => {
       "pis_item_top_LBH",
     );
     if (patchedPisItemTopLbh.provided) {
-      setPath("pis_item_top_LBH", patchedPisItemTopLbh.value);
+      setPisPath("pis_item_top_LBH", patchedPisItemTopLbh.value);
     }
 
     const patchedPisItemBottomLbh = getPatchedLbhRecord(
@@ -2313,7 +2317,7 @@ exports.updateItemPis = async (req, res) => {
       "pis_item_bottom_LBH",
     );
     if (patchedPisItemBottomLbh.provided) {
-      setPath("pis_item_bottom_LBH", patchedPisItemBottomLbh.value);
+      setPisPath("pis_item_bottom_LBH", patchedPisItemBottomLbh.value);
     }
 
     const patchedPisBoxLbh = getPatchedLbhRecord(
@@ -2322,7 +2326,7 @@ exports.updateItemPis = async (req, res) => {
       "pis_box_LBH",
     );
     if (patchedPisBoxLbh.provided) {
-      setPath("pis_box_LBH", patchedPisBoxLbh.value);
+      setPisPath("pis_box_LBH", patchedPisBoxLbh.value);
     }
 
     const patchedPisBoxTopLbh = getPatchedLbhRecord(
@@ -2331,7 +2335,7 @@ exports.updateItemPis = async (req, res) => {
       "pis_box_top_LBH",
     );
     if (patchedPisBoxTopLbh.provided) {
-      setPath("pis_box_top_LBH", patchedPisBoxTopLbh.value);
+      setPisPath("pis_box_top_LBH", patchedPisBoxTopLbh.value);
     }
 
     const patchedPisBoxBottomLbh = getPatchedLbhRecord(
@@ -2340,7 +2344,7 @@ exports.updateItemPis = async (req, res) => {
       "pis_box_bottom_LBH",
     );
     if (patchedPisBoxBottomLbh.provided) {
-      setPath("pis_box_bottom_LBH", patchedPisBoxBottomLbh.value);
+      setPisPath("pis_box_bottom_LBH", patchedPisBoxBottomLbh.value);
     }
 
     if (hasOwn(payload, "pis_item_sizes")) {
@@ -2358,10 +2362,10 @@ exports.updateItemPis = async (req, res) => {
         },
       );
 
-      setPath("pis_item_sizes", parsedPisItemSizes);
-      setPath("pis_item_LBH", derivedPisItemLegacy.single);
-      setPath("pis_item_top_LBH", derivedPisItemLegacy.top);
-      setPath("pis_item_bottom_LBH", derivedPisItemLegacy.bottom);
+      setPisPath("pis_item_sizes", parsedPisItemSizes);
+      setPisPath("pis_item_LBH", derivedPisItemLegacy.single);
+      setPisPath("pis_item_top_LBH", derivedPisItemLegacy.top);
+      setPisPath("pis_item_bottom_LBH", derivedPisItemLegacy.bottom);
       nextPisWeight.top_net = derivedPisItemLegacy.topWeight;
       nextPisWeight.bottom_net = derivedPisItemLegacy.bottomWeight;
       nextPisWeight.total_net = derivedPisItemLegacy.totalWeight;
@@ -2389,11 +2393,11 @@ exports.updateItemPis = async (req, res) => {
         },
       );
 
-      setPath("pis_box_sizes", parsedPisBoxSizes);
-      setPath("pis_box_mode", parsedPisBoxMode);
-      setPath("pis_box_LBH", derivedPisBoxLegacy.single);
-      setPath("pis_box_top_LBH", derivedPisBoxLegacy.top);
-      setPath("pis_box_bottom_LBH", derivedPisBoxLegacy.bottom);
+      setPisPath("pis_box_sizes", parsedPisBoxSizes);
+      setPisPath("pis_box_mode", parsedPisBoxMode);
+      setPisPath("pis_box_LBH", derivedPisBoxLegacy.single);
+      setPisPath("pis_box_top_LBH", derivedPisBoxLegacy.top);
+      setPisPath("pis_box_bottom_LBH", derivedPisBoxLegacy.bottom);
       nextPisWeight.top_gross = derivedPisBoxLegacy.topWeight;
       nextPisWeight.bottom_gross = derivedPisBoxLegacy.bottomWeight;
       nextPisWeight.total_gross = derivedPisBoxLegacy.totalWeight;
@@ -2401,22 +2405,24 @@ exports.updateItemPis = async (req, res) => {
     }
 
     if (hasOwn(payload, "pis_box_mode") && !hasOwn(payload, "pis_box_sizes")) {
-      setPath(
+      setPisPath(
         "pis_box_mode",
         detectBoxPackagingMode(payload?.pis_box_mode, item?.pis_box_sizes),
       );
     }
 
     if (pisWeightTouched) {
-      setPath("pis_weight", nextPisWeight);
+      setPisPath("pis_weight", nextPisWeight);
     }
 
-    if (!touched) {
+    if (!pisFieldsTouched) {
       return res.status(400).json({
         success: false,
         message: "No PIS fields provided",
       });
     }
+
+    setPath("pis_checked_flag", true);
 
     applyCalculatedCbmTotals(item, setPath);
     await item.save();

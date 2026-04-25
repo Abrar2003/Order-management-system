@@ -15,6 +15,7 @@ const BOX_INDIVIDUAL_REMARK_OPTIONS = Object.freeze([
   "box1",
   "box2",
   "box3",
+  "box4",
 ]);
 
 const BOX_CARTON_REMARK_OPTIONS = Object.freeze([
@@ -27,7 +28,7 @@ const BOX_SIZE_REMARK_OPTIONS = Object.freeze([
   ...BOX_CARTON_REMARK_OPTIONS,
 ]);
 
-const SIZE_ENTRY_LIMIT = 3;
+const SIZE_ENTRY_LIMIT = 4;
 
 const normalizeText = (value) => String(value ?? "").trim().toLowerCase();
 

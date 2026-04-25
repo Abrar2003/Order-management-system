@@ -18,6 +18,7 @@ import {
   detectBoxPackagingMode as detectBoxPackagingModeUtil,
   ensureMeasuredSizeEntryCount as ensureMeasuredSizeEntryCountUtil,
   parseMeasuredSizeEntries as parseMeasuredSizeEntriesUtil,
+  SIZE_ENTRY_LIMIT as SIZE_ENTRY_LIMIT_UTIL,
 } from "../utils/measuredSizeForm";
 import { getQcUserUpdateRequestAvailability } from "../utils/qcRequests";
 import { formatNumberInputValue } from "../utils/measurementDisplay";
@@ -195,13 +196,17 @@ const toStrictLbhInputGroup = (dimensions = {}) => {
   if (L && B && H) return { L, B, H };
   return { L: "", B: "", H: "" };
 };
-const SIZE_ENTRY_LIMIT = 3;
+const SIZE_ENTRY_LIMIT = SIZE_ENTRY_LIMIT_UTIL;
+const SIZE_COUNT_OPTIONS = Array.from({ length: SIZE_ENTRY_LIMIT }, (_, index) =>
+  String(index + 1),
+);
 const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
   { value: "top", label: "Top" },
   { value: "base", label: "Base" },
   { value: "item1", label: "Item 1" },
   { value: "item2", label: "Item 2" },
   { value: "item3", label: "Item 3" },
+  { value: "item4", label: "Item 4" },
 ]);
 const BOX_PACKAGING_MODES = BOX_PACKAGING_MODES_UTIL;
 const BOX_ENTRY_TYPES = BOX_ENTRY_TYPES_UTIL;
@@ -2204,9 +2209,11 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 onChange={handleChange}
                 disabled={locked}
               >
-                <option value="1">1</option>
-                <option value="2">2</option>
-                <option value="3">3</option>
+                {SIZE_COUNT_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
               </select>
             </>
           )}
@@ -2229,9 +2236,11 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   onChange={handleChange}
                   disabled={locked}
                 >
-                  <option value="1">1</option>
-                  <option value="2">2</option>
-                  <option value="3">3</option>
+                  {SIZE_COUNT_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
                 </select>
               )}
             </>
