@@ -1021,6 +1021,7 @@ const buildItemMatch = ({ search, brand, vendor } = {}) => {
 const normalizeLookupKey = (value) => normalizeTextField(value).toLowerCase();
 
 const MEASUREMENT_COMPARE_TOLERANCE = 0.0001;
+const WEIGHT_DIFF_PERCENT_TOLERANCE = 10;
 
 const buildMeasurementEntryKey = (entry = {}, index = 0) => {
   const normalizedRemark = normalizeTextField(entry?.remark || entry?.type).toLowerCase();
@@ -1036,6 +1037,18 @@ const hasPositiveMeasurementWeight = (value) => Number(value || 0) > 0;
 
 const areMeasurementNumbersEqual = (left, right) =>
   Math.abs(toSafeNumber(left, 0) - toSafeNumber(right, 0)) < MEASUREMENT_COMPARE_TOLERANCE;
+
+const isWeightDifferenceAtOrAboveTolerance = (inspectedWeight, pisWeight) => {
+  const inspectedValue = toSafeNumber(inspectedWeight, 0);
+  const pisValue = toSafeNumber(pisWeight, 0);
+  if (inspectedValue <= 0 || pisValue <= 0) {
+    return !areMeasurementNumbersEqual(inspectedValue, pisValue);
+  }
+
+  const diffPercent =
+    (Math.abs(inspectedValue - pisValue) / inspectedValue) * 100;
+  return diffPercent >= WEIGHT_DIFF_PERCENT_TOLERANCE;
+};
 
 const getNormalizedWeightFieldValue = (weight = {}, fieldKey = "") =>
   buildWeightRecord(weight)?.[fieldKey] ?? 0;
@@ -1134,7 +1147,7 @@ const compareMeasurementEntryGroups = (
     } else if (
       hasInspectedWeight
       && hasPisWeight
-      && !areMeasurementNumbersEqual(
+      && isWeightDifferenceAtOrAboveTolerance(
         inspectedEntry?.[weightKey],
         pisEntry?.[weightKey],
       )
