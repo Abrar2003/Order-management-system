@@ -429,6 +429,15 @@ const resolveLatestInspectionRecordForRequestEntry = (
       requestEntry?.inspector_id ||
       "",
   ).trim();
+  const canUseDateFallbackRecord = (record = {}) => {
+    const linkedRequestHistoryId = String(record?.request_history_id || "").trim();
+    if (!requestHistoryId || !linkedRequestHistoryId) return true;
+    if (linkedRequestHistoryId === requestHistoryId) return true;
+    if (String(record?.status || "").trim().toLowerCase() === "transfered") {
+      return false;
+    }
+    return Number(record?.checked || 0) <= 0;
+  };
 
   const findLatestMatchingRecord = (matcher) => {
     let latestRecord = null;
@@ -465,8 +474,7 @@ const resolveLatestInspectionRecordForRequestEntry = (
 
   return (
     findLatestMatchingRecord((record) => {
-      const linkedRequestHistoryId = String(record?.request_history_id || "").trim();
-      if (requestHistoryId && linkedRequestHistoryId) return false;
+      if (!canUseDateFallbackRecord(record)) return false;
 
       const recordRequestedDate = toISODateString(
         record?.requested_date || record?.inspection_date || record?.createdAt,
@@ -481,8 +489,7 @@ const resolveLatestInspectionRecordForRequestEntry = (
       return !recordInspectorId || recordInspectorId === requestInspectorId;
     }) ||
     findLatestMatchingRecord((record) => {
-      const linkedRequestHistoryId = String(record?.request_history_id || "").trim();
-      if (requestHistoryId && linkedRequestHistoryId) return false;
+      if (!canUseDateFallbackRecord(record)) return false;
 
       const recordRequestedDate = toISODateString(
         record?.requested_date || record?.inspection_date || record?.createdAt,

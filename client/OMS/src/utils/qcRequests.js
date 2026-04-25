@@ -87,6 +87,13 @@ export const resolveLatestInspectionRecordForRequestEntry = (
       requestEntry?.inspector_id ||
       "",
   ).trim();
+  const canUseDateFallbackRecord = (record = {}) => {
+    const linkedRequestHistoryId = String(record?.request_history_id || "").trim();
+    if (!requestHistoryId || !linkedRequestHistoryId) return true;
+    if (linkedRequestHistoryId === requestHistoryId) return true;
+    if (isInspectionStatusMatching(record?.status, "transfered")) return false;
+    return Number(record?.checked || 0) <= 0;
+  };
 
   const findLatestMatchingRecord = (matcher) => {
     let latestRecord = null;
@@ -122,8 +129,7 @@ export const resolveLatestInspectionRecordForRequestEntry = (
 
   return (
     findLatestMatchingRecord((record) => {
-      const linkedRequestHistoryId = String(record?.request_history_id || "").trim();
-      if (requestHistoryId && linkedRequestHistoryId) return false;
+      if (!canUseDateFallbackRecord(record)) return false;
 
       const recordRequestedDate = toISODateString(
         record?.requested_date || record?.inspection_date || record?.createdAt,
@@ -138,8 +144,7 @@ export const resolveLatestInspectionRecordForRequestEntry = (
       return !recordInspectorId || recordInspectorId === requestInspectorId;
     }) ||
     findLatestMatchingRecord((record) => {
-      const linkedRequestHistoryId = String(record?.request_history_id || "").trim();
-      if (requestHistoryId && linkedRequestHistoryId) return false;
+      if (!canUseDateFallbackRecord(record)) return false;
 
       const recordRequestedDate = toISODateString(
         record?.requested_date || record?.inspection_date || record?.createdAt,
@@ -166,21 +171,23 @@ export const getQcUserUpdateRequestAvailability = (qc = {}) => {
     qc?.inspection_record,
     latestRequestEntry,
   );
-  const latestInspectionHasZeroChecked =
-    Boolean(latestInspectionRecord) && Number(latestInspectionRecord?.checked || 0) <= 0;
+  const zeroCheckedInspectionRecord = (Array.isArray(qc?.inspection_record)
+    ? qc.inspection_record
+    : []
+  ).find((record) => Number(record?.checked || 0) <= 0);
+  if (zeroCheckedInspectionRecord) {
+    return {
+      isAvailable: true,
+      reason: "",
+      latestRequestEntry,
+      latestInspectionRecord: latestInspectionRecord || zeroCheckedInspectionRecord,
+    };
+  }
+
   const latestRequestStatus = normalizeRequestHistoryStatus(
     latestRequestEntry?.status || "open",
   );
   if (latestRequestStatus !== "open") {
-    if (latestInspectionHasZeroChecked) {
-      return {
-        isAvailable: true,
-        reason: "",
-        latestRequestEntry,
-        latestInspectionRecord,
-      };
-    }
-
     return {
       isAvailable: false,
       reason: "The latest QC request is already closed. Align a new QC request before updating again.",
@@ -202,15 +209,6 @@ export const getQcUserUpdateRequestAvailability = (qc = {}) => {
     : false;
 
   if (latestRequestHasActivity) {
-    if (latestInspectionHasZeroChecked) {
-      return {
-        isAvailable: true,
-        reason: "",
-        latestRequestEntry,
-        latestInspectionRecord,
-      };
-    }
-
     return {
       isAvailable: false,
       reason: "The latest QC request is already worked upon. Align a new QC request before updating again.",

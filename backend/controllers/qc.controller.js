@@ -1686,6 +1686,20 @@ const resolveLatestInspectionRecordForRequestEntry = (
       requestEntry?.inspector_id ||
       "",
   ).trim();
+  const canUseDateFallbackRecord = (record = {}) => {
+    const linkedRequestHistoryId = String(record?.request_history_id || "").trim();
+    if (!requestHistoryId || !linkedRequestHistoryId) return true;
+    if (linkedRequestHistoryId === requestHistoryId) return true;
+    if (
+      isInspectionStatusMatching(
+        record?.status,
+        INSPECTION_RECORD_STATUS.TRANSFERRED,
+      )
+    ) {
+      return false;
+    }
+    return toNonNegativeNumber(record?.checked, 0) <= 0;
+  };
 
   const findLatestMatchingRecord = (matcher) => {
     let latestRecord = null;
@@ -1723,8 +1737,7 @@ const resolveLatestInspectionRecordForRequestEntry = (
   if (requestDateKey) {
     candidateRecords.push(
       findLatestMatchingRecord((record) => {
-        const linkedRequestHistoryId = String(record?.request_history_id || "").trim();
-        if (requestHistoryId && linkedRequestHistoryId) return false;
+        if (!canUseDateFallbackRecord(record)) return false;
 
         const recordRequestedDate = toISODateString(
           record?.requested_date || record?.inspection_date || record?.createdAt,
@@ -1741,8 +1754,7 @@ const resolveLatestInspectionRecordForRequestEntry = (
     );
     candidateRecords.push(
       findLatestMatchingRecord((record) => {
-        const linkedRequestHistoryId = String(record?.request_history_id || "").trim();
-        if (requestHistoryId && linkedRequestHistoryId) return false;
+        if (!canUseDateFallbackRecord(record)) return false;
 
         const recordRequestedDate = toISODateString(
           record?.requested_date || record?.inspection_date || record?.createdAt,
@@ -1827,22 +1839,23 @@ const getQcUserLatestRequestAvailability = (
     inspectionRecords,
     latestRequestEntry,
   );
-  const latestInspectionHasZeroChecked =
-    Boolean(latestInspectionRecord) &&
-    toNonNegativeNumber(latestInspectionRecord?.checked, 0) <= 0;
+  const zeroCheckedInspectionRecord = (Array.isArray(inspectionRecords)
+    ? inspectionRecords
+    : []
+  ).find((record) => toNonNegativeNumber(record?.checked, 0) <= 0);
+  if (zeroCheckedInspectionRecord) {
+    return {
+      isAvailable: true,
+      latestRequestEntry,
+      latestInspectionRecord: latestInspectionRecord || zeroCheckedInspectionRecord,
+      reason: "",
+    };
+  }
+
   const latestRequestStatus = normalizeRequestHistoryStatus(
     latestRequestEntry?.status || REQUEST_HISTORY_STATUS.OPEN,
   );
   if (latestRequestStatus !== REQUEST_HISTORY_STATUS.OPEN) {
-    if (latestInspectionHasZeroChecked) {
-      return {
-        isAvailable: true,
-        latestRequestEntry,
-        latestInspectionRecord,
-        reason: "",
-      };
-    }
-
     return {
       isAvailable: false,
       latestRequestEntry,
@@ -1865,15 +1878,6 @@ const getQcUserLatestRequestAvailability = (
     : false;
 
   if (latestRequestHasActivity) {
-    if (latestInspectionHasZeroChecked) {
-      return {
-        isAvailable: true,
-        latestRequestEntry,
-        latestInspectionRecord,
-        reason: "",
-      };
-    }
-
     return {
       isAvailable: false,
       latestRequestEntry,
