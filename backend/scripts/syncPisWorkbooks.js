@@ -20,7 +20,7 @@ const {
 } = require("../services/wasabiStorage.service");
 
 const SIZE_ENTRY_LIMIT = 4;
-const ITEM_REMARKS = ["item1", "item2", "item3", "item4"];
+const ITEM_REMARKS = ["item", "item1", "item2", "item3"];
 const BOX_REMARKS = ["box1", "box2", "box3", "box4"];
 
 const normalizeText = (value) => {
