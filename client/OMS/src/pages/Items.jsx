@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import CreateItemModal from "../components/CreateItemModal";
+import SampleModal from "../components/SampleModal";
 import EditItemModal from "../components/EditItemModal";
 import ItemOrderPresenceTooltip from "../components/ItemOrderPresenceTooltip";
 import SortHeaderButton from "../components/SortHeaderButton";
@@ -185,6 +186,7 @@ const Items = () => {
   const [rows, setRows] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showCreateSampleModal, setShowCreateSampleModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
@@ -586,17 +588,30 @@ const Items = () => {
           {canSyncItems || canCreateItems ? (
             <div className="d-flex gap-2">
               {canCreateItems && (
-                <button
-                  type="button"
-                  className="btn btn-outline-primary btn-sm"
-                  onClick={() => {
-                    setError("");
-                    setSuccess("");
-                    setShowCreateModal(true);
-                  }}
-                >
-                  Create Item
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-outline-primary btn-sm"
+                    onClick={() => {
+                      setError("");
+                      setSuccess("");
+                      setShowCreateModal(true);
+                    }}
+                  >
+                    Create Item
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-outline-secondary btn-sm"
+                    onClick={() => {
+                      setError("");
+                      setSuccess("");
+                      setShowCreateSampleModal(true);
+                    }}
+                  >
+                    Create Sample
+                  </button>
+                </>
               )}
               {canSyncItems && (
                 <button
@@ -961,6 +976,24 @@ const Items = () => {
                 : "Item created successfully.",
             );
             fetchItems();
+          }}
+        />
+      )}
+
+      {showCreateSampleModal && canCreateItems && (
+        <SampleModal
+          mode="create"
+          brandOptions={Array.isArray(filters.brands) ? filters.brands : []}
+          vendorOptions={Array.isArray(filters.vendors) ? filters.vendors : []}
+          onClose={() => setShowCreateSampleModal(false)}
+          onCreated={(createdSample) => {
+            setShowCreateSampleModal(false);
+            const createdCode = String(createdSample?.code || "").trim();
+            setSuccess(
+              createdCode
+                ? `Sample ${createdCode} created successfully.`
+                : "Sample created successfully.",
+            );
           }}
         />
       )}

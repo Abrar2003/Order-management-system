@@ -6,12 +6,20 @@ import SortHeaderButton from "../components/SortHeaderButton";
 import "../App.css";
 import ShippingModal from "../components/ShippingModal";
 import EditOrderModal from "../components/EditOrderModal";
+import EditSampleModal from "../components/EditSampleModal";
+import SampleModal from "../components/SampleModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import { hasShipmentRecords } from "../utils/orderStatus";
 import { formatCbm } from "../utils/cbm";
+import {
+  getShipmentItemDisplay,
+  getShipmentPoDisplay,
+  getShipmentPrimaryQuantityDisplay,
+  isSampleShipmentRow,
+} from "../utils/shipmentRows";
 
 const EMPTY_SUMMARY = {
   total: 0,
@@ -107,6 +115,8 @@ const Shipments = () => {
   const [error, setError] = useState("");
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [editingOrder, setEditingOrder] = useState(null);
+  const [editingSample, setEditingSample] = useState(null);
+  const [showSampleModal, setShowSampleModal] = useState(false);
   const [orderIdSearch, setOrderIdSearch] = useState(() =>
     normalizeSearchParam(searchParams.get("order_id")),
   );
@@ -375,7 +385,9 @@ const Shipments = () => {
   );
 
   const canShowEditAction = useCallback(
-    (row) => isAdmin && hasShipmentRecords({ shipment: row?.shipment }),
+    (row) =>
+      isAdmin &&
+      hasShipmentRecords({ shipment: row?.shipment }),
     [isAdmin],
   );
 
@@ -472,6 +484,7 @@ const Shipments = () => {
         shipments: selectedShipmentRows.map((row) => ({
           order_id: row?._id,
           shipment_id: row?.shipment_id,
+          line_type: row?.line_type || "order",
         })),
       });
 
@@ -504,6 +517,19 @@ const Shipments = () => {
   }, []);
 
   const handleOpenEditModal = useCallback((row) => {
+    if (isSampleShipmentRow(row)) {
+      setEditingSample({
+        _id: row?._id,
+        code: row?.item_code || "",
+        name: row?.sample_name || "",
+        description: row?.description || "",
+        brand: row?.brand || "",
+        vendor: row?.vendor ? String(row.vendor).split(",").map((entry) => entry.trim()).filter(Boolean) : [],
+        shipment: Array.isArray(row?.shipment) ? row.shipment : [],
+      });
+      return;
+    }
+
     const normalizedOrder = {
       _id: row?._id,
       order_id: row?.order_id || "",
@@ -600,6 +626,15 @@ const Shipments = () => {
           </button>
           <h2 className="h4 mb-0">Shipments</h2>
           <div className="d-flex gap-2">
+            {canFinalizeShipping && (
+              <button
+                type="button"
+                className="btn btn-outline-secondary btn-sm"
+                onClick={() => setShowSampleModal(true)}
+              >
+                Add Sample
+              </button>
+            )}
             {canCheckShipments && (
               <button
                 type="button"
@@ -1016,11 +1051,13 @@ const Shipments = () => {
                             />
                           </td>
                         )}
-                        <td className="shipments-col-po">{row?.order_id || "N/A"}</td>
-                        <td className="shipments-col-item">{row?.item_code || "N/A"}</td>
+                        <td className="shipments-col-po">{getShipmentPoDisplay(row)}</td>
+                        <td className="shipments-col-item">{getShipmentItemDisplay(row)}</td>
                         <td className="shipments-col-vendor">{row?.vendor || "N/A"}</td>
                         <td className="shipments-col-description">{row?.description || "N/A"}</td>
-                        <td className="shipments-col-order-qty">{row?.order_quantity || "N/A"}</td>
+                        <td className="shipments-col-order-qty">
+                          {getShipmentPrimaryQuantityDisplay(row)}
+                        </td>
                         <td className="shipments-col-status">{row?.status || "N/A"}</td>
                         <td className="shipments-col-date">{formatDateDDMMYYYY(row?.stuffing_date)}</td>
                         <td className="shipments-col-container">{row?.container || "N/A"}</td>
@@ -1039,6 +1076,8 @@ const Shipments = () => {
                               >
                                 Finalize
                               </button>
+                            ) : isSampleShipmentRow(row) ? (
+                              <span className="text-secondary small">Added via sample</span>
                             ) : (
                               <span className="text-secondary small">N/A</span>
                             )}
@@ -1125,6 +1164,28 @@ const Shipments = () => {
           onClose={() => setEditingOrder(null)}
           onSuccess={() => {
             setEditingOrder(null);
+            fetchShipments();
+          }}
+        />
+      )}
+      {editingSample && (
+        <EditSampleModal
+          sample={editingSample}
+          onClose={() => setEditingSample(null)}
+          onSuccess={() => {
+            setEditingSample(null);
+            fetchShipments();
+          }}
+        />
+      )}
+      {showSampleModal && (
+        <SampleModal
+          mode="ship"
+          brandOptions={[]}
+          vendorOptions={Array.isArray(filterOptions?.vendors) ? filterOptions.vendors : []}
+          onClose={() => setShowSampleModal(false)}
+          onShipped={() => {
+            setShowSampleModal(false);
             fetchShipments();
           }}
         />

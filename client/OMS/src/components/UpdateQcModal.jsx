@@ -587,15 +587,16 @@ const UPDATE_QC_PAST_DAYS_OVERRIDE_BY_USER = Object.freeze({
 });
 
 const getUpdateQcPastDaysLimit = (role = "", userId = "") => {
+  const normalizedRole = String(role || "").trim().toLowerCase();
+  if (normalizedRole === "qc") return 1;
+
   const normalizedUserId = String(userId || "").trim();
   const override = UPDATE_QC_PAST_DAYS_OVERRIDE_BY_USER[normalizedUserId];
   if (Number.isInteger(override) && override >= 0) {
     return override;
   }
 
-  const normalizedRole = String(role || "").trim().toLowerCase();
   if (normalizedRole === "manager") return 2;
-  if (normalizedRole === "qc") return 1;
   return 0;
 };
 
@@ -700,9 +701,10 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     (qc?.master_barcode || qc?.barcode) > 0 && !canEditLockedQcFields;
   const lockInnerBarcodeField = qc?.inner_barcode > 0 && !canEditLockedQcFields;
   const latestInspectionRecord = getLatestInspectionRecord(qc);
+  const latestRequestEntry = getLatestRequestEntry(qc);
   const qcUserRequestAvailability = useMemo(
-    () => getQcUserUpdateRequestAvailability(qc),
-    [qc],
+    () => getQcUserUpdateRequestAvailability(qc, { currentUserId }),
+    [qc, currentUserId],
   );
   const isQcUpdateBlockedByMissingRequest =
     isQcUser && !qcUserRequestAvailability.isAvailable;
@@ -872,11 +874,14 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         { mode: inspectedBoxMode },
       ),
       last_inspected_date: toDDMMYYYYInputValue(
-        adminRecord?.inspection_date || qc.last_inspected_date,
+        adminRecord?.inspection_date ||
+          latestRequestEntry?.request_date ||
+          qc.request_date ||
+          qc.last_inspected_date,
         "",
       ),
     });
-  }, [qc, canRewriteLatestInspectionRecord, latestInspectionRecord]);
+  }, [qc, canRewriteLatestInspectionRecord, latestInspectionRecord, latestRequestEntry]);
 
   useEffect(() => {
     if (lockBarcodeField && barcodeScannerOpen) {
@@ -1650,28 +1655,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       ) {
         setError(buildUpdateQcPastDaysMessage(normalizedRole, updateQcPastDaysLimit));
         return;
-      }
-      if (qcDateOffset === 1) {
-        const hasUsedOneDayBackdatedUpdate = Array.isArray(qc?.inspection_record)
-          && qc.inspection_record.some((record) => {
-            const recordDate = toISODateString(record?.inspection_date || record?.createdAt || "");
-            if (!recordDate || recordDate !== lastInspectedDateIso) return false;
-            const recordInspectorId = String(record?.inspector?._id || record?.inspector || "").trim();
-            if (!recordInspectorId || recordInspectorId !== String(currentUserId || "").trim()) {
-              return false;
-            }
-            const checked = Number(record?.checked || 0);
-            const passed = Number(record?.passed || 0);
-            const offered = Number(record?.vendor_offered || 0);
-            const labelsAddedCount = Array.isArray(record?.labels_added)
-              ? record.labels_added.length
-              : 0;
-            return checked > 0 || passed > 0 || offered > 0 || labelsAddedCount > 0;
-          });
-        if (hasUsedOneDayBackdatedUpdate) {
-          setError("QC can update a 1-day backdated entry only once.");
-          return;
-        }
       }
     }
 
@@ -2576,8 +2559,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   className="form-control"
                   name="last_inspected_date"
                   value={toISODateString(form.last_inspected_date)}
-                  min={isManager ? updateQcMinAllowedDateIso : undefined}
-                  max={isManager ? todayIso : undefined}
+                  min={(isManager || isQcUser) ? updateQcMinAllowedDateIso : undefined}
+                  max={(isManager || isQcUser) ? todayIso : undefined}
                   onChange={(e) =>
                     setForm((prev) => ({
                       ...prev,

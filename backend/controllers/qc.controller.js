@@ -500,6 +500,7 @@ const hasInspectionRecordActivity = ({
 } = {}) =>
   isInspectionStatusMatching(status, INSPECTION_RECORD_STATUS.REJECTED) ||
   isInspectionStatusMatching(status, INSPECTION_RECORD_STATUS.GOODS_NOT_READY) ||
+  isInspectionStatusMatching(status, INSPECTION_RECORD_STATUS.DONE) ||
   isGoodsNotReadyMarked(goodsNotReady, status) ||
   toNonNegativeNumber(checked, 0) > 0 ||
   toNonNegativeNumber(passed, 0) > 0 ||
@@ -681,19 +682,6 @@ const isIsoDateWithinPastDaysInclusive = (isoDate, daysBack = 0) => {
   return target >= minAllowedUtc && target <= todayUtc;
 };
 
-const isIsoDateExactlyDaysBack = (isoDate, daysBack = 0) => {
-  const target = parseIsoDateToUtcDate(isoDate);
-  if (!target) return false;
-
-  const todayUtc = toUtcDayStart(new Date());
-  if (!todayUtc) return false;
-  const offsetDays = Number(daysBack) || 0;
-  const expectedUtc = new Date(todayUtc);
-  expectedUtc.setUTCDate(expectedUtc.getUTCDate() - offsetDays);
-
-  return target.getTime() === expectedUtc.getTime();
-};
-
 const getUpdateQcPastDaysLimit = (role = "", userId = "") => {
   const normalizedUserId = String(userId || "").trim();
   const override = UPDATE_QC_PAST_DAYS_OVERRIDE_BY_USER[normalizedUserId];
@@ -715,6 +703,9 @@ const buildUpdateQcPastDaysMessage = (role = "", daysBack = 0) => {
   const dayLabel = safeDaysBack === 1 ? "day" : "days";
   return `${actorLabel} can update QC only for today and previous ${safeDaysBack} ${dayLabel}`;
 };
+
+const buildQcUserUpdateDateMessage = () =>
+  "QC can update only requests from today or yesterday";
 
 const formatDateDDMMYYYY = (value, fallback = "") =>
   formatDateOnlyDDMMYYYY(value, fallback);
@@ -1821,9 +1812,82 @@ const resolveRequestedQuantityFromQc = (qcDoc = {}) => {
   return 0;
 };
 
+const getInspectionRecordsForRequestEntry = (
+  inspectionRecords = [],
+  requestEntry = null,
+) => {
+  if (!requestEntry) return [];
+
+  const records = Array.isArray(inspectionRecords) ? inspectionRecords : [];
+  const requestHistoryId = String(
+    requestEntry?._id ||
+      requestEntry?.request_history_id ||
+      requestEntry?.id ||
+      "",
+  ).trim();
+  const requestDateKey = toISODateString(
+    requestEntry?.request_date || requestEntry?.requested_date,
+  );
+  const requestInspectorId = String(
+    requestEntry?.inspector?._id ||
+      requestEntry?.inspector ||
+      requestEntry?.inspector_id ||
+      "",
+  ).trim();
+
+  if (requestHistoryId) {
+    const exactMatches = records.filter(
+      (record) => String(record?.request_history_id || "").trim() === requestHistoryId,
+    );
+    if (exactMatches.length > 0) return exactMatches;
+  }
+
+  if (!requestDateKey) return [];
+
+  return records.filter((record) => {
+    const linkedRequestHistoryId = String(record?.request_history_id || "").trim();
+    if (requestHistoryId && linkedRequestHistoryId && linkedRequestHistoryId !== requestHistoryId) {
+      return false;
+    }
+
+    const recordRequestedDate = toISODateString(
+      record?.requested_date || record?.inspection_date || record?.createdAt,
+    );
+    if (recordRequestedDate !== requestDateKey) return false;
+
+    if (!requestInspectorId) return true;
+
+    const recordInspectorId = String(
+      record?.inspector?._id || record?.inspector || "",
+    ).trim();
+    return !recordInspectorId || recordInspectorId === requestInspectorId;
+  });
+};
+
+const resolveLatestInspectionRecordFromList = (inspectionRecords = []) => {
+  let latestRecord = null;
+  let latestTimestamp = 0;
+
+  for (const record of Array.isArray(inspectionRecords) ? inspectionRecords : []) {
+    const recordTimestamp = Math.max(
+      toSortableTimestamp(record?.inspection_date),
+      toSortableTimestamp(record?.requested_date),
+      toSortableTimestamp(record?.createdAt),
+      toSortableTimestamp(record?.updatedAt),
+    );
+    if (!latestRecord || recordTimestamp >= latestTimestamp) {
+      latestRecord = record;
+      latestTimestamp = recordTimestamp;
+    }
+  }
+
+  return latestRecord;
+};
+
 const getQcUserLatestRequestAvailability = (
   qcDoc = {},
   inspectionRecords = [],
+  { currentUserId = "", inspectionDate = "" } = {},
 ) => {
   const latestRequestEntry = resolveLatestRequestEntry(qcDoc?.request_history || []);
   if (!latestRequestEntry) {
@@ -1835,20 +1899,68 @@ const getQcUserLatestRequestAvailability = (
     };
   }
 
-  const latestInspectionRecord = resolveLatestInspectionRecordForRequestEntry(
-    inspectionRecords,
-    latestRequestEntry,
+  const requestDateIso = toISODateString(
+    latestRequestEntry?.request_date || qcDoc?.request_date || "",
   );
-  const zeroCheckedInspectionRecord = (Array.isArray(inspectionRecords)
-    ? inspectionRecords
-    : []
-  ).find((record) => toNonNegativeNumber(record?.checked, 0) <= 0);
-  if (zeroCheckedInspectionRecord) {
+  if (!requestDateIso) {
     return {
-      isAvailable: true,
+      isAvailable: false,
       latestRequestEntry,
-      latestInspectionRecord: latestInspectionRecord || zeroCheckedInspectionRecord,
-      reason: "",
+      latestInspectionRecord: null,
+      reason: "QC request date is invalid.",
+    };
+  }
+
+  if (!isIsoDateWithinPastDaysInclusive(requestDateIso, QC_ALLOWED_PAST_DAYS)) {
+    return {
+      isAvailable: false,
+      latestRequestEntry,
+      latestInspectionRecord: null,
+      reason: buildQcUserUpdateDateMessage(),
+    };
+  }
+
+  const submittedInspectionDateIso = toISODateString(inspectionDate);
+  if (
+    inspectionDate &&
+    (!submittedInspectionDateIso ||
+      !isIsoDateWithinPastDaysInclusive(
+        submittedInspectionDateIso,
+        QC_ALLOWED_PAST_DAYS,
+      ))
+  ) {
+    return {
+      isAvailable: false,
+      latestRequestEntry,
+      latestInspectionRecord: null,
+      reason: buildQcUserUpdateDateMessage(),
+    };
+  }
+
+  const requestInspectorId = String(
+    latestRequestEntry?.inspector?._id ||
+      latestRequestEntry?.inspector ||
+      qcDoc?.inspector?._id ||
+      qcDoc?.inspector ||
+      "",
+  ).trim();
+  const normalizedCurrentUserId = String(currentUserId || "").trim();
+  if (!normalizedCurrentUserId) {
+    return {
+      isAvailable: false,
+      latestRequestEntry,
+      latestInspectionRecord: null,
+      reason: "Unauthorized",
+      statusCode: 401,
+    };
+  }
+
+  if (!requestInspectorId || requestInspectorId !== normalizedCurrentUserId) {
+    return {
+      isAvailable: false,
+      latestRequestEntry,
+      latestInspectionRecord: null,
+      reason: "Only the inspector assigned to this QC request can update it.",
     };
   }
 
@@ -1859,23 +1971,28 @@ const getQcUserLatestRequestAvailability = (
     return {
       isAvailable: false,
       latestRequestEntry,
-      latestInspectionRecord,
-      reason:
-        "The latest QC request is already closed. Align a new QC request before updating again.",
+      latestInspectionRecord: null,
+      reason: "This QC request is already closed and cannot be updated again.",
     };
   }
 
-  const latestRequestHasActivity = latestInspectionRecord
-    ? hasInspectionRecordActivity({
-      checked: latestInspectionRecord?.checked,
-      passed: latestInspectionRecord?.passed,
-      vendorOffered: latestInspectionRecord?.vendor_offered,
-      labelsAdded: latestInspectionRecord?.labels_added,
-      labelRanges: latestInspectionRecord?.label_ranges,
-      goodsNotReady: latestInspectionRecord?.goods_not_ready,
-      status: latestInspectionRecord?.status,
-    })
-    : false;
+  const requestInspectionRecords = getInspectionRecordsForRequestEntry(
+    inspectionRecords,
+    latestRequestEntry,
+  );
+  const latestInspectionRecord =
+    resolveLatestInspectionRecordFromList(requestInspectionRecords);
+  const latestRequestHasActivity = requestInspectionRecords.some((record) =>
+    hasInspectionRecordActivity({
+      checked: record?.checked,
+      passed: record?.passed,
+      vendorOffered: record?.vendor_offered,
+      labelsAdded: record?.labels_added,
+      labelRanges: record?.label_ranges,
+      goodsNotReady: record?.goods_not_ready,
+      status: record?.status,
+    }),
+  );
 
   if (latestRequestHasActivity) {
     return {
@@ -1883,7 +2000,7 @@ const getQcUserLatestRequestAvailability = (
       latestRequestEntry,
       latestInspectionRecord,
       reason:
-        "The latest QC request is already worked upon. Align a new QC request before updating again.",
+        "This QC request has already been inspected and cannot be updated again.",
     };
   }
 
@@ -4102,14 +4219,6 @@ exports.updateQC = async (req, res) => {
           .toLowerCase() === "true");
     const allowAdminRewrite = adminRewriteLatestRecord;
     const allowQcFieldEdits = allowAdminRewrite || isQcUser;
-    const isInspectionDone = isQcOrderInspectionDone(qc, qc?.order);
-
-    if (!hasElevatedAccess && isInspectionDone) {
-      return res.status(403).json({
-        message:
-          "Only admin or manager can update this QC record after inspection is done",
-      });
-    }
 
     const requestedInspectorId =
       inspector !== undefined &&
@@ -4138,90 +4247,45 @@ exports.updateQC = async (req, res) => {
       });
     }
 
-    if (isQcUser && !hasElevatedAccess) {
-      const qcUserRequestAvailability = getQcUserLatestRequestAvailability(
-        qc,
-        beforeInspectionRecords,
-      );
-      if (!qcUserRequestAvailability.isAvailable) {
-        return res.status(403).json({
-          message: qcUserRequestAvailability.reason,
-        });
-      }
-    }
-
     const inspectionDateForPermissionRaw =
       last_inspected_date !== undefined &&
       String(last_inspected_date).trim() !== ""
         ? String(last_inspected_date).trim()
-        : String(qc?.last_inspected_date || qc?.request_date || "").trim();
-    const inspectionDateForPermission = toISODateString(
-      inspectionDateForPermissionRaw,
-    );
-
-    if (!hasElevatedAccess) {
-      if (!inspectionDateForPermission) {
-        return res.status(400).json({
-          message:
-            "last_inspected_date must be a valid date in DD/MM/YYYY or YYYY-MM-DD format",
-        });
-      }
-      if (
-        !isIsoDateWithinPastDaysInclusive(
-          inspectionDateForPermission,
-          updateQcPastDaysLimit,
-        )
-      ) {
-        return res.status(403).json({
-          message: buildUpdateQcPastDaysMessage(
-            normalizedRole,
-            updateQcPastDaysLimit,
-          ),
-        });
-      }
-
-      const isOneDayBackdatedEntry = isIsoDateExactlyDaysBack(
-        inspectionDateForPermission,
-        1,
+        : String(
+            latestRequestEntry?.request_date ||
+              qc?.request_date ||
+              qc?.last_inspected_date ||
+              "",
+          ).trim();
+    let qcUserRequestAvailability = null;
+    if (isQcUser && !hasElevatedAccess) {
+      qcUserRequestAvailability = getQcUserLatestRequestAvailability(
+        qc,
+        beforeInspectionRecords,
+        {
+          currentUserId,
+          inspectionDate:
+            last_inspected_date !== undefined
+              ? inspectionDateForPermissionRaw
+              : "",
+        },
       );
-      if (isQcUser && isOneDayBackdatedEntry) {
-        if (!mongoose.Types.ObjectId.isValid(currentUserId)) {
-          return res.status(401).json({ message: "Unauthorized" });
-        }
-        const existingOneDayBackdatedUpdate = await Inspection.exists({
-          qc: qc._id,
-          inspector: new mongoose.Types.ObjectId(currentUserId),
-          inspection_date: inspectionDateForPermission,
-          $or: [
-            { checked: { $gt: 0 } },
-            { passed: { $gt: 0 } },
-            { vendor_offered: { $gt: 0 } },
-            { "labels_added.0": { $exists: true } },
-          ],
-        });
-        if (existingOneDayBackdatedUpdate) {
-          return res.status(403).json({
-            message: "QC can update a 1-day backdated entry only once",
+      if (!qcUserRequestAvailability.isAvailable) {
+        return res
+          .status(qcUserRequestAvailability.statusCode || 403)
+          .json({
+            message: qcUserRequestAvailability.reason,
           });
-        }
-      }
-    }
-
-    if (!hasElevatedAccess) {
-      if (!currentUserId) {
-        return res.status(401).json({ message: "Unauthorized" });
       }
 
-      const alignedInspectorId = String(
-        qc?.inspector?._id || qc?.inspector || "",
+      const activeRequestInspectorId = String(
+        qcUserRequestAvailability?.latestRequestEntry?.inspector?._id ||
+          qcUserRequestAvailability?.latestRequestEntry?.inspector ||
+          qc?.inspector?._id ||
+          qc?.inspector ||
+          "",
       ).trim();
-      if (!alignedInspectorId || alignedInspectorId !== currentUserId) {
-        return res.status(403).json({
-          message: "QC can update only records aligned to them",
-        });
-      }
-
-      if (requestedInspectorId && requestedInspectorId !== alignedInspectorId) {
+      if (requestedInspectorId && requestedInspectorId !== activeRequestInspectorId) {
         return res.status(403).json({
           message: "QC cannot change the requested inspector",
         });
@@ -5075,11 +5139,6 @@ exports.updateQC = async (req, res) => {
     const hasLabelsPayload =
       (Array.isArray(labels) && labels.length > 0) || hasLabelRangePayload;
 
-    // For QC role, labels are required in the update payload
-    if (isQcUser && !hasLabelsPayload) {
-      return res.status(400).json({ message: "Labels are required for QC updates" });
-    }
-
     const buildLabelsFromRanges = (ranges = []) => {
       const normalizedRanges = [];
       const generatedLabels = [];
@@ -5433,8 +5492,7 @@ exports.updateQC = async (req, res) => {
     }
 
     /* ────────────────────────
-         🧾 CREATE INSPECTION RECORD (NEW)
-         We create a record only when there's a "visit update"
+         🧾 CREATE INSPECTION RECORD
       ──────────────────────── */
 
     const isVisitUpdate =
@@ -5446,6 +5504,7 @@ exports.updateQC = async (req, res) => {
     const shouldUpdateInspectionRecord =
       !allowAdminRewrite &&
       (
+        isQcUser ||
         isVisitUpdate ||
         hasCbmUpdate ||
         (last_inspected_date !== undefined &&
@@ -5468,7 +5527,12 @@ exports.updateQC = async (req, res) => {
         last_inspected_date !== undefined &&
         String(last_inspected_date).trim() !== ""
           ? String(last_inspected_date).trim()
-          : String(qc.last_inspected_date || qc.request_date || "").trim();
+          : String(
+              latestRequestEntry?.request_date ||
+                qc.request_date ||
+                qc.last_inspected_date ||
+                "",
+            ).trim();
       const inspectionDateForRecord = toISODateString(
         inspectionDateForRecordRaw,
       );
@@ -5520,10 +5584,11 @@ exports.updateQC = async (req, res) => {
         appendLabelRanges: isVisitUpdate ? labelRangesUsedThisVisit : [],
         appendLabels: isVisitUpdate ? labelsAddedThisVisit : [],
         replaceCbmSnapshot: hasCbmUpdate || isVisitUpdate,
+        explicitStatus: isQcUser ? INSPECTION_RECORD_STATUS.DONE : "",
       });
 
-      if (latestRequestEntry && inspectionRecord && isVisitUpdate) {
-        latestRequestEntry.status = "inspected";
+      if (latestRequestEntry && inspectionRecord && (isVisitUpdate || isQcUser)) {
+        latestRequestEntry.status = REQUEST_HISTORY_STATUS.INSPECTED;
         stampRequestHistoryEntry(latestRequestEntry, {
           user: req.user,
         });
@@ -7295,14 +7360,6 @@ exports.markGoodsNotReady = async (req, res) => {
     const isManager = normalizedRole === "manager";
     const hasElevatedAccess = isAdmin || isManager;
     const currentUserId = String(req.user?._id || req.user?.id || "").trim();
-    const isInspectionDone = isQcOrderInspectionDone(qc, qc?.order);
-
-    if (!hasElevatedAccess && isInspectionDone) {
-      return res.status(403).json({
-        message:
-          "Only admin or manager can update this QC record after inspection is done",
-      });
-    }
 
     const latestRequestEntry = resolveLatestRequestEntry(
       qc?.request_history || [],
@@ -7322,26 +7379,14 @@ exports.markGoodsNotReady = async (req, res) => {
       const qcUserRequestAvailability = getQcUserLatestRequestAvailability(
         qc,
         beforeInspectionRecords,
+        { currentUserId },
       );
       if (!qcUserRequestAvailability.isAvailable) {
-        return res.status(403).json({
-          message: qcUserRequestAvailability.reason,
-        });
-      }
-    }
-
-    if (!hasElevatedAccess) {
-      if (!currentUserId) {
-        return res.status(401).json({ message: "Unauthorized" });
-      }
-
-      const alignedInspectorId = String(
-        qc?.inspector?._id || qc?.inspector || "",
-      ).trim();
-      if (!alignedInspectorId || alignedInspectorId !== currentUserId) {
-        return res.status(403).json({
-          message: "QC can update only records aligned to them",
-        });
+        return res
+          .status(qcUserRequestAvailability.statusCode || 403)
+          .json({
+            message: qcUserRequestAvailability.reason,
+          });
       }
     }
 
@@ -7483,14 +7528,6 @@ exports.rejectAllQc = async (req, res) => {
     const isManager = normalizedRole === "manager";
     const hasElevatedAccess = isAdmin || isManager;
     const currentUserId = String(req.user?._id || req.user?.id || "").trim();
-    const isInspectionDone = isQcOrderInspectionDone(qc, qc?.order);
-
-    if (!hasElevatedAccess && isInspectionDone) {
-      return res.status(403).json({
-        message:
-          "Only admin or manager can update this QC record after inspection is done",
-      });
-    }
 
     const latestRequestEntry = resolveLatestRequestEntry(
       qc?.request_history || [],
@@ -7510,26 +7547,14 @@ exports.rejectAllQc = async (req, res) => {
       const qcUserRequestAvailability = getQcUserLatestRequestAvailability(
         qc,
         beforeInspectionRecords,
+        { currentUserId },
       );
       if (!qcUserRequestAvailability.isAvailable) {
-        return res.status(403).json({
-          message: qcUserRequestAvailability.reason,
-        });
-      }
-    }
-
-    if (!hasElevatedAccess) {
-      if (!currentUserId) {
-        return res.status(401).json({ message: "Unauthorized" });
-      }
-
-      const alignedInspectorId = String(
-        qc?.inspector?._id || qc?.inspector || "",
-      ).trim();
-      if (!alignedInspectorId || alignedInspectorId !== currentUserId) {
-        return res.status(403).json({
-          message: "QC can update only records aligned to them",
-        });
+        return res
+          .status(qcUserRequestAvailability.statusCode || 403)
+          .json({
+            message: qcUserRequestAvailability.reason,
+          });
       }
     }
 
@@ -9258,19 +9283,20 @@ exports.uploadQcImages = async (req, res) => {
       });
     }
 
-    if (!hasElevatedAccess) {
-      if (!currentUserId) {
-        return res.status(401).json({ success: false, message: "Unauthorized" });
-      }
-
-      const alignedInspectorId = String(
-        qc?.inspector?._id || qc?.inspector || "",
-      ).trim();
-      if (!alignedInspectorId || alignedInspectorId !== currentUserId) {
-        return res.status(403).json({
-          success: false,
-          message: "QC can upload images only for records aligned to them",
-        });
+    if (!hasElevatedAccess && normalizedRole === "qc") {
+      const inspectionRecords = await Inspection.find({ qc: qc._id }).lean();
+      const qcUserRequestAvailability = getQcUserLatestRequestAvailability(
+        qc,
+        inspectionRecords,
+        { currentUserId },
+      );
+      if (!qcUserRequestAvailability.isAvailable) {
+        return res
+          .status(qcUserRequestAvailability.statusCode || 403)
+          .json({
+            success: false,
+            message: qcUserRequestAvailability.reason,
+          });
       }
     }
 

@@ -1944,7 +1944,9 @@ exports.updateItem = async (req, res) => {
       });
     }
 
+    let touched = false;
     const setPath = (path, value) => {
+      touched = true;
       item.set(path, value);
     };
     const nextInspectedWeight = buildWeightRecord(item?.inspected_weight);

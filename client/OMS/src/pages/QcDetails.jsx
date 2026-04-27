@@ -24,6 +24,7 @@ import { formatFixedNumber, formatLbhValue } from "../utils/measurementDisplay";
 import {
   canTransferLatestRequestToday,
   getQcUserUpdateRequestAvailability,
+  resolveLatestRequestEntry,
 } from "../utils/qcRequests";
 import useBulkQcImageUpload from "../hooks/useBulkQcImageUpload";
 import {
@@ -130,22 +131,6 @@ const getWeightValue = (weight = {}, key = "") => {
     ?? 0;
   const parsed = Number(rawValue);
   return Number.isFinite(parsed) ? parsed : 0;
-};
-
-const getUtcDayOffsetFromToday = (value) => {
-  const isoDate = toISODateString(value);
-  if (!isoDate) return null;
-  const [year, month, day] = isoDate.split("-").map(Number);
-  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
-    return null;
-  }
-  const targetUtc = Date.UTC(year, month - 1, day);
-  const todayIso = toISODateString(new Date());
-  if (!todayIso) return null;
-  const [todayYear, todayMonth, todayDay] = todayIso.split("-").map(Number);
-  const todayUtc = Date.UTC(todayYear, todayMonth - 1, todayDay);
-  const oneDayMs = 24 * 60 * 60 * 1000;
-  return Math.round((todayUtc - targetUtc) / oneDayMs);
 };
 
 const getQcPendingAlignmentInfo = (qc = {}) => {
@@ -400,7 +385,6 @@ const QcDetails = () => {
   const canShowEditShippingButton =
     isOnlyAdmin && hasShippingRecords;
 
-  const isInspectionDone = derivedOrderStatus === "Inspection Done";
   const pendingAlignmentInfo = useMemo(
     () => getQcPendingAlignmentInfo(qc),
     [qc],
@@ -408,45 +392,26 @@ const QcDetails = () => {
   const canShowTransferRequest = canTransferLatestRequestToday(qc);
   const canUpdateQcByRole =
     isAdmin ||
-    (!isInspectionDone &&
-      normalizedRole === "qc");
-  const qcUserRequestAvailability = useMemo(
-    () => getQcUserUpdateRequestAvailability(qc),
+    normalizedRole === "qc";
+  const latestRequestEntry = useMemo(
+    () => resolveLatestRequestEntry(qc?.request_history),
     [qc],
   );
-  const alignedInspectorId = String(qc?.inspector?._id || qc?.inspector || "").trim();
+  const qcUserRequestAvailability = useMemo(
+    () => getQcUserUpdateRequestAvailability(qc, { currentUserId }),
+    [qc, currentUserId],
+  );
+  const alignedInspectorId = String(
+    latestRequestEntry?.inspector?._id ||
+      latestRequestEntry?.inspector ||
+      qc?.inspector?._id ||
+      qc?.inspector ||
+      "",
+  ).trim();
   const isQcAlignedRecord = !isQcUser || (
     Boolean(currentUserId) &&
     Boolean(alignedInspectorId) &&
     alignedInspectorId === currentUserId
-  );
-  const inspectionDateForPermission = toISODateString(
-    qc?.last_inspected_date || qc?.request_date || "",
-  );
-  const inspectionDateOffsetDays = getUtcDayOffsetFromToday(inspectionDateForPermission);
-  const isQcInspectionDateAllowed = !isQcUser
-    || (
-      inspectionDateOffsetDays !== null
-      && inspectionDateOffsetDays >= 0
-      && inspectionDateOffsetDays <= 1
-    );
-  const isOneDayBackdatedForQc = isQcUser && inspectionDateOffsetDays === 1;
-  const hasUsedOneDayBackdatedUpdate = Boolean(
-    isOneDayBackdatedForQc
-    && Array.isArray(qc?.inspection_record)
-    && qc.inspection_record.some((record) => {
-      const recordDate = toISODateString(record?.inspection_date || record?.createdAt || "");
-      if (!recordDate || recordDate !== inspectionDateForPermission) return false;
-      const recordInspectorId = String(record?.inspector?._id || record?.inspector || "").trim();
-      if (!recordInspectorId || recordInspectorId !== currentUserId) return false;
-      const checked = Number(record?.checked || 0);
-      const passed = Number(record?.passed || 0);
-      const offered = Number(record?.vendor_offered || 0);
-      const labelsAddedCount = Array.isArray(record?.labels_added)
-        ? record.labels_added.length
-        : 0;
-      return checked > 0 || passed > 0 || offered > 0 || labelsAddedCount > 0;
-    })
   );
   const canUpdateQc =
     canUpdateQcByRole &&
@@ -457,15 +422,9 @@ const QcDetails = () => {
     ? !pendingAlignmentInfo.hasRequest
       ? "QC is not requested yet. Align QC request before updating."
       : !isQcAlignedRecord
-      ? "QC can update only records aligned to them."
-      : isInspectionDone
-      ? "After inspection is done, only admin can update this record."
+      ? "Only the inspector assigned to this QC request can update it."
       : isQcUser && !qcUserRequestAvailability.isAvailable
       ? qcUserRequestAvailability.reason
-      : !isQcInspectionDateAllowed
-      ? "QC date rule will be validated while submitting."
-      : hasUsedOneDayBackdatedUpdate
-      ? "Backdated one-time rule will be validated while submitting."
       : "Only admin, manager, or aligned QC can update this record."
     : "";
   const availableRelatedFileOptions = useMemo(
@@ -486,7 +445,7 @@ const QcDetails = () => {
     pendingAlignmentInfo.hasRequest &&
     (
       isAdmin ||
-      (isQcUser && isQcAlignedRecord)
+      (isQcUser && isQcAlignedRecord && qcUserRequestAvailability.isAvailable)
     );
   const canUploadItemMasterFiles = isAdmin && canUpdateQc;
   const canUploadRelatedFile =
@@ -522,13 +481,9 @@ const QcDetails = () => {
       : !pendingAlignmentInfo.hasRequest
       ? "QC is not requested yet. Align QC request before uploading."
       : !isQcAlignedRecord
-      ? "QC can upload only records aligned to them."
-      : isInspectionDone
-      ? "After inspection is done, only admin can update this record."
-      : !isQcInspectionDateAllowed
-      ? "QC date rule will be validated while submitting."
-      : hasUsedOneDayBackdatedUpdate
-      ? "Backdated one-time rule will be validated while submitting."
+      ? "Only the inspector assigned to this QC request can upload QC images."
+      : isQcUser && !qcUserRequestAvailability.isAvailable
+      ? qcUserRequestAvailability.reason
       : activeRelatedFileConfig?.scope === "qc"
       ? "Only admin, manager, or aligned QC can upload QC images."
       : "Only admin or manager can upload item related files."

@@ -24,6 +24,7 @@ import DailyReport from "./pages/DailyReport";
 import Shipments from "./pages/Shipments";
 import Container from "./pages/Container";
 import Containers from "./pages/Containers";
+import ShippedSamples from "./pages/ShippedSamples";
 import Items from "./pages/Items";
 import ItemOrdersHistory from "./pages/ItemOrdersHistory";
 import UploadLogs from "./pages/UploadLogs";
@@ -299,6 +300,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <Containers />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/shipped-samples"
+            element={
+              <ProtectedRoute>
+                <ShippedSamples />
               </ProtectedRoute>
             }
           />

@@ -59,12 +59,38 @@ const hasInspectionRecordActivity = ({
 } = {}) =>
   isInspectionStatusMatching(status, "rejected") ||
   isInspectionStatusMatching(status, "goods not ready") ||
+  isInspectionStatusMatching(status, "Inspection Done") ||
   Boolean(goodsNotReady?.ready) ||
   Number(checked || 0) > 0 ||
   Number(passed || 0) > 0 ||
   Number(vendorOffered || 0) > 0 ||
   (Array.isArray(labelsAdded) && labelsAdded.length > 0) ||
   (Array.isArray(labelRanges) && labelRanges.length > 0);
+
+const getUtcDayOffsetFromToday = (isoDateValue) => {
+  const normalizedIso = toISODateString(isoDateValue);
+  if (!normalizedIso) return null;
+  const [year, month, day] = normalizedIso.split("-").map(Number);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return null;
+  }
+
+  const todayIso = getTodayISODate();
+  if (!todayIso) return null;
+  const [todayYear, todayMonth, todayDay] = todayIso.split("-").map(Number);
+  const targetUtc = Date.UTC(year, month - 1, day);
+  const todayUtc = Date.UTC(todayYear, todayMonth - 1, todayDay);
+  const oneDayMs = 24 * 60 * 60 * 1000;
+  return Math.round((todayUtc - targetUtc) / oneDayMs);
+};
+
+const isTodayOrYesterday = (value) => {
+  const offset = getUtcDayOffsetFromToday(value);
+  return offset !== null && offset >= 0 && offset <= 1;
+};
+
+const QC_UPDATE_DATE_MESSAGE =
+  "QC can update only requests from today or yesterday.";
 
 export const resolveLatestInspectionRecordForRequestEntry = (
   inspectionRecords = [],
@@ -155,7 +181,62 @@ export const resolveLatestInspectionRecordForRequestEntry = (
   );
 };
 
-export const getQcUserUpdateRequestAvailability = (qc = {}) => {
+const getInspectionRecordsForRequestEntry = (
+  inspectionRecords = [],
+  requestEntry = null,
+) => {
+  if (!requestEntry) return [];
+
+  const records = Array.isArray(inspectionRecords) ? inspectionRecords : [];
+  const requestHistoryId = String(
+    requestEntry?._id ||
+      requestEntry?.request_history_id ||
+      requestEntry?.id ||
+      "",
+  ).trim();
+  const requestDateKey = toISODateString(
+    requestEntry?.request_date || requestEntry?.requested_date,
+  );
+  const requestInspectorId = String(
+    requestEntry?.inspector?._id ||
+      requestEntry?.inspector ||
+      requestEntry?.inspector_id ||
+      "",
+  ).trim();
+
+  if (requestHistoryId) {
+    const exactMatches = records.filter(
+      (record) => String(record?.request_history_id || "").trim() === requestHistoryId,
+    );
+    if (exactMatches.length > 0) return exactMatches;
+  }
+
+  if (!requestDateKey) return [];
+
+  return records.filter((record) => {
+    const linkedRequestHistoryId = String(record?.request_history_id || "").trim();
+    if (requestHistoryId && linkedRequestHistoryId && linkedRequestHistoryId !== requestHistoryId) {
+      return false;
+    }
+
+    const recordRequestedDate = toISODateString(
+      record?.requested_date || record?.inspection_date || record?.createdAt,
+    );
+    if (recordRequestedDate !== requestDateKey) return false;
+
+    if (!requestInspectorId) return true;
+
+    const recordInspectorId = String(
+      record?.inspector?._id || record?.inspector || "",
+    ).trim();
+    return !recordInspectorId || recordInspectorId === requestInspectorId;
+  });
+};
+
+export const getQcUserUpdateRequestAvailability = (
+  qc = {},
+  { currentUserId = "" } = {},
+) => {
   const latestRequestEntry = resolveLatestRequestEntry(qc?.request_history);
 
   if (!latestRequestEntry) {
@@ -167,20 +248,35 @@ export const getQcUserUpdateRequestAvailability = (qc = {}) => {
     };
   }
 
-  const latestInspectionRecord = resolveLatestInspectionRecordForRequestEntry(
-    qc?.inspection_record,
-    latestRequestEntry,
+  const requestDateIso = toISODateString(
+    latestRequestEntry?.request_date || qc?.request_date || "",
   );
-  const zeroCheckedInspectionRecord = (Array.isArray(qc?.inspection_record)
-    ? qc.inspection_record
-    : []
-  ).find((record) => Number(record?.checked || 0) <= 0);
-  if (zeroCheckedInspectionRecord) {
+  if (!requestDateIso || !isTodayOrYesterday(requestDateIso)) {
     return {
-      isAvailable: true,
-      reason: "",
+      isAvailable: false,
+      reason: QC_UPDATE_DATE_MESSAGE,
       latestRequestEntry,
-      latestInspectionRecord: latestInspectionRecord || zeroCheckedInspectionRecord,
+      latestInspectionRecord: null,
+    };
+  }
+
+  const requestInspectorId = String(
+    latestRequestEntry?.inspector?._id ||
+      latestRequestEntry?.inspector ||
+      qc?.inspector?._id ||
+      qc?.inspector ||
+      "",
+  ).trim();
+  const normalizedCurrentUserId = String(currentUserId || "").trim();
+  if (
+    normalizedCurrentUserId &&
+    (!requestInspectorId || requestInspectorId !== normalizedCurrentUserId)
+  ) {
+    return {
+      isAvailable: false,
+      reason: "Only the inspector assigned to this QC request can update it.",
+      latestRequestEntry,
+      latestInspectionRecord: null,
     };
   }
 
@@ -190,28 +286,34 @@ export const getQcUserUpdateRequestAvailability = (qc = {}) => {
   if (latestRequestStatus !== "open") {
     return {
       isAvailable: false,
-      reason: "The latest QC request is already closed. Align a new QC request before updating again.",
+      reason: "This QC request is already closed and cannot be updated again.",
       latestRequestEntry,
-      latestInspectionRecord,
+      latestInspectionRecord: null,
     };
   }
 
-  const latestRequestHasActivity = latestInspectionRecord
-    ? hasInspectionRecordActivity({
-      checked: latestInspectionRecord?.checked,
-      passed: latestInspectionRecord?.passed,
-      vendorOffered: latestInspectionRecord?.vendor_offered,
-      labelsAdded: latestInspectionRecord?.labels_added,
-      labelRanges: latestInspectionRecord?.label_ranges,
-      goodsNotReady: latestInspectionRecord?.goods_not_ready,
-      status: latestInspectionRecord?.status,
-    })
-    : false;
+  const requestInspectionRecords = getInspectionRecordsForRequestEntry(
+    qc?.inspection_record,
+    latestRequestEntry,
+  );
+  const latestInspectionRecord =
+    resolveLatestInspectionRecordForRequestEntry(qc?.inspection_record, latestRequestEntry);
+  const latestRequestHasActivity = requestInspectionRecords.some((record) =>
+    hasInspectionRecordActivity({
+      checked: record?.checked,
+      passed: record?.passed,
+      vendorOffered: record?.vendor_offered,
+      labelsAdded: record?.labels_added,
+      labelRanges: record?.label_ranges,
+      goodsNotReady: record?.goods_not_ready,
+      status: record?.status,
+    }),
+  );
 
   if (latestRequestHasActivity) {
     return {
       isAvailable: false,
-      reason: "The latest QC request is already worked upon. Align a new QC request before updating again.",
+      reason: "This QC request has already been inspected and cannot be updated again.",
       latestRequestEntry,
       latestInspectionRecord,
     };

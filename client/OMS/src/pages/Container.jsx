@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import SampleModal from "../components/SampleModal";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { getUserFromToken } from "../auth/auth.utils";
 import { isViewOnlyUser } from "../auth/permissions";
@@ -68,6 +69,8 @@ const Container = () => {
   const [stuffedById, setStuffedById] = useState("");
   const [vendors, setVendors] = useState([]);
   const [rows, setRows] = useState([]);
+  const [sampleRows, setSampleRows] = useState([]);
+  const [showSampleModal, setShowSampleModal] = useState(false);
   const [orderIdFilter, setOrderIdFilter] = useState(() =>
     normalizeSearchParam(searchParams.get("order_id")),
   );
@@ -272,23 +275,33 @@ const Container = () => {
 
   const orderIdOptions = useMemo(
     () =>
-      [...new Set(rows.map((row) => String(row.orderId || "").trim()).filter(Boolean))]
+      [...new Set(
+        [...rows, ...sampleRows]
+          .map((row) => String(row.orderId || "").trim())
+          .filter(Boolean),
+      )]
         .sort((a, b) => a.localeCompare(b)),
-    [rows],
+    [rows, sampleRows],
   );
 
   const statusOptions = useMemo(
     () =>
-      [...new Set(rows.map((row) => String(row.status || "").trim()).filter(Boolean))]
+      [...new Set(
+        [...rows, ...sampleRows]
+          .map((row) => String(row.status || "").trim())
+          .filter(Boolean),
+      )]
         .sort((a, b) => a.localeCompare(b)),
-    [rows],
+    [rows, sampleRows],
   );
+
+  const combinedRows = useMemo(() => [...rows, ...sampleRows], [rows, sampleRows]);
 
   const filteredRows = useMemo(() => {
     const normalizedOrderId = String(orderIdFilter || "").trim().toLowerCase();
     const normalizedStatus = String(statusFilter || "all").trim();
 
-    return rows.filter((row) => {
+    return combinedRows.filter((row) => {
       const matchesOrderId = normalizedOrderId
         ? String(row.orderId || "").toLowerCase().includes(normalizedOrderId)
         : true;
@@ -299,7 +312,7 @@ const Container = () => {
 
       return matchesOrderId && matchesStatus;
     });
-  }, [orderIdFilter, rows, statusFilter]);
+  }, [combinedRows, orderIdFilter, statusFilter]);
 
   const handleSortColumn = useCallback(
     (column, defaultDirection = "asc") => {
@@ -348,9 +361,12 @@ const Container = () => {
   );
 
   const handleUsePassedToggle = (rowId, checked) => {
-    setRows((prevRows) =>
+    const updateRows = (prevRows) =>
       prevRows.map((row) => {
         if (row.id !== rowId) return row;
+        if (row.lineType === "sample") {
+          return row;
+        }
 
         if (checked) {
           return {
@@ -365,12 +381,14 @@ const Container = () => {
           usePassed: false,
           quantityInput: "",
         };
-      }),
-    );
+      });
+
+    setRows(updateRows);
+    setSampleRows(updateRows);
   };
 
   const handleQuantityChange = (rowId, rawValue) => {
-    setRows((prevRows) =>
+    const updateRows = (prevRows) =>
       prevRows.map((row) => {
         if (row.id !== rowId || row.usePassed) return row;
 
@@ -383,8 +401,10 @@ const Container = () => {
 
         const clamped = Math.max(0, Math.min(row.maxQuantity, parsed));
         return { ...row, quantityInput: String(clamped) };
-      }),
-    );
+      });
+
+    setRows(updateRows);
+    setSampleRows(updateRows);
   };
 
   const selectedRows = useMemo(
@@ -455,14 +475,23 @@ const Container = () => {
 
       const results = await Promise.allSettled(
         selectedRows.map((row) =>
-          api.patch(`/orders/finalize-order/${row.orderDocumentId}`, {
-            stuffing_date: shippingDateIso,
-            container,
-            invoice_number: invoiceNumberValue,
-            stuffed_by: stuffedBy,
-            quantity: row.quantity,
-            remarks: "Bulk container shipment",
-          }),
+          row.lineType === "sample"
+            ? api.patch(`/samples/${row.orderDocumentId}/finalize-shipment`, {
+                stuffing_date: shippingDateIso,
+                container,
+                invoice_number: invoiceNumberValue,
+                stuffed_by: stuffedBy,
+                quantity: row.quantity,
+                remarks: row.itemDescription || "Bulk container shipment",
+              })
+            : api.patch(`/orders/finalize-order/${row.orderDocumentId}`, {
+                stuffing_date: shippingDateIso,
+                container,
+                invoice_number: invoiceNumberValue,
+                stuffed_by: stuffedBy,
+                quantity: row.quantity,
+                remarks: "Bulk container shipment",
+              }),
         ),
       );
 
@@ -490,6 +519,7 @@ const Container = () => {
         );
       }
 
+      setSampleRows([]);
       await fetchVendorRows(vendor);
     } finally {
       setSaving(false);
@@ -510,14 +540,25 @@ const Container = () => {
             Back
           </button>
           <h2 className="h4 mb-0">Bulk Shipping</h2>
-          <button
-            type="button"
-            className="btn btn-outline-secondary btn-sm"
-            onClick={() => fetchVendorRows(vendor)}
-            disabled={!vendor || loadingRows}
-          >
-            {loadingRows ? "Loading..." : "Refresh"}
-          </button>
+          <div className="d-flex gap-2">
+            {canFinalizeShipping && !isViewOnly && (
+              <button
+                type="button"
+                className="btn btn-outline-secondary btn-sm"
+                onClick={() => setShowSampleModal(true)}
+              >
+                Add Sample
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn btn-outline-secondary btn-sm"
+              onClick={() => fetchVendorRows(vendor)}
+              disabled={!vendor || loadingRows}
+            >
+              {loadingRows ? "Loading..." : "Refresh"}
+            </button>
+          </div>
         </div>
 
         {!canFinalizeShipping && (
@@ -644,7 +685,7 @@ const Container = () => {
           <div className="card-body">
             <div className="d-flex flex-wrap gap-2 mb-2">
               <span className="om-summary-chip">Vendor: {vendor || "N/A"}</span>
-              <span className="om-summary-chip">Total Rows: {rows.length}</span>
+              <span className="om-summary-chip">Total Rows: {combinedRows.length}</span>
               <span className="om-summary-chip">
                 Filtered Rows: {filteredRows.length}
               </span>
@@ -803,7 +844,7 @@ const Container = () => {
                               onChange={(e) =>
                                 handleUsePassedToggle(row.id, e.target.checked)
                               }
-                              disabled={row.maxQuantity <= 0}
+                              disabled={row.maxQuantity <= 0 || row.lineType === "sample"}
                             />
                           </td>
                         )}
@@ -835,6 +876,26 @@ const Container = () => {
           </div>
         </div>
       </div>
+      {showSampleModal && (
+        <SampleModal
+          mode="ship"
+          vendorOptions={vendors}
+          shippingContext={{
+            stuffing_date: toISODateString(shippingDate),
+            container: String(containerNumber || "").trim(),
+            invoice_number: String(invoiceNumber || "").trim(),
+            stuffed_by: inspectorById.get(String(stuffedById || "").trim()) || null,
+          }}
+          onClose={() => setShowSampleModal(false)}
+          onShipped={async (sample) => {
+            setShowSampleModal(false);
+            setSuccess(
+              `Sample ${String(sample?.code || "").trim() || ""} added to container ${String(containerNumber || "").trim() || "N/A"}.`,
+            );
+            await fetchVendorRows(vendor);
+          }}
+        />
+      )}
     </>
   );
 };

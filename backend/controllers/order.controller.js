@@ -3,6 +3,7 @@ const path = require("path");
 const Order = require("../models/order.model");
 const QC = require("../models/qc.model");
 const Item = require("../models/item.model");
+const Sample = require("../models/sample.model");
 const UploadLog = require("../models/uploadLog.model");
 const OrderEditLog = require("../models/orderEditLog.model");
 const mongoose = require("mongoose");
@@ -3396,6 +3397,107 @@ const mapOrdersToShipmentRows = (orders = []) =>
     });
   });
 
+const buildSampleShipmentMatch = ({
+  brand,
+  vendor,
+  orderId,
+  itemCode,
+} = {}) => {
+  const match = {
+    "shipment.0": { $exists: true },
+  };
+  const normalizedBrand = normalizeFilterValue(brand);
+  const normalizedVendor = normalizeFilterValue(vendor);
+  const normalizedOrderId = normalizeFilterValue(orderId);
+  const normalizedItemCode = normalizeFilterValue(itemCode);
+
+  if (normalizedBrand) {
+    match.brand = { $regex: escapeRegex(normalizedBrand), $options: "i" };
+  }
+  if (normalizedVendor) {
+    match.vendor = {
+      $elemMatch: {
+        $regex: escapeRegex(normalizedVendor),
+        $options: "i",
+      },
+    };
+  }
+  if (normalizedItemCode) {
+    match.$or = [
+      { code: { $regex: escapeRegex(normalizedItemCode), $options: "i" } },
+      { name: { $regex: escapeRegex(normalizedItemCode), $options: "i" } },
+      { description: { $regex: escapeRegex(normalizedItemCode), $options: "i" } },
+    ];
+  }
+  if (normalizedOrderId) {
+    const lowered = normalizedOrderId.toLowerCase();
+    if (lowered !== "sample") {
+      match.$and = [
+        ...(Array.isArray(match.$and) ? match.$and : []),
+        {
+          $or: [
+            { code: { $regex: escapeRegex(normalizedOrderId), $options: "i" } },
+            { name: { $regex: escapeRegex(normalizedOrderId), $options: "i" } },
+          ],
+        },
+      ];
+    }
+  }
+
+  return match;
+};
+
+const mapSamplesToShipmentRows = (samples = []) =>
+  samples.flatMap((sample) => {
+    const shipmentEntries = Array.isArray(sample?.shipment) ? sample.shipment : [];
+    const vendorLabel = normalizeDistinctValues(sample?.vendor).join(", ");
+    const perItemCbm = toRoundedCbmValue(Math.max(0, Number(sample?.cbm || 0)));
+
+    return shipmentEntries.map((entry, index) => {
+      const parsedShipmentQuantity = Number(entry?.quantity);
+      const quantity = Number.isFinite(parsedShipmentQuantity)
+        ? Math.max(0, parsedShipmentQuantity)
+        : 0;
+
+      return {
+        _id: sample?._id || null,
+        order_id: "Sample",
+        brand: sample?.brand || "",
+        vendor: vendorLabel,
+        ETD: null,
+        order_date: sample?.createdAt || null,
+        updatedAt: sample?.updatedAt || null,
+        item: {
+          item_code: sample?.code || "",
+          description: sample?.description || "",
+        },
+        item_code: sample?.code || "",
+        description: sample?.description || "",
+        order_quantity: quantity,
+        shipment: shipmentEntries,
+        status: "Shipped",
+        passed_quantity: quantity,
+        shippable_quantity: 0,
+        per_item_cbm: perItemCbm,
+        cbm_source: "sample",
+        line_type: "sample",
+        sample_name: sample?.name || "",
+        shipment_id: entry?._id || `${sample?._id || "sample"}-${index}`,
+        stuffing_date: entry?.stuffing_date || null,
+        container: entry?.container || "",
+        invoice_number: normalizeShipmentInvoiceNumber(entry?.invoice_number),
+        quantity,
+        pending: Number.isFinite(Number(entry?.pending))
+          ? Math.max(0, Number(entry.pending))
+          : 0,
+        remaining_remarks: entry?.remaining_remarks || "",
+        shipment_checked: Boolean(entry?.checked?.checked),
+        shipment_checked_by: entry?.checked?.checked_by || null,
+        shipment_cbm: toRoundedCbmValue(perItemCbm * quantity),
+      };
+    });
+  });
+
 const toShipmentTimestamp = (value) => {
   if (!value) return 0;
   const parsed = new Date(value);
@@ -3487,6 +3589,18 @@ const getShipmentDataset = async ({
     .sort({ order_date: -1, updatedAt: -1, order_id: -1 })
     .lean();
 
+  const samples = await Sample.find(
+    buildSampleShipmentMatch({
+      brand,
+      vendor,
+      orderId,
+      itemCode,
+    }),
+  )
+    .select("code name description brand vendor cbm shipment createdAt updatedAt")
+    .sort({ updatedAt: -1, code: 1 })
+    .lean();
+
   const itemCodes = [
     ...new Set(
       orders
@@ -3559,7 +3673,10 @@ const getShipmentDataset = async ({
       );
     });
 
-  const rows = mapOrdersToShipmentRows(derivedOrders);
+  const rows = [
+    ...mapOrdersToShipmentRows(derivedOrders),
+    ...mapSamplesToShipmentRows(samples),
+  ];
 
   const normalizedContainer = normalizeFilterValue(container);
   const containerNeedle = normalizedContainer
@@ -3663,15 +3780,25 @@ const getShipmentDataset = async ({
       sort_order: sortOrder,
     },
     filters: {
-      brands: normalizeDistinctValues(derivedOrders.map((row) => row?.brand)),
-      vendors: normalizeDistinctValues(derivedOrders.map((row) => row?.vendor)),
+      brands: normalizeDistinctValues([
+        ...derivedOrders.map((row) => row?.brand),
+        ...samples.map((row) => row?.brand),
+      ]),
+      vendors: normalizeDistinctValues([
+        ...derivedOrders.map((row) => row?.vendor),
+        ...samples.map((row) => row?.vendor),
+      ]),
       order_ids: normalizeDistinctValues(
-        derivedOrders.map((row) => row?.order_id),
+        [
+          ...derivedOrders.map((row) => row?.order_id),
+          ...(samples.length > 0 ? ["Sample"] : []),
+        ],
       ),
       containers: normalizeDistinctValues(rows.map((row) => row?.container)),
-      item_codes: normalizeDistinctValues(
-        derivedOrders.map((row) => row?.item?.item_code),
-      ),
+      item_codes: normalizeDistinctValues([
+        ...derivedOrders.map((row) => row?.item?.item_code),
+        ...samples.map((row) => row?.code),
+      ]),
       from_date: fromDate ? toISODateString(fromDate) : "",
       to_date: toDate ? toISODateString(toDate) : "",
     },
@@ -8682,12 +8809,17 @@ exports.checkShipmentRows = async (req, res) => {
 
     const shipmentRefs = rawShipments
       .map((entry) => ({
-        orderId: String(entry?.order_id || entry?.orderId || entry?._id || "").trim(),
+        lineType: String(entry?.line_type || entry?.lineType || "order")
+          .trim()
+          .toLowerCase() === "sample"
+          ? "sample"
+          : "order",
+        entityId: String(entry?.order_id || entry?.orderId || entry?._id || "").trim(),
         shipmentId: String(
           entry?.shipment_id || entry?.shipmentId || entry?._shipment_id || "",
         ).trim(),
       }))
-      .filter((entry) => entry.orderId || entry.shipmentId);
+      .filter((entry) => entry.entityId || entry.shipmentId);
 
     if (shipmentRefs.length === 0) {
       return res.status(400).json({
@@ -8697,7 +8829,7 @@ exports.checkShipmentRows = async (req, res) => {
 
     const invalidRef = shipmentRefs.find(
       (entry) =>
-        !mongoose.Types.ObjectId.isValid(entry.orderId) ||
+        !mongoose.Types.ObjectId.isValid(entry.entityId) ||
         !mongoose.Types.ObjectId.isValid(entry.shipmentId),
     );
     if (invalidRef) {
@@ -8707,23 +8839,46 @@ exports.checkShipmentRows = async (req, res) => {
     }
 
     const orderIds = [
-      ...new Set(shipmentRefs.map((entry) => entry.orderId)),
+      ...new Set(
+        shipmentRefs
+          .filter((entry) => entry.lineType === "order")
+          .map((entry) => entry.entityId),
+      ),
     ];
-    const orders = await Order.find({ _id: { $in: orderIds } });
+    const sampleIds = [
+      ...new Set(
+        shipmentRefs
+          .filter((entry) => entry.lineType === "sample")
+          .map((entry) => entry.entityId),
+      ),
+    ];
+    const [orders, samples] = await Promise.all([
+      orderIds.length > 0 ? Order.find({ _id: { $in: orderIds } }) : [],
+      sampleIds.length > 0 ? Sample.find({ _id: { $in: sampleIds } }) : [],
+    ]);
     const ordersById = new Map(
       orders.map((orderDoc) => [String(orderDoc._id), orderDoc]),
+    );
+    const samplesById = new Map(
+      samples.map((sampleDoc) => [String(sampleDoc._id), sampleDoc]),
     );
     const selectedRows = [];
 
     for (const ref of shipmentRefs) {
-      const orderDoc = ordersById.get(ref.orderId);
-      if (!orderDoc) {
+      const parentDoc =
+        ref.lineType === "sample"
+          ? samplesById.get(ref.entityId)
+          : ordersById.get(ref.entityId);
+      if (!parentDoc) {
         return res.status(404).json({
-          message: "One or more selected orders were not found",
+          message:
+            ref.lineType === "sample"
+              ? "One or more selected samples were not found"
+              : "One or more selected orders were not found",
         });
       }
 
-      const shipmentEntry = orderDoc.shipment?.id(ref.shipmentId);
+      const shipmentEntry = parentDoc.shipment?.id(ref.shipmentId);
       if (!shipmentEntry) {
         return res.status(404).json({
           message: "One or more selected shipment rows were not found",
@@ -8743,7 +8898,12 @@ exports.checkShipmentRows = async (req, res) => {
         });
       }
 
-      selectedRows.push({ orderDoc, shipmentEntry, container });
+      selectedRows.push({
+        lineType: ref.lineType,
+        parentDoc,
+        shipmentEntry,
+        container,
+      });
     }
 
     const selectedContainers = [
@@ -8759,13 +8919,15 @@ exports.checkShipmentRows = async (req, res) => {
     const actor = buildAuditActor(req.user);
     const orderSnapshots = new Map();
 
-    selectedRows.forEach(({ orderDoc, shipmentEntry }) => {
-      const orderKey = String(orderDoc._id);
-      if (!orderSnapshots.has(orderKey)) {
-        orderSnapshots.set(orderKey, {
-          orderDoc,
-          beforeSnapshot: buildOrderEditLogSnapshot(orderDoc),
-        });
+    selectedRows.forEach(({ lineType, parentDoc, shipmentEntry }) => {
+      if (lineType === "order") {
+        const orderKey = String(parentDoc._id);
+        if (!orderSnapshots.has(orderKey)) {
+          orderSnapshots.set(orderKey, {
+            orderDoc: parentDoc,
+            beforeSnapshot: buildOrderEditLogSnapshot(parentDoc),
+          });
+        }
       }
 
       shipmentEntry.checked = {
@@ -8774,14 +8936,19 @@ exports.checkShipmentRows = async (req, res) => {
       };
       shipmentEntry.updated_at = updatedAt;
       shipmentEntry.updated_by = actor;
-      orderDoc.updated_by = actor;
+      parentDoc.updated_by = actor;
     });
 
-    await Promise.all(
-      [...orderSnapshots.values()].map(async ({ orderDoc }) => {
-        await orderDoc.save();
-      }),
-    );
+    const parentDocsToSave = [
+      ...new Map(
+        selectedRows.map(({ lineType, parentDoc }) => [
+          `${lineType}:${String(parentDoc?._id || "")}`,
+          parentDoc,
+        ]),
+      ).values(),
+    ];
+
+    await Promise.all(parentDocsToSave.map(async (parentDoc) => parentDoc.save()));
 
     await Promise.all(
       [...orderSnapshots.values()].map(({ orderDoc, beforeSnapshot }) =>
