@@ -5,6 +5,8 @@ const authorize = require("../middlewares/authorize.middleware");
 const {
   getItems,
   getPisDiffItems,
+  getPisDiffCheckedReportPreview,
+  exportPisDiffCheckedReport,
   getItemOrderPresence,
   getItemOrdersHistory,
   createItem,
@@ -33,6 +35,20 @@ router.get(
   auth,
   authorize("admin", "manager", "QC", "dev", "user"),
   getPisDiffItems,
+);
+
+router.get(
+  "/pis-diffs/export-preview",
+  auth,
+  authorize("admin", "manager", "QC", "dev", "user"),
+  getPisDiffCheckedReportPreview,
+);
+
+router.get(
+  "/pis-diffs/export",
+  auth,
+  authorize("admin", "manager", "QC", "dev", "user"),
+  exportPisDiffCheckedReport,
 );
 
 router.post(

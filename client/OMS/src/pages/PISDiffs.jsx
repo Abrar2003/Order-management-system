@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import html2canvas from "html2canvas";
+import { jsPDF } from "jspdf";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import EditPisModal from "../components/EditPisModal";
@@ -166,9 +168,202 @@ const MeasurementCell = ({
   );
 };
 
+const toFilenameSegment = (value, fallback = "report") => {
+  const normalized = String(value ?? "").trim();
+  return (normalized || fallback).replace(/[^a-zA-Z0-9_-]+/g, "_");
+};
+
+const formatPreviewDateTime = (value) => {
+  const parsed = value ? new Date(value) : new Date();
+  if (Number.isNaN(parsed.getTime())) return "N/A";
+  return parsed.toLocaleString("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+};
+
+const formatPreviewList = (values = []) =>
+  Array.isArray(values) && values.length > 0 ? values.join(", ") : "All";
+
+const waitForFontsReady = async () => {
+  if (typeof document !== "undefined" && document.fonts?.ready) {
+    await document.fonts.ready;
+  }
+};
+
+const PisDiffPdfReport = ({ report, reportRef = null }) => {
+  const rows = Array.isArray(report?.rows) ? report.rows : [];
+  const summary = report?.summary || {};
+  const filters = report?.filters || {};
+
+  return (
+    <div className="pis-diff-pdf-report" ref={reportRef}>
+      <header className="pis-diff-report-header">
+        <div>
+          <div className="pis-diff-report-eyebrow">Checked PIS Diffs</div>
+          <h2 className="pis-diff-report-title">PIS vs Inspected Difference Report</h2>
+          <div className="pis-diff-report-subtitle">
+            Generated {formatPreviewDateTime(report?.generated_at)}
+          </div>
+        </div>
+        <div className="pis-diff-report-count">
+          <strong>{Number(summary?.checked_diff_items || rows.length)}</strong>
+          <span>Items</span>
+        </div>
+      </header>
+
+      <section className="pis-diff-report-filter-grid">
+        <div>
+          <span>Search</span>
+          <strong>{filters.search || "All"}</strong>
+        </div>
+        <div>
+          <span>Brand</span>
+          <strong>{filters.brand || "All"}</strong>
+        </div>
+        <div>
+          <span>Vendor</span>
+          <strong>{filters.vendor || "All"}</strong>
+        </div>
+      </section>
+
+      <section className="pis-diff-report-summary-grid">
+        <div>
+          <span>Detailed Rows</span>
+          <strong>{Number(summary?.detailed_difference_rows || 0)}</strong>
+        </div>
+        <div>
+          <span>Brands</span>
+          <strong>{formatPreviewList(summary?.unique_brands)}</strong>
+        </div>
+        <div>
+          <span>Vendors</span>
+          <strong>{formatPreviewList(summary?.unique_vendors)}</strong>
+        </div>
+      </section>
+
+      <div className="pis-diff-report-items">
+        {rows.map((row, rowIndex) => {
+          const measurements = row?.measurements || {};
+          const differences = Array.isArray(row?.differences) ? row.differences : [];
+          const measurementCards = [
+            {
+              label: "Inspected Item",
+              size: measurements?.inspected_item?.sizeDisplay,
+              weightLabel: "Net",
+              weight: measurements?.inspected_item?.weightDisplay,
+            },
+            {
+              label: "PIS Item",
+              size: measurements?.pis_item?.sizeDisplay,
+              weightLabel: "Net",
+              weight: measurements?.pis_item?.weightDisplay,
+            },
+            {
+              label: "Inspected Box",
+              size: measurements?.inspected_box?.sizeDisplay,
+              weightLabel: "Gross",
+              weight: measurements?.inspected_box?.weightDisplay,
+            },
+            {
+              label: "PIS Box",
+              size: measurements?.pis_box?.sizeDisplay,
+              weightLabel: "Gross",
+              weight: measurements?.pis_box?.weightDisplay,
+            },
+          ];
+
+          return (
+            <section
+              className="pis-diff-report-item"
+              key={row?.id || row?.code || `pis-diff-row-${rowIndex}`}
+            >
+              <div className="pis-diff-report-item-head">
+                <div>
+                  <div className="pis-diff-report-code">{row?.code || "N/A"}</div>
+                  <div className="pis-diff-report-description">
+                    {row?.description || "N/A"}
+                  </div>
+                  <div className="pis-diff-report-meta">
+                    <span>{row?.brand || "N/A"}</span>
+                    <span>{row?.vendors || "N/A"}</span>
+                    {row?.updated_at && <span>Updated {row.updated_at}</span>}
+                  </div>
+                </div>
+                <div className="pis-diff-report-badges">
+                  {(Array.isArray(row?.diff_fields) ? row.diff_fields : []).map((field) => (
+                    <span key={`${row?.code}-${field}`}>{field}</span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pis-diff-report-measure-grid">
+                {measurementCards.map((entry) => (
+                  <div key={`${row?.code}-${entry.label}`}>
+                    <span>{entry.label}</span>
+                    <strong>Size: {entry.size || "Not Set"}</strong>
+                    <strong>{entry.weightLabel}: {entry.weight || "Not Set"}</strong>
+                  </div>
+                ))}
+              </div>
+
+              <div className="table-responsive">
+                <table className="table table-sm pis-diff-detail-table mb-0">
+                  <thead>
+                    <tr>
+                      <th>Area</th>
+                      <th>Measurement</th>
+                      <th>Inspected</th>
+                      <th>PIS</th>
+                      <th>Difference</th>
+                      <th>Remark</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {differences.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="text-secondary">
+                          No detailed comparison rows available.
+                        </td>
+                      </tr>
+                    ) : (
+                      differences.map((difference, index) => (
+                        <tr key={difference?.key || `${row?.code}-diff-${index}`}>
+                          <td>{difference?.section || "Difference"}</td>
+                          <td>
+                            <div className="fw-semibold">
+                              {difference?.segment || "Value"}
+                            </div>
+                            <div className="small text-secondary">
+                              {difference?.attribute || "-"}
+                            </div>
+                          </td>
+                          <td>{difference?.inspected || "Not Set"}</td>
+                          <td>{difference?.pis || "Not Set"}</td>
+                          <td>
+                            <span className="pis-diff-delta-badge">
+                              {difference?.delta || "Mismatch"}
+                            </span>
+                          </td>
+                          <td>{difference?.note || "-"}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 const PISDiffs = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "pis-diffs");
+  const pdfReportRef = useRef(null);
 
   const user = getUserFromToken();
   const normalizedRole = String(user?.role || "").trim().toLowerCase();
@@ -177,6 +372,12 @@ const PISDiffs = () => {
   const [rows, setRows] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false);
+  const [pdfPreviewLoading, setPdfPreviewLoading] = useState(false);
+  const [pdfPreviewData, setPdfPreviewData] = useState(null);
+  const [pdfPreviewError, setPdfPreviewError] = useState("");
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [error, setError] = useState("");
   const [searchInput, setSearchInput] = useState(() =>
     normalizeSearchParam(searchParams.get("search")),
@@ -258,6 +459,24 @@ const PISDiffs = () => {
   useEffect(() => {
     fetchDiffItems();
   }, [fetchDiffItems]);
+
+  useEffect(() => {
+    if (!pdfPreviewOpen) return undefined;
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape" && !exportingPdf) {
+        setPdfPreviewOpen(false);
+      }
+    };
+
+    document.body.classList.add("modal-open");
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.classList.remove("modal-open");
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [exportingPdf, pdfPreviewOpen]);
 
   useEffect(() => {
     const currentQuery = searchParams.toString();
@@ -382,6 +601,11 @@ const PISDiffs = () => {
     [getMeasurementSortValue, rows, sortBy, sortOrder],
   );
 
+  const checkedRowsCount = useMemo(
+    () => rows.filter((item) => isPisChecked(item)).length,
+    [rows],
+  );
+
   const handlePisUpdated = useCallback(
     (updatedItem = {}) => {
       const nextItem = {
@@ -407,6 +631,190 @@ const PISDiffs = () => {
     [fetchDiffItems, selectedItem],
   );
 
+  const handleExportCheckedReport = useCallback(async () => {
+    try {
+      setExporting(true);
+      setError("");
+
+      const response = await api.get("/items/pis-diffs/export", {
+        responseType: "blob",
+        params: {
+          search: searchInput,
+          brand: brandFilter,
+          vendor: vendorFilter,
+        },
+      });
+
+      const disposition = String(
+        response?.headers?.["content-disposition"] || "",
+      );
+      const match = disposition.match(
+        /filename\*?=(?:UTF-8''|\"?)([^\";]+)/i,
+      );
+      const fallbackName = `pis-diffs-checked-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const fileName = match?.[1]
+        ? decodeURIComponent(match[1].trim())
+        : fallbackName;
+
+      const blob = new Blob([response.data], {
+        type:
+          response?.headers?.["content-type"]
+          || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (exportError) {
+      let nextMessage = "Failed to export checked PIS diff report.";
+      const blobLike = exportError?.response?.data;
+      if (blobLike instanceof Blob) {
+        try {
+          const text = await blobLike.text();
+          const parsed = JSON.parse(text);
+          nextMessage = parsed?.message || nextMessage;
+        } catch {
+          nextMessage = nextMessage;
+        }
+      } else if (exportError?.response?.data?.message) {
+        nextMessage = exportError.response.data.message;
+      }
+      setError(nextMessage);
+    } finally {
+      setExporting(false);
+    }
+  }, [brandFilter, searchInput, vendorFilter]);
+
+  const handlePreviewPdfReport = useCallback(async () => {
+    try {
+      setPdfPreviewOpen(true);
+      setPdfPreviewLoading(true);
+      setPdfPreviewError("");
+      setPdfPreviewData(null);
+      setError("");
+
+      const response = await api.get("/items/pis-diffs/export-preview", {
+        params: {
+          search: searchInput,
+          brand: brandFilter,
+          vendor: vendorFilter,
+        },
+      });
+
+      setPdfPreviewData(response?.data?.data || null);
+    } catch (previewError) {
+      setPdfPreviewError(
+        previewError?.response?.data?.message
+          || "Failed to load checked PIS diff PDF preview.",
+      );
+    } finally {
+      setPdfPreviewLoading(false);
+    }
+  }, [brandFilter, searchInput, vendorFilter]);
+
+  const handleClosePdfPreview = useCallback(() => {
+    if (exportingPdf) return;
+    setPdfPreviewOpen(false);
+  }, [exportingPdf]);
+
+  const handleExportPdfReport = useCallback(async () => {
+    if (!pdfReportRef.current || !pdfPreviewData || exportingPdf) return;
+
+    const target = pdfReportRef.current;
+    const scrollContainer = target.closest(".pis-diff-pdf-preview-scroll");
+    const previousScrollStyles = scrollContainer
+      ? {
+          maxHeight: scrollContainer.style.maxHeight,
+          overflow: scrollContainer.style.overflow,
+        }
+      : null;
+
+    try {
+      setExportingPdf(true);
+      await waitForFontsReady();
+
+      if (scrollContainer) {
+        scrollContainer.style.maxHeight = "none";
+        scrollContainer.style.overflow = "visible";
+      }
+
+      const canvas = await html2canvas(target, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        windowWidth: Math.max(target.scrollWidth, target.clientWidth),
+        windowHeight: Math.max(target.scrollHeight, target.clientHeight),
+        scrollX: 0,
+        scrollY: -window.scrollY,
+      });
+
+      const imageData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF({
+        orientation: "portrait",
+        unit: "pt",
+        format: "a4",
+      });
+
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 18;
+      const printableWidth = pageWidth - margin * 2;
+      const printableHeight = pageHeight - margin * 2;
+      const imageHeight = (canvas.height * printableWidth) / canvas.width;
+
+      let remainingHeight = imageHeight;
+      let yPosition = margin;
+
+      pdf.addImage(
+        imageData,
+        "PNG",
+        margin,
+        yPosition,
+        printableWidth,
+        imageHeight,
+        undefined,
+        "FAST",
+      );
+
+      remainingHeight -= printableHeight;
+      while (remainingHeight > 0) {
+        pdf.addPage();
+        yPosition = margin - (imageHeight - remainingHeight);
+        pdf.addImage(
+          imageData,
+          "PNG",
+          margin,
+          yPosition,
+          printableWidth,
+          imageHeight,
+          undefined,
+          "FAST",
+        );
+        remainingHeight -= printableHeight;
+      }
+
+      const fileDate = new Date().toISOString().slice(0, 10);
+      const filterName = toFilenameSegment(
+        [brandFilter, vendorFilter, searchInput].filter(Boolean).join("_"),
+        "checked",
+      );
+      pdf.save(`pis-diffs-${filterName}-${fileDate}.pdf`);
+    } catch (pdfError) {
+      console.error("PIS diff PDF export failed:", pdfError);
+      setPdfPreviewError("Failed to export checked PIS diff PDF.");
+    } finally {
+      if (scrollContainer && previousScrollStyles) {
+        scrollContainer.style.maxHeight = previousScrollStyles.maxHeight;
+        scrollContainer.style.overflow = previousScrollStyles.overflow;
+      }
+      setExportingPdf(false);
+    }
+  }, [brandFilter, exportingPdf, pdfPreviewData, searchInput, vendorFilter]);
+
   return (
     <>
       <Navbar />
@@ -414,9 +822,29 @@ const PISDiffs = () => {
       <div className="page-shell py-3">
         <div className="d-flex justify-content-between align-items-center mb-3">
           <h2 className="h4 mb-0">PIS Diffs</h2>
-          <span className="text-secondary small">
-            Items where inspected measurements differ from PIS
-          </span>
+          <div className="d-flex align-items-center gap-2">
+            <span className="text-secondary small">
+              Items where inspected measurements differ from PIS
+            </span>
+            <button
+              type="button"
+              className="btn btn-outline-primary btn-sm"
+              onClick={handleExportCheckedReport}
+              disabled={exporting || loading}
+              title="Export a readable XLSX report for checked PIS diff items matching the current filters"
+            >
+              {exporting ? "Exporting..." : "Export XLSX"}
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={handlePreviewPdfReport}
+              disabled={pdfPreviewLoading || loading}
+              title="Preview a PDF-ready checked PIS diff report before exporting"
+            >
+              {pdfPreviewLoading ? "Loading Preview..." : "Preview PDF"}
+            </button>
+          </div>
         </div>
 
         <div className="card om-card mb-3">
@@ -495,6 +923,7 @@ const PISDiffs = () => {
         <div className="card om-card mb-3">
           <div className="card-body d-flex flex-wrap gap-2">
             <span className="om-summary-chip">Records: {totalRecords}</span>
+            <span className="om-summary-chip">Checked on Page: {checkedRowsCount}</span>
             <span className="om-summary-chip">Page: {page}</span>
             <span className="om-summary-chip">Limit: {limit}</span>
           </div>
@@ -724,6 +1153,82 @@ const PISDiffs = () => {
           </div>
         </div>
       </div>
+
+      {pdfPreviewOpen && (
+        <div
+          className="modal d-block om-modal-backdrop"
+          tabIndex="-1"
+          role="dialog"
+          aria-modal="true"
+          onClick={handleClosePdfPreview}
+        >
+          <div
+            className="modal-dialog modal-dialog-centered modal-xl pis-diff-preview-dialog"
+            role="document"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-content">
+              <div className="modal-header">
+                <div>
+                  <h5 className="modal-title">PIS Diff PDF Preview</h5>
+                  <div className="small text-muted">
+                    Review the report exactly as it will be exported.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn-close"
+                  aria-label="Close"
+                  onClick={handleClosePdfPreview}
+                  disabled={exportingPdf}
+                />
+              </div>
+
+              <div className="modal-body p-0">
+                {pdfPreviewLoading ? (
+                  <div className="text-center py-5">Preparing preview...</div>
+                ) : pdfPreviewError ? (
+                  <div className="p-4">
+                    <div className="alert alert-danger mb-0">
+                      {pdfPreviewError}
+                    </div>
+                  </div>
+                ) : pdfPreviewData ? (
+                  <div className="pis-diff-pdf-preview-scroll">
+                    <PisDiffPdfReport
+                      report={pdfPreviewData}
+                      reportRef={pdfReportRef}
+                    />
+                  </div>
+                ) : (
+                  <div className="text-center py-5 text-secondary">
+                    No preview data available.
+                  </div>
+                )}
+              </div>
+
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary"
+                  onClick={handleClosePdfPreview}
+                  disabled={exportingPdf}
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleExportPdfReport}
+                  disabled={exportingPdf || pdfPreviewLoading || !pdfPreviewData}
+                >
+                  {exportingPdf ? "Exporting..." : "Export PDF"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {selectedItem && canEditPis && (
         <EditPisModal

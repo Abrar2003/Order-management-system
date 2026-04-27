@@ -3,6 +3,7 @@ const Order = require("../models/order.model");
 const QC = require("../models/qc.model");
 const mongoose = require("mongoose");
 const path = require("path");
+const XLSX = require("xlsx");
 const { syncAllItemsFromOrdersAndQc } = require("../services/itemSync");
 const { syncTotalPoCbmForItem } = require("../services/orderCbm.service");
 const {
@@ -1269,6 +1270,511 @@ const buildPisDiffSummary = (item = {}) => {
   };
 };
 
+const PIS_DIFF_ITEM_SELECT = [
+  "code",
+  "name",
+  "description",
+  "brand",
+  "brand_name",
+  "brands",
+  "vendors",
+  "pis_barcode",
+  "pis_master_barcode",
+  "pis_inner_barcode",
+  "pis_weight",
+  "inspected_weight",
+  "pis_item_LBH",
+  "pis_item_sizes",
+  "pis_item_top_LBH",
+  "pis_item_bottom_LBH",
+  "pis_box_LBH",
+  "pis_box_sizes",
+  "pis_box_mode",
+  "pis_box_top_LBH",
+  "pis_box_bottom_LBH",
+  "inspected_item_LBH",
+  "inspected_item_sizes",
+  "inspected_item_top_LBH",
+  "inspected_item_bottom_LBH",
+  "inspected_box_LBH",
+  "inspected_box_sizes",
+  "inspected_box_mode",
+  "inspected_box_top_LBH",
+  "inspected_box_bottom_LBH",
+  "inspected_top_LBH",
+  "inspected_bottom_LBH",
+  "cbm",
+  "pis_checked_flag",
+  "qc.barcode",
+  "qc.master_barcode",
+  "qc.inner_barcode",
+  "updatedAt",
+].join(" ");
+
+const getPisDiffBrand = (item = {}) =>
+  item?.brand_name
+  || item?.brand
+  || (Array.isArray(item?.brands) && item.brands.length > 0 ? item.brands[0] : "");
+
+const getPisDiffVendors = (item = {}) =>
+  Array.isArray(item?.vendors) && item.vendors.length > 0
+    ? item.vendors.join(", ")
+    : "";
+
+const formatPisDiffRemarkLabel = (remark = "", fallback = "Value") => {
+  const normalized = normalizeTextField(remark).toLowerCase();
+  if (!normalized) return fallback;
+  if (normalized === "top") return "Top";
+  if (normalized === "base") return "Base";
+  return normalized.replace(/([a-z]+)(\d+)/i, (_, prefix, number) =>
+    `${prefix.charAt(0).toUpperCase()}${prefix.slice(1)} ${number}`,
+  );
+};
+
+const formatMeasurementNumberDisplay = (value, { decimals = 2 } = {}) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return "Not Set";
+  return parsed.toFixed(decimals).replace(/\.?0+$/, "");
+};
+
+const formatMeasurementLbhDisplay = (entry = {}) => {
+  const L = Number(entry?.L || 0);
+  const B = Number(entry?.B || 0);
+  const H = Number(entry?.H || 0);
+  if (!(L > 0 && B > 0 && H > 0)) return "Not Set";
+  return `${formatMeasurementNumberDisplay(L)} x ${formatMeasurementNumberDisplay(B)} x ${formatMeasurementNumberDisplay(H)}`;
+};
+
+const formatMeasurementBlockForReport = (
+  entries = [],
+  { weightKey = "", fallbackWeight = "Not Set" } = {},
+) => {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return {
+      sizeDisplay: "Not Set",
+      weightDisplay: fallbackWeight,
+    };
+  }
+
+  const sizeDisplay = entries
+    .map((entry, index) => {
+      const label = formatPisDiffRemarkLabel(entry?.remark, `Entry ${index + 1}`);
+      const sizeValue = formatMeasurementLbhDisplay(entry);
+      if (entries.length === 1 && !normalizeTextField(entry?.remark)) {
+        return sizeValue;
+      }
+      return `${label}: ${sizeValue}`;
+    })
+    .join(" | ");
+
+  const weightDisplay = entries
+    .map((entry, index) => {
+      const label = formatPisDiffRemarkLabel(entry?.remark, `Entry ${index + 1}`);
+      const weightValue = formatMeasurementNumberDisplay(entry?.[weightKey], {
+        decimals: 2,
+      });
+      if (entries.length === 1 && !normalizeTextField(entry?.remark)) {
+        return weightValue;
+      }
+      return `${label}: ${weightValue}`;
+    })
+    .join(" | ");
+
+  return {
+    sizeDisplay,
+    weightDisplay,
+  };
+};
+
+const buildPisDiffMeasurementEntries = ({
+  item = {},
+  source = "pis",
+  group = "item",
+} = {}) => {
+  const isPis = source === "pis";
+  const isItemGroup = group === "item";
+  const weight = isPis ? item?.pis_weight : item?.inspected_weight;
+
+  return buildComparableMeasurementEntries({
+    sizes: isPis
+      ? (isItemGroup ? item?.pis_item_sizes : item?.pis_box_sizes)
+      : (isItemGroup ? item?.inspected_item_sizes : item?.inspected_box_sizes),
+    singleLbh: isPis
+      ? (isItemGroup ? item?.pis_item_LBH : item?.pis_box_LBH)
+      : (isItemGroup ? item?.inspected_item_LBH : item?.inspected_box_LBH),
+    topLbh: isPis
+      ? (isItemGroup ? item?.pis_item_top_LBH : item?.pis_box_top_LBH)
+      : (isItemGroup
+          ? item?.inspected_item_top_LBH
+          : item?.inspected_box_top_LBH || item?.inspected_top_LBH),
+    bottomLbh: isPis
+      ? (isItemGroup ? item?.pis_item_bottom_LBH : item?.pis_box_bottom_LBH)
+      : (isItemGroup
+          ? item?.inspected_item_bottom_LBH
+          : item?.inspected_box_bottom_LBH || item?.inspected_bottom_LBH),
+    weight,
+    totalWeightKey: isItemGroup ? "total_net" : "total_gross",
+    topWeightKey: isItemGroup ? "top_net" : "top_gross",
+    bottomWeightKey: isItemGroup ? "bottom_net" : "bottom_gross",
+    weightKey: isItemGroup ? "net_weight" : "gross_weight",
+    remarkOptions: isItemGroup ? ITEM_SIZE_REMARK_OPTIONS : BOX_SIZE_REMARK_OPTIONS,
+  });
+};
+
+const buildPisDiffRows = (items = []) =>
+  (Array.isArray(items) ? items : [])
+    .map((item) => {
+      const pisDiff = buildPisDiffSummary(item);
+      if (!pisDiff) return null;
+      return {
+        ...item,
+        pis_diff: pisDiff,
+      };
+    })
+    .filter(Boolean);
+
+const formatPisDiffValueWithUnit = (value, unit = "") => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return "Not Set";
+  const formatted = parsed.toFixed(2).replace(/\.?0+$/, "");
+  return unit ? `${formatted} ${unit}` : formatted;
+};
+
+const formatPisDiffSignedDelta = (delta, unit = "") => {
+  const parsed = Number(delta);
+  if (!Number.isFinite(parsed) || Math.abs(parsed) < MEASUREMENT_COMPARE_TOLERANCE) {
+    return "0";
+  }
+  const formatted = Math.abs(parsed).toFixed(2).replace(/\.?0+$/, "");
+  return `${parsed > 0 ? "+" : "-"}${formatted}${unit ? ` ${unit}` : ""}`;
+};
+
+const formatPisDiffAbsDelta = (delta, unit = "") => {
+  const parsed = Number(delta);
+  if (!Number.isFinite(parsed)) return `0${unit ? ` ${unit}` : ""}`;
+  const formatted = Math.abs(parsed).toFixed(2).replace(/\.?0+$/, "");
+  return `${formatted}${unit ? ` ${unit}` : ""}`;
+};
+
+const getPisDiffEntryLabel = (entry = null, key = "", fallback = "Value") => {
+  const explicitLabel = formatPisDiffRemarkLabel(entry?.remark || "", "");
+  if (explicitLabel) return explicitLabel;
+
+  const normalizedKey = normalizeTextField(key).toLowerCase();
+  if (!normalizedKey || /^entry\d+$/.test(normalizedKey)) return fallback;
+  return formatPisDiffRemarkLabel(normalizedKey, fallback);
+};
+
+const getPisDiffOrderedEntryKeys = (inspectedEntries = [], pisEntries = []) => [
+  ...new Set([
+    ...(Array.isArray(inspectedEntries) ? inspectedEntries : [])
+      .map((entry, index) => buildMeasurementEntryKey(entry, index)),
+    ...(Array.isArray(pisEntries) ? pisEntries : [])
+      .map((entry, index) => buildMeasurementEntryKey(entry, index)),
+  ]),
+];
+
+const buildPisDiffDetailNote = ({
+  subject = "",
+  inspected = "",
+  pis = "",
+  delta = 0,
+  unit = "",
+  missingSide = "",
+} = {}) => {
+  if (missingSide === "pis") {
+    return `Inspected ${subject} is ${inspected}, while PIS is not set.`;
+  }
+  if (missingSide === "inspected") {
+    return `PIS ${subject} is ${pis}, while inspected value is not set.`;
+  }
+
+  const direction = Number(delta) > 0 ? "greater" : "smaller";
+  return `Inspected ${subject} is ${formatPisDiffAbsDelta(delta, unit)} ${direction} than PIS (${inspected} vs ${pis}).`;
+};
+
+const buildPisDiffMeasurementDetails = ({
+  item = {},
+  group = "item",
+  sizeSection = "Item Size",
+  weightSection = "Item Weight",
+  weightLabel = "Net Weight",
+  weightKey = "net_weight",
+  baseLabel = "Item",
+} = {}) => {
+  const inspectedEntries = buildPisDiffMeasurementEntries({
+    item,
+    source: "inspected",
+    group,
+  });
+  const pisEntries = buildPisDiffMeasurementEntries({ item, source: "pis", group });
+  const inspectedEntriesWithKeys = inspectedEntries.map((entry, index) => ({
+    ...entry,
+    __key: buildMeasurementEntryKey(entry, index),
+  }));
+  const pisEntriesWithKeys = pisEntries.map((entry, index) => ({
+    ...entry,
+    __key: buildMeasurementEntryKey(entry, index),
+  }));
+  const inspectedMap = new Map(
+    inspectedEntriesWithKeys.map((entry) => [entry.__key, entry]),
+  );
+  const pisMap = new Map(pisEntriesWithKeys.map((entry) => [entry.__key, entry]));
+  const orderedKeys = getPisDiffOrderedEntryKeys(inspectedEntries, pisEntries);
+  const details = [];
+
+  orderedKeys.forEach((key, index) => {
+    const inspectedEntry = inspectedMap.get(key) || null;
+    const pisEntry = pisMap.get(key) || null;
+    const segment = getPisDiffEntryLabel(
+      inspectedEntry || pisEntry,
+      key,
+      baseLabel,
+    );
+    const hasInspectedSize = hasAnyPositiveMeasurementLbh(inspectedEntry || {});
+    const hasPisSize = hasAnyPositiveMeasurementLbh(pisEntry || {});
+
+    if (hasInspectedSize !== hasPisSize) {
+      const inspectedValue = hasInspectedSize
+        ? `${formatMeasurementLbhDisplay(inspectedEntry)} cm`
+        : "Not Set";
+      const pisValue = hasPisSize ? `${formatMeasurementLbhDisplay(pisEntry)} cm` : "Not Set";
+      const missingSide = hasInspectedSize ? "pis" : "inspected";
+
+      details.push({
+        key: `${group}-${key}-size-missing-${index}`,
+        section: sizeSection,
+        segment,
+        attribute: "L x B x H",
+        inspected: inspectedValue,
+        pis: pisValue,
+        delta: missingSide === "pis" ? "PIS not set" : "Inspected not set",
+        note: buildPisDiffDetailNote({
+          subject: `${segment} size`,
+          inspected: inspectedValue,
+          pis: pisValue,
+          missingSide,
+        }),
+      });
+    } else if (hasInspectedSize && hasPisSize) {
+      ["L", "B", "H"].forEach((axis) => {
+        const inspectedValueRaw = Number(inspectedEntry?.[axis] || 0);
+        const pisValueRaw = Number(pisEntry?.[axis] || 0);
+        const delta = inspectedValueRaw - pisValueRaw;
+        if (
+          !Number.isFinite(delta)
+          || Math.abs(delta) < MEASUREMENT_COMPARE_TOLERANCE
+        ) {
+          return;
+        }
+
+        const inspectedValue = formatPisDiffValueWithUnit(inspectedValueRaw, "cm");
+        const pisValue = formatPisDiffValueWithUnit(pisValueRaw, "cm");
+
+        details.push({
+          key: `${group}-${key}-${axis}-${index}`,
+          section: sizeSection,
+          segment,
+          attribute: axis,
+          inspected: inspectedValue,
+          pis: pisValue,
+          delta: formatPisDiffSignedDelta(delta, "cm"),
+          note: buildPisDiffDetailNote({
+            subject: `${segment} ${axis}`,
+            inspected: inspectedValue,
+            pis: pisValue,
+            delta,
+            unit: "cm",
+          }),
+        });
+      });
+    }
+
+    if (!weightKey) return;
+
+    const inspectedWeight = Number(inspectedEntry?.[weightKey] || 0);
+    const pisWeight = Number(pisEntry?.[weightKey] || 0);
+    const hasInspectedWeight = inspectedWeight > 0;
+    const hasPisWeight = pisWeight > 0;
+    const weightMismatch =
+      hasInspectedWeight !== hasPisWeight
+      || (
+        hasInspectedWeight
+        && hasPisWeight
+        && isWeightDifferenceAtOrAboveTolerance(inspectedWeight, pisWeight)
+      );
+
+    if (!weightMismatch) return;
+
+    const inspectedValue = hasInspectedWeight
+      ? formatPisDiffValueWithUnit(inspectedWeight, "kg")
+      : "Not Set";
+    const pisValue = hasPisWeight
+      ? formatPisDiffValueWithUnit(pisWeight, "kg")
+      : "Not Set";
+    const delta = inspectedWeight - pisWeight;
+
+    details.push({
+      key: `${group}-${key}-${weightKey}-${index}`,
+      section: weightSection,
+      segment,
+      attribute: weightLabel,
+      inspected: inspectedValue,
+      pis: pisValue,
+      delta:
+        hasInspectedWeight && hasPisWeight
+          ? formatPisDiffSignedDelta(delta, "kg")
+          : (hasInspectedWeight ? "PIS not set" : "Inspected not set"),
+      note: buildPisDiffDetailNote({
+        subject: `${segment} ${weightLabel.toLowerCase()}`,
+        inspected: inspectedValue,
+        pis: pisValue,
+        delta,
+        unit: "kg",
+        missingSide: hasInspectedWeight === hasPisWeight
+          ? ""
+          : (hasInspectedWeight ? "pis" : "inspected"),
+      }),
+    });
+  });
+
+  return details;
+};
+
+const buildPisDiffDetailedComparisons = (item = {}) => {
+  const details = [
+    ...buildPisDiffMeasurementDetails({
+      item,
+      group: "item",
+      sizeSection: "Item Size",
+      weightSection: "Item Weight",
+      weightLabel: "Net Weight",
+      weightKey: "net_weight",
+      baseLabel: "Item",
+    }),
+    ...buildPisDiffMeasurementDetails({
+      item,
+      group: "box",
+      sizeSection: "Box Size",
+      weightSection: "Box Weight",
+      weightLabel: "Gross Weight",
+      weightKey: "gross_weight",
+      baseLabel: "Box",
+    }),
+  ];
+
+  const pisBarcode =
+    normalizeTextField(item?.pis_master_barcode || item?.pis_barcode) || "Not Set";
+  const inspectedBarcode =
+    Number(item?.qc?.master_barcode || item?.qc?.barcode || 0) > 0
+      ? normalizeTextField(item?.qc?.master_barcode || item?.qc?.barcode)
+      : "Not Set";
+
+  if (
+    item?.pis_diff?.flags?.barcode
+    && pisBarcode.toLowerCase() !== inspectedBarcode.toLowerCase()
+  ) {
+    details.push({
+      key: "barcode-master",
+      section: "Barcode",
+      segment: "Master",
+      attribute: "Barcode",
+      inspected: inspectedBarcode,
+      pis: pisBarcode,
+      delta: "Mismatch",
+      note: `Inspected barcode ${inspectedBarcode} does not match PIS barcode ${pisBarcode}.`,
+    });
+  }
+
+  return details;
+};
+
+const buildPisDiffReportPreviewRow = (item = {}) => {
+  const inspectedItemBlock = formatMeasurementBlockForReport(
+    buildPisDiffMeasurementEntries({ item, source: "inspected", group: "item" }),
+    { weightKey: "net_weight" },
+  );
+  const pisItemBlock = formatMeasurementBlockForReport(
+    buildPisDiffMeasurementEntries({ item, source: "pis", group: "item" }),
+    { weightKey: "net_weight" },
+  );
+  const inspectedBoxBlock = formatMeasurementBlockForReport(
+    buildPisDiffMeasurementEntries({ item, source: "inspected", group: "box" }),
+    { weightKey: "gross_weight" },
+  );
+  const pisBoxBlock = formatMeasurementBlockForReport(
+    buildPisDiffMeasurementEntries({ item, source: "pis", group: "box" }),
+    { weightKey: "gross_weight" },
+  );
+
+  return {
+    id: String(item?._id || item?.code || ""),
+    code: normalizeTextField(item?.code) || "N/A",
+    description: normalizeTextField(item?.description || item?.name) || "N/A",
+    brand: getPisDiffBrand(item) || "N/A",
+    vendors: getPisDiffVendors(item) || "N/A",
+    diff_fields: Array.isArray(item?.pis_diff?.fields) ? item.pis_diff.fields : [],
+    updated_at: item?.updatedAt ? new Date(item.updatedAt).toISOString().slice(0, 10) : "",
+    measurements: {
+      inspected_item: inspectedItemBlock,
+      pis_item: pisItemBlock,
+      inspected_box: inspectedBoxBlock,
+      pis_box: pisBoxBlock,
+    },
+    differences: buildPisDiffDetailedComparisons(item),
+  };
+};
+
+const buildPisDiffReportPayload = ({
+  checkedDiffRows = [],
+  search = "",
+  brand = "",
+  vendor = "",
+} = {}) => {
+  const rows = checkedDiffRows.map((item) => buildPisDiffReportPreviewRow(item));
+  const uniqueBrands = normalizeDistinctValues(
+    checkedDiffRows.map((item) => getPisDiffBrand(item)),
+  );
+  const uniqueVendors = normalizeDistinctValues(
+    checkedDiffRows.flatMap((item) => Array.isArray(item?.vendors) ? item.vendors : []),
+  );
+
+  return {
+    generated_at: new Date().toISOString(),
+    filters: {
+      search: normalizeTextField(search) || "All",
+      brand: normalizeTextField(brand) || "All",
+      vendor: normalizeTextField(vendor) || "All",
+    },
+    summary: {
+      checked_diff_items: rows.length,
+      detailed_difference_rows: rows.reduce(
+        (sum, row) => sum + (Array.isArray(row?.differences) ? row.differences.length : 0),
+        0,
+      ),
+      unique_brands: uniqueBrands,
+      unique_vendors: uniqueVendors,
+    },
+    rows,
+  };
+};
+
+const getCheckedPisDiffRowsForReport = async ({ search, brand, vendor } = {}) => {
+  const match = {
+    ...buildItemMatch({ search, brand, vendor }),
+    pis_checked_flag: true,
+  };
+
+  const checkedItems = await Item.find(match)
+    .select(PIS_DIFF_ITEM_SELECT)
+    .sort({ updatedAt: -1, code: 1 })
+    .lean();
+
+  return buildPisDiffRows(checkedItems).filter((item) =>
+    item?.pis_checked_flag === true,
+  );
+};
+
 const buildLatestInspectionReportLookup = async (itemCodes = []) => {
   const normalizedCodes = [...new Set(
     (Array.isArray(itemCodes) ? itemCodes : [])
@@ -1400,51 +1906,11 @@ exports.getPisDiffItems = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const match = buildItemMatch({ search, brand, vendor });
-    const itemSelect = [
-      "code",
-      "name",
-      "description",
-      "brand",
-      "brand_name",
-      "brands",
-      "vendors",
-      "pis_barcode",
-      "pis_master_barcode",
-      "pis_inner_barcode",
-      "pis_weight",
-      "inspected_weight",
-      "pis_item_LBH",
-      "pis_item_sizes",
-      "pis_item_top_LBH",
-      "pis_item_bottom_LBH",
-      "pis_box_LBH",
-      "pis_box_sizes",
-      "pis_box_mode",
-      "pis_box_top_LBH",
-      "pis_box_bottom_LBH",
-      "inspected_item_LBH",
-      "inspected_item_sizes",
-      "inspected_item_top_LBH",
-      "inspected_item_bottom_LBH",
-      "inspected_box_LBH",
-      "inspected_box_sizes",
-      "inspected_box_mode",
-      "inspected_box_top_LBH",
-      "inspected_box_bottom_LBH",
-      "inspected_top_LBH",
-      "inspected_bottom_LBH",
-      "cbm",
-      "pis_checked_flag",
-      "qc.barcode",
-      "qc.master_barcode",
-      "qc.inner_barcode",
-      "updatedAt",
-    ].join(" ");
 
     const [items, brandsRaw, brandNamesRaw, brandsPrimaryRaw, vendorsRaw, codesRaw] =
       await Promise.all([
         Item.find(match)
-          .select(itemSelect)
+          .select(PIS_DIFF_ITEM_SELECT)
           .sort({ updatedAt: -1, code: 1 })
           .lean(),
         Item.distinct("brands", buildItemMatch({ search, vendor })),
@@ -1454,16 +1920,7 @@ exports.getPisDiffItems = async (req, res) => {
         Item.distinct("code", buildItemMatch({ brand, vendor })),
       ]);
 
-    const diffRows = (Array.isArray(items) ? items : [])
-      .map((item) => {
-        const pisDiff = buildPisDiffSummary(item);
-        if (!pisDiff) return null;
-        return {
-          ...item,
-          pis_diff: pisDiff,
-        };
-      })
-      .filter(Boolean);
+    const diffRows = buildPisDiffRows(items);
 
     const paginatedRows = diffRows.slice(skip, skip + limit);
 
@@ -1491,6 +1948,238 @@ exports.getPisDiffItems = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch PIS diff items",
+      error: error.message,
+    });
+  }
+};
+
+exports.getPisDiffCheckedReportPreview = async (req, res) => {
+  try {
+    const search = req.query.search;
+    const brand = req.query.brand;
+    const vendor = req.query.vendor;
+
+    const checkedDiffRows = await getCheckedPisDiffRowsForReport({
+      search,
+      brand,
+      vendor,
+    });
+
+    if (checkedDiffRows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No checked PIS diff items found for preview",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: buildPisDiffReportPayload({
+        checkedDiffRows,
+        search,
+        brand,
+        vendor,
+      }),
+    });
+  } catch (error) {
+    console.error("Preview Checked PIS Diff Report Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to preview checked PIS diff report",
+      error: error.message,
+    });
+  }
+};
+
+exports.exportPisDiffCheckedReport = async (req, res) => {
+  try {
+    const search = req.query.search;
+    const brand = req.query.brand;
+    const vendor = req.query.vendor;
+
+    const checkedDiffRows = await getCheckedPisDiffRowsForReport({
+      search,
+      brand,
+      vendor,
+    });
+
+    if (checkedDiffRows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No checked PIS diff items found for export",
+      });
+    }
+
+    const detailColumns = [
+      { key: "code", header: "Item Code" },
+      { key: "description", header: "Description" },
+      { key: "brand", header: "Brand" },
+      { key: "vendors", header: "Vendors" },
+      { key: "diff_fields", header: "Diff Fields" },
+      { key: "inspected_item_size", header: "Inspected Item Size" },
+      { key: "inspected_item_weight", header: "Inspected Item Net Weight" },
+      { key: "pis_item_size", header: "PIS Item Size" },
+      { key: "pis_item_weight", header: "PIS Item Net Weight" },
+      { key: "inspected_box_size", header: "Inspected Box Size" },
+      { key: "inspected_box_weight", header: "Inspected Box Gross Weight" },
+      { key: "pis_box_size", header: "PIS Box Size" },
+      { key: "pis_box_weight", header: "PIS Box Gross Weight" },
+      { key: "inspected_barcode", header: "Inspected Barcode" },
+      { key: "pis_barcode", header: "PIS Barcode" },
+      { key: "pis_inner_barcode", header: "PIS Inner Barcode" },
+      { key: "updated_at", header: "Last Updated" },
+    ];
+
+    const detailRows = checkedDiffRows.map((item) => {
+      const inspectedItemBlock = formatMeasurementBlockForReport(
+        buildPisDiffMeasurementEntries({ item, source: "inspected", group: "item" }),
+        { weightKey: "net_weight" },
+      );
+      const pisItemBlock = formatMeasurementBlockForReport(
+        buildPisDiffMeasurementEntries({ item, source: "pis", group: "item" }),
+        { weightKey: "net_weight" },
+      );
+      const inspectedBoxBlock = formatMeasurementBlockForReport(
+        buildPisDiffMeasurementEntries({ item, source: "inspected", group: "box" }),
+        { weightKey: "gross_weight" },
+      );
+      const pisBoxBlock = formatMeasurementBlockForReport(
+        buildPisDiffMeasurementEntries({ item, source: "pis", group: "box" }),
+        { weightKey: "gross_weight" },
+      );
+
+      return {
+        code: normalizeTextField(item?.code) || "N/A",
+        description: normalizeTextField(item?.description || item?.name) || "N/A",
+        brand: getPisDiffBrand(item) || "N/A",
+        vendors: getPisDiffVendors(item) || "N/A",
+        diff_fields: Array.isArray(item?.pis_diff?.fields)
+          ? item.pis_diff.fields.join(", ")
+          : "N/A",
+        inspected_item_size: inspectedItemBlock.sizeDisplay,
+        inspected_item_weight: inspectedItemBlock.weightDisplay,
+        pis_item_size: pisItemBlock.sizeDisplay,
+        pis_item_weight: pisItemBlock.weightDisplay,
+        inspected_box_size: inspectedBoxBlock.sizeDisplay,
+        inspected_box_weight: inspectedBoxBlock.weightDisplay,
+        pis_box_size: pisBoxBlock.sizeDisplay,
+        pis_box_weight: pisBoxBlock.weightDisplay,
+        inspected_barcode:
+          normalizeTextField(item?.qc?.master_barcode || item?.qc?.barcode) || "Not Set",
+        pis_barcode:
+          normalizeTextField(item?.pis_master_barcode || item?.pis_barcode) || "Not Set",
+        pis_inner_barcode: normalizeTextField(item?.pis_inner_barcode) || "Not Set",
+        updated_at: item?.updatedAt
+          ? new Date(item.updatedAt).toISOString().slice(0, 10)
+          : "",
+      };
+    });
+    const reportPreviewRows = checkedDiffRows.map((item) =>
+      buildPisDiffReportPreviewRow(item),
+    );
+    const detailedDiffColumns = [
+      { key: "code", header: "Item Code" },
+      { key: "description", header: "Description" },
+      { key: "brand", header: "Brand" },
+      { key: "vendors", header: "Vendors" },
+      { key: "section", header: "Area" },
+      { key: "segment", header: "Measurement Segment" },
+      { key: "attribute", header: "Attribute" },
+      { key: "inspected", header: "Inspected" },
+      { key: "pis", header: "PIS" },
+      { key: "delta", header: "Difference" },
+      { key: "note", header: "Remark" },
+    ];
+    const detailedDiffRows = reportPreviewRows.flatMap((row) =>
+      (Array.isArray(row?.differences) ? row.differences : []).map((difference) => ({
+        code: row?.code || "N/A",
+        description: row?.description || "N/A",
+        brand: row?.brand || "N/A",
+        vendors: row?.vendors || "N/A",
+        section: difference?.section || "",
+        segment: difference?.segment || "",
+        attribute: difference?.attribute || "",
+        inspected: difference?.inspected || "Not Set",
+        pis: difference?.pis || "Not Set",
+        delta: difference?.delta || "",
+        note: difference?.note || "",
+      })),
+    );
+
+    const filterSummaryRows = [
+      ["Checked PIS Diffs Report", ""],
+      ["Generated On", new Date().toISOString().slice(0, 19).replace("T", " ")],
+      ["Search Filter", normalizeTextField(search) || "All"],
+      ["Brand Filter", normalizeTextField(brand) || "All"],
+      ["Vendor Filter", normalizeTextField(vendor) || "All"],
+      ["Checked Diff Items", checkedDiffRows.length],
+      [
+        "Unique Brands",
+        normalizeDistinctValues(checkedDiffRows.map((item) => getPisDiffBrand(item))).join(", "),
+      ],
+      [
+        "Unique Vendors",
+        normalizeDistinctValues(
+          checkedDiffRows.flatMap((item) => Array.isArray(item?.vendors) ? item.vendors : []),
+        ).join(", "),
+      ],
+    ];
+
+    const detailHeaderRow = detailColumns.map((column) => column.header);
+    const detailDataRows = detailRows.map((row) =>
+      detailColumns.map((column) => row[column.key] ?? ""),
+    );
+    const detailedDiffHeaderRow = detailedDiffColumns.map((column) => column.header);
+    const detailedDiffDataRows = detailedDiffRows.map((row) =>
+      detailedDiffColumns.map((column) => row[column.key] ?? ""),
+    );
+
+    const summarySheet = XLSX.utils.aoa_to_sheet(filterSummaryRows);
+    summarySheet["!cols"] = [{ wch: 24 }, { wch: 90 }];
+
+    const detailSheet = XLSX.utils.aoa_to_sheet([detailHeaderRow, ...detailDataRows]);
+    detailSheet["!cols"] = detailColumns.map((column, columnIndex) => {
+      const maxDataLength = Math.max(
+        ...detailDataRows.map((row) => String(row[columnIndex] ?? "").length),
+        column.header.length,
+      );
+      return { wch: Math.min(40, Math.max(14, maxDataLength + 2)) };
+    });
+    const detailedDiffSheet = XLSX.utils.aoa_to_sheet([
+      detailedDiffHeaderRow,
+      ...detailedDiffDataRows,
+    ]);
+    detailedDiffSheet["!cols"] = detailedDiffColumns.map((column, columnIndex) => {
+      const maxDataLength = Math.max(
+        ...detailedDiffDataRows.map((row) => String(row[columnIndex] ?? "").length),
+        column.header.length,
+      );
+      return { wch: Math.min(55, Math.max(14, maxDataLength + 2)) };
+    });
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
+    XLSX.utils.book_append_sheet(workbook, detailSheet, "Checked PIS Diffs");
+    XLSX.utils.book_append_sheet(workbook, detailedDiffSheet, "Detailed Differences");
+
+    const fileBuffer = XLSX.write(workbook, {
+      type: "buffer",
+      bookType: "xlsx",
+    });
+    const fileDate = new Date().toISOString().slice(0, 10);
+    const fileName = `pis-diffs-checked-${fileDate}.xlsx`;
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    return res.status(200).send(fileBuffer);
+  } catch (error) {
+    console.error("Export Checked PIS Diff Report Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to export checked PIS diff report",
       error: error.message,
     });
   }
