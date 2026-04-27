@@ -26,7 +26,12 @@ const getEnvFileNames = (envName) => {
   return fileNames;
 };
 
-const loadEnvFiles = ({ cwd = process.cwd(), envName = process.env.NODE_ENV } = {}) => {
+const loadEnvFiles = ({
+  cwd = process.cwd(),
+  envName = process.env.NODE_ENV,
+  preserveExistingEnv = false,
+} = {}) => {
+  const existingEnv = preserveExistingEnv ? { ...process.env } : null;
   const normalizedEnv = normalizeEnvName(envName);
   if (normalizedEnv) {
     process.env.NODE_ENV = normalizedEnv;
@@ -44,6 +49,12 @@ const loadEnvFiles = ({ cwd = process.cwd(), envName = process.env.NODE_ENV } = 
       override: true,
     });
     loadedFiles.push(envPath);
+  }
+
+  if (existingEnv) {
+    for (const [key, value] of Object.entries(existingEnv)) {
+      process.env[key] = value;
+    }
   }
 
   return {

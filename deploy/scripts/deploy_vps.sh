@@ -30,6 +30,48 @@ is_truthy() {
   esac
 }
 
+get_env_value() {
+  local name="$1"
+  local shell_value="${!name:-}"
+  if [[ -n "$shell_value" ]]; then
+    echo "$shell_value"
+    return
+  fi
+
+  if [[ ! -f "$BACKEND_ENV_FILE" ]]; then
+    echo ""
+    return
+  fi
+
+  local line
+  line="$(grep -E "^[[:space:]]*${name}[[:space:]]*=" "$BACKEND_ENV_FILE" | tail -n 1 || true)"
+  line="${line#*=}"
+  line="${line%$'\r'}"
+  line="${line%\"}"
+  line="${line#\"}"
+  line="${line%\'}"
+  line="${line#\'}"
+  echo "$line"
+}
+
+count_online_pm2_app() {
+  local app_name="$1"
+  pm2 jlist | APP_NAME="$app_name" node -e '
+let input = "";
+process.stdin.on("data", chunk => input += chunk);
+process.stdin.on("end", () => {
+  const apps = JSON.parse(input || "[]");
+  const appName = process.env.APP_NAME;
+  const count = apps.filter(app =>
+    app.name === appName &&
+    app.pm2_env &&
+    app.pm2_env.status === "online"
+  ).length;
+  console.log(count);
+});
+'
+}
+
 run_with_optional_sudo() {
   if [[ "$(id -u)" -eq 0 ]]; then
     "$@"
@@ -119,30 +161,37 @@ cd "$APP_DIR"
 pm2 startOrReload "$PM2_CONFIG" --update-env
 pm2 save
 
-log "Verifying PM2 cluster instances"
+log "Verifying PM2 processes"
 
-EXPECTED_PM2_INSTANCES="${EXPECTED_PM2_INSTANCES:-2}"
-RUNNING_PM2_INSTANCES="$(pm2 jlist | node -e '
-let input = "";
-process.stdin.on("data", chunk => input += chunk);
-process.stdin.on("end", () => {
-  const apps = JSON.parse(input || "[]");
-  const count = apps.filter(app =>
-    app.name === "oms-backend" &&
-    app.pm2_env &&
-    app.pm2_env.status === "online"
-  ).length;
-  console.log(count);
-});
-')"
+EXPECTED_PM2_WEB_INSTANCES="${EXPECTED_PM2_WEB_INSTANCES:-$(get_env_value PM2_WEB_INSTANCES)}"
+EXPECTED_PM2_WEB_INSTANCES="${EXPECTED_PM2_WEB_INSTANCES:-2}"
+RUNNING_PM2_WEB_INSTANCES="$(count_online_pm2_app oms-backend)"
 
-if [[ "$RUNNING_PM2_INSTANCES" -ne "$EXPECTED_PM2_INSTANCES" ]]; then
-  echo "Expected $EXPECTED_PM2_INSTANCES oms-backend PM2 instances, but found $RUNNING_PM2_INSTANCES"
+if [[ "$RUNNING_PM2_WEB_INSTANCES" -ne "$EXPECTED_PM2_WEB_INSTANCES" ]]; then
+  echo "Expected $EXPECTED_PM2_WEB_INSTANCES oms-backend PM2 instances, but found $RUNNING_PM2_WEB_INSTANCES"
   pm2 list
   exit 1
 fi
 
-echo "PM2 cluster is running with $RUNNING_PM2_INSTANCES instances"
+echo "oms-backend is running with $RUNNING_PM2_WEB_INSTANCES instance(s)"
+
+REDIS_JOBS_ENABLED_EFFECTIVE="$(get_env_value REDIS_JOBS_ENABLED)"
+if is_truthy "$REDIS_JOBS_ENABLED_EFFECTIVE"; then
+  EXPECTED_PM2_WORKER_INSTANCES="${EXPECTED_PM2_WORKER_INSTANCES:-$(get_env_value PM2_WORKER_INSTANCES)}"
+  EXPECTED_PM2_WORKER_INSTANCES="${EXPECTED_PM2_WORKER_INSTANCES:-1}"
+  RUNNING_PM2_WORKER_INSTANCES="$(count_online_pm2_app oms-worker)"
+
+  if [[ "$RUNNING_PM2_WORKER_INSTANCES" -ne "$EXPECTED_PM2_WORKER_INSTANCES" ]]; then
+    echo "Expected $EXPECTED_PM2_WORKER_INSTANCES oms-worker PM2 instance(s), but found $RUNNING_PM2_WORKER_INSTANCES"
+    pm2 list
+    exit 1
+  fi
+
+  echo "oms-worker is running with $RUNNING_PM2_WORKER_INSTANCES instance(s)"
+else
+  echo "REDIS_JOBS_ENABLED is not true; skipping required oms-worker online check"
+fi
+
 pm2 list
 
 if is_truthy "$VALIDATE_NGINX" && command -v nginx >/dev/null 2>&1; then

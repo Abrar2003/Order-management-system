@@ -3,9 +3,18 @@ const multer = require("multer");
 
 const auth = require("../middlewares/auth.middleware");
 const authorize = require("../middlewares/authorize.middleware");
+const {
+  cacheRoute,
+  invalidateCacheOnSuccess,
+} = require("../middlewares/cache.middleware");
+const { MEDIUM_CACHE_TTL } = require("../services/cache.service");
+const {
+  invalidateAllOmsCaches,
+} = require("../services/cacheInvalidation.service");
 const brandController = require("../controllers/brand.controller");
 
 const router = express.Router();
+const invalidateAllOnSuccess = invalidateCacheOnSuccess(invalidateAllOmsCaches);
 
 const storage = multer.memoryStorage();
 
@@ -42,6 +51,7 @@ router.get(
   "/",
   auth,
   authorize("admin", "manager", "QC", "dev", "user"),
+  cacheRoute("options", MEDIUM_CACHE_TTL),
   brandController.getAllBrands,
 );
 
@@ -63,6 +73,7 @@ router.get(
   "/:name/calendar",
   auth,
   authorize("admin", "manager", "QC", "dev", "user"),
+  cacheRoute("options", MEDIUM_CACHE_TTL),
   brandController.getBrandCalendar,
 );
 
@@ -71,6 +82,7 @@ router.post(
     auth,
     authorize("admin", "manager", "dev"),
     uploadBrandLogo,
+    invalidateAllOnSuccess,
     brandController.createBrand
 )
 

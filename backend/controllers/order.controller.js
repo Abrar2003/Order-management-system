@@ -31,8 +31,14 @@ const {
 } = require("../services/itemSync");
 const {
   applyTotalPoCbmToOrder,
+  backfillTotalPoCbmForOrders,
   calculateTotalPoCbm,
 } = require("../services/orderCbm.service");
+const {
+  QUEUE_NAMES,
+  enqueueAllOrderCbmRecalc,
+  enqueueBrandCalendarResync,
+} = require("../queues");
 const {
   extractTableRowsFromPdfBuffer,
 } = require("../services/pdfRectifyParser.service");
@@ -10448,6 +10454,53 @@ exports.finalizeOrder = async (req, res) => {
     });
   }
 };
+
+exports.recalculateTotalPoCbm = async (req, res) => {
+  try {
+    const batchSize = Math.min(
+      5000,
+      parsePositiveInt(req.body?.batchSize || req.query?.batchSize, 500),
+    );
+    const dryRun = parseBooleanInput(req.body?.dryRun ?? req.query?.dryRun, false);
+    const asyncRequested = parseBooleanInput(
+      req.body?.async ?? req.query?.async,
+      false,
+    );
+
+    if (asyncRequested) {
+      const job = await enqueueAllOrderCbmRecalc({ batchSize, dryRun });
+      if (job) {
+        return res.status(202).json({
+          success: true,
+          message: "total_po_cbm recalculation queued",
+          queue: QUEUE_NAMES.cbmRecalcQueue,
+          job_id: job.id,
+          status_url: `/jobs/${QUEUE_NAMES.cbmRecalcQueue}/${job.id}`,
+        });
+      }
+    }
+
+    const summary = await backfillTotalPoCbmForOrders({
+      batchSize,
+      dryRun,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "total_po_cbm recalculation completed",
+      summary,
+      queued: false,
+    });
+  } catch (error) {
+    console.error("total_po_cbm recalculation failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: "total_po_cbm recalculation failed",
+      error: error?.message || String(error),
+    });
+  }
+};
+
 exports.reSync = async (req, res) => {
   try {
     const batchSize = Math.min(20, parsePositiveInt(req.query.batchSize, 5));
@@ -10455,6 +10508,28 @@ exports.reSync = async (req, res) => {
       1200000,
       parsePositiveInt(req.query.timeoutMs, 300000),
     );
+    const asyncRequested = parseBooleanInput(
+      req.body?.async ?? req.query?.async,
+      false,
+    );
+
+    if (asyncRequested) {
+      const job = await enqueueBrandCalendarResync({
+        brand: req.body?.brand || req.query?.brand || "",
+        batchSize,
+        timeoutMs,
+      });
+
+      if (job) {
+        return res.status(202).json({
+          success: true,
+          message: "Calendar re-sync queued",
+          queue: QUEUE_NAMES.calendarSyncQueue,
+          job_id: job.id,
+          status_url: `/jobs/${QUEUE_NAMES.calendarSyncQueue}/${job.id}`,
+        });
+      }
+    }
 
     const purgeSummary = await withTimeout(
       purgeOmsEventsForConfiguredBrandCalendars(),

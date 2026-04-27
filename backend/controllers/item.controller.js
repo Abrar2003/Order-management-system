@@ -2,10 +2,16 @@ const Item = require("../models/item.model");
 const Order = require("../models/order.model");
 const QC = require("../models/qc.model");
 const mongoose = require("mongoose");
+const crypto = require("crypto");
+const fs = require("fs/promises");
 const path = require("path");
 const XLSX = require("xlsx");
 const { syncAllItemsFromOrdersAndQc } = require("../services/itemSync");
 const { syncTotalPoCbmForItem } = require("../services/orderCbm.service");
+const {
+  QUEUE_NAMES,
+  enqueuePisFileProcessing,
+} = require("../queues");
 const {
   isConfigured: isWasabiConfigured,
   createStorageKey,
@@ -687,6 +693,7 @@ const PIS_SPREADSHEET_MIME_TYPES = new Set([
   "application/xls",
   "application/x-xls",
 ]);
+const PIS_JOB_INPUT_DIR = path.resolve(__dirname, "../uploads/job-inputs");
 
 const toSafeNumber = (value, fallback = 0) => {
   const parsed = Number(value);
@@ -946,6 +953,45 @@ const uploadPisSpreadsheetForItem = async ({
       }
     }
   }
+};
+
+const parseAsyncRequest = (req) =>
+  ["1", "true", "yes", "y", "on"].includes(
+    String(req?.body?.async ?? req?.query?.async ?? "")
+      .trim()
+      .toLowerCase(),
+  );
+
+const safeDeleteLocalFile = async (filePath = "") => {
+  const normalizedPath = normalizeTextField(filePath);
+  if (!normalizedPath) return;
+  await fs.rm(normalizedPath, { force: true }).catch(() => {});
+};
+
+const stagePisSpreadsheetForJob = async (file) => {
+  const spreadsheetFile = validatePisSpreadsheetUpload(file);
+  await fs.mkdir(PIS_JOB_INPUT_DIR, { recursive: true });
+
+  const checksum = crypto
+    .createHash("sha256")
+    .update(file.buffer)
+    .digest("hex");
+  const safeBaseName = sanitizeBaseFilename(
+    path.parse(spreadsheetFile.originalName).name,
+    "item-pis",
+  );
+  const tempFilePath = path.join(
+    PIS_JOB_INPUT_DIR,
+    `${Date.now()}-${checksum.slice(0, 16)}-${safeBaseName}${spreadsheetFile.extension}`,
+  );
+
+  await fs.writeFile(tempFilePath, file.buffer);
+
+  return {
+    tempFilePath,
+    checksum,
+    originalName: spreadsheetFile.originalName,
+  };
 };
 
 const toTimestamp = (value) => {
@@ -3397,6 +3443,7 @@ exports.getItemPisFileUrl = async (req, res) => {
 
 exports.uploadItemPisFile = async (req, res) => {
   let itemId = "";
+  let stagedPisFilePath = "";
 
   try {
     itemId = getRequestedItemId(req);
@@ -3417,6 +3464,34 @@ exports.uploadItemPisFile = async (req, res) => {
 
     const previousPisFile = normalizeStoredItemFile(item?.pis_file);
     const previousStorageKey = previousPisFile.key;
+
+    if (parseAsyncRequest(req)) {
+      const stagedFile = await stagePisSpreadsheetForJob(req.file);
+      stagedPisFilePath = stagedFile.tempFilePath;
+
+      const job = await enqueuePisFileProcessing({
+        itemId,
+        itemCode: normalizeTextField(item?.code),
+        tempFilePath: stagedFile.tempFilePath,
+        originalName: stagedFile.originalName,
+        previousStorageKey,
+        checksum: stagedFile.checksum,
+      });
+
+      if (job) {
+        return res.status(202).json({
+          success: true,
+          message: "PIS spreadsheet processing queued",
+          queue: QUEUE_NAMES.fileProcessingQueue,
+          job_id: job.id,
+          status_url: `/jobs/${QUEUE_NAMES.fileProcessingQueue}/${job.id}`,
+        });
+      }
+
+      await safeDeleteLocalFile(stagedFile.tempFilePath);
+      stagedPisFilePath = "";
+    }
+
     item.pis_file = await uploadPisSpreadsheetForItem({
       itemCode: normalizeTextField(item?.code),
       itemId,
@@ -3500,6 +3575,7 @@ exports.uploadItemPisFile = async (req, res) => {
       },
     });
   } catch (error) {
+    await safeDeleteLocalFile(stagedPisFilePath);
     if (error?.cleanupError) {
       console.error("PIS upload cleanup after failure failed:", {
         itemId,

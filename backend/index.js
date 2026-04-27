@@ -2,12 +2,12 @@ const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
 const dns = require("dns");
-const dotenv = require("dotenv");
+const path = require("path");
+const { loadEnvFiles } = require("./config/loadEnv");
 
-dotenv.config({
-  path: process.env.NODE_ENV === "production"
-    ? ".env.production"
-    : ".env",
+loadEnvFiles({
+  cwd: path.resolve(__dirname),
+  preserveExistingEnv: true,
 });
 
 
@@ -24,6 +24,9 @@ const sampleRouter = require("./routers/samples.routes");
 const finishRouter = require("./routers/finish.routes");
 const emailLogsRouter = require("./routers/emailLogs.routes");
 const reportsRouter = require("./routers/reports.routes");
+const jobsRouter = require("./routers/jobs.routes");
+const { closeRedisClients } = require("./config/redis");
+const { closeQueues } = require("./queues");
 
 const app = express();
 const PORT = Number.parseInt(String(process.env.PORT || "8008"), 10) || 8008;
@@ -103,6 +106,8 @@ app.use("/finishes", finishRouter);
 app.use("/email-logs", emailLogsRouter);
 app.use("/reports", reportsRouter);
 app.use("/api/reports", reportsRouter);
+app.use("/jobs", jobsRouter);
+app.use("/api/jobs", jobsRouter);
 
 app.get("/", (req, res) => {
   res.send({ message: "Server OK v2" });
@@ -160,6 +165,8 @@ const startServer = async () => {
 
       server.close(async () => {
         try {
+          await closeQueues();
+          await closeRedisClients();
           await mongoose.connection.close(false);
           console.log("MongoDB connection closed.");
           process.exit(0);
