@@ -421,10 +421,10 @@ const QcDetails = () => {
   const qcUpdateDisabledReason = !canUpdateQc
     ? !pendingAlignmentInfo.hasRequest
       ? "QC is not requested yet. Align QC request before updating."
-      : !isQcAlignedRecord
-      ? "Only the inspector assigned to this QC request can update it."
       : isQcUser && !qcUserRequestAvailability.isAvailable
       ? qcUserRequestAvailability.reason
+      : !isQcAlignedRecord
+      ? "Only the inspector assigned to this QC request can update it."
       : "Only admin, manager, or aligned QC can update this record."
     : "";
   const availableRelatedFileOptions = useMemo(

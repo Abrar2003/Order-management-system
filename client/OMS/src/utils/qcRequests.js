@@ -11,6 +11,15 @@ const normalizeRequestHistoryStatus = (value) => {
   return normalized;
 };
 
+const getRequestHistoryStatusPriority = (value) => {
+  const normalized = normalizeRequestHistoryStatus(value);
+  if (normalized === "open") return 4;
+  if (normalized === "inspected") return 3;
+  if (normalized === "rejected") return 2;
+  if (normalized === "transfered") return 1;
+  return 0;
+};
+
 const toSortableTimestamp = (value) => {
   const isoDate = toISODateString(value);
   if (isoDate) {
@@ -28,6 +37,7 @@ export const resolveLatestRequestEntry = (requestHistory = []) => {
   const normalizedHistory = Array.isArray(requestHistory) ? requestHistory : [];
   let latestEntry = null;
   let latestTimestamp = -1;
+  let latestStatusPriority = -1;
 
   normalizedHistory.forEach((entry, index) => {
     const entryTimestamp = Math.max(
@@ -36,14 +46,40 @@ export const resolveLatestRequestEntry = (requestHistory = []) => {
       toSortableTimestamp(entry?.createdAt || entry?.created_at),
       index,
     );
+    const entryStatusPriority = getRequestHistoryStatusPriority(entry?.status);
 
-    if (entryTimestamp >= latestTimestamp) {
+    if (
+      entryTimestamp > latestTimestamp ||
+      (entryTimestamp === latestTimestamp &&
+        entryStatusPriority > latestStatusPriority)
+    ) {
       latestEntry = entry;
       latestTimestamp = entryTimestamp;
+      latestStatusPriority = entryStatusPriority;
     }
   });
 
   return latestEntry;
+};
+
+const resolveLatestRequestEntryForInspector = (
+  requestHistory = [],
+  inspectorId = "",
+) => {
+  const normalizedInspectorId = String(inspectorId || "").trim();
+  if (!normalizedInspectorId) return null;
+
+  return resolveLatestRequestEntry(
+    (Array.isArray(requestHistory) ? requestHistory : []).filter((entry) => {
+      const entryInspectorId = String(
+        entry?.inspector?._id ||
+          entry?.inspector ||
+          entry?.inspector_id ||
+          "",
+      ).trim();
+      return entryInspectorId === normalizedInspectorId;
+    }),
+  );
 };
 
 export const isPendingRequestHistoryStatus = (value) =>
@@ -277,9 +313,19 @@ export const getQcUserUpdateRequestAvailability = (
     normalizedCurrentUserId &&
     (!requestInspectorId || requestInspectorId !== normalizedCurrentUserId)
   ) {
+    const latestRequestForCurrentUser = resolveLatestRequestEntryForInspector(
+      qc?.request_history,
+      normalizedCurrentUserId,
+    );
+    const latestRequestForCurrentUserStatus = normalizeRequestHistoryStatus(
+      latestRequestForCurrentUser?.status || "",
+    );
     return {
       isAvailable: false,
-      reason: "Only the inspector assigned to this QC request can update it.",
+      reason:
+        latestRequestForCurrentUserStatus === "transfered"
+          ? "This QC request was transferred to another inspector and cannot be updated by you."
+          : "Only the inspector assigned to this QC request can update it.",
       latestRequestEntry,
       latestInspectionRecord: null,
     };

@@ -1892,6 +1892,26 @@ const resolveLatestInspectionRecordFromList = (inspectionRecords = []) => {
   return latestRecord;
 };
 
+const resolveLatestRequestEntryForInspector = (
+  requestHistory = [],
+  inspectorId = "",
+) => {
+  const normalizedInspectorId = String(inspectorId || "").trim();
+  if (!normalizedInspectorId) return null;
+
+  return resolveLatestRequestEntry(
+    (Array.isArray(requestHistory) ? requestHistory : []).filter((entry) => {
+      const entryInspectorId = String(
+        entry?.inspector?._id ||
+          entry?.inspector ||
+          entry?.inspector_id ||
+          "",
+      ).trim();
+      return entryInspectorId === normalizedInspectorId;
+    }),
+  );
+};
+
 const getQcUserLatestRequestAvailability = (
   qcDoc = {},
   inspectionRecords = [],
@@ -1965,11 +1985,21 @@ const getQcUserLatestRequestAvailability = (
   }
 
   if (!requestInspectorId || requestInspectorId !== normalizedCurrentUserId) {
+    const latestRequestForCurrentUser = resolveLatestRequestEntryForInspector(
+      qcDoc?.request_history,
+      normalizedCurrentUserId,
+    );
+    const latestRequestForCurrentUserStatus = normalizeRequestHistoryStatus(
+      latestRequestForCurrentUser?.status || "",
+    );
     return {
       isAvailable: false,
       latestRequestEntry,
       latestInspectionRecord: null,
-      reason: "Only the inspector assigned to this QC request can update it.",
+      reason:
+        latestRequestForCurrentUserStatus === REQUEST_HISTORY_STATUS.TRANSFERRED
+          ? "This QC request was transferred to another inspector and cannot be updated by you."
+          : "Only the inspector assigned to this QC request can update it.",
     };
   }
 
