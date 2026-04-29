@@ -432,7 +432,7 @@ const VendorReports = () => {
           >
             Back
           </button>
-          <h2 className="h4 mb-0">Vendor Reports</h2>
+          <h2 className="h4 mb-0">Vendor Performance Reports</h2>
           <span className="d-none d-md-inline" />
         </div>
 

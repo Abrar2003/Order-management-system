@@ -434,7 +434,7 @@ const InspectorReports = () => {
           >
             Back
           </button>
-          <h2 className="h4 mb-0">Inspector Reports</h2>
+          <h2 className="h4 mb-0">Inspector Performance Reports</h2>
           <span className="d-none d-md-inline" />
         </div>
 

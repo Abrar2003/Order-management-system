@@ -49,6 +49,49 @@ const normalizeStatusCounts = (value = {}) => ({
   shipped: Number(value?.shipped || 0),
 });
 
+const toSafeNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return parsed;
+};
+
+const getRemainingQuantity = (item = {}) =>
+  Math.max(
+    0,
+    toSafeNumber(item?.order_quantity || item?.total_quantity, 0) -
+      toSafeNumber(item?.shipped_quantity, 0),
+  );
+
+const formatStatusQuantitySummary = (item = {}) => {
+  const normalizedStatus = String(item?.status || "").trim().toLowerCase();
+  const orderQuantity = toSafeNumber(item?.order_quantity || item?.total_quantity, 0);
+  const shippedQuantity = toSafeNumber(item?.shipped_quantity, 0);
+  const pendingInspectionQuantity = toSafeNumber(item?.open_quantity, 0);
+  const remainingQuantity = getRemainingQuantity(item);
+
+  if (normalizedStatus === "partial shipped") {
+    return `Shipped: ${shippedQuantity} | Remaining: ${remainingQuantity}`;
+  }
+
+  if (normalizedStatus === "inspection done") {
+    return `Ready to Ship: ${remainingQuantity} | Order Qty: ${orderQuantity}`;
+  }
+
+  if (normalizedStatus === "pending") {
+    return `Pending Qty: ${pendingInspectionQuantity} | Order Qty: ${orderQuantity}`;
+  }
+
+  if (normalizedStatus === "under inspection") {
+    return `Under Inspection Qty: ${pendingInspectionQuantity} | Order Qty: ${orderQuantity}`;
+  }
+
+  if (normalizedStatus === "shipped") {
+    return `Shipped: ${shippedQuantity}`;
+  }
+
+  return `Order Qty: ${orderQuantity}`;
+};
+
 const getTotalStatusCounts = (value = {}) => {
   const normalizedCounts = normalizeStatusCounts(value);
   return (
@@ -106,6 +149,22 @@ const PartiallyInspectedItemCounts = ({ counts }) => {
       <div>Partially Shipped: {normalizedCounts.partially_shipped}</div>
       <div>Shipped: {normalizedCounts.shipped}</div>
     </div>
+  );
+};
+
+const getPoStatusDetailItems = (row = {}, isInspectionDoneMode = false) => {
+  const items = Array.isArray(row?.status_items)
+    ? row.status_items
+    : Array.isArray(row?.inspected_items)
+      ? row.inspected_items
+      : [];
+
+  if (!isInspectionDoneMode) {
+    return items;
+  }
+
+  return items.filter(
+    (item) => String(item?.status || "").trim().toLowerCase() !== "shipped",
   );
 };
 
@@ -554,11 +613,7 @@ const PoStatusReport = () => {
                     if (column === "brand") return row?.brand;
                     if (column === "orderId") return row?.order_id;
                     if (column === "itemCode") {
-                      const items = Array.isArray(row?.inspected_items)
-                        ? row.inspected_items
-                        : Array.isArray(row?.open_items)
-                          ? row.open_items
-                          : [];
+                      const items = getPoStatusDetailItems(row, isInspectionDoneMode);
                       return items
                         .map((item) => String(item?.item_code || "").trim())
                         .filter(Boolean)
@@ -607,156 +662,76 @@ const PoStatusReport = () => {
                       </div>
 
                       <div className="table-responsive">
-                        {isInspectionDoneMode ? (
-                          <table className="table table-sm table-striped align-middle mb-0 po-status-report-table">
-                            <thead>
+                        <table className="table table-sm table-striped align-middle mb-0 po-status-report-table">
+                          <thead>
+                            <tr>
+                              <th>
+                                <SortHeaderButton
+                                  label="Brand"
+                                  isActive={sortBy === "brand"}
+                                  direction={sortOrder}
+                                  onClick={() => handleSortColumn("brand", "asc")}
+                                />
+                              </th>
+                              <th>
+                                <SortHeaderButton
+                                  label="PO"
+                                  isActive={sortBy === "orderId"}
+                                  direction={sortOrder}
+                                  onClick={() => handleSortColumn("orderId", "asc")}
+                                />
+                              </th>
+                              <th>
+                                <SortHeaderButton
+                                  label="Item Code"
+                                  isActive={sortBy === "itemCode"}
+                                  direction={sortOrder}
+                                  onClick={() => handleSortColumn("itemCode", "asc")}
+                                />
+                              </th>
+                              <th>
+                                <SortHeaderButton
+                                  label="Order Date"
+                                  isActive={sortBy === "orderDate"}
+                                  direction={sortOrder}
+                                  onClick={() => handleSortColumn("orderDate", "desc")}
+                                />
+                              </th>
+                              <th>
+                                <SortHeaderButton
+                                  label="ETD"
+                                  isActive={sortBy === "etd"}
+                                  direction={sortOrder}
+                                  onClick={() => handleSortColumn("etd", "desc")}
+                                />
+                              </th>
+                              <th className="po-status-item-count-column">
+                                {isInspectionDoneMode ? "Item Count / Qty" : "Item Count / Order Qty"}
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {sortedPos.length === 0 ? (
                               <tr>
-                                <th>
-                                  <SortHeaderButton
-                                    label="Brand"
-                                    isActive={sortBy === "brand"}
-                                    direction={sortOrder}
-                                    onClick={() => handleSortColumn("brand", "asc")}
-                                  />
-                                </th>
-                                <th>
-                                  <SortHeaderButton
-                                    label="PO"
-                                    isActive={sortBy === "orderId"}
-                                    direction={sortOrder}
-                                    onClick={() => handleSortColumn("orderId", "asc")}
-                                  />
-                                </th>
-                                <th>
-                                  <SortHeaderButton
-                                    label="Order Date"
-                                    isActive={sortBy === "orderDate"}
-                                    direction={sortOrder}
-                                    onClick={() => handleSortColumn("orderDate", "desc")}
-                                  />
-                                </th>
-                                <th>
-                                  <SortHeaderButton
-                                    label="ETD"
-                                    isActive={sortBy === "etd"}
-                                    direction={sortOrder}
-                                    onClick={() => handleSortColumn("etd", "desc")}
-                                  />
-                                </th>
-                                <th className="po-status-item-count-column">
-                                  <SortHeaderButton
-                                    label="Item Count"
-                                    isActive={sortBy === "itemCount"}
-                                    direction={sortOrder}
-                                    onClick={() => handleSortColumn("itemCount", "desc")}
-                                  />
-                                </th>
+                                <td colSpan="6" className="text-center py-3">
+                                  {isInspectionDoneMode
+                                    ? "No inspection-done POs for this vendor."
+                                    : "No partially inspected POs for this vendor."}
+                                </td>
                               </tr>
-                            </thead>
-                            <tbody>
-                              {sortedPos.length === 0 ? (
-                                <tr>
-                                  <td colSpan="5" className="text-center py-3">
-                                    No POs for this vendor.
-                                  </td>
-                                </tr>
-                              ) : (
-                                sortedPos.map((row) => (
-                                  <tr
-                                    key={`${vendorKey}-${row.key || row.order_id}`}
-                                    className="table-clickable"
-                                    onClick={() => handleOpenOrder(row.order_id)}
-                                  >
-                                    <td>{row.brand || "N/A"}</td>
-                                    <td>
-                                      <button
-                                        type="button"
-                                        className="btn btn-link p-0 align-baseline text-decoration-none"
-                                        onClick={(event) => {
-                                          event.stopPropagation();
-                                          handleOpenOrder(row.order_id);
-                                        }}
-                                      >
-                                        {row.order_id || "N/A"}
-                                      </button>
-                                    </td>
-                                    <td>{formatDateDDMMYYYY(row.order_date)}</td>
-                                    <td>{formatDateDDMMYYYY(row.effective_etd)}</td>
-                                    <td className="po-status-item-count-column">
-                                      <InspectionDoneItemCounts counts={row.item_counts} />
-                                    </td>
-                                  </tr>
-                                ))
-                              )}
-                            </tbody>
-                          </table>
-                        ) : (
-                          <table className="table table-sm table-striped align-middle mb-0 po-status-report-table">
-                            <thead>
-                              <tr>
-                                <th>
-                                  <SortHeaderButton
-                                    label="Brand"
-                                    isActive={sortBy === "brand"}
-                                    direction={sortOrder}
-                                    onClick={() => handleSortColumn("brand", "asc")}
-                                  />
-                                </th>
-                                <th>
-                                  <SortHeaderButton
-                                    label="PO"
-                                    isActive={sortBy === "orderId"}
-                                    direction={sortOrder}
-                                    onClick={() => handleSortColumn("orderId", "asc")}
-                                  />
-                                </th>
-                                <th>
-                                  <SortHeaderButton
-                                    label="Item Code"
-                                    isActive={sortBy === "itemCode"}
-                                    direction={sortOrder}
-                                    onClick={() => handleSortColumn("itemCode", "asc")}
-                                  />
-                                </th>
-                                <th>
-                                  <SortHeaderButton
-                                    label="Order Date"
-                                    isActive={sortBy === "orderDate"}
-                                    direction={sortOrder}
-                                    onClick={() => handleSortColumn("orderDate", "desc")}
-                                  />
-                                </th>
-                                <th>
-                                  <SortHeaderButton
-                                    label="ETD"
-                                    isActive={sortBy === "etd"}
-                                    direction={sortOrder}
-                                    onClick={() => handleSortColumn("etd", "desc")}
-                                  />
-                                </th>
-                                <th className="po-status-item-count-column">Item Count / Order Qty</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {sortedPos.length === 0 ? (
-                                <tr>
-                                  <td colSpan="6" className="text-center py-3">
-                                    No partially inspected POs for this vendor.
-                                  </td>
-                                </tr>
-                              ) : (
-                                sortedPos.map((row) => (
-                                  <FragmentLikeGroup
-                                    key={`${vendorKey}-${row.key || row.order_id}`}
-                                    row={row}
-                                    handleOpenOrder={handleOpenOrder}
-                                    handleOpenQcDetails={handleOpenQcDetails}
-                                  />
-                                ))
-                              )}
-                            </tbody>
-                          </table>
-                        )}
+                            ) : (
+                              sortedPos.map((row) => (
+                                <FragmentLikeGroup
+                                  key={`${vendorKey}-${row.key || row.order_id}`}
+                                  row={row}
+                                  handleOpenOrder={handleOpenOrder}
+                                  handleOpenQcDetails={handleOpenQcDetails}
+                                  isInspectionDoneMode={isInspectionDoneMode}
+                                />
+                              ))
+                            )}
+                          </tbody>
+                        </table>
                       </div>
                     </div>
                   </div>
@@ -774,17 +749,14 @@ const FragmentLikeGroup = ({
   row,
   handleOpenOrder,
   handleOpenQcDetails,
+  isInspectionDoneMode = false,
 }) => {
-  const inspectedItems = Array.isArray(row?.inspected_items)
-    ? row.inspected_items
-    : Array.isArray(row?.open_items)
-      ? row.open_items
-      : [];
+  const detailItems = getPoStatusDetailItems(row, isInspectionDoneMode);
 
   return (
     <>
       <tr
-        className="table-active table-clickable"
+        className="table-active table-clickable fw-bold"
         onClick={() => handleOpenOrder(row.order_id)}
       >
         <td>{row.brand || "N/A"}</td>
@@ -804,11 +776,15 @@ const FragmentLikeGroup = ({
         <td>{formatDateDDMMYYYY(row.order_date)}</td>
         <td>{formatDateDDMMYYYY(row.effective_etd)}</td>
         <td className="po-status-item-count-column">
-          <PartiallyInspectedItemCounts counts={row.item_counts} />
+          {isInspectionDoneMode ? (
+            <InspectionDoneItemCounts counts={row.item_counts} />
+          ) : (
+            <PartiallyInspectedItemCounts counts={row.item_counts} />
+          )}
         </td>
       </tr>
 
-      {inspectedItems.map((openItem) => (
+      {detailItems.map((openItem) => (
         <tr
           key={`${row.key || row.order_id}-${openItem._id || openItem.item_code}`}
           className="table-clickable"
@@ -835,7 +811,12 @@ const FragmentLikeGroup = ({
           </td>
           <td>{formatDateDDMMYYYY(row.order_date)}</td>
           <td>{formatDateDDMMYYYY(row.effective_etd)}</td>
-          <td className="po-status-item-count-column">{openItem.order_quantity ?? 0}</td>
+          <td className="po-status-item-count-column">
+            <div className="fw-semibold">Order Qty: {openItem.order_quantity ?? 0}</div>
+            <div className="small text-secondary">
+              {formatStatusQuantitySummary(openItem)}
+            </div>
+          </td>
         </tr>
       ))}
     </>
