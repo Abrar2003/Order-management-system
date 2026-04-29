@@ -441,12 +441,7 @@ const QcDetails = () => {
       || RELATED_FILE_OPTIONS[0],
     [availableRelatedFileOptions, relatedFileType],
   );
-  const canUploadQcImages =
-    pendingAlignmentInfo.hasRequest &&
-    (
-      isAdmin ||
-      (isQcUser && isQcAlignedRecord && qcUserRequestAvailability.isAvailable)
-    );
+  const canUploadQcImages = isAdmin || isQcUser;
   const canUploadItemMasterFiles = isAdmin && canUpdateQc;
   const canUploadRelatedFile =
     activeRelatedFileConfig?.scope === "qc"
@@ -478,14 +473,8 @@ const QcDetails = () => {
       ? "Item master not found for this QC."
       : activeRelatedFileConfig?.scope === "item_master" && !isAdmin
       ? "Only admin or manager can upload item related files."
-      : !pendingAlignmentInfo.hasRequest
-      ? "QC is not requested yet. Align QC request before uploading."
-      : !isQcAlignedRecord
-      ? "Only the inspector assigned to this QC request can upload QC images."
-      : isQcUser && !qcUserRequestAvailability.isAvailable
-      ? qcUserRequestAvailability.reason
       : activeRelatedFileConfig?.scope === "qc"
-      ? "Only admin, manager, or aligned QC can upload QC images."
+      ? "Only admin, manager, or QC can upload QC images."
       : "Only admin or manager can upload item related files."
     : "";
 

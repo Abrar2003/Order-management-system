@@ -22,6 +22,11 @@ import {
 } from "../utils/measuredSizeForm";
 import { getQcUserUpdateRequestAvailability } from "../utils/qcRequests";
 import { formatNumberInputValue } from "../utils/measurementDisplay";
+import {
+  buildUpdateQcPastDaysMessage,
+  getUpdateQcPastDaysLimit,
+  isLabelExemptUser,
+} from "../utils/qcUpdateAccess";
 import "../App.css";
 import AllocateLabelsModal from "./AllocateLabelsModal";
 
@@ -582,33 +587,6 @@ const getLatestRequestedQuantity = (qc = {}) => {
   return 0;
 };
 
-const UPDATE_QC_PAST_DAYS_OVERRIDE_BY_USER = Object.freeze({
-  "6993ff47473290fa1cf76b65": 3,
-});
-
-const getUpdateQcPastDaysLimit = (role = "", userId = "") => {
-  const normalizedRole = String(role || "").trim().toLowerCase();
-  if (normalizedRole === "qc") return 1;
-
-  const normalizedUserId = String(userId || "").trim();
-  const override = UPDATE_QC_PAST_DAYS_OVERRIDE_BY_USER[normalizedUserId];
-  if (Number.isInteger(override) && override >= 0) {
-    return override;
-  }
-
-  if (normalizedRole === "manager") return 2;
-  return 0;
-};
-
-const buildUpdateQcPastDaysMessage = (role = "", daysBack = 0) => {
-  const normalizedRole = String(role || "").trim().toLowerCase();
-  const actorLabel = normalizedRole === "manager" ? "Manager" : "QC";
-  const safeDaysBack =
-    Number.isInteger(daysBack) && daysBack >= 0 ? daysBack : 0;
-  const dayLabel = safeDaysBack === 1 ? "day" : "days";
-  return `${actorLabel} can update QC only for today and previous ${safeDaysBack} ${dayLabel}.`;
-};
-
 const PREFERRED_BARCODE_FORMATS = [
   "code_128",
   "ean_13",
@@ -629,11 +607,13 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const canRewriteLatestInspectionRecord = isActualAdmin || Boolean(isAdmin);
   const hasElevatedAccess = canRewriteLatestInspectionRecord || isManager;
   const canManageLabels = ["admin", "manager"].includes(normalizedRole);
+  const isCurrentUserLabelExempt =
+    isActualAdmin || isLabelExemptUser(currentUserId);
   const todayIso = toISODateString(new Date());
-  const updateQcPastDaysLimit = getUpdateQcPastDaysLimit(
-    normalizedRole,
-    currentUserId,
-  );
+  const updateQcPastDaysLimit = getUpdateQcPastDaysLimit({
+    role: normalizedRole,
+    userId: currentUserId,
+  });
   const updateQcMinAllowedDateIso = (() => {
     const minDate = new Date();
     minDate.setDate(minDate.getDate() - updateQcPastDaysLimit);
@@ -1701,7 +1681,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       : 0;
 
     // Validate box sizes when labels are being added
-    if (hasLabelUpdate) {
+    if (!isCurrentUserLabelExempt && hasLabelUpdate) {
       if (boxSizesCount === 0) {
         setError("At least 1 box size is required to add labels.");
         return;
@@ -1919,12 +1899,19 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         return;
       }
 
-      if (requiresBoxSizeForLabelsAfterRewrite && boxSizesCount === 0) {
+      if (
+        !isCurrentUserLabelExempt &&
+        requiresBoxSizeForLabelsAfterRewrite &&
+        boxSizesCount === 0
+      ) {
         setError("At least 1 box size is required to validate labels.");
         return;
       }
 
-      if (rewriteRecordLabelsAfter.length !== requiredLabelsAfterRewrite) {
+      if (
+        !isCurrentUserLabelExempt &&
+        rewriteRecordLabelsAfter.length !== requiredLabelsAfterRewrite
+      ) {
         setError(
           buildQcLabelRequirementMessage({
             totalPassed: qcPassed,
@@ -2068,12 +2055,19 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     const requiresBoxSizeForLabels =
       nextCurrentRequestSamplePassed > 0 || currentRequestLabelsAfterUpdate.length > 0;
 
-    if (requiresBoxSizeForLabels && boxSizesCount === 0) {
+    if (
+      !isCurrentUserLabelExempt &&
+      requiresBoxSizeForLabels &&
+      boxSizesCount === 0
+    ) {
       setError("At least 1 box size is required to validate labels.");
       return;
     }
 
-    if (currentRequestLabelsAfterUpdate.length !== requiredLabelsAfterUpdate) {
+    if (
+      !isCurrentUserLabelExempt &&
+      currentRequestLabelsAfterUpdate.length !== requiredLabelsAfterUpdate
+    ) {
       setError(
         buildQcLabelRequirementMessage({
           totalPassed: nextCurrentRequestSamplePassed,

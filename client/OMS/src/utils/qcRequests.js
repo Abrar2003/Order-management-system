@@ -1,4 +1,8 @@
 import { getTodayISODate, toISODateString } from "./date";
+import {
+  buildUpdateQcPastDaysMessage,
+  getUpdateQcPastDaysLimit,
+} from "./qcUpdateAccess";
 
 const normalizeRequestHistoryStatus = (value) => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -84,13 +88,10 @@ const getUtcDayOffsetFromToday = (isoDateValue) => {
   return Math.round((todayUtc - targetUtc) / oneDayMs);
 };
 
-const isTodayOrYesterday = (value) => {
+const isWithinPastDaysInclusive = (value, daysBack = 0) => {
   const offset = getUtcDayOffsetFromToday(value);
-  return offset !== null && offset >= 0 && offset <= 1;
+  return offset !== null && offset >= 0 && offset <= Math.max(0, Number(daysBack) || 0);
 };
-
-const QC_UPDATE_DATE_MESSAGE =
-  "QC can update only requests from today or yesterday.";
 
 export const resolveLatestInspectionRecordForRequestEntry = (
   inspectionRecords = [],
@@ -237,6 +238,10 @@ export const getQcUserUpdateRequestAvailability = (
   qc = {},
   { currentUserId = "" } = {},
 ) => {
+  const qcUserPastDaysLimit = getUpdateQcPastDaysLimit({
+    role: "qc",
+    userId: currentUserId,
+  });
   const latestRequestEntry = resolveLatestRequestEntry(qc?.request_history);
 
   if (!latestRequestEntry) {
@@ -251,10 +256,10 @@ export const getQcUserUpdateRequestAvailability = (
   const requestDateIso = toISODateString(
     latestRequestEntry?.request_date || qc?.request_date || "",
   );
-  if (!requestDateIso || !isTodayOrYesterday(requestDateIso)) {
+  if (!requestDateIso || !isWithinPastDaysInclusive(requestDateIso, qcUserPastDaysLimit)) {
     return {
       isAvailable: false,
-      reason: QC_UPDATE_DATE_MESSAGE,
+      reason: buildUpdateQcPastDaysMessage("qc", qcUserPastDaysLimit),
       latestRequestEntry,
       latestInspectionRecord: null,
     };

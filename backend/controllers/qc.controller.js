@@ -27,6 +27,10 @@ const {
   toDateOnlyIso,
 } = require("../helpers/dateOnly");
 const {
+  LABEL_EXEMPT_QC_ALLOWED_PAST_DAYS,
+  isLabelExemptUser,
+} = require("../helpers/labelExemptUsers");
+const {
   BOX_PACKAGING_MODES,
   BOX_SIZE_REMARK_OPTIONS,
   buildBoxLegacyFieldsFromEntries,
@@ -684,6 +688,10 @@ const isIsoDateWithinPastDaysInclusive = (isoDate, daysBack = 0) => {
 
 const getUpdateQcPastDaysLimit = (role = "", userId = "") => {
   const normalizedUserId = String(userId || "").trim();
+  if (isLabelExemptUser(normalizedUserId)) {
+    return LABEL_EXEMPT_QC_ALLOWED_PAST_DAYS;
+  }
+
   const override = UPDATE_QC_PAST_DAYS_OVERRIDE_BY_USER[normalizedUserId];
   if (Number.isInteger(override) && override >= 0) {
     return override;
@@ -704,8 +712,8 @@ const buildUpdateQcPastDaysMessage = (role = "", daysBack = 0) => {
   return `${actorLabel} can update QC only for today and previous ${safeDaysBack} ${dayLabel}`;
 };
 
-const buildQcUserUpdateDateMessage = () =>
-  "QC can update only requests from today or yesterday";
+const buildQcUserUpdateDateMessage = (daysBack = QC_ALLOWED_PAST_DAYS) =>
+  buildUpdateQcPastDaysMessage("qc", daysBack);
 
 const formatDateDDMMYYYY = (value, fallback = "") =>
   formatDateOnlyDDMMYYYY(value, fallback);
@@ -1889,6 +1897,7 @@ const getQcUserLatestRequestAvailability = (
   inspectionRecords = [],
   { currentUserId = "", inspectionDate = "" } = {},
 ) => {
+  const qcUserPastDaysLimit = getUpdateQcPastDaysLimit("qc", currentUserId);
   const latestRequestEntry = resolveLatestRequestEntry(qcDoc?.request_history || []);
   if (!latestRequestEntry) {
     return {
@@ -1911,12 +1920,12 @@ const getQcUserLatestRequestAvailability = (
     };
   }
 
-  if (!isIsoDateWithinPastDaysInclusive(requestDateIso, QC_ALLOWED_PAST_DAYS)) {
+  if (!isIsoDateWithinPastDaysInclusive(requestDateIso, qcUserPastDaysLimit)) {
     return {
       isAvailable: false,
       latestRequestEntry,
       latestInspectionRecord: null,
-      reason: buildQcUserUpdateDateMessage(),
+      reason: buildQcUserUpdateDateMessage(qcUserPastDaysLimit),
     };
   }
 
@@ -1926,14 +1935,14 @@ const getQcUserLatestRequestAvailability = (
     (!submittedInspectionDateIso ||
       !isIsoDateWithinPastDaysInclusive(
         submittedInspectionDateIso,
-        QC_ALLOWED_PAST_DAYS,
+        qcUserPastDaysLimit,
       ))
   ) {
     return {
       isAvailable: false,
       latestRequestEntry,
       latestInspectionRecord: null,
-      reason: buildQcUserUpdateDateMessage(),
+      reason: buildQcUserUpdateDateMessage(qcUserPastDaysLimit),
     };
   }
 
@@ -4211,6 +4220,8 @@ exports.updateQC = async (req, res) => {
       normalizedRole,
       currentUserId,
     );
+    const isCurrentUserLabelExempt =
+      isAdmin || isLabelExemptUser(currentUserId);
     const adminRewriteLatestRecord =
       isAdmin &&
       (req.body?.admin_rewrite_latest_record === true ||
@@ -5300,12 +5311,6 @@ exports.updateQC = async (req, res) => {
          []);
     const boxSizesCount = Array.isArray(boxSizesArray) ? boxSizesArray.length : 0;
 
-    // Validate that box sizes exist for label calculations
-    if (boxSizesCount === 0) {
-      return res.status(400).json({
-        message: "At least 1 box size is required to add labels",
-      });
-    }
     const currentRequestLabelsBefore = normalizeLabels(
       currentRequestInspectionRecord?.labels_added || [],
     );
@@ -5450,7 +5455,7 @@ exports.updateQC = async (req, res) => {
       labelsAddedThisVisit = incomingNew;
     }
 
-    if (!(allowAdminRewrite && hasExplicitLabelsPayload)) {
+    if (!isCurrentUserLabelExempt && !(allowAdminRewrite && hasExplicitLabelsPayload)) {
       const currentRequestLabelsAfterUpdate = normalizeLabels([
         ...currentRequestLabelsBefore,
         ...labelsAddedThisVisit,
@@ -5475,7 +5480,7 @@ exports.updateQC = async (req, res) => {
           }),
         });
       }
-    } else if (boxSizesCount === 0) {
+    } else if (!isCurrentUserLabelExempt && boxSizesCount === 0) {
       return res.status(400).json({
         message: "At least 1 box size is required to validate labels",
       });
@@ -5546,11 +5551,14 @@ exports.updateQC = async (req, res) => {
         isManager &&
         !isIsoDateWithinPastDaysInclusive(
           inspectionDateForRecord,
-          MANAGER_ALLOWED_PAST_DAYS,
+          updateQcPastDaysLimit,
         )
       ) {
         return res.status(403).json({
-          message: "Manager can update QC only for today and previous 2 days",
+          message: buildUpdateQcPastDaysMessage(
+            normalizedRole,
+            updateQcPastDaysLimit,
+          ),
         });
       }
 
@@ -9260,44 +9268,6 @@ exports.uploadQcImages = async (req, res) => {
 
     if (!qc) {
       return res.status(404).json({ success: false, message: "QC record not found" });
-    }
-
-    const normalizedRole = String(req.user?.role || "")
-      .trim()
-      .toLowerCase();
-    const isAdmin = normalizedRole === "admin";
-    const isManager = normalizedRole === "manager";
-    const hasElevatedAccess = isAdmin || isManager;
-    const currentUserId = String(req.user?._id || req.user?.id || "").trim();
-
-    const latestRequestEntry = resolveLatestRequestEntry(qc?.request_history || []);
-    const latestRequestedQuantity = resolveRequestedQuantityFromQc(qc);
-    const hasQcRequest =
-      (Array.isArray(qc?.request_history) && qc.request_history.length > 0) ||
-      latestRequestedQuantity > 0;
-
-    if (!hasQcRequest) {
-      return res.status(400).json({
-        success: false,
-        message: "QC is not requested yet. Align QC request before uploading QC images.",
-      });
-    }
-
-    if (!hasElevatedAccess && normalizedRole === "qc") {
-      const inspectionRecords = await Inspection.find({ qc: qc._id }).lean();
-      const qcUserRequestAvailability = getQcUserLatestRequestAvailability(
-        qc,
-        inspectionRecords,
-        { currentUserId },
-      );
-      if (!qcUserRequestAvailability.isAvailable) {
-        return res
-          .status(qcUserRequestAvailability.statusCode || 403)
-          .json({
-            success: false,
-            message: qcUserRequestAvailability.reason,
-          });
-      }
     }
 
     const uploadMode = String(
