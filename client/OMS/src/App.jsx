@@ -41,6 +41,7 @@ import PendingPoReport from "./pages/PendingPoReport";
 import ProductAnalytics from "./pages/ProductAnalytics";
 import PIS from "./pages/PIS";
 import PISDiffs from "./pages/PISDiffs";
+import FinalPISCheck from "./pages/FinalPISCheck";
 import WeeklySummary from "./pages/WeeklySummary";
 import DailySummary from "./pages/DailySummary";
 import EmailLogs from "./pages/EmailLogs";
@@ -354,6 +355,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <PISDiffs />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/final-pis-check"
+            element={
+              <ProtectedRoute>
+                <FinalPISCheck />
               </ProtectedRoute>
             }
           />

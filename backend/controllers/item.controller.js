@@ -33,6 +33,17 @@ const {
   calculateEffectiveBoxEntriesCbmTotal,
   detectBoxPackagingMode,
 } = require("../helpers/boxMeasurement");
+const {
+  FINAL_PIS_CHECK_ITEM_SELECT,
+  buildFinalPisCheckRows,
+  buildFinalPisCheckPayload,
+  buildFinalPisCheckReportPayload,
+  buildFinalPisCheckOptions,
+  filterFinalPisCheckRowsByDiffField,
+  normalizeFinalPisCheckSortBy,
+  normalizeSortOrder,
+  sortFinalPisCheckRows,
+} = require("../helpers/finalPisCheck");
 
 const escapeRegex = (value = "") =>
   String(value)
@@ -1821,6 +1832,63 @@ const getCheckedPisDiffRowsForReport = async ({ search, brand, vendor } = {}) =>
   );
 };
 
+const buildFinalPisCheckMatch = ({ search, brand, vendor } = {}) => {
+  const conditions = [{ pis_checked_flag: true }];
+  const normalizedSearch = normalizeFilterValue(search);
+  const normalizedBrand = normalizeFilterValue(brand);
+  const normalizedVendor = normalizeFilterValue(vendor);
+
+  if (normalizedSearch) {
+    const escaped = escapeRegex(normalizedSearch);
+    conditions.push({
+      $or: [
+        { code: { $regex: escaped, $options: "i" } },
+        { name: { $regex: escaped, $options: "i" } },
+        { description: { $regex: escaped, $options: "i" } },
+      ],
+    });
+  }
+
+  if (normalizedBrand) {
+    conditions.push({
+      $or: [
+        { brand: normalizedBrand },
+        { brands: normalizedBrand },
+        { brand_name: normalizedBrand },
+      ],
+    });
+  }
+
+  if (normalizedVendor) {
+    conditions.push({ vendors: normalizedVendor });
+  }
+
+  return conditions.length === 1 ? conditions[0] : { $and: conditions };
+};
+
+const getFinalPisCheckRowsForQuery = async ({
+  search,
+  brand,
+  vendor,
+  diffField,
+  sortBy,
+  sortOrder,
+} = {}) => {
+  const match = buildFinalPisCheckMatch({ search, brand, vendor });
+  const items = await Item.find(match)
+    .select(FINAL_PIS_CHECK_ITEM_SELECT)
+    .sort({ updatedAt: -1, code: 1 })
+    .lean();
+
+  const rows = buildFinalPisCheckRows(items);
+  const filteredRows = filterFinalPisCheckRowsByDiffField(rows, diffField);
+
+  return sortFinalPisCheckRows(filteredRows, {
+    sortBy: normalizeFinalPisCheckSortBy(sortBy),
+    sortOrder: normalizeSortOrder(sortOrder),
+  });
+};
+
 const buildLatestInspectionReportLookup = async (itemCodes = []) => {
   const normalizedCodes = [...new Set(
     (Array.isArray(itemCodes) ? itemCodes : [])
@@ -2226,6 +2294,298 @@ exports.exportPisDiffCheckedReport = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to export checked PIS diff report",
+      error: error.message,
+    });
+  }
+};
+
+exports.getFinalPisCheckItems = async (req, res) => {
+  try {
+    const search = req.query.search;
+    const brand = req.query.brand;
+    const vendor = req.query.vendor;
+    const diffField = req.query.diff_field;
+    const page = parsePositiveInt(req.query.page, 1);
+    const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
+    const sortBy = req.query.sortBy;
+    const sortOrder = req.query.sortOrder;
+
+    const rows = await getFinalPisCheckRowsForQuery({
+      search,
+      brand,
+      vendor,
+      diffField,
+      sortBy,
+      sortOrder,
+    });
+
+    return res.status(200).json(
+      buildFinalPisCheckPayload({
+        rows,
+        search,
+        brand,
+        vendor,
+        diffField,
+        page,
+        limit,
+      }),
+    );
+  } catch (error) {
+    console.error("Get Final PIS Check Items Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch Final PIS Check items",
+      error: error.message,
+    });
+  }
+};
+
+exports.getFinalPisCheckOptions = async (req, res) => {
+  try {
+    const rows = await getFinalPisCheckRowsForQuery({
+      search: req.query.search,
+      brand: req.query.brand,
+      vendor: req.query.vendor,
+      sortBy: "code",
+      sortOrder: "asc",
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: buildFinalPisCheckOptions(rows),
+    });
+  } catch (error) {
+    console.error("Get Final PIS Check Options Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch Final PIS Check options",
+      error: error.message,
+    });
+  }
+};
+
+exports.getFinalPisCheckReportPreview = async (req, res) => {
+  try {
+    const search = req.query.search;
+    const brand = req.query.brand;
+    const vendor = req.query.vendor;
+    const diffField = req.query.diff_field;
+    const sortBy = req.query.sortBy;
+    const sortOrder = req.query.sortOrder;
+
+    const rows = await getFinalPisCheckRowsForQuery({
+      search,
+      brand,
+      vendor,
+      diffField,
+      sortBy,
+      sortOrder,
+    });
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No Final PIS Check items found for preview",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: buildFinalPisCheckReportPayload({
+        rows,
+        search,
+        brand,
+        vendor,
+        diffField,
+      }),
+    });
+  } catch (error) {
+    console.error("Preview Final PIS Check Report Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to preview Final PIS Check report",
+      error: error.message,
+    });
+  }
+};
+
+exports.exportFinalPisCheckReport = async (req, res) => {
+  try {
+    const search = req.query.search;
+    const brand = req.query.brand;
+    const vendor = req.query.vendor;
+    const diffField = req.query.diff_field;
+    const sortBy = req.query.sortBy;
+    const sortOrder = req.query.sortOrder;
+
+    const rows = await getFinalPisCheckRowsForQuery({
+      search,
+      brand,
+      vendor,
+      diffField,
+      sortBy,
+      sortOrder,
+    });
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No Final PIS Check items found for export",
+      });
+    }
+
+    const reportPayload = buildFinalPisCheckReportPayload({
+      rows,
+      search,
+      brand,
+      vendor,
+      diffField,
+    });
+    const detailColumns = [
+      { key: "code", header: "Item Code" },
+      { key: "description", header: "Description" },
+      { key: "brand", header: "Brand" },
+      { key: "vendors", header: "Vendors" },
+      { key: "diff_fields", header: "Diff Fields" },
+      { key: "inspected_item_size", header: "Inspected Item Size" },
+      { key: "inspected_item_weight", header: "Inspected Item Net Weight" },
+      { key: "pis_item_size", header: "PIS Item Size" },
+      { key: "pis_item_weight", header: "PIS Item Net Weight" },
+      { key: "inspected_box_size", header: "Inspected Box Size" },
+      { key: "inspected_box_weight", header: "Inspected Box Gross Weight" },
+      { key: "pis_box_size", header: "PIS Box Size" },
+      { key: "pis_box_weight", header: "PIS Box Gross Weight" },
+      { key: "updated_at", header: "Last Updated" },
+    ];
+    const detailRows = rows.map((row) => ({
+      code: row?.code || "N/A",
+      description: row?.description || "N/A",
+      brand: row?.brand || "N/A",
+      vendors: row?.vendors || "N/A",
+      diff_fields: Array.isArray(row?.diff_fields) ? row.diff_fields.join(", ") : "",
+      inspected_item_size: row?.measurements?.inspected_item?.sizeDisplay || "Not Set",
+      inspected_item_weight: row?.measurements?.inspected_item?.weightDisplay || "Not Set",
+      pis_item_size: row?.measurements?.pis_item?.sizeDisplay || "Not Set",
+      pis_item_weight: row?.measurements?.pis_item?.weightDisplay || "Not Set",
+      inspected_box_size: row?.measurements?.inspected_box?.sizeDisplay || "Not Set",
+      inspected_box_weight: row?.measurements?.inspected_box?.weightDisplay || "Not Set",
+      pis_box_size: row?.measurements?.pis_box?.sizeDisplay || "Not Set",
+      pis_box_weight: row?.measurements?.pis_box?.weightDisplay || "Not Set",
+      updated_at: row?.updated_at || "",
+    }));
+    const detailedDiffColumns = [
+      { key: "code", header: "Item Code" },
+      { key: "description", header: "Description" },
+      { key: "brand", header: "Brand" },
+      { key: "vendors", header: "Vendors" },
+      { key: "section", header: "Area" },
+      { key: "segment", header: "Measurement Segment" },
+      { key: "attribute", header: "Attribute" },
+      { key: "inspected", header: "Inspected" },
+      { key: "pis", header: "PIS" },
+      { key: "delta", header: "Difference" },
+      { key: "note", header: "Remark" },
+    ];
+    const detailedDiffRows = rows.flatMap((row) =>
+      (Array.isArray(row?.differences) ? row.differences : []).map((difference) => ({
+        code: row?.code || "N/A",
+        description: row?.description || "N/A",
+        brand: row?.brand || "N/A",
+        vendors: row?.vendors || "N/A",
+        section: difference?.section || "",
+        segment: difference?.segment || "",
+        attribute: difference?.attribute || "",
+        inspected: difference?.inspected || "Not Set",
+        pis: difference?.pis || "Not Set",
+        delta: difference?.delta || "",
+        note: difference?.note || "",
+      })),
+    );
+    const filterSummaryRows = [
+      ["Final PIS Check Report", ""],
+      ["Generated On", new Date().toISOString().slice(0, 19).replace("T", " ")],
+      ["Search Filter", reportPayload?.filters?.search || "All"],
+      ["Brand Filter", reportPayload?.filters?.brand || "All"],
+      ["Vendor Filter", reportPayload?.filters?.vendor || "All"],
+      ["Difference Field Filter", reportPayload?.filters?.diff_field || "All"],
+      ["Items With Difference", Number(reportPayload?.summary?.checked_diff_items || 0)],
+      [
+        "Detailed Difference Rows",
+        Number(reportPayload?.summary?.detailed_difference_rows || 0),
+      ],
+      [
+        "Unique Brands",
+        Array.isArray(reportPayload?.summary?.unique_brands)
+          ? reportPayload.summary.unique_brands.join(", ")
+          : "",
+      ],
+      [
+        "Unique Vendors",
+        Array.isArray(reportPayload?.summary?.unique_vendors)
+          ? reportPayload.summary.unique_vendors.join(", ")
+          : "",
+      ],
+      ...Object.entries(reportPayload?.summary?.diff_field_counts || {}).map(
+        ([field, count]) => [`${field} Count`, Number(count || 0)],
+      ),
+    ];
+
+    const detailHeaderRow = detailColumns.map((column) => column.header);
+    const detailDataRows = detailRows.map((row) =>
+      detailColumns.map((column) => row[column.key] ?? ""),
+    );
+    const detailedDiffHeaderRow = detailedDiffColumns.map((column) => column.header);
+    const detailedDiffDataRows = detailedDiffRows.map((row) =>
+      detailedDiffColumns.map((column) => row[column.key] ?? ""),
+    );
+
+    const summarySheet = XLSX.utils.aoa_to_sheet(filterSummaryRows);
+    summarySheet["!cols"] = [{ wch: 28 }, { wch: 90 }];
+
+    const detailSheet = XLSX.utils.aoa_to_sheet([detailHeaderRow, ...detailDataRows]);
+    detailSheet["!cols"] = detailColumns.map((column, columnIndex) => {
+      const maxDataLength = Math.max(
+        ...detailDataRows.map((row) => String(row[columnIndex] ?? "").length),
+        column.header.length,
+      );
+      return { wch: Math.min(44, Math.max(14, maxDataLength + 2)) };
+    });
+
+    const detailedDiffSheet = XLSX.utils.aoa_to_sheet([
+      detailedDiffHeaderRow,
+      ...detailedDiffDataRows,
+    ]);
+    detailedDiffSheet["!cols"] = detailedDiffColumns.map((column, columnIndex) => {
+      const maxDataLength = Math.max(
+        ...detailedDiffDataRows.map((row) => String(row[columnIndex] ?? "").length),
+        column.header.length,
+      );
+      return { wch: Math.min(56, Math.max(14, maxDataLength + 2)) };
+    });
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
+    XLSX.utils.book_append_sheet(workbook, detailSheet, "Final PIS Check");
+    XLSX.utils.book_append_sheet(workbook, detailedDiffSheet, "Detailed Differences");
+
+    const fileBuffer = XLSX.write(workbook, {
+      type: "buffer",
+      bookType: "xlsx",
+    });
+    const fileDate = new Date().toISOString().slice(0, 10);
+    const fileName = `final-pis-check-${fileDate}.xlsx`;
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    return res.status(200).send(fileBuffer);
+  } catch (error) {
+    console.error("Export Final PIS Check Report Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to export Final PIS Check report",
       error: error.message,
     });
   }

@@ -308,6 +308,7 @@ itemSchema.index({ brand: 1 });
 itemSchema.index({ brand_name: 1 });
 itemSchema.index({ brands: 1 });
 itemSchema.index({ vendors: 1 });
+itemSchema.index({ pis_checked_flag: 1 });
 
 itemSchema.pre("validate", function syncBarcodeAliases() {
   const normalizedPisMasterBarcode = String(

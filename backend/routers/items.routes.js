@@ -18,6 +18,10 @@ const {
   getPisDiffItems,
   getPisDiffCheckedReportPreview,
   exportPisDiffCheckedReport,
+  getFinalPisCheckItems,
+  getFinalPisCheckOptions,
+  getFinalPisCheckReportPreview,
+  exportFinalPisCheckReport,
   getItemOrderPresence,
   getItemOrdersHistory,
   createItem,
@@ -64,6 +68,37 @@ router.get(
   auth,
   authorize("admin", "manager", "QC", "dev", "user"),
   exportPisDiffCheckedReport,
+);
+
+router.get(
+  "/final-pis-check",
+  auth,
+  authorize("admin", "manager", "QC", "dev", "user"),
+  cacheRoute("items", MEDIUM_CACHE_TTL),
+  getFinalPisCheckItems,
+);
+
+router.get(
+  "/final-pis-check/options",
+  auth,
+  authorize("admin", "manager", "QC", "dev", "user"),
+  cacheRoute("items", MEDIUM_CACHE_TTL),
+  getFinalPisCheckOptions,
+);
+
+router.get(
+  "/final-pis-check/export-preview",
+  auth,
+  authorize("admin", "manager", "QC", "dev", "user"),
+  cacheRoute("reports", MEDIUM_CACHE_TTL),
+  getFinalPisCheckReportPreview,
+);
+
+router.get(
+  "/final-pis-check/export",
+  auth,
+  authorize("admin", "manager", "QC", "dev", "user"),
+  exportFinalPisCheckReport,
 );
 
 router.post(

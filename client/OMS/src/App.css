@@ -1405,6 +1405,10 @@ small,
   margin-top: 0.65rem;
 }
 
+.pis-diff-report-grid-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .pis-diff-report-filter-grid > div,
 .pis-diff-report-summary-grid > div,
 .pis-diff-report-measure-grid > div {
@@ -2381,6 +2385,10 @@ small,
   .pis-diff-report-filter-grid,
   .pis-diff-report-summary-grid,
   .pis-diff-report-measure-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pis-diff-report-grid-4 {
     grid-template-columns: minmax(0, 1fr);
   }
 

@@ -65,6 +65,7 @@ const Navbar = () => {
         { label: "Containers", path: "/containers" },
         { label: "Daily Inspection Reports", path: "/daily-reports" },
         { label: "Items", path: "/items" },
+        { label: "Samples", path: "/shipped-samples" },
       );
     }
 
@@ -92,6 +93,7 @@ const Navbar = () => {
       links.push(
         { label: "PIS", path: "/pis" },
         { label: "PIS Diffs", path: "/pis-diffs" },
+        { label: "Final PIS Check", path: "/final-pis-check" },
       );
     }
 
