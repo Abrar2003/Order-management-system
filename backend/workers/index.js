@@ -142,6 +142,9 @@ const processAllOrderCbmRecalc = async (job) => {
   const summary = await backfillTotalPoCbmForOrders({
     batchSize: parsePositiveInt(job.data?.batchSize, 500),
     dryRun: Boolean(job.data?.dryRun),
+    forceUpdate: Boolean(job.data?.forceUpdate),
+    requireCalculatedCbm: Boolean(job.data?.requireCalculatedCbm),
+    eligibleOnly: job.data?.eligibleOnly !== false,
   });
   await job.updateProgress(95);
   await invalidateOrderCaches();

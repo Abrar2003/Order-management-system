@@ -338,6 +338,27 @@ const resolveOrderRowCbmSummary = (itemDoc = null, orderQuantity = 0) => {
   };
 };
 
+const resolveOrderRowCbmSummaryWithStoredFallback = ({
+  itemDoc = null,
+  quantity = 0,
+  storedTotalCbm = 0,
+} = {}) => {
+  const calculatedSummary = resolveOrderRowCbmSummary(itemDoc, quantity);
+  if (toPositiveCbmNumber(calculatedSummary?.total) > 0) {
+    return calculatedSummary;
+  }
+
+  const total = toPositiveCbmNumber(storedTotalCbm);
+  if (total <= 0) return calculatedSummary;
+
+  const quantityValue = Math.max(0, Number(quantity || 0));
+  return {
+    source: "total_po_cbm",
+    per_item: quantityValue > 0 ? toRoundedCbmValue(total / quantityValue) : 0,
+    total,
+  };
+};
+
 const normalizeBrandKey = (value) => normalizeLooseString(value).toLowerCase();
 
 const normalizeVendorKey = (value) => normalizeLooseString(value).toLowerCase();
@@ -3102,10 +3123,11 @@ const buildPoBucketDataset = async ({
     const itemCodeValue = normalizeLooseString(orderEntry?.item?.item_code);
     const itemDoc = itemMap.get(itemCodeValue.toLowerCase()) || null;
     const storedPoCbm = toPositiveCbmNumber(orderEntry?.total_po_cbm);
-    const cbmSummary =
-      storedPoCbm > 0
-        ? { total: storedPoCbm }
-        : resolveOrderRowCbmSummary(itemDoc, lineProgress.order_quantity);
+    const cbmSummary = resolveOrderRowCbmSummaryWithStoredFallback({
+      itemDoc,
+      quantity: lineProgress.order_quantity,
+      storedTotalCbm: storedPoCbm,
+    });
     groupedEntry.total_cbm += Number(cbmSummary?.total || 0);
     groupedEntry.order_date = resolveEarlierDate(
       groupedEntry.order_date,
@@ -3320,6 +3342,37 @@ const resolveShipmentRowCbm = ({
   return 0;
 };
 
+const resolveSampleShipmentCbmSummary = (sample = {}, quantity = 0) => {
+  const shipmentQuantity = Math.max(0, Number(quantity || 0));
+  if (shipmentQuantity <= 0) {
+    return {
+      per_item_cbm: 0,
+      shipment_cbm: 0,
+      source: null,
+    };
+  }
+
+  const measuredShipmentCbm = calculateTotalPoCbm({
+    orderQuantity: shipmentQuantity,
+    inspectedBoxSizes: sample?.box_sizes,
+    inspectedBoxMode: sample?.box_mode,
+  });
+  if (measuredShipmentCbm > 0) {
+    return {
+      per_item_cbm: toRoundedCbmValue(measuredShipmentCbm / shipmentQuantity),
+      shipment_cbm: measuredShipmentCbm,
+      source: "sample_box",
+    };
+  }
+
+  const perItemCbm = toRoundedCbmValue(Math.max(0, Number(sample?.cbm || 0)));
+  return {
+    per_item_cbm: perItemCbm,
+    shipment_cbm: toRoundedCbmValue(perItemCbm * shipmentQuantity),
+    source: "sample",
+  };
+};
+
 const mapOrdersToShipmentRows = (orders = []) =>
   orders.flatMap((order) => {
     const shipmentEntries = Array.isArray(order?.shipment)
@@ -3330,11 +3383,12 @@ const mapOrdersToShipmentRows = (orders = []) =>
       ? parsedOrderQuantity
       : 0;
     const storedPoCbm = toPositiveCbmNumber(order?.total_po_cbm);
-    const cbmSummary = resolveOrderRowCbmSummary(order?.itemDoc, 1);
-    const perItemCbm =
-      storedPoCbm > 0 && normalizedOrderQuantity > 0
-        ? toRoundedCbmValue(storedPoCbm / normalizedOrderQuantity)
-        : Number(cbmSummary?.per_item || 0);
+    const cbmSummary = resolveOrderRowCbmSummaryWithStoredFallback({
+      itemDoc: order?.itemDoc,
+      quantity: normalizedOrderQuantity,
+      storedTotalCbm: storedPoCbm,
+    });
+    const perItemCbm = Number(cbmSummary?.per_item || 0);
 
     const baseRow = {
       _id: order?._id || null,
@@ -3457,13 +3511,13 @@ const mapSamplesToShipmentRows = (samples = []) =>
   samples.flatMap((sample) => {
     const shipmentEntries = Array.isArray(sample?.shipment) ? sample.shipment : [];
     const vendorLabel = normalizeDistinctValues(sample?.vendor).join(", ");
-    const perItemCbm = toRoundedCbmValue(Math.max(0, Number(sample?.cbm || 0)));
 
     return shipmentEntries.map((entry, index) => {
       const parsedShipmentQuantity = Number(entry?.quantity);
       const quantity = Number.isFinite(parsedShipmentQuantity)
         ? Math.max(0, parsedShipmentQuantity)
         : 0;
+      const cbmSummary = resolveSampleShipmentCbmSummary(sample, quantity);
 
       return {
         _id: sample?._id || null,
@@ -3484,8 +3538,8 @@ const mapSamplesToShipmentRows = (samples = []) =>
         status: "Shipped",
         passed_quantity: quantity,
         shippable_quantity: 0,
-        per_item_cbm: perItemCbm,
-        cbm_source: "sample",
+        per_item_cbm: cbmSummary.per_item_cbm,
+        cbm_source: cbmSummary.source,
         line_type: "sample",
         sample_name: sample?.name || "",
         shipment_id: entry?._id || `${sample?._id || "sample"}-${index}`,
@@ -3499,7 +3553,7 @@ const mapSamplesToShipmentRows = (samples = []) =>
         remaining_remarks: entry?.remaining_remarks || "",
         shipment_checked: Boolean(entry?.checked?.checked),
         shipment_checked_by: entry?.checked?.checked_by || null,
-        shipment_cbm: toRoundedCbmValue(perItemCbm * quantity),
+        shipment_cbm: cbmSummary.shipment_cbm,
       };
     });
   });
@@ -3603,7 +3657,7 @@ const getShipmentDataset = async ({
       itemCode,
     }),
   )
-    .select("code name description brand vendor cbm shipment createdAt updatedAt")
+    .select("code name description brand vendor cbm box_sizes box_mode shipment createdAt updatedAt")
     .sort({ updatedAt: -1, code: 1 })
     .lean();
 
@@ -6058,21 +6112,14 @@ exports.getOrderById = async (req, res) => {
       const itemCodeKey = normalizeLooseString(orderRow?.item?.item_code).toLowerCase();
       const itemDoc = itemMap.get(itemCodeKey) || null;
       const storedPoCbm = toPositiveCbmNumber(orderRow?.total_po_cbm);
-      const fallbackCbmSummary = resolveOrderRowCbmSummary(itemDoc, orderRow?.quantity);
       return {
         ...orderRow,
         status: deriveOrderStatus({ orderEntry: orderRow }),
-        cbm_summary:
-          storedPoCbm > 0
-            ? {
-                source: "total_po_cbm",
-                per_item:
-                  Number(orderRow?.quantity || 0) > 0
-                    ? toRoundedCbmValue(storedPoCbm / Number(orderRow.quantity || 0))
-                    : 0,
-                total: storedPoCbm,
-              }
-            : fallbackCbmSummary,
+        cbm_summary: resolveOrderRowCbmSummaryWithStoredFallback({
+          itemDoc,
+          quantity: orderRow?.quantity,
+          storedTotalCbm: storedPoCbm,
+        }),
       };
     });
 
@@ -6520,9 +6567,9 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
     const totalCbm = toRoundedCbmValue(
       orders.reduce((sum, row) => {
         const rowCbm =
+          toPositiveCbmNumber(row?.total_cbm) ||
           toPositiveCbmNumber(row?.total_po_cbm) ||
-          toPositiveCbmNumber(row?.top_po_cbm) ||
-          toPositiveCbmNumber(row?.total_cbm);
+          toPositiveCbmNumber(row?.top_po_cbm);
         return sum + rowCbm;
       }, 0),
     );
@@ -8685,11 +8732,25 @@ exports.getPackedGoods = async (req, res) => {
         const storedPoCbm = toPositiveCbmNumber(orderEntry?.total_po_cbm);
         const orderQuantity = Math.max(0, Number(orderEntry?.quantity || 0));
         const cbmSummary = resolveOrderRowCbmSummary(itemDoc, packedQuantity);
-        const perItemCbm =
+        const calculatedPackedCbm = toPositiveCbmNumber(cbmSummary?.total);
+        const storedPerItemCbm =
           storedPoCbm > 0 && orderQuantity > 0
             ? toRoundedCbmValue(storedPoCbm / orderQuantity)
-            : Number(cbmSummary?.per_item || 0);
-        const totalCbm = toRoundedCbmValue(perItemCbm * packedQuantity);
+            : 0;
+        const perItemCbm =
+          calculatedPackedCbm > 0 && packedQuantity > 0
+            ? toRoundedCbmValue(calculatedPackedCbm / packedQuantity)
+            : storedPerItemCbm || Number(cbmSummary?.per_item || 0);
+        const totalCbm =
+          calculatedPackedCbm > 0
+            ? toRoundedCbmValue(calculatedPackedCbm)
+            : toRoundedCbmValue(perItemCbm * packedQuantity);
+        const cbmSource =
+          calculatedPackedCbm > 0
+            ? cbmSummary?.source || null
+            : storedPoCbm > 0
+              ? "total_po_cbm"
+              : cbmSummary?.source || null;
         const normalizedOrderId = normalizeOrderKey(orderEntry?.order_id) || "N/A";
         const poKey = [
           normalizedOrderId,
@@ -8712,7 +8773,7 @@ exports.getPackedGoods = async (req, res) => {
           po_has_no_pending_quantity: Number(poPendingQuantityMap.get(poKey) || 0) <= 0,
           total_cbm: Number.isFinite(totalCbm) ? totalCbm : 0,
           per_item_cbm: Number.isFinite(perItemCbm) ? perItemCbm : 0,
-          cbm_source: storedPoCbm > 0 ? "total_po_cbm" : cbmSummary?.source || null,
+          cbm_source: cbmSource,
         };
       })
       .filter(Boolean);
@@ -10462,13 +10523,31 @@ exports.recalculateTotalPoCbm = async (req, res) => {
       parsePositiveInt(req.body?.batchSize || req.query?.batchSize, 500),
     );
     const dryRun = parseBooleanInput(req.body?.dryRun ?? req.query?.dryRun, false);
+    const forceUpdate = parseBooleanInput(
+      req.body?.forceUpdate ?? req.query?.forceUpdate,
+      false,
+    );
+    const requireCalculatedCbm = parseBooleanInput(
+      req.body?.requireCalculatedCbm ?? req.query?.requireCalculatedCbm,
+      false,
+    );
+    const eligibleOnly = parseBooleanInput(
+      req.body?.eligibleOnly ?? req.query?.eligibleOnly,
+      true,
+    );
     const asyncRequested = parseBooleanInput(
       req.body?.async ?? req.query?.async,
       false,
     );
 
     if (asyncRequested) {
-      const job = await enqueueAllOrderCbmRecalc({ batchSize, dryRun });
+      const job = await enqueueAllOrderCbmRecalc({
+        batchSize,
+        dryRun,
+        forceUpdate,
+        requireCalculatedCbm,
+        eligibleOnly,
+      });
       if (job) {
         return res.status(202).json({
           success: true,
@@ -10483,6 +10562,9 @@ exports.recalculateTotalPoCbm = async (req, res) => {
     const summary = await backfillTotalPoCbmForOrders({
       batchSize,
       dryRun,
+      forceUpdate,
+      requireCalculatedCbm,
+      eligibleOnly,
     });
 
     return res.status(200).json({

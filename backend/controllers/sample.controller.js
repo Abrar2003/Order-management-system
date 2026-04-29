@@ -1,5 +1,6 @@
 const Sample = require("../models/sample.model");
 const { BOX_PACKAGING_MODES, BOX_ENTRY_TYPES } = require("../helpers/boxMeasurement");
+const { calculateTotalPoCbm } = require("../services/orderCbm.service");
 
 const SHIPPED_BY_VENDOR_ID = "shipped_by_vendor";
 const SHIPPED_BY_VENDOR_NAME = "Shipped By Vendor";
@@ -258,10 +259,29 @@ const normalizeDistinctValues = (values = []) =>
       .filter(Boolean),
   )].sort((left, right) => left.localeCompare(right));
 
-const calculateShipmentCbm = (sample = {}, quantity = 0) => {
-  const perUnitCbm = Math.max(0, Number(sample?.cbm || 0));
-  return Number((perUnitCbm * Math.max(0, Number(quantity || 0))).toFixed(3));
+const roundCbm = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Number(parsed.toFixed(6));
 };
+
+const calculateShipmentCbm = (sample = {}, quantity = 0) => {
+  const shipmentQuantity = Math.max(0, Number(quantity || 0));
+  if (shipmentQuantity <= 0) return 0;
+
+  const measuredShipmentCbm = calculateTotalPoCbm({
+    orderQuantity: shipmentQuantity,
+    inspectedBoxSizes: sample?.box_sizes,
+    inspectedBoxMode: sample?.box_mode,
+  });
+  if (measuredShipmentCbm > 0) return roundCbm(measuredShipmentCbm);
+
+  const perUnitCbm = Math.max(0, Number(sample?.cbm || 0));
+  return roundCbm(perUnitCbm * shipmentQuantity);
+};
+
+const calculateSamplePerItemCbm = (sample = {}) =>
+  calculateShipmentCbm(sample, 1);
 
 const isBadRequestError = (error) => {
   const normalized = String(error?.message || "").trim().toLowerCase();
@@ -303,7 +323,7 @@ const flattenSampleShipmentRows = (samples = []) =>
         shipment_checked: Boolean(entry?.checked?.checked),
         shipment_checked_by: entry?.checked?.checked_by || null,
         shipment_cbm: calculateShipmentCbm(sample, quantity),
-        per_item_cbm: Math.max(0, Number(sample?.cbm || 0)),
+        per_item_cbm: calculateSamplePerItemCbm(sample),
         createdAt: sample?.createdAt || null,
         updatedAt: sample?.updatedAt || null,
       };

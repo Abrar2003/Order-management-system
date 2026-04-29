@@ -171,11 +171,17 @@ const enqueueOrderCbmRecalc = ({ orderId } = {}) => {
   );
 };
 
-const enqueueAllOrderCbmRecalc = ({ batchSize = 500, dryRun = false } = {}) =>
+const enqueueAllOrderCbmRecalc = ({
+  batchSize = 500,
+  dryRun = false,
+  forceUpdate = false,
+  requireCalculatedCbm = false,
+  eligibleOnly = true,
+} = {}) =>
   addJob(
     QUEUE_NAMES.cbmRecalcQueue,
     JOB_NAMES.RECALCULATE_ALL_ORDER_CBM,
-    { batchSize, dryRun },
+    { batchSize, dryRun, forceUpdate, requireCalculatedCbm, eligibleOnly },
     { jobId: `cbm:all:${dryRun ? "dry-run" : "live"}:${Date.now()}` },
   );
 

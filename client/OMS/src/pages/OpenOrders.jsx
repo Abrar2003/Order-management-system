@@ -584,9 +584,9 @@ const OpenOrders = ({ bucket = "open" }) => {
                         <td>
                           {formatCbm(
                             resolvePreferredCbm(
+                              order?.total_cbm,
                               order?.total_po_cbm,
                               order?.top_po_cbm,
-                              order?.total_cbm,
                             ),
                           )}
                         </td>

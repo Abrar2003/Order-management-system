@@ -26,10 +26,16 @@ const main = async () => {
 
   const batchSize = parsePositiveIntArg("batch-size", 500);
   const dryRun = hasFlag("dry-run");
+  const forceUpdate = !hasFlag("no-force");
+  const requireCalculatedCbm = !hasFlag("include-zero-cbm");
+  const eligibleOnly = hasFlag("eligible-only");
 
   const summary = await backfillTotalPoCbmForOrders({
     batchSize,
     dryRun,
+    forceUpdate,
+    requireCalculatedCbm,
+    eligibleOnly,
   });
 
   console.log("total_po_cbm backfill completed");

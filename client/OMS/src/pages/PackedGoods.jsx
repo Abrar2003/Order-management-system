@@ -559,9 +559,9 @@ const PackedGoods = () => {
                           <td>
                             {formatCbm(
                               resolvePreferredCbm(
+                                row?.total_cbm,
                                 row?.total_po_cbm,
                                 row?.top_po_cbm,
-                                row?.total_cbm,
                               ),
                             )}
                           </td>

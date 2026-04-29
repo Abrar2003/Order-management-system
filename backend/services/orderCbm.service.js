@@ -147,7 +147,7 @@ const calculateCartonModeTotalPoCbm = ({
   // Formula requested for PO CBM. It intentionally uses the master carton CBM
   // and count metadata rather than summing inner + master carton dimensions.
   return roundCbm(
-    ((itemCountInInner * boxCountInMaster) / quantity) * masterBoxCbm,
+    (quantity / (itemCountInInner * boxCountInMaster)) * masterBoxCbm,
   );
 };
 
@@ -375,6 +375,8 @@ const findItemsByCodes = async (codes = []) => {
 const processBackfillBatch = async ({
   orders = [],
   dryRun = false,
+  forceUpdate = false,
+  requireCalculatedCbm = false,
 } = {}) => {
   const summary = {
     processed: 0,
@@ -382,6 +384,7 @@ const processBackfillBatch = async ({
     skipped: 0,
     failed: 0,
     missing_items: 0,
+    no_calculated_cbm: 0,
   };
 
   const itemMap = await findItemsByCodes(orders.map(getOrderItemCode));
@@ -391,14 +394,26 @@ const processBackfillBatch = async ({
     try {
       summary.processed += 1;
       const item = itemMap.get(normalizeLookupKey(getOrderItemCode(order))) || null;
-      if (!item) summary.missing_items += 1;
+      if (!item) {
+        summary.missing_items += 1;
+        if (requireCalculatedCbm) {
+          summary.skipped += 1;
+          continue;
+        }
+      }
 
       const nextValue = item
         ? calculateOrderTotalPoCbm({ order, item })
         : 0;
       const currentValue = roundCbm(order?.total_po_cbm || 0);
 
-      if (currentValue === nextValue) {
+      if (requireCalculatedCbm && nextValue <= 0) {
+        summary.no_calculated_cbm += 1;
+        summary.skipped += 1;
+        continue;
+      }
+
+      if (!forceUpdate && currentValue === nextValue) {
         summary.skipped += 1;
         continue;
       }
@@ -440,6 +455,9 @@ const addSummary = (target, source) => {
 const backfillTotalPoCbmForOrders = async ({
   batchSize = DEFAULT_BATCH_SIZE,
   dryRun = false,
+  forceUpdate = false,
+  requireCalculatedCbm = false,
+  eligibleOnly = true,
 } = {}) => {
   const safeBatchSize = Math.max(1, Number(batchSize) || DEFAULT_BATCH_SIZE);
   const summary = {
@@ -448,9 +466,17 @@ const backfillTotalPoCbmForOrders = async ({
     skipped: 0,
     failed: 0,
     missing_items: 0,
+    no_calculated_cbm: 0,
   };
 
-  const cursor = Order.find(buildEligibleOrderMatch())
+  const orderMatch = eligibleOnly
+    ? buildEligibleOrderMatch()
+    : {
+        archived: { $ne: true },
+        status: { $ne: "Cancelled" },
+      };
+
+  const cursor = Order.find(orderMatch)
     .select("_id order_id item quantity status qc_record archived total_po_cbm")
     .lean()
     .cursor();
@@ -459,18 +485,37 @@ const backfillTotalPoCbmForOrders = async ({
   for await (const order of cursor) {
     batch.push(order);
     if (batch.length >= safeBatchSize) {
-      addSummary(summary, await processBackfillBatch({ orders: batch, dryRun }));
+      addSummary(
+        summary,
+        await processBackfillBatch({
+          orders: batch,
+          dryRun,
+          forceUpdate,
+          requireCalculatedCbm,
+        }),
+      );
       batch = [];
     }
   }
 
   if (batch.length > 0) {
-    addSummary(summary, await processBackfillBatch({ orders: batch, dryRun }));
+    addSummary(
+      summary,
+      await processBackfillBatch({
+        orders: batch,
+        dryRun,
+        forceUpdate,
+        requireCalculatedCbm,
+      }),
+    );
   }
 
   return {
     ...summary,
     dry_run: Boolean(dryRun),
+    force_update: Boolean(forceUpdate),
+    require_calculated_cbm: Boolean(requireCalculatedCbm),
+    eligible_only: Boolean(eligibleOnly),
     batch_size: safeBatchSize,
   };
 };

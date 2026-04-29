@@ -257,12 +257,12 @@ const formatResolvedCbm = (value) => {
 };
 
 const renderOrderCbmCell = (order) => {
-  const storedTotalCbm = resolvePreferredCbm(
+  const totalCbm = resolvePreferredCbm(
+    order?.cbm_summary?.total,
     order?.total_po_cbm,
     order?.top_po_cbm,
   );
   const perItemCbm = order?.cbm_summary?.per_item;
-  const totalCbm = storedTotalCbm > 0 ? storedTotalCbm : order?.cbm_summary?.total;
 
   return (
     <div className="d-flex flex-column gap-1">

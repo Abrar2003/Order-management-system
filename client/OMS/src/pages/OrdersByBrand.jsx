@@ -33,9 +33,9 @@ const calculateOrdersTotalCbm = (orders = []) =>
     (sum, order) =>
       sum +
       resolvePreferredCbm(
+        order?.total_cbm,
         order?.total_po_cbm,
         order?.top_po_cbm,
-        order?.total_cbm,
       ),
     0,
   );
@@ -94,8 +94,8 @@ const OrdersByBrand = () => {
         const responseSummary = res.data?.summary || {};
         const totalCbm =
           resolvePreferredCbm(
-            responseSummary?.total_po_cbm,
             responseSummary?.total_cbm,
+            responseSummary?.total_po_cbm,
           ) || calculateOrdersTotalCbm(responseOrders);
 
         setOrders(responseOrders);
@@ -243,9 +243,9 @@ const OrdersByBrand = () => {
                         <td>
                           {formatCbm(
                             resolvePreferredCbm(
+                              order?.total_cbm,
                               order?.total_po_cbm,
                               order?.top_po_cbm,
-                              order?.total_cbm,
                             ),
                           )}
                         </td>
