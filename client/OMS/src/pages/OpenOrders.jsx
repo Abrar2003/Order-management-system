@@ -602,8 +602,8 @@ const OpenOrders = ({ bucket = "open" }) => {
                               orderId={order?.order_id}
                               itemCode={order?.item?.item_code}
                               etd={order?.ETD}
-                              revisedEtd={order?.effective_ETD || order?.revised_ETD}
-                              fallback="-"
+                              revisedEtd={order?.revised_ETD}
+                              fallback="N/A"
                               showOriginalWhenNoRevision={false}
                             />
                           )}

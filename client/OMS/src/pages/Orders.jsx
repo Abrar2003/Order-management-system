@@ -574,7 +574,7 @@ const Orders = () => {
                             itemCode={order?.item?.item_code}
                             etd={order?.ETD}
                             revisedEtd={order?.revised_ETD}
-                            fallback="-"
+                            fallback="N/A"
                             showOriginalWhenNoRevision={false}
                             />
                         </td>

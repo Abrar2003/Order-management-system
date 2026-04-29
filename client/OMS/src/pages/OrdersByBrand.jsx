@@ -255,8 +255,8 @@ const OrdersByBrand = () => {
                           <OrderEtdWithHistory
                             orderId={order?.order_id}
                             etd={order?.ETD}
-                            revisedEtd={order?.effective_ETD || order?.revised_ETD}
-                            fallback="-"
+                            revisedEtd={order?.revised_ETD}
+                            fallback="N/A"
                             showOriginalWhenNoRevision={false}
                           />
                         </td>
