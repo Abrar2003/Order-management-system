@@ -1,5 +1,68 @@
 const mongoose = require("mongoose");
 
+const {
+  BOX_PACKAGING_MODES,
+  BOX_ENTRY_TYPES,
+  BOX_SIZE_REMARK_OPTIONS,
+} = require("../helpers/boxMeasurement");
+
+const SIZE_ENTRY_LIMIT = 4;
+const ITEM_SIZE_REMARKS = [
+  "",
+  "item",
+  "top",
+  "base",
+  "item1",
+  "item2",
+  "item3",
+  "item4",
+];
+const BOX_SIZE_REMARKS = ["", ...BOX_SIZE_REMARK_OPTIONS];
+
+const createSizeEntrySchema = (remarkEnum = []) =>
+  new mongoose.Schema(
+    {
+      L: { type: Number, default: 0, min: 0 },
+      B: { type: Number, default: 0, min: 0 },
+      H: { type: Number, default: 0, min: 0 },
+      remark: {
+        type: String,
+        enum: remarkEnum,
+        default: "",
+        trim: true,
+      },
+      net_weight: { type: Number, default: 0, min: 0 },
+      gross_weight: { type: Number, default: 0, min: 0 },
+    },
+    { _id: false },
+  );
+
+const itemSizeEntrySchema = createSizeEntrySchema(ITEM_SIZE_REMARKS);
+const boxSizeEntrySchema = new mongoose.Schema(
+  {
+    L: { type: Number, default: 0, min: 0 },
+    B: { type: Number, default: 0, min: 0 },
+    H: { type: Number, default: 0, min: 0 },
+    remark: {
+      type: String,
+      enum: BOX_SIZE_REMARKS,
+      default: "",
+      trim: true,
+    },
+    net_weight: { type: Number, default: 0, min: 0 },
+    gross_weight: { type: Number, default: 0, min: 0 },
+    box_type: {
+      type: String,
+      enum: Object.values(BOX_ENTRY_TYPES),
+      default: BOX_ENTRY_TYPES.INDIVIDUAL,
+      trim: true,
+    },
+    item_count_in_inner: { type: Number, default: 0, min: 0 },
+    box_count_in_master: { type: Number, default: 0, min: 0 },
+  },
+  { _id: false },
+);
+
 const AuditActorSchema = new mongoose.Schema(
   {
     user: {
@@ -31,7 +94,7 @@ const InspectionSchema = new mongoose.Schema(
     inspection_date: {
       type: String,
       required: true,
-    }, 
+    },
 
     status: {
       type: String,
@@ -73,7 +136,30 @@ const InspectionSchema = new mongoose.Schema(
       box3: { type: String, default: "0" },
       total: { type: String, default: "0" },
     },
-
+    inspected_item_sizes: {
+      type: [itemSizeEntrySchema],
+      default: [],
+      validate: {
+        validator: (entries) =>
+          !Array.isArray(entries) || entries.length <= SIZE_ENTRY_LIMIT,
+        message: `inspected_item_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
+      },
+    },
+    inspected_box_sizes: {
+      type: [boxSizeEntrySchema],
+      default: [],
+      validate: {
+        validator: (entries) =>
+          !Array.isArray(entries) || entries.length <= SIZE_ENTRY_LIMIT,
+        message: `inspected_box_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
+      },
+    },
+    inspected_box_mode: {
+      type: String,
+      enum: Object.values(BOX_PACKAGING_MODES),
+      default: BOX_PACKAGING_MODES.INDIVIDUAL,
+      trim: true,
+    },
     // ranges selected during this visit (supports multiple ranges)
     label_ranges: [
       {
@@ -85,7 +171,7 @@ const InspectionSchema = new mongoose.Schema(
     labels_added: [{ type: Number, min: 0 }],
 
     goods_not_ready: {
-      ready: {type: Boolean, default: false},
+      ready: { type: Boolean, default: false },
       reason: { type: String, default: "" },
     },
 

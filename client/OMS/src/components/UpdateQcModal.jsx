@@ -669,9 +669,11 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const [saving, setSaving] = useState(false);
   const [showAllocateModal, setShowAllocateModal] = useState(false);
   const [barcodeScannerOpen, setBarcodeScannerOpen] = useState(false);
+  const [barcodeScannerTarget, setBarcodeScannerTarget] = useState("barcode");
   const [barcodeScannerError, setBarcodeScannerError] = useState("");
   const [barcodeScannerStatus, setBarcodeScannerStatus] = useState("");
   const [barcodeScannedInSession, setBarcodeScannedInSession] = useState(false);
+  const [innerBarcodeScannedInSession, setInnerBarcodeScannedInSession] = useState(false);
   const barcodeVideoRef = useRef(null);
   const barcodeStreamRef = useRef(null);
   const barcodeDetectorRef = useRef(null);
@@ -863,16 +865,31 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       ),
     });
     setBarcodeScannedInSession(false);
+    setInnerBarcodeScannedInSession(false);
     setBarcodeScannerStatus("");
     setBarcodeScannerError("");
+    setBarcodeScannerTarget("barcode");
     setBarcodeScannerOpen(false);
   }, [qc, canRewriteLatestInspectionRecord, latestInspectionRecord, latestRequestEntry]);
 
   useEffect(() => {
-    if (lockBarcodeField && barcodeScannerOpen) {
+    const shouldCloseScanner =
+      barcodeScannerOpen &&
+      ((barcodeScannerTarget === "barcode" && lockBarcodeField) ||
+        (barcodeScannerTarget === "inner_barcode" &&
+          (lockInnerBarcodeField ||
+            form.inspected_box_mode !== BOX_PACKAGING_MODES.CARTON)));
+
+    if (shouldCloseScanner) {
       setBarcodeScannerOpen(false);
     }
-  }, [lockBarcodeField, barcodeScannerOpen]);
+  }, [
+    lockBarcodeField,
+    lockInnerBarcodeField,
+    barcodeScannerOpen,
+    barcodeScannerTarget,
+    form.inspected_box_mode,
+  ]);
 
   useEffect(() => {
     if (!barcodeScannerOpen) return undefined;
@@ -928,10 +945,15 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
       setForm((prev) => ({
         ...prev,
-        barcode: parsedNumericBarcode,
+        [barcodeScannerTarget]: parsedNumericBarcode,
       }));
-      setBarcodeScannedInSession(true);
-      setBarcodeScannerStatus(`Scanned: ${parsedNumericBarcode}`);
+      if (barcodeScannerTarget === "inner_barcode") {
+        setInnerBarcodeScannedInSession(true);
+        setBarcodeScannerStatus(`Inner barcode scanned: ${parsedNumericBarcode}`);
+      } else {
+        setBarcodeScannedInSession(true);
+        setBarcodeScannerStatus(`Master barcode scanned: ${parsedNumericBarcode}`);
+      }
       setBarcodeScannerOpen(false);
       return true;
     };
@@ -1084,12 +1106,12 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       cancelled = true;
       stopScannerResources();
     };
-  }, [barcodeScannerOpen]);
+  }, [barcodeScannerOpen, barcodeScannerTarget]);
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
 
-    if (isQcUser && name === "barcode") {
+    if (isQcUser && (name === "barcode" || name === "inner_barcode")) {
       return;
     }
 
@@ -1105,6 +1127,9 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
       if (name === "inspected_box_mode") {
         const nextMode = detectBoxPackagingMode(nextValue, prev.inspected_box_sizes);
+        if (nextMode !== BOX_PACKAGING_MODES.CARTON) {
+          setInnerBarcodeScannedInSession(false);
+        }
         return {
           ...prev,
           inspected_box_mode: nextMode,
@@ -1242,6 +1267,17 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         [name]: nextValue,
       };
     });
+  };
+
+  const toggleBarcodeScanner = (targetField) => {
+    setBarcodeScannerError("");
+    setBarcodeScannerStatus("");
+    if (barcodeScannerOpen && barcodeScannerTarget === targetField) {
+      setBarcodeScannerOpen(false);
+      return;
+    }
+    setBarcodeScannerTarget(targetField);
+    setBarcodeScannerOpen(true);
   };
 
   const handleSizeEntryChange = (groupKey, index, field, value) => {
@@ -1716,6 +1752,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       ? form.inner_barcode.trim()
       : "";
     const currentMasterBarcodeValue = Number(qc?.master_barcode || qc?.barcode || 0);
+    const currentInnerBarcodeValue = Number(qc?.inner_barcode || 0);
     const barcodeParsed = barcodeValue === "" ? null : Number(barcodeValue);
     const innerBarcodeParsed =
       innerBarcodeValue === "" ? null : Number(innerBarcodeValue);
@@ -1787,8 +1824,15 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         }
       }
 
-      if (isCartonPackagingMode && innerBarcodeParsed !== null) {
+      if (
+        isCartonPackagingMode &&
+        innerBarcodeParsed !== null &&
+        innerBarcodeParsed !== currentInnerBarcodeValue
+      ) {
         payload.inner_barcode = innerBarcodeParsed;
+        if (isQcUser) {
+          payload.inner_barcode_scanned = innerBarcodeScannedInSession;
+        }
       }
 
       if (lastInspectedDateValue && !isAdminRewriteMode) {
@@ -2606,17 +2650,15 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   <button
                     type="button"
                     className="btn btn-outline-secondary"
-                    onClick={() => {
-                      setBarcodeScannerError("");
-                      setBarcodeScannerStatus("");
-                      setBarcodeScannerOpen((prev) => !prev);
-                    }}
+                    onClick={() => toggleBarcodeScanner("barcode")}
                     disabled={lockBarcodeField}
                   >
-                    {barcodeScannerOpen ? "Stop Scan" : "Scan"}
+                    {barcodeScannerOpen && barcodeScannerTarget === "barcode"
+                      ? "Stop Scan"
+                      : "Scan"}
                   </button>
                 </div>
-                {barcodeScannerOpen && (
+                {barcodeScannerOpen && barcodeScannerTarget === "barcode" && (
                   <div className="border rounded p-2 mt-2">
                     <video
                       ref={barcodeVideoRef}
@@ -2643,19 +2685,59 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
               {form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON && (
                 <div className="col-md-6">
                   <label className="form-label">Inner Carton Barcode</label>
-                  <input
-                    type="number"
-                    className="form-control"
-                    name="inner_barcode"
-                    value={form.inner_barcode}
-                    onChange={handleChange}
-                    min="1"
-                    step="1"
-                    disabled={lockInnerBarcodeField}
-                    placeholder={
-                      lockInnerBarcodeField ? "Already set" : "Enter inner carton barcode"
-                    }
-                  />
+                  <div className="input-group">
+                    <input
+                      type="number"
+                      className="form-control"
+                      name="inner_barcode"
+                      value={form.inner_barcode}
+                      onChange={handleChange}
+                      min="1"
+                      step="1"
+                      disabled={lockInnerBarcodeField}
+                      readOnly={isQcUser}
+                      placeholder={
+                        lockInnerBarcodeField
+                          ? "Already set"
+                          : isQcUser
+                            ? "Scan inner carton barcode"
+                            : "Enter inner carton barcode"
+                      }
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-outline-secondary"
+                      onClick={() => toggleBarcodeScanner("inner_barcode")}
+                      disabled={lockInnerBarcodeField}
+                    >
+                      {barcodeScannerOpen && barcodeScannerTarget === "inner_barcode"
+                        ? "Stop Scan"
+                        : "Scan"}
+                    </button>
+                  </div>
+                  {barcodeScannerOpen && barcodeScannerTarget === "inner_barcode" && (
+                    <div className="border rounded p-2 mt-2">
+                      <video
+                        ref={barcodeVideoRef}
+                        autoPlay
+                        muted
+                        playsInline
+                        className="w-100 rounded"
+                        style={{ maxHeight: "240px", objectFit: "cover", background: "#111827" }}
+                      />
+                      {barcodeScannerStatus && (
+                        <div className="small text-muted mt-2">{barcodeScannerStatus}</div>
+                      )}
+                      {barcodeScannerError && (
+                        <div className="small text-danger mt-1">{barcodeScannerError}</div>
+                      )}
+                    </div>
+                  )}
+                  {isQcUser && !lockInnerBarcodeField && (
+                    <div className="small text-secondary mt-2">
+                      QC users can fill the inner carton barcode only by scanning.
+                    </div>
+                  )}
                 </div>
               )}
 

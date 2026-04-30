@@ -1,6 +1,7 @@
 const Item = require("../models/item.model");
 const Order = require("../models/order.model");
 const QC = require("../models/qc.model");
+const Inspection = require("../models/inspection.model");
 const mongoose = require("mongoose");
 const crypto = require("crypto");
 const fs = require("fs/promises");
@@ -44,6 +45,9 @@ const {
   normalizeSortOrder,
   sortFinalPisCheckRows,
 } = require("../helpers/finalPisCheck");
+const {
+  compareInspectionSizeSnapshot,
+} = require("../helpers/inspectionSizeSnapshot");
 
 const escapeRegex = (value = "") =>
   String(value)
@@ -1790,6 +1794,8 @@ const buildPisDiffReportPreviewRow = (item = {}) => {
     vendors: getPisDiffVendors(item) || "N/A",
     diff_fields: Array.isArray(item?.pis_diff?.fields) ? item.pis_diff.fields : [],
     updated_at: item?.updatedAt ? new Date(item.updatedAt).toISOString().slice(0, 10) : "",
+    inspection_report_mismatch: Boolean(item?.inspection_report_mismatch),
+    inspection_report_mismatch_count: Number(item?.inspection_report_mismatch_count || 0),
     measurements: {
       inspected_item: inspectedItemBlock,
       pis_item: pisItemBlock,
@@ -1844,10 +1850,20 @@ const getCheckedPisDiffRowsForReport = async ({ search, brand, vendor } = {}) =>
     .select(PIS_DIFF_ITEM_SELECT)
     .sort({ updatedAt: -1, code: 1 })
     .lean();
+  const mismatchLookup = await buildInspectionReportMismatchLookup(checkedItems);
 
-  return buildPisDiffRows(checkedItems).filter((item) =>
-    item?.pis_checked_flag === true,
-  );
+  return buildPisDiffRows(checkedItems)
+    .filter((item) => item?.pis_checked_flag === true)
+    .map((item) => {
+      const mismatchEntry = mismatchLookup.get(normalizeLookupKey(item?.code)) || {};
+      return {
+        ...item,
+        inspection_report_mismatch: Boolean(mismatchEntry?.inspection_report_mismatch),
+        inspection_report_mismatch_count: Number(
+          mismatchEntry?.inspection_report_mismatch_count || 0,
+        ),
+      };
+    });
 };
 
 const buildFinalPisCheckMatch = ({ search, brand, vendor } = {}) => {
@@ -1897,8 +1913,18 @@ const getFinalPisCheckRowsForQuery = async ({
     .select(FINAL_PIS_CHECK_ITEM_SELECT)
     .sort({ updatedAt: -1, code: 1 })
     .lean();
+  const mismatchLookup = await buildInspectionReportMismatchLookup(items);
 
-  const rows = buildFinalPisCheckRows(items);
+  const rows = buildFinalPisCheckRows(items).map((row) => {
+    const mismatchEntry = mismatchLookup.get(normalizeLookupKey(row?.code)) || {};
+    return {
+      ...row,
+      inspection_report_mismatch: Boolean(mismatchEntry?.inspection_report_mismatch),
+      inspection_report_mismatch_count: Number(
+        mismatchEntry?.inspection_report_mismatch_count || 0,
+      ),
+    };
+  });
   const filteredRows = filterFinalPisCheckRowsByDiffField(rows, diffField);
 
   return sortFinalPisCheckRows(filteredRows, {
@@ -1955,6 +1981,72 @@ const buildLatestInspectionReportLookup = async (itemCodes = []) => {
   });
 
   return latestByItemCode;
+};
+
+const buildInspectionReportMismatchLookup = async (items = []) => {
+  const itemByCode = new Map(
+    (Array.isArray(items) ? items : [])
+      .map((item) => [normalizeLookupKey(item?.code), item])
+      .filter(([key]) => Boolean(key)),
+  );
+  const itemCodes = [...itemByCode.keys()];
+
+  if (itemCodes.length === 0) {
+    return new Map();
+  }
+
+  const qcRows = await QC.find({
+    $or: itemCodes.map((codeKey) => ({
+      "item.item_code": new RegExp(`^\\s*${escapeRegex(codeKey)}\\s*$`, "i"),
+    })),
+  })
+    .select("_id item.item_code")
+    .lean();
+
+  const qcIdToItemCode = new Map(
+    (Array.isArray(qcRows) ? qcRows : []).map((qcDoc) => [
+      String(qcDoc?._id || ""),
+      normalizeLookupKey(qcDoc?.item?.item_code),
+    ]),
+  );
+  const qcIds = [...qcIdToItemCode.keys()].filter((value) =>
+    mongoose.Types.ObjectId.isValid(value),
+  );
+
+  if (qcIds.length === 0) {
+    return new Map();
+  }
+
+  const inspections = await Inspection.find({
+    qc: {
+      $in: qcIds.map((value) => new mongoose.Types.ObjectId(value)),
+    },
+  })
+    .select("qc inspected_item_sizes inspected_box_sizes inspected_box_mode")
+    .lean();
+
+  const mismatchLookup = new Map();
+
+  (Array.isArray(inspections) ? inspections : []).forEach((inspection) => {
+    const itemCodeKey = qcIdToItemCode.get(String(inspection?.qc || ""));
+    const currentItemDoc = itemByCode.get(itemCodeKey);
+    if (!itemCodeKey || !currentItemDoc) return;
+
+    const mismatch = compareInspectionSizeSnapshot(inspection, currentItemDoc);
+    const currentEntry = mismatchLookup.get(itemCodeKey) || {
+      inspection_report_mismatch: false,
+      inspection_report_mismatch_count: 0,
+    };
+
+    if (mismatch.has_mismatch) {
+      currentEntry.inspection_report_mismatch = true;
+      currentEntry.inspection_report_mismatch_count += 1;
+    }
+
+    mismatchLookup.set(itemCodeKey, currentEntry);
+  });
+
+  return mismatchLookup;
 };
 
 exports.getItems = async (req, res) => {
@@ -2051,8 +2143,17 @@ exports.getPisDiffItems = async (req, res) => {
         Item.distinct("vendors", buildItemMatch({ search, brand })),
         Item.distinct("code", buildItemMatch({ brand, vendor })),
       ]);
-
-    const diffRows = buildPisDiffRows(items);
+    const mismatchLookup = await buildInspectionReportMismatchLookup(items);
+    const diffRows = buildPisDiffRows(items).map((item) => {
+      const mismatchEntry = mismatchLookup.get(normalizeLookupKey(item?.code)) || {};
+      return {
+        ...item,
+        inspection_report_mismatch: Boolean(mismatchEntry?.inspection_report_mismatch),
+        inspection_report_mismatch_count: Number(
+          mismatchEntry?.inspection_report_mismatch_count || 0,
+        ),
+      };
+    });
 
     const paginatedRows = diffRows.slice(skip, skip + limit);
 
@@ -2148,6 +2249,7 @@ exports.exportPisDiffCheckedReport = async (req, res) => {
       { key: "brand", header: "Brand" },
       { key: "vendors", header: "Vendors" },
       { key: "diff_fields", header: "Diff Fields" },
+      { key: "inspection_report", header: "Inspection Report" },
       { key: "inspected_item_size", header: "Inspected Item Size" },
       { key: "inspected_item_weight", header: "Inspected Item Net Weight" },
       { key: "pis_item_size", header: "PIS Item Size" },
@@ -2188,6 +2290,9 @@ exports.exportPisDiffCheckedReport = async (req, res) => {
         diff_fields: Array.isArray(item?.pis_diff?.fields)
           ? item.pis_diff.fields.join(", ")
           : "N/A",
+        inspection_report: item?.inspection_report_mismatch
+          ? "Inspection report mismatch"
+          : "No mismatch",
         inspected_item_size: inspectedItemBlock.sizeDisplay,
         inspected_item_weight: inspectedItemBlock.weightDisplay,
         pis_item_size: pisItemBlock.sizeDisplay,
@@ -2465,6 +2570,7 @@ exports.exportFinalPisCheckReport = async (req, res) => {
       { key: "brand", header: "Brand" },
       { key: "vendors", header: "Vendors" },
       { key: "diff_fields", header: "Diff Fields" },
+      { key: "inspection_report", header: "Inspection Report" },
       { key: "inspected_item_size", header: "Inspected Item Size" },
       { key: "inspected_item_weight", header: "Inspected Item Net Weight" },
       { key: "pis_item_size", header: "PIS Item Size" },
@@ -2481,6 +2587,9 @@ exports.exportFinalPisCheckReport = async (req, res) => {
       brand: row?.brand || "N/A",
       vendors: row?.vendors || "N/A",
       diff_fields: Array.isArray(row?.diff_fields) ? row.diff_fields.join(", ") : "",
+      inspection_report: row?.inspection_report_mismatch
+        ? "Inspection report mismatch"
+        : "No mismatch",
       inspected_item_size: row?.measurements?.inspected_item?.sizeDisplay || "Not Set",
       inspected_item_weight: row?.measurements?.inspected_item?.weightDisplay || "Not Set",
       pis_item_size: row?.measurements?.pis_item?.sizeDisplay || "Not Set",

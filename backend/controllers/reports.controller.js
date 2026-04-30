@@ -3,6 +3,10 @@ const mongoose = require("mongoose");
 const Inspection = require("../models/inspection.model");
 const QC = require("../models/qc.model");
 const Item = require("../models/item.model");
+const {
+  compareInspectionSizeSnapshot,
+  normalizeNumber,
+} = require("../helpers/inspectionSizeSnapshot");
 
 const normalizeText = (value) => String(value ?? "").trim();
 
@@ -143,6 +147,62 @@ const normalizeOptionalFilter = (value) => {
   }
   return normalized;
 };
+
+const escapeRegex = (value = "") =>
+  String(value)
+    .trim()
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const parsePositiveInt = (value, fallback = 1) => {
+  const parsed = Number.parseInt(String(value ?? "").trim(), 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return parsed;
+};
+
+const normalizeLookupKey = (value) => normalizeText(value).toLowerCase();
+
+const normalizeBooleanFilter = (value, fallback = false) => {
+  const normalized = normalizeText(value).toLowerCase();
+  if (!normalized) return fallback;
+  if (["true", "1", "yes", "y"].includes(normalized)) return true;
+  if (["false", "0", "no", "n"].includes(normalized)) return false;
+  return fallback;
+};
+
+const normalizeInspectionStatusFilter = (value) => {
+  const normalized = normalizeOptionalFilter(value).toLowerCase();
+  if (!normalized) return "";
+
+  const statusMap = {
+    pending: "pending",
+    "inspection done": "Inspection Done",
+    inspection_done: "Inspection Done",
+    done: "Inspection Done",
+    "goods not ready": "goods not ready",
+    goods_not_ready: "goods not ready",
+    rejected: "rejected",
+    transfered: "transfered",
+    transferred: "transfered",
+  };
+
+  return statusMap[normalized] || "";
+};
+
+const QC_REPORT_MISMATCH_ITEM_SELECT = [
+  "code",
+  "inspected_item_sizes",
+  "inspected_box_sizes",
+  "inspected_box_mode",
+  "inspected_item_LBH",
+  "inspected_item_top_LBH",
+  "inspected_item_bottom_LBH",
+  "inspected_box_LBH",
+  "inspected_box_top_LBH",
+  "inspected_box_bottom_LBH",
+  "inspected_top_LBH",
+  "inspected_bottom_LBH",
+  "inspected_weight",
+].join(" ");
 
 const buildScalarValueExpression = (fieldPath, fallbackValue = "") => ({
   $let: {
@@ -624,6 +684,85 @@ const buildUserLookupStages = () => [
   },
 ];
 
+const buildQcReportMismatchPipeline = ({
+  reportRange,
+  inspectorObjectId = null,
+  brand = "",
+  vendor = "",
+  status = "",
+  orderId = "",
+  itemCode = "",
+} = {}) => {
+  const pipeline = [
+    ...buildDateNormalizationStages({ reportRange, inspectorObjectId }),
+    ...buildQcLookupStages(),
+    ...buildUserLookupStages(),
+  ];
+
+  const match = {};
+  if (brand) match.brand_value = brand;
+  if (vendor) match.vendor_value = vendor;
+  if (status) match.status = status;
+  if (orderId) {
+    match.order_id_value = { $regex: escapeRegex(orderId), $options: "i" };
+  }
+  if (itemCode) {
+    match.item_code_value = { $regex: escapeRegex(itemCode), $options: "i" };
+  }
+
+  if (Object.keys(match).length > 0) {
+    pipeline.push({ $match: match });
+  }
+
+  pipeline.push(
+    {
+      $project: {
+        _id: 1,
+        qc_id: "$qc",
+        inspector_id: "$inspector_id_value",
+        inspector_name: "$inspector_name_value",
+        brand: "$brand_value",
+        vendor: "$vendor_value",
+        order_id: "$order_id_value",
+        item_code: "$item_code_value",
+        item_description: buildTrimmedStringExpression("$qc_doc.item.description"),
+        requested_date: buildNormalizedDateOutputExpression(
+          "$requested_date_value",
+          "$requested_date",
+        ),
+        inspection_date: buildNormalizedDateOutputExpression(
+          "$inspection_date_value",
+          "$inspection_date",
+        ),
+        inspection_date_value: 1,
+        status: 1,
+        checked: {
+          $round: [buildNumericExpression("$checked"), 3],
+        },
+        passed: {
+          $round: [buildNumericExpression("$passed"), 3],
+        },
+        pending_after: {
+          $round: [buildNumericExpression("$pending_after"), 3],
+        },
+        inspected_item_sizes: 1,
+        inspected_box_sizes: 1,
+        inspected_box_mode: 1,
+        createdAt: 1,
+      },
+    },
+    {
+      $sort: {
+        inspection_date_value: -1,
+        createdAt: -1,
+        _id: -1,
+      },
+    },
+  );
+
+  return pipeline;
+};
+
 const buildItemLookupStages = () => [
   {
     $lookup: {
@@ -1098,6 +1237,250 @@ exports.getVendorWiseQaDetailed = async (req, res) => {
     console.error("Vendor Wise QA Detailed Error:", error);
     return res.status(500).json({
       message: error?.message || "Failed to fetch vendor wise QA detailed report",
+    });
+  }
+};
+
+exports.getQcReportMismatch = async (req, res) => {
+  try {
+    const brand = normalizeOptionalFilter(req.query.brand);
+    const vendor = normalizeOptionalFilter(req.query.vendor);
+    const inspector = normalizeOptionalFilter(
+      req.query.inspector ?? req.query.inspector_id ?? req.query.inspectorId,
+    );
+    const status = normalizeInspectionStatusFilter(req.query.status);
+    const orderId = normalizeOptionalFilter(
+      req.query.order_id ?? req.query.orderId ?? req.query.po,
+    );
+    const itemCode = normalizeOptionalFilter(
+      req.query.item_code ?? req.query.itemCode,
+    );
+    const mismatchOnly = normalizeBooleanFilter(
+      req.query.mismatch_only ?? req.query.mismatchOnly,
+      false,
+    );
+    const page = parsePositiveInt(req.query.page, 1);
+    const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
+
+    const reportRange = resolveReportRange({
+      fromDate: req.query.from ?? req.query.from_date ?? req.query.fromDate,
+      toDate: req.query.to ?? req.query.to_date ?? req.query.toDate,
+      timeline: req.query.timeline,
+      customDays: req.query.custom_days ?? req.query.customDays,
+    });
+    if (!reportRange) {
+      return res.status(400).json({ message: "Invalid report filters" });
+    }
+
+    if (inspector && !mongoose.Types.ObjectId.isValid(inspector)) {
+      return res.status(400).json({ message: "Invalid inspector filter" });
+    }
+
+    const normalizedRole = normalizeText(req.user?.role).toLowerCase();
+    const isQcUser = normalizedRole === "qc";
+    const currentUserId = normalizeText(req.user?._id || req.user?.id || "");
+
+    let effectiveInspectorFilter = inspector;
+    if (isQcUser) {
+      if (!currentUserId || !mongoose.Types.ObjectId.isValid(currentUserId)) {
+        return res.status(403).json({
+          message: "QC visibility could not be resolved for this user",
+        });
+      }
+      if (inspector && inspector !== currentUserId) {
+        return res.status(403).json({
+          message: "QC can only view their own inspection mismatch records",
+        });
+      }
+      effectiveInspectorFilter = currentUserId;
+    }
+
+    const inspectorObjectId =
+      effectiveInspectorFilter && mongoose.Types.ObjectId.isValid(effectiveInspectorFilter)
+        ? new mongoose.Types.ObjectId(effectiveInspectorFilter)
+        : null;
+
+    const inspections = await Inspection.aggregate(
+      buildQcReportMismatchPipeline({
+        reportRange,
+        inspectorObjectId,
+        brand,
+        vendor,
+        status,
+        orderId,
+        itemCode,
+      }),
+    ).allowDiskUse(true);
+
+    const uniqueItemCodes = [
+      ...new Set(
+        (Array.isArray(inspections) ? inspections : [])
+          .map((entry) => normalizeText(entry?.item_code || ""))
+          .filter(Boolean),
+      ),
+    ];
+
+    const itemDocs = uniqueItemCodes.length > 0
+      ? await Item.find({
+          $or: uniqueItemCodes.map((code) => ({
+            code: {
+              $regex: `^${escapeRegex(code)}$`,
+              $options: "i",
+            },
+          })),
+        })
+          .select(QC_REPORT_MISMATCH_ITEM_SELECT)
+          .lean()
+      : [];
+
+    const itemDocByCode = new Map(
+      (Array.isArray(itemDocs) ? itemDocs : []).map((itemDoc) => [
+        normalizeLookupKey(itemDoc?.code),
+        itemDoc,
+      ]),
+    );
+
+    const mappedRows = (Array.isArray(inspections) ? inspections : []).map((inspection) => {
+      const currentItemDoc =
+        itemDocByCode.get(normalizeLookupKey(inspection?.item_code)) || {};
+      const mismatch = compareInspectionSizeSnapshot(inspection, currentItemDoc);
+
+      return {
+        id: String(inspection?._id || ""),
+        inspection_id: String(inspection?._id || ""),
+        qc_id: String(inspection?.qc_id || ""),
+        order_id: normalizeText(inspection?.order_id) || "N/A",
+        brand: normalizeText(inspection?.brand) || "N/A",
+        vendor: normalizeText(inspection?.vendor) || "N/A",
+        item_code: normalizeText(inspection?.item_code) || "N/A",
+        item_description: normalizeText(inspection?.item_description) || "N/A",
+        inspector_id: normalizeText(inspection?.inspector_id),
+        inspector_name: normalizeText(inspection?.inspector_name) || "Unassigned",
+        requested_date: normalizeText(inspection?.requested_date),
+        inspection_date: normalizeText(inspection?.inspection_date),
+        status: normalizeText(inspection?.status),
+        checked: normalizeNumber(inspection?.checked),
+        passed: normalizeNumber(inspection?.passed),
+        pending_after: normalizeNumber(inspection?.pending_after),
+        current_qc_inspected_item_sizes:
+          mismatch.current_snapshot.inspected_item_sizes,
+        inspection_inspected_item_sizes:
+          mismatch.inspection_snapshot.inspected_item_sizes,
+        current_qc_inspected_box_sizes:
+          mismatch.current_snapshot.inspected_box_sizes,
+        inspection_inspected_box_sizes:
+          mismatch.inspection_snapshot.inspected_box_sizes,
+        current_qc_inspected_box_mode:
+          mismatch.current_snapshot.inspected_box_mode,
+        inspection_inspected_box_mode:
+          mismatch.inspection_snapshot.inspected_box_mode,
+        mismatch_summary: {
+          has_mismatch: mismatch.has_mismatch,
+          mismatch_count: mismatch.mismatch_count,
+          item_size_mismatch_count: mismatch.item_size_mismatches.length,
+          box_size_mismatch_count: mismatch.box_size_mismatches.length,
+          box_mode_mismatch_count: mismatch.box_mode_mismatch ? 1 : 0,
+        },
+        item_size_mismatches: mismatch.item_size_mismatches,
+        box_size_mismatches: mismatch.box_size_mismatches,
+        box_mode_mismatch: mismatch.box_mode_mismatch,
+      };
+    });
+
+    const summary = mappedRows.reduce(
+      (accumulator, row) => {
+        accumulator.total_inspections += 1;
+        if (row?.mismatch_summary?.has_mismatch) {
+          accumulator.mismatch_inspections += 1;
+        } else {
+          accumulator.clean_inspections += 1;
+        }
+        accumulator.item_size_mismatch_count += Number(
+          row?.mismatch_summary?.item_size_mismatch_count || 0,
+        );
+        accumulator.box_size_mismatch_count += Number(
+          row?.mismatch_summary?.box_size_mismatch_count || 0,
+        );
+        accumulator.box_mode_mismatch_count += Number(
+          row?.mismatch_summary?.box_mode_mismatch_count || 0,
+        );
+        return accumulator;
+      },
+      {
+        total_inspections: 0,
+        mismatch_inspections: 0,
+        clean_inspections: 0,
+        item_size_mismatch_count: 0,
+        box_size_mismatch_count: 0,
+        box_mode_mismatch_count: 0,
+      },
+    );
+
+    const filteredRows = mismatchOnly
+      ? mappedRows.filter((row) => row?.mismatch_summary?.has_mismatch)
+      : mappedRows;
+    const total = filteredRows.length;
+    const totalPages = Math.max(1, Math.ceil(total / Math.max(1, limit)));
+    const safePage = Math.min(Math.max(1, page), totalPages);
+    const skip = (safePage - 1) * Math.max(1, limit);
+
+    const sortedBrands = [...new Set(
+      mappedRows
+        .map((row) => normalizeText(row?.brand))
+        .filter(Boolean)
+        .filter((value) => value !== "N/A"),
+    )].sort((left, right) => left.localeCompare(right));
+    const sortedVendors = [...new Set(
+      mappedRows
+        .map((row) => normalizeText(row?.vendor))
+        .filter(Boolean)
+        .filter((value) => value !== "N/A"),
+    )].sort((left, right) => left.localeCompare(right));
+    const inspectorOptions = [...new Map(
+      mappedRows
+        .map((row) => ({
+          _id: normalizeText(row?.inspector_id),
+          name: normalizeText(row?.inspector_name) || "Unassigned",
+        }))
+        .filter((option) => option._id)
+        .map((option) => [option._id, option]),
+    ).values()].sort((left, right) =>
+      `${left.name} ${left._id}`.localeCompare(`${right.name} ${right._id}`),
+    );
+
+    return res.status(200).json({
+      success: true,
+      rows: filteredRows.slice(skip, skip + Math.max(1, limit)),
+      summary,
+      filters: {
+        timeline: reportRange.timeline,
+        custom_days:
+          reportRange.timeline === "custom" ? reportRange.days : null,
+        from_date: reportRange.from_date_iso,
+        to_date: reportRange.to_date_iso,
+        brand,
+        vendor,
+        inspector: effectiveInspectorFilter,
+        status,
+        order_id: orderId,
+        item_code: itemCode,
+        mismatch_only: mismatchOnly,
+        brand_options: sortedBrands,
+        vendor_options: sortedVendors,
+        inspector_options: inspectorOptions,
+      },
+      pagination: {
+        page: safePage,
+        limit: Math.max(1, limit),
+        total,
+        totalPages,
+      },
+    });
+  } catch (error) {
+    console.error("QC Report Mismatch Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to fetch QC report mismatch data",
     });
   }
 };

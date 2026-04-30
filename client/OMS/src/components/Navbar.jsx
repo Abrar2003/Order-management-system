@@ -172,6 +172,11 @@ const Navbar = () => {
 
     return [
       routeMenuItem("items-all", "View Items", "/items"),
+      routeMenuItem(
+        "items-qc-report-mismatch",
+        "QC Report Mismatch",
+        "/reports/qc-report-mismatch",
+      ),
       ...ITEM_FILE_OPTIONS.map((option) =>
         routeMenuItem(
           `items-file-${option.value}`,
@@ -201,6 +206,7 @@ const Navbar = () => {
       routeMenuItem("inspector-reports", "Inspector Performance Reports", "/reports/inspectors"),
       routeMenuItem("vendor-reports", "Vendor Performance Reports", "/reports/vendors"),
       routeMenuItem("vendor-wise-qa", "Vendor Wise QA Report", "/reports/vendor-wise-qa"),
+      routeMenuItem("qc-report-mismatch", "QC Report Mismatch", "/reports/qc-report-mismatch"),
       routeMenuItem("delayed-pos", "Delayed PO Reports", "/reports/delayed-pos"),
       routeMenuItem("upcoming-etd", "Upcoming ETD Reports", "/reports/upcoming-etd"),
       routeMenuItem("po-status", "PO Status Report", "/reports/po-status"),

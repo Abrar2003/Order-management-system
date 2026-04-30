@@ -24,4 +24,11 @@ router.get(
   reportsController.getVendorWiseQaDetailed,
 );
 
+router.get(
+  "/qc-report-mismatch",
+  auth,
+  authorize("admin", "manager", "QC", "dev", "user"),
+  reportsController.getQcReportMismatch,
+);
+
 module.exports = router;

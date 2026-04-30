@@ -40,6 +40,9 @@ const {
   normalizeStoredBoxEntries,
 } = require("../helpers/boxMeasurement");
 const {
+  buildInspectionSizeSnapshot,
+} = require("../helpers/inspectionSizeSnapshot");
+const {
   deriveGroupedOrderStatus,
   deriveOrderProgress,
   deriveOrderStatus,
@@ -2162,6 +2165,8 @@ const upsertInspectionRecordForRequest = async ({
   allowRequestedDateFallback = true,
   goodsNotReady = null,
   explicitStatus = "",
+  currentSizeSource = null,
+  sizeSnapshotPayload = {},
 }) => {
   if (!qcDoc?._id) return null;
 
@@ -2215,6 +2220,11 @@ const upsertInspectionRecordForRequest = async ({
       : null;
   const normalizedExplicitStatus = normalizeText(explicitStatus);
   const qcCbmSnapshot = buildNormalizedCbmSnapshot(qcDoc?.cbm);
+  const inspectionSizeSnapshot = buildInspectionSizeSnapshot({
+    qcDoc,
+    currentSource: currentSizeSource,
+    updatePayload: sizeSnapshotPayload,
+  });
 
   if (!inspectionRecord) {
     inspectionRecord = await Inspection.create({
@@ -2239,6 +2249,9 @@ const upsertInspectionRecordForRequest = async ({
       vendor_offered: toNonNegativeNumber(addProvision, 0),
       pending_after: pendingAfter,
       cbm: qcCbmSnapshot,
+      inspected_item_sizes: inspectionSizeSnapshot.inspected_item_sizes,
+      inspected_box_sizes: inspectionSizeSnapshot.inspected_box_sizes,
+      inspected_box_mode: inspectionSizeSnapshot.inspected_box_mode,
       label_ranges: labelRangesToAppend,
       labels_added: labelsToAppend,
       ...(normalizedGoodsNotReady
@@ -2286,6 +2299,12 @@ const upsertInspectionRecordForRequest = async ({
   inspectionRecord.passed = nextPassed;
   inspectionRecord.vendor_offered = nextOffered;
   inspectionRecord.pending_after = pendingAfter;
+  inspectionRecord.inspected_item_sizes =
+    inspectionSizeSnapshot.inspected_item_sizes;
+  inspectionRecord.inspected_box_sizes =
+    inspectionSizeSnapshot.inspected_box_sizes;
+  inspectionRecord.inspected_box_mode =
+    inspectionSizeSnapshot.inspected_box_mode;
 
   if (replaceCbmSnapshot) {
     inspectionRecord.cbm = qcCbmSnapshot;
@@ -2424,6 +2443,43 @@ const escapeRegex = (value = "") =>
   String(value)
     .trim()
     .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const INSPECTION_SIZE_SOURCE_SELECT = [
+  "code",
+  "inspected_item_sizes",
+  "inspected_box_sizes",
+  "inspected_box_mode",
+  "inspected_item_LBH",
+  "inspected_item_top_LBH",
+  "inspected_item_bottom_LBH",
+  "inspected_box_LBH",
+  "inspected_box_top_LBH",
+  "inspected_box_bottom_LBH",
+  "inspected_top_LBH",
+  "inspected_bottom_LBH",
+  "inspected_weight",
+].join(" ");
+
+const resolveQcInspectionSizeItemCode = (qcDoc = {}) =>
+  normalizeText(qcDoc?.item?.item_code || qcDoc?.order?.item?.item_code || "");
+
+const findInspectionSizeSourceForQc = async (qcDoc = {}, existingSource = null) => {
+  if (existingSource && typeof existingSource === "object") {
+    return existingSource;
+  }
+
+  const itemCode = resolveQcInspectionSizeItemCode(qcDoc);
+  if (!itemCode) return null;
+
+  return Item.findOne({
+    code: {
+      $regex: `^${escapeRegex(itemCode)}$`,
+      $options: "i",
+    },
+  })
+    .select(INSPECTION_SIZE_SOURCE_SELECT)
+    .lean();
+};
 
 const toDateInputValue = (value = new Date()) => toISODateString(value) || null;
 
@@ -4017,6 +4073,7 @@ exports.alignQC = async (req, res) => {
         appendLabels: [],
         replaceCbmSnapshot: true,
         allowRequestedDateFallback: false,
+        currentSizeSource: matchedItem || null,
       });
 
       await existingQC.save();
@@ -4133,6 +4190,7 @@ exports.alignQC = async (req, res) => {
       appendLabels: [],
       replaceCbmSnapshot: true,
       allowRequestedDateFallback: false,
+      currentSizeSource: matchedItem || null,
     });
 
     applyQcOrderStatus(qc, orderRecord);
@@ -4196,6 +4254,7 @@ exports.updateQC = async (req, res) => {
       master_barcode,
       inner_barcode,
       barcode_scanned,
+      inner_barcode_scanned,
       packed_size,
       finishing,
       branding,
@@ -4264,6 +4323,9 @@ exports.updateQC = async (req, res) => {
     const barcodeScannedByQcUser =
       barcode_scanned === true ||
       String(barcode_scanned || "").trim().toLowerCase() === "true";
+    const innerBarcodeScannedByQcUser =
+      inner_barcode_scanned === true ||
+      String(inner_barcode_scanned || "").trim().toLowerCase() === "true";
 
     const requestedInspectorId =
       inspector !== undefined &&
@@ -5073,8 +5135,17 @@ exports.updateQC = async (req, res) => {
           message: "inner_barcode must be a non-negative number",
         });
       }
+      const currentInnerBarcode = Number(qc?.inner_barcode || 0);
+      if (
+        isQcUser &&
+        nextInnerBarcode !== currentInnerBarcode &&
+        !innerBarcodeScannedByQcUser
+      ) {
+        return res.status(403).json({
+          message: "QC users must scan the inner barcode. Manual inner barcode entry is not allowed.",
+        });
+      }
       if (!allowQcFieldEdits && !isAdmin) {
-        const currentInnerBarcode = Number(qc?.inner_barcode || 0);
         if (currentInnerBarcode > 0 && nextInnerBarcode !== currentInnerBarcode) {
           return res
             .status(400)
@@ -5561,6 +5632,10 @@ exports.updateQC = async (req, res) => {
       );
 
     if (shouldUpdateInspectionRecord) {
+      const inspectionSizeSource = await findInspectionSizeSourceForQc(
+        qc,
+        itemDocForInspectedLbhUpdate,
+      );
       const inspectionInspectorId = qc.inspector?._id
         ? qc.inspector._id
         : qc.inspector;
@@ -5636,6 +5711,8 @@ exports.updateQC = async (req, res) => {
         appendLabels: isVisitUpdate ? labelsAddedThisVisit : [],
         replaceCbmSnapshot: hasCbmUpdate || isVisitUpdate,
         explicitStatus: isQcUser ? INSPECTION_RECORD_STATUS.DONE : "",
+        currentSizeSource: inspectionSizeSource,
+        sizeSnapshotPayload: req.body || {},
       });
 
       if (latestRequestEntry && inspectionRecord && (isVisitUpdate || isQcUser)) {
@@ -7468,6 +7545,7 @@ exports.markGoodsNotReady = async (req, res) => {
     }
 
     const requestedQuantityForRecord = latestRequestedQuantity;
+    const inspectionSizeSource = await findInspectionSizeSourceForQc(qc);
 
     qc.last_inspected_date = inspectionDate;
     qc.remarks = reason;
@@ -7493,6 +7571,7 @@ exports.markGoodsNotReady = async (req, res) => {
         ready: true,
         reason,
       },
+      currentSizeSource: inspectionSizeSource,
     });
 
     if (latestRequestEntry && inspectionRecord) {
@@ -7670,6 +7749,11 @@ exports.rejectAllQc = async (req, res) => {
     const previousRejectedImageKey = normalizeText(
       qc?.rejected_image?.key || "",
     );
+    const inspectionSizeSource = await findInspectionSizeSourceForQc(qc);
+    const inspectionSizeSnapshot = buildInspectionSizeSnapshot({
+      qcDoc: qc,
+      currentSource: inspectionSizeSource,
+    });
 
     const requestHistoryId = latestRequestEntry?._id || null;
     let inspectionRecord = null;
@@ -7701,6 +7785,9 @@ exports.rejectAllQc = async (req, res) => {
         passed: 0,
         pending_after: 0,
         cbm: buildNormalizedCbmSnapshot(qc?.cbm),
+        inspected_item_sizes: inspectionSizeSnapshot.inspected_item_sizes,
+        inspected_box_sizes: inspectionSizeSnapshot.inspected_box_sizes,
+        inspected_box_mode: inspectionSizeSnapshot.inspected_box_mode,
         label_ranges: [],
         labels_added: [],
         goods_not_ready: {
@@ -7722,6 +7809,12 @@ exports.rejectAllQc = async (req, res) => {
       inspectionRecord.checked = requestedQuantityForRecord;
       inspectionRecord.passed = 0;
       inspectionRecord.status = INSPECTION_RECORD_STATUS.REJECTED;
+      inspectionRecord.inspected_item_sizes =
+        inspectionSizeSnapshot.inspected_item_sizes;
+      inspectionRecord.inspected_box_sizes =
+        inspectionSizeSnapshot.inspected_box_sizes;
+      inspectionRecord.inspected_box_mode =
+        inspectionSizeSnapshot.inspected_box_mode;
       inspectionRecord.goods_not_ready = {
         ready: false,
         reason: "",
@@ -8042,6 +8135,7 @@ exports.transferQcRequest = async (req, res) => {
       appendLabels: [],
       replaceCbmSnapshot: false,
       allowRequestedDateFallback: false,
+      currentSizeSource: await findInspectionSizeSourceForQc(qc),
     });
 
     const refreshedInspectionRecords = await Inspection.find({ qc: qc._id }).lean();
@@ -8498,6 +8592,7 @@ exports.transferInspectionRecord = async (req, res) => {
       replaceCbmSnapshot: false,
       allowRequestedDateFallback: false,
       explicitStatus: INSPECTION_RECORD_STATUS.DONE,
+      currentSizeSource: matchedItem || null,
     });
     if (targetInspection) {
       targetInspection.cbm = buildSingleBoxCbmSnapshot(transferCbmTotal);

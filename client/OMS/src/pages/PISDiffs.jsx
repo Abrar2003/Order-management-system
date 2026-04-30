@@ -291,6 +291,9 @@ const PisDiffPdfReport = ({ report, reportRef = null }) => {
                   </div>
                 </div>
                 <div className="pis-diff-report-badges">
+                  {row?.inspection_report_mismatch && (
+                    <span className="text-bg-danger">Inspection report mismatch</span>
+                  )}
                   {(Array.isArray(row?.diff_fields) ? row.diff_fields : []).map((field) => (
                     <span key={`${row?.code}-${field}`}>{field}</span>
                   ))}
@@ -1016,13 +1019,14 @@ const PISDiffs = () => {
                           onClick={() => handleSortColumn("pisBox", "asc")}
                         />
                       </th>
+                      <th>Inspection Report</th>
                       {canEditPis && <th>Action</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {sortedRows.length === 0 && (
                       <tr>
-                        <td colSpan={canEditPis ? 10 : 9} className="text-center py-4">
+                        <td colSpan={canEditPis ? 11 : 10} className="text-center py-4">
                           No PIS diffs found
                         </td>
                       </tr>
@@ -1089,6 +1093,17 @@ const PISDiffs = () => {
                               group="box"
                               weightLabel="Gross"
                             />
+                          </td>
+                          <td>
+                            {item?.inspection_report_mismatch ? (
+                              <span className="badge text-bg-danger">
+                                Inspection report mismatch
+                              </span>
+                            ) : (
+                              <span className="badge text-bg-light border text-secondary">
+                                No mismatch
+                              </span>
+                            )}
                           </td>
                           {canEditPis && (
                             <td>

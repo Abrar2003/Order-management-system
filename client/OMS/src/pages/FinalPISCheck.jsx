@@ -247,6 +247,9 @@ const FinalPisCheckReport = ({
                   </div>
                   <div className="d-flex flex-column align-items-end gap-2">
                     <div className="pis-diff-report-badges">
+                      {row?.inspection_report_mismatch && (
+                        <span className="text-bg-danger">Inspection report mismatch</span>
+                      )}
                       {(Array.isArray(row?.diff_fields) ? row.diff_fields : []).map((field) => (
                         <span key={`${row?.code}-${field}`}>{field}</span>
                       ))}

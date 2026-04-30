@@ -40,6 +40,7 @@ import UpcomingEtdReports from "./pages/UpcomingEtdReports";
 import PoStatusReport from "./pages/PoStatusReport";
 import PendingPoReport from "./pages/PendingPoReport";
 import ProductAnalytics from "./pages/ProductAnalytics";
+import QcReportMismatch from "./pages/QcReportMismatch";
 import PIS from "./pages/PIS";
 import PISDiffs from "./pages/PISDiffs";
 import FinalPISCheck from "./pages/FinalPISCheck";
@@ -256,6 +257,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <PendingPoReport />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/reports/qc-report-mismatch"
+            element={
+              <ProtectedRoute>
+                <QcReportMismatch />
               </ProtectedRoute>
             }
           />
