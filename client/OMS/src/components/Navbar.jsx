@@ -6,6 +6,10 @@ import RectifyPdfModal from "./RectifyPdfModal";
 import AllocateLabelsModal from "./AllocateLabelsModal";
 import ChangePasswordModal from "./ChangePasswordModal";
 import CheckLabelsModal from "./CheckLabelsModal";
+import {
+  buildItemFilesPagePath,
+  ITEM_FILE_OPTIONS,
+} from "../constants/itemFiles";
 import "../App.css";
 
 const routeMenuItem = (key, label, path) => ({
@@ -153,7 +157,6 @@ const Navbar = () => {
     if (canAccessQc) {
       links.push(
         routeMenuItem("qc", "QC", "/qc"),
-        routeMenuItem("items", "Items", "/items"),
         routeMenuItem("shipments", "Shipments", "/shipments"),
         routeMenuItem("containers", "Containers", "/containers"),
       );
@@ -163,6 +166,21 @@ const Navbar = () => {
   }, [canAccessQc, isQcOnlyRole]);
 
   const generalMenuItems = useMemo(() => [routeMenuItem("home", "Home", "/")], []);
+
+  const itemMenuItems = useMemo(() => {
+    if (!canAccessQc || isQcOnlyRole) return [];
+
+    return [
+      routeMenuItem("items-all", "View Items", "/items"),
+      ...ITEM_FILE_OPTIONS.map((option) =>
+        routeMenuItem(
+          `items-file-${option.value}`,
+          option.label,
+          buildItemFilesPagePath(option.value),
+        )
+      ),
+    ];
+  }, [canAccessQc, isQcOnlyRole]);
 
   const orderMenuItems = useMemo(() => {
     if (!canAccessQc || isQcOnlyRole) return [];
@@ -200,8 +218,12 @@ const Navbar = () => {
       );
     }
 
+    if (canManageLabels) {
+      links.push(actionMenuItem("check-labels", "Check Labels", "check-labels"));
+    }
+
     return links;
-  }, [canAccessAnalytics, canAccessQc, isQcOnlyRole]);
+  }, [canAccessAnalytics, canAccessQc, canManageLabels, isQcOnlyRole]);
 
   const processMenuItems = useMemo(() => {
     if (isQcOnlyRole) return [];
@@ -213,18 +235,11 @@ const Navbar = () => {
     }
 
     if (canManageLabels) {
-      items.push(
-        actionMenuItem("allocate-labels", "Allocate Labels", "allocate-labels"),
-        actionMenuItem("check-labels", "Check Labels", "check-labels"),
-      );
-    }
-
-    if (canCreateUsers) {
-      items.push(routeMenuItem("create-users", "Create Users", "/users/new"));
+      items.push(actionMenuItem("allocate-labels", "Allocate Labels", "allocate-labels"));
     }
 
     return items;
-  }, [canAccessQc, canCreateUsers, canManageLabels, isQcOnlyRole]);
+  }, [canAccessQc, canManageLabels, isQcOnlyRole]);
 
   const updateOrdersMenuItems = useMemo(() => {
     if (!canManageOrders || isQcOnlyRole) return [];
@@ -259,7 +274,7 @@ const Navbar = () => {
 
     items.push(
       routeMenuItem("pis", "PIS", "/pis"),
-      routeMenuItem("pis-diffs", "PIS Diffs", "/pis-diffs"),
+      routeMenuItem("pis-diffs", "Update PIS / QC Reports", "/pis-diffs"),
       routeMenuItem("final-pis-check", "Final PIS Check", "/final-pis-check"),
     );
 
@@ -275,32 +290,44 @@ const Navbar = () => {
     ];
   }, [canViewOrderPages, isQcOnlyRole]);
 
-  const accountMenuItems = useMemo(
-    () => [
-      actionMenuItem("theme", themeLabel, "toggle-theme"),
-      actionMenuItem("change-password", "Change Password", "change-password"),
-      actionMenuItem("logout", "Logout", "logout", "danger"),
-    ],
-    [themeLabel],
+  const settingsMenuItems = useMemo(
+    () => {
+      const items = [];
+
+      if (canCreateUsers) {
+        items.push(routeMenuItem("create-users", "Create User", "/users/new"));
+      }
+
+      items.push(
+        actionMenuItem("theme", themeLabel, "toggle-theme"),
+        actionMenuItem("change-password", "Change Password", "change-password"),
+        actionMenuItem("logout", "Logout", "logout", "danger"),
+      );
+
+      return items;
+    },
+    [canCreateUsers, themeLabel],
   );
 
   const menuSections = useMemo(
     () =>
       [
+        { key: "items", label: "Items", items: itemMenuItems },
         { key: "orders", label: "Orders", items: orderMenuItems },
         { key: "reports", label: "Reports", items: reportMenuItems },
         { key: "process", label: "Process", items: processMenuItems },
         { key: "update-orders", label: "Update Orders", items: updateOrdersMenuItems },
         { key: "upload-add", label: "Upload - Add", items: uploadAddMenuItems },
         { key: "logs", label: "Logs", items: logMenuItems },
-        { key: "settings", label: "Settings", items: accountMenuItems },
+        { key: "settings", label: "Settings", items: settingsMenuItems },
       ].filter((section) => Array.isArray(section.items) && section.items.length > 0),
     [
-      accountMenuItems,
+      itemMenuItems,
       logMenuItems,
       orderMenuItems,
       processMenuItems,
       reportMenuItems,
+      settingsMenuItems,
       updateOrdersMenuItems,
       uploadAddMenuItems,
     ],
@@ -309,7 +336,8 @@ const Navbar = () => {
   const desktopPrimaryDropdownSections = useMemo(
     () =>
       menuSections.filter(
-        (section) => section.key === "orders" || section.key === "reports",
+        (section) =>
+          section.key === "items" || section.key === "orders" || section.key === "reports",
       ),
     [menuSections],
   );
@@ -317,7 +345,8 @@ const Navbar = () => {
   const desktopOverflowSections = useMemo(
     () =>
       menuSections.filter(
-        (section) => section.key !== "orders" && section.key !== "reports",
+        (section) =>
+          section.key !== "items" && section.key !== "orders" && section.key !== "reports",
       ),
     [menuSections],
   );

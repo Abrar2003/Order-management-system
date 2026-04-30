@@ -8,12 +8,16 @@ import EditOrderModal from "../components/EditOrderModal";
 import EditInspectionRecordsModal from "../components/EditInspectionRecordsModal";
 import GoodsNotReadyModal from "../components/GoodsNotReadyModal";
 import RejectAllModal from "../components/RejectAllModal";
-import PdfViewerModal from "../components/PdfViewerModal";
+import FilePreviewModal from "../components/FilePreviewModal";
 import SortHeaderButton from "../components/SortHeaderButton";
 import TransferQcRequestModal from "../components/TransferQcRequestModal";
 import TransferInspectionModal from "../components/TransferInspectionModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import { isViewOnlyUser } from "../auth/permissions";
+import {
+  buildItemFileUploadRequest,
+  ITEM_FILE_OPTIONS,
+} from "../constants/itemFiles";
 import {
   getNextClientSortState,
   sortClientRows,
@@ -201,71 +205,10 @@ const InfoBox = ({ label, value, compact = false }) => (
 );
 
 const RELATED_FILE_OPTIONS = Object.freeze([
-  {
-    value: "product_image",
-    label: "Product Image",
-    buttonLabel: "Item image",
+  ...ITEM_FILE_OPTIONS.map((option) => ({
+    ...option,
     scope: "item_master",
-    field: "image",
-    previewMode: "image",
-    accept: ".jpg,.jpeg,.png,image/jpeg,image/png",
-    extensions: [".jpg", ".jpeg", ".png"],
-    mimeTypes: ["image/jpeg", "image/png"],
-    invalidMessage:
-      "Only JPG, JPEG, or PNG files are allowed for product images.",
-  },
-  {
-    value: "cad_file",
-    label: "CAD File",
-    buttonLabel: "CAD file",
-    scope: "item_master",
-    field: "cad_file",
-    previewMode: "pdf",
-    accept: ".pdf,application/pdf",
-    extensions: [".pdf"],
-    mimeTypes: ["application/pdf"],
-    invalidMessage: "Only PDF files are allowed for CAD files.",
-  },
-  {
-    value: "pis_file",
-    label: "PIS",
-    buttonLabel: "PIS",
-    scope: "item_master",
-    field: "pis_file",
-    previewMode: "pdf",
-    accept: ".pdf,application/pdf",
-    extensions: [".pdf"],
-    mimeTypes: ["application/pdf"],
-    invalidMessage: "Only PDF files are allowed for PIS.",
-  },
-  {
-    value: "assembly_file",
-    label: "Assembly",
-    buttonLabel: "Assembly",
-    scope: "item_master",
-    field: "assembly_file",
-    previewMode: "pdf",
-    accept: ".pdf,application/pdf",
-    extensions: [".pdf"],
-    mimeTypes: ["application/pdf"],
-    invalidMessage: "Only PDF files are allowed for Assembly.",
-  },
-  {
-    value: "packeging_ppt",
-    label: "Packaging PPT",
-    buttonLabel: "Packaging PPT",
-    scope: "item_master",
-    field: "packeging_ppt",
-    previewMode: "external",
-    accept:
-      ".ppt,.pptx,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    extensions: [".ppt", ".pptx"],
-    mimeTypes: [
-      "application/vnd.ms-powerpoint",
-      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    ],
-    invalidMessage: "Only PPT or PPTX files are allowed for Packaging PPT.",
-  },
+  })),
   {
     value: "qc_images",
     label: "QC Images",
@@ -345,7 +288,7 @@ const QcDetails = () => {
   const [deletingRelatedFile, setDeletingRelatedFile] = useState(false);
   const [relatedFileUploadProgress, setRelatedFileUploadProgress] = useState(0);
   const [openingRelatedFileType, setOpeningRelatedFileType] = useState("");
-  const [pdfViewerFile, setPdfViewerFile] = useState(null);
+  const [previewFile, setPreviewFile] = useState(null);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [showShippingModal, setShowShippingModal] = useState(false);
   const [showEditShippingModal, setShowEditShippingModal] = useState(false);
@@ -916,12 +859,13 @@ const QcDetails = () => {
         throw new Error(`${fileConfig.label} URL is not available.`);
       }
 
-      if (fileConfig.previewMode === "pdf") {
-        setPdfViewerFile({
+      if (fileConfig.previewMode === "pdf" || fileConfig.previewMode === "image" || fileConfig.previewMode === "office") {
+        setPreviewFile({
           title: fileConfig.label,
           url: fileUrl,
           originalName:
             String(response?.data?.data?.file?.originalName || currentFile?.originalName || "").trim(),
+          previewMode: fileConfig.previewMode,
         });
       } else {
         window.open(fileUrl, "_blank", "noopener,noreferrer");
@@ -1077,13 +1021,15 @@ const QcDetails = () => {
           throw new Error("Item master record not found for this QC.");
         }
 
-        const formData = new FormData();
-        formData.append("file_type", relatedFileType);
-        formData.append("file", selectedFiles[0]);
+        const uploadRequest = buildItemFileUploadRequest({
+          itemId: qc.item_master._id,
+          fileType: relatedFileType,
+          file: selectedFiles[0],
+        });
 
         response = await api.post(
-          `/items/${encodeURIComponent(qc.item_master._id)}/files`,
-          formData,
+          uploadRequest.path,
+          uploadRequest.formData,
           {
             onUploadProgress: handleRelatedFileUploadProgress,
           },
@@ -2370,12 +2316,13 @@ const QcDetails = () => {
         />
       )}
 
-      {pdfViewerFile && (
-        <PdfViewerModal
-          title={pdfViewerFile.title}
-          url={pdfViewerFile.url}
-          originalName={pdfViewerFile.originalName}
-          onClose={() => setPdfViewerFile(null)}
+      {previewFile && (
+        <FilePreviewModal
+          title={previewFile.title}
+          url={previewFile.url}
+          originalName={previewFile.originalName}
+          previewMode={previewFile.previewMode}
+          onClose={() => setPreviewFile(null)}
         />
       )}
 

@@ -5,7 +5,13 @@ import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import FilePreviewModal from "../components/FilePreviewModal";
 import SortHeaderButton from "../components/SortHeaderButton";
+import {
+  getStoredItemFileUrl,
+  hasStoredItemFile,
+  ITEM_FILE_OPTIONS as ITEM_MASTER_FILE_OPTIONS,
+} from "../constants/itemFiles";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { getDerivedOrderStatus } from "../utils/orderStatus";
 import { formatPositiveCbm } from "../utils/cbm";
@@ -155,44 +161,6 @@ const toOptionalArray = (value) => {
   }
   return [];
 };
-
-const ITEM_MASTER_FILE_OPTIONS = Object.freeze([
-  {
-    value: "product_image",
-    label: "Product Image",
-    field: "image",
-  },
-  {
-    value: "cad_file",
-    label: "CAD File",
-    field: "cad_file",
-  },
-  {
-    value: "pis_file",
-    label: "PIS",
-    field: "pis_file",
-  },
-  {
-    value: "assembly_file",
-    label: "Assembly",
-    field: "assembly_file",
-  },
-  {
-    value: "packeging_ppt",
-    label: "Packaging PPT",
-    field: "packeging_ppt",
-  },
-]);
-
-const hasStoredFile = (file = {}) =>
-  Boolean(
-    String(
-      file?.key || file?.url || file?.link || file?.public_id || "",
-    ).trim(),
-  );
-
-const getStoredFileUrl = (file = {}) =>
-  String(file?.url || file?.link || "").trim();
 
 const getFinishImageUrl = (entry = {}) =>
   String(
@@ -753,6 +721,7 @@ const InspectionReport = () => {
   const [inspectionSortOrder, setInspectionSortOrder] = useState("desc");
   const [remarkSortBy, setRemarkSortBy] = useState("inspectionDate");
   const [remarkSortOrder, setRemarkSortOrder] = useState("desc");
+  const [previewFile, setPreviewFile] = useState(null);
 
   const backTarget = useMemo(() => {
     const fromPreviousPage = String(location.state?.fromPreviousPage || "").trim();
@@ -803,9 +772,21 @@ const InspectionReport = () => {
   );
 
   const uploadedItemMasterFiles = useMemo(
-    () => itemMasterFiles.filter((entry) => hasStoredFile(entry.file)),
+    () => itemMasterFiles.filter((entry) => hasStoredItemFile(entry.file)),
     [itemMasterFiles],
   );
+
+  const handlePreviewItemMasterFile = useCallback((entry = {}) => {
+    const fileUrl = getStoredItemFileUrl(entry.file);
+    if (!fileUrl) return;
+
+    setPreviewFile({
+      title: entry.label || "Item File",
+      url: fileUrl,
+      originalName: String(entry?.file?.originalName || "").trim(),
+      previewMode: entry.previewMode || "pdf",
+    });
+  }, []);
 
   const inspectionRows = useMemo(() => {
     const sourceRows = Array.isArray(qc?.inspection_record) ? qc.inspection_record : [];
@@ -1798,7 +1779,7 @@ const InspectionReport = () => {
               {uploadedItemMasterFiles.length > 0 ? (
                 <div className="row g-3">
                   {uploadedItemMasterFiles.map((entry) => {
-                    const fileUrl = getStoredFileUrl(entry.file);
+                    const fileUrl = getStoredItemFileUrl(entry.file);
 
                     return (
                       <div key={entry.value} className="col-md-6 col-xl-4">
@@ -1809,14 +1790,27 @@ const InspectionReport = () => {
                               {String(entry.file?.originalName || "Uploaded file").trim()}
                             </div>
                             <div className="mt-auto">
-                              <a
-                                href={fileUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="btn btn-outline-secondary btn-sm rounded-pill"
-                              >
-                                Open File
-                              </a>
+                              <div className="d-flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-primary btn-sm rounded-pill"
+                                  onClick={() => handlePreviewItemMasterFile(entry)}
+                                  disabled={!fileUrl}
+                                >
+                                  Preview
+                                </button>
+                                <a
+                                  href={fileUrl || "#"}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="btn btn-outline-secondary btn-sm rounded-pill"
+                                  onClick={(event) => {
+                                    if (!fileUrl) event.preventDefault();
+                                  }}
+                                >
+                                  Open File
+                                </a>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -2165,6 +2159,16 @@ const InspectionReport = () => {
           </div>
         </div>
       </div>
+
+      {previewFile && (
+        <FilePreviewModal
+          title={previewFile.title}
+          url={previewFile.url}
+          originalName={previewFile.originalName}
+          previewMode={previewFile.previewMode}
+          onClose={() => setPreviewFile(null)}
+        />
+      )}
     </>
   );
 };

@@ -14,7 +14,16 @@ import {
 } from "../utils/measuredSizeForm";
 import "../App.css";
 
-const ACCEPTED_PIS_SHEET = ".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel";
+const ACCEPTED_PIS_SHEET = [
+  ".xlsx",
+  ".xls",
+  ".csv",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+  "text/csv",
+  "application/csv",
+  "text/plain",
+].join(",");
 
 const createInitialForm = () => ({
   code: "",
@@ -148,9 +157,10 @@ const CreateItemModal = ({
       const normalizedFileName = String(pisSheetFile.name || "").toLowerCase();
       if (
         !normalizedFileName.endsWith(".xlsx") &&
-        !normalizedFileName.endsWith(".xls")
+        !normalizedFileName.endsWith(".xls") &&
+        !normalizedFileName.endsWith(".csv")
       ) {
-        throw new Error("Only .xlsx and .xls files are allowed for the PIS sheet.");
+        throw new Error("Only .xlsx, .xls, and .csv files are allowed for the PIS sheet.");
       }
 
       const pisItemPayload = parseMeasuredSizeEntries({
@@ -295,7 +305,7 @@ const CreateItemModal = ({
                   disabled={saving}
                 />
                 <div className="small text-secondary mt-1">
-                  Upload the source PIS spreadsheet in `.xlsx` or `.xls` format.
+                  Upload the source PIS spreadsheet in `.xlsx`, `.xls`, or `.csv` format.
                 </div>
               </div>
             </div>

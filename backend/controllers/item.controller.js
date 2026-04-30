@@ -656,8 +656,9 @@ const ITEM_PDF_EXTENSIONS = new Set([".pdf"]);
 const ITEM_PRESENTATION_MIME_TYPES = new Set([
   "application/vnd.ms-powerpoint",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.ms-powerpoint.presentation.macroenabled.12",
 ]);
-const ITEM_PRESENTATION_EXTENSIONS = new Set([".ppt", ".pptx"]);
+const ITEM_PRESENTATION_EXTENSIONS = new Set([".ppt", ".pptx", ".pptm"]);
 const ITEM_FILE_CONFIG = Object.freeze({
   product_image: {
     field: "image",
@@ -703,12 +704,12 @@ const ITEM_FILE_CONFIG = Object.freeze({
     mimeTypes: ITEM_PRESENTATION_MIME_TYPES,
     extensions: ITEM_PRESENTATION_EXTENSIONS,
     defaultExtension: ".pptx",
-    invalidTypeMessage: "Only PPT or PPTX files are allowed for Packaging PPT",
+    invalidTypeMessage: "Only PPT, PPTX, or PPTM files are allowed for Packaging PPT",
   },
 });
 const ALLOWED_ITEM_FILE_TYPES = new Set(Object.keys(ITEM_FILE_CONFIG));
 const ITEM_FILE_URL_EXPIRES_IN = 24 * 60 * 60;
-const PIS_SPREADSHEET_EXTENSIONS = new Set([".xlsx", ".xls"]);
+const PIS_SPREADSHEET_EXTENSIONS = new Set([".xlsx", ".xls", ".csv"]);
 const PIS_SPREADSHEET_MIME_TYPES = new Set([
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.ms-excel",
@@ -717,6 +718,9 @@ const PIS_SPREADSHEET_MIME_TYPES = new Set([
   "application/x-msexcel",
   "application/xls",
   "application/x-xls",
+  "text/csv",
+  "application/csv",
+  "text/plain",
 ]);
 const PIS_JOB_INPUT_DIR = path.resolve(__dirname, "../uploads/job-inputs");
 
@@ -865,7 +869,7 @@ const validatePisSpreadsheetUpload = (file) => {
   const originalName = normalizeTextField(file?.originalname);
   const extension = path.extname(originalName).toLowerCase();
   if (!PIS_SPREADSHEET_EXTENSIONS.has(extension)) {
-    throw createHttpError(400, "Only .xlsx and .xls files are allowed for PIS uploads");
+    throw createHttpError(400, "Only .xlsx, .xls, and .csv files are allowed for PIS uploads");
   }
 
   const mimeType = normalizeTextField(file?.mimetype).toLowerCase();
@@ -874,7 +878,7 @@ const validatePisSpreadsheetUpload = (file) => {
     && mimeType !== "application/octet-stream"
     && !PIS_SPREADSHEET_MIME_TYPES.has(mimeType)
   ) {
-    throw createHttpError(400, "Only .xlsx and .xls files are allowed for PIS uploads");
+    throw createHttpError(400, "Only .xlsx, .xls, and .csv files are allowed for PIS uploads");
   }
 
   return {
@@ -3659,6 +3663,10 @@ exports.uploadItemFile = async (req, res) => {
         success: false,
         message: "No file uploaded",
       });
+    }
+
+    if (fileType === "pis_file") {
+      return exports.uploadItemPisFile(req, res);
     }
 
     if (!isWasabiConfigured()) {

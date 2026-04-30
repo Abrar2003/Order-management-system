@@ -1720,13 +1720,28 @@ small,
 
 .weekly-summary-table th > .btn.btn-link {
   width: 100%;
+  position: relative;
   justify-content: center;
   text-align: center;
+  padding-inline: 0.9rem;
 }
 
 .weekly-summary-table .om-sort-header {
   width: 100%;
   justify-content: center;
+}
+
+.weekly-summary-table th > .btn.btn-link > span:first-child {
+  display: block;
+  width: 100%;
+  text-align: center;
+}
+
+.weekly-summary-table th > .btn.btn-link .om-sort-header-arrows {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .weekly-summary-table td > div {

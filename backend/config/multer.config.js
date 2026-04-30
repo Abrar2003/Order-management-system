@@ -28,6 +28,12 @@ const GENERIC_UPLOAD_MIME_TYPES = new Set([
   "application/x-msexcel",
   "application/xls",
   "application/x-xls",
+  "text/csv",
+  "application/csv",
+  "text/plain",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.ms-powerpoint.presentation.macroenabled.12",
   "image/jpeg",
   "image/png",
   "image/webp",
@@ -41,6 +47,10 @@ const GENERIC_UPLOAD_EXTENSIONS = new Set([
   ".pdf",
   ".xls",
   ".xlsx",
+  ".csv",
+  ".ppt",
+  ".pptx",
+  ".pptm",
 ]);
 
 // Legacy non-QC uploads still use the generic middleware; QC image routes must

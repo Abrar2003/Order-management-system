@@ -26,6 +26,7 @@ import Container from "./pages/Container";
 import Containers from "./pages/Containers";
 import ShippedSamples from "./pages/ShippedSamples";
 import Items from "./pages/Items";
+import ItemFilesPage from "./pages/ItemFilesPage";
 import ItemOrdersHistory from "./pages/ItemOrdersHistory";
 import UploadLogs from "./pages/UploadLogs";
 import OrderEditLogs from "./pages/OrderEditLogs";
@@ -327,6 +328,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <Items />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/item-files"
+            element={
+              <ProtectedRoute>
+                <ItemFilesPage />
               </ProtectedRoute>
             }
           />
