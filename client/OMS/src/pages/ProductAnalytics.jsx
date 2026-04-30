@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import SortHeaderButton from "../components/SortHeaderButton";
+import Tooltip from "../components/Tooltip";
 import {
   getNextClientSortState,
   sortClientRows,
@@ -30,6 +31,75 @@ const normalizeFilterParam = (value, fallback = "all") => {
 };
 
 const normalizeSearchParam = (value) => String(value || "").trim();
+
+const HEADER_FORMULAS = Object.freeze({
+  orderId: {
+    title: "PO",
+    lines: [
+      "Direct value from the order record: order.order_id.",
+      "This column is an identifier, so there is no derived formula.",
+    ],
+  },
+  itemCode: {
+    title: "Item Code",
+    lines: [
+      "Direct value from the linked order item: order.item.item_code.",
+      "This column is an identifier, so there is no derived formula.",
+    ],
+  },
+  orderQuantity: {
+    title: "Order Qty",
+    lines: [
+      "Formula: Order Qty = order.quantity.",
+      "This is taken directly from the order quantity stored on the order row.",
+    ],
+  },
+  passedQuantity: {
+    title: "Passed",
+    lines: [
+      "Formula: Passed = sum of passed quantities from all linked inspections.",
+      "Calculation: inspections.reduce((sum, inspection) => sum + inspection.passed, 0).",
+    ],
+  },
+  inspectionTimeDays: {
+    title: "Inspection Time (days)",
+    lines: [
+      "Formula: (last inspection createdAt - first inspection createdAt) / (1000 x 60 x 60 x 24).",
+      "This value is only calculated when at least 2 inspection records exist, then rounded to 2 decimals in the API.",
+    ],
+  },
+  rejectionPercent: {
+    title: "Average Rejection (%)",
+    lines: [
+      "Start with remaining = order quantity.",
+      "For each inspection: rejected = remaining - passed, rejection % = (rejected / remaining) x 100.",
+      "Average Rejection (%) = average of the non-zero rejection percentages collected across inspections.",
+    ],
+  },
+});
+
+const HeaderFormulaTooltip = ({ column, children }) => {
+  const formula = HEADER_FORMULAS[column];
+
+  if (!formula) return children;
+
+  return (
+    <Tooltip
+      content={(
+        <div>
+          <div className="tooltip-title">{formula.title}</div>
+          {formula.lines.map((line) => (
+            <div key={`${column}-${line}`} className="tooltip-detail">
+              {line}
+            </div>
+          ))}
+        </div>
+      )}
+    >
+      {children}
+    </Tooltip>
+  );
+};
 
 const ProductAnalytics = () => {
   const navigate = useNavigate();
@@ -268,54 +338,72 @@ const ProductAnalytics = () => {
                   <thead className="table-primary">
                     <tr>
                       <th>
-                        <SortHeaderButton
-                          label="PO"
-                          isActive={sortBy === "orderId"}
-                          direction={sortOrder}
-                          onClick={() => handleSortColumn("orderId", "asc")}
-                        />
+                        <HeaderFormulaTooltip column="orderId">
+                          <SortHeaderButton
+                            label="PO"
+                            isActive={sortBy === "orderId"}
+                            direction={sortOrder}
+                            onClick={() => handleSortColumn("orderId", "asc")}
+                            showNativeTitle={false}
+                          />
+                        </HeaderFormulaTooltip>
                       </th>
                       <th>
-                        <SortHeaderButton
-                          label="Item Code"
-                          isActive={sortBy === "itemCode"}
-                          direction={sortOrder}
-                          onClick={() => handleSortColumn("itemCode", "asc")}
-                        />
+                        <HeaderFormulaTooltip column="itemCode">
+                          <SortHeaderButton
+                            label="Item Code"
+                            isActive={sortBy === "itemCode"}
+                            direction={sortOrder}
+                            onClick={() => handleSortColumn("itemCode", "asc")}
+                            showNativeTitle={false}
+                          />
+                        </HeaderFormulaTooltip>
                       </th>
                       <th>
-                        <SortHeaderButton
-                          label="Order Qty"
-                          isActive={sortBy === "orderQuantity"}
-                          direction={sortOrder}
-                          onClick={() => handleSortColumn("orderQuantity", "desc")}
-                        />
+                        <HeaderFormulaTooltip column="orderQuantity">
+                          <SortHeaderButton
+                            label="Order Qty"
+                            isActive={sortBy === "orderQuantity"}
+                            direction={sortOrder}
+                            onClick={() => handleSortColumn("orderQuantity", "desc")}
+                            showNativeTitle={false}
+                          />
+                        </HeaderFormulaTooltip>
                       </th>
                       <th>
-                        <SortHeaderButton
-                          label="Passed"
-                          isActive={sortBy === "passedQuantity"}
-                          direction={sortOrder}
-                          onClick={() => handleSortColumn("passedQuantity", "desc")}
-                        />
+                        <HeaderFormulaTooltip column="passedQuantity">
+                          <SortHeaderButton
+                            label="Passed"
+                            isActive={sortBy === "passedQuantity"}
+                            direction={sortOrder}
+                            onClick={() => handleSortColumn("passedQuantity", "desc")}
+                            showNativeTitle={false}
+                          />
+                        </HeaderFormulaTooltip>
                       </th>
                       <th>
-                        <SortHeaderButton
-                          label="Inspection Time (days)"
-                          isActive={sortBy === "inspectionTimeDays"}
-                          direction={sortOrder}
-                          onClick={() =>
-                            handleSortColumn("inspectionTimeDays", "desc")
-                          }
-                        />
+                        <HeaderFormulaTooltip column="inspectionTimeDays">
+                          <SortHeaderButton
+                            label="Inspection Time (days)"
+                            isActive={sortBy === "inspectionTimeDays"}
+                            direction={sortOrder}
+                            onClick={() =>
+                              handleSortColumn("inspectionTimeDays", "desc")
+                            }
+                            showNativeTitle={false}
+                          />
+                        </HeaderFormulaTooltip>
                       </th>
                       <th>
-                        <SortHeaderButton
-                          label="Average Rejection (%)"
-                          isActive={sortBy === "rejectionPercent"}
-                          direction={sortOrder}
-                          onClick={() => handleSortColumn("rejectionPercent", "desc")}
-                        />
+                        <HeaderFormulaTooltip column="rejectionPercent">
+                          <SortHeaderButton
+                            label="Average Rejection (%)"
+                            isActive={sortBy === "rejectionPercent"}
+                            direction={sortOrder}
+                            onClick={() => handleSortColumn("rejectionPercent", "desc")}
+                            showNativeTitle={false}
+                          />
+                        </HeaderFormulaTooltip>
                       </th>
                     </tr>
                   </thead>

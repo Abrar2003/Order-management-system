@@ -54,6 +54,18 @@ const ITEM_FILE_OPTIONS = Object.freeze([
     mimeTypes: ["application/pdf"],
     invalidMessage: "Only PDF files are allowed for Assembly.",
   },
+  {
+    value: "packeging_ppt",
+    label: "Packaging PPT",
+    accept:
+      ".ppt,.pptx,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    extensions: [".ppt", ".pptx"],
+    mimeTypes: [
+      "application/vnd.ms-powerpoint",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ],
+    invalidMessage: "Only PPT or PPTX files are allowed for Packaging PPT.",
+  },
 ]);
 const ITEM_FILE_OPTIONS_BY_VALUE = Object.freeze(
   ITEM_FILE_OPTIONS.reduce((acc, option) => {
@@ -862,7 +874,7 @@ const Items = () => {
                                 <>
                                   <select
                                     className="form-select form-select-sm"
-                                    style={{ width: "140px" }}
+                                    style={{ width: "170px" }}
                                     value={selectedFileType}
                                     disabled={Boolean(uploadingItemId)}
                                     onChange={(e) =>

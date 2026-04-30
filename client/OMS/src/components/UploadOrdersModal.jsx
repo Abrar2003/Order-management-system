@@ -95,12 +95,32 @@ const formatPreviousOrderActionSummary = (action = {}) => {
   return `Keep both with ${previousOrderId}`;
 };
 
-const UploadOrdersModal = ({ onClose, onSuccess }) => {
+const UploadOrdersModal = ({
+  onClose,
+  onSuccess,
+  title = "Upload Orders",
+  initialMode = "upload",
+  allowedModes = ["upload", "manual"],
+}) => {
+  const normalizedAllowedModes = useMemo(() => {
+    const safeModes = Array.isArray(allowedModes)
+      ? allowedModes
+        .map((modeValue) => String(modeValue || "").trim().toLowerCase())
+        .filter((modeValue) => modeValue === "upload" || modeValue === "manual")
+      : [];
+
+    return safeModes.length > 0 ? [...new Set(safeModes)] : ["upload", "manual"];
+  }, [allowedModes]);
+  const resolvedInitialMode = useMemo(() => {
+    const requestedMode = String(initialMode || "").trim().toLowerCase();
+    if (normalizedAllowedModes.includes(requestedMode)) return requestedMode;
+    return normalizedAllowedModes[0] || "upload";
+  }, [initialMode, normalizedAllowedModes]);
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [loadingReferenceData, setLoadingReferenceData] = useState(false);
   const [error, setError] = useState("");
-  const [mode, setMode] = useState("upload");
+  const [mode, setMode] = useState(resolvedInitialMode);
   const [nextRowId, setNextRowId] = useState(2);
   const [manualRows, setManualRows] = useState([createEmptyManualRow(1)]);
   const [brandOptions, setBrandOptions] = useState([]);
@@ -139,6 +159,11 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
     () => sortUniqueStrings([...itemCodeOptions, ...manualRows.map((row) => row?.item_code)]),
     [itemCodeOptions, manualRows],
   );
+
+  useEffect(() => {
+    setMode(resolvedInitialMode);
+    setError("");
+  }, [resolvedInitialMode]);
 
   useEffect(() => {
     if (mode !== "manual") return;
@@ -562,8 +587,8 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
       setLoading(true);
       setError("");
       await createManualOrders(payloadRows);
-      onSuccess();
-      onClose();
+      onSuccess?.();
+      onClose?.();
     } catch (err) {
       setError(err?.response?.data?.message || "Manual add failed");
     } finally {
@@ -576,33 +601,39 @@ const UploadOrdersModal = ({ onClose, onSuccess }) => {
       <div className="modal-dialog modal-dialog-centered modal-xl" role="document">
         <div className="modal-content">
           <div className="modal-header">
-            <h5 className="modal-title">Upload Orders</h5>
+            <h5 className="modal-title">{title}</h5>
             <button type="button" className="btn-close" onClick={onClose} aria-label="Close" />
           </div>
 
           <div className="modal-body d-grid gap-3">
-            <div className="btn-group w-100" role="group" aria-label="Upload mode">
-              <button
-                type="button"
-                className={`btn ${mode === "upload" ? "btn-primary" : "btn-outline-primary"}`}
-                onClick={() => {
-                  setMode("upload");
-                  setError("");
-                }}
-              >
-                Upload Excel
-              </button>
-              <button
-                type="button"
-                className={`btn ${mode === "manual" ? "btn-primary" : "btn-outline-primary"}`}
-                onClick={() => {
-                  setMode("manual");
-                  setError("");
-                }}
-              >
-                Manual Add
-              </button>
-            </div>
+            {normalizedAllowedModes.length > 1 && (
+              <div className="btn-group w-100" role="group" aria-label="Upload mode">
+                {normalizedAllowedModes.includes("upload") && (
+                  <button
+                    type="button"
+                    className={`btn ${mode === "upload" ? "btn-primary" : "btn-outline-primary"}`}
+                    onClick={() => {
+                      setMode("upload");
+                      setError("");
+                    }}
+                  >
+                    Update Orders by Excel
+                  </button>
+                )}
+                {normalizedAllowedModes.includes("manual") && (
+                  <button
+                    type="button"
+                    className={`btn ${mode === "manual" ? "btn-primary" : "btn-outline-primary"}`}
+                    onClick={() => {
+                      setMode("manual");
+                      setError("");
+                    }}
+                  >
+                    Update Orders Manually
+                  </button>
+                )}
+              </div>
+            )}
 
             {mode === "upload" ? (
               <div className="d-grid gap-3">

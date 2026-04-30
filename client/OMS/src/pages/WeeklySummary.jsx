@@ -888,7 +888,17 @@ const WeeklySummary = () => {
                     </div>
 
                     <div className="table-responsive">
-                      <table className="table table-sm table-striped align-middle mb-0">
+                      <table className="table table-sm table-striped align-middle mb-0 weekly-summary-table">
+                        <colgroup>
+                          <col style={{ width: "14%" }} />
+                          <col style={{ width: "12%" }} />
+                          <col style={{ width: "20%" }} />
+                          <col style={{ width: "12%" }} />
+                          <col style={{ width: "10%" }} />
+                          <col style={{ width: "12%" }} />
+                          <col style={{ width: "10%" }} />
+                          <col style={{ width: "10%" }} />
+                        </colgroup>
                         <thead>
                           <tr>
                             <th>

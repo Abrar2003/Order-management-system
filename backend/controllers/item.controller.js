@@ -653,6 +653,11 @@ const ITEM_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png"]);
 const ITEM_IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png"]);
 const ITEM_PDF_MIME_TYPES = new Set(["application/pdf"]);
 const ITEM_PDF_EXTENSIONS = new Set([".pdf"]);
+const ITEM_PRESENTATION_MIME_TYPES = new Set([
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+]);
+const ITEM_PRESENTATION_EXTENSIONS = new Set([".ppt", ".pptx"]);
 const ITEM_FILE_CONFIG = Object.freeze({
   product_image: {
     field: "image",
@@ -690,6 +695,15 @@ const ITEM_FILE_CONFIG = Object.freeze({
     extensions: ITEM_PDF_EXTENSIONS,
     defaultExtension: ".pdf",
     invalidTypeMessage: "Only PDF files are allowed for Assembly files",
+  },
+  packeging_ppt: {
+    field: "packeging_ppt",
+    folder: "item-packaging-ppt",
+    label: "Packaging PPT",
+    mimeTypes: ITEM_PRESENTATION_MIME_TYPES,
+    extensions: ITEM_PRESENTATION_EXTENSIONS,
+    defaultExtension: ".pptx",
+    invalidTypeMessage: "Only PPT or PPTX files are allowed for Packaging PPT",
   },
 });
 const ALLOWED_ITEM_FILE_TYPES = new Set(Object.keys(ITEM_FILE_CONFIG));

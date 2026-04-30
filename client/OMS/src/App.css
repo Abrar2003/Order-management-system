@@ -1708,6 +1708,37 @@ small,
   background: linear-gradient(135deg, var(--om-color-surface-muted) 0%, var(--om-color-surface-alt) 100%);
 }
 
+.weekly-summary-table th,
+.weekly-summary-table td {
+  text-align: center;
+  vertical-align: middle;
+}
+
+.weekly-summary-table {
+  table-layout: fixed;
+}
+
+.weekly-summary-table th > .btn.btn-link {
+  width: 100%;
+  justify-content: center;
+  text-align: center;
+}
+
+.weekly-summary-table .om-sort-header {
+  width: 100%;
+  justify-content: center;
+}
+
+.weekly-summary-table td > div {
+  width: 100%;
+  text-align: center;
+}
+
+.weekly-summary-table th,
+.weekly-summary-table td {
+  overflow-wrap: anywhere;
+}
+
 .weekly-summary-brand-panel {
   min-width: 10rem;
   min-height: 4rem;

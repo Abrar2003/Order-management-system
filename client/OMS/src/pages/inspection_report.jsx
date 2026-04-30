@@ -156,6 +156,44 @@ const toOptionalArray = (value) => {
   return [];
 };
 
+const ITEM_MASTER_FILE_OPTIONS = Object.freeze([
+  {
+    value: "product_image",
+    label: "Product Image",
+    field: "image",
+  },
+  {
+    value: "cad_file",
+    label: "CAD File",
+    field: "cad_file",
+  },
+  {
+    value: "pis_file",
+    label: "PIS",
+    field: "pis_file",
+  },
+  {
+    value: "assembly_file",
+    label: "Assembly",
+    field: "assembly_file",
+  },
+  {
+    value: "packeging_ppt",
+    label: "Packaging PPT",
+    field: "packeging_ppt",
+  },
+]);
+
+const hasStoredFile = (file = {}) =>
+  Boolean(
+    String(
+      file?.key || file?.url || file?.link || file?.public_id || "",
+    ).trim(),
+  );
+
+const getStoredFileUrl = (file = {}) =>
+  String(file?.url || file?.link || "").trim();
+
 const getFinishImageUrl = (entry = {}) =>
   String(
     entry?.image?.url
@@ -753,6 +791,20 @@ const InspectionReport = () => {
         qc?.item_master?.image?.url || qc?.item_master?.image?.link || "",
       ).trim(),
     [qc?.item_master?.image?.link, qc?.item_master?.image?.url],
+  );
+
+  const itemMasterFiles = useMemo(
+    () =>
+      ITEM_MASTER_FILE_OPTIONS.map((option) => ({
+        ...option,
+        file: qc?.item_master?.[option.field] || null,
+      })),
+    [qc?.item_master],
+  );
+
+  const uploadedItemMasterFiles = useMemo(
+    () => itemMasterFiles.filter((entry) => hasStoredFile(entry.file)),
+    [itemMasterFiles],
   );
 
   const inspectionRows = useMemo(() => {
@@ -1734,6 +1786,49 @@ const InspectionReport = () => {
                   </div>
                 </div>
               </div>
+            </section>
+
+            <section>
+              <div className="d-flex justify-content-between align-items-center mb-3">
+                <h3 className="h6 mb-0">Related Files</h3>
+                <span className="small text-secondary">
+                  {uploadedItemMasterFiles.length} {uploadedItemMasterFiles.length === 1 ? "file" : "files"}
+                </span>
+              </div>
+              {uploadedItemMasterFiles.length > 0 ? (
+                <div className="row g-3">
+                  {uploadedItemMasterFiles.map((entry) => {
+                    const fileUrl = getStoredFileUrl(entry.file);
+
+                    return (
+                      <div key={entry.value} className="col-md-6 col-xl-4">
+                        <div className="card h-100 shadow-sm border-0">
+                          <div className="card-body d-flex flex-column gap-2">
+                            <div className="fw-semibold">{entry.label}</div>
+                            <div className="small text-secondary">
+                              {String(entry.file?.originalName || "Uploaded file").trim()}
+                            </div>
+                            <div className="mt-auto">
+                              <a
+                                href={fileUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="btn btn-outline-secondary btn-sm rounded-pill"
+                              >
+                                Open File
+                              </a>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-secondary small">
+                  No related item files uploaded yet.
+                </div>
+              )}
             </section>
 
             <section>

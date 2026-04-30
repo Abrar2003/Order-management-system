@@ -1,33 +1,47 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { logout, getToken, getUserFromToken } from "../auth/auth.service";
-import "../App.css";
-import { useEffect, useMemo, useRef, useState } from "react";
 import UploadOrdersModal from "./UploadOrdersModal";
 import RectifyPdfModal from "./RectifyPdfModal";
 import AllocateLabelsModal from "./AllocateLabelsModal";
 import ChangePasswordModal from "./ChangePasswordModal";
 import CheckLabelsModal from "./CheckLabelsModal";
+import "../App.css";
+
+const routeMenuItem = (key, label, path) => ({
+  key,
+  label,
+  kind: "route",
+  path,
+});
+
+const actionMenuItem = (key, label, action, tone = "default") => ({
+  key,
+  label,
+  kind: "action",
+  action,
+  tone,
+});
 
 const Navbar = () => {
   const token = getToken();
   const user = getUserFromToken();
   const role = user?.role;
   const normalizedRole = String(role || "").trim().toLowerCase();
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [showRectifyPdfModal, setShowRectifyPdfModal] = useState(false);
+
+  const navigate = useNavigate();
+  const navShellRef = useRef(null);
+
+  const [showUploadExcelModal, setShowUploadExcelModal] = useState(false);
+  const [showManualUpdateModal, setShowManualUpdateModal] = useState(false);
+  const [showUpdatePdfModal, setShowUpdatePdfModal] = useState(false);
   const [showAllocateModal, setShowAllocateModal] = useState(false);
   const [showCheckLabelsModal, setShowCheckLabelsModal] = useState(false);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
-  const [showMainMenu, setShowMainMenu] = useState(false);
-  const [showReportsMenu, setShowReportsMenu] = useState(false);
-  const [showSummaryMenu, setShowSummaryMenu] = useState(false);
-  const [showLogsMenu, setShowLogsMenu] = useState(false);
-  const [showOpenOrdersMenu, setShowOpenOrdersMenu] = useState(false);
-  const mainMenuRef = useRef(null);
-  const quickReportsMenuRef = useRef(null);
-  const [showQuickReportsMenu, setShowQuickReportsMenu] = useState(false);
-  const quickOpenOrdersMenuRef = useRef(null);
-  const [showQuickOpenOrdersMenu, setShowQuickOpenOrdersMenu] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [openMobileSection, setOpenMobileSection] = useState("");
+  const [openDesktopDropdown, setOpenDesktopDropdown] = useState("");
+  const [openDesktopMenuSection, setOpenDesktopMenuSection] = useState("");
 
   const getInitialTheme = () => {
     const stored = localStorage.getItem("theme");
@@ -48,128 +62,265 @@ const Navbar = () => {
   const canCreateUsers = normalizedRole === "admin";
   const canAccessAnalytics = ["admin", "manager", "user"].includes(normalizedRole);
 
-  const navigate = useNavigate();
+  const closeAllMenus = useCallback(() => {
+    setShowMobileMenu(false);
+    setOpenMobileSection("");
+    setOpenDesktopDropdown("");
+    setOpenDesktopMenuSection("");
+  }, []);
 
-  const primaryRouteLinks = useMemo(() => {
+  const themeLabel = useMemo(() => {
+    if (theme === "system") return "Theme: System";
+    if (theme === "dark") return "Theme: Dark";
+    return "Theme: Light";
+  }, [theme]);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((prev) => {
+      if (prev === "system") return "light";
+      if (prev === "light") return "dark";
+      return "system";
+    });
+  }, []);
+
+  const handleLogout = useCallback(() => {
+    closeAllMenus();
+    logout();
+    navigate("/signin");
+  }, [closeAllMenus, navigate]);
+
+  const handleNavigate = useCallback(
+    (path) => {
+      closeAllMenus();
+      navigate(path);
+    },
+    [closeAllMenus, navigate],
+  );
+
+  const runMenuAction = useCallback(
+    (action) => {
+      closeAllMenus();
+
+      if (action === "toggle-theme") {
+        toggleTheme();
+        return;
+      }
+
+      if (action === "change-password") {
+        setShowChangePasswordModal(true);
+        return;
+      }
+
+      if (action === "allocate-labels") {
+        setShowAllocateModal(true);
+        return;
+      }
+
+      if (action === "check-labels") {
+        setShowCheckLabelsModal(true);
+        return;
+      }
+
+      if (action === "update-orders-excel") {
+        setShowUploadExcelModal(true);
+        return;
+      }
+
+      if (action === "update-orders-pdf") {
+        setShowUpdatePdfModal(true);
+        return;
+      }
+
+      if (action === "update-orders-manual") {
+        setShowManualUpdateModal(true);
+        return;
+      }
+
+      if (action === "logout") {
+        handleLogout();
+      }
+    },
+    [closeAllMenus, handleLogout, toggleTheme],
+  );
+
+  const desktopDirectLinks = useMemo(() => {
     if (isQcOnlyRole) {
-      return [{ label: "QC", path: "/qc" }];
+      return [routeMenuItem("qc", "QC", "/qc")];
     }
 
     const links = [];
 
     if (canAccessQc) {
       links.push(
-        { label: "QC", path: "/qc" },
-        { label: "Orders", path: "/all-orders" },
-        { label: "Shipments", path: "/shipments" },
-        { label: "Containers", path: "/containers" },
-        { label: "Daily Inspection Reports", path: "/daily-reports" },
-        { label: "Items", path: "/items" },
-        { label: "Samples", path: "/shipped-samples" },
+        routeMenuItem("qc", "QC", "/qc"),
+        routeMenuItem("items", "Items", "/items"),
+        routeMenuItem("shipments", "Shipments", "/shipments"),
+        routeMenuItem("containers", "Containers", "/containers"),
       );
     }
 
-    
-
     return links;
-  }, [canAccessQc, canViewOrderPages, isQcOnlyRole]);
+  }, [canAccessQc, isQcOnlyRole]);
 
-  const secondaryRouteLinks = useMemo(() => {
-    if (isQcOnlyRole) {
-      return [];
-    }
+  const generalMenuItems = useMemo(() => [routeMenuItem("home", "Home", "/")], []);
 
-    const links = [{ label: "Home", path: "/" }];
-
-    if (canAccessQc) {
-      links.push(
-        { label: "Items", path: "/items" },
-        { label: "Bulk Shipping", path: "/container" },
-        { label: "Shipped Samples", path: "/shipped-samples" },
-      );
-    }
-
-    if (canViewOrderPages) {
-      links.push(
-        { label: "PIS", path: "/pis" },
-        { label: "PIS Diffs", path: "/pis-diffs" },
-        { label: "Final PIS Check", path: "/final-pis-check" },
-      );
-    }
-
-    if (canEditPis) {
-      links.push({ label: "Upload Finish", path: "/pis?open_finish=1" });
-    }
-
-    if (canCreateUsers) {
-      links.push({ label: "Archived Orders", path: "/archived-orders" });
-    }
-
-    return links;
-  }, [canAccessQc, canViewOrderPages, canEditPis, canCreateUsers, isQcOnlyRole]);
-
-  const reportRouteLinks = useMemo(() => {
+  const orderMenuItems = useMemo(() => {
     if (!canAccessQc || isQcOnlyRole) return [];
-    const links = [
-      { label: "Inspector Performance Reports", path: "/reports/inspectors" },
-      { label: "Vendor Performance Reports", path: "/reports/vendors" },
-      { label: "Vendor Wise QA Report", path: "/reports/vendor-wise-qa" },
-      { label: "Delayed PO Reports", path: "/reports/delayed-pos" },
-      { label: "Upcoming ETD Reports", path: "/reports/upcoming-etd" },
-      { label: "PO Status Report", path: "/reports/po-status" },
-      { label: "Pending PO Report", path: "/reports/pending-po" },
-      { label: "Weekly Order Summary", path: "/summary/weekly" },
-      { label: "Daily Summary", path: "/summary/daily" },
-      { label: "Daily Inspection Reports", path: "/daily-reports" },
-      { label: "Packed Goods", path: "/packed-goods" },
-    ];
-    
-    if (canAccessAnalytics) {
-      links.push({ label: "Product Analytics", path: "/reports/product-analytics" });
-    }
-    
-    return links;
-  }, [canAccessQc, isQcOnlyRole, canAccessAnalytics]);
 
-  const quickReportRouteLinks = useMemo(() => {
-    if (!canAccessQc || isQcOnlyRole) return [];
-    return [{ label: "Daily Inspection Reports", path: "/daily-reports" }, ...reportRouteLinks];
-  }, [canAccessQc, isQcOnlyRole, reportRouteLinks]);
-
-  const openOrderRouteLinks = useMemo(() => {
-    if (!canAccessQc || isQcOnlyRole) return [];
     return [
-      { label: "All Orders", path: "/all-orders" },
-      { label: "Open Orders", path: "/open-orders" },
-      { label: "Inspected Orders", path: "/inspected-orders" },
-      { label: "Shipped Orders", path: "/shipped-orders" },
+      routeMenuItem("all-orders", "All Orders", "/all-orders"),
+      routeMenuItem("open-orders", "Open Orders", "/open-orders"),
+      routeMenuItem("inspected-orders", "Inspected Orders", "/inspected-orders"),
+      routeMenuItem("shipped-orders", "Shipped Orders", "/shipped-orders"),
     ];
   }, [canAccessQc, isQcOnlyRole]);
 
-  const logRouteLinks = useMemo(() => {
-    if (!canViewOrderPages || isQcOnlyRole) return [];
+  const reportMenuItems = useMemo(() => {
+    if (!canAccessQc || isQcOnlyRole) return [];
+
+    const links = [
+      routeMenuItem("daily-reports", "Daily Inspection Reports", "/daily-reports"),
+      routeMenuItem("inspector-reports", "Inspector Performance Reports", "/reports/inspectors"),
+      routeMenuItem("vendor-reports", "Vendor Performance Reports", "/reports/vendors"),
+      routeMenuItem("vendor-wise-qa", "Vendor Wise QA Report", "/reports/vendor-wise-qa"),
+      routeMenuItem("delayed-pos", "Delayed PO Reports", "/reports/delayed-pos"),
+      routeMenuItem("upcoming-etd", "Upcoming ETD Reports", "/reports/upcoming-etd"),
+      routeMenuItem("po-status", "PO Status Report", "/reports/po-status"),
+      routeMenuItem("pending-po", "Pending PO Report", "/reports/pending-po"),
+      routeMenuItem("weekly-summary", "Weekly Order Summary", "/summary/weekly"),
+      routeMenuItem("daily-summary", "Daily Summary", "/summary/daily"),
+      routeMenuItem("packed-goods", "Packed Goods", "/packed-goods"),
+      routeMenuItem("archived-orders", "Archived Orders", "/archived-orders"),
+      routeMenuItem("samples", "Shipped Samples", "/shipped-samples"),
+    ];
+
+    if (canAccessAnalytics) {
+      links.push(
+        routeMenuItem("product-analytics", "Product Analytics", "/reports/product-analytics"),
+      );
+    }
+
+    return links;
+  }, [canAccessAnalytics, canAccessQc, isQcOnlyRole]);
+
+  const processMenuItems = useMemo(() => {
+    if (isQcOnlyRole) return [];
+
+    const items = [];
+
+    if (canAccessQc) {
+      items.push(routeMenuItem("bulk-shipping", "Bulk Shipping", "/container"));
+    }
+
+    if (canManageLabels) {
+      items.push(
+        actionMenuItem("allocate-labels", "Allocate Labels", "allocate-labels"),
+        actionMenuItem("check-labels", "Check Labels", "check-labels"),
+      );
+    }
+
+    if (canCreateUsers) {
+      items.push(routeMenuItem("create-users", "Create Users", "/users/new"));
+    }
+
+    return items;
+  }, [canAccessQc, canCreateUsers, canManageLabels, isQcOnlyRole]);
+
+  const updateOrdersMenuItems = useMemo(() => {
+    if (!canManageOrders || isQcOnlyRole) return [];
+
     return [
-      { label: "Upload Logs", path: "/upload-logs" },
-      { label: "Order Edit Logs", path: "/order-edit-logs" },
-      { label: "Email Logs", path: "/email-logs" },
+      actionMenuItem(
+        "update-orders-excel",
+        "Update Orders by Excel",
+        "update-orders-excel",
+      ),
+      actionMenuItem(
+        "update-orders-pdf",
+        "Update Orders by PDF",
+        "update-orders-pdf",
+      ),
+      actionMenuItem(
+        "update-orders-manual",
+        "Update Orders Manually",
+        "update-orders-manual",
+      ),
+    ];
+  }, [canManageOrders, isQcOnlyRole]);
+
+  const uploadAddMenuItems = useMemo(() => {
+    if (!canViewOrderPages || isQcOnlyRole) return [];
+
+    const items = [];
+
+    if (canEditPis) {
+      items.push(routeMenuItem("upload-finish", "Upload Finish", "/pis?open_finish=1"));
+    }
+
+    items.push(
+      routeMenuItem("pis", "PIS", "/pis"),
+      routeMenuItem("pis-diffs", "PIS Diffs", "/pis-diffs"),
+      routeMenuItem("final-pis-check", "Final PIS Check", "/final-pis-check"),
+    );
+
+    return items;
+  }, [canEditPis, canViewOrderPages, isQcOnlyRole]);
+
+  const logMenuItems = useMemo(() => {
+    if (!canViewOrderPages || isQcOnlyRole) return [];
+
+    return [
+      routeMenuItem("upload-logs", "Upload Logs", "/upload-logs"),
+      routeMenuItem("order-edit-logs", "Order Edit Logs", "/order-edit-logs"),
     ];
   }, [canViewOrderPages, isQcOnlyRole]);
 
-  const handleLogout = () => {
-    logout();
-    navigate("/signin");
-  };
+  const accountMenuItems = useMemo(
+    () => [
+      actionMenuItem("theme", themeLabel, "toggle-theme"),
+      actionMenuItem("change-password", "Change Password", "change-password"),
+      actionMenuItem("logout", "Logout", "logout", "danger"),
+    ],
+    [themeLabel],
+  );
 
-  const handleNavigate = (path) => {
-    navigate(path);
-    setShowMainMenu(false);
-    setShowReportsMenu(false);
-    setShowSummaryMenu(false);
-    setShowLogsMenu(false);
-    setShowOpenOrdersMenu(false);
-    setShowQuickReportsMenu(false);
-    setShowQuickOpenOrdersMenu(false);
-  };
+  const menuSections = useMemo(
+    () =>
+      [
+        { key: "orders", label: "Orders", items: orderMenuItems },
+        { key: "reports", label: "Reports", items: reportMenuItems },
+        { key: "process", label: "Process", items: processMenuItems },
+        { key: "update-orders", label: "Update Orders", items: updateOrdersMenuItems },
+        { key: "upload-add", label: "Upload - Add", items: uploadAddMenuItems },
+        { key: "logs", label: "Logs", items: logMenuItems },
+        { key: "settings", label: "Settings", items: accountMenuItems },
+      ].filter((section) => Array.isArray(section.items) && section.items.length > 0),
+    [
+      accountMenuItems,
+      logMenuItems,
+      orderMenuItems,
+      processMenuItems,
+      reportMenuItems,
+      updateOrdersMenuItems,
+      uploadAddMenuItems,
+    ],
+  );
+
+  const desktopPrimaryDropdownSections = useMemo(
+    () =>
+      menuSections.filter(
+        (section) => section.key === "orders" || section.key === "reports",
+      ),
+    [menuSections],
+  );
+
+  const desktopOverflowSections = useMemo(
+    () =>
+      menuSections.filter(
+        (section) => section.key !== "orders" && section.key !== "reports",
+      ),
+    [menuSections],
+  );
 
   useEffect(() => {
     if (theme === "system") {
@@ -182,33 +333,56 @@ const Navbar = () => {
 
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (mainMenuRef.current && !mainMenuRef.current.contains(event.target)) {
-        setShowMainMenu(false);
-        setShowReportsMenu(false);
-        setShowSummaryMenu(false);
-        setShowLogsMenu(false);
-        setShowOpenOrdersMenu(false);
-      }
-
-      if (quickReportsMenuRef.current && !quickReportsMenuRef.current.contains(event.target)) {
-        setShowQuickReportsMenu(false);
-      }
-
-      if (quickOpenOrdersMenuRef.current && !quickOpenOrdersMenuRef.current.contains(event.target)) {
-        setShowQuickOpenOrdersMenu(false);
+      if (navShellRef.current && !navShellRef.current.contains(event.target)) {
+        closeAllMenus();
       }
     };
 
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+  }, [closeAllMenus]);
 
-  const toggleTheme = () => {
-    setTheme((prev) => {
-      if (prev === "system") return "light";
-      if (prev === "light") return "dark";
-      return "system";
-    });
+  const toggleMobileSection = (sectionKey) => {
+    setOpenMobileSection((prev) => (prev === sectionKey ? "" : sectionKey));
+  };
+
+  const toggleDesktopDropdown = (sectionKey) => {
+    setOpenDesktopDropdown((prev) => (prev === sectionKey ? "" : sectionKey));
+    setShowMobileMenu(false);
+    setOpenMobileSection("");
+    setOpenDesktopMenuSection("");
+  };
+
+  const toggleDesktopMenuSection = (sectionKey) => {
+    setOpenDesktopMenuSection((prev) => (prev === sectionKey ? "" : sectionKey));
+  };
+
+  const renderMenuItem = (item, className = "") => {
+    const buttonClassName = [
+      "list-group-item",
+      "list-group-item-action",
+      "text-start",
+      item.tone === "danger" ? "text-danger" : "",
+      className,
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    const handleSelect =
+      item.kind === "route"
+        ? () => handleNavigate(item.path)
+        : () => runMenuAction(item.action);
+
+    return (
+      <button
+        key={item.key}
+        type="button"
+        className={buttonClassName}
+        onClick={handleSelect}
+      >
+        {item.label}
+      </button>
+    );
   };
 
   if (!token) return null;
@@ -216,7 +390,7 @@ const Navbar = () => {
   return (
     <>
       <div className="page-shell pt-3">
-        <div className="om-navbar-stack">
+        <div className="om-navbar-stack" ref={navShellRef}>
           <nav className="navbar bg-body-tertiary rounded-4 px-3 py-2 om-navbar om-card">
             <div className="container-fluid px-0 d-flex align-items-center gap-2">
               <button
@@ -227,401 +401,171 @@ const Navbar = () => {
                 Order Management System
               </button>
 
-              <div className="d-flex align-items-center gap-2 ms-auto">
-                <div className="position-relative" ref={mainMenuRef}>
-                  <button
-                    type="button"
-                    className="btn btn-outline-primary btn-sm rounded-pill om-hamburger-btn"
-                    aria-expanded={showMainMenu}
-                    onClick={() => {
-                      setShowMainMenu((prev) => !prev);
-                      setShowQuickReportsMenu(false);
-                      setShowQuickOpenOrdersMenu(false);
-                    }}
-                    title="Menu"
-                  >
-                    <span aria-hidden="true">&#9776;</span>
-                    <span>Menu</span>
-                  </button>
+              <div className="d-none d-lg-flex ms-auto align-items-center small text-secondary">
+                {user?.name || "User"} ({role || "N/A"})
+              </div>
 
-                  {showMainMenu && (
-                    <div className="card om-main-menu-dropdown shadow-sm">
-                      <div className="list-group list-group-flush">
-                        <div className="list-group-item text-secondary small">
-                          {user?.name || "User"} ({role || "N/A"})
-                        </div>
+              <div className="position-relative d-lg-none ms-auto">
+                <button
+                  type="button"
+                  className="btn btn-outline-primary btn-sm rounded-pill om-hamburger-btn"
+                  aria-expanded={showMobileMenu}
+                  onClick={() => {
+                    setShowMobileMenu((prev) => !prev);
+                    setOpenDesktopDropdown("");
+                  }}
+                  title="Menu"
+                >
+                  <span aria-hidden="true">&#9776;</span>
+                  <span>Menu</span>
+                </button>
 
-                        {secondaryRouteLinks.map((link) => (
-                          <button
-                            key={link.path}
-                            type="button"
-                            className="list-group-item list-group-item-action text-start"
-                            onClick={() => handleNavigate(link.path)}
-                          >
-                            {link.label}
-                          </button>
-                        ))}
-
-                        {openOrderRouteLinks.length > 0 && (
-                          <>
-                            <button
-                              type="button"
-                              className="list-group-item list-group-item-action text-start d-flex justify-content-between align-items-center"
-                              aria-expanded={showOpenOrdersMenu}
-                              onClick={() => {
-                                setShowOpenOrdersMenu((prev) => !prev);
-                                setShowReportsMenu(false);
-                                setShowSummaryMenu(false);
-                                setShowLogsMenu(false);
-                              }}
-                            >
-                              <span>Orders</span>
-                              <span className="small text-secondary">
-                                {showOpenOrdersMenu ? "Hide" : "Show"}
-                              </span>
-                            </button>
-                            {showOpenOrdersMenu && openOrderRouteLinks.map((link) => (
-                              <button
-                                key={`mobile-open-orders-${link.path}`}
-                                type="button"
-                                className="list-group-item list-group-item-action text-start ps-4"
-                                onClick={() => handleNavigate(link.path)}
-                              >
-                                {link.label}
-                              </button>
-                            ))}
-                          </>
-                        )}
-
-                        {reportRouteLinks.length > 0 && (
-                          <>
-                            <button
-                              type="button"
-                              className="list-group-item list-group-item-action text-start d-flex justify-content-between align-items-center"
-                              aria-expanded={showReportsMenu}
-                              onClick={() => {
-                                setShowReportsMenu((prev) => !prev);
-                                setShowSummaryMenu(false);
-                                setShowLogsMenu(false);
-                                setShowOpenOrdersMenu(false);
-                              }}
-                            >
-                              <span>Reports</span>
-                              <span className="small text-secondary">
-                                {showReportsMenu ? "Hide" : "Show"}
-                              </span>
-                            </button>
-                            {showReportsMenu && reportRouteLinks.map((link) => (
-                              <button
-                                key={link.path}
-                                type="button"
-                                className="list-group-item list-group-item-action text-start ps-4"
-                                onClick={() => handleNavigate(link.path)}
-                              >
-                                {link.label}
-                              </button>
-                            ))}
-                          </>
-                        )}
-
-                        {/* {summaryRouteLinks.length > 0 && (
-                          <>
-                            <button
-                              type="button"
-                              className="list-group-item list-group-item-action text-start d-flex justify-content-between align-items-center"
-                              aria-expanded={showSummaryMenu}
-                              onClick={() => {
-                                setShowSummaryMenu((prev) => !prev);
-                                setShowReportsMenu(false);
-                                setShowLogsMenu(false);
-                                setShowOpenOrdersMenu(false);
-                              }}
-                            >
-                              <span>Summary</span>
-                              <span className="small text-secondary">
-                                {showSummaryMenu ? "Hide" : "Show"}
-                              </span>
-                            </button>
-                            {showSummaryMenu && summaryRouteLinks.map((link) => (
-                              <button
-                                key={link.path}
-                                type="button"
-                                className="list-group-item list-group-item-action text-start ps-4"
-                                onClick={() => handleNavigate(link.path)}
-                              >
-                                {link.label}
-                              </button>
-                            ))}
-                          </>
-                        )} */}
-
-                        {logRouteLinks.length > 0 && (
-                          <>
-                            <button
-                              type="button"
-                              className="list-group-item list-group-item-action text-start d-flex justify-content-between align-items-center"
-                              aria-expanded={showLogsMenu}
-                              onClick={() => {
-                                setShowLogsMenu((prev) => !prev);
-                                setShowReportsMenu(false);
-                                setShowSummaryMenu(false);
-                                setShowOpenOrdersMenu(false);
-                              }}
-                            >
-                              <span>Logs</span>
-                              <span className="small text-secondary">
-                                {showLogsMenu ? "Hide" : "Show"}
-                              </span>
-                            </button>
-                            {showLogsMenu && logRouteLinks.map((link) => (
-                              <button
-                                key={link.path}
-                                type="button"
-                                className="list-group-item list-group-item-action text-start ps-4"
-                                onClick={() => handleNavigate(link.path)}
-                              >
-                                {link.label}
-                              </button>
-                            ))}
-                          </>
-                        )}
-
-                        {primaryRouteLinks.map((link) => (
-                          link.path === "/all-orders" && openOrderRouteLinks.length > 0 ? null : (
-                            <button
-                              key={`mobile-${link.path}`}
-                              type="button"
-                              className="list-group-item list-group-item-action text-start om-menu-mobile-only"
-                              onClick={() => handleNavigate(link.path)}
-                            >
-                              {link.label}
-                            </button>
-                          )
-                        ))}
-
-                        <button
-                          type="button"
-                          className="list-group-item list-group-item-action text-start"
-                          onClick={() => {
-                            toggleTheme();
-                            setShowMainMenu(false);
-                            setShowReportsMenu(false);
-                            setShowSummaryMenu(false);
-                            setShowLogsMenu(false);
-                            setShowOpenOrdersMenu(false);
-                          }}
-                        >
-                          {theme === "system"
-                            ? "Theme: System"
-                            : theme === "dark"
-                              ? "Theme: Dark"
-                              : "Theme: Light"}
-                        </button>
-
-                        <button
-                          type="button"
-                          className="list-group-item list-group-item-action text-start"
-                          onClick={() => {
-                            setShowChangePasswordModal(true);
-                            setShowMainMenu(false);
-                            setShowLogsMenu(false);
-                            setShowOpenOrdersMenu(false);
-                          }}
-                        >
-                          Change Password
-                        </button>
-
-                        {canManageLabels && (
-                          <button
-                            type="button"
-                            className="list-group-item list-group-item-action text-start"
-                            onClick={() => {
-                              setShowCheckLabelsModal(true);
-                              setShowMainMenu(false);
-                              setShowLogsMenu(false);
-                              setShowOpenOrdersMenu(false);
-                            }}
-                          >
-                            Check Labels
-                          </button>
-                        )}
-
-                        {canManageLabels && (
-                          <button
-                            type="button"
-                            className="list-group-item list-group-item-action text-start"
-                            onClick={() => {
-                              setShowAllocateModal(true);
-                              setShowMainMenu(false);
-                              setShowLogsMenu(false);
-                              setShowOpenOrdersMenu(false);
-                            }}
-                          >
-                            Allocate Labels
-                          </button>
-                        )}
-
-                        {canCreateUsers && (
-                          <button
-                            type="button"
-                            className="list-group-item list-group-item-action text-start"
-                            onClick={() => handleNavigate("/users/new")}
-                          >
-                            Create User
-                          </button>
-                        )}
-
-                        {canManageOrders && (
-                          <button
-                            type="button"
-                            className="list-group-item list-group-item-action text-start"
-                            onClick={() => {
-                              setShowUploadModal(true);
-                              setShowMainMenu(false);
-                              setShowOpenOrdersMenu(false);
-                            }}
-                          >
-                            Update Orders
-                          </button>
-                        )}
-
-                        {canManageOrders && (
-                          <button
-                            type="button"
-                            className="list-group-item list-group-item-action text-start"
-                            onClick={() => {
-                              setShowRectifyPdfModal(true);
-                              setShowMainMenu(false);
-                              setShowOpenOrdersMenu(false);
-                            }}
-                          >
-                            Rectify PDF
-                          </button>
-                        )}
-
-                        <button
-                          type="button"
-                          className="list-group-item list-group-item-action text-start text-danger"
-                          onClick={handleLogout}
-                        >
-                          Logout
-                        </button>
+                {showMobileMenu && (
+                  <div className="card om-main-menu-dropdown shadow-sm">
+                    <div className="list-group list-group-flush">
+                      <div className="list-group-item text-secondary small">
+                        {user?.name || "User"} ({role || "N/A"})
                       </div>
+
+                      {generalMenuItems.map((item) => renderMenuItem(item))}
+
+                      {desktopDirectLinks.map((item) => renderMenuItem(item))}
+
+                      {menuSections.map((section) => (
+                        <div key={`mobile-section-${section.key}`}>
+                          <button
+                            type="button"
+                            className="list-group-item list-group-item-action text-start d-flex justify-content-between align-items-center"
+                            aria-expanded={openMobileSection === section.key}
+                            onClick={() => toggleMobileSection(section.key)}
+                          >
+                            <span>{section.label}</span>
+                            <span className="small text-secondary">
+                              {openMobileSection === section.key ? "Hide" : "Show"}
+                            </span>
+                          </button>
+
+                          {openMobileSection === section.key &&
+                            section.items.map((item) => renderMenuItem(item, "ps-4"))}
+                        </div>
+                      ))}
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             </div>
           </nav>
 
-          {primaryRouteLinks.length > 0 && (
-            <div className="om-route-bar rounded-4 px-2 py-2 d-none d-lg-flex flex-wrap gap-2 mt-2">
-              {primaryRouteLinks.map((link) => (
-                link.path === "/all-orders" && openOrderRouteLinks.length > 0 ? (
-                  <div
-                    key="desktop-open-orders-menu"
-                    className="position-relative"
-                    ref={quickOpenOrdersMenuRef}
-                  >
-                    <button
-                      type="button"
-                      className="btn btn-outline-primary btn-sm rounded-pill"
-                      aria-expanded={showQuickOpenOrdersMenu}
-                      onClick={() => {
-                        setShowQuickOpenOrdersMenu((prev) => !prev);
-                        setShowQuickReportsMenu(false);
-                      }}
-                    >
-                      Orders
-                    </button>
+          <div className="om-route-bar rounded-4 px-2 py-2 d-none d-lg-flex flex-wrap gap-2 mt-2">
+            {desktopDirectLinks.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                className="btn btn-outline-primary btn-sm rounded-pill"
+                onClick={() => handleNavigate(item.path)}
+              >
+                {item.label}
+              </button>
+            ))}
 
-                    {showQuickOpenOrdersMenu && (
-                      <div
-                        className="card om-main-menu-dropdown shadow-sm"
-                        style={{ left: 0, right: "auto" }}
-                      >
-                        <div className="list-group list-group-flush">
-                          {openOrderRouteLinks.map((orderLink) => (
-                            <button
-                              key={orderLink.path}
-                              type="button"
-                              className="list-group-item list-group-item-action text-start"
-                              onClick={() => handleNavigate(orderLink.path)}
-                            >
-                              {orderLink.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : link.path === "/daily-reports" && quickReportRouteLinks.length > 0 ? (
-                  <div
-                    key="desktop-reports-menu"
-                    className="position-relative"
-                    ref={quickReportsMenuRef}
-                  >
-                    <button
-                      type="button"
-                      className="btn btn-outline-primary btn-sm rounded-pill"
-                      aria-expanded={showQuickReportsMenu}
-                      onClick={() => {
-                        setShowQuickReportsMenu((prev) => !prev);
-                        setShowQuickOpenOrdersMenu(false);
-                      }}
-                    >
-                      Reports
-                    </button>
+            {desktopPrimaryDropdownSections.map((section) => (
+              <div key={`desktop-section-${section.key}`} className="position-relative">
+                <button
+                  type="button"
+                  className={`btn btn-sm rounded-pill ${openDesktopDropdown === section.key ? "btn-primary" : "btn-outline-primary"}`}
+                  aria-expanded={openDesktopDropdown === section.key}
+                  onClick={() => toggleDesktopDropdown(section.key)}
+                >
+                  {section.label}
+                </button>
 
-                    {showQuickReportsMenu && (
-                      <div
-                        className="card om-main-menu-dropdown shadow-sm"
-                        style={{ left: 0, right: "auto" }}
-                      >
-                        <div className="list-group list-group-flush">
-                          {quickReportRouteLinks.map((reportLink) => (
-                            <button
-                              key={reportLink.path}
-                              type="button"
-                              className="list-group-item list-group-item-action text-start"
-                              onClick={() => handleNavigate(reportLink.path)}
-                            >
-                              {reportLink.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <button
-                    key={link.path}
-                    type="button"
-                    className="btn btn-outline-primary btn-sm rounded-pill"
-                    onClick={() => handleNavigate(link.path)}
+                {openDesktopDropdown === section.key && (
+                  <div
+                    className="card om-main-menu-dropdown shadow-sm"
+                    style={{ left: 0, right: "auto" }}
                   >
-                    {link.label}
-                  </button>
-                )
-              ))}
-            </div>
-          )}
+                    <div className="list-group list-group-flush">
+                      {section.items.map((item) => renderMenuItem(item))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {(generalMenuItems.length > 0 || desktopOverflowSections.length > 0) && (
+              <div className="position-relative ms-auto">
+                <button
+                  type="button"
+                  className={`btn btn-sm rounded-pill ${openDesktopDropdown === "menu" ? "btn-primary" : "btn-outline-primary"}`}
+                  aria-expanded={openDesktopDropdown === "menu"}
+                  onClick={() => toggleDesktopDropdown("menu")}
+                >
+                  Menu
+                </button>
+
+                {openDesktopDropdown === "menu" && (
+                  <div
+                    className="card om-main-menu-dropdown shadow-sm"
+                    style={{ left: "auto", right: 0 }}
+                  >
+                    <div className="list-group list-group-flush">
+                      {generalMenuItems.map((item) => renderMenuItem(item))}
+
+                      {desktopOverflowSections.map((section) => (
+                        <div key={`desktop-overflow-${section.key}`}>
+                          <button
+                            type="button"
+                            className="list-group-item list-group-item-action text-start d-flex justify-content-between align-items-center"
+                            aria-expanded={openDesktopMenuSection === section.key}
+                            onClick={() => toggleDesktopMenuSection(section.key)}
+                          >
+                            <span>{section.label}</span>
+                            <span className="small text-secondary">
+                              {openDesktopMenuSection === section.key ? "Hide" : "Show"}
+                            </span>
+                          </button>
+                          {openDesktopMenuSection === section.key &&
+                            section.items.map((item) => renderMenuItem(item, "ps-4"))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {showUploadModal && (
+      {showUploadExcelModal && (
         <UploadOrdersModal
-          onClose={() => setShowUploadModal(false)}
+          title="Update Orders by Excel"
+          initialMode="upload"
+          allowedModes={["upload"]}
+          onClose={() => setShowUploadExcelModal(false)}
           onSuccess={() => {
-            setShowUploadModal(false);
+            setShowUploadExcelModal(false);
           }}
         />
       )}
 
-      {showRectifyPdfModal && (
+      {showUpdatePdfModal && (
         <RectifyPdfModal
-          onClose={() => setShowRectifyPdfModal(false)}
+          title="Update Orders by PDF"
+          onClose={() => setShowUpdatePdfModal(false)}
           onSuccess={() => {}}
+        />
+      )}
+
+      {showManualUpdateModal && (
+        <UploadOrdersModal
+          title="Update Orders Manually"
+          initialMode="manual"
+          allowedModes={["manual"]}
+          onClose={() => setShowManualUpdateModal(false)}
+          onSuccess={() => {
+            setShowManualUpdateModal(false);
+          }}
         />
       )}
 

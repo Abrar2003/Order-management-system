@@ -44,7 +44,6 @@ import PISDiffs from "./pages/PISDiffs";
 import FinalPISCheck from "./pages/FinalPISCheck";
 import WeeklySummary from "./pages/WeeklySummary";
 import DailySummary from "./pages/DailySummary";
-import EmailLogs from "./pages/EmailLogs";
 
 // import Users from "./pages/Users"; // later
 const clearStaleUiOverlays = ({ removeCustomModalRoots = false } = {}) => {
@@ -382,15 +381,6 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <OrderEditLogs />
-              </ProtectedRoute>
-            }
-          />
-
-          <Route
-            path="/email-logs"
-            element={
-              <ProtectedRoute>
-                <EmailLogs />
               </ProtectedRoute>
             }
           />

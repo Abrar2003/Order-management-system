@@ -42,7 +42,11 @@ const formatPreviousOrderActionSummary = (action = {}) => {
   return `Keep both with ${previousOrderId}`;
 };
 
-const RectifyPdfModal = ({ onClose, onSuccess }) => {
+const RectifyPdfModal = ({
+  onClose,
+  onSuccess,
+  title = "Update Orders by PDF",
+}) => {
   const [file, setFile] = useState(null);
   const [brand, setBrand] = useState("");
   const [vendor, setVendor] = useState("");
@@ -206,7 +210,7 @@ const RectifyPdfModal = ({ onClose, onSuccess }) => {
       <div className="modal-dialog modal-dialog-centered modal-xl" role="document">
         <div className="modal-content">
           <div className="modal-header">
-            <h5 className="modal-title">Rectify PDF</h5>
+            <h5 className="modal-title">{title}</h5>
             <button
               type="button"
               className="btn-close"

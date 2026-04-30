@@ -66,6 +66,8 @@ const Tooltip = ({ children, content, onOpen }) => {
         ref={triggerRef}
         onMouseEnter={showTooltip}
         onMouseLeave={hideTooltip}
+        onFocusCapture={showTooltip}
+        onBlurCapture={hideTooltip}
         style={{ display: "inline-block" }}
       >
         {children}

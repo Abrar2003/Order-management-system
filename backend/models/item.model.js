@@ -293,6 +293,14 @@ const itemSchema = new mongoose.Schema(
       link: { type: String, default: "", trim: true },
       public_id: { type: String, default: "", trim: true },
     },
+    packeging_ppt: {
+      key: { type: String, default: "", trim: true },
+      originalName: { type: String, default: "", trim: true },
+      contentType: { type: String, default: "", trim: true },
+      size: { type: Number, default: 0, min: 0 },
+      link: { type: String, default: "", trim: true },
+      public_id: { type: String, default: "", trim: true },
+    },
     pis_checked_flag: { type: Boolean, default: false },
     finish: {
       type: [finishAssignmentSchema],

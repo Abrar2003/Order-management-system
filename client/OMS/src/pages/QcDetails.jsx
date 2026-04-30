@@ -251,6 +251,22 @@ const RELATED_FILE_OPTIONS = Object.freeze([
     invalidMessage: "Only PDF files are allowed for Assembly.",
   },
   {
+    value: "packeging_ppt",
+    label: "Packaging PPT",
+    buttonLabel: "Packaging PPT",
+    scope: "item_master",
+    field: "packeging_ppt",
+    previewMode: "external",
+    accept:
+      ".ppt,.pptx,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    extensions: [".ppt", ".pptx"],
+    mimeTypes: [
+      "application/vnd.ms-powerpoint",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ],
+    invalidMessage: "Only PPT or PPTX files are allowed for Packaging PPT.",
+  },
+  {
     value: "qc_images",
     label: "QC Images",
     buttonLabel: "QC images",
