@@ -61,7 +61,7 @@ export const ITEM_FILE_OPTIONS = Object.freeze([
   },
   {
     value: "assembly_file",
-    label: "Assembly",
+    label: "Assembly Instructions",
     buttonLabel: "Assembly",
     field: "assembly_file",
     previewMode: "pdf",
