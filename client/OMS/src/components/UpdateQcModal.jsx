@@ -671,6 +671,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const [barcodeScannerOpen, setBarcodeScannerOpen] = useState(false);
   const [barcodeScannerError, setBarcodeScannerError] = useState("");
   const [barcodeScannerStatus, setBarcodeScannerStatus] = useState("");
+  const [barcodeScannedInSession, setBarcodeScannedInSession] = useState(false);
   const barcodeVideoRef = useRef(null);
   const barcodeStreamRef = useRef(null);
   const barcodeDetectorRef = useRef(null);
@@ -861,6 +862,10 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         "",
       ),
     });
+    setBarcodeScannedInSession(false);
+    setBarcodeScannerStatus("");
+    setBarcodeScannerError("");
+    setBarcodeScannerOpen(false);
   }, [qc, canRewriteLatestInspectionRecord, latestInspectionRecord, latestRequestEntry]);
 
   useEffect(() => {
@@ -925,6 +930,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         ...prev,
         barcode: parsedNumericBarcode,
       }));
+      setBarcodeScannedInSession(true);
       setBarcodeScannerStatus(`Scanned: ${parsedNumericBarcode}`);
       setBarcodeScannerOpen(false);
       return true;
@@ -1082,6 +1088,10 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
+
+    if (isQcUser && name === "barcode") {
+      return;
+    }
 
     if (NON_NEGATIVE_FIELDS.has(name) && value !== "") {
       const parsedValue = Number(value);
@@ -1705,6 +1715,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     const innerBarcodeValue = isCartonPackagingMode
       ? form.inner_barcode.trim()
       : "";
+    const currentMasterBarcodeValue = Number(qc?.master_barcode || qc?.barcode || 0);
     const barcodeParsed = barcodeValue === "" ? null : Number(barcodeValue);
     const innerBarcodeParsed =
       innerBarcodeValue === "" ? null : Number(innerBarcodeValue);
@@ -1768,9 +1779,12 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         if (isCartonPackagingMode) {
           payload.inner_barcode = innerBarcodeParsed ?? 0;
         }
-      } else if (barcodeParsed !== null) {
+      } else if (barcodeParsed !== null && barcodeParsed !== currentMasterBarcodeValue) {
         payload.barcode = barcodeParsed;
         payload.master_barcode = barcodeParsed;
+        if (isQcUser) {
+          payload.barcode_scanned = barcodeScannedInSession;
+        }
       }
 
       if (isCartonPackagingMode && innerBarcodeParsed !== null) {
@@ -2580,8 +2594,13 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     min="1"
                     step="1"
                     disabled={lockBarcodeField}
+                    readOnly={isQcUser}
                     placeholder={
-                      lockBarcodeField ? "Already set" : "Enter master barcode"
+                      lockBarcodeField
+                        ? "Already set"
+                        : isQcUser
+                          ? "Scan master barcode"
+                          : "Enter master barcode"
                     }
                   />
                   <button
@@ -2613,6 +2632,11 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     {barcodeScannerError && (
                       <div className="small text-danger mt-1">{barcodeScannerError}</div>
                     )}
+                  </div>
+                )}
+                {isQcUser && !lockBarcodeField && (
+                  <div className="small text-secondary mt-2">
+                    QC users can fill the master barcode only by scanning.
                   </div>
                 )}
               </div>

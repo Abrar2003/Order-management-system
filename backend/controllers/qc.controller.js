@@ -4195,6 +4195,7 @@ exports.updateQC = async (req, res) => {
       barcode,
       master_barcode,
       inner_barcode,
+      barcode_scanned,
       packed_size,
       finishing,
       branding,
@@ -4260,6 +4261,9 @@ exports.updateQC = async (req, res) => {
           .toLowerCase() === "true");
     const allowAdminRewrite = adminRewriteLatestRecord;
     const allowQcFieldEdits = allowAdminRewrite || isQcUser;
+    const barcodeScannedByQcUser =
+      barcode_scanned === true ||
+      String(barcode_scanned || "").trim().toLowerCase() === "true";
 
     const requestedInspectorId =
       inspector !== undefined &&
@@ -5041,8 +5045,17 @@ exports.updateQC = async (req, res) => {
           message: "master_barcode must be a non-negative number",
         });
       }
+      const currentMasterBarcode = Number(qc?.master_barcode || qc?.barcode || 0);
+      if (
+        isQcUser &&
+        nextMasterBarcode !== currentMasterBarcode &&
+        !barcodeScannedByQcUser
+      ) {
+        return res.status(403).json({
+          message: "QC users must scan the master barcode. Manual barcode entry is not allowed.",
+        });
+      }
       if (!allowQcFieldEdits && !isAdmin) {
-        const currentMasterBarcode = Number(qc?.master_barcode || qc?.barcode || 0);
         if (currentMasterBarcode > 0 && nextMasterBarcode !== currentMasterBarcode) {
           return res
             .status(400)
