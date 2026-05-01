@@ -10618,6 +10618,13 @@ exports.deleteInspectionRecord = async (req, res) => {
   }
 };
 
+
+
+// test comments
+
+
+
+
 exports.syncInspectionStatuses = async (req, res) => {
   try {
     const inspections = await Inspection.find({})
