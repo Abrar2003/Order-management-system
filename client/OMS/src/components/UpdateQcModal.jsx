@@ -1756,6 +1756,10 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     const barcodeParsed = barcodeValue === "" ? null : Number(barcodeValue);
     const innerBarcodeParsed =
       innerBarcodeValue === "" ? null : Number(innerBarcodeValue);
+    const effectiveMasterBarcodeValue =
+      barcodeParsed !== null ? barcodeParsed : currentMasterBarcodeValue;
+    const effectiveInnerBarcodeValue =
+      innerBarcodeParsed !== null ? innerBarcodeParsed : currentInnerBarcodeValue;
 
     if (
       barcodeParsed !== null &&
@@ -1770,6 +1774,20 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       (!Number.isInteger(innerBarcodeParsed) || innerBarcodeParsed <= 0)
     ) {
       setError("Inner carton barcode must be a positive integer.");
+      return;
+    }
+
+    if (isQcUser && (!Number.isInteger(effectiveMasterBarcodeValue) || effectiveMasterBarcodeValue <= 0)) {
+      setError("QC users must scan the master barcode before updating this QC record.");
+      return;
+    }
+
+    if (
+      isQcUser &&
+      isCartonPackagingMode &&
+      (!Number.isInteger(effectiveInnerBarcodeValue) || effectiveInnerBarcodeValue <= 0)
+    ) {
+      setError("QC users must scan the inner carton barcode before updating this QC record.");
       return;
     }
 
@@ -2678,7 +2696,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 )}
                 {isQcUser && !lockBarcodeField && (
                   <div className="small text-secondary mt-2">
-                    QC users can fill the master barcode only by scanning.
+                    QC users must scan the master barcode before saving.
                   </div>
                 )}
               </div>
@@ -2735,7 +2753,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   )}
                   {isQcUser && !lockInnerBarcodeField && (
                     <div className="small text-secondary mt-2">
-                      QC users can fill the inner carton barcode only by scanning.
+                      QC users must scan the inner carton barcode before saving.
                     </div>
                   )}
                 </div>

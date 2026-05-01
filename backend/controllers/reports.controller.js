@@ -4,6 +4,7 @@ const Inspection = require("../models/inspection.model");
 const QC = require("../models/qc.model");
 const Item = require("../models/item.model");
 const {
+  buildNormalizedInspectionSizeState,
   compareInspectionSizeSnapshot,
   normalizeNumber,
 } = require("../helpers/inspectionSizeSnapshot");
@@ -1340,7 +1341,7 @@ exports.getQcReportMismatch = async (req, res) => {
       ]),
     );
 
-    const mappedRows = (Array.isArray(inspections) ? inspections : []).map((inspection) => {
+    const inspectionRows = (Array.isArray(inspections) ? inspections : []).map((inspection) => {
       const currentItemDoc =
         itemDocByCode.get(normalizeLookupKey(inspection?.item_code)) || {};
       const mismatch = compareInspectionSizeSnapshot(inspection, currentItemDoc);
@@ -1358,6 +1359,7 @@ exports.getQcReportMismatch = async (req, res) => {
         inspector_name: normalizeText(inspection?.inspector_name) || "Unassigned",
         requested_date: normalizeText(inspection?.requested_date),
         inspection_date: normalizeText(inspection?.inspection_date),
+        inspection_date_value: inspection?.inspection_date_value || null,
         status: normalizeText(inspection?.status),
         checked: normalizeNumber(inspection?.checked),
         passed: normalizeNumber(inspection?.passed),
@@ -1387,7 +1389,7 @@ exports.getQcReportMismatch = async (req, res) => {
       };
     });
 
-    const summary = mappedRows.reduce(
+    const summary = inspectionRows.reduce(
       (accumulator, row) => {
         accumulator.total_inspections += 1;
         if (row?.mismatch_summary?.has_mismatch) {
@@ -1416,28 +1418,197 @@ exports.getQcReportMismatch = async (req, res) => {
       },
     );
 
+    const groupedRowsMap = new Map();
+    inspectionRows.forEach((row) => {
+      const groupKey =
+        normalizeText(row?.qc_id) ||
+        `${normalizeLookupKey(row?.order_id)}::${normalizeLookupKey(row?.item_code)}`;
+      const currentEntry = groupedRowsMap.get(groupKey);
+
+      if (!currentEntry) {
+        const currentItemDoc =
+          itemDocByCode.get(normalizeLookupKey(row?.item_code)) || {};
+        const normalizedCurrentSnapshot =
+          buildNormalizedInspectionSizeState(currentItemDoc);
+        const currentSnapshot = {
+          inspected_item_sizes: Array.isArray(row?.current_qc_inspected_item_sizes)
+            ? row.current_qc_inspected_item_sizes
+            : normalizedCurrentSnapshot.inspected_item_sizes,
+          inspected_box_sizes: Array.isArray(row?.current_qc_inspected_box_sizes)
+            ? row.current_qc_inspected_box_sizes
+            : normalizedCurrentSnapshot.inspected_box_sizes,
+          inspected_box_mode:
+            row?.current_qc_inspected_box_mode ||
+            normalizedCurrentSnapshot.inspected_box_mode,
+        };
+
+        groupedRowsMap.set(groupKey, {
+          id: normalizeText(row?.qc_id) || normalizeText(row?.inspection_id) || groupKey,
+          qc_id: normalizeText(row?.qc_id),
+          order_id: row?.order_id || "N/A",
+          brand: row?.brand || "N/A",
+          vendor: row?.vendor || "N/A",
+          item_code: row?.item_code || "N/A",
+          item_description: row?.item_description || "N/A",
+          inspector_names: [],
+          requested_date: row?.requested_date || "",
+          inspection_date: row?.inspection_date || "",
+          inspection_date_value: row?.inspection_date_value || null,
+          status: row?.status || "",
+          checked: 0,
+          passed: 0,
+          pending_after: row?.pending_after ?? 0,
+          inspection_count: 0,
+          current_qc_inspected_item_sizes: currentSnapshot.inspected_item_sizes,
+          current_qc_inspected_box_sizes: currentSnapshot.inspected_box_sizes,
+          current_qc_inspected_box_mode: currentSnapshot.inspected_box_mode,
+          mismatch_summary: {
+            has_mismatch: false,
+            mismatch_count: 0,
+            mismatch_inspection_count: 0,
+            clean_inspection_count: 0,
+            item_size_mismatch_count: 0,
+            box_size_mismatch_count: 0,
+            box_mode_mismatch_count: 0,
+          },
+          inspection_records: [],
+        });
+      }
+
+      const group = groupedRowsMap.get(groupKey);
+      group.inspection_count += 1;
+      group.checked += Number(row?.checked || 0);
+      group.passed += Number(row?.passed || 0);
+      group.pending_after = row?.pending_after ?? group.pending_after;
+
+      if (
+        row?.inspection_date_value &&
+        (!group.inspection_date_value ||
+          new Date(row.inspection_date_value).getTime() >=
+            new Date(group.inspection_date_value).getTime())
+      ) {
+        group.inspection_date_value = row.inspection_date_value;
+        group.inspection_date = row?.inspection_date || group.inspection_date;
+        group.requested_date = row?.requested_date || group.requested_date;
+        group.status = row?.status || group.status;
+      }
+
+      if (row?.inspector_name && !group.inspector_names.includes(row.inspector_name)) {
+        group.inspector_names.push(row.inspector_name);
+      }
+
+      const inspectionRecord = {
+        inspection_id: row?.inspection_id || row?.id,
+        requested_date: row?.requested_date || "",
+        inspection_date: row?.inspection_date || "",
+        inspection_date_value: row?.inspection_date_value || null,
+        inspector_id: row?.inspector_id || "",
+        inspector_name: row?.inspector_name || "Unassigned",
+        status: row?.status || "",
+        checked: Number(row?.checked || 0),
+        passed: Number(row?.passed || 0),
+        pending_after: Number(row?.pending_after || 0),
+        inspection_snapshot: {
+          inspected_item_sizes: Array.isArray(row?.inspection_inspected_item_sizes)
+            ? row.inspection_inspected_item_sizes
+            : [],
+          inspected_box_sizes: Array.isArray(row?.inspection_inspected_box_sizes)
+            ? row.inspection_inspected_box_sizes
+            : [],
+          inspected_box_mode: row?.inspection_inspected_box_mode || "",
+        },
+        mismatch_summary: {
+          has_mismatch: Boolean(row?.mismatch_summary?.has_mismatch),
+          mismatch_count: Number(row?.mismatch_summary?.mismatch_count || 0),
+          item_size_mismatch_count: Number(
+            row?.mismatch_summary?.item_size_mismatch_count || 0,
+          ),
+          box_size_mismatch_count: Number(
+            row?.mismatch_summary?.box_size_mismatch_count || 0,
+          ),
+          box_mode_mismatch_count: Number(
+            row?.mismatch_summary?.box_mode_mismatch_count || 0,
+          ),
+        },
+        item_size_mismatches: Array.isArray(row?.item_size_mismatches)
+          ? row.item_size_mismatches
+          : [],
+        box_size_mismatches: Array.isArray(row?.box_size_mismatches)
+          ? row.box_size_mismatches
+          : [],
+        box_mode_mismatch: row?.box_mode_mismatch || null,
+      };
+
+      group.inspection_records.push(inspectionRecord);
+      group.mismatch_summary.mismatch_count += inspectionRecord.mismatch_summary.mismatch_count;
+      group.mismatch_summary.item_size_mismatch_count +=
+        inspectionRecord.mismatch_summary.item_size_mismatch_count;
+      group.mismatch_summary.box_size_mismatch_count +=
+        inspectionRecord.mismatch_summary.box_size_mismatch_count;
+      group.mismatch_summary.box_mode_mismatch_count +=
+        inspectionRecord.mismatch_summary.box_mode_mismatch_count;
+
+      if (inspectionRecord.mismatch_summary.has_mismatch) {
+        group.mismatch_summary.has_mismatch = true;
+        group.mismatch_summary.mismatch_inspection_count += 1;
+      } else {
+        group.mismatch_summary.clean_inspection_count += 1;
+      }
+    });
+
+    const groupedRows = [...groupedRowsMap.values()]
+      .map((group) => {
+        const sortedInspectionRecords = [...group.inspection_records].sort((left, right) => {
+          const leftTime = left?.inspection_date_value
+            ? new Date(left.inspection_date_value).getTime()
+            : 0;
+          const rightTime = right?.inspection_date_value
+            ? new Date(right.inspection_date_value).getTime()
+            : 0;
+          return leftTime - rightTime;
+        }).map((inspectionRecord, index) => ({
+          ...inspectionRecord,
+          sheet_label: `Inspection ${index + 1}`,
+        }));
+
+        return {
+          ...group,
+          inspector_name: group.inspector_names.join(", ") || "Unassigned",
+          inspection_records: sortedInspectionRecords,
+        };
+      })
+      .sort((left, right) => {
+        const leftTime = left?.inspection_date_value
+          ? new Date(left.inspection_date_value).getTime()
+          : 0;
+        const rightTime = right?.inspection_date_value
+          ? new Date(right.inspection_date_value).getTime()
+          : 0;
+        return rightTime - leftTime;
+      });
+
     const filteredRows = mismatchOnly
-      ? mappedRows.filter((row) => row?.mismatch_summary?.has_mismatch)
-      : mappedRows;
+      ? groupedRows.filter((row) => row?.mismatch_summary?.has_mismatch)
+      : groupedRows;
     const total = filteredRows.length;
     const totalPages = Math.max(1, Math.ceil(total / Math.max(1, limit)));
     const safePage = Math.min(Math.max(1, page), totalPages);
     const skip = (safePage - 1) * Math.max(1, limit);
 
     const sortedBrands = [...new Set(
-      mappedRows
+      inspectionRows
         .map((row) => normalizeText(row?.brand))
         .filter(Boolean)
         .filter((value) => value !== "N/A"),
     )].sort((left, right) => left.localeCompare(right));
     const sortedVendors = [...new Set(
-      mappedRows
+      inspectionRows
         .map((row) => normalizeText(row?.vendor))
         .filter(Boolean)
         .filter((value) => value !== "N/A"),
     )].sort((left, right) => left.localeCompare(right));
     const inspectorOptions = [...new Map(
-      mappedRows
+      inspectionRows
         .map((row) => ({
           _id: normalizeText(row?.inspector_id),
           name: normalizeText(row?.inspector_name) || "Unassigned",

@@ -177,17 +177,22 @@ const buildMismatchKeySet = (mismatches = []) =>
     ),
   );
 
-const buildDetailRows = ({
-  inspectionEntries = [],
+const buildSheetRows = ({
+  inspections = [],
   currentEntries = [],
-  mismatches = [],
   labelPrefix = "",
   fields = [],
+  snapshotKey = "",
+  mismatchKey = "",
 } = {}) => {
-  const mismatchKeySet = buildMismatchKeySet(mismatches);
+  const safeInspections = Array.isArray(inspections) ? inspections : [];
   const maxLength = Math.max(
-    Array.isArray(inspectionEntries) ? inspectionEntries.length : 0,
     Array.isArray(currentEntries) ? currentEntries.length : 0,
+    ...safeInspections.map((inspection) =>
+      Array.isArray(inspection?.inspection_snapshot?.[snapshotKey])
+        ? inspection.inspection_snapshot[snapshotKey].length
+        : 0,
+    ),
   );
 
   if (maxLength === 0) {
@@ -196,36 +201,77 @@ const buildDetailRows = ({
 
   const rows = [];
   for (let index = 0; index < maxLength; index += 1) {
-    const inspectionEntry = inspectionEntries[index] || {};
     const currentEntry = currentEntries[index] || {};
 
     fields.forEach((field) => {
-      const key = `${index}:${field.key}`;
+      const inspectionCells = safeInspections.map((inspection, inspectionIndex) => {
+        const inspectionEntries = Array.isArray(inspection?.inspection_snapshot?.[snapshotKey])
+          ? inspection.inspection_snapshot[snapshotKey]
+          : [];
+        const inspectionEntry = inspectionEntries[index] || {};
+        const mismatchKeySet = buildMismatchKeySet(inspection?.[mismatchKey]);
+        const mismatchKey = `${index}:${field.key}`;
+        const inspectionValue = inspectionEntry?.[field.key];
+        const currentValue = currentEntry?.[field.key];
+
+        return {
+          key: `${inspection?.inspection_id || inspectionIndex}-${index}-${field.key}`,
+          inspection_id: inspection?.inspection_id || "",
+          label: inspection?.sheet_label || `Inspection ${inspectionIndex + 1}`,
+          inspection_date: inspection?.inspection_date || "",
+          inspector_name: inspection?.inspector_name || "Unassigned",
+          value: formatComparisonValue(inspectionValue, field.type, field.key),
+          is_mismatch:
+            mismatchKeySet.has(mismatchKey) ||
+            !valuesMatch(inspectionValue, currentValue, field.type),
+        };
+      });
+
       rows.push({
         key: `${labelPrefix}-${index}-${field.key}`,
         field: `${labelPrefix} ${index + 1} - ${field.label}`,
-        inspection_value: formatComparisonValue(
-          inspectionEntry?.[field.key],
-          field.type,
-          field.key,
-        ),
-        current_value: formatComparisonValue(
-          currentEntry?.[field.key],
-          field.type,
-          field.key,
-        ),
-        is_mismatch:
-          mismatchKeySet.has(key) ||
-          !valuesMatch(
-            inspectionEntry?.[field.key],
-            currentEntry?.[field.key],
-            field.type,
-          ),
+        current_value: formatComparisonValue(currentEntry?.[field.key], field.type, field.key),
+        inspection_cells: inspectionCells,
+        is_mismatch: inspectionCells.some((cell) => cell.is_mismatch),
       });
     });
   }
 
   return rows;
+};
+
+const buildBoxModeSheetRows = ({
+  inspections = [],
+  currentMode = "",
+} = {}) => {
+  const safeInspections = Array.isArray(inspections) ? inspections : [];
+  if (!currentMode && safeInspections.length === 0) {
+    return [];
+  }
+
+  return [{
+    key: "box-mode",
+    field: "Box Mode",
+    current_value: formatBoxModeLabel(currentMode),
+    inspection_cells: safeInspections.map((inspection, inspectionIndex) => {
+      const inspectionMode = inspection?.inspection_snapshot?.inspected_box_mode || "";
+      return {
+        key: `${inspection?.inspection_id || inspectionIndex}-box-mode`,
+        inspection_id: inspection?.inspection_id || "",
+        label: inspection?.sheet_label || `Inspection ${inspectionIndex + 1}`,
+        inspection_date: inspection?.inspection_date || "",
+        inspector_name: inspection?.inspector_name || "Unassigned",
+        value: formatBoxModeLabel(inspectionMode),
+        is_mismatch:
+          Boolean(inspection?.box_mode_mismatch) ||
+          !valuesMatch(inspectionMode, currentMode, "text"),
+      };
+    }),
+    is_mismatch: safeInspections.some((inspection) =>
+      Boolean(inspection?.box_mode_mismatch) ||
+      !valuesMatch(inspection?.inspection_snapshot?.inspected_box_mode, currentMode, "text"),
+    ),
+  }];
 };
 
 const defaultReport = {
@@ -634,41 +680,41 @@ const QcReportMismatch = () => {
   const summary = report?.summary || defaultReport.summary;
   const rows = Array.isArray(report?.rows) ? report.rows : [];
   const pagination = report?.pagination || defaultReport.pagination;
-
+  const selectedInspectionRecords = useMemo(
+    () => (Array.isArray(selectedRow?.inspection_records) ? selectedRow.inspection_records : []),
+    [selectedRow],
+  );
   const itemDetailRows = useMemo(() => {
     if (!selectedRow) return [];
-    return buildDetailRows({
-      inspectionEntries: selectedRow?.inspection_inspected_item_sizes,
+    return buildSheetRows({
+      inspections: selectedInspectionRecords,
       currentEntries: selectedRow?.current_qc_inspected_item_sizes,
-      mismatches: selectedRow?.item_size_mismatches,
       labelPrefix: "Item Size",
       fields: ITEM_SIZE_FIELDS,
+      snapshotKey: "inspected_item_sizes",
+      mismatchKey: "item_size_mismatches",
     });
-  }, [selectedRow]);
+  }, [selectedInspectionRecords, selectedRow]);
 
   const boxDetailRows = useMemo(() => {
     if (!selectedRow) return [];
-    return buildDetailRows({
-      inspectionEntries: selectedRow?.inspection_inspected_box_sizes,
+    return buildSheetRows({
+      inspections: selectedInspectionRecords,
       currentEntries: selectedRow?.current_qc_inspected_box_sizes,
-      mismatches: selectedRow?.box_size_mismatches,
       labelPrefix: "Box Size",
       fields: BOX_SIZE_FIELDS,
+      snapshotKey: "inspected_box_sizes",
+      mismatchKey: "box_size_mismatches",
     });
-  }, [selectedRow]);
+  }, [selectedInspectionRecords, selectedRow]);
 
   const boxModeRows = useMemo(() => {
     if (!selectedRow) return [];
-    const inspectionMode = selectedRow?.inspection_inspected_box_mode;
-    const currentMode = selectedRow?.current_qc_inspected_box_mode;
-    return [{
-      key: "box-mode",
-      field: "Box Mode",
-      inspection_value: formatBoxModeLabel(inspectionMode),
-      current_value: formatBoxModeLabel(currentMode),
-      is_mismatch: !valuesMatch(inspectionMode, currentMode, "text"),
-    }];
-  }, [selectedRow]);
+    return buildBoxModeSheetRows({
+      inspections: selectedInspectionRecords,
+      currentMode: selectedRow?.current_qc_inspected_box_mode,
+    });
+  }, [selectedInspectionRecords, selectedRow]);
 
   return (
     <>
@@ -678,7 +724,7 @@ const QcReportMismatch = () => {
         <div className="d-flex justify-content-between align-items-center mb-3">
           <h2 className="h4 mb-0">QC Report Mismatch</h2>
           <span className="small text-secondary">
-            Inspection snapshots vs current inspected sizes
+            All inspection snapshots vs current inspected sizes
           </span>
         </div>
 
@@ -932,13 +978,23 @@ const QcReportMismatch = () => {
                           <td>{formatDateDDMMYYYY(row?.requested_date)}</td>
                           <td>{formatDateDDMMYYYY(row?.inspection_date)}</td>
                           <td>{row?.status || "N/A"}</td>
-                          <td>{row?.checked ?? 0}</td>
-                          <td>{row?.passed ?? 0}</td>
+                          <td>
+                            <div>{row?.checked ?? 0}</div>
+                            <div className="small text-secondary">
+                              {row?.inspection_count || 0} inspections
+                            </div>
+                          </td>
+                          <td>
+                            <div>{row?.passed ?? 0}</div>
+                            <div className="small text-secondary">
+                              Pending: {row?.pending_after ?? 0}
+                            </div>
+                          </td>
                           <td>
                             <div className="small">
-                              <div>Inspection: {formatBoxModeLabel(row?.inspection_inspected_box_mode)}</div>
+                              <div>Current: {formatBoxModeLabel(row?.current_qc_inspected_box_mode)}</div>
                               <div className="text-secondary">
-                                Current: {formatBoxModeLabel(row?.current_qc_inspected_box_mode)}
+                                Records: {row?.inspection_count || 0}
                               </div>
                             </div>
                           </td>
@@ -946,11 +1002,14 @@ const QcReportMismatch = () => {
                             <span className={`badge ${hasMismatch ? "text-bg-danger" : "text-bg-success"}`}>
                               {hasMismatch ? "Mismatch" : "Matched"}
                             </span>
-                            {hasMismatch && (
-                              <div className="small text-secondary mt-1">
+                            <div className="small text-secondary mt-1">
+                              {row?.mismatch_summary?.mismatch_inspection_count || 0} / {row?.inspection_count || 0} inspections
+                            </div>
+                            {hasMismatch ? (
+                              <div className="small text-secondary">
                                 {row?.mismatch_summary?.mismatch_count || 0} fields
                               </div>
-                            )}
+                            ) : null}
                           </td>
                           <td>
                             <button
@@ -1033,7 +1092,7 @@ const QcReportMismatch = () => {
                   <h5 className="modal-title">QC Report Mismatch Details</h5>
                   <div className="small text-muted">
                     {selectedRow?.order_id || "N/A"} | {selectedRow?.item_code || "N/A"} |{" "}
-                    {selectedRow?.inspector_name || "Unassigned"}
+                    {selectedRow?.inspection_count || 0} inspections
                   </div>
                 </div>
                 <button
@@ -1047,19 +1106,22 @@ const QcReportMismatch = () => {
               <div className="modal-body">
                 <div className="d-flex flex-wrap gap-2 mb-3">
                   <span className="om-summary-chip">
-                    Requested: {formatDateDDMMYYYY(selectedRow?.requested_date)}
+                    Latest Requested: {formatDateDDMMYYYY(selectedRow?.requested_date)}
                   </span>
                   <span className="om-summary-chip">
-                    Inspected: {formatDateDDMMYYYY(selectedRow?.inspection_date)}
+                    Latest Inspected: {formatDateDDMMYYYY(selectedRow?.inspection_date)}
                   </span>
                   <span className="om-summary-chip">
-                    Checked: {selectedRow?.checked ?? 0}
+                    Total Checked: {selectedRow?.checked ?? 0}
                   </span>
                   <span className="om-summary-chip">
-                    Passed: {selectedRow?.passed ?? 0}
+                    Total Passed: {selectedRow?.passed ?? 0}
                   </span>
                   <span className="om-summary-chip">
                     Pending After: {selectedRow?.pending_after ?? 0}
+                  </span>
+                  <span className="om-summary-chip">
+                    Mismatch Inspections: {selectedRow?.mismatch_summary?.mismatch_inspection_count || 0}
                   </span>
                 </div>
 
@@ -1078,9 +1140,18 @@ const QcReportMismatch = () => {
                           <thead>
                             <tr>
                               <th>Field</th>
-                              <th>Inspection Snapshot Value</th>
                               <th>Current QC Value</th>
-                              <th>Difference Status</th>
+                              {selectedInspectionRecords.map((inspection) => (
+                                <th key={inspection?.inspection_id || inspection?.sheet_label}>
+                                  <div>{inspection?.sheet_label || "Inspection"}</div>
+                                  <div className="small text-secondary fw-normal">
+                                    {formatDateDDMMYYYY(inspection?.inspection_date)}
+                                  </div>
+                                  <div className="small text-secondary fw-normal">
+                                    {inspection?.inspector_name || "Unassigned"}
+                                  </div>
+                                </th>
+                              ))}
                             </tr>
                           </thead>
                           <tbody>
@@ -1090,13 +1161,18 @@ const QcReportMismatch = () => {
                                 className={entry.is_mismatch ? "table-warning" : ""}
                               >
                                 <td>{entry.field}</td>
-                                <td>{entry.inspection_value}</td>
                                 <td>{entry.current_value}</td>
-                                <td>
-                                  <span className={`badge ${entry.is_mismatch ? "text-bg-danger" : "text-bg-success"}`}>
-                                    {entry.is_mismatch ? "Mismatch" : "Matched"}
-                                  </span>
-                                </td>
+                                {entry.inspection_cells.map((cell) => (
+                                  <td
+                                    key={cell.key}
+                                    className={cell.is_mismatch ? "table-danger" : ""}
+                                  >
+                                    <div>{cell.value}</div>
+                                    <div className="small text-secondary">
+                                      {cell.is_mismatch ? "Mismatch" : "Matched"}
+                                    </div>
+                                  </td>
+                                ))}
                               </tr>
                             ))}
                           </tbody>

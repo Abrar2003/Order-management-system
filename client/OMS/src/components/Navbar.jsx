@@ -27,6 +27,13 @@ const actionMenuItem = (key, label, action, tone = "default") => ({
   tone,
 });
 
+const groupMenuItem = (key, label, items) => ({
+  key,
+  label,
+  kind: "group",
+  items: Array.isArray(items) ? items : [],
+});
+
 const Navbar = () => {
   const token = getToken();
   const user = getUserFromToken();
@@ -44,8 +51,10 @@ const Navbar = () => {
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [openMobileSection, setOpenMobileSection] = useState("");
+  const [openMobileGroup, setOpenMobileGroup] = useState("");
   const [openDesktopDropdown, setOpenDesktopDropdown] = useState("");
   const [openDesktopMenuSection, setOpenDesktopMenuSection] = useState("");
+  const [openDesktopSubmenu, setOpenDesktopSubmenu] = useState("");
 
   const getInitialTheme = () => {
     const stored = localStorage.getItem("theme");
@@ -69,8 +78,10 @@ const Navbar = () => {
   const closeAllMenus = useCallback(() => {
     setShowMobileMenu(false);
     setOpenMobileSection("");
+    setOpenMobileGroup("");
     setOpenDesktopDropdown("");
     setOpenDesktopMenuSection("");
+    setOpenDesktopSubmenu("");
   }, []);
 
   const themeLabel = useMemo(() => {
@@ -201,34 +212,50 @@ const Navbar = () => {
   const reportMenuItems = useMemo(() => {
     if (!canAccessQc || isQcOnlyRole) return [];
 
-    const links = [
-      routeMenuItem("daily-reports", "Daily Inspection Reports", "/daily-reports"),
-      routeMenuItem("inspector-reports", "Inspector Performance Reports", "/reports/inspectors"),
-      routeMenuItem("vendor-reports", "Vendor Performance Reports", "/reports/vendors"),
-      routeMenuItem("vendor-wise-qa", "Vendor Wise QA Report", "/reports/vendor-wise-qa"),
-      routeMenuItem("qc-report-mismatch", "QC Report Mismatch", "/reports/qc-report-mismatch"),
-      routeMenuItem("delayed-pos", "Delayed PO Reports", "/reports/delayed-pos"),
-      routeMenuItem("upcoming-etd", "Upcoming ETD Reports", "/reports/upcoming-etd"),
-      routeMenuItem("po-status", "PO Status Report", "/reports/po-status"),
-      routeMenuItem("pending-po", "Pending PO Report", "/reports/pending-po"),
+    const inspectionReports = [
+      routeMenuItem("daily-reports", "Daily Inspection Report", "/daily-reports"),
       routeMenuItem("weekly-summary", "Weekly Order Summary", "/summary/weekly"),
       routeMenuItem("daily-summary", "Daily Summary", "/summary/daily"),
-      routeMenuItem("packed-goods", "Packed Goods", "/packed-goods"),
-      routeMenuItem("archived-orders", "Archived Orders", "/archived-orders"),
-      routeMenuItem("samples", "Shipped Samples", "/shipped-samples"),
     ];
 
-    if (canAccessAnalytics) {
-      links.push(
+    const performanceReports = [
+      routeMenuItem("inspector-reports", "Inspector Performance Report", "/reports/inspectors"),
+      routeMenuItem("vendor-reports", "Vendor Performance Report", "/reports/vendors"),
+      routeMenuItem(
+        "vendor-wise-qa",
+        "Vendor Wise QA Performance Report",
+        "/reports/vendor-wise-qa",
+      ),
+    ];
+
+    const orderReports = [
+      routeMenuItem("delayed-pos", "Delayed PO", "/reports/delayed-pos"),
+      routeMenuItem("upcoming-etd", "Upcoming ETD", "/reports/upcoming-etd"),
+      routeMenuItem("po-status", "PO Status", "/reports/po-status"),
+      routeMenuItem("pending-po", "Pending PO", "/reports/pending-po"),
+      routeMenuItem("packed-goods", "Packed PO", "/packed-goods"),
+      routeMenuItem("archived-orders", "Archived", "/archived-orders"),
+    ];
+
+    const otherReports = [
+      ...(canAccessAnalytics
+        ? [
         routeMenuItem("product-analytics", "Product Analytics", "/reports/product-analytics"),
-      );
-    }
+          ]
+        : []),
+      ...(canManageLabels
+        ? [actionMenuItem("check-labels", "Check Labels", "check-labels")]
+        : []),
+      routeMenuItem("samples", "Shipped Samples", "/shipped-samples"),
+      routeMenuItem("qc-report-mismatch", "QC Mismatch Report", "/reports/qc-report-mismatch"),
+    ];
 
-    if (canManageLabels) {
-      links.push(actionMenuItem("check-labels", "Check Labels", "check-labels"));
-    }
-
-    return links;
+    return [
+      groupMenuItem("inspection-reports", "Inspection Reports", inspectionReports),
+      groupMenuItem("performance-reports", "Performance Reports", performanceReports),
+      groupMenuItem("order-reports", "Order Reports", orderReports),
+      groupMenuItem("other-reports", "Other Reports", otherReports),
+    ].filter((group) => Array.isArray(group.items) && group.items.length > 0);
   }, [canAccessAnalytics, canAccessQc, canManageLabels, isQcOnlyRole]);
 
   const processMenuItems = useMemo(() => {
@@ -379,17 +406,28 @@ const Navbar = () => {
 
   const toggleMobileSection = (sectionKey) => {
     setOpenMobileSection((prev) => (prev === sectionKey ? "" : sectionKey));
+    setOpenMobileGroup("");
   };
 
   const toggleDesktopDropdown = (sectionKey) => {
     setOpenDesktopDropdown((prev) => (prev === sectionKey ? "" : sectionKey));
     setShowMobileMenu(false);
     setOpenMobileSection("");
+    setOpenMobileGroup("");
     setOpenDesktopMenuSection("");
+    setOpenDesktopSubmenu("");
   };
 
   const toggleDesktopMenuSection = (sectionKey) => {
     setOpenDesktopMenuSection((prev) => (prev === sectionKey ? "" : sectionKey));
+  };
+
+  const toggleMobileGroup = (groupKey) => {
+    setOpenMobileGroup((prev) => (prev === groupKey ? "" : groupKey));
+  };
+
+  const toggleDesktopSubmenu = (groupKey) => {
+    setOpenDesktopSubmenu((prev) => (prev === groupKey ? "" : groupKey));
   };
 
   const renderMenuItem = (item, className = "") => {
@@ -417,6 +455,61 @@ const Navbar = () => {
       >
         {item.label}
       </button>
+    );
+  };
+
+  const renderMobileMenuEntry = (item, parentKey = "") => {
+    if (item.kind !== "group") {
+      return renderMenuItem(item, parentKey ? "ps-4" : "");
+    }
+
+    const groupKey = `${parentKey}${item.key}`;
+    return (
+      <div key={groupKey}>
+        <button
+          type="button"
+          className="list-group-item list-group-item-action text-start d-flex justify-content-between align-items-center"
+          aria-expanded={openMobileGroup === groupKey}
+          onClick={() => toggleMobileGroup(groupKey)}
+        >
+          <span>{item.label}</span>
+          <span className="small text-secondary">
+            {openMobileGroup === groupKey ? "Hide" : "Show"}
+          </span>
+        </button>
+        {openMobileGroup === groupKey &&
+          item.items.map((childItem) => renderMobileMenuEntry(childItem, `${groupKey}:`))}
+      </div>
+    );
+  };
+
+  const renderDesktopDropdownEntry = (item, sectionKey = "") => {
+    if (item.kind !== "group") {
+      return renderMenuItem(item);
+    }
+
+    const submenuKey = `${sectionKey}:${item.key}`;
+    const isSubmenuOpen = openDesktopSubmenu === submenuKey;
+
+    return (
+      <div key={submenuKey} className="position-relative">
+        <button
+          type="button"
+          className={`list-group-item list-group-item-action text-start d-flex justify-content-between align-items-center ${isSubmenuOpen ? "active" : ""}`}
+          aria-expanded={isSubmenuOpen}
+          onClick={() => toggleDesktopSubmenu(submenuKey)}
+        >
+          <span>{item.label}</span>
+          <span className="small">{isSubmenuOpen ? "\u203A" : "\u203A"}</span>
+        </button>
+        {isSubmenuOpen && (
+          <div className="card om-main-menu-dropdown om-main-menu-subdropdown shadow-sm">
+            <div className="list-group list-group-flush">
+              {item.items.map((childItem) => renderMenuItem(childItem))}
+            </div>
+          </div>
+        )}
+      </div>
     );
   };
 
@@ -481,7 +574,9 @@ const Navbar = () => {
                           </button>
 
                           {openMobileSection === section.key &&
-                            section.items.map((item) => renderMenuItem(item, "ps-4"))}
+                            section.items.map((item) =>
+                              renderMobileMenuEntry(item, `${section.key}:`)
+                            )}
                         </div>
                       ))}
                     </div>
@@ -520,7 +615,9 @@ const Navbar = () => {
                     style={{ left: 0, right: "auto" }}
                   >
                     <div className="list-group list-group-flush">
-                      {section.items.map((item) => renderMenuItem(item))}
+                      {section.items.map((item) =>
+                        renderDesktopDropdownEntry(item, section.key)
+                      )}
                     </div>
                   </div>
                 )}

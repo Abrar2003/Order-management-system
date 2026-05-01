@@ -5094,12 +5094,31 @@ exports.updateQC = async (req, res) => {
       qc.last_inspected_date = normalizedLastInspectedDate;
     }
 
+    let itemDocForBarcodeRequirement = itemDocForInspectedLbhUpdate;
+    const qcItemCodeForBarcodeRequirement = normalizeText(
+      qc?.item?.item_code || itemCodeForInspectedLbhUpdate || "",
+    );
+    if (
+      isQcUser &&
+      !itemDocForBarcodeRequirement &&
+      qcItemCodeForBarcodeRequirement
+    ) {
+      itemDocForBarcodeRequirement = await Item.findOne({
+        code: {
+          $regex: `^${escapeRegex(qcItemCodeForBarcodeRequirement)}$`,
+          $options: "i",
+        },
+      });
+    }
+
     /* ────────────────────────
          🔢 BARCODE
       ──────────────────────── */
 
     const nextMasterBarcodeRaw =
       master_barcode !== undefined ? master_barcode : barcode;
+    const currentMasterBarcode = Number(qc?.master_barcode || qc?.barcode || 0);
+    let resolvedMasterBarcode = currentMasterBarcode;
     if (nextMasterBarcodeRaw !== undefined) {
       const nextMasterBarcode = Number(nextMasterBarcodeRaw);
       if (!Number.isFinite(nextMasterBarcode) || nextMasterBarcode < 0) {
@@ -5107,7 +5126,6 @@ exports.updateQC = async (req, res) => {
           message: "master_barcode must be a non-negative number",
         });
       }
-      const currentMasterBarcode = Number(qc?.master_barcode || qc?.barcode || 0);
       if (
         isQcUser &&
         nextMasterBarcode !== currentMasterBarcode &&
@@ -5124,10 +5142,13 @@ exports.updateQC = async (req, res) => {
             .json({ message: "master barcode can only be set once" });
         }
       }
+      resolvedMasterBarcode = nextMasterBarcode;
       qc.master_barcode = nextMasterBarcode;
       qc.barcode = nextMasterBarcode;
     }
 
+    const currentInnerBarcode = Number(qc?.inner_barcode || 0);
+    let resolvedInnerBarcode = currentInnerBarcode;
     if (inner_barcode !== undefined) {
       const nextInnerBarcode = Number(inner_barcode);
       if (!Number.isFinite(nextInnerBarcode) || nextInnerBarcode < 0) {
@@ -5135,7 +5156,6 @@ exports.updateQC = async (req, res) => {
           message: "inner_barcode must be a non-negative number",
         });
       }
-      const currentInnerBarcode = Number(qc?.inner_barcode || 0);
       if (
         isQcUser &&
         nextInnerBarcode !== currentInnerBarcode &&
@@ -5152,7 +5172,40 @@ exports.updateQC = async (req, res) => {
             .json({ message: "inner barcode can only be set once" });
         }
       }
+      resolvedInnerBarcode = nextInnerBarcode;
       qc.inner_barcode = nextInnerBarcode;
+    }
+
+    const effectiveBoxModeForQcBarcodeRequirement =
+      parsedInspectedBoxSizeEntries.hasInput
+        ? detectBoxPackagingMode(
+            parsedInspectedBoxSizeEntries.mode || parsedInspectedBoxMode,
+            parsedInspectedBoxSizeEntries.value,
+          )
+        : hasInspectedBoxModeUpdate
+          ? detectBoxPackagingMode(
+              parsedInspectedBoxMode,
+              itemDocForBarcodeRequirement?.inspected_box_sizes,
+            )
+          : detectBoxPackagingMode(
+              itemDocForBarcodeRequirement?.inspected_box_mode,
+              itemDocForBarcodeRequirement?.inspected_box_sizes,
+            );
+
+    if (isQcUser && resolvedMasterBarcode <= 0) {
+      return res.status(400).json({
+        message: "QC users must scan the master barcode before updating this QC record.",
+      });
+    }
+
+    if (
+      isQcUser &&
+      effectiveBoxModeForQcBarcodeRequirement === BOX_PACKAGING_MODES.CARTON &&
+      resolvedInnerBarcode <= 0
+    ) {
+      return res.status(400).json({
+        message: "QC users must scan the inner barcode before updating this QC record.",
+      });
     }
 
     /* ────────────────────────

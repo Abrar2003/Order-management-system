@@ -300,6 +300,21 @@ small,
   background: var(--om-color-surface-muted);
 }
 
+.om-main-menu-dropdown .list-group-item.active {
+  background: var(--om-color-accent-soft);
+  color: var(--om-color-text);
+  border-color: rgba(203, 189, 170, 0.42);
+}
+
+.om-main-menu-subdropdown {
+  top: -0.35rem;
+  left: calc(100% - 0.35rem);
+  right: auto;
+  min-width: 15.5rem;
+  width: min(19rem, calc(100vw - 2rem));
+  max-width: calc(100vw - 2rem);
+}
+
 .om-menu-mobile-only {
   display: block;
 }

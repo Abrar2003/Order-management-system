@@ -534,7 +534,7 @@ const VendorWiseQAReport = () => {
           >
             Back
           </button>
-          <h2 className="h4 mb-0">Vendor Wise QA Report</h2>
+          <h2 className="h4 mb-0">Vendor Wise QA Performance Report</h2>
           <span className="d-none d-md-inline" />
         </div>
 
