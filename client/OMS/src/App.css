@@ -2576,6 +2576,23 @@ small,
   outline: none;
 }
 
+button.om-item-order-presence-label {
+  border: 0;
+  background: transparent;
+  color: var(--bs-link-color);
+  font: inherit;
+}
+
+.om-item-order-presence-link {
+  cursor: pointer;
+}
+
+.om-item-order-presence-link:hover,
+.om-item-order-presence-link:focus-visible {
+  color: var(--bs-link-hover-color);
+  text-decoration-style: solid;
+}
+
 .om-item-order-presence-panel {
   position: absolute;
   left: 0;

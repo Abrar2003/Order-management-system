@@ -1960,11 +1960,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         return;
       }
 
-      if (offeredQuantity > requestedQuantityLimit) {
-        setError("Offered quantity cannot exceed quantity requested.");
-        return;
-      }
-
       if (totalCheckedAfterRewrite > totalOfferedAfterRewrite) {
         setError("QC checked cannot exceed offered quantity.");
         return;
@@ -2069,41 +2064,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       ...currentRequestLabelsBefore,
       ...incomingNewLabels,
     ]);
-    const hasStartedInspection =
-      (qc.quantities?.qc_checked || 0) > 0 ||
-      Number(qc?.quantities?.qc_passed || 0) > 0 ||
-      Number(qc?.quantities?.vendor_provision || 0) > 0 ||
-      (Array.isArray(qc?.inspection_record) &&
-        qc.inspection_record.some((record) => {
-          const checked = Number(record?.checked || 0);
-          const passed = Number(record?.passed || 0);
-          const offered = Number(record?.vendor_offered || 0);
-          const labelsAdded = Array.isArray(record?.labels_added)
-            ? record.labels_added.length
-            : 0;
-          return checked > 0 || passed > 0 || offered > 0 || labelsAdded > 0;
-        }));
-    const parsedPendingQuantityLimit = Number(
-      qc.quantities?.pending ??
-        (qc.quantities?.client_demand || 0) - (qc.quantities?.qc_passed || 0),
-    );
-    const pendingQuantityLimit = Number.isFinite(parsedPendingQuantityLimit)
-      ? Math.max(0, parsedPendingQuantityLimit)
-      : 0;
-
-    if (hasStartedInspection) {
-      if (offeredQuantity > pendingQuantityLimit) {
-        setError("Offered quantity cannot exceed pending quantity.");
-        return;
-      }
-    } else if (
-      requestedQuantityLimit !== undefined &&
-      totalOfferedNext > requestedQuantityLimit
-    ) {
-      setError("Offered quantity cannot exceed quantity requested.");
-      return;
-    }
-
     if (totalOfferedNext < 0) {
       setError("Offered quantity cannot be negative.");
       return;

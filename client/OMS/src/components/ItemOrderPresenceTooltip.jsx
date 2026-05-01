@@ -126,15 +126,36 @@ const ItemOrderPresenceTooltip = ({
   }
 
   const triggerLabel = label || normalizedItemCode;
+  const triggerClassName = [
+    "om-item-order-presence-label",
+    onClick ? "om-item-order-presence-link" : "",
+    buttonClassName,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const trigger = onClick ? (
+    <button
+      type="button"
+      className={triggerClassName}
+      onClick={onClick}
+    >
+      {triggerLabel}
+    </button>
+  ) : (
+    <span className={triggerClassName}>
+      {triggerLabel}
+    </span>
+  );
 
   return (
-  <Tooltip
-    onOpen={loadTooltipData}
-    content={
-      <>
-        <div className="tooltip-title">
-          {excludeOrderId ? "Other Active POs" : "Active POs"}
-        </div>
+    <span className={className || undefined}>
+      <Tooltip
+        onOpen={loadTooltipData}
+        content={
+          <>
+            <div className="tooltip-title">
+              {excludeOrderId ? "Other Active POs" : "Active POs"}
+            </div>
 
         {loading ? (
           <div className="tooltip-empty">Loading...</div>
@@ -181,14 +202,13 @@ const ItemOrderPresenceTooltip = ({
             );
           })
         )}
-      </>
-    }
-  >
-    <span className="om-item-order-presence-label">
-      {label || itemCode}
+          </>
+        }
+      >
+        {trigger}
+      </Tooltip>
     </span>
-  </Tooltip>
-);
+  );
 };
 
 export default ItemOrderPresenceTooltip;

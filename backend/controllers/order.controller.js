@@ -2301,6 +2301,10 @@ const applyNewOrderRows = async ({
             if (!Number.isFinite(parsed) || parsed < 0) return 0;
             return Math.min(parsed, nextQuantity);
           };
+          const toNonNegativeQuantity = (value) => {
+            const parsed = Number(value || 0);
+            return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+          };
 
           previousQc.order = newOrder._id;
           previousQc.order_meta = previousQc.order_meta || {};
@@ -2322,7 +2326,7 @@ const applyNewOrderRows = async ({
           );
           const nextProvision = Math.max(
             nextPassed,
-            clampToDemand(previousQc.quantities.vendor_provision),
+            toNonNegativeQuantity(previousQc.quantities.vendor_provision),
           );
 
           previousQc.quantities.client_demand = nextQuantity;
@@ -9554,6 +9558,10 @@ exports.editOrder = async (req, res) => {
           if (!Number.isFinite(parsed) || parsed < 0) return 0;
           return Math.min(parsed, nextQuantity);
         };
+        const toNonNegativeQuantity = (value) => {
+          const parsed = Number(value || 0);
+          return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+        };
 
         const nextPassed = clampToDemand(qcRecord.quantities.qc_passed);
         const nextCheckedRaw = clampToDemand(qcRecord.quantities.qc_checked);
@@ -9561,7 +9569,7 @@ exports.editOrder = async (req, res) => {
         const nextRequested = clampToDemand(
           qcRecord.quantities.quantity_requested,
         );
-        const nextProvision = clampToDemand(
+        const nextProvision = toNonNegativeQuantity(
           qcRecord.quantities.vendor_provision,
         );
 

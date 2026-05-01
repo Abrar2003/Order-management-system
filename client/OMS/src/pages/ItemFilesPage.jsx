@@ -707,20 +707,16 @@ const ItemFilesPage = () => {
 
                       return (
                         <tr key={item?._id || item?.code}>
-                          <td
-                            style={{ cursor: item?.code ? "pointer" : "default" }}
-                            onClick={
-                              item?.code
-                                ? () => navigateToItemOrdersHistory(item)
-                                : undefined
-                            }
-                          >
-                            <div className="d-flex align-items-center gap-2">
-                              <span>{item?.code || "N/A"}</span>
-                              {item?.code && (
-                                <ItemOrderPresenceTooltip itemCode={item.code} />
-                              )}
-                            </div>
+                          <td>
+                            {item?.code ? (
+                              <ItemOrderPresenceTooltip
+                                itemCode={item.code}
+                                onClick={() => navigateToItemOrdersHistory(item)}
+                                buttonClassName="p-0"
+                              />
+                            ) : (
+                              "N/A"
+                            )}
                           </td>
                           <td>{item?.name || "N/A"}</td>
                           <td>

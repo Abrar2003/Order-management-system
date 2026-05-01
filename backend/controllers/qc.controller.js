@@ -3855,12 +3855,6 @@ exports.alignQC = async (req, res) => {
       });
     }
 
-    if (hasVendorProvisionInput && vendorProvision > quantityRequested) {
-      return res.status(400).json({
-        message: "vendor provision can't be greater than quantity requested",
-      });
-    }
-
     const requestDateValue = toISODateString(request_date);
     if (!requestDateValue) {
       return res.status(400).json({ message: "request date is required" });
@@ -5426,30 +5420,6 @@ exports.updateQC = async (req, res) => {
       return res
         .status(400)
         .json({ message: "offered quantity cannot be negative" });
-    }
-
-    const pendingQuantityLimit = Math.max(
-      0,
-      clientDemandQuantity - currentEffectivePassedTotal,
-    );
-
-    if (allowAdminRewrite && hasExplicitQuantityPayload) {
-      // Admin rewrite updates aggregate QC totals across inspection rows.
-      // Per-request offered/requested validation belongs to the inspection row edit route.
-    } else if (hasStartedInspection) {
-      if (addProvision > pendingQuantityLimit) {
-        return res.status(400).json({
-          message: "offered quantity cannot exceed pending quantity",
-        });
-      }
-    } else if (
-      Number.isFinite(quantityRequestedCap) &&
-      quantityRequestedCap >= 0 &&
-      nextVendorProvision > quantityRequestedCap
-    ) {
-      return res.status(400).json({
-        message: "offered quantity cannot exceed quantity requested",
-      });
     }
 
     if (nextCurrentRequestChecked > nextCurrentRequestOffered) {
@@ -10163,9 +10133,6 @@ exports.editInspectionRecords = async (req, res) => {
 
       if (passed > checked) {
         throw new Error("Passed quantity cannot exceed checked quantity");
-      }
-      if (vendorOffered > vendorRequested) {
-        throw new Error("offered quantity cannot exceed quantity requested");
       }
       if (checked > vendorOffered) {
         throw new Error("Checked quantity cannot exceed offered quantity");

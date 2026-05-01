@@ -774,15 +774,16 @@ const Items = () => {
 
                       return (
                         <tr key={item?._id || item?.code}>
-                          <td
-                            style={{ cursor: item?.code ? "pointer" : "default" }}
-                            onClick={
-                              item?.code
-                                ? () => navigateToItemOrdersHistory(item)
-                                : undefined
-                            }
-                          >
-                            {item?.code || "N/A"}
+                          <td>
+                            {item?.code ? (
+                              <ItemOrderPresenceTooltip
+                                itemCode={item.code}
+                                onClick={() => navigateToItemOrdersHistory(item)}
+                                buttonClassName="p-0"
+                              />
+                            ) : (
+                              "N/A"
+                            )}
                           </td>
                           <td>{item?.name || "N/A"}</td>
                           <td>
