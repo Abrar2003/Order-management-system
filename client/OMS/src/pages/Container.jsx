@@ -6,6 +6,7 @@ import SampleModal from "../components/SampleModal";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { getUserFromToken } from "../auth/auth.utils";
 import { isViewOnlyUser } from "../auth/permissions";
+import { usePermissions } from "../auth/PermissionContext";
 import {
   getTodayDDMMYYYY,
   isValidDDMMYYYY,
@@ -48,11 +49,9 @@ const Container = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "bulk-shipping");
   const user = getUserFromToken();
+  const { hasPermission } = usePermissions();
   const isViewOnly = isViewOnlyUser(user);
-  const normalizedRole = String(user?.role || "").trim().toLowerCase();
-  const canFinalizeShipping = ["admin", "manager", "dev"].includes(
-    normalizedRole,
-  );
+  const canFinalizeShipping = hasPermission("shipments", "edit");
 
   const [containerNumber, setContainerNumber] = useState(() =>
     normalizeSearchParam(searchParams.get("container_number")),

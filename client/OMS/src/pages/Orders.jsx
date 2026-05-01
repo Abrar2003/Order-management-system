@@ -3,6 +3,7 @@ import axios from "../api/axios";
 import Navbar from "../components/Navbar";
 import { getUserFromToken } from "../auth/auth.utils";
 import { isViewOnlyUser } from "../auth/permissions";
+import { usePermissions } from "../auth/PermissionContext";
 import AlignQCModal from "../components/AlignQcModal";
 import EditOrderModal from "../components/EditOrderModal";
 import EditCompleteOrderModal from "../components/EditCompleteOrderModal";
@@ -289,15 +290,15 @@ const Orders = () => {
   const navigate = useNavigate();
 
   const user = getUserFromToken();
-  const role = user?.role;
-  const normalizedRole = String(role || "")
-    .trim()
-    .toLowerCase();
+  const { hasPermission } = usePermissions();
   const isViewOnly = isViewOnlyUser(user);
-  const canManageOrders = ["admin", "manager", "dev"].includes(normalizedRole);
-  const canAlignQc = ["admin", "manager"].includes(normalizedRole);
-  const canEditOrder = normalizedRole === "admin";
-  const canArchiveOrder = normalizedRole === "admin";
+  const canManageOrders =
+    hasPermission("orders", "create") ||
+    hasPermission("orders", "edit") ||
+    hasPermission("uploads", "upload");
+  const canAlignQc = hasPermission("qc", "assign");
+  const canEditOrder = hasPermission("orders", "edit");
+  const canArchiveOrder = hasPermission("orders", "delete");
   const showActionColumn = canManageOrders || isViewOnly;
 
   const orderId = searchParams.get("order_id");

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { editOrder } from "../services/orders.service";
-import { getUserFromToken } from "../auth/auth.utils";
+import { usePermissions } from "../auth/PermissionContext";
 import {
   formatDateDDMMYYYY,
   getTodayDDMMYYYY,
@@ -87,8 +87,8 @@ const buildAdjustedShipmentPreview = (shipmentRows, targetQuantity) => {
 };
 
 const EditOrderModal = ({ order, onClose, onSuccess }) => {
-  const user = getUserFromToken();
-  const isAdmin = String(user?.role || "").toLowerCase() === "admin";
+  const { hasPermission } = usePermissions();
+  const canEditOrders = hasPermission("orders", "edit");
 
   const [form, setForm] = useState({
     brand: String(order?.brand ?? ""),
@@ -170,7 +170,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
   };
 
   const removeShipmentRow = (index) => {
-    if (!isAdmin) return;
+    if (!canEditOrders) return;
     setForm((prev) => ({
       ...prev,
       shipment: prev.shipment.filter((_, i) => i !== index),
@@ -178,7 +178,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
   };
 
   const addShipmentRow = () => {
-    if (!isAdmin) return;
+    if (!canEditOrders) return;
     setForm((prev) => ({
       ...prev,
       shipment: [...prev.shipment, createEmptyShipmentRow()],
@@ -194,7 +194,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
     if (!vendor) return "vendor is required";
     if (!itemCode) return "item_code is required";
 
-    if (isAdmin) {
+    if (canEditOrders) {
       const quantity = Number(form.quantity);
       if (!Number.isFinite(quantity) || quantity < 0) {
         return "quantity must be a valid non-negative number";
@@ -237,7 +237,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
       lines.push(`Edit Remark: ${payload.edit_remark}`);
     }
 
-    if (isAdmin) {
+    if (canEditOrders) {
       lines.push(
         `Order Quantity: ${toSafeNumber(order?.quantity)} -> ${payload.quantity}`,
       );
@@ -279,7 +279,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
       edit_remark: String(form.edit_remark ?? "").trim(),
     };
 
-    if (isAdmin) {
+    if (canEditOrders) {
       payload.quantity = Number(form.quantity);
       payload.shipment = form.shipment.map((entry) => ({
         stuffed_by: {
@@ -364,10 +364,10 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                   className="form-control"
                   min="0"
                   value={form.quantity}
-                  disabled={!isAdmin}
+                  disabled={!canEditOrders}
                   onChange={(e) => setForm((prev) => ({ ...prev, quantity: e.target.value }))}
                 />
-                {!isAdmin && (
+                {!canEditOrders && (
                   <div className="small text-secondary mt-1">
                     Only admin can edit quantity or shipping details.
                   </div>
@@ -405,7 +405,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
 
             <div className="d-flex justify-content-between align-items-center">
               <h6 className="mb-0">Shipment Rows</h6>
-              {isAdmin && (
+              {canEditOrders && (
                 <button type="button" className="btn btn-outline-secondary btn-sm" onClick={addShipmentRow}>
                   Add Row
                 </button>
@@ -439,7 +439,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                         <select
                           className="form-select form-select-sm"
                           value={entry.stuffed_by_id}
-                          disabled={!isAdmin || loadingInspectors}
+                          disabled={!canEditOrders || loadingInspectors}
                           onChange={(e) =>
                             updateShipmentRow(index, "stuffed_by_id", e.target.value)
                           }
@@ -459,7 +459,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                           type="text"
                           className="form-control form-control-sm"
                           value={entry.container}
-                          disabled={!isAdmin}
+                          disabled={!canEditOrders}
                           onChange={(e) =>
                             updateShipmentRow(index, "container", e.target.value)
                           }
@@ -470,7 +470,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                           type="text"
                           className="form-control form-control-sm"
                           value={entry.invoice_number}
-                          disabled={!isAdmin}
+                          disabled={!canEditOrders}
                           onChange={(e) =>
                             updateShipmentRow(index, "invoice_number", e.target.value)
                           }
@@ -482,7 +482,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                           lang="en-GB"
                           className="form-control form-control-sm"
                           value={toISODateString(entry.stuffing_date)}
-                          disabled={!isAdmin}
+                          disabled={!canEditOrders}
                           onChange={(e) =>
                             updateShipmentRow(
                               index,
@@ -498,7 +498,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                           min="1"
                           className="form-control form-control-sm"
                           value={entry.quantity}
-                          disabled={!isAdmin}
+                          disabled={!canEditOrders}
                           onChange={(e) =>
                             updateShipmentRow(index, "quantity", e.target.value)
                           }
@@ -509,14 +509,14 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                           type="text"
                           className="form-control form-control-sm"
                           value={entry.remaining_remarks}
-                          disabled={!isAdmin}
+                          disabled={!canEditOrders}
                           onChange={(e) =>
                             updateShipmentRow(index, "remaining_remarks", e.target.value)
                           }
                         />
                       </td>
                       <td>
-                        {isAdmin ? (
+                        {canEditOrders ? (
                           <button
                             type="button"
                             className="btn btn-outline-danger btn-sm"
@@ -536,7 +536,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
 
             <div className="d-flex flex-wrap gap-2">
               <span className="om-summary-chip">Input shipped: {inputTotalShipped}</span>
-              {isAdmin && (
+              {canEditOrders && (
                 <>
                   <span className="om-summary-chip">
                     Adjusted shipped: {adjustedShippedTotal}
@@ -548,7 +548,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
               )}
             </div>
 
-            {isAdmin && (
+            {canEditOrders && (
               <div className="small text-secondary">
                 Any non-negative quantity is allowed. Setting quantity to 0 will
                 archive this order. On save, shipment rows and QC quantities are

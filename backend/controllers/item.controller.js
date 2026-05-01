@@ -48,6 +48,16 @@ const {
 const {
   compareInspectionSizeSnapshot,
 } = require("../helpers/inspectionSizeSnapshot");
+const {
+  NOT_SET_STATUS,
+  PD_STATUSES,
+  ProductDatabaseError,
+  applyProductDatabaseApprove,
+  applyProductDatabaseCheck,
+  applyProductDatabaseSave,
+  buildProductDatabaseRow,
+  normalizePdStatus,
+} = require("../helpers/productDatabase");
 
 const escapeRegex = (value = "") =>
   String(value)
@@ -1098,6 +1108,66 @@ const buildItemMatch = ({ search, brand, vendor } = {}) => {
   return { $and: conditions };
 };
 
+const PRODUCT_DATABASE_ITEM_SELECT = [
+  "code",
+  "name",
+  "description",
+  "brand",
+  "brand_name",
+  "brands",
+  "vendors",
+  "pd_item_sizes",
+  "pd_box_sizes",
+  "pd_box_mode",
+  "pd_checked",
+  "pd_created_by",
+  "pd_checked_by",
+  "pd_approved_by",
+  "pd_last_changed_by",
+  "updatedAt",
+].join(" ");
+
+const buildProductDatabaseStatusMatch = (status) => {
+  const normalizedStatus = String(status ?? "").trim().toLowerCase().replace(/\s+/g, "_");
+  if (!normalizedStatus || normalizedStatus === "all") return {};
+
+  if (normalizedStatus === NOT_SET_STATUS || normalizedStatus === "not_set") {
+    return {
+      $or: [
+        { pd_checked: { $exists: false } },
+        { pd_checked: null },
+        { pd_checked: "" },
+        { pd_checked: "not set" },
+      ],
+    };
+  }
+
+  const statusValue = normalizePdStatus(normalizedStatus);
+  return statusValue ? { pd_checked: statusValue } : {};
+};
+
+const combineMongoMatches = (...matches) => {
+  const activeMatches = matches.filter((match) => match && Object.keys(match).length > 0);
+  if (activeMatches.length === 0) return {};
+  if (activeMatches.length === 1) return activeMatches[0];
+  return { $and: activeMatches };
+};
+
+const handleProductDatabaseError = (res, error, fallbackMessage) => {
+  if (error instanceof ProductDatabaseError) {
+    return res.status(error.statusCode || 400).json({
+      success: false,
+      message: error.message,
+    });
+  }
+
+  console.error(fallbackMessage, error);
+  return res.status(500).json({
+    success: false,
+    message: error?.message || fallbackMessage,
+  });
+};
+
 const normalizeLookupKey = (value) => normalizeTextField(value).toLowerCase();
 
 const MEASUREMENT_COMPARE_TOLERANCE = 0.0001;
@@ -2047,6 +2117,213 @@ const buildInspectionReportMismatchLookup = async (items = []) => {
   });
 
   return mismatchLookup;
+};
+
+exports.getProductDatabaseItems = async (req, res) => {
+  try {
+    const search = req.query.search;
+    const brand = req.query.brand;
+    const vendor = req.query.vendor;
+    const status = req.query.status;
+    const page = parsePositiveInt(req.query.page, 1);
+    const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
+    const skip = (page - 1) * limit;
+
+    const baseMatch = buildItemMatch({ search, brand, vendor });
+    const statusMatch = buildProductDatabaseStatusMatch(status);
+    const match = combineMongoMatches(baseMatch, statusMatch);
+
+    const [
+      items,
+      totalRecords,
+      brandsRaw,
+      brandNamesRaw,
+      brandsPrimaryRaw,
+      vendorsRaw,
+      notSetCount,
+      createdCount,
+      checkedCount,
+      approvedCount,
+    ] = await Promise.all([
+      Item.find(match)
+        .select(PRODUCT_DATABASE_ITEM_SELECT)
+        .sort({ updatedAt: -1, code: 1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Item.countDocuments(match),
+      Item.distinct("brands", buildItemMatch({ search, vendor })),
+      Item.distinct("brand_name", buildItemMatch({ search, vendor })),
+      Item.distinct("brand", buildItemMatch({ search, vendor })),
+      Item.distinct("vendors", buildItemMatch({ search, brand })),
+      Item.countDocuments(
+        combineMongoMatches(baseMatch, buildProductDatabaseStatusMatch(NOT_SET_STATUS)),
+      ),
+      Item.countDocuments(
+        combineMongoMatches(baseMatch, buildProductDatabaseStatusMatch(PD_STATUSES.CREATED)),
+      ),
+      Item.countDocuments(
+        combineMongoMatches(baseMatch, buildProductDatabaseStatusMatch(PD_STATUSES.CHECKED)),
+      ),
+      Item.countDocuments(
+        combineMongoMatches(baseMatch, buildProductDatabaseStatusMatch(PD_STATUSES.APPROVED)),
+      ),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      rows: (Array.isArray(items) ? items : []).map((item) =>
+        buildProductDatabaseRow(item, req.user),
+      ),
+      summary: {
+        not_set: notSetCount,
+        created: createdCount,
+        checked: checkedCount,
+        approved: approvedCount,
+      },
+      filters: {
+        search: normalizeFilterValue(search) || "",
+        brand: normalizeFilterValue(brand) || "",
+        vendor: normalizeFilterValue(vendor) || "",
+        status: String(status || "").trim() || "all",
+        brand_options: normalizeDistinctValues([
+          ...(brandsPrimaryRaw || []),
+          ...(brandsRaw || []),
+          ...(brandNamesRaw || []),
+        ]),
+        vendor_options: normalizeDistinctValues(vendorsRaw),
+      },
+      pagination: {
+        page,
+        limit,
+        total: totalRecords,
+        totalPages: Math.max(1, Math.ceil(totalRecords / limit)),
+      },
+    });
+  } catch (error) {
+    console.error("Get Product Database Items Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to fetch Product Database items",
+    });
+  }
+};
+
+exports.updateProductDatabaseItem = async (req, res) => {
+  try {
+    const itemId = String(req.params.id || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(itemId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid item id",
+      });
+    }
+
+    const item = await Item.findById(itemId);
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: "Item not found",
+      });
+    }
+
+    const result = applyProductDatabaseSave({
+      item,
+      payload: req.body || {},
+      user: req.user,
+    });
+    await item.save();
+
+    return res.status(200).json({
+      success: true,
+      message: result.message,
+      data: buildProductDatabaseRow(item.toObject(), req.user),
+    });
+  } catch (error) {
+    return handleProductDatabaseError(
+      res,
+      error,
+      "Failed to update Product Database item",
+    );
+  }
+};
+
+exports.checkProductDatabaseItem = async (req, res) => {
+  try {
+    const itemId = String(req.params.id || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(itemId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid item id",
+      });
+    }
+
+    const item = await Item.findById(itemId);
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: "Item not found",
+      });
+    }
+
+    const result = applyProductDatabaseCheck({
+      item,
+      payload: req.body || {},
+      user: req.user,
+    });
+    await item.save();
+
+    return res.status(200).json({
+      success: true,
+      message: result.message,
+      data: buildProductDatabaseRow(item.toObject(), req.user),
+    });
+  } catch (error) {
+    return handleProductDatabaseError(
+      res,
+      error,
+      "Failed to check Product Database item",
+    );
+  }
+};
+
+exports.approveProductDatabaseItem = async (req, res) => {
+  try {
+    const itemId = String(req.params.id || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(itemId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid item id",
+      });
+    }
+
+    const item = await Item.findById(itemId);
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: "Item not found",
+      });
+    }
+
+    const result = applyProductDatabaseApprove({
+      item,
+      payload: req.body || {},
+      user: req.user,
+    });
+    await item.save();
+
+    return res.status(200).json({
+      success: true,
+      message: result.message,
+      data: buildProductDatabaseRow(item.toObject(), req.user),
+    });
+  } catch (error) {
+    return handleProductDatabaseError(
+      res,
+      error,
+      "Failed to approve Product Database item",
+    );
+  }
 };
 
 exports.getItems = async (req, res) => {

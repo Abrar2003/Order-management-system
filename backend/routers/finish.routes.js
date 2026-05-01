@@ -1,7 +1,7 @@
 const express = require("express");
 
 const auth = require("../middlewares/auth.middleware");
-const authorize = require("../middlewares/authorize.middleware");
+const { requirePermission } = require("../middlewares/permission.middleware");
 const upload = require("../config/multer.config");
 const finishController = require("../controllers/finish.controller");
 
@@ -16,28 +16,28 @@ router.get(
 router.get(
   "/vendor-items",
   auth,
-  authorize("admin", "manager", "dev"),
+  requirePermission("finishes", "view"),
   finishController.getVendorItemsForFinish,
 );
 
 router.get(
   "/image",
   auth,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("finishes", "view"),
   finishController.getFinishImage,
 );
 
 router.get(
   "/:id/image",
   auth,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("finishes", "view"),
   finishController.getFinishImage,
 );
 
 router.post(
   "/",
   auth,
-  authorize("admin", "manager", "dev"),
+  requirePermission("finishes", "upload"),
   upload.safeSingle("image"),
   finishController.upsertFinish,
 );

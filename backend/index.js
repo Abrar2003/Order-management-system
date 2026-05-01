@@ -24,6 +24,7 @@ const sampleRouter = require("./routers/samples.routes");
 const finishRouter = require("./routers/finish.routes");
 const reportsRouter = require("./routers/reports.routes");
 const jobsRouter = require("./routers/jobs.routes");
+const permissionsRouter = require("./routers/permissions.routes");
 const { closeRedisClients } = require("./config/redis");
 const { closeQueues } = require("./queues");
 
@@ -106,6 +107,8 @@ app.use("/reports", reportsRouter);
 app.use("/api/reports", reportsRouter);
 app.use("/jobs", jobsRouter);
 app.use("/api/jobs", jobsRouter);
+app.use("/permissions", permissionsRouter);
+app.use("/api/permissions", permissionsRouter);
 
 app.get("/", (req, res) => {
   res.send({ message: "Server OK v2" });

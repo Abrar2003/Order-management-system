@@ -5,7 +5,7 @@ import Navbar from "../components/Navbar";
 import EditPisModal from "../components/EditPisModal";
 import SortHeaderButton from "../components/SortHeaderButton";
 import UploadFinishModal from "../components/UploadFinishModal";
-import { getUserFromToken } from "../auth/auth.utils";
+import { usePermissions } from "../auth/PermissionContext";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import {
   getNextClientSortState,
@@ -85,9 +85,8 @@ const getPisWeight = (item, key) => {
 const PIS = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "pis");
-  const user = getUserFromToken();
-  const normalizedRole = String(user?.role || "").trim().toLowerCase();
-  const canEditPis = ["admin", "manager", "dev"].includes(normalizedRole);
+  const { canEditPis, hasPermission } = usePermissions();
+  const canUploadFinish = hasPermission("finishes", "upload");
 
   const [rows, setRows] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
@@ -178,13 +177,13 @@ const PIS = () => {
 
   useEffect(() => {
     const shouldOpenFinishModal =
-      canEditPis &&
+      canUploadFinish &&
       String(searchParams.get("open_finish") || "").trim().toLowerCase() === "1";
 
     if (shouldOpenFinishModal) {
       setShowUploadFinishModal(true);
     }
-  }, [canEditPis, searchParams]);
+  }, [canUploadFinish, searchParams]);
 
   useEffect(() => {
     const currentQuery = searchParams.toString();
@@ -310,7 +309,7 @@ const PIS = () => {
       <div className="page-shell py-3">
         <div className="d-flex justify-content-between align-items-center mb-3">
           <h2 className="h4 mb-0">PIS</h2>
-          {canEditPis ? (
+          {canUploadFinish ? (
             <div className="d-flex flex-wrap gap-2">
               <button
                 type="button"
@@ -592,7 +591,7 @@ const PIS = () => {
         />
       )}
 
-      {showUploadFinishModal && canEditPis && (
+      {showUploadFinishModal && canUploadFinish && (
         <UploadFinishModal
           onClose={() => setShowUploadFinishModal(false)}
           onSaved={(message) => {

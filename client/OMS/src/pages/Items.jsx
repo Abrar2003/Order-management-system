@@ -7,7 +7,7 @@ import SampleModal from "../components/SampleModal";
 import EditItemModal from "../components/EditItemModal";
 import ItemOrderPresenceTooltip from "../components/ItemOrderPresenceTooltip";
 import SortHeaderButton from "../components/SortHeaderButton";
-import { getUserFromToken } from "../auth/auth.utils";
+import { usePermissions } from "../auth/PermissionContext";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import {
   buildItemFileUploadRequest,
@@ -139,12 +139,11 @@ const Items = () => {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "items");
-  const user = getUserFromToken();
-  const normalizedRole = String(user?.role || "").trim().toLowerCase();
-  const canSyncItems = ["admin", "manager", "dev"].includes(normalizedRole);
-  const canEditItems = ["admin", "manager", "dev"].includes(normalizedRole);
-  const canCreateItems = ["admin", "manager", "dev"].includes(normalizedRole);
-  const canUploadItemFiles = ["admin", "manager"].includes(normalizedRole);
+  const { canEditPis, hasPermission } = usePermissions();
+  const canSyncItems = hasPermission("items", "sync");
+  const canEditItems = hasPermission("items", "edit");
+  const canCreateItems = hasPermission("items", "create") && canEditPis;
+  const canUploadItemFiles = hasPermission("images_documents", "upload");
 
   const [rows, setRows] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);

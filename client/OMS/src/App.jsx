@@ -10,6 +10,7 @@ import {
 import "./App.css";
 
 import ProtectedRoute from "./routes/ProtectedRoute";
+import { PermissionProvider } from "./auth/PermissionContext";
 
 import SignIn from "./pages/Signin";
 import Home from "./pages/Home";
@@ -41,6 +42,8 @@ import PoStatusReport from "./pages/PoStatusReport";
 import PendingPoReport from "./pages/PendingPoReport";
 import ProductAnalytics from "./pages/ProductAnalytics";
 import QcReportMismatch from "./pages/QcReportMismatch";
+import ProductDatabase from "./pages/ProductDatabase";
+import PermissionManagement from "./pages/PermissionManagement";
 import PIS from "./pages/PIS";
 import PISDiffs from "./pages/PISDiffs";
 import FinalPISCheck from "./pages/FinalPISCheck";
@@ -119,8 +122,9 @@ const App = () => {
   return (
     <div className="app-shell">
       <Router>
-        <RouteUiCleanup />
-        <Routes>
+        <PermissionProvider>
+          <RouteUiCleanup />
+          <Routes>
           {/* Public */}
           <Route path="/signin" element={<SignIn />} />
 
@@ -275,6 +279,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <ProductAnalytics />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/product-database"
+            element={
+              <ProtectedRoute>
+                <ProductDatabase />
               </ProtectedRoute>
             }
           />
@@ -459,6 +472,15 @@ const App = () => {
             }
           />
 
+          <Route
+            path="/settings/permissions"
+            element={
+              <ProtectedRoute>
+                <PermissionManagement />
+              </ProtectedRoute>
+            }
+          />
+
           {/* Optional future */}
           {/* 
         <Route
@@ -472,8 +494,9 @@ const App = () => {
         */}
 
           {/* Fallback */}
-          <Route path="*" element={<Navigate to="/orders" replace />} />
-        </Routes>
+            <Route path="*" element={<Navigate to="/orders" replace />} />
+          </Routes>
+        </PermissionProvider>
       </Router>
     </div>
   );

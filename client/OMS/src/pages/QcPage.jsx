@@ -7,6 +7,7 @@ import TransferQcRequestModal from "../components/TransferQcRequestModal";
 import AlignQCModal from "../components/AlignQcModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import { isViewOnlyUser } from "../auth/permissions";
+import { usePermissions } from "../auth/PermissionContext";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import {
@@ -239,17 +240,16 @@ const QCPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const currentUser = getUserFromToken();
+  const { hasPermission } = usePermissions();
   const isViewOnly = isViewOnlyUser(currentUser);
   const normalizedRole = String(currentUser?.role || "").trim().toLowerCase();
   const isQcUser = normalizedRole === "qc";
-  const canAlignQc = ["admin", "manager"].includes(normalizedRole);
-  const canTransferRequest = ["admin", "manager"].includes(
-    normalizedRole,
-  );
+  const canAlignQc = hasPermission("qc", "assign");
+  const canTransferRequest = hasPermission("qc", "assign");
   const showActionColumn = !isViewOnly;
   const tableColumnCount = showActionColumn ? TABLE_COLUMN_COUNT : TABLE_COLUMN_COUNT - 1;
   const canUseInspectorFilter = !isQcUser;
-  const canExportQcList = ["admin", "manager", "dev", "user"].includes(normalizedRole);
+  const canExportQcList = hasPermission("qc", "export");
   const initialFilters = buildQcFilterStateFromSearchParams(
     searchParams,
     canUseInspectorFilter,

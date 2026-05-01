@@ -1,7 +1,7 @@
 const express = require("express");
 
 const auth = require("../middlewares/auth.middleware");
-const authorize = require("../middlewares/authorize.middleware");
+const { requirePermission } = require("../middlewares/permission.middleware");
 const jobsController = require("../controllers/jobs.controller");
 
 const router = express.Router();
@@ -9,21 +9,21 @@ const router = express.Router();
 router.get(
   "/:queueName/:jobId",
   auth,
-  authorize("admin", "manager", "dev"),
+  requirePermission("jobs", "view"),
   jobsController.getJobStatus,
 );
 
 router.get(
   "/:queueName",
   auth,
-  authorize("admin", "manager", "dev"),
+  requirePermission("jobs", "view"),
   jobsController.getQueueCounts,
 );
 
 router.post(
   "/:queueName/:jobId/retry",
   auth,
-  authorize("admin", "manager"),
+  requirePermission("jobs", "manage"),
   jobsController.retryJob,
 );
 

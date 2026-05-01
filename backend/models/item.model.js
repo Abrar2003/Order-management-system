@@ -76,6 +76,37 @@ const finishAssignmentSchema = new mongoose.Schema(
   },
   { _id: false },
 );
+const productDatabaseActorSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "users",
+      default: null,
+    },
+    name: { type: String, default: "", trim: true },
+    created_at: { type: Date, default: null },
+    updated_at: { type: Date, default: null },
+    checked_at: { type: Date, default: null },
+    approved_at: { type: Date, default: null },
+    changed_at: { type: Date, default: null },
+  },
+  { _id: false },
+);
+const productDatabaseHistorySchema = new mongoose.Schema(
+  {
+    action: {
+      type: String,
+      enum: ["create", "update", "check", "approve", "reset_to_created"],
+      required: true,
+    },
+    previous_status: { type: String, default: "not_set", trim: true },
+    next_status: { type: String, default: "not_set", trim: true },
+    actor: { type: productDatabaseActorSchema, default: () => ({}) },
+    changed_fields: { type: [String], default: [] },
+    timestamp: { type: Date, default: Date.now },
+  },
+  { _id: false },
+);
 
 const itemSchema = new mongoose.Schema(
   {
@@ -200,6 +231,15 @@ const itemSchema = new mongoose.Schema(
         message: `pis_item_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
       },
     },
+    pd_item_sizes: {
+      type: [itemSizeEntrySchema],
+      default: [],
+      validate: {
+        validator: (entries) =>
+          !Array.isArray(entries) || entries.length <= SIZE_ENTRY_LIMIT,
+        message: `pd_item_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
+      },
+    },
     pis_item_top_LBH: {
       L: { type: Number, default: 0, min: 0 },
       B: { type: Number, default: 0, min: 0 },
@@ -230,6 +270,32 @@ const itemSchema = new mongoose.Schema(
       default: BOX_PACKAGING_MODES.INDIVIDUAL,
       trim: true,
     },
+    pd_box_sizes: {
+      type: [boxSizeEntrySchema],
+      default: [],
+      validate: {
+        validator: (entries) =>
+          !Array.isArray(entries) || entries.length <= SIZE_ENTRY_LIMIT,
+        message: `pd_box_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
+      },
+    },
+    pd_box_mode: {
+      type: String,
+      enum: Object.values(BOX_PACKAGING_MODES),
+      default: BOX_PACKAGING_MODES.INDIVIDUAL,
+      trim: true,
+    },
+    pd_checked: {
+      type: String,
+      enum: ["created", "checked", "approved", "not set"],
+      default: undefined,
+      trim: true,
+    },
+    pd_created_by: { type: productDatabaseActorSchema, default: undefined },
+    pd_checked_by: { type: productDatabaseActorSchema, default: undefined },
+    pd_approved_by: { type: productDatabaseActorSchema, default: undefined },
+    pd_last_changed_by: { type: productDatabaseActorSchema, default: undefined },
+    pd_history: { type: [productDatabaseHistorySchema], default: [] },
     pis_box_top_LBH: {
       L: { type: Number, default: 0, min: 0 },
       B: { type: Number, default: 0, min: 0 },
@@ -317,6 +383,7 @@ itemSchema.index({ brand_name: 1 });
 itemSchema.index({ brands: 1 });
 itemSchema.index({ vendors: 1 });
 itemSchema.index({ pis_checked_flag: 1 });
+itemSchema.index({ pd_checked: 1 });
 
 itemSchema.pre("validate", function syncBarcodeAliases() {
   const normalizedPisMasterBarcode = String(

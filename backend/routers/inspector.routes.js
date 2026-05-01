@@ -1,17 +1,16 @@
 const express = require("express");
 const router = express.Router();
 const auth = require("../middlewares/auth.middleware");
-const authorize = require("../middlewares/authorize.middleware");
+const { requirePermission } = require("../middlewares/permission.middleware");
 const inspectorController = require("../controllers/inspector.controller");
 
-// 🔐 All routes require authentication and Manager/Admin authorization
 router.use(auth);
 router.get(
   "/options",
-  authorize("manager", "admin", "dev"),
+  requirePermission("labels", "view"),
   inspectorController.getInspectorOptions,
 );
-router.use(authorize("manager", "admin"));
+router.use(requirePermission("labels", "manage"));
 
 /**
  * GET /inspectors

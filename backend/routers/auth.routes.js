@@ -7,7 +7,7 @@ const {
   forceChangeUserPassword,
 } = require("../controllers/auth.controller");
 const auth = require("../middlewares/auth.middleware");
-const authorize = require("../middlewares/authorize.middleware");
+const { requirePermission } = require("../middlewares/permission.middleware");
 const createRateLimiter = require("../middlewares/rateLimit.middleware");
 
 const router = express.Router();
@@ -25,13 +25,13 @@ router.patch(
   "/force-change-password",
   authRateLimit,
   auth,
-  authorize("admin", "manager", "dev"),
+  requirePermission("users", "manage"),
   forceChangeUserPassword,
 );
 router.get(
   "/",
   auth,
-  authorize("admin", "manager", "dev", "user"),
+  requirePermission("users", "view"),
   getUsers
 );
 

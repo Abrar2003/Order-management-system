@@ -2,15 +2,15 @@ const express = require("express");
 const router = express.Router();
 
 const auth = require("../middlewares/auth.middleware");
-const authorize = require("../middlewares/authorize.middleware");
+const { requirePermission } = require("../middlewares/permission.middleware");
 const userController = require("../controllers/user.controller");
 
 router.use(auth);
-router.use(authorize("admin"));
+router.use(requirePermission("users", "create"));
 
 /**
  * POST /users
- * Create a user (Admin/Manager)
+ * Create a user (permission-gated).
  */
 router.post("/", userController.createUser); 
 

@@ -8,7 +8,7 @@ import ShippingModal from "../components/ShippingModal";
 import EditOrderModal from "../components/EditOrderModal";
 import EditSampleModal from "../components/EditSampleModal";
 import SampleModal from "../components/SampleModal";
-import { getUserFromToken } from "../auth/auth.utils";
+import { usePermissions } from "../auth/PermissionContext";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -100,15 +100,10 @@ const Shipments = () => {
     searchParams.get("sort_order"),
     initialSortBy,
   );
-  const user = getUserFromToken();
-  const normalizedRole = String(user?.role || "")
-    .trim()
-    .toLowerCase();
-  const isAdmin = normalizedRole === "admin";
-  const canFinalizeShipping = ["admin", "manager", "dev"].includes(
-    normalizedRole,
-  );
-  const canCheckShipments = canFinalizeShipping;
+  const { hasPermission } = usePermissions();
+  const canFinalizeShipping = hasPermission("shipments", "edit");
+  const canCheckShipments = hasPermission("shipments", "edit");
+  const canEditShipments = hasPermission("shipments", "edit");
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -386,9 +381,9 @@ const Shipments = () => {
 
   const canShowEditAction = useCallback(
     (row) =>
-      isAdmin &&
+      canEditShipments &&
       hasShipmentRecords({ shipment: row?.shipment }),
-    [isAdmin],
+    [canEditShipments],
   );
 
   const selectedShipmentRows = useMemo(
@@ -992,7 +987,7 @@ const Shipments = () => {
                           Finalize
                         </button>
                       </th>}
-                      {isAdmin && <th className="shipments-col-action">
+                      {canEditShipments && <th className="shipments-col-action">
                         <button
                           type="button"
                           className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
@@ -1009,7 +1004,7 @@ const Shipments = () => {
                           colSpan={
                             (canCheckShipments ? 1 : 0) +
                             (canFinalizeShipping ? 14 : 13) +
-                            (isAdmin ? 1 : 0)
+                            (canEditShipments ? 1 : 0)
                           }
                           className="text-center py-4"
                         >
@@ -1083,7 +1078,7 @@ const Shipments = () => {
                             )}
                           </td>
                         )}
-                        {isAdmin && (
+                        {canEditShipments && (
                           <td className="shipments-col-action">
                             {canShowEditAction(row) ? (
                               <button

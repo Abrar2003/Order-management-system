@@ -2,7 +2,7 @@ const express = require("express");
 const multer = require("multer");
 
 const auth = require("../middlewares/auth.middleware");
-const authorize = require("../middlewares/authorize.middleware");
+const { requirePermission } = require("../middlewares/permission.middleware");
 const {
   cacheRoute,
   invalidateCacheOnSuccess,
@@ -50,7 +50,7 @@ const uploadBrandLogo = (req, res, next) =>
 router.get(
   "/",
   auth,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("brands", "view"),
   cacheRoute("options", MEDIUM_CACHE_TTL),
   brandController.getAllBrands,
 );
@@ -58,21 +58,21 @@ router.get(
 router.get(
   "/logo",
   auth,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("brands", "view"),
   brandController.getBrandLogo,
 );
 
 router.get(
   "/:name/logo",
   auth,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("brands", "view"),
   brandController.getBrandLogo,
 );
 
 router.get(
   "/:name/calendar",
   auth,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("calendar", "view"),
   cacheRoute("options", MEDIUM_CACHE_TTL),
   brandController.getBrandCalendar,
 );
@@ -80,7 +80,7 @@ router.get(
 router.post(
     "/create-brand",
     auth,
-    authorize("admin", "manager", "dev"),
+    requirePermission("brands", "create"),
     uploadBrandLogo,
     invalidateAllOnSuccess,
     brandController.createBrand

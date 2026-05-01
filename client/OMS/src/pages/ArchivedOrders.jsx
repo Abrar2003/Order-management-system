@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import SortHeaderButton from "../components/SortHeaderButton";
-import { getUserFromToken } from "../auth/auth.service";
+import { usePermissions } from "../auth/PermissionContext";
 import {
   getArchivedOrders,
   syncZeroQuantityOrdersArchive,
@@ -36,8 +36,10 @@ const normalizeSearchParam = (value) => String(value || "").trim();
 const ArchivedOrders = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "archived-orders");
-  const user = getUserFromToken();
-  const isAdmin = String(user?.role || "").toLowerCase() === "admin";
+  const { hasPermission } = usePermissions();
+  const canViewArchived = hasPermission("orders", "view");
+  const canEditArchived = hasPermission("orders", "edit");
+  const canSyncArchived = hasPermission("orders", "sync");
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -107,9 +109,9 @@ const ArchivedOrders = () => {
   }, [activeQueryParams]);
 
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!canViewArchived) return;
     fetchArchivedOrders();
-  }, [fetchArchivedOrders, isAdmin]);
+  }, [canViewArchived, fetchArchivedOrders]);
 
   useEffect(() => {
     const currentQuery = searchParams.toString();
@@ -242,7 +244,7 @@ const ArchivedOrders = () => {
     }
   };
 
-  if (!isAdmin) {
+  if (!canViewArchived) {
     return <Navigate to="/" replace />;
   }
 
@@ -287,7 +289,7 @@ const ArchivedOrders = () => {
               type="button"
               className="btn btn-outline-primary btn-sm"
               onClick={handleSyncZeroQuantity}
-              disabled={syncing}
+              disabled={syncing || !canSyncArchived}
             >
               {syncing ? "Syncing..." : "Sync 0 Qty Orders"}
             </button>
@@ -449,6 +451,7 @@ const ArchivedOrders = () => {
                     {sortedRows.map((row) => {
                       const restoreStatus = String(row?.restore_status || "").trim();
                       const canUnarchive =
+                        canEditArchived &&
                         Boolean(row?._id)
                         && Boolean(restoreStatus)
                         && Number(row?.quantity || 0) > 0;

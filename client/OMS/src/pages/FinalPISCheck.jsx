@@ -5,7 +5,7 @@ import { jsPDF } from "jspdf";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import EditPisModal from "../components/EditPisModal";
-import { getUserFromToken } from "../auth/auth.utils";
+import { usePermissions } from "../auth/PermissionContext";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
@@ -335,9 +335,7 @@ const FinalPISCheck = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "final-pis-check");
   const pdfReportRef = useRef(null);
-  const user = getUserFromToken();
-  const normalizedRole = String(user?.role || "").trim().toLowerCase();
-  const canEditPis = normalizedRole === "admin";
+  const { canEditPis } = usePermissions();
 
   const [reportData, setReportData] = useState(() => buildEmptyReportData());
   const [options, setOptions] = useState({

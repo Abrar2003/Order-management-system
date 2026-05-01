@@ -10,6 +10,7 @@ import {
   buildItemFilesPagePath,
   ITEM_FILE_OPTIONS,
 } from "../constants/itemFiles";
+import { usePermissions } from "../auth/PermissionContext";
 import "../App.css";
 
 const routeMenuItem = (key, label, path) => ({
@@ -39,6 +40,7 @@ const Navbar = () => {
   const user = getUserFromToken();
   const role = user?.role;
   const normalizedRole = String(role || "").trim().toLowerCase();
+  const { hasPermission, isAdmin } = usePermissions();
 
   const navigate = useNavigate();
   const navShellRef = useRef(null);
@@ -66,14 +68,20 @@ const Navbar = () => {
 
   const [theme, setTheme] = useState(getInitialTheme);
 
-  const canAccessQc = ["qc", "admin", "manager", "dev", "user"].includes(normalizedRole);
+  const canAccessQc = hasPermission("qc", "view");
   const isQcOnlyRole = normalizedRole === "qc";
-  const canManageOrders = ["admin", "manager", "dev"].includes(normalizedRole);
-  const canEditPis = ["admin", "manager", "dev"].includes(normalizedRole);
-  const canViewOrderPages = ["admin", "manager", "dev", "user"].includes(normalizedRole);
-  const canManageLabels = ["admin", "manager"].includes(normalizedRole);
-  const canCreateUsers = normalizedRole === "admin";
-  const canAccessAnalytics = ["admin", "manager", "user"].includes(normalizedRole);
+  const canManageOrders =
+    hasPermission("orders", "edit") ||
+    hasPermission("orders", "create") ||
+    hasPermission("uploads", "upload");
+  const canViewOrderPages = hasPermission("orders", "view");
+  const canManageLabels =
+    hasPermission("labels", "manage") || hasPermission("labels", "assign");
+  const canCreateUsers = hasPermission("users", "create");
+  const canAccessAnalytics = hasPermission("reports", "view");
+  const canManageProductDatabase = hasPermission("product_database", "view");
+  const canUploadFinish = hasPermission("finishes", "upload");
+  const canViewPis = hasPermission("pis", "view");
 
   const closeAllMenus = useCallback(() => {
     setShowMobileMenu(false);
@@ -168,18 +176,24 @@ const Navbar = () => {
     if (canAccessQc) {
       links.push(
         routeMenuItem("qc", "QC", "/qc"),
-        routeMenuItem("shipments", "Shipments", "/shipments"),
-        routeMenuItem("containers", "Containers", "/containers"),
       );
     }
 
+    if (hasPermission("shipments", "view")) {
+      links.push(routeMenuItem("shipments", "Shipments", "/shipments"));
+    }
+
+    if (hasPermission("containers", "view")) {
+      links.push(routeMenuItem("containers", "Containers", "/containers"));
+    }
+
     return links;
-  }, [canAccessQc, isQcOnlyRole]);
+  }, [canAccessQc, hasPermission, isQcOnlyRole]);
 
   const generalMenuItems = useMemo(() => [routeMenuItem("home", "Home", "/")], []);
 
   const itemMenuItems = useMemo(() => {
-    if (!canAccessQc || isQcOnlyRole) return [];
+    if (!hasPermission("items", "view") || isQcOnlyRole) return [];
 
     return [
       routeMenuItem("items-all", "View Items", "/items"),
@@ -196,10 +210,10 @@ const Navbar = () => {
         )
       ),
     ];
-  }, [canAccessQc, isQcOnlyRole]);
+  }, [hasPermission, isQcOnlyRole]);
 
   const orderMenuItems = useMemo(() => {
-    if (!canAccessQc || isQcOnlyRole) return [];
+    if (!canViewOrderPages || isQcOnlyRole) return [];
 
     return [
       routeMenuItem("all-orders", "All Orders", "/all-orders"),
@@ -207,10 +221,10 @@ const Navbar = () => {
       routeMenuItem("inspected-orders", "Inspected Orders", "/inspected-orders"),
       routeMenuItem("shipped-orders", "Shipped Orders", "/shipped-orders"),
     ];
-  }, [canAccessQc, isQcOnlyRole]);
+  }, [canViewOrderPages, isQcOnlyRole]);
 
   const reportMenuItems = useMemo(() => {
-    if (!canAccessQc || isQcOnlyRole) return [];
+    if (!hasPermission("reports", "view") || isQcOnlyRole) return [];
 
     const inspectionReports = [
       routeMenuItem("daily-reports", "Daily Inspection Report", "/daily-reports"),
@@ -256,14 +270,14 @@ const Navbar = () => {
       groupMenuItem("order-reports", "Order Reports", orderReports),
       groupMenuItem("other-reports", "Other Reports", otherReports),
     ].filter((group) => Array.isArray(group.items) && group.items.length > 0);
-  }, [canAccessAnalytics, canAccessQc, canManageLabels, isQcOnlyRole]);
+  }, [canAccessAnalytics, canManageLabels, hasPermission, isQcOnlyRole]);
 
   const processMenuItems = useMemo(() => {
     if (isQcOnlyRole) return [];
 
     const items = [];
 
-    if (canAccessQc) {
+    if (hasPermission("containers", "edit") || hasPermission("containers", "manage")) {
       items.push(routeMenuItem("bulk-shipping", "Bulk Shipping", "/container"));
     }
 
@@ -272,7 +286,7 @@ const Navbar = () => {
     }
 
     return items;
-  }, [canAccessQc, canManageLabels, isQcOnlyRole]);
+  }, [canManageLabels, hasPermission, isQcOnlyRole]);
 
   const updateOrdersMenuItems = useMemo(() => {
     if (!canManageOrders || isQcOnlyRole) return [];
@@ -301,18 +315,30 @@ const Navbar = () => {
 
     const items = [];
 
-    if (canEditPis) {
+    if (canUploadFinish) {
       items.push(routeMenuItem("upload-finish", "Upload Finish", "/pis?open_finish=1"));
     }
 
-    items.push(
-      routeMenuItem("pis", "PIS", "/pis"),
-      routeMenuItem("pis-diffs", "Update PIS / QC Reports", "/pis-diffs"),
-      routeMenuItem("final-pis-check", "Final PIS Check", "/final-pis-check"),
-    );
+    if (canManageProductDatabase) {
+      items.push(routeMenuItem("product-database", "Product Database", "/product-database"));
+    }
+
+    if (canViewPis) {
+      items.push(
+        routeMenuItem("pis", "PIS", "/pis"),
+        routeMenuItem("pis-diffs", "Update PIS / QC Reports", "/pis-diffs"),
+        routeMenuItem("final-pis-check", "Final PIS Check", "/final-pis-check"),
+      );
+    }
 
     return items;
-  }, [canEditPis, canViewOrderPages, isQcOnlyRole]);
+  }, [
+    canManageProductDatabase,
+    canUploadFinish,
+    canViewOrderPages,
+    canViewPis,
+    isQcOnlyRole,
+  ]);
 
   const logMenuItems = useMemo(() => {
     if (!canViewOrderPages || isQcOnlyRole) return [];
@@ -331,6 +357,12 @@ const Navbar = () => {
         items.push(routeMenuItem("create-users", "Create User", "/users/new"));
       }
 
+      if (isAdmin) {
+        items.push(
+          routeMenuItem("permission-management", "Rights Management", "/settings/permissions"),
+        );
+      }
+
       items.push(
         actionMenuItem("theme", themeLabel, "toggle-theme"),
         actionMenuItem("change-password", "Change Password", "change-password"),
@@ -339,7 +371,7 @@ const Navbar = () => {
 
       return items;
     },
-    [canCreateUsers, themeLabel],
+    [canCreateUsers, isAdmin, themeLabel],
   );
 
   const menuSections = useMemo(

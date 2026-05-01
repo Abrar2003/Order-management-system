@@ -1,7 +1,7 @@
 const express = require("express");
 const upload = require("../config/multer.config");
 const authenticate = require("../middlewares/auth.middleware");
-const authorize = require("../middlewares/authorize.middleware");
+const { requirePermission } = require("../middlewares/permission.middleware");
 const {
   cacheRoute,
   invalidateCacheOnSuccess,
@@ -59,7 +59,7 @@ const invalidateOrdersOnSuccess = invalidateCacheOnSuccess(invalidateOrderCaches
 router.post(
   "/upload-orders",
   authenticate,
-  authorize("admin", "manager", "dev"),
+  requirePermission("uploads", "upload"),
   invalidateOrdersOnSuccess,
   upload.safeSingle("file"),
   uploadOrders,
@@ -68,7 +68,7 @@ router.post(
 router.post(
   "/manual-orders",
   authenticate,
-  authorize("admin", "manager", "dev"),
+  requirePermission("orders", "create"),
   invalidateOrdersOnSuccess,
   createOrdersManually,
 );
@@ -76,7 +76,7 @@ router.post(
 router.post(
   "/rectify-pdf",
   authenticate,
-  authorize("admin", "manager", "dev"),
+  requirePermission("uploads", "upload"),
   invalidateOrdersOnSuccess,
   upload.safeSingle("file"),
   rectifyPdfOrders,
@@ -85,14 +85,14 @@ router.post(
 router.get(
   "/previous-order-check",
   authenticate,
-  authorize("admin", "manager", "dev"),
+  requirePermission("orders", "view"),
   lookupPreviousOrder,
 );
 
 router.get(
   "/upload-logs",
   authenticate,
-  authorize("admin", "manager", "dev", "user"),
+  requirePermission("uploads", "view"),
   cacheRoute("orders", MEDIUM_CACHE_TTL),
   getUploadLogs,
 );
@@ -100,7 +100,7 @@ router.get(
 router.get(
   "/edit-logs",
   authenticate,
-  authorize("admin", "manager", "dev", "user"),
+  requirePermission("orders", "view"),
   cacheRoute("orders", MEDIUM_CACHE_TTL),
   getOrderEditLogs,
 );
@@ -109,80 +109,80 @@ router.get(
 router.get(
   "/",
   authenticate,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("orders", "view"),
   cacheRoute("orders", SHORT_CACHE_TTL),
   getOrders,
 );
 
 // List order's brands and vendors
-router.get("/brands-and-vendors", authenticate, authorize("admin", "manager", "QC", "dev", "user"), cacheRoute("options", MEDIUM_CACHE_TTL), getOrderSummary);
-router.get("/packed-goods", authenticate, authorize("admin", "manager", "QC", "dev", "user"), cacheRoute("orders", SHORT_CACHE_TTL), getPackedGoods);
+router.get("/brands-and-vendors", authenticate, requirePermission("orders", "view"), cacheRoute("options", MEDIUM_CACHE_TTL), getOrderSummary);
+router.get("/packed-goods", authenticate, requirePermission("orders", "view"), cacheRoute("orders", SHORT_CACHE_TTL), getPackedGoods);
 
 //get orders by brand and status
 router.get(
   "/brand/:brand/vendor/:vendor/status/:status",
   authenticate,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("orders", "view"),
   cacheRoute("orders", SHORT_CACHE_TTL),
   getOrdersByBrandAndStatus,
 );
 
 // get orders with optional filters via query params
-router.get("/filters", authenticate, authorize("admin", "manager", "QC", "dev", "user"), cacheRoute("orders", SHORT_CACHE_TTL), getOrdersByFiltersDb);
-router.get("/export", authenticate, authorize("admin", "manager", "QC", "dev", "user"), exportOrdersDb);
+router.get("/filters", authenticate, requirePermission("orders", "view"), cacheRoute("orders", SHORT_CACHE_TTL), getOrdersByFiltersDb);
+router.get("/export", authenticate, requirePermission("orders", "export"), exportOrdersDb);
 router.get(
   "/po-status-report",
   authenticate,
-  authorize("admin", "manager", "dev", "user"),
+  requirePermission("reports", "view"),
   cacheRoute("reports", MEDIUM_CACHE_TTL),
   getPoStatusReport,
 );
 router.get(
   "/pending-po-report",
   authenticate,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("reports", "view"),
   cacheRoute("reports", MEDIUM_CACHE_TTL),
   getPendingPoReport,
 );
 router.get(
   "/delayed-po-report",
   authenticate,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("reports", "view"),
   cacheRoute("reports", MEDIUM_CACHE_TTL),
   getDelayedPoReport,
 );
 router.get(
   "/upcoming-etd-report",
   authenticate,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("reports", "view"),
   cacheRoute("reports", MEDIUM_CACHE_TTL),
   getUpcomingEtdReport,
 );
 router.get(
   "/delayed-po-report/export",
   authenticate,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("reports", "export"),
   exportDelayedPoReport,
 );
 router.get(
   "/pending-po-report/export",
   authenticate,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("reports", "export"),
   exportPendingPoReport,
 );
 router.get(
   "/upcoming-etd-report/export",
   authenticate,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("reports", "export"),
   exportUpcomingEtdReport,
 );
-router.get("/revised-etd-history", authenticate, authorize("admin", "manager", "QC", "dev", "user"), cacheRoute("orders", SHORT_CACHE_TTL), getRevisedEtdHistory);
+router.get("/revised-etd-history", authenticate, requirePermission("orders", "view"), cacheRoute("orders", SHORT_CACHE_TTL), getRevisedEtdHistory);
 
 // List shipped/partially shipped/inspection-done items with latest shipment details
 router.get(
   "/containers",
   authenticate,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("containers", "view"),
   cacheRoute("orders", SHORT_CACHE_TTL),
   getContainersDb,
 );
@@ -190,14 +190,14 @@ router.get(
 router.get(
   "/shipments/export",
   authenticate,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("shipments", "export"),
   exportShipmentsDb,
 );
 
 router.get(
   "/shipments",
   authenticate,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("shipments", "view"),
   cacheRoute("orders", SHORT_CACHE_TTL),
   getShipmentsDb,
 );
@@ -205,7 +205,7 @@ router.get(
 router.patch(
   "/shipments/check",
   authenticate,
-  authorize("admin", "manager", "dev"),
+  requirePermission("shipments", "edit"),
   invalidateOrdersOnSuccess,
   checkShipmentRows,
 );
@@ -214,7 +214,7 @@ router.patch(
 router.patch(
   "/edit-order/:id",
   authenticate,
-  authorize("admin"),
+  requirePermission("orders", "edit"),
   invalidateOrdersOnSuccess,
   editOrder,
 );
@@ -222,7 +222,7 @@ router.patch(
 router.patch(
   "/bulk-revised-etd",
   authenticate,
-  authorize("admin"),
+  requirePermission("orders", "edit"),
   invalidateOrdersOnSuccess,
   bulkUpdateRevisedEtd,
 );
@@ -230,7 +230,7 @@ router.patch(
 router.patch(
   "/edit-complete-order/:id",
   authenticate,
-  authorize("admin"),
+  requirePermission("orders", "edit"),
   invalidateOrdersOnSuccess,
   editCompleteOrder,
 );
@@ -238,7 +238,7 @@ router.patch(
 router.patch(
   "/archive-order/:id",
   authenticate,
-  authorize("admin"),
+  requirePermission("orders", "delete"),
   invalidateOrdersOnSuccess,
   archiveOrder,
 );
@@ -246,7 +246,7 @@ router.patch(
 router.patch(
   "/unarchive-order/:id",
   authenticate,
-  authorize("admin"),
+  requirePermission("orders", "edit"),
   invalidateOrdersOnSuccess,
   unarchiveOrder,
 );
@@ -254,7 +254,7 @@ router.patch(
 router.get(
   "/archived",
   authenticate,
-  authorize("admin"),
+  requirePermission("orders", "view"),
   cacheRoute("orders", SHORT_CACHE_TTL),
   getArchivedOrders,
 );
@@ -262,7 +262,7 @@ router.get(
 router.post(
   "/sync-zero-quantity-archive",
   authenticate,
-  authorize("admin"),
+  requirePermission("orders", "sync"),
   invalidateOrdersOnSuccess,
   syncZeroQuantityOrdersArchive,
 );
@@ -270,24 +270,24 @@ router.post(
 router.patch(
   "/finalize-order/:id",
   authenticate,
-  authorize("admin", "manager", "dev"),
+  requirePermission("orders", "edit"),
   invalidateOrdersOnSuccess,
   finalizeOrder,
 );
 
-router.get("/today-etd-orders", authenticate, authorize("admin", "manager", "QC", "dev", "user"), cacheRoute("dashboard", SHORT_CACHE_TTL), getTodayEtdOrdersByBrand);
+router.get("/today-etd-orders", authenticate, requirePermission("dashboard", "view"), cacheRoute("dashboard", SHORT_CACHE_TTL), getTodayEtdOrdersByBrand);
 
 // Get vendor summary by brand
-router.get("/:brand/vendor-summary", authenticate, authorize("admin", "manager", "QC", "dev", "user"), cacheRoute("dashboard", SHORT_CACHE_TTL), getVendorSummaryByBrand);
-router.get("/:brand/today-etd-orders", authenticate, authorize("admin", "manager", "QC", "dev", "user"), cacheRoute("dashboard", SHORT_CACHE_TTL), getTodayEtdOrdersByBrand);
+router.get("/:brand/vendor-summary", authenticate, requirePermission("dashboard", "view"), cacheRoute("dashboard", SHORT_CACHE_TTL), getVendorSummaryByBrand);
+router.get("/:brand/today-etd-orders", authenticate, requirePermission("dashboard", "view"), cacheRoute("dashboard", SHORT_CACHE_TTL), getTodayEtdOrdersByBrand);
 
 // Get order by ID
-router.get("/order-by-id/:id", authenticate, authorize("admin", "manager", "QC", "dev", "user"), cacheRoute("orders", SHORT_CACHE_TTL), getOrderById);
+router.get("/order-by-id/:id", authenticate, requirePermission("orders", "view"), cacheRoute("orders", SHORT_CACHE_TTL), getOrderById);
 
 router.post(
   "/recalculate-total-po-cbm",
   authenticate,
-  authorize("admin", "manager", "dev"),
+  requirePermission("orders", "sync"),
   invalidateOrdersOnSuccess,
   recalculateTotalPoCbm,
 );
@@ -296,7 +296,7 @@ router.post(
 router.post(
   "/re-sync",
   authenticate,
-  authorize("admin", "manager", "dev"),
+  requirePermission("calendar", "sync"),
   invalidateOrdersOnSuccess,
   reSync,
 );

@@ -1,6 +1,6 @@
 const express = require("express");
 const auth = require("../middlewares/auth.middleware");
-const authorize = require("../middlewares/authorize.middleware");
+const { requirePermission } = require("../middlewares/permission.middleware");
 const {
   getSamples,
   createSample,
@@ -14,35 +14,35 @@ const router = express.Router();
 router.get(
   "/",
   auth,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("samples", "view"),
   getSamples,
 );
 
 router.get(
   "/shipped",
   auth,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("samples", "view"),
   getShippedSamples,
 );
 
 router.post(
   "/",
   auth,
-  authorize("admin", "manager", "dev"),
+  requirePermission("samples", "create"),
   createSample,
 );
 
 router.patch(
   "/:id",
   auth,
-  authorize("admin"),
+  requirePermission("samples", "edit"),
   updateSample,
 );
 
 router.patch(
   "/:id/finalize-shipment",
   auth,
-  authorize("admin", "manager", "dev"),
+  requirePermission("samples", "edit"),
   finalizeSampleShipment,
 );
 

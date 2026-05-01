@@ -3,6 +3,10 @@ const upload = require("../config/multer.config");
 const auth = require("../middlewares/auth.middleware");
 const authorize = require("../middlewares/authorize.middleware");
 const {
+  requireAdminOnlyPisEdit,
+  requirePermission,
+} = require("../middlewares/permission.middleware");
+const {
   cacheRoute,
   invalidateCacheOnSuccess,
 } = require("../middlewares/cache.middleware");
@@ -22,6 +26,10 @@ const {
   getFinalPisCheckOptions,
   getFinalPisCheckReportPreview,
   exportFinalPisCheckReport,
+  getProductDatabaseItems,
+  updateProductDatabaseItem,
+  checkProductDatabaseItem,
+  approveProductDatabaseItem,
   getItemOrderPresence,
   getItemOrdersHistory,
   createItem,
@@ -39,10 +47,23 @@ const { getProductAnalytics } = require("../controllers/product.controller");
 const router = express.Router();
 const invalidateItemsOnSuccess = invalidateCacheOnSuccess(invalidateItemCaches);
 
+const requiresPisAdminForPayload = (req, res, next) => {
+  const hasPisFile = Boolean(req.file);
+  const hasPisFields = Object.keys(req.body || {}).some((key) =>
+    String(key || "").toLowerCase().startsWith("pis"),
+  );
+
+  if (hasPisFile || hasPisFields) {
+    return requireAdminOnlyPisEdit(req, res, next);
+  }
+
+  return next();
+};
+
 router.get(
   "/",
   auth,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("items", "view"),
   cacheRoute("items", MEDIUM_CACHE_TTL),
   getItems,
 );
@@ -50,7 +71,7 @@ router.get(
 router.get(
   "/pis-diffs",
   auth,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("pis", "view"),
   cacheRoute("items", MEDIUM_CACHE_TTL),
   getPisDiffItems,
 );
@@ -58,7 +79,7 @@ router.get(
 router.get(
   "/pis-diffs/export-preview",
   auth,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("pis", "export"),
   cacheRoute("reports", MEDIUM_CACHE_TTL),
   getPisDiffCheckedReportPreview,
 );
@@ -66,14 +87,14 @@ router.get(
 router.get(
   "/pis-diffs/export",
   auth,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("pis", "export"),
   exportPisDiffCheckedReport,
 );
 
 router.get(
   "/final-pis-check",
   auth,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("pis", "view"),
   cacheRoute("items", MEDIUM_CACHE_TTL),
   getFinalPisCheckItems,
 );
@@ -81,7 +102,7 @@ router.get(
 router.get(
   "/final-pis-check/options",
   auth,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("pis", "view"),
   cacheRoute("items", MEDIUM_CACHE_TTL),
   getFinalPisCheckOptions,
 );
@@ -89,7 +110,7 @@ router.get(
 router.get(
   "/final-pis-check/export-preview",
   auth,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("pis", "export"),
   cacheRoute("reports", MEDIUM_CACHE_TTL),
   getFinalPisCheckReportPreview,
 );
@@ -97,15 +118,51 @@ router.get(
 router.get(
   "/final-pis-check/export",
   auth,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("pis", "export"),
   exportFinalPisCheckReport,
+);
+
+router.get(
+  "/product-database",
+  auth,
+  requirePermission("product_database", "view"),
+  cacheRoute("items", MEDIUM_CACHE_TTL),
+  getProductDatabaseItems,
+);
+
+router.patch(
+  "/:id/product-database",
+  auth,
+  authorize("admin", "manager"),
+  requirePermission("product_database", "edit"),
+  invalidateItemsOnSuccess,
+  updateProductDatabaseItem,
+);
+
+router.post(
+  "/:id/product-database/check",
+  auth,
+  authorize("manager"),
+  requirePermission("product_database", "approve"),
+  invalidateItemsOnSuccess,
+  checkProductDatabaseItem,
+);
+
+router.post(
+  "/:id/product-database/approve",
+  auth,
+  authorize("admin"),
+  requirePermission("product_database", "approve"),
+  invalidateItemsOnSuccess,
+  approveProductDatabaseItem,
 );
 
 router.post(
   "/",
   auth,
-  authorize("admin", "manager", "dev"),
+  requirePermission("items", "create"),
   upload.safeSingle("pis_file"),
+  requiresPisAdminForPayload,
   invalidateItemsOnSuccess,
   createItem,
 );
@@ -113,7 +170,7 @@ router.post(
 router.post(
   "/sync",
   auth,
-  authorize("admin", "manager", "dev"),
+  requirePermission("items", "sync"),
   invalidateItemsOnSuccess,
   syncItemsFromOrders,
 );
@@ -121,7 +178,7 @@ router.post(
 router.get(
   "/:itemCode/order-presence",
   auth,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("items", "view"),
   cacheRoute("items", SHORT_CACHE_TTL),
   getItemOrderPresence,
 );
@@ -129,7 +186,7 @@ router.get(
 router.get(
   "/:itemCode/orders-history",
   auth,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("items", "view"),
   cacheRoute("items", SHORT_CACHE_TTL),
   getItemOrdersHistory,
 );
@@ -137,23 +194,23 @@ router.get(
 router.get(
   "/:id/files/:fileType/url",
   auth,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("images_documents", "view"),
   getItemFileUrl,
 );
 
 router.get(
   "/:itemId/pis-file-url",
   auth,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("pis", "view"),
   getItemPisFileUrl,
 );
 
-router.get("/product-analytics", auth, authorize("admin", "manager", "dev", "user"), cacheRoute("analytics", MEDIUM_CACHE_TTL), getProductAnalytics);
+router.get("/product-analytics", auth, requirePermission("reports", "view"), cacheRoute("analytics", MEDIUM_CACHE_TTL), getProductAnalytics);
 
 router.patch(
   "/:id",
   auth,
-  authorize("admin", "manager", "dev"),
+  requirePermission("items", "edit"),
   invalidateItemsOnSuccess,
   updateItem,
 );
@@ -161,7 +218,8 @@ router.patch(
 router.patch(
   "/:id/pis",
   auth,
-  authorize("admin", "manager", "dev"),
+  requireAdminOnlyPisEdit,
+  requirePermission("pis", "edit"),
   invalidateItemsOnSuccess,
   updateItemPis,
 );
@@ -169,7 +227,8 @@ router.patch(
 router.post(
   "/:itemId/pis-upload",
   auth,
-  authorize("admin", "manager", "dev"),
+  requireAdminOnlyPisEdit,
+  requirePermission("pis", "upload"),
   upload.safeSingle("file"),
   invalidateItemsOnSuccess,
   uploadItemPisFile,
@@ -178,7 +237,7 @@ router.post(
 router.post(
   "/:id/files",
   auth,
-  authorize("admin", "manager"),
+  requirePermission("images_documents", "upload"),
   upload.safeSingle("file"),
   invalidateItemsOnSuccess,
   uploadItemFile,
@@ -187,7 +246,7 @@ router.post(
 router.delete(
   "/:id/files/:fileType",
   auth,
-  authorize("admin", "manager"),
+  requirePermission("images_documents", "delete"),
   invalidateItemsOnSuccess,
   deleteItemFile,
 );

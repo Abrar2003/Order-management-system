@@ -5,13 +5,14 @@ import Navbar from "../components/Navbar";
 import FilePreviewModal from "../components/FilePreviewModal";
 import ItemOrderPresenceTooltip from "../components/ItemOrderPresenceTooltip";
 import SortHeaderButton from "../components/SortHeaderButton";
-import { getUserFromToken } from "../auth/auth.utils";
+import { usePermissions } from "../auth/PermissionContext";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import {
   buildItemFileUploadRequest,
   DEFAULT_ITEM_FILE_TYPE,
   getItemFileOption,
   hasStoredItemFile,
+  isPisSpreadsheetUploadType,
 } from "../constants/itemFiles";
 import {
   getNextClientSortState,
@@ -120,9 +121,8 @@ const ItemFilesPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "item-files");
 
-  const user = getUserFromToken();
-  const normalizedRole = String(user?.role || "").trim().toLowerCase();
-  const canUploadItemFiles = ["admin", "manager"].includes(normalizedRole);
+  const { canEditPis, hasPermission } = usePermissions();
+  const canUploadItemFiles = hasPermission("images_documents", "upload");
 
   const requestedFileType = normalizeFilterParam(
     searchParams.get("file_type"),
@@ -131,6 +131,9 @@ const ItemFilesPage = () => {
   const activeFileOption =
     getItemFileOption(requestedFileType) || getItemFileOption(DEFAULT_ITEM_FILE_TYPE);
   const activeFileType = activeFileOption?.value || DEFAULT_ITEM_FILE_TYPE;
+  const canUploadActiveFile =
+    canUploadItemFiles &&
+    (!isPisSpreadsheetUploadType(activeFileType) || canEditPis);
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -379,7 +382,7 @@ const ItemFilesPage = () => {
   );
 
   const handleOpenItemFilePicker = useCallback((item) => {
-    if (!canUploadItemFiles || uploadingItemId) return;
+    if (!canUploadActiveFile || uploadingItemId) return;
 
     const itemId = String(item?._id || "").trim();
     if (!itemId) return;
@@ -389,7 +392,7 @@ const ItemFilesPage = () => {
     window.setTimeout(() => {
       itemFileInputRef.current?.click();
     }, 0);
-  }, [canUploadItemFiles, uploadingItemId]);
+  }, [canUploadActiveFile, uploadingItemId]);
 
   const handleItemFileChange = useCallback(async (event) => {
     const inputElement = event.target;
@@ -494,7 +497,7 @@ const ItemFilesPage = () => {
           type="file"
           className="d-none"
           accept={activeFileOption.accept}
-          disabled={!canUploadItemFiles || Boolean(uploadingItemId)}
+          disabled={!canUploadActiveFile || Boolean(uploadingItemId)}
           onChange={handleItemFileChange}
         />
 
@@ -773,7 +776,7 @@ const ItemFilesPage = () => {
                               >
                                 {isOpeningThisItem ? "Loading..." : "Preview"}
                               </button>
-                              {canUploadItemFiles && (
+                              {canUploadActiveFile && (
                                 <button
                                   type="button"
                                   className="btn btn-primary btn-sm"

@@ -332,6 +332,42 @@ small,
   letter-spacing: 0.03em;
 }
 
+.product-database-box-toolbar .form-select-sm,
+.product-database-box-toolbar .btn-sm {
+  min-height: auto;
+  align-self: center;
+}
+
+.product-database-modal-dialog {
+  width: min(1480px, calc(100vw - 2rem));
+  max-width: min(1480px, calc(100vw - 2rem));
+}
+
+.product-database-modal-dialog .table {
+  table-layout: auto;
+}
+
+.product-database-modal-dialog .form-control-sm,
+.product-database-modal-dialog .form-select-sm {
+  min-width: 6.5rem;
+}
+
+.rights-management-search {
+  min-width: min(100%, 260px);
+}
+
+.rights-management-table th,
+.rights-management-table td {
+  vertical-align: middle;
+}
+
+.rights-management-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--om-color-surface);
+}
+
 .card,
 .om-card {
   border: 1px solid var(--om-color-border);

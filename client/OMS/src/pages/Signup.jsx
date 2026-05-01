@@ -2,12 +2,12 @@ import { useMemo, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
-import { getUserFromToken } from "../auth/auth.utils";
+import { usePermissions } from "../auth/PermissionContext";
 import "../App.css";
 
 const Signup = () => {
-  const user = getUserFromToken();
-  const isAdmin = user?.role === "admin";
+  const { hasPermission } = usePermissions();
+  const canCreateUsers = hasPermission("users", "create");
   const navigate = useNavigate();
   const roles = useMemo(() => ["admin", "manager", "QC", "dev", "user"], []);
 
@@ -24,7 +24,7 @@ const Signup = () => {
   const [success, setSuccess] = useState("");
   const [saving, setSaving] = useState(false);
 
-  if (!isAdmin) {
+  if (!canCreateUsers) {
     return <Navigate to="/" replace />;
   }
 

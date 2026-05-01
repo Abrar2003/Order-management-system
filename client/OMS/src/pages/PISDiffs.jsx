@@ -6,7 +6,7 @@ import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import EditPisModal from "../components/EditPisModal";
 import SortHeaderButton from "../components/SortHeaderButton";
-import { getUserFromToken } from "../auth/auth.utils";
+import { usePermissions } from "../auth/PermissionContext";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import {
   getNextClientSortState,
@@ -368,9 +368,7 @@ const PISDiffs = () => {
   useRememberSearchParams(searchParams, setSearchParams, "pis-diffs");
   const pdfReportRef = useRef(null);
 
-  const user = getUserFromToken();
-  const normalizedRole = String(user?.role || "").trim().toLowerCase();
-  const canEditPis = ["admin", "manager", "dev"].includes(normalizedRole);
+  const { canEditPis } = usePermissions();
 
   const [rows, setRows] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);

@@ -5,7 +5,7 @@ const upload = require("../config/multer.config");
 const qcImageAnyUpload = upload.qcImageAnyUpload;
 const qcImageSingleUpload = upload.qcImageSingleUpload;
 const auth = require("../middlewares/auth.middleware");
-const authorize = require("../middlewares/authorize.middleware");
+const { requirePermission } = require("../middlewares/permission.middleware");
 const {
   cacheRoute,
   invalidateCacheOnSuccess,
@@ -24,7 +24,7 @@ const invalidateQcOnSuccess = invalidateCacheOnSuccess(invalidateQcCaches);
 router.get(
   "/list",
   auth,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("qc", "view"),
   cacheRoute("qc", SHORT_CACHE_TTL),
   qcController.getQCList
 );
@@ -33,7 +33,7 @@ router.get(
 router.post(
   "/align-qc",
   auth,
-  authorize("admin", "manager"),
+  requirePermission("qc", "assign"),
   invalidateQcOnSuccess,
   qcController.alignQC
 );
@@ -42,7 +42,7 @@ router.post(
 router.patch(
   "/update-qc/:id",
   auth,
-  authorize("QC", "admin", "manager"),
+  requirePermission("qc", "edit"),
   invalidateQcOnSuccess,
   qcController.updateQC
 );
@@ -50,7 +50,7 @@ router.patch(
 router.patch(
   "/goods-not-ready/:id",
   auth,
-  authorize("QC", "admin", "manager"),
+  requirePermission("qc", "edit"),
   invalidateQcOnSuccess,
   qcController.markGoodsNotReady
 );
@@ -58,7 +58,7 @@ router.patch(
 router.patch(
   "/reject-all/:id",
   auth,
-  authorize("QC", "admin", "manager"),
+  requirePermission("qc", "edit"),
   qcImageSingleUpload("image"),
   invalidateQcOnSuccess,
   qcController.rejectAllQc,
@@ -67,7 +67,7 @@ router.patch(
 router.post(
   "/:id/transfer-request",
   auth,
-  authorize("admin", "manager"),
+  requirePermission("qc", "assign"),
   invalidateQcOnSuccess,
   qcController.transferQcRequest,
 );
@@ -75,7 +75,7 @@ router.post(
 router.post(
   "/:id/images",
   auth,
-  authorize("QC", "admin", "manager"),
+  requirePermission("images_documents", "upload"),
   qcImageAnyUpload,
   invalidateQcOnSuccess,
   qcController.uploadQcImages,
@@ -84,7 +84,7 @@ router.post(
 router.delete(
   "/:id/images",
   auth,
-  authorize("admin", "manager"),
+  requirePermission("images_documents", "delete"),
   invalidateQcOnSuccess,
   qcController.deleteQcImages,
 );
@@ -92,7 +92,7 @@ router.delete(
 router.post(
   "/sync-item-details",
   auth,
-  authorize("admin", "manager", "dev"),
+  requirePermission("qc", "sync"),
   invalidateQcOnSuccess,
   qcController.syncQcDetailsFromItems,
 );
@@ -100,7 +100,7 @@ router.post(
 router.post(
   "/sync-inspections",
   auth,
-  authorize("admin", "manager", "dev"),
+  requirePermission("inspections", "sync"),
   invalidateQcOnSuccess,
   qcController.syncInspectionStatuses,
 );
@@ -108,7 +108,7 @@ router.post(
 router.get(
   "/daily-report",
   auth,
-  authorize("admin", "manager", "dev", "user"),
+  requirePermission("reports", "view"),
   cacheRoute("reports", MEDIUM_CACHE_TTL),
   qcController.getDailyReport
 );
@@ -116,7 +116,7 @@ router.get(
 router.get(
   "/reports/inspectors",
   auth,
-  authorize("admin", "manager", "dev", "user"),
+  requirePermission("reports", "view"),
   cacheRoute("reports", MEDIUM_CACHE_TTL),
   qcController.getInspectorReports,
 );
@@ -124,7 +124,7 @@ router.get(
 router.get(
   "/reports/vendors",
   auth,
-  authorize("admin", "manager", "dev", "user"),
+  requirePermission("reports", "view"),
   cacheRoute("reports", MEDIUM_CACHE_TTL),
   qcController.getVendorReports,
 );
@@ -132,7 +132,7 @@ router.get(
 router.get(
   "/reports/weekly-summary",
   auth,
-  authorize("admin", "manager", "dev", "user"),
+  requirePermission("reports", "view"),
   cacheRoute("reports", MEDIUM_CACHE_TTL),
   qcController.getWeeklyOrderSummary,
 );
@@ -140,7 +140,7 @@ router.get(
 router.get(
   "/reports/daily-summary",
   auth,
-  authorize("admin", "manager", "dev", "user"),
+  requirePermission("reports", "view"),
   cacheRoute("reports", MEDIUM_CACHE_TTL),
   qcController.getDailyOrderSummary,
 );
@@ -148,14 +148,14 @@ router.get(
 router.get(
   "/export",
   auth,
-  authorize("admin", "manager", "dev", "user"),
+  requirePermission("qc", "export"),
   qcController.exportQCList,
 );
 
 router.patch(
   "/:id/inspection-records",
   auth,
-  authorize("admin", "manager"),
+  requirePermission("inspections", "edit"),
   invalidateQcOnSuccess,
   qcController.editInspectionRecords,
 );
@@ -163,7 +163,7 @@ router.patch(
 router.get(
   "/:id/inspection-record/:recordId/transfer-target",
   auth,
-  authorize("admin", "manager"),
+  requirePermission("inspections", "assign"),
   cacheRoute("qc", SHORT_CACHE_TTL),
   qcController.lookupInspectionTransferTarget,
 );
@@ -171,7 +171,7 @@ router.get(
 router.post(
   "/:id/inspection-record/:recordId/transfer",
   auth,
-  authorize("admin", "manager"),
+  requirePermission("inspections", "assign"),
   invalidateQcOnSuccess,
   qcController.transferInspectionRecord,
 );
@@ -179,7 +179,7 @@ router.post(
 router.delete(
   "/:id/inspection-record/:recordId",
   auth,
-  authorize("admin"),
+  requirePermission("inspections", "delete"),
   invalidateQcOnSuccess,
   qcController.deleteInspectionRecord,
 );
@@ -187,7 +187,7 @@ router.delete(
 router.get(
   "/:id",
   auth,
-  authorize("admin", "manager", "QC", "dev", "user"),
+  requirePermission("qc", "view"),
   cacheRoute("qc", SHORT_CACHE_TTL),
   qcController.getQCById
 );
