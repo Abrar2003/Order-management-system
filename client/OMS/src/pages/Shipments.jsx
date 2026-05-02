@@ -676,8 +676,8 @@ const Shipments = () => {
 
         <div className="card om-card mb-3">
           <div className="card-body">
-            <form className="row g-2 align-items-end" onSubmit={handleApplyFilters}>
-              <div className="col-md-3">
+            <form className="row g-2 align-items-end shipments-filter-form" onSubmit={handleApplyFilters}>
+              <div className="col-lg-3 col-md-6">
                 <label className="form-label">Search by Order ID</label>
                 <input
                   type="text"
@@ -693,7 +693,7 @@ const Shipments = () => {
                   ))}
                 </datalist>
               </div>
-              <div className="col-md-3">
+              <div className="col-lg-3 col-md-6">
                 <label className="form-label">Search by Item Code</label>
                 <input
                   type="text"
@@ -709,7 +709,7 @@ const Shipments = () => {
                   ))}
                 </datalist>
               </div>
-              <div className="col-md-3">
+              <div className="col-lg-2 col-md-6">
                 <label className="form-label">Search by Container Number</label>
                 <input
                   type="text"
@@ -725,7 +725,7 @@ const Shipments = () => {
                   ))}
                 </datalist>
               </div>
-              <div className="col-md-2">
+              <div className="col-lg-2 col-md-6">
                 <label className="form-label">Filter by Vendor</label>
                 <select
                   className="form-select"
@@ -740,13 +740,13 @@ const Shipments = () => {
                   ))}
                 </select>
               </div>
-              <div className="col-md-1 d-flex gap-2">
-                <button type="submit" className="btn btn-primary">
+              <div className="col-lg-2 col-md-12 shipments-filter-actions">
+                <button type="submit" className="btn btn-primary flex-fill">
                   Apply
                 </button>
                 <button
                   type="button"
-                  className="btn btn-outline-secondary"
+                  className="btn btn-outline-secondary flex-fill"
                   onClick={handleClearFilters}
                 >
                   Clear

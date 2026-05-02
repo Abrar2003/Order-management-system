@@ -309,6 +309,7 @@ const OrderEtdWithHistory = ({
       panelClassName="om-etd-history-panel"
       onOpen={loadHistory}
       align="right"
+      openOnFocus={false}
       trigger={<span className="om-etd-history-label" tabIndex={0}>{formattedEtd}</span>}
     >
       {historyState.status === "loading" ? (

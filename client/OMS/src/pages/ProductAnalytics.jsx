@@ -85,6 +85,7 @@ const HeaderFormulaTooltip = ({ column, children }) => {
 
   return (
     <Tooltip
+      openOnFocus={false}
       content={(
         <div>
           <div className="tooltip-title">{formula.title}</div>

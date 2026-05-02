@@ -11,6 +11,8 @@ import "./App.css";
 
 import ProtectedRoute from "./routes/ProtectedRoute";
 import { PermissionProvider } from "./auth/PermissionContext";
+import { getUserFromToken } from "./auth/auth.service";
+import { normalizeUserRole } from "./auth/permissions";
 
 import SignIn from "./pages/Signin";
 import Home from "./pages/Home";
@@ -118,6 +120,22 @@ const RouteUiCleanup = () => {
   return null;
 };
 
+const RootRoute = () => {
+  const role = normalizeUserRole(getUserFromToken()?.role);
+
+  if (role === "qc") {
+    return <Navigate to="/qc" replace />;
+  }
+
+  return <Home />;
+};
+
+const AppFallbackRoute = () => {
+  const role = normalizeUserRole(getUserFromToken()?.role);
+
+  return <Navigate to={role === "qc" ? "/qc" : "/orders"} replace />;
+};
+
 const App = () => {
   return (
     <div className="app-shell">
@@ -133,7 +151,7 @@ const App = () => {
             path="/"
             element={
               <ProtectedRoute>
-                <Home />
+                <RootRoute />
               </ProtectedRoute>
             }
           />
@@ -494,7 +512,7 @@ const App = () => {
         */}
 
           {/* Fallback */}
-            <Route path="*" element={<Navigate to="/orders" replace />} />
+            <Route path="*" element={<AppFallbackRoute />} />
           </Routes>
         </PermissionProvider>
       </Router>

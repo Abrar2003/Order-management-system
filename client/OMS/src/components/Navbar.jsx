@@ -190,7 +190,10 @@ const Navbar = () => {
     return links;
   }, [canAccessQc, hasPermission, isQcOnlyRole]);
 
-  const generalMenuItems = useMemo(() => [routeMenuItem("home", "Home", "/")], []);
+  const generalMenuItems = useMemo(
+    () => (isQcOnlyRole ? [] : [routeMenuItem("home", "Home", "/")]),
+    [isQcOnlyRole],
+  );
 
   const itemMenuItems = useMemo(() => {
     if (!hasPermission("items", "view") || isQcOnlyRole) return [];
@@ -224,13 +227,19 @@ const Navbar = () => {
   }, [canViewOrderPages, isQcOnlyRole]);
 
   const reportMenuItems = useMemo(() => {
-    if (!hasPermission("reports", "view") || isQcOnlyRole) return [];
-
     const inspectionReports = [
       routeMenuItem("daily-reports", "Daily Inspection Report", "/daily-reports"),
       routeMenuItem("weekly-summary", "Weekly Order Summary", "/summary/weekly"),
       routeMenuItem("daily-summary", "Daily Summary", "/summary/daily"),
     ];
+
+    if (isQcOnlyRole) {
+      return [
+        groupMenuItem("inspection-reports", "Inspection Reports", inspectionReports),
+      ];
+    }
+
+    if (!hasPermission("reports", "view")) return [];
 
     const performanceReports = [
       routeMenuItem("inspector-reports", "Inspector Performance Report", "/reports/inspectors"),
@@ -402,7 +411,12 @@ const Navbar = () => {
     () =>
       menuSections.filter(
         (section) =>
-          section.key === "items" || section.key === "orders" || section.key === "reports",
+          section.key === "items" ||
+          section.key === "orders" ||
+          section.key === "reports" ||
+          section.key === "process" ||
+          section.key === "update-orders" ||
+          section.key === "upload-add",
       ),
     [menuSections],
   );
@@ -411,7 +425,12 @@ const Navbar = () => {
     () =>
       menuSections.filter(
         (section) =>
-          section.key !== "items" && section.key !== "orders" && section.key !== "reports",
+          section.key !== "items" &&
+          section.key !== "orders" &&
+          section.key !== "reports" &&
+          section.key !== "process" &&
+          section.key !== "update-orders" &&
+          section.key !== "upload-add",
       ),
     [menuSections],
   );
@@ -522,9 +541,22 @@ const Navbar = () => {
 
     const submenuKey = `${sectionKey}:${item.key}`;
     const isSubmenuOpen = openDesktopSubmenu === submenuKey;
+    const isReportsSection = sectionKey === "reports";
 
     return (
-      <div key={submenuKey} className="position-relative">
+      <div
+        key={submenuKey}
+        className="position-relative"
+        onMouseEnter={
+          isReportsSection ? () => setOpenDesktopSubmenu(submenuKey) : undefined
+        }
+        onMouseLeave={
+          isReportsSection
+            ? () =>
+                setOpenDesktopSubmenu((prev) => (prev === submenuKey ? "" : prev))
+            : undefined
+        }
+      >
         <button
           type="button"
           className={`list-group-item list-group-item-action text-start d-flex justify-content-between align-items-center ${isSubmenuOpen ? "active" : ""}`}
@@ -556,7 +588,7 @@ const Navbar = () => {
               <button
                 type="button"
                 className="om-nav-brand h5 mb-0 me-2"
-                onClick={() => handleNavigate("/")}
+                onClick={() => handleNavigate(isQcOnlyRole ? "/qc" : "/")}
               >
                 Order Management System
               </button>

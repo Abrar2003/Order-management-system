@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 
 const OFFSET = 8;
 
-const Tooltip = ({ children, content, onOpen }) => {
+const Tooltip = ({ children, content, onOpen, openOnFocus = true }) => {
   const triggerRef = useRef(null);
   const tooltipRef = useRef(null);
 
@@ -66,8 +66,8 @@ const Tooltip = ({ children, content, onOpen }) => {
         ref={triggerRef}
         onMouseEnter={showTooltip}
         onMouseLeave={hideTooltip}
-        onFocusCapture={showTooltip}
-        onBlurCapture={hideTooltip}
+        onFocusCapture={openOnFocus ? showTooltip : undefined}
+        onBlurCapture={openOnFocus ? hideTooltip : undefined}
         style={{ display: "inline-block" }}
       >
         {children}

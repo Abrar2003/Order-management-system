@@ -14,6 +14,7 @@ const HoverPortal = ({
   className = "",
   panelClassName = "",
   align = "left",
+  openOnFocus = true,
 }) => {
   const triggerRef = useRef(null);
   const panelRef = useRef(null);
@@ -121,8 +122,8 @@ const HoverPortal = ({
         className={className}
         onMouseEnter={openPanel}
         onMouseLeave={handleLeave}
-        onFocus={openPanel}
-        onBlur={handleLeave}
+        onFocus={openOnFocus ? openPanel : undefined}
+        onBlur={openOnFocus ? handleLeave : undefined}
       >
         {trigger}
       </span>
