@@ -86,3 +86,24 @@ export const uploadQcImageBatch = async ({
     onUploadProgress,
   });
 };
+
+export const downloadSelectedQcImages = async ({
+  qcId,
+  imageIds = [],
+  imageKeys = [],
+} = {}) => {
+  if (!normalizeText(qcId)) {
+    throw new Error("QC id is required");
+  }
+
+  return api.post(
+    `/qc/${encodeURIComponent(qcId)}/images/download`,
+    {
+      image_ids: Array.isArray(imageIds) ? imageIds : [],
+      image_keys: Array.isArray(imageKeys) ? imageKeys : [],
+    },
+    {
+      responseType: "blob",
+    },
+  );
+};

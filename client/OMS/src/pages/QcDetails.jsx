@@ -36,7 +36,10 @@ import {
   hasShipmentRecords as getHasShipmentRecords,
   hasShippableQuantity,
 } from "../utils/orderStatus";
-import { MAX_QC_IMAGE_UPLOAD_COUNT } from "../services/qcImages.service";
+import {
+  downloadSelectedQcImages,
+  MAX_QC_IMAGE_UPLOAD_COUNT,
+} from "../services/qcImages.service";
 import Barcode from "react-barcode";
 import "../App.css";
 
@@ -255,6 +258,42 @@ const getQcImageSelectionValue = (image) =>
 
 const isMongoObjectIdLike = (value) => /^[a-f0-9]{24}$/i.test(String(value || "").trim());
 
+const getDownloadFileName = (response, fallbackName) => {
+  const disposition = String(response?.headers?.["content-disposition"] || "");
+  const match = disposition.match(/filename\*?=(?:UTF-8''|\"?)([^\";]+)/i);
+  return match?.[1] ? decodeURIComponent(match[1].trim()) : fallbackName;
+};
+
+const downloadBlobResponse = (response, fallbackName, fallbackType) => {
+  const blob = new Blob([response.data], {
+    type: response?.headers?.["content-type"] || fallbackType,
+  });
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = getDownloadFileName(response, fallbackName);
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(url);
+};
+
+const resolveBlobErrorMessage = async (error, fallbackMessage) => {
+  const responseData = error?.response?.data;
+
+  if (responseData instanceof Blob) {
+    try {
+      const parsed = JSON.parse(await responseData.text());
+      const message = String(parsed?.message || "").trim();
+      if (message) return message;
+    } catch (_parseError) {
+      // Fall through to the standard error message lookup.
+    }
+  }
+
+  return error?.response?.data?.message || error?.message || fallbackMessage;
+};
+
 const buildSelectedFileBatchKey = ({
   qcId = "",
   fileType = "",
@@ -300,6 +339,7 @@ const QcDetails = () => {
   const [showQcImageGallery, setShowQcImageGallery] = useState(false);
   const [activeQcImageIndex, setActiveQcImageIndex] = useState(0);
   const [selectedQcImageIds, setSelectedQcImageIds] = useState([]);
+  const [downloadingQcImages, setDownloadingQcImages] = useState(false);
   const [timelineSortBy, setTimelineSortBy] = useState("inspectionDate");
   const [timelineSortOrder, setTimelineSortOrder] = useState("desc");
   const [shippingSortBy, setShippingSortBy] = useState("stuffingDate");
@@ -328,6 +368,7 @@ const QcDetails = () => {
   const isAdmin = normalizedRole === "admin" || normalizedRole === "manager";
   const isOnlyAdmin = normalizedRole === "admin";
   const canTransferInspectionRecords = isAdmin;
+  const canDeleteInspectionRecords = isAdmin;
   const showInspectionActions = canTransferInspectionRecords || isOnlyAdmin;
   const canFinalizeShipping = ["admin", "manager", "dev"].includes(
     normalizedRole,
@@ -637,9 +678,21 @@ const QcDetails = () => {
     relatedFileUploadDisabledReason,
   ]);
   const activeQcImage = qcImages[activeQcImageIndex] || null;
+  const selectableQcImageIds = useMemo(
+    () => qcImages.map((image) => getQcImageSelectionValue(image)).filter(Boolean),
+    [qcImages],
+  );
   const selectedQcImages = useMemo(
     () => qcImages.filter((image) => selectedQcImageIds.includes(getQcImageSelectionValue(image))),
     [qcImages, selectedQcImageIds],
+  );
+  const allSelectableQcImagesSelected = useMemo(
+    () =>
+      selectableQcImageIds.length > 0 &&
+      selectableQcImageIds.every((selectionValue) =>
+        selectedQcImageIds.includes(selectionValue),
+      ),
+    [selectableQcImageIds, selectedQcImageIds],
   );
 
   const requestInspectionTimeline = useMemo(() => {
@@ -1124,7 +1177,7 @@ const QcDetails = () => {
 
   const handleDeleteInspectionRecord = useCallback(
     async (recordId) => {
-      if (!isOnlyAdmin || !recordId) return;
+      if (!canDeleteInspectionRecords || !recordId) return;
 
       const confirmed = window.confirm(
         "Are you sure you want to delete this inspection record?",
@@ -1157,7 +1210,7 @@ const QcDetails = () => {
         setDeletingInspectionId("");
       }
     },
-    [fetchQcDetails, handleBackNavigation, id, isOnlyAdmin],
+    [canDeleteInspectionRecords, fetchQcDetails, handleBackNavigation, id],
   );
 
   const handleOpenQcImageGallery = useCallback((index = 0) => {
@@ -1184,6 +1237,61 @@ const QcDetails = () => {
         : [...previous, selectionValue],
     );
   }, []);
+
+  const handleToggleSelectAllQcImages = useCallback(() => {
+    if (
+      selectableQcImageIds.length === 0 ||
+      deletingQcImages ||
+      downloadingQcImages
+    ) {
+      return;
+    }
+
+    setSelectedQcImageIds((previous) =>
+      selectableQcImageIds.every((selectionValue) =>
+        previous.includes(selectionValue),
+      )
+        ? []
+        : selectableQcImageIds,
+    );
+  }, [deletingQcImages, downloadingQcImages, selectableQcImageIds]);
+
+  const handleDownloadSelectedQcImages = useCallback(async () => {
+    if (downloadingQcImages || selectedQcImages.length === 0) return;
+
+    const imageIds = selectedQcImages
+      .map((image) => String(image?._id || "").trim())
+      .filter((value) => isMongoObjectIdLike(value));
+    const imageKeys = selectedQcImages
+      .map((image) => String(image?.key || "").trim())
+      .filter(Boolean);
+
+    if (imageIds.length === 0 && imageKeys.length === 0) {
+      alert("Selected QC images are missing download references.");
+      return;
+    }
+
+    try {
+      setDownloadingQcImages(true);
+      const response = await downloadSelectedQcImages({
+        qcId: id,
+        imageIds,
+        imageKeys,
+      });
+      const fallbackName = `qc-images-${String(qc?.order_id || id || "download").trim() || "download"}.zip`;
+      downloadBlobResponse(response, fallbackName, "application/zip");
+    } catch (error) {
+      console.error(error);
+      alert(
+        await resolveBlobErrorMessage(
+          error,
+          "Failed to download selected QC images.",
+        ),
+      );
+    } finally {
+      setDownloadingQcImages(false);
+    }
+  }, [downloadingQcImages, id, qc?.order_id, selectedQcImages]);
 
   const handleDeleteSelectedQcImages = useCallback(async () => {
     if (deletingQcImages || selectedQcImages.length === 0) return;
@@ -1971,7 +2079,7 @@ const QcDetails = () => {
                                       Transfer
                                     </button>
                                   )}
-                                  {isOnlyAdmin && (
+                                  {canDeleteInspectionRecords && (
                                     <button
                                       type="button"
                                       className="btn btn-outline-danger btn-sm"
@@ -2350,13 +2458,43 @@ const QcDetails = () => {
                   </div>
                 )}
               </div>
-              <div className="d-flex flex-wrap align-items-center gap-2">
+              <div className="qc-image-gallery-actions">
+                <button
+                  type="button"
+                  className="btn btn-outline-primary btn-sm"
+                  onClick={handleToggleSelectAllQcImages}
+                  disabled={
+                    selectableQcImageIds.length === 0 ||
+                    deletingQcImages ||
+                    downloadingQcImages
+                  }
+                >
+                  {allSelectableQcImagesSelected ? "Clear Selection" : "Select All"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-outline-success btn-sm"
+                  onClick={handleDownloadSelectedQcImages}
+                  disabled={
+                    selectedQcImages.length === 0 ||
+                    deletingQcImages ||
+                    downloadingQcImages
+                  }
+                >
+                  {downloadingQcImages
+                    ? "Preparing Zip..."
+                    : `Download Selected${selectedQcImages.length > 0 ? ` (${selectedQcImages.length})` : ""}`}
+                </button>
                 {canManageQcImages && (
                   <button
                     type="button"
                     className="btn btn-outline-danger btn-sm"
                     onClick={handleDeleteSelectedQcImages}
-                    disabled={selectedQcImages.length === 0 || deletingQcImages}
+                    disabled={
+                      selectedQcImages.length === 0 ||
+                      deletingQcImages ||
+                      downloadingQcImages
+                    }
                   >
                     {deletingQcImages
                       ? "Deleting..."
@@ -2367,7 +2505,7 @@ const QcDetails = () => {
                   type="button"
                   className="btn btn-outline-secondary btn-sm"
                   onClick={handleCloseQcImageGallery}
-                  disabled={deletingQcImages}
+                  disabled={deletingQcImages || downloadingQcImages}
                 >
                   Close
                 </button>
@@ -2440,7 +2578,7 @@ const QcDetails = () => {
                         )}
                       </button>
 
-                      {canManageQcImages && (
+                      {selectionValue && (
                         <label
                           className="qc-image-gallery-thumb-check"
                           onClick={(event) => event.stopPropagation()}
@@ -2450,7 +2588,7 @@ const QcDetails = () => {
                             className="form-check-input m-0"
                             checked={Boolean(isChecked)}
                             onChange={() => handleToggleQcImageSelection(image)}
-                            disabled={deletingQcImages}
+                            disabled={deletingQcImages || downloadingQcImages}
                           />
                         </label>
                       )}

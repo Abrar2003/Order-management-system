@@ -63,6 +63,9 @@ const {
 const {
   scanBarcodeFromUpload,
 } = require("../services/qcBarcodeScan.service");
+const {
+  buildQcImagesArchive,
+} = require("../services/qcImageDownload.service");
 
 const normalizeLabels = (labels = []) => {
   if (!Array.isArray(labels)) return [];
@@ -9747,6 +9750,81 @@ exports.deleteQcImages = async (req, res) => {
   }
 };
 
+exports.downloadQcImages = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const qc = await QC.findById(id).select("order_id qc_images");
+
+    if (!qc) {
+      return res.status(404).json({
+        success: false,
+        message: "QC record not found",
+      });
+    }
+
+    const rawImageIds = Array.isArray(req.body?.image_ids)
+      ? req.body.image_ids
+      : Array.isArray(req.body?.imageIds)
+        ? req.body.imageIds
+        : [];
+    const rawImageKeys = Array.isArray(req.body?.image_keys)
+      ? req.body.image_keys
+      : Array.isArray(req.body?.imageKeys)
+        ? req.body.imageKeys
+        : [];
+
+    const requestedImageIds = Array.from(
+      new Set(rawImageIds.map((value) => String(value || "").trim()).filter(Boolean)),
+    );
+    const requestedImageKeys = Array.from(
+      new Set(rawImageKeys.map((value) => normalizeText(value)).filter(Boolean)),
+    );
+
+    if (requestedImageIds.length === 0 && requestedImageKeys.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Select at least one QC image to download",
+      });
+    }
+
+    const qcImages = Array.isArray(qc?.qc_images) ? qc.qc_images : [];
+    const imagesToDownload = qcImages.filter((image) => {
+      const imageId = String(image?._id || "").trim();
+      const imageKey = normalizeText(image?.key || "");
+      return (
+        (imageId && requestedImageIds.includes(imageId)) ||
+        (imageKey && requestedImageKeys.includes(imageKey))
+      );
+    });
+
+    if (imagesToDownload.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Selected QC images were not found",
+      });
+    }
+
+    const archive = await buildQcImagesArchive({
+      images: imagesToDownload,
+      archiveLabel: normalizeText(qc?.order_id || qc?._id || "qc-images"),
+    });
+
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${String(archive.archiveFileName || "qc-images.zip").replace(/"/g, "")}"`,
+    );
+
+    return res.status(200).send(archive.archiveBuffer);
+  } catch (error) {
+    console.error("Download QC Images Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to download QC images",
+    });
+  }
+};
+
 exports.getQCById = async (req, res) => {
   try {
     const qc = await QC.findById(req.params.id)
@@ -10446,6 +10524,16 @@ exports.editInspectionRecords = async (req, res) => {
 
 exports.deleteInspectionRecord = async (req, res) => {
   try {
+    const normalizedRole = String(req.user?.role || "").trim().toLowerCase();
+    const canDeleteInspectionRecord =
+      normalizedRole === "admin" || normalizedRole === "manager";
+
+    if (!canDeleteInspectionRecord) {
+      return res.status(403).json({
+        message: "Only admin or manager can delete inspection records",
+      });
+    }
+
     const qcId = String(req.params.id || "").trim();
     const recordId = String(req.params.recordId || "").trim();
 
@@ -10607,7 +10695,7 @@ exports.deleteInspectionRecord = async (req, res) => {
       beforeSnapshot: beforeQcSnapshot,
       afterSnapshot: buildQcEditLogSnapshot(qc.toObject(), remainingInspections),
       operationType: "qc_inspection_record_delete",
-      extraRemarks: ["Inspection record deleted through admin route."],
+      extraRemarks: ["Inspection record deleted through admin or manager route."],
     });
     if (orderRecord) {
       await createOrderEditLogFromQc({
