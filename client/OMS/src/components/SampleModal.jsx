@@ -46,6 +46,68 @@ const normalizeSampleOptionLabel = (sample = {}) => {
   return [code, name, brand].filter(Boolean).join(" | ");
 };
 
+const hasPositiveNumericInput = (value) => {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) return false;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) && parsed > 0;
+};
+
+const hasMeaningfulSampleSizeInput = (
+  entry = {},
+  { mode = BOX_PACKAGING_MODES.INDIVIDUAL } = {},
+) => {
+  const resolvedMode = detectBoxPackagingMode(mode, [entry]);
+
+  if (
+    String(entry?.L ?? "").trim() !== "" ||
+    String(entry?.B ?? "").trim() !== "" ||
+    String(entry?.H ?? "").trim() !== "" ||
+    String(entry?.weight ?? "").trim() !== ""
+  ) {
+    return true;
+  }
+
+  if (resolvedMode === BOX_PACKAGING_MODES.CARTON) {
+    return (
+      hasPositiveNumericInput(entry?.item_count_in_inner) ||
+      hasPositiveNumericInput(entry?.box_count_in_master)
+    );
+  }
+
+  return String(entry?.remark ?? "").trim() !== "";
+};
+
+const parseOptionalSampleMeasuredSizeEntries = ({
+  entries = [],
+  count = 1,
+  mode = BOX_PACKAGING_MODES.INDIVIDUAL,
+  ...rest
+} = {}) => {
+  const resolvedMode = detectBoxPackagingMode(mode, entries);
+  const normalizedEntries = ensureMeasuredSizeEntryCount(entries, count, {
+    mode: resolvedMode,
+  });
+  const hasMeaningfulInput = normalizedEntries.some((entry) =>
+    hasMeaningfulSampleSizeInput(entry, { mode: resolvedMode }),
+  );
+
+  if (!hasMeaningfulInput) {
+    return {
+      mode: resolvedMode,
+      hasAnyInput: false,
+      value: [],
+    };
+  }
+
+  return parseMeasuredSizeEntries({
+    entries,
+    count,
+    mode: resolvedMode,
+    ...rest,
+  });
+};
+
 const SampleModal = ({
   mode = "create",
   onClose,
@@ -227,7 +289,7 @@ const SampleModal = ({
       throw new Error("Sample code is required.");
     }
 
-    const itemSizesPayload = parseMeasuredSizeEntries({
+    const itemSizesPayload = parseOptionalSampleMeasuredSizeEntries({
       entries: sampleForm.item_sizes,
       count: sampleForm.item_count,
       groupLabel: "Sample item size",
@@ -239,7 +301,7 @@ const SampleModal = ({
       throw new Error(itemSizesPayload.error);
     }
 
-    const boxSizesPayload = parseMeasuredSizeEntries({
+    const boxSizesPayload = parseOptionalSampleMeasuredSizeEntries({
       entries: sampleForm.box_sizes,
       count: sampleForm.box_count,
       groupLabel: "Sample box size",
@@ -536,7 +598,7 @@ const SampleModal = ({
 
                   <MeasuredSizeSection
                     sectionKey="sample-item"
-                    title="Sample Item Sizes (cm) and Net Weight"
+                    title="Sample Item Sizes (Optional) (cm) and Net Weight"
                     countLabel="Item Sets"
                     countValue={sampleForm.item_count}
                     entries={displayedItemEntries}
@@ -553,7 +615,7 @@ const SampleModal = ({
 
                   <MeasuredSizeSection
                     sectionKey="sample-box"
-                    title="Sample Box Sizes (cm) and Gross Weight"
+                    title="Sample Box Sizes (Optional) (cm) and Gross Weight"
                     countLabel="Box Sets"
                     countValue={sampleForm.box_count}
                     entries={displayedBoxEntries}

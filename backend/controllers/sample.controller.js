@@ -43,6 +43,13 @@ const toNonNegativeNumber = (value, fieldLabel) => {
   return parsed;
 };
 
+const isPositiveNumericInput = (value) => {
+  const normalized = normalizeText(value);
+  if (!normalized) return false;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) && parsed > 0;
+};
+
 const normalizeVendorList = (value) => {
   if (Array.isArray(value)) {
     return [...new Set(value.map((entry) => normalizeText(entry)).filter(Boolean))];
@@ -105,16 +112,42 @@ const parseJsonBodyField = (value, label) => {
   }
 };
 
+const isBlankItemSizeEntry = (entry = {}) =>
+  !isPositiveNumericInput(entry?.L) &&
+  !isPositiveNumericInput(entry?.B) &&
+  !isPositiveNumericInput(entry?.H) &&
+  !isPositiveNumericInput(entry?.net_weight) &&
+  !isPositiveNumericInput(entry?.gross_weight) &&
+  !normalizeText(entry?.remark);
+
+const isBlankBoxSizeEntry = (
+  entry = {},
+  boxMode = BOX_PACKAGING_MODES.INDIVIDUAL,
+) =>
+  !isPositiveNumericInput(entry?.L) &&
+  !isPositiveNumericInput(entry?.B) &&
+  !isPositiveNumericInput(entry?.H) &&
+  !isPositiveNumericInput(entry?.net_weight) &&
+  !isPositiveNumericInput(entry?.gross_weight) &&
+  (
+    boxMode === BOX_PACKAGING_MODES.CARTON
+      ? true
+      : !normalizeText(entry?.remark)
+  ) &&
+  !isPositiveNumericInput(entry?.item_count_in_inner) &&
+  !isPositiveNumericInput(entry?.box_count_in_master);
+
 const normalizeItemSizeEntries = (entries = []) => {
   if (!Array.isArray(entries)) {
     throw new Error("item_sizes must be an array");
   }
-  if (entries.length > SIZE_ENTRY_LIMIT) {
+  const normalizedEntries = entries.filter((entry) => !isBlankItemSizeEntry(entry));
+  if (normalizedEntries.length > SIZE_ENTRY_LIMIT) {
     throw new Error(`item_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`);
   }
 
   const seenRemarks = new Set();
-  return entries.map((entry, index) => {
+  return normalizedEntries.map((entry, index) => {
     const label = `item_sizes[${index + 1}]`;
     const L = toNonNegativeNumber(entry?.L ?? 0, `${label}.L`);
     const B = toNonNegativeNumber(entry?.B ?? 0, `${label}.B`);
@@ -133,7 +166,7 @@ const normalizeItemSizeEntries = (entries = []) => {
       throw new Error(`${label} must include positive L, B, and H values`);
     }
 
-    if (entries.length > 1) {
+    if (normalizedEntries.length > 1) {
       if (!remark) {
         throw new Error(`${label}.remark is required`);
       }
@@ -150,7 +183,7 @@ const normalizeItemSizeEntries = (entries = []) => {
       L,
       B,
       H,
-      remark: entries.length > 1 ? remark : "",
+      remark: normalizedEntries.length > 1 ? remark : "",
       net_weight: netWeight,
       gross_weight: grossWeight,
     };
@@ -161,11 +194,14 @@ const normalizeBoxSizeEntries = (entries = [], boxMode = BOX_PACKAGING_MODES.IND
   if (!Array.isArray(entries)) {
     throw new Error("box_sizes must be an array");
   }
-  if (entries.length > SIZE_ENTRY_LIMIT) {
+  const normalizedEntries = entries.filter(
+    (entry) => !isBlankBoxSizeEntry(entry, boxMode),
+  );
+  if (normalizedEntries.length > SIZE_ENTRY_LIMIT) {
     throw new Error(`box_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`);
   }
 
-  return entries.map((entry, index) => {
+  return normalizedEntries.map((entry, index) => {
     const label = `box_sizes[${index + 1}]`;
     const L = toNonNegativeNumber(entry?.L ?? 0, `${label}.L`);
     const B = toNonNegativeNumber(entry?.B ?? 0, `${label}.B`);
