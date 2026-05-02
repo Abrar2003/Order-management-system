@@ -256,7 +256,7 @@ const Navbar = () => {
       routeMenuItem("upcoming-etd", "Upcoming ETD", "/reports/upcoming-etd"),
       routeMenuItem("po-status", "PO Status", "/reports/po-status"),
       routeMenuItem("pending-po", "Pending PO", "/reports/pending-po"),
-      routeMenuItem("packed-goods", "Packed PO", "/packed-goods"),
+      routeMenuItem("packed-goods", "Packed Goods", "/packed-goods"),
       routeMenuItem("archived-orders", "Archived", "/archived-orders"),
     ];
 
