@@ -60,6 +60,9 @@ const {
   cleanupLocalQcImageFiles,
   processQcImageBatch,
 } = require("../services/qcImageUpload.service");
+const {
+  scanBarcodeFromUpload,
+} = require("../services/qcBarcodeScan.service");
 
 const normalizeLabels = (labels = []) => {
   if (!Array.isArray(labels)) return [];
@@ -6051,6 +6054,56 @@ exports.updateQC = async (req, res) => {
     });
   } catch (err) {
     res.status(400).json({ message: err.message });
+  }
+};
+
+exports.scanBarcodeUpload = async (req, res) => {
+  try {
+    const normalizedRole = String(req.user?.role || "").trim().toLowerCase();
+    const currentUserId = String(req.user?._id || req.user?.id || "").trim();
+    const isAdmin = normalizedRole === "admin";
+    const canUploadBarcode = isAdmin || isLabelExemptUser(currentUserId);
+
+    if (!canUploadBarcode) {
+      return res.status(403).json({
+        success: false,
+        message: "Barcode upload is only available to label-exempt users.",
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "Barcode file is required.",
+      });
+    }
+
+    const scanResult = await scanBarcodeFromUpload(req.file);
+
+    return res.status(200).json({
+      success: true,
+      message: "Barcode scanned successfully.",
+      data: {
+        barcode: scanResult.barcode,
+        raw_text: scanResult.rawText,
+        barcode_format: scanResult.barcodeFormat,
+        source_type: scanResult.sourceType,
+        page_number: scanResult.pageNumber || null,
+      },
+    });
+  } catch (error) {
+    console.error("Scan Barcode Upload Error:", {
+      userId: String(req.user?._id || req.user?.id || "").trim(),
+      message: error?.message || String(error),
+      code: error?.code || "",
+      details: error?.details || "",
+    });
+
+    return res.status(error?.statusCode || 500).json({
+      success: false,
+      message: error?.message || "Failed to scan barcode file.",
+      ...(error?.details ? { details: error.details } : {}),
+    });
   }
 };
 

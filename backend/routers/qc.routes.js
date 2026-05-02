@@ -38,6 +38,14 @@ router.post(
   qcController.alignQC
 );
 
+router.post(
+  "/scan-barcode",
+  auth,
+  requirePermission("qc", "edit"),
+  upload.safeSingle("file"),
+  qcController.scanBarcodeUpload,
+);
+
 // Update QC (Inspector or Admin)
 router.patch(
   "/update-qc/:id",
