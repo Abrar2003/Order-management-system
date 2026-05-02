@@ -1,6 +1,9 @@
 const path = require("path");
+const axios = require("axios");
 const AdmZip = require("adm-zip");
 const { getObjectBuffer } = require("./wasabiStorage.service");
+
+const DOWNLOAD_CONCURRENCY = 6;
 
 const normalizeText = (value) => String(value ?? "").trim();
 
@@ -67,6 +70,72 @@ const buildArchiveFileName = (archiveLabel = "") => {
   return `${safeLabel || "qc-images"}-${dateStamp}.zip`;
 };
 
+const mapWithConcurrencyLimit = async (
+  items = [],
+  concurrencyLimit = 1,
+  mapper = async (item) => item,
+) => {
+  const safeItems = Array.isArray(items) ? items : [];
+  const safeConcurrencyLimit = Math.max(1, Number(concurrencyLimit) || 1);
+  const results = new Array(safeItems.length);
+  let nextIndex = 0;
+
+  const workers = Array.from(
+    { length: Math.min(safeConcurrencyLimit, safeItems.length) },
+    () =>
+      (async () => {
+        while (true) {
+          const currentIndex = nextIndex;
+          nextIndex += 1;
+
+          if (currentIndex >= safeItems.length) {
+            return;
+          }
+
+          results[currentIndex] = await mapper(
+            safeItems[currentIndex],
+            currentIndex,
+          );
+        }
+      })(),
+  );
+
+  await Promise.all(workers);
+  return results;
+};
+
+const getLegacyUrlBuffer = async (url = "") => {
+  const normalizedUrl = normalizeText(url);
+  if (!normalizedUrl) {
+    throw new Error("Legacy QC image URL is missing");
+  }
+
+  const response = await axios.get(normalizedUrl, {
+    responseType: "arraybuffer",
+    timeout: 30000,
+  });
+
+  return {
+    buffer: Buffer.from(response.data),
+    contentType: normalizeText(response?.headers?.["content-type"] || ""),
+    size: Number(response?.data?.byteLength || 0),
+  };
+};
+
+const fetchQcImageContent = async (image = {}) => {
+  const storageKey = normalizeText(image?.key || "");
+  if (storageKey) {
+    return getObjectBuffer(storageKey);
+  }
+
+  const legacyUrl = normalizeText(image?.url || image?.link || "");
+  if (legacyUrl) {
+    return getLegacyUrlBuffer(legacyUrl);
+  }
+
+  throw new Error("QC image storage reference is missing");
+};
+
 const buildQcImagesArchive = async ({
   images = [],
   archiveLabel = "",
@@ -76,34 +145,48 @@ const buildQcImagesArchive = async ({
     throw new Error("Select at least one QC image to download");
   }
 
+  const preparedEntries = await mapWithConcurrencyLimit(
+    safeImages,
+    DOWNLOAD_CONCURRENCY,
+    async (image, index) => {
+      const archiveEntryName = buildArchiveEntryName(image, index);
+
+      try {
+        const objectData = await fetchQcImageContent(image);
+        return {
+          ok: true,
+          archiveEntryName,
+          buffer: objectData.buffer,
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          archiveEntryName,
+          error: error?.message || "Failed to load image from storage",
+        };
+      }
+    },
+  );
+
   const zip = new AdmZip();
   const usedNames = new Set();
   const failures = [];
   let downloadedCount = 0;
 
-  for (let index = 0; index < safeImages.length; index += 1) {
-    const image = safeImages[index];
-    const storageKey = normalizeText(image?.key || "");
-    const archiveEntryName = ensureUniqueArchiveEntryName(
-      buildArchiveEntryName(image, index),
+  preparedEntries.forEach((entry) => {
+    const uniqueArchiveEntryName = ensureUniqueArchiveEntryName(
+      entry.archiveEntryName,
       usedNames,
     );
 
-    if (!storageKey) {
-      failures.push(`${archiveEntryName}: storage key is missing`);
-      continue;
+    if (!entry.ok) {
+      failures.push(`${uniqueArchiveEntryName}: ${entry.error}`);
+      return;
     }
 
-    try {
-      const objectData = await getObjectBuffer(storageKey);
-      zip.addFile(archiveEntryName, objectData.buffer);
-      downloadedCount += 1;
-    } catch (error) {
-      failures.push(
-        `${archiveEntryName}: ${error?.message || "Failed to load image from storage"}`,
-      );
-    }
-  }
+    zip.addFile(uniqueArchiveEntryName, entry.buffer);
+    downloadedCount += 1;
+  });
 
   if (downloadedCount === 0) {
     throw new Error(

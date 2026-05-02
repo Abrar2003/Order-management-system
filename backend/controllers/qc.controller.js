@@ -9750,16 +9750,150 @@ exports.deleteQcImages = async (req, res) => {
   }
 };
 
-exports.downloadQcImages = async (req, res) => {
+exports.downloadQcImageFile = async (req, res) => {
   try {
-    const { id } = req.params;
-    const qc = await QC.findById(id).select("order_id qc_images");
+    const qcId = String(req.params.id || "").trim();
+    const requestedImageId = String(
+      req.query?.image_id ?? req.query?.imageId ?? "",
+    ).trim();
+    const requestedImageKey = normalizeText(
+      req.query?.image_key ?? req.query?.imageKey ?? "",
+    );
+
+    if (!mongoose.Types.ObjectId.isValid(qcId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid QC id",
+      });
+    }
+
+    if (!requestedImageId && !requestedImageKey) {
+      return res.status(400).json({
+        success: false,
+        message: "Select a QC image to download",
+      });
+    }
+
+    const qc = await QC.findById(qcId).select("order_id inspector qc_images");
 
     if (!qc) {
       return res.status(404).json({
         success: false,
         message: "QC record not found",
       });
+    }
+
+    const normalizedRole = String(req.user?.role || "").trim().toLowerCase();
+    if (normalizedRole === "qc") {
+      const currentUserId = String(
+        req.user?.id || req.user?._id || "",
+      ).trim();
+      const alignedInspectorId = String(
+        qc?.inspector?._id || qc?.inspector || "",
+      ).trim();
+
+      if (
+        !currentUserId ||
+        !alignedInspectorId ||
+        alignedInspectorId !== currentUserId
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: "QC can only view records aligned to them",
+        });
+      }
+    }
+
+    const qcImages = Array.isArray(qc?.qc_images) ? qc.qc_images : [];
+    const imageToDownload = qcImages.find((image) => {
+      const imageId = String(image?._id || "").trim();
+      const imageKey = normalizeText(image?.key || "");
+      return (
+        (requestedImageId && imageId === requestedImageId) ||
+        (requestedImageKey && imageKey === requestedImageKey)
+      );
+    });
+
+    if (!imageToDownload) {
+      return res.status(404).json({
+        success: false,
+        message: "Selected QC image was not found",
+      });
+    }
+
+    const storageKey = normalizeText(imageToDownload?.key || "");
+    if (!storageKey) {
+      return res.status(404).json({
+        success: false,
+        message: "Selected QC image is missing a storage key",
+      });
+    }
+
+    const objectData = await getObjectBuffer(storageKey);
+    const fileName =
+      path.basename(
+        normalizeText(imageToDownload?.originalName || storageKey),
+      ) || "qc-image";
+
+    res.setHeader(
+      "Content-Type",
+      normalizeText(
+        objectData?.contentType || imageToDownload?.contentType || "",
+      ) || "application/octet-stream",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${fileName.replace(/"/g, "")}"`,
+    );
+
+    return res.status(200).send(objectData.buffer);
+  } catch (error) {
+    console.error("Download QC Image File Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to download QC image",
+    });
+  }
+};
+
+exports.downloadQcImages = async (req, res) => {
+  try {
+    const qcId = String(req.params.id || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(qcId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid QC id",
+      });
+    }
+
+    const qc = await QC.findById(qcId).select("order_id inspector qc_images");
+
+    if (!qc) {
+      return res.status(404).json({
+        success: false,
+        message: "QC record not found",
+      });
+    }
+
+    const normalizedRole = String(req.user?.role || "").trim().toLowerCase();
+    if (normalizedRole === "qc") {
+      const currentUserId = String(
+        req.user?.id || req.user?._id || "",
+      ).trim();
+      const alignedInspectorId = String(
+        qc?.inspector?._id || qc?.inspector || "",
+      ).trim();
+
+      if (
+        !currentUserId ||
+        !alignedInspectorId ||
+        alignedInspectorId !== currentUserId
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: "QC can only view records aligned to them",
+        });
+      }
     }
 
     const rawImageIds = Array.isArray(req.body?.image_ids)

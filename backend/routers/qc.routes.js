@@ -89,6 +89,13 @@ router.post(
   qcController.uploadQcImages,
 );
 
+router.get(
+  "/:id/images/file",
+  auth,
+  requirePermission("qc", "view"),
+  qcController.downloadQcImageFile,
+);
+
 router.post(
   "/:id/images/download",
   auth,

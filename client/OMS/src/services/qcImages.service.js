@@ -87,6 +87,27 @@ export const uploadQcImageBatch = async ({
   });
 };
 
+export const downloadQcImageFile = async ({
+  qcId,
+  imageId = "",
+  imageKey = "",
+} = {}) => {
+  if (!normalizeText(qcId)) {
+    throw new Error("QC id is required");
+  }
+
+  return api.get(
+    `/qc/${encodeURIComponent(qcId)}/images/file`,
+    {
+      params: {
+        image_id: normalizeText(imageId),
+        image_key: normalizeText(imageKey),
+      },
+      responseType: "blob",
+    },
+  );
+};
+
 export const downloadSelectedQcImages = async ({
   qcId,
   imageIds = [],
