@@ -2,16 +2,26 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import { getUserFromToken } from "../auth/auth.service";
+import { usePermissions } from "../auth/PermissionContext";
 import Navbar from "../components/Navbar";
+import ProductTypeDynamicForm from "../components/ProductTypeDynamicForm";
+import {
+  getProductTypeTemplateByKey,
+  getProductTypeTemplates,
+} from "../services/productTypeTemplates.service";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import {
-  BOX_ENTRY_TYPES,
   BOX_PACKAGING_MODES,
-  BOX_SIZE_REMARK_OPTIONS,
-  ITEM_SIZE_REMARK_OPTIONS,
 } from "../utils/measuredSizeForm";
+import {
+  buildProductTypePayload,
+  createProductTypeFormState,
+  hasProductTypeFormValues,
+  normalizeTemplateKey,
+  validateProductTypeFormState,
+} from "../utils/productTypeTemplates";
 import "../App.css";
 
 const DEFAULT_FILTER = "all";
@@ -24,27 +34,6 @@ const STATUS_OPTIONS = Object.freeze([
   { value: "checked", label: "Checked" },
   { value: "approved", label: "Approved" },
 ]);
-
-const emptyItemEntry = () => ({
-  remark: "",
-  L: "",
-  B: "",
-  H: "",
-  net_weight: "",
-  gross_weight: "",
-});
-
-const emptyBoxEntry = (boxType = BOX_ENTRY_TYPES.INDIVIDUAL) => ({
-  remark: boxType === BOX_ENTRY_TYPES.INDIVIDUAL ? "" : boxType,
-  box_type: boxType,
-  L: "",
-  B: "",
-  H: "",
-  net_weight: "",
-  gross_weight: "",
-  item_count_in_inner: boxType === BOX_ENTRY_TYPES.INNER ? "" : "0",
-  box_count_in_master: boxType === BOX_ENTRY_TYPES.MASTER ? "" : "0",
-});
 
 const normalizeTextValue = (value) => String(value || "").trim();
 
@@ -99,7 +88,14 @@ const formatNumber = (value) => {
   return parsed.toFixed(3).replace(/\.?0+$/, "");
 };
 
-const formatRemark = (value) => normalizeTextValue(value) || "Single";
+const formatRemark = (value) => {
+  const normalized = normalizeTextValue(value);
+  if (!normalized) return "Single";
+  return normalized
+    .replace(/_/g, " ")
+    .replace(/([a-zA-Z])(\d)/g, "$1 $2")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+};
 
 const formatBoxMode = (value) => {
   const mode = normalizeTextValue(value).toLowerCase();
@@ -114,101 +110,60 @@ const formatActor = (actor = null, dateKey = "") => {
   return date ? `${name} (${date})` : name;
 };
 
-const hasMeaningfulEntry = (entry = {}) =>
-  ["L", "B", "H", "net_weight", "gross_weight", "item_count_in_inner", "box_count_in_master"]
-    .some((field) => normalizeTextValue(entry?.[field]) !== "" && Number(entry?.[field] || 0) > 0) ||
-  Boolean(normalizeTextValue(entry?.remark));
+const buildPayloadFromForm = () => ({});
 
-const toFormItemEntries = (entries = []) => {
-  const rows = (Array.isArray(entries) ? entries : []).map((entry) => ({
-    ...emptyItemEntry(),
-    remark: normalizeTextValue(entry?.remark),
-    L: formatNumber(entry?.L) === "Not Set" ? "" : formatNumber(entry?.L),
-    B: formatNumber(entry?.B) === "Not Set" ? "" : formatNumber(entry?.B),
-    H: formatNumber(entry?.H) === "Not Set" ? "" : formatNumber(entry?.H),
-    net_weight: formatNumber(entry?.net_weight) === "Not Set" ? "" : formatNumber(entry?.net_weight),
-    gross_weight:
-      formatNumber(entry?.gross_weight) === "Not Set" ? "" : formatNumber(entry?.gross_weight),
-  }));
-  return rows.length > 0 ? rows : [emptyItemEntry()];
+const getDisplayItemSizes = (row = {}) => {
+  const productItemSizes = Array.isArray(row?.product_specs?.item_sizes)
+    ? row.product_specs.item_sizes
+    : [];
+  if (productItemSizes.length > 0) return productItemSizes;
+  return Array.isArray(row?.pd_item_sizes) ? row.pd_item_sizes : [];
 };
 
-const toFormBoxEntries = (entries = [], mode = BOX_PACKAGING_MODES.INDIVIDUAL) => {
-  const resolvedMode =
-    mode === BOX_PACKAGING_MODES.CARTON
-      ? BOX_PACKAGING_MODES.CARTON
-      : BOX_PACKAGING_MODES.INDIVIDUAL;
-  const sourceEntries = Array.isArray(entries) ? entries : [];
-
-  if (resolvedMode === BOX_PACKAGING_MODES.CARTON) {
-    const inner =
-      sourceEntries.find((entry) => entry?.box_type === BOX_ENTRY_TYPES.INNER) ||
-      sourceEntries[0] ||
-      {};
-    const master =
-      sourceEntries.find((entry) => entry?.box_type === BOX_ENTRY_TYPES.MASTER) ||
-      sourceEntries[1] ||
-      {};
-
-    return [inner, master].map((entry, index) => {
-      const boxType = index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
-      return {
-        ...emptyBoxEntry(boxType),
-        remark: boxType,
-        box_type: boxType,
-        L: formatNumber(entry?.L) === "Not Set" ? "" : formatNumber(entry?.L),
-        B: formatNumber(entry?.B) === "Not Set" ? "" : formatNumber(entry?.B),
-        H: formatNumber(entry?.H) === "Not Set" ? "" : formatNumber(entry?.H),
-        net_weight:
-          formatNumber(entry?.net_weight) === "Not Set" ? "" : formatNumber(entry?.net_weight),
-        gross_weight:
-          formatNumber(entry?.gross_weight) === "Not Set" ? "" : formatNumber(entry?.gross_weight),
-        item_count_in_inner:
-          boxType === BOX_ENTRY_TYPES.INNER
-            ? formatNumber(entry?.item_count_in_inner) === "Not Set"
-              ? ""
-              : formatNumber(entry?.item_count_in_inner)
-            : "0",
-        box_count_in_master:
-          boxType === BOX_ENTRY_TYPES.MASTER
-            ? formatNumber(entry?.box_count_in_master) === "Not Set"
-              ? ""
-              : formatNumber(entry?.box_count_in_master)
-            : "0",
-      };
-    });
-  }
-
-  const rows = sourceEntries.map((entry) => ({
-    ...emptyBoxEntry(),
-    remark: normalizeTextValue(entry?.remark),
-    box_type: BOX_ENTRY_TYPES.INDIVIDUAL,
-    L: formatNumber(entry?.L) === "Not Set" ? "" : formatNumber(entry?.L),
-    B: formatNumber(entry?.B) === "Not Set" ? "" : formatNumber(entry?.B),
-    H: formatNumber(entry?.H) === "Not Set" ? "" : formatNumber(entry?.H),
-    net_weight: formatNumber(entry?.net_weight) === "Not Set" ? "" : formatNumber(entry?.net_weight),
-    gross_weight:
-      formatNumber(entry?.gross_weight) === "Not Set" ? "" : formatNumber(entry?.gross_weight),
-    item_count_in_inner: "0",
-    box_count_in_master: "0",
-  }));
-  return rows.length > 0 ? rows : [emptyBoxEntry()];
+const getDisplayBoxSizes = (row = {}) => {
+  const productBoxSizes = Array.isArray(row?.product_specs?.box_sizes)
+    ? row.product_specs.box_sizes
+    : [];
+  if (productBoxSizes.length > 0) return productBoxSizes;
+  return Array.isArray(row?.pd_box_sizes) ? row.pd_box_sizes : [];
 };
 
-const stripEmptyEntries = (entries = []) =>
-  (Array.isArray(entries) ? entries : []).filter((entry) => hasMeaningfulEntry(entry));
+const getDisplayBoxMode = (row = {}) =>
+  Array.isArray(row?.product_specs?.box_sizes) && row.product_specs.box_sizes.length > 0
+    ? row?.product_specs?.box_mode || BOX_PACKAGING_MODES.INDIVIDUAL
+    : row?.pd_box_mode || BOX_PACKAGING_MODES.INDIVIDUAL;
 
-const buildPayloadFromForm = (form = {}) => ({
-  pd_item_sizes: stripEmptyEntries(form.pd_item_sizes),
-  pd_box_mode: form.pd_box_mode,
-  pd_box_sizes: stripEmptyEntries(form.pd_box_sizes),
+const normalizeProductSpecsForCompare = (productSpecs = {}) => ({
+  fields: (Array.isArray(productSpecs?.fields) ? productSpecs.fields : []).map((field) => ({
+    field_id: field?.field_id || null,
+    key: field?.key || "",
+    label: field?.label || "",
+    group_key: field?.group_key || "",
+    group_label: field?.group_label || "",
+    input_type: field?.input_type || "",
+    value_type: field?.value_type || "",
+    unit: field?.unit || "",
+    value_text: field?.value_text || "",
+    value_number: field?.value_number ?? null,
+    value_boolean: field?.value_boolean ?? null,
+    value_date: field?.value_date || null,
+    value_array: Array.isArray(field?.value_array) ? field.value_array : [],
+    raw_value:
+      field?.value_type === "object" || field?.input_type === "file"
+        ? field?.raw_value ?? null
+        : null,
+  })),
+  item_sizes: Array.isArray(productSpecs?.item_sizes) ? productSpecs.item_sizes : [],
+  box_sizes: Array.isArray(productSpecs?.box_sizes) ? productSpecs.box_sizes : [],
+  box_mode: productSpecs?.box_mode || BOX_PACKAGING_MODES.INDIVIDUAL,
 });
 
 const normalizePayloadForCompare = (payload = {}) =>
   JSON.stringify({
-    pd_item_sizes: payload.pd_item_sizes || [],
     pd_box_mode: payload.pd_box_mode || BOX_PACKAGING_MODES.INDIVIDUAL,
     pd_box_sizes: payload.pd_box_sizes || [],
+    product_type: payload.product_type || null,
+    product_specs: normalizeProductSpecsForCompare(payload.product_specs),
   });
 
 const SizeSummary = ({ entries = [], type = "item" }) => {
@@ -245,67 +200,339 @@ const SummaryCard = ({ label, value }) => (
   </div>
 );
 
+const cloneProductTypeValidation = () => ({
+  product_type: "",
+  fields: {},
+  item_sizes: {},
+  box_sizes: {},
+});
+
+const buildExistingProductTypePayload = (item = {}) => ({
+  product_type: item?.product_type || null,
+  product_specs: item?.product_specs || {
+    fields: [],
+    item_sizes: [],
+    box_sizes: [],
+    box_mode: BOX_PACKAGING_MODES.INDIVIDUAL,
+    raw_values: {},
+  },
+});
+
+const buildTemplateOptionValue = (key = "", version = "") =>
+  normalizeTemplateKey(key) && Number(version) > 0
+    ? `${normalizeTemplateKey(key)}::${Number(version)}`
+    : "";
+
+const parseTemplateOptionValue = (value = "") => {
+  const [keyPart = "", versionPart = ""] = String(value || "").split("::");
+  const version = Number.parseInt(versionPart, 10);
+  return {
+    key: normalizeTemplateKey(keyPart),
+    version: Number.isFinite(version) && version > 0 ? version : 0,
+  };
+};
+
 const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
+  const { hasPermission } = usePermissions();
   const user = getUserFromToken();
   const normalizedRole = String(user?.role || "").trim().toLowerCase();
   const isManager = normalizedRole === "manager";
   const isAdmin = normalizedRole === "admin";
+  const canViewProductTypeTemplates = hasPermission("product_type_templates", "view");
   const canEdit = Boolean(item?.permissions?.can_edit);
   const initialForm = useMemo(
     () => ({
-      pd_item_sizes: toFormItemEntries(item?.pd_item_sizes),
-      pd_box_mode:
-        item?.pd_box_mode === BOX_PACKAGING_MODES.CARTON
-          ? BOX_PACKAGING_MODES.CARTON
-          : BOX_PACKAGING_MODES.INDIVIDUAL,
-      pd_box_sizes: toFormBoxEntries(item?.pd_box_sizes, item?.pd_box_mode),
+      productTypeKey: normalizeTemplateKey(item?.product_type?.key),
+      productTypeVersion: Number(item?.product_type?.version || 0),
     }),
     [item],
   );
   const [form, setForm] = useState(initialForm);
+  const [templateOptions, setTemplateOptions] = useState([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templatesError, setTemplatesError] = useState("");
+  const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [templateLoading, setTemplateLoading] = useState(false);
+  const [templateError, setTemplateError] = useState("");
+  const [productTypeForm, setProductTypeForm] = useState(() =>
+    createProductTypeFormState({ item, template: null }),
+  );
+  const [productTypeErrors, setProductTypeErrors] = useState(
+    cloneProductTypeValidation(),
+  );
   const [savingAction, setSavingAction] = useState("");
   const [error, setError] = useState("");
 
-  const currentPayload = useMemo(() => buildPayloadFromForm(form), [form]);
-  const initialPayload = useMemo(() => buildPayloadFromForm(initialForm), [initialForm]);
+  useEffect(() => {
+    setForm(initialForm);
+  }, [initialForm]);
+
+  const loadTemplateOptions = useCallback(async () => {
+    if (!canViewProductTypeTemplates) {
+      setTemplateOptions([]);
+      setTemplatesError("");
+      setTemplatesLoading(false);
+      return;
+    }
+
+    try {
+      setTemplatesLoading(true);
+      setTemplatesError("");
+      const response = await getProductTypeTemplates();
+      const currentSelectionRef = buildTemplateOptionValue(
+        item?.product_type?.key,
+        item?.product_type?.version,
+      );
+      const options = (Array.isArray(response?.data) ? response.data : []).filter(
+        (templateOption) =>
+          templateOption?.status === "active" ||
+          buildTemplateOptionValue(
+            templateOption?.key,
+            templateOption?.version,
+          ) === currentSelectionRef,
+      );
+      setTemplateOptions(options);
+    } catch (loadError) {
+      setTemplateOptions([]);
+      setTemplatesError(
+        loadError?.response?.data?.message ||
+          loadError?.message ||
+          "Failed to load product type templates.",
+      );
+    } finally {
+      setTemplatesLoading(false);
+    }
+  }, [canViewProductTypeTemplates, item]);
+
+  useEffect(() => {
+    loadTemplateOptions();
+  }, [loadTemplateOptions]);
+
+  const loadSelectedTemplate = useCallback(
+    async (templateKey, templateVersion = 0) => {
+      const normalizedTemplateKey = normalizeTemplateKey(templateKey);
+      if (!canViewProductTypeTemplates || !normalizedTemplateKey) {
+        setSelectedTemplate(null);
+        setTemplateError("");
+        setTemplateLoading(false);
+        return;
+      }
+
+      try {
+        setTemplateLoading(true);
+        setTemplateError("");
+        const response = await getProductTypeTemplateByKey(normalizedTemplateKey, {
+          ...(templateVersion > 0 ? { version: templateVersion } : {}),
+        });
+        setSelectedTemplate(response?.data || null);
+      } catch (loadError) {
+        setSelectedTemplate(null);
+        setTemplateError(
+          loadError?.response?.data?.message ||
+            loadError?.message ||
+            "Failed to load the selected product type template.",
+        );
+      } finally {
+        setTemplateLoading(false);
+      }
+    },
+    [canViewProductTypeTemplates],
+  );
+
+  useEffect(() => {
+    const selectedKey = normalizeTemplateKey(form.productTypeKey);
+    if (!selectedKey) {
+      setSelectedTemplate(null);
+      setTemplateError("");
+      setProductTypeForm(createProductTypeFormState({ item, template: null }));
+      setProductTypeErrors(cloneProductTypeValidation());
+      return;
+    }
+
+    loadSelectedTemplate(selectedKey, Number(form.productTypeVersion || 0));
+  }, [form.productTypeKey, form.productTypeVersion, item, loadSelectedTemplate]);
+
+  useEffect(() => {
+    if (!selectedTemplate) {
+      return;
+    }
+
+    setProductTypeForm(createProductTypeFormState({ item, template: selectedTemplate }));
+    setProductTypeErrors(cloneProductTypeValidation());
+  }, [item, selectedTemplate]);
+
+  const templateReady =
+    !normalizeTemplateKey(form.productTypeKey) ||
+    (!templateLoading && Boolean(selectedTemplate));
+
+  const currentProductTypePayload = useMemo(() => {
+    if (!normalizeTemplateKey(form.productTypeKey)) {
+      return {
+        product_type: null,
+        product_specs: {
+          fields: [],
+          item_sizes: [],
+          box_sizes: [],
+          box_mode: BOX_PACKAGING_MODES.INDIVIDUAL,
+          raw_values: {},
+        },
+      };
+    }
+
+    if (selectedTemplate) {
+      return buildProductTypePayload({
+        template: selectedTemplate,
+        selectedProductTypeKey: form.productTypeKey,
+        formState: productTypeForm,
+      });
+    }
+
+    if (
+      normalizeTemplateKey(item?.product_type?.key) === normalizeTemplateKey(form.productTypeKey) &&
+      Number(item?.product_type?.version || 0) === Number(form.productTypeVersion || 0)
+    ) {
+      return buildExistingProductTypePayload(item);
+    }
+
+    return {
+      product_type: null,
+      product_specs: {
+        fields: [],
+        item_sizes: [],
+        box_sizes: [],
+        box_mode: BOX_PACKAGING_MODES.INDIVIDUAL,
+        raw_values: {},
+      },
+    };
+  }, [form.productTypeKey, form.productTypeVersion, item, productTypeForm, selectedTemplate]);
+
+  const currentPayload = useMemo(
+    () => ({
+      ...buildPayloadFromForm(form),
+      ...currentProductTypePayload,
+    }),
+    [currentProductTypePayload, form],
+  );
+
+  const initialPayload = useMemo(
+    () => ({
+      ...buildPayloadFromForm(initialForm),
+      ...buildExistingProductTypePayload(item),
+    }),
+    [initialForm, item],
+  );
   const hasChanges =
     normalizePayloadForCompare(currentPayload) !== normalizePayloadForCompare(initialPayload);
   const canCheck = Boolean(item?.permissions?.can_check) && !hasChanges;
   const canApprove = isAdmin && (item?.pd_checked === "checked" || hasChanges);
 
-  const updateItemEntry = (index, field, value) => {
+  const handleProductTypeChange = (nextValue) => {
+    const { key: nextKey, version: nextVersion } = parseTemplateOptionValue(nextValue);
+    const currentKey = normalizeTemplateKey(form.productTypeKey);
+    const currentVersion = Number(form.productTypeVersion || 0);
+    if (nextKey === currentKey && nextVersion === currentVersion) return;
+
+    const hasDynamicValues = hasProductTypeFormValues(productTypeForm);
+    const hasExistingSelection = Boolean(currentKey);
+    if (hasExistingSelection || hasDynamicValues) {
+      const confirmed = window.confirm(
+        "Changing the product type will reset the current product spec fields. Continue?",
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+
     setForm((prev) => ({
       ...prev,
-      pd_item_sizes: prev.pd_item_sizes.map((entry, entryIndex) =>
-        entryIndex === index ? { ...entry, [field]: value } : entry,
-      ),
+      productTypeKey: nextKey,
+      productTypeVersion: nextVersion,
+    }));
+    setSelectedTemplate(null);
+    setTemplateError("");
+    setProductTypeForm(createProductTypeFormState({ item: {}, template: null }));
+    setProductTypeErrors(cloneProductTypeValidation());
+  };
+
+  const handleProductTypeFieldChange = (fieldKey, value) => {
+    setProductTypeErrors(cloneProductTypeValidation());
+    setProductTypeForm((prev) => ({
+      ...prev,
+      fieldValues: {
+        ...prev.fieldValues,
+        [fieldKey]: value,
+      },
     }));
   };
 
-  const updateBoxEntry = (index, field, value) => {
-    setForm((prev) => ({
+  const handleItemSizeChange = (fieldKey, fieldName, value) => {
+    setProductTypeErrors(cloneProductTypeValidation());
+    setProductTypeForm((prev) => ({
       ...prev,
-      pd_box_sizes: prev.pd_box_sizes.map((entry, entryIndex) =>
-        entryIndex === index ? { ...entry, [field]: value } : entry,
-      ),
+      itemSizeValues: {
+        ...prev.itemSizeValues,
+        [fieldKey]: {
+          ...(prev.itemSizeValues?.[fieldKey] || {}),
+          [fieldName]: value,
+        },
+      },
     }));
   };
 
-  const handleBoxModeChange = (nextMode) => {
-    setForm((prev) => ({
-      ...prev,
-      pd_box_mode: nextMode,
-      pd_box_sizes:
-        nextMode === BOX_PACKAGING_MODES.CARTON
-          ? toFormBoxEntries(prev.pd_box_sizes, BOX_PACKAGING_MODES.CARTON)
-          : toFormBoxEntries(prev.pd_box_sizes, BOX_PACKAGING_MODES.INDIVIDUAL),
-    }));
+  const handleBoxSizeChange = (fieldKey, fieldName, value) => {
+    setProductTypeErrors(cloneProductTypeValidation());
+    setProductTypeForm((prev) => {
+      const nextEntry = {
+        ...(prev.boxSizeValues?.[fieldKey] || {}),
+        [fieldName]: value,
+      };
+
+      const normalizedBoxType =
+        fieldName === "box_type"
+          ? normalizeTemplateKey(value)
+          : normalizeTemplateKey(nextEntry?.box_type);
+
+      if (normalizedBoxType !== BOX_ENTRY_TYPES.INNER) {
+        nextEntry.item_count_in_inner = "0";
+      }
+      if (normalizedBoxType !== BOX_ENTRY_TYPES.MASTER) {
+        nextEntry.box_count_in_master = "0";
+      }
+
+      return {
+        ...prev,
+        boxSizeValues: {
+          ...prev.boxSizeValues,
+          [fieldKey]: nextEntry,
+        },
+      };
+    });
   };
 
   const runMutation = async (action) => {
     try {
       setSavingAction(action);
       setError("");
+      setProductTypeErrors(cloneProductTypeValidation());
+
+      if (normalizeTemplateKey(form.productTypeKey) && !templateReady) {
+        setError("Please wait for the selected product type template to finish loading.");
+        return;
+      }
+
+      if (selectedTemplate) {
+        const validation = validateProductTypeFormState({
+          template: selectedTemplate,
+          selectedProductTypeKey: form.productTypeKey,
+          formState: productTypeForm,
+        });
+
+        if (!validation.valid) {
+          setProductTypeErrors(validation.errors);
+          setError("Please fix the highlighted product type fields before saving.");
+          return;
+        }
+      }
 
       let response;
       if (action === "check") {
@@ -372,234 +599,113 @@ const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
             </div>
 
             <section className="mb-4">
-              <div className="d-flex justify-content-between align-items-center mb-2">
-                <h6 className="mb-0">PD Item Sizes</h6>
-                {canEdit && form.pd_item_sizes.length < 4 && (
-                  <button
-                    type="button"
-                    className="btn btn-outline-primary btn-sm"
-                    onClick={() =>
-                      setForm((prev) => ({
-                        ...prev,
-                        pd_item_sizes: [...prev.pd_item_sizes, emptyItemEntry()],
-                      }))
-                    }
-                  >
-                    Add Item Size
-                  </button>
-                )}
-              </div>
-
-              <div className="table-responsive">
-                <table className="table table-sm align-middle mb-0">
-                  <thead>
-                    <tr>
-                      <th>Remark</th>
-                      <th>L</th>
-                      <th>B</th>
-                      <th>H</th>
-                      <th>Net Weight</th>
-                      <th>Gross Weight</th>
-                      {canEdit && <th>Action</th>}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {form.pd_item_sizes.map((entry, index) => (
-                      <tr key={`pd-item-${index}`}>
-                        <td>
-                          <select
-                            className="form-select form-select-sm"
-                            value={entry.remark}
-                            disabled={!canEdit || form.pd_item_sizes.length === 1}
-                            onChange={(event) => updateItemEntry(index, "remark", event.target.value)}
-                          >
-                            <option value="">Single</option>
-                            {ITEM_SIZE_REMARK_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        {["L", "B", "H", "net_weight", "gross_weight"].map((field) => (
-                          <td key={field}>
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.001"
-                              className="form-control form-control-sm"
-                              value={entry[field]}
-                              disabled={!canEdit}
-                              onChange={(event) => updateItemEntry(index, field, event.target.value)}
-                            />
-                          </td>
-                        ))}
-                        {canEdit && (
-                          <td>
-                            <button
-                              type="button"
-                              className="btn btn-outline-danger btn-sm"
-                              disabled={form.pd_item_sizes.length <= 1}
-                              onClick={() =>
-                                setForm((prev) => ({
-                                  ...prev,
-                                  pd_item_sizes: prev.pd_item_sizes.filter((_, rowIndex) => rowIndex !== index),
-                                }))
-                              }
-                            >
-                              Remove
-                            </button>
-                          </td>
-                        )}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            <section>
-              <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-                <h6 className="mb-0">PD Box Sizes</h6>
-                <div className="d-flex align-items-center gap-2 product-database-box-toolbar">
-                  <select
-                    className="form-select form-select-sm w-auto"
-                    value={form.pd_box_mode}
-                    disabled={!canEdit}
-                    onChange={(event) => handleBoxModeChange(event.target.value)}
-                  >
-                    <option value={BOX_PACKAGING_MODES.INDIVIDUAL}>Individual</option>
-                    <option value={BOX_PACKAGING_MODES.CARTON}>Carton</option>
-                  </select>
-                  {canEdit &&
-                    form.pd_box_mode !== BOX_PACKAGING_MODES.CARTON &&
-                    form.pd_box_sizes.length < 4 && (
-                      <button
-                        type="button"
-                        className="btn btn-outline-primary btn-sm text-nowrap"
-                        onClick={() =>
-                          setForm((prev) => ({
-                            ...prev,
-                            pd_box_sizes: [...prev.pd_box_sizes, emptyBoxEntry()],
-                          }))
-                        }
+              <div className="card om-card product-database-product-type-card">
+                <div className="card-body">
+                  <div className="row g-3 align-items-end">
+                    <div className="col-lg-4">
+                      <label className="form-label">Product Type</label>
+                      <select
+                        className={`form-select ${productTypeErrors.product_type ? "is-invalid" : ""}`}
+                        value={buildTemplateOptionValue(form.productTypeKey, form.productTypeVersion)}
+                        disabled={!canEdit || templatesLoading}
+                        onChange={(event) => handleProductTypeChange(event.target.value)}
                       >
-                        Add Box Size
-                      </button>
+                        <option value="">Select product type</option>
+                        {templateOptions.map((templateOption) => (
+                          <option
+                            key={templateOption._id || `${templateOption.key}-${templateOption.version}`}
+                            value={buildTemplateOptionValue(
+                              templateOption.key,
+                              templateOption.version,
+                            )}
+                          >
+                            {templateOption.label} v{templateOption.version}
+                            {templateOption.status && templateOption.status !== "active"
+                              ? ` (${templateOption.status})`
+                              : ""}
+                          </option>
+                        ))}
+                      </select>
+                      {productTypeErrors.product_type && (
+                        <div className="invalid-feedback d-block">
+                          {productTypeErrors.product_type}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="col-lg-8">
+                      <div className="d-flex flex-wrap gap-2 justify-content-lg-end">
+                        {templatesLoading && (
+                          <span className="om-summary-chip">Loading product types...</span>
+                        )}
+                        {templateLoading && normalizeTemplateKey(form.productTypeKey) && (
+                          <span className="om-summary-chip">Loading selected template...</span>
+                        )}
+                        {selectedTemplate && (
+                          <>
+                            <span className="om-summary-chip">
+                              {selectedTemplate.label}
+                            </span>
+                            <span className="om-summary-chip">
+                              Version: {selectedTemplate.version}
+                            </span>
+                            <span className="om-summary-chip">
+                              Status: {selectedTemplate.status}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {templatesError && (
+                    <div className="alert alert-danger mt-3 mb-0">
+                      {templatesError}
+                    </div>
+                  )}
+                  {templateError && (
+                    <div className="alert alert-danger mt-3 mb-0">
+                      {templateError}
+                    </div>
+                  )}
+                  {!templatesLoading &&
+                    !templatesError &&
+                    templateOptions.length === 0 && (
+                      <div className="alert alert-warning mt-3 mb-0">
+                        No product type templates are available yet.
+                      </div>
+                    )}
+                  {!normalizeTemplateKey(form.productTypeKey) &&
+                    !templatesLoading &&
+                    !templatesError && (
+                      <div className="alert alert-light border mt-3 mb-0">
+                        Select a product type to load its template-driven product spec fields.
+                      </div>
                     )}
                 </div>
               </div>
+            </section>
 
-              <div className="table-responsive">
-                <table className="table table-sm align-middle mb-0">
-                  <thead>
-                    <tr>
-                      <th>Type / Remark</th>
-                      <th>L</th>
-                      <th>B</th>
-                      <th>H</th>
-                      <th>Gross Weight</th>
-                      <th>Net Weight</th>
-                      <th>Item Count In Inner</th>
-                      <th>Box Count In Master</th>
-                      {canEdit && <th>Action</th>}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {form.pd_box_sizes.map((entry, index) => {
-                      const isCarton = form.pd_box_mode === BOX_PACKAGING_MODES.CARTON;
-                      const boxType = isCarton
-                        ? index === 0
-                          ? BOX_ENTRY_TYPES.INNER
-                          : BOX_ENTRY_TYPES.MASTER
-                        : BOX_ENTRY_TYPES.INDIVIDUAL;
+            {selectedTemplate && (
+              <section className="mb-4">
+                <ProductTypeDynamicForm
+                  template={selectedTemplate}
+                  fieldValues={productTypeForm.fieldValues}
+                  itemSizeValues={productTypeForm.itemSizeValues}
+                  boxSizeValues={productTypeForm.boxSizeValues}
+                  errors={productTypeErrors}
+                  disabled={!canEdit}
+                  onFieldChange={handleProductTypeFieldChange}
+                  onItemSizeChange={handleItemSizeChange}
+                  onBoxSizeChange={handleBoxSizeChange}
+                />
+              </section>
+            )}
 
-                      return (
-                        <tr key={`pd-box-${index}`}>
-                          <td>
-                            {isCarton ? (
-                              <span className="badge text-bg-light border text-secondary">
-                                {boxType === BOX_ENTRY_TYPES.INNER ? "Inner Carton" : "Master Carton"}
-                              </span>
-                            ) : (
-                              <select
-                                className="form-select form-select-sm"
-                                value={entry.remark}
-                                disabled={!canEdit || form.pd_box_sizes.length === 1}
-                                onChange={(event) => updateBoxEntry(index, "remark", event.target.value)}
-                              >
-                                <option value="">Single</option>
-                                {BOX_SIZE_REMARK_OPTIONS
-                                  .filter((option) => !["inner", "master"].includes(option.value))
-                                  .map((option) => (
-                                    <option key={option.value} value={option.value}>
-                                      {option.label}
-                                    </option>
-                                  ))}
-                              </select>
-                            )}
-                          </td>
-                          {["L", "B", "H", "gross_weight", "net_weight"].map((field) => (
-                            <td key={field}>
-                              <input
-                                type="number"
-                                min="0"
-                                step="0.001"
-                                className="form-control form-control-sm"
-                                value={entry[field]}
-                                disabled={!canEdit}
-                                onChange={(event) => updateBoxEntry(index, field, event.target.value)}
-                              />
-                            </td>
-                          ))}
-                          <td>
-                            <input
-                              type="number"
-                              min="0"
-                              step="1"
-                              className="form-control form-control-sm"
-                              value={entry.item_count_in_inner}
-                              disabled={!canEdit || boxType !== BOX_ENTRY_TYPES.INNER}
-                              onChange={(event) =>
-                                updateBoxEntry(index, "item_count_in_inner", event.target.value)
-                              }
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="number"
-                              min="0"
-                              step="1"
-                              className="form-control form-control-sm"
-                              value={entry.box_count_in_master}
-                              disabled={!canEdit || boxType !== BOX_ENTRY_TYPES.MASTER}
-                              onChange={(event) =>
-                                updateBoxEntry(index, "box_count_in_master", event.target.value)
-                              }
-                            />
-                          </td>
-                          {canEdit && (
-                            <td>
-                              <button
-                                type="button"
-                                className="btn btn-outline-danger btn-sm"
-                                disabled={isCarton || form.pd_box_sizes.length <= 1}
-                                onClick={() =>
-                                  setForm((prev) => ({
-                                    ...prev,
-                                    pd_box_sizes: prev.pd_box_sizes.filter((_, rowIndex) => rowIndex !== index),
-                                  }))
-                                }
-                              >
-                                Remove
-                              </button>
-                            </td>
-                          )}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+            <section className="mb-4">
+              <div className="alert alert-light border mb-0">
+                All measurements are maintained in the selected product type template's
+                Sizes section above. The legacy PD size editor has been removed.
               </div>
             </section>
 
@@ -623,7 +729,7 @@ const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
               <button
                 type="button"
                 className="btn btn-outline-primary"
-                disabled={savingAction !== ""}
+                disabled={savingAction !== "" || !templateReady}
                 onClick={() => runMutation("save")}
               >
                 {savingAction === "save" ? "Saving..." : "Save Changes"}
@@ -633,7 +739,7 @@ const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={!canCheck || savingAction !== ""}
+                disabled={!canCheck || savingAction !== "" || !templateReady}
                 onClick={() => runMutation("check")}
               >
                 {savingAction === "check" ? "Checking..." : "Check"}
@@ -643,7 +749,7 @@ const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
               <button
                 type="button"
                 className="btn btn-success"
-                disabled={!canApprove || savingAction !== ""}
+                disabled={!canApprove || savingAction !== "" || !templateReady}
                 onClick={() => runMutation("approve")}
               >
                 {savingAction === "approve" ? "Approving..." : "Approve"}
@@ -922,8 +1028,8 @@ const ProductDatabase = () => {
                       <th>Name / Description</th>
                       <th>Brand</th>
                       <th>Vendor</th>
-                      <th>PD Item Sizes</th>
-                      <th>PD Box Sizes</th>
+                      <th>Product Sizes</th>
+                      <th>Box Sizes</th>
                       <th>Status</th>
                       <th>Audit</th>
                       <th>Actions</th>
@@ -939,12 +1045,12 @@ const ProductDatabase = () => {
                         </td>
                         <td>{row.brand_name || row.brand || row.brands?.join(", ") || "N/A"}</td>
                         <td>{Array.isArray(row.vendors) && row.vendors.length > 0 ? row.vendors.join(", ") : "N/A"}</td>
-                        <td><SizeSummary entries={row.pd_item_sizes} type="item" /></td>
+                        <td><SizeSummary entries={getDisplayItemSizes(row)} type="item" /></td>
                         <td>
                           <div className="small text-secondary mb-1">
-                            Mode: {formatBoxMode(row.pd_box_mode)}
+                            Mode: {formatBoxMode(getDisplayBoxMode(row))}
                           </div>
-                          <SizeSummary entries={row.pd_box_sizes} type="box" />
+                          <SizeSummary entries={getDisplayBoxSizes(row)} type="box" />
                         </td>
                         <td>
                           <span className={`badge ${getStatusBadgeClass(row.pd_checked)}`}>

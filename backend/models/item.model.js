@@ -26,7 +26,6 @@ const createSizeEntrySchema = (remarkEnum = []) =>
       H: { type: Number, default: 0, min: 0 },
       remark: {
         type: String,
-        enum: remarkEnum,
         default: "",
         trim: true,
       },
@@ -107,6 +106,64 @@ const productDatabaseHistorySchema = new mongoose.Schema(
   },
   { _id: false },
 );
+const productTypeSnapshotSchema = new mongoose.Schema(
+  {
+    template: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "product_type_templates",
+      default: null,
+    },
+    key: { type: String, default: "", trim: true, lowercase: true },
+    label: { type: String, default: "", trim: true },
+    version: { type: Number, default: 1, min: 1 },
+  },
+  { _id: false },
+);
+const productSpecFieldValueSchema = new mongoose.Schema(
+  {
+    field_id: { type: mongoose.Schema.Types.ObjectId, default: null },
+    key: { type: String, default: "", trim: true, lowercase: true },
+    label: { type: String, default: "", trim: true },
+    group_key: { type: String, default: "", trim: true, lowercase: true },
+    group_label: { type: String, default: "", trim: true },
+    input_type: { type: String, default: "text", trim: true, lowercase: true },
+    value_type: { type: String, default: "string", trim: true, lowercase: true },
+    unit: { type: String, default: "", trim: true },
+    value_text: { type: String, default: "", trim: true },
+    value_number: { type: Number, default: null },
+    value_boolean: { type: Boolean, default: null },
+    value_date: { type: Date, default: null },
+    value_array: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    raw_value: { type: mongoose.Schema.Types.Mixed, default: null },
+    source_header: { type: String, default: "", trim: true },
+  },
+  { _id: false },
+);
+const productSpecsSchema = new mongoose.Schema(
+  {
+    fields: { type: [productSpecFieldValueSchema], default: [] },
+    item_sizes: {
+      type: [itemSizeEntrySchema],
+      default: [],
+    },
+    box_sizes: {
+      type: [boxSizeEntrySchema],
+      default: [],
+    },
+    box_mode: {
+      type: String,
+      enum: Object.values(BOX_PACKAGING_MODES),
+      default: BOX_PACKAGING_MODES.INDIVIDUAL,
+      trim: true,
+    },
+    raw_values: {
+      type: Map,
+      of: mongoose.Schema.Types.Mixed,
+      default: () => ({}),
+    },
+  },
+  { _id: false },
+);
 
 const itemSchema = new mongoose.Schema(
   {
@@ -123,6 +180,20 @@ const itemSchema = new mongoose.Schema(
     brand_name: { type: String, default: "", trim: true },
     brands: { type: [String], default: [] },
     vendors: { type: [String], default: [] },
+    product_type: {
+      type: productTypeSnapshotSchema,
+      default: undefined,
+    },
+    product_specs: {
+      type: productSpecsSchema,
+      default: () => ({
+        fields: [],
+        item_sizes: [],
+        box_sizes: [],
+        box_mode: BOX_PACKAGING_MODES.INDIVIDUAL,
+        raw_values: {},
+      }),
+    },
     inspected_weight: {
       top_net: { type: Number, default: 0, min: 0 },
       top_gross: { type: Number, default: 0, min: 0 },
@@ -384,6 +455,12 @@ itemSchema.index({ brands: 1 });
 itemSchema.index({ vendors: 1 });
 itemSchema.index({ pis_checked_flag: 1 });
 itemSchema.index({ pd_checked: 1 });
+itemSchema.index({ "product_type.key": 1 });
+itemSchema.index({ "product_type.template": 1 });
+itemSchema.index({ "product_specs.fields.key": 1 });
+itemSchema.index({ "product_specs.fields.value_text": 1 });
+itemSchema.index({ "product_specs.fields.value_number": 1 });
+itemSchema.index({ "product_specs.fields.value_boolean": 1 });
 
 itemSchema.pre("validate", function syncBarcodeAliases() {
   const normalizedPisMasterBarcode = String(
@@ -411,6 +488,44 @@ itemSchema.pre("validate", function syncBarcodeAliases() {
     Number.isFinite(resolvedQcInnerBarcode) && resolvedQcInnerBarcode > 0
       ? resolvedQcInnerBarcode
       : 0;
+
+  if (this.product_type && typeof this.product_type === "object") {
+    this.product_type.key = String(this.product_type.key || "").trim().toLowerCase();
+    this.product_type.label = String(this.product_type.label || "").trim();
+    this.product_type.version = Math.max(
+      1,
+      Number.parseInt(String(this.product_type.version || 1), 10) || 1,
+    );
+  }
+
+  if (this.product_specs && typeof this.product_specs === "object") {
+    this.product_specs.box_mode =
+      Object.values(BOX_PACKAGING_MODES).includes(this.product_specs.box_mode)
+        ? this.product_specs.box_mode
+        : BOX_PACKAGING_MODES.INDIVIDUAL;
+
+    if (Array.isArray(this.product_specs.fields)) {
+      this.product_specs.fields = this.product_specs.fields.map((entry) => ({
+        ...entry,
+        key: String(entry?.key || "").trim().toLowerCase(),
+        label: String(entry?.label || "").trim(),
+        group_key: String(entry?.group_key || "").trim().toLowerCase(),
+        group_label: String(entry?.group_label || "").trim(),
+        input_type: String(entry?.input_type || "text").trim().toLowerCase(),
+        value_type: String(entry?.value_type || "string").trim().toLowerCase(),
+        unit: String(entry?.unit || "").trim(),
+        value_text: String(entry?.value_text || "").trim(),
+        source_header: String(entry?.source_header || "").trim(),
+      }));
+    }
+  }
 });
 
-module.exports = mongoose.model("items", itemSchema);
+const Item = mongoose.model("items", itemSchema);
+
+Item.createSizeEntrySchema = createSizeEntrySchema;
+Item.itemSizeEntrySchema = itemSizeEntrySchema;
+Item.boxSizeEntrySchema = boxSizeEntrySchema;
+Item.SIZE_ENTRY_LIMIT = SIZE_ENTRY_LIMIT;
+
+module.exports = Item;

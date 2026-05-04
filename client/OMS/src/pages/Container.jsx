@@ -51,7 +51,12 @@ const Container = () => {
   const user = getUserFromToken();
   const { hasPermission } = usePermissions();
   const isViewOnly = isViewOnlyUser(user);
-  const canFinalizeShipping = hasPermission("shipments", "edit");
+  const normalizedRole = String(user?.role || "").trim().toLowerCase();
+  const canFinalizeShipping =
+    hasPermission("shipments", "edit") ||
+    normalizedRole === "admin" ||
+    normalizedRole === "manager" ||
+    normalizedRole === "dev";
 
   const [containerNumber, setContainerNumber] = useState(() =>
     normalizeSearchParam(searchParams.get("container_number")),

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { editOrder } from "../services/orders.service";
 import { usePermissions } from "../auth/PermissionContext";
+import { getUserFromToken } from "../auth/auth.service";
 import {
   formatDateDDMMYYYY,
   getTodayDDMMYYYY,
@@ -88,7 +89,13 @@ const buildAdjustedShipmentPreview = (shipmentRows, targetQuantity) => {
 
 const EditOrderModal = ({ order, onClose, onSuccess }) => {
   const { hasPermission } = usePermissions();
+  const user = getUserFromToken();
+  const normalizedRole = String(user?.role || "").trim().toLowerCase();
+  const hasRoleShipmentAccess =
+    normalizedRole === "admin" || normalizedRole === "manager";
   const canEditOrders = hasPermission("orders", "edit");
+  const canEditShipmentDetails =
+    canEditOrders || hasPermission("shipments", "edit") || hasRoleShipmentAccess;
 
   const [form, setForm] = useState({
     brand: String(order?.brand ?? ""),
@@ -170,7 +177,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
   };
 
   const removeShipmentRow = (index) => {
-    if (!canEditOrders) return;
+    if (!canEditShipmentDetails) return;
     setForm((prev) => ({
       ...prev,
       shipment: prev.shipment.filter((_, i) => i !== index),
@@ -178,7 +185,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
   };
 
   const addShipmentRow = () => {
-    if (!canEditOrders) return;
+    if (!canEditShipmentDetails) return;
     setForm((prev) => ({
       ...prev,
       shipment: [...prev.shipment, createEmptyShipmentRow()],
@@ -194,7 +201,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
     if (!vendor) return "vendor is required";
     if (!itemCode) return "item_code is required";
 
-    if (canEditOrders) {
+    if (canEditShipmentDetails) {
       const quantity = Number(form.quantity);
       if (!Number.isFinite(quantity) || quantity < 0) {
         return "quantity must be a valid non-negative number";
@@ -237,7 +244,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
       lines.push(`Edit Remark: ${payload.edit_remark}`);
     }
 
-    if (canEditOrders) {
+    if (canEditShipmentDetails) {
       lines.push(
         `Order Quantity: ${toSafeNumber(order?.quantity)} -> ${payload.quantity}`,
       );
@@ -279,7 +286,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
       edit_remark: String(form.edit_remark ?? "").trim(),
     };
 
-    if (canEditOrders) {
+    if (canEditShipmentDetails) {
       payload.quantity = Number(form.quantity);
       payload.shipment = form.shipment.map((entry) => ({
         stuffed_by: {
@@ -345,6 +352,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                   type="text"
                   className="form-control"
                   value={form.brand}
+                  disabled={!canEditOrders}
                   onChange={(e) => setForm((prev) => ({ ...prev, brand: e.target.value }))}
                 />
               </div>
@@ -354,6 +362,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                   type="text"
                   className="form-control"
                   value={form.vendor}
+                  disabled={!canEditOrders}
                   onChange={(e) => setForm((prev) => ({ ...prev, vendor: e.target.value }))}
                 />
               </div>
@@ -364,10 +373,10 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                   className="form-control"
                   min="0"
                   value={form.quantity}
-                  disabled={!canEditOrders}
+                  disabled={!canEditShipmentDetails}
                   onChange={(e) => setForm((prev) => ({ ...prev, quantity: e.target.value }))}
                 />
-                {!canEditOrders && (
+                {!canEditShipmentDetails && (
                   <div className="small text-secondary mt-1">
                     Only admin or manager can edit quantity or shipping details.
                   </div>
@@ -379,6 +388,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                   type="text"
                   className="form-control"
                   value={form.item_code}
+                  disabled={!canEditOrders}
                   onChange={(e) => setForm((prev) => ({ ...prev, item_code: e.target.value }))}
                 />
               </div>
@@ -388,6 +398,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                   type="text"
                   className="form-control"
                   value={form.description}
+                  disabled={!canEditOrders}
                   onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
                 />
               </div>
@@ -397,15 +408,21 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                   className="form-control"
                   rows="2"
                   value={form.edit_remark}
+                  disabled={!canEditShipmentDetails}
                   onChange={(e) => setForm((prev) => ({ ...prev, edit_remark: e.target.value }))}
                   placeholder="Add a remark for this order edit"
                 />
+                {!canEditOrders && canEditShipmentDetails && (
+                  <div className="small text-secondary mt-1">
+                    Order details are read-only here. Shipment quantity and shipment rows can still be updated.
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="d-flex justify-content-between align-items-center">
               <h6 className="mb-0">Shipment Rows</h6>
-              {canEditOrders && (
+              {canEditShipmentDetails && (
                 <button type="button" className="btn btn-outline-secondary btn-sm" onClick={addShipmentRow}>
                   Add Row
                 </button>
@@ -439,7 +456,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                         <select
                           className="form-select form-select-sm"
                           value={entry.stuffed_by_id}
-                          disabled={!canEditOrders || loadingInspectors}
+                          disabled={!canEditShipmentDetails || loadingInspectors}
                           onChange={(e) =>
                             updateShipmentRow(index, "stuffed_by_id", e.target.value)
                           }
@@ -459,7 +476,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                           type="text"
                           className="form-control form-control-sm"
                           value={entry.container}
-                          disabled={!canEditOrders}
+                          disabled={!canEditShipmentDetails}
                           onChange={(e) =>
                             updateShipmentRow(index, "container", e.target.value)
                           }
@@ -470,7 +487,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                           type="text"
                           className="form-control form-control-sm"
                           value={entry.invoice_number}
-                          disabled={!canEditOrders}
+                          disabled={!canEditShipmentDetails}
                           onChange={(e) =>
                             updateShipmentRow(index, "invoice_number", e.target.value)
                           }
@@ -482,7 +499,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                           lang="en-GB"
                           className="form-control form-control-sm"
                           value={toISODateString(entry.stuffing_date)}
-                          disabled={!canEditOrders}
+                          disabled={!canEditShipmentDetails}
                           onChange={(e) =>
                             updateShipmentRow(
                               index,
@@ -498,7 +515,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                           min="1"
                           className="form-control form-control-sm"
                           value={entry.quantity}
-                          disabled={!canEditOrders}
+                          disabled={!canEditShipmentDetails}
                           onChange={(e) =>
                             updateShipmentRow(index, "quantity", e.target.value)
                           }
@@ -509,14 +526,14 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                           type="text"
                           className="form-control form-control-sm"
                           value={entry.remaining_remarks}
-                          disabled={!canEditOrders}
+                          disabled={!canEditShipmentDetails}
                           onChange={(e) =>
                             updateShipmentRow(index, "remaining_remarks", e.target.value)
                           }
                         />
                       </td>
                       <td>
-                        {canEditOrders ? (
+                        {canEditShipmentDetails ? (
                           <button
                             type="button"
                             className="btn btn-outline-danger btn-sm"
@@ -536,7 +553,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
 
             <div className="d-flex flex-wrap gap-2">
               <span className="om-summary-chip">Input shipped: {inputTotalShipped}</span>
-              {canEditOrders && (
+              {canEditShipmentDetails && (
                 <>
                   <span className="om-summary-chip">
                     Adjusted shipped: {adjustedShippedTotal}
@@ -548,7 +565,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
               )}
             </div>
 
-            {canEditOrders && (
+            {canEditShipmentDetails && (
               <div className="small text-secondary">
                 Any non-negative quantity is allowed. Setting quantity to 0 will
                 archive this order. On save, shipment rows and QC quantities are

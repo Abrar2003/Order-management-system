@@ -40,7 +40,7 @@ const Navbar = () => {
   const user = getUserFromToken();
   const role = user?.role;
   const normalizedRole = String(role || "").trim().toLowerCase();
-  const { hasPermission, isAdmin } = usePermissions();
+  const { hasPermission, isAdmin, role: permissionRole } = usePermissions();
 
   const navigate = useNavigate();
   const navShellRef = useRef(null);
@@ -366,6 +366,16 @@ const Navbar = () => {
         items.push(routeMenuItem("create-users", "Create User", "/users/new"));
       }
 
+      if (hasPermission("product_type_templates", "view") && ["admin", "manager"].includes(permissionRole)) {
+        items.push(
+          routeMenuItem(
+            "product-type-templates",
+            "Product Type Templates",
+            "/settings/product-type-templates",
+          ),
+        );
+      }
+
       if (isAdmin) {
         items.push(
           routeMenuItem("permission-management", "Rights Management", "/settings/permissions"),
@@ -380,7 +390,7 @@ const Navbar = () => {
 
       return items;
     },
-    [canCreateUsers, isAdmin, themeLabel],
+    [canCreateUsers, hasPermission, isAdmin, permissionRole, themeLabel],
   );
 
   const menuSections = useMemo(

@@ -352,6 +352,42 @@ small,
   min-width: 6.5rem;
 }
 
+.product-database-product-type-card {
+  border-style: dashed;
+}
+
+.om-product-type-group-card .card-header {
+  padding: 1rem 1.25rem 0.75rem;
+}
+
+.om-product-type-group-card .card-header:hover {
+  background: rgba(203, 189, 170, 0.08);
+}
+
+.om-product-type-size-card {
+  padding: 1rem;
+  border: 1px solid rgba(203, 189, 170, 0.45);
+  border-radius: 1rem;
+  background: var(--om-color-surface-muted);
+}
+
+.om-product-type-checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.65rem 1rem;
+}
+
+.product-type-template-list .list-group-item.active {
+  border-color: var(--bs-primary);
+  background: rgba(112, 106, 95, 0.12);
+  color: inherit;
+}
+
+.product-type-template-group-card .border.rounded-4,
+.product-database-product-type-card .alert-light.border {
+  background: var(--om-color-surface-muted);
+}
+
 .rights-management-search {
   min-width: min(100%, 260px);
 }
@@ -2838,5 +2874,16 @@ button.om-item-order-presence-label {
 
   .packed-goods-filter-field--po {
     max-width: 160px;
+  }
+}
+
+@media (max-width: 991.98px) {
+  .product-database-modal-dialog {
+    width: min(100vw - 1rem, 100%);
+    max-width: min(100vw - 1rem, 100%);
+  }
+
+  .om-product-type-group-card .card-header {
+    padding-inline: 1rem;
   }
 }

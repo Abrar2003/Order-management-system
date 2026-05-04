@@ -4340,6 +4340,8 @@ exports.updateQC = async (req, res) => {
           .toLowerCase() === "true");
     const allowAdminRewrite = adminRewriteLatestRecord;
     const allowQcFieldEdits = allowAdminRewrite || isQcUser;
+    const allowQcSizeFieldEdits =
+      allowAdminRewrite || isQcUser || isManager;
     const barcodeScannedByQcUser =
       barcode_scanned === true ||
       String(barcode_scanned || "").trim().toLowerCase() === "true";
@@ -4954,7 +4956,7 @@ exports.updateQC = async (req, res) => {
       });
     }
 
-    if (hasInspectedLbhUpdate && !allowQcFieldEdits) {
+    if (hasInspectedLbhUpdate && !allowQcSizeFieldEdits) {
       const assertWriteOnceLbh = (incomingValue, existingValue, fieldName) => {
         if (!incomingValue) return;
         if (
@@ -4999,7 +5001,7 @@ exports.updateQC = async (req, res) => {
       );
     }
 
-    if (hasInspectedWeightUpdate && !allowQcFieldEdits) {
+    if (hasInspectedWeightUpdate && !allowQcSizeFieldEdits) {
       for (const fieldKey of INSPECTED_WEIGHT_FIELD_KEYS) {
         const parsedField = parsedInspectedWeightFields[fieldKey];
         if (!parsedField?.hasInput) continue;
@@ -5064,7 +5066,7 @@ exports.updateQC = async (req, res) => {
       hasCompletePositiveLbh(effectiveInspectedTopLbh) ||
       hasCompletePositiveLbh(effectiveInspectedBottomLbh);
 
-    if (hasCbmUpdate && cbmLockedByLbh && !allowQcFieldEdits) {
+    if (hasCbmUpdate && cbmLockedByLbh && !allowQcSizeFieldEdits) {
       return res.status(400).json({
         message:
           "CBM fields are locked because inspected LBH is present. Update LBH instead.",

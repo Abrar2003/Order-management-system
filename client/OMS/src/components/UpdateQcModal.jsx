@@ -685,6 +685,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const barcodeReaderControlsRef = useRef(null);
   const barcodeUploadInputRef = useRef(null);
   const canEditLockedQcFields = canRewriteLatestInspectionRecord || isQcUser;
+  const canEditLockedQcSizeFields =
+    canRewriteLatestInspectionRecord || isQcUser || isManager;
   const lockBarcodeField =
     (qc?.master_barcode || qc?.barcode) > 0 && !canEditLockedQcFields;
   const lockInnerBarcodeField = qc?.inner_barcode > 0 && !canEditLockedQcFields;
@@ -1634,9 +1636,9 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       bottomRemark: "base",
     }).filter((entry) => hasMeaningfulMeasuredSize(entry));
     const lockInspectedItemSection =
-      !canEditLockedQcFields && existingItemSizeEntries.length > 0;
+      !canEditLockedQcSizeFields && existingItemSizeEntries.length > 0;
     const lockInspectedBoxSection =
-      !canEditLockedQcFields && existingBoxSizeEntries.length > 0;
+      !canEditLockedQcSizeFields && existingBoxSizeEntries.length > 0;
     const inspectedItemSizePayload = parseMeasuredSizeEntries({
       entries: form.inspected_item_sizes,
       count: form.inspected_item_count,
@@ -2257,9 +2259,9 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     bottomRemark: "base",
   }).filter((entry) => hasMeaningfulMeasuredSize(entry));
   const lockInspectedItemSection =
-    !canEditLockedQcFields && existingItemSizeEntries.length > 0;
+    !canEditLockedQcSizeFields && existingItemSizeEntries.length > 0;
   const lockInspectedBoxSection =
-    !canEditLockedQcFields && existingBoxSizeEntries.length > 0;
+    !canEditLockedQcSizeFields && existingBoxSizeEntries.length > 0;
   const hasLockedInspectedWeight = lockInspectedItemSection || lockInspectedBoxSection;
   const hasAnyLockedInspectedLbh = hasLockedInspectedWeight;
   const displayedItemEntries = ensureMeasuredSizeEntryCount(
@@ -2624,7 +2626,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 <h6 className="mb-0">Inspected Measurements</h6>
               </div>
 
-              {hasAnyLockedInspectedLbh && !canEditLockedQcFields && (
+              {hasAnyLockedInspectedLbh && !canEditLockedQcSizeFields && (
                 <div className="col-12">
                   <div className="small text-secondary">
                     Existing inspected measurement entries are locked after first update.

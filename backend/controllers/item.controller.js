@@ -2,6 +2,7 @@ const Item = require("../models/item.model");
 const Order = require("../models/order.model");
 const QC = require("../models/qc.model");
 const Inspection = require("../models/inspection.model");
+const ProductTypeTemplate = require("../models/productTypeTemplate.model");
 const mongoose = require("mongoose");
 const crypto = require("crypto");
 const fs = require("fs/promises");
@@ -58,6 +59,12 @@ const {
   buildProductDatabaseRow,
   normalizePdStatus,
 } = require("../helpers/productDatabase");
+const {
+  buildProductTypeSnapshot,
+  mapUploadedRowToProductSpecs,
+  normalizeProductSpecsPayload,
+  normalizeTemplateKey,
+} = require("../helpers/productTypeTemplates");
 
 const escapeRegex = (value = "") =>
   String(value)
@@ -927,6 +934,124 @@ const parseJsonBodyField = (value, fieldLabel) => {
   }
 };
 
+const resolveProductTypeTemplateSelection = (payload = {}) => ({
+  templateId: normalizeTextField(
+    payload?.product_type_template_id ||
+      payload?.product_type_template ||
+      payload?.product_type?.template ||
+      "",
+  ),
+  templateKey: normalizeTemplateKey(
+    payload?.product_type_key || payload?.product_type?.key || "",
+  ),
+  templateVersion: Number.parseInt(
+    String(payload?.product_type?.version ?? payload?.product_type_version ?? "").trim(),
+    10,
+  ),
+});
+
+const findProductTypeTemplateForItemPayload = async (payload = {}) => {
+  const { templateId, templateKey, templateVersion } =
+    resolveProductTypeTemplateSelection(payload);
+
+  if (templateId) {
+    if (!mongoose.Types.ObjectId.isValid(templateId)) {
+      throw createHttpError(400, "product_type template id is invalid");
+    }
+
+    const templateDoc = await ProductTypeTemplate.findOne({
+      _id: templateId,
+      status: { $ne: "archived" },
+    });
+    if (!templateDoc) {
+      throw createHttpError(404, "Selected product type template was not found");
+    }
+    return templateDoc;
+  }
+
+  if (!templateKey) return null;
+
+  const templateMatch = {
+    key: templateKey,
+    status: "active",
+  };
+  if (Number.isFinite(templateVersion) && templateVersion > 0) {
+    templateMatch.version = templateVersion;
+  }
+
+  const templateDoc = await ProductTypeTemplate.findOne(templateMatch)
+    .sort({ version: -1, updatedAt: -1 });
+
+  if (!templateDoc) {
+    throw createHttpError(
+      404,
+      `Active product type template not found for key ${templateKey}`,
+    );
+  }
+
+  return templateDoc;
+};
+
+const resolveItemProductTypeContext = async (payload = {}) => {
+  const parsedProductRow = parseJsonBodyField(
+    payload?.product_row ?? payload?.uploaded_row,
+    "product_row",
+  );
+  const parsedProductSpecs = parseJsonBodyField(
+    payload?.product_specs,
+    "product_specs",
+  );
+
+  if (parsedProductRow !== undefined && parsedProductSpecs !== undefined) {
+    throw createHttpError(
+      400,
+      "Provide either product_row or product_specs, not both",
+    );
+  }
+
+  const templateDoc = await findProductTypeTemplateForItemPayload(payload);
+  const needsTemplate = Boolean(
+    templateDoc || parsedProductRow !== undefined || parsedProductSpecs !== undefined,
+  );
+
+  if (!needsTemplate) {
+    return {
+      templateDoc: null,
+      productTypeSnapshot: null,
+      productSpecs: null,
+      commonFields: {},
+    };
+  }
+
+  if (!templateDoc) {
+    throw createHttpError(
+      400,
+      "product_type template selection is required when product_row or product_specs is provided",
+    );
+  }
+
+  let productSpecs = null;
+  let commonFields = {};
+
+  if (parsedProductRow !== undefined) {
+    const mappedSpecs = mapUploadedRowToProductSpecs(
+      parsedProductRow,
+      templateDoc.toObject({ depopulate: true }),
+    );
+    commonFields = mappedSpecs.common_fields || {};
+    productSpecs = normalizeProductSpecsPayload(mappedSpecs);
+  } else if (parsedProductSpecs !== undefined) {
+    productSpecs = normalizeProductSpecsPayload(parsedProductSpecs);
+  }
+
+  return {
+    templateDoc,
+    productTypeSnapshot: buildProductTypeSnapshot(templateDoc),
+    productSpecs,
+    commonFields,
+  };
+};
+
 const uploadPisSpreadsheetForItem = async ({
   itemCode = "",
   itemId = "",
@@ -1116,6 +1241,8 @@ const PRODUCT_DATABASE_ITEM_SELECT = [
   "brand_name",
   "brands",
   "vendors",
+  "product_type",
+  "product_specs",
   "pd_item_sizes",
   "pd_box_sizes",
   "pd_box_mode",
@@ -3204,11 +3331,22 @@ exports.getItemOrderPresence = async (req, res) => {
 exports.createItem = async (req, res) => {
   try {
     const payload = req.body && typeof req.body === "object" ? req.body : {};
-    const code = normalizeTextField(payload.code).toUpperCase();
-    const name = normalizeTextField(payload.name);
-    const description = normalizeTextField(payload.description);
+    const productTypeContext = await resolveItemProductTypeContext(payload);
+    const importedCommonFields = productTypeContext.commonFields || {};
+    const code = normalizeTextField(
+      payload.code || importedCommonFields.code,
+    ).toUpperCase();
+    const description = normalizeTextField(
+      payload.description || importedCommonFields.description,
+    );
+    const name = normalizeTextField(
+      payload.name || importedCommonFields.name || description,
+    );
     const brand = normalizeTextField(payload.brand);
     const vendor = normalizeTextField(payload.vendor);
+    const importedPisMasterBarcode = normalizeTextField(
+      importedCommonFields.pis_master_barcode || importedCommonFields.pis_barcode,
+    );
 
     if (!code) {
       return res.status(400).json({
@@ -3314,6 +3452,12 @@ exports.createItem = async (req, res) => {
       brand_name: brand,
       brands: [brand],
       vendors: [vendor],
+      ...(productTypeContext.productTypeSnapshot
+        ? { product_type: productTypeContext.productTypeSnapshot }
+        : {}),
+      ...(productTypeContext.productSpecs
+        ? { product_specs: productTypeContext.productSpecs }
+        : {}),
       pis_item_sizes: parsedPisItemSizes,
       pis_box_sizes: parsedPisBoxSizes,
       pis_box_mode: parsedPisBoxMode,
@@ -3335,6 +3479,12 @@ exports.createItem = async (req, res) => {
         from_orders: false,
         from_qc: false,
       },
+      ...(importedPisMasterBarcode
+        ? {
+            pis_master_barcode: importedPisMasterBarcode,
+            pis_barcode: importedPisMasterBarcode,
+          }
+        : {}),
     });
 
     applyCalculatedCbmTotals(item, (pathKey, pathValue) => {
@@ -3443,6 +3593,8 @@ exports.updateItem = async (req, res) => {
       });
     }
 
+    const productTypeContext = await resolveItemProductTypeContext(payload);
+
     let touched = false;
     const setPath = (path, value) => {
       touched = true;
@@ -3458,6 +3610,14 @@ exports.updateItem = async (req, res) => {
 
     if (hasOwn(payload, "description")) {
       setPath("description", normalizeTextField(payload.description));
+    }
+
+    if (productTypeContext.productTypeSnapshot) {
+      setPath("product_type", productTypeContext.productTypeSnapshot);
+    }
+
+    if (productTypeContext.productSpecs) {
+      setPath("product_specs", productTypeContext.productSpecs);
     }
 
     if (payload?.inspected_weight && typeof payload.inspected_weight === "object") {

@@ -399,7 +399,7 @@ const QcDetails = () => {
     qc,
   });
   const canShowEditShippingButton =
-    isOnlyAdmin && hasShippingRecords;
+    isAdmin && hasShippingRecords;
 
   const pendingAlignmentInfo = useMemo(
     () => getQcPendingAlignmentInfo(qc),

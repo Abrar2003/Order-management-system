@@ -47,41 +47,14 @@ const PermissionManagement = () => {
   const isLockedCell = useCallback(
     (moduleKey, action) => {
       if (selectedRole === "admin") return false;
-
-      const pisLock = meta?.locked?.pis;
-      const permissionsLock = meta?.locked?.permissions;
-
-      if (
-        moduleKey === "pis" &&
-        Array.isArray(pisLock?.actions) &&
-        pisLock.actions.includes(action)
-      ) {
-        return true;
-      }
-
-      if (
-        moduleKey === "permissions" &&
-        Array.isArray(permissionsLock?.actions) &&
-        permissionsLock.actions.includes(action)
-      ) {
-        return true;
-      }
-
-      return false;
+      const lockMeta = meta?.locked?.[moduleKey];
+      return Array.isArray(lockMeta?.actions) && lockMeta.actions.includes(action);
     },
     [meta?.locked, selectedRole],
   );
 
   const getLockMessage = useCallback(
-    (moduleKey) => {
-      if (moduleKey === "pis") {
-        return meta?.locked?.pis?.message || "PIS mutation rights are admin-only.";
-      }
-      if (moduleKey === "permissions") {
-        return meta?.locked?.permissions?.message || "Permission management is admin-only.";
-      }
-      return "";
-    },
+    (moduleKey) => meta?.locked?.[moduleKey]?.message || "",
     [meta?.locked],
   );
 
@@ -298,7 +271,7 @@ const PermissionManagement = () => {
                     <tr key={module.key}>
                       <th scope="row">
                         <div>{module.label}</div>
-                        {(module.key === "pis" || module.key === "permissions") &&
+                        {meta?.locked?.[module.key] &&
                           selectedRole !== "admin" && (
                             <div className="small text-secondary">
                               {getLockMessage(module.key)}

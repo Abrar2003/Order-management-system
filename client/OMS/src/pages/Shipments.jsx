@@ -8,6 +8,7 @@ import ShippingModal from "../components/ShippingModal";
 import EditOrderModal from "../components/EditOrderModal";
 import EditSampleModal from "../components/EditSampleModal";
 import SampleModal from "../components/SampleModal";
+import { getUserFromToken } from "../auth/auth.service";
 import { usePermissions } from "../auth/PermissionContext";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
@@ -100,10 +101,19 @@ const Shipments = () => {
     searchParams.get("sort_order"),
     initialSortBy,
   );
+  const user = getUserFromToken();
+  const normalizedRole = String(user?.role || "").trim().toLowerCase();
+  const hasRoleShipmentAccess =
+    normalizedRole === "admin" ||
+    normalizedRole === "manager" ||
+    normalizedRole === "dev";
   const { hasPermission } = usePermissions();
-  const canFinalizeShipping = hasPermission("shipments", "edit");
-  const canCheckShipments = hasPermission("shipments", "edit");
-  const canEditShipments = hasPermission("shipments", "edit");
+  const canFinalizeShipping =
+    hasPermission("shipments", "edit") || hasRoleShipmentAccess;
+  const canCheckShipments =
+    hasPermission("shipments", "edit") || hasRoleShipmentAccess;
+  const canEditShipments =
+    hasPermission("shipments", "edit") || hasRoleShipmentAccess;
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);

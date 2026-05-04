@@ -4,6 +4,10 @@ const {
   BOX_PACKAGING_MODES,
   detectBoxPackagingMode,
 } = require("./boxMeasurement");
+const {
+  normalizeProductSpecsPayload,
+  normalizeTemplateKey,
+} = require("./productTypeTemplates");
 
 const SIZE_ENTRY_LIMIT = 4;
 const PD_STATUSES = Object.freeze({
@@ -30,6 +34,11 @@ const normalizeKey = (value) => normalizeText(value).toLowerCase();
 const normalizeRole = (value) => normalizeKey(value);
 const normalizeId = (value) =>
   String(value?._id || value?.user || value || "").trim();
+const normalizeVersion = (value) => {
+  const parsed = Number.parseInt(String(value ?? "").trim(), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 1;
+  return parsed;
+};
 
 class ProductDatabaseError extends Error {
   constructor(message, statusCode = 400) {
@@ -233,6 +242,25 @@ const extractProductDatabaseFields = (item = {}) => {
     pd_item_sizes: normalizeItemSizeEntries(item?.pd_item_sizes || []),
     pd_box_sizes: normalizeBoxSizeEntries(item?.pd_box_sizes || [], pdBoxMode),
     pd_box_mode: pdBoxMode,
+    product_type:
+      item?.product_type && typeof item.product_type === "object"
+        ? {
+            template: item.product_type.template || null,
+            key: normalizeTemplateKey(item.product_type.key),
+            label: normalizeText(item.product_type.label),
+            version: normalizeVersion(item.product_type.version),
+          }
+        : null,
+    product_specs:
+      item?.product_specs && typeof item.product_specs === "object"
+        ? normalizeProductSpecsPayload(item.product_specs)
+        : {
+            fields: [],
+            item_sizes: [],
+            box_sizes: [],
+            box_mode: BOX_PACKAGING_MODES.INDIVIDUAL,
+            raw_values: {},
+          },
   };
 };
 
@@ -240,6 +268,8 @@ const normalizeProductDatabaseInput = (payload = {}) => {
   const hasItemSizes = hasOwn(payload, "pd_item_sizes");
   const hasBoxSizes = hasOwn(payload, "pd_box_sizes");
   const hasBoxMode = hasOwn(payload, "pd_box_mode");
+  const hasProductType = hasOwn(payload, "product_type");
+  const hasProductSpecs = hasOwn(payload, "product_specs");
   const data = {};
 
   if (hasItemSizes) {
@@ -255,8 +285,58 @@ const normalizeProductDatabaseInput = (payload = {}) => {
     }
   }
 
+  if (hasProductType || hasProductSpecs) {
+    const productType = payload?.product_type;
+    const hasSelectedProductType =
+      productType &&
+      typeof productType === "object" &&
+      (normalizeTemplateKey(productType?.key) || normalizeId(productType?.template));
+
+    if (!hasSelectedProductType && hasProductSpecs) {
+      throw new ProductDatabaseError(
+        "Product type selection is required when product specs are provided",
+      );
+    }
+
+    if (hasSelectedProductType) {
+      data.product_type = {
+        template: normalizeId(productType?.template) || null,
+        key: normalizeTemplateKey(productType?.key),
+        label: normalizeText(productType?.label),
+        version: normalizeVersion(productType?.version),
+      };
+    } else if (hasProductType) {
+      data.product_type = null;
+    }
+
+    if (hasProductSpecs) {
+      data.product_specs = hasSelectedProductType
+        ? normalizeProductSpecsPayload(payload?.product_specs || {})
+        : {
+            fields: [],
+            item_sizes: [],
+            box_sizes: [],
+            box_mode: BOX_PACKAGING_MODES.INDIVIDUAL,
+            raw_values: {},
+          };
+    } else if (hasProductType && data.product_type === null) {
+      data.product_specs = {
+        fields: [],
+        item_sizes: [],
+        box_sizes: [],
+        box_mode: BOX_PACKAGING_MODES.INDIVIDUAL,
+        raw_values: {},
+      };
+    }
+  }
+
   return {
-    hasInput: hasItemSizes || hasBoxSizes || hasBoxMode,
+    hasInput:
+      hasItemSizes ||
+      hasBoxSizes ||
+      hasBoxMode ||
+      hasProductType ||
+      hasProductSpecs,
     data,
   };
 };
@@ -273,19 +353,27 @@ const mergeProductDatabaseFields = (currentState = {}, inputData = {}) => {
       : normalizeItemSizeEntries(currentState.pd_item_sizes || []),
     pd_box_sizes: nextBoxSizes,
     pd_box_mode: detectBoxPackagingMode(nextBoxMode, nextBoxSizes),
+    product_type: hasOwn(inputData, "product_type")
+      ? inputData.product_type
+      : currentState.product_type || null,
+    product_specs: hasOwn(inputData, "product_specs")
+      ? normalizeProductSpecsPayload(inputData.product_specs || {})
+      : normalizeProductSpecsPayload(currentState.product_specs || {}),
   };
 };
 
 const stableStringify = (value) => JSON.stringify(value || null);
 
 const getChangedProductDatabaseFields = (currentState = {}, nextState = {}) =>
-  ["pd_item_sizes", "pd_box_sizes", "pd_box_mode"].filter(
+  ["pd_item_sizes", "pd_box_sizes", "pd_box_mode", "product_type", "product_specs"].filter(
     (field) => stableStringify(currentState?.[field]) !== stableStringify(nextState?.[field]),
   );
 
 const hasProductDatabaseData = (state = {}) =>
   (Array.isArray(state?.pd_item_sizes) && state.pd_item_sizes.length > 0) ||
-  (Array.isArray(state?.pd_box_sizes) && state.pd_box_sizes.length > 0);
+  (Array.isArray(state?.pd_box_sizes) && state.pd_box_sizes.length > 0) ||
+  (Array.isArray(state?.product_specs?.item_sizes) && state.product_specs.item_sizes.length > 0) ||
+  (Array.isArray(state?.product_specs?.box_sizes) && state.product_specs.box_sizes.length > 0);
 
 const appendPdHistory = (
   item,
@@ -312,6 +400,14 @@ const setProductDatabaseFields = (item, state = {}) => {
   item.pd_item_sizes = state.pd_item_sizes || [];
   item.pd_box_sizes = state.pd_box_sizes || [];
   item.pd_box_mode = state.pd_box_mode || BOX_PACKAGING_MODES.INDIVIDUAL;
+  item.product_type = state.product_type || undefined;
+  item.product_specs = state.product_specs || {
+    fields: [],
+    item_sizes: [],
+    box_sizes: [],
+    box_mode: BOX_PACKAGING_MODES.INDIVIDUAL,
+    raw_values: {},
+  };
 };
 
 const clearReviewActors = (item) => {
@@ -377,10 +473,12 @@ const applyProductDatabaseSave = ({ item, payload = {}, user = {} } = {}) => {
   const changedFields = getChangedProductDatabaseFields(currentState, nextState);
 
   if (!input.hasInput) {
-    throw new ProductDatabaseError("Product Database size data is required");
+    throw new ProductDatabaseError("Product Database measurement data is required");
   }
   if (!hasProductDatabaseData(nextState)) {
-    throw new ProductDatabaseError("At least one PD item or box size is required");
+    throw new ProductDatabaseError(
+      "At least one product item size or box size is required",
+    );
   }
 
   if (changedFields.length > 0 || !previousStatus) {
@@ -421,7 +519,9 @@ const applyProductDatabaseCheck = ({ item, payload = {}, user = {} } = {}) => {
   const changedFields = getChangedProductDatabaseFields(currentState, nextState);
 
   if (!hasProductDatabaseData(nextState)) {
-    throw new ProductDatabaseError("At least one PD item or box size is required before checking");
+    throw new ProductDatabaseError(
+      "At least one product item size or box size is required before checking",
+    );
   }
 
   if (changedFields.length > 0) {
@@ -490,7 +590,9 @@ const applyProductDatabaseApprove = ({ item, payload = {}, user = {} } = {}) => 
   const changedFields = getChangedProductDatabaseFields(currentState, nextState);
 
   if (!hasProductDatabaseData(nextState)) {
-    throw new ProductDatabaseError("At least one PD item or box size is required before approving");
+    throw new ProductDatabaseError(
+      "At least one product item size or box size is required before approving",
+    );
   }
 
   if (changedFields.length === 0 && previousStatus !== PD_STATUSES.CHECKED) {
@@ -578,6 +680,8 @@ const buildProductDatabaseRow = (item = {}, user = {}) => {
     pd_item_sizes: state.pd_item_sizes,
     pd_box_sizes: state.pd_box_sizes,
     pd_box_mode: state.pd_box_mode,
+    product_type: state.product_type,
+    product_specs: state.product_specs,
     pd_checked: status,
     pd_created_by: item?.pd_created_by || null,
     pd_checked_by: item?.pd_checked_by || null,

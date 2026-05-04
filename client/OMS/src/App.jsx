@@ -45,6 +45,7 @@ import PendingPoReport from "./pages/PendingPoReport";
 import ProductAnalytics from "./pages/ProductAnalytics";
 import QcReportMismatch from "./pages/QcReportMismatch";
 import ProductDatabase from "./pages/ProductDatabase";
+import ProductTypeTemplates from "./pages/ProductTypeTemplates";
 import PermissionManagement from "./pages/PermissionManagement";
 import PIS from "./pages/PIS";
 import PISDiffs from "./pages/PISDiffs";
@@ -495,6 +496,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <PermissionManagement />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/settings/product-type-templates"
+            element={
+              <ProtectedRoute>
+                <ProductTypeTemplates />
               </ProtectedRoute>
             }
           />

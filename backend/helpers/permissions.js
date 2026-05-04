@@ -23,6 +23,7 @@ const PERMISSION_MODULES = Object.freeze([
   { key: "inspections", label: "Inspections" },
   { key: "items", label: "Items" },
   { key: "product_database", label: "Product Database" },
+  { key: "product_type_templates", label: "Product Type Templates" },
   { key: "pis", label: "PIS" },
   { key: "uploads", label: "Uploads" },
   { key: "shipments", label: "Shipments" },
@@ -48,6 +49,18 @@ const PIS_ADMIN_ONLY_ACTIONS = Object.freeze([
   "delete",
   "approve",
   "upload",
+  "sync",
+  "manage",
+]);
+
+const PRODUCT_TYPE_TEMPLATE_ADMIN_ONLY_ACTIONS = Object.freeze([
+  "create",
+  "edit",
+  "delete",
+  "approve",
+  "upload",
+  "export",
+  "assign",
   "sync",
   "manage",
 ]);
@@ -93,6 +106,15 @@ const lockAdminOnlyPermissions = (roleKey, permissions) => {
     }
   });
 
+  PRODUCT_TYPE_TEMPLATE_ADMIN_ONLY_ACTIONS.forEach((action) => {
+    if (
+      permissions?.product_type_templates &&
+      action in permissions.product_type_templates
+    ) {
+      permissions.product_type_templates[action] = false;
+    }
+  });
+
   PERMISSION_ADMIN_ONLY_ACTIONS.forEach((action) => {
     if (permissions?.permissions && action in permissions.permissions) {
       permissions.permissions[action] = false;
@@ -128,6 +150,7 @@ const buildUserPermissions = () => {
     "inspections",
     "items",
     "product_database",
+    "product_type_templates",
     "pis",
     "shipments",
     "containers",
@@ -158,6 +181,7 @@ const buildQcPermissions = () => {
     "inspections",
     "items",
     "pis",
+    "product_type_templates",
     "shipments",
     "containers",
     "samples",
@@ -247,6 +271,12 @@ const isPermissionCellLocked = (role, moduleKey, action) => {
   if (roleKey === "admin") return false;
   if (moduleKey === "permissions") return true;
   if (moduleKey === "pis" && PIS_ADMIN_ONLY_ACTIONS.includes(action)) return true;
+  if (
+    moduleKey === "product_type_templates" &&
+    PRODUCT_TYPE_TEMPLATE_ADMIN_ONLY_ACTIONS.includes(action)
+  ) {
+    return true;
+  }
   return false;
 };
 
@@ -259,6 +289,11 @@ const buildPermissionMeta = () => ({
       roles: ROLE_KEYS.filter((role) => role !== "admin"),
       actions: PIS_ADMIN_ONLY_ACTIONS,
       message: "PIS data edit rights are admin-only and cannot be assigned to manager or other roles.",
+    },
+    product_type_templates: {
+      roles: ROLE_KEYS.filter((role) => role !== "admin"),
+      actions: PRODUCT_TYPE_TEMPLATE_ADMIN_ONLY_ACTIONS,
+      message: "Product type template create/update/archive rights are admin-only.",
     },
     permissions: {
       roles: ROLE_KEYS.filter((role) => role !== "admin"),
@@ -283,6 +318,7 @@ module.exports = {
   PERMISSION_MODULES,
   ROLE_KEYS,
   PIS_ADMIN_ONLY_ACTIONS,
+  PRODUCT_TYPE_TEMPLATE_ADMIN_ONLY_ACTIONS,
   clonePermissions: clone,
   buildPermissionMeta,
   buildAuditActor,
