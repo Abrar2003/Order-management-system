@@ -24,6 +24,7 @@ const PERMISSION_MODULES = Object.freeze([
   { key: "items", label: "Items" },
   { key: "product_database", label: "Product Database" },
   { key: "product_type_templates", label: "Product Type Templates" },
+  { key: "workflow", label: "Workflow" },
   { key: "pis", label: "PIS" },
   { key: "uploads", label: "Uploads" },
   { key: "shipments", label: "Shipments" },
@@ -151,6 +152,7 @@ const buildUserPermissions = () => {
     "items",
     "product_database",
     "product_type_templates",
+    "workflow",
     "pis",
     "shipments",
     "containers",
@@ -182,6 +184,7 @@ const buildQcPermissions = () => {
     "items",
     "pis",
     "product_type_templates",
+    "workflow",
     "shipments",
     "containers",
     "samples",
@@ -238,7 +241,10 @@ const mergePermissionsWithDefaults = (role, permissions = {}) => {
 
   PERMISSION_MODULES.forEach((module) => {
     PERMISSION_ACTIONS.forEach((action) => {
-      if (permissions?.[module.key] && Object.prototype.hasOwnProperty.call(permissions[module.key], action)) {
+      if (
+        permissions?.[module.key]
+        && Object.prototype.hasOwnProperty.call(permissions[module.key], action)
+      ) {
         merged[module.key][action] = normalized[module.key][action];
       }
     });

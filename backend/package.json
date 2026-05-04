@@ -9,6 +9,7 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "seed:product-types": "node scripts/seedProductTypeTemplates.js",
+    "seed:workflow-task-types": "node scripts/seedWorkflowTaskTypes.js",
     "wasabi:cors": "node scripts/setWasabiCors.js",
     "export:pis:pdf": "node scripts/exportPisPdfExample.js",
     "sync:pis": "node scripts/syncPisWorkbooks.js",

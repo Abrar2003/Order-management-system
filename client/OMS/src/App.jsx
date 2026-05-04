@@ -46,6 +46,12 @@ import ProductAnalytics from "./pages/ProductAnalytics";
 import QcReportMismatch from "./pages/QcReportMismatch";
 import ProductDatabase from "./pages/ProductDatabase";
 import ProductTypeTemplates from "./pages/ProductTypeTemplates";
+import WorkflowBatches from "./pages/WorkflowBatches";
+import WorkflowBatchDetail from "./pages/WorkflowBatchDetail";
+import WorkflowTasks from "./pages/WorkflowTasks";
+import WorkflowMyTasks from "./pages/WorkflowMyTasks";
+import WorkflowTaskTypes from "./pages/WorkflowTaskTypes";
+import WorkflowDepartments from "./pages/WorkflowDepartments";
 import PermissionManagement from "./pages/PermissionManagement";
 import PIS from "./pages/PIS";
 import PISDiffs from "./pages/PISDiffs";
@@ -505,6 +511,60 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <ProductTypeTemplates />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/workflow/batches"
+            element={
+              <ProtectedRoute>
+                <WorkflowBatches />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/workflow/batches/:batchId"
+            element={
+              <ProtectedRoute>
+                <WorkflowBatchDetail />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/workflow/tasks"
+            element={
+              <ProtectedRoute>
+                <WorkflowTasks />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/workflow/my-tasks"
+            element={
+              <ProtectedRoute>
+                <WorkflowMyTasks />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/workflow/task-types"
+            element={
+              <ProtectedRoute>
+                <WorkflowTaskTypes />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/workflow/departments"
+            element={
+              <ProtectedRoute>
+                <WorkflowDepartments />
               </ProtectedRoute>
             }
           />

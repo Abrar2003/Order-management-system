@@ -89,6 +89,9 @@ const Navbar = () => {
   const canManageProductDatabase = hasPermission("product_database", "view");
   const canUploadFinish = hasPermission("finishes", "upload");
   const canViewPis = hasPermission("pis", "view");
+  const canViewWorkflow = hasPermission("workflow", "view");
+  const canManageWorkflow = ["admin", "manager"].includes(permissionRole)
+    && hasPermission("workflow", "manage");
 
   const closeAllMenus = useCallback(() => {
     setShowMobileMenu(false);
@@ -379,6 +382,25 @@ const Navbar = () => {
     ];
   }, [canViewOrderPages, isQcOnlyRole]);
 
+  const workflowMenuItems = useMemo(() => {
+    if (!canViewWorkflow || isQcOnlyRole) return [];
+
+    const items = [
+      routeMenuItem("workflow-batches", "Batches", "/workflow/batches"),
+      routeMenuItem("workflow-task-board", "Task Board", "/workflow/tasks"),
+      routeMenuItem("workflow-my-tasks", "My Tasks", "/workflow/my-tasks"),
+    ];
+
+    if (canManageWorkflow) {
+      items.push(
+        routeMenuItem("workflow-task-types", "Task Types", "/workflow/task-types"),
+        routeMenuItem("workflow-departments", "Departments", "/workflow/departments"),
+      );
+    }
+
+    return sortEntriesByLabel(items);
+  }, [canManageWorkflow, canViewWorkflow, isQcOnlyRole]);
+
   const settingsMenuItems = useMemo(
     () => {
       const items = [];
@@ -420,6 +442,7 @@ const Navbar = () => {
         { key: "items", label: "Items", items: itemMenuItems },
         { key: "orders", label: "Orders", items: orderMenuItems },
         { key: "reports", label: "Reports", items: reportMenuItems },
+        { key: "workflow", label: "Production Workflow", items: workflowMenuItems },
         { key: "process", label: "Process", items: processMenuItems },
         { key: "update-orders", label: "Update Orders", items: updateOrdersMenuItems },
         { key: "upload-add", label: "Upload - Add", items: uploadAddMenuItems },
@@ -432,6 +455,7 @@ const Navbar = () => {
       orderMenuItems,
       processMenuItems,
       reportMenuItems,
+      workflowMenuItems,
       settingsMenuItems,
       updateOrdersMenuItems,
       uploadAddMenuItems,
@@ -445,6 +469,7 @@ const Navbar = () => {
           section.key === "items" ||
           section.key === "orders" ||
           section.key === "reports" ||
+          section.key === "workflow" ||
           section.key === "process" ||
           section.key === "update-orders" ||
           section.key === "upload-add",
@@ -477,6 +502,7 @@ const Navbar = () => {
           section.key !== "items" &&
           section.key !== "orders" &&
           section.key !== "reports" &&
+          section.key !== "workflow" &&
           section.key !== "process" &&
           section.key !== "update-orders" &&
           section.key !== "upload-add",

@@ -388,6 +388,55 @@ small,
   background: var(--om-color-surface-muted);
 }
 
+.workflow-modal-dialog {
+  width: min(1440px, calc(100vw - 2rem));
+  max-width: min(1440px, calc(100vw - 2rem));
+}
+
+.workflow-user-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem 1rem;
+  max-height: 240px;
+  overflow: auto;
+  padding: 0.95rem 1rem;
+  border: 1px solid rgba(203, 189, 170, 0.55);
+  border-radius: 1rem;
+  background: var(--om-color-surface-muted);
+}
+
+.workflow-summary-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.workflow-preview-card,
+.workflow-action-panel,
+.workflow-comment-card,
+.workflow-member-card {
+  padding: 1rem 1.05rem;
+  border: 1px solid rgba(203, 189, 170, 0.55);
+  border-radius: 1rem;
+  background: var(--om-color-surface-muted);
+}
+
+.workflow-preview-files {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.workflow-preview-file-row {
+  padding: 0.65rem 0.8rem;
+  border-radius: 0.85rem;
+  background: rgba(255, 255, 255, 0.45);
+  border: 1px solid rgba(203, 189, 170, 0.4);
+}
+
+:root[data-theme="dark"] .workflow-preview-file-row {
+  background: rgba(59, 49, 41, 0.45);
+}
+
 .rights-management-search {
   min-width: min(100%, 260px);
 }

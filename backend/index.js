@@ -26,6 +26,7 @@ const reportsRouter = require("./routers/reports.routes");
 const jobsRouter = require("./routers/jobs.routes");
 const permissionsRouter = require("./routers/permissions.routes");
 const productTypeTemplatesRouter = require("./routers/productTypeTemplates.routes");
+const workflowRouter = require("./routers/workflow.routes");
 const { closeRedisClients } = require("./config/redis");
 const { closeQueues } = require("./queues");
 
@@ -111,6 +112,7 @@ app.use("/api/jobs", jobsRouter);
 app.use("/permissions", permissionsRouter);
 app.use("/api/permissions", permissionsRouter);
 app.use("/product-type-templates", productTypeTemplatesRouter);
+app.use("/workflow", workflowRouter);
 
 app.get("/", (req, res) => {
   res.send({ message: "Server OK v2" });
