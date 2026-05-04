@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import {
-  MAX_QC_IMAGE_UPLOAD_COUNT,
+  MAX_QC_IMAGE_UPLOAD_FILES_PER_REQUEST,
   QC_IMAGE_BATCH_SIZE,
   getQcImageFileSignature,
   isSupportedQcImageFile,
@@ -174,7 +174,7 @@ const createSummaryMessage = ({
 export const useBulkQcImageUpload = ({
   qcId = "",
   batchSize = QC_IMAGE_BATCH_SIZE,
-  maxFiles = MAX_QC_IMAGE_UPLOAD_COUNT,
+  maxFiles = MAX_QC_IMAGE_UPLOAD_FILES_PER_REQUEST,
 } = {}) => {
   const [state, setState] = useState(createInitialState);
   const stateRef = useRef(state);
@@ -227,6 +227,11 @@ export const useBulkQcImageUpload = ({
     if (normalizeText(uploadMode).toLowerCase() === "single" && validFiles.length > 1) {
       validFiles = validFiles.slice(0, 1);
       messages.push("Single image mode keeps only the first valid image.");
+    }
+
+    if (maxFiles <= 0) {
+      validFiles = [];
+      messages.push("QC image upload limit reached for this QC record.");
     }
 
     if (validFiles.length > maxFiles) {

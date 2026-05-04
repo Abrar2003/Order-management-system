@@ -1,6 +1,7 @@
 import api from "../api/axios";
 
-export const MAX_QC_IMAGE_UPLOAD_COUNT = 100;
+export const MAX_QC_IMAGE_UPLOAD_FILES_PER_REQUEST = 100;
+export const QC_IMAGE_UPLOAD_LIMIT_PER_INSPECTION_RECORD = 100;
 export const QC_IMAGE_BATCH_SIZE = 10;
 export const SUPPORTED_QC_IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png"];
 export const SUPPORTED_QC_IMAGE_MIME_TYPES = ["image/jpeg", "image/png"];

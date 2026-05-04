@@ -9348,6 +9348,9 @@ exports.editOrder = async (req, res) => {
       .trim()
       .toLowerCase();
     const isRequesterAdmin = requesterRole === "admin";
+    const isRequesterManager = requesterRole === "manager";
+    const canRequesterEditShipmentDetails =
+      isRequesterAdmin || isRequesterManager;
     const archiveRemarkInput = String(
       payload.archive_remark ?? payload.archiveRemark ?? "",
     ).trim();
@@ -9356,9 +9359,9 @@ exports.editOrder = async (req, res) => {
     ).trim();
     const beforeEditSnapshot = buildOrderEditLogSnapshot(order);
 
-    if ((hasQuantity || hasShipment) && !isRequesterAdmin) {
+    if ((hasQuantity || hasShipment) && !canRequesterEditShipmentDetails) {
       return res.status(403).json({
-        message: "Only admin can edit shipping details or final quantity",
+        message: "Only admin or manager can edit shipping details or final quantity",
       });
     }
 

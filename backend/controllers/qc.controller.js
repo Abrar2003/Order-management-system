@@ -50,6 +50,7 @@ const {
 } = require("../helpers/orderStatus");
 const {
   QC_IMAGE_UPLOAD_MODES,
+  QC_IMAGE_UPLOAD_LIMIT_PER_INSPECTION_RECORD,
   MAX_QC_IMAGE_UPLOAD_COUNT,
 } = require("../config/qcImageUpload.config");
 const {
@@ -172,6 +173,25 @@ const toNormalizedCbmString = (value) => {
 };
 
 const normalizeText = (value) => String(value ?? "").trim();
+const getQcInspectionRecordCount = (qc = {}) =>
+  Array.isArray(qc?.inspection_record) ? qc.inspection_record.length : 0;
+const getQcImageUploadTotalLimit = (qc = {}) =>
+  getQcInspectionRecordCount(qc) * QC_IMAGE_UPLOAD_LIMIT_PER_INSPECTION_RECORD;
+const getQcImageCurrentCount = (qc = {}) =>
+  Array.isArray(qc?.qc_images) ? qc.qc_images.length : 0;
+const getRemainingQcImageUploadSlots = (qc = {}) =>
+  Math.max(0, getQcImageUploadTotalLimit(qc) - getQcImageCurrentCount(qc));
+const buildQcImageUploadLimitMessage = (qc = {}) => {
+  const inspectionRecordCount = getQcInspectionRecordCount(qc);
+  const totalLimit = getQcImageUploadTotalLimit(qc);
+  const currentCount = getQcImageCurrentCount(qc);
+
+  if (inspectionRecordCount <= 0) {
+    return "QC image uploads are available only after at least one inspection record exists.";
+  }
+
+  return `QC image limit reached. ${currentCount} of ${totalLimit} images already uploaded (${inspectionRecordCount} inspection record${inspectionRecordCount === 1 ? "" : "s"} x ${QC_IMAGE_UPLOAD_LIMIT_PER_INSPECTION_RECORD}).`;
+};
 const pad2 = (value) => String(value).padStart(2, "0");
 const QC_REQUEST_TYPES = Object.freeze({
   FULL: "FULL",
@@ -9509,7 +9529,7 @@ exports.uploadQcImages = async (req, res) => {
     if (files.length > MAX_QC_IMAGE_UPLOAD_COUNT) {
       return res.status(400).json({
         success: false,
-        message: `You can upload up to ${MAX_QC_IMAGE_UPLOAD_COUNT} QC images at once`,
+        message: `You can upload up to ${MAX_QC_IMAGE_UPLOAD_COUNT} QC images in one request`,
       });
     }
     if (uploadMode === QC_IMAGE_UPLOAD_MODES.SINGLE && files.length !== 1) {
@@ -9531,6 +9551,20 @@ exports.uploadQcImages = async (req, res) => {
         ? normalizeText(req.body?.comment || "")
         : "";
     const uploadedBy = buildAuditActor(req.user);
+    const remainingUploadSlots = getRemainingQcImageUploadSlots(qc);
+    if (remainingUploadSlots <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: buildQcImageUploadLimitMessage(qc),
+        data: {
+          total_limit: getQcImageUploadTotalLimit(qc),
+          current_count: getQcImageCurrentCount(qc),
+          remaining_slots: 0,
+          inspection_record_count: getQcInspectionRecordCount(qc),
+        },
+      });
+    }
+
     const {
       uploadedCount,
       skippedDuplicateCount,
@@ -9547,6 +9581,8 @@ exports.uploadQcImages = async (req, res) => {
       uploadMode,
       singleImageComment,
       uploadedBy,
+      maxSuccessfulUploads: remainingUploadSlots,
+      uploadLimitMessage: buildQcImageUploadLimitMessage(qc),
       requestStartedAt,
     });
 
@@ -9580,6 +9616,10 @@ exports.uploadQcImages = async (req, res) => {
         bytes_saved: bytesSaved,
         processed_count: processedCount,
         total_requested_count: totalRequestedCount,
+        total_limit: getQcImageUploadTotalLimit(qc),
+        current_count: getQcImageCurrentCount(qc) + uploadedCount,
+        remaining_slots: Math.max(0, remainingUploadSlots - uploadedCount),
+        inspection_record_count: getQcInspectionRecordCount(qc),
       },
     });
   } catch (error) {

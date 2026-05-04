@@ -38,7 +38,8 @@ import {
 } from "../utils/orderStatus";
 import {
   downloadSelectedQcImages,
-  MAX_QC_IMAGE_UPLOAD_COUNT,
+  MAX_QC_IMAGE_UPLOAD_FILES_PER_REQUEST,
+  QC_IMAGE_UPLOAD_LIMIT_PER_INSPECTION_RECORD,
 } from "../services/qcImages.service";
 import Barcode from "react-barcode";
 import "../App.css";
@@ -349,6 +350,18 @@ const QcDetails = () => {
 
   const navigate = useNavigate();
   const location = useLocation();
+  const qcInspectionRecordCount = Array.isArray(qc?.inspection_record)
+    ? qc.inspection_record.length
+    : 0;
+  const qcImageCurrentTotalCount = Array.isArray(qc?.qc_images)
+    ? qc.qc_images.length
+    : 0;
+  const qcImageUploadTotalLimit =
+    qcInspectionRecordCount * QC_IMAGE_UPLOAD_LIMIT_PER_INSPECTION_RECORD;
+  const qcImageUploadRemainingSlots = Math.max(
+    0,
+    qcImageUploadTotalLimit - qcImageCurrentTotalCount,
+  );
   const relatedFileInputRef = useRef(null);
   const relatedFileUploadInFlightRef = useRef(false);
   const relatedFileUploadBatchKeyRef = useRef("");
@@ -359,7 +372,10 @@ const QcDetails = () => {
     startUpload: startQcImageUpload,
     retryFailedFiles: retryFailedQcImageFiles,
     reset: resetQcImageUpload,
-  } = useBulkQcImageUpload({ qcId: id });
+  } = useBulkQcImageUpload({
+    qcId: id,
+    maxFiles: qcImageUploadRemainingSlots,
+  });
   const user = getUserFromToken();
   const isViewOnly = isViewOnlyUser(user);
   const normalizedRole = String(user?.role || "").trim().toLowerCase();
@@ -443,6 +459,7 @@ const QcDetails = () => {
   );
   const canUploadQcImages = isAdmin || isQcUser;
   const canUploadItemMasterFiles = isAdmin && canUpdateQc;
+  const canUploadMoreQcImages = qcImageUploadRemainingSlots > 0;
   const canUploadRelatedFile =
     activeRelatedFileConfig?.scope === "qc"
       ? canUploadQcImages
@@ -451,7 +468,10 @@ const QcDetails = () => {
   const canUploadActiveRelatedFile =
     canUploadRelatedFile &&
     (
-      activeRelatedFileConfig?.scope === "qc" ||
+      (
+        activeRelatedFileConfig?.scope === "qc" &&
+        canUploadMoreQcImages
+      ) ||
       Boolean(qc?.item_master?._id)
     );
   const isQcImageUploadType = activeRelatedFileConfig?.value === "qc_images";
@@ -473,6 +493,10 @@ const QcDetails = () => {
       ? "Item master not found for this QC."
       : activeRelatedFileConfig?.scope === "item_master" && !isAdmin
       ? "Only admin or manager can upload item related files."
+      : activeRelatedFileConfig?.scope === "qc" && qcInspectionRecordCount <= 0
+      ? "QC image uploads are available after at least one inspection record exists."
+      : activeRelatedFileConfig?.scope === "qc" && !canUploadMoreQcImages
+      ? `QC image upload limit reached (${qcImageCurrentTotalCount}/${qcImageUploadTotalLimit}).`
       : activeRelatedFileConfig?.scope === "qc"
       ? "Only admin, manager, or QC can upload QC images."
       : "Only admin or manager can upload item related files."
@@ -1606,7 +1630,13 @@ const QcDetails = () => {
                     {" | "}
                     {qcImageUploadMode === "single" ? "Single mode" : "Bulk mode"}
                     {" | "}
-                    Up to {MAX_QC_IMAGE_UPLOAD_COUNT} images total, 10 per request
+                    Limit {qcImageUploadTotalLimit} ({qcInspectionRecordCount} inspection record{qcInspectionRecordCount === 1 ? "" : "s"} x {QC_IMAGE_UPLOAD_LIMIT_PER_INSPECTION_RECORD})
+                    {" | "}
+                    Uploaded {qcImageCurrentTotalCount}
+                    {" | "}
+                    Remaining {qcImageUploadRemainingSlots}
+                    {" | "}
+                    Up to {MAX_QC_IMAGE_UPLOAD_FILES_PER_REQUEST} per request
                   </div>
                 </div>
                 <div className="text-end small text-muted">

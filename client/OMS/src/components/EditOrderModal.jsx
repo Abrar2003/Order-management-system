@@ -369,7 +369,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
                 />
                 {!canEditOrders && (
                   <div className="small text-secondary mt-1">
-                    Only admin can edit quantity or shipping details.
+                    Only admin or manager can edit quantity or shipping details.
                   </div>
                 )}
               </div>

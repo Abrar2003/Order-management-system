@@ -177,7 +177,7 @@ const handleQcImageUploadErrors = (err, _req, res, next) => {
     if (err.code === "LIMIT_FILE_COUNT") {
       return res.status(400).json({
         success: false,
-        message: `You can upload up to ${MAX_QC_IMAGE_UPLOAD_COUNT} QC images at once`,
+        message: `You can upload up to ${MAX_QC_IMAGE_UPLOAD_COUNT} QC images in one request`,
       });
     }
 

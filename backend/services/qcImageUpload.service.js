@@ -79,6 +79,27 @@ const buildQcImageFailureEntry = ({
   ...(normalizeText(stage) ? { stage: normalizeText(stage) } : {}),
 });
 
+const claimUploadSlot = (uploadSlotState = null) => {
+  if (!uploadSlotState || !Number.isFinite(uploadSlotState.remaining)) {
+    return true;
+  }
+
+  if (uploadSlotState.remaining <= 0) {
+    return false;
+  }
+
+  uploadSlotState.remaining -= 1;
+  return true;
+};
+
+const releaseUploadSlot = (uploadSlotState = null) => {
+  if (!uploadSlotState || !Number.isFinite(uploadSlotState.remaining)) {
+    return;
+  }
+
+  uploadSlotState.remaining += 1;
+};
+
 const buildStoredQcImageEntry = ({
   uploadResult = {},
   hash = "",
@@ -300,6 +321,8 @@ const processSingleQcImageFile = async ({
   uploadedAt = null,
   existingHashes = new Set(),
   requestHashes = new Set(),
+  uploadSlotState = null,
+  uploadLimitMessage = "",
 } = {}) => {
   const fallbackOriginalName =
     file?.originalname ||
@@ -308,6 +331,7 @@ const processSingleQcImageFile = async ({
     }`;
   let preparedUpload = null;
   let uploadResult = null;
+  let claimedUploadSlot = false;
 
   try {
     preparedUpload = await prepareSingleQcImageUpload({
@@ -351,6 +375,20 @@ const processSingleQcImageFile = async ({
 
     requestHashes.add(normalizedHash);
 
+    if (!claimUploadSlot(uploadSlotState)) {
+      return {
+        status: "failed",
+        failure: buildQcImageFailureEntry({
+          originalName: preparedUpload?.originalName || fallbackOriginalName,
+          reason:
+            normalizeText(uploadLimitMessage)
+            || "QC image upload limit reached for this record",
+          stage: "limit",
+        }),
+      };
+    }
+    claimedUploadSlot = true;
+
     uploadResult = await uploadPreparedQcImage({
       preparedUpload,
       folder: "qc-images",
@@ -373,6 +411,8 @@ const processSingleQcImageFile = async ({
 
     if (Number(persistResult?.modifiedCount || 0) <= 0) {
       await cleanupUploadedQcImageObject(uploadResult?.key);
+      releaseUploadSlot(uploadSlotState);
+      claimedUploadSlot = false;
       existingHashes.add(normalizedHash);
       return {
         status: "duplicate",
@@ -393,6 +433,11 @@ const processSingleQcImageFile = async ({
       optimizationError: normalizeText(preparedUpload?.optimizationError || ""),
     };
   } catch (error) {
+    if (claimedUploadSlot) {
+      releaseUploadSlot(uploadSlotState);
+      claimedUploadSlot = false;
+    }
+
     if (uploadResult?.key) {
       await cleanupUploadedQcImageObject(uploadResult.key);
     }
@@ -423,6 +468,8 @@ const processQcImageBatch = async ({
   uploadMode = "",
   singleImageComment = "",
   uploadedBy = null,
+  maxSuccessfulUploads = null,
+  uploadLimitMessage = "",
   requestStartedAt = Date.now(),
 } = {}) => {
   const safeFiles = flattenUploadedFiles(files);
@@ -439,7 +486,12 @@ const processQcImageBatch = async ({
   let bytesSaved = 0;
 
   const chunkSize = Math.max(1, QC_IMAGE_PROCESSING_CHUNK_SIZE);
-  const processingConcurrency = Math.max(1, QC_IMAGE_PROCESSING_CONCURRENCY);
+  const processingConcurrency = Number.isFinite(maxSuccessfulUploads)
+    ? 1
+    : Math.max(1, QC_IMAGE_PROCESSING_CONCURRENCY);
+  const uploadSlotState = Number.isFinite(maxSuccessfulUploads)
+    ? { remaining: Math.max(0, Number(maxSuccessfulUploads) || 0) }
+    : null;
   const fileChunks = chunkItems(safeFiles, chunkSize);
 
   logQcImageUploadEvent("start", {
@@ -465,6 +517,8 @@ const processQcImageBatch = async ({
           uploadedAt: new Date(),
           existingHashes,
           requestHashes,
+          uploadSlotState,
+          uploadLimitMessage,
         }),
     );
 
