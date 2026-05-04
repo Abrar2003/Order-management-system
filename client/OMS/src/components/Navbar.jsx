@@ -35,6 +35,13 @@ const groupMenuItem = (key, label, items) => ({
   items: Array.isArray(items) ? items : [],
 });
 
+const sortEntriesByLabel = (entries) =>
+  [...entries].sort((left, right) =>
+    String(left?.label || "").localeCompare(String(right?.label || ""), undefined, {
+      sensitivity: "base",
+    })
+  );
+
 const Navbar = () => {
   const token = getToken();
   const user = getUserFromToken();
@@ -297,36 +304,32 @@ const Navbar = () => {
     return items;
   }, [canManageLabels, hasPermission, isQcOnlyRole]);
 
-  const updateOrdersMenuItems = useMemo(() => {
+  const uploadOrdersMenuItems = useMemo(() => {
     if (!canManageOrders || isQcOnlyRole) return [];
 
     return [
       actionMenuItem(
         "update-orders-excel",
-        "Update Orders by Excel",
+        "Upload Orders by Excel",
         "update-orders-excel",
       ),
       actionMenuItem(
         "update-orders-pdf",
-        "Update Orders by PDF",
+        "Upload Orders by PDF",
         "update-orders-pdf",
       ),
       actionMenuItem(
         "update-orders-manual",
-        "Update Orders Manually",
+        "Upload Orders Manually",
         "update-orders-manual",
       ),
     ];
   }, [canManageOrders, isQcOnlyRole]);
 
-  const uploadAddMenuItems = useMemo(() => {
-    if (!canViewOrderPages || isQcOnlyRole) return [];
+  const updateOrdersMenuItems = useMemo(() => {
+    if (isQcOnlyRole) return [];
 
     const items = [];
-
-    if (canUploadFinish) {
-      items.push(routeMenuItem("upload-finish", "Upload Finish", "/pis?open_finish=1"));
-    }
 
     if (canManageProductDatabase) {
       items.push(routeMenuItem("product-database", "Product Database", "/product-database"));
@@ -334,19 +337,37 @@ const Navbar = () => {
 
     if (canViewPis) {
       items.push(
-        routeMenuItem("pis", "PIS", "/pis"),
-        routeMenuItem("pis-diffs", "Update PIS / QC Reports", "/pis-diffs"),
+        routeMenuItem("update-pis-qc-reports", "Update PIS / QC Reports", "/pis-diffs"),
         routeMenuItem("final-pis-check", "Final PIS Check", "/final-pis-check"),
       );
     }
 
     return items;
+  }, [canManageProductDatabase, canViewPis, isQcOnlyRole]);
+
+  const uploadAddMenuItems = useMemo(() => {
+    if (isQcOnlyRole) return [];
+
+    const items = [];
+
+    if (canUploadFinish) {
+      items.push(routeMenuItem("upload-finish", "Upload Finish", "/pis?open_finish=1"));
+    }
+
+    if (canViewPis) {
+      items.push(routeMenuItem("pis", "PIS", "/pis"));
+    }
+
+    if (uploadOrdersMenuItems.length > 0) {
+      items.push(groupMenuItem("upload-orders", "Upload Orders", uploadOrdersMenuItems));
+    }
+
+    return sortEntriesByLabel(items);
   }, [
-    canManageProductDatabase,
     canUploadFinish,
-    canViewOrderPages,
     canViewPis,
     isQcOnlyRole,
+    uploadOrdersMenuItems,
   ]);
 
   const logMenuItems = useMemo(() => {
@@ -430,6 +451,24 @@ const Navbar = () => {
       ),
     [menuSections],
   );
+
+  const desktopQuickLinkEntries = useMemo(() => {
+    const directLinks = desktopDirectLinks.map((item) => ({
+      kind: "route",
+      key: item.key,
+      label: item.label,
+      item,
+    }));
+
+    const dropdownSections = desktopPrimaryDropdownSections.map((section) => ({
+      kind: "section",
+      key: section.key,
+      label: section.label,
+      section,
+    }));
+
+    return sortEntriesByLabel([...directLinks, ...dropdownSections]);
+  }, [desktopDirectLinks, desktopPrimaryDropdownSections]);
 
   const desktopOverflowSections = useMemo(
     () =>
@@ -551,17 +590,17 @@ const Navbar = () => {
 
     const submenuKey = `${sectionKey}:${item.key}`;
     const isSubmenuOpen = openDesktopSubmenu === submenuKey;
-    const isReportsSection = sectionKey === "reports";
+    const opensOnHover = sectionKey === "reports" || sectionKey === "upload-add";
 
     return (
       <div
         key={submenuKey}
         className="position-relative"
         onMouseEnter={
-          isReportsSection ? () => setOpenDesktopSubmenu(submenuKey) : undefined
+          opensOnHover ? () => setOpenDesktopSubmenu(submenuKey) : undefined
         }
         onMouseLeave={
-          isReportsSection
+          opensOnHover
             ? () =>
                 setOpenDesktopSubmenu((prev) => (prev === submenuKey ? "" : prev))
             : undefined
@@ -661,42 +700,42 @@ const Navbar = () => {
           </nav>
 
           <div className="om-route-bar rounded-4 px-2 py-2 d-none d-lg-flex flex-wrap gap-2 mt-2">
-            {desktopDirectLinks.map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                className="btn btn-outline-primary btn-sm rounded-pill"
-                onClick={() => handleNavigate(item.path)}
-              >
-                {item.label}
-              </button>
-            ))}
-
-            {desktopPrimaryDropdownSections.map((section) => (
-              <div key={`desktop-section-${section.key}`} className="position-relative">
+            {desktopQuickLinkEntries.map((entry) =>
+              entry.kind === "route" ? (
                 <button
+                  key={entry.key}
                   type="button"
-                  className={`btn btn-sm rounded-pill ${openDesktopDropdown === section.key ? "btn-primary" : "btn-outline-primary"}`}
-                  aria-expanded={openDesktopDropdown === section.key}
-                  onClick={() => toggleDesktopDropdown(section.key)}
+                  className="btn btn-outline-primary btn-sm rounded-pill"
+                  onClick={() => handleNavigate(entry.item.path)}
                 >
-                  {section.label}
+                  {entry.item.label}
                 </button>
-
-                {openDesktopDropdown === section.key && (
-                  <div
-                    className="card om-main-menu-dropdown shadow-sm"
-                    style={{ left: 0, right: "auto" }}
+              ) : (
+                <div key={`desktop-section-${entry.section.key}`} className="position-relative">
+                  <button
+                    type="button"
+                    className={`btn btn-sm rounded-pill ${openDesktopDropdown === entry.section.key ? "btn-primary" : "btn-outline-primary"}`}
+                    aria-expanded={openDesktopDropdown === entry.section.key}
+                    onClick={() => toggleDesktopDropdown(entry.section.key)}
                   >
-                    <div className="list-group list-group-flush">
-                      {section.items.map((item) =>
-                        renderDesktopDropdownEntry(item, section.key)
-                      )}
+                    {entry.section.label}
+                  </button>
+
+                  {openDesktopDropdown === entry.section.key && (
+                    <div
+                      className="card om-main-menu-dropdown shadow-sm"
+                      style={{ left: 0, right: "auto" }}
+                    >
+                      <div className="list-group list-group-flush">
+                        {entry.section.items.map((item) =>
+                          renderDesktopDropdownEntry(item, entry.section.key)
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            ))}
+                  )}
+                </div>
+              )
+            )}
 
             {(generalMenuItems.length > 0 || desktopOverflowSections.length > 0) && (
               <div className="position-relative ms-auto">
