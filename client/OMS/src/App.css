@@ -437,6 +437,101 @@ small,
   background: rgba(59, 49, 41, 0.45);
 }
 
+.workflow-dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.workflow-dashboard-stat {
+  position: relative;
+  overflow: hidden;
+}
+
+.workflow-dashboard-stat::after {
+  content: "";
+  position: absolute;
+  right: -2.5rem;
+  bottom: -3rem;
+  width: 9rem;
+  height: 9rem;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(112, 106, 95, 0.18) 0%, rgba(112, 106, 95, 0) 72%);
+  pointer-events: none;
+}
+
+.workflow-dashboard-stat-label {
+  position: relative;
+  z-index: 1;
+  margin-bottom: 0.55rem;
+  color: var(--om-color-text-muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.workflow-dashboard-stat-value {
+  position: relative;
+  z-index: 1;
+  font-size: clamp(1.8rem, 2.8vw, 2.45rem);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--om-color-text);
+}
+
+.workflow-dashboard-stat-note {
+  position: relative;
+  z-index: 1;
+  max-width: 15rem;
+  margin-top: 0.7rem;
+  color: var(--om-color-text-muted);
+  font-size: var(--om-font-size-meta);
+}
+
+.workflow-dashboard-spotlight-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.workflow-dashboard-spotlight-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid rgba(203, 189, 170, 0.55);
+  border-radius: 1rem;
+  background: var(--om-color-surface-muted);
+}
+
+.workflow-dashboard-spotlight-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
+.workflow-dashboard-table th,
+.workflow-dashboard-table td {
+  vertical-align: middle;
+}
+
+.workflow-dashboard-table th {
+  white-space: nowrap;
+}
+
+@media (max-width: 767.98px) {
+  .workflow-dashboard-spotlight-item {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .workflow-dashboard-spotlight-meta {
+    justify-content: flex-start;
+  }
+}
+
 .rights-management-search {
   min-width: min(100%, 260px);
 }

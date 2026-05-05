@@ -200,6 +200,7 @@ const buildUserPermissions = () => {
   grant(permissions, "qc", ["export"]);
   grant(permissions, "reports", ["export"]);
   grant(permissions, "pis", ["export"]);
+  grant(permissions, "images_documents", ["upload"]);
   grant(permissions, "images_documents", ["export"]);
 
   return lockAdminOnlyPermissions("user", permissions);

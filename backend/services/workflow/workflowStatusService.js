@@ -25,6 +25,33 @@ const {
 
 const DEFAULT_PAGE_LIMIT = 20;
 const MAX_PAGE_LIMIT = 100;
+const ACTIVE_TASK_STATUSES = Object.freeze([
+  "pending",
+  "assigned",
+  "in_progress",
+  "submitted",
+  "review",
+  "rework",
+]);
+const AWAITING_REVIEW_TASK_STATUSES = Object.freeze([
+  "submitted",
+  "review",
+]);
+const DASHBOARD_COUNT_FIELDS = Object.freeze([
+  "total_tasks",
+  "open_tasks",
+  "pending_tasks",
+  "assigned_tasks",
+  "in_progress_tasks",
+  "submitted_tasks",
+  "review_tasks",
+  "rework_tasks",
+  "completed_tasks",
+  "cancelled_tasks",
+  "awaiting_review_tasks",
+  "overdue_tasks",
+  "due_today_tasks",
+]);
 
 const normalizeId = (value) => String(value || "").trim();
 
@@ -62,6 +89,12 @@ const serializeTask = (doc = {}) => ({
   task_type_name: normalizeText(doc?.task_type_name || doc?.task_type?.name),
 });
 
+const buildWorkflowDashboardCounts = (doc = {}) =>
+  DASHBOARD_COUNT_FIELDS.reduce((acc, key) => {
+    acc[key] = Number(doc?.[key] || 0);
+    return acc;
+  }, {});
+
 const buildTaskVisibilityMatch = (user = {}) => {
   if (isAdmin(user)) {
     return { is_deleted: false };
@@ -70,6 +103,64 @@ const buildTaskVisibilityMatch = (user = {}) => {
   return {
     is_deleted: false,
     "assigned_to.user": user?._id || null,
+  };
+};
+
+const buildTaskListMatch = ({ query = {}, user = {} } = {}) => {
+  const privilegedReader = isAdmin(user);
+  const match = buildTaskVisibilityMatch(user);
+
+  if (normalizeText(query?.status)) {
+    match.status = normalizeText(query.status).toLowerCase();
+  }
+  if (normalizeText(query?.task_type_key)) {
+    match.task_type_key = normalizeKey(query.task_type_key);
+  }
+  if (normalizeText(query?.batch) && mongoose.Types.ObjectId.isValid(query.batch)) {
+    match.batch = new mongoose.Types.ObjectId(query.batch);
+  }
+  if (
+    privilegedReader &&
+    normalizeText(query?.assignee) &&
+    mongoose.Types.ObjectId.isValid(query.assignee)
+  ) {
+    match["assigned_to.user"] = new mongoose.Types.ObjectId(query.assignee);
+  }
+  if (normalizeText(query?.department) && mongoose.Types.ObjectId.isValid(query.department)) {
+    match.department = new mongoose.Types.ObjectId(query.department);
+  }
+  if (normalizeText(query?.brand)) {
+    match.brand = normalizeText(query.brand);
+  }
+
+  const dueFrom = toDateOrNull(query?.due_date_from);
+  const dueTo = toDateOrNull(query?.due_date_to);
+  if (dueFrom || dueTo) {
+    match.due_date = {};
+    if (dueFrom) {
+      match.due_date.$gte = dueFrom;
+    }
+    if (dueTo) {
+      const nextDay = new Date(dueTo);
+      nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+      match.due_date.$lt = nextDay;
+    }
+  }
+
+  if (normalizeText(query?.search)) {
+    const regex = new RegExp(escapeRegex(normalizeText(query.search)), "i");
+    match.$or = [
+      { task_no: regex },
+      { title: regex },
+      { source_folder_name: regex },
+      { source_folder_path: regex },
+      { brand: regex },
+    ];
+  }
+
+  return {
+    match,
+    privilegedReader,
   };
 };
 
@@ -131,56 +222,7 @@ const listWorkflowTasks = async ({ query = {}, user = {} } = {}) => {
   const page = parsePositiveInt(query?.page, 1);
   const limit = Math.min(MAX_PAGE_LIMIT, parsePositiveInt(query?.limit, DEFAULT_PAGE_LIMIT));
   const skip = (page - 1) * limit;
-  const privilegedReader = isAdmin(user);
-  const match = buildTaskVisibilityMatch(user);
-
-  if (normalizeText(query?.status)) {
-    match.status = normalizeText(query.status).toLowerCase();
-  }
-  if (normalizeText(query?.task_type_key)) {
-    match.task_type_key = normalizeKey(query.task_type_key);
-  }
-  if (normalizeText(query?.batch) && mongoose.Types.ObjectId.isValid(query.batch)) {
-    match.batch = new mongoose.Types.ObjectId(query.batch);
-  }
-  if (
-    privilegedReader &&
-    normalizeText(query?.assignee) &&
-    mongoose.Types.ObjectId.isValid(query.assignee)
-  ) {
-    match["assigned_to.user"] = new mongoose.Types.ObjectId(query.assignee);
-  }
-  if (normalizeText(query?.department) && mongoose.Types.ObjectId.isValid(query.department)) {
-    match.department = new mongoose.Types.ObjectId(query.department);
-  }
-  if (normalizeText(query?.brand)) {
-    match.brand = normalizeText(query.brand);
-  }
-
-  const dueFrom = toDateOrNull(query?.due_date_from);
-  const dueTo = toDateOrNull(query?.due_date_to);
-  if (dueFrom || dueTo) {
-    match.due_date = {};
-    if (dueFrom) {
-      match.due_date.$gte = dueFrom;
-    }
-    if (dueTo) {
-      const nextDay = new Date(dueTo);
-      nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-      match.due_date.$lt = nextDay;
-    }
-  }
-
-  if (normalizeText(query?.search)) {
-    const regex = new RegExp(escapeRegex(normalizeText(query.search)), "i");
-    match.$or = [
-      { task_no: regex },
-      { title: regex },
-      { source_folder_name: regex },
-      { source_folder_path: regex },
-      { brand: regex },
-    ];
-  }
+  const { match } = buildTaskListMatch({ query, user });
 
   const [rows, totalRecords] = await Promise.all([
     populateTaskQuery(
@@ -200,6 +242,213 @@ const listWorkflowTasks = async ({ query = {}, user = {} } = {}) => {
       totalPages: Math.max(1, Math.ceil(totalRecords / limit)),
       totalRecords,
     },
+  };
+};
+
+const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
+  if (!isAdmin(user)) {
+    throw new Error("Only admins can view the workflow dashboard");
+  }
+
+  const { match } = buildTaskListMatch({ query, user });
+  const now = new Date();
+  const todayStart = new Date(now);
+  todayStart.setHours(0, 0, 0, 0);
+  const tomorrowStart = new Date(todayStart);
+  tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+
+  const statusCount = (status) => ({
+    $sum: {
+      $cond: [{ $eq: ["$status", status] }, 1, 0],
+    },
+  });
+
+  const openTaskCount = {
+    $sum: {
+      $cond: [{ $in: ["$status", ACTIVE_TASK_STATUSES] }, 1, 0],
+    },
+  };
+
+  const awaitingReviewCount = {
+    $sum: {
+      $cond: [{ $in: ["$status", AWAITING_REVIEW_TASK_STATUSES] }, 1, 0],
+    },
+  };
+
+  const overdueCount = {
+    $sum: {
+      $cond: [
+        {
+          $and: [
+            { $in: ["$status", ACTIVE_TASK_STATUSES] },
+            { $ne: ["$due_date", null] },
+            { $lt: ["$due_date", now] },
+          ],
+        },
+        1,
+        0,
+      ],
+    },
+  };
+
+  const dueTodayCount = {
+    $sum: {
+      $cond: [
+        {
+          $and: [
+            { $in: ["$status", ACTIVE_TASK_STATUSES] },
+            { $ne: ["$due_date", null] },
+            { $gte: ["$due_date", todayStart] },
+            { $lt: ["$due_date", tomorrowStart] },
+          ],
+        },
+        1,
+        0,
+      ],
+    },
+  };
+
+  const baseGroup = {
+    total_tasks: { $sum: 1 },
+    open_tasks: openTaskCount,
+    pending_tasks: statusCount("pending"),
+    assigned_tasks: statusCount("assigned"),
+    in_progress_tasks: statusCount("in_progress"),
+    submitted_tasks: statusCount("submitted"),
+    review_tasks: statusCount("review"),
+    rework_tasks: statusCount("rework"),
+    completed_tasks: statusCount("completed"),
+    cancelled_tasks: statusCount("cancelled"),
+    awaiting_review_tasks: awaitingReviewCount,
+    overdue_tasks: overdueCount,
+    due_today_tasks: dueTodayCount,
+  };
+
+  const [summary] = await Task.aggregate([
+    { $match: match },
+    {
+      $facet: {
+        overall: [
+          {
+            $group: {
+              _id: null,
+              ...baseGroup,
+              unassigned_tasks: {
+                $sum: {
+                  $cond: [
+                    {
+                      $eq: [
+                        {
+                          $size: { $ifNull: ["$assigned_to", []] },
+                        },
+                        0,
+                      ],
+                    },
+                    1,
+                    0,
+                  ],
+                },
+              },
+            },
+          },
+        ],
+        users: [
+          { $unwind: "$assigned_to" },
+          {
+            $match: {
+              "assigned_to.user": { $ne: null },
+            },
+          },
+          {
+            $group: {
+              _id: "$assigned_to.user",
+              ...baseGroup,
+              last_task_update_at: { $max: "$updatedAt" },
+            },
+          },
+          {
+            $lookup: {
+              from: "users",
+              localField: "_id",
+              foreignField: "_id",
+              as: "user",
+            },
+          },
+          {
+            $unwind: {
+              path: "$user",
+              preserveNullAndEmptyArrays: true,
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              user_id: "$_id",
+              name: {
+                $ifNull: ["$user.name", "Unknown User"],
+              },
+              email: {
+                $ifNull: ["$user.email", ""],
+              },
+              role: {
+                $ifNull: ["$user.role", ""],
+              },
+              last_task_update_at: 1,
+              total_tasks: 1,
+              open_tasks: 1,
+              pending_tasks: 1,
+              assigned_tasks: 1,
+              in_progress_tasks: 1,
+              submitted_tasks: 1,
+              review_tasks: 1,
+              rework_tasks: 1,
+              completed_tasks: 1,
+              cancelled_tasks: 1,
+              awaiting_review_tasks: 1,
+              overdue_tasks: 1,
+              due_today_tasks: 1,
+            },
+          },
+          {
+            $sort: {
+              open_tasks: -1,
+              overdue_tasks: -1,
+              awaiting_review_tasks: -1,
+              total_tasks: -1,
+              name: 1,
+            },
+          },
+        ],
+      },
+    },
+  ]);
+
+  const overall = {
+    ...buildWorkflowDashboardCounts(summary?.overall?.[0]),
+    unassigned_tasks: Number(summary?.overall?.[0]?.unassigned_tasks || 0),
+  };
+
+  const users = Array.isArray(summary?.users)
+    ? summary.users.map((entry) => ({
+        user_id: entry?.user_id || null,
+        name: normalizeText(entry?.name) || "Unknown User",
+        email: normalizeText(entry?.email),
+        role: normalizeText(entry?.role),
+        last_task_update_at: entry?.last_task_update_at || null,
+        counts: buildWorkflowDashboardCounts(entry),
+      }))
+    : [];
+
+  return {
+    generated_at: now.toISOString(),
+    overall: {
+      ...overall,
+      users_with_tasks: users.length,
+      users_with_overdue_tasks: users.filter(
+        (entry) => Number(entry?.counts?.overdue_tasks || 0) > 0,
+      ).length,
+    },
+    users,
   };
 };
 
@@ -871,6 +1120,7 @@ module.exports = {
   createWorkflowTaskType,
   deleteWorkflowTask,
   getTaskByIdForUser,
+  getWorkflowDashboardSummary,
   listWorkflowDepartments,
   listWorkflowTaskTypes,
   listWorkflowTasks,

@@ -4,6 +4,7 @@ const {
   assignWorkflowTask,
   buildTaskDetail,
   deleteWorkflowTask,
+  getWorkflowDashboardSummary,
   listWorkflowTasks,
   reviewWorkflowTask,
   reworkWorkflowTask,
@@ -12,6 +13,26 @@ const {
   updateWorkflowTaskStatus,
 } = require("../../services/workflow/workflowStatusService");
 const { getErrorStatusCode } = require("./_utils");
+
+const getWorkflowDashboard = async (req, res) => {
+  try {
+    const data = await getWorkflowDashboardSummary({
+      query: req.query || {},
+      user: req.user,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    console.error("Get Workflow Dashboard Error:", error);
+    return res.status(getErrorStatusCode(error)).json({
+      success: false,
+      message: error.message || "Failed to fetch workflow dashboard",
+    });
+  }
+};
 
 const getWorkflowTasks = async (req, res) => {
   try {
@@ -261,6 +282,7 @@ const removeTask = async (req, res) => {
 module.exports = {
   approveTask,
   assignTask,
+  getWorkflowDashboard,
   getWorkflowTask,
   getWorkflowTasks,
   patchTaskStatus,

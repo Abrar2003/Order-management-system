@@ -20,6 +20,11 @@ export const getWorkflowBatches = async (params = {}) => {
   return res.data;
 };
 
+export const getWorkflowDashboard = async (params = {}) => {
+  const res = await api.get("/workflow/dashboard", { params });
+  return res.data;
+};
+
 export const getWorkflowBatchById = async (id) => {
   const res = await api.get(
     `/workflow/batches/${encodeURIComponent(requireId(id, "Batch id"))}`,

@@ -48,6 +48,7 @@ import ProductDatabase from "./pages/ProductDatabase";
 import ProductTypeTemplates from "./pages/ProductTypeTemplates";
 import WorkflowBatches from "./pages/WorkflowBatches";
 import WorkflowBatchDetail from "./pages/WorkflowBatchDetail";
+import WorkflowDashboard from "./pages/WorkflowDashboard";
 import WorkflowTasks from "./pages/WorkflowTasks";
 import WorkflowMyTasks from "./pages/WorkflowMyTasks";
 import WorkflowTaskTypes from "./pages/WorkflowTaskTypes";
@@ -511,6 +512,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <ProductTypeTemplates />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/workflow/dashboard"
+            element={
+              <ProtectedRoute>
+                <WorkflowDashboard />
               </ProtectedRoute>
             }
           />

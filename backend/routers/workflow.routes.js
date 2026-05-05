@@ -13,6 +13,7 @@ const {
 const {
   approveTask,
   assignTask,
+  getWorkflowDashboard,
   getWorkflowTask,
   getWorkflowTasks,
   patchTaskStatus,
@@ -35,6 +36,13 @@ const {
 } = require("../controllers/workflow/department.controller");
 
 const router = express.Router();
+
+router.get(
+  "/dashboard",
+  auth,
+  requirePermission("workflow", "view"),
+  getWorkflowDashboard,
+);
 
 router.post(
   "/batches/from-folder-manifest",
