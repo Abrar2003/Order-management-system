@@ -2898,6 +2898,11 @@ button.om-item-order-presence-label {
   min-width: 130px;
 }
 
+.packed-goods-filter-field--brand {
+  position: relative;
+  min-width: 220px;
+}
+
 .packed-goods-filter-field--po {
   flex-basis: 140px;
 }
@@ -2912,6 +2917,71 @@ button.om-item-order-presence-label {
   min-width: 106px;
 }
 
+.packed-goods-brand-trigger {
+  min-height: 31px;
+  cursor: pointer;
+}
+
+.packed-goods-brand-menu {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  z-index: 20;
+  width: min(320px, 90vw);
+  padding: 0.75rem;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 0.75rem;
+  background: #fff;
+}
+
+.packed-goods-brand-menu-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.packed-goods-brand-menu-list {
+  display: grid;
+  gap: 0.5rem;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.packed-goods-brand-option {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.15rem 0;
+  margin: 0;
+}
+
+.packed-goods-brand-option .form-check-input {
+  margin: 0;
+}
+
+.packed-goods-brand-option .form-check-label {
+  display: block;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.packed-goods-pdf-surface {
+  position: absolute;
+  left: -20000px;
+  top: 0;
+  width: 1120px;
+  padding: 24px;
+  background: #fff;
+}
+
+.packed-goods-pdf-report {
+  width: 100%;
+  background: #fff;
+}
+
 @media (min-width: 1200px) {
   .packed-goods-filter-bar {
     flex-wrap: nowrap;
@@ -2919,6 +2989,10 @@ button.om-item-order-presence-label {
 
   .packed-goods-filter-field {
     max-width: 190px;
+  }
+
+  .packed-goods-filter-field--brand {
+    max-width: 250px;
   }
 
   .packed-goods-filter-field--po {

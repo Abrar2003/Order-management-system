@@ -126,6 +126,28 @@ const normalizeDistinctValues = (values = []) =>
   ].sort((a, b) => a.localeCompare(b));
 
 const normalizeLooseString = (value) => String(value ?? "").trim();
+const normalizeFilterValues = (value) => {
+  const rawValues = Array.isArray(value)
+    ? value
+    : value === undefined || value === null
+      ? []
+      : [value];
+
+  return normalizeDistinctValues(
+    rawValues
+      .flatMap((entry) => (Array.isArray(entry) ? entry : [entry]))
+      .map((entry) => String(entry ?? "").trim())
+      .filter((entry) => {
+        const lowered = entry.toLowerCase();
+        return (
+          entry.length > 0 &&
+          lowered !== "all" &&
+          lowered !== "undefined" &&
+          lowered !== "null"
+        );
+      }),
+  );
+};
 const validateSpreadsheetUpload = (file) => {
   if (!file?.buffer || !Buffer.isBuffer(file.buffer)) {
     throw new Error("Uploaded spreadsheet file is invalid");
@@ -8633,187 +8655,288 @@ exports.getOrderSummary = async (req, res) => {
   }
 };
 
-exports.getPackedGoods = async (req, res) => {
-  try {
-    const selectedBrand = normalizeFilterValue(req.query.brand);
-    const selectedVendor = normalizeFilterValue(req.query.vendor);
-    const selectedOrderId = normalizeFilterValue(
-      req.query.order_id ?? req.query.order ?? req.query.po,
-    );
+const buildPackedGoodsDataset = async ({
+  brands = [],
+  vendor = "",
+  orderId = "",
+} = {}) => {
+  const selectedBrands = normalizeFilterValues(brands);
+  const selectedBrandKeys = new Set(selectedBrands.map((brand) => normalizeBrandKey(brand)));
+  const selectedVendor = normalizeFilterValue(vendor);
+  const selectedOrderId = normalizeFilterValue(orderId);
 
-    const orders = await Order.find(ACTIVE_ORDER_MATCH)
+  const orders = await Order.find(ACTIVE_ORDER_MATCH)
+    .select(
+      "order_id item brand vendor quantity shipment qc_record order_date updatedAt total_po_cbm",
+    )
+    .populate({
+      path: "qc_record",
+      select: "quantities request_history last_inspected_date inspection_dates",
+    })
+    .sort({ order_date: -1, updatedAt: -1, order_id: 1 })
+    .lean();
+
+  const itemCodes = [
+    ...new Set(
+      orders
+        .map((orderEntry) => normalizeLooseString(orderEntry?.item?.item_code))
+        .filter(Boolean),
+    ),
+  ];
+
+  const itemDocs = itemCodes.length > 0
+    ? await Item.find({ code: { $in: itemCodes } })
       .select(
-        "order_id item brand vendor quantity shipment qc_record order_date updatedAt total_po_cbm",
+        [
+          "code",
+          "cbm",
+          "inspected_item_LBH",
+          "inspected_item_top_LBH",
+          "inspected_item_bottom_LBH",
+          "inspected_box_sizes",
+          "inspected_box_mode",
+          "inspected_box_LBH",
+          "inspected_box_top_LBH",
+          "inspected_box_bottom_LBH",
+          "inspected_top_LBH",
+          "inspected_bottom_LBH",
+          "pis_item_LBH",
+          "pis_item_top_LBH",
+          "pis_item_bottom_LBH",
+          "pis_box_LBH",
+          "pis_box_top_LBH",
+          "pis_box_bottom_LBH",
+        ].join(" "),
       )
-      .populate({
-        path: "qc_record",
-        select: "quantities request_history last_inspected_date inspection_dates",
-      })
-      .sort({ order_date: -1, updatedAt: -1, order_id: 1 })
-      .lean();
+      .lean()
+    : [];
 
-    const itemCodes = [
-      ...new Set(
-        orders
-          .map((orderEntry) => normalizeLooseString(orderEntry?.item?.item_code))
-          .filter(Boolean),
-      ),
-    ];
+  const itemMap = new Map(
+    itemDocs.map((itemDoc) => [
+      normalizeLooseString(itemDoc?.code).toLowerCase(),
+      itemDoc,
+    ]),
+  );
 
-    const itemDocs = itemCodes.length > 0
-      ? await Item.find({ code: { $in: itemCodes } })
-        .select(
-          [
-            "code",
-            "cbm",
-            "inspected_item_LBH",
-            "inspected_item_top_LBH",
-            "inspected_item_bottom_LBH",
-            "inspected_box_sizes",
-            "inspected_box_mode",
-            "inspected_box_LBH",
-            "inspected_box_top_LBH",
-            "inspected_box_bottom_LBH",
-            "inspected_top_LBH",
-            "inspected_bottom_LBH",
-            "pis_item_LBH",
-            "pis_item_top_LBH",
-            "pis_item_bottom_LBH",
-            "pis_box_LBH",
-            "pis_box_top_LBH",
-            "pis_box_bottom_LBH",
-          ].join(" "),
-        )
-        .lean()
-      : [];
+  const poPendingQuantityMap = new Map();
 
-    const itemMap = new Map(
-      itemDocs.map((itemDoc) => [
-        normalizeLooseString(itemDoc?.code).toLowerCase(),
-        itemDoc,
-      ]),
+  for (const orderEntry of Array.isArray(orders) ? orders : []) {
+    const progress = deriveOrderProgress({ orderEntry });
+    const poKey = [
+      normalizeOrderKey(orderEntry?.order_id) || "N/A",
+      normalizeLooseString(orderEntry?.brand) || "N/A",
+      normalizeLooseString(orderEntry?.vendor) || "N/A",
+    ].join("__");
+
+    poPendingQuantityMap.set(
+      poKey,
+      (poPendingQuantityMap.get(poKey) || 0)
+        + Math.max(0, Number(progress?.pending_inspection_quantity || 0)),
     );
+  }
 
-    const poPendingQuantityMap = new Map();
-
-    for (const orderEntry of Array.isArray(orders) ? orders : []) {
+  const allRows = (Array.isArray(orders) ? orders : [])
+    .map((orderEntry) => {
       const progress = deriveOrderProgress({ orderEntry });
+      const packedQuantity = Math.max(
+        0,
+        Number(progress?.inspected_unshipped_quantity || 0),
+      );
+      if (packedQuantity <= 0) {
+        return null;
+      }
+
+      const brand = normalizeLooseString(orderEntry?.brand);
+      const vendorValue = normalizeLooseString(orderEntry?.vendor);
+      const itemCode = normalizeLooseString(orderEntry?.item?.item_code);
+      const itemDoc = itemMap.get(itemCode.toLowerCase()) || null;
+      const storedPoCbm = toPositiveCbmNumber(orderEntry?.total_po_cbm);
+      const orderQuantity = Math.max(0, Number(orderEntry?.quantity || 0));
+      const cbmSummary = resolveOrderRowCbmSummary(itemDoc, packedQuantity);
+      const calculatedPackedCbm = toPositiveCbmNumber(cbmSummary?.total);
+      const storedPerItemCbm =
+        storedPoCbm > 0 && orderQuantity > 0
+          ? toRoundedCbmValue(storedPoCbm / orderQuantity)
+          : 0;
+      const perItemCbm =
+        calculatedPackedCbm > 0 && packedQuantity > 0
+          ? toRoundedCbmValue(calculatedPackedCbm / packedQuantity)
+          : storedPerItemCbm || Number(cbmSummary?.per_item || 0);
+      const totalCbm =
+        calculatedPackedCbm > 0
+          ? toRoundedCbmValue(calculatedPackedCbm)
+          : toRoundedCbmValue(perItemCbm * packedQuantity);
+      const cbmSource =
+        calculatedPackedCbm > 0
+          ? cbmSummary?.source || null
+          : storedPoCbm > 0
+            ? "total_po_cbm"
+            : cbmSummary?.source || null;
+      const normalizedOrderId = normalizeOrderKey(orderEntry?.order_id) || "N/A";
       const poKey = [
-        normalizeOrderKey(orderEntry?.order_id) || "N/A",
-        normalizeLooseString(orderEntry?.brand) || "N/A",
-        normalizeLooseString(orderEntry?.vendor) || "N/A",
+        normalizedOrderId,
+        brand || "N/A",
+        vendorValue || "N/A",
       ].join("__");
 
-      poPendingQuantityMap.set(
-        poKey,
-        (poPendingQuantityMap.get(poKey) || 0)
-          + Math.max(0, Number(progress?.pending_inspection_quantity || 0)),
-      );
-    }
-
-    const brandVendorFilteredRows = (Array.isArray(orders) ? orders : [])
-      .map((orderEntry) => {
-        const progress = deriveOrderProgress({ orderEntry });
-        const packedQuantity = Math.max(
+      return {
+        id: String(orderEntry?._id || ""),
+        order_id: normalizedOrderId,
+        item_code: itemCode || "N/A",
+        brand: brand || "N/A",
+        vendor: vendorValue || "N/A",
+        order_quantity: orderQuantity,
+        packed_quantity: packedQuantity,
+        pending_quantity: Math.max(
           0,
-          Number(progress?.inspected_unshipped_quantity || 0),
-        );
-        if (packedQuantity <= 0) {
-          return null;
-        }
+          Number(progress?.pending_inspection_quantity || 0),
+        ),
+        po_has_no_pending_quantity: Number(poPendingQuantityMap.get(poKey) || 0) <= 0,
+        total_cbm: Number.isFinite(totalCbm) ? totalCbm : 0,
+        per_item_cbm: Number.isFinite(perItemCbm) ? perItemCbm : 0,
+        cbm_source: cbmSource,
+      };
+    })
+    .filter(Boolean);
 
-        const brand = normalizeLooseString(orderEntry?.brand);
-        const vendor = normalizeLooseString(orderEntry?.vendor);
-        if (selectedBrand && brand !== selectedBrand) {
-          return null;
-        }
-        if (selectedVendor && vendor !== selectedVendor) {
-          return null;
-        }
+  const brandFilteredRows = allRows.filter((row) => (
+    selectedBrandKeys.size === 0
+      || selectedBrandKeys.has(normalizeBrandKey(row?.brand))
+  ));
+  const brandVendorFilteredRows = brandFilteredRows.filter((row) => (
+    !selectedVendor || normalizeLooseString(row?.vendor) === selectedVendor
+  ));
+  const rows = selectedOrderId
+    ? brandVendorFilteredRows.filter(
+        (row) => normalizeOrderKey(row?.order_id) === normalizeOrderKey(selectedOrderId),
+      )
+    : brandVendorFilteredRows;
 
-        const itemCode = normalizeLooseString(orderEntry?.item?.item_code);
-        const itemDoc = itemMap.get(itemCode.toLowerCase()) || null;
-        const storedPoCbm = toPositiveCbmNumber(orderEntry?.total_po_cbm);
-        const orderQuantity = Math.max(0, Number(orderEntry?.quantity || 0));
-        const cbmSummary = resolveOrderRowCbmSummary(itemDoc, packedQuantity);
-        const calculatedPackedCbm = toPositiveCbmNumber(cbmSummary?.total);
-        const storedPerItemCbm =
-          storedPoCbm > 0 && orderQuantity > 0
-            ? toRoundedCbmValue(storedPoCbm / orderQuantity)
-            : 0;
-        const perItemCbm =
-          calculatedPackedCbm > 0 && packedQuantity > 0
-            ? toRoundedCbmValue(calculatedPackedCbm / packedQuantity)
-            : storedPerItemCbm || Number(cbmSummary?.per_item || 0);
-        const totalCbm =
-          calculatedPackedCbm > 0
-            ? toRoundedCbmValue(calculatedPackedCbm)
-            : toRoundedCbmValue(perItemCbm * packedQuantity);
-        const cbmSource =
-          calculatedPackedCbm > 0
-            ? cbmSummary?.source || null
-            : storedPoCbm > 0
-              ? "total_po_cbm"
-              : cbmSummary?.source || null;
-        const normalizedOrderId = normalizeOrderKey(orderEntry?.order_id) || "N/A";
-        const poKey = [
-          normalizedOrderId,
-          brand || "N/A",
-          vendor || "N/A",
-        ].join("__");
+  const brandFilterSource = selectedVendor
+    ? allRows.filter((row) => normalizeLooseString(row?.vendor) === selectedVendor)
+    : allRows;
 
-        return {
-          id: String(orderEntry?._id || ""),
-          order_id: normalizedOrderId,
-          item_code: itemCode || "N/A",
-          brand: brand || "N/A",
-          vendor: vendor || "N/A",
-          order_quantity: orderQuantity,
-          packed_quantity: packedQuantity,
-          pending_quantity: Math.max(
-            0,
-            Number(progress?.pending_inspection_quantity || 0),
-          ),
-          po_has_no_pending_quantity: Number(poPendingQuantityMap.get(poKey) || 0) <= 0,
-          total_cbm: Number.isFinite(totalCbm) ? totalCbm : 0,
-          per_item_cbm: Number.isFinite(perItemCbm) ? perItemCbm : 0,
-          cbm_source: cbmSource,
-        };
-      })
-      .filter(Boolean);
-    const rows = selectedOrderId
-      ? brandVendorFilteredRows.filter(
-          (row) =>
-            normalizeOrderKey(row?.order_id) === normalizeOrderKey(selectedOrderId),
-        )
-      : brandVendorFilteredRows;
+  return {
+    rows,
+    filters: {
+      brands: normalizeDistinctValues(brandFilterSource.map((row) => row?.brand)),
+      vendors: normalizeDistinctValues(brandFilteredRows.map((row) => row?.vendor)),
+      order_ids: normalizeDistinctValues(
+        brandVendorFilteredRows.map((row) => row?.order_id),
+      ),
+    },
+    summary: {
+      total_rows: rows.length,
+      total_packed_quantity: rows.reduce(
+        (sum, row) => sum + Number(row?.packed_quantity || 0),
+        0,
+      ),
+      total_cbm: toRoundedCbmValue(
+        rows.reduce((sum, row) => sum + Number(row?.total_cbm || 0), 0),
+      ),
+    },
+  };
+};
+
+exports.getPackedGoods = async (req, res) => {
+  try {
+    const dataset = await buildPackedGoodsDataset({
+      brands: req.query.brand ?? req.query.brands ?? req.query["brand[]"],
+      vendor: req.query.vendor,
+      orderId: req.query.order_id ?? req.query.order ?? req.query.po,
+    });
 
     return res.status(200).json({
       success: true,
-      data: rows,
-      filters: {
-        brands: normalizeDistinctValues(brandVendorFilteredRows.map((row) => row?.brand)),
-        vendors: normalizeDistinctValues(brandVendorFilteredRows.map((row) => row?.vendor)),
-        order_ids: normalizeDistinctValues(
-          brandVendorFilteredRows.map((row) => row?.order_id),
-        ),
-      },
-      summary: {
-        total_rows: rows.length,
-        total_packed_quantity: rows.reduce(
-          (sum, row) => sum + Number(row?.packed_quantity || 0),
-          0,
-        ),
-        total_cbm: toRoundedCbmValue(
-          rows.reduce((sum, row) => sum + Number(row?.total_cbm || 0), 0),
-        ),
-      },
+      data: dataset.rows,
+      filters: dataset.filters,
+      summary: dataset.summary,
     });
   } catch (error) {
     console.error("Get Packed Goods Error:", error);
     return res.status(500).json({
       success: false,
       message: "Failed to fetch packed goods",
+      error: error.message,
+    });
+  }
+};
+
+exports.exportPackedGoods = async (req, res) => {
+  try {
+    const exportFormat =
+      String(req.query.format || "")
+        .trim()
+        .toLowerCase() === "xlsx"
+        ? "xlsx"
+        : "xls";
+
+    const dataset = await buildPackedGoodsDataset({
+      brands: req.query.brand ?? req.query.brands ?? req.query["brand[]"],
+      vendor: req.query.vendor,
+      orderId: req.query.order_id ?? req.query.order ?? req.query.po,
+    });
+
+    const columns = [
+      { key: "order_id", header: "PO" },
+      { key: "brand", header: "Brand" },
+      { key: "vendor", header: "Vendor" },
+      { key: "item_code", header: "Item Code" },
+      { key: "order_quantity", header: "Order Quantity" },
+      { key: "packed_quantity", header: "Packed Quantity" },
+      { key: "pending_quantity", header: "Pending Quantity" },
+      { key: "total_cbm", header: "Total CBM" },
+      { key: "po_pending_clear", header: "PO Pending Cleared" },
+    ];
+
+    const exportRows = dataset.rows.map((row) => ({
+      order_id: String(row?.order_id || "").trim(),
+      brand: String(row?.brand || "").trim(),
+      vendor: String(row?.vendor || "").trim(),
+      item_code: String(row?.item_code || "").trim(),
+      order_quantity: Number(row?.order_quantity || 0),
+      packed_quantity: Number(row?.packed_quantity || 0),
+      pending_quantity: Number(row?.pending_quantity || 0),
+      total_cbm: Number(row?.total_cbm || 0),
+      po_pending_clear: row?.po_has_no_pending_quantity ? "Yes" : "No",
+    }));
+
+    const headerRow = columns.map((column) => column.header);
+    const dataRows = exportRows.map((row) =>
+      columns.map((column) => row[column.key] ?? ""),
+    );
+
+    const worksheet = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
+    worksheet["!cols"] = columns.map((column, columnIndex) => {
+      const maxDataLength = Math.max(
+        ...dataRows.map((row) => String(row[columnIndex] ?? "").length),
+        column.header.length,
+      );
+      return { wch: Math.min(28, Math.max(12, maxDataLength + 2)) };
+    });
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Packed Goods");
+    const fileBuffer = XLSX.write(workbook, {
+      type: "buffer",
+      bookType: exportFormat,
+    });
+    const fileDate = new Date().toISOString().slice(0, 10);
+    const fileName = `packed-goods-${fileDate}.${exportFormat}`;
+
+    res.setHeader(
+      "Content-Type",
+      exportFormat === "xlsx"
+        ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        : "application/vnd.ms-excel",
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    return res.status(200).send(fileBuffer);
+  } catch (error) {
+    console.error("Export Packed Goods Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to export packed goods",
       error: error.message,
     });
   }

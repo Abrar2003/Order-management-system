@@ -32,12 +32,35 @@ const PDF_EXTENSION_SET = new Set(WORKFLOW_PDF_EXTENSIONS);
 const EXCEL_EXTENSION_SET = new Set(WORKFLOW_EXCEL_EXTENSIONS);
 const THREE_D_EXTENSION_SET = new Set(WORKFLOW_THREE_D_EXTENSIONS);
 
-const toLowerSet = (values = []) =>
-  new Set(
-    (Array.isArray(values) ? values : [])
-      .map((value) => normalizeText(value).replace(/^\./, "").toLowerCase())
-      .filter(Boolean),
-  );
+const normalizeExtensionsSet = (values = []) => {
+  const arr = Array.isArray(values) ? values : (typeof values === "string" ? [values] : []);
+  const set = new Set();
+  arr.forEach((val) => {
+    if (typeof val !== "string") return;
+    val.split(",").forEach((item) => {
+      const normalized = normalizeText(item).replace(/^\./, "").toLowerCase();
+      if (normalized) {
+        set.add(normalized);
+      }
+    });
+  });
+  return set;
+};
+
+const normalizeMimeTypesSet = (values = []) => {
+  const arr = Array.isArray(values) ? values : (typeof values === "string" ? [values] : []);
+  const set = new Set();
+  arr.forEach((val) => {
+    if (typeof val !== "string") return;
+    val.split(",").forEach((item) => {
+      const normalized = normalizeText(item).toLowerCase();
+      if (normalized) {
+        set.add(normalized);
+      }
+    });
+  });
+  return set;
+};
 
 const matchesPatternList = (value, patterns = []) => {
   const normalizedValue = normalizeText(value).toLowerCase();
@@ -127,6 +150,16 @@ export const getDirectSubfolder = (rootFolder = "", relativePath = "") => {
   return pathSegments[startIndex] || "";
 };
 
+export const isTempManifestFile = (filename = "") => {
+  const name = String(filename || "").trim();
+  if (!name) return true;
+  if (name.startsWith(".~lock.")) return true;
+  if (name.startsWith("~$")) return true;
+  if (name.endsWith("#")) return true;
+  if (name.startsWith(".")) return true;
+  return false;
+};
+
 export const buildFileManifest = (files = []) =>
   Array.from(files || [])
     .map((file) => {
@@ -144,7 +177,7 @@ export const buildFileManifest = (files = []) =>
         file_type: classifyFileType(extension, file?.type),
       };
     })
-    .filter((entry) => entry.name && entry.relative_path);
+    .filter((entry) => entry.name && entry.relative_path && !isTempManifestFile(entry.name));
 
 export const summarizeManifest = (manifest = [], rootFolder = "") => {
   const summary = {
@@ -185,8 +218,8 @@ export const summarizeManifest = (manifest = [], rootFolder = "") => {
 
 const applyTaskTypeRule = (manifest = [], taskType = null) => {
   const rule = taskType?.file_match_rule || {};
-  const extensionSet = toLowerSet(rule.extensions);
-  const mimeTypeSet = toLowerSet(rule.mime_types);
+  const extensionSet = normalizeExtensionsSet(rule.extensions);
+  const mimeTypeSet = normalizeMimeTypesSet(rule.mime_types);
 
   return (Array.isArray(manifest) ? manifest : []).filter((entry) => {
     const extensionMatches =
@@ -201,25 +234,32 @@ const applyTaskTypeRule = (manifest = [], taskType = null) => {
   });
 };
 
-export const previewPictureCleaningTasks = (manifest = [], taskType = null) =>
-  applyTaskTypeRule(manifest, taskType)
-    .filter((entry) =>
-      IMAGE_EXTENSION_SET.has(normalizeText(entry?.extension).toLowerCase()),
-    )
+export const previewPerFileTasks = (manifest = [], taskType = null) => {
+  const label =
+    normalizeText(taskType?.name)
+    || normalizeText(taskType?.label)
+    || "Workflow Task";
+
+  return applyTaskTypeRule(manifest, taskType)
     .map((entry, index) => ({
-      id: `picture-cleaning-${index + 1}`,
-      title: `Picture Cleaning - ${entry.name}`,
+      id: `per-file-${index + 1}`,
+      title: `${label} - ${entry.name}`,
       source_folder_path: entry.folder_path,
       source_files: [entry],
       source_file_count: 1,
     }));
+};
 
-export const previewThreeDTasks = (
+export const previewPerDirectSubfolderTasks = (
   manifest = [],
   rootFolder = "",
   taskType = null,
 ) => {
   const grouped = new Map();
+  const label =
+    normalizeText(taskType?.name)
+    || normalizeText(taskType?.label)
+    || "Workflow Task";
 
   applyTaskTypeRule(manifest, taskType).forEach((entry) => {
     const directSubfolder = getDirectSubfolder(rootFolder, entry?.folder_path);
@@ -233,8 +273,8 @@ export const previewThreeDTasks = (
   return [...grouped.entries()]
     .sort((left, right) => left[0].localeCompare(right[0], undefined, { sensitivity: "base" }))
     .map(([folderName, entries], index) => ({
-      id: `three-d-${index + 1}`,
-      title: `3D Creation - ${folderName}`,
+      id: `per-subfolder-${index + 1}`,
+      title: `${label} - ${folderName}`,
       source_folder_path: entries[0]?.folder_path || `${normalizeText(rootFolder)}/${folderName}`,
       source_files: entries,
       source_file_count: entries.length,
@@ -282,18 +322,12 @@ export const buildTaskPreview = ({
     return [];
   }
 
-  if (
-    normalizeText(taskType?.key) === "picture_cleaning"
-    || autoCreateMode === "per_file"
-  ) {
-    return previewPictureCleaningTasks(manifest, taskType);
+  if (autoCreateMode === "per_file") {
+    return previewPerFileTasks(manifest, taskType);
   }
 
-  if (
-    normalizeText(taskType?.key) === "three_d_creation"
-    || autoCreateMode === "per_direct_subfolder"
-  ) {
-    return previewThreeDTasks(manifest, rootFolder, taskType);
+  if (autoCreateMode === "per_direct_subfolder") {
+    return previewPerDirectSubfolderTasks(manifest, rootFolder, taskType);
   }
 
   return previewOncePerBatchTask(

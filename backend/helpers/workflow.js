@@ -215,20 +215,36 @@ const buildSourceFileMetadata = (entry = {}, { sourceFolderName = "" } = {}) => 
   };
 };
 
+const isTempManifestFile = (filename = "") => {
+  const name = String(filename || "").trim();
+  if (!name) return true;
+  if (name.startsWith(".~lock.")) return true;
+  if (name.startsWith("~$")) return true;
+  if (name.endsWith("#")) return true;
+  if (name.startsWith(".")) return true;
+  return false;
+};
+
 const normalizeFileManifest = (entries = [], { sourceFolderName = "" } = {}) => {
   if (!Array.isArray(entries)) {
     throw new Error("file_manifest must be an array");
   }
-  if (entries.length === 0) {
+  
+  const validEntries = entries.filter((entry) => !isTempManifestFile(entry?.name));
+
+  if (validEntries.length === 0 && entries.length > 0) {
+    throw new Error("file_manifest contains only ignored/temporary files");
+  }
+  if (validEntries.length === 0) {
     throw new Error("file_manifest must contain at least one file entry");
   }
-  if (entries.length > MAX_WORKFLOW_MANIFEST_ENTRIES) {
+  if (validEntries.length > MAX_WORKFLOW_MANIFEST_ENTRIES) {
     throw new Error(
       `file_manifest cannot exceed ${MAX_WORKFLOW_MANIFEST_ENTRIES} entries`,
     );
   }
 
-  return entries.map((entry) => buildSourceFileMetadata(entry, { sourceFolderName }));
+  return validEntries.map((entry) => buildSourceFileMetadata(entry, { sourceFolderName }));
 };
 
 const stripRootFolderPrefix = (filePath = "", sourceFolderName = "") => {

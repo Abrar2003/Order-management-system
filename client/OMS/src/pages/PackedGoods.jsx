@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import html2canvas from "html2canvas";
+import { jsPDF } from "jspdf";
 import { useSearchParams } from "react-router-dom";
 import api from "../api/axios";
+import { usePermissions } from "../auth/PermissionContext";
 import Navbar from "../components/Navbar";
 import SortHeaderButton from "../components/SortHeaderButton";
 import {
@@ -20,6 +23,44 @@ const LIMIT_OPTIONS = [10, 20, 50, 100];
 const normalizeFilterValue = (value, fallback = "all") => {
   const normalized = String(value || "").trim();
   return normalized || fallback;
+};
+
+const normalizeFilterValues = (values = []) =>
+  [
+    ...new Set(
+      (Array.isArray(values) ? values : [values])
+        .map((value) => String(value || "").trim())
+        .filter((value) => {
+          const lowered = value.toLowerCase();
+          return (
+            value.length > 0
+            && lowered !== "all"
+            && lowered !== "undefined"
+            && lowered !== "null"
+          );
+        }),
+    ),
+  ].sort((left, right) => left.localeCompare(right));
+
+const normalizeDistinctValues = (values = []) =>
+  [
+    ...new Set(
+      values.map((value) => String(value || "").trim()).filter(Boolean),
+    ),
+  ].sort((left, right) => left.localeCompare(right));
+
+const areStringArraysEqual = (left = [], right = []) =>
+  left.length === right.length && left.every((value, index) => value === right[index]);
+
+const matchesSelectedBrands = (selectedBrands = [], rowBrand = "") =>
+  selectedBrands.length === 0 || selectedBrands.includes(String(rowBrand || "").trim());
+
+const matchesDraftFilters = (row = {}, brands = [], vendor = "all") => {
+  const rowBrand = String(row?.brand || "").trim();
+  const rowVendor = String(row?.vendor || "").trim();
+  if (!matchesSelectedBrands(brands, rowBrand)) return false;
+  if (vendor !== "all" && rowVendor !== vendor) return false;
+  return true;
 };
 
 const parseSortBy = (value) => {
@@ -51,31 +92,87 @@ const parseLimit = (value) => {
 };
 
 const buildFilterStateFromSearchParams = (params) => ({
-  brand: normalizeFilterValue(params.get("brand")),
+  brands: normalizeFilterValues(params.getAll("brand")),
   vendor: normalizeFilterValue(params.get("vendor")),
   po: normalizeFilterValue(params.get("po")),
 });
 
+const buildPackedGoodsSearchParams = ({
+  appliedFilters,
+  sortBy,
+  sortOrder,
+  page,
+  limit,
+}) => {
+  const next = new URLSearchParams();
+  normalizeFilterValues(appliedFilters?.brands).forEach((brand) => {
+    next.append("brand", brand);
+  });
+  if (appliedFilters?.vendor !== "all") next.set("vendor", appliedFilters.vendor);
+  if (appliedFilters?.po !== "all") next.set("po", appliedFilters.po);
+  if (sortBy !== DEFAULT_SORT_BY) next.set("sort_by", sortBy);
+  if (sortOrder !== DEFAULT_SORT_ORDER) next.set("sort_order", sortOrder);
+  if (page > 1) next.set("page", String(page));
+  if (limit !== DEFAULT_LIMIT) next.set("limit", String(limit));
+  return next;
+};
+
+const buildPackedGoodsApiQuery = (filters = {}) => {
+  const params = new URLSearchParams();
+  normalizeFilterValues(filters?.brands).forEach((brand) => {
+    params.append("brand", brand);
+  });
+  if (filters?.vendor && filters.vendor !== "all") {
+    params.set("vendor", filters.vendor);
+  }
+  if (filters?.po && filters.po !== "all") {
+    params.set("order_id", filters.po);
+  }
+  return params;
+};
+
+const getDownloadFileName = (response, fallbackName) => {
+  const disposition = String(response?.headers?.["content-disposition"] || "");
+  const match = disposition.match(/filename\*?=(?:UTF-8''|\"?)([^\";]+)/i);
+  return match?.[1] ? decodeURIComponent(match[1].trim()) : fallbackName;
+};
+
+const downloadBlobResponse = (response, fallbackName, fallbackType) => {
+  const blob = new Blob([response.data], {
+    type: response?.headers?.["content-type"] || fallbackType,
+  });
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = getDownloadFileName(response, fallbackName);
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(url);
+};
+
+const formatSelectedBrands = (
+  selectedBrands = [],
+  fallback = "All Brands",
+  collapseAfter = 2,
+) => {
+  if (selectedBrands.length === 0) return fallback;
+  if (selectedBrands.length <= collapseAfter) return selectedBrands.join(", ");
+  return `${selectedBrands.length} brands selected`;
+};
+
 const PackedGoods = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "packed-goods");
+  const { hasPermission } = usePermissions();
 
   const initialFilters = buildFilterStateFromSearchParams(searchParams);
   const initialSortBy = parseSortBy(searchParams.get("sort_by"));
   const initialSortOrder = parseSortOrder(searchParams.get("sort_order"));
+  const canExportPackedGoods = hasPermission("orders", "export");
 
-  const [rows, setRows] = useState([]);
-  const [filterOptions, setFilterOptions] = useState({
-    brands: [],
-    vendors: [],
-    order_ids: [],
-  });
-  const [summary, setSummary] = useState({
-    total_rows: 0,
-    total_packed_quantity: 0,
-    total_cbm: 0,
-  });
-  const [draftBrand, setDraftBrand] = useState(initialFilters.brand);
+  const [allRows, setAllRows] = useState([]);
+  const [draftBrands, setDraftBrands] = useState(initialFilters.brands);
   const [draftVendor, setDraftVendor] = useState(initialFilters.vendor);
   const [draftPo, setDraftPo] = useState(initialFilters.po);
   const [appliedFilters, setAppliedFilters] = useState(initialFilters);
@@ -90,54 +187,28 @@ const PackedGoods = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [syncedQuery, setSyncedQuery] = useState(null);
+  const [brandDropdownOpen, setBrandDropdownOpen] = useState(false);
+  const [exportingFormat, setExportingFormat] = useState("");
+
+  const brandFilterRef = useRef(null);
+  const reportRef = useRef(null);
 
   const fetchPackedGoods = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
 
-      const response = await api.get("/orders/packed-goods", {
-        params: {
-          brand: appliedFilters.brand === "all" ? "" : appliedFilters.brand,
-          vendor: appliedFilters.vendor === "all" ? "" : appliedFilters.vendor,
-          order_id: appliedFilters.po === "all" ? "" : appliedFilters.po,
-        },
-      });
-
-      setRows(Array.isArray(response?.data?.data) ? response.data.data : []);
-      setFilterOptions({
-        brands: Array.isArray(response?.data?.filters?.brands)
-          ? response.data.filters.brands
-          : [],
-        vendors: Array.isArray(response?.data?.filters?.vendors)
-          ? response.data.filters.vendors
-          : [],
-        order_ids: Array.isArray(response?.data?.filters?.order_ids)
-          ? response.data.filters.order_ids
-          : [],
-      });
-      setSummary({
-        total_rows: Number(response?.data?.summary?.total_rows || 0),
-        total_packed_quantity: Number(
-          response?.data?.summary?.total_packed_quantity || 0,
-        ),
-        total_cbm: Number(response?.data?.summary?.total_cbm || 0),
-      });
+      const response = await api.get("/orders/packed-goods");
+      setAllRows(Array.isArray(response?.data?.data) ? response.data.data : []);
     } catch (fetchError) {
       setError(
         fetchError?.response?.data?.message || "Failed to load packed goods.",
       );
-      setRows([]);
-      setFilterOptions({ brands: [], vendors: [], order_ids: [] });
-      setSummary({
-        total_rows: 0,
-        total_packed_quantity: 0,
-        total_cbm: 0,
-      });
+      setAllRows([]);
     } finally {
       setLoading(false);
     }
-  }, [appliedFilters.brand, appliedFilters.po, appliedFilters.vendor]);
+  }, []);
 
   useEffect(() => {
     fetchPackedGoods();
@@ -151,16 +222,18 @@ const PackedGoods = () => {
     const nextPage = parsePositiveInt(searchParams.get("page"), 1);
     const nextLimit = parseLimit(searchParams.get("limit"));
 
-    setDraftBrand((prev) => (prev === nextFilters.brand ? prev : nextFilters.brand));
+    setDraftBrands((prev) =>
+      areStringArraysEqual(prev, nextFilters.brands) ? prev : nextFilters.brands,
+    );
     setDraftVendor((prev) => (prev === nextFilters.vendor ? prev : nextFilters.vendor));
     setDraftPo((prev) => (prev === nextFilters.po ? prev : nextFilters.po));
-    setAppliedFilters((prev) =>
-      prev.brand === nextFilters.brand &&
-      prev.vendor === nextFilters.vendor &&
-      prev.po === nextFilters.po
+    setAppliedFilters((prev) => (
+      areStringArraysEqual(prev.brands, nextFilters.brands)
+      && prev.vendor === nextFilters.vendor
+      && prev.po === nextFilters.po
         ? prev
-        : nextFilters,
-    );
+        : nextFilters
+    ));
     setSortBy((prev) => (prev === nextSortBy ? prev : nextSortBy));
     setSortOrder((prev) => (prev === nextSortOrder ? prev : nextSortOrder));
     setPage((prev) => (prev === nextPage ? prev : nextPage));
@@ -172,90 +245,125 @@ const PackedGoods = () => {
     const currentQuery = searchParams.toString();
     if (syncedQuery !== currentQuery) return;
 
-    const next = new URLSearchParams();
-    if (appliedFilters.brand !== "all") next.set("brand", appliedFilters.brand);
-    if (appliedFilters.vendor !== "all") next.set("vendor", appliedFilters.vendor);
-    if (appliedFilters.po !== "all") next.set("po", appliedFilters.po);
-    if (sortBy !== DEFAULT_SORT_BY) next.set("sort_by", sortBy);
-    if (sortOrder !== DEFAULT_SORT_ORDER) next.set("sort_order", sortOrder);
-    if (page > 1) next.set("page", String(page));
-    if (limit !== DEFAULT_LIMIT) next.set("limit", String(limit));
+    const next = buildPackedGoodsSearchParams({
+      appliedFilters,
+      sortBy,
+      sortOrder,
+      page,
+      limit,
+    });
 
     if (!areSearchParamsEquivalent(next, searchParams)) {
       setSearchParams(next, { replace: true });
     }
   }, [
-    appliedFilters.brand,
-    appliedFilters.po,
-    appliedFilters.vendor,
+    appliedFilters,
+    limit,
+    page,
     searchParams,
     setSearchParams,
     sortBy,
     sortOrder,
-    page,
-    limit,
     syncedQuery,
   ]);
 
-  const availableDraftVendors = useMemo(() => {
-    if (draftBrand === "all") {
-      return filterOptions.vendors;
-    }
+  useEffect(() => {
+    if (!brandDropdownOpen) return undefined;
 
-    return Array.from(
-      new Set(
-        rows
-          .filter((row) => String(row?.brand || "").trim() === draftBrand)
-          .map((row) => String(row?.vendor || "").trim())
-          .filter(Boolean),
-      ),
-    ).sort((left, right) => left.localeCompare(right));
-  }, [draftBrand, filterOptions.vendors, rows]);
-
-  const availableDraftPos = useMemo(() => {
-    if (
-      draftBrand === appliedFilters.brand &&
-      draftVendor === appliedFilters.vendor
-    ) {
-      return [...filterOptions.order_ids].sort((left, right) =>
-        left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }),
-      );
-    }
-
-    const matchesDraftFilters = (row) => {
-      const rowBrand = String(row?.brand || "").trim();
-      const rowVendor = String(row?.vendor || "").trim();
-      if (draftBrand !== "all" && rowBrand !== draftBrand) return false;
-      if (draftVendor !== "all" && rowVendor !== draftVendor) return false;
-      return true;
+    const handlePointerDown = (event) => {
+      if (!brandFilterRef.current?.contains(event.target)) {
+        setBrandDropdownOpen(false);
+      }
     };
 
-    const rowOptions = Array.from(
-      new Set(
-        rows
-          .filter(matchesDraftFilters)
-          .map((row) => String(row?.order_id || "").trim())
-          .filter(Boolean),
+    const handleEscape = (event) => {
+      if (event.key === "Escape") {
+        setBrandDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [brandDropdownOpen]);
+
+  const brandOptions = useMemo(
+    () => normalizeDistinctValues(allRows.map((row) => row?.brand)),
+    [allRows],
+  );
+
+  const availableDraftVendors = useMemo(
+    () =>
+      normalizeDistinctValues(
+        allRows
+          .filter((row) => matchesDraftFilters(row, draftBrands, "all"))
+          .map((row) => row?.vendor),
       ),
-    );
+    [allRows, draftBrands],
+  );
 
-    const sourceOptions = rowOptions.length > 0 ? rowOptions : filterOptions.order_ids;
+  const availableDraftPos = useMemo(
+    () =>
+      normalizeDistinctValues(
+        allRows
+          .filter((row) => matchesDraftFilters(row, draftBrands, draftVendor))
+          .map((row) => row?.order_id),
+      ).sort((left, right) =>
+        left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }),
+      ),
+    [allRows, draftBrands, draftVendor],
+  );
 
-    return [...sourceOptions].sort((left, right) =>
-      left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }),
-    );
-  }, [
-    appliedFilters.brand,
-    appliedFilters.vendor,
-    draftBrand,
-    draftVendor,
-    filterOptions.order_ids,
-    rows,
-  ]);
+  const filteredRows = useMemo(
+    () =>
+      allRows.filter((row) => {
+        const rowBrand = String(row?.brand || "").trim();
+        const rowVendor = String(row?.vendor || "").trim();
+        const rowPo = String(row?.order_id || "").trim();
+
+        if (!matchesSelectedBrands(appliedFilters.brands, rowBrand)) {
+          return false;
+        }
+        if (appliedFilters.vendor !== "all" && rowVendor !== appliedFilters.vendor) {
+          return false;
+        }
+        if (appliedFilters.po !== "all" && rowPo !== appliedFilters.po) {
+          return false;
+        }
+        return true;
+      }),
+    [allRows, appliedFilters],
+  );
+
+  const summary = useMemo(
+    () => ({
+      total_rows: filteredRows.length,
+      total_packed_quantity: filteredRows.reduce(
+        (sum, row) => sum + Number(row?.packed_quantity || 0),
+        0,
+      ),
+      total_cbm: filteredRows.reduce(
+        (sum, row) =>
+          sum
+          + Number(
+            resolvePreferredCbm(
+              row?.total_cbm,
+              row?.total_po_cbm,
+              row?.top_po_cbm,
+            ) || 0,
+          ),
+        0,
+      ),
+    }),
+    [filteredRows],
+  );
 
   const sortedRows = useMemo(
     () =>
-      sortClientRows(rows, {
+      sortClientRows(filteredRows, {
         sortBy,
         sortOrder,
         getSortValue: (row, column) => {
@@ -269,7 +377,7 @@ const PackedGoods = () => {
           return "";
         },
       }),
-    [rows, sortBy, sortOrder],
+    [filteredRows, sortBy, sortOrder],
   );
 
   const totalPages = useMemo(
@@ -287,9 +395,32 @@ const PackedGoods = () => {
   }, [limit, page, sortedRows]);
 
   const hasPendingFilterChanges =
-    draftBrand !== appliedFilters.brand ||
-    draftVendor !== appliedFilters.vendor ||
-    draftPo !== appliedFilters.po;
+    !areStringArraysEqual(draftBrands, appliedFilters.brands)
+    || draftVendor !== appliedFilters.vendor
+    || draftPo !== appliedFilters.po;
+
+  const appliedBrandLabel = useMemo(
+    () => formatSelectedBrands(appliedFilters.brands, "All Brands", 2),
+    [appliedFilters.brands],
+  );
+
+  const exportBrandLabel = useMemo(
+    () =>
+      appliedFilters.brands.length === 0
+        ? "All Brands"
+        : appliedFilters.brands.join(", "),
+    [appliedFilters.brands],
+  );
+
+  const draftBrandLabel = useMemo(
+    () => formatSelectedBrands(draftBrands, "All Brands", 1),
+    [draftBrands],
+  );
+
+  const exportGeneratedAt = useMemo(
+    () => new Date().toLocaleString(),
+    [appliedFilters, sortedRows.length],
+  );
 
   const handleSortColumn = useCallback(
     (column, defaultDirection = "asc") => {
@@ -306,8 +437,25 @@ const PackedGoods = () => {
     [sortBy, sortOrder],
   );
 
-  const handleDraftBrandChange = useCallback((event) => {
-    setDraftBrand(event.target.value);
+  const handleDraftBrandToggle = useCallback((brand) => {
+    setDraftBrands((prev) => {
+      const nextBrands = prev.includes(brand)
+        ? prev.filter((value) => value !== brand)
+        : [...prev, brand];
+      return normalizeFilterValues(nextBrands);
+    });
+    setDraftVendor("all");
+    setDraftPo("all");
+  }, []);
+
+  const handleSelectAllBrands = useCallback(() => {
+    setDraftBrands(brandOptions);
+    setDraftVendor("all");
+    setDraftPo("all");
+  }, [brandOptions]);
+
+  const handleClearDraftBrands = useCallback(() => {
+    setDraftBrands([]);
     setDraftVendor("all");
     setDraftPo("all");
   }, []);
@@ -320,7 +468,7 @@ const PackedGoods = () => {
   const handleApplyFilters = useCallback(() => {
     setPage(1);
     setAppliedFilters({
-      brand: draftBrand,
+      brands: normalizeFilterValues(draftBrands),
       vendor:
         draftVendor !== "all" && !availableDraftVendors.includes(draftVendor)
           ? "all"
@@ -330,57 +478,191 @@ const PackedGoods = () => {
           ? "all"
           : draftPo,
     });
-  }, [availableDraftPos, availableDraftVendors, draftBrand, draftPo, draftVendor]);
+    setBrandDropdownOpen(false);
+  }, [availableDraftPos, availableDraftVendors, draftBrands, draftPo, draftVendor]);
 
   const handleClearFilters = useCallback(() => {
-    const clearedFilters = { brand: "all", vendor: "all", po: "all" };
+    const clearedFilters = { brands: [], vendor: "all", po: "all" };
     setPage(1);
-    setDraftBrand(clearedFilters.brand);
+    setDraftBrands(clearedFilters.brands);
     setDraftVendor(clearedFilters.vendor);
     setDraftPo(clearedFilters.po);
     setAppliedFilters(clearedFilters);
+    setBrandDropdownOpen(false);
   }, []);
+
+  const handleExportXls = useCallback(async () => {
+    if (sortedRows.length === 0) return;
+
+    try {
+      setExportingFormat("xls");
+      const query = buildPackedGoodsApiQuery(appliedFilters);
+      query.set("format", "xls");
+      const response = await api.get(
+        `/orders/packed-goods/export?${query.toString()}`,
+        { responseType: "blob" },
+      );
+      downloadBlobResponse(
+        response,
+        `packed-goods-${new Date().toISOString().slice(0, 10)}.xls`,
+        "application/vnd.ms-excel",
+      );
+    } catch (exportError) {
+      console.error(exportError);
+      alert("Failed to export packed goods as XLS.");
+    } finally {
+      setExportingFormat("");
+    }
+  }, [appliedFilters, sortedRows.length]);
+
+  const handleExportPdf = useCallback(async () => {
+    if (!reportRef.current || loading || sortedRows.length === 0) return;
+
+    try {
+      setExportingFormat("pdf");
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+      const target = reportRef.current;
+      const canvas = await html2canvas(target, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        windowWidth: Math.max(target.scrollWidth, target.clientWidth),
+        windowHeight: Math.max(target.scrollHeight, target.clientHeight),
+        scrollX: 0,
+        scrollY: 0,
+      });
+      const imageData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 18;
+      const printableWidth = pageWidth - margin * 2;
+      const printableHeight = pageHeight - margin * 2;
+      const imageHeight = (canvas.height * printableWidth) / canvas.width;
+
+      let remainingHeight = imageHeight;
+      let yPosition = margin;
+      pdf.addImage(imageData, "PNG", margin, yPosition, printableWidth, imageHeight);
+      remainingHeight -= printableHeight;
+
+      while (remainingHeight > 0) {
+        pdf.addPage();
+        yPosition = margin - (imageHeight - remainingHeight);
+        pdf.addImage(imageData, "PNG", margin, yPosition, printableWidth, imageHeight);
+        remainingHeight -= printableHeight;
+      }
+
+      pdf.save(`packed-goods-${new Date().toISOString().slice(0, 10)}.pdf`);
+    } catch (pdfError) {
+      console.error(pdfError);
+      alert("Failed to export packed goods PDF.");
+    } finally {
+      setExportingFormat("");
+    }
+  }, [loading, sortedRows.length]);
 
   return (
     <>
       <Navbar />
 
       <div className="page-shell py-3">
-        <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <div className="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
           <div>
             <h2 className="h4 mb-1">Packed Goods</h2>
             <p className="text-secondary mb-0">
               Items inspected and packed, but not yet shipped.
             </p>
           </div>
-          <div className="d-flex flex-wrap gap-2">
-            <span className="om-summary-chip">Rows: {summary.total_rows}</span>
-            <span className="om-summary-chip">
-              Packed Qty: {summary.total_packed_quantity}
-            </span>
-            <span className="om-summary-chip">
-              Total CBM: {formatCbm(summary.total_cbm)}
-            </span>
+          <div className="d-flex flex-column align-items-stretch align-items-md-end gap-2">
+            {canExportPackedGoods && (
+              <div className="d-flex flex-wrap justify-content-end gap-2">
+                <button
+                  type="button"
+                  className="btn btn-outline-primary btn-sm"
+                  onClick={handleExportPdf}
+                  disabled={loading || exportingFormat !== "" || sortedRows.length === 0}
+                >
+                  {exportingFormat === "pdf" ? "Exporting..." : "Export PDF"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-outline-primary btn-sm"
+                  onClick={handleExportXls}
+                  disabled={loading || exportingFormat !== "" || sortedRows.length === 0}
+                >
+                  {exportingFormat === "xls" ? "Exporting..." : "Export XLS"}
+                </button>
+              </div>
+            )}
+            <div className="d-flex flex-wrap justify-content-end gap-2">
+              <span className="om-summary-chip">Rows: {summary.total_rows}</span>
+              <span className="om-summary-chip">Brands: {appliedBrandLabel}</span>
+              <span className="om-summary-chip">
+                Packed Qty: {summary.total_packed_quantity}
+              </span>
+              <span className="om-summary-chip">
+                Total CBM: {formatCbm(summary.total_cbm)}
+              </span>
+            </div>
           </div>
         </div>
 
         <div className="card om-card mb-3">
           <div className="card-body">
             <div className="packed-goods-filter-bar">
-              <div className="packed-goods-filter-field">
-                <label className="form-label small mb-1">Brand</label>
-                <select
-                  className="form-select form-select-sm"
-                  value={draftBrand}
-                  onChange={handleDraftBrandChange}
+              <div
+                className="packed-goods-filter-field packed-goods-filter-field--brand"
+                ref={brandFilterRef}
+              >
+                <label className="form-label small mb-1">Brands</label>
+                <button
+                  type="button"
+                  className="form-select form-select-sm text-start packed-goods-brand-trigger"
+                  onClick={() => setBrandDropdownOpen((prev) => !prev)}
+                  aria-expanded={brandDropdownOpen}
                 >
-                  <option value="all">All Brands</option>
-                  {filterOptions.brands.map((brand) => (
-                    <option key={brand} value={brand}>
-                      {brand}
-                    </option>
-                  ))}
-                </select>
+                  {draftBrandLabel}
+                </button>
+                {brandDropdownOpen && (
+                  <div className="packed-goods-brand-menu shadow-sm">
+                    <div className="packed-goods-brand-menu-actions">
+                      <button
+                        type="button"
+                        className="btn btn-link btn-sm p-0"
+                        onClick={handleSelectAllBrands}
+                      >
+                        Select all
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-link btn-sm p-0"
+                        onClick={handleClearDraftBrands}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                    <div className="packed-goods-brand-menu-list">
+                      {brandOptions.length === 0 ? (
+                        <div className="small text-secondary">No brands available.</div>
+                      ) : (
+                        brandOptions.map((brand) => (
+                          <label
+                            key={brand}
+                            className="form-check packed-goods-brand-option"
+                          >
+                            <input
+                              type="checkbox"
+                              className="form-check-input"
+                              checked={draftBrands.includes(brand)}
+                              onChange={() => handleDraftBrandToggle(brand)}
+                            />
+                            <span className="form-check-label">{brand}</span>
+                          </label>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="packed-goods-filter-field">
@@ -449,10 +731,10 @@ const PackedGoods = () => {
                 disabled={
                   loading
                   || (
-                    draftBrand === "all"
+                    draftBrands.length === 0
                     && draftVendor === "all"
                     && draftPo === "all"
-                    && appliedFilters.brand === "all"
+                    && appliedFilters.brands.length === 0
                     && appliedFilters.vendor === "all"
                     && appliedFilters.po === "all"
                   )
@@ -467,6 +749,82 @@ const PackedGoods = () => {
         {error && (
           <div className="alert alert-danger mb-3" role="alert">
             {error}
+          </div>
+        )}
+
+        {canExportPackedGoods && sortedRows.length > 0 && (
+          <div className="packed-goods-pdf-surface" aria-hidden="true">
+            <div ref={reportRef} className="packed-goods-pdf-report">
+              <div className="d-flex justify-content-between align-items-start gap-3 mb-3">
+                <div>
+                  <h2 className="h4 mb-1">Packed Goods Report</h2>
+                  <p className="text-secondary mb-0">Generated {exportGeneratedAt}</p>
+                </div>
+                <div className="d-flex flex-wrap justify-content-end gap-2">
+                  <span className="om-summary-chip">Brands: {exportBrandLabel}</span>
+                  <span className="om-summary-chip">
+                    Vendor: {appliedFilters.vendor === "all" ? "All Vendors" : appliedFilters.vendor}
+                  </span>
+                  <span className="om-summary-chip">
+                    PO: {appliedFilters.po === "all" ? "All POs" : appliedFilters.po}
+                  </span>
+                </div>
+              </div>
+
+              <div className="d-flex flex-wrap gap-2 mb-3">
+                <span className="om-summary-chip">Rows: {summary.total_rows}</span>
+                <span className="om-summary-chip">
+                  Packed Qty: {summary.total_packed_quantity}
+                </span>
+                <span className="om-summary-chip">
+                  Total CBM: {formatCbm(summary.total_cbm)}
+                </span>
+              </div>
+
+              <div className="card om-card">
+                <div className="card-body p-0">
+                  <div className="table-responsive">
+                    <table className="table table-striped align-middle om-table mb-0">
+                      <thead className="table-primary">
+                        <tr>
+                          <th>PO</th>
+                          <th>Brand</th>
+                          <th>Vendor</th>
+                          <th>Item code</th>
+                          <th>Order Quantity</th>
+                          <th>Packed Quantity</th>
+                          <th>Total CBM</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sortedRows.map((row) => (
+                          <tr
+                            key={`pdf-${row?.id || `${row?.order_id}-${row?.item_code}`}`}
+                            className={row?.po_has_no_pending_quantity ? "om-report-success-row" : ""}
+                          >
+                            <td>{row?.order_id || "N/A"}</td>
+                            <td>{row?.brand || "N/A"}</td>
+                            <td>{row?.vendor || "N/A"}</td>
+                            <td>{row?.item_code || "N/A"}</td>
+                            <td>{Number(row?.order_quantity || 0)}</td>
+                            <td>{Number(row?.packed_quantity || 0)}</td>
+                            <td>
+                              {formatCbm(
+                                resolvePreferredCbm(
+                                  row?.total_cbm,
+                                  row?.total_po_cbm,
+                                  row?.top_po_cbm,
+                                ),
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 

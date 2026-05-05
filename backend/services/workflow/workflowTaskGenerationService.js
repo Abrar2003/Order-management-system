@@ -22,8 +22,35 @@ const normalizeId = (value) => String(value || "").trim();
 const uniqueIds = (values = []) =>
   [...new Set((Array.isArray(values) ? values : []).map(normalizeId).filter(Boolean))];
 
-const toLowerSet = (values = []) =>
-  new Set((Array.isArray(values) ? values : []).map((value) => normalizeText(value).toLowerCase()).filter(Boolean));
+const normalizeExtensionsSet = (values = []) => {
+  const arr = Array.isArray(values) ? values : (typeof values === "string" ? [values] : []);
+  const set = new Set();
+  arr.forEach((val) => {
+    if (typeof val !== "string") return;
+    val.split(",").forEach((item) => {
+      const normalized = normalizeText(item).replace(/^\./, "").toLowerCase();
+      if (normalized) {
+        set.add(normalized);
+      }
+    });
+  });
+  return set;
+};
+
+const normalizeMimeTypesSet = (values = []) => {
+  const arr = Array.isArray(values) ? values : (typeof values === "string" ? [values] : []);
+  const set = new Set();
+  arr.forEach((val) => {
+    if (typeof val !== "string") return;
+    val.split(",").forEach((item) => {
+      const normalized = normalizeText(item).toLowerCase();
+      if (normalized) {
+        set.add(normalized);
+      }
+    });
+  });
+  return set;
+};
 
 const matchesPatternList = (value, patterns = []) => {
   const normalizedValue = normalizeText(value).toLowerCase();
@@ -33,14 +60,15 @@ const matchesPatternList = (value, patterns = []) => {
 
 const matchesTaskTypeRule = (entry = {}, taskType = {}) => {
   const rule = taskType?.file_match_rule || {};
+  const extensionSet = normalizeExtensionsSet(rule.extensions);
+  const mimeTypeSet = normalizeMimeTypesSet(rule.mime_types);
+
   const extensionMatches =
-    !Array.isArray(rule.extensions) ||
-    rule.extensions.length === 0 ||
-    toLowerSet(rule.extensions).has(normalizeText(entry?.extension).toLowerCase());
+    extensionSet.size === 0 ||
+    extensionSet.has(normalizeText(entry?.extension).replace(/^\./, "").toLowerCase());
   const mimeMatches =
-    !Array.isArray(rule.mime_types) ||
-    rule.mime_types.length === 0 ||
-    toLowerSet(rule.mime_types).has(normalizeText(entry?.mime_type).toLowerCase());
+    mimeTypeSet.size === 0 ||
+    mimeTypeSet.has(normalizeText(entry?.mime_type).toLowerCase());
   const nameMatches = matchesPatternList(entry?.name, rule.name_patterns || []);
   const folderMatches = matchesPatternList(entry?.folder_path, rule.folder_patterns || []);
   return extensionMatches && mimeMatches && nameMatches && folderMatches;
@@ -98,11 +126,7 @@ const validateAssigneeUsers = async (assigneeIds = []) => {
 };
 
 const createPerFileTaskDefinitions = ({ batch, taskType, manifestEntries = [] }) => {
-  const filteredEntries = manifestEntries.filter((entry) => matchesTaskTypeRule(entry, taskType));
-  const supportedEntries =
-    taskType?.key === "picture_cleaning"
-      ? filteredEntries.filter((entry) => IMAGE_EXTENSIONS.has(normalizeText(entry.extension).toLowerCase()))
-      : filteredEntries;
+  const supportedEntries = manifestEntries.filter((entry) => matchesTaskTypeRule(entry, taskType));
 
   if (supportedEntries.length === 0) {
     throw new Error(`No matching files found for ${taskType.name || taskType.key}`);
