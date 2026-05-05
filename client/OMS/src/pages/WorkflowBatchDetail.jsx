@@ -5,11 +5,16 @@ import WorkflowTaskDetailModal from "../components/workflow/WorkflowTaskDetailMo
 import { usePermissions } from "../auth/PermissionContext";
 import {
   cancelWorkflowBatch,
+  deleteWorkflowBatch,
+  deleteWorkflowTask,
   getWorkflowBatchById,
   getWorkflowTasks,
   getWorkflowUsers,
 } from "../api/workflowApi";
 import "../App.css";
+
+const DEFAULT_TASK_LIMIT = 20;
+const TASK_LIMIT_OPTIONS = [20, 50, 100];
 
 const formatDateTime = (value) => {
   if (!value) return "—";
@@ -25,19 +30,30 @@ const WorkflowBatchDetail = () => {
   const navigate = useNavigate();
   const { batchId } = useParams();
   const { hasPermission, role } = usePermissions();
-  const isManagerOrAdmin = ["admin", "manager"].includes(String(role || "").trim().toLowerCase());
+  const normalizedRole = String(role || "").trim().toLowerCase();
+  const isManagerOrAdmin = ["admin", "manager"].includes(normalizedRole);
+  const isAdmin = normalizedRole === "admin";
   const canViewWorkflow = hasPermission("workflow", "view");
   const canEditWorkflow = isManagerOrAdmin && hasPermission("workflow", "edit");
   const canAssignWorkflow = isManagerOrAdmin && hasPermission("workflow", "assign");
   const canApproveWorkflow = isManagerOrAdmin && hasPermission("workflow", "approve");
+  const canDeleteWorkflow = isAdmin && hasPermission("workflow", "delete");
 
   const [batch, setBatch] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [tasksLoading, setTasksLoading] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [selectedTaskId, setSelectedTaskId] = useState("");
+  const [taskPage, setTaskPage] = useState(1);
+  const [taskLimit, setTaskLimit] = useState(DEFAULT_TASK_LIMIT);
+  const [taskPagination, setTaskPagination] = useState({
+    page: 1,
+    totalPages: 1,
+    totalRecords: 0,
+  });
   const [refreshTick, setRefreshTick] = useState(0);
 
   const loadBatchDetail = useCallback(async () => {
@@ -49,21 +65,16 @@ const WorkflowBatchDetail = () => {
     setLoading(true);
     setError("");
     try {
-      const [batchResult, taskResult, userResult] = await Promise.allSettled([
+      const [batchResult, userResult] = await Promise.allSettled([
         getWorkflowBatchById(batchId),
-        getWorkflowTasks({ batch: batchId, limit: 100 }),
         canAssignWorkflow ? getWorkflowUsers() : Promise.resolve([]),
       ]);
 
       if (batchResult.status !== "fulfilled") {
         throw batchResult.reason;
       }
-      if (taskResult.status !== "fulfilled") {
-        throw taskResult.reason;
-      }
 
       setBatch(batchResult.value?.data || null);
-      setTasks(Array.isArray(taskResult.value?.data) ? taskResult.value.data : []);
       setUsers(
         userResult.status === "fulfilled" && Array.isArray(userResult.value)
           ? userResult.value
@@ -71,7 +82,6 @@ const WorkflowBatchDetail = () => {
       );
     } catch (loadError) {
       setBatch(null);
-      setTasks([]);
       setError(
         loadError?.response?.data?.message
           || loadError?.message
@@ -82,9 +92,51 @@ const WorkflowBatchDetail = () => {
     }
   }, [batchId, canAssignWorkflow, canViewWorkflow]);
 
+  const loadBatchTasks = useCallback(async () => {
+    if (!canViewWorkflow || !batchId) {
+      setTasksLoading(false);
+      return;
+    }
+
+    setTasksLoading(true);
+    setError("");
+    try {
+      const taskResult = await getWorkflowTasks({
+        batch: batchId,
+        page: taskPage,
+        limit: taskLimit,
+      });
+
+      setTasks(Array.isArray(taskResult?.data) ? taskResult.data : []);
+      setTaskPagination({
+        page: Number(taskResult?.pagination?.page || 1),
+        totalPages: Number(taskResult?.pagination?.totalPages || 1),
+        totalRecords: Number(taskResult?.pagination?.totalRecords || 0),
+      });
+    } catch (loadError) {
+      setTasks([]);
+      setTaskPagination({
+        page: 1,
+        totalPages: 1,
+        totalRecords: 0,
+      });
+      setError(
+        loadError?.response?.data?.message
+          || loadError?.message
+          || "Failed to fetch workflow tasks for this batch.",
+      );
+    } finally {
+      setTasksLoading(false);
+    }
+  }, [batchId, canViewWorkflow, taskLimit, taskPage]);
+
   useEffect(() => {
     loadBatchDetail();
   }, [loadBatchDetail, refreshTick]);
+
+  useEffect(() => {
+    loadBatchTasks();
+  }, [loadBatchTasks, refreshTick]);
 
   const handleCancelBatch = async () => {
     const confirmed = window.confirm(
@@ -104,6 +156,52 @@ const WorkflowBatchDetail = () => {
         cancelError?.response?.data?.message
           || cancelError?.message
           || "Failed to cancel workflow batch.",
+      );
+    }
+  };
+
+  const handleDeleteBatch = async () => {
+    const confirmed = window.confirm(
+      `Delete workflow batch ${batch?.batch_no || batch?.name || ""} and all tasks inside it?`,
+    );
+    if (!confirmed) return;
+
+    const reason = window.prompt("Optional delete note") || "";
+    setError("");
+    setSuccess("");
+    try {
+      await deleteWorkflowBatch(batchId, { note: reason });
+      navigate("/workflow/batches");
+    } catch (deleteError) {
+      setError(
+        deleteError?.response?.data?.message
+          || deleteError?.message
+          || "Failed to delete workflow batch.",
+      );
+    }
+  };
+
+  const handleDeleteTask = async (task) => {
+    const confirmed = window.confirm(
+      `Delete workflow task ${task?.task_no || task?.title || "this task"}?`,
+    );
+    if (!confirmed) return;
+
+    const reason = window.prompt("Optional delete note") || "";
+    setError("");
+    setSuccess("");
+    try {
+      await deleteWorkflowTask(task._id, { note: reason });
+      setSuccess("Workflow task deleted successfully.");
+      if (selectedTaskId === task._id) {
+        setSelectedTaskId("");
+      }
+      setRefreshTick((prev) => prev + 1);
+    } catch (deleteError) {
+      setError(
+        deleteError?.response?.data?.message
+          || deleteError?.message
+          || "Failed to delete workflow task.",
       );
     }
   };
@@ -129,7 +227,8 @@ const WorkflowBatchDetail = () => {
           <div>
             <h2 className="h4">Workflow Batch Detail</h2>
             <div className="text-secondary">
-              Review batch metadata and the generated production tasks.
+              Review the batch container and the separate production tasks generated
+              inside it.
             </div>
           </div>
           <div className="d-flex flex-wrap gap-2">
@@ -158,6 +257,15 @@ const WorkflowBatchDetail = () => {
                 Cancel Batch
               </button>
             )}
+            {canDeleteWorkflow && (
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={handleDeleteBatch}
+              >
+                Delete Batch
+              </button>
+            )}
           </div>
         </div>
 
@@ -182,7 +290,7 @@ const WorkflowBatchDetail = () => {
               <div className="card-body">
                 <div className="d-flex flex-wrap gap-2 mb-3">
                   <span className="om-summary-chip">Batch No: {batch.batch_no}</span>
-                  <span className="om-summary-chip">Status: {batch.status}</span>
+                  <span className="om-summary-chip">Batch Status: {batch.status}</span>
                   <span className="om-summary-chip">
                     Task Type: {batch.selected_task_type?.name || batch.task_type?.name || batch.task_type_key}
                   </span>
@@ -210,6 +318,13 @@ const WorkflowBatchDetail = () => {
                   <div className="col-md-6">
                     <div className="small text-secondary mb-1">Description</div>
                     <div className="fw-semibold">{batch.description || "—"}</div>
+                  </div>
+                  <div className="col-md-3">
+                    <div className="small text-secondary mb-1">How to read this batch</div>
+                    <div className="fw-semibold">
+                      The batch is only the container. Each generated task below moves
+                      independently.
+                    </div>
                   </div>
                   <div className="col-md-3">
                     <div className="small text-secondary mb-1">Created By</div>
@@ -246,12 +361,46 @@ const WorkflowBatchDetail = () => {
                 <span className="om-summary-chip">
                   Completed: {Number(batch.counts?.completed_tasks || 0)}
                 </span>
+                <span className="small text-secondary align-self-center">
+                  Generated tasks shown below are paginated and keep their own status,
+                  history, comments, and rework counts.
+                </span>
               </div>
             </div>
 
             <div className="card om-card">
               <div className="card-body p-0">
-                {tasks.length === 0 ? (
+                <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 p-3 border-bottom">
+                  <div>
+                    <div className="fw-semibold">Generated Tasks</div>
+                    <div className="small text-secondary">
+                      Total task records in this batch: {taskPagination.totalRecords}
+                    </div>
+                  </div>
+                  <div className="d-flex align-items-center gap-2">
+                    <label className="small text-secondary mb-0">Rows</label>
+                    <select
+                      className="form-select form-select-sm"
+                      style={{ width: "auto" }}
+                      value={taskLimit}
+                      onChange={(event) => {
+                        setTaskLimit(Number(event.target.value) || DEFAULT_TASK_LIMIT);
+                        setTaskPage(1);
+                      }}
+                    >
+                      {TASK_LIMIT_OPTIONS.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                {tasksLoading ? (
+                  <div className="text-center py-5 text-secondary">
+                    Loading generated tasks...
+                  </div>
+                ) : tasks.length === 0 ? (
                   <div className="text-center py-5 text-secondary">
                     No generated tasks found for this batch.
                   </div>
@@ -296,13 +445,24 @@ const WorkflowBatchDetail = () => {
                             <td>{Array.isArray(task.source_files) ? task.source_files.length : 0}</td>
                             <td>{formatDateTime(task.due_date)}</td>
                             <td>
-                              <button
-                                type="button"
-                                className="btn btn-outline-primary btn-sm"
-                                onClick={() => setSelectedTaskId(task._id)}
-                              >
-                                View
-                              </button>
+                              <div className="d-flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-primary btn-sm"
+                                  onClick={() => setSelectedTaskId(task._id)}
+                                >
+                                  View
+                                </button>
+                                {canDeleteWorkflow && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-danger btn-sm"
+                                    onClick={() => handleDeleteTask(task)}
+                                  >
+                                    Delete Task
+                                  </button>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -311,6 +471,30 @@ const WorkflowBatchDetail = () => {
                   </div>
                 )}
               </div>
+            </div>
+
+            <div className="d-flex justify-content-center align-items-center gap-3 mt-3">
+              <button
+                type="button"
+                className="btn btn-outline-secondary"
+                disabled={tasksLoading || taskPage <= 1}
+                onClick={() => setTaskPage((prev) => Math.max(1, prev - 1))}
+              >
+                Previous
+              </button>
+              <div className="small text-secondary">
+                Page {taskPagination.page} of {taskPagination.totalPages}
+              </div>
+              <button
+                type="button"
+                className="btn btn-outline-secondary"
+                disabled={tasksLoading || taskPage >= taskPagination.totalPages}
+                onClick={() =>
+                  setTaskPage((prev) => Math.min(taskPagination.totalPages, prev + 1))
+                }
+              >
+                Next
+              </button>
             </div>
           </>
         )}
@@ -323,8 +507,13 @@ const WorkflowBatchDetail = () => {
           canManageWorkflow={canEditWorkflow}
           canAssignWorkflow={canAssignWorkflow}
           canApproveWorkflow={canApproveWorkflow}
+          canDeleteWorkflow={canDeleteWorkflow}
           onClose={() => setSelectedTaskId("")}
           onUpdated={() => setRefreshTick((prev) => prev + 1)}
+          onDeleted={() => {
+            setSelectedTaskId("");
+            setRefreshTick((prev) => prev + 1);
+          }}
         />
       )}
     </>

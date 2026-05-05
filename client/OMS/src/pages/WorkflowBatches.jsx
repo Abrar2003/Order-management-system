@@ -5,6 +5,7 @@ import WorkflowBatchCreateModal from "../components/workflow/WorkflowBatchCreate
 import { usePermissions } from "../auth/PermissionContext";
 import {
   cancelWorkflowBatch,
+  deleteWorkflowBatch,
   getWorkflowBatches,
   getWorkflowTaskTypes,
   getWorkflowUsers,
@@ -42,10 +43,13 @@ const getAuditActorName = (actor = {}) =>
 const WorkflowBatches = () => {
   const navigate = useNavigate();
   const { hasPermission, role } = usePermissions();
-  const isManagerOrAdmin = ["admin", "manager"].includes(String(role || "").trim().toLowerCase());
+  const normalizedRole = String(role || "").trim().toLowerCase();
+  const isManagerOrAdmin = ["admin", "manager"].includes(normalizedRole);
+  const isAdmin = normalizedRole === "admin";
   const canViewWorkflow = hasPermission("workflow", "view");
   const canCreateWorkflow = isManagerOrAdmin && hasPermission("workflow", "create");
   const canEditWorkflow = isManagerOrAdmin && hasPermission("workflow", "edit");
+  const canDeleteWorkflow = isAdmin && hasPermission("workflow", "delete");
 
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "workflow-batches");
@@ -221,6 +225,31 @@ const WorkflowBatches = () => {
     }
   };
 
+  const handleDeleteBatch = async (batch) => {
+    const confirmed = window.confirm(
+      `Delete workflow batch ${batch?.batch_no || batch?.name || "this batch"} and all tasks inside it?`,
+    );
+    if (!confirmed) return;
+
+    const reason = window.prompt("Optional delete note") || "";
+
+    setError("");
+    setSuccess("");
+    try {
+      await deleteWorkflowBatch(batch._id, {
+        note: normalizeText(reason),
+      });
+      setSuccess("Workflow batch deleted successfully.");
+      setRefreshTick((prev) => prev + 1);
+    } catch (deleteError) {
+      setError(
+        deleteError?.response?.data?.message
+          || deleteError?.message
+          || "Failed to delete workflow batch.",
+      );
+    }
+  };
+
   if (!canViewWorkflow) {
     return (
       <>
@@ -242,7 +271,8 @@ const WorkflowBatches = () => {
           <div>
             <h2 className="h4">Workflow Batches</h2>
             <div className="text-secondary">
-              Build production tasks from browser folder manifests without uploading files.
+              Build batch containers from browser folder manifests and generate separate
+              production tasks without uploading files.
             </div>
           </div>
           {canCreateWorkflow && (
@@ -418,6 +448,7 @@ const WorkflowBatches = () => {
                       <th>Assigned</th>
                       <th>In Progress</th>
                       <th>Submitted</th>
+                      <th>Review</th>
                       <th>Rework</th>
                       <th>Completed</th>
                       <th>Created By</th>
@@ -440,6 +471,7 @@ const WorkflowBatches = () => {
                         <td>{Number(batch.counts?.assigned_tasks || 0)}</td>
                         <td>{Number(batch.counts?.in_progress_tasks || 0)}</td>
                         <td>{Number(batch.counts?.submitted_tasks || 0)}</td>
+                        <td>{Number(batch.counts?.review_tasks || 0)}</td>
                         <td>{Number(batch.counts?.rework_tasks || 0)}</td>
                         <td>{Number(batch.counts?.completed_tasks || 0)}</td>
                         <td>{getAuditActorName(batch.created_by)}</td>
@@ -467,6 +499,15 @@ const WorkflowBatches = () => {
                                 onClick={() => handleCancelBatch(batch)}
                               >
                                 Cancel
+                              </button>
+                            )}
+                            {canDeleteWorkflow && (
+                              <button
+                                type="button"
+                                className="btn btn-danger btn-sm"
+                                onClick={() => handleDeleteBatch(batch)}
+                              >
+                                Delete Batch
                               </button>
                             )}
                           </div>

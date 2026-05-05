@@ -98,7 +98,7 @@ const Order_Schema = new mongoose.Schema(
     },
     total_po_cbm: { type: Number, default: 0, min: 0 },
     quantity: { type: Number, required: true },
-    shipment: { type: [ShipmentEntrySchema], default: [] },
+    shipment: { type: [ShipmentEntrySchema], default: [] }, 
     gcal: {
       calendarId: { type: String, default: null },
       eventId: { type: String, default: null },

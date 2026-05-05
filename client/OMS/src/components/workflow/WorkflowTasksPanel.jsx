@@ -4,6 +4,7 @@ import { getUserFromToken } from "../../auth/auth.service";
 import { usePermissions } from "../../auth/PermissionContext";
 import {
   approveWorkflowTask,
+  deleteWorkflowTask,
   getWorkflowBatches,
   getWorkflowDepartments,
   getWorkflowTaskTypes,
@@ -55,11 +56,14 @@ const WorkflowTasksPanel = ({
   const { hasPermission, role } = usePermissions();
   const currentUser = getUserFromToken();
   const currentUserId = currentUser?._id || currentUser?.id || "";
-  const isManagerOrAdmin = ["admin", "manager"].includes(String(role || "").trim().toLowerCase());
+  const normalizedRole = String(role || "").trim().toLowerCase();
+  const isManagerOrAdmin = ["admin", "manager"].includes(normalizedRole);
+  const isAdmin = normalizedRole === "admin";
   const canViewWorkflow = hasPermission("workflow", "view");
   const canAssignWorkflow = isManagerOrAdmin && hasPermission("workflow", "assign");
   const canApproveWorkflow = isManagerOrAdmin && hasPermission("workflow", "approve");
   const canManageWorkflow = isManagerOrAdmin && hasPermission("workflow", "edit");
+  const canDeleteWorkflow = isAdmin && hasPermission("workflow", "delete");
 
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(
@@ -276,6 +280,22 @@ const WorkflowTasksPanel = ({
           || "Task update failed.",
       );
     }
+  };
+
+  const handleDeleteTask = async (task) => {
+    const confirmed = window.confirm(
+      `Delete workflow task ${task?.task_no || task?.title || "this task"}?`,
+    );
+    if (!confirmed) return;
+
+    const reason = window.prompt("Enter delete note (optional)") || "";
+    await handleQuickAction(
+      () =>
+        deleteWorkflowTask(task._id, {
+          note: normalizeText(reason),
+        }),
+      "Workflow task deleted successfully.",
+    );
   };
 
   const taskStatuses = useMemo(
@@ -591,7 +611,7 @@ const WorkflowTasksPanel = ({
                                     )
                                   }
                                 >
-                                  Submit
+                                  Mark as Done / Submit for Review
                                 </button>
                               )}
                               {showReview && (
@@ -605,7 +625,7 @@ const WorkflowTasksPanel = ({
                                     )
                                   }
                                 >
-                                  Review
+                                  Move to Review
                                 </button>
                               )}
                               {showApprove && (
@@ -638,7 +658,16 @@ const WorkflowTasksPanel = ({
                                     );
                                   }}
                                 >
-                                  Rework
+                                  Send to Rework
+                                </button>
+                              )}
+                              {canDeleteWorkflow && (
+                                <button
+                                  type="button"
+                                  className="btn btn-danger btn-sm"
+                                  onClick={() => handleDeleteTask(task)}
+                                >
+                                  Delete Task
                                 </button>
                               )}
                             </div>
@@ -685,8 +714,13 @@ const WorkflowTasksPanel = ({
           canManageWorkflow={canManageWorkflow}
           canAssignWorkflow={canAssignWorkflow}
           canApproveWorkflow={canApproveWorkflow}
+          canDeleteWorkflow={canDeleteWorkflow}
           onClose={() => setSelectedTaskId("")}
           onUpdated={() => {
+            setRefreshTick((prev) => prev + 1);
+          }}
+          onDeleted={() => {
+            setSelectedTaskId("");
             setRefreshTick((prev) => prev + 1);
           }}
         />

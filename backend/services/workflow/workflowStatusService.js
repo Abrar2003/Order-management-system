@@ -14,11 +14,14 @@ const {
   canReadWorkflowTask,
   canStartWorkflowTask,
   canSubmitWorkflowTask,
+  isAdmin,
   isManagerOrAdmin,
   isPrivilegedWorkflowReader,
 } = require("./workflowPermissionService");
-const { syncWorkflowBatchTaskCounts } = require("./workflowBatchService");
 const { validateAssigneeUsers } = require("./workflowTaskGenerationService");
+const {
+  recalculateWorkflowBatchFromTasks,
+} = require("./workflowBatchAggregationService");
 
 const DEFAULT_PAGE_LIMIT = 20;
 const MAX_PAGE_LIMIT = 100;
@@ -330,7 +333,7 @@ const applyTaskTransition = async ({
     note,
     commentType,
   });
-  await syncWorkflowBatchTaskCounts(task.batch);
+  await recalculateWorkflowBatchFromTasks(task.batch);
 
   return buildTaskDetail(task._id, actor);
 };
@@ -445,7 +448,7 @@ const assignWorkflowTask = async ({
     });
   }
 
-  await syncWorkflowBatchTaskCounts(task.batch);
+  await recalculateWorkflowBatchFromTasks(task.batch);
   return buildTaskDetail(task._id, actor);
 };
 
@@ -580,6 +583,84 @@ const addWorkflowTaskComment = async ({
     .populate("created_by.user", "name email role")
     .populate("updated_by.user", "name email role")
     .lean();
+};
+
+const deleteWorkflowTask = async ({
+  taskId,
+  actor = {},
+  note = "",
+}) => {
+  if (!isAdmin(actor)) {
+    throw new Error("Only admins can delete workflow tasks");
+  }
+
+  const task = await getMutableTaskById(taskId);
+  const auditActor = buildAuditActor(actor);
+  const normalizedNote = normalizeText(note) || "Workflow task deleted by admin";
+  const fromStatus = task.status;
+  const shouldCancelTask = !["completed", "cancelled"].includes(fromStatus);
+
+  if (shouldCancelTask) {
+    task.status = "cancelled";
+    task.blocked_reason = normalizedNote;
+
+    await TaskStatusHistory.create({
+      task: task._id,
+      batch: task.batch,
+      from_status: fromStatus,
+      to_status: "cancelled",
+      changed_by: auditActor,
+      changed_at: new Date(),
+      note: normalizedNote,
+      metadata: {
+        deleted_by_admin: true,
+        task_deleted: true,
+      },
+    });
+  }
+
+  task.is_deleted = true;
+  task.updated_by = auditActor;
+  await task.save();
+
+  await TaskAssignment.updateMany(
+    {
+      task: task._id,
+      status: "active",
+    },
+    {
+      $set: {
+        status: "removed",
+        removed_at: new Date(),
+        removed_by: auditActor,
+        note: normalizedNote,
+      },
+    },
+  );
+
+  await Comment.updateMany(
+    {
+      task: task._id,
+      is_deleted: false,
+    },
+    {
+      $set: {
+        is_deleted: true,
+        deleted_at: new Date(),
+        deleted_by: auditActor,
+        updated_by: auditActor,
+      },
+    },
+  );
+
+  await recalculateWorkflowBatchFromTasks(task.batch);
+
+  return {
+    _id: task._id,
+    batch: task.batch,
+    task_no: task.task_no,
+    is_deleted: true,
+  };
 };
 
 const normalizeTaskTypeDefaultAssignees = async (entries = []) => {
@@ -788,6 +869,7 @@ module.exports = {
   buildTaskDetail,
   createWorkflowDepartment,
   createWorkflowTaskType,
+  deleteWorkflowTask,
   getTaskByIdForUser,
   listWorkflowDepartments,
   listWorkflowTaskTypes,

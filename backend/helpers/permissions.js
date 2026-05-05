@@ -66,6 +66,10 @@ const PRODUCT_TYPE_TEMPLATE_ADMIN_ONLY_ACTIONS = Object.freeze([
   "manage",
 ]);
 
+const WORKFLOW_ADMIN_ONLY_ACTIONS = Object.freeze([
+  "delete",
+]);
+
 const PERMISSION_ADMIN_ONLY_ACTIONS = Object.freeze(PERMISSION_ACTIONS);
 
 const moduleKeys = new Set(PERMISSION_MODULES.map((module) => module.key));
@@ -113,6 +117,12 @@ const lockAdminOnlyPermissions = (roleKey, permissions) => {
       action in permissions.product_type_templates
     ) {
       permissions.product_type_templates[action] = false;
+    }
+  });
+
+  WORKFLOW_ADMIN_ONLY_ACTIONS.forEach((action) => {
+    if (permissions?.workflow && action in permissions.workflow) {
+      permissions.workflow[action] = false;
     }
   });
 
@@ -283,6 +293,9 @@ const isPermissionCellLocked = (role, moduleKey, action) => {
   ) {
     return true;
   }
+  if (moduleKey === "workflow" && WORKFLOW_ADMIN_ONLY_ACTIONS.includes(action)) {
+    return true;
+  }
   return false;
 };
 
@@ -300,6 +313,11 @@ const buildPermissionMeta = () => ({
       roles: ROLE_KEYS.filter((role) => role !== "admin"),
       actions: PRODUCT_TYPE_TEMPLATE_ADMIN_ONLY_ACTIONS,
       message: "Product type template create/update/archive rights are admin-only.",
+    },
+    workflow: {
+      roles: ROLE_KEYS.filter((role) => role !== "admin"),
+      actions: WORKFLOW_ADMIN_ONLY_ACTIONS,
+      message: "Workflow delete rights are admin-only.",
     },
     permissions: {
       roles: ROLE_KEYS.filter((role) => role !== "admin"),
@@ -325,6 +343,7 @@ module.exports = {
   ROLE_KEYS,
   PIS_ADMIN_ONLY_ACTIONS,
   PRODUCT_TYPE_TEMPLATE_ADMIN_ONLY_ACTIONS,
+  WORKFLOW_ADMIN_ONLY_ACTIONS,
   clonePermissions: clone,
   buildPermissionMeta,
   buildAuditActor,

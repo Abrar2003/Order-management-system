@@ -8,6 +8,7 @@ const {
   getWorkflowBatch,
   getWorkflowBatches,
   patchWorkflowBatch,
+  removeBatch,
 } = require("../controllers/workflow/batch.controller");
 const {
   approveTask,
@@ -16,6 +17,7 @@ const {
   getWorkflowTasks,
   patchTaskStatus,
   postTaskComment,
+  removeTask,
   reviewTask,
   reworkTask,
   startTask,
@@ -70,6 +72,14 @@ router.patch(
   authorize("admin", "manager"),
   requirePermission("workflow", "edit"),
   cancelBatch,
+);
+
+router.delete(
+  "/batches/:id",
+  auth,
+  authorize("admin"),
+  requirePermission("workflow", "delete"),
+  removeBatch,
 );
 
 router.get(
@@ -145,6 +155,14 @@ router.post(
   auth,
   requirePermission("workflow", "view"),
   postTaskComment,
+);
+
+router.delete(
+  "/tasks/:id",
+  auth,
+  authorize("admin"),
+  requirePermission("workflow", "delete"),
+  removeTask,
 );
 
 router.get(

@@ -2,8 +2,11 @@ const { normalizeRoleKey } = require("../../helpers/permissions");
 
 const normalizeId = (value) => String(value || "").trim();
 
+const isAdmin = (user = {}) =>
+  normalizeRoleKey(user?.role) === "admin";
+
 const isManagerOrAdmin = (user = {}) =>
-  ["admin", "manager"].includes(normalizeRoleKey(user?.role));
+  isAdmin(user) || normalizeRoleKey(user?.role) === "manager";
 
 const isPrivilegedWorkflowReader = (user = {}) =>
   ["admin", "manager", "dev"].includes(normalizeRoleKey(user?.role));
@@ -29,6 +32,7 @@ const canApproveWorkflowTask = (user = {}, task = {}) =>
   isManagerOrAdmin(user) && !isTaskAssignedToUser(task, user?._id);
 
 module.exports = {
+  isAdmin,
   canApproveWorkflowTask,
   canReadWorkflowTask,
   canStartWorkflowTask,

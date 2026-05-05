@@ -1,6 +1,7 @@
 const {
   cancelWorkflowBatch,
   createWorkflowBatchFromFolderManifest,
+  deleteWorkflowBatch,
   getWorkflowBatchById,
   listWorkflowBatches,
   updateWorkflowBatch,
@@ -107,10 +108,33 @@ const cancelBatch = async (req, res) => {
   }
 };
 
+const removeBatch = async (req, res) => {
+  try {
+    const data = await deleteWorkflowBatch(
+      req.params.id,
+      req.user,
+      req.body?.note || req.body?.reason || "",
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Workflow batch deleted successfully",
+      data,
+    });
+  } catch (error) {
+    console.error("Delete Workflow Batch Error:", error);
+    return res.status(getErrorStatusCode(error)).json({
+      success: false,
+      message: error.message || "Failed to delete workflow batch",
+    });
+  }
+};
+
 module.exports = {
   cancelBatch,
   createBatchFromFolderManifest,
   getWorkflowBatch,
   getWorkflowBatches,
   patchWorkflowBatch,
+  removeBatch,
 };

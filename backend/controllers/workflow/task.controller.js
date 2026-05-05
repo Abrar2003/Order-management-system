@@ -3,6 +3,7 @@ const {
   approveWorkflowTask,
   assignWorkflowTask,
   buildTaskDetail,
+  deleteWorkflowTask,
   listWorkflowTasks,
   reviewWorkflowTask,
   reworkWorkflowTask,
@@ -235,6 +236,28 @@ const postTaskComment = async (req, res) => {
   }
 };
 
+const removeTask = async (req, res) => {
+  try {
+    const data = await deleteWorkflowTask({
+      taskId: req.params.id,
+      actor: req.user,
+      note: req.body?.note || req.body?.reason || "",
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Workflow task deleted successfully",
+      data,
+    });
+  } catch (error) {
+    console.error("Delete Workflow Task Error:", error);
+    return res.status(getErrorStatusCode(error)).json({
+      success: false,
+      message: error.message || "Failed to delete workflow task",
+    });
+  }
+};
+
 module.exports = {
   approveTask,
   assignTask,
@@ -242,6 +265,7 @@ module.exports = {
   getWorkflowTasks,
   patchTaskStatus,
   postTaskComment,
+  removeTask,
   reviewTask,
   reworkTask,
   startTask,

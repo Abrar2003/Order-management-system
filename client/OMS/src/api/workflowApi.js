@@ -43,6 +43,14 @@ export const cancelWorkflowBatch = async (id, payload = {}) => {
   return res.data;
 };
 
+export const deleteWorkflowBatch = async (id, payload = {}) => {
+  const res = await api.delete(
+    `/workflow/batches/${encodeURIComponent(requireId(id, "Batch id"))}`,
+    { data: payload },
+  );
+  return res.data;
+};
+
 export const getWorkflowTasks = async (params = {}) => {
   const res = await api.get("/workflow/tasks", { params });
   return res.data;
@@ -115,6 +123,14 @@ export const addWorkflowTaskComment = async (id, payload = {}) => {
   const res = await api.post(
     `/workflow/tasks/${encodeURIComponent(requireId(id, "Task id"))}/comments`,
     payload,
+  );
+  return res.data;
+};
+
+export const deleteWorkflowTask = async (id, payload = {}) => {
+  const res = await api.delete(
+    `/workflow/tasks/${encodeURIComponent(requireId(id, "Task id"))}`,
+    { data: payload },
   );
   return res.data;
 };

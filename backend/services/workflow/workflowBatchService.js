@@ -2,7 +2,6 @@ const mongoose = require("mongoose");
 const { buildAuditActor } = require("../../helpers/permissions");
 const {
   WORKFLOW_BATCH_STATUSES,
-  WORKFLOW_TASK_STATUSES,
   buildBatchCounts,
   buildWorkflowBatchNo,
   normalizeFileManifest,
@@ -20,7 +19,10 @@ const {
   previewTaskDefinitionsForBatch,
   validateAssigneeUsers,
 } = require("./workflowTaskGenerationService");
-const { isPrivilegedWorkflowReader, isManagerOrAdmin } = require("./workflowPermissionService");
+const {
+  recalculateWorkflowBatchFromTasks,
+} = require("./workflowBatchAggregationService");
+const { isAdmin, isPrivilegedWorkflowReader } = require("./workflowPermissionService");
 
 const DEFAULT_PAGE_LIMIT = 20;
 const MAX_PAGE_LIMIT = 100;
@@ -81,85 +83,6 @@ const serializeBatch = (doc = {}) => ({
     doc?.source_folder_key || doc?.source_folder_name || "folder",
   ),
 });
-
-const deriveBatchStatusFromCounts = (counts = {}, currentStatus = "draft") => {
-  if (currentStatus === "cancelled") return "cancelled";
-  if (!Number(counts?.total_tasks || 0)) return "draft";
-  if (Number(counts?.completed_tasks || 0) >= Number(counts?.total_tasks || 0)) {
-    return "completed";
-  }
-  if (
-    Number(counts?.in_progress_tasks || 0) > 0 ||
-    Number(counts?.submitted_tasks || 0) > 0 ||
-    Number(counts?.review_tasks || 0) > 0 ||
-    Number(counts?.rework_tasks || 0) > 0
-  ) {
-    return "in_progress";
-  }
-  return "tasks_created";
-};
-
-const syncWorkflowBatchTaskCounts = async (batchId) => {
-  const batch = await Batch.findById(batchId);
-  if (!batch || batch.is_deleted) {
-    return null;
-  }
-
-  const aggregation = await Task.aggregate([
-    {
-      $match: {
-        batch: batch._id,
-        is_deleted: false,
-      },
-    },
-    {
-      $group: {
-        _id: "$status",
-        count: { $sum: 1 },
-      },
-    },
-  ]);
-
-  const taskCounts = {
-    total_tasks: 0,
-    pending_tasks: 0,
-    assigned_tasks: 0,
-    in_progress_tasks: 0,
-    submitted_tasks: 0,
-    review_tasks: 0,
-    rework_tasks: 0,
-    completed_tasks: 0,
-  };
-
-  aggregation.forEach((entry) => {
-    taskCounts.total_tasks += Number(entry.count || 0);
-    const key = `${entry._id}_tasks`;
-    if (Object.prototype.hasOwnProperty.call(taskCounts, key)) {
-      taskCounts[key] = Number(entry.count || 0);
-    }
-  });
-
-  batch.counts = buildBatchCounts(batch.counts || {}, taskCounts);
-  const nextStatus = deriveBatchStatusFromCounts(batch.counts, batch.status);
-  batch.status = nextStatus;
-
-  const hasStarted =
-    taskCounts.in_progress_tasks > 0 ||
-    taskCounts.submitted_tasks > 0 ||
-    taskCounts.review_tasks > 0 ||
-    taskCounts.rework_tasks > 0 ||
-    taskCounts.completed_tasks > 0;
-
-  if (!batch.started_at && hasStarted) {
-    batch.started_at = new Date();
-  }
-
-  batch.completed_at =
-    nextStatus === "completed" && taskCounts.total_tasks > 0 ? new Date() : null;
-
-  await batch.save();
-  return populateBatchQuery(Batch.findById(batch._id));
-};
 
 const createWorkflowBatchFromFolderManifest = async (payload = {}, actor = {}) => {
   const name = normalizeText(payload?.name);
@@ -245,9 +168,10 @@ const createWorkflowBatchFromFolderManifest = async (payload = {}, actor = {}) =
     });
 
     batchDoc.counts = buildBatchCounts(fileCounts, generationResult.task_counts);
-    batchDoc.status = deriveBatchStatusFromCounts(batchDoc.counts, "tasks_created");
+    batchDoc.status = "tasks_created";
     batchDoc.updated_by = auditActor;
     await batchDoc.save();
+    await recalculateWorkflowBatchFromTasks(batchDoc._id);
 
     return populateBatchQuery(Batch.findById(batchDoc._id));
   } catch (error) {
@@ -367,6 +291,116 @@ const updateWorkflowBatch = async (id, payload = {}, actor = {}) => {
   return populateBatchQuery(Batch.findById(batch._id));
 };
 
+const deleteWorkflowBatch = async (id, actor = {}, note = "") => {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new Error("Invalid batch id");
+  }
+  if (!isAdmin(actor)) {
+    throw new Error("Only admins can delete workflow batches");
+  }
+
+  const batch = await Batch.findById(id);
+  if (!batch || batch.is_deleted) {
+    throw new Error("Workflow batch not found");
+  }
+
+  const auditActor = buildAuditActor(actor);
+  const normalizedNote = normalizeText(note) || "Workflow batch deleted by admin";
+  const tasks = await Task.find({
+    batch: batch._id,
+    is_deleted: false,
+  }).select("_id batch status");
+
+  const taskIds = tasks.map((task) => task._id);
+  const tasksNeedingCancellationHistory = tasks.filter(
+    (task) => !["completed", "cancelled"].includes(task.status),
+  );
+
+  if (taskIds.length > 0) {
+    await Task.updateMany(
+      { _id: { $in: taskIds } },
+      {
+        $set: {
+          is_deleted: true,
+          updated_by: auditActor,
+        },
+      },
+    );
+
+    if (tasksNeedingCancellationHistory.length > 0) {
+      await Task.updateMany(
+        { _id: { $in: tasksNeedingCancellationHistory.map((task) => task._id) } },
+        {
+          $set: {
+            status: "cancelled",
+            blocked_reason: normalizedNote,
+          },
+        },
+      );
+
+      await TaskStatusHistory.insertMany(
+        tasksNeedingCancellationHistory.map((task) => ({
+          task: task._id,
+          batch: batch._id,
+          from_status: task.status,
+          to_status: "cancelled",
+          changed_by: auditActor,
+          changed_at: new Date(),
+          note: normalizedNote,
+          metadata: {
+            batch_deleted: true,
+            deleted_by_admin: true,
+          },
+        })),
+        { ordered: false },
+      );
+    }
+
+    await TaskAssignment.updateMany(
+      {
+        batch: batch._id,
+        status: "active",
+      },
+      {
+        $set: {
+          status: "removed",
+          removed_at: new Date(),
+          removed_by: auditActor,
+          note: normalizedNote,
+        },
+      },
+    );
+  }
+
+  await Comment.updateMany(
+    {
+      batch: batch._id,
+      is_deleted: false,
+    },
+    {
+      $set: {
+        is_deleted: true,
+        deleted_at: new Date(),
+        deleted_by: auditActor,
+        updated_by: auditActor,
+      },
+    },
+  );
+
+  batch.is_deleted = true;
+  batch.status = "cancelled";
+  batch.updated_by = auditActor;
+  batch.completed_at = null;
+  await batch.save();
+
+  return {
+    _id: batch._id,
+    batch_no: batch.batch_no,
+    status: batch.status,
+    is_deleted: true,
+  };
+};
+
 const cancelWorkflowBatch = async (id, actor = {}, note = "") => {
   if (!mongoose.Types.ObjectId.isValid(id)) {
     throw new Error("Invalid batch id");
@@ -445,14 +479,15 @@ const cancelWorkflowBatch = async (id, actor = {}, note = "") => {
   batch.updated_by = auditActor;
   await batch.save();
 
-  return syncWorkflowBatchTaskCounts(batch._id);
+  await recalculateWorkflowBatchFromTasks(batch._id);
+  return populateBatchQuery(Batch.findById(batch._id));
 };
 
 module.exports = {
   cancelWorkflowBatch,
   createWorkflowBatchFromFolderManifest,
+  deleteWorkflowBatch,
   getWorkflowBatchById,
   listWorkflowBatches,
-  syncWorkflowBatchTaskCounts,
   updateWorkflowBatch,
 };

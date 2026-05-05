@@ -190,7 +190,8 @@ const WorkflowBatchCreateModal = ({
             <div>
               <h5 className="modal-title">Create Workflow Batch from Folder</h5>
               <div className="small text-muted">
-                OMS reads folder metadata in the browser and sends only a JSON manifest.
+                OMS creates a batch container and then generates separate workflow tasks
+                from the JSON manifest only.
               </div>
             </div>
             <button
@@ -456,8 +457,8 @@ const WorkflowBatchCreateModal = ({
                         <div>
                           <h6 className="mb-1">Expected Task Preview</h6>
                           <div className="small text-secondary">
-                            Frontend preview mirrors the selected task type rule. Backend remains
-                            the final source of truth.
+                            Preview the separate child tasks that will be created inside this
+                            batch. Backend remains the final source of truth.
                           </div>
                         </div>
                         <span className="om-summary-chip">

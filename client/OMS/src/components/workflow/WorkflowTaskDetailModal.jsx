@@ -4,6 +4,7 @@ import {
   addWorkflowTaskComment,
   approveWorkflowTask,
   assignWorkflowTask,
+  deleteWorkflowTask,
   getWorkflowTaskById,
   reviewWorkflowTask,
   sendWorkflowTaskToRework,
@@ -33,7 +34,9 @@ const WorkflowTaskDetailModal = ({
   canManageWorkflow = false,
   canAssignWorkflow = false,
   canApproveWorkflow = false,
+  canDeleteWorkflow = false,
   onClose,
+  onDeleted,
   onUpdated,
 }) => {
   const currentUser = getUserFromToken();
@@ -108,6 +111,7 @@ const WorkflowTaskDetailModal = ({
   const canApprove = canApproveWorkflow && ["submitted", "review"].includes(task?.status);
   const canRework = canApproveWorkflow && ["submitted", "review"].includes(task?.status);
   const canAssign = canAssignWorkflow && !["completed", "cancelled"].includes(task?.status);
+  const canDelete = canDeleteWorkflow && Boolean(task?._id);
   const canComment = Boolean(task?._id);
 
   const handleTaskAction = async (action, message) => {
@@ -167,6 +171,34 @@ const WorkflowTaskDetailModal = ({
     );
     setCommentText("");
     setCommentType("general");
+  };
+
+  const handleDeleteTask = async () => {
+    if (!task?._id) return;
+
+    const confirmed = window.confirm(
+      `Delete workflow task ${task?.task_no || task?.title || "this task"}?`,
+    );
+    if (!confirmed) return;
+
+    const reason = window.prompt("Optional delete note") || "";
+    setActionLoading(true);
+    setActionError("");
+    setActionSuccess("");
+    try {
+      await deleteWorkflowTask(task._id, {
+        note: normalizeText(reason),
+      });
+      onDeleted?.(task);
+    } catch (deleteError) {
+      setActionError(
+        deleteError?.response?.data?.message
+          || deleteError?.message
+          || "Failed to delete workflow task.",
+      );
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   return (
@@ -363,6 +395,16 @@ const WorkflowTaskDetailModal = ({
                             onClick={() => setOpenPanel((prev) => (prev === "comment" ? "" : "comment"))}
                           >
                             Add Comment
+                          </button>
+                        )}
+                        {canDelete && (
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm"
+                            disabled={actionLoading}
+                            onClick={handleDeleteTask}
+                          >
+                            Delete Task
                           </button>
                         )}
                       </div>
