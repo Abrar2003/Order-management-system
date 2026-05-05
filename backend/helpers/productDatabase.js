@@ -8,6 +8,11 @@ const {
   normalizeProductSpecsPayload,
   normalizeTemplateKey,
 } = require("./productTypeTemplates");
+const {
+  isAdminLikeRole,
+  isManagerLikeRole,
+  normalizeUserRoleKey,
+} = require("./userRole");
 
 const SIZE_ENTRY_LIMIT = 4;
 const PD_STATUSES = Object.freeze({
@@ -31,7 +36,7 @@ const ITEM_REMARK_OPTIONS = Object.freeze([
 const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key);
 const normalizeText = (value) => String(value ?? "").trim();
 const normalizeKey = (value) => normalizeText(value).toLowerCase();
-const normalizeRole = (value) => normalizeKey(value);
+const normalizeRole = (value) => normalizeUserRoleKey(value);
 const normalizeId = (value) =>
   String(value?._id || value?.user || value || "").trim();
 const normalizeVersion = (value) => {
@@ -461,7 +466,7 @@ const markProductDatabaseCreated = ({
 
 const applyProductDatabaseSave = ({ item, payload = {}, user = {} } = {}) => {
   const role = normalizeRole(user?.role);
-  if (!["admin", "manager"].includes(role)) {
+  if (!isManagerLikeRole(role)) {
     throw new ProductDatabaseError("Only admin or manager can update Product Database data", 403);
   }
 
@@ -640,16 +645,23 @@ const buildProductDatabasePermissions = (item = {}, user = {}) => {
   const lastChangerId = normalizeId(item?.pd_last_changed_by?.user);
   const isCreator = Boolean(creatorId && actorId === creatorId);
   const isLastChanger = Boolean(lastChangerId && actorId === lastChangerId);
-  const canEdit = ["admin", "manager"].includes(role);
+  const canEdit = isManagerLikeRole(role);
   const canCheck =
-    role === "manager" &&
+    !isAdminLikeRole(role) &&
+    isManagerLikeRole(role) &&
     status === PD_STATUSES.CREATED &&
     hasData &&
     !isCreator &&
     !isLastChanger;
 
   let checkBlockedReason = "";
-  if (role === "manager" && status === PD_STATUSES.CREATED && hasData && !canCheck) {
+  if (
+    !isAdminLikeRole(role) &&
+    isManagerLikeRole(role) &&
+    status === PD_STATUSES.CREATED &&
+    hasData &&
+    !canCheck
+  ) {
     if (isCreator || isLastChanger) {
       checkBlockedReason =
         "You cannot check this because you created or last changed this PD data.";
@@ -659,7 +671,7 @@ const buildProductDatabasePermissions = (item = {}, user = {}) => {
   return {
     can_edit: canEdit,
     can_check: canCheck,
-    can_approve: role === "admin" && status === PD_STATUSES.CHECKED && hasData,
+    can_approve: isAdminLikeRole(role) && status === PD_STATUSES.CHECKED && hasData,
     check_blocked_reason: checkBlockedReason,
   };
 };

@@ -107,9 +107,9 @@ const WorkflowTaskDetailModal = ({
 
   const canStart = isAssignedUser && ["assigned", "rework"].includes(task?.status);
   const canSubmit = isAssignedUser && ["assigned", "in_progress", "rework"].includes(task?.status);
-  const canMoveToReview = canApproveWorkflow && task?.status === "submitted";
+  const canMoveToReview = canManageWorkflow && task?.status === "submitted";
   const canApprove = canApproveWorkflow && ["submitted", "review"].includes(task?.status);
-  const canRework = canApproveWorkflow && ["submitted", "review"].includes(task?.status);
+  const canRework = canManageWorkflow && ["submitted", "review"].includes(task?.status);
   const canAssign = canAssignWorkflow && !["completed", "cancelled"].includes(task?.status);
   const canDelete = canDeleteWorkflow && Boolean(task?._id);
   const canComment = Boolean(task?._id);

@@ -1,3 +1,5 @@
+import { isAdminLikeRole, isManagerLikeRole, normalizeUserRole } from "../auth/permissions";
+
 const MANAGER_ALLOWED_PAST_DAYS = 2;
 const QC_ALLOWED_PAST_DAYS = 1;
 const LABEL_EXEMPT_QC_ALLOWED_PAST_DAYS = 5;
@@ -43,15 +45,20 @@ export const getUpdateQcPastDaysLimit = ({
     return override;
   }
 
-  const normalizedRole = String(role || "").trim().toLowerCase();
-  if (normalizedRole === "manager") return MANAGER_ALLOWED_PAST_DAYS;
+  const normalizedRole = normalizeUserRole(role);
+  if (!isAdminLikeRole(normalizedRole) && isManagerLikeRole(normalizedRole)) {
+    return MANAGER_ALLOWED_PAST_DAYS;
+  }
   if (normalizedRole === "qc") return QC_ALLOWED_PAST_DAYS;
   return 0;
 };
 
 export const buildUpdateQcPastDaysMessage = (role = "", daysBack = 0) => {
-  const normalizedRole = String(role || "").trim().toLowerCase();
-  const actorLabel = normalizedRole === "manager" ? "Manager" : "QC";
+  const normalizedRole = normalizeUserRole(role);
+  const actorLabel =
+    !isAdminLikeRole(normalizedRole) && isManagerLikeRole(normalizedRole)
+      ? "Manager"
+      : "QC";
   const safeDaysBack =
     Number.isInteger(daysBack) && daysBack >= 0 ? daysBack : 0;
   const dayLabel = safeDaysBack === 1 ? "day" : "days";

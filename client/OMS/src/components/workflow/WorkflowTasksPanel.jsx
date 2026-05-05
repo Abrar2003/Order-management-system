@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { getUserFromToken } from "../../auth/auth.service";
+import { isAdminLikeRole, isManagerLikeRole } from "../../auth/permissions";
 import { usePermissions } from "../../auth/PermissionContext";
 import {
   approveWorkflowTask,
@@ -56,14 +57,14 @@ const WorkflowTasksPanel = ({
   const { hasPermission, role } = usePermissions();
   const currentUser = getUserFromToken();
   const currentUserId = currentUser?._id || currentUser?.id || "";
-  const normalizedRole = String(role || "").trim().toLowerCase();
-  const isManagerOrAdmin = ["admin", "manager"].includes(normalizedRole);
-  const isAdmin = normalizedRole === "admin";
+  const isManagerOrAdmin = isManagerLikeRole(role);
+  const isAdmin = isAdminLikeRole(role);
   const canViewWorkflow = hasPermission("workflow", "view");
   const canAssignWorkflow = isManagerOrAdmin && hasPermission("workflow", "assign");
-  const canApproveWorkflow = isManagerOrAdmin && hasPermission("workflow", "approve");
+  const canApproveWorkflow = isAdmin && hasPermission("workflow", "approve");
   const canManageWorkflow = isManagerOrAdmin && hasPermission("workflow", "edit");
   const canDeleteWorkflow = isAdmin && hasPermission("workflow", "delete");
+  const canFilterByAssignee = isAdmin && canViewWorkflow;
 
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(
@@ -117,7 +118,7 @@ const WorkflowTasksPanel = ({
           getWorkflowTaskTypes(),
           getWorkflowDepartments(),
           getWorkflowBatches({ limit: 100 }),
-          canAssignWorkflow || isManagerOrAdmin
+          canAssignWorkflow || canFilterByAssignee
             ? getWorkflowUsers()
             : Promise.resolve([]),
         ]);
@@ -157,7 +158,7 @@ const WorkflowTasksPanel = ({
     } finally {
       setLookupLoading(false);
     }
-  }, [canAssignWorkflow, canViewWorkflow, isManagerOrAdmin]);
+  }, [canAssignWorkflow, canFilterByAssignee, canViewWorkflow]);
 
   const loadTasks = useCallback(async () => {
     if (!canViewWorkflow) {
@@ -175,7 +176,7 @@ const WorkflowTasksPanel = ({
         task_type_key: taskTypeFilter || undefined,
         batch: batchFilter || undefined,
         assignee:
-          mineOnly && isManagerOrAdmin
+          mineOnly && isAdmin
             ? currentUserId || undefined
             : assigneeFilter || undefined,
         department: departmentFilter || undefined,
@@ -215,7 +216,7 @@ const WorkflowTasksPanel = ({
     departmentFilter,
     dueDateFrom,
     dueDateTo,
-    isManagerOrAdmin,
+    isAdmin,
     limit,
     mineOnly,
     page,
@@ -393,7 +394,7 @@ const WorkflowTasksPanel = ({
                   ))}
                 </select>
               </div>
-              {isManagerOrAdmin && !mineOnly && (
+              {canFilterByAssignee && !mineOnly && (
                 <div className="col-md-3 col-lg-2">
                   <label className="form-label">Assignee</label>
                   <select
@@ -549,10 +550,12 @@ const WorkflowTasksPanel = ({
                       const showSubmit =
                         assignedToCurrentUser
                         && ["assigned", "in_progress", "rework"].includes(task.status);
+                      const showReview =
+                        canManageWorkflow && task.status === "submitted";
+                      const showRework =
+                        canManageWorkflow && ["submitted", "review"].includes(task.status);
                       const showApprove =
                         canApproveWorkflow && ["submitted", "review"].includes(task.status);
-                      const showReview =
-                        canApproveWorkflow && task.status === "submitted";
 
                       return (
                         <tr key={task._id}>
@@ -628,21 +631,7 @@ const WorkflowTasksPanel = ({
                                   Move to Review
                                 </button>
                               )}
-                              {showApprove && (
-                                <button
-                                  type="button"
-                                  className="btn btn-success btn-sm"
-                                  onClick={() =>
-                                    handleQuickAction(
-                                      () => approveWorkflowTask(task._id, {}),
-                                      "Task approved successfully.",
-                                    )
-                                  }
-                                >
-                                  Approve
-                                </button>
-                              )}
-                              {showApprove && (
+                              {showRework && (
                                 <button
                                   type="button"
                                   className="btn btn-outline-danger btn-sm"
@@ -659,6 +648,20 @@ const WorkflowTasksPanel = ({
                                   }}
                                 >
                                   Send to Rework
+                                </button>
+                              )}
+                              {showApprove && (
+                                <button
+                                  type="button"
+                                  className="btn btn-success btn-sm"
+                                  onClick={() =>
+                                    handleQuickAction(
+                                      () => approveWorkflowTask(task._id, {}),
+                                      "Task approved successfully.",
+                                    )
+                                  }
+                                >
+                                  Approve
                                 </button>
                               )}
                               {canDeleteWorkflow && (

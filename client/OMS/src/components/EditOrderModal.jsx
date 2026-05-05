@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { editOrder } from "../services/orders.service";
+import { isManagerLikeRole } from "../auth/permissions";
 import { usePermissions } from "../auth/PermissionContext";
 import { getUserFromToken } from "../auth/auth.service";
 import {
@@ -90,9 +91,7 @@ const buildAdjustedShipmentPreview = (shipmentRows, targetQuantity) => {
 const EditOrderModal = ({ order, onClose, onSuccess }) => {
   const { hasPermission } = usePermissions();
   const user = getUserFromToken();
-  const normalizedRole = String(user?.role || "").trim().toLowerCase();
-  const hasRoleShipmentAccess =
-    normalizedRole === "admin" || normalizedRole === "manager";
+  const hasRoleShipmentAccess = isManagerLikeRole(user?.role);
   const canEditOrders = hasPermission("orders", "edit");
   const canEditShipmentDetails =
     canEditOrders || hasPermission("shipments", "edit") || hasRoleShipmentAccess;

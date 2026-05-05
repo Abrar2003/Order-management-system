@@ -8,6 +8,11 @@ const QcEditLog = require("../models/qcEditLog.model");
 const OrderEditLog = require("../models/orderEditLog.model");
 const XLSX = require("xlsx");
 const path = require("path");
+const {
+  isAdminLikeRole,
+  isManagerLikeRole,
+  normalizeUserRoleKey,
+} = require("../helpers/userRole");
 
 const Order = require("../models/order.model");
 const mongoose = require("mongoose");
@@ -726,15 +731,20 @@ const getUpdateQcPastDaysLimit = (role = "", userId = "") => {
     return override;
   }
 
-  const normalizedRole = String(role || "").trim().toLowerCase();
-  if (normalizedRole === "manager") return MANAGER_ALLOWED_PAST_DAYS;
+  const normalizedRole = normalizeUserRoleKey(role);
+  if (!isAdminLikeRole(normalizedRole) && isManagerLikeRole(normalizedRole)) {
+    return MANAGER_ALLOWED_PAST_DAYS;
+  }
   if (normalizedRole === "qc") return QC_ALLOWED_PAST_DAYS;
   return 0;
 };
 
 const buildUpdateQcPastDaysMessage = (role = "", daysBack = 0) => {
-  const normalizedRole = String(role || "").trim().toLowerCase();
-  const actorLabel = normalizedRole === "manager" ? "Manager" : "QC";
+  const normalizedRole = normalizeUserRoleKey(role);
+  const actorLabel =
+    !isAdminLikeRole(normalizedRole) && isManagerLikeRole(normalizedRole)
+      ? "Manager"
+      : "QC";
   const safeDaysBack =
     Number.isInteger(daysBack) && daysBack >= 0 ? daysBack : 0;
   const dayLabel = safeDaysBack === 1 ? "day" : "days";
@@ -3894,11 +3904,9 @@ exports.alignQC = async (req, res) => {
         .json({ message: "request date must be a valid date" });
     }
 
-    const normalizedRole = String(req.user?.role || "")
-      .trim()
-      .toLowerCase();
-    const isAdmin = normalizedRole === "admin";
-    const isManager = normalizedRole === "manager";
+    const normalizedRole = normalizeUserRoleKey(req.user?.role);
+    const isAdmin = isAdminLikeRole(normalizedRole);
+    const isManager = !isAdmin && isManagerLikeRole(normalizedRole);
 
     if (
       isManager &&
@@ -4318,11 +4326,9 @@ exports.updateQC = async (req, res) => {
         : null;
     const beforeOrderSnapshot = buildOrderAuditSnapshotForQc(linkedOrderBefore);
 
-    const normalizedRole = String(req.user?.role || "")
-      .trim()
-      .toLowerCase();
-    const isAdmin = normalizedRole === "admin";
-    const isManager = normalizedRole === "manager";
+    const normalizedRole = normalizeUserRoleKey(req.user?.role);
+    const isAdmin = isAdminLikeRole(normalizedRole);
+    const isManager = !isAdmin && isManagerLikeRole(normalizedRole);
     const isQcUser = normalizedRole === "qc";
     const hasElevatedAccess = isAdmin || isManager;
     const currentUserId = String(req.user?._id || req.user?.id || "").trim();
@@ -6084,9 +6090,9 @@ exports.updateQC = async (req, res) => {
 
 exports.scanBarcodeUpload = async (req, res) => {
   try {
-    const normalizedRole = String(req.user?.role || "").trim().toLowerCase();
+    const normalizedRole = normalizeUserRoleKey(req.user?.role);
     const currentUserId = String(req.user?._id || req.user?.id || "").trim();
-    const isAdmin = normalizedRole === "admin";
+    const isAdmin = isAdminLikeRole(normalizedRole);
     const canUploadBarcode = isAdmin || isLabelExemptUser(currentUserId);
 
     if (!canUploadBarcode) {
@@ -7582,11 +7588,9 @@ exports.markGoodsNotReady = async (req, res) => {
       beforeInspectionRecords,
     );
 
-    const normalizedRole = String(req.user?.role || "")
-      .trim()
-      .toLowerCase();
-    const isAdmin = normalizedRole === "admin";
-    const isManager = normalizedRole === "manager";
+    const normalizedRole = normalizeUserRoleKey(req.user?.role);
+    const isAdmin = isAdminLikeRole(normalizedRole);
+    const isManager = !isAdmin && isManagerLikeRole(normalizedRole);
     const hasElevatedAccess = isAdmin || isManager;
     const currentUserId = String(req.user?._id || req.user?.id || "").trim();
 
@@ -7752,11 +7756,9 @@ exports.rejectAllQc = async (req, res) => {
     );
     const beforeOrderSnapshot = buildOrderAuditSnapshotForQc(qc?.order || null);
 
-    const normalizedRole = String(req.user?.role || "")
-      .trim()
-      .toLowerCase();
-    const isAdmin = normalizedRole === "admin";
-    const isManager = normalizedRole === "manager";
+    const normalizedRole = normalizeUserRoleKey(req.user?.role);
+    const isAdmin = isAdminLikeRole(normalizedRole);
+    const isManager = !isAdmin && isManagerLikeRole(normalizedRole);
     const hasElevatedAccess = isAdmin || isManager;
     const currentUserId = String(req.user?._id || req.user?.id || "").trim();
 
@@ -9651,11 +9653,9 @@ exports.deleteQcImages = async (req, res) => {
       return res.status(404).json({ success: false, message: "QC record not found" });
     }
 
-    const normalizedRole = String(req.user?.role || "")
-      .trim()
-      .toLowerCase();
-    const isAdmin = normalizedRole === "admin";
-    const isManager = normalizedRole === "manager";
+    const normalizedRole = normalizeUserRoleKey(req.user?.role);
+    const isAdmin = isAdminLikeRole(normalizedRole);
+    const isManager = !isAdmin && isManagerLikeRole(normalizedRole);
     const hasElevatedAccess = isAdmin || isManager;
     const currentUserId = String(req.user?._id || req.user?.id || "").trim();
     const isInspectionDone = isQcOrderInspectionDone(qc, qc?.order);
@@ -10700,9 +10700,8 @@ exports.editInspectionRecords = async (req, res) => {
 
 exports.deleteInspectionRecord = async (req, res) => {
   try {
-    const normalizedRole = String(req.user?.role || "").trim().toLowerCase();
-    const canDeleteInspectionRecord =
-      normalizedRole === "admin" || normalizedRole === "manager";
+    const normalizedRole = normalizeUserRoleKey(req.user?.role);
+    const canDeleteInspectionRecord = isManagerLikeRole(normalizedRole);
 
     if (!canDeleteInspectionRecord) {
       return res.status(403).json({

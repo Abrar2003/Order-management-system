@@ -9,11 +9,12 @@ const {
   sortTemplateGroups,
 } = require("../helpers/productTypeTemplates");
 const { normalizeRoleKey } = require("../helpers/permissions");
+const { isManagerLikeRole } = require("../helpers/userRole");
 
 const normalizeText = (value) => String(value ?? "").trim();
 
 const isPrivilegedTemplateReader = (user = {}) =>
-  ["admin", "manager"].includes(normalizeRoleKey(user?.role));
+  isManagerLikeRole(normalizeRoleKey(user?.role));
 
 const buildTemplateMeta = () => ({
   statuses: PRODUCT_TYPE_TEMPLATE_STATUSES,

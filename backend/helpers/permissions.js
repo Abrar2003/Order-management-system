@@ -1,4 +1,8 @@
-const { normalizeUserRoleKey } = require("./userRole");
+const {
+  isAdminLikeRole,
+  isSuperAdminLikeRole,
+  normalizeUserRoleKey,
+} = require("./userRole");
 
 // Add new permission modules/actions here first, then guard routes with
 // requirePermission(module, action). PIS mutation actions are deliberately
@@ -42,7 +46,16 @@ const PERMISSION_MODULES = Object.freeze([
   { key: "permissions", label: "Permission Management" },
 ]);
 
-const ROLE_KEYS = Object.freeze(["admin", "manager", "user", "qc", "dev"]);
+const ROLE_KEYS = Object.freeze([
+  "admin",
+  "super_admin",
+  "manager",
+  "product_manager",
+  "inspection_manager",
+  "user",
+  "qc",
+  "dev",
+]);
 
 const PIS_ADMIN_ONLY_ACTIONS = Object.freeze([
   "create",
@@ -67,6 +80,7 @@ const PRODUCT_TYPE_TEMPLATE_ADMIN_ONLY_ACTIONS = Object.freeze([
 ]);
 
 const WORKFLOW_ADMIN_ONLY_ACTIONS = Object.freeze([
+  "approve",
   "delete",
 ]);
 
@@ -103,13 +117,15 @@ const grantAll = (permissions, moduleKey) => {
 };
 
 const lockAdminOnlyPermissions = (roleKey, permissions) => {
-  if (roleKey === "admin") return permissions;
+  if (!isSuperAdminLikeRole(roleKey)) {
+    PIS_ADMIN_ONLY_ACTIONS.forEach((action) => {
+      if (permissions?.pis && action in permissions.pis) {
+        permissions.pis[action] = false;
+      }
+    });
+  }
 
-  PIS_ADMIN_ONLY_ACTIONS.forEach((action) => {
-    if (permissions?.pis && action in permissions.pis) {
-      permissions.pis[action] = false;
-    }
-  });
+  if (isAdminLikeRole(roleKey)) return permissions;
 
   PRODUCT_TYPE_TEMPLATE_ADMIN_ONLY_ACTIONS.forEach((action) => {
     if (
@@ -150,6 +166,12 @@ const buildDevPermissions = () => {
   const permissions = buildAdminPermissions();
   return lockAdminOnlyPermissions("dev", permissions);
 };
+
+const buildSuperAdminPermissions = () => buildAdminPermissions();
+
+const buildProductManagerPermissions = () => buildManagerPermissions();
+
+const buildInspectionManagerPermissions = () => buildManagerPermissions();
 
 const buildUserPermissions = () => {
   const permissions = createEmptyPermissions();
@@ -214,7 +236,10 @@ const buildQcPermissions = () => {
 
 const DEFAULT_PERMISSION_BUILDERS = Object.freeze({
   admin: buildAdminPermissions,
+  super_admin: buildSuperAdminPermissions,
   manager: buildManagerPermissions,
+  product_manager: buildProductManagerPermissions,
+  inspection_manager: buildInspectionManagerPermissions,
   user: buildUserPermissions,
   qc: buildQcPermissions,
   dev: buildDevPermissions,
@@ -284,9 +309,10 @@ const sanitizePermissionsForRole = (role, permissions = {}) => {
 
 const isPermissionCellLocked = (role, moduleKey, action) => {
   const roleKey = normalizeRoleKey(role);
-  if (roleKey === "admin") return false;
-  if (moduleKey === "permissions") return true;
+  if (isSuperAdminLikeRole(roleKey)) return false;
   if (moduleKey === "pis" && PIS_ADMIN_ONLY_ACTIONS.includes(action)) return true;
+  if (isAdminLikeRole(roleKey)) return false;
+  if (moduleKey === "permissions") return true;
   if (
     moduleKey === "product_type_templates" &&
     PRODUCT_TYPE_TEMPLATE_ADMIN_ONLY_ACTIONS.includes(action)
@@ -305,22 +331,22 @@ const buildPermissionMeta = () => ({
   actions: PERMISSION_ACTIONS,
   locked: {
     pis: {
-      roles: ROLE_KEYS.filter((role) => role !== "admin"),
+      roles: ROLE_KEYS.filter((role) => !isSuperAdminLikeRole(role)),
       actions: PIS_ADMIN_ONLY_ACTIONS,
-      message: "PIS data edit rights are admin-only and cannot be assigned to manager or other roles.",
+      message: "PIS data edit rights are super-admin-only and cannot be assigned to other roles.",
     },
     product_type_templates: {
-      roles: ROLE_KEYS.filter((role) => role !== "admin"),
+      roles: ROLE_KEYS.filter((role) => !isAdminLikeRole(role)),
       actions: PRODUCT_TYPE_TEMPLATE_ADMIN_ONLY_ACTIONS,
       message: "Product type template create/update/archive rights are admin-only.",
     },
     workflow: {
-      roles: ROLE_KEYS.filter((role) => role !== "admin"),
+      roles: ROLE_KEYS.filter((role) => !isAdminLikeRole(role)),
       actions: WORKFLOW_ADMIN_ONLY_ACTIONS,
-      message: "Workflow delete rights are admin-only.",
+      message: "Workflow task approve and delete rights are admin-only.",
     },
     permissions: {
-      roles: ROLE_KEYS.filter((role) => role !== "admin"),
+      roles: ROLE_KEYS.filter((role) => !isAdminLikeRole(role)),
       actions: PERMISSION_ADMIN_ONLY_ACTIONS,
       message: "Permission-management rights are admin-only.",
     },

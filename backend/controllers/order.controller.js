@@ -8,6 +8,7 @@ const UploadLog = require("../models/uploadLog.model");
 const OrderEditLog = require("../models/orderEditLog.model");
 const mongoose = require("mongoose");
 const dateParser = require("../helpers/dateparsser");
+const { isAdminLikeRole, isManagerLikeRole, normalizeUserRoleKey } = require("../helpers/userRole");
 const {
   formatDateOnlyDDMMYYYY,
   parseDateOnly,
@@ -9467,13 +9468,9 @@ exports.editOrder = async (req, res) => {
       hasShipment ? "shipment" : "",
       hasRevisedEtd ? "revised_ETD" : "",
     ].filter(Boolean);
-    const requesterRole = String(req.user?.role || "")
-      .trim()
-      .toLowerCase();
-    const isRequesterAdmin = requesterRole === "admin";
-    const isRequesterManager = requesterRole === "manager";
-    const canRequesterEditShipmentDetails =
-      isRequesterAdmin || isRequesterManager;
+    const requesterRole = normalizeUserRoleKey(req.user?.role);
+    const canRequesterEditShipmentDetails = isManagerLikeRole(requesterRole);
+    const isRequesterAdmin = isAdminLikeRole(requesterRole);
     const archiveRemarkInput = String(
       payload.archive_remark ?? payload.archiveRemark ?? "",
     ).trim();

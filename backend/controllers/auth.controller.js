@@ -2,7 +2,10 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const User = require("../models/user.model");
-const { normalizeUserRole } = require("../helpers/userRole");
+const {
+  isAdminLikeRole,
+  normalizeUserRole,
+} = require("../helpers/userRole");
 
 const isTruthy = (value) =>
   ["1", "true", "yes", "y", "on"].includes(
@@ -280,7 +283,7 @@ const forceChangeUserPassword = async (req, res) => {
       return res.status(404).json({ message: "Target user not found" });
     }
 
-    if (String(targetUser.role || "").trim().toLowerCase() === "admin") {
+    if (isAdminLikeRole(targetUser.role)) {
       return res.status(403).json({
         message: "Admin passwords cannot be force changed by this route",
       });

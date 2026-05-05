@@ -5,6 +5,7 @@ import EmailLogsModal from "../components/EmailLogsModal";
 import SortHeaderButton from "../components/SortHeaderButton";
 import api from "../api/axios";
 import { getUserFromToken } from "../auth/auth.utils";
+import { hasShipmentPrivilegeRole } from "../auth/permissions";
 import {
   getNextClientSortState,
   sortClientRows,
@@ -39,8 +40,7 @@ const normalizeSearchParam = (value) => String(value || "").trim();
 const EmailLogs = () => {
   const navigate = useNavigate();
   const user = getUserFromToken();
-  const normalizedRole = String(user?.role || "").trim().toLowerCase();
-  const canManageEmailLogs = ["admin", "manager", "dev"].includes(normalizedRole);
+  const canManageEmailLogs = hasShipmentPrivilegeRole(user?.role);
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "email-logs");
 

@@ -63,7 +63,7 @@ const serializeTask = (doc = {}) => ({
 });
 
 const buildTaskVisibilityMatch = (user = {}) => {
-  if (isPrivilegedWorkflowReader(user)) {
+  if (isAdmin(user)) {
     return { is_deleted: false };
   }
 
@@ -131,7 +131,7 @@ const listWorkflowTasks = async ({ query = {}, user = {} } = {}) => {
   const page = parsePositiveInt(query?.page, 1);
   const limit = Math.min(MAX_PAGE_LIMIT, parsePositiveInt(query?.limit, DEFAULT_PAGE_LIMIT));
   const skip = (page - 1) * limit;
-  const privilegedReader = isPrivilegedWorkflowReader(user);
+  const privilegedReader = isAdmin(user);
   const match = buildTaskVisibilityMatch(user);
 
   if (normalizeText(query?.status)) {
@@ -352,11 +352,11 @@ const assertTransitionPermission = ({ task, actor, toStatus }) => {
   }
 
   if (["completed"].includes(toStatus) && !canApproveWorkflowTask(actor, task)) {
-    throw new Error("Only admin or manager can approve this task");
+    throw new Error("Only admins can approve this task");
   }
 
   if (["rework"].includes(toStatus)) {
-    if (!canApproveWorkflowTask(actor, task)) {
+    if (!isManagerOrAdmin(actor)) {
       throw new Error("Only admin or manager can send this task to rework");
     }
   }

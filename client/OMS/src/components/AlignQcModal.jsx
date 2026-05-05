@@ -9,6 +9,7 @@ import {
 } from "../utils/date";
 import { formatCbm } from "../utils/cbm";
 import { getUserFromToken } from "../auth/auth.utils";
+import { isAdminLikeRole, isManagerLikeRole, normalizeUserRole } from "../auth/permissions";
 import "../App.css";
 
 const normalizeRequestType = (value) =>
@@ -29,8 +30,8 @@ const AlignQCModal = ({
 }) => {
   const navigate = useNavigate();
   const user = getUserFromToken();
-  const normalizedRole = String(user?.role || "").trim().toLowerCase();
-  const isManager = normalizedRole === "manager";
+  const normalizedRole = normalizeUserRole(user?.role);
+  const isManager = !isAdminLikeRole(normalizedRole) && isManagerLikeRole(normalizedRole);
   const todayIso = toISODateString(new Date());
   const managerMinAllowedDateIso = (() => {
     const minDate = new Date();

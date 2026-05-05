@@ -1,14 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
+import { isAdminLikeRole, ROLE_LABELS } from "../auth/permissions";
 import { usePermissions } from "../auth/PermissionContext";
-
-const ROLE_LABELS = {
-  admin: "Admin",
-  manager: "Manager",
-  user: "User",
-  qc: "QC",
-  dev: "Dev",
-};
 
 const formatActionLabel = (value = "") =>
   String(value)
@@ -46,7 +39,7 @@ const PermissionManagement = () => {
 
   const isLockedCell = useCallback(
     (moduleKey, action) => {
-      if (selectedRole === "admin") return false;
+      if (isAdminLikeRole(selectedRole)) return false;
       const lockMeta = meta?.locked?.[moduleKey];
       return Array.isArray(lockMeta?.actions) && lockMeta.actions.includes(action);
     },
@@ -186,7 +179,8 @@ const PermissionManagement = () => {
           </p>
           <h2 className="h4 mb-1">Rights Management</h2>
           <p className="text-secondary mb-0">
-            Manage role-level access. PIS mutation and permission-management stay admin-only.
+            Manage role-level access. PIS mutation, workflow task approve/delete,
+            and permission-management stay admin-only.
           </p>
         </div>
         <button
@@ -238,7 +232,7 @@ const PermissionManagement = () => {
               {new Date(selectedRoleRecord.updated_at).toLocaleString()}
             </div>
           )}
-          {selectedRole === "admin" && (
+          {isAdminLikeRole(selectedRole) && (
             <div className="alert alert-warning py-2 mt-3 mb-0">
               Admin permission changes are powerful. If you disable an admin action here,
               backend permission checks can deny it even to admins.
@@ -272,7 +266,7 @@ const PermissionManagement = () => {
                       <th scope="row">
                         <div>{module.label}</div>
                         {meta?.locked?.[module.key] &&
-                          selectedRole !== "admin" && (
+                          !isAdminLikeRole(selectedRole) && (
                             <div className="small text-secondary">
                               {getLockMessage(module.key)}
                             </div>

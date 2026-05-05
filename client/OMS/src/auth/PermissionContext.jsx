@@ -9,7 +9,7 @@ import {
 import { useLocation } from "react-router-dom";
 import api from "../api/axios";
 import { getToken, getUserFromToken } from "./auth.service";
-import { normalizeUserRole } from "./permissions";
+import { isAdminLikeRole, normalizeUserRole } from "./permissions";
 
 const PermissionContext = createContext({
   permissions: {},
@@ -76,7 +76,7 @@ export const PermissionProvider = ({ children }) => {
       const actionKey = String(action || "").trim();
       if (!moduleKey || !actionKey) return false;
       if (moduleKey === "pis" && isPisMutation(actionKey)) {
-        return role === "admin";
+        return isAdminLikeRole(role);
       }
       return Boolean(permissions?.[moduleKey]?.[actionKey]);
     },
@@ -90,8 +90,8 @@ export const PermissionProvider = ({ children }) => {
       loading,
       error,
       role,
-      isAdmin: role === "admin",
-      canEditPis: role === "admin",
+      isAdmin: isAdminLikeRole(role),
+      canEditPis: isAdminLikeRole(role),
       hasPermission,
       refreshPermissions,
     }),

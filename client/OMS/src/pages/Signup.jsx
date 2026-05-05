@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import api from "../api/axios";
+import { USER_ROLE_OPTIONS } from "../auth/permissions";
 import Navbar from "../components/Navbar";
 import { usePermissions } from "../auth/PermissionContext";
 import "../App.css";
@@ -9,7 +10,7 @@ const Signup = () => {
   const { hasPermission } = usePermissions();
   const canCreateUsers = hasPermission("users", "create");
   const navigate = useNavigate();
-  const roles = useMemo(() => ["admin", "manager", "QC", "dev", "user"], []);
+  const roles = useMemo(() => USER_ROLE_OPTIONS, []);
 
   const [form, setForm] = useState({
     username: "",
@@ -159,8 +160,8 @@ const Signup = () => {
                 <label className="form-label">Role</label>
                 <select name="role" value={form.role} onChange={handleChange} className="form-select">
                   {roles.map((role) => (
-                    <option key={role} value={role}>
-                      {role}
+                    <option key={role.value} value={role.value}>
+                      {role.label}
                     </option>
                   ))}
                 </select>

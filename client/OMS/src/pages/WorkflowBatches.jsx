@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { isAdminLikeRole, isManagerLikeRole } from "../auth/permissions";
 import Navbar from "../components/Navbar";
 import WorkflowBatchCreateModal from "../components/workflow/WorkflowBatchCreateModal";
 import { usePermissions } from "../auth/PermissionContext";
@@ -43,9 +44,8 @@ const getAuditActorName = (actor = {}) =>
 const WorkflowBatches = () => {
   const navigate = useNavigate();
   const { hasPermission, role } = usePermissions();
-  const normalizedRole = String(role || "").trim().toLowerCase();
-  const isManagerOrAdmin = ["admin", "manager"].includes(normalizedRole);
-  const isAdmin = normalizedRole === "admin";
+  const isManagerOrAdmin = isManagerLikeRole(role);
+  const isAdmin = isAdminLikeRole(role);
   const canViewWorkflow = hasPermission("workflow", "view");
   const canCreateWorkflow = isManagerOrAdmin && hasPermission("workflow", "create");
   const canEditWorkflow = isManagerOrAdmin && hasPermission("workflow", "edit");

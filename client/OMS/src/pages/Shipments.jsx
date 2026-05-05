@@ -9,6 +9,7 @@ import EditOrderModal from "../components/EditOrderModal";
 import EditSampleModal from "../components/EditSampleModal";
 import SampleModal from "../components/SampleModal";
 import { getUserFromToken } from "../auth/auth.service";
+import { hasShipmentPrivilegeRole } from "../auth/permissions";
 import { usePermissions } from "../auth/PermissionContext";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
@@ -102,11 +103,7 @@ const Shipments = () => {
     initialSortBy,
   );
   const user = getUserFromToken();
-  const normalizedRole = String(user?.role || "").trim().toLowerCase();
-  const hasRoleShipmentAccess =
-    normalizedRole === "admin" ||
-    normalizedRole === "manager" ||
-    normalizedRole === "dev";
+  const hasRoleShipmentAccess = hasShipmentPrivilegeRole(user?.role);
   const { hasPermission } = usePermissions();
   const canFinalizeShipping =
     hasPermission("shipments", "edit") || hasRoleShipmentAccess;

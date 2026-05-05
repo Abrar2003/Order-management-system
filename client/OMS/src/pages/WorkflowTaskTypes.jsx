@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { isManagerLikeRole } from "../auth/permissions";
 import Navbar from "../components/Navbar";
 import WorkflowTaskTypeEditorModal from "../components/workflow/WorkflowTaskTypeEditorModal";
 import { usePermissions } from "../auth/PermissionContext";
@@ -13,7 +14,7 @@ import "../App.css";
 
 const WorkflowTaskTypes = () => {
   const { hasPermission, role } = usePermissions();
-  const isManagerOrAdmin = ["admin", "manager"].includes(String(role || "").trim().toLowerCase());
+  const isManagerOrAdmin = isManagerLikeRole(role);
   const canManageWorkflow = isManagerOrAdmin && hasPermission("workflow", "manage");
 
   const [rows, setRows] = useState([]);

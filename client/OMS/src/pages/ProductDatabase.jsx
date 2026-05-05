@@ -2,6 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import { getUserFromToken } from "../auth/auth.service";
+import {
+  isAdminLikeRole,
+  isManagerLikeRole,
+  normalizeUserRole,
+} from "../auth/permissions";
 import { usePermissions } from "../auth/PermissionContext";
 import Navbar from "../components/Navbar";
 import ProductTypeDynamicForm from "../components/ProductTypeDynamicForm";
@@ -235,9 +240,9 @@ const parseTemplateOptionValue = (value = "") => {
 const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
   const { hasPermission } = usePermissions();
   const user = getUserFromToken();
-  const normalizedRole = String(user?.role || "").trim().toLowerCase();
-  const isManager = normalizedRole === "manager";
-  const isAdmin = normalizedRole === "admin";
+  const normalizedRole = normalizeUserRole(user?.role);
+  const isAdmin = isAdminLikeRole(normalizedRole);
+  const isManager = isManagerLikeRole(normalizedRole) && !isAdmin;
   const canViewProductTypeTemplates = hasPermission("product_type_templates", "view");
   const canEdit = Boolean(item?.permissions?.can_edit);
   const initialForm = useMemo(

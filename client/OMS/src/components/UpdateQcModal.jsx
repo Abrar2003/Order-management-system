@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import api from "../api/axios";
 import { getUserFromToken } from "../auth/auth.utils";
+import {
+  isAdminLikeRole,
+  isManagerLikeRole,
+  normalizeUserRole,
+} from "../auth/permissions";
 import { scanQcBarcodeFile } from "../services/qcBarcode.service";
 import {
   isValidDDMMYYYY,
@@ -601,13 +606,13 @@ const PREFERRED_BARCODE_FORMATS = [
 const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
   const user = getUserFromToken();
   const currentUserId = String(user?.id || user?._id || "").trim();
-  const normalizedRole = String(user?.role || "").trim().toLowerCase();
-  const isActualAdmin = normalizedRole === "admin";
+  const normalizedRole = normalizeUserRole(user?.role);
+  const isActualAdmin = isAdminLikeRole(normalizedRole);
   const isQcUser = normalizedRole === "qc";
-  const isManager = normalizedRole === "manager";
+  const isManager = isManagerLikeRole(normalizedRole) && !isActualAdmin;
   const canRewriteLatestInspectionRecord = isActualAdmin || Boolean(isAdmin);
   const hasElevatedAccess = canRewriteLatestInspectionRecord || isManager;
-  const canManageLabels = ["admin", "manager"].includes(normalizedRole);
+  const canManageLabels = isManagerLikeRole(normalizedRole);
   const isCurrentUserLabelExempt =
     isActualAdmin || isLabelExemptUser(currentUserId);
   const todayIso = toISODateString(new Date());

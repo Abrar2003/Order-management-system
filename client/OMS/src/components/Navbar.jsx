@@ -10,6 +10,11 @@ import {
   buildItemFilesPagePath,
   ITEM_FILE_OPTIONS,
 } from "../constants/itemFiles";
+import {
+  isManagerLikeRole,
+  isQcOnlyUserRole,
+  normalizeUserRole,
+} from "../auth/permissions";
 import { usePermissions } from "../auth/PermissionContext";
 import "../App.css";
 
@@ -46,7 +51,7 @@ const Navbar = () => {
   const token = getToken();
   const user = getUserFromToken();
   const role = user?.role;
-  const normalizedRole = String(role || "").trim().toLowerCase();
+  const normalizedRole = normalizeUserRole(role);
   const { hasPermission, isAdmin, role: permissionRole } = usePermissions();
 
   const navigate = useNavigate();
@@ -76,7 +81,7 @@ const Navbar = () => {
   const [theme, setTheme] = useState(getInitialTheme);
 
   const canAccessQc = hasPermission("qc", "view");
-  const isQcOnlyRole = normalizedRole === "qc";
+  const isQcOnlyRole = isQcOnlyUserRole(normalizedRole);
   const canManageOrders =
     hasPermission("orders", "edit") ||
     hasPermission("orders", "create") ||
@@ -90,7 +95,7 @@ const Navbar = () => {
   const canUploadFinish = hasPermission("finishes", "upload");
   const canViewPis = hasPermission("pis", "view");
   const canViewWorkflow = hasPermission("workflow", "view");
-  const canManageWorkflow = ["admin", "manager"].includes(permissionRole)
+  const canManageWorkflow = isManagerLikeRole(permissionRole)
     && hasPermission("workflow", "manage");
 
   const closeAllMenus = useCallback(() => {
@@ -409,7 +414,7 @@ const Navbar = () => {
         items.push(routeMenuItem("create-users", "Create User", "/users/new"));
       }
 
-      if (hasPermission("product_type_templates", "view") && ["admin", "manager"].includes(permissionRole)) {
+      if (hasPermission("product_type_templates", "view") && isManagerLikeRole(permissionRole)) {
         items.push(
           routeMenuItem(
             "product-type-templates",

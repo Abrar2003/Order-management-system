@@ -1,4 +1,5 @@
 const { normalizeRoleKey } = require("../helpers/permissions");
+const { isAdminLikeRole, isSuperAdminLikeRole } = require("../helpers/userRole");
 const { userHasPermission } = require("../services/permission.service");
 
 const requirePermission = (moduleKey, action) => async (req, res, next) => {
@@ -23,9 +24,9 @@ const requirePermission = (moduleKey, action) => async (req, res, next) => {
 
 const requireAdminOnlyPisEdit = (req, res, next) => {
   const roleKey = normalizeRoleKey(req.user?.role);
-  if (roleKey !== "admin") {
+  if (!isSuperAdminLikeRole(roleKey)) {
     return res.status(403).json({
-      message: "PIS data edit/update/import/sync is admin-only.",
+      message: "PIS data edit/update/import/sync is super-admin-only.",
     });
   }
 
@@ -34,7 +35,7 @@ const requireAdminOnlyPisEdit = (req, res, next) => {
 
 const requireAdminOnlyPermissionManagement = (req, res, next) => {
   const roleKey = normalizeRoleKey(req.user?.role);
-  if (roleKey !== "admin") {
+  if (!isAdminLikeRole(roleKey)) {
     return res.status(403).json({
       message: "Permission management is admin-only.",
     });

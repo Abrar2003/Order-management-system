@@ -1,15 +1,18 @@
+const { isAdminLikeRole, isManagerLikeRole } = require("../../helpers/userRole");
 const { normalizeRoleKey } = require("../../helpers/permissions");
 
 const normalizeId = (value) => String(value || "").trim();
 
 const isAdmin = (user = {}) =>
-  normalizeRoleKey(user?.role) === "admin";
+  isAdminLikeRole(normalizeRoleKey(user?.role));
 
 const isManagerOrAdmin = (user = {}) =>
-  isAdmin(user) || normalizeRoleKey(user?.role) === "manager";
+  isManagerLikeRole(normalizeRoleKey(user?.role));
 
 const isPrivilegedWorkflowReader = (user = {}) =>
-  ["admin", "manager", "dev"].includes(normalizeRoleKey(user?.role));
+  [
+    "dev",
+  ].includes(normalizeRoleKey(user?.role)) || isManagerLikeRole(normalizeRoleKey(user?.role));
 
 const isTaskAssignedToUser = (task = {}, userId) => {
   const normalizedUserId = normalizeId(userId);
@@ -20,7 +23,7 @@ const isTaskAssignedToUser = (task = {}, userId) => {
 };
 
 const canReadWorkflowTask = (user = {}, task = {}) =>
-  isPrivilegedWorkflowReader(user) || isTaskAssignedToUser(task, user?._id);
+  isAdmin(user) || isTaskAssignedToUser(task, user?._id);
 
 const canStartWorkflowTask = (user = {}, task = {}) =>
   isTaskAssignedToUser(task, user?._id);
@@ -29,7 +32,7 @@ const canSubmitWorkflowTask = (user = {}, task = {}) =>
   isTaskAssignedToUser(task, user?._id);
 
 const canApproveWorkflowTask = (user = {}, task = {}) =>
-  isManagerOrAdmin(user) && !isTaskAssignedToUser(task, user?._id);
+  isAdmin(user) && !isTaskAssignedToUser(task, user?._id);
 
 module.exports = {
   isAdmin,

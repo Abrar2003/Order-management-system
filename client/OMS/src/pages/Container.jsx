@@ -5,7 +5,7 @@ import Navbar from "../components/Navbar";
 import SampleModal from "../components/SampleModal";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { getUserFromToken } from "../auth/auth.utils";
-import { isViewOnlyUser } from "../auth/permissions";
+import { hasShipmentPrivilegeRole, isViewOnlyUser } from "../auth/permissions";
 import { usePermissions } from "../auth/PermissionContext";
 import {
   getTodayDDMMYYYY,
@@ -51,12 +51,8 @@ const Container = () => {
   const user = getUserFromToken();
   const { hasPermission } = usePermissions();
   const isViewOnly = isViewOnlyUser(user);
-  const normalizedRole = String(user?.role || "").trim().toLowerCase();
   const canFinalizeShipping =
-    hasPermission("shipments", "edit") ||
-    normalizedRole === "admin" ||
-    normalizedRole === "manager" ||
-    normalizedRole === "dev";
+    hasPermission("shipments", "edit") || hasShipmentPrivilegeRole(user?.role);
 
   const [containerNumber, setContainerNumber] = useState(() =>
     normalizeSearchParam(searchParams.get("container_number")),

@@ -13,7 +13,13 @@ import SortHeaderButton from "../components/SortHeaderButton";
 import TransferQcRequestModal from "../components/TransferQcRequestModal";
 import TransferInspectionModal from "../components/TransferInspectionModal";
 import { getUserFromToken } from "../auth/auth.utils";
-import { isViewOnlyUser } from "../auth/permissions";
+import {
+  hasShipmentPrivilegeRole,
+  isAdminLikeRole,
+  isManagerLikeRole,
+  isViewOnlyUser,
+  normalizeUserRole,
+} from "../auth/permissions";
 import {
   buildItemFileUploadRequest,
   ITEM_FILE_OPTIONS,
@@ -378,17 +384,15 @@ const QcDetails = () => {
   });
   const user = getUserFromToken();
   const isViewOnly = isViewOnlyUser(user);
-  const normalizedRole = String(user?.role || "").trim().toLowerCase();
+  const normalizedRole = normalizeUserRole(user?.role);
   const currentUserId = String(user?.id || user?._id || "").trim();
   const isQcUser = normalizedRole === "qc";
-  const isAdmin = normalizedRole === "admin" || normalizedRole === "manager";
-  const isOnlyAdmin = normalizedRole === "admin";
+  const isAdmin = isManagerLikeRole(normalizedRole);
+  const isOnlyAdmin = isAdminLikeRole(normalizedRole);
   const canTransferInspectionRecords = isAdmin;
   const canDeleteInspectionRecords = isAdmin;
   const showInspectionActions = canTransferInspectionRecords || isOnlyAdmin;
-  const canFinalizeShipping = ["admin", "manager", "dev"].includes(
-    normalizedRole,
-  );
+  const canFinalizeShipping = hasShipmentPrivilegeRole(normalizedRole);
   const derivedOrderStatus = useMemo(
     () => getDerivedOrderStatus({ order: qc?.order || {}, qc }),
     [qc],
