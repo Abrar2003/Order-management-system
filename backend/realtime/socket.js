@@ -99,6 +99,19 @@ const canJoinWorkflowUserRoom = async (user = {}, targetUserId = "") => {
   return isPrivilegedWorkflowReader(user);
 };
 
+const autoJoinWorkflowRooms = async (socket) => {
+  const user = socket?.data?.user || {};
+  const socketUserId = normalizeText(socket?.data?.userId || user?._id);
+
+  if (await canJoinWorkflowDashboard(user)) {
+    socket.join(WORKFLOW_DASHBOARD_ROOM);
+  }
+
+  if (socketUserId && (await canJoinWorkflowUserRoom(user, socketUserId))) {
+    socket.join(buildWorkflowUserRoom(socketUserId));
+  }
+};
+
 const registerWorkflowRealtimeHandlers = (io) => {
   io.use(async (socket, next) => {
     try {
@@ -112,6 +125,10 @@ const registerWorkflowRealtimeHandlers = (io) => {
   });
 
   io.on("connection", (socket) => {
+    autoJoinWorkflowRooms(socket).catch((error) => {
+      console.error("workflow socket auto-join failed:", error);
+    });
+
     socket.on("workflow:join_dashboard", async (acknowledge) => {
       try {
         const allowed = await canJoinWorkflowDashboard(socket.data.user);

@@ -36,8 +36,10 @@ export const getWorkflowSocket = () => {
   if (!workflowSocket) {
     workflowSocket = io(resolveSocketBaseUrl(), {
       autoConnect: false,
-      transports: ["websocket"],
+      withCredentials: true,
+      transports: ["websocket", "polling"],
       reconnection: true,
+      timeout: 10000,
     });
   }
 
