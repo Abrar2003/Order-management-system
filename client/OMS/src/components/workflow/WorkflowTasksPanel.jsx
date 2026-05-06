@@ -42,14 +42,14 @@ const formatDateTime = (value) => {
   if (!value) return "—";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "—";
-  return parsed.toLocaleString();
+  return parsed.toLocaleString("en-GB");
 };
 
 const formatDateOnly = (value) => {
   if (!value) return "—";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "—";
-  return parsed.toLocaleDateString();
+  return parsed.toLocaleDateString("en-GB");
 };
 
 const getTaskUserId = (entry = {}) =>
