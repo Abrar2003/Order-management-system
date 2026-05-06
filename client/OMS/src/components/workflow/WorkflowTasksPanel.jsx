@@ -58,48 +58,14 @@ const getTaskUserId = (entry = {}) =>
 const getTaskUserName = (entry = {}) =>
   entry?.user?.name || entry?.user?.email || entry?.name || entry?.email || "User";
 
+const getAuditActorName = (actor = {}) =>
+  actor?.name || actor?.user?.name || actor?.user?.email || "User";
+
 const WORKFLOW_ACTION_ICONS = Object.freeze({
   info: "/workflow-icons/info.png",
   delete: "/workflow-icons/delete.png",
+  rework: "/workflow-icons/rework.png",
 });
-
-const ReworkActionIcon = () => (
-  <svg viewBox="0 0 24 24" aria-hidden="true">
-    <path
-      d="M8 7H18V17"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.75"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-    <path
-      d="M8 7L11 4"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.75"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-    <path
-      d="M8 7L11 10"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.75"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-    <path
-      d="M16 17H6V7"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.75"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      opacity="0.55"
-    />
-  </svg>
-);
 
 const getTaskActionState = ({
   task = {},
@@ -189,6 +155,11 @@ const WorkflowTasksPanel = ({
     type: "",
     note: "",
   });
+
+  const activePromptTask = useMemo(
+    () => rows.find((task) => String(task?._id) === String(notePrompt.taskId)) || null,
+    [notePrompt.taskId, rows],
+  );
 
   const loadLookups = useCallback(async () => {
     if (!canViewWorkflow) {
@@ -697,6 +668,7 @@ const WorkflowTasksPanel = ({
                       <th>Task Name</th>
                       <th>Task Type</th>
                       <th>Dates</th>
+                      <th>Rework</th>
                       <th>Status Flow</th>
                       <th>Actions</th>
                     </tr>
@@ -710,12 +682,16 @@ const WorkflowTasksPanel = ({
                         canApproveWorkflow,
                       });
                       const isBusy = actionTaskId === task._id;
-                      const isNotePromptOpen = notePrompt.taskId === task._id;
+                      const isCompletePromptOpen =
+                        notePrompt.taskId === task._id && notePrompt.type === "complete";
                       const assigneeText =
                         Array.isArray(task.assigned_to) && task.assigned_to.length > 0
                           ? task.assigned_to.map((entry) => getTaskUserName(entry)).join(", ")
                           : "Unassigned";
                       const reworkCount = Number(task?.reworked?.count || task?.rework_count || 0);
+                      const reworkComments = Array.isArray(task?.reworked?.comments)
+                        ? [...task.reworked.comments].reverse()
+                        : [];
 
                       return (
                         <tr key={task._id}>
@@ -734,9 +710,6 @@ const WorkflowTasksPanel = ({
                               </div>
                               <div className="small text-secondary mt-1">
                                 {formatWorkflowStageLabel(task.status)}
-                              </div>
-                              <div className="small text-secondary">
-                                Reworks: {reworkCount}
                               </div>
                             </div>
                           </td>
@@ -757,6 +730,44 @@ const WorkflowTasksPanel = ({
                             </div>
                           </td>
                           <td>
+                            <div className="workflow-rework-cell">
+                              <span
+                                className={[
+                                  "workflow-rework-badge",
+                                  reworkCount > 0 ? "has-comments" : "is-empty",
+                                ]
+                                  .filter(Boolean)
+                                  .join(" ")}
+                                tabIndex={reworkCount > 0 ? 0 : -1}
+                              >
+                                {reworkCount}
+                                {reworkCount > 0 && (
+                                  <span className="workflow-rework-hovercard">
+                                    <span className="workflow-rework-hovercard-title">
+                                      Rework Comments
+                                    </span>
+                                    <span className="workflow-rework-hovercard-list">
+                                      {reworkComments.map((entry, index) => (
+                                        <span
+                                          key={`${task._id}-rework-${index}`}
+                                          className="workflow-rework-hovercard-item"
+                                        >
+                                          <span className="workflow-rework-hovercard-comment">
+                                            {entry?.comment || "—"}
+                                          </span>
+                                          <span className="workflow-rework-hovercard-meta">
+                                            {getAuditActorName(entry?.created_by)} •{" "}
+                                            {formatDateTime(entry?.created_at)}
+                                          </span>
+                                        </span>
+                                      ))}
+                                    </span>
+                                  </span>
+                                )}
+                              </span>
+                            </div>
+                          </td>
+                          <td>
                             <div className="workflow-task-flow-cell">
                               <WorkflowTaskStageBar
                                 task={task}
@@ -769,17 +780,15 @@ const WorkflowTasksPanel = ({
                                 onStepClick={(stepKey) => handleStageClick(task, stepKey)}
                               />
 
-                              {isNotePromptOpen && (
+                              {isCompletePromptOpen && (
                                 <div className="workflow-stage-popover workflow-task-quick-note mt-3">
                                   <div className="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
                                     <div>
                                       <div className="fw-semibold">
-                                        {notePrompt.type === "complete" ? "Mark Complete" : "Send to Rework"}
+                                        Mark Complete
                                       </div>
                                       <div className="small text-secondary">
-                                        {notePrompt.type === "complete"
-                                          ? "Add an optional completion note, then keep moving from the table."
-                                          : "Add the reason once, then keep moving from the table."}
+                                        Add an optional completion note, then keep moving from the table.
                                       </div>
                                     </div>
                                     <button
@@ -797,17 +806,11 @@ const WorkflowTasksPanel = ({
                                       Close
                                     </button>
                                   </div>
-                                  <label className="form-label">
-                                    {notePrompt.type === "complete" ? "Completion Comment" : "Rework Reason"}
-                                  </label>
+                                  <label className="form-label">Completion Comment</label>
                                   <textarea
                                     rows="2"
                                     className="form-control"
-                                    placeholder={
-                                      notePrompt.type === "complete"
-                                        ? "Add a short completion note"
-                                        : "Explain what needs to be fixed"
-                                    }
+                                    placeholder="Add a short completion note"
                                     value={notePrompt.note}
                                     onChange={(event) =>
                                       setNotePrompt((prev) => ({
@@ -833,15 +836,13 @@ const WorkflowTasksPanel = ({
                                     </button>
                                     <button
                                       type="button"
-                                      className={`btn btn-sm ${notePrompt.type === "complete" ? "btn-primary" : "btn-danger"}`}
+                                      className="btn btn-primary btn-sm"
                                       onClick={() => handleConfirmNote(task)}
                                       disabled={isBusy}
                                     >
                                       {isBusy
                                         ? "Saving..."
-                                        : notePrompt.type === "complete"
-                                        ? "Save Complete"
-                                        : "Confirm Rework"}
+                                        : "Save Complete"}
                                     </button>
                                   </div>
                                 </div>
@@ -868,7 +869,7 @@ const WorkflowTasksPanel = ({
                                   title={`Send to rework (${reworkCount})`}
                                   aria-label="Send to rework"
                                 >
-                                  <ReworkActionIcon />
+                                  <img src={WORKFLOW_ACTION_ICONS.rework} alt="" />
                                 </button>
                               )}
                               {canDeleteWorkflow && (
@@ -968,6 +969,91 @@ const WorkflowTasksPanel = ({
             setRefreshTick((prev) => prev + 1);
           }}
         />
+      )}
+
+      {notePrompt.type === "rework" && notePrompt.taskId && (
+        <div
+          className="modal d-block om-modal-backdrop"
+          tabIndex="-1"
+          role="dialog"
+          aria-modal="true"
+          onClick={() =>
+            setNotePrompt({
+              taskId: "",
+              type: "",
+              note: "",
+            })
+          }
+        >
+          <div
+            className="modal-dialog modal-dialog-centered workflow-quick-modal-dialog"
+            role="document"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-content">
+              <div className="modal-header">
+                <div>
+                  <h5 className="modal-title">Send to Rework</h5>
+                  <div className="small text-muted">
+                    {activePromptTask?.title || activePromptTask?.task_no || "Add a rework note"}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn-close"
+                  aria-label="Close"
+                  onClick={() =>
+                    setNotePrompt({
+                      taskId: "",
+                      type: "",
+                      note: "",
+                    })
+                  }
+                  disabled={actionTaskId === notePrompt.taskId}
+                />
+              </div>
+              <div className="modal-body">
+                <label className="form-label">Rework Comment</label>
+                <textarea
+                  rows="3"
+                  className="form-control"
+                  placeholder="Explain what needs to be fixed"
+                  value={notePrompt.note}
+                  onChange={(event) =>
+                    setNotePrompt((prev) => ({
+                      ...prev,
+                      note: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary"
+                  onClick={() =>
+                    setNotePrompt({
+                      taskId: "",
+                      type: "",
+                      note: "",
+                    })
+                  }
+                  disabled={actionTaskId === notePrompt.taskId}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  onClick={() => handleConfirmNote(activePromptTask || { _id: notePrompt.taskId })}
+                  disabled={actionTaskId === notePrompt.taskId}
+                >
+                  {actionTaskId === notePrompt.taskId ? "Saving..." : "Confirm Rework"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

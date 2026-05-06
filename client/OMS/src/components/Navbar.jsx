@@ -450,7 +450,7 @@ const Navbar = () => {
         { key: "workflow", label: "Production Workflow", items: workflowMenuItems },
         { key: "process", label: "Process", items: processMenuItems },
         { key: "update-orders", label: "Update Orders", items: updateOrdersMenuItems },
-        { key: "upload-add", label: "Upload - Add", items: uploadAddMenuItems },
+        { key: "upload-add", label: "Upload", items: uploadAddMenuItems },
         { key: "logs", label: "Logs", items: logMenuItems },
         { key: "settings", label: "Settings", items: settingsMenuItems },
       ].filter((section) => Array.isArray(section.items) && section.items.length > 0),
@@ -474,7 +474,6 @@ const Navbar = () => {
           section.key === "items" ||
           section.key === "orders" ||
           section.key === "reports" ||
-          section.key === "workflow" ||
           section.key === "process" ||
           section.key === "update-orders" ||
           section.key === "upload-add",
@@ -507,7 +506,6 @@ const Navbar = () => {
           section.key !== "items" &&
           section.key !== "orders" &&
           section.key !== "reports" &&
-          section.key !== "workflow" &&
           section.key !== "process" &&
           section.key !== "update-orders" &&
           section.key !== "upload-add",
