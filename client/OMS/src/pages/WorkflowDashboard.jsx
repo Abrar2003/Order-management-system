@@ -8,6 +8,7 @@ import {
   getWorkflowDepartments,
   getWorkflowTaskTypes,
 } from "../api/workflowApi";
+import useWorkflowRealtime from "../hooks/useWorkflowRealtime";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
@@ -19,6 +20,12 @@ const formatDateTime = (value) => {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "—";
   return parsed.toLocaleString();
+};
+
+const formatRealtimeStatusLabel = (connectionState = "") => {
+  if (connectionState === "live") return "Live";
+  if (connectionState === "reconnecting") return "Reconnecting";
+  return "Offline";
 };
 
 const formatRoleLabel = (role) =>
@@ -50,6 +57,10 @@ const WorkflowDashboard = () => {
   const [dueDateTo, setDueDateTo] = useState(() => normalizeText(searchParams.get("due_date_to")));
   const [userSearch, setUserSearch] = useState(() => normalizeText(searchParams.get("user_search")));
   const [refreshTick, setRefreshTick] = useState(0);
+
+  const handleRealtimeRefresh = useCallback(() => {
+    setRefreshTick((prev) => prev + 1);
+  }, []);
 
   const loadLookups = useCallback(async () => {
     if (!canViewDashboard) {
@@ -135,6 +146,13 @@ const WorkflowDashboard = () => {
   useEffect(() => {
     loadDashboard();
   }, [loadDashboard, refreshTick]);
+
+  const { connectionState } = useWorkflowRealtime({
+    enabled: canViewDashboard,
+    joinDashboard: canViewDashboard,
+    onTaskUpdated: handleRealtimeRefresh,
+    onBatchUpdated: handleRealtimeRefresh,
+  });
 
   useEffect(() => {
     const next = new URLSearchParams();
@@ -283,7 +301,12 @@ const WorkflowDashboard = () => {
       <div className="page-shell py-3">
         <div className="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
           <div>
-            <h2 className="h4 mb-1">Workflow Dashboard</h2>
+            <div className="d-flex flex-wrap align-items-center gap-2 mb-1">
+              <h2 className="h4 mb-0">Workflow Dashboard</h2>
+              <span className="om-summary-chip">
+                {formatRealtimeStatusLabel(connectionState)}
+              </span>
+            </div>
             <div className="text-secondary">
               Admin quick glance for production workflow workload, approval queue, and user-level task ownership.
             </div>

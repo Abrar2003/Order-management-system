@@ -11,6 +11,7 @@ import {
   getWorkflowTaskTypes,
   getWorkflowUsers,
 } from "../api/workflowApi";
+import useWorkflowRealtime from "../hooks/useWorkflowRealtime";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
@@ -36,6 +37,12 @@ const formatDateTime = (value) => {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "—";
   return parsed.toLocaleString();
+};
+
+const formatRealtimeStatusLabel = (connectionState = "") => {
+  if (connectionState === "live") return "Live";
+  if (connectionState === "reconnecting") return "Reconnecting";
+  return "Offline";
 };
 
 const getAuditActorName = (actor = {}) =>
@@ -76,6 +83,10 @@ const WorkflowBatches = () => {
     totalRecords: 0,
   });
   const [refreshTick, setRefreshTick] = useState(0);
+
+  const handleRealtimeRefresh = useCallback(() => {
+    setRefreshTick((prev) => prev + 1);
+  }, []);
 
   const loadLookups = useCallback(async () => {
     if (!canViewWorkflow) {
@@ -173,6 +184,12 @@ const WorkflowBatches = () => {
     loadBatches();
   }, [loadBatches, refreshTick]);
 
+  const { connectionState } = useWorkflowRealtime({
+    enabled: canViewWorkflow,
+    joinDashboard: canViewWorkflow,
+    onBatchUpdated: handleRealtimeRefresh,
+  });
+
   useEffect(() => {
     const next = new URLSearchParams();
     if (statusFilter) next.set("status", statusFilter);
@@ -269,7 +286,12 @@ const WorkflowBatches = () => {
       <div className="page-shell py-3">
         <div className="d-flex justify-content-between align-items-center mb-3">
           <div>
-            <h2 className="h4">Workflow Batches</h2>
+            <div className="d-flex flex-wrap align-items-center gap-2">
+              <h2 className="h4 mb-0">Workflow Batches</h2>
+              <span className="om-summary-chip">
+                {formatRealtimeStatusLabel(connectionState)}
+              </span>
+            </div>
             <div className="text-secondary">
               Build batch containers from browser folder manifests and generate separate
               production tasks without uploading files.

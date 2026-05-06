@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const http = require("http");
 const mongoose = require("mongoose");
 const dns = require("dns");
 const path = require("path");
@@ -29,6 +30,7 @@ const productTypeTemplatesRouter = require("./routers/productTypeTemplates.route
 const workflowRouter = require("./routers/workflow.routes");
 const { closeRedisClients } = require("./config/redis");
 const { closeQueues } = require("./queues");
+const { createSocketServer } = require("./realtime/socket");
 
 const app = express();
 const PORT = Number.parseInt(String(process.env.PORT || "8008"), 10) || 8008;
@@ -161,7 +163,15 @@ const startServer = async () => {
   try {
     await connectDB();
 
-    const server = app.listen(PORT, () => {
+    const server = http.createServer(app);
+    const io = createSocketServer({
+      server,
+      allowedOrigins: effectiveAllowedOrigins,
+      allowCredentials: corsOptions.credentials,
+    });
+    app.set("io", io);
+
+    server.listen(PORT, () => {
       console.log(`Server started on port ${PORT}`);
     });
 
@@ -170,6 +180,7 @@ const startServer = async () => {
 
       server.close(async () => {
         try {
+          await io.close();
           await closeQueues();
           await closeRedisClients();
           await mongoose.connection.close(false);

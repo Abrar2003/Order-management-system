@@ -12,6 +12,7 @@ import {
   getWorkflowTasks,
   getWorkflowUsers,
 } from "../api/workflowApi";
+import useWorkflowRealtime from "../hooks/useWorkflowRealtime";
 import "../App.css";
 
 const DEFAULT_TASK_LIMIT = 20;
@@ -22,6 +23,12 @@ const formatDateTime = (value) => {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "—";
   return parsed.toLocaleString();
+};
+
+const formatRealtimeStatusLabel = (connectionState = "") => {
+  if (connectionState === "live") return "Live";
+  if (connectionState === "reconnecting") return "Reconnecting";
+  return "Offline";
 };
 
 const getAuditActorName = (actor = {}) =>
@@ -55,6 +62,10 @@ const WorkflowBatchDetail = () => {
     totalRecords: 0,
   });
   const [refreshTick, setRefreshTick] = useState(0);
+
+  const handleRealtimeRefresh = useCallback(() => {
+    setRefreshTick((prev) => prev + 1);
+  }, []);
 
   const loadBatchDetail = useCallback(async () => {
     if (!canViewWorkflow || !batchId) {
@@ -137,6 +148,14 @@ const WorkflowBatchDetail = () => {
   useEffect(() => {
     loadBatchTasks();
   }, [loadBatchTasks, refreshTick]);
+
+  const { connectionState } = useWorkflowRealtime({
+    enabled: canViewWorkflow,
+    batchId: canViewWorkflow ? batchId : "",
+    onTaskUpdated: handleRealtimeRefresh,
+    onBatchUpdated: handleRealtimeRefresh,
+    onCommentAdded: handleRealtimeRefresh,
+  });
 
   const handleCancelBatch = async () => {
     const confirmed = window.confirm(
@@ -225,7 +244,12 @@ const WorkflowBatchDetail = () => {
       <div className="page-shell py-3">
         <div className="d-flex justify-content-between align-items-center mb-3">
           <div>
-            <h2 className="h4">Workflow Batch Detail</h2>
+            <div className="d-flex flex-wrap align-items-center gap-2">
+              <h2 className="h4 mb-0">Workflow Batch Detail</h2>
+              <span className="om-summary-chip">
+                {formatRealtimeStatusLabel(connectionState)}
+              </span>
+            </div>
             <div className="text-secondary">
               Review the batch container and the separate production tasks generated
               inside it.

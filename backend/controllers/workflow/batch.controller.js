@@ -10,7 +10,11 @@ const { getErrorStatusCode } = require("./_utils");
 
 const createBatchFromFolderManifest = async (req, res) => {
   try {
-    const data = await createWorkflowBatchFromFolderManifest(req.body || {}, req.user);
+    const data = await createWorkflowBatchFromFolderManifest(
+      req.body || {},
+      req.user,
+      req,
+    );
     return res.status(201).json({
       success: true,
       message: "Workflow batch created successfully",
@@ -71,7 +75,7 @@ const getWorkflowBatch = async (req, res) => {
 
 const patchWorkflowBatch = async (req, res) => {
   try {
-    const data = await updateWorkflowBatch(req.params.id, req.body || {}, req.user);
+    const data = await updateWorkflowBatch(req.params.id, req.body || {}, req.user, req);
     return res.status(200).json({
       success: true,
       message: "Workflow batch updated successfully",
@@ -92,6 +96,7 @@ const cancelBatch = async (req, res) => {
       req.params.id,
       req.user,
       req.body?.note || req.body?.reason || "",
+      req,
     );
 
     return res.status(200).json({
@@ -114,6 +119,7 @@ const removeBatch = async (req, res) => {
       req.params.id,
       req.user,
       req.body?.note || req.body?.reason || "",
+      req,
     );
 
     return res.status(200).json({

@@ -16,6 +16,7 @@ import {
   uploadWorkflowTask,
 } from "../../api/workflowApi";
 import { useRememberSearchParams } from "../../hooks/useRememberSearchParams";
+import useWorkflowRealtime from "../../hooks/useWorkflowRealtime";
 import { areSearchParamsEquivalent } from "../../utils/searchParams";
 import WorkflowBatchCreateModal from "./WorkflowBatchCreateModal";
 import WorkflowTaskCreateModal from "./WorkflowTaskCreateModal";
@@ -67,6 +68,12 @@ const getTaskUserName = (entry = {}) =>
 
 const getAuditActorName = (actor = {}) =>
   actor?.name || actor?.user?.name || actor?.user?.email || "User";
+
+const formatRealtimeStatusLabel = (connectionState = "") => {
+  if (connectionState === "live") return "Live";
+  if (connectionState === "reconnecting") return "Reconnecting";
+  return "Offline";
+};
 
 const WORKFLOW_ACTION_ICONS = Object.freeze({
   info: "/workflow-icons/info.png",
@@ -163,6 +170,10 @@ const WorkflowTasksPanel = ({
     type: "",
     note: "",
   });
+
+  const handleRealtimeRefresh = useCallback(() => {
+    setRefreshTick((prev) => prev + 1);
+  }, []);
 
   const activePromptTask = useMemo(
     () => rows.find((task) => String(task?._id) === String(notePrompt.taskId)) || null,
@@ -471,6 +482,14 @@ const WorkflowTasksPanel = ({
 
   const visibleRows = useMemo(() => rows, [rows]);
 
+  const { connectionState } = useWorkflowRealtime({
+    enabled: canViewWorkflow,
+    joinDashboard: !mineOnly && canViewWorkflow,
+    userId: mineOnly && canViewWorkflow ? currentUserId : "",
+    onTaskUpdated: handleRealtimeRefresh,
+    onBatchUpdated: !mineOnly ? handleRealtimeRefresh : undefined,
+  });
+
   if (!canViewWorkflow) {
     return (
       <div className="page-shell py-3">
@@ -486,7 +505,12 @@ const WorkflowTasksPanel = ({
       <div className="page-shell py-3">
         <div className="d-flex justify-content-between align-items-center mb-3">
           <div>
-            <h2 className="h4">{title}</h2>
+            <div className="d-flex flex-wrap align-items-center gap-2">
+              <h2 className="h4 mb-0">{title}</h2>
+              <span className="om-summary-chip">
+                {formatRealtimeStatusLabel(connectionState)}
+              </span>
+            </div>
             <div className="text-secondary">{description}</div>
           </div>
           {canCreateWorkflow && (

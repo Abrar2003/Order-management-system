@@ -23,6 +23,11 @@ const {
   recalculateWorkflowBatchFromTasks,
 } = require("./workflowBatchAggregationService");
 const { isAdmin, isPrivilegedWorkflowReader } = require("./workflowPermissionService");
+const {
+  emitWorkflowBatchUpdated,
+  emitWorkflowTaskUpdated,
+  extractAssignedUserIds,
+} = require("./workflowRealtimeService");
 
 const DEFAULT_PAGE_LIMIT = 20;
 const MAX_PAGE_LIMIT = 100;
@@ -54,6 +59,60 @@ const escapeRegex = (value = "") =>
   String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const normalizeId = (value) => String(value || "").trim();
+
+const buildRealtimeSummaryTask = ({
+  batch = null,
+  assignedUserIds = [],
+  status = "assigned",
+  actor = {},
+} = {}) => ({
+  _id: null,
+  batch: batch?._id || batch || null,
+  status,
+  assigned_to: (Array.isArray(assignedUserIds) ? assignedUserIds : [])
+    .filter(Boolean)
+    .map((userId) => ({ user: userId })),
+  updatedAt: new Date(),
+  updated_by: buildAuditActor(actor),
+});
+
+const collectTaskAssigneeIds = (tasks = []) =>
+  [
+    ...new Set(
+      (Array.isArray(tasks) ? tasks : [])
+        .flatMap((task) => extractAssignedUserIds(task?.assigned_to))
+        .filter(Boolean),
+    ),
+  ];
+
+const emitWorkflowBatchMutation = ({
+  realtimeSource = null,
+  batch = null,
+  message = "",
+  affectedAssigneeIds = [],
+  actor = {},
+} = {}) => {
+  if (!realtimeSource || !batch) return;
+
+  emitWorkflowBatchUpdated(realtimeSource, batch, { message });
+
+  if (Array.isArray(affectedAssigneeIds) && affectedAssigneeIds.length > 0) {
+    emitWorkflowTaskUpdated(
+      realtimeSource,
+      buildRealtimeSummaryTask({
+        batch,
+        assignedUserIds: affectedAssigneeIds,
+        actor,
+      }),
+      batch,
+      {
+        changedBy: buildAuditActor(actor),
+        message,
+        additionalUserIds: affectedAssigneeIds,
+      },
+    );
+  }
+};
 
 const getAccessibleBatchIdsForUser = async (user = {}) => {
   const userId = normalizeId(user?._id);
@@ -94,7 +153,11 @@ const serializeBatch = (doc = {}) => ({
   ),
 });
 
-const createWorkflowBatchFromFolderManifest = async (payload = {}, actor = {}) => {
+const createWorkflowBatchFromFolderManifest = async (
+  payload = {},
+  actor = {},
+  realtimeSource = null,
+) => {
   const startCode = normalizeText(payload?.start_code);
   if (!startCode) {
     throw new Error("start_code is required");
@@ -194,13 +257,24 @@ const createWorkflowBatchFromFolderManifest = async (payload = {}, actor = {}) =
     batchDoc.status = "tasks_created";
     batchDoc.updated_by = auditActor;
     await batchDoc.save();
-    await recalculateWorkflowBatchFromTasks(batchDoc._id);
+    const recalculatedBatch = await recalculateWorkflowBatchFromTasks(batchDoc._id);
+
+    emitWorkflowBatchMutation({
+      realtimeSource,
+      batch: recalculatedBatch || batchDoc,
+      message: "Workflow batch created",
+      affectedAssigneeIds: collectTaskAssigneeIds(generationResult.tasks),
+      actor,
+    });
 
     return populateBatchQuery(Batch.findById(batchDoc._id));
   } catch (error) {
     batchDoc.status = "failed";
     batchDoc.updated_by = auditActor;
     await batchDoc.save().catch(() => {});
+    emitWorkflowBatchUpdated(realtimeSource, batchDoc, {
+      message: "Workflow batch failed during task generation",
+    });
     throw error;
   }
 };
@@ -282,7 +356,12 @@ const getWorkflowBatchById = async (id, user = {}) => {
   return doc ? serializeBatch(doc) : null;
 };
 
-const updateWorkflowBatch = async (id, payload = {}, actor = {}) => {
+const updateWorkflowBatch = async (
+  id,
+  payload = {},
+  actor = {},
+  realtimeSource = null,
+) => {
   if (!mongoose.Types.ObjectId.isValid(id)) {
     throw new Error("Invalid batch id");
   }
@@ -314,10 +393,18 @@ const updateWorkflowBatch = async (id, payload = {}, actor = {}) => {
 
   batch.updated_by = buildAuditActor(actor);
   await batch.save();
+  emitWorkflowBatchUpdated(realtimeSource, batch, {
+    message: "Workflow batch updated",
+  });
   return populateBatchQuery(Batch.findById(batch._id));
 };
 
-const deleteWorkflowBatch = async (id, actor = {}, note = "") => {
+const deleteWorkflowBatch = async (
+  id,
+  actor = {},
+  note = "",
+  realtimeSource = null,
+) => {
   if (!mongoose.Types.ObjectId.isValid(id)) {
     throw new Error("Invalid batch id");
   }
@@ -335,7 +422,7 @@ const deleteWorkflowBatch = async (id, actor = {}, note = "") => {
   const tasks = await Task.find({
     batch: batch._id,
     is_deleted: false,
-  }).select("_id batch status");
+  }).select("_id batch status assigned_to");
 
   const taskIds = tasks.map((task) => task._id);
 
@@ -405,6 +492,14 @@ const deleteWorkflowBatch = async (id, actor = {}, note = "") => {
   batch.completed_at = null;
   await batch.save();
 
+  emitWorkflowBatchMutation({
+    realtimeSource,
+    batch,
+    message: "Workflow batch deleted",
+    affectedAssigneeIds: collectTaskAssigneeIds(tasks),
+    actor,
+  });
+
   return {
     _id: batch._id,
     batch_no: batch.batch_no,
@@ -413,7 +508,12 @@ const deleteWorkflowBatch = async (id, actor = {}, note = "") => {
   };
 };
 
-const cancelWorkflowBatch = async (id, actor = {}, note = "") => {
+const cancelWorkflowBatch = async (
+  id,
+  actor = {},
+  note = "",
+  realtimeSource = null,
+) => {
   if (!mongoose.Types.ObjectId.isValid(id)) {
     throw new Error("Invalid batch id");
   }
@@ -431,7 +531,9 @@ const cancelWorkflowBatch = async (id, actor = {}, note = "") => {
     batch: batch._id,
     is_deleted: false,
     status: { $nin: ["uploaded"] },
-  }).lean();
+  })
+    .select("_id batch status assigned_to")
+    .lean();
 
   if (tasks.length > 0) {
     const taskIds = tasks.map((task) => task._id);
@@ -491,7 +593,16 @@ const cancelWorkflowBatch = async (id, actor = {}, note = "") => {
   batch.updated_by = auditActor;
   await batch.save();
 
-  await recalculateWorkflowBatchFromTasks(batch._id);
+  const recalculatedBatch = await recalculateWorkflowBatchFromTasks(batch._id);
+
+  emitWorkflowBatchMutation({
+    realtimeSource,
+    batch: recalculatedBatch || batch,
+    message: "Workflow batch cancelled",
+    affectedAssigneeIds: collectTaskAssigneeIds(tasks),
+    actor,
+  });
+
   return populateBatchQuery(Batch.findById(batch._id));
 };
 

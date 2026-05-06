@@ -34,6 +34,11 @@ const { validateAssigneeUsers } = require("./workflowTaskGenerationService");
 const {
   recalculateWorkflowBatchFromTasks,
 } = require("./workflowBatchAggregationService");
+const {
+  emitWorkflowBatchUpdated,
+  emitWorkflowCommentAdded,
+  emitWorkflowTaskUpdated,
+} = require("./workflowRealtimeService");
 
 const DEFAULT_PAGE_LIMIT = 20;
 const MAX_PAGE_LIMIT = 100;
@@ -254,6 +259,27 @@ const recalculateWorkflowBatchIfPresent = async (batchId) => {
   return recalculateWorkflowBatchFromTasks(batchId);
 };
 
+const emitWorkflowTaskMutation = ({
+  realtimeSource = null,
+  task = null,
+  batch = null,
+  actor = {},
+  message = "",
+  additionalUserIds = [],
+} = {}) => {
+  if (!realtimeSource || !task) return;
+
+  emitWorkflowTaskUpdated(realtimeSource, task, batch, {
+    changedBy: buildAuditActor(actor),
+    message,
+    additionalUserIds,
+  });
+
+  if (batch) {
+    emitWorkflowBatchUpdated(realtimeSource, batch, { message });
+  }
+};
+
 const getTaskByIdForUser = async (id, user = {}) => {
   if (!mongoose.Types.ObjectId.isValid(id)) {
     throw new Error("Invalid task id");
@@ -335,7 +361,11 @@ const listWorkflowTasks = async ({ query = {}, user = {} } = {}) => {
   };
 };
 
-const createWorkflowTask = async ({ payload = {}, actor = {} } = {}) => {
+const createWorkflowTask = async ({
+  payload = {},
+  actor = {},
+  realtimeSource = null,
+} = {}) => {
   if (!isManagerOrAdmin(actor)) {
     throw new Error("Only admin or manager can create workflow tasks");
   }
@@ -432,8 +462,18 @@ const createWorkflowTask = async ({ payload = {}, actor = {} } = {}) => {
     },
   });
 
-  await recalculateWorkflowBatchIfPresent(task.batch);
-  return buildTaskDetail(task._id, actor);
+  const batch = await recalculateWorkflowBatchIfPresent(task.batch);
+  const taskDetail = await buildTaskDetail(task._id, actor);
+
+  emitWorkflowTaskMutation({
+    realtimeSource,
+    task: taskDetail,
+    batch,
+    actor,
+    message: "Workflow task created",
+  });
+
+  return taskDetail;
 };
 
 const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
@@ -724,6 +764,8 @@ const applyTaskTransition = async ({
   toStatus,
   note = "",
   commentType = "system",
+  realtimeSource = null,
+  successMessage = "",
 }) => {
   const auditActor = buildAuditActor(actor);
   const fromStatus = normalizeWorkflowTaskStatus(task.status, {
@@ -773,9 +815,18 @@ const applyTaskTransition = async ({
     note,
     commentType,
   });
-  await recalculateWorkflowBatchIfPresent(task.batch);
+  const batch = await recalculateWorkflowBatchIfPresent(task.batch);
+  const taskDetail = await buildTaskDetail(task._id, actor);
 
-  return buildTaskDetail(task._id, actor);
+  emitWorkflowTaskMutation({
+    realtimeSource,
+    task: taskDetail,
+    batch,
+    actor,
+    message: successMessage || `Workflow task moved to ${toStatus}`,
+  });
+
+  return taskDetail;
 };
 
 const assertTransitionPermission = ({ task, actor, toStatus }) => {
@@ -807,6 +858,7 @@ const assignWorkflowTask = async ({
   assigneeIds = [],
   actor = {},
   note = "",
+  realtimeSource = null,
 }) => {
   const task = await getMutableTaskById(taskId);
   if (normalizeWorkflowTaskStatus(task.status, { fallback: "" }) === "uploaded") {
@@ -896,15 +948,31 @@ const assignWorkflowTask = async ({
     });
   }
 
-  await recalculateWorkflowBatchIfPresent(task.batch);
-  return buildTaskDetail(task._id, actor);
+  const batch = await recalculateWorkflowBatchIfPresent(task.batch);
+  const taskDetail = await buildTaskDetail(task._id, actor);
+
+  emitWorkflowTaskMutation({
+    realtimeSource,
+    task: taskDetail,
+    batch,
+    actor,
+    message: "Workflow task assignment updated",
+    additionalUserIds: currentAssigneeIds,
+  });
+
+  return taskDetail;
 };
 
 const startWorkflowTask = async ({ taskId, actor = {}, note = "" }) => {
   throw new Error("Start is no longer a separate workflow stage");
 };
 
-const completeWorkflowTask = async ({ taskId, actor = {}, note = "" }) => {
+const completeWorkflowTask = async ({
+  taskId,
+  actor = {},
+  note = "",
+  realtimeSource = null,
+} = {}) => {
   const task = await getMutableTaskById(taskId);
   assertTransitionPermission({ task, actor, toStatus: "complete" });
   return applyTaskTransition({
@@ -913,10 +981,17 @@ const completeWorkflowTask = async ({ taskId, actor = {}, note = "" }) => {
     toStatus: "complete",
     note,
     commentType: "complete",
+    realtimeSource,
+    successMessage: "Workflow task marked complete",
   });
 };
 
-const uploadWorkflowTask = async ({ taskId, actor = {}, note = "" }) => {
+const uploadWorkflowTask = async ({
+  taskId,
+  actor = {},
+  note = "",
+  realtimeSource = null,
+} = {}) => {
   const task = await getMutableTaskById(taskId);
   assertTransitionPermission({ task, actor, toStatus: "uploaded" });
   return applyTaskTransition({
@@ -925,10 +1000,17 @@ const uploadWorkflowTask = async ({ taskId, actor = {}, note = "" }) => {
     toStatus: "uploaded",
     note,
     commentType: "upload",
+    realtimeSource,
+    successMessage: "Workflow task marked uploaded",
   });
 };
 
-const approveWorkflowTask = async ({ taskId, actor = {}, note = "" }) => {
+const approveWorkflowTask = async ({
+  taskId,
+  actor = {},
+  note = "",
+  realtimeSource = null,
+} = {}) => {
   const task = await getMutableTaskById(taskId);
   assertTransitionPermission({ task, actor, toStatus: "approved" });
   return applyTaskTransition({
@@ -937,10 +1019,17 @@ const approveWorkflowTask = async ({ taskId, actor = {}, note = "" }) => {
     toStatus: "approved",
     note,
     commentType: "approval",
+    realtimeSource,
+    successMessage: "Workflow task approved",
   });
 };
 
-const reworkWorkflowTask = async ({ taskId, actor = {}, note = "" }) => {
+const reworkWorkflowTask = async ({
+  taskId,
+  actor = {},
+  note = "",
+  realtimeSource = null,
+} = {}) => {
   if (!normalizeText(note)) {
     throw new Error("A rework reason is required");
   }
@@ -999,8 +1088,18 @@ const reworkWorkflowTask = async ({ taskId, actor = {}, note = "" }) => {
     note,
     commentType: "rework",
   });
-  await recalculateWorkflowBatchIfPresent(task.batch);
-  return buildTaskDetail(task._id, actor);
+  const batch = await recalculateWorkflowBatchIfPresent(task.batch);
+  const taskDetail = await buildTaskDetail(task._id, actor);
+
+  emitWorkflowTaskMutation({
+    realtimeSource,
+    task: taskDetail,
+    batch,
+    actor,
+    message: "Workflow task sent to rework",
+  });
+
+  return taskDetail;
 };
 
 const updateWorkflowTaskStatus = async ({
@@ -1008,6 +1107,7 @@ const updateWorkflowTaskStatus = async ({
   actor = {},
   toStatus,
   note = "",
+  realtimeSource = null,
 }) => {
   const normalizedStatus = normalizeWorkflowTaskStatus(toStatus, { fallback: "" });
   if (!WORKFLOW_TASK_STATUSES.includes(normalizedStatus)) {
@@ -1033,6 +1133,8 @@ const updateWorkflowTaskStatus = async ({
         : normalizedStatus === "uploaded"
         ? "upload"
         : "system",
+    realtimeSource,
+    successMessage: `Workflow task moved to ${normalizedStatus}`,
   });
 };
 
@@ -1047,6 +1149,7 @@ const addWorkflowTaskComment = async ({
   actor = {},
   comment = "",
   commentType = "general",
+  realtimeSource = null,
 }) => {
   const normalizedComment = normalizeText(comment);
   if (!normalizedComment) {
@@ -1070,16 +1173,23 @@ const addWorkflowTaskComment = async ({
     updated_by: buildAuditActor(actor),
   });
 
-  return Comment.findById(savedComment._id)
+  const commentDetail = await Comment.findById(savedComment._id)
     .populate("created_by.user", "name email role")
     .populate("updated_by.user", "name email role")
     .lean();
+
+  emitWorkflowCommentAdded(realtimeSource, commentDetail, task, {
+    message: "Workflow task comment added",
+  });
+
+  return commentDetail;
 };
 
 const deleteWorkflowTask = async ({
   taskId,
   actor = {},
   note = "",
+  realtimeSource = null,
 }) => {
   if (!isAdmin(actor)) {
     throw new Error("Only admins can delete workflow tasks");
@@ -1140,7 +1250,15 @@ const deleteWorkflowTask = async ({
     },
   );
 
-  await recalculateWorkflowBatchIfPresent(task.batch);
+  const batch = await recalculateWorkflowBatchIfPresent(task.batch);
+
+  emitWorkflowTaskMutation({
+    realtimeSource,
+    task,
+    batch,
+    actor,
+    message: "Workflow task deleted",
+  });
 
   return {
     _id: task._id,

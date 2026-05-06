@@ -320,18 +320,54 @@ const summarizeManifestCounts = (entries = []) => {
 
 const buildEmptyTaskCounts = () => ({
   total_tasks: 0,
+  pending_tasks: 0,
   assigned_tasks: 0,
+  in_progress_tasks: 0,
   complete_tasks: 0,
+  submitted_tasks: 0,
   approved_tasks: 0,
+  review_tasks: 0,
   uploaded_tasks: 0,
+  completed_tasks: 0,
   reworked_tasks: 0,
+  rework_tasks: 0,
 });
+
+const buildDerivedTaskCounts = (taskCounts = {}) => {
+  const normalized = {
+    ...buildEmptyTaskCounts(),
+    ...(taskCounts || {}),
+  };
+
+  normalized.total_tasks = Number(normalized.total_tasks || 0);
+  normalized.pending_tasks = Number(normalized.pending_tasks || 0);
+  normalized.assigned_tasks = Number(normalized.assigned_tasks || 0);
+  normalized.in_progress_tasks = Number(normalized.in_progress_tasks || 0);
+  normalized.complete_tasks = Number(normalized.complete_tasks || 0);
+  normalized.submitted_tasks = Number(
+    normalized.submitted_tasks || normalized.complete_tasks || 0,
+  );
+  normalized.approved_tasks = Number(normalized.approved_tasks || 0);
+  normalized.review_tasks = Number(
+    normalized.review_tasks || normalized.approved_tasks || 0,
+  );
+  normalized.uploaded_tasks = Number(normalized.uploaded_tasks || 0);
+  normalized.completed_tasks = Number(
+    normalized.completed_tasks || normalized.uploaded_tasks || 0,
+  );
+  normalized.reworked_tasks = Number(normalized.reworked_tasks || 0);
+  normalized.rework_tasks = Number(
+    normalized.rework_tasks || normalized.reworked_tasks || 0,
+  );
+
+  return normalized;
+};
 
 const buildBatchCounts = (fileCounts = {}, taskCounts = {}) => ({
   ...summarizeManifestCounts([]),
-  ...buildEmptyTaskCounts(),
+  ...buildDerivedTaskCounts(),
   ...(fileCounts || {}),
-  ...(taskCounts || {}),
+  ...buildDerivedTaskCounts(taskCounts),
 });
 
 const buildWorkflowBatchNo = (id, date = new Date()) => {
