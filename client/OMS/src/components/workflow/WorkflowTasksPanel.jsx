@@ -661,8 +661,8 @@ const WorkflowTasksPanel = ({
                 No workflow tasks found for the current filters.
               </div>
             ) : (
-              <div className="table-responsive">
-                <table className="table align-middle mb-0">
+              <div className="table-responsive workflow-task-table-wrap">
+                <table className="table align-middle mb-0 workflow-task-table">
                   <thead>
                     <tr>
                       <th>Task Name</th>
