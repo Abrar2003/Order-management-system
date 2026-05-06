@@ -3649,6 +3649,10 @@ button.om-item-order-presence-label {
   min-width: 130px;
 }
 
+.packed-goods-filter-field--brand {
+  position: relative;
+}
+
 .packed-goods-filter-field--po {
   flex-basis: 140px;
 }
@@ -3661,6 +3665,45 @@ button.om-item-order-presence-label {
 .packed-goods-filter-button {
   flex: 0 0 auto;
   min-width: 106px;
+}
+
+.packed-goods-filter-trigger {
+  display: block;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+.packed-goods-filter-menu {
+  width: 100%;
+  max-height: 300px;
+  padding: 0.35rem;
+  overflow-y: auto;
+}
+
+.packed-goods-filter-option {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.35rem 0.45rem;
+  border-radius: var(--bs-border-radius-sm);
+  cursor: pointer;
+}
+
+.packed-goods-filter-option:hover,
+.packed-goods-filter-option:focus-within {
+  background: rgba(13, 110, 253, 0.08);
+}
+
+.packed-goods-filter-option .form-check-input {
+  margin: 0;
+  float: none;
+}
+
+.packed-goods-filter-option-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.875rem;
 }
 
 .packed-goods-pdf-surface {

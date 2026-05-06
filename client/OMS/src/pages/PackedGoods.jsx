@@ -19,6 +19,7 @@ const DEFAULT_SORT_BY = "po";
 const DEFAULT_SORT_ORDER = "asc";
 const DEFAULT_LIMIT = 20;
 const LIMIT_OPTIONS = [10, 20, 50, 100];
+const DEFAULT_BRAND_FILTER = ["all"];
 
 const normalizeFilterValue = (value, fallback = "all") => {
   const normalized = String(value || "").trim();
@@ -29,6 +30,7 @@ const normalizeFilterValues = (values = []) =>
   [
     ...new Set(
       (Array.isArray(values) ? values : [values])
+        .flatMap((value) => String(value || "").split(","))
         .map((value) => String(value || "").trim())
         .filter((value) => {
           const lowered = value.toLowerCase();
@@ -42,6 +44,21 @@ const normalizeFilterValues = (values = []) =>
     ),
   ].sort((left, right) => left.localeCompare(right));
 
+const normalizeBrandFilter = (values = DEFAULT_BRAND_FILTER) => {
+  const normalized = normalizeFilterValues(values);
+  return normalized.length > 0 ? normalized : DEFAULT_BRAND_FILTER;
+};
+
+const isAllBrandFilter = (values = DEFAULT_BRAND_FILTER) =>
+  !Array.isArray(values) || values.length === 0 || values.includes("all");
+
+const areBrandFiltersEqual = (left, right) => {
+  const normalizedLeft = normalizeBrandFilter(left);
+  const normalizedRight = normalizeBrandFilter(right);
+  if (normalizedLeft.length !== normalizedRight.length) return false;
+  return normalizedLeft.every((value, index) => value === normalizedRight[index]);
+};
+
 const normalizeDistinctValues = (values = []) =>
   [
     ...new Set(
@@ -49,10 +66,15 @@ const normalizeDistinctValues = (values = []) =>
     ),
   ].sort((left, right) => left.localeCompare(right));
 
-const matchesDraftFilters = (row = {}, brand = "all", vendor = "all") => {
+const matchesBrandFilter = (rowBrandValue, brands = DEFAULT_BRAND_FILTER) => {
+  const rowBrand = String(rowBrandValue || "").trim();
+  return isAllBrandFilter(brands) || normalizeBrandFilter(brands).includes(rowBrand);
+};
+
+const matchesDraftFilters = (row = {}, brands = DEFAULT_BRAND_FILTER, vendor = "all") => {
   const rowBrand = String(row?.brand || "").trim();
   const rowVendor = String(row?.vendor || "").trim();
-  if (brand !== "all" && rowBrand !== brand) return false;
+  if (!matchesBrandFilter(rowBrand, brands)) return false;
   if (vendor !== "all" && rowVendor !== vendor) return false;
   return true;
 };
@@ -86,18 +108,10 @@ const parseLimit = (value) => {
 };
 
 const buildFilterStateFromSearchParams = (params) => {
-  const brandParam = params.get("brand");
-  let brand = ["all"];
-  if (brandParam) {
-    if (brandParam === "all") {
-        brand = ["all"];
-    } else {
-        brand = brandParam.split(',').map(normalizeFilterValue);
-    }
-  }
+  const brandParams = params.getAll("brand");
 
   return {
-    brand,
+    brand: normalizeBrandFilter(brandParams.length > 0 ? brandParams : params.get("brand")),
     vendor: normalizeFilterValue(params.get("vendor")),
     po: normalizeFilterValue(params.get("po")),
   };
@@ -111,11 +125,12 @@ const buildPackedGoodsSearchParams = ({
   limit,
 }) => {
   const next = new URLSearchParams();
-  
-  if (appliedFilters?.brand && appliedFilters.brand.length > 0 && !appliedFilters.brand.includes("all")) {
-    next.set("brand", appliedFilters.brand.join(','));
+
+  const selectedBrands = normalizeBrandFilter(appliedFilters?.brand);
+  if (!isAllBrandFilter(selectedBrands)) {
+    next.set("brand", selectedBrands.join(","));
   }
-  
+
   if (appliedFilters?.vendor !== "all") next.set("vendor", appliedFilters.vendor);
   if (appliedFilters?.po !== "all") next.set("po", appliedFilters.po);
   if (sortBy !== DEFAULT_SORT_BY) next.set("sort_by", sortBy);
@@ -127,8 +142,9 @@ const buildPackedGoodsSearchParams = ({
 
 const buildPackedGoodsApiQuery = (filters = {}) => {
   const params = new URLSearchParams();
-  if (filters?.brand && filters.brand.length > 0 && !filters.brand.includes("all")) {
-    params.set("brand", filters.brand.join(','));
+  const selectedBrands = normalizeBrandFilter(filters?.brand);
+  if (!isAllBrandFilter(selectedBrands)) {
+    params.set("brand", selectedBrands.join(","));
   }
   if (filters?.vendor && filters.vendor !== "all") {
     params.set("vendor", filters.vendor);
@@ -219,17 +235,12 @@ const PackedGoods = () => {
     const nextLimit = parseLimit(searchParams.get("limit"));
 
     setDraftBrand((prev) => {
-      const prevBrandString = Array.isArray(prev) ? prev.join(',') : prev;
-      const nextBrandString = Array.isArray(nextFilters.brand) ? nextFilters.brand.join(',') : nextFilters.brand;
-      return prevBrandString === nextBrandString ? prev : nextFilters.brand;
+      return areBrandFiltersEqual(prev, nextFilters.brand) ? prev : nextFilters.brand;
     });
     setDraftVendor((prev) => (prev === nextFilters.vendor ? prev : nextFilters.vendor));
     setDraftPo((prev) => (prev === nextFilters.po ? prev : nextFilters.po));
     setAppliedFilters((prev) => {
-      const prevBrandString = Array.isArray(prev.brand) ? prev.brand.join(',') : prev.brand;
-      const nextBrandString = Array.isArray(nextFilters.brand) ? nextFilters.brand.join(',') : nextFilters.brand;
-
-      return prevBrandString === nextBrandString
+      return areBrandFiltersEqual(prev.brand, nextFilters.brand)
         && prev.vendor === nextFilters.vendor
         && prev.po === nextFilters.po
           ? prev
@@ -302,7 +313,7 @@ const PackedGoods = () => {
         const rowVendor = String(row?.vendor || "").trim();
         const rowPo = String(row?.order_id || "").trim();
 
-        if (appliedFilters.brand !== "all" && rowBrand !== appliedFilters.brand) {
+        if (!matchesBrandFilter(rowBrand, appliedFilters.brand)) {
           return false;
         }
         if (appliedFilters.vendor !== "all" && rowVendor !== appliedFilters.vendor) {
@@ -373,7 +384,7 @@ const PackedGoods = () => {
   }, [limit, page, sortedRows]);
 
   const hasPendingFilterChanges =
-    draftBrand !== appliedFilters.brand
+    !areBrandFiltersEqual(draftBrand, appliedFilters.brand)
     || draftVendor !== appliedFilters.vendor
     || draftPo !== appliedFilters.po;
 
@@ -400,12 +411,12 @@ const PackedGoods = () => {
   const handleDraftBrandChange = useCallback((event) => {
     const value = event.target.value;
     const checked = event.target.checked;
-    
+
     setDraftBrand((prev) => {
       let next = [...(Array.isArray(prev) ? prev : [prev])];
-      
+
       if (value === "all") {
-        next = ["all"];
+        next = DEFAULT_BRAND_FILTER;
       } else {
         if (checked) {
           next = next.filter((v) => v !== "all");
@@ -414,10 +425,10 @@ const PackedGoods = () => {
           next = next.filter((v) => v !== value);
         }
         if (next.length === 0) {
-          next = ["all"];
+          next = DEFAULT_BRAND_FILTER;
         }
       }
-      return next;
+      return normalizeBrandFilter(next);
     });
 
     setDraftVendor("all");
@@ -432,7 +443,7 @@ const PackedGoods = () => {
   const handleApplyFilters = useCallback(() => {
     setPage(1);
     setAppliedFilters({
-      brand: draftBrand,
+      brand: normalizeBrandFilter(draftBrand),
       vendor:
         draftVendor !== "all" && !availableDraftVendors.includes(draftVendor)
           ? "all"
@@ -445,7 +456,7 @@ const PackedGoods = () => {
   }, [availableDraftPos, availableDraftVendors, draftBrand, draftPo, draftVendor]);
 
   const handleClearFilters = useCallback(() => {
-    const clearedFilters = { brand: ["all"], vendor: "all", po: "all" };
+    const clearedFilters = { brand: DEFAULT_BRAND_FILTER, vendor: "all", po: "all" };
     setPage(1);
     setDraftBrand(clearedFilters.brand);
     setDraftVendor(clearedFilters.vendor);
@@ -574,22 +585,23 @@ const PackedGoods = () => {
         <div className="card om-card mb-3">
           <div className="card-body">
             <div className="packed-goods-filter-bar">
-              <div className="packed-goods-filter-field dropdown">
+              <div className="packed-goods-filter-field packed-goods-filter-field--brand dropdown">
                 <label className="form-label small mb-1">Brand</label>
-                <div
-                  className="form-select form-select-sm text-start"
+                <button
+                  type="button"
+                  className="form-select form-select-sm packed-goods-filter-trigger"
                   role="button"
                   data-bs-toggle="dropdown"
                   data-bs-auto-close="outside"
                   aria-expanded="false"
                 >
                   <div className="text-truncate">
-                    {draftBrand.includes("all") || draftBrand.length === 0 ? "All Brands" : draftBrand.join(", ")}
+                    {isAllBrandFilter(draftBrand) ? "All Brands" : draftBrand.join(", ")}
                   </div>
-                </div>
-                <ul className="dropdown-menu p-2 shadow w-100" style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                </button>
+                <ul className="dropdown-menu packed-goods-filter-menu shadow">
                   <li>
-                    <div className="form-check dropdown-item pe-2 mb-1">
+                    <label className="packed-goods-filter-option" htmlFor="brand-all">
                       <input
                         className="form-check-input"
                         type="checkbox"
@@ -598,14 +610,17 @@ const PackedGoods = () => {
                         checked={draftBrand.includes("all")}
                         onChange={handleDraftBrandChange}
                       />
-                      <label className="form-check-label w-100" htmlFor="brand-all" role="button">
+                      <span className="packed-goods-filter-option-label">
                         All Brands
-                      </label>
-                    </div>
+                      </span>
+                    </label>
                   </li>
                   {brandOptions.map((brand) => (
                     <li key={brand}>
-                      <div className="form-check dropdown-item pe-2 mb-1">
+                      <label
+                        className="packed-goods-filter-option"
+                        htmlFor={`brand-${brand}`}
+                      >
                         <input
                           className="form-check-input"
                           type="checkbox"
@@ -614,10 +629,10 @@ const PackedGoods = () => {
                           checked={draftBrand.includes(brand)}
                           onChange={handleDraftBrandChange}
                         />
-                        <label className="form-check-label w-100" htmlFor={`brand-${brand}`} role="button">
+                        <span className="packed-goods-filter-option-label">
                           {brand}
-                        </label>
-                      </div>
+                        </span>
+                      </label>
                     </li>
                   ))}
                 </ul>
@@ -689,10 +704,10 @@ const PackedGoods = () => {
                 disabled={
                   loading
                   || (
-                    draftBrand === "all"
+                    isAllBrandFilter(draftBrand)
                     && draftVendor === "all"
                     && draftPo === "all"
-                    && appliedFilters.brand === "all"
+                    && isAllBrandFilter(appliedFilters.brand)
                     && appliedFilters.vendor === "all"
                     && appliedFilters.po === "all"
                   )

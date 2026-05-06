@@ -137,6 +137,7 @@ const normalizeFilterValues = (value) => {
   return normalizeDistinctValues(
     rawValues
       .flatMap((entry) => (Array.isArray(entry) ? entry : [entry]))
+      .flatMap((entry) => String(entry ?? "").split(","))
       .map((entry) => String(entry ?? "").trim())
       .filter((entry) => {
         const lowered = entry.toLowerCase();
