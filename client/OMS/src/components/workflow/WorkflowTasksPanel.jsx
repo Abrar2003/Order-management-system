@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import api from "../../api/axios";
 import { getUserFromToken } from "../../auth/auth.service";
 import { isAdminLikeRole, isManagerLikeRole } from "../../auth/permissions";
 import { usePermissions } from "../../auth/PermissionContext";
@@ -26,6 +27,12 @@ const DEFAULT_LIMIT = 20;
 const LIMIT_OPTIONS = [10, 20, 50, 100];
 
 const normalizeText = (value) => String(value ?? "").trim();
+const normalizeDistinctValues = (values = []) =>
+  [
+    ...new Set(
+      values.map((value) => String(value ?? "").trim()).filter(Boolean),
+    ),
+  ].sort((left, right) => left.localeCompare(right));
 
 const parsePositiveInt = (value, fallback = 1) => {
   const parsed = Number.parseInt(String(value ?? "").trim(), 10);
@@ -131,6 +138,7 @@ const WorkflowTasksPanel = ({
   const [taskTypes, setTaskTypes] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [users, setUsers] = useState([]);
+  const [brands, setBrands] = useState([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showFolderCreateModal, setShowFolderCreateModal] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState("");
@@ -161,6 +169,16 @@ const WorkflowTasksPanel = ({
     [notePrompt.taskId, rows],
   );
 
+  const availableBrandOptions = useMemo(
+    () =>
+      normalizeDistinctValues([
+        ...brands,
+        ...rows.map((task) => task?.brand),
+        brandFilter,
+      ]),
+    [brandFilter, brands, rows],
+  );
+
   const loadLookups = useCallback(async () => {
     if (!canViewWorkflow) {
       setLookupLoading(false);
@@ -169,13 +187,14 @@ const WorkflowTasksPanel = ({
 
     setLookupLoading(true);
     try {
-      const [taskTypeResult, departmentResult, userResult] =
+      const [taskTypeResult, departmentResult, userResult, brandResult] =
         await Promise.allSettled([
           getWorkflowTaskTypes(),
           getWorkflowDepartments(),
           canAssignWorkflow || canFilterByAssignee || canCreateWorkflow
             ? getWorkflowUsers()
             : Promise.resolve([]),
+          api.get("/orders/brands-and-vendors"),
         ]);
 
       if (taskTypeResult.status === "fulfilled") {
@@ -200,6 +219,15 @@ const WorkflowTasksPanel = ({
         );
       } else {
         setUsers([]);
+      }
+      if (brandResult.status === "fulfilled") {
+        setBrands(
+          Array.isArray(brandResult.value?.data?.brands)
+            ? normalizeDistinctValues(brandResult.value.data.brands)
+            : [],
+        );
+      } else {
+        setBrands([]);
       }
     } catch (loadError) {
       setError(
@@ -958,14 +986,12 @@ const WorkflowTasksPanel = ({
           taskTypes={taskTypes}
           departments={departments}
           availableUsers={users}
+          brandOptions={availableBrandOptions}
           defaultTaskTypeKey={taskTypeFilter}
           onClose={() => setShowCreateModal(false)}
-          onCreated={(task) => {
+          onCreated={() => {
             setShowCreateModal(false);
             setSuccess("Workflow task created successfully.");
-            if (task?._id) {
-              setSelectedTaskId(task._id);
-            }
             setRefreshTick((prev) => prev + 1);
           }}
         />

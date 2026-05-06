@@ -2,6 +2,12 @@ import { useMemo, useState } from "react";
 import { createWorkflowTask } from "../../api/workflowApi";
 
 const normalizeText = (value) => String(value ?? "").trim();
+const normalizeDistinctValues = (values = []) =>
+  [
+    ...new Set(
+      values.map((value) => String(value ?? "").trim()).filter(Boolean),
+    ),
+  ].sort((left, right) => left.localeCompare(right));
 const PRIORITY_OPTIONS = ["low", "normal", "high", "urgent"];
 
 const createDraft = ({ defaultTaskTypeKey = "" } = {}) => ({
@@ -28,6 +34,7 @@ const WorkflowTaskCreateModal = ({
   taskTypes = [],
   departments = [],
   availableUsers = [],
+  brandOptions = [],
   defaultTaskTypeKey = "",
   onClose,
   onCreated,
@@ -47,6 +54,15 @@ const WorkflowTaskCreateModal = ({
   const selectedAssigneeIds = useMemo(
     () => new Set((Array.isArray(form.assignee_ids) ? form.assignee_ids : []).map(String)),
     [form.assignee_ids],
+  );
+
+  const availableBrandOptions = useMemo(
+    () =>
+      normalizeDistinctValues([
+        ...brandOptions,
+        form.brand,
+      ]),
+    [brandOptions, form.brand],
   );
 
   const handleTaskTypeChange = (taskTypeKey) => {
@@ -252,14 +268,20 @@ const WorkflowTaskCreateModal = ({
 
                         <div className="col-md-12">
                           <label className="form-label">Brand</label>
-                          <input
-                            type="text"
-                            className="form-control"
+                          <select
+                            className="form-select"
                             value={form.brand}
                             onChange={(event) =>
                               setForm((prev) => ({ ...prev, brand: event.target.value }))
                             }
-                          />
+                          >
+                            <option value="">Select brand</option>
+                            {availableBrandOptions.map((brand) => (
+                              <option key={brand} value={brand}>
+                                {brand}
+                              </option>
+                            ))}
+                          </select>
                         </div>
 
                       </div>
