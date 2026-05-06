@@ -75,6 +75,7 @@ const BatchSchema = new mongoose.Schema(
       trim: true,
     },
     assignees: { type: [UserReferenceSchema], default: [] },
+    due_date: { type: Date, default: null },
     counts: {
       type: BatchCountsSchema,
       default: () => buildBatchCounts(),
@@ -97,6 +98,7 @@ BatchSchema.index({ source_folder_key: 1 });
 BatchSchema.index({ task_type_key: 1 });
 BatchSchema.index({ status: 1, createdAt: -1 });
 BatchSchema.index({ brand: 1, status: 1, createdAt: -1 });
+BatchSchema.index({ due_date: 1, status: 1 });
 BatchSchema.index({ "created_by.user": 1, createdAt: -1 });
 BatchSchema.index(
   { source_folder_key: 1, task_type_key: 1 },

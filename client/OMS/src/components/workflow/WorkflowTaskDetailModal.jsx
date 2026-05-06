@@ -12,6 +12,7 @@ import {
   submitWorkflowTask,
 } from "../../api/workflowApi";
 import { formatBytes } from "../../utils/workflowManifest";
+import WorkflowTaskStageBar from "./WorkflowTaskStageBar";
 
 const normalizeText = (value) => String(value ?? "").trim();
 
@@ -51,7 +52,8 @@ const WorkflowTaskDetailModal = ({
   const [openPanel, setOpenPanel] = useState("");
   const [assignIds, setAssignIds] = useState([]);
   const [assignNote, setAssignNote] = useState("");
-  const [managerNote, setManagerNote] = useState("");
+  const [showReworkPrompt, setShowReworkPrompt] = useState(false);
+  const [reworkNote, setReworkNote] = useState("");
   const [commentText, setCommentText] = useState("");
   const [commentType, setCommentType] = useState("general");
 
@@ -108,7 +110,8 @@ const WorkflowTaskDetailModal = ({
   const canStart = isAssignedUser && ["assigned", "rework"].includes(task?.status);
   const canSubmit = isAssignedUser && ["assigned", "in_progress", "rework"].includes(task?.status);
   const canMoveToReview = canManageWorkflow && task?.status === "submitted";
-  const canApprove = canApproveWorkflow && ["submitted", "review"].includes(task?.status);
+  const canApprove =
+    canApproveWorkflow && !isAssignedUser && ["submitted", "review"].includes(task?.status);
   const canRework = canManageWorkflow && ["submitted", "review"].includes(task?.status);
   const canAssign = canAssignWorkflow && !["completed", "cancelled"].includes(task?.status);
   const canDelete = canDeleteWorkflow && Boolean(task?._id);
@@ -122,8 +125,9 @@ const WorkflowTaskDetailModal = ({
       await action();
       await loadTask({ keepMessages: true });
       setActionSuccess(message);
-      setManagerNote("");
       setAssignNote("");
+      setShowReworkPrompt(false);
+      setReworkNote("");
       onUpdated?.();
     } catch (submitError) {
       setActionError(
@@ -173,6 +177,60 @@ const WorkflowTaskDetailModal = ({
     setCommentType("general");
   };
 
+  const handleStageBarClick = async (stepKey) => {
+    if (stepKey === "in_progress" && canStart) {
+      await handleTaskAction(
+        () => startWorkflowTask(taskId),
+        "Task moved to in progress.",
+      );
+      return;
+    }
+
+    if (stepKey === "submitted" && canSubmit) {
+      await handleTaskAction(
+        () => submitWorkflowTask(taskId),
+        "Task submitted for review.",
+      );
+      return;
+    }
+
+    if (stepKey === "review" && canMoveToReview) {
+      await handleTaskAction(
+        () => reviewWorkflowTask(taskId, { note: "" }),
+        "Task moved to review.",
+      );
+      return;
+    }
+
+    if (stepKey === "rework" && canRework) {
+      setActionError("");
+      setActionSuccess("");
+      setShowReworkPrompt(true);
+      setOpenPanel("");
+      return;
+    }
+
+    if (stepKey === "completed" && canApprove) {
+      await handleTaskAction(
+        () => approveWorkflowTask(taskId, { note: "" }),
+        "Task approved successfully.",
+      );
+    }
+  };
+
+  const handleConfirmRework = async () => {
+    const normalizedNote = normalizeText(reworkNote);
+    if (!normalizedNote) {
+      setActionError("Rework reason is required.");
+      return;
+    }
+
+    await handleTaskAction(
+      () => sendWorkflowTaskToRework(taskId, { note: normalizedNote }),
+      "Task sent to rework.",
+    );
+  };
+
   const handleDeleteTask = async () => {
     if (!task?._id) return;
 
@@ -219,7 +277,7 @@ const WorkflowTaskDetailModal = ({
             <div>
               <h5 className="modal-title">Workflow Task Detail</h5>
               <div className="small text-muted">
-                View source references, comments, history, and available workflow actions.
+                View task history, comments, assignments, and available workflow actions.
               </div>
             </div>
             <button
@@ -266,7 +324,8 @@ const WorkflowTaskDetailModal = ({
                       <div className="col-md-4">
                         <div className="small text-secondary mb-1">Batch</div>
                         <div className="fw-semibold">
-                          {task.batch?.batch_no || "—"} {task.batch?.name ? `• ${task.batch.name}` : ""}
+                          {task.batch?.batch_no || "Standalone task"}{" "}
+                          {task.batch?.name ? `• ${task.batch.name}` : ""}
                         </div>
                       </div>
                       <div className="col-md-4">
@@ -276,14 +335,6 @@ const WorkflowTaskDetailModal = ({
                       <div className="col-md-4">
                         <div className="small text-secondary mb-1">Department</div>
                         <div className="fw-semibold">{task.department?.name || "—"}</div>
-                      </div>
-                      <div className="col-md-6">
-                        <div className="small text-secondary mb-1">Source Folder</div>
-                        <div className="fw-semibold">{task.source_folder_name || "—"}</div>
-                      </div>
-                      <div className="col-md-6">
-                        <div className="small text-secondary mb-1">Source Folder Path</div>
-                        <div className="fw-semibold">{task.source_folder_path || "—"}</div>
                       </div>
                       <div className="col-md-4">
                         <div className="small text-secondary mb-1">Assigned Users</div>
@@ -311,78 +362,21 @@ const WorkflowTaskDetailModal = ({
                   <div className="card-body">
                     <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
                       <div>
-                        <h6 className="mb-1">Actions</h6>
+                        <h6 className="mb-1">Progress & Actions</h6>
                         <div className="small text-secondary">
-                          Buttons only appear when the current user can perform them.
+                          Use the task rail for quick updates. Only rework stops for a remark.
                         </div>
                       </div>
                       <div className="d-flex flex-wrap gap-2">
-                        {canStart && (
-                          <button
-                            type="button"
-                            className="btn btn-outline-primary btn-sm"
-                            disabled={actionLoading}
-                            onClick={() =>
-                              handleTaskAction(
-                                () => startWorkflowTask(taskId),
-                                "Task moved to in progress.",
-                              )
-                            }
-                          >
-                            Start Work
-                          </button>
-                        )}
-                        {canSubmit && (
-                          <button
-                            type="button"
-                            className="btn btn-primary btn-sm"
-                            disabled={actionLoading}
-                            onClick={() =>
-                              handleTaskAction(
-                                () => submitWorkflowTask(taskId),
-                                "Task submitted for review.",
-                              )
-                            }
-                          >
-                            Mark as Done / Submit for Review
-                          </button>
-                        )}
-                        {canMoveToReview && (
-                          <button
-                            type="button"
-                            className="btn btn-outline-secondary btn-sm"
-                            disabled={actionLoading}
-                            onClick={() => setOpenPanel((prev) => (prev === "review" ? "" : "review"))}
-                          >
-                            Move to Review
-                          </button>
-                        )}
-                        {canApprove && (
-                          <button
-                            type="button"
-                            className="btn btn-success btn-sm"
-                            disabled={actionLoading}
-                            onClick={() => setOpenPanel((prev) => (prev === "approve" ? "" : "approve"))}
-                          >
-                            Approve
-                          </button>
-                        )}
-                        {canRework && (
-                          <button
-                            type="button"
-                            className="btn btn-outline-danger btn-sm"
-                            disabled={actionLoading}
-                            onClick={() => setOpenPanel((prev) => (prev === "rework" ? "" : "rework"))}
-                          >
-                            Send to Rework
-                          </button>
-                        )}
                         {canAssign && (
                           <button
                             type="button"
                             className="btn btn-outline-dark btn-sm"
                             disabled={actionLoading}
-                            onClick={() => setOpenPanel((prev) => (prev === "assign" ? "" : "assign"))}
+                            onClick={() => {
+                              setShowReworkPrompt(false);
+                              setOpenPanel((prev) => (prev === "assign" ? "" : "assign"));
+                            }}
                           >
                             Assign / Reassign
                           </button>
@@ -392,7 +386,10 @@ const WorkflowTaskDetailModal = ({
                             type="button"
                             className="btn btn-outline-secondary btn-sm"
                             disabled={actionLoading}
-                            onClick={() => setOpenPanel((prev) => (prev === "comment" ? "" : "comment"))}
+                            onClick={() => {
+                              setShowReworkPrompt(false);
+                              setOpenPanel((prev) => (prev === "comment" ? "" : "comment"));
+                            }}
                           >
                             Add Comment
                           </button>
@@ -409,6 +406,59 @@ const WorkflowTaskDetailModal = ({
                         )}
                       </div>
                     </div>
+
+                    <WorkflowTaskStageBar
+                      task={task}
+                      className="mb-3"
+                      disabled={actionLoading}
+                      isStepClickable={(stepKey) =>
+                        (stepKey === "in_progress" && canStart)
+                        || (stepKey === "submitted" && canSubmit)
+                        || (stepKey === "review" && canMoveToReview)
+                        || (stepKey === "rework" && canRework)
+                        || (stepKey === "completed" && canApprove)
+                      }
+                      onStepClick={handleStageBarClick}
+                    />
+
+                    {showReworkPrompt && (
+                      <div className="workflow-stage-popover mb-3">
+                        <div className="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+                          <div>
+                            <div className="fw-semibold">Send to Rework</div>
+                            <div className="small text-secondary">
+                              Add the required remark, then the task goes back for fixes.
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn btn-outline-secondary btn-sm"
+                            onClick={() => setShowReworkPrompt(false)}
+                            disabled={actionLoading}
+                          >
+                            Close
+                          </button>
+                        </div>
+                        <label className="form-label">Rework Reason</label>
+                        <textarea
+                          rows="3"
+                          className="form-control"
+                          placeholder="Explain what needs to be fixed"
+                          value={reworkNote}
+                          onChange={(event) => setReworkNote(event.target.value)}
+                        />
+                        <div className="d-flex justify-content-end mt-3">
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm"
+                            disabled={actionLoading}
+                            onClick={handleConfirmRework}
+                          >
+                            {actionLoading ? "Saving..." : "Confirm Rework"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
 
                     {openPanel === "assign" && (
                       <div className="workflow-action-panel">
@@ -503,102 +553,6 @@ const WorkflowTaskDetailModal = ({
                               onClick={handleAddComment}
                             >
                               {actionLoading ? "Saving..." : "Add Comment"}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {openPanel === "review" && (
-                      <div className="workflow-action-panel">
-                        <div className="row g-3">
-                          <div className="col-12">
-                            <label className="form-label">Review Note</label>
-                            <textarea
-                              rows="3"
-                              className="form-control"
-                              value={managerNote}
-                              onChange={(event) => setManagerNote(event.target.value)}
-                            />
-                          </div>
-                          <div className="col-12 d-flex justify-content-end">
-                            <button
-                              type="button"
-                              className="btn btn-outline-secondary btn-sm"
-                              disabled={actionLoading}
-                              onClick={() =>
-                                handleTaskAction(
-                                  () => reviewWorkflowTask(taskId, { note: normalizeText(managerNote) }),
-                                  "Task moved to review.",
-                                )
-                              }
-                            >
-                              {actionLoading ? "Saving..." : "Confirm Review"}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {openPanel === "approve" && (
-                      <div className="workflow-action-panel">
-                        <div className="row g-3">
-                          <div className="col-12">
-                            <label className="form-label">Approval Note</label>
-                            <textarea
-                              rows="3"
-                              className="form-control"
-                              value={managerNote}
-                              onChange={(event) => setManagerNote(event.target.value)}
-                            />
-                          </div>
-                          <div className="col-12 d-flex justify-content-end">
-                            <button
-                              type="button"
-                              className="btn btn-success btn-sm"
-                              disabled={actionLoading}
-                              onClick={() =>
-                                handleTaskAction(
-                                  () => approveWorkflowTask(taskId, { note: normalizeText(managerNote) }),
-                                  "Task approved successfully.",
-                                )
-                              }
-                            >
-                              {actionLoading ? "Saving..." : "Confirm Approval"}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {openPanel === "rework" && (
-                      <div className="workflow-action-panel">
-                        <div className="row g-3">
-                          <div className="col-12">
-                            <label className="form-label">Rework Reason</label>
-                            <textarea
-                              rows="3"
-                              className="form-control"
-                              value={managerNote}
-                              onChange={(event) => setManagerNote(event.target.value)}
-                            />
-                          </div>
-                          <div className="col-12 d-flex justify-content-end">
-                            <button
-                              type="button"
-                              className="btn btn-danger btn-sm"
-                              disabled={actionLoading}
-                              onClick={() =>
-                                handleTaskAction(
-                                  () =>
-                                    sendWorkflowTaskToRework(taskId, {
-                                      note: normalizeText(managerNote),
-                                    }),
-                                  "Task sent to rework.",
-                                )
-                              }
-                            >
-                              {actionLoading ? "Saving..." : "Confirm Rework"}
                             </button>
                           </div>
                         </div>

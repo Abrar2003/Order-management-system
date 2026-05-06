@@ -16,7 +16,7 @@ const TaskSchema = new mongoose.Schema(
     batch: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "workflow_batches",
-      required: true,
+      default: null,
       index: true,
     },
     batch_no: { type: String, default: "", trim: true, uppercase: true },

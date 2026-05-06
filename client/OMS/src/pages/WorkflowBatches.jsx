@@ -442,6 +442,7 @@ const WorkflowBatches = () => {
                       <th>Brand</th>
                       <th>Task Type</th>
                       <th>Status</th>
+                      <th>Due Date</th>
                       <th>Total Files</th>
                       <th>Total Tasks</th>
                       <th>Pending</th>
@@ -465,6 +466,7 @@ const WorkflowBatches = () => {
                         <td>{batch.brand || "—"}</td>
                         <td>{batch.selected_task_type?.name || batch.task_type?.name || batch.task_type_key}</td>
                         <td>{batch.status}</td>
+                        <td>{formatDateTime(batch.due_date)}</td>
                         <td>{Number(batch.counts?.total_files || 0)}</td>
                         <td>{Number(batch.counts?.total_tasks || 0)}</td>
                         <td>{Number(batch.counts?.pending_tasks || 0)}</td>

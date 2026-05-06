@@ -40,6 +40,16 @@ const toDateOrNull = (value) => {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
+const parseDueDate = (value) => {
+  const normalized = normalizeText(value);
+  if (!normalized) return null;
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error("due_date is invalid");
+  }
+  return parsed;
+};
+
 const escapeRegex = (value = "") =>
   String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -94,6 +104,7 @@ const createWorkflowBatchFromFolderManifest = async (payload = {}, actor = {}) =
   const sourceFolderKey = normalizeSourceFolderKey(sourceFolderName);
   const taskType = await findActiveTaskTypeByKey(payload?.task_type_key);
   const assignees = await validateAssigneeUsers(payload?.assignee_ids || []);
+  const dueDate = parseDueDate(payload?.due_date);
   const manifestEntries = normalizeFileManifest(payload?.file_manifest, {
     sourceFolderName,
   });
@@ -150,6 +161,7 @@ const createWorkflowBatchFromFolderManifest = async (payload = {}, actor = {}) =
     status: WORKFLOW_BATCH_STATUSES[0],
     assignment_mode: normalizeText(payload?.assignment_mode || "manual").toLowerCase() || "manual",
     assignees: assignees.map((assignee) => ({ user: assignee._id })),
+    due_date: dueDate,
     counts: buildBatchCounts(fileCounts, {}),
     uploaded_by: auditActor,
     created_by: auditActor,
@@ -284,6 +296,9 @@ const updateWorkflowBatch = async (id, payload = {}, actor = {}) => {
   }
   if (payload?.assignment_mode !== undefined) {
     batch.assignment_mode = normalizeText(payload.assignment_mode).toLowerCase() || batch.assignment_mode;
+  }
+  if (payload?.due_date !== undefined) {
+    batch.due_date = parseDueDate(payload.due_date);
   }
 
   batch.updated_by = buildAuditActor(actor);

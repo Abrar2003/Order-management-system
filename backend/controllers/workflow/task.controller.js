@@ -3,6 +3,7 @@ const {
   approveWorkflowTask,
   assignWorkflowTask,
   buildTaskDetail,
+  createWorkflowTask,
   deleteWorkflowTask,
   getWorkflowDashboardSummary,
   listWorkflowTasks,
@@ -51,6 +52,27 @@ const getWorkflowTasks = async (req, res) => {
     return res.status(getErrorStatusCode(error)).json({
       success: false,
       message: error.message || "Failed to fetch workflow tasks",
+    });
+  }
+};
+
+const createTask = async (req, res) => {
+  try {
+    const data = await createWorkflowTask({
+      payload: req.body || {},
+      actor: req.user,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Workflow task created successfully",
+      data,
+    });
+  } catch (error) {
+    console.error("Create Workflow Task Error:", error);
+    return res.status(getErrorStatusCode(error)).json({
+      success: false,
+      message: error.message || "Failed to create workflow task",
     });
   }
 };
@@ -282,6 +304,7 @@ const removeTask = async (req, res) => {
 module.exports = {
   approveTask,
   assignTask,
+  createTask,
   getWorkflowDashboard,
   getWorkflowTask,
   getWorkflowTasks,

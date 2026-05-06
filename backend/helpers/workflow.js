@@ -337,6 +337,16 @@ const buildWorkflowBatchNo = (id, date = new Date()) => {
   return `WFB-${dateKey}-${idSuffix}`;
 };
 
+const buildWorkflowManualTaskNo = (id, date = new Date()) => {
+  const dateKey = [
+    date.getUTCFullYear(),
+    String(date.getUTCMonth() + 1).padStart(2, "0"),
+    String(date.getUTCDate()).padStart(2, "0"),
+  ].join("");
+  const idSuffix = String(id || "").slice(-6).toUpperCase();
+  return `WMT-${dateKey}-${idSuffix}`;
+};
+
 const buildWorkflowTaskNo = (batchNo = "", index = 0) =>
   `${normalizeText(batchNo)}-${String(Number(index) + 1).padStart(3, "0")}`;
 
@@ -363,6 +373,7 @@ module.exports = {
   buildEmptyTaskCounts,
   buildSourceFileMetadata,
   buildWorkflowBatchNo,
+  buildWorkflowManualTaskNo,
   buildWorkflowTaskNo,
   classifyFileType,
   collapseWhitespace,

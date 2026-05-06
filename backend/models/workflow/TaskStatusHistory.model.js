@@ -15,7 +15,7 @@ const TaskStatusHistorySchema = new mongoose.Schema(
     batch: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "workflow_batches",
-      required: true,
+      default: null,
     },
     from_status: {
       type: String,

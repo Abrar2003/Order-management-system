@@ -13,6 +13,7 @@ const {
 const {
   approveTask,
   assignTask,
+  createTask,
   getWorkflowDashboard,
   getWorkflowTask,
   getWorkflowTasks,
@@ -36,6 +37,14 @@ const {
 } = require("../controllers/workflow/department.controller");
 
 const router = express.Router();
+const WORKFLOW_MANAGER_ROLES = [
+  "admin",
+  "super admin",
+  "manager",
+  "product manager",
+  "inspection manager",
+];
+const WORKFLOW_ADMIN_ROLES = ["admin", "super admin"];
 
 router.get(
   "/dashboard",
@@ -47,7 +56,7 @@ router.get(
 router.post(
   "/batches/from-folder-manifest",
   auth,
-  authorize("admin", "manager"),
+  authorize(...WORKFLOW_MANAGER_ROLES),
   requirePermission("workflow", "create"),
   createBatchFromFolderManifest,
 );
@@ -69,7 +78,7 @@ router.get(
 router.patch(
   "/batches/:id",
   auth,
-  authorize("admin", "manager"),
+  authorize(...WORKFLOW_MANAGER_ROLES),
   requirePermission("workflow", "edit"),
   patchWorkflowBatch,
 );
@@ -77,7 +86,7 @@ router.patch(
 router.patch(
   "/batches/:id/cancel",
   auth,
-  authorize("admin", "manager"),
+  authorize(...WORKFLOW_MANAGER_ROLES),
   requirePermission("workflow", "edit"),
   cancelBatch,
 );
@@ -85,9 +94,17 @@ router.patch(
 router.delete(
   "/batches/:id",
   auth,
-  authorize("admin"),
+  authorize(...WORKFLOW_ADMIN_ROLES),
   requirePermission("workflow", "delete"),
   removeBatch,
+);
+
+router.post(
+  "/tasks",
+  auth,
+  authorize(...WORKFLOW_MANAGER_ROLES),
+  requirePermission("workflow", "create"),
+  createTask,
 );
 
 router.get(
@@ -107,7 +124,7 @@ router.get(
 router.patch(
   "/tasks/:id/assign",
   auth,
-  authorize("admin", "manager"),
+  authorize(...WORKFLOW_MANAGER_ROLES),
   requirePermission("workflow", "assign"),
   assignTask,
 );
@@ -129,7 +146,7 @@ router.patch(
 router.patch(
   "/tasks/:id/review",
   auth,
-  authorize("admin", "manager"),
+  authorize(...WORKFLOW_MANAGER_ROLES),
   requirePermission("workflow", "edit"),
   reviewTask,
 );
@@ -137,7 +154,7 @@ router.patch(
 router.patch(
   "/tasks/:id/approve",
   auth,
-  authorize("admin", "manager"),
+  authorize(...WORKFLOW_ADMIN_ROLES),
   requirePermission("workflow", "approve"),
   approveTask,
 );
@@ -145,7 +162,7 @@ router.patch(
 router.patch(
   "/tasks/:id/rework",
   auth,
-  authorize("admin", "manager"),
+  authorize(...WORKFLOW_MANAGER_ROLES),
   requirePermission("workflow", "edit"),
   reworkTask,
 );
@@ -153,7 +170,7 @@ router.patch(
 router.patch(
   "/tasks/:id/status",
   auth,
-  authorize("admin", "manager"),
+  authorize(...WORKFLOW_MANAGER_ROLES),
   requirePermission("workflow", "edit"),
   patchTaskStatus,
 );
@@ -168,7 +185,7 @@ router.post(
 router.delete(
   "/tasks/:id",
   auth,
-  authorize("admin"),
+  authorize(...WORKFLOW_ADMIN_ROLES),
   requirePermission("workflow", "delete"),
   removeTask,
 );
@@ -183,7 +200,7 @@ router.get(
 router.post(
   "/task-types",
   auth,
-  authorize("admin", "manager"),
+  authorize(...WORKFLOW_MANAGER_ROLES),
   requirePermission("workflow", "manage"),
   createTaskType,
 );
@@ -191,7 +208,7 @@ router.post(
 router.patch(
   "/task-types/:id",
   auth,
-  authorize("admin", "manager"),
+  authorize(...WORKFLOW_MANAGER_ROLES),
   requirePermission("workflow", "manage"),
   patchTaskType,
 );
@@ -206,7 +223,7 @@ router.get(
 router.post(
   "/departments",
   auth,
-  authorize("admin", "manager"),
+  authorize(...WORKFLOW_MANAGER_ROLES),
   requirePermission("workflow", "manage"),
   createDepartment,
 );
@@ -214,7 +231,7 @@ router.post(
 router.patch(
   "/departments/:id",
   auth,
-  authorize("admin", "manager"),
+  authorize(...WORKFLOW_MANAGER_ROLES),
   requirePermission("workflow", "manage"),
   patchDepartment,
 );

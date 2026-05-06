@@ -292,6 +292,9 @@ const WorkflowBatchDetail = () => {
                   <span className="om-summary-chip">Batch No: {batch.batch_no}</span>
                   <span className="om-summary-chip">Batch Status: {batch.status}</span>
                   <span className="om-summary-chip">
+                    Due Date: {formatDateTime(batch.due_date)}
+                  </span>
+                  <span className="om-summary-chip">
                     Task Type: {batch.selected_task_type?.name || batch.task_type?.name || batch.task_type_key}
                   </span>
                   <span className="om-summary-chip">
@@ -315,11 +318,15 @@ const WorkflowBatchDetail = () => {
                     <div className="small text-secondary mb-1">Brand</div>
                     <div className="fw-semibold">{batch.brand || "—"}</div>
                   </div>
+                  <div className="col-md-4">
+                    <div className="small text-secondary mb-1">Due Date</div>
+                    <div className="fw-semibold">{formatDateTime(batch.due_date)}</div>
+                  </div>
                   <div className="col-md-6">
                     <div className="small text-secondary mb-1">Description</div>
                     <div className="fw-semibold">{batch.description || "—"}</div>
                   </div>
-                  <div className="col-md-3">
+                  <div className="col-md-6">
                     <div className="small text-secondary mb-1">How to read this batch</div>
                     <div className="fw-semibold">
                       The batch is only the container. Each generated task below moves

@@ -15,7 +15,7 @@ const CommentSchema = new mongoose.Schema(
     batch: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "workflow_batches",
-      required: true,
+      default: null,
     },
     comment: { type: String, required: true, trim: true },
     comment_type: {

@@ -15,7 +15,7 @@ const TaskAssignmentSchema = new mongoose.Schema(
     batch: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "workflow_batches",
-      required: true,
+      default: null,
     },
     assignee: {
       type: mongoose.Schema.Types.ObjectId,

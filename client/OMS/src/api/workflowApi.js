@@ -61,6 +61,11 @@ export const getWorkflowTasks = async (params = {}) => {
   return res.data;
 };
 
+export const createWorkflowTask = async (payload = {}) => {
+  const res = await api.post("/workflow/tasks", payload);
+  return res.data;
+};
+
 export const getWorkflowTaskById = async (id) => {
   const res = await api.get(
     `/workflow/tasks/${encodeURIComponent(requireId(id, "Task id"))}`,

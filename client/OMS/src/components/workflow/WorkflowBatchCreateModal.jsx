@@ -24,6 +24,7 @@ const WorkflowBatchCreateModal = ({
     name: "",
     source_folder_name: "",
     brand: "",
+    due_date: "",
     description: "",
     task_type_key: "",
     assignee_ids: [],
@@ -139,7 +140,7 @@ const WorkflowBatchCreateModal = ({
 
     setSubmitting(true);
     try {
-      const result = await createBatchFromFolderManifest({
+      const payload = {
         name: normalizeText(form.name),
         source_folder_name: normalizeText(form.source_folder_name),
         brand: normalizeText(form.brand),
@@ -155,7 +156,12 @@ const WorkflowBatchCreateModal = ({
           mime_type: entry.mime_type,
           size_bytes: entry.size_bytes,
         })),
-      });
+      };
+      if (normalizeText(form.due_date)) {
+        payload.due_date = normalizeText(form.due_date);
+      }
+
+      const result = await createBatchFromFolderManifest(payload);
       onCreated?.(result?.data || result);
     } catch (submitError) {
       const message =
@@ -320,6 +326,22 @@ const WorkflowBatchCreateModal = ({
                         </div>
 
                         <div className="col-12">
+                          <label className="form-label">Due Date</label>
+                          <input
+                            type="date"
+                            className="form-control"
+                            value={form.due_date}
+                            onChange={(event) =>
+                              setForm((prev) => ({ ...prev, due_date: event.target.value }))
+                            }
+                          />
+                          <div className="form-text">
+                            This due date is saved on the batch and copied to the generated
+                            child tasks.
+                          </div>
+                        </div>
+
+                        <div className="col-12">
                           <label className="form-label">Task Type</label>
                           <select
                             className="form-select"
@@ -396,12 +418,6 @@ const WorkflowBatchCreateModal = ({
                           )}
                         </div>
 
-                        <div className="col-12">
-                          <div className="alert alert-secondary py-2 mb-0">
-                            Due date is not shown here yet because the current backend batch API
-                            does not store it.
-                          </div>
-                        </div>
                       </div>
                     </div>
                   </section>
@@ -441,6 +457,11 @@ const WorkflowBatchCreateModal = ({
                           <span className="om-summary-chip">
                             Direct Subfolders: {summary.direct_subfolders_count}
                           </span>
+                          {normalizeText(form.due_date) && (
+                            <span className="om-summary-chip">
+                              Due Date: {form.due_date}
+                            </span>
+                          )}
                         </div>
                       ) : (
                         <div className="text-secondary">Select a folder to calculate the summary.</div>

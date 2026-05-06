@@ -2,13 +2,22 @@ const mongoose = require("mongoose");
 const { buildAuditActor } = require("../../helpers/permissions");
 const User = require("../../models/user.model");
 const {
+  buildWorkflowManualTaskNo,
   WORKFLOW_ALLOWED_STATUS_TRANSITIONS,
   WORKFLOW_TASK_COMMENT_TYPES,
+  WORKFLOW_TASK_PRIORITIES,
   WORKFLOW_TASK_STATUSES,
   normalizeKey,
   normalizeText,
 } = require("../../helpers/workflow");
-const { Comment, Department, Task, TaskAssignment, TaskStatusHistory, TaskType } = require("../../models/workflow");
+const {
+  Comment,
+  Department,
+  Task,
+  TaskAssignment,
+  TaskStatusHistory,
+  TaskType,
+} = require("../../models/workflow");
 const {
   canApproveWorkflowTask,
   canReadWorkflowTask,
@@ -164,6 +173,55 @@ const buildTaskListMatch = ({ query = {}, user = {} } = {}) => {
   };
 };
 
+const findActiveTaskTypeForManualTask = async (taskTypeKey = "") => {
+  const normalizedTaskTypeKey = normalizeKey(taskTypeKey);
+  if (!normalizedTaskTypeKey) {
+    throw new Error("task_type_key is required");
+  }
+
+  const taskType = await TaskType.findOne({
+    key: normalizedTaskTypeKey,
+    is_active: true,
+  })
+    .select(
+      "_id key name category auto_create_mode default_department default_assignees default_priority requires_review is_active",
+    )
+    .lean();
+
+  if (!taskType) {
+    throw new Error("Selected task type was not found or is inactive");
+  }
+
+  return taskType;
+};
+
+const parseDueDate = (value) => {
+  const normalized = normalizeText(value);
+  if (!normalized) return null;
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error("due_date is invalid");
+  }
+  return parsed;
+};
+
+const normalizeTaskPriority = (value, fallback = "normal") => {
+  const normalizedPriority = normalizeText(value || fallback).toLowerCase();
+  if (!WORKFLOW_TASK_PRIORITIES.includes(normalizedPriority)) {
+    throw new Error("priority is invalid");
+  }
+  return normalizedPriority;
+};
+
+
+const recalculateWorkflowBatchIfPresent = async (batchId) => {
+  if (!batchId || !mongoose.Types.ObjectId.isValid(batchId)) {
+    return null;
+  }
+
+  return recalculateWorkflowBatchFromTasks(batchId);
+};
+
 const getTaskByIdForUser = async (id, user = {}) => {
   if (!mongoose.Types.ObjectId.isValid(id)) {
     throw new Error("Invalid task id");
@@ -243,6 +301,103 @@ const listWorkflowTasks = async ({ query = {}, user = {} } = {}) => {
       totalRecords,
     },
   };
+};
+
+const createWorkflowTask = async ({ payload = {}, actor = {} } = {}) => {
+  if (!isManagerOrAdmin(actor)) {
+    throw new Error("Only admin or manager can create workflow tasks");
+  }
+
+  const title = normalizeText(payload?.title || payload?.name);
+  if (!title) {
+    throw new Error("Task name is required");
+  }
+
+  const taskType = await findActiveTaskTypeForManualTask(payload?.task_type_key);
+
+  const assigneeIds = payload?.assignee_ids !== undefined
+    ? payload.assignee_ids
+    : (Array.isArray(taskType?.default_assignees)
+        ? taskType.default_assignees.map((entry) => normalizeId(entry?.user || entry))
+        : []);
+  const assignees = await validateAssigneeUsers(assigneeIds || []);
+
+  const department = payload?.department !== undefined
+    ? await ensureDepartmentExists(payload.department)
+    : (taskType?.default_department || null);
+  const dueDate = payload?.due_date !== undefined ? parseDueDate(payload.due_date) : null;
+  const reviewRequired = payload?.review_required !== undefined
+    ? Boolean(payload.review_required)
+    : taskType?.requires_review !== false;
+  const priority = normalizeTaskPriority(
+    payload?.priority,
+    taskType?.default_priority || "normal",
+  );
+  const taskId = new mongoose.Types.ObjectId();
+  const taskNo = buildWorkflowManualTaskNo(taskId, new Date());
+  const auditActor = buildAuditActor(actor);
+  const assignedUserRefs = assignees.map((user) => ({ user: user._id }));
+  const initialStatus = assignedUserRefs.length > 0 ? "assigned" : "pending";
+
+  const task = await Task.create({
+    _id: taskId,
+    batch: null,
+    batch_no: "",
+    task_no: taskNo,
+    title,
+    description: normalizeText(payload?.description),
+    task_type: taskType._id,
+    task_type_key: taskType.key,
+    task_type_name: taskType.name,
+    department,
+    brand: normalizeText(payload?.brand),
+    source_folder_name: "",
+    source_folder_path: "",
+    source_files: [],
+    status: initialStatus,
+    priority,
+    assigned_to: assignedUserRefs,
+    assigned_by: assignedUserRefs.length > 0 ? auditActor : {},
+    assigned_at: assignedUserRefs.length > 0 ? new Date() : null,
+    due_date: dueDate,
+    review_required: reviewRequired,
+    tags: [taskType.key],
+    created_by: auditActor,
+    updated_by: auditActor,
+  });
+
+  if (assignees.length > 0) {
+    await TaskAssignment.insertMany(
+      assignees.map((user) => ({
+        task: task._id,
+        batch: null,
+        assignee: user._id,
+        department: task.department || null,
+        status: "active",
+        assigned_at: new Date(),
+        assigned_by: auditActor,
+        note: "Task created with assignee",
+      })),
+      { ordered: true },
+    );
+  }
+
+  await TaskStatusHistory.create({
+    task: task._id,
+    batch: null,
+    from_status: "",
+    to_status: initialStatus,
+    changed_by: auditActor,
+    changed_at: new Date(),
+    note: normalizeText(payload?.creation_note),
+    metadata: {
+      initial_creation: true,
+      manual_creation: true,
+    },
+  });
+
+  await recalculateWorkflowBatchIfPresent(task.batch);
+  return buildTaskDetail(task._id, actor);
 };
 
 const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
@@ -517,7 +672,7 @@ const createTransitionCommentIfNeeded = async ({
 
   await Comment.create({
     task: task._id,
-    batch: task.batch,
+    batch: task.batch || null,
     comment: normalizedNote,
     comment_type: WORKFLOW_TASK_COMMENT_TYPES.includes(commentType)
       ? commentType
@@ -567,7 +722,7 @@ const applyTaskTransition = async ({
   await task.save();
   await TaskStatusHistory.create({
     task: task._id,
-    batch: task.batch,
+    batch: task.batch || null,
     from_status: fromStatus,
     to_status: toStatus,
     changed_by: buildAuditActor(actor),
@@ -582,7 +737,7 @@ const applyTaskTransition = async ({
     note,
     commentType,
   });
-  await recalculateWorkflowBatchFromTasks(task.batch);
+  await recalculateWorkflowBatchIfPresent(task.batch);
 
   return buildTaskDetail(task._id, actor);
 };
@@ -658,7 +813,7 @@ const assignWorkflowTask = async ({
     await TaskAssignment.insertMany(
       idsToAdd.map((id) => ({
         task: task._id,
-        batch: task.batch,
+        batch: task.batch || null,
         assignee: id,
         department: task.department || null,
         status: "active",
@@ -685,7 +840,7 @@ const assignWorkflowTask = async ({
   if (fromStatus !== toStatus) {
     await TaskStatusHistory.create({
       task: task._id,
-      batch: task.batch,
+      batch: task.batch || null,
       from_status: fromStatus,
       to_status: toStatus,
       changed_by: auditActor,
@@ -697,7 +852,7 @@ const assignWorkflowTask = async ({
     });
   }
 
-  await recalculateWorkflowBatchFromTasks(task.batch);
+  await recalculateWorkflowBatchIfPresent(task.batch);
   return buildTaskDetail(task._id, actor);
 };
 
@@ -819,7 +974,7 @@ const addWorkflowTaskComment = async ({
   const normalizedCommentType = normalizeText(commentType).toLowerCase();
   const savedComment = await Comment.create({
     task: task._id,
-    batch: task.batch,
+    batch: task.batch || null,
     comment: normalizedComment,
     comment_type: WORKFLOW_TASK_COMMENT_TYPES.includes(normalizedCommentType)
       ? normalizedCommentType
@@ -855,7 +1010,7 @@ const deleteWorkflowTask = async ({
 
     await TaskStatusHistory.create({
       task: task._id,
-      batch: task.batch,
+      batch: task.batch || null,
       from_status: fromStatus,
       to_status: "cancelled",
       changed_by: auditActor,
@@ -902,7 +1057,7 @@ const deleteWorkflowTask = async ({
     },
   );
 
-  await recalculateWorkflowBatchFromTasks(task.batch);
+  await recalculateWorkflowBatchIfPresent(task.batch);
 
   return {
     _id: task._id,
@@ -1116,6 +1271,7 @@ module.exports = {
   approveWorkflowTask,
   assignWorkflowTask,
   buildTaskDetail,
+  createWorkflowTask,
   createWorkflowDepartment,
   createWorkflowTaskType,
   deleteWorkflowTask,

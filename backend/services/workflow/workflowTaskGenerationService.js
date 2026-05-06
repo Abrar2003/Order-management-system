@@ -283,6 +283,7 @@ const generateTasksForBatch = async ({
     assigned_to: assignedUsers,
     assigned_by: assignees.length > 0 ? auditActor : {},
     assigned_at: assignees.length > 0 ? now : null,
+    due_date: batch?.due_date || null,
     review_required: taskType.requires_review !== false,
     tags: [taskType.key],
     created_by: auditActor,
