@@ -3896,6 +3896,7 @@ const getContainerDataset = async ({
   brand,
   vendor,
   container,
+  checked_status,
   fromDate,
   toDate,
 } = {}) => {
@@ -3958,7 +3959,7 @@ const getContainerDataset = async ({
     groupedByContainer.set(containerNumber, existingGroup);
   }
 
-  const rows = Array.from(groupedByContainer.values())
+  let rows = Array.from(groupedByContainer.values())
     .map((group) => {
       const shipmentCount = Number(group.shipment_count || 0);
       const checkedCount = Number(group.checked_count || 0);
@@ -3991,6 +3992,11 @@ const getContainerDataset = async ({
         String(right?.container || ""),
       );
     });
+
+  const normalizedCheckedStatus = String(checked_status || "").trim().toLowerCase();
+  if (normalizedCheckedStatus && normalizedCheckedStatus !== "all") {
+    rows = rows.filter((row) => String(row.checked_status).toLowerCase() === normalizedCheckedStatus);
+  }
 
   return {
     rows,
@@ -9313,6 +9319,7 @@ exports.getContainersDb = async (req, res) => {
       brand: req.query.brand,
       vendor: req.query.vendor,
       container: req.query.container ?? req.query.container_number,
+      checked_status: req.query.checked_status,
       fromDate:
         req.query.from_date ??
         req.query.fromDate ??

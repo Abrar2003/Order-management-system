@@ -4,15 +4,15 @@ import {
   addWorkflowTaskComment,
   approveWorkflowTask,
   assignWorkflowTask,
+  completeWorkflowTask,
   deleteWorkflowTask,
   getWorkflowTaskById,
-  reviewWorkflowTask,
   sendWorkflowTaskToRework,
-  startWorkflowTask,
-  submitWorkflowTask,
+  uploadWorkflowTask,
 } from "../../api/workflowApi";
 import { formatBytes } from "../../utils/workflowManifest";
 import WorkflowTaskStageBar from "./WorkflowTaskStageBar";
+import { formatWorkflowStageLabel } from "./workflowTaskProgress";
 
 const normalizeText = (value) => String(value ?? "").trim();
 
@@ -23,11 +23,21 @@ const formatDateTime = (value) => {
   return parsed.toLocaleString();
 };
 
+const formatDateOnly = (value) => {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "—";
+  return parsed.toLocaleDateString();
+};
+
 const getAuditActorName = (actor = {}) =>
   actor?.name || actor?.user?.name || actor?.user?.email || "N/A";
 
 const getUserId = (entry = {}) =>
   entry?.user?._id || entry?.user?.id || entry?.user || entry?._id || entry?.id || "";
+
+const getUserLabel = (entry = {}) =>
+  entry?.name || entry?.email || entry?.user?.name || entry?.user?.email || "User";
 
 const WorkflowTaskDetailModal = ({
   taskId,
@@ -52,8 +62,7 @@ const WorkflowTaskDetailModal = ({
   const [openPanel, setOpenPanel] = useState("");
   const [assignIds, setAssignIds] = useState([]);
   const [assignNote, setAssignNote] = useState("");
-  const [showReworkPrompt, setShowReworkPrompt] = useState(false);
-  const [reworkNote, setReworkNote] = useState("");
+  const [notePrompt, setNotePrompt] = useState({ type: "", note: "" });
   const [commentText, setCommentText] = useState("");
   const [commentType, setCommentType] = useState("general");
 
@@ -107,13 +116,13 @@ const WorkflowTaskDetailModal = ({
     [assignedUsers, currentUserId],
   );
 
-  const canStart = isAssignedUser && ["assigned", "rework"].includes(task?.status);
-  const canSubmit = isAssignedUser && ["assigned", "in_progress", "rework"].includes(task?.status);
-  const canMoveToReview = canManageWorkflow && task?.status === "submitted";
-  const canApprove =
-    canApproveWorkflow && !isAssignedUser && ["submitted", "review"].includes(task?.status);
-  const canRework = canManageWorkflow && ["submitted", "review"].includes(task?.status);
-  const canAssign = canAssignWorkflow && !["completed", "cancelled"].includes(task?.status);
+  const canComplete = isAssignedUser && task?.status === "assigned";
+  const canApprove = canApproveWorkflow && !isAssignedUser && task?.status === "complete";
+  const canUpload =
+    (isAssignedUser || canManageWorkflow || canApproveWorkflow) && task?.status === "approved";
+  const canRework =
+    canManageWorkflow && ["complete", "approved", "uploaded"].includes(task?.status);
+  const canAssign = canAssignWorkflow && task?.status !== "uploaded";
   const canDelete = canDeleteWorkflow && Boolean(task?._id);
   const canComment = Boolean(task?._id);
 
@@ -126,8 +135,7 @@ const WorkflowTaskDetailModal = ({
       await loadTask({ keepMessages: true });
       setActionSuccess(message);
       setAssignNote("");
-      setShowReworkPrompt(false);
-      setReworkNote("");
+      setNotePrompt({ type: "", note: "" });
       onUpdated?.();
     } catch (submitError) {
       setActionError(
@@ -149,6 +157,11 @@ const WorkflowTaskDetailModal = ({
   };
 
   const handleSaveAssignments = async () => {
+    if (!Array.isArray(assignIds) || assignIds.length === 0) {
+      setActionError("At least one assignee is required.");
+      return;
+    }
+
     await handleTaskAction(
       () =>
         assignWorkflowTask(taskId, {
@@ -178,50 +191,42 @@ const WorkflowTaskDetailModal = ({
   };
 
   const handleStageBarClick = async (stepKey) => {
-    if (stepKey === "in_progress" && canStart) {
-      await handleTaskAction(
-        () => startWorkflowTask(taskId),
-        "Task moved to in progress.",
-      );
-      return;
-    }
-
-    if (stepKey === "submitted" && canSubmit) {
-      await handleTaskAction(
-        () => submitWorkflowTask(taskId),
-        "Task submitted for review.",
-      );
-      return;
-    }
-
-    if (stepKey === "review" && canMoveToReview) {
-      await handleTaskAction(
-        () => reviewWorkflowTask(taskId, { note: "" }),
-        "Task moved to review.",
-      );
-      return;
-    }
-
-    if (stepKey === "rework" && canRework) {
+    if (stepKey === "complete" && canComplete) {
       setActionError("");
       setActionSuccess("");
-      setShowReworkPrompt(true);
       setOpenPanel("");
+      setNotePrompt({ type: "complete", note: "" });
       return;
     }
 
-    if (stepKey === "completed" && canApprove) {
+    if (stepKey === "approved" && canApprove) {
       await handleTaskAction(
         () => approveWorkflowTask(taskId, { note: "" }),
         "Task approved successfully.",
       );
+      return;
+    }
+
+    if (stepKey === "uploaded" && canUpload) {
+      await handleTaskAction(
+        () => uploadWorkflowTask(taskId),
+        "Task marked uploaded successfully.",
+      );
     }
   };
 
-  const handleConfirmRework = async () => {
-    const normalizedNote = normalizeText(reworkNote);
-    if (!normalizedNote) {
+  const handleConfirmNote = async () => {
+    const normalizedNote = normalizeText(notePrompt.note);
+    if (notePrompt.type === "rework" && !normalizedNote) {
       setActionError("Rework reason is required.");
+      return;
+    }
+
+    if (notePrompt.type === "complete") {
+      await handleTaskAction(
+        () => completeWorkflowTask(taskId, { note: normalizedNote }),
+        "Task marked complete successfully.",
+      );
       return;
     }
 
@@ -277,7 +282,7 @@ const WorkflowTaskDetailModal = ({
             <div>
               <h5 className="modal-title">Workflow Task Detail</h5>
               <div className="small text-muted">
-                View task history, comments, assignments, and available workflow actions.
+                View task history, comments, assignments, and quick workflow actions.
               </div>
             </div>
             <button
@@ -308,9 +313,11 @@ const WorkflowTaskDetailModal = ({
                     </div>
                   </div>
                   <div className="d-flex flex-wrap gap-2">
-                    <span className="om-summary-chip">Status: {task.status}</span>
                     <span className="om-summary-chip">
-                      Rework Count: {Number(task.rework_count || 0)}
+                      Status: {formatWorkflowStageLabel(task.status)}
+                    </span>
+                    <span className="om-summary-chip">
+                      Reworks: {Number(task?.reworked?.count || task?.rework_count || 0)}
                     </span>
                     <span className="om-summary-chip">
                       Source Files: {Array.isArray(task.source_files) ? task.source_files.length : 0}
@@ -322,11 +329,8 @@ const WorkflowTaskDetailModal = ({
                   <div className="card-body">
                     <div className="row g-3">
                       <div className="col-md-4">
-                        <div className="small text-secondary mb-1">Batch</div>
-                        <div className="fw-semibold">
-                          {task.batch?.batch_no || "Standalone task"}{" "}
-                          {task.batch?.name ? `• ${task.batch.name}` : ""}
-                        </div>
+                        <div className="small text-secondary mb-1">Task No</div>
+                        <div className="fw-semibold">{task.task_no || "—"}</div>
                       </div>
                       <div className="col-md-4">
                         <div className="small text-secondary mb-1">Brand</div>
@@ -340,19 +344,29 @@ const WorkflowTaskDetailModal = ({
                         <div className="small text-secondary mb-1">Assigned Users</div>
                         <div className="fw-semibold">
                           {assignedUsers.length > 0
-                            ? assignedUsers.map((user) => user?.name || user?.email || "User").join(", ")
+                            ? assignedUsers.map((user) => getUserLabel(user)).join(", ")
                             : "Unassigned"}
                         </div>
                       </div>
                       <div className="col-md-4">
                         <div className="small text-secondary mb-1">Due Date</div>
-                        <div className="fw-semibold">{formatDateTime(task.due_date)}</div>
+                        <div className="fw-semibold">{formatDateOnly(task.due_date)}</div>
                       </div>
                       <div className="col-md-4">
                         <div className="small text-secondary mb-1">Created By</div>
-                        <div className="fw-semibold">
-                          {getAuditActorName(task.created_by)}
-                        </div>
+                        <div className="fw-semibold">{getAuditActorName(task.created_by)}</div>
+                      </div>
+                      <div className="col-md-4">
+                        <div className="small text-secondary mb-1">Assigned At</div>
+                        <div className="fw-semibold">{formatDateTime(task.assigned_at)}</div>
+                      </div>
+                      <div className="col-md-4">
+                        <div className="small text-secondary mb-1">Complete At</div>
+                        <div className="fw-semibold">{formatDateTime(task.completed_at)}</div>
+                      </div>
+                      <div className="col-md-4">
+                        <div className="small text-secondary mb-1">Approved At</div>
+                        <div className="fw-semibold">{formatDateTime(task.approved_at)}</div>
                       </div>
                     </div>
                   </div>
@@ -364,7 +378,7 @@ const WorkflowTaskDetailModal = ({
                       <div>
                         <h6 className="mb-1">Progress & Actions</h6>
                         <div className="small text-secondary">
-                          Use the task rail for quick updates. Only rework stops for a remark.
+                          Use the lean status line for quick updates. Complete and rework both accept notes.
                         </div>
                       </div>
                       <div className="d-flex flex-wrap gap-2">
@@ -374,7 +388,7 @@ const WorkflowTaskDetailModal = ({
                             className="btn btn-outline-dark btn-sm"
                             disabled={actionLoading}
                             onClick={() => {
-                              setShowReworkPrompt(false);
+                              setNotePrompt({ type: "", note: "" });
                               setOpenPanel((prev) => (prev === "assign" ? "" : "assign"));
                             }}
                           >
@@ -387,11 +401,26 @@ const WorkflowTaskDetailModal = ({
                             className="btn btn-outline-secondary btn-sm"
                             disabled={actionLoading}
                             onClick={() => {
-                              setShowReworkPrompt(false);
+                              setNotePrompt({ type: "", note: "" });
                               setOpenPanel((prev) => (prev === "comment" ? "" : "comment"));
                             }}
                           >
                             Add Comment
+                          </button>
+                        )}
+                        {canRework && (
+                          <button
+                            type="button"
+                            className="btn btn-outline-danger btn-sm"
+                            disabled={actionLoading}
+                            onClick={() => {
+                              setActionError("");
+                              setActionSuccess("");
+                              setOpenPanel("");
+                              setNotePrompt({ type: "rework", note: "" });
+                            }}
+                          >
+                            Rework
                           </button>
                         )}
                         {canDelete && (
@@ -412,49 +441,63 @@ const WorkflowTaskDetailModal = ({
                       className="mb-3"
                       disabled={actionLoading}
                       isStepClickable={(stepKey) =>
-                        (stepKey === "in_progress" && canStart)
-                        || (stepKey === "submitted" && canSubmit)
-                        || (stepKey === "review" && canMoveToReview)
-                        || (stepKey === "rework" && canRework)
-                        || (stepKey === "completed" && canApprove)
+                        (stepKey === "complete" && canComplete)
+                        || (stepKey === "approved" && canApprove)
+                        || (stepKey === "uploaded" && canUpload)
                       }
                       onStepClick={handleStageBarClick}
                     />
 
-                    {showReworkPrompt && (
+                    {notePrompt.type && (
                       <div className="workflow-stage-popover mb-3">
                         <div className="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
                           <div>
-                            <div className="fw-semibold">Send to Rework</div>
+                            <div className="fw-semibold">
+                              {notePrompt.type === "complete" ? "Mark Complete" : "Send to Rework"}
+                            </div>
                             <div className="small text-secondary">
-                              Add the required remark, then the task goes back for fixes.
+                              {notePrompt.type === "complete"
+                                ? "Add an optional completion note before moving the task ahead."
+                                : "Add the required remark, then the task goes back for fixes."}
                             </div>
                           </div>
                           <button
                             type="button"
                             className="btn btn-outline-secondary btn-sm"
-                            onClick={() => setShowReworkPrompt(false)}
+                            onClick={() => setNotePrompt({ type: "", note: "" })}
                             disabled={actionLoading}
                           >
                             Close
                           </button>
                         </div>
-                        <label className="form-label">Rework Reason</label>
+                        <label className="form-label">
+                          {notePrompt.type === "complete" ? "Completion Comment" : "Rework Reason"}
+                        </label>
                         <textarea
                           rows="3"
                           className="form-control"
-                          placeholder="Explain what needs to be fixed"
-                          value={reworkNote}
-                          onChange={(event) => setReworkNote(event.target.value)}
+                          placeholder={
+                            notePrompt.type === "complete"
+                              ? "Add a short completion note"
+                              : "Explain what needs to be fixed"
+                          }
+                          value={notePrompt.note}
+                          onChange={(event) =>
+                            setNotePrompt((prev) => ({ ...prev, note: event.target.value }))
+                          }
                         />
                         <div className="d-flex justify-content-end mt-3">
                           <button
                             type="button"
-                            className="btn btn-danger btn-sm"
+                            className={`btn btn-sm ${notePrompt.type === "complete" ? "btn-primary" : "btn-danger"}`}
                             disabled={actionLoading}
-                            onClick={handleConfirmRework}
+                            onClick={handleConfirmNote}
                           >
-                            {actionLoading ? "Saving..." : "Confirm Rework"}
+                            {actionLoading
+                              ? "Saving..."
+                              : notePrompt.type === "complete"
+                              ? "Save Complete"
+                              : "Confirm Rework"}
                           </button>
                         </div>
                       </div>
@@ -531,7 +574,9 @@ const WorkflowTaskDetailModal = ({
                               onChange={(event) => setCommentType(event.target.value)}
                             >
                               <option value="general">General</option>
-                              <option value="review">Review</option>
+                              <option value="complete">Complete</option>
+                              <option value="approval">Approval</option>
+                              <option value="upload">Upload</option>
                               <option value="rework">Rework</option>
                               <option value="system">System</option>
                             </select>
@@ -611,28 +656,24 @@ const WorkflowTaskDetailModal = ({
                     <section className="card om-card">
                       <div className="card-body">
                         <h6 className="mb-3">Comments</h6>
-                        {Array.isArray(task.comments) && task.comments.length > 0 ? (
-                          <div className="d-grid gap-2">
-                            {task.comments.map((comment) => (
-                              <div key={comment._id} className="workflow-comment-card">
-                                <div className="d-flex flex-wrap justify-content-between gap-2 mb-1">
-                                  <div className="fw-semibold">
-                                    {getAuditActorName(comment.created_by)}
-                                  </div>
-                                  <div className="small text-secondary">
-                                    {formatDateTime(comment.createdAt || comment.created_at)}
-                                  </div>
-                                </div>
-                                <div className="small text-secondary text-uppercase mb-1">
-                                  {comment.comment_type || "general"}
-                                </div>
-                                <div>{comment.comment}</div>
+                        <div className="d-grid gap-3">
+                          {(Array.isArray(task.comments) ? task.comments : []).map((entry) => (
+                            <div key={entry._id} className="workflow-comment-card">
+                              <div className="d-flex flex-wrap justify-content-between gap-2">
+                                <div className="fw-semibold">{entry.comment}</div>
+                                <span className="om-summary-chip">
+                                  {formatWorkflowStageLabel(entry.comment_type || "general")}
+                                </span>
                               </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="text-secondary">No comments yet.</div>
-                        )}
+                              <div className="small text-secondary mt-2">
+                                {getAuditActorName(entry.created_by)} • {formatDateTime(entry.createdAt)}
+                              </div>
+                            </div>
+                          ))}
+                          {(!Array.isArray(task.comments) || task.comments.length === 0) && (
+                            <div className="text-secondary">No comments on this task yet.</div>
+                          )}
+                        </div>
                       </div>
                     </section>
                   </div>
@@ -641,69 +682,53 @@ const WorkflowTaskDetailModal = ({
                     <section className="card om-card mb-3">
                       <div className="card-body">
                         <h6 className="mb-3">Assignment History</h6>
-                        {Array.isArray(task.assignments) && task.assignments.length > 0 ? (
-                          <div className="d-grid gap-2">
-                            {task.assignments.map((assignment) => (
-                              <div key={assignment._id} className="workflow-comment-card">
-                                <div className="fw-semibold mb-1">
-                                  {assignment.assignee?.name || assignment.assignee?.email || "User"}
-                                </div>
-                                <div className="small text-secondary">
-                                  Status: {assignment.status}
-                                </div>
-                                <div className="small text-secondary">
-                                  Assigned: {formatDateTime(assignment.assigned_at)}
-                                </div>
-                                {assignment.note && (
-                                  <div className="small mt-1">{assignment.note}</div>
-                                )}
+                        <div className="d-grid gap-3">
+                          {(Array.isArray(task.assignments) ? task.assignments : []).map((entry) => (
+                            <div key={entry._id} className="workflow-member-card">
+                              <div className="fw-semibold">{getUserLabel(entry.assignee || {})}</div>
+                              <div className="small text-secondary mt-1">
+                                {entry.status} • Assigned {formatDateTime(entry.assigned_at)}
                               </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="text-secondary">No assignment history yet.</div>
-                        )}
+                              <div className="small text-secondary mt-1">
+                                {normalizeText(entry.note) || "—"}
+                              </div>
+                            </div>
+                          ))}
+                          {(!Array.isArray(task.assignments) || task.assignments.length === 0) && (
+                            <div className="text-secondary">No assignment history found.</div>
+                          )}
+                        </div>
                       </div>
                     </section>
 
                     <section className="card om-card">
                       <div className="card-body">
                         <h6 className="mb-3">Status History</h6>
-                        {Array.isArray(task.status_history) && task.status_history.length > 0 ? (
-                          <div className="d-grid gap-2">
-                            {task.status_history.map((history) => (
-                              <div key={history._id} className="workflow-comment-card">
-                                <div className="d-flex flex-wrap justify-content-between gap-2 mb-1">
-                                  <div className="fw-semibold">
-                                    {(history.from_status || "created").replace(/_/g, " ")} →{" "}
-                                    {(history.to_status || "—").replace(/_/g, " ")}
-                                  </div>
-                                  <div className="small text-secondary">
-                                    {formatDateTime(history.changed_at || history.createdAt)}
-                                  </div>
-                                </div>
-                                <div className="small text-secondary mb-1">
-                                  By {getAuditActorName(history.changed_by)}
-                                </div>
-                                {history.note && <div className="small">{history.note}</div>}
+                        <div className="d-grid gap-3">
+                          {(Array.isArray(task.status_history) ? task.status_history : []).map((entry) => (
+                            <div key={entry._id} className="workflow-member-card">
+                              <div className="fw-semibold">
+                                {formatWorkflowStageLabel(entry.from_status || "assigned")} {"->"}{" "}
+                                {formatWorkflowStageLabel(entry.to_status)}
                               </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="text-secondary">No status history yet.</div>
-                        )}
+                              <div className="small text-secondary mt-1">
+                                {getAuditActorName(entry.changed_by)} • {formatDateTime(entry.changed_at)}
+                              </div>
+                              <div className="small text-secondary mt-1">
+                                {normalizeText(entry.note) || "—"}
+                              </div>
+                            </div>
+                          ))}
+                          {(!Array.isArray(task.status_history) || task.status_history.length === 0) && (
+                            <div className="text-secondary">No status history found.</div>
+                          )}
+                        </div>
                       </div>
                     </section>
                   </div>
                 </div>
               </>
             )}
-          </div>
-
-          <div className="modal-footer">
-            <button type="button" className="btn btn-outline-secondary" onClick={onClose}>
-              Close
-            </button>
           </div>
         </div>
       </div>

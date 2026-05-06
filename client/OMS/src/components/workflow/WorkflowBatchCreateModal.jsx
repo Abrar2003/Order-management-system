@@ -21,8 +21,7 @@ const WorkflowBatchCreateModal = ({
 }) => {
   const fileInputRef = useRef(null);
   const [form, setForm] = useState({
-    name: "",
-    source_folder_name: "",
+    start_code: "",
     brand: "",
     due_date: "",
     description: "",
@@ -50,10 +49,9 @@ const WorkflowBatchCreateModal = ({
         manifest,
         rootFolder,
         taskType: selectedTaskType,
-        batchName: form.name,
-        sourceFolderName: form.source_folder_name,
+        startCode: form.start_code,
       }),
-    [form.name, form.source_folder_name, manifest, rootFolder, selectedTaskType],
+    [form.start_code, manifest, rootFolder, selectedTaskType],
   );
 
   const previewError = useMemo(() => {
@@ -93,11 +91,6 @@ const WorkflowBatchCreateModal = ({
     setSummary(nextSummary);
     setError("");
     setDuplicateError("");
-    setForm((prev) => ({
-      ...prev,
-      name: normalizeText(prev.name) || nextRootFolder,
-      source_folder_name: nextRootFolder || prev.source_folder_name,
-    }));
   };
 
   const toggleAssignee = (userId) => {
@@ -121,16 +114,20 @@ const WorkflowBatchCreateModal = ({
       setError("Please select a folder to build the file manifest.");
       return;
     }
-    if (!normalizeText(form.name)) {
-      setError("Batch name is required.");
+    if (!normalizeText(rootFolder)) {
+      setError("A valid root folder is required.");
       return;
     }
-    if (!normalizeText(form.source_folder_name)) {
-      setError("Source folder name is required.");
+    if (!normalizeText(form.start_code)) {
+      setError("Start code is required.");
       return;
     }
     if (!normalizeText(form.task_type_key)) {
       setError("Task type is required.");
+      return;
+    }
+    if (!Array.isArray(form.assignee_ids) || form.assignee_ids.length === 0) {
+      setError("At least one assignee is required.");
       return;
     }
     if (!previewTasks.length) {
@@ -141,8 +138,9 @@ const WorkflowBatchCreateModal = ({
     setSubmitting(true);
     try {
       const payload = {
-        name: normalizeText(form.name),
-        source_folder_name: normalizeText(form.source_folder_name),
+        name: normalizeText(form.start_code) || normalizeText(rootFolder),
+        start_code: normalizeText(form.start_code),
+        source_folder_name: normalizeText(rootFolder),
         brand: normalizeText(form.brand),
         description: normalizeText(form.description),
         task_type_key: normalizeText(form.task_type_key),
@@ -167,7 +165,7 @@ const WorkflowBatchCreateModal = ({
       const message =
         submitError?.response?.data?.message
         || submitError?.message
-        || "Failed to create workflow batch.";
+        || "Failed to create workflow tasks from folder.";
       if (isDuplicateBatchMessage(message)) {
         setDuplicateError(message);
       } else {
@@ -194,10 +192,10 @@ const WorkflowBatchCreateModal = ({
         <div className="modal-content">
           <div className="modal-header">
             <div>
-              <h5 className="modal-title">Create Workflow Batch from Folder</h5>
+              <h5 className="modal-title">Create Tasks from Folder</h5>
               <div className="small text-muted">
-                OMS creates a batch container and then generates separate workflow tasks
-                from the JSON manifest only.
+                OMS stores the import internally, then creates separate workflow tasks from
+                the folder manifest.
               </div>
             </div>
             <button
@@ -213,7 +211,7 @@ const WorkflowBatchCreateModal = ({
               {error && <div className="alert alert-danger">{error}</div>}
               {duplicateError && (
                 <div className="alert alert-warning">
-                  <div className="fw-semibold mb-1">Duplicate batch blocked</div>
+                  <div className="fw-semibold mb-1">Duplicate import blocked</div>
                   <div>{duplicateError}</div>
                 </div>
               )}
@@ -279,37 +277,29 @@ const WorkflowBatchCreateModal = ({
                       <div className="text-uppercase text-secondary small fw-semibold mb-2">
                         Step 2
                       </div>
-                      <h6 className="mb-3">Batch Metadata</h6>
+                      <h6 className="mb-3">Task Setup</h6>
 
                       <div className="row g-3">
                         <div className="col-12">
-                          <label className="form-label">Batch Name</label>
+                          <label className="form-label">Start Code</label>
                           <input
                             type="text"
                             className="form-control"
-                            value={form.name}
+                            value={form.start_code}
                             onChange={(event) =>
-                              setForm((prev) => ({ ...prev, name: event.target.value }))
-                            }
-                          />
-                        </div>
-
-                        <div className="col-12">
-                          <label className="form-label">Source Folder Name</label>
-                          <input
-                            type="text"
-                            className="form-control"
-                            value={form.source_folder_name}
-                            onChange={(event) =>
-                              setForm((prev) => ({
-                                ...prev,
-                                source_folder_name: event.target.value,
-                              }))
+                              setForm((prev) => ({ ...prev, start_code: event.target.value }))
                             }
                           />
                           <div className="form-text">
-                            Auto-detected from the selected folder root. You can adjust it if
-                            needed.
+                            Generated task names will become
+                            {" "}
+                            <code>{normalizeText(form.start_code) || "CODE"}1</code>,
+                            {" "}
+                            <code>{normalizeText(form.start_code) || "CODE"}2</code>,
+                            {" "}
+                            <code>{normalizeText(form.start_code) || "CODE"}3</code>
+                            {" "}
+                            and so on.
                           </div>
                         </div>
 
@@ -336,8 +326,7 @@ const WorkflowBatchCreateModal = ({
                             }
                           />
                           <div className="form-text">
-                            This due date is saved on the batch and copied to the generated
-                            child tasks.
+                            This due date is saved internally and copied to the generated tasks.
                           </div>
                         </div>
 
@@ -386,8 +375,8 @@ const WorkflowBatchCreateModal = ({
                           </div>
                           {availableUsers.length === 0 ? (
                             <div className="alert alert-secondary mb-0 py-2">
-                              No user options available. You can still create the batch with
-                              pending tasks.
+                              No user options available. You can still create these tasks as
+                              pending.
                             </div>
                           ) : (
                             <div className="workflow-user-picker">
@@ -478,8 +467,8 @@ const WorkflowBatchCreateModal = ({
                         <div>
                           <h6 className="mb-1">Expected Task Preview</h6>
                           <div className="small text-secondary">
-                            Preview the separate child tasks that will be created inside this
-                            batch. Backend remains the final source of truth.
+                            Preview the tasks that will be created from this folder. Backend
+                            remains the final source of truth.
                           </div>
                         </div>
                         <span className="om-summary-chip">
@@ -595,7 +584,7 @@ const WorkflowBatchCreateModal = ({
                 Cancel
               </button>
               <button type="submit" className="btn btn-primary" disabled={submitting}>
-                {submitting ? "Creating..." : "Create Batch"}
+                {submitting ? "Creating..." : "Create Tasks"}
               </button>
             </div>
           </form>

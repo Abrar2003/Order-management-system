@@ -3,6 +3,7 @@ const {
   approveWorkflowTask,
   assignWorkflowTask,
   buildTaskDetail,
+  completeWorkflowTask,
   createWorkflowTask,
   deleteWorkflowTask,
   getWorkflowDashboardSummary,
@@ -11,6 +12,7 @@ const {
   reworkWorkflowTask,
   startWorkflowTask,
   submitWorkflowTask,
+  uploadWorkflowTask,
   updateWorkflowTaskStatus,
 } = require("../../services/workflow/workflowStatusService");
 const { getErrorStatusCode } = require("./_utils");
@@ -155,14 +157,36 @@ const submitTask = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Workflow task submitted successfully",
+      message: "Workflow task marked complete successfully",
       data,
     });
   } catch (error) {
     console.error("Submit Workflow Task Error:", error);
     return res.status(getErrorStatusCode(error)).json({
       success: false,
-      message: error.message || "Failed to submit workflow task",
+      message: error.message || "Failed to complete workflow task",
+    });
+  }
+};
+
+const completeTask = async (req, res) => {
+  try {
+    const data = await completeWorkflowTask({
+      taskId: req.params.id,
+      actor: req.user,
+      note: req.body?.note || req.body?.comment || "",
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Workflow task marked complete successfully",
+      data,
+    });
+  } catch (error) {
+    console.error("Complete Workflow Task Error:", error);
+    return res.status(getErrorStatusCode(error)).json({
+      success: false,
+      message: error.message || "Failed to complete workflow task",
     });
   }
 };
@@ -207,6 +231,28 @@ const approveTask = async (req, res) => {
     return res.status(getErrorStatusCode(error)).json({
       success: false,
       message: error.message || "Failed to approve workflow task",
+    });
+  }
+};
+
+const uploadTask = async (req, res) => {
+  try {
+    const data = await uploadWorkflowTask({
+      taskId: req.params.id,
+      actor: req.user,
+      note: req.body?.note || "",
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Workflow task marked uploaded successfully",
+      data,
+    });
+  } catch (error) {
+    console.error("Upload Workflow Task Error:", error);
+    return res.status(getErrorStatusCode(error)).json({
+      success: false,
+      message: error.message || "Failed to mark workflow task uploaded",
     });
   }
 };
@@ -304,6 +350,7 @@ const removeTask = async (req, res) => {
 module.exports = {
   approveTask,
   assignTask,
+  completeTask,
   createTask,
   getWorkflowDashboard,
   getWorkflowTask,
@@ -315,4 +362,5 @@ module.exports = {
   reworkTask,
   startTask,
   submitTask,
+  uploadTask,
 };

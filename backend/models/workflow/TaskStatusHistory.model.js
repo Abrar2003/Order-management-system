@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 const {
-  WORKFLOW_TASK_STATUSES,
+  WORKFLOW_ALL_TASK_STATUSES,
   normalizeText,
 } = require("../../helpers/workflow");
 const { AuditActorSchema } = require("./shared");
@@ -19,13 +19,13 @@ const TaskStatusHistorySchema = new mongoose.Schema(
     },
     from_status: {
       type: String,
-      enum: [...WORKFLOW_TASK_STATUSES, ""],
+      enum: [...WORKFLOW_ALL_TASK_STATUSES, ""],
       default: "",
       trim: true,
     },
     to_status: {
       type: String,
-      enum: WORKFLOW_TASK_STATUSES,
+      enum: WORKFLOW_ALL_TASK_STATUSES,
       required: true,
       trim: true,
     },

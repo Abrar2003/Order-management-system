@@ -202,8 +202,8 @@ const WorkflowDashboard = () => {
         .sort(
           (left, right) =>
             getCount(right, "open_tasks") - getCount(left, "open_tasks")
-            || getCount(right, "awaiting_review_tasks")
-              - getCount(left, "awaiting_review_tasks"),
+            || getCount(right, "needs_approval_tasks")
+              - getCount(left, "needs_approval_tasks"),
         )
         .slice(0, 5),
     };
@@ -222,19 +222,19 @@ const WorkflowDashboard = () => {
         key: "open",
         label: "Open Tasks",
         value: Number(overall.open_tasks || 0),
-        note: "Pending through rework and still active.",
+        note: "Assigned through approved and still active.",
       },
       {
         key: "approval",
         label: "Needs Approval",
-        value: Number(overall.awaiting_review_tasks || 0),
-        note: "Submitted or in review waiting on admin action.",
+        value: Number(overall.needs_approval_tasks || 0),
+        note: "Completed work waiting on admin approval.",
       },
       {
         key: "overdue",
         label: "Overdue",
         value: Number(overall.overdue_tasks || 0),
-        note: "Past due and not yet completed or cancelled.",
+        note: "Past due and not yet uploaded.",
       },
       {
         key: "due-today",
@@ -246,7 +246,7 @@ const WorkflowDashboard = () => {
         key: "unassigned",
         label: "Unassigned",
         value: Number(overall.unassigned_tasks || 0),
-        note: "Tasks with no assignee yet.",
+        note: "Should normally stay at zero now that assignees are required.",
       },
     ];
   }, [dashboard?.overall]);
@@ -285,7 +285,7 @@ const WorkflowDashboard = () => {
           <div>
             <h2 className="h4 mb-1">Workflow Dashboard</h2>
             <div className="text-secondary">
-              Admin quick glance for production workflow workload, review queue, and user-level task ownership.
+              Admin quick glance for production workflow workload, approval queue, and user-level task ownership.
             </div>
           </div>
           <div className="d-flex flex-wrap gap-2">
@@ -325,7 +325,7 @@ const WorkflowDashboard = () => {
                   className="form-control"
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Task no, title, folder, brand"
+                  placeholder="Task no, title, brand"
                 />
               </div>
               <div className="col-lg-3">
@@ -346,7 +346,7 @@ const WorkflowDashboard = () => {
                   onChange={(event) => setStatusFilter(event.target.value)}
                 >
                   <option value="">All</option>
-                  {["pending", "assigned", "in_progress", "submitted", "review", "rework", "completed", "cancelled"].map((status) => (
+                  {["assigned", "complete", "approved", "uploaded"].map((status) => (
                     <option key={status} value={status}>
                       {status}
                     </option>
@@ -503,7 +503,7 @@ const WorkflowDashboard = () => {
                         </div>
                         <div className="workflow-dashboard-spotlight-meta">
                           <span className="om-summary-chip">Open: {getCount(entry, "open_tasks")}</span>
-                          <span className="om-summary-chip">Review: {getCount(entry, "awaiting_review_tasks")}</span>
+                          <span className="om-summary-chip">Needs Approval: {getCount(entry, "needs_approval_tasks")}</span>
                           <span className="om-summary-chip">Overdue: {getCount(entry, "overdue_tasks")}</span>
                         </div>
                       </div>
@@ -528,11 +528,12 @@ const WorkflowDashboard = () => {
                           <th>Role</th>
                           <th>Total</th>
                           <th>Open</th>
-                          <th>Ready</th>
-                          <th>In Progress</th>
-                          <th>Waiting Review</th>
+                          <th>Assigned</th>
+                          <th>Complete</th>
+                          <th>Needs Approval</th>
+                          <th>Approved</th>
                           <th>Rework</th>
-                          <th>Completed</th>
+                          <th>Uploaded</th>
                           <th>Overdue</th>
                           <th>Due Today</th>
                           <th>Last Update</th>
@@ -541,8 +542,6 @@ const WorkflowDashboard = () => {
                       </thead>
                       <tbody>
                         {visibleUsers.map((entry) => {
-                          const readyCount =
-                            getCount(entry, "pending_tasks") + getCount(entry, "assigned_tasks");
                           const userId = entry?.user_id ? String(entry.user_id) : "";
                           return (
                             <tr key={userId || entry.email || entry.name}>
@@ -553,11 +552,12 @@ const WorkflowDashboard = () => {
                               <td>{formatRoleLabel(entry.role)}</td>
                               <td>{getCount(entry, "total_tasks")}</td>
                               <td>{getCount(entry, "open_tasks")}</td>
-                              <td>{readyCount}</td>
-                              <td>{getCount(entry, "in_progress_tasks")}</td>
-                              <td>{getCount(entry, "awaiting_review_tasks")}</td>
-                              <td>{getCount(entry, "rework_tasks")}</td>
-                              <td>{getCount(entry, "completed_tasks")}</td>
+                              <td>{getCount(entry, "assigned_tasks")}</td>
+                              <td>{getCount(entry, "complete_tasks")}</td>
+                              <td>{getCount(entry, "needs_approval_tasks")}</td>
+                              <td>{getCount(entry, "approved_tasks")}</td>
+                              <td>{getCount(entry, "reworked_tasks")}</td>
+                              <td>{getCount(entry, "uploaded_tasks")}</td>
                               <td>{getCount(entry, "overdue_tasks")}</td>
                               <td>{getCount(entry, "due_today_tasks")}</td>
                               <td>{formatDateTime(entry.last_task_update_at)}</td>

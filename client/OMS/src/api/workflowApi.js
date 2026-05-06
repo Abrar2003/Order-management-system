@@ -97,9 +97,25 @@ export const submitWorkflowTask = async (id, payload = {}) => {
   return res.data;
 };
 
+export const completeWorkflowTask = async (id, payload = {}) => {
+  const res = await api.patch(
+    `/workflow/tasks/${encodeURIComponent(requireId(id, "Task id"))}/complete`,
+    payload,
+  );
+  return res.data;
+};
+
 export const approveWorkflowTask = async (id, payload = {}) => {
   const res = await api.patch(
     `/workflow/tasks/${encodeURIComponent(requireId(id, "Task id"))}/approve`,
+    payload,
+  );
+  return res.data;
+};
+
+export const uploadWorkflowTask = async (id, payload = {}) => {
+  const res = await api.patch(
+    `/workflow/tasks/${encodeURIComponent(requireId(id, "Task id"))}/upload`,
     payload,
   );
   return res.data;

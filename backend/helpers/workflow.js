@@ -1,8 +1,14 @@
 const path = require("path");
 
 const WORKFLOW_TASK_STATUSES = Object.freeze([
-  "pending",
   "assigned",
+  "complete",
+  "approved",
+  "uploaded",
+]);
+
+const WORKFLOW_LEGACY_TASK_STATUSES = Object.freeze([
+  "pending",
   "in_progress",
   "submitted",
   "review",
@@ -10,6 +16,11 @@ const WORKFLOW_TASK_STATUSES = Object.freeze([
   "completed",
   "cancelled",
   "blocked",
+]);
+
+const WORKFLOW_ALL_TASK_STATUSES = Object.freeze([
+  ...WORKFLOW_TASK_STATUSES,
+  ...WORKFLOW_LEGACY_TASK_STATUSES,
 ]);
 
 const WORKFLOW_BATCH_STATUSES = Object.freeze([
@@ -29,6 +40,9 @@ const WORKFLOW_TASK_ASSIGNMENT_STATUSES = Object.freeze([
 ]);
 const WORKFLOW_TASK_COMMENT_TYPES = Object.freeze([
   "general",
+  "complete",
+  "approval",
+  "upload",
   "review",
   "rework",
   "system",
@@ -56,15 +70,10 @@ const WORKFLOW_AUTO_CREATE_MODES = Object.freeze([
 ]);
 
 const WORKFLOW_ALLOWED_STATUS_TRANSITIONS = Object.freeze({
-  pending: ["assigned", "cancelled"],
-  assigned: ["in_progress", "submitted", "cancelled"],
-  in_progress: ["submitted", "cancelled"],
-  submitted: ["review", "rework", "completed", "cancelled"],
-  review: ["rework", "completed", "cancelled"],
-  rework: ["in_progress", "submitted", "cancelled"],
-  completed: [],
-  cancelled: [],
-  blocked: ["assigned", "in_progress", "cancelled"],
+  assigned: ["complete"],
+  complete: ["approved"],
+  approved: ["uploaded"],
+  uploaded: [],
 });
 
 const MAX_WORKFLOW_MANIFEST_ENTRIES = 10000;
@@ -311,13 +320,11 @@ const summarizeManifestCounts = (entries = []) => {
 
 const buildEmptyTaskCounts = () => ({
   total_tasks: 0,
-  pending_tasks: 0,
   assigned_tasks: 0,
-  in_progress_tasks: 0,
-  submitted_tasks: 0,
-  review_tasks: 0,
-  rework_tasks: 0,
-  completed_tasks: 0,
+  complete_tasks: 0,
+  approved_tasks: 0,
+  uploaded_tasks: 0,
+  reworked_tasks: 0,
 });
 
 const buildBatchCounts = (fileCounts = {}, taskCounts = {}) => ({
@@ -353,6 +360,75 @@ const buildWorkflowTaskNo = (batchNo = "", index = 0) =>
 const isObjectIdLike = (value) =>
   /^[a-f0-9]{24}$/i.test(String(value || "").trim());
 
+const normalizeWorkflowTaskStatus = (value, { fallback = "" } = {}) => {
+  const normalized = normalizeText(value).toLowerCase();
+  switch (normalized) {
+    case "pending":
+    case "in_progress":
+    case "assigned":
+    case "rework":
+      return "assigned";
+    case "submitted":
+    case "review":
+    case "complete":
+      return "complete";
+    case "approved":
+      return "approved";
+    case "uploaded":
+    case "completed":
+      return "uploaded";
+    case "cancelled":
+    case "blocked":
+      return fallback;
+    default:
+      return WORKFLOW_TASK_STATUSES.includes(normalized) ? normalized : fallback || normalized;
+  }
+};
+
+const WORKFLOW_STATUS_QUERY_ALIASES = Object.freeze({
+  assigned: ["assigned", "pending", "in_progress", "rework"],
+  complete: ["complete", "submitted", "review"],
+  approved: ["approved"],
+  uploaded: ["uploaded", "completed"],
+});
+
+const getWorkflowStatusFilterValues = (value) => {
+  const normalized = normalizeWorkflowTaskStatus(value, { fallback: "" });
+  return WORKFLOW_STATUS_QUERY_ALIASES[normalized] || [];
+};
+
+const buildWorkflowTaskStatusNormalizationExpression = (fieldPath = "$status") => ({
+  $switch: {
+    branches: [
+      {
+        case: {
+          $in: [fieldPath, ["assigned", "pending", "in_progress", "rework"]],
+        },
+        then: "assigned",
+      },
+      {
+        case: {
+          $in: [fieldPath, ["complete", "submitted", "review"]],
+        },
+        then: "complete",
+      },
+      {
+        case: {
+          $eq: [fieldPath, "approved"],
+        },
+        then: "approved",
+      },
+      {
+        case: {
+          $in: [fieldPath, ["uploaded", "completed"]],
+        },
+        then: "uploaded",
+      },
+    ],
+    default: fieldPath,
+  },
+});
+
 module.exports = {
   CAD_EXTENSIONS,
   EXCEL_EXTENSIONS,
@@ -360,16 +436,19 @@ module.exports = {
   MAX_WORKFLOW_MANIFEST_ENTRIES,
   PDF_EXTENSIONS,
   THREE_D_EXTENSIONS,
+  WORKFLOW_ALL_TASK_STATUSES,
   WORKFLOW_ALLOWED_STATUS_TRANSITIONS,
   WORKFLOW_ASSIGNMENT_MODES,
   WORKFLOW_BATCH_STATUSES,
   WORKFLOW_AUTO_CREATE_MODES,
+  WORKFLOW_LEGACY_TASK_STATUSES,
   WORKFLOW_TASK_ASSIGNMENT_STATUSES,
   WORKFLOW_TASK_COMMENT_TYPES,
   WORKFLOW_TASK_PRIORITIES,
   WORKFLOW_TASK_STATUSES,
   WORKFLOW_TASK_TYPE_CATEGORIES,
   buildBatchCounts,
+  buildWorkflowTaskStatusNormalizationExpression,
   buildEmptyTaskCounts,
   buildSourceFileMetadata,
   buildWorkflowBatchNo,
@@ -377,6 +456,7 @@ module.exports = {
   buildWorkflowTaskNo,
   classifyFileType,
   collapseWhitespace,
+  getWorkflowStatusFilterValues,
   getDirectSubfolderName,
   isObjectIdLike,
   normalizeFileManifest,
@@ -385,6 +465,7 @@ module.exports = {
   normalizeNameKey,
   normalizeSourceFolderKey,
   normalizeSourceFolderName,
+  normalizeWorkflowTaskStatus,
   normalizeText,
   sanitizeManifestPath,
   stripRootFolderPrefix,

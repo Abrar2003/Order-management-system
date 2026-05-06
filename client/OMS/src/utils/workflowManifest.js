@@ -243,11 +243,28 @@ export const previewPerFileTasks = (manifest = [], taskType = null) => {
   return applyTaskTypeRule(manifest, taskType)
     .map((entry, index) => ({
       id: `per-file-${index + 1}`,
-      title: `${label} - ${entry.name}`,
+      title: buildPreviewTaskTitle({
+        startCode: taskType?.preview_start_code,
+        index,
+        fallbackTitle: `${label} - ${entry.name}`,
+      }),
       source_folder_path: entry.folder_path,
       source_files: [entry],
       source_file_count: 1,
     }));
+};
+
+const buildPreviewTaskTitle = ({
+  startCode = "",
+  index = 0,
+  fallbackTitle = "",
+}) => {
+  const normalizedStartCode = normalizeText(startCode);
+  if (normalizedStartCode) {
+    return `${normalizedStartCode}${Number(index) + 1}`;
+  }
+
+  return fallbackTitle;
 };
 
 export const previewPerDirectSubfolderTasks = (
@@ -274,7 +291,11 @@ export const previewPerDirectSubfolderTasks = (
     .sort((left, right) => left[0].localeCompare(right[0], undefined, { sensitivity: "base" }))
     .map(([folderName, entries], index) => ({
       id: `per-subfolder-${index + 1}`,
-      title: `${label} - ${folderName}`,
+      title: buildPreviewTaskTitle({
+        startCode: taskType?.preview_start_code,
+        index,
+        fallbackTitle: `${label} - ${folderName}`,
+      }),
       source_folder_path: entries[0]?.folder_path || `${normalizeText(rootFolder)}/${folderName}`,
       source_files: entries,
       source_file_count: entries.length,
@@ -301,7 +322,11 @@ export const previewOncePerBatchTask = (
   return [
     {
       id: "once-per-batch-1",
-      title: `${label} - ${suffix}`,
+      title: buildPreviewTaskTitle({
+        startCode: taskType?.preview_start_code,
+        index: 0,
+        fallbackTitle: `${label} - ${suffix}`,
+      }),
       source_folder_path: normalizeText(sourceFolderName),
       source_files: filteredEntries,
       source_file_count: filteredEntries.length,
@@ -315,24 +340,35 @@ export const buildTaskPreview = ({
   taskType = null,
   batchName = "",
   sourceFolderName = "",
+  startCode = "",
 } = {}) => {
   const autoCreateMode = normalizeText(taskType?.auto_create_mode).toLowerCase();
+  const taskTypeWithPreviewStartCode = taskType
+    ? {
+        ...taskType,
+        preview_start_code: normalizeText(startCode),
+      }
+    : null;
 
-  if (!Array.isArray(manifest) || manifest.length === 0 || !taskType) {
+  if (!Array.isArray(manifest) || manifest.length === 0 || !taskTypeWithPreviewStartCode) {
     return [];
   }
 
   if (autoCreateMode === "per_file") {
-    return previewPerFileTasks(manifest, taskType);
+    return previewPerFileTasks(manifest, taskTypeWithPreviewStartCode);
   }
 
   if (autoCreateMode === "per_direct_subfolder") {
-    return previewPerDirectSubfolderTasks(manifest, rootFolder, taskType);
+    return previewPerDirectSubfolderTasks(
+      manifest,
+      rootFolder,
+      taskTypeWithPreviewStartCode,
+    );
   }
 
   return previewOncePerBatchTask(
     manifest,
-    taskType,
+    taskTypeWithPreviewStartCode,
     batchName,
     sourceFolderName || rootFolder,
   );

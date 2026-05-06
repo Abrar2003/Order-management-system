@@ -392,7 +392,6 @@ const Navbar = () => {
 
     const items = [
       ...(isAdmin ? [routeMenuItem("workflow-dashboard", "Dashboard", "/workflow/dashboard")] : []),
-      routeMenuItem("workflow-batches", "Batches", "/workflow/batches"),
       routeMenuItem("workflow-task-board", "Task Board", "/workflow/tasks"),
       routeMenuItem("workflow-my-tasks", "My Tasks", "/workflow/my-tasks"),
     ];

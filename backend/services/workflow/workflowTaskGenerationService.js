@@ -245,6 +245,20 @@ const createInitialHistoryEntries = (tasks = [], actor = {}, note = "") =>
     },
   }));
 
+const buildGeneratedTaskTitle = ({
+  batch = {},
+  taskType = {},
+  definition = {},
+  index = 0,
+}) => {
+  const startCode = normalizeText(batch?.start_code);
+  if (startCode) {
+    return `${startCode}${Number(index) + 1}`;
+  }
+
+  return `${taskType.name} - ${definition.titleSuffix}`;
+};
+
 const generateTasksForBatch = async ({
   batch,
   taskType,
@@ -256,11 +270,15 @@ const generateTasksForBatch = async ({
     throw new Error("A persisted batch reference is required before task generation");
   }
 
+  if (!Array.isArray(assignees) || assignees.length === 0) {
+    throw new Error("At least one assignee is required to create workflow tasks");
+  }
+
   await ensureBatchHasNoGeneratedTasks(batch._id);
 
   const taskDefinitions = buildTaskDefinitions({ batch, taskType, manifestEntries });
   const auditActor = buildAuditActor(actor);
-  const initialStatus = assignees.length > 0 ? "assigned" : "pending";
+  const initialStatus = "assigned";
   const assignedUsers = assignees.map((user) => ({ user: user._id }));
   const now = new Date();
 
@@ -268,7 +286,12 @@ const generateTasksForBatch = async ({
     batch: batch._id,
     batch_no: batch.batch_no,
     task_no: buildWorkflowTaskNo(batch.batch_no, index),
-    title: `${taskType.name} - ${definition.titleSuffix}`,
+    title: buildGeneratedTaskTitle({
+      batch,
+      taskType,
+      definition,
+      index,
+    }),
     description: normalizeText(batch.description),
     task_type: taskType._id,
     task_type_key: taskType.key,
@@ -281,8 +304,8 @@ const generateTasksForBatch = async ({
     status: initialStatus,
     priority: taskType.default_priority || "normal",
     assigned_to: assignedUsers,
-    assigned_by: assignees.length > 0 ? auditActor : {},
-    assigned_at: assignees.length > 0 ? now : null,
+    assigned_by: auditActor,
+    assigned_at: now,
     due_date: batch?.due_date || null,
     review_required: taskType.requires_review !== false,
     tags: [taskType.key],
@@ -312,7 +335,7 @@ const generateTasksForBatch = async ({
   const historyDocs = createInitialHistoryEntries(
     insertedTasks,
     actor,
-    assignees.length > 0 ? "Task created and assigned during batch creation" : "Task created from folder manifest",
+    "Task created and assigned during batch creation",
   );
   await TaskStatusHistory.insertMany(historyDocs, { ordered: true });
 

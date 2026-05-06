@@ -46,8 +46,6 @@ import ProductAnalytics from "./pages/ProductAnalytics";
 import QcReportMismatch from "./pages/QcReportMismatch";
 import ProductDatabase from "./pages/ProductDatabase";
 import ProductTypeTemplates from "./pages/ProductTypeTemplates";
-import WorkflowBatches from "./pages/WorkflowBatches";
-import WorkflowBatchDetail from "./pages/WorkflowBatchDetail";
 import WorkflowDashboard from "./pages/WorkflowDashboard";
 import WorkflowTasks from "./pages/WorkflowTasks";
 import WorkflowMyTasks from "./pages/WorkflowMyTasks";
@@ -529,7 +527,7 @@ const App = () => {
             path="/workflow/batches"
             element={
               <ProtectedRoute>
-                <WorkflowBatches />
+                <Navigate to="/workflow/tasks" replace />
               </ProtectedRoute>
             }
           />
@@ -538,7 +536,7 @@ const App = () => {
             path="/workflow/batches/:batchId"
             element={
               <ProtectedRoute>
-                <WorkflowBatchDetail />
+                <Navigate to="/workflow/tasks" replace />
               </ProtectedRoute>
             }
           />

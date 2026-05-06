@@ -2,7 +2,7 @@ const USER_ROLES = Object.freeze([
   "admin",
   "manager",
   "product manager",
-  "inspection manager",
+  " ",
   "super admin",
   "QC",
   "dev",

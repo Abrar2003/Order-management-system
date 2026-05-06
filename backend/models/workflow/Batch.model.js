@@ -32,13 +32,11 @@ const BatchCountsSchema = new mongoose.Schema(
     three_d_files: { type: Number, default: 0, min: 0 },
     other_files: { type: Number, default: 0, min: 0 },
     total_tasks: { type: Number, default: 0, min: 0 },
-    pending_tasks: { type: Number, default: 0, min: 0 },
     assigned_tasks: { type: Number, default: 0, min: 0 },
-    in_progress_tasks: { type: Number, default: 0, min: 0 },
-    submitted_tasks: { type: Number, default: 0, min: 0 },
-    review_tasks: { type: Number, default: 0, min: 0 },
-    rework_tasks: { type: Number, default: 0, min: 0 },
-    completed_tasks: { type: Number, default: 0, min: 0 },
+    complete_tasks: { type: Number, default: 0, min: 0 },
+    approved_tasks: { type: Number, default: 0, min: 0 },
+    uploaded_tasks: { type: Number, default: 0, min: 0 },
+    reworked_tasks: { type: Number, default: 0, min: 0 },
   },
   { _id: false },
 );
@@ -48,6 +46,7 @@ const BatchSchema = new mongoose.Schema(
     batch_no: { type: String, required: true, trim: true, uppercase: true },
     name: { type: String, required: true, trim: true },
     name_key: { type: String, required: true, trim: true, lowercase: true },
+    start_code: { type: String, default: "", trim: true },
     source_folder_name: { type: String, required: true, trim: true },
     source_folder_key: { type: String, required: true, trim: true, lowercase: true },
     description: { type: String, default: "", trim: true },
@@ -115,6 +114,7 @@ BatchSchema.index(
 BatchSchema.pre("validate", function normalizeBatch() {
   this.name = normalizeText(this.name);
   this.name_key = normalizeNameKey(this.name_key || this.name);
+  this.start_code = normalizeText(this.start_code);
   this.source_folder_name = normalizeSourceFolderName(this.source_folder_name);
   this.source_folder_key = normalizeSourceFolderKey(
     this.source_folder_key || this.source_folder_name,

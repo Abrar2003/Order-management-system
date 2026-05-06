@@ -95,9 +95,18 @@ const serializeBatch = (doc = {}) => ({
 });
 
 const createWorkflowBatchFromFolderManifest = async (payload = {}, actor = {}) => {
-  const name = normalizeText(payload?.name);
+  const startCode = normalizeText(payload?.start_code);
+  if (!startCode) {
+    throw new Error("start_code is required");
+  }
+
+  const name = normalizeText(payload?.name || startCode || payload?.source_folder_name);
   if (!name) {
     throw new Error("Batch name is required");
+  }
+
+  if (!Array.isArray(payload?.assignee_ids) || payload.assignee_ids.length === 0) {
+    throw new Error("At least one assignee is required");
   }
 
   const sourceFolderName = normalizeSourceFolderName(payload?.source_folder_name);
@@ -128,6 +137,7 @@ const createWorkflowBatchFromFolderManifest = async (payload = {}, actor = {}) =
   previewTaskDefinitionsForBatch({
     batch: {
       name,
+      start_code: startCode,
       source_folder_name: sourceFolderName,
       description: normalizeText(payload?.description),
       brand: normalizeText(payload?.brand),
@@ -145,6 +155,7 @@ const createWorkflowBatchFromFolderManifest = async (payload = {}, actor = {}) =
     batch_no: batchNo,
     name,
     name_key: normalizeNameKey(name),
+    start_code: startCode,
     source_folder_name: sourceFolderName,
     source_folder_key: sourceFolderKey,
     description: normalizeText(payload?.description),
@@ -327,9 +338,6 @@ const deleteWorkflowBatch = async (id, actor = {}, note = "") => {
   }).select("_id batch status");
 
   const taskIds = tasks.map((task) => task._id);
-  const tasksNeedingCancellationHistory = tasks.filter(
-    (task) => !["completed", "cancelled"].includes(task.status),
-  );
 
   if (taskIds.length > 0) {
     await Task.updateMany(
@@ -342,39 +350,28 @@ const deleteWorkflowBatch = async (id, actor = {}, note = "") => {
       },
     );
 
-    if (tasksNeedingCancellationHistory.length > 0) {
-      await Task.updateMany(
-        { _id: { $in: tasksNeedingCancellationHistory.map((task) => task._id) } },
-        {
-          $set: {
-            status: "cancelled",
-            blocked_reason: normalizedNote,
-          },
+    await TaskStatusHistory.insertMany(
+      tasks.map((task) => ({
+        task: task._id,
+        batch: batch._id,
+        from_status: task.status,
+        to_status: task.status,
+        changed_by: auditActor,
+        changed_at: new Date(),
+        note: normalizedNote,
+        metadata: {
+          batch_deleted: true,
+          deleted_by_admin: true,
+          task_deleted: true,
         },
-      );
-
-      await TaskStatusHistory.insertMany(
-        tasksNeedingCancellationHistory.map((task) => ({
-          task: task._id,
-          batch: batch._id,
-          from_status: task.status,
-          to_status: "cancelled",
-          changed_by: auditActor,
-          changed_at: new Date(),
-          note: normalizedNote,
-          metadata: {
-            batch_deleted: true,
-            deleted_by_admin: true,
-          },
-        })),
-        { ordered: false },
-      );
-    }
+      })),
+      { ordered: false },
+    ).catch(() => {});
 
     await TaskAssignment.updateMany(
       {
         batch: batch._id,
-        status: "active",
+        status: { $in: ["active", "completed"] },
       },
       {
         $set: {
@@ -433,7 +430,7 @@ const cancelWorkflowBatch = async (id, actor = {}, note = "") => {
   const tasks = await Task.find({
     batch: batch._id,
     is_deleted: false,
-    status: { $nin: ["completed", "cancelled"] },
+    status: { $nin: ["uploaded"] },
   }).lean();
 
   if (tasks.length > 0) {
@@ -442,7 +439,7 @@ const cancelWorkflowBatch = async (id, actor = {}, note = "") => {
       { _id: { $in: taskIds } },
       {
         $set: {
-          status: "cancelled",
+          is_deleted: true,
           updated_by: auditActor,
         },
       },
@@ -451,7 +448,7 @@ const cancelWorkflowBatch = async (id, actor = {}, note = "") => {
     await TaskAssignment.updateMany(
       {
         task: { $in: taskIds },
-        status: "active",
+        status: { $in: ["active", "completed"] },
       },
       {
         $set: {
@@ -468,11 +465,11 @@ const cancelWorkflowBatch = async (id, actor = {}, note = "") => {
         task: task._id,
         batch: batch._id,
         from_status: task.status,
-        to_status: "cancelled",
+        to_status: task.status,
         changed_by: auditActor,
         changed_at: new Date(),
         note: normalizeText(note) || "Batch cancelled",
-        metadata: { batch_cancelled: true },
+        metadata: { batch_cancelled: true, task_deleted: true },
       })),
       { ordered: false },
     );

@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const {
   WORKFLOW_BATCH_STATUSES,
+  buildWorkflowTaskStatusNormalizationExpression,
   buildBatchCounts,
   buildEmptyTaskCounts,
 } = require("../../helpers/workflow");
@@ -47,11 +48,10 @@ const deriveWorkflowBatchStatusFromCounts = (
   }
 
   const totalTasks = Number(counts?.total_tasks || 0);
-  const completedTasks = Number(counts?.completed_tasks || 0);
-  const inProgressTasks = Number(counts?.in_progress_tasks || 0);
-  const submittedTasks = Number(counts?.submitted_tasks || 0);
-  const reviewTasks = Number(counts?.review_tasks || 0);
-  const reworkTasks = Number(counts?.rework_tasks || 0);
+  const assignedTasks = Number(counts?.assigned_tasks || 0);
+  const completedTasks = Number(counts?.complete_tasks || 0);
+  const approvedTasks = Number(counts?.approved_tasks || 0);
+  const uploadedTasks = Number(counts?.uploaded_tasks || 0);
   const blockedTasks = Number(meta?.blocked_tasks || 0);
   const cancelledTasks = Number(meta?.cancelled_tasks || 0);
 
@@ -63,16 +63,15 @@ const deriveWorkflowBatchStatusFromCounts = (
     return "cancelled";
   }
 
-  if (completedTasks >= totalTasks) {
+  if (uploadedTasks >= totalTasks) {
     return "completed";
   }
 
   if (
+    assignedTasks > 0 ||
     completedTasks > 0 ||
-    inProgressTasks > 0 ||
-    submittedTasks > 0 ||
-    reviewTasks > 0 ||
-    reworkTasks > 0 ||
+    approvedTasks > 0 ||
+    uploadedTasks > 0 ||
     blockedTasks > 0
   ) {
     return "in_progress";
@@ -99,8 +98,16 @@ const recalculateWorkflowBatchFromTasks = async (batchId) => {
       },
     },
     {
+      $addFields: {
+        normalized_status: buildWorkflowTaskStatusNormalizationExpression(),
+        normalized_rework_count: {
+          $ifNull: ["$reworked.count", { $ifNull: ["$rework_count", 0] }],
+        },
+      },
+    },
+    {
       $group: {
-        _id: "$status",
+        _id: "$normalized_status",
         count: { $sum: 1 },
       },
     },
@@ -108,6 +115,35 @@ const recalculateWorkflowBatchFromTasks = async (batchId) => {
 
   const { counts: taskCounts, meta } =
     buildWorkflowBatchTaskCountsFromAggregation(aggregation);
+
+  const [reworkedSummary] = await Task.aggregate([
+    {
+      $match: {
+        batch: batch._id,
+        is_deleted: false,
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        reworked_tasks: {
+          $sum: {
+            $cond: [
+              {
+                $gt: [
+                  { $ifNull: ["$reworked.count", { $ifNull: ["$rework_count", 0] }] },
+                  0,
+                ],
+              },
+              1,
+              0,
+            ],
+          },
+        },
+      },
+    },
+  ]);
+  taskCounts.reworked_tasks = Number(reworkedSummary?.reworked_tasks || 0);
 
   batch.counts = buildBatchCounts(batch.counts || {}, taskCounts);
   batch.status = deriveWorkflowBatchStatusFromCounts(
@@ -117,11 +153,10 @@ const recalculateWorkflowBatchFromTasks = async (batchId) => {
   );
 
   const hasStarted =
-    Number(taskCounts.in_progress_tasks || 0) > 0 ||
-    Number(taskCounts.submitted_tasks || 0) > 0 ||
-    Number(taskCounts.review_tasks || 0) > 0 ||
-    Number(taskCounts.rework_tasks || 0) > 0 ||
-    Number(taskCounts.completed_tasks || 0) > 0 ||
+    Number(taskCounts.assigned_tasks || 0) > 0 ||
+    Number(taskCounts.complete_tasks || 0) > 0 ||
+    Number(taskCounts.approved_tasks || 0) > 0 ||
+    Number(taskCounts.uploaded_tasks || 0) > 0 ||
     Number(meta.blocked_tasks || 0) > 0;
 
   if (!batch.started_at && hasStarted) {

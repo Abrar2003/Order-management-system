@@ -5,19 +5,18 @@ import { isAdminLikeRole, isManagerLikeRole } from "../../auth/permissions";
 import { usePermissions } from "../../auth/PermissionContext";
 import {
   approveWorkflowTask,
+  completeWorkflowTask,
   deleteWorkflowTask,
-  getWorkflowBatches,
   getWorkflowDepartments,
   getWorkflowTaskTypes,
   getWorkflowTasks,
   getWorkflowUsers,
-  reviewWorkflowTask,
   sendWorkflowTaskToRework,
-  startWorkflowTask,
-  submitWorkflowTask,
+  uploadWorkflowTask,
 } from "../../api/workflowApi";
 import { useRememberSearchParams } from "../../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../../utils/searchParams";
+import WorkflowBatchCreateModal from "./WorkflowBatchCreateModal";
 import WorkflowTaskCreateModal from "./WorkflowTaskCreateModal";
 import WorkflowTaskDetailModal from "./WorkflowTaskDetailModal";
 import WorkflowTaskStageBar from "./WorkflowTaskStageBar";
@@ -46,11 +45,61 @@ const formatDateTime = (value) => {
   return parsed.toLocaleString();
 };
 
+const formatDateOnly = (value) => {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "—";
+  return parsed.toLocaleDateString();
+};
+
 const getTaskUserId = (entry = {}) =>
   entry?.user?._id || entry?.user?.id || entry?.user || entry?._id || entry?.id || "";
 
 const getTaskUserName = (entry = {}) =>
   entry?.user?.name || entry?.user?.email || entry?.name || entry?.email || "User";
+
+const WORKFLOW_ACTION_ICONS = Object.freeze({
+  info: "/workflow-icons/info.png",
+  delete: "/workflow-icons/delete.png",
+});
+
+const ReworkActionIcon = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path
+      d="M8 7H18V17"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M8 7L11 4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M8 7L11 10"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M16 17H6V7"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      opacity="0.55"
+    />
+  </svg>
+);
 
 const getTaskActionState = ({
   task = {},
@@ -66,16 +115,15 @@ const getTaskActionState = ({
 
   return {
     assignedToCurrentUser,
-    canStart:
-      assignedToCurrentUser && ["assigned", "rework"].includes(task?.status),
-    canSubmit:
-      assignedToCurrentUser && ["assigned", "in_progress", "rework"].includes(task?.status),
-    canReview: canManageWorkflow && task?.status === "submitted",
-    canRework: canManageWorkflow && ["submitted", "review"].includes(task?.status),
+    canComplete: assignedToCurrentUser && task?.status === "assigned",
+    canUpload:
+      (assignedToCurrentUser || canManageWorkflow || canApproveWorkflow)
+      && task?.status === "approved",
+    canRework: canManageWorkflow && ["complete", "approved", "uploaded"].includes(task?.status),
     canApprove:
       canApproveWorkflow
       && !assignedToCurrentUser
-      && ["submitted", "review"].includes(task?.status),
+      && task?.status === "complete",
   };
 };
 
@@ -116,14 +164,13 @@ const WorkflowTasksPanel = ({
   const [success, setSuccess] = useState("");
   const [taskTypes, setTaskTypes] = useState([]);
   const [departments, setDepartments] = useState([]);
-  const [batches, setBatches] = useState([]);
   const [users, setUsers] = useState([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showFolderCreateModal, setShowFolderCreateModal] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState("");
   const [search, setSearch] = useState(() => normalizeText(searchParams.get("search")));
   const [statusFilter, setStatusFilter] = useState(() => normalizeText(searchParams.get("status")));
   const [taskTypeFilter, setTaskTypeFilter] = useState(() => normalizeText(searchParams.get("task_type_key")));
-  const [batchFilter, setBatchFilter] = useState(() => normalizeText(searchParams.get("batch")));
   const [assigneeFilter, setAssigneeFilter] = useState(() => {
     const value = normalizeText(searchParams.get("assignee"));
     if (mineOnly) return currentUserId;
@@ -137,8 +184,9 @@ const WorkflowTasksPanel = ({
   const [limit, setLimit] = useState(() => parseLimit(searchParams.get("limit")));
   const [refreshTick, setRefreshTick] = useState(0);
   const [actionTaskId, setActionTaskId] = useState("");
-  const [reworkPrompt, setReworkPrompt] = useState({
+  const [notePrompt, setNotePrompt] = useState({
     taskId: "",
+    type: "",
     note: "",
   });
 
@@ -150,11 +198,10 @@ const WorkflowTasksPanel = ({
 
     setLookupLoading(true);
     try {
-      const [taskTypeResult, departmentResult, batchResult, userResult] =
+      const [taskTypeResult, departmentResult, userResult] =
         await Promise.allSettled([
           getWorkflowTaskTypes(),
           getWorkflowDepartments(),
-          getWorkflowBatches({ limit: 100 }),
           canAssignWorkflow || canFilterByAssignee || canCreateWorkflow
             ? getWorkflowUsers()
             : Promise.resolve([]),
@@ -171,9 +218,6 @@ const WorkflowTasksPanel = ({
             ? departmentResult.value.data
             : [],
         );
-      }
-      if (batchResult.status === "fulfilled") {
-        setBatches(Array.isArray(batchResult.value?.data) ? batchResult.value.data : []);
       }
       if (userResult.status === "fulfilled") {
         setUsers(
@@ -211,7 +255,6 @@ const WorkflowTasksPanel = ({
         limit,
         status: statusFilter || undefined,
         task_type_key: taskTypeFilter || undefined,
-        batch: batchFilter || undefined,
         assignee:
           mineOnly && isAdmin
             ? currentUserId || undefined
@@ -246,7 +289,6 @@ const WorkflowTasksPanel = ({
     }
   }, [
     assigneeFilter,
-    batchFilter,
     brandFilter,
     canViewWorkflow,
     currentUserId,
@@ -275,7 +317,6 @@ const WorkflowTasksPanel = ({
     if (search) next.set("search", search);
     if (statusFilter) next.set("status", statusFilter);
     if (taskTypeFilter) next.set("task_type_key", taskTypeFilter);
-    if (batchFilter) next.set("batch", batchFilter);
     if (assigneeFilter && !mineOnly) next.set("assignee", assigneeFilter);
     if (departmentFilter) next.set("department", departmentFilter);
     if (brandFilter) next.set("brand", brandFilter);
@@ -289,7 +330,6 @@ const WorkflowTasksPanel = ({
     }
   }, [
     assigneeFilter,
-    batchFilter,
     brandFilter,
     departmentFilter,
     dueDateFrom,
@@ -307,7 +347,7 @@ const WorkflowTasksPanel = ({
   const handleQuickAction = async (
     action,
     message,
-    { taskId = "", closeReworkPrompt = false } = {},
+    { taskId = "", closeNotePrompt = false } = {},
   ) => {
     setError("");
     setSuccess("");
@@ -315,9 +355,10 @@ const WorkflowTasksPanel = ({
     try {
       await action();
       setSuccess(message);
-      if (closeReworkPrompt) {
-        setReworkPrompt({
+      if (closeNotePrompt) {
+        setNotePrompt({
           taskId: "",
+          type: "",
           note: "",
         });
       }
@@ -358,54 +399,59 @@ const WorkflowTasksPanel = ({
       canApproveWorkflow,
     });
 
-    if (stepKey === "in_progress" && actions.canStart) {
-      await handleQuickAction(
-        () => startWorkflowTask(task._id),
-        "Task moved to in progress.",
-        { taskId: task._id },
-      );
-      return;
-    }
-
-    if (stepKey === "submitted" && actions.canSubmit) {
-      await handleQuickAction(
-        () => submitWorkflowTask(task._id),
-        "Task submitted for review.",
-        { taskId: task._id },
-      );
-      return;
-    }
-
-    if (stepKey === "review" && actions.canReview) {
-      await handleQuickAction(
-        () => reviewWorkflowTask(task._id, { note: "" }),
-        "Task moved to review.",
-        { taskId: task._id },
-      );
-      return;
-    }
-
-    if (stepKey === "rework" && actions.canRework) {
-      setReworkPrompt({
+    if (stepKey === "complete" && actions.canComplete) {
+      setNotePrompt({
         taskId: task._id,
+        type: "complete",
         note: "",
       });
       return;
     }
 
-    if (stepKey === "completed" && actions.canApprove) {
+    if (stepKey === "approved" && actions.canApprove) {
       await handleQuickAction(
         () => approveWorkflowTask(task._id, { note: "" }),
         "Task approved successfully.",
         { taskId: task._id },
       );
+      return;
+    }
+
+    if (stepKey === "uploaded" && actions.canUpload) {
+      await handleQuickAction(
+        () => uploadWorkflowTask(task._id),
+        "Task marked uploaded successfully.",
+        { taskId: task._id },
+      );
     }
   };
 
-  const handleConfirmRework = async (task) => {
-    const note = normalizeText(reworkPrompt.note);
-    if (!note) {
+  const handleReworkAction = (task) => {
+    setError("");
+    setSuccess("");
+    setNotePrompt({
+      taskId: task._id,
+      type: "rework",
+      note: "",
+    });
+  };
+
+  const handleConfirmNote = async (task) => {
+    const note = normalizeText(notePrompt.note);
+    if (notePrompt.type === "rework" && !note) {
       setError("Rework reason is required.");
+      return;
+    }
+
+    if (notePrompt.type === "complete") {
+      await handleQuickAction(
+        () => completeWorkflowTask(task._id, { note }),
+        "Task marked complete successfully.",
+        {
+          taskId: task._id,
+          closeNotePrompt: true,
+        },
+      );
       return;
     }
 
@@ -414,13 +460,13 @@ const WorkflowTasksPanel = ({
       "Task sent to rework.",
       {
         taskId: task._id,
-        closeReworkPrompt: true,
+        closeNotePrompt: true,
       },
     );
   };
 
   const taskStatuses = useMemo(
-    () => ["pending", "assigned", "in_progress", "submitted", "review", "rework", "completed", "cancelled"],
+    () => ["assigned", "complete", "approved", "uploaded"],
     [],
   );
 
@@ -445,13 +491,22 @@ const WorkflowTasksPanel = ({
             <div className="text-secondary">{description}</div>
           </div>
           {canCreateWorkflow && (
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => setShowCreateModal(true)}
-            >
-              Create Task
-            </button>
+            <div className="d-flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="btn btn-outline-primary"
+                onClick={() => setShowFolderCreateModal(true)}
+              >
+                Create Tasks from Folder
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setShowCreateModal(true)}
+              >
+                Create Manual Task
+              </button>
+            </div>
           )}
         </div>
 
@@ -505,22 +560,7 @@ const WorkflowTasksPanel = ({
                     <option key={taskType._id || taskType.key} value={taskType.key}>
                       {taskType.name}
                     </option>
-                  ))}
-                </select>
-              </div>
-              <div className="col-md-3 col-lg-2">
-                <label className="form-label">Batch</label>
-                <select
-                  className="form-select"
-                  value={batchFilter}
-                  onChange={(event) => setBatchFilter(event.target.value)}
-                >
-                  <option value="">All</option>
-                  {batches.map((batch) => (
-                    <option key={batch._id} value={batch._id}>
-                      {batch.batch_no} • {batch.name}
-                    </option>
-                  ))}
+                    ))}
                 </select>
               </div>
               {canFilterByAssignee && !mineOnly && (
@@ -610,7 +650,6 @@ const WorkflowTasksPanel = ({
                     setSearch("");
                     setStatusFilter("");
                     setTaskTypeFilter("");
-                    setBatchFilter("");
                     setAssigneeFilter(mineOnly ? currentUserId : "");
                     setDepartmentFilter("");
                     setBrandFilter("");
@@ -655,9 +694,10 @@ const WorkflowTasksPanel = ({
                 <table className="table align-middle mb-0">
                   <thead>
                     <tr>
-                      <th>Task</th>
-                      <th>Assigned Users</th>
-                      <th>Due Date</th>
+                      <th>Task Name</th>
+                      <th>Task Type</th>
+                      <th>Dates</th>
+                      <th>Status Flow</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
@@ -670,61 +710,85 @@ const WorkflowTasksPanel = ({
                         canApproveWorkflow,
                       });
                       const isBusy = actionTaskId === task._id;
-                      const isReworkPromptOpen = reworkPrompt.taskId === task._id;
-                      const batchLabel = task?.batch?.batch_no
-                        ? `${task.batch.batch_no}${task?.batch?.name ? ` • ${task.batch.name}` : ""}`
-                        : "Standalone task";
+                      const isNotePromptOpen = notePrompt.taskId === task._id;
+                      const assigneeText =
+                        Array.isArray(task.assigned_to) && task.assigned_to.length > 0
+                          ? task.assigned_to.map((entry) => getTaskUserName(entry)).join(", ")
+                          : "Unassigned";
+                      const reworkCount = Number(task?.reworked?.count || task?.rework_count || 0);
 
                       return (
                         <tr key={task._id}>
                           <td>
-                            <div className="workflow-task-cell">
-                              <div className="d-flex flex-wrap align-items-center gap-2 mb-1">
-                                <div className="fw-semibold">{task.title}</div>
-                                <span className="om-summary-chip">{task.task_no}</span>
+                            <div className="workflow-task-name-cell">
+                              <div className="fw-semibold">{task.title}</div>
+                              <div className="small text-secondary mt-1">
+                                {assigneeText}
                               </div>
-                              <div className="workflow-task-meta">
-                                <span>{task.task_type_name || task.task_type?.name || task.task_type_key}</span>
-                                <span>{batchLabel}</span>
-                                <span>Status: {formatWorkflowStageLabel(task.status)}</span>
-                                {task.department?.name && <span>{task.department.name}</span>}
-                                {task.brand && <span>Brand: {task.brand}</span>}
-                                {Number(task.rework_count || 0) > 0 && (
-                                  <span>Rework: {Number(task.rework_count || 0)}</span>
-                                )}
-                                {Array.isArray(task.source_files) && task.source_files.length > 0 && (
-                                  <span>Files: {task.source_files.length}</span>
-                                )}
+                            </div>
+                          </td>
+                          <td>
+                            <div className="workflow-task-type-cell">
+                              <div className="fw-semibold">
+                                {task.task_type_name || task.task_type?.name || task.task_type_key}
                               </div>
+                              <div className="small text-secondary mt-1">
+                                {formatWorkflowStageLabel(task.status)}
+                              </div>
+                              <div className="small text-secondary">
+                                Reworks: {reworkCount}
+                              </div>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="workflow-task-dates">
+                              <div>
+                                <span className="workflow-task-dates-label">Assigned</span>
+                                <span>{formatDateTime(task.assigned_at)}</span>
+                              </div>
+                              <div>
+                                <span className="workflow-task-dates-label">Due</span>
+                                <span>{formatDateOnly(task.due_date)}</span>
+                              </div>
+                              <div>
+                                <span className="workflow-task-dates-label">Complete</span>
+                                <span>{formatDateTime(task.completed_at)}</span>
+                              </div>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="workflow-task-flow-cell">
                               <WorkflowTaskStageBar
                                 task={task}
-                                className="mt-3"
                                 disabled={isBusy}
                                 isStepClickable={(stepKey) =>
-                                  (stepKey === "in_progress" && actions.canStart)
-                                  || (stepKey === "submitted" && actions.canSubmit)
-                                  || (stepKey === "review" && actions.canReview)
-                                  || (stepKey === "rework" && actions.canRework)
-                                  || (stepKey === "completed" && actions.canApprove)
+                                  (stepKey === "complete" && actions.canComplete)
+                                  || (stepKey === "approved" && actions.canApprove)
+                                  || (stepKey === "uploaded" && actions.canUpload)
                                 }
                                 onStepClick={(stepKey) => handleStageClick(task, stepKey)}
                               />
 
-                              {isReworkPromptOpen && (
+                              {isNotePromptOpen && (
                                 <div className="workflow-stage-popover workflow-task-quick-note mt-3">
                                   <div className="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
                                     <div>
-                                      <div className="fw-semibold">Send to Rework</div>
+                                      <div className="fw-semibold">
+                                        {notePrompt.type === "complete" ? "Mark Complete" : "Send to Rework"}
+                                      </div>
                                       <div className="small text-secondary">
-                                        Add the reason once, then keep moving from the board.
+                                        {notePrompt.type === "complete"
+                                          ? "Add an optional completion note, then keep moving from the table."
+                                          : "Add the reason once, then keep moving from the table."}
                                       </div>
                                     </div>
                                     <button
                                       type="button"
                                       className="btn btn-outline-secondary btn-sm"
                                       onClick={() =>
-                                        setReworkPrompt({
+                                        setNotePrompt({
                                           taskId: "",
+                                          type: "",
                                           note: "",
                                         })
                                       }
@@ -733,14 +797,20 @@ const WorkflowTasksPanel = ({
                                       Close
                                     </button>
                                   </div>
-                                  <label className="form-label">Rework Reason</label>
+                                  <label className="form-label">
+                                    {notePrompt.type === "complete" ? "Completion Comment" : "Rework Reason"}
+                                  </label>
                                   <textarea
                                     rows="2"
                                     className="form-control"
-                                    placeholder="Explain what needs to be fixed"
-                                    value={reworkPrompt.note}
+                                    placeholder={
+                                      notePrompt.type === "complete"
+                                        ? "Add a short completion note"
+                                        : "Explain what needs to be fixed"
+                                    }
+                                    value={notePrompt.note}
                                     onChange={(event) =>
-                                      setReworkPrompt((prev) => ({
+                                      setNotePrompt((prev) => ({
                                         ...prev,
                                         note: event.target.value,
                                       }))
@@ -751,8 +821,9 @@ const WorkflowTasksPanel = ({
                                       type="button"
                                       className="btn btn-outline-secondary btn-sm"
                                       onClick={() =>
-                                        setReworkPrompt({
+                                        setNotePrompt({
                                           taskId: "",
+                                          type: "",
                                           note: "",
                                         })
                                       }
@@ -762,11 +833,15 @@ const WorkflowTasksPanel = ({
                                     </button>
                                     <button
                                       type="button"
-                                      className="btn btn-danger btn-sm"
-                                      onClick={() => handleConfirmRework(task)}
+                                      className={`btn btn-sm ${notePrompt.type === "complete" ? "btn-primary" : "btn-danger"}`}
+                                      onClick={() => handleConfirmNote(task)}
                                       disabled={isBusy}
                                     >
-                                      {isBusy ? "Saving..." : "Confirm Rework"}
+                                      {isBusy
+                                        ? "Saving..."
+                                        : notePrompt.type === "complete"
+                                        ? "Save Complete"
+                                        : "Confirm Rework"}
                                     </button>
                                   </div>
                                 </div>
@@ -774,28 +849,38 @@ const WorkflowTasksPanel = ({
                             </div>
                           </td>
                           <td>
-                            {Array.isArray(task.assigned_to) && task.assigned_to.length > 0
-                              ? task.assigned_to.map((entry) => getTaskUserName(entry)).join(", ")
-                              : "Unassigned"}
-                          </td>
-                          <td>{formatDateTime(task.due_date)}</td>
-                          <td>
-                            <div className="d-flex flex-wrap gap-2">
+                            <div className="workflow-task-actions">
                               <button
                                 type="button"
-                                className="btn btn-outline-primary btn-sm"
+                                className="workflow-icon-button"
                                 onClick={() => setSelectedTaskId(task._id)}
+                                title="View task details"
+                                aria-label="View task details"
                               >
-                                View
+                                <img src={WORKFLOW_ACTION_ICONS.info} alt="" />
                               </button>
+                              {actions.canRework && (
+                                <button
+                                  type="button"
+                                  className="workflow-icon-button is-accent"
+                                  disabled={isBusy}
+                                  onClick={() => handleReworkAction(task)}
+                                  title={`Send to rework (${reworkCount})`}
+                                  aria-label="Send to rework"
+                                >
+                                  <ReworkActionIcon />
+                                </button>
+                              )}
                               {canDeleteWorkflow && (
                                 <button
                                   type="button"
-                                  className="btn btn-danger btn-sm"
+                                  className="workflow-icon-button is-danger"
                                   disabled={isBusy}
                                   onClick={() => handleDeleteTask(task)}
+                                  title="Delete task"
+                                  aria-label="Delete task"
                                 >
-                                  Delete Task
+                                  <img src={WORKFLOW_ACTION_ICONS.delete} alt="" />
                                 </button>
                               )}
                             </div>
@@ -849,6 +934,19 @@ const WorkflowTasksPanel = ({
           }}
           onDeleted={() => {
             setSelectedTaskId("");
+            setRefreshTick((prev) => prev + 1);
+          }}
+        />
+      )}
+
+      {showFolderCreateModal && (
+        <WorkflowBatchCreateModal
+          taskTypes={taskTypes}
+          availableUsers={users}
+          onClose={() => setShowFolderCreateModal(false)}
+          onCreated={() => {
+            setShowFolderCreateModal(false);
+            setSuccess("Tasks created from folder successfully.");
             setRefreshTick((prev) => prev + 1);
           }}
         />

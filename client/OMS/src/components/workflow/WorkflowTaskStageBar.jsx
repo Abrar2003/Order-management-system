@@ -11,44 +11,39 @@ const WorkflowTaskStageBar = ({
   isStepClickable = () => false,
   onStepClick,
 }) => {
-  const reachedSteps = getWorkflowReachedStageKeys(task);
-  const activeStage = getWorkflowDisplayStageKey(task);
+  const activeKey = getWorkflowDisplayStageKey(task);
+  const reachedKeys = getWorkflowReachedStageKeys(task);
 
   return (
-    <div className={["workflow-stage-rail-scroller", className].filter(Boolean).join(" ")}>
-      <div className="workflow-stage-rail" role="group" aria-label="Workflow stages">
+    <div className={["workflow-status-line", className].filter(Boolean).join(" ")}>
+      <div className="workflow-status-line-track" aria-hidden="true" />
+      <div className="workflow-status-line-steps" role="group" aria-label="Task status flow">
         {WORKFLOW_STAGE_BAR_STEPS.map((step, index) => {
-          const nextStep = WORKFLOW_STAGE_BAR_STEPS[index + 1] || null;
-          const isActive = activeStage === step.key && step.key !== "completed";
-          const isComplete = reachedSteps.has(step.key) && !isActive;
-          const isClickable =
+          const active = step.key === activeKey;
+          const complete = reachedKeys.has(step.key) && !active;
+          const clickable =
             !disabled
             && typeof onStepClick === "function"
             && Boolean(isStepClickable(step.key));
-          const hasCompleteConnector =
-            Boolean(nextStep)
-            && (reachedSteps.has(nextStep.key) || activeStage === nextStep.key);
 
           return (
             <button
               key={step.key}
               type="button"
               className={[
-                "workflow-stage-rail-step",
-                isComplete ? "is-complete" : "",
-                isActive ? "is-active" : "",
-                isClickable ? "is-clickable" : "",
-                hasCompleteConnector ? "has-complete-connector" : "",
+                "workflow-status-line-step",
+                active ? "is-active" : "",
+                complete ? "is-complete" : "",
+                clickable ? "is-clickable" : "",
               ]
                 .filter(Boolean)
                 .join(" ")}
-              disabled={!isClickable}
+              disabled={!clickable}
               onClick={() => onStepClick?.(step.key)}
+              style={{ "--workflow-step-index": index }}
             >
-              <span className="workflow-stage-rail-node">
-                {isComplete ? "✓" : ""}
-              </span>
-              <span className="workflow-stage-rail-label">{step.label}</span>
+              <span className="workflow-status-line-node" />
+              <span className="workflow-status-line-label">{step.label}</span>
             </button>
           );
         })}

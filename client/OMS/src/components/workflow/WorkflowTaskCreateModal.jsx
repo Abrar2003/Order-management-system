@@ -12,7 +12,6 @@ const createDraft = ({ defaultTaskTypeKey = "" } = {}) => ({
   department: "",
   priority: "normal",
   due_date: "",
-  review_required: true,
   brand: "",
 });
 
@@ -64,7 +63,6 @@ const WorkflowTaskCreateModal = ({
         || "",
       assignee_ids: getTaskTypeDefaultAssigneeIds(nextTaskType),
       priority: normalizeText(nextTaskType?.default_priority) || "normal",
-      review_required: nextTaskType?.requires_review !== false,
     }));
   };
 
@@ -89,6 +87,10 @@ const WorkflowTaskCreateModal = ({
       setError("Task name is required.");
       return;
     }
+    if (!Array.isArray(form.assignee_ids) || form.assignee_ids.length === 0) {
+      setError("At least one assignee is required.");
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -99,7 +101,6 @@ const WorkflowTaskCreateModal = ({
         assignee_ids: form.assignee_ids,
         department: normalizeText(form.department) || null,
         priority: normalizeText(form.priority) || "normal",
-        review_required: Boolean(form.review_required),
         brand: normalizeText(form.brand),
       };
 
@@ -138,7 +139,7 @@ const WorkflowTaskCreateModal = ({
             <div>
               <h5 className="modal-title">Create Workflow Task</h5>
               <div className="small text-muted">
-                Create a standalone manual task without linking it to a batch.
+                Create a standalone manual task.
               </div>
             </div>
             <button
@@ -249,7 +250,7 @@ const WorkflowTaskCreateModal = ({
                           />
                         </div>
 
-                        <div className="col-md-6">
+                        <div className="col-md-12">
                           <label className="form-label">Brand</label>
                           <input
                             type="text"
@@ -261,22 +262,6 @@ const WorkflowTaskCreateModal = ({
                           />
                         </div>
 
-                        <div className="col-md-6">
-                          <div className="form-check form-switch mt-4 pt-2">
-                            <input
-                              type="checkbox"
-                              className="form-check-input"
-                              checked={form.review_required}
-                              onChange={(event) =>
-                                setForm((prev) => ({
-                                  ...prev,
-                                  review_required: event.target.checked,
-                                }))
-                              }
-                            />
-                            <label className="form-check-label">Requires Review</label>
-                          </div>
-                        </div>
                       </div>
                     </div>
                   </section>
@@ -290,7 +275,7 @@ const WorkflowTaskCreateModal = ({
                           Task Type: {selectedTaskType?.name || "Select a task type"}
                         </span>
                         <span className="om-summary-chip">
-                          Review: {form.review_required ? "Required" : "Optional"}
+                          Status Flow: Assigned {"->"} Complete {"->"} Approved {"->"} Uploaded
                         </span>
                         <span className="om-summary-chip">
                           Priority: {form.priority || "normal"}

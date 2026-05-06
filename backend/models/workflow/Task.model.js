@@ -3,6 +3,7 @@ const {
   WORKFLOW_TASK_PRIORITIES,
   WORKFLOW_TASK_STATUSES,
   normalizeKey,
+  normalizeWorkflowTaskStatus,
   normalizeText,
 } = require("../../helpers/workflow");
 const {
@@ -10,6 +11,23 @@ const {
   SourceFileMetadataSchema,
   UserReferenceSchema,
 } = require("./shared");
+
+const TaskReworkedCommentSchema = new mongoose.Schema(
+  {
+    comment: { type: String, default: "", trim: true },
+    created_at: { type: Date, default: Date.now },
+    created_by: { type: AuditActorSchema, default: () => ({}) },
+  },
+  { _id: false },
+);
+
+const TaskReworkedSchema = new mongoose.Schema(
+  {
+    count: { type: Number, default: 0, min: 0 },
+    comments: { type: [TaskReworkedCommentSchema], default: [] },
+  },
+  { _id: false },
+);
 
 const TaskSchema = new mongoose.Schema(
   {
@@ -42,7 +60,7 @@ const TaskSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: WORKFLOW_TASK_STATUSES,
-      default: "pending",
+      default: "assigned",
       trim: true,
     },
     priority: {
@@ -58,9 +76,14 @@ const TaskSchema = new mongoose.Schema(
     started_at: { type: Date, default: null },
     submitted_at: { type: Date, default: null },
     completed_at: { type: Date, default: null },
+    approved_by: { type: AuditActorSchema, default: () => ({}) },
+    approved_at: { type: Date, default: null },
+    uploaded_by: { type: AuditActorSchema, default: () => ({}) },
+    uploaded_at: { type: Date, default: null },
     review_required: { type: Boolean, default: true },
     reviewed_by: { type: AuditActorSchema, default: () => ({}) },
     reviewed_at: { type: Date, default: null },
+    reworked: { type: TaskReworkedSchema, default: () => ({}) },
     rework_count: { type: Number, default: 0, min: 0 },
     blocked_reason: { type: String, default: "", trim: true },
     tags: { type: [String], default: [] },
@@ -92,6 +115,31 @@ TaskSchema.pre("validate", function normalizeTask() {
   this.source_folder_name = normalizeText(this.source_folder_name);
   this.source_folder_path = normalizeText(this.source_folder_path);
   this.blocked_reason = normalizeText(this.blocked_reason);
+  this.status = normalizeWorkflowTaskStatus(this.status, { fallback: "assigned" }) || "assigned";
+  if (["approved", "uploaded"].includes(this.status)) {
+    if (!this.approved_at && this.reviewed_at) {
+      this.approved_at = this.reviewed_at;
+    }
+    if (!this.approved_by?.user && this.reviewed_by?.user) {
+      this.approved_by = this.reviewed_by;
+    }
+  }
+  if (!this.reworked || typeof this.reworked !== "object") {
+    this.reworked = { count: 0, comments: [] };
+  }
+  this.reworked.comments = Array.isArray(this.reworked.comments)
+    ? this.reworked.comments.map((entry) => ({
+        comment: normalizeText(entry?.comment),
+        created_at: entry?.created_at || new Date(),
+        created_by: entry?.created_by || {},
+      }))
+    : [];
+  this.reworked.count = Math.max(
+    0,
+    Number(this.reworked.count || 0),
+    Number(this.rework_count || 0),
+  );
+  this.rework_count = this.reworked.count;
   this.tags = Array.isArray(this.tags)
     ? [...new Set(this.tags.map((value) => normalizeText(value)).filter(Boolean))]
     : [];

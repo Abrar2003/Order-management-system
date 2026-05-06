@@ -13,6 +13,7 @@ const {
 const {
   approveTask,
   assignTask,
+  completeTask,
   createTask,
   getWorkflowDashboard,
   getWorkflowTask,
@@ -24,6 +25,7 @@ const {
   reworkTask,
   startTask,
   submitTask,
+  uploadTask,
 } = require("../controllers/workflow/task.controller");
 const {
   createTaskType,
@@ -144,6 +146,13 @@ router.patch(
 );
 
 router.patch(
+  "/tasks/:id/complete",
+  auth,
+  requirePermission("workflow", "view"),
+  completeTask,
+);
+
+router.patch(
   "/tasks/:id/review",
   auth,
   authorize(...WORKFLOW_MANAGER_ROLES),
@@ -160,6 +169,13 @@ router.patch(
 );
 
 router.patch(
+  "/tasks/:id/upload",
+  auth,
+  requirePermission("workflow", "view"),
+  uploadTask,
+);
+
+router.patch(
   "/tasks/:id/rework",
   auth,
   authorize(...WORKFLOW_MANAGER_ROLES),
@@ -170,8 +186,7 @@ router.patch(
 router.patch(
   "/tasks/:id/status",
   auth,
-  authorize(...WORKFLOW_MANAGER_ROLES),
-  requirePermission("workflow", "edit"),
+  requirePermission("workflow", "view"),
   patchTaskStatus,
 );
 

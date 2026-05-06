@@ -60,6 +60,12 @@ const Containers = () => {
   const [draftBrandFilter, setDraftBrandFilter] = useState(() =>
     normalizeFilterParam(searchParams.get("brand"), "all"),
   );
+  const [checkedStatusFilter, setCheckedStatusFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("checked_status"), "all"),
+  );
+  const [draftCheckedStatusFilter, setDraftCheckedStatusFilter] = useState(() =>
+    normalizeFilterParam(searchParams.get("checked_status"), "all"),
+  );
   const [fromDateFilter, setFromDateFilter] = useState(() =>
     normalizeDateParam(searchParams.get("from_date") || searchParams.get("fromDate")),
   );
@@ -92,6 +98,7 @@ const Containers = () => {
           container: containerSearch,
           vendor: vendorFilter,
           brand: brandFilter,
+          checked_status: checkedStatusFilter,
           from_date: fromDateFilter,
           to_date: toDateFilter,
         },
@@ -122,7 +129,7 @@ const Containers = () => {
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, containerSearch, fromDateFilter, toDateFilter, vendorFilter]);
+  }, [brandFilter, checkedStatusFilter, containerSearch, fromDateFilter, toDateFilter, vendorFilter]);
 
   useEffect(() => {
     fetchContainers();
@@ -133,6 +140,7 @@ const Containers = () => {
     const nextContainerSearch = normalizeSearchParam(searchParams.get("container"));
     const nextVendorFilter = normalizeFilterParam(searchParams.get("vendor"), "all");
     const nextBrandFilter = normalizeFilterParam(searchParams.get("brand"), "all");
+    const nextCheckedStatusFilter = normalizeFilterParam(searchParams.get("checked_status"), "all");
     const nextFromDateFilter = normalizeDateParam(
       searchParams.get("from_date") || searchParams.get("fromDate"),
     );
@@ -157,6 +165,12 @@ const Containers = () => {
     );
     setDraftBrandFilter((prev) =>
       prev === nextBrandFilter ? prev : nextBrandFilter,
+    );
+    setCheckedStatusFilter((prev) =>
+      prev === nextCheckedStatusFilter ? prev : nextCheckedStatusFilter,
+    );
+    setDraftCheckedStatusFilter((prev) =>
+      prev === nextCheckedStatusFilter ? prev : nextCheckedStatusFilter,
     );
     setFromDateFilter((prev) =>
       prev === nextFromDateFilter ? prev : nextFromDateFilter,
@@ -183,6 +197,7 @@ const Containers = () => {
     if (containerValue) next.set("container", containerValue);
     if (vendorFilter && vendorFilter !== "all") next.set("vendor", vendorFilter);
     if (brandFilter && brandFilter !== "all") next.set("brand", brandFilter);
+    if (checkedStatusFilter && checkedStatusFilter !== "all") next.set("checked_status", checkedStatusFilter);
     if (fromDateFilter) next.set("from_date", fromDateFilter);
     if (toDateFilter) next.set("to_date", toDateFilter);
 
@@ -191,6 +206,7 @@ const Containers = () => {
     }
   }, [
     brandFilter,
+    checkedStatusFilter,
     containerSearch,
     fromDateFilter,
     searchParams,
@@ -232,6 +248,7 @@ const Containers = () => {
     setContainerSearch(normalizeSearchParam(draftContainerSearch));
     setVendorFilter(normalizeFilterParam(draftVendorFilter, "all"));
     setBrandFilter(normalizeFilterParam(draftBrandFilter, "all"));
+    setCheckedStatusFilter(normalizeFilterParam(draftCheckedStatusFilter, "all"));
     setFromDateFilter(normalizeDateParam(draftFromDateFilter));
     setToDateFilter(normalizeDateParam(draftToDateFilter));
   };
@@ -240,11 +257,13 @@ const Containers = () => {
     setDraftContainerSearch("");
     setDraftVendorFilter("all");
     setDraftBrandFilter("all");
+    setDraftCheckedStatusFilter("all");
     setDraftFromDateFilter("");
     setDraftToDateFilter("");
     setContainerSearch("");
     setVendorFilter("all");
     setBrandFilter("all");
+    setCheckedStatusFilter("all");
     setFromDateFilter("");
     setToDateFilter("");
   };
@@ -342,6 +361,19 @@ const Containers = () => {
                       {brand}
                     </option>
                   ))}
+                </select>
+              </div>
+              <div className="col-md-2">
+                <label className="form-label">Checked Status</label>
+                <select
+                  className="form-select"
+                  value={draftCheckedStatusFilter}
+                  onChange={(event) => setDraftCheckedStatusFilter(event.target.value)}
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="checked">Checked</option>
+                  <option value="partially checked">Partially Checked</option>
+                  <option value="checking pending">Checking Pending</option>
                 </select>
               </div>
               <div className="col-md-2">

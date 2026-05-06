@@ -25,21 +25,21 @@ const isTaskAssignedToUser = (task = {}, userId) => {
 const canReadWorkflowTask = (user = {}, task = {}) =>
   isAdmin(user) || isTaskAssignedToUser(task, user?._id);
 
-const canStartWorkflowTask = (user = {}, task = {}) =>
-  isTaskAssignedToUser(task, user?._id);
-
-const canSubmitWorkflowTask = (user = {}, task = {}) =>
+const canCompleteWorkflowTask = (user = {}, task = {}) =>
   isTaskAssignedToUser(task, user?._id);
 
 const canApproveWorkflowTask = (user = {}, task = {}) =>
   isAdmin(user) && !isTaskAssignedToUser(task, user?._id);
 
+const canUploadWorkflowTask = (user = {}, task = {}) =>
+  isAdmin(user) || isTaskAssignedToUser(task, user?._id);
+
 module.exports = {
   isAdmin,
   canApproveWorkflowTask,
+  canCompleteWorkflowTask,
   canReadWorkflowTask,
-  canStartWorkflowTask,
-  canSubmitWorkflowTask,
+  canUploadWorkflowTask,
   isManagerOrAdmin,
   isPrivilegedWorkflowReader,
   isTaskAssignedToUser,

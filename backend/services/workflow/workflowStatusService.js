@@ -2,12 +2,15 @@ const mongoose = require("mongoose");
 const { buildAuditActor } = require("../../helpers/permissions");
 const User = require("../../models/user.model");
 const {
+  buildWorkflowTaskStatusNormalizationExpression,
   buildWorkflowManualTaskNo,
+  getWorkflowStatusFilterValues,
   WORKFLOW_ALLOWED_STATUS_TRANSITIONS,
   WORKFLOW_TASK_COMMENT_TYPES,
   WORKFLOW_TASK_PRIORITIES,
   WORKFLOW_TASK_STATUSES,
   normalizeKey,
+  normalizeWorkflowTaskStatus,
   normalizeText,
 } = require("../../helpers/workflow");
 const {
@@ -20,9 +23,9 @@ const {
 } = require("../../models/workflow");
 const {
   canApproveWorkflowTask,
+  canCompleteWorkflowTask,
   canReadWorkflowTask,
-  canStartWorkflowTask,
-  canSubmitWorkflowTask,
+  canUploadWorkflowTask,
   isAdmin,
   isManagerOrAdmin,
   isPrivilegedWorkflowReader,
@@ -35,29 +38,19 @@ const {
 const DEFAULT_PAGE_LIMIT = 20;
 const MAX_PAGE_LIMIT = 100;
 const ACTIVE_TASK_STATUSES = Object.freeze([
-  "pending",
   "assigned",
-  "in_progress",
-  "submitted",
-  "review",
-  "rework",
-]);
-const AWAITING_REVIEW_TASK_STATUSES = Object.freeze([
-  "submitted",
-  "review",
+  "complete",
+  "approved",
 ]);
 const DASHBOARD_COUNT_FIELDS = Object.freeze([
   "total_tasks",
   "open_tasks",
-  "pending_tasks",
   "assigned_tasks",
-  "in_progress_tasks",
-  "submitted_tasks",
-  "review_tasks",
-  "rework_tasks",
-  "completed_tasks",
-  "cancelled_tasks",
-  "awaiting_review_tasks",
+  "complete_tasks",
+  "approved_tasks",
+  "uploaded_tasks",
+  "reworked_tasks",
+  "needs_approval_tasks",
   "overdue_tasks",
   "due_today_tasks",
 ]);
@@ -92,11 +85,39 @@ const populateTaskQuery = (query) =>
     .populate("reviewed_by.user", "name email role")
     .lean();
 
-const serializeTask = (doc = {}) => ({
-  ...doc,
-  task_type_key: normalizeKey(doc?.task_type_key || doc?.task_type?.key),
-  task_type_name: normalizeText(doc?.task_type_name || doc?.task_type?.name),
-});
+const getTaskReworkPayload = (doc = {}) => {
+  const comments = Array.isArray(doc?.reworked?.comments) ? doc.reworked.comments : [];
+  const count = Math.max(
+    0,
+    Number(doc?.reworked?.count || 0),
+    Number(doc?.rework_count || 0),
+  );
+
+  return {
+    count,
+    comments,
+  };
+};
+
+const serializeTask = (doc = {}) => {
+  const normalizedStatus = normalizeWorkflowTaskStatus(doc?.status, {
+    fallback: "assigned",
+  }) || "assigned";
+  const reworked = getTaskReworkPayload(doc);
+
+  return {
+    ...doc,
+    status: normalizedStatus,
+    task_type_key: normalizeKey(doc?.task_type_key || doc?.task_type?.key),
+    task_type_name: normalizeText(doc?.task_type_name || doc?.task_type?.name),
+    approved_at: doc?.approved_at || doc?.reviewed_at || null,
+    approved_by:
+      doc?.approved_by?.user || doc?.approved_by?.name || doc?.approved_by?.email
+        ? doc.approved_by
+        : doc?.reviewed_by || {},
+    reworked,
+  };
+};
 
 const buildWorkflowDashboardCounts = (doc = {}) =>
   DASHBOARD_COUNT_FIELDS.reduce((acc, key) => {
@@ -115,12 +136,23 @@ const buildTaskVisibilityMatch = (user = {}) => {
   };
 };
 
+const buildStatusMatch = (status = "") => {
+  const values = getWorkflowStatusFilterValues(status);
+  if (values.length === 0) {
+    return normalizeText(status).toLowerCase();
+  }
+  if (values.length === 1) {
+    return values[0];
+  }
+  return { $in: values };
+};
+
 const buildTaskListMatch = ({ query = {}, user = {} } = {}) => {
   const privilegedReader = isAdmin(user);
   const match = buildTaskVisibilityMatch(user);
 
   if (normalizeText(query?.status)) {
-    match.status = normalizeText(query.status).toLowerCase();
+    match.status = buildStatusMatch(query.status);
   }
   if (normalizeText(query?.task_type_key)) {
     match.task_type_key = normalizeKey(query.task_type_key);
@@ -321,6 +353,9 @@ const createWorkflowTask = async ({ payload = {}, actor = {} } = {}) => {
         ? taskType.default_assignees.map((entry) => normalizeId(entry?.user || entry))
         : []);
   const assignees = await validateAssigneeUsers(assigneeIds || []);
+  if (assignees.length === 0) {
+    throw new Error("At least one assignee is required");
+  }
 
   const department = payload?.department !== undefined
     ? await ensureDepartmentExists(payload.department)
@@ -337,7 +372,8 @@ const createWorkflowTask = async ({ payload = {}, actor = {} } = {}) => {
   const taskNo = buildWorkflowManualTaskNo(taskId, new Date());
   const auditActor = buildAuditActor(actor);
   const assignedUserRefs = assignees.map((user) => ({ user: user._id }));
-  const initialStatus = assignedUserRefs.length > 0 ? "assigned" : "pending";
+  const initialStatus = "assigned";
+  const assignedAt = new Date();
 
   const task = await Task.create({
     _id: taskId,
@@ -357,8 +393,8 @@ const createWorkflowTask = async ({ payload = {}, actor = {} } = {}) => {
     status: initialStatus,
     priority,
     assigned_to: assignedUserRefs,
-    assigned_by: assignedUserRefs.length > 0 ? auditActor : {},
-    assigned_at: assignedUserRefs.length > 0 ? new Date() : null,
+    assigned_by: auditActor,
+    assigned_at: assignedAt,
     due_date: dueDate,
     review_required: reviewRequired,
     tags: [taskType.key],
@@ -374,7 +410,7 @@ const createWorkflowTask = async ({ payload = {}, actor = {} } = {}) => {
         assignee: user._id,
         department: task.department || null,
         status: "active",
-        assigned_at: new Date(),
+        assigned_at: assignedAt,
         assigned_by: auditActor,
         note: "Task created with assignee",
       })),
@@ -414,19 +450,13 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
 
   const statusCount = (status) => ({
     $sum: {
-      $cond: [{ $eq: ["$status", status] }, 1, 0],
+      $cond: [{ $eq: ["$normalized_status", status] }, 1, 0],
     },
   });
 
   const openTaskCount = {
     $sum: {
-      $cond: [{ $in: ["$status", ACTIVE_TASK_STATUSES] }, 1, 0],
-    },
-  };
-
-  const awaitingReviewCount = {
-    $sum: {
-      $cond: [{ $in: ["$status", AWAITING_REVIEW_TASK_STATUSES] }, 1, 0],
+      $cond: [{ $in: ["$normalized_status", ACTIVE_TASK_STATUSES] }, 1, 0],
     },
   };
 
@@ -435,7 +465,7 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
       $cond: [
         {
           $and: [
-            { $in: ["$status", ACTIVE_TASK_STATUSES] },
+            { $in: ["$normalized_status", ACTIVE_TASK_STATUSES] },
             { $ne: ["$due_date", null] },
             { $lt: ["$due_date", now] },
           ],
@@ -451,7 +481,7 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
       $cond: [
         {
           $and: [
-            { $in: ["$status", ACTIVE_TASK_STATUSES] },
+            { $in: ["$normalized_status", ACTIVE_TASK_STATUSES] },
             { $ne: ["$due_date", null] },
             { $gte: ["$due_date", todayStart] },
             { $lt: ["$due_date", tomorrowStart] },
@@ -466,21 +496,30 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
   const baseGroup = {
     total_tasks: { $sum: 1 },
     open_tasks: openTaskCount,
-    pending_tasks: statusCount("pending"),
     assigned_tasks: statusCount("assigned"),
-    in_progress_tasks: statusCount("in_progress"),
-    submitted_tasks: statusCount("submitted"),
-    review_tasks: statusCount("review"),
-    rework_tasks: statusCount("rework"),
-    completed_tasks: statusCount("completed"),
-    cancelled_tasks: statusCount("cancelled"),
-    awaiting_review_tasks: awaitingReviewCount,
+    complete_tasks: statusCount("complete"),
+    approved_tasks: statusCount("approved"),
+    uploaded_tasks: statusCount("uploaded"),
+    reworked_tasks: {
+      $sum: {
+        $cond: [{ $gt: ["$normalized_rework_count", 0] }, 1, 0],
+      },
+    },
+    needs_approval_tasks: statusCount("complete"),
     overdue_tasks: overdueCount,
     due_today_tasks: dueTodayCount,
   };
 
   const [summary] = await Task.aggregate([
     { $match: match },
+    {
+      $addFields: {
+        normalized_status: buildWorkflowTaskStatusNormalizationExpression(),
+        normalized_rework_count: {
+          $ifNull: ["$reworked.count", { $ifNull: ["$rework_count", 0] }],
+        },
+      },
+    },
     {
       $facet: {
         overall: [
@@ -551,15 +590,12 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
               last_task_update_at: 1,
               total_tasks: 1,
               open_tasks: 1,
-              pending_tasks: 1,
               assigned_tasks: 1,
-              in_progress_tasks: 1,
-              submitted_tasks: 1,
-              review_tasks: 1,
-              rework_tasks: 1,
-              completed_tasks: 1,
-              cancelled_tasks: 1,
-              awaiting_review_tasks: 1,
+              complete_tasks: 1,
+              approved_tasks: 1,
+              uploaded_tasks: 1,
+              reworked_tasks: 1,
+              needs_approval_tasks: 1,
               overdue_tasks: 1,
               due_today_tasks: 1,
             },
@@ -568,7 +604,7 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
             $sort: {
               open_tasks: -1,
               overdue_tasks: -1,
-              awaiting_review_tasks: -1,
+              needs_approval_tasks: -1,
               total_tasks: -1,
               name: 1,
             },
@@ -624,7 +660,7 @@ const updateAssignmentCompletionState = async (task, toStatus, actor, note = "")
     return;
   }
 
-  if (toStatus === "completed") {
+  if (toStatus === "complete") {
     await TaskAssignment.updateMany(
       {
         task: task._id,
@@ -635,26 +671,26 @@ const updateAssignmentCompletionState = async (task, toStatus, actor, note = "")
         $set: {
           status: "completed",
           completed_at: new Date(),
-          note: normalizeText(note) || "Task completed",
+          note: normalizeText(note) || "Task marked complete",
         },
       },
     );
     return;
   }
 
-  if (toStatus === "cancelled") {
+  if (toStatus === "assigned") {
     await TaskAssignment.updateMany(
       {
         task: task._id,
         assignee: { $in: activeAssigneeIds },
-        status: "active",
       },
       {
         $set: {
-          status: "removed",
-          removed_at: new Date(),
-          removed_by: buildAuditActor(actor),
-          note: normalizeText(note) || "Task cancelled",
+          status: "active",
+          completed_at: null,
+          removed_at: null,
+          removed_by: {},
+          note: normalizeText(note) || "Task returned for rework",
         },
       },
     );
@@ -689,34 +725,34 @@ const applyTaskTransition = async ({
   note = "",
   commentType = "system",
 }) => {
-  const fromStatus = task.status;
+  const auditActor = buildAuditActor(actor);
+  const fromStatus = normalizeWorkflowTaskStatus(task.status, {
+    fallback: "assigned",
+  }) || "assigned";
   ensureAllowedStatusTransition(fromStatus, toStatus);
 
+  task.status = fromStatus;
   task.status = toStatus;
-  task.updated_by = buildAuditActor(actor);
+  task.updated_by = auditActor;
 
-  if (toStatus === "in_progress" && !task.started_at) {
-    task.started_at = new Date();
-  }
-  if (toStatus === "submitted") {
-    task.submitted_at = new Date();
-  }
-  if (toStatus === "review") {
-    task.reviewed_by = buildAuditActor(actor);
-    task.reviewed_at = new Date();
-  }
-  if (toStatus === "rework") {
-    task.reviewed_by = buildAuditActor(actor);
-    task.reviewed_at = new Date();
-    task.rework_count = Number(task.rework_count || 0) + 1;
-  }
-  if (toStatus === "completed") {
-    task.reviewed_by = buildAuditActor(actor);
-    task.reviewed_at = new Date();
+  if (toStatus === "complete") {
     task.completed_at = new Date();
+    task.approved_at = null;
+    task.approved_by = {};
+    task.uploaded_at = null;
+    task.uploaded_by = {};
   }
-  if (toStatus === "cancelled") {
-    task.blocked_reason = normalizeText(note) || task.blocked_reason;
+  if (toStatus === "approved") {
+    task.approved_by = auditActor;
+    task.approved_at = new Date();
+    task.reviewed_by = auditActor;
+    task.reviewed_at = task.approved_at;
+    task.uploaded_at = null;
+    task.uploaded_by = {};
+  }
+  if (toStatus === "uploaded") {
+    task.uploaded_by = auditActor;
+    task.uploaded_at = new Date();
   }
 
   await task.save();
@@ -725,7 +761,7 @@ const applyTaskTransition = async ({
     batch: task.batch || null,
     from_status: fromStatus,
     to_status: toStatus,
-    changed_by: buildAuditActor(actor),
+    changed_by: auditActor,
     changed_at: new Date(),
     note: normalizeText(note),
     metadata: {},
@@ -743,23 +779,19 @@ const applyTaskTransition = async ({
 };
 
 const assertTransitionPermission = ({ task, actor, toStatus }) => {
-  if (["in_progress"].includes(toStatus) && !canStartWorkflowTask(actor, task)) {
-    throw new Error("Only an assigned user can start this task");
+  if (["complete"].includes(toStatus) && !canCompleteWorkflowTask(actor, task)) {
+    throw new Error("Only an assigned user can mark this task complete");
   }
 
-  if (["submitted"].includes(toStatus) && !canSubmitWorkflowTask(actor, task)) {
-    throw new Error("Only an assigned user can submit this task");
+  if (["uploaded"].includes(toStatus) && !canUploadWorkflowTask(actor, task)) {
+    throw new Error("Only the assignee or an admin can mark this task uploaded");
   }
 
-  if (["review", "cancelled"].includes(toStatus) && !isManagerOrAdmin(actor)) {
-    throw new Error("Only admin or manager can change this task to the requested status");
-  }
-
-  if (["completed"].includes(toStatus) && !canApproveWorkflowTask(actor, task)) {
+  if (["approved"].includes(toStatus) && !canApproveWorkflowTask(actor, task)) {
     throw new Error("Only admins can approve this task");
   }
 
-  if (["rework"].includes(toStatus)) {
+  if (toStatus === "__rework__") {
     if (!isManagerOrAdmin(actor)) {
       throw new Error("Only admin or manager can send this task to rework");
     }
@@ -777,11 +809,14 @@ const assignWorkflowTask = async ({
   note = "",
 }) => {
   const task = await getMutableTaskById(taskId);
-  if (["completed", "cancelled"].includes(task.status)) {
-    throw new Error("Completed or cancelled tasks cannot be reassigned");
+  if (normalizeWorkflowTaskStatus(task.status, { fallback: "" }) === "uploaded") {
+    throw new Error("Uploaded tasks cannot be reassigned");
   }
 
   const nextAssignees = await validateAssigneeUsers(assigneeIds);
+  if (nextAssignees.length === 0) {
+    throw new Error("At least one assignee is required");
+  }
   const nextAssigneeIds = nextAssignees.map((user) => normalizeId(user._id));
   const currentAssigneeIds = (Array.isArray(task.assigned_to) ? task.assigned_to : [])
     .map((entry) => normalizeId(entry?.user))
@@ -825,16 +860,25 @@ const assignWorkflowTask = async ({
     );
   }
 
-  const fromStatus = task.status;
-  const toStatus = nextAssigneeIds.length > 0
-    ? (task.status === "pending" ? "assigned" : task.status)
-    : (task.status === "assigned" ? "pending" : task.status);
+  const fromStatus = normalizeWorkflowTaskStatus(task.status, {
+    fallback: "assigned",
+  }) || "assigned";
+  const shouldResetStatus = fromStatus !== "assigned" && idsToAdd.length > 0;
+  const toStatus = shouldResetStatus ? "assigned" : fromStatus;
+  const assignedAt = new Date();
 
   task.assigned_to = nextAssignees.map((user) => ({ user: user._id }));
-  task.assigned_by = nextAssigneeIds.length > 0 ? auditActor : {};
-  task.assigned_at = nextAssigneeIds.length > 0 ? new Date() : null;
+  task.assigned_by = auditActor;
+  task.assigned_at = assignedAt;
   task.updated_by = auditActor;
   task.status = toStatus;
+  if (toStatus === "assigned") {
+    task.completed_at = null;
+    task.approved_at = null;
+    task.approved_by = {};
+    task.uploaded_at = null;
+    task.uploaded_by = {};
+  }
   await task.save();
 
   if (fromStatus !== toStatus) {
@@ -857,50 +901,42 @@ const assignWorkflowTask = async ({
 };
 
 const startWorkflowTask = async ({ taskId, actor = {}, note = "" }) => {
+  throw new Error("Start is no longer a separate workflow stage");
+};
+
+const completeWorkflowTask = async ({ taskId, actor = {}, note = "" }) => {
   const task = await getMutableTaskById(taskId);
-  assertTransitionPermission({ task, actor, toStatus: "in_progress" });
+  assertTransitionPermission({ task, actor, toStatus: "complete" });
   return applyTaskTransition({
     task,
     actor,
-    toStatus: "in_progress",
+    toStatus: "complete",
     note,
-    commentType: "system",
+    commentType: "complete",
   });
 };
 
-const submitWorkflowTask = async ({ taskId, actor = {}, note = "" }) => {
+const uploadWorkflowTask = async ({ taskId, actor = {}, note = "" }) => {
   const task = await getMutableTaskById(taskId);
-  assertTransitionPermission({ task, actor, toStatus: "submitted" });
+  assertTransitionPermission({ task, actor, toStatus: "uploaded" });
   return applyTaskTransition({
     task,
     actor,
-    toStatus: "submitted",
+    toStatus: "uploaded",
     note,
-    commentType: "system",
-  });
-};
-
-const reviewWorkflowTask = async ({ taskId, actor = {}, note = "" }) => {
-  const task = await getMutableTaskById(taskId);
-  assertTransitionPermission({ task, actor, toStatus: "review" });
-  return applyTaskTransition({
-    task,
-    actor,
-    toStatus: "review",
-    note,
-    commentType: "review",
+    commentType: "upload",
   });
 };
 
 const approveWorkflowTask = async ({ taskId, actor = {}, note = "" }) => {
   const task = await getMutableTaskById(taskId);
-  assertTransitionPermission({ task, actor, toStatus: "completed" });
+  assertTransitionPermission({ task, actor, toStatus: "approved" });
   return applyTaskTransition({
     task,
     actor,
-    toStatus: "completed",
+    toStatus: "approved",
     note,
-    commentType: "review",
+    commentType: "approval",
   });
 };
 
@@ -910,14 +946,61 @@ const reworkWorkflowTask = async ({ taskId, actor = {}, note = "" }) => {
   }
 
   const task = await getMutableTaskById(taskId);
-  assertTransitionPermission({ task, actor, toStatus: "rework" });
-  return applyTaskTransition({
+  const fromStatus = normalizeWorkflowTaskStatus(task.status, {
+    fallback: "assigned",
+  }) || "assigned";
+
+  if (!["complete", "approved", "uploaded"].includes(fromStatus)) {
+    throw new Error("Only completed, approved, or uploaded tasks can be sent to rework");
+  }
+
+  assertTransitionPermission({ task, actor, toStatus: "__rework__" });
+
+  const auditActor = buildAuditActor(actor);
+  const currentReworked = getTaskReworkPayload(task);
+  task.status = "assigned";
+  task.completed_at = null;
+  task.approved_at = null;
+  task.approved_by = {};
+  task.uploaded_at = null;
+  task.uploaded_by = {};
+  task.updated_by = auditActor;
+  task.reworked = {
+    count: currentReworked.count + 1,
+    comments: [
+      ...currentReworked.comments,
+      {
+        comment: normalizeText(note),
+        created_at: new Date(),
+        created_by: auditActor,
+      },
+    ],
+  };
+  task.rework_count = task.reworked.count;
+  await task.save();
+
+  await TaskStatusHistory.create({
+    task: task._id,
+    batch: task.batch || null,
+    from_status: fromStatus,
+    to_status: "assigned",
+    changed_by: auditActor,
+    changed_at: new Date(),
+    note: normalizeText(note),
+    metadata: {
+      rework: true,
+      rework_count: task.reworked.count,
+    },
+  });
+  await updateAssignmentCompletionState(task, "assigned", actor, note);
+  await createTransitionCommentIfNeeded({
     task,
     actor,
-    toStatus: "rework",
     note,
     commentType: "rework",
   });
+  await recalculateWorkflowBatchIfPresent(task.batch);
+  return buildTaskDetail(task._id, actor);
 };
 
 const updateWorkflowTaskStatus = async ({
@@ -926,20 +1009,16 @@ const updateWorkflowTaskStatus = async ({
   toStatus,
   note = "",
 }) => {
-  const normalizedStatus = normalizeText(toStatus).toLowerCase();
+  const normalizedStatus = normalizeWorkflowTaskStatus(toStatus, { fallback: "" });
   if (!WORKFLOW_TASK_STATUSES.includes(normalizedStatus)) {
     throw new Error("Invalid task status");
   }
   if (normalizedStatus === "assigned") {
-    throw new Error("Use the task assignment endpoint to assign this task");
+    throw new Error("Use the task assignment or rework action to move a task back to assigned");
   }
 
   const task = await getMutableTaskById(taskId);
   assertTransitionPermission({ task, actor, toStatus: normalizedStatus });
-
-  if (normalizedStatus === "rework" && !normalizeText(note)) {
-    throw new Error("A rework reason is required");
-  }
 
   return applyTaskTransition({
     task,
@@ -947,12 +1026,20 @@ const updateWorkflowTaskStatus = async ({
     toStatus: normalizedStatus,
     note,
     commentType:
-      normalizedStatus === "review"
-        ? "review"
-        : normalizedStatus === "rework"
-        ? "rework"
+      normalizedStatus === "complete"
+        ? "complete"
+        : normalizedStatus === "approved"
+        ? "approval"
+        : normalizedStatus === "uploaded"
+        ? "upload"
         : "system",
   });
+};
+
+const submitWorkflowTask = (args = {}) => completeWorkflowTask(args);
+
+const reviewWorkflowTask = async () => {
+  throw new Error("Review is no longer a separate workflow stage");
 };
 
 const addWorkflowTaskComment = async ({
@@ -1001,36 +1088,32 @@ const deleteWorkflowTask = async ({
   const task = await getMutableTaskById(taskId);
   const auditActor = buildAuditActor(actor);
   const normalizedNote = normalizeText(note) || "Workflow task deleted by admin";
-  const fromStatus = task.status;
-  const shouldCancelTask = !["completed", "cancelled"].includes(fromStatus);
-
-  if (shouldCancelTask) {
-    task.status = "cancelled";
-    task.blocked_reason = normalizedNote;
-
-    await TaskStatusHistory.create({
-      task: task._id,
-      batch: task.batch || null,
-      from_status: fromStatus,
-      to_status: "cancelled",
-      changed_by: auditActor,
-      changed_at: new Date(),
-      note: normalizedNote,
-      metadata: {
-        deleted_by_admin: true,
-        task_deleted: true,
-      },
-    });
-  }
+  const fromStatus = normalizeWorkflowTaskStatus(task.status, {
+    fallback: "assigned",
+  }) || "assigned";
 
   task.is_deleted = true;
   task.updated_by = auditActor;
   await task.save();
 
+  await TaskStatusHistory.create({
+    task: task._id,
+    batch: task.batch || null,
+    from_status: fromStatus,
+    to_status: fromStatus,
+    changed_by: auditActor,
+    changed_at: new Date(),
+    note: normalizedNote,
+    metadata: {
+      deleted_by_admin: true,
+      task_deleted: true,
+    },
+  });
+
   await TaskAssignment.updateMany(
     {
       task: task._id,
-      status: "active",
+      status: { $in: ["active", "completed"] },
     },
     {
       $set: {
@@ -1271,6 +1354,7 @@ module.exports = {
   approveWorkflowTask,
   assignWorkflowTask,
   buildTaskDetail,
+  completeWorkflowTask,
   createWorkflowTask,
   createWorkflowDepartment,
   createWorkflowTaskType,
@@ -1284,6 +1368,7 @@ module.exports = {
   reworkWorkflowTask,
   startWorkflowTask,
   submitWorkflowTask,
+  uploadWorkflowTask,
   updateWorkflowDepartment,
   updateWorkflowTaskStatus,
   updateWorkflowTaskType,
