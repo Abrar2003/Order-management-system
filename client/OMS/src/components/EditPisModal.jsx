@@ -112,6 +112,7 @@ const buildInitialForm = (item = {}) => {
       : 1;
 
   return {
+    country_of_origin: toText(item?.country_of_origin),
     master_barcode: toText(item?.pis_master_barcode || item?.pis_barcode),
     inner_barcode: toText(item?.pis_inner_barcode),
     pis_item_count: String(pisItemCount),
@@ -308,6 +309,7 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
       }
 
       const payload = {
+        country_of_origin: toText(form.country_of_origin),
         pis_barcode: toText(form.master_barcode),
         pis_master_barcode: toText(form.master_barcode),
         pis_inner_barcode: toText(form.inner_barcode),
@@ -357,9 +359,20 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
                 <label className="form-label">Vendors (Read Only)</label>
                 <input type="text" className="form-control" value={vendorsLabel} disabled />
               </div>
-              <div className="col-12">
+              <div className="col-md-8">
                 <label className="form-label">Description (Read Only)</label>
                 <input type="text" className="form-control" value={itemDescription} disabled />
+              </div>
+              <div className="col-md-4">
+                <label className="form-label">Country of Origin</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={form.country_of_origin}
+                  placeholder="Optional"
+                  onChange={(event) => updateField("country_of_origin", event.target.value)}
+                  disabled={saving}
+                />
               </div>
             </div>
 

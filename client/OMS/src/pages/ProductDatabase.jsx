@@ -115,7 +115,9 @@ const formatActor = (actor = null, dateKey = "") => {
   return date ? `${name} (${date})` : name;
 };
 
-const buildPayloadFromForm = () => ({});
+const buildPayloadFromForm = (form = {}) => ({
+  country_of_origin: normalizeTextValue(form.countryOfOrigin),
+});
 
 const getDisplayItemSizes = (row = {}) => {
   const productItemSizes = Array.isArray(row?.product_specs?.item_sizes)
@@ -165,6 +167,7 @@ const normalizeProductSpecsForCompare = (productSpecs = {}) => ({
 
 const normalizePayloadForCompare = (payload = {}) =>
   JSON.stringify({
+    country_of_origin: normalizeTextValue(payload.country_of_origin),
     pd_box_mode: payload.pd_box_mode || BOX_PACKAGING_MODES.INDIVIDUAL,
     pd_box_sizes: payload.pd_box_sizes || [],
     product_type: payload.product_type || null,
@@ -247,6 +250,7 @@ const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
   const canEdit = Boolean(item?.permissions?.can_edit);
   const initialForm = useMemo(
     () => ({
+      countryOfOrigin: normalizeTextValue(item?.country_of_origin),
       productTypeKey: normalizeTemplateKey(item?.product_type?.key),
       productTypeVersion: Number(item?.product_type?.version || 0),
     }),
@@ -602,6 +606,31 @@ const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
                 Last Changed: {formatActor(item?.pd_last_changed_by, "changed_at")}
               </span>
             </div>
+
+            <section className="mb-4">
+              <div className="card om-card">
+                <div className="card-body">
+                  <div className="row g-3">
+                    <div className="col-lg-6">
+                      <label className="form-label">Country of Origin</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={form.countryOfOrigin}
+                        placeholder="Optional"
+                        disabled={!canEdit}
+                        onChange={(event) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            countryOfOrigin: event.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
 
             <section className="mb-4">
               <div className="card om-card product-database-product-type-card">

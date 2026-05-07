@@ -1241,6 +1241,7 @@ const PRODUCT_DATABASE_ITEM_SELECT = [
   "brand_name",
   "brands",
   "vendors",
+  "country_of_origin",
   "product_type",
   "product_specs",
   "pd_item_sizes",
@@ -3965,6 +3966,9 @@ exports.updateItemPis = async (req, res) => {
     }
     if (hasOwn(payload, "pis_inner_barcode")) {
       setPisPath("pis_inner_barcode", normalizeTextField(payload.pis_inner_barcode));
+    }
+    if (hasOwn(payload, "country_of_origin")) {
+      setPisPath("country_of_origin", normalizeTextField(payload.country_of_origin));
     }
 
     const patchedPisItemLbh = getPatchedLbhRecord(

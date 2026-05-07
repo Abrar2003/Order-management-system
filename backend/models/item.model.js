@@ -180,6 +180,7 @@ const itemSchema = new mongoose.Schema(
     brand_name: { type: String, default: "", trim: true },
     brands: { type: [String], default: [] },
     vendors: { type: [String], default: [] },
+    country_of_origin: { type: String, default: "", trim: true },
     product_type: {
       type: productTypeSnapshotSchema,
       default: undefined,

@@ -244,6 +244,7 @@ const normalizeBoxSizeEntries = (
 const extractProductDatabaseFields = (item = {}) => {
   const pdBoxMode = detectBoxPackagingMode(item?.pd_box_mode, item?.pd_box_sizes);
   return {
+    country_of_origin: normalizeText(item?.country_of_origin),
     pd_item_sizes: normalizeItemSizeEntries(item?.pd_item_sizes || []),
     pd_box_sizes: normalizeBoxSizeEntries(item?.pd_box_sizes || [], pdBoxMode),
     pd_box_mode: pdBoxMode,
@@ -270,12 +271,17 @@ const extractProductDatabaseFields = (item = {}) => {
 };
 
 const normalizeProductDatabaseInput = (payload = {}) => {
+  const hasCountryOfOrigin = hasOwn(payload, "country_of_origin");
   const hasItemSizes = hasOwn(payload, "pd_item_sizes");
   const hasBoxSizes = hasOwn(payload, "pd_box_sizes");
   const hasBoxMode = hasOwn(payload, "pd_box_mode");
   const hasProductType = hasOwn(payload, "product_type");
   const hasProductSpecs = hasOwn(payload, "product_specs");
   const data = {};
+
+  if (hasCountryOfOrigin) {
+    data.country_of_origin = normalizeText(payload.country_of_origin);
+  }
 
   if (hasItemSizes) {
     data.pd_item_sizes = normalizeItemSizeEntries(payload.pd_item_sizes || []);
@@ -337,6 +343,7 @@ const normalizeProductDatabaseInput = (payload = {}) => {
 
   return {
     hasInput:
+      hasCountryOfOrigin ||
       hasItemSizes ||
       hasBoxSizes ||
       hasBoxMode ||
@@ -353,6 +360,9 @@ const mergeProductDatabaseFields = (currentState = {}, inputData = {}) => {
     : normalizeBoxSizeEntries(currentState.pd_box_sizes || [], nextBoxMode);
 
   return {
+    country_of_origin: hasOwn(inputData, "country_of_origin")
+      ? normalizeText(inputData.country_of_origin)
+      : normalizeText(currentState.country_of_origin),
     pd_item_sizes: hasOwn(inputData, "pd_item_sizes")
       ? normalizeItemSizeEntries(inputData.pd_item_sizes)
       : normalizeItemSizeEntries(currentState.pd_item_sizes || []),
@@ -370,7 +380,14 @@ const mergeProductDatabaseFields = (currentState = {}, inputData = {}) => {
 const stableStringify = (value) => JSON.stringify(value || null);
 
 const getChangedProductDatabaseFields = (currentState = {}, nextState = {}) =>
-  ["pd_item_sizes", "pd_box_sizes", "pd_box_mode", "product_type", "product_specs"].filter(
+  [
+    "country_of_origin",
+    "pd_item_sizes",
+    "pd_box_sizes",
+    "pd_box_mode",
+    "product_type",
+    "product_specs",
+  ].filter(
     (field) => stableStringify(currentState?.[field]) !== stableStringify(nextState?.[field]),
   );
 
@@ -402,6 +419,7 @@ const appendPdHistory = (
 };
 
 const setProductDatabaseFields = (item, state = {}) => {
+  item.country_of_origin = normalizeText(state.country_of_origin);
   item.pd_item_sizes = state.pd_item_sizes || [];
   item.pd_box_sizes = state.pd_box_sizes || [];
   item.pd_box_mode = state.pd_box_mode || BOX_PACKAGING_MODES.INDIVIDUAL;
@@ -505,7 +523,7 @@ const applyProductDatabaseSave = ({ item, payload = {}, user = {} } = {}) => {
   return {
     changed: false,
     status: previousStatus,
-    message: "No Product Database size changes detected.",
+    message: "No Product Database changes detected.",
   };
 };
 
@@ -689,6 +707,7 @@ const buildProductDatabaseRow = (item = {}, user = {}) => {
     brand_name: item?.brand_name || "",
     brands: Array.isArray(item?.brands) ? item.brands : [],
     vendors: Array.isArray(item?.vendors) ? item.vendors : [],
+    country_of_origin: state.country_of_origin,
     pd_item_sizes: state.pd_item_sizes,
     pd_box_sizes: state.pd_box_sizes,
     pd_box_mode: state.pd_box_mode,
