@@ -1299,6 +1299,8 @@ const handleProductDatabaseError = (res, error, fallbackMessage) => {
 const normalizeLookupKey = (value) => normalizeTextField(value).toLowerCase();
 
 const MEASUREMENT_COMPARE_TOLERANCE = 0.0001;
+const SIZE_DIMENSION_DIFF_TOLERANCE = 0.5;
+const CBM_COMPARE_DECIMALS = 2;
 const WEIGHT_DIFF_PERCENT_TOLERANCE = 10;
 
 const buildMeasurementEntryKey = (entry = {}, index = 0) => {
@@ -1315,6 +1317,32 @@ const hasPositiveMeasurementWeight = (value) => Number(value || 0) > 0;
 
 const areMeasurementNumbersEqual = (left, right) =>
   Math.abs(toSafeNumber(left, 0) - toSafeNumber(right, 0)) < MEASUREMENT_COMPARE_TOLERANCE;
+
+const areSizeDimensionNumbersEqual = (left, right) =>
+  Math.abs(toSafeNumber(left, 0) - toSafeNumber(right, 0)) <= SIZE_DIMENSION_DIFF_TOLERANCE;
+
+const roundCbmForComparison = (value) => {
+  const parsed = toSafeNumber(value, 0);
+  return Number(parsed.toFixed(CBM_COMPARE_DECIMALS));
+};
+
+const compareRoundedCbmValues = (inspectedValue, pisValue) => {
+  const inspected = roundCbmForComparison(inspectedValue);
+  const pis = roundCbmForComparison(pisValue);
+  const hasInspected = inspected > 0;
+  const hasPis = pis > 0;
+  const delta = inspected - pis;
+
+  return {
+    mismatch: hasInspected !== hasPis || (hasInspected && hasPis && delta !== 0),
+    hasData: hasInspected || hasPis,
+    hasInspected,
+    hasPis,
+    inspected,
+    pis,
+    delta,
+  };
+};
 
 const isWeightDifferenceAtOrAboveTolerance = (inspectedWeight, pisWeight) => {
   const inspectedValue = toSafeNumber(inspectedWeight, 0);
@@ -1408,9 +1436,9 @@ const compareMeasurementEntryGroups = (
       sizeMismatch = true;
     } else if (hasInspectedSize && hasPisSize) {
       if (
-        !areMeasurementNumbersEqual(inspectedEntry?.L, pisEntry?.L)
-        || !areMeasurementNumbersEqual(inspectedEntry?.B, pisEntry?.B)
-        || !areMeasurementNumbersEqual(inspectedEntry?.H, pisEntry?.H)
+        !areSizeDimensionNumbersEqual(inspectedEntry?.L, pisEntry?.L)
+        || !areSizeDimensionNumbersEqual(inspectedEntry?.B, pisEntry?.B)
+        || !areSizeDimensionNumbersEqual(inspectedEntry?.H, pisEntry?.H)
       ) {
         sizeMismatch = true;
       }
@@ -1515,10 +1543,15 @@ const buildPisDiffSummary = (item = {}) => {
       : "";
   const barcodeMismatch =
     Boolean(pisBarcode || inspectedBarcode) && pisBarcode !== inspectedBarcode;
+  const cbmComparison = compareRoundedCbmValues(
+    item?.cbm?.calculated_inspected_total,
+    item?.cbm?.calculated_pis_total,
+  );
 
   const hasInspectedData =
     itemComparison.hasInspectedData
     || boxComparison.hasInspectedData
+    || cbmComparison.hasData
     || Boolean(pisBarcode || inspectedBarcode);
   if (!hasInspectedData) {
     return null;
@@ -1530,6 +1563,7 @@ const buildPisDiffSummary = (item = {}) => {
   if (itemComparison.weightMismatch) diffFields.push("Item Weight");
   if (boxComparison.sizeMismatch) diffFields.push("Box Size");
   if (boxComparison.weightMismatch) diffFields.push("Box Weight");
+  if (cbmComparison.mismatch) diffFields.push("CBM");
 
   if (diffFields.length === 0) {
     return null;
@@ -1543,6 +1577,7 @@ const buildPisDiffSummary = (item = {}) => {
       item_weight: itemComparison.weightMismatch,
       box_size: boxComparison.sizeMismatch,
       box_weight: boxComparison.weightMismatch,
+      cbm: cbmComparison.mismatch,
     },
   };
 };
@@ -1733,6 +1768,18 @@ const formatPisDiffAbsDelta = (delta, unit = "") => {
   return `${formatted}${unit ? ` ${unit}` : ""}`;
 };
 
+const formatPisDiffCbmValue = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return "Not Set";
+  return `${parsed.toFixed(CBM_COMPARE_DECIMALS)} cbm`;
+};
+
+const formatPisDiffSignedCbmDelta = (delta) => {
+  const parsed = Number(delta);
+  if (!Number.isFinite(parsed) || parsed === 0) return "0.00 cbm";
+  return `${parsed > 0 ? "+" : "-"}${Math.abs(parsed).toFixed(CBM_COMPARE_DECIMALS)} cbm`;
+};
+
 const getPisDiffEntryLabel = (entry = null, key = "", fallback = "Value") => {
   const explicitLabel = formatPisDiffRemarkLabel(entry?.remark || "", "");
   if (explicitLabel) return explicitLabel;
@@ -1840,7 +1887,7 @@ const buildPisDiffMeasurementDetails = ({
         const delta = inspectedValueRaw - pisValueRaw;
         if (
           !Number.isFinite(delta)
-          || Math.abs(delta) < MEASUREMENT_COMPARE_TOLERANCE
+          || Math.abs(delta) <= SIZE_DIMENSION_DIFF_TOLERANCE
         ) {
           return;
         }
@@ -1918,6 +1965,46 @@ const buildPisDiffMeasurementDetails = ({
   return details;
 };
 
+const buildPisDiffCbmDetails = (item = {}) => {
+  const comparison = compareRoundedCbmValues(
+    item?.cbm?.calculated_inspected_total,
+    item?.cbm?.calculated_pis_total,
+  );
+  if (!comparison.mismatch) return [];
+
+  const inspectedValue = comparison.hasInspected
+    ? formatPisDiffCbmValue(comparison.inspected)
+    : "Not Set";
+  const pisValue = comparison.hasPis
+    ? formatPisDiffCbmValue(comparison.pis)
+    : "Not Set";
+
+  return [
+    {
+      key: "cbm-calculated-total",
+      section: "CBM",
+      segment: "Calculated",
+      attribute: "Total CBM",
+      inspected: inspectedValue,
+      pis: pisValue,
+      delta:
+        comparison.hasInspected && comparison.hasPis
+          ? formatPisDiffSignedCbmDelta(comparison.delta)
+          : (comparison.hasInspected ? "PIS not set" : "Inspected not set"),
+      note: buildPisDiffDetailNote({
+        subject: "calculated total CBM",
+        inspected: inspectedValue,
+        pis: pisValue,
+        delta: comparison.delta,
+        unit: "cbm",
+        missingSide: comparison.hasInspected === comparison.hasPis
+          ? ""
+          : (comparison.hasInspected ? "pis" : "inspected"),
+      }),
+    },
+  ];
+};
+
 const buildPisDiffDetailedComparisons = (item = {}) => {
   const details = [
     ...buildPisDiffMeasurementDetails({
@@ -1938,6 +2025,7 @@ const buildPisDiffDetailedComparisons = (item = {}) => {
       weightKey: "gross_weight",
       baseLabel: "Box",
     }),
+    ...buildPisDiffCbmDetails(item),
   ];
 
   const pisBarcode =

@@ -379,6 +379,132 @@ const mergeProductDatabaseFields = (currentState = {}, inputData = {}) => {
 
 const stableStringify = (value) => JSON.stringify(value || null);
 
+const PRODUCT_DATABASE_SIZE_DIFF_TOLERANCE = 0.5;
+const PRODUCT_DATABASE_CBM_DECIMALS = 2;
+const PRODUCT_DATABASE_SIZE_DIMENSIONS = Object.freeze(["L", "B", "H"]);
+
+const toCompareNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const roundForCompare = (value, decimals = PRODUCT_DATABASE_CBM_DECIMALS) =>
+  Number(toCompareNumber(value, 0).toFixed(decimals));
+
+const areNumbersWithinTolerance = (left, right, tolerance = 0) =>
+  Math.abs(toCompareNumber(left, 0) - toCompareNumber(right, 0)) <= tolerance;
+
+const isCbmProductSpecField = (field = {}) => {
+  const descriptor = [
+    field?.key,
+    field?.label,
+    field?.unit,
+    field?.source_header,
+  ]
+    .map((value) => normalizeKey(value))
+    .join(" ");
+  return descriptor.includes("cbm") || descriptor.includes("cubic meter");
+};
+
+const normalizeCbmRawValuesForCompare = (value, key = "") => {
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizeCbmRawValuesForCompare(entry, key));
+  }
+  if (value && typeof value === "object") {
+    return Object.keys(value)
+      .sort()
+      .reduce((accumulator, rawKey) => {
+        accumulator[rawKey] = normalizeCbmRawValuesForCompare(value[rawKey], rawKey);
+        return accumulator;
+      }, {});
+  }
+  if (
+    normalizeKey(key).includes("cbm") &&
+    value !== null &&
+    value !== "" &&
+    Number.isFinite(Number(value))
+  ) {
+    return roundForCompare(value);
+  }
+  return value;
+};
+
+const normalizeProductSpecFieldsForCompare = (fields = []) =>
+  (Array.isArray(fields) ? fields : []).map((field) => ({
+    ...field,
+    value_number:
+      isCbmProductSpecField(field) && field?.value_number !== null && field?.value_number !== undefined
+        ? roundForCompare(field.value_number)
+        : field?.value_number,
+  }));
+
+const areSizeEntriesEqualForCompare = (currentEntry = {}, nextEntry = {}) => {
+  const currentKeys = Object.keys(currentEntry || {});
+  const nextKeys = Object.keys(nextEntry || {});
+  const keys = [...new Set([...currentKeys, ...nextKeys])];
+
+  return keys.every((key) => {
+    if (PRODUCT_DATABASE_SIZE_DIMENSIONS.includes(key)) {
+      return areNumbersWithinTolerance(
+        currentEntry?.[key],
+        nextEntry?.[key],
+        PRODUCT_DATABASE_SIZE_DIFF_TOLERANCE,
+      );
+    }
+
+    const currentValue = currentEntry?.[key];
+    const nextValue = nextEntry?.[key];
+    if (typeof currentValue === "number" || typeof nextValue === "number") {
+      return areNumbersWithinTolerance(currentValue, nextValue, 0);
+    }
+
+    return stableStringify(currentValue) === stableStringify(nextValue);
+  });
+};
+
+const areSizeEntryArraysEqualForCompare = (currentEntries = [], nextEntries = []) => {
+  const current = Array.isArray(currentEntries) ? currentEntries : [];
+  const next = Array.isArray(nextEntries) ? nextEntries : [];
+  if (current.length !== next.length) return false;
+  return current.every((entry, index) => areSizeEntriesEqualForCompare(entry, next[index]));
+};
+
+const areProductSpecsEqualForCompare = (currentSpecs = {}, nextSpecs = {}) => {
+  const current = currentSpecs || {};
+  const next = nextSpecs || {};
+
+  if (
+    stableStringify(normalizeProductSpecFieldsForCompare(current.fields)) !==
+    stableStringify(normalizeProductSpecFieldsForCompare(next.fields))
+  ) {
+    return false;
+  }
+  if (!areSizeEntryArraysEqualForCompare(current.item_sizes, next.item_sizes)) {
+    return false;
+  }
+  if (!areSizeEntryArraysEqualForCompare(current.box_sizes, next.box_sizes)) {
+    return false;
+  }
+  if (stableStringify(current.box_mode) !== stableStringify(next.box_mode)) {
+    return false;
+  }
+
+  return (
+    stableStringify(normalizeCbmRawValuesForCompare(current.raw_values)) ===
+    stableStringify(normalizeCbmRawValuesForCompare(next.raw_values))
+  );
+};
+
+const areProductDatabaseFieldValuesEqual = (field, currentValue, nextValue) => {
+  if (field === "pd_item_sizes" || field === "pd_box_sizes") {
+    return areSizeEntryArraysEqualForCompare(currentValue, nextValue);
+  }
+  if (field === "product_specs") {
+    return areProductSpecsEqualForCompare(currentValue, nextValue);
+  }
+  return stableStringify(currentValue) === stableStringify(nextValue);
+};
+
 const getChangedProductDatabaseFields = (currentState = {}, nextState = {}) =>
   [
     "country_of_origin",
@@ -388,7 +514,11 @@ const getChangedProductDatabaseFields = (currentState = {}, nextState = {}) =>
     "product_type",
     "product_specs",
   ].filter(
-    (field) => stableStringify(currentState?.[field]) !== stableStringify(nextState?.[field]),
+    (field) => !areProductDatabaseFieldValuesEqual(
+      field,
+      currentState?.[field],
+      nextState?.[field],
+    ),
   );
 
 const hasProductDatabaseData = (state = {}) =>

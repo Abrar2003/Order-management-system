@@ -120,6 +120,34 @@ const buildPayloadFromForm = (form = {}) => ({
   country_of_origin: normalizeTextValue(form.countryOfOrigin),
 });
 
+const PRODUCT_DATABASE_SIZE_DIFF_TOLERANCE = 0.5;
+const PRODUCT_DATABASE_CBM_DECIMALS = 2;
+const PRODUCT_DATABASE_SIZE_DIMENSIONS = Object.freeze(["L", "B", "H"]);
+const stableStringify = (value) => JSON.stringify(value ?? null);
+
+const toCompareNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const roundForCompare = (value, decimals = PRODUCT_DATABASE_CBM_DECIMALS) =>
+  Number(toCompareNumber(value, 0).toFixed(decimals));
+
+const areNumbersWithinTolerance = (left, right, tolerance = 0) =>
+  Math.abs(toCompareNumber(left, 0) - toCompareNumber(right, 0)) <= tolerance;
+
+const isCbmProductSpecField = (field = {}) => {
+  const descriptor = [
+    field?.key,
+    field?.label,
+    field?.unit,
+    field?.source_header,
+  ]
+    .map((value) => normalizeTextValue(value).toLowerCase())
+    .join(" ");
+  return descriptor.includes("cbm") || descriptor.includes("cubic meter");
+};
+
 const getDisplayItemSizes = (row = {}) => {
   const productItemSizes = Array.isArray(row?.product_specs?.item_sizes)
     ? row.product_specs.item_sizes
@@ -164,16 +192,119 @@ const normalizeProductSpecsForCompare = (productSpecs = {}) => ({
   item_sizes: Array.isArray(productSpecs?.item_sizes) ? productSpecs.item_sizes : [],
   box_sizes: Array.isArray(productSpecs?.box_sizes) ? productSpecs.box_sizes : [],
   box_mode: productSpecs?.box_mode || BOX_PACKAGING_MODES.INDIVIDUAL,
+  raw_values:
+    productSpecs?.raw_values && typeof productSpecs.raw_values === "object"
+      ? productSpecs.raw_values
+      : {},
 });
 
-const normalizePayloadForCompare = (payload = {}) =>
-  JSON.stringify({
-    country_of_origin: normalizeTextValue(payload.country_of_origin),
-    pd_box_mode: payload.pd_box_mode || BOX_PACKAGING_MODES.INDIVIDUAL,
-    pd_box_sizes: payload.pd_box_sizes || [],
-    product_type: payload.product_type || null,
-    product_specs: normalizeProductSpecsForCompare(payload.product_specs),
+const normalizeCbmRawValuesForCompare = (value, key = "") => {
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizeCbmRawValuesForCompare(entry, key));
+  }
+  if (value && typeof value === "object") {
+    return Object.keys(value)
+      .sort()
+      .reduce((accumulator, rawKey) => {
+        accumulator[rawKey] = normalizeCbmRawValuesForCompare(value[rawKey], rawKey);
+        return accumulator;
+      }, {});
+  }
+  if (
+    normalizeTextValue(key).toLowerCase().includes("cbm") &&
+    value !== null &&
+    value !== "" &&
+    Number.isFinite(Number(value))
+  ) {
+    return roundForCompare(value);
+  }
+  return value;
+};
+
+const normalizeProductSpecFieldsForCompare = (fields = []) =>
+  (Array.isArray(fields) ? fields : []).map((field) => ({
+    ...field,
+    value_number:
+      isCbmProductSpecField(field) && field?.value_number !== null && field?.value_number !== undefined
+        ? roundForCompare(field.value_number)
+        : field?.value_number,
+  }));
+
+const areSizeEntriesEqualForCompare = (currentEntry = {}, nextEntry = {}) => {
+  const keys = [
+    ...new Set([
+      ...Object.keys(currentEntry || {}),
+      ...Object.keys(nextEntry || {}),
+    ]),
+  ];
+
+  return keys.every((key) => {
+    if (PRODUCT_DATABASE_SIZE_DIMENSIONS.includes(key)) {
+      return areNumbersWithinTolerance(
+        currentEntry?.[key],
+        nextEntry?.[key],
+        PRODUCT_DATABASE_SIZE_DIFF_TOLERANCE,
+      );
+    }
+
+    const currentValue = currentEntry?.[key];
+    const nextValue = nextEntry?.[key];
+    if (typeof currentValue === "number" || typeof nextValue === "number") {
+      return areNumbersWithinTolerance(currentValue, nextValue, 0);
+    }
+
+    return stableStringify(currentValue) === stableStringify(nextValue);
   });
+};
+
+const areSizeEntryArraysEqualForCompare = (currentEntries = [], nextEntries = []) => {
+  const current = Array.isArray(currentEntries) ? currentEntries : [];
+  const next = Array.isArray(nextEntries) ? nextEntries : [];
+  if (current.length !== next.length) return false;
+  return current.every((entry, index) => areSizeEntriesEqualForCompare(entry, next[index]));
+};
+
+const areProductSpecsEqualForCompare = (currentSpecs = {}, nextSpecs = {}) => {
+  const current = normalizeProductSpecsForCompare(currentSpecs);
+  const next = normalizeProductSpecsForCompare(nextSpecs);
+
+  if (
+    stableStringify(normalizeProductSpecFieldsForCompare(current.fields)) !==
+    stableStringify(normalizeProductSpecFieldsForCompare(next.fields))
+  ) {
+    return false;
+  }
+  if (!areSizeEntryArraysEqualForCompare(current.item_sizes, next.item_sizes)) {
+    return false;
+  }
+  if (!areSizeEntryArraysEqualForCompare(current.box_sizes, next.box_sizes)) {
+    return false;
+  }
+  if (stableStringify(current.box_mode) !== stableStringify(next.box_mode)) {
+    return false;
+  }
+  return (
+    stableStringify(normalizeCbmRawValuesForCompare(current.raw_values)) ===
+    stableStringify(normalizeCbmRawValuesForCompare(next.raw_values))
+  );
+};
+
+const arePayloadsEqualForCompare = (currentPayload = {}, initialPayload = {}) =>
+  normalizeTextValue(currentPayload.country_of_origin) ===
+    normalizeTextValue(initialPayload.country_of_origin) &&
+  stableStringify(currentPayload.product_type || null) ===
+    stableStringify(initialPayload.product_type || null) &&
+  (currentPayload.pd_box_mode || BOX_PACKAGING_MODES.INDIVIDUAL) ===
+    (initialPayload.pd_box_mode || BOX_PACKAGING_MODES.INDIVIDUAL) &&
+  areSizeEntryArraysEqualForCompare(
+    currentPayload.pd_item_sizes || [],
+    initialPayload.pd_item_sizes || [],
+  ) &&
+  areSizeEntryArraysEqualForCompare(
+    currentPayload.pd_box_sizes || [],
+    initialPayload.pd_box_sizes || [],
+  ) &&
+  areProductSpecsEqualForCompare(currentPayload.product_specs, initialPayload.product_specs);
 
 const SizeSummary = ({ entries = [], type = "item" }) => {
   const rows = Array.isArray(entries) ? entries : [];
@@ -431,8 +562,7 @@ const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
     }),
     [initialForm, item],
   );
-  const hasChanges =
-    normalizePayloadForCompare(currentPayload) !== normalizePayloadForCompare(initialPayload);
+  const hasChanges = !arePayloadsEqualForCompare(currentPayload, initialPayload);
   const canCheck = Boolean(item?.permissions?.can_check) && !hasChanges;
   const canApprove = isAdmin && (item?.pd_checked === "checked" || hasChanges);
 

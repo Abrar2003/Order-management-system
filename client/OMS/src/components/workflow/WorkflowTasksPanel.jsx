@@ -13,6 +13,7 @@ import {
   getWorkflowTasks,
   getWorkflowUsers,
   sendWorkflowTaskToRework,
+  startWorkflowTask,
   uploadWorkflowTask,
 } from "../../api/workflowApi";
 import { useRememberSearchParams } from "../../hooks/useRememberSearchParams";
@@ -95,7 +96,8 @@ const getTaskActionState = ({
 
   return {
     assignedToCurrentUser,
-    canComplete: assignedToCurrentUser && task?.status === "assigned",
+    canStart: assignedToCurrentUser && task?.status === "assigned",
+    canComplete: assignedToCurrentUser && task?.status === "started",
     canUpload:
       (assignedToCurrentUser || canManageWorkflow || canApproveWorkflow)
       && task?.status === "approved",
@@ -409,6 +411,15 @@ const WorkflowTasksPanel = ({
       canApproveWorkflow,
     });
 
+    if (stepKey === "started" && actions.canStart) {
+      await handleQuickAction(
+        () => startWorkflowTask(task._id, { note: "" }),
+        "Task started successfully.",
+        { taskId: task._id },
+      );
+      return;
+    }
+
     if (stepKey === "complete" && actions.canComplete) {
       setNotePrompt({
         taskId: task._id,
@@ -476,7 +487,7 @@ const WorkflowTasksPanel = ({
   };
 
   const taskStatuses = useMemo(
-    () => ["assigned", "complete", "approved", "uploaded"],
+    () => ["assigned", "started", "complete", "approved", "uploaded"],
     [],
   );
 
@@ -772,6 +783,10 @@ const WorkflowTasksPanel = ({
                                 <span>{formatDateTime(task.assigned_at)}</span>
                               </div>
                               <div>
+                                <span className="workflow-task-dates-label">Started</span>
+                                <span>{formatDateTime(task.started_at)}</span>
+                              </div>
+                              <div>
                                 <span className="workflow-task-dates-label">Due</span>
                                 <span>{formatDateOnly(task.due_date)}</span>
                               </div>
@@ -825,7 +840,8 @@ const WorkflowTasksPanel = ({
                                 task={task}
                                 disabled={isBusy}
                                 isStepClickable={(stepKey) =>
-                                  (stepKey === "complete" && actions.canComplete)
+                                  (stepKey === "started" && actions.canStart)
+                                  || (stepKey === "complete" && actions.canComplete)
                                   || (stepKey === "approved" && actions.canApprove)
                                   || (stepKey === "uploaded" && actions.canUpload)
                                 }

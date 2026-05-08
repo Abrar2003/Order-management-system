@@ -44,6 +44,7 @@ const DEFAULT_PAGE_LIMIT = 20;
 const MAX_PAGE_LIMIT = 100;
 const ACTIVE_TASK_STATUSES = Object.freeze([
   "assigned",
+  "started",
   "complete",
   "approved",
 ]);
@@ -51,6 +52,7 @@ const DASHBOARD_COUNT_FIELDS = Object.freeze([
   "total_tasks",
   "open_tasks",
   "assigned_tasks",
+  "started_tasks",
   "complete_tasks",
   "approved_tasks",
   "uploaded_tasks",
@@ -537,6 +539,7 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
     total_tasks: { $sum: 1 },
     open_tasks: openTaskCount,
     assigned_tasks: statusCount("assigned"),
+    started_tasks: statusCount("started"),
     complete_tasks: statusCount("complete"),
     approved_tasks: statusCount("approved"),
     uploaded_tasks: statusCount("uploaded"),
@@ -631,6 +634,7 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
               total_tasks: 1,
               open_tasks: 1,
               assigned_tasks: 1,
+              started_tasks: 1,
               complete_tasks: 1,
               approved_tasks: 1,
               uploaded_tasks: 1,
@@ -777,7 +781,16 @@ const applyTaskTransition = async ({
   task.status = toStatus;
   task.updated_by = auditActor;
 
+  if (toStatus === "started") {
+    task.started_at = new Date();
+    task.completed_at = null;
+    task.approved_at = null;
+    task.approved_by = {};
+    task.uploaded_at = null;
+    task.uploaded_by = {};
+  }
   if (toStatus === "complete") {
+    task.started_at = task.started_at || new Date();
     task.completed_at = new Date();
     task.approved_at = null;
     task.approved_by = {};
@@ -785,6 +798,8 @@ const applyTaskTransition = async ({
     task.uploaded_by = {};
   }
   if (toStatus === "approved") {
+    task.started_at = task.started_at || new Date();
+    task.completed_at = task.completed_at || new Date();
     task.approved_by = auditActor;
     task.approved_at = new Date();
     task.reviewed_by = auditActor;
@@ -793,6 +808,8 @@ const applyTaskTransition = async ({
     task.uploaded_by = {};
   }
   if (toStatus === "uploaded") {
+    task.started_at = task.started_at || new Date();
+    task.completed_at = task.completed_at || new Date();
     task.uploaded_by = auditActor;
     task.uploaded_at = new Date();
   }
@@ -830,6 +847,10 @@ const applyTaskTransition = async ({
 };
 
 const assertTransitionPermission = ({ task, actor, toStatus }) => {
+  if (toStatus === "started" && !canCompleteWorkflowTask(actor, task)) {
+    throw new Error("Only an assigned user can start this task");
+  }
+
   if (["complete"].includes(toStatus) && !canCompleteWorkflowTask(actor, task)) {
     throw new Error("Only an assigned user can mark this task complete");
   }
@@ -925,6 +946,7 @@ const assignWorkflowTask = async ({
   task.updated_by = auditActor;
   task.status = toStatus;
   if (toStatus === "assigned") {
+    task.started_at = null;
     task.completed_at = null;
     task.approved_at = null;
     task.approved_by = {};
@@ -963,8 +985,23 @@ const assignWorkflowTask = async ({
   return taskDetail;
 };
 
-const startWorkflowTask = async ({ taskId, actor = {}, note = "" }) => {
-  throw new Error("Start is no longer a separate workflow stage");
+const startWorkflowTask = async ({
+  taskId,
+  actor = {},
+  note = "",
+  realtimeSource = null,
+} = {}) => {
+  const task = await getMutableTaskById(taskId);
+  assertTransitionPermission({ task, actor, toStatus: "started" });
+  return applyTaskTransition({
+    task,
+    actor,
+    toStatus: "started",
+    note,
+    commentType: "system",
+    realtimeSource,
+    successMessage: "Workflow task started",
+  });
 };
 
 const completeWorkflowTask = async ({
@@ -1048,6 +1085,7 @@ const reworkWorkflowTask = async ({
   const auditActor = buildAuditActor(actor);
   const currentReworked = getTaskReworkPayload(task);
   task.status = "assigned";
+  task.started_at = null;
   task.completed_at = null;
   task.approved_at = null;
   task.approved_by = {};

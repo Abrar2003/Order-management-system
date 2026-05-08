@@ -8,6 +8,7 @@ import {
   deleteWorkflowTask,
   getWorkflowTaskById,
   sendWorkflowTaskToRework,
+  startWorkflowTask,
   uploadWorkflowTask,
 } from "../../api/workflowApi";
 import { formatBytes } from "../../utils/workflowManifest";
@@ -116,7 +117,8 @@ const WorkflowTaskDetailModal = ({
     [assignedUsers, currentUserId],
   );
 
-  const canComplete = isAssignedUser && task?.status === "assigned";
+  const canStart = isAssignedUser && task?.status === "assigned";
+  const canComplete = isAssignedUser && task?.status === "started";
   const canApprove = canApproveWorkflow && !isAssignedUser && task?.status === "complete";
   const canUpload =
     (isAssignedUser || canManageWorkflow || canApproveWorkflow) && task?.status === "approved";
@@ -191,6 +193,14 @@ const WorkflowTaskDetailModal = ({
   };
 
   const handleStageBarClick = async (stepKey) => {
+    if (stepKey === "started" && canStart) {
+      await handleTaskAction(
+        () => startWorkflowTask(taskId, { note: "" }),
+        "Task started successfully.",
+      );
+      return;
+    }
+
     if (stepKey === "complete" && canComplete) {
       setActionError("");
       setActionSuccess("");
@@ -361,6 +371,10 @@ const WorkflowTaskDetailModal = ({
                         <div className="fw-semibold">{formatDateTime(task.assigned_at)}</div>
                       </div>
                       <div className="col-md-4">
+                        <div className="small text-secondary mb-1">Started At</div>
+                        <div className="fw-semibold">{formatDateTime(task.started_at)}</div>
+                      </div>
+                      <div className="col-md-4">
                         <div className="small text-secondary mb-1">Complete At</div>
                         <div className="fw-semibold">{formatDateTime(task.completed_at)}</div>
                       </div>
@@ -378,7 +392,7 @@ const WorkflowTaskDetailModal = ({
                       <div>
                         <h6 className="mb-1">Progress & Actions</h6>
                         <div className="small text-secondary">
-                          Use the lean status line for quick updates. Complete and rework both accept notes.
+                          Use the lean status line for quick updates. Start is instant; complete and rework both accept notes.
                         </div>
                       </div>
                       <div className="d-flex flex-wrap gap-2">
@@ -441,7 +455,8 @@ const WorkflowTaskDetailModal = ({
                       className="mb-3"
                       disabled={actionLoading}
                       isStepClickable={(stepKey) =>
-                        (stepKey === "complete" && canComplete)
+                        (stepKey === "started" && canStart)
+                        || (stepKey === "complete" && canComplete)
                         || (stepKey === "approved" && canApprove)
                         || (stepKey === "uploaded" && canUpload)
                       }

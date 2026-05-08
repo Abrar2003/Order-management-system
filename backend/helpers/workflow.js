@@ -2,6 +2,7 @@ const path = require("path");
 
 const WORKFLOW_TASK_STATUSES = Object.freeze([
   "assigned",
+  "started",
   "complete",
   "approved",
   "uploaded",
@@ -70,7 +71,8 @@ const WORKFLOW_AUTO_CREATE_MODES = Object.freeze([
 ]);
 
 const WORKFLOW_ALLOWED_STATUS_TRANSITIONS = Object.freeze({
-  assigned: ["complete"],
+  assigned: ["started"],
+  started: ["complete"],
   complete: ["approved"],
   approved: ["uploaded"],
   uploaded: [],
@@ -322,6 +324,7 @@ const buildEmptyTaskCounts = () => ({
   total_tasks: 0,
   pending_tasks: 0,
   assigned_tasks: 0,
+  started_tasks: 0,
   in_progress_tasks: 0,
   complete_tasks: 0,
   submitted_tasks: 0,
@@ -342,7 +345,12 @@ const buildDerivedTaskCounts = (taskCounts = {}) => {
   normalized.total_tasks = Number(normalized.total_tasks || 0);
   normalized.pending_tasks = Number(normalized.pending_tasks || 0);
   normalized.assigned_tasks = Number(normalized.assigned_tasks || 0);
-  normalized.in_progress_tasks = Number(normalized.in_progress_tasks || 0);
+  normalized.started_tasks = Number(
+    normalized.started_tasks || normalized.in_progress_tasks || 0,
+  );
+  normalized.in_progress_tasks = Number(
+    normalized.in_progress_tasks || normalized.started_tasks || 0,
+  );
   normalized.complete_tasks = Number(normalized.complete_tasks || 0);
   normalized.submitted_tasks = Number(
     normalized.submitted_tasks || normalized.complete_tasks || 0,
@@ -400,10 +408,12 @@ const normalizeWorkflowTaskStatus = (value, { fallback = "" } = {}) => {
   const normalized = normalizeText(value).toLowerCase();
   switch (normalized) {
     case "pending":
-    case "in_progress":
     case "assigned":
     case "rework":
       return "assigned";
+    case "in_progress":
+    case "started":
+      return "started";
     case "submitted":
     case "review":
     case "complete":
@@ -422,7 +432,8 @@ const normalizeWorkflowTaskStatus = (value, { fallback = "" } = {}) => {
 };
 
 const WORKFLOW_STATUS_QUERY_ALIASES = Object.freeze({
-  assigned: ["assigned", "pending", "in_progress", "rework"],
+  assigned: ["assigned", "pending", "rework"],
+  started: ["started", "in_progress"],
   complete: ["complete", "submitted", "review"],
   approved: ["approved"],
   uploaded: ["uploaded", "completed"],
@@ -438,9 +449,15 @@ const buildWorkflowTaskStatusNormalizationExpression = (fieldPath = "$status") =
     branches: [
       {
         case: {
-          $in: [fieldPath, ["assigned", "pending", "in_progress", "rework"]],
+          $in: [fieldPath, ["assigned", "pending", "rework"]],
         },
         then: "assigned",
+      },
+      {
+        case: {
+          $in: [fieldPath, ["started", "in_progress"]],
+        },
+        then: "started",
       },
       {
         case: {

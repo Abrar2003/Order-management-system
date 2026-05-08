@@ -369,7 +369,7 @@ const WorkflowDashboard = () => {
                   onChange={(event) => setStatusFilter(event.target.value)}
                 >
                   <option value="">All</option>
-                  {["assigned", "complete", "approved", "uploaded"].map((status) => (
+                  {["assigned", "started", "complete", "approved", "uploaded"].map((status) => (
                     <option key={status} value={status}>
                       {status}
                     </option>
@@ -552,6 +552,7 @@ const WorkflowDashboard = () => {
                           <th>Total</th>
                           <th>Open</th>
                           <th>Assigned</th>
+                          <th>Started</th>
                           <th>Complete</th>
                           <th>Needs Approval</th>
                           <th>Approved</th>
@@ -576,6 +577,7 @@ const WorkflowDashboard = () => {
                               <td>{getCount(entry, "total_tasks")}</td>
                               <td>{getCount(entry, "open_tasks")}</td>
                               <td>{getCount(entry, "assigned_tasks")}</td>
+                              <td>{getCount(entry, "started_tasks")}</td>
                               <td>{getCount(entry, "complete_tasks")}</td>
                               <td>{getCount(entry, "needs_approval_tasks")}</td>
                               <td>{getCount(entry, "approved_tasks")}</td>

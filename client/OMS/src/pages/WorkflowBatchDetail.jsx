@@ -378,7 +378,7 @@ const WorkflowBatchDetail = () => {
                   Assigned: {Number(batch.counts?.assigned_tasks || 0)}
                 </span>
                 <span className="om-summary-chip">
-                  In Progress: {Number(batch.counts?.in_progress_tasks || 0)}
+                  Started: {Number(batch.counts?.started_tasks || batch.counts?.in_progress_tasks || 0)}
                 </span>
                 <span className="om-summary-chip">
                   Submitted: {Number(batch.counts?.submitted_tasks || 0)}

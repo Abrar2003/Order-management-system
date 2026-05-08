@@ -297,7 +297,7 @@ const WorkflowTaskCreateModal = ({
                           Task Type: {selectedTaskType?.name || "Select a task type"}
                         </span>
                         <span className="om-summary-chip">
-                          Status Flow: Assigned {"->"} Complete {"->"} Approved {"->"} Uploaded
+                          Status Flow: Assigned {"->"} Started {"->"} Complete {"->"} Approved {"->"} Uploaded
                         </span>
                         <span className="om-summary-chip">
                           Priority: {form.priority || "normal"}

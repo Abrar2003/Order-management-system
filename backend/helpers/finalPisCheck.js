@@ -65,6 +65,8 @@ const FINAL_PIS_CHECK_SORT_FIELDS = Object.freeze([
 ]);
 
 const COMPARE_TOLERANCE = 0.001;
+const SIZE_DIMENSION_DIFF_TOLERANCE = 0.5;
+const CBM_COMPARE_DECIMALS = 2;
 const SIZE_ENTRY_LIMIT = 4;
 const EMPTY_LABEL = "Not Set";
 const ITEM_REMARK_ORDER = Object.freeze([
@@ -113,11 +115,24 @@ const hasMeaningfulNumber = (value) => {
   return parsed !== null && Math.abs(parsed) > COMPARE_TOLERANCE;
 };
 
-const compareNumericValues = (inspectedValue, pisValue) => {
-  const inspected = toFiniteNumber(inspectedValue);
-  const pis = toFiniteNumber(pisValue);
-  const hasInspected = hasMeaningfulNumber(inspected);
-  const hasPis = hasMeaningfulNumber(pis);
+const toComparableNumber = (value, decimals = null) => {
+  const parsed = toFiniteNumber(value);
+  if (parsed === null) return null;
+  return Number.isInteger(decimals) ? Number(parsed.toFixed(decimals)) : parsed;
+};
+
+const hasMeaningfulComparableNumber = (value, tolerance = COMPARE_TOLERANCE) =>
+  value !== null && Math.abs(value) > tolerance;
+
+const compareNumericValues = (
+  inspectedValue,
+  pisValue,
+  { tolerance = COMPARE_TOLERANCE, decimals = null } = {},
+) => {
+  const inspected = toComparableNumber(inspectedValue, decimals);
+  const pis = toComparableNumber(pisValue, decimals);
+  const hasInspected = hasMeaningfulComparableNumber(inspected, tolerance);
+  const hasPis = hasMeaningfulComparableNumber(pis, tolerance);
 
   if (!hasInspected && !hasPis) {
     return {
@@ -143,7 +158,7 @@ const compareNumericValues = (inspectedValue, pisValue) => {
 
   const delta = (inspected ?? 0) - (pis ?? 0);
   return {
-    mismatch: Math.abs(delta) > COMPARE_TOLERANCE,
+    mismatch: Math.abs(delta) > tolerance,
     hasInspected,
     hasPis,
     inspected: inspected ?? 0,
@@ -194,11 +209,13 @@ const trimFormattedNumber = (value, decimals = 3) =>
 
 const formatNumberDisplay = (
   value,
-  { decimals = 3, unit = "", emptyLabel = EMPTY_LABEL } = {},
+  { decimals = 3, unit = "", emptyLabel = EMPTY_LABEL, fixedDecimals = false } = {},
 ) => {
   const parsed = toFiniteNumber(value);
   if (parsed === null || Math.abs(parsed) <= COMPARE_TOLERANCE) return emptyLabel;
-  const formatted = trimFormattedNumber(parsed, decimals);
+  const formatted = fixedDecimals
+    ? Number(parsed).toFixed(decimals)
+    : trimFormattedNumber(parsed, decimals);
   return unit ? `${formatted} ${unit}` : formatted;
 };
 
@@ -211,13 +228,20 @@ const formatSizeDisplay = (entry = {}) => {
     : values.join(" x ");
 };
 
-const formatSignedDeltaDisplay = (value, unit = "", decimals = 3) => {
+const formatSignedDeltaDisplay = (
+  value,
+  unit = "",
+  decimals = 3,
+  { tolerance = COMPARE_TOLERANCE, fixedDecimals = false } = {},
+) => {
   const parsed = toFiniteNumber(value);
-  if (parsed === null || Math.abs(parsed) <= COMPARE_TOLERANCE) {
+  if (parsed === null || Math.abs(parsed) <= tolerance) {
     return "0";
   }
 
-  const formatted = trimFormattedNumber(Math.abs(parsed), decimals);
+  const formatted = fixedDecimals
+    ? Math.abs(parsed).toFixed(decimals)
+    : trimFormattedNumber(Math.abs(parsed), decimals);
   return `${parsed > 0 ? "+" : "-"}${formatted}${unit ? ` ${unit}` : ""}`;
 };
 
@@ -572,20 +596,38 @@ const createNumericDifference = ({
   pisValue,
   unit = "",
   decimals = 3,
+  compareTolerance = COMPARE_TOLERANCE,
+  compareDecimals = null,
+  fixedDecimals = false,
 } = {}) => {
-  const comparison = compareNumericValues(inspectedValue, pisValue);
+  const comparison = compareNumericValues(inspectedValue, pisValue, {
+    tolerance: compareTolerance,
+    decimals: compareDecimals,
+  });
   if (!comparison.mismatch) return null;
+  const displayInspectedValue = Number.isInteger(compareDecimals)
+    ? comparison.inspected
+    : inspectedValue;
+  const displayPisValue = Number.isInteger(compareDecimals)
+    ? comparison.pis
+    : pisValue;
 
-  const inspectedDisplay = formatNumberDisplay(inspectedValue, {
-    decimals,
-    unit,
-    emptyLabel: EMPTY_LABEL,
-  });
-  const pisDisplay = formatNumberDisplay(pisValue, {
-    decimals,
-    unit,
-    emptyLabel: EMPTY_LABEL,
-  });
+  const inspectedDisplay = comparison.hasInspected
+    ? formatNumberDisplay(displayInspectedValue, {
+        decimals,
+        unit,
+        emptyLabel: EMPTY_LABEL,
+        fixedDecimals,
+      })
+    : EMPTY_LABEL;
+  const pisDisplay = comparison.hasPis
+    ? formatNumberDisplay(displayPisValue, {
+        decimals,
+        unit,
+        emptyLabel: EMPTY_LABEL,
+        fixedDecimals,
+      })
+    : EMPTY_LABEL;
 
   return {
     key,
@@ -596,7 +638,10 @@ const createNumericDifference = ({
     pis: pisDisplay,
     delta:
       comparison.hasInspected && comparison.hasPis
-        ? formatSignedDeltaDisplay(comparison.delta, unit, decimals)
+        ? formatSignedDeltaDisplay(comparison.delta, unit, decimals, {
+            tolerance: compareTolerance,
+            fixedDecimals,
+          })
         : (comparison.hasInspected ? "PIS not set" : "Inspected not set"),
     note: buildNumericDifferenceNote({
       segment,
@@ -683,6 +728,7 @@ const buildItemSizeDifferences = (inspectedEntries = [], pisEntries = []) => {
         inspectedValue: inspectedEntry?.[axis],
         pisValue: pisEntry?.[axis],
         unit: "cm",
+        compareTolerance: SIZE_DIMENSION_DIFF_TOLERANCE,
       });
       if (difference) differences.push(difference);
     });
@@ -742,6 +788,7 @@ const buildBoxSizeDifferences = ({
         inspectedValue: inspectedEntry?.[axis],
         pisValue: pisEntry?.[axis],
         unit: "cm",
+        compareTolerance: SIZE_DIMENSION_DIFF_TOLERANCE,
       });
       if (difference) differences.push(difference);
     });
@@ -814,7 +861,9 @@ const buildCbmDifferences = (item = {}) => {
     inspectedValue: item?.cbm?.calculated_inspected_total,
     pisValue: item?.cbm?.calculated_pis_total,
     unit: "cbm",
-    decimals: 6,
+    decimals: CBM_COMPARE_DECIMALS,
+    compareDecimals: CBM_COMPARE_DECIMALS,
+    fixedDecimals: true,
   });
 
   return difference ? [difference] : [];

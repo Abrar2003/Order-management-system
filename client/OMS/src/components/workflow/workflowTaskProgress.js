@@ -2,6 +2,7 @@ const normalizeText = (value) => String(value ?? "").trim().toLowerCase();
 
 export const WORKFLOW_STAGE_BAR_STEPS = Object.freeze([
   { key: "assigned", label: "Assigned" },
+  { key: "started", label: "Started" },
   { key: "complete", label: "Complete" },
   { key: "approved", label: "Approved" },
   { key: "uploaded", label: "Uploaded" },

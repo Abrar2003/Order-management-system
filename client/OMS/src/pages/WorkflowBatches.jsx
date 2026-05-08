@@ -469,7 +469,7 @@ const WorkflowBatches = () => {
                       <th>Total Tasks</th>
                       <th>Pending</th>
                       <th>Assigned</th>
-                      <th>In Progress</th>
+                      <th>Started</th>
                       <th>Submitted</th>
                       <th>Review</th>
                       <th>Rework</th>
@@ -493,7 +493,7 @@ const WorkflowBatches = () => {
                         <td>{Number(batch.counts?.total_tasks || 0)}</td>
                         <td>{Number(batch.counts?.pending_tasks || 0)}</td>
                         <td>{Number(batch.counts?.assigned_tasks || 0)}</td>
-                        <td>{Number(batch.counts?.in_progress_tasks || 0)}</td>
+                        <td>{Number(batch.counts?.started_tasks || batch.counts?.in_progress_tasks || 0)}</td>
                         <td>{Number(batch.counts?.submitted_tasks || 0)}</td>
                         <td>{Number(batch.counts?.review_tasks || 0)}</td>
                         <td>{Number(batch.counts?.rework_tasks || 0)}</td>

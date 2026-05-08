@@ -48,7 +48,7 @@ const deriveWorkflowBatchStatusFromCounts = (
   }
 
   const totalTasks = Number(counts?.total_tasks || 0);
-  const assignedTasks = Number(counts?.assigned_tasks || 0);
+  const startedTasks = Number(counts?.started_tasks || counts?.in_progress_tasks || 0);
   const completedTasks = Number(counts?.complete_tasks || 0);
   const approvedTasks = Number(counts?.approved_tasks || 0);
   const uploadedTasks = Number(counts?.uploaded_tasks || 0);
@@ -68,7 +68,7 @@ const deriveWorkflowBatchStatusFromCounts = (
   }
 
   if (
-    assignedTasks > 0 ||
+    startedTasks > 0 ||
     completedTasks > 0 ||
     approvedTasks > 0 ||
     uploadedTasks > 0 ||
@@ -153,7 +153,7 @@ const recalculateWorkflowBatchFromTasks = async (batchId) => {
   );
 
   const hasStarted =
-    Number(taskCounts.assigned_tasks || 0) > 0 ||
+    Number(taskCounts.started_tasks || taskCounts.in_progress_tasks || 0) > 0 ||
     Number(taskCounts.complete_tasks || 0) > 0 ||
     Number(taskCounts.approved_tasks || 0) > 0 ||
     Number(taskCounts.uploaded_tasks || 0) > 0 ||

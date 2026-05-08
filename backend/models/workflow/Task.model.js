@@ -116,6 +116,9 @@ TaskSchema.pre("validate", function normalizeTask() {
   this.source_folder_path = normalizeText(this.source_folder_path);
   this.blocked_reason = normalizeText(this.blocked_reason);
   this.status = normalizeWorkflowTaskStatus(this.status, { fallback: "assigned" }) || "assigned";
+  if (["started", "complete", "approved", "uploaded"].includes(this.status) && !this.started_at) {
+    this.started_at = new Date();
+  }
   if (["approved", "uploaded"].includes(this.status)) {
     if (!this.approved_at && this.reviewed_at) {
       this.approved_at = this.reviewed_at;
