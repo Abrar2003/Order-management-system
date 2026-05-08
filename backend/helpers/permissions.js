@@ -66,6 +66,10 @@ const PIS_ADMIN_ONLY_ACTIONS = Object.freeze([
   "sync",
   "manage",
 ]);
+const INSPECTION_MANAGER_PIS_ACTIONS = Object.freeze([
+  "edit",
+  "upload",
+]);
 
 const PRODUCT_TYPE_TEMPLATE_ADMIN_ONLY_ACTIONS = Object.freeze([
   "create",
@@ -116,16 +120,36 @@ const grantAll = (permissions, moduleKey) => {
   grant(permissions, moduleKey, PERMISSION_ACTIONS);
 };
 
-const lockAdminOnlyPermissions = (roleKey, permissions) => {
-  if (!isSuperAdminLikeRole(roleKey)) {
-    PIS_ADMIN_ONLY_ACTIONS.forEach((action) => {
-      if (permissions?.pis && action in permissions.pis) {
-        permissions.pis[action] = false;
-      }
-    });
+const canRoleUsePisAction = (roleKey, action) => {
+  if (!PIS_ADMIN_ONLY_ACTIONS.includes(action)) return true;
+  if (isAdminLikeRole(roleKey) || isSuperAdminLikeRole(roleKey)) return true;
+  if (roleKey === "inspection_manager") {
+    return INSPECTION_MANAGER_PIS_ACTIONS.includes(action);
+  }
+  return false;
+};
+
+const applyRequiredPermissionFloors = (roleKey, permissions) => {
+  if (isAdminLikeRole(roleKey) || isSuperAdminLikeRole(roleKey)) {
+    grant(permissions, "pis", PIS_ADMIN_ONLY_ACTIONS);
+    return permissions;
   }
 
-  if (isAdminLikeRole(roleKey)) return permissions;
+  if (roleKey === "inspection_manager") {
+    grant(permissions, "pis", INSPECTION_MANAGER_PIS_ACTIONS);
+  }
+
+  return permissions;
+};
+
+const lockAdminOnlyPermissions = (roleKey, permissions) => {
+  PIS_ADMIN_ONLY_ACTIONS.forEach((action) => {
+    if (permissions?.pis && action in permissions.pis && !canRoleUsePisAction(roleKey, action)) {
+      permissions.pis[action] = false;
+    }
+  });
+
+  if (isAdminLikeRole(roleKey)) return applyRequiredPermissionFloors(roleKey, permissions);
 
   PRODUCT_TYPE_TEMPLATE_ADMIN_ONLY_ACTIONS.forEach((action) => {
     if (
@@ -148,7 +172,7 @@ const lockAdminOnlyPermissions = (roleKey, permissions) => {
     }
   });
 
-  return permissions;
+  return applyRequiredPermissionFloors(roleKey, permissions);
 };
 
 const buildAdminPermissions = () => {
@@ -171,7 +195,10 @@ const buildSuperAdminPermissions = () => buildAdminPermissions();
 
 const buildProductManagerPermissions = () => buildManagerPermissions();
 
-const buildInspectionManagerPermissions = () => buildManagerPermissions();
+const buildInspectionManagerPermissions = () => {
+  const permissions = buildAdminPermissions();
+  return lockAdminOnlyPermissions("inspection_manager", permissions);
+};
 
 const buildUserPermissions = () => {
   const permissions = createEmptyPermissions();
@@ -311,7 +338,9 @@ const sanitizePermissionsForRole = (role, permissions = {}) => {
 const isPermissionCellLocked = (role, moduleKey, action) => {
   const roleKey = normalizeRoleKey(role);
   if (isSuperAdminLikeRole(roleKey)) return false;
-  if (moduleKey === "pis" && PIS_ADMIN_ONLY_ACTIONS.includes(action)) return true;
+  if (moduleKey === "pis" && PIS_ADMIN_ONLY_ACTIONS.includes(action)) {
+    return !canRoleUsePisAction(roleKey, action);
+  }
   if (isAdminLikeRole(roleKey)) return false;
   if (moduleKey === "permissions") return true;
   if (
@@ -332,9 +361,10 @@ const buildPermissionMeta = () => ({
   actions: PERMISSION_ACTIONS,
   locked: {
     pis: {
-      roles: ROLE_KEYS.filter((role) => !isSuperAdminLikeRole(role)),
+      roles: ROLE_KEYS.filter((role) => !canRoleUsePisAction(role, "edit")),
       actions: PIS_ADMIN_ONLY_ACTIONS,
-      message: "PIS data edit rights are super-admin-only and cannot be assigned to other roles.",
+      message:
+        "PIS edit and upload rights are fixed for Inspection Manager, while broader PIS mutation rights remain restricted to admin roles.",
     },
     product_type_templates: {
       roles: ROLE_KEYS.filter((role) => !isAdminLikeRole(role)),
@@ -369,8 +399,10 @@ module.exports = {
   PERMISSION_MODULES,
   ROLE_KEYS,
   PIS_ADMIN_ONLY_ACTIONS,
+  INSPECTION_MANAGER_PIS_ACTIONS,
   PRODUCT_TYPE_TEMPLATE_ADMIN_ONLY_ACTIONS,
   WORKFLOW_ADMIN_ONLY_ACTIONS,
+  canRoleUsePisAction,
   clonePermissions: clone,
   buildPermissionMeta,
   buildAuditActor,

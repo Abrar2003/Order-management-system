@@ -1,4 +1,4 @@
-const { normalizeRoleKey } = require("../helpers/permissions");
+const { canRoleUsePisAction, normalizeRoleKey } = require("../helpers/permissions");
 const { isAdminLikeRole, isSuperAdminLikeRole } = require("../helpers/userRole");
 const { userHasPermission } = require("../services/permission.service");
 
@@ -24,9 +24,11 @@ const requirePermission = (moduleKey, action) => async (req, res, next) => {
 
 const requireAdminOnlyPisEdit = (req, res, next) => {
   const roleKey = normalizeRoleKey(req.user?.role);
-  if (!isSuperAdminLikeRole(roleKey)) {
+  const canEditPis = canRoleUsePisAction(roleKey, "edit");
+  const canUploadPis = canRoleUsePisAction(roleKey, "upload");
+  if (!canEditPis && !canUploadPis) {
     return res.status(403).json({
-      message: "PIS data edit/update/import/sync is super-admin-only.",
+      message: "PIS data edit/update/upload is restricted to authorized roles.",
     });
   }
 

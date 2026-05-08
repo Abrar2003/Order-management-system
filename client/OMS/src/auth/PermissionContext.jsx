@@ -22,9 +22,6 @@ const PermissionContext = createContext({
   refreshPermissions: async () => {},
 });
 
-const isPisMutation = (action) =>
-  ["create", "edit", "delete", "approve", "upload", "sync", "manage"].includes(action);
-
 export const PermissionProvider = ({ children }) => {
   const location = useLocation();
   const [permissions, setPermissions] = useState({});
@@ -75,12 +72,14 @@ export const PermissionProvider = ({ children }) => {
       const moduleKey = String(moduleName || "").trim();
       const actionKey = String(action || "").trim();
       if (!moduleKey || !actionKey) return false;
-      if (moduleKey === "pis" && isPisMutation(actionKey)) {
-        return isAdminLikeRole(role);
-      }
       return Boolean(permissions?.[moduleKey]?.[actionKey]);
     },
-    [permissions, role],
+    [permissions],
+  );
+
+  const canEditPis = Boolean(
+    permissions?.pis?.edit ||
+    permissions?.pis?.upload,
   );
 
   const value = useMemo(
@@ -91,11 +90,12 @@ export const PermissionProvider = ({ children }) => {
       error,
       role,
       isAdmin: isAdminLikeRole(role),
-      canEditPis: isAdminLikeRole(role),
+      canEditPis,
       hasPermission,
       refreshPermissions,
     }),
     [
+      canEditPis,
       error,
       hasPermission,
       loading,

@@ -179,8 +179,9 @@ const PermissionManagement = () => {
           </p>
           <h2 className="h4 mb-1">Rights Management</h2>
           <p className="text-secondary mb-0">
-            Manage role-level access. PIS mutation, workflow task approve/delete,
-            and permission-management stay admin-only.
+            Manage role-level access. Inspection Manager keeps fixed PIS edit/upload
+            rights, while broader PIS mutation, workflow approve/delete, and
+            permission-management stay restricted.
           </p>
         </div>
         <button
