@@ -592,6 +592,7 @@ export const buildProductTypePayload = ({
   template = null,
   selectedProductTypeKey = "",
   formState = {},
+  includeSizeFields = true,
 } = {}) => {
   const normalizedProductTypeKey = normalizeTemplateKey(selectedProductTypeKey);
 
@@ -616,6 +617,10 @@ export const buildProductTypePayload = ({
   flattenTemplateFields(template).forEach((field) => {
     const fieldKey = normalizeTemplateKey(field?.key);
     const inputType = normalizeTemplateKey(field?.input_type);
+
+    if (!includeSizeFields && (inputType === "item_size" || inputType === "box_size")) {
+      return;
+    }
 
     if (inputType === "item_size") {
       const entry = toMeaningfulSizePayloadEntry(formState?.itemSizeValues?.[fieldKey]);

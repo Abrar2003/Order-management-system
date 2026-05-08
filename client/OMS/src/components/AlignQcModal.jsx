@@ -18,6 +18,33 @@ const normalizeRequestType = (value) =>
 const normalizeInspectionStatus = (value) =>
   String(value || "").trim().toLowerCase();
 
+const addDaysToIsoDate = (isoDate = "", days = 0) => {
+  const normalizedIso = toISODateString(isoDate);
+  if (!normalizedIso) return "";
+
+  const parsed = new Date(`${normalizedIso}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return "";
+
+  parsed.setUTCDate(parsed.getUTCDate() + days);
+  return toISODateString(parsed);
+};
+
+const getInitialRequestDateValue = ({
+  value = "",
+  futureOnly = false,
+  todayIso = "",
+  tomorrowIso = "",
+} = {}) => {
+  const initialIso = toISODateString(value);
+  if (futureOnly) {
+    return initialIso && initialIso > todayIso
+      ? toDDMMYYYYInputValue(initialIso, "")
+      : toDDMMYYYYInputValue(tomorrowIso, "") || getTodayDDMMYYYY();
+  }
+
+  return toDDMMYYYYInputValue(value, "") || getTodayDDMMYYYY();
+};
+
 const AlignQCModal = ({
   order,
   onClose,
@@ -31,8 +58,13 @@ const AlignQCModal = ({
   const navigate = useNavigate();
   const user = getUserFromToken();
   const normalizedRole = normalizeUserRole(user?.role);
-  const isManager = !isAdminLikeRole(normalizedRole) && isManagerLikeRole(normalizedRole);
+  const isInspectionManager = normalizedRole === "inspection_manager";
+  const isManager =
+    !isAdminLikeRole(normalizedRole) &&
+    isManagerLikeRole(normalizedRole) &&
+    !isInspectionManager;
   const todayIso = toISODateString(new Date());
+  const tomorrowIso = addDaysToIsoDate(todayIso, 1);
   const managerMinAllowedDateIso = (() => {
     const minDate = new Date();
     minDate.setDate(minDate.getDate() - 2);
@@ -46,7 +78,12 @@ const AlignQCModal = ({
     normalizeRequestType(initialRequestType),
   );
   const [request_date, setReqDate] = useState(
-    toDDMMYYYYInputValue(initialRequestDate, "") || getTodayDDMMYYYY(),
+    getInitialRequestDateValue({
+      value: initialRequestDate,
+      futureOnly: isInspectionManager,
+      todayIso,
+      tomorrowIso,
+    }),
   );
   const [quantityRequested, setQuantityRequested] = useState(
     initialQuantityRequested !== undefined && initialQuantityRequested !== null
@@ -90,7 +127,14 @@ const AlignQCModal = ({
   useEffect(() => {
     setInspector(initialInspector ? String(initialInspector) : "");
     setRequestType(normalizeRequestType(initialRequestType));
-    setReqDate(toDDMMYYYYInputValue(initialRequestDate, "") || getTodayDDMMYYYY());
+    setReqDate(
+      getInitialRequestDateValue({
+        value: initialRequestDate,
+        futureOnly: isInspectionManager,
+        todayIso,
+        tomorrowIso,
+      }),
+    );
     setQuantityRequested(
       initialQuantityRequested !== undefined && initialQuantityRequested !== null
         ? String(initialQuantityRequested)
@@ -101,6 +145,9 @@ const AlignQCModal = ({
     initialRequestDate,
     initialQuantityRequested,
     initialRequestType,
+    isInspectionManager,
+    todayIso,
+    tomorrowIso,
   ]);
 
   useEffect(() => {
@@ -175,6 +222,10 @@ const AlignQCModal = ({
       )
     ) {
       alert("Manager can align QC only for today and previous 2 days.");
+      return;
+    }
+    if (isInspectionManager && requestDateIso <= todayIso) {
+      alert("Inspection Manager can raise QC requests for future dates only.");
       return;
     }
 
@@ -374,11 +425,22 @@ const AlignQCModal = ({
                 lang="en-GB"
                 className="form-control"
                 value={toISODateString(request_date)}
-                min={isManager ? managerMinAllowedDateIso : undefined}
+                min={
+                  isInspectionManager
+                    ? tomorrowIso
+                    : isManager
+                      ? managerMinAllowedDateIso
+                      : undefined
+                }
                 max={isManager ? todayIso : undefined}
                 onChange={(e) => setReqDate(toDDMMYYYYInputValue(e.target.value, ""))}
                 disabled={submitting}
               />
+              {isInspectionManager && (
+                <div className="small text-secondary mt-1">
+                  Inspection Manager can raise requests for future dates only.
+                </div>
+              )}
             </div>
 
             <div>

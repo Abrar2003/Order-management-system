@@ -428,7 +428,11 @@ const PISDiffs = () => {
         },
       });
 
-      setRows(Array.isArray(response?.data?.data) ? response.data.data : []);
+      setRows(
+        (Array.isArray(response?.data?.data) ? response.data.data : []).filter(
+          (item) => !isPisChecked(item),
+        ),
+      );
       setTotalPages(Number(response?.data?.pagination?.totalPages || 1));
       setTotalRecords(Number(response?.data?.pagination?.totalRecords || 0));
       setFilters({
@@ -602,11 +606,6 @@ const PISDiffs = () => {
     [getMeasurementSortValue, rows, sortBy, sortOrder],
   );
 
-  const checkedRowsCount = useMemo(
-    () => rows.filter((item) => isPisChecked(item)).length,
-    [rows],
-  );
-
   const handlePisUpdated = useCallback(
     (updatedItem = {}) => {
       const nextItem = {
@@ -618,11 +617,7 @@ const PISDiffs = () => {
 
       if (nextItemId) {
         setRows((prevRows) =>
-          prevRows.map((row) =>
-            String(row?._id || "") === nextItemId
-              ? { ...row, ...nextItem, pis_checked_flag: true }
-              : row,
-          ),
+          prevRows.filter((row) => String(row?._id || "") !== nextItemId),
         );
       }
 
@@ -825,7 +820,7 @@ const PISDiffs = () => {
           <h2 className="h4 mb-0">PIS Diffs</h2>
           <div className="d-flex align-items-center gap-2">
             <span className="text-secondary small">
-              Items where inspected measurements differ from PIS
+              Unchecked items where inspected measurements differ from PIS
             </span>
             <button
               type="button"
@@ -923,8 +918,7 @@ const PISDiffs = () => {
 
         <div className="card om-card mb-3">
           <div className="card-body d-flex flex-wrap gap-2">
-            <span className="om-summary-chip">Records: {totalRecords}</span>
-            <span className="om-summary-chip">Checked on Page: {checkedRowsCount}</span>
+            <span className="om-summary-chip">Unchecked Records: {totalRecords}</span>
             <span className="om-summary-chip">Page: {page}</span>
             <span className="om-summary-chip">Limit: {limit}</span>
           </div>
@@ -1025,18 +1019,15 @@ const PISDiffs = () => {
                     {sortedRows.length === 0 && (
                       <tr>
                         <td colSpan={canEditPis ? 11 : 10} className="text-center py-4">
-                          No PIS diffs found
+                          No unchecked PIS diffs found
                         </td>
                       </tr>
                     )}
 
                     {sortedRows.map((item) => {
-                      const isCheckedWithDiff = isPisChecked(item);
-
                       return (
                         <tr
                           key={item?._id || item?.code}
-                          className={isCheckedWithDiff ? "table-danger" : ""}
                         >
                           <td>{item?.code || "N/A"}</td>
                           <td>{item?.description || item?.name || "N/A"}</td>
@@ -1045,11 +1036,9 @@ const PISDiffs = () => {
                           <td>
                             <div className="d-flex flex-wrap gap-1">
                               <span
-                                className={`badge ${
-                                  isCheckedWithDiff ? "text-bg-danger" : "text-bg-warning"
-                                }`}
+                                className="badge text-bg-warning"
                               >
-                                {isCheckedWithDiff ? "PIS Checked" : "Needs PIS Check"}
+                                Needs PIS Check
                               </span>
                               {(Array.isArray(item?.pis_diff?.fields) ? item.pis_diff.fields : []).map(
                                 (field) => (

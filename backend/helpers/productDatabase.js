@@ -81,11 +81,18 @@ const toNonNegativeNumber = (value, fieldLabel = "Value") => {
 };
 
 const hasMeaningfulNumber = (value) => toNonNegativeNumber(value) > 0;
+const assignPositiveNumber = (target = {}, key = "", value, fieldLabel = "Value") => {
+  if (value === undefined || value === null || value === "") return;
+  const parsed = toNonNegativeNumber(value, fieldLabel);
+  if (parsed > 0) {
+    target[key] = parsed;
+  }
+};
 
 const hasMeaningfulItemEntry = (entry = {}) =>
-  ["L", "B", "H", "net_weight", "gross_weight"].some((field) =>
+  ["L", "B", "H", "net_weight", "gross_weight", "weight"].some((field) =>
     hasMeaningfulNumber(entry?.[field]),
-  ) || Boolean(normalizeKey(entry?.remark));
+  );
 
 const hasMeaningfulBoxEntry = (entry = {}) =>
   [
@@ -94,11 +101,10 @@ const hasMeaningfulBoxEntry = (entry = {}) =>
     "H",
     "net_weight",
     "gross_weight",
+    "weight",
     "item_count_in_inner",
     "box_count_in_master",
-  ].some((field) => hasMeaningfulNumber(entry?.[field])) ||
-  Boolean(normalizeKey(entry?.remark)) ||
-  Boolean(normalizeKey(entry?.box_type));
+  ].some((field) => hasMeaningfulNumber(entry?.[field]));
 
 const normalizeItemSizeEntries = (entries = []) => {
   if (!Array.isArray(entries)) {
@@ -117,29 +123,29 @@ const normalizeItemSizeEntries = (entries = []) => {
     const entryLabel = `PD item size ${index + 1}`;
 
     const normalizedRemark = normalizeKey(entry?.remark || entry?.type || "");
-    const remark = meaningfulEntries.length === 1 ? "" : normalizedRemark;
-
-    if (meaningfulEntries.length > 1) {
-      if (!remark) {
-        throw new ProductDatabaseError(`${entryLabel} remark is required`);
-      }
-      if (!ITEM_REMARK_OPTIONS.includes(remark)) {
+    if (normalizedRemark) {
+      if (!ITEM_REMARK_OPTIONS.includes(normalizedRemark)) {
         throw new ProductDatabaseError(`${entryLabel} remark is invalid`);
       }
-      if (seenRemarks.has(remark)) {
+      if (seenRemarks.has(normalizedRemark)) {
         throw new ProductDatabaseError("PD item size remarks must be unique");
       }
-      seenRemarks.add(remark);
+      seenRemarks.add(normalizedRemark);
     }
 
-    return {
-      L: toNonNegativeNumber(entry?.L, `${entryLabel} L`),
-      B: toNonNegativeNumber(entry?.B, `${entryLabel} B`),
-      H: toNonNegativeNumber(entry?.H, `${entryLabel} H`),
-      remark,
-      net_weight: toNonNegativeNumber(entry?.net_weight ?? entry?.weight, `${entryLabel} net weight`),
-      gross_weight: toNonNegativeNumber(entry?.gross_weight, `${entryLabel} gross weight`),
-    };
+    const payload = {};
+    assignPositiveNumber(payload, "L", entry?.L, `${entryLabel} L`);
+    assignPositiveNumber(payload, "B", entry?.B, `${entryLabel} B`);
+    assignPositiveNumber(payload, "H", entry?.H, `${entryLabel} H`);
+    if (normalizedRemark) payload.remark = normalizedRemark;
+    assignPositiveNumber(
+      payload,
+      "net_weight",
+      entry?.net_weight ?? entry?.weight,
+      `${entryLabel} net weight`,
+    );
+    assignPositiveNumber(payload, "gross_weight", entry?.gross_weight, `${entryLabel} gross weight`);
+    return payload;
   });
 };
 
@@ -166,17 +172,32 @@ const normalizeBoxSizeEntries = (
   ) {
     return meaningfulEntries.map((entry, index) => {
       const entryLabel = `PD box size ${index + 1}`;
-      return {
-        L: toNonNegativeNumber(entry?.L, `${entryLabel} L`),
-        B: toNonNegativeNumber(entry?.B, `${entryLabel} B`),
-        H: toNonNegativeNumber(entry?.H, `${entryLabel} H`),
-        remark: normalizeKey(entry?.remark || entry?.type || entry?.box_type || ""),
-        box_type: normalizeKey(entry?.box_type || BOX_ENTRY_TYPES.INDIVIDUAL),
-        net_weight: toNonNegativeNumber(entry?.net_weight, `${entryLabel} net weight`),
-        gross_weight: toNonNegativeNumber(entry?.gross_weight ?? entry?.weight, `${entryLabel} gross weight`),
-        item_count_in_inner: toNonNegativeNumber(entry?.item_count_in_inner, `${entryLabel} item count in inner`),
-        box_count_in_master: toNonNegativeNumber(entry?.box_count_in_master, `${entryLabel} box count in master`),
-      };
+      const payload = {};
+      assignPositiveNumber(payload, "L", entry?.L, `${entryLabel} L`);
+      assignPositiveNumber(payload, "B", entry?.B, `${entryLabel} B`);
+      assignPositiveNumber(payload, "H", entry?.H, `${entryLabel} H`);
+      payload.remark = normalizeKey(entry?.remark || entry?.type || entry?.box_type || "");
+      payload.box_type = normalizeKey(entry?.box_type || BOX_ENTRY_TYPES.INDIVIDUAL);
+      assignPositiveNumber(payload, "net_weight", entry?.net_weight, `${entryLabel} net weight`);
+      assignPositiveNumber(
+        payload,
+        "gross_weight",
+        entry?.gross_weight ?? entry?.weight,
+        `${entryLabel} gross weight`,
+      );
+      assignPositiveNumber(
+        payload,
+        "item_count_in_inner",
+        entry?.item_count_in_inner,
+        `${entryLabel} item count in inner`,
+      );
+      assignPositiveNumber(
+        payload,
+        "box_count_in_master",
+        entry?.box_count_in_master,
+        `${entryLabel} box count in master`,
+      );
+      return payload;
     });
   }
 
@@ -184,56 +205,62 @@ const normalizeBoxSizeEntries = (
   return meaningfulEntries.map((entry, index) => {
     const entryLabel = `PD box size ${index + 1}`;
 
-    const baseEntry = {
-      L: toNonNegativeNumber(entry?.L, `${entryLabel} L`),
-      B: toNonNegativeNumber(entry?.B, `${entryLabel} B`),
-      H: toNonNegativeNumber(entry?.H, `${entryLabel} H`),
-      net_weight: toNonNegativeNumber(entry?.net_weight, `${entryLabel} net weight`),
-      gross_weight: toNonNegativeNumber(entry?.gross_weight ?? entry?.weight, `${entryLabel} gross weight`),
-    };
+    const baseEntry = {};
+    assignPositiveNumber(baseEntry, "L", entry?.L, `${entryLabel} L`);
+    assignPositiveNumber(baseEntry, "B", entry?.B, `${entryLabel} B`);
+    assignPositiveNumber(baseEntry, "H", entry?.H, `${entryLabel} H`);
+    assignPositiveNumber(baseEntry, "net_weight", entry?.net_weight, `${entryLabel} net weight`);
+    assignPositiveNumber(
+      baseEntry,
+      "gross_weight",
+      entry?.gross_weight ?? entry?.weight,
+      `${entryLabel} gross weight`,
+    );
 
     if (resolvedMode === BOX_PACKAGING_MODES.CARTON) {
       const boxType = index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
-      const itemCountInInner =
-        boxType === BOX_ENTRY_TYPES.INNER
-          ? toNonNegativeNumber(entry?.item_count_in_inner, `${entryLabel} item count in inner`)
-          : 0;
-      const boxCountInMaster =
-        boxType === BOX_ENTRY_TYPES.MASTER
-          ? toNonNegativeNumber(entry?.box_count_in_master, `${entryLabel} box count in master`)
-          : 0;
-
-      return {
+      const cartonEntry = {
         ...baseEntry,
         remark: boxType,
         box_type: boxType,
-        item_count_in_inner: itemCountInInner,
-        box_count_in_master: boxCountInMaster,
       };
+      if (boxType === BOX_ENTRY_TYPES.INNER) {
+        assignPositiveNumber(
+          cartonEntry,
+          "item_count_in_inner",
+          entry?.item_count_in_inner,
+          `${entryLabel} item count in inner`,
+        );
+      }
+      if (boxType === BOX_ENTRY_TYPES.MASTER) {
+        assignPositiveNumber(
+          cartonEntry,
+          "box_count_in_master",
+          entry?.box_count_in_master,
+          `${entryLabel} box count in master`,
+        );
+      }
+
+      return cartonEntry;
     }
 
     const normalizedRemark = normalizeKey(entry?.remark || entry?.type || "");
-    const remark = meaningfulEntries.length === 1 ? "" : normalizedRemark;
-    if (meaningfulEntries.length > 1) {
-      if (!remark) {
-        throw new ProductDatabaseError(`${entryLabel} remark is required`);
-      }
-      if (!BOX_INDIVIDUAL_REMARK_OPTIONS.includes(remark)) {
+    if (normalizedRemark) {
+      if (!BOX_INDIVIDUAL_REMARK_OPTIONS.includes(normalizedRemark)) {
         throw new ProductDatabaseError(`${entryLabel} remark is invalid`);
       }
-      if (seenRemarks.has(remark)) {
+      if (seenRemarks.has(normalizedRemark)) {
         throw new ProductDatabaseError("PD box size remarks must be unique");
       }
-      seenRemarks.add(remark);
+      seenRemarks.add(normalizedRemark);
     }
 
-    return {
+    const individualEntry = {
       ...baseEntry,
-      remark,
       box_type: BOX_ENTRY_TYPES.INDIVIDUAL,
-      item_count_in_inner: 0,
-      box_count_in_master: 0,
     };
+    if (normalizedRemark) individualEntry.remark = normalizedRemark;
+    return individualEntry;
   });
 };
 

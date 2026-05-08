@@ -720,6 +720,16 @@ const isIsoDateWithinPastDaysInclusive = (isoDate, daysBack = 0) => {
   return target >= minAllowedUtc && target <= todayUtc;
 };
 
+const isIsoDateInFuture = (isoDate) => {
+  const target = parseIsoDateToUtcDate(isoDate);
+  if (!target) return false;
+
+  const todayUtc = toUtcDayStart(new Date());
+  if (!todayUtc) return false;
+
+  return target > todayUtc;
+};
+
 const getUpdateQcPastDaysLimit = (role = "", userId = "") => {
   const normalizedUserId = String(userId || "").trim();
   if (isLabelExemptUser(normalizedUserId)) {
@@ -3906,10 +3916,12 @@ exports.alignQC = async (req, res) => {
 
     const normalizedRole = normalizeUserRoleKey(req.user?.role);
     const isAdmin = isAdminLikeRole(normalizedRole);
+    const isInspectionManager = normalizedRole === "inspection_manager";
     const isManager = !isAdmin && isManagerLikeRole(normalizedRole);
+    const isStandardManager = isManager && !isInspectionManager;
 
     if (
-      isManager &&
+      isStandardManager &&
       !isIsoDateWithinPastDaysInclusive(
         requestDateValue,
         MANAGER_ALLOWED_PAST_DAYS,
@@ -3917,6 +3929,12 @@ exports.alignQC = async (req, res) => {
     ) {
       return res.status(403).json({
         message: "Manager can align QC only for today and previous 2 days",
+      });
+    }
+
+    if (isInspectionManager && !isIsoDateInFuture(requestDateValue)) {
+      return res.status(403).json({
+        message: "Inspection Manager can raise QC requests for future dates only",
       });
     }
 

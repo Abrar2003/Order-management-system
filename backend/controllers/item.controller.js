@@ -2622,7 +2622,23 @@ exports.getPisDiffItems = async (req, res) => {
     const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
     const skip = (page - 1) * limit;
 
-    const match = buildItemMatch({ search, brand, vendor });
+    const uncheckedPisMatch = { pis_checked_flag: { $ne: true } };
+    const match = combineMongoMatches(
+      buildItemMatch({ search, brand, vendor }),
+      uncheckedPisMatch,
+    );
+    const brandOptionsMatch = combineMongoMatches(
+      buildItemMatch({ search, vendor }),
+      uncheckedPisMatch,
+    );
+    const vendorOptionsMatch = combineMongoMatches(
+      buildItemMatch({ search, brand }),
+      uncheckedPisMatch,
+    );
+    const codeOptionsMatch = combineMongoMatches(
+      buildItemMatch({ brand, vendor }),
+      uncheckedPisMatch,
+    );
 
     const [items, brandsRaw, brandNamesRaw, brandsPrimaryRaw, vendorsRaw, codesRaw] =
       await Promise.all([
@@ -2630,11 +2646,11 @@ exports.getPisDiffItems = async (req, res) => {
           .select(PIS_DIFF_ITEM_SELECT)
           .sort({ updatedAt: -1, code: 1 })
           .lean(),
-        Item.distinct("brands", buildItemMatch({ search, vendor })),
-        Item.distinct("brand_name", buildItemMatch({ search, vendor })),
-        Item.distinct("brand", buildItemMatch({ search, vendor })),
-        Item.distinct("vendors", buildItemMatch({ search, brand })),
-        Item.distinct("code", buildItemMatch({ brand, vendor })),
+        Item.distinct("brands", brandOptionsMatch),
+        Item.distinct("brand_name", brandOptionsMatch),
+        Item.distinct("brand", brandOptionsMatch),
+        Item.distinct("vendors", vendorOptionsMatch),
+        Item.distinct("code", codeOptionsMatch),
       ]);
     const mismatchLookup = await buildInspectionReportMismatchLookup(items);
     const diffRows = buildPisDiffRows(items).map((item) => {

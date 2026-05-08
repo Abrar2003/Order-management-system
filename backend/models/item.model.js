@@ -342,7 +342,7 @@ const itemSchema = new mongoose.Schema(
       },
     },
     pd_item_sizes: {
-      type: [itemSizeEntrySchema],
+      type: [productSpecItemSizeEntrySchema],
       default: [],
       validate: {
         validator: (entries) =>
@@ -381,7 +381,7 @@ const itemSchema = new mongoose.Schema(
       trim: true,
     },
     pd_box_sizes: {
-      type: [boxSizeEntrySchema],
+      type: [productSpecBoxSizeEntrySchema],
       default: [],
       validate: {
         validator: (entries) =>

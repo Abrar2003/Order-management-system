@@ -349,16 +349,29 @@ const ProductTypeDynamicForm = ({
   boxSizeValues = {},
   errors = {},
   disabled = false,
+  hideSizeFields = false,
   onFieldChange,
   onItemSizeChange,
   onBoxSizeChange,
 }) => {
   const groups = useMemo(() => sortTemplateGroups(template?.groups), [template]);
+  const visibleGroups = useMemo(
+    () =>
+      hideSizeFields
+        ? groups.filter((group) =>
+            flattenTemplateFields({ groups: [group] }).some((field) => {
+              const inputType = normalizeTemplateKey(field?.input_type);
+              return inputType !== "item_size" && inputType !== "box_size";
+            }),
+          )
+        : groups,
+    [groups, hideSizeFields],
+  );
   const [openGroups, setOpenGroups] = useState([]);
 
   useEffect(() => {
-    setOpenGroups(groups.slice(0, 2).map((group) => normalizeTemplateKey(group?.key)));
-  }, [groups]);
+    setOpenGroups(visibleGroups.slice(0, 2).map((group) => normalizeTemplateKey(group?.key)));
+  }, [visibleGroups]);
 
   if (!template) {
     return null;
@@ -366,10 +379,14 @@ const ProductTypeDynamicForm = ({
 
   return (
     <div className="d-grid gap-3">
-      {groups.map((group) => {
+      {visibleGroups.map((group) => {
         const groupKey = normalizeTemplateKey(group?.key);
         const isOpen = openGroups.includes(groupKey);
-        const groupFields = flattenTemplateFields({ groups: [group] });
+        const groupFields = flattenTemplateFields({ groups: [group] }).filter((field) => {
+          if (!hideSizeFields) return true;
+          const inputType = normalizeTemplateKey(field?.input_type);
+          return inputType !== "item_size" && inputType !== "box_size";
+        });
 
         return (
           <section key={groupKey} className="card om-card om-product-type-group-card">

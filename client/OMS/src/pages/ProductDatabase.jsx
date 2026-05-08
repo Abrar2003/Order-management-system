@@ -18,8 +18,18 @@ import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import {
+  BOX_CARTON_REMARK_OPTIONS,
   BOX_ENTRY_TYPES,
   BOX_PACKAGING_MODES,
+  BOX_SIZE_REMARK_OPTIONS,
+  convertMeasuredBoxEntriesMode,
+  createEmptyMeasuredSizeEntry,
+  detectBoxPackagingMode,
+  ensureMeasuredSizeEntryCount,
+  getRemarkLabel,
+  normalizeSizeCount,
+  SIZE_ENTRY_LIMIT as SIZE_ENTRY_LIMIT_UTIL,
+  toDimensionInputValue,
 } from "../utils/measuredSizeForm";
 import {
   buildProductTypePayload,
@@ -32,6 +42,18 @@ import "../App.css";
 const DEFAULT_FILTER = "all";
 const DEFAULT_LIMIT = 20;
 const LIMIT_OPTIONS = [20, 50, 100];
+const SIZE_ENTRY_LIMIT = SIZE_ENTRY_LIMIT_UTIL;
+const SIZE_COUNT_OPTIONS = Array.from({ length: SIZE_ENTRY_LIMIT }, (_, index) =>
+  String(index + 1),
+);
+const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
+  { value: "top", label: "Top" },
+  { value: "base", label: "Base" },
+  { value: "item1", label: "Item 1" },
+  { value: "item2", label: "Item 2" },
+  { value: "item3", label: "Item 3" },
+  { value: "item4", label: "Item 4" },
+]);
 const STATUS_OPTIONS = Object.freeze([
   { value: DEFAULT_FILTER, label: "All Statuses" },
   { value: "not_set", label: "Not Set" },
@@ -148,25 +170,38 @@ const isCbmProductSpecField = (field = {}) => {
 };
 
 const getDisplayItemSizes = (row = {}) => {
+  const pdItemSizes = Array.isArray(row?.pd_item_sizes) ? row.pd_item_sizes : [];
+  if (pdItemSizes.length > 0) return pdItemSizes;
   const productItemSizes = Array.isArray(row?.product_specs?.item_sizes)
     ? row.product_specs.item_sizes
     : [];
-  if (productItemSizes.length > 0) return productItemSizes;
-  return Array.isArray(row?.pd_item_sizes) ? row.pd_item_sizes : [];
+  return productItemSizes;
 };
 
 const getDisplayBoxSizes = (row = {}) => {
+  const pdBoxSizes = Array.isArray(row?.pd_box_sizes) ? row.pd_box_sizes : [];
+  if (pdBoxSizes.length > 0) return pdBoxSizes;
   const productBoxSizes = Array.isArray(row?.product_specs?.box_sizes)
     ? row.product_specs.box_sizes
     : [];
-  if (productBoxSizes.length > 0) return productBoxSizes;
-  return Array.isArray(row?.pd_box_sizes) ? row.pd_box_sizes : [];
+  return productBoxSizes;
 };
 
-const getDisplayBoxMode = (row = {}) =>
-  Array.isArray(row?.product_specs?.box_sizes) && row.product_specs.box_sizes.length > 0
-    ? row?.product_specs?.box_mode || BOX_PACKAGING_MODES.INDIVIDUAL
-    : row?.pd_box_mode || BOX_PACKAGING_MODES.INDIVIDUAL;
+const getDisplayBoxMode = (row = {}) => {
+  const pdBoxSizes = Array.isArray(row?.pd_box_sizes) ? row.pd_box_sizes : [];
+  if (pdBoxSizes.length > 0) {
+    return detectBoxPackagingMode(row?.pd_box_mode, pdBoxSizes);
+  }
+
+  const productBoxSizes = Array.isArray(row?.product_specs?.box_sizes)
+    ? row.product_specs.box_sizes
+    : [];
+  if (productBoxSizes.length > 0) {
+    return detectBoxPackagingMode(row?.product_specs?.box_mode, productBoxSizes);
+  }
+
+  return detectBoxPackagingMode(row?.pd_box_mode, []);
+};
 
 const normalizeProductSpecsForCompare = (productSpecs = {}) => ({
   fields: (Array.isArray(productSpecs?.fields) ? productSpecs.fields : []).map((field) => ({
@@ -339,6 +374,264 @@ const SummaryCard = ({ label, value }) => (
   </div>
 );
 
+const ProductDatabaseMeasuredSizeSection = ({
+  title,
+  countName,
+  countValue,
+  entriesKey,
+  entries,
+  remarkOptions,
+  weightLabel,
+  countLabel,
+  disabled = false,
+  mode = BOX_PACKAGING_MODES.INDIVIDUAL,
+  modeName = "",
+  showModeSelector = false,
+  onControlChange,
+  onEntryChange,
+}) => {
+  const isCartonMode = mode === BOX_PACKAGING_MODES.CARTON;
+  const safeCount = isCartonMode ? 2 : normalizeSizeCount(countValue, 1);
+  const entryColumnClass = safeCount > 1 ? "col-md-2" : "col-md-3";
+
+  return (
+    <>
+      <div className="col-md-2">
+        {showModeSelector ? (
+          <>
+            <label className="form-label">Packaging Mode</label>
+            <select
+              className="form-select"
+              name={modeName}
+              value={mode}
+              onChange={onControlChange}
+              disabled={disabled}
+            >
+              <option value={BOX_PACKAGING_MODES.INDIVIDUAL}>Individual Boxes</option>
+              <option value={BOX_PACKAGING_MODES.CARTON}>Inner + Master Carton</option>
+            </select>
+          </>
+        ) : (
+          <>
+            <label className="form-label">{countLabel}</label>
+            <select
+              className="form-select"
+              name={countName}
+              value={String(safeCount)}
+              onChange={onControlChange}
+              disabled={disabled}
+            >
+              {SIZE_COUNT_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
+
+        {showModeSelector && countName && (
+          <>
+            <label className="form-label mt-3">{countLabel}</label>
+            {isCartonMode ? (
+              <input
+                type="text"
+                className="form-control"
+                value="2"
+                disabled
+                readOnly
+              />
+            ) : (
+              <select
+                className="form-select"
+                name={countName}
+                value={String(safeCount)}
+                onChange={onControlChange}
+                disabled={disabled}
+              >
+                {SIZE_COUNT_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            )}
+          </>
+        )}
+      </div>
+
+      <div className="col-md-10">
+        <label className="form-label">{title}</label>
+        <div className="d-grid gap-2">
+          {entries.slice(0, safeCount).map((entry, index) => (
+            <div key={`${entriesKey}-${index}`} className="border rounded p-3">
+              <div className="small text-secondary mb-2">
+                {isCartonMode
+                  ? index === 0
+                    ? "Inner carton"
+                    : "Master carton"
+                  : safeCount === 1
+                  ? "Single entry"
+                  : `Entry ${index + 1}${entry.remark ? ` | ${getRemarkLabel(remarkOptions, entry.remark)}` : ""}`}
+              </div>
+
+              <div className="row g-2">
+                {safeCount > 1 && (
+                  <div className="col-md-3">
+                    <label className="form-label small text-secondary">Remark</label>
+                    {isCartonMode ? (
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={getRemarkLabel(remarkOptions, entry.remark)}
+                        disabled
+                        readOnly
+                      />
+                    ) : (
+                      <select
+                        className="form-select"
+                        value={entry.remark}
+                        onChange={(event) =>
+                          onEntryChange?.(
+                            entriesKey,
+                            index,
+                            "remark",
+                            event.target.value,
+                          )
+                        }
+                        disabled={disabled}
+                      >
+                        <option value="">Select remark</option>
+                        {remarkOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                )}
+
+                <div className={entryColumnClass}>
+                  <label className="form-label small text-secondary">L</label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    value={entry.L}
+                    onChange={(event) =>
+                      onEntryChange?.(entriesKey, index, "L", event.target.value)
+                    }
+                    min="0"
+                    step="any"
+                    disabled={disabled}
+                  />
+                </div>
+                <div className={entryColumnClass}>
+                  <label className="form-label small text-secondary">B</label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    value={entry.B}
+                    onChange={(event) =>
+                      onEntryChange?.(entriesKey, index, "B", event.target.value)
+                    }
+                    min="0"
+                    step="any"
+                    disabled={disabled}
+                  />
+                </div>
+                <div className={entryColumnClass}>
+                  <label className="form-label small text-secondary">H</label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    value={entry.H}
+                    onChange={(event) =>
+                      onEntryChange?.(entriesKey, index, "H", event.target.value)
+                    }
+                    min="0"
+                    step="any"
+                    disabled={disabled}
+                  />
+                </div>
+                <div className={safeCount > 1 ? "col-md-3" : "col-md-3"}>
+                  <label className="form-label small text-secondary">{weightLabel}</label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    value={entry.weight}
+                    onChange={(event) =>
+                      onEntryChange?.(entriesKey, index, "weight", event.target.value)
+                    }
+                    min="0"
+                    step="any"
+                    disabled={disabled}
+                  />
+                </div>
+
+                {isCartonMode && index === 0 && (
+                  <div className="col-md-3">
+                    <label className="form-label small text-secondary">Item Count In Inner</label>
+                    <input
+                      type="number"
+                      className="form-control"
+                      value={entry.item_count_in_inner}
+                      onChange={(event) =>
+                        onEntryChange?.(
+                          entriesKey,
+                          index,
+                          "item_count_in_inner",
+                          event.target.value,
+                        )
+                      }
+                      min="0"
+                      step="1"
+                      disabled={disabled}
+                    />
+                  </div>
+                )}
+
+                {isCartonMode && index === 1 && (
+                  <div className="col-md-3">
+                    <label className="form-label small text-secondary">Box Count In Master</label>
+                    <input
+                      type="number"
+                      className="form-control"
+                      value={entry.box_count_in_master}
+                      onChange={(event) =>
+                        onEntryChange?.(
+                          entriesKey,
+                          index,
+                          "box_count_in_master",
+                          event.target.value,
+                        )
+                      }
+                      min="0"
+                      step="1"
+                      disabled={disabled}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {safeCount === 1 && !isCartonMode && (
+          <div className="small text-secondary mt-2">
+            Single-entry measurements do not use remarks.
+          </div>
+        )}
+        {isCartonMode && (
+          <div className="small text-secondary mt-2">
+            Master carton CBM is treated as the final effective box CBM.
+          </div>
+        )}
+      </div>
+    </>
+  );
+};
+
 const cloneProductTypeValidation = () => ({
   product_type: "",
   fields: {},
@@ -356,6 +649,234 @@ const buildExistingProductTypePayload = (item = {}) => ({
     raw_values: {},
   },
 });
+
+const hasObjectKey = (value = {}, key = "") =>
+  Object.prototype.hasOwnProperty.call(value || {}, key);
+
+const isProductSpecSizeRawValue = (value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const hasDimension = ["L", "B", "H"].some((key) => hasObjectKey(value, key));
+  const hasSizeMetadata = [
+    "remark",
+    "net_weight",
+    "gross_weight",
+    "box_type",
+    "item_count_in_inner",
+    "box_count_in_master",
+  ].some((key) => hasObjectKey(value, key));
+  return hasDimension && hasSizeMetadata;
+};
+
+const stripProductSpecSizeRawValues = (rawValues = {}) =>
+  Object.entries(rawValues && typeof rawValues === "object" ? rawValues : {}).reduce(
+    (accumulator, [key, value]) => {
+      if (!isProductSpecSizeRawValue(value)) {
+        accumulator[key] = value;
+      }
+      return accumulator;
+    },
+    {},
+  );
+
+const buildProductTypePayloadWithoutSizeSections = (payload = {}) => ({
+  ...payload,
+  product_specs: {
+    fields: Array.isArray(payload?.product_specs?.fields) ? payload.product_specs.fields : [],
+    item_sizes: [],
+    box_sizes: [],
+    box_mode: BOX_PACKAGING_MODES.INDIVIDUAL,
+    raw_values: stripProductSpecSizeRawValues(payload?.product_specs?.raw_values),
+  },
+});
+
+const buildExistingProductDatabaseSizePayload = (item = {}) => ({
+  pd_item_sizes: Array.isArray(item?.pd_item_sizes) ? item.pd_item_sizes : [],
+  pd_box_sizes: Array.isArray(item?.pd_box_sizes) ? item.pd_box_sizes : [],
+  pd_box_mode: detectBoxPackagingMode(item?.pd_box_mode, item?.pd_box_sizes || []),
+});
+
+const normalizeMeasuredKey = (value) => normalizeTextValue(value).toLowerCase();
+
+const getPositivePayloadNumber = (value) => {
+  const normalized = normalizeTextValue(value);
+  if (!normalized) return null;
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+const addPositivePayloadNumber = (payload = {}, key = "", value) => {
+  const parsed = getPositivePayloadNumber(value);
+  if (parsed !== null) {
+    payload[key] = parsed;
+  }
+};
+
+const hasMeaningfulMeasuredPayloadInput = (entry = {}, includeCartonCounts = false) => {
+  const fields = ["L", "B", "H", "weight"];
+  if (includeCartonCounts) {
+    fields.push("item_count_in_inner", "box_count_in_master");
+  }
+  return fields.some((field) => getPositivePayloadNumber(entry?.[field]) !== null);
+};
+
+const toMeasuredSizeEntryFormValue = (
+  entry = {},
+  {
+    weightKey = "",
+    mode = BOX_PACKAGING_MODES.INDIVIDUAL,
+    boxType = BOX_ENTRY_TYPES.INDIVIDUAL,
+  } = {},
+) => {
+  const normalizedRemark = normalizeMeasuredKey(entry?.remark || entry?.type || "");
+  const normalizedBoxType = normalizeMeasuredKey(entry?.box_type || boxType);
+  const resolvedMode = detectBoxPackagingMode(mode, [
+    { ...entry, remark: normalizedRemark, box_type: normalizedBoxType },
+  ]);
+  const resolvedBoxType =
+    resolvedMode === BOX_PACKAGING_MODES.CARTON
+      ? normalizedBoxType === BOX_ENTRY_TYPES.MASTER ||
+        normalizedRemark === BOX_ENTRY_TYPES.MASTER
+        ? BOX_ENTRY_TYPES.MASTER
+        : BOX_ENTRY_TYPES.INNER
+      : BOX_ENTRY_TYPES.INDIVIDUAL;
+
+  return {
+    ...createEmptyMeasuredSizeEntry({
+      mode: resolvedMode,
+      boxType: resolvedBoxType,
+    }),
+    remark: resolvedMode === BOX_PACKAGING_MODES.CARTON ? resolvedBoxType : normalizedRemark,
+    box_type: resolvedBoxType,
+    L: toDimensionInputValue(entry?.L),
+    B: toDimensionInputValue(entry?.B),
+    H: toDimensionInputValue(entry?.H),
+    weight: toDimensionInputValue(entry?.[weightKey] ?? entry?.weight),
+    item_count_in_inner: toDimensionInputValue(entry?.item_count_in_inner),
+    box_count_in_master: toDimensionInputValue(entry?.box_count_in_master),
+  };
+};
+
+const createProductDatabaseMeasuredSizeFormState = (item = {}) => {
+  const itemEntries = getDisplayItemSizes(item).map((entry) =>
+    toMeasuredSizeEntryFormValue(entry, { weightKey: "net_weight" }),
+  );
+  const itemCount = String(normalizeSizeCount(Math.max(itemEntries.length, 1), 1));
+  const boxMode = getDisplayBoxMode(item);
+  const boxEntries = getDisplayBoxSizes(item).map((entry) =>
+    toMeasuredSizeEntryFormValue(entry, {
+      weightKey: "gross_weight",
+      mode: boxMode,
+      boxType: entry?.box_type,
+    }),
+  );
+  const resolvedBoxMode = detectBoxPackagingMode(boxMode, boxEntries);
+  const boxCount =
+    resolvedBoxMode === BOX_PACKAGING_MODES.CARTON
+      ? "2"
+      : String(normalizeSizeCount(Math.max(boxEntries.length, 1), 1));
+
+  return {
+    itemCount,
+    itemEntries: ensureMeasuredSizeEntryCount(itemEntries, itemCount),
+    boxMode: resolvedBoxMode,
+    boxCount,
+    boxEntries: ensureMeasuredSizeEntryCount(boxEntries, boxCount, {
+      mode: resolvedBoxMode,
+    }),
+  };
+};
+
+const cloneMeasuredSizeEntries = (entries = []) =>
+  (Array.isArray(entries) ? entries : []).map((entry) => ({ ...entry }));
+
+const cloneMeasuredSizeFormState = (formState = {}) => ({
+  itemCount: String(normalizeSizeCount(formState?.itemCount, 1)),
+  itemEntries: cloneMeasuredSizeEntries(formState?.itemEntries),
+  boxMode: detectBoxPackagingMode(formState?.boxMode, formState?.boxEntries || []),
+  boxCount: String(normalizeSizeCount(formState?.boxCount, 1)),
+  boxEntries: cloneMeasuredSizeEntries(formState?.boxEntries),
+});
+
+const getProductDatabaseMeasuredSizeFormState = ({ draft = null, item = {} } = {}) =>
+  draft?.measuredSizeForm
+    ? cloneMeasuredSizeFormState(draft.measuredSizeForm)
+    : createProductDatabaseMeasuredSizeFormState(item);
+
+const buildMeasuredSizeEntriesPayload = ({
+  entries = [],
+  count = 1,
+  mode = BOX_PACKAGING_MODES.INDIVIDUAL,
+  weightPayloadKey = "",
+  isBox = false,
+} = {}) => {
+  const resolvedMode = isBox ? detectBoxPackagingMode(mode, entries) : BOX_PACKAGING_MODES.INDIVIDUAL;
+  const safeCount =
+    isBox && resolvedMode === BOX_PACKAGING_MODES.CARTON
+      ? 2
+      : normalizeSizeCount(count, 1);
+  const scopedEntries = ensureMeasuredSizeEntryCount(entries, safeCount, {
+    mode: resolvedMode,
+  }).slice(0, safeCount);
+
+  return scopedEntries.reduce((payloadEntries, entry, index) => {
+    const isCartonMode = isBox && resolvedMode === BOX_PACKAGING_MODES.CARTON;
+    if (!hasMeaningfulMeasuredPayloadInput(entry, isCartonMode)) {
+      return payloadEntries;
+    }
+
+    const payload = {};
+    ["L", "B", "H"].forEach((dimensionKey) => {
+      addPositivePayloadNumber(payload, dimensionKey, entry?.[dimensionKey]);
+    });
+    if (weightPayloadKey) {
+      addPositivePayloadNumber(payload, weightPayloadKey, entry?.weight);
+    }
+
+    if (isBox) {
+      if (isCartonMode) {
+        const boxType = index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
+        payload.remark = boxType;
+        payload.box_type = boxType;
+        if (boxType === BOX_ENTRY_TYPES.INNER) {
+          addPositivePayloadNumber(payload, "item_count_in_inner", entry?.item_count_in_inner);
+        }
+        if (boxType === BOX_ENTRY_TYPES.MASTER) {
+          addPositivePayloadNumber(payload, "box_count_in_master", entry?.box_count_in_master);
+        }
+      } else {
+        payload.box_type = BOX_ENTRY_TYPES.INDIVIDUAL;
+        const remark = normalizeMeasuredKey(entry?.remark);
+        if (remark) payload.remark = remark;
+      }
+    } else {
+      const remark = normalizeMeasuredKey(entry?.remark);
+      if (remark) payload.remark = remark;
+    }
+
+    payloadEntries.push(payload);
+    return payloadEntries;
+  }, []);
+};
+
+const buildProductDatabaseMeasuredSizePayload = (formState = {}) => {
+  const boxMode = detectBoxPackagingMode(formState?.boxMode, formState?.boxEntries || []);
+  return {
+    pd_item_sizes: buildMeasuredSizeEntriesPayload({
+      entries: formState?.itemEntries,
+      count: formState?.itemCount,
+      weightPayloadKey: "net_weight",
+    }),
+    pd_box_sizes: buildMeasuredSizeEntriesPayload({
+      entries: formState?.boxEntries,
+      count: formState?.boxCount,
+      mode: boxMode,
+      weightPayloadKey: "gross_weight",
+      isBox: true,
+    }),
+    pd_box_mode: boxMode,
+  };
+};
 
 const cloneDraftValue = (value) => {
   if (Array.isArray(value)) return [...value];
@@ -397,13 +918,19 @@ const getProductTypeFormState = ({ draft = null, form = {}, item = {}, template 
     ? cloneProductTypeFormState(draft.productTypeForm)
     : createProductTypeFormState({ item, template });
 
-const createProductDatabaseDraft = ({ form = {}, productTypeForm = {}, payload = {} } = {}) => ({
+const createProductDatabaseDraft = ({
+  form = {},
+  productTypeForm = {},
+  measuredSizeForm = {},
+  payload = {},
+} = {}) => ({
   form: {
     countryOfOrigin: form?.countryOfOrigin || "",
     productTypeKey: normalizeTemplateKey(form?.productTypeKey),
     productTypeVersion: Number(form?.productTypeVersion || 0),
   },
   productTypeForm: cloneProductTypeFormState(productTypeForm),
+  measuredSizeForm: cloneMeasuredSizeFormState(measuredSizeForm),
   payload,
   savedAt: new Date().toISOString(),
 });
@@ -440,6 +967,13 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
             product_type: draftPayload.product_type || null,
             product_specs:
               draftPayload.product_specs || buildExistingProductTypePayload({}).product_specs,
+            pd_item_sizes: Array.isArray(draftPayload.pd_item_sizes)
+              ? draftPayload.pd_item_sizes
+              : item?.pd_item_sizes,
+            pd_box_sizes: Array.isArray(draftPayload.pd_box_sizes)
+              ? draftPayload.pd_box_sizes
+              : item?.pd_box_sizes,
+            pd_box_mode: draftPayload.pd_box_mode || item?.pd_box_mode,
           }
         : item,
     [draftPayload, item],
@@ -469,6 +1003,9 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
   const [productTypeForm, setProductTypeForm] = useState(() =>
     getProductTypeFormState({ draft, form: initialForm, item: draftItem, template: null }),
   );
+  const [measuredSizeForm, setMeasuredSizeForm] = useState(() =>
+    getProductDatabaseMeasuredSizeFormState({ draft, item: draftItem }),
+  );
   const [productTypeErrors, setProductTypeErrors] = useState(
     cloneProductTypeValidation(),
   );
@@ -479,6 +1016,10 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
   useEffect(() => {
     setForm(initialForm);
   }, [initialForm]);
+
+  useEffect(() => {
+    setMeasuredSizeForm(getProductDatabaseMeasuredSizeFormState({ draft, item: draftItem }));
+  }, [draft, draftItem]);
 
   const loadTemplateOptions = useCallback(async () => {
     if (!canViewProductTypeTemplates) {
@@ -607,6 +1148,7 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
         template: selectedTemplate,
         selectedProductTypeKey: form.productTypeKey,
         formState: productTypeForm,
+        includeSizeFields: false,
       });
     }
 
@@ -616,7 +1158,9 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
       Number(draftItem?.product_type?.version || 0) ===
         Number(form.productTypeVersion || 0)
     ) {
-      return buildExistingProductTypePayload(draftItem);
+      return buildProductTypePayloadWithoutSizeSections(
+        buildExistingProductTypePayload(draftItem),
+      );
     }
 
     return {
@@ -631,12 +1175,18 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
     };
   }, [draftItem, form.productTypeKey, form.productTypeVersion, productTypeForm, selectedTemplate]);
 
+  const currentMeasuredSizePayload = useMemo(
+    () => buildProductDatabaseMeasuredSizePayload(measuredSizeForm),
+    [measuredSizeForm],
+  );
+
   const currentPayload = useMemo(
     () => ({
       ...buildPayloadFromForm(form),
       ...currentProductTypePayload,
+      ...currentMeasuredSizePayload,
     }),
-    [currentProductTypePayload, form],
+    [currentMeasuredSizePayload, currentProductTypePayload, form],
   );
 
   const initialPayload = useMemo(
@@ -645,6 +1195,7 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
         countryOfOrigin: normalizeTextValue(item?.country_of_origin),
       }),
       ...buildExistingProductTypePayload(item),
+      ...buildExistingProductDatabaseSizePayload(item),
     }),
     [item],
   );
@@ -743,6 +1294,92 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
     });
   };
 
+  const handleMeasuredSizeControlChange = (event) => {
+    const { name, value } = event.target;
+    clearDraftMessage();
+
+    setMeasuredSizeForm((prev) => {
+      if (name === "pd_box_mode") {
+        const nextMode = detectBoxPackagingMode(value, prev.boxEntries);
+        return {
+          ...prev,
+          boxMode: nextMode,
+          boxCount:
+            nextMode === BOX_PACKAGING_MODES.CARTON
+              ? "2"
+              : String(normalizeSizeCount(prev.boxCount, 1)),
+          boxEntries: ensureMeasuredSizeEntryCount(
+            convertMeasuredBoxEntriesMode(prev.boxEntries, nextMode),
+            nextMode === BOX_PACKAGING_MODES.CARTON ? 2 : prev.boxCount,
+            { mode: nextMode },
+          ),
+        };
+      }
+
+      if (name === "pd_item_count" || name === "pd_box_count") {
+        const safeCount = String(normalizeSizeCount(value, 1));
+        if (name === "pd_item_count") {
+          return {
+            ...prev,
+            itemCount: safeCount,
+            itemEntries: ensureMeasuredSizeEntryCount(prev.itemEntries, safeCount),
+          };
+        }
+
+        return {
+          ...prev,
+          boxCount: safeCount,
+          boxEntries: ensureMeasuredSizeEntryCount(prev.boxEntries, safeCount, {
+            mode: prev.boxMode,
+          }),
+        };
+      }
+
+      return prev;
+    });
+  };
+
+  const handleMeasuredSizeEntryChange = (entriesKey, index, field, value) => {
+    if (field !== "remark" && value !== "") {
+      const parsedValue = Number(value);
+      if (!Number.isFinite(parsedValue) || parsedValue < 0) {
+        return;
+      }
+    }
+
+    clearDraftMessage();
+    setMeasuredSizeForm((prev) => {
+      const currentEntries = Array.isArray(prev?.[entriesKey]) ? prev[entriesKey] : [];
+      const nextEntries = currentEntries.map((entry, entryIndex) =>
+        entryIndex === index
+          ? {
+              ...entry,
+              [field]:
+                field === "remark"
+                  ? normalizeMeasuredKey(value)
+                  : value,
+            }
+          : entry,
+      );
+
+      if (entriesKey === "boxEntries") {
+        return {
+          ...prev,
+          boxEntries: ensureMeasuredSizeEntryCount(
+            nextEntries,
+            prev.boxCount,
+            { mode: prev.boxMode },
+          ),
+        };
+      }
+
+      return {
+        ...prev,
+        itemEntries: ensureMeasuredSizeEntryCount(nextEntries, prev.itemCount),
+      };
+    });
+  };
+
   const handleSaveDraft = () => {
     setError("");
     setProductTypeErrors(cloneProductTypeValidation());
@@ -757,6 +1394,7 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
       draft: createProductDatabaseDraft({
         form,
         productTypeForm,
+        measuredSizeForm,
         payload: currentPayload,
       }),
     });
@@ -795,6 +1433,16 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
       setSavingAction("");
     }
   };
+
+  const displayedItemEntries = ensureMeasuredSizeEntryCount(
+    measuredSizeForm.itemEntries,
+    measuredSizeForm.itemCount,
+  );
+  const displayedBoxEntries = ensureMeasuredSizeEntryCount(
+    measuredSizeForm.boxEntries,
+    measuredSizeForm.boxCount,
+    { mode: measuredSizeForm.boxMode },
+  );
 
   return (
     <div
@@ -970,6 +1618,7 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
                   boxSizeValues={productTypeForm.boxSizeValues}
                   errors={productTypeErrors}
                   disabled={!canEdit}
+                  hideSizeFields
                   onFieldChange={handleProductTypeFieldChange}
                   onItemSizeChange={handleItemSizeChange}
                   onBoxSizeChange={handleBoxSizeChange}
@@ -978,9 +1627,52 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
             )}
 
             <section className="mb-4">
-              <div className="alert alert-light border mb-0">
-                All measurements are maintained in the selected product type template's
-                Sizes section above. The legacy PD size editor has been removed.
+              <div className="card om-card">
+                <div className="card-body">
+                  <div className="row g-3">
+                    <div className="col-12">
+                      <h6 className="mb-0">Product Database Measurements</h6>
+                      <div className="small text-secondary">
+                        Item weight is saved as net weight. Box weight is saved as gross weight.
+                      </div>
+                    </div>
+
+                    <ProductDatabaseMeasuredSizeSection
+                      title="Item Sizes (cm) and Net Weight"
+                      countName="pd_item_count"
+                      countValue={measuredSizeForm.itemCount}
+                      entriesKey="itemEntries"
+                      entries={displayedItemEntries}
+                      remarkOptions={ITEM_SIZE_REMARK_OPTIONS}
+                      weightLabel="Net Weight"
+                      countLabel="Item Sets"
+                      disabled={!canEdit}
+                      onControlChange={handleMeasuredSizeControlChange}
+                      onEntryChange={handleMeasuredSizeEntryChange}
+                    />
+
+                    <ProductDatabaseMeasuredSizeSection
+                      title="Box Sizes (cm) and Gross Weight"
+                      countName="pd_box_count"
+                      countValue={measuredSizeForm.boxCount}
+                      entriesKey="boxEntries"
+                      entries={displayedBoxEntries}
+                      remarkOptions={
+                        measuredSizeForm.boxMode === BOX_PACKAGING_MODES.CARTON
+                          ? BOX_CARTON_REMARK_OPTIONS
+                          : BOX_SIZE_REMARK_OPTIONS
+                      }
+                      weightLabel="Gross Weight"
+                      countLabel="Box Sets"
+                      disabled={!canEdit}
+                      mode={measuredSizeForm.boxMode}
+                      modeName="pd_box_mode"
+                      showModeSelector
+                      onControlChange={handleMeasuredSizeControlChange}
+                      onEntryChange={handleMeasuredSizeEntryChange}
+                    />
+                  </div>
+                </div>
               </div>
             </section>
 
