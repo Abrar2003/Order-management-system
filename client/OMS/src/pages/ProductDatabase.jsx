@@ -18,6 +18,7 @@ import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import {
+  BOX_ENTRY_TYPES,
   BOX_PACKAGING_MODES,
 } from "../utils/measuredSizeForm";
 import {
