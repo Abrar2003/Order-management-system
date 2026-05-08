@@ -39,7 +39,6 @@ const FilePreviewModal = ({
       tabIndex="-1"
       role="dialog"
       aria-modal="true"
-      onClick={onClose}
     >
       <div
         className="modal-dialog modal-dialog-centered modal-xl"
