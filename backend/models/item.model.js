@@ -60,6 +60,44 @@ const boxSizeEntrySchema = new mongoose.Schema(
   },
   { _id: false },
 );
+const createOptionalSizeNumberField = () => ({ type: Number, min: 0 });
+const productSpecItemSizeEntrySchema = new mongoose.Schema(
+  {
+    L: createOptionalSizeNumberField(),
+    B: createOptionalSizeNumberField(),
+    H: createOptionalSizeNumberField(),
+    remark: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    net_weight: createOptionalSizeNumberField(),
+    gross_weight: createOptionalSizeNumberField(),
+  },
+  { _id: false },
+);
+const productSpecBoxSizeEntrySchema = new mongoose.Schema(
+  {
+    L: createOptionalSizeNumberField(),
+    B: createOptionalSizeNumberField(),
+    H: createOptionalSizeNumberField(),
+    remark: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    net_weight: createOptionalSizeNumberField(),
+    gross_weight: createOptionalSizeNumberField(),
+    box_type: {
+      type: String,
+      enum: Object.values(BOX_ENTRY_TYPES),
+      trim: true,
+    },
+    item_count_in_inner: createOptionalSizeNumberField(),
+    box_count_in_master: createOptionalSizeNumberField(),
+  },
+  { _id: false },
+);
 const finishAssignmentSchema = new mongoose.Schema(
   {
     finish_id: {
@@ -143,11 +181,11 @@ const productSpecsSchema = new mongoose.Schema(
   {
     fields: { type: [productSpecFieldValueSchema], default: [] },
     item_sizes: {
-      type: [itemSizeEntrySchema],
+      type: [productSpecItemSizeEntrySchema],
       default: [],
     },
     box_sizes: {
-      type: [boxSizeEntrySchema],
+      type: [productSpecBoxSizeEntrySchema],
       default: [],
     },
     box_mode: {

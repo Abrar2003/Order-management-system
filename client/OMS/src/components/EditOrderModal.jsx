@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import api from "../api/axios";
 import { editOrder } from "../services/orders.service";
 import { isManagerLikeRole } from "../auth/permissions";
 import { usePermissions } from "../auth/PermissionContext";
@@ -20,6 +21,15 @@ const normalizeShipmentDraftInvoiceNumber = (value) => {
   const normalized = String(value ?? "").trim();
   return normalized && normalized !== "N/A" ? normalized : "";
 };
+
+const normalizeUniqueOptions = (values = []) =>
+  [
+    ...new Set(
+      (Array.isArray(values) ? values : [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean),
+    ),
+  ].sort((left, right) => left.localeCompare(right));
 
 const normalizeStuffedById = (entry = {}) => {
   const id = String(entry?.stuffed_by?.id ?? "").trim();
@@ -105,6 +115,8 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
     edit_remark: "",
     shipment: makeInitialShipmentRows(order?.shipment),
   });
+  const [brandOptions, setBrandOptions] = useState([]);
+  const [brandOptionsLoading, setBrandOptionsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const {
@@ -113,6 +125,32 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
     loadingInspectors,
     inspectorError,
   } = useShippingInspectors();
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchBrandOptions = async () => {
+      try {
+        setBrandOptionsLoading(true);
+        const response = await api.get("/orders/brands-and-vendors");
+        if (cancelled) return;
+        setBrandOptions(normalizeUniqueOptions(response?.data?.brands));
+      } catch (fetchError) {
+        if (cancelled) return;
+        setBrandOptions([]);
+      } finally {
+        if (!cancelled) {
+          setBrandOptionsLoading(false);
+        }
+      }
+    };
+
+    fetchBrandOptions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const targetQuantity = Number(form.quantity);
   const inputTotalShipped = useMemo(
@@ -156,6 +194,10 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
       left.name.localeCompare(right.name),
     );
   }, [form.shipment, inspectors]);
+  const availableBrandOptions = useMemo(
+    () => normalizeUniqueOptions([...brandOptions, form.brand]),
+    [brandOptions, form.brand],
+  );
 
   const updateShipmentRow = (index, field, value) => {
     setForm((prev) => {
@@ -347,13 +389,21 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
             <div className="row g-2">
               <div className="col-md-6">
                 <label className="form-label">Brand</label>
-                <input
-                  type="text"
-                  className="form-control"
+                <select
+                  className="form-select"
                   value={form.brand}
-                  disabled={!canEditOrders}
+                  disabled={!canEditOrders || brandOptionsLoading}
                   onChange={(e) => setForm((prev) => ({ ...prev, brand: e.target.value }))}
-                />
+                >
+                  <option value="">
+                    {brandOptionsLoading ? "Loading brands..." : "Select Brand"}
+                  </option>
+                  {availableBrandOptions.map((brandValue) => (
+                    <option key={brandValue} value={brandValue}>
+                      {brandValue}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="col-md-6">
                 <label className="form-label">Vendor</label>

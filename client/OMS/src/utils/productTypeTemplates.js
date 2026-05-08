@@ -545,6 +545,11 @@ const buildFieldValuePayload = (field = {}, value) => {
 };
 
 const toMeaningfulSizePayloadEntry = (entry = {}) => {
+  const hasMeaningfulSizeValue = (value) => {
+    if (isBlankValue(value)) return false;
+    const parsed = Number(value);
+    return !Number.isFinite(parsed) || parsed !== 0;
+  };
   const hasAnyValue = [
     "L",
     "B",
@@ -553,23 +558,34 @@ const toMeaningfulSizePayloadEntry = (entry = {}) => {
     "gross_weight",
     "item_count_in_inner",
     "box_count_in_master",
-  ].some((field) => !isBlankValue(entry?.[field]));
+  ].some((field) => hasMeaningfulSizeValue(entry?.[field]));
 
   if (!hasAnyValue) return null;
 
-  return {
-    L: Number(entry?.L || 0),
-    B: Number(entry?.B || 0),
-    H: Number(entry?.H || 0),
+  const payload = {
     remark: normalizeTemplateKey(entry?.remark),
-    net_weight: Number(entry?.net_weight || 0),
-    gross_weight: Number(entry?.gross_weight || 0),
-    box_type:
-      normalizeTemplateKey(entry?.box_type || BOX_ENTRY_TYPES.INDIVIDUAL) ||
-      BOX_ENTRY_TYPES.INDIVIDUAL,
-    item_count_in_inner: Number(entry?.item_count_in_inner || 0),
-    box_count_in_master: Number(entry?.box_count_in_master || 0),
   };
+
+  [
+    "L",
+    "B",
+    "H",
+    "net_weight",
+    "gross_weight",
+    "item_count_in_inner",
+    "box_count_in_master",
+  ].forEach((field) => {
+    if (hasMeaningfulSizeValue(entry?.[field])) {
+      payload[field] = Number(entry[field]);
+    }
+  });
+
+  const boxType = normalizeTemplateKey(entry?.box_type || BOX_ENTRY_TYPES.INDIVIDUAL);
+  if (boxType) {
+    payload.box_type = boxType;
+  }
+
+  return payload;
 };
 
 export const buildProductTypePayload = ({

@@ -100,14 +100,6 @@ const hasMeaningfulBoxEntry = (entry = {}) =>
   Boolean(normalizeKey(entry?.remark)) ||
   Boolean(normalizeKey(entry?.box_type));
 
-const assertPositiveDimensions = (entry = {}, entryLabel = "Size") => {
-  ["L", "B", "H"].forEach((field) => {
-    if (toNonNegativeNumber(entry?.[field], `${entryLabel} ${field}`) <= 0) {
-      throw new ProductDatabaseError(`${entryLabel} ${field} must be greater than 0`);
-    }
-  });
-};
-
 const normalizeItemSizeEntries = (entries = []) => {
   if (!Array.isArray(entries)) {
     throw new ProductDatabaseError("pd_item_sizes must be an array");
@@ -123,7 +115,6 @@ const normalizeItemSizeEntries = (entries = []) => {
   const seenRemarks = new Set();
   return meaningfulEntries.map((entry, index) => {
     const entryLabel = `PD item size ${index + 1}`;
-    assertPositiveDimensions(entry, entryLabel);
 
     const normalizedRemark = normalizeKey(entry?.remark || entry?.type || "");
     const remark = meaningfulEntries.length === 1 ? "" : normalizedRemark;
@@ -173,13 +164,25 @@ const normalizeBoxSizeEntries = (
     meaningfulEntries.length > 0 &&
     meaningfulEntries.length !== 2
   ) {
-    throw new ProductDatabaseError("pd_box_sizes must contain inner and master entries in carton mode");
+    return meaningfulEntries.map((entry, index) => {
+      const entryLabel = `PD box size ${index + 1}`;
+      return {
+        L: toNonNegativeNumber(entry?.L, `${entryLabel} L`),
+        B: toNonNegativeNumber(entry?.B, `${entryLabel} B`),
+        H: toNonNegativeNumber(entry?.H, `${entryLabel} H`),
+        remark: normalizeKey(entry?.remark || entry?.type || entry?.box_type || ""),
+        box_type: normalizeKey(entry?.box_type || BOX_ENTRY_TYPES.INDIVIDUAL),
+        net_weight: toNonNegativeNumber(entry?.net_weight, `${entryLabel} net weight`),
+        gross_weight: toNonNegativeNumber(entry?.gross_weight ?? entry?.weight, `${entryLabel} gross weight`),
+        item_count_in_inner: toNonNegativeNumber(entry?.item_count_in_inner, `${entryLabel} item count in inner`),
+        box_count_in_master: toNonNegativeNumber(entry?.box_count_in_master, `${entryLabel} box count in master`),
+      };
+    });
   }
 
   const seenRemarks = new Set();
   return meaningfulEntries.map((entry, index) => {
     const entryLabel = `PD box size ${index + 1}`;
-    assertPositiveDimensions(entry, entryLabel);
 
     const baseEntry = {
       L: toNonNegativeNumber(entry?.L, `${entryLabel} L`),
@@ -199,13 +202,6 @@ const normalizeBoxSizeEntries = (
         boxType === BOX_ENTRY_TYPES.MASTER
           ? toNonNegativeNumber(entry?.box_count_in_master, `${entryLabel} box count in master`)
           : 0;
-
-      if (boxType === BOX_ENTRY_TYPES.INNER && itemCountInInner <= 0) {
-        throw new ProductDatabaseError(`${entryLabel} item count in inner must be greater than 0`);
-      }
-      if (boxType === BOX_ENTRY_TYPES.MASTER && boxCountInMaster <= 0) {
-        throw new ProductDatabaseError(`${entryLabel} box count in master must be greater than 0`);
-      }
 
       return {
         ...baseEntry,
@@ -303,12 +299,6 @@ const normalizeProductDatabaseInput = (payload = {}) => {
       typeof productType === "object" &&
       (normalizeTemplateKey(productType?.key) || normalizeId(productType?.template));
 
-    if (!hasSelectedProductType && hasProductSpecs) {
-      throw new ProductDatabaseError(
-        "Product type selection is required when product specs are provided",
-      );
-    }
-
     if (hasSelectedProductType) {
       data.product_type = {
         template: normalizeId(productType?.template) || null,
@@ -321,15 +311,15 @@ const normalizeProductDatabaseInput = (payload = {}) => {
     }
 
     if (hasProductSpecs) {
-      data.product_specs = hasSelectedProductType
-        ? normalizeProductSpecsPayload(payload?.product_specs || {})
-        : {
+      data.product_specs = hasProductType && !hasSelectedProductType
+        ? {
             fields: [],
             item_sizes: [],
             box_sizes: [],
             box_mode: BOX_PACKAGING_MODES.INDIVIDUAL,
             raw_values: {},
-          };
+          }
+        : normalizeProductSpecsPayload(payload?.product_specs || {});
     } else if (hasProductType && data.product_type === null) {
       data.product_specs = {
         fields: [],
@@ -626,12 +616,7 @@ const applyProductDatabaseSave = ({ item, payload = {}, user = {} } = {}) => {
   const changedFields = getChangedProductDatabaseFields(currentState, nextState);
 
   if (!input.hasInput) {
-    throw new ProductDatabaseError("Product Database measurement data is required");
-  }
-  if (!hasProductDatabaseData(nextState)) {
-    throw new ProductDatabaseError(
-      "At least one product item size or box size is required",
-    );
+    throw new ProductDatabaseError("Product Database data is required");
   }
 
   if (changedFields.length > 0 || !previousStatus) {
@@ -659,7 +644,7 @@ const applyProductDatabaseSave = ({ item, payload = {}, user = {} } = {}) => {
 
 const applyProductDatabaseCheck = ({ item, payload = {}, user = {} } = {}) => {
   const role = normalizeRole(user?.role);
-  if (role !== "manager") {
+  if (isAdminLikeRole(role) || !isManagerLikeRole(role)) {
     throw new ProductDatabaseError("Only managers can check Product Database data", 403);
   }
 
@@ -670,12 +655,6 @@ const applyProductDatabaseCheck = ({ item, payload = {}, user = {} } = {}) => {
   const input = normalizeProductDatabaseInput(payload);
   const nextState = mergeProductDatabaseFields(currentState, input.data);
   const changedFields = getChangedProductDatabaseFields(currentState, nextState);
-
-  if (!hasProductDatabaseData(nextState)) {
-    throw new ProductDatabaseError(
-      "At least one product item size or box size is required before checking",
-    );
-  }
 
   if (changedFields.length > 0) {
     markProductDatabaseCreated({
@@ -742,12 +721,6 @@ const applyProductDatabaseApprove = ({ item, payload = {}, user = {} } = {}) => 
   const nextState = mergeProductDatabaseFields(currentState, input.data);
   const changedFields = getChangedProductDatabaseFields(currentState, nextState);
 
-  if (!hasProductDatabaseData(nextState)) {
-    throw new ProductDatabaseError(
-      "At least one product item size or box size is required before approving",
-    );
-  }
-
   if (changedFields.length === 0 && previousStatus !== PD_STATUSES.CHECKED) {
     throw new ProductDatabaseError("Only checked Product Database records can be approved");
   }
@@ -787,8 +760,6 @@ const buildProductDatabasePermissions = (item = {}, user = {}) => {
   const role = normalizeRole(user?.role);
   const actorId = normalizeId(user?._id || user?.id);
   const status = normalizePdStatus(item?.pd_checked);
-  const state = extractProductDatabaseFields(item);
-  const hasData = hasProductDatabaseData(state);
   const creatorId = normalizeId(item?.pd_created_by?.user);
   const lastChangerId = normalizeId(item?.pd_last_changed_by?.user);
   const isCreator = Boolean(creatorId && actorId === creatorId);
@@ -798,7 +769,6 @@ const buildProductDatabasePermissions = (item = {}, user = {}) => {
     !isAdminLikeRole(role) &&
     isManagerLikeRole(role) &&
     status === PD_STATUSES.CREATED &&
-    hasData &&
     !isCreator &&
     !isLastChanger;
 
@@ -807,7 +777,6 @@ const buildProductDatabasePermissions = (item = {}, user = {}) => {
     !isAdminLikeRole(role) &&
     isManagerLikeRole(role) &&
     status === PD_STATUSES.CREATED &&
-    hasData &&
     !canCheck
   ) {
     if (isCreator || isLastChanger) {
@@ -819,7 +788,7 @@ const buildProductDatabasePermissions = (item = {}, user = {}) => {
   return {
     can_edit: canEdit,
     can_check: canCheck,
-    can_approve: isAdminLikeRole(role) && status === PD_STATUSES.CHECKED && hasData,
+    can_approve: isAdminLikeRole(role) && status === PD_STATUSES.CHECKED,
     check_blocked_reason: checkBlockedReason,
   };
 };

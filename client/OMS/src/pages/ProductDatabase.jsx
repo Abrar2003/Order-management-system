@@ -26,7 +26,6 @@ import {
   createProductTypeFormState,
   hasProductTypeFormValues,
   normalizeTemplateKey,
-  validateProductTypeFormState,
 } from "../utils/productTypeTemplates";
 import "../App.css";
 
@@ -773,20 +772,6 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
       if (normalizeTemplateKey(form.productTypeKey) && !templateReady) {
         setError("Please wait for the selected product type template to finish loading.");
         return;
-      }
-
-      if (selectedTemplate) {
-        const validation = validateProductTypeFormState({
-          template: selectedTemplate,
-          selectedProductTypeKey: form.productTypeKey,
-          formState: productTypeForm,
-        });
-
-        if (!validation.valid) {
-          setProductTypeErrors(validation.errors);
-          setError("Please fix the highlighted product type fields before saving.");
-          return;
-        }
       }
 
       let response;

@@ -775,6 +775,19 @@ const normalizeProductSpecFieldEntry = (entry = {}) => {
   };
 };
 
+const hasMeaningfulSizeValue = (value) => {
+  if (isBlankValue(value)) return false;
+  const parsed = Number(value);
+  return !Number.isFinite(parsed) || parsed !== 0;
+};
+
+const assignOptionalSizeNumber = (payload, key, value, label) => {
+  if (!hasMeaningfulSizeValue(value)) return;
+  const parsed = toParsedNumber(value, label, { allowBlank: true });
+  if (parsed === null) return;
+  payload[key] = Math.max(0, Number(parsed));
+};
+
 const normalizeProductSpecItemSizeEntries = (entries = []) => {
   if (!Array.isArray(entries)) {
     throw new Error("product_specs.item_sizes must be an array");
@@ -782,42 +795,46 @@ const normalizeProductSpecItemSizeEntries = (entries = []) => {
 
   return entries
     .filter((entry) =>
-      ["L", "B", "H", "net_weight", "gross_weight", "remark"].some(
-        (field) => !isBlankValue(entry?.[field]),
+      ["L", "B", "H", "net_weight", "gross_weight"].some(
+        (field) => hasMeaningfulSizeValue(entry?.[field]),
       ),
     )
-    .map((entry, index) => ({
-      L: toParsedNumber(entry?.L, `product_specs.item_sizes.${index + 1}.L`, {
-        allowBlank: false,
-      }),
-      B: toParsedNumber(entry?.B, `product_specs.item_sizes.${index + 1}.B`, {
-        allowBlank: false,
-      }),
-      H: toParsedNumber(entry?.H, `product_specs.item_sizes.${index + 1}.H`, {
-        allowBlank: false,
-      }),
-      remark: normalizeTemplateKey(entry?.remark),
-      net_weight: Math.max(
-        0,
-        Number(
-          toParsedNumber(
-            entry?.net_weight,
-            `product_specs.item_sizes.${index + 1}.net_weight`,
-            { allowBlank: true },
-          ) || 0,
-        ),
-      ),
-      gross_weight: Math.max(
-        0,
-        Number(
-          toParsedNumber(
-            entry?.gross_weight,
-            `product_specs.item_sizes.${index + 1}.gross_weight`,
-            { allowBlank: true },
-          ) || 0,
-        ),
-      ),
-    }));
+    .map((entry, index) => {
+      const normalizedEntry = {
+        remark: normalizeTemplateKey(entry?.remark),
+      };
+      assignOptionalSizeNumber(
+        normalizedEntry,
+        "L",
+        entry?.L,
+        `product_specs.item_sizes.${index + 1}.L`,
+      );
+      assignOptionalSizeNumber(
+        normalizedEntry,
+        "B",
+        entry?.B,
+        `product_specs.item_sizes.${index + 1}.B`,
+      );
+      assignOptionalSizeNumber(
+        normalizedEntry,
+        "H",
+        entry?.H,
+        `product_specs.item_sizes.${index + 1}.H`,
+      );
+      assignOptionalSizeNumber(
+        normalizedEntry,
+        "net_weight",
+        entry?.net_weight,
+        `product_specs.item_sizes.${index + 1}.net_weight`,
+      );
+      assignOptionalSizeNumber(
+        normalizedEntry,
+        "gross_weight",
+        entry?.gross_weight,
+        `product_specs.item_sizes.${index + 1}.gross_weight`,
+      );
+      return normalizedEntry;
+    });
 };
 
 const normalizeProductSpecBoxSizeEntries = (entries = [], mode = "") => {
@@ -833,86 +850,60 @@ const normalizeProductSpecBoxSizeEntries = (entries = [], mode = "") => {
         "H",
         "net_weight",
         "gross_weight",
-        "remark",
-        "box_type",
         "item_count_in_inner",
         "box_count_in_master",
-      ].some((field) => !isBlankValue(entry?.[field])),
+      ].some((field) => hasMeaningfulSizeValue(entry?.[field])),
     )
     .map((entry, index) => {
       const boxType = normalizeTemplateKey(
         entry?.box_type || BOX_ENTRY_TYPES.INDIVIDUAL,
       );
       const normalizedEntry = {
-        L: toParsedNumber(entry?.L, `product_specs.box_sizes.${index + 1}.L`, {
-          allowBlank: false,
-        }),
-        B: toParsedNumber(entry?.B, `product_specs.box_sizes.${index + 1}.B`, {
-          allowBlank: false,
-        }),
-        H: toParsedNumber(entry?.H, `product_specs.box_sizes.${index + 1}.H`, {
-          allowBlank: false,
-        }),
         remark: normalizeTemplateKey(entry?.remark || entry?.box_type || ""),
-        net_weight: Math.max(
-          0,
-          Number(
-            toParsedNumber(
-              entry?.net_weight,
-              `product_specs.box_sizes.${index + 1}.net_weight`,
-              { allowBlank: true },
-            ) || 0,
-          ),
-        ),
-        gross_weight: Math.max(
-          0,
-          Number(
-            toParsedNumber(
-              entry?.gross_weight,
-              `product_specs.box_sizes.${index + 1}.gross_weight`,
-              { allowBlank: true },
-            ) || 0,
-          ),
-        ),
         box_type: boxType || BOX_ENTRY_TYPES.INDIVIDUAL,
-        item_count_in_inner: Math.max(
-          0,
-          Number(
-            toParsedNumber(
-              entry?.item_count_in_inner,
-              `product_specs.box_sizes.${index + 1}.item_count_in_inner`,
-              { allowBlank: true },
-            ) || 0,
-          ),
-        ),
-        box_count_in_master: Math.max(
-          0,
-          Number(
-            toParsedNumber(
-              entry?.box_count_in_master,
-              `product_specs.box_sizes.${index + 1}.box_count_in_master`,
-              { allowBlank: true },
-            ) || 0,
-          ),
-        ),
       };
-
-      if (
-        normalizedEntry.box_type === BOX_ENTRY_TYPES.INNER &&
-        normalizedEntry.item_count_in_inner <= 0
-      ) {
-        throw new Error(
-          `product_specs.box_sizes.${index + 1}.item_count_in_inner must be greater than 0`,
-        );
-      }
-      if (
-        normalizedEntry.box_type === BOX_ENTRY_TYPES.MASTER &&
-        normalizedEntry.box_count_in_master <= 0
-      ) {
-        throw new Error(
-          `product_specs.box_sizes.${index + 1}.box_count_in_master must be greater than 0`,
-        );
-      }
+      assignOptionalSizeNumber(
+        normalizedEntry,
+        "L",
+        entry?.L,
+        `product_specs.box_sizes.${index + 1}.L`,
+      );
+      assignOptionalSizeNumber(
+        normalizedEntry,
+        "B",
+        entry?.B,
+        `product_specs.box_sizes.${index + 1}.B`,
+      );
+      assignOptionalSizeNumber(
+        normalizedEntry,
+        "H",
+        entry?.H,
+        `product_specs.box_sizes.${index + 1}.H`,
+      );
+      assignOptionalSizeNumber(
+        normalizedEntry,
+        "net_weight",
+        entry?.net_weight,
+        `product_specs.box_sizes.${index + 1}.net_weight`,
+      );
+      assignOptionalSizeNumber(
+        normalizedEntry,
+        "gross_weight",
+        entry?.gross_weight,
+        `product_specs.box_sizes.${index + 1}.gross_weight`,
+      );
+      assignOptionalSizeNumber(
+        normalizedEntry,
+        "item_count_in_inner",
+        entry?.item_count_in_inner,
+        `product_specs.box_sizes.${index + 1}.item_count_in_inner`,
+      );
+      assignOptionalSizeNumber(
+        normalizedEntry,
+        "box_count_in_master",
+        entry?.box_count_in_master,
+        `product_specs.box_sizes.${index + 1}.box_count_in_master`,
+      );
 
       return normalizedEntry;
     });
@@ -924,6 +915,24 @@ const normalizeProductSpecBoxSizeEntries = (entries = [], mode = "") => {
   };
 };
 
+const hasMeaningfulProductSpecFieldEntry = (entry = {}) => {
+  switch (normalizeTemplateKey(entry?.value_type)) {
+    case "number":
+      return entry?.value_number !== null && entry?.value_number !== undefined;
+    case "boolean":
+      return entry?.value_boolean !== null && entry?.value_boolean !== undefined;
+    case "date":
+      return Boolean(entry?.value_date);
+    case "array":
+      return Array.isArray(entry?.value_array) && entry.value_array.length > 0;
+    case "object":
+      return !isBlankValue(entry?.raw_value) || !isBlankValue(entry?.value_text);
+    case "string":
+    default:
+      return !isBlankValue(entry?.value_text);
+  }
+};
+
 const normalizeProductSpecsPayload = (productSpecs = {}) => {
   if (!productSpecs || typeof productSpecs !== "object" || Array.isArray(productSpecs)) {
     throw new Error("product_specs must be an object");
@@ -932,7 +941,7 @@ const normalizeProductSpecsPayload = (productSpecs = {}) => {
   const normalizedFields = Array.isArray(productSpecs.fields)
     ? productSpecs.fields
         .map((entry) => normalizeProductSpecFieldEntry(entry))
-        .filter((entry) => entry.key)
+        .filter((entry) => entry.key && hasMeaningfulProductSpecFieldEntry(entry))
     : [];
   const normalizedItemSizes = normalizeProductSpecItemSizeEntries(
     productSpecs.item_sizes || [],
