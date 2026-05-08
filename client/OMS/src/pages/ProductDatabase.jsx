@@ -358,6 +358,57 @@ const buildExistingProductTypePayload = (item = {}) => ({
   },
 });
 
+const cloneDraftValue = (value) => {
+  if (Array.isArray(value)) return [...value];
+  if (typeof File !== "undefined" && value instanceof File) return value;
+  if (value && typeof value === "object") return { ...value };
+  return value;
+};
+
+const cloneDraftRecord = (record = {}) =>
+  Object.entries(record || {}).reduce((accumulator, [key, value]) => {
+    accumulator[key] = cloneDraftValue(value);
+    return accumulator;
+  }, {});
+
+const cloneDraftNestedRecord = (record = {}) =>
+  Object.entries(record || {}).reduce((accumulator, [key, value]) => {
+    accumulator[key] = cloneDraftRecord(value);
+    return accumulator;
+  }, {});
+
+const cloneProductTypeFormState = (formState = {}) => ({
+  fieldValues: cloneDraftRecord(formState?.fieldValues),
+  itemSizeValues: cloneDraftNestedRecord(formState?.itemSizeValues),
+  boxSizeValues: cloneDraftNestedRecord(formState?.boxSizeValues),
+});
+
+const getProductDatabaseDraftKey = (item = {}) =>
+  normalizeTextValue(item?.id || item?._id);
+
+const hasDraftProductTypeFormForSelection = (draft = {}, form = {}) =>
+  Boolean(draft?.productTypeForm) &&
+  normalizeTemplateKey(draft?.form?.productTypeKey) ===
+    normalizeTemplateKey(form?.productTypeKey) &&
+  Number(draft?.form?.productTypeVersion || 0) ===
+    Number(form?.productTypeVersion || 0);
+
+const getProductTypeFormState = ({ draft = null, form = {}, item = {}, template = null } = {}) =>
+  hasDraftProductTypeFormForSelection(draft, form)
+    ? cloneProductTypeFormState(draft.productTypeForm)
+    : createProductTypeFormState({ item, template });
+
+const createProductDatabaseDraft = ({ form = {}, productTypeForm = {}, payload = {} } = {}) => ({
+  form: {
+    countryOfOrigin: form?.countryOfOrigin || "",
+    productTypeKey: normalizeTemplateKey(form?.productTypeKey),
+    productTypeVersion: Number(form?.productTypeVersion || 0),
+  },
+  productTypeForm: cloneProductTypeFormState(productTypeForm),
+  payload,
+  savedAt: new Date().toISOString(),
+});
+
 const buildTemplateOptionValue = (key = "", version = "") =>
   normalizeTemplateKey(key) && Number(version) > 0
     ? `${normalizeTemplateKey(key)}::${Number(version)}`
@@ -372,7 +423,7 @@ const parseTemplateOptionValue = (value = "") => {
   };
 };
 
-const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
+const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraft }) => {
   const { hasPermission } = usePermissions();
   const user = getUserFromToken();
   const normalizedRole = normalizeUserRole(user?.role);
@@ -380,13 +431,34 @@ const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
   const isManager = isManagerLikeRole(normalizedRole) && !isAdmin;
   const canViewProductTypeTemplates = hasPermission("product_type_templates", "view");
   const canEdit = Boolean(item?.permissions?.can_edit);
+  const draftPayload = draft?.payload || null;
+  const draftItem = useMemo(
+    () =>
+      draftPayload
+        ? {
+            ...item,
+            country_of_origin: draftPayload.country_of_origin ?? item?.country_of_origin,
+            product_type: draftPayload.product_type || null,
+            product_specs:
+              draftPayload.product_specs || buildExistingProductTypePayload({}).product_specs,
+          }
+        : item,
+    [draftPayload, item],
+  );
   const initialForm = useMemo(
-    () => ({
-      countryOfOrigin: normalizeTextValue(item?.country_of_origin),
-      productTypeKey: normalizeTemplateKey(item?.product_type?.key),
-      productTypeVersion: Number(item?.product_type?.version || 0),
-    }),
-    [item],
+    () =>
+      draft?.form
+        ? {
+            countryOfOrigin: draft.form.countryOfOrigin || "",
+            productTypeKey: normalizeTemplateKey(draft.form.productTypeKey),
+            productTypeVersion: Number(draft.form.productTypeVersion || 0),
+          }
+        : {
+            countryOfOrigin: normalizeTextValue(draftItem?.country_of_origin),
+            productTypeKey: normalizeTemplateKey(draftItem?.product_type?.key),
+            productTypeVersion: Number(draftItem?.product_type?.version || 0),
+          },
+    [draft, draftItem],
   );
   const [form, setForm] = useState(initialForm);
   const [templateOptions, setTemplateOptions] = useState([]);
@@ -396,13 +468,14 @@ const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
   const [templateLoading, setTemplateLoading] = useState(false);
   const [templateError, setTemplateError] = useState("");
   const [productTypeForm, setProductTypeForm] = useState(() =>
-    createProductTypeFormState({ item, template: null }),
+    getProductTypeFormState({ draft, form: initialForm, item: draftItem, template: null }),
   );
   const [productTypeErrors, setProductTypeErrors] = useState(
     cloneProductTypeValidation(),
   );
   const [savingAction, setSavingAction] = useState("");
   const [error, setError] = useState("");
+  const [draftMessage, setDraftMessage] = useState("");
 
   useEffect(() => {
     setForm(initialForm);
@@ -421,8 +494,8 @@ const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
       setTemplatesError("");
       const response = await getProductTypeTemplates();
       const currentSelectionRef = buildTemplateOptionValue(
-        item?.product_type?.key,
-        item?.product_type?.version,
+        draftItem?.product_type?.key,
+        draftItem?.product_type?.version,
       );
       const options = (Array.isArray(response?.data) ? response.data : []).filter(
         (templateOption) =>
@@ -443,7 +516,7 @@ const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
     } finally {
       setTemplatesLoading(false);
     }
-  }, [canViewProductTypeTemplates, item]);
+  }, [canViewProductTypeTemplates, draftItem]);
 
   useEffect(() => {
     loadTemplateOptions();
@@ -485,22 +558,32 @@ const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
     if (!selectedKey) {
       setSelectedTemplate(null);
       setTemplateError("");
-      setProductTypeForm(createProductTypeFormState({ item, template: null }));
+      setProductTypeForm(
+        getProductTypeFormState({ draft, form, item: draftItem, template: null }),
+      );
       setProductTypeErrors(cloneProductTypeValidation());
       return;
     }
 
     loadSelectedTemplate(selectedKey, Number(form.productTypeVersion || 0));
-  }, [form.productTypeKey, form.productTypeVersion, item, loadSelectedTemplate]);
+  }, [
+    draft,
+    draftItem,
+    form.productTypeKey,
+    form.productTypeVersion,
+    loadSelectedTemplate,
+  ]);
 
   useEffect(() => {
     if (!selectedTemplate) {
       return;
     }
 
-    setProductTypeForm(createProductTypeFormState({ item, template: selectedTemplate }));
+    setProductTypeForm(
+      getProductTypeFormState({ draft, form, item: draftItem, template: selectedTemplate }),
+    );
     setProductTypeErrors(cloneProductTypeValidation());
-  }, [item, selectedTemplate]);
+  }, [draft, draftItem, form.productTypeKey, form.productTypeVersion, selectedTemplate]);
 
   const templateReady =
     !normalizeTemplateKey(form.productTypeKey) ||
@@ -529,10 +612,12 @@ const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
     }
 
     if (
-      normalizeTemplateKey(item?.product_type?.key) === normalizeTemplateKey(form.productTypeKey) &&
-      Number(item?.product_type?.version || 0) === Number(form.productTypeVersion || 0)
+      normalizeTemplateKey(draftItem?.product_type?.key) ===
+        normalizeTemplateKey(form.productTypeKey) &&
+      Number(draftItem?.product_type?.version || 0) ===
+        Number(form.productTypeVersion || 0)
     ) {
-      return buildExistingProductTypePayload(item);
+      return buildExistingProductTypePayload(draftItem);
     }
 
     return {
@@ -545,7 +630,7 @@ const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
         raw_values: {},
       },
     };
-  }, [form.productTypeKey, form.productTypeVersion, item, productTypeForm, selectedTemplate]);
+  }, [draftItem, form.productTypeKey, form.productTypeVersion, productTypeForm, selectedTemplate]);
 
   const currentPayload = useMemo(
     () => ({
@@ -557,16 +642,23 @@ const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
 
   const initialPayload = useMemo(
     () => ({
-      ...buildPayloadFromForm(initialForm),
+      ...buildPayloadFromForm({
+        countryOfOrigin: normalizeTextValue(item?.country_of_origin),
+      }),
       ...buildExistingProductTypePayload(item),
     }),
-    [initialForm, item],
+    [item],
   );
   const hasChanges = !arePayloadsEqualForCompare(currentPayload, initialPayload);
   const canCheck = Boolean(item?.permissions?.can_check) && !hasChanges;
   const canApprove = isAdmin && (item?.pd_checked === "checked" || hasChanges);
 
+  const clearDraftMessage = () => {
+    if (draftMessage) setDraftMessage("");
+  };
+
   const handleProductTypeChange = (nextValue) => {
+    clearDraftMessage();
     const { key: nextKey, version: nextVersion } = parseTemplateOptionValue(nextValue);
     const currentKey = normalizeTemplateKey(form.productTypeKey);
     const currentVersion = Number(form.productTypeVersion || 0);
@@ -595,6 +687,7 @@ const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
   };
 
   const handleProductTypeFieldChange = (fieldKey, value) => {
+    clearDraftMessage();
     setProductTypeErrors(cloneProductTypeValidation());
     setProductTypeForm((prev) => ({
       ...prev,
@@ -606,6 +699,7 @@ const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
   };
 
   const handleItemSizeChange = (fieldKey, fieldName, value) => {
+    clearDraftMessage();
     setProductTypeErrors(cloneProductTypeValidation());
     setProductTypeForm((prev) => ({
       ...prev,
@@ -620,6 +714,7 @@ const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
   };
 
   const handleBoxSizeChange = (fieldKey, fieldName, value) => {
+    clearDraftMessage();
     setProductTypeErrors(cloneProductTypeValidation());
     setProductTypeForm((prev) => {
       const nextEntry = {
@@ -647,6 +742,26 @@ const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
         },
       };
     });
+  };
+
+  const handleSaveDraft = () => {
+    setError("");
+    setProductTypeErrors(cloneProductTypeValidation());
+
+    if (normalizeTemplateKey(form.productTypeKey) && !templateReady) {
+      setError("Please wait for the selected product type template to finish loading.");
+      return;
+    }
+
+    onSaveDraft?.({
+      itemId: getProductDatabaseDraftKey(item),
+      draft: createProductDatabaseDraft({
+        form,
+        productTypeForm,
+        payload: currentPayload,
+      }),
+    });
+    setDraftMessage("Draft saved on this page only. Nothing was sent to the backend.");
   };
 
   const runMutation = async (action) => {
@@ -685,7 +800,10 @@ const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
         response = await api.patch(`/items/${item.id}/product-database`, currentPayload);
       }
 
-      onSaved?.(response?.data?.message || "Product Database record updated.");
+      onSaved?.(
+        response?.data?.message || "Product Database record updated.",
+        getProductDatabaseDraftKey(item),
+      );
     } catch (err) {
       setError(err?.response?.data?.message || "Failed to update Product Database record.");
     } finally {
@@ -719,6 +837,13 @@ const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
 
           <div className="modal-body">
             {error && <div className="alert alert-danger mb-3">{error}</div>}
+            {draftMessage && <div className="alert alert-success mb-3">{draftMessage}</div>}
+            {!draftMessage && draft && (
+              <div className="alert alert-info mb-3">
+                A frontend-only draft is loaded for this item. Use Save Changes, Check, or Approve
+                when you want to store it on the backend.
+              </div>
+            )}
 
             <div className="d-flex flex-wrap gap-2 mb-3">
               <span className={`badge ${getStatusBadgeClass(item?.pd_checked)}`}>
@@ -750,12 +875,13 @@ const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
                         value={form.countryOfOrigin}
                         placeholder="Optional"
                         disabled={!canEdit}
-                        onChange={(event) =>
+                        onChange={(event) => {
+                          clearDraftMessage();
                           setForm((prev) => ({
                             ...prev,
                             countryOfOrigin: event.target.value,
-                          }))
-                        }
+                          }));
+                        }}
                       />
                     </div>
                   </div>
@@ -893,6 +1019,16 @@ const ProductDatabaseModal = ({ item, onClose, onSaved }) => {
             {canEdit && (
               <button
                 type="button"
+                className="btn btn-outline-dark"
+                disabled={savingAction !== "" || !templateReady}
+                onClick={handleSaveDraft}
+              >
+                Save Draft
+              </button>
+            )}
+            {canEdit && (
+              <button
+                type="button"
                 className="btn btn-outline-primary"
                 disabled={savingAction !== "" || !templateReady}
                 onClick={() => runMutation("save")}
@@ -973,6 +1109,7 @@ const ProductDatabase = () => {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [selectedItem, setSelectedItem] = useState(null);
+  const [productDatabaseDrafts, setProductDatabaseDrafts] = useState({});
   const [syncedQuery, setSyncedQuery] = useState(null);
 
   const fetchRows = useCallback(async () => {
@@ -1077,12 +1214,38 @@ const ProductDatabase = () => {
     setLimit(DEFAULT_LIMIT);
   };
 
-  const handleSaved = (message) => {
+  const handleDraftSaved = useCallback(({ itemId, draft: nextDraft }) => {
+    const draftKey = normalizeTextValue(itemId);
+    if (!draftKey) return;
+
+    setProductDatabaseDrafts((prev) => ({
+      ...prev,
+      [draftKey]: nextDraft,
+    }));
+  }, []);
+
+  const clearProductDatabaseDraft = useCallback((itemId) => {
+    const draftKey = normalizeTextValue(itemId);
+    if (!draftKey) return;
+
+    setProductDatabaseDrafts((prev) => {
+      if (!prev[draftKey]) return prev;
+      const next = { ...prev };
+      delete next[draftKey];
+      return next;
+    });
+  }, []);
+
+  const handleSaved = (message, itemId = getProductDatabaseDraftKey(selectedItem)) => {
     setSuccess(message);
     setSelectedItem(null);
+    clearProductDatabaseDraft(itemId);
     fetchRows();
     window.setTimeout(() => setSuccess(""), 4000);
   };
+
+  const selectedDraftKey = getProductDatabaseDraftKey(selectedItem);
+  const selectedDraft = selectedDraftKey ? productDatabaseDrafts[selectedDraftKey] : null;
 
   return (
     <>
@@ -1294,8 +1457,10 @@ const ProductDatabase = () => {
       {selectedItem && (
         <ProductDatabaseModal
           item={selectedItem}
+          draft={selectedDraft}
           onClose={() => setSelectedItem(null)}
           onSaved={handleSaved}
+          onSaveDraft={handleDraftSaved}
         />
       )}
     </>

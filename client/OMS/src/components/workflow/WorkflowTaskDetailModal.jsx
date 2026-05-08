@@ -9,6 +9,7 @@ import {
   getWorkflowTaskById,
   sendWorkflowTaskToRework,
   startWorkflowTask,
+  updateWorkflowTask,
   uploadWorkflowTask,
 } from "../../api/workflowApi";
 import { formatBytes } from "../../utils/workflowManifest";
@@ -40,12 +41,30 @@ const getUserId = (entry = {}) =>
 const getUserLabel = (entry = {}) =>
   entry?.name || entry?.email || entry?.user?.name || entry?.user?.email || "User";
 
+const formatDateInputValue = (value) => {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toISOString().slice(0, 10);
+};
+
+const buildTaskEditForm = (task = {}) => ({
+  title: normalizeText(task?.title),
+  description: normalizeText(task?.description),
+  brand: normalizeText(task?.brand),
+  department: task?.department?._id || task?.department || "",
+  priority: normalizeText(task?.priority || "normal"),
+  dueDate: formatDateInputValue(task?.due_date),
+});
+
 const WorkflowTaskDetailModal = ({
   taskId,
   availableUsers = [],
+  departments = [],
   canManageWorkflow = false,
   canAssignWorkflow = false,
   canApproveWorkflow = false,
+  canEditTaskDetails = false,
   canDeleteWorkflow = false,
   onClose,
   onDeleted,
@@ -66,6 +85,7 @@ const WorkflowTaskDetailModal = ({
   const [notePrompt, setNotePrompt] = useState({ type: "", note: "" });
   const [commentText, setCommentText] = useState("");
   const [commentType, setCommentType] = useState("general");
+  const [editForm, setEditForm] = useState(() => buildTaskEditForm());
 
   const loadTask = async ({ keepMessages = false } = {}) => {
     if (!taskId) return;
@@ -79,6 +99,7 @@ const WorkflowTaskDetailModal = ({
       const response = await getWorkflowTaskById(taskId);
       const nextTask = response?.data || null;
       setTask(nextTask);
+      setEditForm(buildTaskEditForm(nextTask || {}));
       setAssignIds(
         Array.isArray(nextTask?.assigned_to)
           ? nextTask.assigned_to.map((entry) => getUserId(entry)).filter(Boolean)
@@ -128,7 +149,24 @@ const WorkflowTaskDetailModal = ({
   const canDelete = canDeleteWorkflow && Boolean(task?._id);
   const canComment = Boolean(task?._id);
 
-  const handleTaskAction = async (action, message) => {
+  const departmentOptions = useMemo(() => {
+    const options = Array.isArray(departments) ? [...departments] : [];
+    const currentDepartment = task?.department;
+    const currentDepartmentId = currentDepartment?._id || currentDepartment;
+    if (
+      currentDepartmentId &&
+      !options.some((department) => String(department?._id) === String(currentDepartmentId))
+    ) {
+      options.push(
+        typeof currentDepartment === "object"
+          ? currentDepartment
+          : { _id: currentDepartmentId, name: "Current Department" },
+      );
+    }
+    return options;
+  }, [departments, task?.department]);
+
+  const handleTaskAction = async (action, message, { onSuccess } = {}) => {
     setActionLoading(true);
     setActionError("");
     setActionSuccess("");
@@ -138,6 +176,7 @@ const WorkflowTaskDetailModal = ({
       setActionSuccess(message);
       setAssignNote("");
       setNotePrompt({ type: "", note: "" });
+      onSuccess?.();
       onUpdated?.();
     } catch (submitError) {
       setActionError(
@@ -171,6 +210,36 @@ const WorkflowTaskDetailModal = ({
           note: normalizeText(assignNote),
         }),
       "Task assignment updated successfully.",
+    );
+  };
+
+  const handleEditFormChange = (field, value) => {
+    setEditForm((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  const handleSaveTaskDetails = async () => {
+    if (!normalizeText(editForm.title)) {
+      setActionError("Task name is required.");
+      return;
+    }
+
+    await handleTaskAction(
+      () =>
+        updateWorkflowTask(taskId, {
+          title: normalizeText(editForm.title),
+          description: normalizeText(editForm.description),
+          brand: normalizeText(editForm.brand),
+          department: normalizeText(editForm.department) || null,
+          priority: normalizeText(editForm.priority) || "normal",
+          due_date: normalizeText(editForm.dueDate) || null,
+        }),
+      "Task details updated successfully.",
+      {
+        onSuccess: () => setOpenPanel(""),
+      },
     );
   };
 
@@ -396,6 +465,19 @@ const WorkflowTaskDetailModal = ({
                         </div>
                       </div>
                       <div className="d-flex flex-wrap gap-2">
+                        {canEditTaskDetails && (
+                          <button
+                            type="button"
+                            className="btn btn-outline-primary btn-sm"
+                            disabled={actionLoading}
+                            onClick={() => {
+                              setNotePrompt({ type: "", note: "" });
+                              setOpenPanel((prev) => (prev === "edit" ? "" : "edit"));
+                            }}
+                          >
+                            Edit Details
+                          </button>
+                        )}
                         {canAssign && (
                           <button
                             type="button"
@@ -513,6 +595,117 @@ const WorkflowTaskDetailModal = ({
                               : notePrompt.type === "complete"
                               ? "Save Complete"
                               : "Confirm Rework"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {openPanel === "edit" && (
+                      <div className="workflow-action-panel mb-3">
+                        <div className="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+                          <div>
+                            <div className="fw-semibold">Edit Task Details</div>
+                            <div className="small text-secondary">
+                              Admin-only task metadata. Status and assignees still use their own actions.
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn btn-outline-secondary btn-sm"
+                            onClick={() => {
+                              setEditForm(buildTaskEditForm(task || {}));
+                              setOpenPanel("");
+                            }}
+                            disabled={actionLoading}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                        <div className="row g-3">
+                          <div className="col-md-6">
+                            <label className="form-label">Task Name</label>
+                            <input
+                              type="text"
+                              className="form-control"
+                              value={editForm.title}
+                              onChange={(event) => handleEditFormChange("title", event.target.value)}
+                              disabled={actionLoading}
+                            />
+                          </div>
+                          <div className="col-md-6">
+                            <label className="form-label">Brand</label>
+                            <input
+                              type="text"
+                              className="form-control"
+                              value={editForm.brand}
+                              onChange={(event) => handleEditFormChange("brand", event.target.value)}
+                              disabled={actionLoading}
+                            />
+                          </div>
+                          <div className="col-md-6">
+                            <label className="form-label">Department</label>
+                            <select
+                              className="form-select"
+                              value={editForm.department}
+                              onChange={(event) => handleEditFormChange("department", event.target.value)}
+                              disabled={actionLoading}
+                            >
+                              <option value="">No Department</option>
+                              {departmentOptions.map((department) => (
+                                <option
+                                  key={department?._id || department?.key || department?.name}
+                                  value={department?._id || ""}
+                                >
+                                  {department?.name || department?.key || "Department"}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="col-md-3">
+                            <label className="form-label">Priority</label>
+                            <select
+                              className="form-select"
+                              value={editForm.priority}
+                              onChange={(event) => handleEditFormChange("priority", event.target.value)}
+                              disabled={actionLoading}
+                            >
+                              <option value="low">Low</option>
+                              <option value="normal">Normal</option>
+                              <option value="high">High</option>
+                              <option value="urgent">Urgent</option>
+                            </select>
+                          </div>
+                          <div className="col-md-3">
+                            <label className="form-label">Due Date</label>
+                            <input
+                              type="date"
+                              className="form-control"
+                              value={editForm.dueDate}
+                              onChange={(event) => handleEditFormChange("dueDate", event.target.value)}
+                              disabled={actionLoading}
+                            />
+                          </div>
+                          <div className="col-12">
+                            <label className="form-label">Description</label>
+                            <textarea
+                              rows="3"
+                              className="form-control"
+                              value={editForm.description}
+                              onChange={(event) =>
+                                handleEditFormChange("description", event.target.value)
+                              }
+                              disabled={actionLoading}
+                            />
+                          </div>
+                        </div>
+                        <div className="d-flex justify-content-end mt-3">
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            disabled={actionLoading}
+                            onClick={handleSaveTaskDetails}
+                          >
+                            {actionLoading ? "Saving..." : "Save Details"}
                           </button>
                         </div>
                       </div>

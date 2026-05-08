@@ -435,31 +435,26 @@ small,
 
 .workflow-task-table > thead > tr > th:nth-child(1),
 .workflow-task-table > tbody > tr > td:nth-child(1) {
-  width: 15%;
+  width: 18%;
 }
 
 .workflow-task-table > thead > tr > th:nth-child(2),
 .workflow-task-table > tbody > tr > td:nth-child(2) {
-  width: 14%;
+  width: 13%;
 }
 
 .workflow-task-table > thead > tr > th:nth-child(3),
 .workflow-task-table > tbody > tr > td:nth-child(3) {
-  width: 17%;
+  width: 15%;
 }
 
 .workflow-task-table > thead > tr > th:nth-child(4),
 .workflow-task-table > tbody > tr > td:nth-child(4) {
-  width: 8%;
+  width: 42%;
 }
 
 .workflow-task-table > thead > tr > th:nth-child(5),
 .workflow-task-table > tbody > tr > td:nth-child(5) {
-  width: 34%;
-}
-
-.workflow-task-table > thead > tr > th:nth-child(6),
-.workflow-task-table > tbody > tr > td:nth-child(6) {
   width: 12%;
 }
 
@@ -529,6 +524,17 @@ small,
 
 .workflow-rework-badge.is-empty {
   opacity: 0.82;
+}
+
+.workflow-task-rework-line {
+  margin-top: 0.2rem;
+}
+
+.workflow-rework-badge.is-inline {
+  min-width: 0;
+  height: 1.55rem;
+  padding: 0 0.5rem;
+  font-size: 0.72rem;
 }
 
 .workflow-rework-hovercard {
@@ -672,7 +678,7 @@ small,
 .workflow-status-line-steps {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.2rem;
 }
 

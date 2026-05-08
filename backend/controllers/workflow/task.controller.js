@@ -13,6 +13,7 @@ const {
   startWorkflowTask,
   submitWorkflowTask,
   uploadWorkflowTask,
+  updateWorkflowTaskDetails,
   updateWorkflowTaskStatus,
 } = require("../../services/workflow/workflowStatusService");
 const { getErrorStatusCode } = require("./_utils");
@@ -312,6 +313,29 @@ const patchTaskStatus = async (req, res) => {
   }
 };
 
+const patchTask = async (req, res) => {
+  try {
+    const data = await updateWorkflowTaskDetails({
+      taskId: req.params.id,
+      payload: req.body || {},
+      actor: req.user,
+      realtimeSource: req,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Workflow task details updated successfully",
+      data,
+    });
+  } catch (error) {
+    console.error("Update Workflow Task Details Error:", error);
+    return res.status(getErrorStatusCode(error)).json({
+      success: false,
+      message: error.message || "Failed to update workflow task details",
+    });
+  }
+};
+
 const postTaskComment = async (req, res) => {
   try {
     const data = await addWorkflowTaskComment({
@@ -367,6 +391,7 @@ module.exports = {
   getWorkflowDashboard,
   getWorkflowTask,
   getWorkflowTasks,
+  patchTask,
   patchTaskStatus,
   postTaskComment,
   removeTask,

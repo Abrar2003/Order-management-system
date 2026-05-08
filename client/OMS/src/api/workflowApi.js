@@ -73,6 +73,14 @@ export const getWorkflowTaskById = async (id) => {
   return res.data;
 };
 
+export const updateWorkflowTask = async (id, payload = {}) => {
+  const res = await api.patch(
+    `/workflow/tasks/${encodeURIComponent(requireId(id, "Task id"))}`,
+    payload,
+  );
+  return res.data;
+};
+
 export const assignWorkflowTask = async (id, payload = {}) => {
   const res = await api.patch(
     `/workflow/tasks/${encodeURIComponent(requireId(id, "Task id"))}/assign`,

@@ -731,7 +731,6 @@ const WorkflowTasksPanel = ({
                       <th>Task Name</th>
                       <th>Task Type</th>
                       <th>Dates</th>
-                      <th>Rework</th>
                       <th>Status Flow</th>
                       <th>Actions</th>
                     </tr>
@@ -764,6 +763,43 @@ const WorkflowTasksPanel = ({
                               <div className="small text-secondary mt-1">
                                 {assigneeText}
                               </div>
+                              <div className="workflow-task-rework-line">
+                                <span
+                                  className={[
+                                    "workflow-rework-badge",
+                                    "is-inline",
+                                    reworkCount > 0 ? "has-comments" : "is-empty",
+                                  ]
+                                    .filter(Boolean)
+                                    .join(" ")}
+                                  tabIndex={reworkCount > 0 ? 0 : -1}
+                                >
+                                  Reworked: {reworkCount}
+                                  {reworkCount > 0 && (
+                                    <span className="workflow-rework-hovercard">
+                                      <span className="workflow-rework-hovercard-title">
+                                        Rework Comments
+                                      </span>
+                                      <span className="workflow-rework-hovercard-list">
+                                        {reworkComments.map((entry, index) => (
+                                          <span
+                                            key={`${task._id}-rework-${index}`}
+                                            className="workflow-rework-hovercard-item"
+                                          >
+                                            <span className="workflow-rework-hovercard-comment">
+                                              {entry?.comment || "—"}
+                                            </span>
+                                            <span className="workflow-rework-hovercard-meta">
+                                              {getAuditActorName(entry?.created_by)} •{" "}
+                                              {formatDateTime(entry?.created_at)}
+                                            </span>
+                                          </span>
+                                        ))}
+                                      </span>
+                                    </span>
+                                  )}
+                                </span>
+                              </div>
                             </div>
                           </td>
                           <td>
@@ -794,44 +830,6 @@ const WorkflowTasksPanel = ({
                                 <span className="workflow-task-dates-label">Complete</span>
                                 <span>{formatDateTime(task.completed_at)}</span>
                               </div>
-                            </div>
-                          </td>
-                          <td>
-                            <div className="workflow-rework-cell">
-                              <span
-                                className={[
-                                  "workflow-rework-badge",
-                                  reworkCount > 0 ? "has-comments" : "is-empty",
-                                ]
-                                  .filter(Boolean)
-                                  .join(" ")}
-                                tabIndex={reworkCount > 0 ? 0 : -1}
-                              >
-                                {reworkCount}
-                                {reworkCount > 0 && (
-                                  <span className="workflow-rework-hovercard">
-                                    <span className="workflow-rework-hovercard-title">
-                                      Rework Comments
-                                    </span>
-                                    <span className="workflow-rework-hovercard-list">
-                                      {reworkComments.map((entry, index) => (
-                                        <span
-                                          key={`${task._id}-rework-${index}`}
-                                          className="workflow-rework-hovercard-item"
-                                        >
-                                          <span className="workflow-rework-hovercard-comment">
-                                            {entry?.comment || "—"}
-                                          </span>
-                                          <span className="workflow-rework-hovercard-meta">
-                                            {getAuditActorName(entry?.created_by)} •{" "}
-                                            {formatDateTime(entry?.created_at)}
-                                          </span>
-                                        </span>
-                                      ))}
-                                    </span>
-                                  </span>
-                                )}
-                              </span>
                             </div>
                           </td>
                           <td>
@@ -993,9 +991,11 @@ const WorkflowTasksPanel = ({
         <WorkflowTaskDetailModal
           taskId={selectedTaskId}
           availableUsers={users}
+          departments={departments}
           canManageWorkflow={canManageWorkflow}
           canAssignWorkflow={canAssignWorkflow}
           canApproveWorkflow={canApproveWorkflow}
+          canEditTaskDetails={isAdmin && canManageWorkflow}
           canDeleteWorkflow={canDeleteWorkflow}
           onClose={() => setSelectedTaskId("")}
           onUpdated={() => {

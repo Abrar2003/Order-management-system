@@ -70,6 +70,8 @@ const parsePositiveInt = (value, fallback = 1) => {
   return parsed;
 };
 
+const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key);
+
 const toDateOrNull = (value) => {
   const normalized = normalizeText(value);
   if (!normalized) return null;
@@ -1182,6 +1184,96 @@ const reviewWorkflowTask = async () => {
   throw new Error("Review is no longer a separate workflow stage");
 };
 
+const updateWorkflowTaskDetails = async ({
+  taskId,
+  payload = {},
+  actor = {},
+  realtimeSource = null,
+} = {}) => {
+  if (!isAdmin(actor)) {
+    throw new Error("Only admins can edit workflow task details");
+  }
+
+  const task = await getMutableTaskById(taskId);
+  const auditActor = buildAuditActor(actor);
+  const changedFields = [];
+
+  if (hasOwn(payload, "title") || hasOwn(payload, "name")) {
+    const title = normalizeText(payload?.title || payload?.name);
+    if (!title) {
+      throw new Error("Task name is required");
+    }
+    if (task.title !== title) {
+      task.title = title;
+      changedFields.push("title");
+    }
+  }
+
+  if (hasOwn(payload, "description")) {
+    const description = normalizeText(payload.description);
+    if (task.description !== description) {
+      task.description = description;
+      changedFields.push("description");
+    }
+  }
+
+  if (hasOwn(payload, "brand")) {
+    const brand = normalizeText(payload.brand);
+    if (task.brand !== brand) {
+      task.brand = brand;
+      changedFields.push("brand");
+    }
+  }
+
+  if (hasOwn(payload, "priority")) {
+    const priority = normalizeTaskPriority(payload.priority, task.priority || "normal");
+    if (task.priority !== priority) {
+      task.priority = priority;
+      changedFields.push("priority");
+    }
+  }
+
+  if (hasOwn(payload, "due_date")) {
+    const dueDate = parseDueDate(payload.due_date);
+    const currentTime = task.due_date ? task.due_date.getTime() : null;
+    const nextTime = dueDate ? dueDate.getTime() : null;
+    if (currentTime !== nextTime) {
+      task.due_date = dueDate;
+      changedFields.push("due_date");
+    }
+  }
+
+  if (hasOwn(payload, "department")) {
+    const department = await ensureDepartmentExists(payload.department, "department");
+    const currentDepartment = normalizeId(task.department);
+    const nextDepartment = normalizeId(department);
+    if (currentDepartment !== nextDepartment) {
+      task.department = department;
+      changedFields.push("department");
+    }
+  }
+
+  if (changedFields.length === 0) {
+    return buildTaskDetail(task._id, actor);
+  }
+
+  task.updated_by = auditActor;
+  await task.save();
+
+  const batch = await recalculateWorkflowBatchIfPresent(task.batch);
+  const taskDetail = await buildTaskDetail(task._id, actor);
+
+  emitWorkflowTaskMutation({
+    realtimeSource,
+    task: taskDetail,
+    batch,
+    actor,
+    message: "Workflow task details updated",
+  });
+
+  return taskDetail;
+};
+
 const addWorkflowTaskComment = async ({
   taskId,
   actor = {},
@@ -1317,16 +1409,16 @@ const normalizeTaskTypeDefaultAssignees = async (entries = []) => {
   return users.map((user) => ({ user: user._id }));
 };
 
-const ensureDepartmentExists = async (departmentId) => {
+const ensureDepartmentExists = async (departmentId, fieldLabel = "default_department") => {
   const normalizedId = normalizeId(departmentId);
   if (!normalizedId) return null;
   if (!mongoose.Types.ObjectId.isValid(normalizedId)) {
-    throw new Error("default_department is invalid");
+    throw new Error(`${fieldLabel} is invalid`);
   }
 
   const department = await Department.findById(normalizedId).select("_id").lean();
   if (!department) {
-    throw new Error("default_department was not found");
+    throw new Error(`${fieldLabel} was not found`);
   }
   return department._id;
 };
@@ -1526,6 +1618,7 @@ module.exports = {
   submitWorkflowTask,
   uploadWorkflowTask,
   updateWorkflowDepartment,
+  updateWorkflowTaskDetails,
   updateWorkflowTaskStatus,
   updateWorkflowTaskType,
 };

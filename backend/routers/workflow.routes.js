@@ -18,6 +18,7 @@ const {
   getWorkflowDashboard,
   getWorkflowTask,
   getWorkflowTasks,
+  patchTask,
   patchTaskStatus,
   postTaskComment,
   removeTask,
@@ -121,6 +122,14 @@ router.get(
   auth,
   requirePermission("workflow", "view"),
   getWorkflowTask,
+);
+
+router.patch(
+  "/tasks/:id",
+  auth,
+  authorize(...WORKFLOW_ADMIN_ROLES),
+  requirePermission("workflow", "edit"),
+  patchTask,
 );
 
 router.patch(
