@@ -2,23 +2,11 @@ const mongoose = require("mongoose");
 const {
   BOX_PACKAGING_MODES,
   BOX_ENTRY_TYPES,
-  BOX_SIZE_REMARK_OPTIONS,
 } = require("../helpers/boxMeasurement");
 
 const SIZE_ENTRY_LIMIT = 4;
-const ITEM_SIZE_REMARKS = [
-  "",
-  "item",
-  "top",
-  "base",
-  "item1",
-  "item2",
-  "item3",
-  "item4",
-];
-const BOX_SIZE_REMARKS = ["", ...BOX_SIZE_REMARK_OPTIONS];
 
-const createSizeEntrySchema = (remarkEnum = []) =>
+const createSizeEntrySchema = () =>
   new mongoose.Schema(
     {
       L: { type: Number, default: 0, min: 0 },
@@ -35,7 +23,7 @@ const createSizeEntrySchema = (remarkEnum = []) =>
     { _id: false },
   );
 
-const itemSizeEntrySchema = createSizeEntrySchema(ITEM_SIZE_REMARKS);
+const itemSizeEntrySchema = createSizeEntrySchema();
 const boxSizeEntrySchema = new mongoose.Schema(
   {
     L: { type: Number, default: 0, min: 0 },
@@ -43,7 +31,6 @@ const boxSizeEntrySchema = new mongoose.Schema(
     H: { type: Number, default: 0, min: 0 },
     remark: {
       type: String,
-      enum: BOX_SIZE_REMARKS,
       default: "",
       trim: true,
     },
@@ -61,6 +48,14 @@ const boxSizeEntrySchema = new mongoose.Schema(
   { _id: false },
 );
 const createOptionalSizeNumberField = () => ({ type: Number, min: 0 });
+const legacyLbhSchema = new mongoose.Schema(
+  {
+    L: createOptionalSizeNumberField(),
+    B: createOptionalSizeNumberField(),
+    H: createOptionalSizeNumberField(),
+  },
+  { _id: false },
+);
 const productSpecItemSizeEntrySchema = new mongoose.Schema(
   {
     L: createOptionalSizeNumberField(),
@@ -263,11 +258,7 @@ const itemSchema = new mongoose.Schema(
       calculated_pis_total: { type: String, default: "0", trim: true },
       calculated_total: { type: String, default: "0", trim: true },
     },
-    inspected_item_LBH: {
-      L: { type: Number, default: 0, min: 0 },
-      B: { type: Number, default: 0, min: 0 },
-      H: { type: Number, default: 0, min: 0 },
-    },
+    inspected_item_LBH: legacyLbhSchema,
     inspected_item_sizes: {
       type: [itemSizeEntrySchema],
       default: [],
@@ -277,21 +268,9 @@ const itemSchema = new mongoose.Schema(
         message: `inspected_item_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
       },
     },
-    inspected_item_top_LBH: {
-      L: { type: Number, default: 0, min: 0 },
-      B: { type: Number, default: 0, min: 0 },
-      H: { type: Number, default: 0, min: 0 },
-    },
-    inspected_item_bottom_LBH: {
-      L: { type: Number, default: 0, min: 0 },
-      B: { type: Number, default: 0, min: 0 },
-      H: { type: Number, default: 0, min: 0 },
-    },
-    inspected_box_LBH: {
-      L: { type: Number, default: 0, min: 0 },
-      B: { type: Number, default: 0, min: 0 },
-      H: { type: Number, default: 0, min: 0 },
-    },
+    inspected_item_top_LBH: legacyLbhSchema,
+    inspected_item_bottom_LBH: legacyLbhSchema,
+    inspected_box_LBH: legacyLbhSchema,
     inspected_box_sizes: {
       type: [boxSizeEntrySchema],
       default: [],
@@ -307,31 +286,11 @@ const itemSchema = new mongoose.Schema(
       default: BOX_PACKAGING_MODES.INDIVIDUAL,
       trim: true,
     },
-    inspected_box_top_LBH: {
-      L: { type: Number, default: 0, min: 0 },
-      B: { type: Number, default: 0, min: 0 },
-      H: { type: Number, default: 0, min: 0 },
-    },
-    inspected_box_bottom_LBH: {
-      L: { type: Number, default: 0, min: 0 },
-      B: { type: Number, default: 0, min: 0 },
-      H: { type: Number, default: 0, min: 0 },
-    },
-    inspected_top_LBH: {
-      L: { type: Number, default: 0, min: 0 },
-      B: { type: Number, default: 0, min: 0 },
-      H: { type: Number, default: 0, min: 0 },
-    },
-    inspected_bottom_LBH: {
-      L: { type: Number, default: 0, min: 0 },
-      B: { type: Number, default: 0, min: 0 },
-      H: { type: Number, default: 0, min: 0 },
-    },
-    pis_item_LBH: {
-      L: { type: Number, default: 0, min: 0 },
-      B: { type: Number, default: 0, min: 0 },
-      H: { type: Number, default: 0, min: 0 },
-    },
+    inspected_box_top_LBH: legacyLbhSchema,
+    inspected_box_bottom_LBH: legacyLbhSchema,
+    inspected_top_LBH: legacyLbhSchema,
+    inspected_bottom_LBH: legacyLbhSchema,
+    pis_item_LBH: legacyLbhSchema,
     pis_item_sizes: {
       type: [itemSizeEntrySchema],
       default: [],
@@ -350,21 +309,9 @@ const itemSchema = new mongoose.Schema(
         message: `pd_item_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
       },
     },
-    pis_item_top_LBH: {
-      L: { type: Number, default: 0, min: 0 },
-      B: { type: Number, default: 0, min: 0 },
-      H: { type: Number, default: 0, min: 0 },
-    },
-    pis_item_bottom_LBH: {
-      L: { type: Number, default: 0, min: 0 },
-      B: { type: Number, default: 0, min: 0 },
-      H: { type: Number, default: 0, min: 0 },
-    },
-    pis_box_LBH: {
-      L: { type: Number, default: 0, min: 0 },
-      B: { type: Number, default: 0, min: 0 },
-      H: { type: Number, default: 0, min: 0 },
-    },
+    pis_item_top_LBH: legacyLbhSchema,
+    pis_item_bottom_LBH: legacyLbhSchema,
+    pis_box_LBH: legacyLbhSchema,
     pis_box_sizes: {
       type: [boxSizeEntrySchema],
       default: [],
@@ -406,16 +353,8 @@ const itemSchema = new mongoose.Schema(
     pd_approved_by: { type: productDatabaseActorSchema, default: undefined },
     pd_last_changed_by: { type: productDatabaseActorSchema, default: undefined },
     pd_history: { type: [productDatabaseHistorySchema], default: [] },
-    pis_box_top_LBH: {
-      L: { type: Number, default: 0, min: 0 },
-      B: { type: Number, default: 0, min: 0 },
-      H: { type: Number, default: 0, min: 0 },
-    },
-    pis_box_bottom_LBH: {
-      L: { type: Number, default: 0, min: 0 },
-      B: { type: Number, default: 0, min: 0 },
-      H: { type: Number, default: 0, min: 0 },
-    },
+    pis_box_top_LBH: legacyLbhSchema,
+    pis_box_bottom_LBH: legacyLbhSchema,
     pis_barcode: { type: String, default: "", trim: true },
     pis_master_barcode: { type: String, default: "", trim: true },
     pis_inner_barcode: { type: String, default: "", trim: true },

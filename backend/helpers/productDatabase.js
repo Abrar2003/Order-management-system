@@ -1,6 +1,5 @@
 const {
   BOX_ENTRY_TYPES,
-  BOX_INDIVIDUAL_REMARK_OPTIONS,
   BOX_PACKAGING_MODES,
   detectBoxPackagingMode,
 } = require("./boxMeasurement");
@@ -22,17 +21,6 @@ const PD_STATUSES = Object.freeze({
 });
 const PD_STATUS_VALUES = Object.freeze(Object.values(PD_STATUSES));
 const NOT_SET_STATUS = "not_set";
-const ITEM_REMARK_OPTIONS = Object.freeze([
-  "",
-  "item",
-  "top",
-  "base",
-  "item1",
-  "item2",
-  "item3",
-  "item4",
-]);
-
 const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key);
 const normalizeText = (value) => String(value ?? "").trim();
 const normalizeKey = (value) => normalizeText(value).toLowerCase();
@@ -124,9 +112,6 @@ const normalizeItemSizeEntries = (entries = []) => {
 
     const normalizedRemark = normalizeKey(entry?.remark || entry?.type || "");
     if (normalizedRemark) {
-      if (!ITEM_REMARK_OPTIONS.includes(normalizedRemark)) {
-        throw new ProductDatabaseError(`${entryLabel} remark is invalid`);
-      }
       if (seenRemarks.has(normalizedRemark)) {
         throw new ProductDatabaseError("PD item size remarks must be unique");
       }
@@ -221,7 +206,7 @@ const normalizeBoxSizeEntries = (
       const boxType = index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
       const cartonEntry = {
         ...baseEntry,
-        remark: boxType,
+        remark: normalizeKey(entry?.remark || entry?.type || "") || boxType,
         box_type: boxType,
       };
       if (boxType === BOX_ENTRY_TYPES.INNER) {
@@ -246,9 +231,6 @@ const normalizeBoxSizeEntries = (
 
     const normalizedRemark = normalizeKey(entry?.remark || entry?.type || "");
     if (normalizedRemark) {
-      if (!BOX_INDIVIDUAL_REMARK_OPTIONS.includes(normalizedRemark)) {
-        throw new ProductDatabaseError(`${entryLabel} remark is invalid`);
-      }
       if (seenRemarks.has(normalizedRemark)) {
         throw new ProductDatabaseError("PD box size remarks must be unique");
       }

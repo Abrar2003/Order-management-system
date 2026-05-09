@@ -2,21 +2,9 @@ const mongoose = require("mongoose");
 const {
   BOX_PACKAGING_MODES,
   BOX_ENTRY_TYPES,
-  BOX_SIZE_REMARK_OPTIONS,
 } = require("../helpers/boxMeasurement");
 
 const SIZE_ENTRY_LIMIT = 4;
-const ITEM_SIZE_REMARKS = [
-  "",
-  "item",
-  "top",
-  "base",
-  "item1",
-  "item2",
-  "item3",
-  "item4",
-];
-const BOX_SIZE_REMARKS = ["", ...BOX_SIZE_REMARK_OPTIONS];
 
 const AuditActorSchema = new mongoose.Schema(
   {
@@ -58,7 +46,7 @@ const ShipmentEntrySchema = new mongoose.Schema(
   { _id: true },
 );
 
-const createSizeEntrySchema = (remarkEnum = []) =>
+const createSizeEntrySchema = () =>
   new mongoose.Schema(
     {
       L: { type: Number, default: 0, min: 0 },
@@ -66,7 +54,6 @@ const createSizeEntrySchema = (remarkEnum = []) =>
       H: { type: Number, default: 0, min: 0 },
       remark: {
         type: String,
-        enum: remarkEnum,
         default: "",
         trim: true,
       },
@@ -76,7 +63,7 @@ const createSizeEntrySchema = (remarkEnum = []) =>
     { _id: false },
   );
 
-const itemSizeEntrySchema = createSizeEntrySchema(ITEM_SIZE_REMARKS);
+const itemSizeEntrySchema = createSizeEntrySchema();
 const boxSizeEntrySchema = new mongoose.Schema(
   {
     L: { type: Number, default: 0, min: 0 },
@@ -84,7 +71,6 @@ const boxSizeEntrySchema = new mongoose.Schema(
     H: { type: Number, default: 0, min: 0 },
     remark: {
       type: String,
-      enum: BOX_SIZE_REMARKS,
       default: "",
       trim: true,
     },

@@ -1,5 +1,4 @@
 import {
-  BOX_ENTRY_TYPES,
   BOX_PACKAGING_MODES,
   SIZE_ENTRY_LIMIT,
   getRemarkLabel,
@@ -28,6 +27,7 @@ const MeasuredSizeSection = ({
   const isCartonMode = mode === BOX_PACKAGING_MODES.CARTON;
   const safeCount = isCartonMode ? 2 : normalizeSizeCount(countValue, 1);
   const entryColumnClass = safeCount > 1 ? "col-md-2" : "col-md-3";
+  const remarkListId = `${sectionKey || "size"}-remark-options`;
 
   return (
     <>
@@ -98,32 +98,28 @@ const MeasuredSizeSection = ({
                 {safeCount > 1 && (
                   <div className="col-md-3">
                     <label className="form-label small text-secondary">Remark</label>
-                    {isCartonMode ? (
-                      <input
-                        type="text"
-                        className="form-control"
-                        value={getRemarkLabel(
-                          remarkOptions,
-                          index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER,
-                        )}
-                        disabled
-                        readOnly
-                      />
-                    ) : (
-                      <select
-                        className="form-select"
-                        value={entry.remark}
-                        onChange={(event) => onEntryChange?.(index, "remark", event.target.value)}
-                        disabled={disabled}
-                      >
-                        <option value="">Select remark</option>
-                        {remarkOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    )}
+                    <input
+                      type="text"
+                      className="form-control"
+                      list={`${remarkListId}-${index}`}
+                      value={entry.remark}
+                      onChange={(event) => onEntryChange?.(index, "remark", event.target.value)}
+                      placeholder={
+                        isCartonMode
+                          ? index === 0
+                            ? "Inner carton"
+                            : "Master carton"
+                          : "Custom remark"
+                      }
+                      disabled={disabled}
+                    />
+                    <datalist id={`${remarkListId}-${index}`}>
+                      {remarkOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </datalist>
                   </div>
                 )}
                 <div className={entryColumnClass}>

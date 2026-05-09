@@ -36,6 +36,10 @@ const {
   calculateTotalPoCbm,
 } = require("../services/orderCbm.service");
 const {
+  calculateEffectiveBoxEntriesCbmTotal,
+  detectBoxPackagingMode,
+} = require("../helpers/boxMeasurement");
+const {
   QUEUE_NAMES,
   enqueueAllOrderCbmRecalc,
   enqueueBrandCalendarResync,
@@ -251,6 +255,12 @@ const resolveSplitOrSingleLbhCbmTotal = ({
   return toPositiveCbmNumber(calculateCbmFromLbh(singleLbh));
 };
 
+const calculateSizeEntriesCbmTotal = (entries = []) =>
+  (Array.isArray(entries) ? entries : []).reduce(
+    (sum, entry) => sum + toPositiveCbmNumber(calculateCbmFromLbh(entry)),
+    0,
+  );
+
 const resolveOrderRowCbmSummary = (itemDoc = null, orderQuantity = 0) => {
   if (!itemDoc || typeof itemDoc !== "object") {
     return {
@@ -278,6 +288,16 @@ const resolveOrderRowCbmSummary = (itemDoc = null, orderQuantity = 0) => {
     };
   }
 
+  const inspectedItemCbm = calculateSizeEntriesCbmTotal(itemDoc?.inspected_item_sizes);
+  if (inspectedItemCbm > 0) {
+    const perItem = toRoundedCbmValue(inspectedItemCbm);
+    return {
+      source: "inspected_item",
+      per_item: perItem,
+      total: toRoundedCbmValue(Math.max(0, Number(orderQuantity || 0)) * perItem),
+    };
+  }
+
   const inspectedStoredCbm = [
     itemDoc?.cbm?.calculated_inspected_total,
     itemDoc?.cbm?.inspected_total,
@@ -288,6 +308,22 @@ const resolveOrderRowCbmSummary = (itemDoc = null, orderQuantity = 0) => {
     const perItem = toRoundedCbmValue(inspectedStoredCbm);
     return {
       source: "inspected",
+      per_item: perItem,
+      total: toRoundedCbmValue(Math.max(0, Number(orderQuantity || 0)) * perItem),
+    };
+  }
+
+  const pisBoxMode = detectBoxPackagingMode(itemDoc?.pis_box_mode, itemDoc?.pis_box_sizes);
+  const pisBoxEntriesCbm = calculateEffectiveBoxEntriesCbmTotal(
+    itemDoc?.pis_box_sizes,
+    pisBoxMode,
+  );
+  const pisItemEntriesCbm = calculateSizeEntriesCbmTotal(itemDoc?.pis_item_sizes);
+  const pisSizeEntriesCbm = pisBoxEntriesCbm || pisItemEntriesCbm;
+  if (pisSizeEntriesCbm > 0) {
+    const perItem = toRoundedCbmValue(pisSizeEntriesCbm);
+    return {
+      source: pisBoxEntriesCbm > 0 ? "pis_box" : "pis_item",
       per_item: perItem,
       total: toRoundedCbmValue(Math.max(0, Number(orderQuantity || 0)) * perItem),
     };
@@ -3060,6 +3096,7 @@ const buildPoBucketDataset = async ({
         [
           "code",
           "cbm",
+          "inspected_item_sizes",
           "inspected_item_LBH",
           "inspected_item_top_LBH",
           "inspected_item_bottom_LBH",
@@ -3070,9 +3107,12 @@ const buildPoBucketDataset = async ({
           "inspected_box_bottom_LBH",
           "inspected_top_LBH",
           "inspected_bottom_LBH",
+          "pis_item_sizes",
           "pis_item_LBH",
           "pis_item_top_LBH",
           "pis_item_bottom_LBH",
+          "pis_box_sizes",
+          "pis_box_mode",
           "pis_box_LBH",
           "pis_box_top_LBH",
           "pis_box_bottom_LBH",
@@ -3703,6 +3743,7 @@ const getShipmentDataset = async ({
         [
           "code",
           "cbm",
+          "inspected_item_sizes",
           "inspected_item_LBH",
           "inspected_item_top_LBH",
           "inspected_item_bottom_LBH",
@@ -3713,9 +3754,12 @@ const getShipmentDataset = async ({
           "inspected_box_bottom_LBH",
           "inspected_top_LBH",
           "inspected_bottom_LBH",
+          "pis_item_sizes",
           "pis_item_LBH",
           "pis_item_top_LBH",
           "pis_item_bottom_LBH",
+          "pis_box_sizes",
+          "pis_box_mode",
           "pis_box_LBH",
           "pis_box_top_LBH",
           "pis_box_bottom_LBH",
@@ -6115,6 +6159,7 @@ exports.getOrderById = async (req, res) => {
           [
             "code",
             "cbm",
+            "inspected_item_sizes",
             "inspected_item_LBH",
             "inspected_item_top_LBH",
             "inspected_item_bottom_LBH",
@@ -6125,9 +6170,12 @@ exports.getOrderById = async (req, res) => {
             "inspected_box_bottom_LBH",
             "inspected_top_LBH",
             "inspected_bottom_LBH",
+            "pis_item_sizes",
             "pis_item_LBH",
             "pis_item_top_LBH",
             "pis_item_bottom_LBH",
+            "pis_box_sizes",
+            "pis_box_mode",
             "pis_box_LBH",
             "pis_box_top_LBH",
             "pis_box_bottom_LBH",
@@ -8698,6 +8746,7 @@ const buildPackedGoodsDataset = async ({
         [
           "code",
           "cbm",
+          "inspected_item_sizes",
           "inspected_item_LBH",
           "inspected_item_top_LBH",
           "inspected_item_bottom_LBH",
@@ -8708,9 +8757,12 @@ const buildPackedGoodsDataset = async ({
           "inspected_box_bottom_LBH",
           "inspected_top_LBH",
           "inspected_bottom_LBH",
+          "pis_item_sizes",
           "pis_item_LBH",
           "pis_item_top_LBH",
           "pis_item_bottom_LBH",
+          "pis_box_sizes",
+          "pis_box_mode",
           "pis_box_LBH",
           "pis_box_top_LBH",
           "pis_box_bottom_LBH",

@@ -2295,6 +2295,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     const isCartonMode = mode === BOX_PACKAGING_MODES.CARTON;
     const safeCount = isCartonMode ? 2 : normalizeSizeCount(countValue, 1);
     const entryColumnClass = safeCount > 1 ? "col-md-2" : "col-md-3";
+    const remarkListId = `${entriesKey || "qc-size"}-remark-options`;
 
     return (
       <>
@@ -2378,36 +2379,35 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   {safeCount > 1 && (
                     <div className="col-md-3">
                       <label className="form-label small text-secondary">Remark</label>
-                      {isCartonMode ? (
-                        <input
-                          type="text"
-                          className="form-control"
-                          value={getRemarkLabel(remarkOptions, entry.remark)}
-                          disabled
-                          readOnly
-                        />
-                      ) : (
-                        <select
-                          className="form-select"
-                          value={entry.remark}
-                          onChange={(event) =>
-                            handleSizeEntryChange(
-                              entriesKey,
-                              index,
-                              "remark",
-                              event.target.value,
-                            )
-                          }
-                          disabled={locked}
-                        >
-                          <option value="">Select remark</option>
-                          {remarkOptions.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      )}
+                      <input
+                        type="text"
+                        className="form-control"
+                        list={`${remarkListId}-${index}`}
+                        value={entry.remark}
+                        onChange={(event) =>
+                          handleSizeEntryChange(
+                            entriesKey,
+                            index,
+                            "remark",
+                            event.target.value,
+                          )
+                        }
+                        placeholder={
+                          isCartonMode
+                            ? index === 0
+                              ? "Inner carton"
+                              : "Master carton"
+                            : "Custom remark"
+                        }
+                        disabled={locked}
+                      />
+                      <datalist id={`${remarkListId}-${index}`}>
+                        {remarkOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </datalist>
                     </div>
                   )}
                   <div className={entryColumnClass}>

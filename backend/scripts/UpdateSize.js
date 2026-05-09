@@ -55,8 +55,76 @@ function parseLBH(value) {
   };
 }
 
-function isValidLBH(obj) {
-  return obj && (obj.L > 0 || obj.B > 0 || obj.H > 0);
+function hasCompletePositiveLBH(obj) {
+  return obj && obj.L > 0 && obj.B > 0 && obj.H > 0;
+}
+
+function calculateCbmFromLbh(obj) {
+  if (!hasCompletePositiveLBH(obj)) return 0;
+  return Number(((obj.L * obj.B * obj.H) / 1000000).toFixed(6));
+}
+
+function toFixedWeight(value) {
+  return Number((Number(value) || 0).toFixed(3));
+}
+
+function buildSizeEntries({ singleEntry, topEntry, bottomEntry, dimensionKey, weightKey }) {
+  const entries = [];
+
+  if (topEntry || bottomEntry) {
+    if (hasCompletePositiveLBH(topEntry?.[dimensionKey])) {
+      entries.push({
+        ...topEntry[dimensionKey],
+        remark: "top",
+        [weightKey]: toFixedWeight(topEntry?.[weightKey === "net_weight" ? "net" : "gross"]),
+      });
+    }
+    if (hasCompletePositiveLBH(bottomEntry?.[dimensionKey])) {
+      entries.push({
+        ...bottomEntry[dimensionKey],
+        remark: "base",
+        [weightKey]: toFixedWeight(bottomEntry?.[weightKey === "net_weight" ? "net" : "gross"]),
+      });
+    }
+  }
+
+  if (entries.length === 0 && hasCompletePositiveLBH(singleEntry?.[dimensionKey])) {
+    entries.push({
+      ...singleEntry[dimensionKey],
+      remark: "",
+      [weightKey]: toFixedWeight(singleEntry?.[weightKey === "net_weight" ? "net" : "gross"]),
+    });
+  }
+
+  if (entries.length === 1) {
+    entries[0].remark = "";
+  }
+
+  return entries.slice(0, 4);
+}
+
+function buildPisWeight(itemSizeEntries, boxSizeEntries) {
+  const itemTop = itemSizeEntries.find((entry) => entry.remark === "top");
+  const itemBottom = itemSizeEntries.find((entry) => entry.remark === "base");
+  const boxTop = boxSizeEntries.find((entry) => entry.remark === "top");
+  const boxBottom = boxSizeEntries.find((entry) => entry.remark === "base");
+  const totalNet = itemSizeEntries.reduce(
+    (sum, entry) => sum + (Number(entry.net_weight) || 0),
+    0,
+  );
+  const totalGross = boxSizeEntries.reduce(
+    (sum, entry) => sum + (Number(entry.gross_weight) || 0),
+    0,
+  );
+
+  return {
+    top_net: toFixedWeight(itemTop?.net_weight || 0),
+    top_gross: toFixedWeight(boxTop?.gross_weight || 0),
+    bottom_net: toFixedWeight(itemBottom?.net_weight || 0),
+    bottom_gross: toFixedWeight(boxBottom?.gross_weight || 0),
+    total_net: toFixedWeight(totalNet),
+    total_gross: toFixedWeight(totalGross),
+  };
 }
 
 function parseFlag(value) {
@@ -81,11 +149,6 @@ function parseFlag(value) {
   return "unknown";
 }
 
-function parseCbm(value) {
-  const num = extractNumber(value);
-  return Number(num.toFixed(3));
-}
-
 async function run() {
   await mongoose.connect(process.env.MONGO_URI);
 
@@ -103,7 +166,6 @@ async function run() {
       const entry = {
         code,
         brandName: cleanString(row["brand"]),
-        piCbm: parseCbm(row["pi_cbm"]),
         product: parseLBH(row["product_size"]),
         box: parseLBH(row["box_size"]),
         net: extractNumber(row["net_weight"]),
@@ -159,83 +221,36 @@ async function run() {
 
     const mainEntry = singleEntry || topEntry || bottomEntry || entries[0];
 
-    const topProduct = topEntry?.product || { L: 0, B: 0, H: 0 };
-    const bottomProduct = bottomEntry?.product || { L: 0, B: 0, H: 0 };
-    const mainProduct = isValidLBH(mainEntry?.product)
-      ? mainEntry.product
-      : { L: 0, B: 0, H: 0 };
-
-    const topBox = topEntry?.box || { L: 0, B: 0, H: 0 };
-    const bottomBox = bottomEntry?.box || { L: 0, B: 0, H: 0 };
-    const mainBox = isValidLBH(mainEntry?.box)
-      ? mainEntry.box
-      : { L: 0, B: 0, H: 0 };
-
-    const topNet = topEntry?.net || 0;
-    const bottomNet = bottomEntry?.net || 0;
-    const topGross = topEntry?.gross || 0;
-    const bottomGross = bottomEntry?.gross || 0;
-
-    const mainNet = mainEntry?.net || 0;
-    const mainGross = mainEntry?.gross || 0;
-
-    const hasTopOrBottom = !!topEntry || !!bottomEntry;
-
-    const totalNet = hasTopOrBottom
-      ? Number((topNet + bottomNet).toFixed(3))
-      : Number(mainNet.toFixed(3));
-
-    const totalGross = hasTopOrBottom
-      ? Number((topGross + bottomGross).toFixed(3))
-      : Number(mainGross.toFixed(3));
-
+    const itemSizeEntries = buildSizeEntries({
+      singleEntry: mainEntry,
+      topEntry,
+      bottomEntry,
+      dimensionKey: "product",
+      weightKey: "net_weight",
+    });
+    const boxSizeEntries = buildSizeEntries({
+      singleEntry: mainEntry,
+      topEntry,
+      bottomEntry,
+      dimensionKey: "box",
+      weightKey: "gross_weight",
+    });
+    const pisWeight = buildPisWeight(itemSizeEntries, boxSizeEntries);
+    const cbmSource = boxSizeEntries.length > 0 ? boxSizeEntries : itemSizeEntries;
     const totalPiCbm = Number(
-      entries.reduce((sum, e) => sum + (e.piCbm || 0), 0).toFixed(3)
+      cbmSource.reduce((sum, entry) => sum + calculateCbmFromLbh(entry), 0).toFixed(6),
     );
 
     const update = {
       $set: {
         brand_name: mainEntry?.brandName || "",
-
-        // single/default PIS item size
-        "pis_item_LBH.L": mainProduct.L,
-        "pis_item_LBH.B": mainProduct.B,
-        "pis_item_LBH.H": mainProduct.H,
-
-        // top item size
-        "pis_item_top_LBH.L": topProduct.L,
-        "pis_item_top_LBH.B": topProduct.B,
-        "pis_item_top_LBH.H": topProduct.H,
-
-        // bottom item size
-        "pis_item_bottom_LBH.L": bottomProduct.L,
-        "pis_item_bottom_LBH.B": bottomProduct.B,
-        "pis_item_bottom_LBH.H": bottomProduct.H,
-
-        // single/default box size
-        "pis_box_LBH.L": mainBox.L,
-        "pis_box_LBH.B": mainBox.B,
-        "pis_box_LBH.H": mainBox.H,
-
-        // top box size
-        "pis_box_top_LBH.L": topBox.L,
-        "pis_box_top_LBH.B": topBox.B,
-        "pis_box_top_LBH.H": topBox.H,
-
-        // bottom box size
-        "pis_box_bottom_LBH.L": bottomBox.L,
-        "pis_box_bottom_LBH.B": bottomBox.B,
-        "pis_box_bottom_LBH.H": bottomBox.H,
-
-        // weights
-        "pis_weight.top_net": Number(topNet.toFixed(3)),
-        "pis_weight.top_gross": Number(topGross.toFixed(3)),
-        "pis_weight.bottom_net": Number(bottomNet.toFixed(3)),
-        "pis_weight.bottom_gross": Number(bottomGross.toFixed(3)),
-        "pis_weight.total_net": totalNet,
-        "pis_weight.total_gross": totalGross,
-
-        // cbm
+        pis_item_sizes: itemSizeEntries,
+        pis_box_sizes: boxSizeEntries,
+        pis_box_mode: "individual",
+        pis_weight: pisWeight,
+        "cbm.top": cbmSource[0] ? String(calculateCbmFromLbh(cbmSource[0])) : "0",
+        "cbm.bottom": cbmSource[1] ? String(calculateCbmFromLbh(cbmSource[1])) : "0",
+        "cbm.total": String(totalPiCbm),
         "cbm.calculated_pis_total": String(totalPiCbm),
       },
     };

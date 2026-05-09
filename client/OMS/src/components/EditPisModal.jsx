@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
 import MeasuredSizeSection from "./MeasuredSizeSection";
+import { getCountryOfOriginOptions } from "../constants/countryOfOrigin";
 import { formatDateDDMMYYYY } from "../utils/date";
 import {
   BOX_PACKAGING_MODES,
@@ -211,6 +212,10 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
   );
   const brandLabel = useMemo(() => getBrandLabel(item), [item]);
   const vendorsLabel = useMemo(() => getVendorsLabel(item), [item]);
+  const countryOfOriginOptions = useMemo(
+    () => getCountryOfOriginOptions(form.country_of_origin),
+    [form.country_of_origin],
+  );
   const showInspectedReference = !isPisChecked(item);
   const inspectedReference = useMemo(() => buildInspectedReference(item), [item]);
   const displayedItemEntries = useMemo(
@@ -430,14 +435,19 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
               </div>
               <div className="col-md-4">
                 <label className="form-label">Country of Origin</label>
-                <input
-                  type="text"
-                  className="form-control"
+                <select
+                  className="form-select"
                   value={form.country_of_origin}
-                  placeholder="Optional"
                   onChange={(event) => updateField("country_of_origin", event.target.value)}
                   disabled={saving}
-                />
+                >
+                  <option value="">Select country</option>
+                  {countryOfOriginOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 

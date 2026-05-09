@@ -24,6 +24,7 @@ import "../App.css";
 
 const SIZE_UNIT = "cm";
 const WEIGHT_UNIT = "kg";
+const MEASUREMENT_ENTRY_DISPLAY_LIMIT = 4;
 
 const toTimestamp = (value) => {
   if (!value) return 0;
@@ -277,7 +278,7 @@ const normalizeMeasurementEntries = (
         };
       })
       .filter((entry) => entry.L > 0 && entry.B > 0 && entry.H > 0)
-      .slice(0, 3),
+      .slice(0, MEASUREMENT_ENTRY_DISPLAY_LIMIT),
     remarkOrder,
   );
 
@@ -1045,17 +1046,10 @@ const InspectionReport = () => {
     );
     const pisProductLbh =
       pisItemEntries.length > 0
-        ? toStructuredLbhFromEntries(
-            pisItemEntries,
-            itemMaster?.pis_item_LBH || itemMaster?.item_LBH,
-            { indexedRemarks: ITEM_INDEXED_REMARKS },
-          )
-        : formatStructuredLbhValue({
-            top: itemMaster?.pis_item_top_LBH,
-            bottom: itemMaster?.pis_item_bottom_LBH,
-            single: itemMaster?.pis_item_LBH,
-            fallback: itemMaster?.item_LBH,
-          });
+        ? toStructuredLbhFromEntries(pisItemEntries, null, {
+            indexedRemarks: ITEM_INDEXED_REMARKS,
+          })
+        : formatStructuredLbhValue();
     const checkedProductLbh =
       inspectedItemEntries.length > 0
         ? toStructuredLbhFromEntries(
@@ -1069,30 +1063,12 @@ const InspectionReport = () => {
             single: itemMaster?.inspected_item_LBH,
             fallback: itemMaster?.item_LBH,
           });
-    const pisBoxTopLbh =
-      itemMaster?.pis_box_top_LBH || itemMaster?.pis_item_top_LBH || {};
-    const pisBoxBottomLbh =
-      itemMaster?.pis_box_bottom_LBH || itemMaster?.pis_item_bottom_LBH || {};
     const pisPackedSize =
       pisBoxEntries.length > 0
-        ? toStructuredLbhFromEntries(
-            pisBoxEntries,
-            itemMaster?.pis_box_LBH
-              || itemMaster?.pis_item_LBH
-              || itemMaster?.box_LBH
-              || itemMaster?.item_LBH,
-            { indexedRemarks: BOX_INDEXED_REMARKS },
-          )
-        : formatStructuredLbhValue({
-            top: pisBoxTopLbh,
-            bottom: pisBoxBottomLbh,
-            single:
-              itemMaster?.pis_box_LBH
-              || itemMaster?.pis_item_LBH
-              || itemMaster?.box_LBH
-              || itemMaster?.item_LBH,
-            fallback: itemMaster?.box_LBH || itemMaster?.item_LBH,
-          });
+        ? toStructuredLbhFromEntries(pisBoxEntries, null, {
+            indexedRemarks: BOX_INDEXED_REMARKS,
+          })
+        : formatStructuredLbhValue();
     const inspectedTopLbh =
       itemMaster?.inspected_box_top_LBH
       || itemMaster?.inspected_top_LBH

@@ -5,7 +5,6 @@ const { calculateTotalPoCbm } = require("../services/orderCbm.service");
 const SHIPPED_BY_VENDOR_ID = "shipped_by_vendor";
 const SHIPPED_BY_VENDOR_NAME = "Shipped By Vendor";
 const SIZE_ENTRY_LIMIT = 4;
-const ITEM_SIZE_REMARK_OPTIONS = ["item", "top", "base", "item1", "item2", "item3", "item4"];
 
 const escapeRegex = (value = "") =>
   String(value)
@@ -170,9 +169,6 @@ const normalizeItemSizeEntries = (entries = []) => {
       if (!remark) {
         throw new Error(`${label}.remark is required`);
       }
-      if (!ITEM_SIZE_REMARK_OPTIONS.includes(remark)) {
-        throw new Error(`${label}.remark is invalid`);
-      }
       if (seenRemarks.has(remark)) {
         throw new Error("item_sizes remarks must be unique");
       }
@@ -225,7 +221,7 @@ const normalizeBoxSizeEntries = (entries = [], boxMode = BOX_PACKAGING_MODES.IND
         L,
         B,
         H,
-        remark: isInner ? "inner" : "master",
+        remark: normalizeText(entry?.remark).toLowerCase() || (isInner ? "inner" : "master"),
         net_weight: netWeight,
         gross_weight: grossWeight,
         box_type: isInner ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER,

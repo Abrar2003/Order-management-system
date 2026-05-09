@@ -107,7 +107,7 @@ const detectBoxPackagingMode = (value = "", entries = []) => {
 
 const normalizeIndividualRemark = (value = "") => {
   const normalized = normalizeText(value);
-  return BOX_INDIVIDUAL_REMARK_OPTIONS.includes(normalized) ? normalized : "";
+  return normalized;
 };
 
 const normalizeBoxEntryMetadata = (entry = {}, mode = BOX_PACKAGING_MODES.INDIVIDUAL) => {
@@ -123,7 +123,7 @@ const normalizeBoxEntryMetadata = (entry = {}, mode = BOX_PACKAGING_MODES.INDIVI
         : BOX_ENTRY_TYPES.INNER;
 
     return {
-      remark: resolvedType,
+      remark: normalizedRemark || resolvedType,
       box_type: resolvedType,
       item_count_in_inner:
         resolvedType === BOX_ENTRY_TYPES.INNER
@@ -209,8 +209,14 @@ const sortBoxEntriesByRemark = (
       : BOX_INDIVIDUAL_REMARK_OPTIONS;
 
   return [...(Array.isArray(entries) ? entries : [])].sort((left, right) => {
-    const leftRemark = normalizeText(left?.remark || "");
-    const rightRemark = normalizeText(right?.remark || "");
+    const leftRemark =
+      resolvedMode === BOX_PACKAGING_MODES.CARTON
+        ? normalizeText(left?.box_type || left?.remark || "")
+        : normalizeText(left?.remark || "");
+    const rightRemark =
+      resolvedMode === BOX_PACKAGING_MODES.CARTON
+        ? normalizeText(right?.box_type || right?.remark || "")
+        : normalizeText(right?.remark || "");
     const leftIndex = remarkOrder.indexOf(leftRemark);
     const rightIndex = remarkOrder.indexOf(rightRemark);
     const safeLeftIndex = leftIndex >= 0 ? leftIndex : remarkOrder.length + 1;

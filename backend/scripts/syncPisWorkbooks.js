@@ -836,13 +836,7 @@ const extractWorkbookData = (filePath) => {
       payload: {
         pis_barcode: "",
         pis_item_sizes: [],
-        pis_item_LBH: { L: 0, B: 0, H: 0 },
-        pis_item_top_LBH: { L: 0, B: 0, H: 0 },
-        pis_item_bottom_LBH: { L: 0, B: 0, H: 0 },
         pis_box_sizes: [],
-        pis_box_LBH: { L: 0, B: 0, H: 0 },
-        pis_box_top_LBH: { L: 0, B: 0, H: 0 },
-        pis_box_bottom_LBH: { L: 0, B: 0, H: 0 },
         pis_weight: {
           top_net: 0,
           top_gross: 0,
@@ -907,8 +901,8 @@ const extractWorkbookData = (filePath) => {
     gross_weight: entry.weight,
   }));
 
-  const itemLegacy = buildLegacyFields(itemEntries, "net_weight");
-  const boxLegacy = buildLegacyFields(boxEntries, "gross_weight");
+  const itemWeightSummary = buildLegacyFields(itemEntries, "net_weight");
+  const boxWeightSummary = buildLegacyFields(boxEntries, "gross_weight");
   const cbmSource = boxEntries.length > 0 ? boxEntries : itemEntries;
   const cbmTotal = cbmSource.reduce(
     (sum, entry) => sum + Number(calculateCbmFromLbh(entry) || 0),
@@ -936,20 +930,14 @@ const extractWorkbookData = (filePath) => {
     payload: {
       pis_barcode: normalizeText(barcodeRow ? cell(sheet, barcodeRow, 9) : ""),
       pis_item_sizes: itemEntries,
-      pis_item_LBH: itemLegacy.single,
-      pis_item_top_LBH: itemLegacy.top,
-      pis_item_bottom_LBH: itemLegacy.bottom,
       pis_box_sizes: boxEntries,
-      pis_box_LBH: boxLegacy.single,
-      pis_box_top_LBH: boxLegacy.top,
-      pis_box_bottom_LBH: boxLegacy.bottom,
       pis_weight: {
-        top_net: itemLegacy.topWeight,
-        top_gross: boxLegacy.topWeight,
-        bottom_net: itemLegacy.bottomWeight,
-        bottom_gross: boxLegacy.bottomWeight,
-        total_net: itemLegacy.totalWeight,
-        total_gross: boxLegacy.totalWeight,
+        top_net: itemWeightSummary.topWeight,
+        top_gross: boxWeightSummary.topWeight,
+        bottom_net: itemWeightSummary.bottomWeight,
+        bottom_gross: boxWeightSummary.bottomWeight,
+        total_net: itemWeightSummary.totalWeight,
+        total_gross: boxWeightSummary.totalWeight,
       },
       cbm: {
         top: cbmSource[0] ? calculateCbmFromLbh(cbmSource[0]) : "0",
@@ -1007,13 +995,7 @@ const applyWorkbookPayload = (item, payload) => {
   const changedPaths = [];
 
   applyValueIfChanged(item, "pis_item_sizes", payload.pis_item_sizes, changedPaths);
-  applyValueIfChanged(item, "pis_item_LBH", payload.pis_item_LBH, changedPaths);
-  applyValueIfChanged(item, "pis_item_top_LBH", payload.pis_item_top_LBH, changedPaths);
-  applyValueIfChanged(item, "pis_item_bottom_LBH", payload.pis_item_bottom_LBH, changedPaths);
   applyValueIfChanged(item, "pis_box_sizes", payload.pis_box_sizes, changedPaths);
-  applyValueIfChanged(item, "pis_box_LBH", payload.pis_box_LBH, changedPaths);
-  applyValueIfChanged(item, "pis_box_top_LBH", payload.pis_box_top_LBH, changedPaths);
-  applyValueIfChanged(item, "pis_box_bottom_LBH", payload.pis_box_bottom_LBH, changedPaths);
   applyValueIfChanged(item, "pis_weight", payload.pis_weight, changedPaths);
   applyValueIfChanged(item, "cbm.top", payload?.cbm?.top || "0", changedPaths);
   applyValueIfChanged(item, "cbm.bottom", payload?.cbm?.bottom || "0", changedPaths);

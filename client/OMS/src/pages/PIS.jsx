@@ -18,6 +18,7 @@ import "../App.css";
 
 const DEFAULT_LIMIT = 20;
 const LIMIT_OPTIONS = [10, 20, 50, 100];
+const MEASUREMENT_ENTRY_DISPLAY_LIMIT = 4;
 
 const parsePositiveInt = (value, fallback = 1) => {
   const parsed = Number.parseInt(value, 10);
@@ -46,6 +47,7 @@ const normalizeMeasurementEntries = (entries = [], weightKey = "") =>
       const H = Number(entry?.H || 0);
       const weight = Number(weightKey ? entry?.[weightKey] : 0);
       return {
+        remark: String(entry?.remark || entry?.type || "").trim().toLowerCase(),
         L: Number.isFinite(L) ? L : 0,
         B: Number.isFinite(B) ? B : 0,
         H: Number.isFinite(H) ? H : 0,
@@ -53,14 +55,41 @@ const normalizeMeasurementEntries = (entries = [], weightKey = "") =>
       };
     })
     .filter((entry) => entry.L > 0 && entry.B > 0 && entry.H > 0)
-    .slice(0, 3);
-const getPrimaryMeasurementLbh = (entries = [], fallback = {}) =>
-  normalizeMeasurementEntries(entries)[0] || fallback || {};
+    .slice(0, MEASUREMENT_ENTRY_DISPLAY_LIMIT);
+const getPrimaryMeasurementLbh = (entries = []) =>
+  normalizeMeasurementEntries(entries)[0] || {};
 const sumMeasurementWeights = (entries = [], weightKey = "") =>
   normalizeMeasurementEntries(entries, weightKey).reduce(
     (sum, entry) => sum + (Number(entry?.weight || 0) || 0),
     0,
   );
+
+const formatMeasurementRemark = (remark = "", fallback = "") => {
+  const normalized = String(remark || "").trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (normalized === "top") return "Top";
+  if (normalized === "base") return "Base";
+  return normalized.replace(/([a-z]+)(\d+)/i, (_, prefix, number) =>
+    `${prefix.charAt(0).toUpperCase()}${prefix.slice(1)} ${number}`,
+  );
+};
+
+const formatMeasurementEntriesLbh = (
+  entries = [],
+  { fallback = "0.00 x 0.00 x 0.00" } = {},
+) => {
+  const normalizedEntries = normalizeMeasurementEntries(entries);
+  if (normalizedEntries.length === 0) return fallback;
+
+  return normalizedEntries
+    .map((entry, index) => {
+      const display = formatLbhValue(entry, { fallback });
+      if (normalizedEntries.length === 1 && !entry.remark) return display;
+      const label = formatMeasurementRemark(entry.remark, `Entry ${index + 1}`);
+      return `${label}: ${display}`;
+    })
+    .join(" | ");
+};
 
 const getBrand = (item) =>
   item?.brand_name
@@ -283,17 +312,11 @@ const PIS = () => {
           if (column === "pisNet") return getPisWeight(item, "net");
           if (column === "pisGross") return getPisWeight(item, "gross");
           if (column === "itemLbh") {
-            const value = getPrimaryMeasurementLbh(
-              item?.pis_item_sizes,
-              item?.pis_item_LBH || {},
-            );
+            const value = getPrimaryMeasurementLbh(item?.pis_item_sizes);
             return [value?.L || 0, value?.B || 0, value?.H || 0];
           }
           if (column === "boxLbh") {
-            const value = getPrimaryMeasurementLbh(
-              item?.pis_box_sizes,
-              item?.pis_box_LBH || {},
-            );
+            const value = getPrimaryMeasurementLbh(item?.pis_box_sizes);
             return [value?.L || 0, value?.B || 0, value?.H || 0];
           }
           if (column === "cbm") return Number(item?.cbm?.calculated_pis_total || 0);
@@ -474,7 +497,7 @@ const PIS = () => {
                       </th>
                       <th>
                         <SortHeaderButton
-                          label="PIS Item LBH"
+                          label="PIS Item Sizes"
                           isActive={sortBy === "itemLbh"}
                           direction={sortOrder}
                           onClick={() => handleSortColumn("itemLbh", "asc")}
@@ -482,7 +505,7 @@ const PIS = () => {
                       </th>
                       <th>
                         <SortHeaderButton
-                          label="PIS Box LBH"
+                          label="PIS Box Sizes"
                           isActive={sortBy === "boxLbh"}
                           direction={sortOrder}
                           onClick={() => handleSortColumn("boxLbh", "asc")}
@@ -515,8 +538,8 @@ const PIS = () => {
                         <td>{getVendors(item)}</td>
                         <td>{formatFixedNumber(getPisWeight(item, "net"))}</td>
                         <td>{formatFixedNumber(getPisWeight(item, "gross"))}</td>
-                        <td>{formatLbhValue(getPrimaryMeasurementLbh(item?.pis_item_sizes, item?.pis_item_LBH || {}), { fallback: "0.00 x 0.00 x 0.00" })}</td>
-                        <td>{formatLbhValue(getPrimaryMeasurementLbh(item?.pis_box_sizes, item?.pis_box_LBH || {}), { fallback: "0.00 x 0.00 x 0.00" })}</td>
+                        <td>{formatMeasurementEntriesLbh(item?.pis_item_sizes)}</td>
+                        <td>{formatMeasurementEntriesLbh(item?.pis_box_sizes)}</td>
                         <td>{formatCbm(item?.cbm?.calculated_pis_total)}</td>
                         {canEditPis && (
                           <td>

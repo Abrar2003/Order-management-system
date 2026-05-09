@@ -1,7 +1,6 @@
 const {
   BOX_PACKAGING_MODES,
   BOX_ENTRY_TYPES,
-  BOX_SIZE_REMARK_OPTIONS,
   detectBoxPackagingMode,
 } = require("./boxMeasurement");
 
@@ -145,7 +144,7 @@ const normalizeBoxEntryMetadata = (
         : BOX_ENTRY_TYPES.INNER;
 
     return {
-      remark: resolvedType,
+      remark: normalizedRemark || resolvedType,
       box_type: resolvedType,
       item_count_in_inner:
         resolvedType === BOX_ENTRY_TYPES.INNER
@@ -159,7 +158,7 @@ const normalizeBoxEntryMetadata = (
   }
 
   return {
-    remark: BOX_SIZE_REMARK_OPTIONS.includes(normalizedRemark) ? normalizedRemark : "",
+    remark: normalizedRemark,
     box_type: BOX_ENTRY_TYPES.INDIVIDUAL,
     item_count_in_inner: 0,
     box_count_in_master: 0,

@@ -14,6 +14,7 @@ import {
   getProductTypeTemplateByKey,
   getProductTypeTemplates,
 } from "../services/productTypeTemplates.service";
+import { getCountryOfOriginOptions } from "../constants/countryOfOrigin";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -393,6 +394,7 @@ const ProductDatabaseMeasuredSizeSection = ({
   const isCartonMode = mode === BOX_PACKAGING_MODES.CARTON;
   const safeCount = isCartonMode ? 2 : normalizeSizeCount(countValue, 1);
   const entryColumnClass = safeCount > 1 ? "col-md-2" : "col-md-3";
+  const remarkListId = `${entriesKey || "pd-size"}-remark-options`;
 
   return (
     <>
@@ -479,36 +481,35 @@ const ProductDatabaseMeasuredSizeSection = ({
                 {safeCount > 1 && (
                   <div className="col-md-3">
                     <label className="form-label small text-secondary">Remark</label>
-                    {isCartonMode ? (
-                      <input
-                        type="text"
-                        className="form-control"
-                        value={getRemarkLabel(remarkOptions, entry.remark)}
-                        disabled
-                        readOnly
-                      />
-                    ) : (
-                      <select
-                        className="form-select"
-                        value={entry.remark}
-                        onChange={(event) =>
-                          onEntryChange?.(
-                            entriesKey,
-                            index,
-                            "remark",
-                            event.target.value,
-                          )
-                        }
-                        disabled={disabled}
-                      >
-                        <option value="">Select remark</option>
-                        {remarkOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    )}
+                    <input
+                      type="text"
+                      className="form-control"
+                      list={`${remarkListId}-${index}`}
+                      value={entry.remark}
+                      onChange={(event) =>
+                        onEntryChange?.(
+                          entriesKey,
+                          index,
+                          "remark",
+                          event.target.value,
+                        )
+                      }
+                      placeholder={
+                        isCartonMode
+                          ? index === 0
+                            ? "Inner carton"
+                            : "Master carton"
+                          : "Custom remark"
+                      }
+                      disabled={disabled}
+                    />
+                    <datalist id={`${remarkListId}-${index}`}>
+                      {remarkOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </datalist>
                   </div>
                 )}
 
@@ -746,7 +747,10 @@ const toMeasuredSizeEntryFormValue = (
       mode: resolvedMode,
       boxType: resolvedBoxType,
     }),
-    remark: resolvedMode === BOX_PACKAGING_MODES.CARTON ? resolvedBoxType : normalizedRemark,
+    remark:
+      resolvedMode === BOX_PACKAGING_MODES.CARTON
+        ? normalizedRemark || resolvedBoxType
+        : normalizedRemark,
     box_type: resolvedBoxType,
     L: toDimensionInputValue(entry?.L),
     B: toDimensionInputValue(entry?.B),
@@ -836,7 +840,7 @@ const buildMeasuredSizeEntriesPayload = ({
     if (isBox) {
       if (isCartonMode) {
         const boxType = index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
-        payload.remark = boxType;
+        payload.remark = normalizeMeasuredKey(entry?.remark) || boxType;
         payload.box_type = boxType;
         if (boxType === BOX_ENTRY_TYPES.INNER) {
           addPositivePayloadNumber(payload, "item_count_in_inner", entry?.item_count_in_inner);
@@ -1012,6 +1016,10 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
   const [savingAction, setSavingAction] = useState("");
   const [error, setError] = useState("");
   const [draftMessage, setDraftMessage] = useState("");
+  const countryOfOriginOptions = useMemo(
+    () => getCountryOfOriginOptions(form.countryOfOrigin),
+    [form.countryOfOrigin],
+  );
 
   useEffect(() => {
     setForm(initialForm);
@@ -1501,11 +1509,9 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
                   <div className="row g-3">
                     <div className="col-lg-6">
                       <label className="form-label">Country of Origin</label>
-                      <input
-                        type="text"
-                        className="form-control"
+                      <select
+                        className="form-select"
                         value={form.countryOfOrigin}
-                        placeholder="Optional"
                         disabled={!canEdit}
                         onChange={(event) => {
                           clearDraftMessage();
@@ -1514,7 +1520,14 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
                             countryOfOrigin: event.target.value,
                           }));
                         }}
-                      />
+                      >
+                        <option value="">Select country</option>
+                        {countryOfOriginOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   </div>
                 </div>
