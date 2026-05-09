@@ -1532,15 +1532,26 @@ const resolveItemReportCbmPerUnit = (
     return pisStoredCbm;
   }
 
+  const inspectedBoxMode = detectBoxPackagingMode(
+    itemDoc?.inspected_box_mode,
+    itemDoc?.inspected_box_sizes,
+  );
   const inspectedSizeEntriesCbm =
-    calculateSizeEntriesCbmTotal(itemDoc?.inspected_box_sizes) ||
+    calculateEffectiveBoxEntriesCbmTotal(
+      itemDoc?.inspected_box_sizes,
+      inspectedBoxMode,
+    ) ||
     calculateSizeEntriesCbmTotal(itemDoc?.inspected_item_sizes);
   if (inspectedSizeEntriesCbm > 0) {
     return inspectedSizeEntriesCbm;
   }
 
+  const pisBoxMode = detectBoxPackagingMode(
+    itemDoc?.pis_box_mode,
+    itemDoc?.pis_box_sizes,
+  );
   const pisSizeEntriesCbm =
-    calculateSizeEntriesCbmTotal(itemDoc?.pis_box_sizes) ||
+    calculateEffectiveBoxEntriesCbmTotal(itemDoc?.pis_box_sizes, pisBoxMode) ||
     calculateSizeEntriesCbmTotal(itemDoc?.pis_item_sizes);
   if (pisSizeEntriesCbm > 0) {
     return pisSizeEntriesCbm;
@@ -5962,12 +5973,8 @@ exports.updateQC = async (req, res) => {
               : itemDoc?.inspected_box_bottom_LBH ||
                 itemDoc?.inspected_bottom_LBH,
         });
-        const calculatedInspectedSizeEntriesCbm = Math.max(
-          calculateEffectiveBoxEntriesCbmTotal(
-            itemDoc?.inspected_box_sizes,
-            inspectedBoxMode,
-          ),
-          calculateSizeEntriesCbmTotal(itemDoc?.inspected_item_sizes),
+        const calculatedInspectedItemEntriesCbm = calculateSizeEntriesCbmTotal(
+          itemDoc?.inspected_item_sizes,
         );
         const calculatedInspectedTopCbm = inspectedBoxSummary.first;
         const calculatedInspectedBottomCbm = inspectedBoxSummary.second;
@@ -5981,15 +5988,29 @@ exports.updateQC = async (req, res) => {
         const calculatedInspectedCbm =
           toNonNegativeNumber(inspectedBoxSummary.total, 0) > 0
             ? inspectedBoxSummary.total
-          : calculatedInspectedSizeEntriesCbm > 0
-            ? toNormalizedCbmString(calculatedInspectedSizeEntriesCbm)
+          : calculatedInspectedItemEntriesCbm > 0
+            ? toNormalizedCbmString(calculatedInspectedItemEntriesCbm)
             : calculatedInspectedCbmFromBox;
-        const calculatedPisSizeEntriesCbm = Math.max(
-          calculateSizeEntriesCbmTotal(itemDoc?.pis_box_sizes),
-          calculateSizeEntriesCbmTotal(itemDoc?.pis_item_sizes),
+        const pisBoxMode = detectBoxPackagingMode(
+          itemDoc?.pis_box_mode,
+          itemDoc?.pis_box_sizes,
+        );
+        const pisBoxSummary = buildBoxMeasurementCbmSummary({
+          sizes: itemDoc?.pis_box_sizes,
+          mode: pisBoxMode,
+          singleLbh: itemDoc?.pis_box_LBH || itemDoc?.box_LBH,
+          topLbh: pisBoxMode === BOX_PACKAGING_MODES.CARTON ? null : itemDoc?.pis_box_top_LBH,
+          bottomLbh:
+            pisBoxMode === BOX_PACKAGING_MODES.CARTON ? null : itemDoc?.pis_box_bottom_LBH,
+        });
+        const calculatedPisItemEntriesCbm = calculateSizeEntriesCbmTotal(
+          itemDoc?.pis_item_sizes,
         );
         const calculatedPisCbm = calculateCbmFromLbh(
-          calculatedPisSizeEntriesCbm > 0
+          (
+            toNonNegativeNumber(pisBoxSummary.total, 0) > 0 ||
+            calculatedPisItemEntriesCbm > 0
+          )
             ? {}
             : itemDoc?.pis_box_LBH ||
                 itemDoc?.box_LBH ||
@@ -6005,8 +6026,10 @@ exports.updateQC = async (req, res) => {
           inspected_total: calculatedInspectedCbm,
           calculated_inspected_total: calculatedInspectedCbm,
           calculated_pis_total:
-            calculatedPisSizeEntriesCbm > 0
-              ? toNormalizedCbmString(calculatedPisSizeEntriesCbm)
+            toNonNegativeNumber(pisBoxSummary.total, 0) > 0
+              ? pisBoxSummary.total
+            : calculatedPisItemEntriesCbm > 0
+              ? toNormalizedCbmString(calculatedPisItemEntriesCbm)
               : calculatedPisCbm,
           calculated_total: calculatedInspectedCbm,
         };

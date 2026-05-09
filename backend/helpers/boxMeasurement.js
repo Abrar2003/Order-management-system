@@ -65,6 +65,21 @@ const calculateCbmFromLbh = (dimensions = {}) => {
   return toDecimalString(cubicMeters, 6);
 };
 
+const calculateCartonPerItemCbm = ({
+  innerEntry = null,
+  masterEntry = null,
+} = {}) => {
+  const itemCountInInner = toPositiveNumber(innerEntry?.item_count_in_inner, 0);
+  const boxCountInMaster = toPositiveNumber(masterEntry?.box_count_in_master, 0);
+  const masterCbm = toPositiveNumber(calculateCbmFromLbh(masterEntry || {}), 0);
+
+  if (itemCountInInner <= 0 || boxCountInMaster <= 0 || masterCbm <= 0) {
+    return 0;
+  }
+
+  return masterCbm / (itemCountInInner * boxCountInMaster);
+};
+
 const detectBoxPackagingMode = (value = "", entries = []) => {
   const normalizedValue = normalizeText(value);
   if (
@@ -399,7 +414,13 @@ const buildBoxMeasurementCbmSummary = ({
       first: innerCbm,
       second: masterCbm,
       third: "0",
-      total: masterCbm,
+      total: toDecimalString(
+        calculateCartonPerItemCbm({
+          innerEntry,
+          masterEntry,
+        }),
+        6,
+      ),
     };
   }
 

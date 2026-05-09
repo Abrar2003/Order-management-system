@@ -11,6 +11,7 @@ import {
   ensureMeasuredSizeEntryCount,
   normalizeSizeCount,
   parseMeasuredSizeEntries,
+  resolvePreferredMeasuredSizeCbm,
 } from "../utils/measuredSizeForm";
 import {
   getTodayDDMMYYYY,
@@ -204,9 +205,10 @@ const SampleModal = ({
     [sampleForm.box_count, sampleForm.box_mode, sampleForm.box_sizes],
   );
   const calculatedCbm = useMemo(() => {
-    const itemValue = Number(calculatedItemCbm || 0);
-    const boxValue = Number(calculatedBoxCbm || 0);
-    return boxValue >= itemValue ? calculatedBoxCbm : calculatedItemCbm;
+    return resolvePreferredMeasuredSizeCbm(
+      calculatedBoxCbm,
+      calculatedItemCbm,
+    );
   }, [calculatedBoxCbm, calculatedItemCbm]);
 
   const selectedSample = useMemo(

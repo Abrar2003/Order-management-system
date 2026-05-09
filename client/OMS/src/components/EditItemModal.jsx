@@ -13,6 +13,7 @@ import {
   hasMeaningfulMeasuredSize,
   normalizeSizeCount,
   parseMeasuredSizeEntries,
+  resolvePreferredMeasuredSizeCbm,
 } from "../utils/measuredSizeForm";
 import "../App.css";
 
@@ -159,11 +160,10 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
     [form.inspected_box_count, form.inspected_box_mode, form.inspected_box_sizes],
   );
   const calculatedInspectedCbm = useMemo(() => {
-    const itemCbmValue = Number(calculatedInspectedItemCbm || 0);
-    const boxCbmValue = Number(calculatedInspectedBoxCbm || 0);
-    return boxCbmValue >= itemCbmValue
-      ? calculatedInspectedBoxCbm
-      : calculatedInspectedItemCbm;
+    return resolvePreferredMeasuredSizeCbm(
+      calculatedInspectedBoxCbm,
+      calculatedInspectedItemCbm,
+    );
   }, [calculatedInspectedBoxCbm, calculatedInspectedItemCbm]);
 
   const updateField = (path, value) => {

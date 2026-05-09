@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
 import MeasuredSizeSection from "./MeasuredSizeSection";
+import { formatDateDDMMYYYY } from "../utils/date";
 import {
   BOX_PACKAGING_MODES,
   BOX_SIZE_REMARK_OPTIONS,
@@ -13,6 +14,7 @@ import {
   hasMeaningfulMeasuredSize,
   normalizeSizeCount,
   parseMeasuredSizeEntries,
+  resolvePreferredMeasuredSizeCbm,
 } from "../utils/measuredSizeForm";
 import "../App.css";
 
@@ -70,6 +72,29 @@ const getVendorsLabel = (item = {}) =>
   Array.isArray(item?.vendors) && item.vendors.length > 0
     ? item.vendors.join(", ")
     : "N/A";
+
+const toTimestamp = (value) => {
+  const parsed = new Date(value || "");
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+};
+
+const buildLatestInspectionContext = (orders = []) =>
+  (Array.isArray(orders) ? orders : [])
+    .flatMap((order) =>
+      (Array.isArray(order?.inspections) ? order.inspections : []).map((inspection) => ({
+        order_id: toText(order?.order_id, "N/A"),
+        brand: toText(order?.brand, "N/A"),
+        vendor: toText(order?.vendor, "N/A"),
+        inspection_date: toText(inspection?.inspection_date),
+        requested_date: toText(inspection?.requested_date),
+        sort_time: Math.max(
+          toTimestamp(inspection?.inspection_date),
+          toTimestamp(inspection?.requested_date),
+          toTimestamp(order?.order_date),
+        ),
+      })),
+    )
+    .sort((left, right) => (right.sort_time || 0) - (left.sort_time || 0))[0] || null;
 
 const buildInitialForm = (item = {}) => {
   const pisWeight = item?.pis_weight || {};
@@ -176,6 +201,8 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
   const [form, setForm] = useState(() => buildInitialForm(item));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [latestInspectionContext, setLatestInspectionContext] = useState(null);
+  const [latestInspectionContextLoading, setLatestInspectionContextLoading] = useState(false);
 
   const itemCode = useMemo(() => toText(item?.code, "N/A"), [item?.code]);
   const itemDescription = useMemo(
@@ -209,10 +236,48 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
     [form.pis_box_count, form.pis_box_mode, form.pis_box_sizes],
   );
   const calculatedPisCbm = useMemo(() => {
-    const itemCbmValue = Number(calculatedPisItemCbm || 0);
-    const boxCbmValue = Number(calculatedPisBoxCbm || 0);
-    return boxCbmValue >= itemCbmValue ? calculatedPisBoxCbm : calculatedPisItemCbm;
+    return resolvePreferredMeasuredSizeCbm(
+      calculatedPisBoxCbm,
+      calculatedPisItemCbm,
+    );
   }, [calculatedPisBoxCbm, calculatedPisItemCbm]);
+
+  useEffect(() => {
+    if (!showInspectedReference || !itemCode || itemCode === "N/A") {
+      setLatestInspectionContext(null);
+      setLatestInspectionContextLoading(false);
+      return undefined;
+    }
+
+    let ignore = false;
+
+    const fetchLatestInspectionContext = async () => {
+      try {
+        setLatestInspectionContextLoading(true);
+        const response = await api.get(
+          `/items/${encodeURIComponent(itemCode)}/orders-history`,
+        );
+        if (ignore) return;
+        setLatestInspectionContext(
+          buildLatestInspectionContext(response?.data?.data),
+        );
+      } catch {
+        if (!ignore) {
+          setLatestInspectionContext(null);
+        }
+      } finally {
+        if (!ignore) {
+          setLatestInspectionContextLoading(false);
+        }
+      }
+    };
+
+    fetchLatestInspectionContext();
+
+    return () => {
+      ignore = true;
+    };
+  }, [itemCode, showInspectedReference]);
 
   const updateField = (path, value) => {
     setForm((prev) => {
@@ -406,6 +471,41 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
                   <span className="badge text-bg-warning">Needs PIS Check</span>
                 </div>
                 <div className="row g-3 small">
+                  <div className="col-md-3">
+                    <div className="text-secondary">PO Number</div>
+                    <div className="fw-semibold">
+                      {latestInspectionContextLoading
+                        ? "Loading..."
+                        : latestInspectionContext?.order_id || "N/A"}
+                    </div>
+                  </div>
+                  <div className="col-md-3">
+                    <div className="text-secondary">Brand</div>
+                    <div className="fw-semibold">
+                      {latestInspectionContextLoading
+                        ? "Loading..."
+                        : latestInspectionContext?.brand || brandLabel}
+                    </div>
+                  </div>
+                  <div className="col-md-3">
+                    <div className="text-secondary">Vendor</div>
+                    <div className="fw-semibold">
+                      {latestInspectionContextLoading
+                        ? "Loading..."
+                        : latestInspectionContext?.vendor || vendorsLabel}
+                    </div>
+                  </div>
+                  <div className="col-md-3">
+                    <div className="text-secondary">Inspection Date</div>
+                    <div className="fw-semibold">
+                      {latestInspectionContextLoading
+                        ? "Loading..."
+                        : formatDateDDMMYYYY(
+                            latestInspectionContext?.inspection_date,
+                            "N/A",
+                          )}
+                    </div>
+                  </div>
                   <div className="col-md-6">
                     <div className="text-secondary">Master Carton Barcode</div>
                     <div className="fw-semibold">{inspectedReference.masterBarcode}</div>

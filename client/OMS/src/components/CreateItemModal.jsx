@@ -11,6 +11,7 @@ import {
   ensureMeasuredSizeEntryCount,
   normalizeSizeCount,
   parseMeasuredSizeEntries,
+  resolvePreferredMeasuredSizeCbm,
 } from "../utils/measuredSizeForm";
 import "../App.css";
 
@@ -74,9 +75,10 @@ const CreateItemModal = ({
     [form.pis_box_count, form.pis_box_mode, form.pis_box_sizes],
   );
   const calculatedPisCbm = useMemo(() => {
-    const itemCbmValue = Number(calculatedPisItemCbm || 0);
-    const boxCbmValue = Number(calculatedPisBoxCbm || 0);
-    return boxCbmValue >= itemCbmValue ? calculatedPisBoxCbm : calculatedPisItemCbm;
+    return resolvePreferredMeasuredSizeCbm(
+      calculatedPisBoxCbm,
+      calculatedPisItemCbm,
+    );
   }, [calculatedPisBoxCbm, calculatedPisItemCbm]);
 
   const handleFieldChange = (name, value) => {

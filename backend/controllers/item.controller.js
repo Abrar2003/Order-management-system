@@ -32,7 +32,6 @@ const {
   BOX_SIZE_REMARK_OPTIONS,
   buildBoxLegacyFieldsFromEntries,
   buildBoxMeasurementCbmSummary,
-  calculateEffectiveBoxEntriesCbmTotal,
   detectBoxPackagingMode,
 } = require("../helpers/boxMeasurement");
 const {
@@ -205,12 +204,6 @@ const sortSizeEntriesByRemark = (entries = [], remarkOptions = []) =>
     const safeRightIndex = rightIndex >= 0 ? rightIndex : SIZE_ENTRY_LIMIT + 1;
     return safeLeftIndex - safeRightIndex;
   });
-
-const calculateSizeEntriesCbmTotal = (entries = []) =>
-  normalizeStoredSizeEntries(entries).reduce(
-    (sum, entry) => sum + toPositiveCbmNumber(calculateCbmFromLbh(entry)),
-    0,
-  );
 
 const buildSizeEntriesFromLegacy = ({
   sizes = [],
@@ -560,15 +553,21 @@ const applyCalculatedCbmTotals = (item, setPath) => {
           remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
         });
 
+  const pisBoxMode = detectBoxPackagingMode(
+    item?.pis_box_mode,
+    item?.pis_box_sizes,
+  );
+  const pisBoxSummary = buildBoxMeasurementCbmSummary({
+    sizes: item?.pis_box_sizes,
+    mode: pisBoxMode,
+    singleLbh: item?.pis_box_LBH || item?.box_LBH,
+    topLbh: pisBoxMode === BOX_PACKAGING_MODES.CARTON ? null : item?.pis_box_top_LBH,
+    bottomLbh:
+      pisBoxMode === BOX_PACKAGING_MODES.CARTON ? null : item?.pis_box_bottom_LBH,
+  });
   const pisSummary =
-    calculateSizeEntriesCbmTotal(item?.pis_box_sizes) > 0
-      ? buildMeasurementCbmSummary({
-          sizes: item?.pis_box_sizes,
-          singleLbh: item?.pis_box_LBH || item?.box_LBH,
-          topLbh: item?.pis_box_top_LBH,
-          bottomLbh: item?.pis_box_bottom_LBH,
-          remarkOptions: BOX_SIZE_REMARK_OPTIONS,
-        })
+    toPositiveCbmNumber(pisBoxSummary.total) > 0
+      ? pisBoxSummary
       : buildMeasurementCbmSummary({
           sizes: item?.pis_item_sizes,
           singleLbh: item?.pis_item_LBH || item?.item_LBH,

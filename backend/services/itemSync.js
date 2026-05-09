@@ -160,30 +160,55 @@ const applyDerivedItemFields = (item, { preferredBrand = "" } = {}) => {
           item?.inspected_bottom_LBH ||
           item?.inspected_item_bottom_LBH,
   });
-  const nextInspectedTop = inspectedBoxSummary.first;
-  const nextInspectedBottom = inspectedBoxSummary.second;
-  const nextCalculatedInspectedTotal =
+  const inspectedItemSummary = buildBoxMeasurementCbmSummary({
+    sizes: item?.inspected_item_sizes,
+    mode: BOX_PACKAGING_MODES.INDIVIDUAL,
+    singleLbh: item?.inspected_item_LBH,
+    topLbh: item?.inspected_item_top_LBH,
+    bottomLbh: item?.inspected_item_bottom_LBH,
+  });
+  const resolvedInspectedSummary =
     Math.max(0, toSafeNumber(inspectedBoxSummary.total, 0)) > 0
-      ? inspectedBoxSummary.total
-      : calculateCbmFromBoxSize(
-          item?.inspected_box_LBH || item?.box_LBH || item?.inspected_item_LBH,
-        );
-  const nextPisTop = calculateCbmFromBoxSize(
-    item?.pis_box_top_LBH || item?.pis_item_top_LBH,
+      ? inspectedBoxSummary
+      : Math.max(0, toSafeNumber(inspectedItemSummary.total, 0)) > 0
+        ? inspectedItemSummary
+        : null;
+  const nextInspectedTop = resolvedInspectedSummary?.first || "0";
+  const nextInspectedBottom = resolvedInspectedSummary?.second || "0";
+  const nextCalculatedInspectedTotal = resolvedInspectedSummary?.total
+    || calculateCbmFromBoxSize(
+      item?.inspected_box_LBH || item?.box_LBH || item?.inspected_item_LBH,
+    );
+
+  const pisBoxMode = detectBoxPackagingMode(
+    item?.pis_box_mode,
+    item?.pis_box_sizes,
   );
-  const nextPisBottom = calculateCbmFromBoxSize(
-    item?.pis_box_bottom_LBH || item?.pis_item_bottom_LBH,
-  );
-  const hasSplitPisCbm =
-    Math.max(0, toSafeNumber(nextPisTop, 0)) > 0
-    && Math.max(0, toSafeNumber(nextPisBottom, 0)) > 0;
-  const nextCalculatedPisTotal = hasSplitPisCbm
-    ? toDecimalString(
-        Math.max(0, toSafeNumber(nextPisTop, 0))
-        + Math.max(0, toSafeNumber(nextPisBottom, 0)),
-        6,
-      )
-    : calculateCbmFromBoxSize(item?.pis_box_LBH || item?.box_LBH || item?.pis_item_LBH);
+  const pisBoxSummary = buildBoxMeasurementCbmSummary({
+    sizes: item?.pis_box_sizes,
+    mode: pisBoxMode,
+    singleLbh: item?.pis_box_LBH || item?.box_LBH || item?.pis_item_LBH,
+    topLbh: pisBoxMode === BOX_PACKAGING_MODES.CARTON ? null : item?.pis_box_top_LBH,
+    bottomLbh:
+      pisBoxMode === BOX_PACKAGING_MODES.CARTON ? null : item?.pis_box_bottom_LBH,
+  });
+  const pisItemSummary = buildBoxMeasurementCbmSummary({
+    sizes: item?.pis_item_sizes,
+    mode: BOX_PACKAGING_MODES.INDIVIDUAL,
+    singleLbh: item?.pis_item_LBH,
+    topLbh: item?.pis_item_top_LBH,
+    bottomLbh: item?.pis_item_bottom_LBH,
+  });
+  const resolvedPisSummary =
+    Math.max(0, toSafeNumber(pisBoxSummary.total, 0)) > 0
+      ? pisBoxSummary
+      : Math.max(0, toSafeNumber(pisItemSummary.total, 0)) > 0
+        ? pisItemSummary
+        : null;
+  const nextPisTop = resolvedPisSummary?.first || "0";
+  const nextPisBottom = resolvedPisSummary?.second || "0";
+  const nextCalculatedPisTotal = resolvedPisSummary?.total
+    || calculateCbmFromBoxSize(item?.pis_box_LBH || item?.box_LBH || item?.pis_item_LBH);
   const currentCalculatedInspectedTotal = normalizeCbmText(
     item?.cbm?.calculated_inspected_total ?? item?.cbm?.calculated_total ?? "0",
   );

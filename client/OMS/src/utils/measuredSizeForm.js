@@ -107,6 +107,11 @@ export const normalizeSizeCount = (value, fallback = 1) => {
   return parsed;
 };
 
+const toPositiveNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
 const coerceMeasuredSizeEntry = (
   entry = {},
   { mode = BOX_PACKAGING_MODES.INDIVIDUAL } = {},
@@ -558,6 +563,10 @@ export const calculateMeasuredSizeEntriesCbm = (
     mode: resolvedMode,
   }).slice(0, safeCount);
   if (resolvedMode === BOX_PACKAGING_MODES.CARTON) {
+    const innerEntry =
+      scopedEntries.find((entry) => entry?.box_type === BOX_ENTRY_TYPES.INNER) ||
+      scopedEntries[0] ||
+      null;
     const masterEntry =
       scopedEntries.find((entry) => entry?.box_type === BOX_ENTRY_TYPES.MASTER) ||
       scopedEntries[1] ||
@@ -571,7 +580,14 @@ export const calculateMeasuredSizeEntriesCbm = (
     if (L <= 0 || B <= 0 || H <= 0) {
       return formatCbm(0);
     }
-    return formatCbm((L * B * H) / 1000000);
+    const itemCountInInner = toPositiveNumber(innerEntry?.item_count_in_inner);
+    const boxCountInMaster = toPositiveNumber(masterEntry?.box_count_in_master);
+    if (itemCountInInner <= 0 || boxCountInMaster <= 0) {
+      return formatCbm(0);
+    }
+    return formatCbm(
+      ((L * B * H) / 1000000) / (itemCountInInner * boxCountInMaster),
+    );
   }
   const total = scopedEntries.reduce((sum, entry) => {
     const L = Number(entry?.L || 0);
@@ -587,4 +603,10 @@ export const calculateMeasuredSizeEntriesCbm = (
   }, 0);
 
   return formatCbm(total);
+};
+
+export const resolvePreferredMeasuredSizeCbm = (boxCbm = 0, itemCbm = 0) => {
+  const boxValue = toPositiveNumber(boxCbm);
+  if (boxValue > 0) return formatCbm(boxValue);
+  return formatCbm(toPositiveNumber(itemCbm));
 };
