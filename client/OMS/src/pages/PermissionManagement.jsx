@@ -27,6 +27,7 @@ const PermissionManagement = () => {
     () => roles.find((entry) => entry.role === selectedRole) || null,
     [roles, selectedRole],
   );
+  const isAdminMirrorRole = selectedRole === "inspection_manager";
 
   const filteredModules = useMemo(() => {
     const search = moduleSearch.trim().toLowerCase();
@@ -39,16 +40,20 @@ const PermissionManagement = () => {
 
   const isLockedCell = useCallback(
     (moduleKey, action) => {
+      if (isAdminMirrorRole) return true;
       if (isAdminLikeRole(selectedRole)) return false;
       const lockMeta = meta?.locked?.[moduleKey];
       return Array.isArray(lockMeta?.actions) && lockMeta.actions.includes(action);
     },
-    [meta?.locked, selectedRole],
+    [isAdminMirrorRole, meta?.locked, selectedRole],
   );
 
   const getLockMessage = useCallback(
-    (moduleKey) => meta?.locked?.[moduleKey]?.message || "",
-    [meta?.locked],
+    (moduleKey) =>
+      isAdminMirrorRole
+        ? "Inspection Manager follows Admin permissions."
+        : meta?.locked?.[moduleKey]?.message || "",
+    [isAdminMirrorRole, meta?.locked],
   );
 
   const loadPermissions = useCallback(async () => {
@@ -179,9 +184,8 @@ const PermissionManagement = () => {
           </p>
           <h2 className="h4 mb-1">Rights Management</h2>
           <p className="text-secondary mb-0">
-            Manage role-level access. Inspection Manager keeps fixed PIS edit/upload
-            rights, while broader PIS mutation, workflow approve/delete, and
-            permission-management stay restricted.
+            Manage role-level access. Inspection Manager mirrors the current Admin
+            rights, with PIS Diffs editing kept unavailable on that page.
           </p>
         </div>
         <button
@@ -233,7 +237,12 @@ const PermissionManagement = () => {
               {new Date(selectedRoleRecord.updated_at).toLocaleString()}
             </div>
           )}
-          {isAdminLikeRole(selectedRole) && (
+          {isAdminMirrorRole ? (
+            <div className="alert alert-info py-2 mt-3 mb-0">
+              Inspection Manager follows Admin permissions. Update Admin rights to
+              change both roles.
+            </div>
+          ) : isAdminLikeRole(selectedRole) && (
             <div className="alert alert-warning py-2 mt-3 mb-0">
               Admin permission changes are powerful. If you disable an admin action here,
               backend permission checks can deny it even to admins.
@@ -301,7 +310,7 @@ const PermissionManagement = () => {
             type="button"
             className="btn btn-outline-secondary"
             onClick={handleReset}
-            disabled={loading || saving || !selectedRole}
+            disabled={loading || saving || !selectedRole || isAdminMirrorRole}
           >
             Reset to Default
           </button>
@@ -309,7 +318,7 @@ const PermissionManagement = () => {
             type="button"
             className="btn btn-primary"
             onClick={handleSave}
-            disabled={loading || saving || !selectedRole}
+            disabled={loading || saving || !selectedRole || isAdminMirrorRole}
           >
             {saving ? "Saving..." : "Save Permissions"}
           </button>

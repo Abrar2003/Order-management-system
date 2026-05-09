@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
 import { formatDateDDMMYYYY } from "../utils/date";
 import {
+  BOX_PACKAGING_MODES,
   buildMeasuredSizeEntriesFromLegacy,
+  detectBoxPackagingMode,
   hasMeaningfulMeasuredSize,
 } from "../utils/measuredSizeForm";
 
@@ -59,28 +61,43 @@ const formatLabelRanges = (labels = [], maxRanges = 8) => {
 const getQcLabelRequirement = ({
   totalPassed = 0,
   boxSizesCount = 0,
+  boxMode = BOX_PACKAGING_MODES.INDIVIDUAL,
+  boxSizes = [],
 }) => {
   const safePassed = Math.max(0, Number(totalPassed) || 0);
   const safeBoxSizesCount = Math.max(0, Number(boxSizesCount) || 0);
+  const safeBoxMode = detectBoxPackagingMode(boxMode, boxSizes);
+  const multiplier =
+    safeBoxMode === BOX_PACKAGING_MODES.CARTON ? 1 : safeBoxSizesCount;
 
   return {
-    requiredCount: safePassed * safeBoxSizesCount,
+    requiredCount: safePassed * multiplier,
     basisQuantity: safePassed,
     boxSizesCount: safeBoxSizesCount,
+    boxMode: safeBoxMode,
+    multiplier,
   };
 };
 
 const buildQcLabelRequirementMessage = ({
   totalPassed = 0,
   boxSizesCount = 0,
+  boxMode = BOX_PACKAGING_MODES.INDIVIDUAL,
+  boxSizes = [],
   actualCount = 0,
 }) => {
   const requirement = getQcLabelRequirement({
     totalPassed,
     boxSizesCount,
+    boxMode,
+    boxSizes,
   });
 
-  return `Total labels must equal passed quantity × box sizes count (${requirement.requiredCount}). Actual total labels: ${Math.max(0, Number(actualCount) || 0)}. Expected: ${requirement.basisQuantity} × ${requirement.boxSizesCount}.`;
+  if (requirement.boxMode === BOX_PACKAGING_MODES.CARTON) {
+    return `Total labels must equal passed quantity (${requirement.requiredCount}). Actual total labels: ${Math.max(0, Number(actualCount) || 0)}. Expected: passed quantity ${requirement.basisQuantity}.`;
+  }
+
+  return `Total labels must equal passed quantity x box sizes count (${requirement.requiredCount}). Actual total labels: ${Math.max(0, Number(actualCount) || 0)}. Expected: passed quantity ${requirement.basisQuantity} x box sizes ${requirement.boxSizesCount}.`;
 };
 
 const parseLabelRanges = (ranges = []) => {
@@ -189,9 +206,13 @@ const TransferInspectionModal = ({
 
   const existingBoxSizeEntries = useMemo(() => {
     const itemMaster = qc?.item_master || {};
+    const boxMode = detectBoxPackagingMode(
+      itemMaster?.inspected_box_mode,
+      itemMaster?.inspected_box_sizes,
+    );
     return buildMeasuredSizeEntriesFromLegacy({
       primaryEntries: itemMaster?.inspected_box_sizes,
-      mode: itemMaster?.inspected_box_mode,
+      mode: boxMode,
       singleLbh: itemMaster?.inspected_box_LBH || itemMaster?.box_LBH,
       topLbh: itemMaster?.inspected_box_top_LBH || itemMaster?.inspected_top_LBH,
       bottomLbh:
@@ -199,7 +220,26 @@ const TransferInspectionModal = ({
     }).filter((entry) => hasMeaningfulMeasuredSize(entry));
   }, [qc?.item_master]);
 
+  const existingBoxMode = useMemo(() => {
+    const itemMaster = qc?.item_master || {};
+    return detectBoxPackagingMode(
+      itemMaster?.inspected_box_mode,
+      itemMaster?.inspected_box_sizes,
+    );
+  }, [qc?.item_master]);
   const boxSizesCount = existingBoxSizeEntries.length;
+  const labelRequirement = useMemo(
+    () =>
+      getQcLabelRequirement({
+        totalPassed: toPositiveInteger(quantity) || 0,
+        boxSizesCount,
+        boxMode: existingBoxMode,
+        boxSizes: existingBoxSizeEntries,
+      }),
+    [boxSizesCount, existingBoxMode, existingBoxSizeEntries, quantity],
+  );
+  const requiresBoxSizeCountForLabels =
+    labelRequirement.boxMode !== BOX_PACKAGING_MODES.CARTON;
 
   const maxTransferQuantity = useMemo(() => {
     const targetOpenQuantity = Number(lookupResult?.target?.open_quantity || 0) || 0;
@@ -209,14 +249,11 @@ const TransferInspectionModal = ({
     return sourcePassedQuantity;
   }, [lookupResult?.target?.open_quantity, sourcePassedQuantity]);
 
-  const requiredLabelsCount = useMemo(
-    () =>
-      getQcLabelRequirement({
-        totalPassed: toPositiveInteger(quantity) || 0,
-        boxSizesCount,
-      }).requiredCount,
-    [boxSizesCount, quantity],
-  );
+  const requiredLabelsCount = labelRequirement.requiredCount;
+  const requiredLabelsText =
+    labelRequirement.boxMode === BOX_PACKAGING_MODES.CARTON
+      ? `Required labels: ${requiredLabelsCount} = passed quantity ${toPositiveInteger(quantity) || 0}`
+      : `Required labels: ${requiredLabelsCount} = passed quantity ${toPositiveInteger(quantity) || 0} x box sizes ${boxSizesCount}`;
 
   const handleLabelRangeChange = (index, field, value) => {
     setLabelRanges((previous) =>
@@ -321,7 +358,11 @@ const TransferInspectionModal = ({
       return;
     }
 
-    if (transferQuantity > 0 && boxSizesCount === 0) {
+    if (
+      transferQuantity > 0 &&
+      requiresBoxSizeCountForLabels &&
+      boxSizesCount === 0
+    ) {
       setError("At least 1 box size is required to validate labels.");
       return;
     }
@@ -331,6 +372,8 @@ const TransferInspectionModal = ({
         buildQcLabelRequirementMessage({
           totalPassed: transferQuantity,
           boxSizesCount,
+          boxMode: existingBoxMode,
+          boxSizes: existingBoxSizeEntries,
           actualCount: selectedLabels.length,
         }),
       );
@@ -557,7 +600,7 @@ const TransferInspectionModal = ({
                 ))}
               </div>
               <div className="form-text">
-                Required labels: {requiredLabelsCount} = {(toPositiveInteger(quantity) || 0)} × {boxSizesCount}
+                {requiredLabelsText}
               </div>
             </div>
 

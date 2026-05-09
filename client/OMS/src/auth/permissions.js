@@ -58,7 +58,7 @@ export const isQcOnlyUserRole = (role) =>
   normalizeUserRole(role) === "qc";
 
 export const isAdminLikeRole = (role) =>
-  ["admin", "super_admin"].includes(normalizeUserRole(role));
+  ["admin", "super_admin", "inspection_manager"].includes(normalizeUserRole(role));
 
 export const isManagerLikeRole = (role) =>
   isAdminLikeRole(role)

@@ -533,28 +533,43 @@ const getEffectiveRequestPassedQuantity = ({
 const getQcLabelRequirement = ({
   totalPassed = 0,
   boxSizesCount = 0,
+  boxMode = BOX_PACKAGING_MODES.INDIVIDUAL,
+  boxSizes = [],
 }) => {
   const safePassed = Math.max(0, Number(totalPassed) || 0);
   const safeBoxSizesCount = Math.max(0, Number(boxSizesCount) || 0);
+  const safeBoxMode = detectBoxPackagingMode(boxMode, boxSizes);
+  const multiplier =
+    safeBoxMode === BOX_PACKAGING_MODES.CARTON ? 1 : safeBoxSizesCount;
 
   return {
-    requiredCount: safePassed * safeBoxSizesCount,
+    requiredCount: safePassed * multiplier,
     basisQuantity: safePassed,
     boxSizesCount: safeBoxSizesCount,
+    boxMode: safeBoxMode,
+    multiplier,
   };
 };
 
 const buildQcLabelRequirementMessage = ({
   totalPassed = 0,
   boxSizesCount = 0,
+  boxMode = BOX_PACKAGING_MODES.INDIVIDUAL,
+  boxSizes = [],
   actualCount = 0,
 }) => {
   const requirement = getQcLabelRequirement({
     totalPassed,
     boxSizesCount,
+    boxMode,
+    boxSizes,
   });
 
-  return `Total labels must equal passed quantity × box sizes count (${requirement.requiredCount}). Actual total labels: ${Math.max(0, Number(actualCount) || 0)}. Expected: ${requirement.basisQuantity} × ${requirement.boxSizesCount}.`;
+  if (requirement.boxMode === BOX_PACKAGING_MODES.CARTON) {
+    return `Total labels must equal passed quantity (${requirement.requiredCount}). Actual total labels: ${Math.max(0, Number(actualCount) || 0)}. Expected: passed quantity ${requirement.basisQuantity}.`;
+  }
+
+  return `Total labels must equal passed quantity x box sizes count (${requirement.requiredCount}). Actual total labels: ${Math.max(0, Number(actualCount) || 0)}. Expected: passed quantity ${requirement.basisQuantity} x box sizes ${requirement.boxSizesCount}.`;
 };
 
 const getLatestRequestedQuantity = (qc = {}) => {
@@ -1813,10 +1828,21 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     const boxSizesCount = Array.isArray(boxSizesForLabelValidation)
       ? boxSizesForLabelValidation.length
       : 0;
+    const labelBoxMode = inspectedBoxSizePayload.hasAnyInput
+      ? detectBoxPackagingMode(
+          inspectedBoxSizePayload.mode || form.inspected_box_mode,
+          boxSizesForLabelValidation,
+        )
+      : detectBoxPackagingMode(
+          form.inspected_box_mode || existingInspectedBoxMode,
+          boxSizesForLabelValidation,
+        );
+    const requiresBoxSizeCountForLabels =
+      labelBoxMode !== BOX_PACKAGING_MODES.CARTON;
 
     // Validate box sizes when labels are being added
     if (!isCurrentUserLabelExempt && hasLabelUpdate) {
-      if (boxSizesCount === 0) {
+      if (requiresBoxSizeCountForLabels && boxSizesCount === 0) {
         setError("At least 1 box size is required to add labels.");
         return;
       }
@@ -2029,6 +2055,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       const requiredLabelsAfterRewrite = getQcLabelRequirement({
         totalPassed: qcPassed,
         boxSizesCount,
+        boxMode: labelBoxMode,
+        boxSizes: boxSizesForLabelValidation,
       }).requiredCount;
       const requiresBoxSizeForLabelsAfterRewrite =
         qcPassed > 0 || rewriteRecordLabelsAfter.length > 0;
@@ -2061,6 +2089,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
       if (
         !isCurrentUserLabelExempt &&
         requiresBoxSizeForLabelsAfterRewrite &&
+        requiresBoxSizeCountForLabels &&
         boxSizesCount === 0
       ) {
         setError("At least 1 box size is required to validate labels.");
@@ -2075,6 +2104,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
           buildQcLabelRequirementMessage({
             totalPassed: qcPassed,
             boxSizesCount,
+            boxMode: labelBoxMode,
+            boxSizes: boxSizesForLabelValidation,
             actualCount: rewriteRecordLabelsAfter.length,
           }),
         );
@@ -2175,6 +2206,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     const requiredLabelsAfterUpdate = getQcLabelRequirement({
       totalPassed: nextCurrentRequestSamplePassed,
       boxSizesCount,
+      boxMode: labelBoxMode,
+      boxSizes: boxSizesForLabelValidation,
     }).requiredCount;
     const requiresBoxSizeForLabels =
       nextCurrentRequestSamplePassed > 0 || currentRequestLabelsAfterUpdate.length > 0;
@@ -2182,6 +2215,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     if (
       !isCurrentUserLabelExempt &&
       requiresBoxSizeForLabels &&
+      requiresBoxSizeCountForLabels &&
       boxSizesCount === 0
     ) {
       setError("At least 1 box size is required to validate labels.");
@@ -2196,6 +2230,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
         buildQcLabelRequirementMessage({
           totalPassed: nextCurrentRequestSamplePassed,
           boxSizesCount,
+          boxMode: labelBoxMode,
+          boxSizes: boxSizesForLabelValidation,
           actualCount: currentRequestLabelsAfterUpdate.length,
         }),
       );

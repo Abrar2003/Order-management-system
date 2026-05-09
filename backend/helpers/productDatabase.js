@@ -719,7 +719,7 @@ const applyProductDatabaseCheck = ({ item, payload = {}, user = {} } = {}) => {
 
 const applyProductDatabaseApprove = ({ item, payload = {}, user = {} } = {}) => {
   const role = normalizeRole(user?.role);
-  if (role !== "admin") {
+  if (!isAdminLikeRole(role)) {
     throw new ProductDatabaseError("Only admin can approve Product Database data", 403);
   }
 

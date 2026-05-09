@@ -12,11 +12,15 @@ const {
 } = require("../helpers/permissions");
 
 const HISTORY_LIMIT = 25;
+const ADMIN_PERMISSION_SOURCE_ROLE = "admin";
+const ADMIN_PERMISSION_MIRROR_ROLES = new Set(["inspection_manager"]);
 
-const serializeRolePermission = (doc, role) => {
+const serializeRolePermission = (doc, role, permissionOverride = null) => {
   const roleKey = normalizeRoleKey(doc?.role || role);
   const rawPermissions = doc?.permissions || {};
-  const permissions = mergePermissionsWithDefaults(roleKey, rawPermissions);
+  const permissions = permissionOverride
+    ? clonePermissions(permissionOverride)
+    : mergePermissionsWithDefaults(roleKey, rawPermissions);
 
   return {
     role: roleKey,
@@ -31,8 +35,27 @@ const getRolePermissionDoc = async (role) => {
   return RolePermission.findOne({ role: roleKey }).lean();
 };
 
+const getAdminPermissionSource = async () => {
+  const adminDoc = await getRolePermissionDoc(ADMIN_PERMISSION_SOURCE_ROLE);
+  return {
+    doc: adminDoc,
+    permissions: mergePermissionsWithDefaults(
+      ADMIN_PERMISSION_SOURCE_ROLE,
+      adminDoc?.permissions || {},
+    ),
+  };
+};
+
 const getRolePermissions = async (role) => {
   const roleKey = normalizeRoleKey(role);
+  if (ADMIN_PERMISSION_MIRROR_ROLES.has(roleKey)) {
+    const adminPermissionSource = await getAdminPermissionSource();
+    return serializeRolePermission(
+      { ...(adminPermissionSource.doc || {}), role: roleKey },
+      roleKey,
+      adminPermissionSource.permissions,
+    );
+  }
   const doc = await getRolePermissionDoc(roleKey);
   return serializeRolePermission(doc, roleKey);
 };
@@ -40,10 +63,22 @@ const getRolePermissions = async (role) => {
 const getAllRolePermissions = async () => {
   const docs = await RolePermission.find({ role: { $in: ROLE_KEYS } }).lean();
   const docByRole = new Map(docs.map((doc) => [normalizeRoleKey(doc.role), doc]));
+  const adminPermissions = mergePermissionsWithDefaults(
+    ADMIN_PERMISSION_SOURCE_ROLE,
+    docByRole.get(ADMIN_PERMISSION_SOURCE_ROLE)?.permissions || {},
+  );
 
   return {
     meta: buildPermissionMeta(),
-    roles: ROLE_KEYS.map((role) => serializeRolePermission(docByRole.get(role), role)),
+    roles: ROLE_KEYS.map((role) =>
+      serializeRolePermission(
+        ADMIN_PERMISSION_MIRROR_ROLES.has(role)
+          ? { ...(docByRole.get(ADMIN_PERMISSION_SOURCE_ROLE) || {}), role }
+          : docByRole.get(role),
+        role,
+        ADMIN_PERMISSION_MIRROR_ROLES.has(role) ? adminPermissions : null,
+      ),
+    ),
   };
 };
 
@@ -70,11 +105,20 @@ const saveRolePermissions = async ({
   auditAction = "update",
 }) => {
   const roleKey = normalizeRoleKey(role);
+  const adminPermissionSource = ADMIN_PERMISSION_MIRROR_ROLES.has(roleKey)
+    ? await getAdminPermissionSource()
+    : null;
+  const effectiveRequestedPermissions = ADMIN_PERMISSION_MIRROR_ROLES.has(roleKey)
+    ? adminPermissionSource.permissions
+    : permissions;
   const previousDoc = await RolePermission.findOne({ role: roleKey }).lean();
   const previousPermissions = previousDoc
     ? mergePermissionsWithDefaults(roleKey, previousDoc.permissions)
     : getDefaultPermissionsForRole(roleKey);
-  const nextPermissions = sanitizePermissionsForRole(roleKey, permissions);
+  const nextPermissions = sanitizePermissionsForRole(
+    roleKey,
+    effectiveRequestedPermissions,
+  );
   const auditActor = buildAuditActor(actor);
   const historyEntry = {
     action: auditAction,
@@ -103,7 +147,7 @@ const saveRolePermissions = async ({
     { new: true, upsert: true },
   ).lean();
 
-  return serializeRolePermission(updated, roleKey);
+  return getRolePermissions(updated?.role || roleKey);
 };
 
 const resetRolePermissions = async ({ role, actor }) => {

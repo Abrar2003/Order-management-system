@@ -426,28 +426,43 @@ const calculateQcAggregateMetrics = (qcDoc, inspectionRecords = []) => {
 const getQcLabelRequirement = ({
   totalPassed = 0,
   boxSizesCount = 0,
+  boxMode = BOX_PACKAGING_MODES.INDIVIDUAL,
+  boxSizes = [],
 }) => {
   const safePassed = toNonNegativeNumber(totalPassed, 0);
   const safeBoxSizesCount = toNonNegativeNumber(boxSizesCount, 0);
+  const safeBoxMode = detectBoxPackagingMode(boxMode, boxSizes);
+  const multiplier =
+    safeBoxMode === BOX_PACKAGING_MODES.CARTON ? 1 : safeBoxSizesCount;
 
   return {
-    requiredCount: safePassed * safeBoxSizesCount,
+    requiredCount: safePassed * multiplier,
     basisQuantity: safePassed,
     boxSizesCount: safeBoxSizesCount,
+    boxMode: safeBoxMode,
+    multiplier,
   };
 };
 
 const buildQcLabelRequirementMessage = ({
   totalPassed = 0,
   boxSizesCount = 0,
+  boxMode = BOX_PACKAGING_MODES.INDIVIDUAL,
+  boxSizes = [],
   actualCount = 0,
 }) => {
   const requirement = getQcLabelRequirement({
     totalPassed,
     boxSizesCount,
+    boxMode,
+    boxSizes,
   });
 
-  return `Total labels must equal passed quantity × box sizes count (${requirement.requiredCount}). Actual total labels: ${toNonNegativeNumber(actualCount, 0)}. Expected: ${requirement.basisQuantity} × ${requirement.boxSizesCount}.`;
+  if (requirement.boxMode === BOX_PACKAGING_MODES.CARTON) {
+    return `Total labels must equal passed quantity (${requirement.requiredCount}). Actual total labels: ${toNonNegativeNumber(actualCount, 0)}. Expected: passed quantity ${requirement.basisQuantity}.`;
+  }
+
+  return `Total labels must equal passed quantity x box sizes count (${requirement.requiredCount}). Actual total labels: ${toNonNegativeNumber(actualCount, 0)}. Expected: passed quantity ${requirement.basisQuantity} x box sizes ${requirement.boxSizesCount}.`;
 };
 
 const normalizeInspectionStatus = (value) =>
@@ -5324,13 +5339,42 @@ exports.updateQC = async (req, res) => {
       });
     }
 
+    let itemDocForLabelValidation = itemDocForInspectedSizeUpdate;
+    const itemCodeForLabelValidation = normalizeText(
+      qc?.item?.item_code || itemCodeForInspectedSizeUpdate || "",
+    );
+    if (!itemDocForLabelValidation && itemCodeForLabelValidation) {
+      itemDocForLabelValidation = await Item.findOne({
+        code: {
+          $regex: `^${escapeRegex(itemCodeForLabelValidation)}$`,
+          $options: "i",
+        },
+      })
+        .select("inspected_box_sizes inspected_box_mode pis_box_sizes pis_box_mode")
+        .lean();
+    }
+
     // Calculate size counts for label validation
     const boxSizesArray = parsedInspectedBoxSizeEntries.hasInput
       ? parsedInspectedBoxSizeEntries.value
-      : (itemDocForInspectedSizeUpdate?.inspected_box_sizes ||
-         itemDocForInspectedSizeUpdate?.pis_box_sizes ||
+      : (itemDocForLabelValidation?.inspected_box_sizes ||
+         itemDocForLabelValidation?.pis_box_sizes ||
          []);
     const boxSizesCount = Array.isArray(boxSizesArray) ? boxSizesArray.length : 0;
+    const labelBoxMode = parsedInspectedBoxSizeEntries.hasInput
+      ? detectBoxPackagingMode(
+          parsedInspectedBoxSizeEntries.mode || parsedInspectedBoxMode,
+          boxSizesArray,
+        )
+      : hasInspectedBoxModeUpdate
+        ? detectBoxPackagingMode(parsedInspectedBoxMode, boxSizesArray)
+        : detectBoxPackagingMode(
+            itemDocForLabelValidation?.inspected_box_mode ||
+              itemDocForLabelValidation?.pis_box_mode,
+            boxSizesArray,
+          );
+    const requiresBoxSizeCountForLabels =
+      labelBoxMode !== BOX_PACKAGING_MODES.CARTON;
 
     const currentRequestLabelsBefore = normalizeLabels(
       currentRequestInspectionRecord?.labels_added || [],
@@ -5338,6 +5382,8 @@ exports.updateQC = async (req, res) => {
     const labelRequirement = getQcLabelRequirement({
       totalPassed: nextCurrentRequestSamplePassed,
       boxSizesCount,
+      boxMode: labelBoxMode,
+      boxSizes: boxSizesArray,
     });
     const existingNormalizedLabels = normalizeLabels(qc.labels || []);
 
@@ -5486,7 +5532,11 @@ exports.updateQC = async (req, res) => {
       const requiresBoxSizeForLabels =
         nextCurrentRequestSamplePassed > 0 ||
         currentRequestLabelsCountAfterUpdate > 0;
-      if (requiresBoxSizeForLabels && boxSizesCount === 0) {
+      if (
+        requiresBoxSizeForLabels &&
+        requiresBoxSizeCountForLabels &&
+        boxSizesCount === 0
+      ) {
         return res.status(400).json({
           message: "At least 1 box size is required to validate labels",
         });
@@ -5497,11 +5547,17 @@ exports.updateQC = async (req, res) => {
           message: buildQcLabelRequirementMessage({
             totalPassed: nextCurrentRequestSamplePassed,
             boxSizesCount,
+            boxMode: labelBoxMode,
+            boxSizes: boxSizesArray,
             actualCount: currentRequestLabelsCountAfterUpdate,
           }),
         });
       }
-    } else if (!isCurrentUserLabelExempt && boxSizesCount === 0) {
+    } else if (
+      !isCurrentUserLabelExempt &&
+      requiresBoxSizeCountForLabels &&
+      boxSizesCount === 0
+    ) {
       return res.status(400).json({
         message: "At least 1 box size is required to validate labels",
       });
@@ -8328,9 +8384,47 @@ exports.transferInspectionRecord = async (req, res) => {
             $options: "i",
           },
         })
-          .select("code name description cbm qc")
-          .lean()
+        .select("code name description cbm qc inspected_box_sizes inspected_box_mode pis_box_sizes pis_box_mode")
+        .lean()
       : null;
+
+    const transferBoxSizes =
+      Array.isArray(matchedItem?.inspected_box_sizes) &&
+      matchedItem.inspected_box_sizes.length > 0
+        ? matchedItem.inspected_box_sizes
+        : matchedItem?.pis_box_sizes || [];
+    const transferBoxSizesCount = Array.isArray(transferBoxSizes)
+      ? transferBoxSizes.length
+      : 0;
+    const transferBoxMode = detectBoxPackagingMode(
+      matchedItem?.inspected_box_mode || matchedItem?.pis_box_mode,
+      transferBoxSizes,
+    );
+    const transferLabelRequirement = getQcLabelRequirement({
+      totalPassed: transferQuantityRaw,
+      boxSizesCount: transferBoxSizesCount,
+      boxMode: transferBoxMode,
+      boxSizes: transferBoxSizes,
+    });
+    if (
+      transferBoxMode !== BOX_PACKAGING_MODES.CARTON &&
+      transferBoxSizesCount === 0
+    ) {
+      return res.status(400).json({
+        message: "At least 1 box size is required to validate labels",
+      });
+    }
+    if (transferLabels.length !== transferLabelRequirement.requiredCount) {
+      return res.status(400).json({
+        message: buildQcLabelRequirementMessage({
+          totalPassed: transferQuantityRaw,
+          boxSizesCount: transferBoxSizesCount,
+          boxMode: transferBoxMode,
+          boxSizes: transferBoxSizes,
+          actualCount: transferLabels.length,
+        }),
+      });
+    }
 
     const transferDate = toISODateString(new Date()) || sourceInspection?.inspection_date || sourceQc?.request_date || "";
     const requestedDate = String(

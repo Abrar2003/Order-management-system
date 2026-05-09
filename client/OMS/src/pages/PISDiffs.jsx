@@ -368,7 +368,8 @@ const PISDiffs = () => {
   useRememberSearchParams(searchParams, setSearchParams, "pis-diffs");
   const pdfReportRef = useRef(null);
 
-  const { canEditPis } = usePermissions();
+  const { canEditPis, role } = usePermissions();
+  const canEditPisDiffs = canEditPis && role !== "inspection_manager";
 
   const [rows, setRows] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
@@ -1012,13 +1013,13 @@ const PISDiffs = () => {
                         />
                       </th>
                       <th>Inspection Report</th>
-                      {canEditPis && <th>Action</th>}
+                      {canEditPisDiffs && <th>Action</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {sortedRows.length === 0 && (
                       <tr>
-                        <td colSpan={canEditPis ? 11 : 10} className="text-center py-4">
+                        <td colSpan={canEditPisDiffs ? 11 : 10} className="text-center py-4">
                           No unchecked PIS diffs found
                         </td>
                       </tr>
@@ -1092,7 +1093,7 @@ const PISDiffs = () => {
                               </span>
                             )}
                           </td>
-                          {canEditPis && (
+                          {canEditPisDiffs && (
                             <td>
                               <button
                                 type="button"
@@ -1232,7 +1233,7 @@ const PISDiffs = () => {
         </div>
       )}
 
-      {selectedItem && canEditPis && (
+      {selectedItem && canEditPisDiffs && (
         <EditPisModal
           item={selectedItem}
           onClose={() => setSelectedItem(null)}

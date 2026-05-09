@@ -449,7 +449,7 @@ const Navbar = () => {
         { key: "reports", label: "Reports", items: reportMenuItems },
         { key: "workflow", label: "Production Workflow", items: workflowMenuItems },
         { key: "process", label: "Process", items: processMenuItems },
-        { key: "update-orders", label: "Update Orders", items: updateOrdersMenuItems },
+        { key: "update-orders", label: "Update", items: updateOrdersMenuItems },
         { key: "upload-add", label: "Upload", items: uploadAddMenuItems },
         { key: "logs", label: "Logs", items: logMenuItems },
         { key: "settings", label: "Settings", items: settingsMenuItems },

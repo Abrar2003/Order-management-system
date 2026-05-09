@@ -32,7 +32,11 @@ const CANONICAL_ROLES = Object.freeze({
 });
 
 const SUPER_ADMIN_LIKE_ROLE_KEYS = Object.freeze(["super_admin"]);
-const ADMIN_LIKE_ROLE_KEYS = Object.freeze(["admin", ...SUPER_ADMIN_LIKE_ROLE_KEYS]);
+const ADMIN_LIKE_ROLE_KEYS = Object.freeze([
+  "admin",
+  "inspection_manager",
+  ...SUPER_ADMIN_LIKE_ROLE_KEYS,
+]);
 const MANAGER_LIKE_ROLE_KEYS = Object.freeze([
   ...ADMIN_LIKE_ROLE_KEYS,
   "manager",

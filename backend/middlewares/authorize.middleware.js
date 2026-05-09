@@ -1,4 +1,7 @@
-const { normalizeUserRoleKey } = require("../helpers/userRole");
+const {
+  ADMIN_LIKE_ROLE_KEYS,
+  normalizeUserRoleKey,
+} = require("../helpers/userRole");
 
 const MANAGER_PEER_ROLE_KEYS = Object.freeze([
   "manager",
@@ -11,6 +14,10 @@ const expandAllowedRoleKeys = (allowedRoles = []) => {
 
   allowedRoles.forEach((role) => {
     const roleKey = normalizeUserRoleKey(role);
+    if (roleKey === "admin") {
+      ADMIN_LIKE_ROLE_KEYS.forEach((adminRoleKey) => roleKeys.add(adminRoleKey));
+      return;
+    }
     if (roleKey === "manager") {
       MANAGER_PEER_ROLE_KEYS.forEach((managerRoleKey) => roleKeys.add(managerRoleKey));
       return;

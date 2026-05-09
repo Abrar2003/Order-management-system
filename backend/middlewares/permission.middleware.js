@@ -1,5 +1,5 @@
 const { canRoleUsePisAction, normalizeRoleKey } = require("../helpers/permissions");
-const { isAdminLikeRole, isSuperAdminLikeRole } = require("../helpers/userRole");
+const { isAdminLikeRole } = require("../helpers/userRole");
 const { userHasPermission } = require("../services/permission.service");
 
 const requirePermission = (moduleKey, action) => async (req, res, next) => {

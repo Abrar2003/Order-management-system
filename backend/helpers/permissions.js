@@ -6,7 +6,7 @@ const {
 
 // Add new permission modules/actions here first, then guard routes with
 // requirePermission(module, action). PIS mutation actions are deliberately
-// hard-locked for non-admin roles both here and in permission.middleware.js.
+// hard-locked for non-admin-profile roles both here and in permission.middleware.js.
 const PERMISSION_ACTIONS = Object.freeze([
   "view",
   "create",
@@ -66,10 +66,7 @@ const PIS_ADMIN_ONLY_ACTIONS = Object.freeze([
   "sync",
   "manage",
 ]);
-const INSPECTION_MANAGER_PIS_ACTIONS = Object.freeze([
-  "edit",
-  "upload",
-]);
+const INSPECTION_MANAGER_PIS_ACTIONS = Object.freeze(PIS_ADMIN_ONLY_ACTIONS);
 
 const PRODUCT_TYPE_TEMPLATE_ADMIN_ONLY_ACTIONS = Object.freeze([
   "create",
@@ -123,9 +120,6 @@ const grantAll = (permissions, moduleKey) => {
 const canRoleUsePisAction = (roleKey, action) => {
   if (!PIS_ADMIN_ONLY_ACTIONS.includes(action)) return true;
   if (isAdminLikeRole(roleKey) || isSuperAdminLikeRole(roleKey)) return true;
-  if (roleKey === "inspection_manager") {
-    return INSPECTION_MANAGER_PIS_ACTIONS.includes(action);
-  }
   return false;
 };
 
@@ -133,10 +127,6 @@ const applyRequiredPermissionFloors = (roleKey, permissions) => {
   if (isAdminLikeRole(roleKey) || isSuperAdminLikeRole(roleKey)) {
     grant(permissions, "pis", PIS_ADMIN_ONLY_ACTIONS);
     return permissions;
-  }
-
-  if (roleKey === "inspection_manager") {
-    grant(permissions, "pis", INSPECTION_MANAGER_PIS_ACTIONS);
   }
 
   return permissions;
@@ -196,8 +186,7 @@ const buildSuperAdminPermissions = () => buildAdminPermissions();
 const buildProductManagerPermissions = () => buildManagerPermissions();
 
 const buildInspectionManagerPermissions = () => {
-  const permissions = buildAdminPermissions();
-  return lockAdminOnlyPermissions("inspection_manager", permissions);
+  return buildAdminPermissions();
 };
 
 const buildUserPermissions = () => {
@@ -364,7 +353,7 @@ const buildPermissionMeta = () => ({
       roles: ROLE_KEYS.filter((role) => !canRoleUsePisAction(role, "edit")),
       actions: PIS_ADMIN_ONLY_ACTIONS,
       message:
-        "PIS edit and upload rights are fixed for Inspection Manager, while broader PIS mutation rights remain restricted to admin roles.",
+        "PIS mutation rights are restricted to admin-profile roles.",
     },
     product_type_templates: {
       roles: ROLE_KEYS.filter((role) => !isAdminLikeRole(role)),
