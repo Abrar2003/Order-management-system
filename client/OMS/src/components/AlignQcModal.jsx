@@ -18,30 +18,9 @@ const normalizeRequestType = (value) =>
 const normalizeInspectionStatus = (value) =>
   String(value || "").trim().toLowerCase();
 
-const addDaysToIsoDate = (isoDate = "", days = 0) => {
-  const normalizedIso = toISODateString(isoDate);
-  if (!normalizedIso) return "";
-
-  const parsed = new Date(`${normalizedIso}T00:00:00Z`);
-  if (Number.isNaN(parsed.getTime())) return "";
-
-  parsed.setUTCDate(parsed.getUTCDate() + days);
-  return toISODateString(parsed);
-};
-
 const getInitialRequestDateValue = ({
   value = "",
-  futureOnly = false,
-  todayIso = "",
-  tomorrowIso = "",
 } = {}) => {
-  const initialIso = toISODateString(value);
-  if (futureOnly) {
-    return initialIso && initialIso > todayIso
-      ? toDDMMYYYYInputValue(initialIso, "")
-      : toDDMMYYYYInputValue(tomorrowIso, "") || getTodayDDMMYYYY();
-  }
-
   return toDDMMYYYYInputValue(value, "") || getTodayDDMMYYYY();
 };
 
@@ -64,7 +43,6 @@ const AlignQCModal = ({
     isManagerLikeRole(normalizedRole) &&
     !isInspectionManager;
   const todayIso = toISODateString(new Date());
-  const tomorrowIso = addDaysToIsoDate(todayIso, 1);
   const managerMinAllowedDateIso = (() => {
     const minDate = new Date();
     minDate.setDate(minDate.getDate() - 2);
@@ -80,9 +58,6 @@ const AlignQCModal = ({
   const [request_date, setReqDate] = useState(
     getInitialRequestDateValue({
       value: initialRequestDate,
-      futureOnly: isInspectionManager,
-      todayIso,
-      tomorrowIso,
     }),
   );
   const [quantityRequested, setQuantityRequested] = useState(
@@ -130,9 +105,6 @@ const AlignQCModal = ({
     setReqDate(
       getInitialRequestDateValue({
         value: initialRequestDate,
-        futureOnly: isInspectionManager,
-        todayIso,
-        tomorrowIso,
       }),
     );
     setQuantityRequested(
@@ -145,9 +117,6 @@ const AlignQCModal = ({
     initialRequestDate,
     initialQuantityRequested,
     initialRequestType,
-    isInspectionManager,
-    todayIso,
-    tomorrowIso,
   ]);
 
   useEffect(() => {
@@ -224,11 +193,6 @@ const AlignQCModal = ({
       alert("Manager can align QC only for today and previous 2 days.");
       return;
     }
-    if (isInspectionManager && requestDateIso <= todayIso) {
-      alert("Inspection Manager can raise QC requests for future dates only.");
-      return;
-    }
-
     if (Number.isNaN(requestedQuantityNumber) || requestedQuantityNumber < 0) {
       alert("Quantity values must be valid non-negative numbers.");
       return;
@@ -425,22 +389,11 @@ const AlignQCModal = ({
                 lang="en-GB"
                 className="form-control"
                 value={toISODateString(request_date)}
-                min={
-                  isInspectionManager
-                    ? tomorrowIso
-                    : isManager
-                      ? managerMinAllowedDateIso
-                      : undefined
-                }
+                min={isManager ? managerMinAllowedDateIso : undefined}
                 max={isManager ? todayIso : undefined}
                 onChange={(e) => setReqDate(toDDMMYYYYInputValue(e.target.value, ""))}
                 disabled={submitting}
               />
-              {isInspectionManager && (
-                <div className="small text-secondary mt-1">
-                  Inspection Manager can raise requests for future dates only.
-                </div>
-              )}
             </div>
 
             <div>
