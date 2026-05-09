@@ -215,6 +215,7 @@ const Navbar = () => {
 
     return [
       routeMenuItem("items-all", "View Items", "/items"),
+      routeMenuItem("item-masters", "Item Masters", "/item-masters"),
       routeMenuItem(
         "items-qc-report-mismatch",
         "QC Report Mismatch",
@@ -347,8 +348,18 @@ const Navbar = () => {
       items.push(
         routeMenuItem("update-pis-qc-reports", "Final PIS Check", "/pis-diffs"),
         routeMenuItem("final-pis-check", "Update PIS / QC Reports", "/final-pis-check"),
+        routeMenuItem("PIS", "PIS", "/pis")
       );
     }
+
+    if (hasPermission("containers", "edit") || hasPermission("containers", "manage")) {
+      items.push(routeMenuItem("bulk-shipping", "Bulk Shipping", "/container"));
+    }
+
+    if (canManageLabels) {
+      items.push(actionMenuItem("allocate-labels", "Allocate Labels", "allocate-labels"));
+    }
+
 
     return items;
   }, [canManageProductDatabase, canViewPis, isQcOnlyRole]);
@@ -362,13 +373,18 @@ const Navbar = () => {
       items.push(routeMenuItem("upload-finish", "Upload Finish", "/pis?open_finish=1"));
     }
 
-    if (canViewPis) {
-      items.push(routeMenuItem("pis", "PIS", "/pis"));
-    }
-
     if (uploadOrdersMenuItems.length > 0) {
       items.push(groupMenuItem("upload-orders", "Upload Orders", uploadOrdersMenuItems));
     }
+    items.push(
+      ...ITEM_FILE_OPTIONS.map((option) =>
+        routeMenuItem(
+          `items-file-${option.value}`,
+          option.label,
+          buildItemFilesPagePath(option.value),
+        )
+      ),
+    )
 
     return sortEntriesByLabel(items);
   }, [
@@ -444,11 +460,10 @@ const Navbar = () => {
   const menuSections = useMemo(
     () =>
       [
-        { key: "items", label: "Items", items: itemMenuItems },
+        { key: "items", label: "Items Database", items: itemMenuItems },
         { key: "orders", label: "Orders", items: orderMenuItems },
         { key: "reports", label: "Reports", items: reportMenuItems },
         { key: "workflow", label: "Production Workflow", items: workflowMenuItems },
-        { key: "process", label: "Process", items: processMenuItems },
         { key: "update-orders", label: "Update", items: updateOrdersMenuItems },
         { key: "upload-add", label: "Upload", items: uploadAddMenuItems },
         { key: "logs", label: "Logs", items: logMenuItems },

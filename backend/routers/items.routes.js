@@ -19,6 +19,7 @@ const {
 } = require("../services/cacheInvalidation.service");
 const {
   getItems,
+  getItemMasters,
   getPisDiffItems,
   getPisDiffCheckedReportPreview,
   exportPisDiffCheckedReport,
@@ -74,6 +75,14 @@ router.get(
   requirePermission("pis", "view"),
   cacheRoute("items", MEDIUM_CACHE_TTL),
   getPisDiffItems,
+);
+
+router.get(
+  "/masters",
+  auth,
+  requirePermission("items", "view"),
+  cacheRoute("items", MEDIUM_CACHE_TTL),
+  getItemMasters,
 );
 
 router.get(

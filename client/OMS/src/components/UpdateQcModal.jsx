@@ -13,7 +13,6 @@ import {
   toISODateString,
 } from "../utils/date";
 import {
-  BOX_CARTON_REMARK_OPTIONS as BOX_CARTON_REMARK_OPTIONS_UTIL,
   BOX_ENTRY_TYPES as BOX_ENTRY_TYPES_UTIL,
   BOX_PACKAGING_MODES as BOX_PACKAGING_MODES_UTIL,
   BOX_SIZE_REMARK_OPTIONS as BOX_SIZE_REMARK_OPTIONS_UTIL,
@@ -212,17 +211,16 @@ const SIZE_COUNT_OPTIONS = Array.from({ length: SIZE_ENTRY_LIMIT }, (_, index) =
   String(index + 1),
 );
 const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
+  { value: "item", label: "Item" },
   { value: "top", label: "Top" },
   { value: "base", label: "Base" },
   { value: "item1", label: "Item 1" },
   { value: "item2", label: "Item 2" },
   { value: "item3", label: "Item 3" },
-  { value: "item4", label: "Item 4" },
 ]);
 const BOX_PACKAGING_MODES = BOX_PACKAGING_MODES_UTIL;
 const BOX_ENTRY_TYPES = BOX_ENTRY_TYPES_UTIL;
 const BOX_SIZE_REMARK_OPTIONS = BOX_SIZE_REMARK_OPTIONS_UTIL;
-const BOX_CARTON_REMARK_OPTIONS = BOX_CARTON_REMARK_OPTIONS_UTIL;
 const createEmptyMeasuredSizeEntry = (options = {}) =>
   createEmptyMeasuredSizeEntryUtil(options);
 const normalizeSizeCount = (value, fallback = 1) => {
@@ -2331,7 +2329,6 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     const isCartonMode = mode === BOX_PACKAGING_MODES.CARTON;
     const safeCount = isCartonMode ? 2 : normalizeSizeCount(countValue, 1);
     const entryColumnClass = safeCount > 1 ? "col-md-2" : "col-md-3";
-    const remarkListId = `${entriesKey || "qc-size"}-remark-options`;
 
     return (
       <>
@@ -2415,10 +2412,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                   {safeCount > 1 && (
                     <div className="col-md-3">
                       <label className="form-label small text-secondary">Remark</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        list={`${remarkListId}-${index}`}
+                      <select
+                        className="form-select"
                         value={entry.remark}
                         onChange={(event) =>
                           handleSizeEntryChange(
@@ -2428,22 +2423,15 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                             event.target.value,
                           )
                         }
-                        placeholder={
-                          isCartonMode
-                            ? index === 0
-                              ? "Inner carton"
-                              : "Master carton"
-                            : "Custom remark"
-                        }
                         disabled={locked}
-                      />
-                      <datalist id={`${remarkListId}-${index}`}>
+                      >
+                        <option value="">Select Remark</option>
                         {remarkOptions.map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label}
                           </option>
                         ))}
-                      </datalist>
+                      </select>
                     </div>
                   )}
                   <div className={entryColumnClass}>
@@ -2693,10 +2681,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                 countValue: form.inspected_box_count,
                 entriesKey: "inspected_box_sizes",
                 entries: displayedBoxEntries,
-                remarkOptions:
-                  form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON
-                    ? BOX_CARTON_REMARK_OPTIONS
-                    : BOX_SIZE_REMARK_OPTIONS,
+                remarkOptions: BOX_SIZE_REMARK_OPTIONS,
                 weightLabel: "Gross Weight",
                 locked: lockInspectedBoxSection,
                 countLabel: "Box Sets",

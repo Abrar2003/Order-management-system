@@ -150,12 +150,12 @@ const toPositiveCbmNumber = (value) => {
 
 const SIZE_ENTRY_LIMIT = 4;
 const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
+  "item",
   "top",
   "base",
   "item1",
   "item2",
   "item3",
-  "item4",
 ]);
 const WEIGHT_FIELD_KEYS = Object.freeze([
   "top_net",
@@ -411,11 +411,19 @@ const parseSizeEntriesPayload = (
 
   const seenRemarks = new Set();
   const isBoxSizeField =
-    fieldLabel === "inspected_box_sizes" || fieldLabel === "pis_box_sizes";
+    fieldLabel === "inspected_box_sizes" ||
+    fieldLabel === "pis_box_sizes" ||
+    fieldLabel === "master_box_sizes";
   const resolvedBoxMode =
     isBoxSizeField
       ? detectBoxPackagingMode(mode, entries)
       : BOX_PACKAGING_MODES.INDIVIDUAL;
+  const allowedRemarkValues = new Set(
+    (Array.isArray(remarkOptions) ? remarkOptions : [])
+      .map((option) => normalizeTextField(option).toLowerCase())
+      .filter(Boolean),
+  );
+  const allowedRemarkList = [...allowedRemarkValues].join(", ");
 
   return entries.map((entry, index) => {
     const entryLabel = `${fieldLabel} ${index + 1}`;
@@ -427,12 +435,13 @@ const parseSizeEntriesPayload = (
       throw new Error(`${entryLabel} must have positive L, B, and H values`);
     }
 
-    const isCartonBoxEntry =
-      isBoxSizeField && resolvedBoxMode === BOX_PACKAGING_MODES.CARTON;
     const normalizedRemark = normalizeTextField(entry?.remark || "").toLowerCase();
-    if (entries.length > 1 && !isCartonBoxEntry) {
+    if (entries.length > 1) {
       if (!normalizedRemark) {
         throw new Error(`${entryLabel}.remark is required`);
+      }
+      if (allowedRemarkValues.size > 0 && !allowedRemarkValues.has(normalizedRemark)) {
+        throw new Error(`${entryLabel}.remark must be one of: ${allowedRemarkList}`);
       }
       if (seenRemarks.has(normalizedRemark)) {
         throw new Error(`${fieldLabel} remarks must be unique`);
@@ -461,7 +470,7 @@ const parseSizeEntriesPayload = (
     if (isBoxSizeField) {
       if (resolvedBoxMode === BOX_PACKAGING_MODES.CARTON) {
         const entryType = index === 0 ? "inner" : "master";
-        parsedEntry.remark = normalizedRemark || entryType;
+        parsedEntry.remark = normalizedRemark;
         parsedEntry.box_type = entryType;
         parsedEntry.item_count_in_inner =
           entryType === "inner"
@@ -1590,6 +1599,34 @@ const PIS_DIFF_ITEM_SELECT = [
   "updatedAt",
 ].join(" ");
 
+const ITEM_MASTER_SELECT = [
+  "code",
+  "name",
+  "description",
+  "brand",
+  "brand_name",
+  "brands",
+  "vendors",
+  "country_of_origin",
+  "product_type",
+  "pis_checked_flag",
+  "pis_item_sizes",
+  "pis_box_sizes",
+  "pis_box_mode",
+  "master_item_sizes",
+  "master_box_sizes",
+  "master_box_mode",
+  "updatedAt",
+].join(" ");
+
+const ITEM_MASTER_ELIGIBLE_MATCH = Object.freeze({
+  $or: [
+    { "master_item_sizes.0": { $exists: true } },
+    { "master_box_sizes.0": { $exists: true } },
+    { pis_checked_flag: true },
+  ],
+});
+
 const getPisDiffBrand = (item = {}) =>
   item?.brand_name
   || item?.brand
@@ -2575,6 +2612,77 @@ exports.getItems = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch items",
+      error: error.message,
+    });
+  }
+};
+
+exports.getItemMasters = async (req, res) => {
+  try {
+    const search = req.query.search;
+    const brand = req.query.brand;
+    const vendor = req.query.vendor;
+    const page = parsePositiveInt(req.query.page, 1);
+    const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
+    const skip = (page - 1) * limit;
+
+    const match = combineMongoMatches(
+      buildItemMatch({ search, brand, vendor }),
+      ITEM_MASTER_ELIGIBLE_MATCH,
+    );
+    const brandOptionsMatch = combineMongoMatches(
+      buildItemMatch({ search, vendor }),
+      ITEM_MASTER_ELIGIBLE_MATCH,
+    );
+    const vendorOptionsMatch = combineMongoMatches(
+      buildItemMatch({ search, brand }),
+      ITEM_MASTER_ELIGIBLE_MATCH,
+    );
+    const codeOptionsMatch = combineMongoMatches(
+      buildItemMatch({ brand, vendor }),
+      ITEM_MASTER_ELIGIBLE_MATCH,
+    );
+
+    const [items, totalRecords, brandsRaw, brandNamesRaw, brandsPrimaryRaw, vendorsRaw, codesRaw] =
+      await Promise.all([
+        Item.find(match)
+          .select(ITEM_MASTER_SELECT)
+          .sort({ updatedAt: -1, code: 1 })
+          .skip(skip)
+          .limit(limit)
+          .lean(),
+        Item.countDocuments(match),
+        Item.distinct("brands", brandOptionsMatch),
+        Item.distinct("brand_name", brandOptionsMatch),
+        Item.distinct("brand", brandOptionsMatch),
+        Item.distinct("vendors", vendorOptionsMatch),
+        Item.distinct("code", codeOptionsMatch),
+      ]);
+
+    return res.status(200).json({
+      success: true,
+      data: items,
+      pagination: {
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(totalRecords / limit)),
+        totalRecords,
+      },
+      filters: {
+        brands: normalizeDistinctValues([
+          ...(brandsPrimaryRaw || []),
+          ...(brandsRaw || []),
+          ...(brandNamesRaw || []),
+        ]),
+        vendors: normalizeDistinctValues(vendorsRaw),
+        item_codes: normalizeDistinctValues(codesRaw),
+      },
+    });
+  } catch (error) {
+    console.error("Get Item Masters Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch item masters",
       error: error.message,
     });
   }
@@ -4007,6 +4115,7 @@ exports.updateItemPis = async (req, res) => {
       );
 
       setPisPath("pis_item_sizes", parsedPisItemSizes);
+      setPisPath("master_item_sizes", parsedPisItemSizes);
       nextPisWeight.top_net = derivedPisItemLegacy.topWeight;
       nextPisWeight.bottom_net = derivedPisItemLegacy.bottomWeight;
       nextPisWeight.total_net = derivedPisItemLegacy.totalWeight;
@@ -4036,6 +4145,8 @@ exports.updateItemPis = async (req, res) => {
 
       setPisPath("pis_box_sizes", parsedPisBoxSizes);
       setPisPath("pis_box_mode", parsedPisBoxMode);
+      setPisPath("master_box_sizes", parsedPisBoxSizes);
+      setPisPath("master_box_mode", parsedPisBoxMode);
       nextPisWeight.top_gross = derivedPisBoxLegacy.topWeight;
       nextPisWeight.bottom_gross = derivedPisBoxLegacy.bottomWeight;
       nextPisWeight.total_gross = derivedPisBoxLegacy.totalWeight;
@@ -4046,6 +4157,10 @@ exports.updateItemPis = async (req, res) => {
       setPisPath(
         "pis_box_mode",
         detectBoxPackagingMode(payload?.pis_box_mode, item?.pis_box_sizes),
+      );
+      setPisPath(
+        "master_box_mode",
+        detectBoxPackagingMode(payload?.pis_box_mode, item?.master_box_sizes),
       );
     }
 

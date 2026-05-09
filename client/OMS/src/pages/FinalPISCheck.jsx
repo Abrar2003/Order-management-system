@@ -194,6 +194,9 @@ const FinalPisCheckReport = ({
           rows.map((row, rowIndex) => {
             const measurements = row?.measurements || {};
             const differences = Array.isArray(row?.differences) ? row.differences : [];
+            const references = row?.references || {};
+            const itemReferenceLabel = references.item_label || "PIS";
+            const boxReferenceLabel = references.box_label || "PIS";
             const measurementCards = [
               {
                 label: "Inspected Item",
@@ -202,7 +205,7 @@ const FinalPisCheckReport = ({
                 weight: measurements?.inspected_item?.weightDisplay,
               },
               {
-                label: "PIS Item",
+                label: `${itemReferenceLabel} Item`,
                 size: measurements?.pis_item?.sizeDisplay,
                 weightLabel: "Net",
                 weight: measurements?.pis_item?.weightDisplay,
@@ -214,7 +217,7 @@ const FinalPisCheckReport = ({
                 weight: measurements?.inspected_box?.weightDisplay,
               },
               {
-                label: "PIS Box",
+                label: `${boxReferenceLabel} Box`,
                 size: measurements?.pis_box?.sizeDisplay,
                 weightLabel: "Gross",
                 weight: measurements?.pis_box?.weightDisplay,
@@ -284,7 +287,7 @@ const FinalPisCheckReport = ({
                         <th>Area</th>
                         <th>Measurement</th>
                         <th>Inspected</th>
-                        <th>PIS</th>
+                        <th>Reference</th>
                         <th>Difference</th>
                         <th>Remark</th>
                       </tr>

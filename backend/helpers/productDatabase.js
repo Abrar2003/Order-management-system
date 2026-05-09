@@ -14,6 +14,21 @@ const {
 } = require("./userRole");
 
 const SIZE_ENTRY_LIMIT = 4;
+const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
+  "item",
+  "top",
+  "base",
+  "item1",
+  "item2",
+  "item3",
+]);
+const BOX_SIZE_REMARK_OPTIONS = Object.freeze([
+  "top",
+  "base",
+  "box1",
+  "box2",
+  "box3",
+]);
 const PD_STATUSES = Object.freeze({
   CREATED: "created",
   CHECKED: "checked",
@@ -24,6 +39,15 @@ const NOT_SET_STATUS = "not_set";
 const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key);
 const normalizeText = (value) => String(value ?? "").trim();
 const normalizeKey = (value) => normalizeText(value).toLowerCase();
+const formatRemarkOptions = (options = []) => options.join(", ");
+const validateRemarkOption = (remark = "", options = [], fieldLabel = "Remark") => {
+  if (!remark) return;
+  if (!options.includes(remark)) {
+    throw new ProductDatabaseError(
+      `${fieldLabel} must be one of: ${formatRemarkOptions(options)}`,
+    );
+  }
+};
 const normalizeRole = (value) => normalizeUserRoleKey(value);
 const normalizeId = (value) =>
   String(value?._id || value?.user || value || "").trim();
@@ -111,6 +135,14 @@ const normalizeItemSizeEntries = (entries = []) => {
     const entryLabel = `PD item size ${index + 1}`;
 
     const normalizedRemark = normalizeKey(entry?.remark || entry?.type || "");
+    if (meaningfulEntries.length > 1 && !normalizedRemark) {
+      throw new ProductDatabaseError(`${entryLabel} remark is required`);
+    }
+    validateRemarkOption(
+      normalizedRemark,
+      ITEM_SIZE_REMARK_OPTIONS,
+      `${entryLabel} remark`,
+    );
     if (normalizedRemark) {
       if (seenRemarks.has(normalizedRemark)) {
         throw new ProductDatabaseError("PD item size remarks must be unique");
@@ -161,7 +193,13 @@ const normalizeBoxSizeEntries = (
       assignPositiveNumber(payload, "L", entry?.L, `${entryLabel} L`);
       assignPositiveNumber(payload, "B", entry?.B, `${entryLabel} B`);
       assignPositiveNumber(payload, "H", entry?.H, `${entryLabel} H`);
-      payload.remark = normalizeKey(entry?.remark || entry?.type || entry?.box_type || "");
+      const normalizedRemark = normalizeKey(entry?.remark || entry?.type || "");
+      validateRemarkOption(
+        normalizedRemark,
+        BOX_SIZE_REMARK_OPTIONS,
+        `${entryLabel} remark`,
+      );
+      payload.remark = normalizedRemark;
       payload.box_type = normalizeKey(entry?.box_type || BOX_ENTRY_TYPES.INDIVIDUAL);
       assignPositiveNumber(payload, "net_weight", entry?.net_weight, `${entryLabel} net weight`);
       assignPositiveNumber(
@@ -204,9 +242,22 @@ const normalizeBoxSizeEntries = (
 
     if (resolvedMode === BOX_PACKAGING_MODES.CARTON) {
       const boxType = index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
+      const normalizedRemark = normalizeKey(entry?.remark || entry?.type || "");
+      if (!normalizedRemark) {
+        throw new ProductDatabaseError(`${entryLabel} remark is required`);
+      }
+      validateRemarkOption(
+        normalizedRemark,
+        BOX_SIZE_REMARK_OPTIONS,
+        `${entryLabel} remark`,
+      );
+      if (seenRemarks.has(normalizedRemark)) {
+        throw new ProductDatabaseError("PD box size remarks must be unique");
+      }
+      seenRemarks.add(normalizedRemark);
       const cartonEntry = {
         ...baseEntry,
-        remark: normalizeKey(entry?.remark || entry?.type || "") || boxType,
+        remark: normalizedRemark,
         box_type: boxType,
       };
       if (boxType === BOX_ENTRY_TYPES.INNER) {
@@ -230,6 +281,14 @@ const normalizeBoxSizeEntries = (
     }
 
     const normalizedRemark = normalizeKey(entry?.remark || entry?.type || "");
+    if (meaningfulEntries.length > 1 && !normalizedRemark) {
+      throw new ProductDatabaseError(`${entryLabel} remark is required`);
+    }
+    validateRemarkOption(
+      normalizedRemark,
+      BOX_SIZE_REMARK_OPTIONS,
+      `${entryLabel} remark`,
+    );
     if (normalizedRemark) {
       if (seenRemarks.has(normalizedRemark)) {
         throw new ProductDatabaseError("PD box size remarks must be unique");

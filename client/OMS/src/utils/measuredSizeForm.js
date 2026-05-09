@@ -27,15 +27,40 @@ export const BOX_SIZE_REMARK_OPTIONS = Object.freeze([
   { value: "box1", label: "Box 1" },
   { value: "box2", label: "Box 2" },
   { value: "box3", label: "Box 3" },
-  { value: "box4", label: "Box 4" },
-  { value: "inner", label: "Inner Carton" },
-  { value: "master", label: "Master Carton" },
 ]);
 
 export const BOX_CARTON_REMARK_OPTIONS = Object.freeze([
   { value: "inner", label: "Inner Carton" },
   { value: "master", label: "Master Carton" },
 ]);
+
+const normalizeRemarkValue = (value = "") =>
+  String(value || "").trim().toLowerCase();
+
+const getRemarkOptionValues = (options = []) =>
+  options
+    .map((option) => normalizeRemarkValue(option?.value))
+    .filter(Boolean);
+
+const formatRemarkOptions = (options = []) =>
+  options
+    .map((option) => String(option?.label || option?.value || "").trim())
+    .filter(Boolean)
+    .join(", ");
+
+const BOX_SIZE_REMARK_VALUES = Object.freeze(
+  getRemarkOptionValues(BOX_SIZE_REMARK_OPTIONS),
+);
+
+const getDefaultBoxRemarkForIndex = (index = 0) =>
+  BOX_SIZE_REMARK_VALUES[index] || "";
+
+const normalizeAllowedBoxRemark = (value = "", index = 0) => {
+  const normalized = normalizeRemarkValue(value);
+  return BOX_SIZE_REMARK_VALUES.includes(normalized)
+    ? normalized
+    : getDefaultBoxRemarkForIndex(index);
+};
 
 const LEGACY_WEIGHT_FALLBACK_BY_KEY = Object.freeze({
   total_net: "net",
@@ -67,8 +92,11 @@ export const detectBoxPackagingMode = (mode = "", entries = []) => {
     : BOX_PACKAGING_MODES.INDIVIDUAL;
 };
 
-const createCartonEntry = (boxType = BOX_ENTRY_TYPES.INNER) => ({
-  remark: boxType,
+const createCartonEntry = (
+  boxType = BOX_ENTRY_TYPES.INNER,
+  index = boxType === BOX_ENTRY_TYPES.MASTER ? 1 : 0,
+) => ({
+  remark: getDefaultBoxRemarkForIndex(index),
   box_type: boxType,
   L: "",
   B: "",
@@ -114,21 +142,23 @@ const toPositiveNumber = (value) => {
 
 const coerceMeasuredSizeEntry = (
   entry = {},
-  { mode = BOX_PACKAGING_MODES.INDIVIDUAL } = {},
+  { mode = BOX_PACKAGING_MODES.INDIVIDUAL, index = 0 } = {},
 ) => {
   const resolvedMode = detectBoxPackagingMode(mode, [entry]);
   const normalizedRemark = String(entry?.remark || "").trim().toLowerCase();
   const normalizedBoxType = String(entry?.box_type || "").trim().toLowerCase();
   const isCartonMode = resolvedMode === BOX_PACKAGING_MODES.CARTON;
   const resolvedBoxType = isCartonMode
-    ? normalizedBoxType === BOX_ENTRY_TYPES.MASTER || normalizedRemark === BOX_ENTRY_TYPES.MASTER
+    ? normalizedBoxType === BOX_ENTRY_TYPES.MASTER ||
+      normalizedRemark === BOX_ENTRY_TYPES.MASTER ||
+      index === 1
       ? BOX_ENTRY_TYPES.MASTER
       : BOX_ENTRY_TYPES.INNER
     : BOX_ENTRY_TYPES.INDIVIDUAL;
 
   return {
     remark: isCartonMode
-      ? normalizedRemark || resolvedBoxType
+      ? normalizeAllowedBoxRemark(normalizedRemark, index)
       : normalizedRemark,
     box_type: resolvedBoxType,
     L: String(entry?.L || ""),
@@ -151,7 +181,11 @@ export const ensureMeasuredSizeEntryCount = (
       ? 2
       : normalizeSizeCount(count, 1);
   const nextEntries = Array.isArray(entries)
-    ? entries.slice(0, safeCount).map((entry) => coerceMeasuredSizeEntry(entry, { mode: resolvedMode }))
+    ? entries
+        .slice(0, safeCount)
+        .map((entry, index) =>
+          coerceMeasuredSizeEntry(entry, { mode: resolvedMode, index }),
+        )
     : [];
 
   while (nextEntries.length < safeCount) {
@@ -170,7 +204,7 @@ export const ensureMeasuredSizeEntryCount = (
   if (resolvedMode === BOX_PACKAGING_MODES.CARTON) {
     nextEntries.forEach((entry, index) => {
       entry.box_type = index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
-      entry.remark = String(entry?.remark || entry.box_type).trim().toLowerCase();
+      entry.remark = normalizeAllowedBoxRemark(entry?.remark, index);
       if (entry.box_type === BOX_ENTRY_TYPES.INNER) {
         entry.box_count_in_master = "0";
       } else {
@@ -188,10 +222,10 @@ export const ensureMeasuredSizeEntryCount = (
 const toMeasuredSizeEntryValue = (
   entry = {},
   weightKey = "",
-  { mode = BOX_PACKAGING_MODES.INDIVIDUAL } = {},
+  { mode = BOX_PACKAGING_MODES.INDIVIDUAL, index = 0 } = {},
 ) => {
   const resolvedMode = detectBoxPackagingMode(mode, [entry]);
-  const coercedEntry = coerceMeasuredSizeEntry(entry, { mode: resolvedMode });
+  const coercedEntry = coerceMeasuredSizeEntry(entry, { mode: resolvedMode, index });
   return {
     ...coercedEntry,
     L: toDimensionInputValue(entry?.L),
@@ -241,7 +275,9 @@ export const buildMeasuredSizeEntriesFromLegacy = ({
   const resolvedMode = detectBoxPackagingMode(mode, primaryEntries);
   const normalizedPrimaryEntries = Array.isArray(primaryEntries)
     ? primaryEntries
-        .map((entry) => toMeasuredSizeEntryValue(entry, weightKey, { mode: resolvedMode }))
+        .map((entry, index) =>
+          toMeasuredSizeEntryValue(entry, weightKey, { mode: resolvedMode, index }),
+        )
         .filter((entry) => hasMeaningfulMeasuredSize(entry))
         .slice(0, resolvedMode === BOX_PACKAGING_MODES.CARTON ? 2 : SIZE_ENTRY_LIMIT)
     : [];
@@ -258,7 +294,7 @@ export const buildMeasuredSizeEntriesFromLegacy = ({
         [weightKey]: totalWeight,
       },
       weightKey,
-      { mode: resolvedMode },
+      { mode: resolvedMode, index: 1 },
     );
     return hasMeaningfulMeasuredSize(masterEntry)
       ? [masterEntry]
@@ -318,7 +354,7 @@ export const convertMeasuredBoxEntriesMode = (
           boxType: BOX_ENTRY_TYPES.INNER,
         }),
         ...firstEntry,
-        remark: String(firstEntry?.remark || BOX_ENTRY_TYPES.INNER).trim().toLowerCase(),
+        remark: normalizeAllowedBoxRemark(firstEntry?.remark, 0),
         box_type: BOX_ENTRY_TYPES.INNER,
         box_count_in_master: "0",
       },
@@ -328,7 +364,7 @@ export const convertMeasuredBoxEntriesMode = (
           boxType: BOX_ENTRY_TYPES.MASTER,
         }),
         ...secondEntry,
-        remark: String(secondEntry?.remark || BOX_ENTRY_TYPES.MASTER).trim().toLowerCase(),
+        remark: normalizeAllowedBoxRemark(secondEntry?.remark, 1),
         box_type: BOX_ENTRY_TYPES.MASTER,
         item_count_in_inner: "0",
       },
@@ -341,7 +377,7 @@ export const convertMeasuredBoxEntriesMode = (
     remark:
       normalizedEntries.length === 1
         ? ""
-        : String(entry?.remark || BOX_SIZE_REMARK_OPTIONS[index]?.value || "").trim().toLowerCase(),
+        : normalizeAllowedBoxRemark(entry?.remark, index),
     box_type: BOX_ENTRY_TYPES.INDIVIDUAL,
     item_count_in_inner: "0",
     box_count_in_master: "0",
@@ -463,6 +499,8 @@ export const parseMeasuredSizeEntries = ({
   }
 
   const seenRemarks = new Set();
+  const allowedRemarkValues = new Set(getRemarkOptionValues(remarkOptions));
+  const allowedRemarkList = formatRemarkOptions(remarkOptions);
   const parsedEntries = [];
 
   for (let index = 0; index < scopedEntries.length; index += 1) {
@@ -483,13 +521,15 @@ export const parseMeasuredSizeEntries = ({
     }
 
     let normalizedRemark = "";
-    if (resolvedMode === BOX_PACKAGING_MODES.CARTON) {
-      const fallbackRemark = index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
-      normalizedRemark = String(entry?.remark || fallbackRemark).trim().toLowerCase();
-    } else if (safeCount > 1) {
+    if (safeCount > 1) {
       normalizedRemark = String(entry?.remark || "").trim().toLowerCase();
       if (!normalizedRemark) {
         return { error: `${entryLabel} remark is required.` };
+      }
+      if (allowedRemarkValues.size > 0 && !allowedRemarkValues.has(normalizedRemark)) {
+        return {
+          error: `${entryLabel} remark must be one of: ${allowedRemarkList}.`,
+        };
       }
       if (seenRemarks.has(normalizedRemark)) {
         return { error: `${groupLabel} remarks must be unique.` };
@@ -516,7 +556,7 @@ export const parseMeasuredSizeEntries = ({
 
     if (resolvedMode === BOX_PACKAGING_MODES.CARTON) {
       const boxType = index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
-      parsedEntry.remark = normalizedRemark || boxType;
+      parsedEntry.remark = normalizedRemark;
       parsedEntry.box_type = boxType;
       if (boxType === BOX_ENTRY_TYPES.INNER) {
         const itemCountInInner = Number(String(entry?.item_count_in_inner ?? "").trim());

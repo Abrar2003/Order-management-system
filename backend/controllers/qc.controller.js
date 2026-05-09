@@ -239,12 +239,12 @@ const EMPTY_LBH = Object.freeze({
 });
 const SIZE_ENTRY_LIMIT = 4;
 const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
+  "item",
   "top",
   "base",
   "item1",
   "item2",
   "item3",
-  "item4",
 ]);
 const resolveQcOrderStatus = (qcDoc = null, orderDoc = null) => {
   const resolvedOrder = orderDoc || qcDoc?.order || null;
@@ -4560,6 +4560,12 @@ exports.updateQC = async (req, res) => {
         fieldName === "inspected_box_sizes"
           ? detectBoxPackagingMode(mode, nonEmptyEntries)
           : BOX_PACKAGING_MODES.INDIVIDUAL;
+      const allowedRemarkValues = new Set(
+        (Array.isArray(remarkOptions) ? remarkOptions : [])
+          .map((option) => normalizeText(option).toLowerCase())
+          .filter(Boolean),
+      );
+      const allowedRemarkList = [...allowedRemarkValues].join(", ");
 
       if (
         fieldName === "inspected_box_sizes" &&
@@ -4592,14 +4598,16 @@ exports.updateQC = async (req, res) => {
         ).toLowerCase();
         const nextRemark =
           nonEmptyEntries.length === 1 ? "" : normalizedRemark;
-        const isCartonBoxEntry =
-          fieldName === "inspected_box_sizes" &&
-          resolvedBoxMode === BOX_PACKAGING_MODES.CARTON;
 
-        if (nonEmptyEntries.length > 1 && !isCartonBoxEntry) {
+        if (nonEmptyEntries.length > 1) {
           if (!nextRemark) {
             throw new Error(
               `${fieldName}[${entryIndex}] remark is required when multiple entries are provided`,
+            );
+          }
+          if (allowedRemarkValues.size > 0 && !allowedRemarkValues.has(nextRemark)) {
+            throw new Error(
+              `${fieldName}[${entryIndex}] remark must be one of: ${allowedRemarkList}`,
             );
           }
           if (seenRemarks.has(nextRemark)) {
@@ -4627,7 +4635,7 @@ exports.updateQC = async (req, res) => {
         if (fieldName === "inspected_box_sizes") {
           if (resolvedBoxMode === BOX_PACKAGING_MODES.CARTON) {
             const boxType = entryIndex === 0 ? "inner" : "master";
-            parsedEntry.remark = nextRemark || boxType;
+            parsedEntry.remark = nextRemark;
             parsedEntry.box_type = boxType;
             parsedEntry.item_count_in_inner =
               boxType === "inner"

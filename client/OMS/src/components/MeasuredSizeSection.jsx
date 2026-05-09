@@ -27,7 +27,6 @@ const MeasuredSizeSection = ({
   const isCartonMode = mode === BOX_PACKAGING_MODES.CARTON;
   const safeCount = isCartonMode ? 2 : normalizeSizeCount(countValue, 1);
   const entryColumnClass = safeCount > 1 ? "col-md-2" : "col-md-3";
-  const remarkListId = `${sectionKey || "size"}-remark-options`;
 
   return (
     <>
@@ -98,28 +97,19 @@ const MeasuredSizeSection = ({
                 {safeCount > 1 && (
                   <div className="col-md-3">
                     <label className="form-label small text-secondary">Remark</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      list={`${remarkListId}-${index}`}
+                    <select
+                      className="form-select"
                       value={entry.remark}
                       onChange={(event) => onEntryChange?.(index, "remark", event.target.value)}
-                      placeholder={
-                        isCartonMode
-                          ? index === 0
-                            ? "Inner carton"
-                            : "Master carton"
-                          : "Custom remark"
-                      }
                       disabled={disabled}
-                    />
-                    <datalist id={`${remarkListId}-${index}`}>
+                    >
+                      <option value="">Select Remark</option>
                       {remarkOptions.map((option) => (
                         <option key={option.value} value={option.value}>
                           {option.label}
                         </option>
                       ))}
-                    </datalist>
+                    </select>
                   </div>
                 )}
                 <div className={entryColumnClass}>

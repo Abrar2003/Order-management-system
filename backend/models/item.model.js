@@ -327,6 +327,30 @@ const itemSchema = new mongoose.Schema(
       default: BOX_PACKAGING_MODES.INDIVIDUAL,
       trim: true,
     },
+    master_item_sizes: {
+      type: [itemSizeEntrySchema],
+      default: [],
+      validate: {
+        validator: (entries) =>
+          !Array.isArray(entries) || entries.length <= SIZE_ENTRY_LIMIT,
+        message: `master_item_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
+      },
+    },
+    master_box_sizes: {
+      type: [boxSizeEntrySchema],
+      default: [],
+      validate: {
+        validator: (entries) =>
+          !Array.isArray(entries) || entries.length <= SIZE_ENTRY_LIMIT,
+        message: `master_box_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`,
+      },
+    },
+    master_box_mode: {
+      type: String,
+      enum: Object.values(BOX_PACKAGING_MODES),
+      default: BOX_PACKAGING_MODES.INDIVIDUAL,
+      trim: true,
+    },
     pd_box_sizes: {
       type: [productSpecBoxSizeEntrySchema],
       default: [],

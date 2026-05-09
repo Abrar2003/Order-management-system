@@ -5,6 +5,21 @@ const { calculateTotalPoCbm } = require("../services/orderCbm.service");
 const SHIPPED_BY_VENDOR_ID = "shipped_by_vendor";
 const SHIPPED_BY_VENDOR_NAME = "Shipped By Vendor";
 const SIZE_ENTRY_LIMIT = 4;
+const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
+  "item",
+  "top",
+  "base",
+  "item1",
+  "item2",
+  "item3",
+]);
+const BOX_SIZE_REMARK_OPTIONS = Object.freeze([
+  "top",
+  "base",
+  "box1",
+  "box2",
+  "box3",
+]);
 
 const escapeRegex = (value = "") =>
   String(value)
@@ -12,6 +27,13 @@ const escapeRegex = (value = "") =>
     .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const normalizeText = (value) => String(value ?? "").trim();
+const formatRemarkOptions = (options = []) => options.join(", ");
+const validateRemarkOption = (remark = "", options = [], fieldLabel = "Remark") => {
+  if (!remark) return;
+  if (!options.includes(remark)) {
+    throw new Error(`${fieldLabel} must be one of: ${formatRemarkOptions(options)}`);
+  }
+};
 
 const normalizeFilterValue = (value) => {
   const normalized = normalizeText(value);
@@ -169,10 +191,13 @@ const normalizeItemSizeEntries = (entries = []) => {
       if (!remark) {
         throw new Error(`${label}.remark is required`);
       }
+      validateRemarkOption(remark, ITEM_SIZE_REMARK_OPTIONS, `${label}.remark`);
       if (seenRemarks.has(remark)) {
         throw new Error("item_sizes remarks must be unique");
       }
       seenRemarks.add(remark);
+    } else {
+      validateRemarkOption(remark, ITEM_SIZE_REMARK_OPTIONS, `${label}.remark`);
     }
 
     return {
@@ -197,6 +222,7 @@ const normalizeBoxSizeEntries = (entries = [], boxMode = BOX_PACKAGING_MODES.IND
     throw new Error(`box_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`);
   }
 
+  const seenRemarks = new Set();
   return normalizedEntries.map((entry, index) => {
     const label = `box_sizes[${index + 1}]`;
     const L = toNonNegativeNumber(entry?.L ?? 0, `${label}.L`);
@@ -217,11 +243,24 @@ const normalizeBoxSizeEntries = (entries = [], boxMode = BOX_PACKAGING_MODES.IND
 
     if (boxMode === BOX_PACKAGING_MODES.CARTON) {
       const isInner = index === 0;
+      const remark = normalizeText(entry?.remark).toLowerCase();
+      if (normalizedEntries.length > 1) {
+        if (!remark) {
+          throw new Error(`${label}.remark is required`);
+        }
+        validateRemarkOption(remark, BOX_SIZE_REMARK_OPTIONS, `${label}.remark`);
+        if (seenRemarks.has(remark)) {
+          throw new Error("box_sizes remarks must be unique");
+        }
+        seenRemarks.add(remark);
+      } else {
+        validateRemarkOption(remark, BOX_SIZE_REMARK_OPTIONS, `${label}.remark`);
+      }
       return {
         L,
         B,
         H,
-        remark: normalizeText(entry?.remark).toLowerCase() || (isInner ? "inner" : "master"),
+        remark,
         net_weight: netWeight,
         gross_weight: grossWeight,
         box_type: isInner ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER,
@@ -237,11 +276,25 @@ const normalizeBoxSizeEntries = (entries = [], boxMode = BOX_PACKAGING_MODES.IND
       };
     }
 
+    const remark = normalizeText(entry?.remark).toLowerCase();
+    if (normalizedEntries.length > 1) {
+      if (!remark) {
+        throw new Error(`${label}.remark is required`);
+      }
+      validateRemarkOption(remark, BOX_SIZE_REMARK_OPTIONS, `${label}.remark`);
+      if (seenRemarks.has(remark)) {
+        throw new Error("box_sizes remarks must be unique");
+      }
+      seenRemarks.add(remark);
+    } else {
+      validateRemarkOption(remark, BOX_SIZE_REMARK_OPTIONS, `${label}.remark`);
+    }
+
     return {
       L,
       B,
       H,
-      remark: normalizeText(entry?.remark).toLowerCase(),
+      remark,
       net_weight: netWeight,
       gross_weight: grossWeight,
       box_type: BOX_ENTRY_TYPES.INDIVIDUAL,

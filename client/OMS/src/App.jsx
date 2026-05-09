@@ -29,6 +29,7 @@ import Container from "./pages/Container";
 import Containers from "./pages/Containers";
 import ShippedSamples from "./pages/ShippedSamples";
 import Items from "./pages/Items";
+import ItemMasters from "./pages/ItemMasters";
 import ItemFilesPage from "./pages/ItemFilesPage";
 import ItemOrdersHistory from "./pages/ItemOrdersHistory";
 import UploadLogs from "./pages/UploadLogs";
@@ -375,6 +376,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <Items />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/item-masters"
+            element={
+              <ProtectedRoute>
+                <ItemMasters />
               </ProtectedRoute>
             }
           />

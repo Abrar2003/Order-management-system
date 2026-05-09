@@ -26,6 +26,9 @@ const FINAL_PIS_CHECK_ITEM_SELECT = [
   "pis_box_mode",
   "pis_box_top_LBH",
   "pis_box_bottom_LBH",
+  "master_item_sizes",
+  "master_box_sizes",
+  "master_box_mode",
   "inspected_item_LBH",
   "inspected_item_sizes",
   "inspected_item_top_LBH",
@@ -558,13 +561,14 @@ const buildNumericDifferenceNote = ({
   pisDisplay = EMPTY_LABEL,
   hasInspected = false,
   hasPis = false,
+  referenceLabel = "PIS",
 } = {}) => {
   const subject = `${segment} ${attribute}`.trim();
   if (hasInspected && !hasPis) {
-    return `Inspected ${subject} is ${inspectedDisplay}, while PIS is not set.`;
+    return `Inspected ${subject} is ${inspectedDisplay}, while ${referenceLabel} is not set.`;
   }
   if (!hasInspected && hasPis) {
-    return `PIS ${subject} is ${pisDisplay}, while inspected value is not set.`;
+    return `${referenceLabel} ${subject} is ${pisDisplay}, while inspected value is not set.`;
   }
   return `${subject} differs (${inspectedDisplay} vs ${pisDisplay}).`;
 };
@@ -576,13 +580,14 @@ const buildTextDifferenceNote = ({
   pisDisplay = EMPTY_LABEL,
   hasInspected = false,
   hasPis = false,
+  referenceLabel = "PIS",
 } = {}) => {
   const subject = `${segment} ${attribute}`.trim();
   if (hasInspected && !hasPis) {
-    return `Inspected ${subject} is ${inspectedDisplay}, while PIS is not set.`;
+    return `Inspected ${subject} is ${inspectedDisplay}, while ${referenceLabel} is not set.`;
   }
   if (!hasInspected && hasPis) {
-    return `PIS ${subject} is ${pisDisplay}, while inspected value is not set.`;
+    return `${referenceLabel} ${subject} is ${pisDisplay}, while inspected value is not set.`;
   }
   return `${subject} differs (${inspectedDisplay} vs ${pisDisplay}).`;
 };
@@ -599,6 +604,7 @@ const createNumericDifference = ({
   compareTolerance = COMPARE_TOLERANCE,
   compareDecimals = null,
   fixedDecimals = false,
+  referenceLabel = "PIS",
 } = {}) => {
   const comparison = compareNumericValues(inspectedValue, pisValue, {
     tolerance: compareTolerance,
@@ -636,13 +642,14 @@ const createNumericDifference = ({
     attribute,
     inspected: inspectedDisplay,
     pis: pisDisplay,
+    reference_label: referenceLabel,
     delta:
       comparison.hasInspected && comparison.hasPis
         ? formatSignedDeltaDisplay(comparison.delta, unit, decimals, {
             tolerance: compareTolerance,
             fixedDecimals,
           })
-        : (comparison.hasInspected ? "PIS not set" : "Inspected not set"),
+        : (comparison.hasInspected ? `${referenceLabel} not set` : "Inspected not set"),
     note: buildNumericDifferenceNote({
       segment,
       attribute,
@@ -650,6 +657,7 @@ const createNumericDifference = ({
       pisDisplay,
       hasInspected: comparison.hasInspected,
       hasPis: comparison.hasPis,
+      referenceLabel,
     }),
   };
 };
@@ -661,6 +669,7 @@ const createTextDifference = ({
   attribute,
   inspectedValue,
   pisValue,
+  referenceLabel = "PIS",
 } = {}) => {
   const comparison = compareTextValues(inspectedValue, pisValue);
   if (!comparison.mismatch) return null;
@@ -675,6 +684,7 @@ const createTextDifference = ({
     attribute,
     inspected: inspectedDisplay,
     pis: pisDisplay,
+    reference_label: referenceLabel,
     delta: "Mismatch",
     note: buildTextDifferenceNote({
       segment,
@@ -683,6 +693,7 @@ const createTextDifference = ({
       pisDisplay,
       hasInspected: comparison.hasInspected,
       hasPis: comparison.hasPis,
+      referenceLabel,
     }),
   };
 };
@@ -704,7 +715,11 @@ const getEntryLabel = (entry = {}, key = "", fallback = "Value") => {
   return formatRemarkLabel(key, fallback);
 };
 
-const buildItemSizeDifferences = (inspectedEntries = [], pisEntries = []) => {
+const buildItemSizeDifferences = (
+  inspectedEntries = [],
+  pisEntries = [],
+  { referenceLabel = "PIS" } = {},
+) => {
   const differences = [];
   const orderedKeys = buildUnionKeys(inspectedEntries, pisEntries, buildItemEntryKey);
   const inspectedMap = new Map(
@@ -729,6 +744,7 @@ const buildItemSizeDifferences = (inspectedEntries = [], pisEntries = []) => {
         pisValue: pisEntry?.[axis],
         unit: "cm",
         compareTolerance: SIZE_DIMENSION_DIFF_TOLERANCE,
+        referenceLabel,
       });
       if (difference) differences.push(difference);
     });
@@ -741,6 +757,7 @@ const buildItemSizeDifferences = (inspectedEntries = [], pisEntries = []) => {
       inspectedValue: inspectedEntry?.net_weight,
       pisValue: pisEntry?.net_weight,
       unit: "kg",
+      referenceLabel,
     });
     if (weightDifference) differences.push(weightDifference);
   });
@@ -753,6 +770,7 @@ const buildBoxSizeDifferences = ({
   pisEntries = [],
   inspectedMode = "",
   pisMode = "",
+  referenceLabel = "PIS",
 } = {}) => {
   const differences = [];
   const modeDifference = createTextDifference({
@@ -762,6 +780,7 @@ const buildBoxSizeDifferences = ({
     attribute: "Box Mode",
     inspectedValue: inspectedMode,
     pisValue: pisMode,
+    referenceLabel,
   });
   if (modeDifference) differences.push(modeDifference);
 
@@ -789,6 +808,7 @@ const buildBoxSizeDifferences = ({
         pisValue: pisEntry?.[axis],
         unit: "cm",
         compareTolerance: SIZE_DIMENSION_DIFF_TOLERANCE,
+        referenceLabel,
       });
       if (difference) differences.push(difference);
     });
@@ -824,6 +844,7 @@ const buildBoxSizeDifferences = ({
         inspectedValue: entryConfig.inspectedValue,
         pisValue: entryConfig.pisValue,
         unit: entryConfig.unit,
+        referenceLabel,
       });
       if (difference) differences.push(difference);
     });
@@ -832,20 +853,37 @@ const buildBoxSizeDifferences = ({
   return differences;
 };
 
+const sumEntryWeight = (entries = [], weightKey = "") =>
+  (Array.isArray(entries) ? entries : []).reduce(
+    (sum, entry) => sum + (toFiniteNumber(entry?.[weightKey]) || 0),
+    0,
+  );
+
 const buildOverallWeightDifferences = (item = {}) => {
   const differences = [];
   [
     { key: "total-net", attribute: "Total Net", unit: "kg", fieldKey: "total_net" },
     { key: "total-gross", attribute: "Total Gross", unit: "kg", fieldKey: "total_gross" },
   ].forEach((weightField) => {
+    const isNetWeight = weightField.fieldKey === "total_net";
+    const masterEntries = isNetWeight ? item?.master_item_sizes : item?.master_box_sizes;
+    const masterWeight = sumEntryWeight(
+      masterEntries,
+      isNetWeight ? "net_weight" : "gross_weight",
+    );
+    const hasMasterWeight = masterWeight > COMPARE_TOLERANCE;
+    const referenceLabel = hasMasterWeight ? "Master" : "PIS";
     const difference = createNumericDifference({
       key: `weight-${weightField.key}`,
       section: "Weight",
       segment: "Overall",
       attribute: weightField.attribute,
       inspectedValue: getWeightRecordValue(item?.inspected_weight, weightField.fieldKey),
-      pisValue: getWeightRecordValue(item?.pis_weight, weightField.fieldKey),
+      pisValue: hasMasterWeight
+        ? masterWeight
+        : getWeightRecordValue(item?.pis_weight, weightField.fieldKey),
       unit: weightField.unit,
+      referenceLabel,
     });
     if (difference) differences.push(difference);
   });
@@ -917,6 +955,9 @@ const buildFinalPisCheckRow = (item = {}) => {
     bottomLbh: item?.pis_item_bottom_LBH,
     weight: item?.pis_weight,
   });
+  const masterItemEntries = buildItemMeasurementEntries({
+    sizes: item?.master_item_sizes,
+  });
   const inspectedBoxEntries = buildBoxMeasurementEntries({
     sizes: item?.inspected_box_sizes,
     mode: item?.inspected_box_mode,
@@ -933,21 +974,36 @@ const buildFinalPisCheckRow = (item = {}) => {
     bottomLbh: item?.pis_box_bottom_LBH,
     weight: item?.pis_weight,
   });
+  const masterBoxEntries = buildBoxMeasurementEntries({
+    sizes: item?.master_box_sizes,
+    mode: item?.master_box_mode,
+  });
+  const hasMasterItemEntries = masterItemEntries.length > 0;
+  const hasMasterBoxEntries = masterBoxEntries.length > 0;
+  const referenceItemEntries = hasMasterItemEntries ? masterItemEntries : pisItemEntries;
+  const referenceBoxEntries = hasMasterBoxEntries ? masterBoxEntries : pisBoxEntries;
+  const itemReferenceLabel = hasMasterItemEntries ? "Master" : "PIS";
+  const boxReferenceLabel = hasMasterBoxEntries ? "Master" : "PIS";
 
   const resolvedInspectedBoxMode = formatBoxModeLabel(
     detectBoxPackagingMode(item?.inspected_box_mode, item?.inspected_box_sizes),
   );
   const resolvedPisBoxMode = formatBoxModeLabel(
-    detectBoxPackagingMode(item?.pis_box_mode, item?.pis_box_sizes),
+    hasMasterBoxEntries
+      ? detectBoxPackagingMode(item?.master_box_mode, item?.master_box_sizes)
+      : detectBoxPackagingMode(item?.pis_box_mode, item?.pis_box_sizes),
   );
 
   const differences = [
-    ...buildItemSizeDifferences(inspectedItemEntries, pisItemEntries),
+    ...buildItemSizeDifferences(inspectedItemEntries, referenceItemEntries, {
+      referenceLabel: itemReferenceLabel,
+    }),
     ...buildBoxSizeDifferences({
       inspectedEntries: inspectedBoxEntries,
-      pisEntries: pisBoxEntries,
+      pisEntries: referenceBoxEntries,
       inspectedMode: resolvedInspectedBoxMode,
       pisMode: resolvedPisBoxMode,
+      referenceLabel: boxReferenceLabel,
     }),
     ...buildOverallWeightDifferences(item),
     ...buildCbmDifferences(item),
@@ -977,9 +1033,15 @@ const buildFinalPisCheckRow = (item = {}) => {
     diff_fields: diffFields,
     measurements: {
       inspected_item: buildMeasurementDisplay(inspectedItemEntries, "net_weight"),
-      pis_item: buildMeasurementDisplay(pisItemEntries, "net_weight"),
+      pis_item: buildMeasurementDisplay(referenceItemEntries, "net_weight"),
       inspected_box: buildMeasurementDisplay(inspectedBoxEntries, "gross_weight"),
-      pis_box: buildMeasurementDisplay(pisBoxEntries, "gross_weight"),
+      pis_box: buildMeasurementDisplay(referenceBoxEntries, "gross_weight"),
+    },
+    references: {
+      item_label: itemReferenceLabel,
+      box_label: boxReferenceLabel,
+      has_master_item_sizes: hasMasterItemEntries,
+      has_master_box_sizes: hasMasterBoxEntries,
     },
     differences,
   };
