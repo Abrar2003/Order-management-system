@@ -418,6 +418,12 @@ const WorkflowTaskDetailModal = ({
                         <div className="small text-secondary mb-1">Department</div>
                         <div className="fw-semibold">{task.department?.name || "—"}</div>
                       </div>
+                      <div className="col-12">
+                        <div className="small text-secondary mb-1">Description</div>
+                        <div className="fw-semibold text-wrap">
+                          {normalizeText(task.description) || "—"}
+                        </div>
+                      </div>
                       <div className="col-md-4">
                         <div className="small text-secondary mb-1">Assigned Users</div>
                         <div className="fw-semibold">
