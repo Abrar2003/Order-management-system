@@ -7,6 +7,16 @@ import {
 } from "../utils/productTypeTemplates";
 
 const normalizeText = (value) => String(value ?? "").trim();
+const NUMBER_LIST_ENTRY_LIMIT = 4;
+
+const getNumberListMaxEntries = (field = {}) => {
+  const parsed = Number.parseInt(
+    String(field?.validation?.max_entries ?? NUMBER_LIST_ENTRY_LIMIT).trim(),
+    10,
+  );
+  if (!Number.isFinite(parsed) || parsed < 1) return NUMBER_LIST_ENTRY_LIMIT;
+  return Math.min(parsed, NUMBER_LIST_ENTRY_LIMIT);
+};
 
 const getSizeErrorMessage = (errors = {}, fieldName = "") =>
   normalizeText(errors?.[fieldName]);
@@ -224,6 +234,80 @@ const DynamicField = ({
             {field?.required ? " *" : ""}
           </label>
         </div>
+        {field?.description && <div className="form-text">{field.description}</div>}
+        {error && <div className="invalid-feedback d-block">{error}</div>}
+      </div>
+    );
+  }
+
+  if (inputType === "number_list") {
+    const maxEntries = getNumberListMaxEntries(field);
+    const values = (Array.isArray(value) ? value : []).slice(0, maxEntries);
+    const selectedCount = values.length > 0 ? String(values.length) : "";
+
+    return (
+      <div className="col-12">
+        <label className="form-label">
+          {field?.label}
+          {field?.required ? " *" : ""}
+        </label>
+        <div className="row g-3">
+          <div className="col-md-4">
+            <select
+              className={`form-select ${error ? "is-invalid" : ""}`}
+              value={selectedCount}
+              disabled={disabled}
+              onChange={(event) => {
+                const nextCount = Number.parseInt(event.target.value, 10);
+                if (!Number.isFinite(nextCount) || nextCount < 1) {
+                  onChange?.(fieldKey, []);
+                  return;
+                }
+                onChange?.(
+                  fieldKey,
+                  Array.from({ length: Math.min(nextCount, maxEntries) }, (_, index) =>
+                    values[index] ?? "",
+                  ),
+                );
+              }}
+            >
+              <option value="">Select count</option>
+              {Array.from({ length: maxEntries }, (_, index) => String(index + 1)).map(
+                (option) => (
+                  <option key={`${fieldKey}-count-${option}`} value={option}>
+                    {option}
+                  </option>
+                ),
+              )}
+            </select>
+          </div>
+
+          {values.map((entry, index) => (
+            <div className="col-md-4" key={`${fieldKey}-distance-${index}`}>
+              <input
+                type="number"
+                min="0"
+                step="0.001"
+                className={`form-control ${error ? "is-invalid" : ""}`}
+                value={entry ?? ""}
+                disabled={disabled}
+                placeholder={`Distance ${index + 1}`}
+                onChange={(event) => {
+                  const nextValue = event.target.value;
+                  if (nextValue !== "") {
+                    const parsedValue = Number(nextValue);
+                    if (!Number.isFinite(parsedValue) || parsedValue < 0) return;
+                  }
+                  const nextValues = values.map((currentValue, innerIndex) =>
+                    innerIndex === index ? nextValue : currentValue,
+                  );
+                  onChange?.(fieldKey, nextValues);
+                }}
+              />
+            </div>
+          ))}
+        </div>
+        {field?.unit && <div className="form-text">Unit: {field.unit}</div>}
         {field?.description && <div className="form-text">{field.description}</div>}
         {error && <div className="invalid-feedback d-block">{error}</div>}
       </div>

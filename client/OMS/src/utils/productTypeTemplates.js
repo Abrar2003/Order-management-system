@@ -1,5 +1,7 @@
 import { BOX_ENTRY_TYPES, BOX_PACKAGING_MODES } from "./measuredSizeForm";
 
+const NUMBER_LIST_ENTRY_LIMIT = 4;
+
 export const PRODUCT_TYPE_TEMPLATE_STATUSES = Object.freeze([
   "draft",
   "active",
@@ -11,6 +13,7 @@ export const PRODUCT_TYPE_TEMPLATE_INPUT_TYPES = Object.freeze([
   "text",
   "textarea",
   "number",
+  "number_list",
   "boolean",
   "select",
   "multiselect",
@@ -99,6 +102,8 @@ export const getDefaultValueTypeForInputType = (inputType = "text") => {
   switch (normalizeTemplateKey(inputType)) {
     case "number":
       return "number";
+    case "number_list":
+      return "array";
     case "boolean":
       return "boolean";
     case "date":
@@ -134,6 +139,11 @@ const toStoredSizeNumberString = (value) => {
   return String(parsed).replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
 };
 
+const toStoredNumberListValues = (values = []) =>
+  (Array.isArray(values) ? values : [])
+    .map((value) => toStoredSizeNumberString(value))
+    .filter((value) => value !== "");
+
 const extractProductSpecFieldValue = (entry = {}) => {
   const valueType = normalizeTemplateKey(entry?.value_type);
   switch (valueType) {
@@ -146,6 +156,9 @@ const extractProductSpecFieldValue = (entry = {}) => {
         ? new Date(entry.value_date).toISOString().slice(0, 10)
         : "";
     case "array":
+      if (normalizeTemplateKey(entry?.input_type) === "number_list") {
+        return toStoredNumberListValues(entry?.value_array);
+      }
       return Array.isArray(entry?.value_array) ? entry.value_array : [];
     case "object":
       return entry?.raw_value ?? null;
@@ -275,6 +288,15 @@ const toNonNegativeNumber = (value, label) => {
     throw new Error(`${label} must be a non-negative number`);
   }
   return parsed;
+};
+
+const getNumberListMaxEntries = (field = {}) => {
+  const parsed = Number.parseInt(
+    String(field?.validation?.max_entries ?? NUMBER_LIST_ENTRY_LIMIT).trim(),
+    10,
+  );
+  if (!Number.isFinite(parsed) || parsed < 1) return NUMBER_LIST_ENTRY_LIMIT;
+  return Math.min(parsed, NUMBER_LIST_ENTRY_LIMIT);
 };
 
 const validateSizeEntry = (entry = {}, label = "", { requireCountField = "" } = {}) => {
@@ -424,6 +446,34 @@ export const validateProductTypeFormState = ({
     }
 
     const currentValue = formState?.fieldValues?.[fieldKey];
+    if (inputType === "number_list") {
+      const values = Array.isArray(currentValue) ? currentValue : [];
+      const hasAnyValue = values.some((entry) => !isBlankValue(entry));
+      if (field?.required && !hasAnyValue) {
+        errors.fields[fieldKey] = `${field?.label || field?.key} is required`;
+        return;
+      }
+      if (!hasAnyValue) return;
+
+      const maxEntries = getNumberListMaxEntries(field);
+      if (values.length > maxEntries) {
+        errors.fields[fieldKey] =
+          `${field?.label || field?.key} can have at most ${maxEntries} values`;
+        return;
+      }
+
+      const invalidIndex = values.findIndex((entry) => {
+        if (isBlankValue(entry)) return true;
+        const parsed = Number(entry);
+        return !Number.isFinite(parsed) || parsed < 0;
+      });
+      if (invalidIndex >= 0) {
+        errors.fields[fieldKey] =
+          `${field?.label || field?.key} distance ${invalidIndex + 1} must be a non-negative number`;
+      }
+      return;
+    }
+
     if (field?.required) {
       const missingBoolean = valueType === "boolean" && currentValue === null;
       if (missingBoolean || isBlankValue(currentValue)) {
@@ -519,6 +569,16 @@ const buildFieldValuePayload = (field = {}, value) => {
   }
 
   if (valueType === "array") {
+    if (inputType === "number_list") {
+      basePayload.value_array = (Array.isArray(value) ? value : [])
+        .filter((entry) => !isBlankValue(entry))
+        .map((entry) => Number(entry))
+        .filter((entry) => Number.isFinite(entry) && entry >= 0)
+        .slice(0, getNumberListMaxEntries(field));
+      basePayload.raw_value = basePayload.value_array;
+      return basePayload;
+    }
+
     basePayload.value_array = Array.isArray(value) ? value : [];
     return basePayload;
   }

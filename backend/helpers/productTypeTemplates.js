@@ -16,6 +16,7 @@ const PRODUCT_TYPE_TEMPLATE_INPUT_TYPES = Object.freeze([
   "text",
   "textarea",
   "number",
+  "number_list",
   "boolean",
   "select",
   "multiselect",
@@ -49,6 +50,7 @@ const DEFAULT_BOOLEAN_FALSE_VALUES = Object.freeze([
   "n",
   "off",
 ]);
+const NUMBER_LIST_ENTRY_LIMIT = 4;
 
 const normalizeText = (value) => String(value ?? "").trim();
 
@@ -118,6 +120,8 @@ const getDefaultValueTypeForInputType = (inputType = "text") => {
   switch (inputType) {
     case "number":
       return "number";
+    case "number_list":
+      return "array";
     case "boolean":
       return "boolean";
     case "date":
@@ -274,6 +278,14 @@ const prepareTemplatePayload = (payload = {}) => {
         ),
         is_active: toBooleanFlag(field?.is_active, true),
       };
+
+      if (inputType === "number_list") {
+        normalizedField.value_type = "array";
+        normalizedField.validation = {
+          ...normalizedField.validation,
+          max_entries: getNumberListMaxEntries(normalizedField),
+        };
+      }
 
       if (inputType === "item_size" || inputType === "box_size") {
         normalizedField.value_type = "array";
@@ -474,6 +486,44 @@ const normalizeValueArray = (value, field = {}) => {
   return tokens.map((entry) => normalizeText(entry)).filter(Boolean);
 };
 
+const getNumberListMaxEntries = (field = {}) => {
+  const parsed = Number.parseInt(
+    String(field?.validation?.max_entries ?? NUMBER_LIST_ENTRY_LIMIT).trim(),
+    10,
+  );
+  if (!Number.isFinite(parsed) || parsed < 1) return NUMBER_LIST_ENTRY_LIMIT;
+  return Math.min(parsed, NUMBER_LIST_ENTRY_LIMIT);
+};
+
+const normalizeNumberListArray = (value, field = {}) => {
+  const rawValues = Array.isArray(value)
+    ? value
+    : normalizeValueArray(value, {
+        validation: {
+          separators: [",", ";", "\n"],
+        },
+      });
+  const maxEntries = getNumberListMaxEntries(field);
+  const scopedValues = rawValues.filter((entry) => !isBlankValue(entry));
+  if (scopedValues.length > maxEntries) {
+    throw new Error(
+      `${field?.label || field?.key || "Number list"} can have at most ${maxEntries} values`,
+    );
+  }
+
+  return scopedValues.map((entry, index) => {
+    const parsed = Number(
+      typeof entry === "string" ? entry.replace(/,/g, "").trim() : entry,
+    );
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      throw new Error(
+        `${field?.label || field?.key || "Number list"} distance ${index + 1} must be a non-negative number`,
+      );
+    }
+    return parsed;
+  });
+};
+
 const buildProductSpecFieldValue = (
   field = {},
   rawValue,
@@ -532,7 +582,10 @@ const buildProductSpecFieldValue = (
       );
       break;
     case "array":
-      normalizedField.value_array = normalizeValueArray(effectiveRawValue, field);
+      normalizedField.value_array =
+        normalizedField.input_type === "number_list"
+          ? normalizeNumberListArray(effectiveRawValue, field)
+          : normalizeValueArray(effectiveRawValue, field);
       break;
     case "object":
       break;
@@ -720,6 +773,7 @@ const buildProductTypeSnapshot = (template = {}) => ({
 const normalizeProductSpecFieldEntry = (entry = {}) => {
   const valueType = normalizeTemplateKey(entry?.value_type)
     || getDefaultValueTypeForInputType(entry?.input_type);
+  const inputType = normalizeTemplateKey(entry?.input_type || "text");
   if (!PRODUCT_TYPE_TEMPLATE_VALUE_TYPES.includes(valueType)) {
     throw new Error(`Invalid product spec value_type for ${entry?.key || "field"}`);
   }
@@ -754,7 +808,7 @@ const normalizeProductSpecFieldEntry = (entry = {}) => {
     label: normalizeText(entry?.label),
     group_key: normalizeTemplateKey(entry?.group_key),
     group_label: normalizeText(entry?.group_label),
-    input_type: normalizeTemplateKey(entry?.input_type || "text"),
+    input_type: inputType,
     value_type: valueType,
     unit: normalizeText(entry?.unit),
     value_text: normalizeText(entry?.value_text),
@@ -766,7 +820,12 @@ const normalizeProductSpecFieldEntry = (entry = {}) => {
         : toParsedDate(entry.value_date, `${entry?.label || entry?.key || "Field"} date`, {
             allowBlank: true,
           }),
-    value_array: Array.isArray(entry?.value_array) ? entry.value_array : [],
+    value_array:
+      valueType === "array" && inputType === "number_list"
+        ? normalizeNumberListArray(entry?.value_array, entry)
+        : Array.isArray(entry?.value_array)
+        ? entry.value_array
+        : [],
     raw_value:
       entry?.raw_value === undefined
         ? null

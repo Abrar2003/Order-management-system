@@ -73,6 +73,17 @@ const buildSelectField = (config = {}) =>
     value_type: "string",
   });
 
+const buildNumberListField = (config = {}) =>
+  buildField({
+    ...config,
+    input_type: "number_list",
+    value_type: "array",
+    validation: {
+      max_entries: 4,
+      ...(config.validation || {}),
+    },
+  });
+
 const buildItemSizeField = (config = {}) =>
   buildField({
     ...config,
@@ -337,6 +348,12 @@ const buildTableTemplate = () =>
             source_headers: ["Backing under table top Materia"],
           }),
           buildNumberField({
+            key: "table_top_thickness",
+            label: "Table Top Thickness",
+            order: 45,
+            source_headers: ["Table Top Thickness", "Table Top Thikness"],
+          }),
+          buildNumberField({
             key: "number_of_legs",
             label: "Number Of Legs",
             order: 50,
@@ -353,6 +370,17 @@ const buildTableTemplate = () =>
             label: "Shape Of Support Between Legs",
             order: 70,
             source_headers: ["Shape of support between legs"],
+          }),
+          buildNumberListField({
+            key: "distances_between_legs",
+            label: "Distances Between Legs",
+            order: 75,
+            unit: "cm",
+            source_headers: [
+              "Distances Between Legs",
+              "Distance Between Legs",
+              "Distance Between Table Legs",
+            ],
           }),
           buildField({
             key: "kd_or_fixed",
