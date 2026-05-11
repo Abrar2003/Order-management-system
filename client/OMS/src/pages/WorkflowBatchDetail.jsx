@@ -43,7 +43,6 @@ const WorkflowBatchDetail = () => {
   const canViewWorkflow = hasPermission("workflow", "view");
   const canEditWorkflow = isManagerOrAdmin && hasPermission("workflow", "edit");
   const canAssignWorkflow = isManagerOrAdmin && hasPermission("workflow", "assign");
-  const canApproveWorkflow = isAdmin && hasPermission("workflow", "approve");
   const canDeleteWorkflow = isAdmin && hasPermission("workflow", "delete");
 
   const [batch, setBatch] = useState(null);
@@ -537,7 +536,6 @@ const WorkflowBatchDetail = () => {
           availableUsers={users}
           canManageWorkflow={canEditWorkflow}
           canAssignWorkflow={canAssignWorkflow}
-          canApproveWorkflow={canApproveWorkflow}
           canDeleteWorkflow={canDeleteWorkflow}
           onClose={() => setSelectedTaskId("")}
           onUpdated={() => setRefreshTick((prev) => prev + 1)}

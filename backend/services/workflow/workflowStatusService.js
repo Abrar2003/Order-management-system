@@ -139,9 +139,21 @@ const buildTaskVisibilityMatch = (user = {}) => {
     return { is_deleted: false };
   }
 
+  const userId = user?._id || user?.id || null;
+  if (!userId) {
+    return {
+      is_deleted: false,
+      $and: [{ _id: { $exists: false } }],
+    };
+  }
+
   return {
     is_deleted: false,
-    "assigned_to.user": user?._id || null,
+    $or: [
+      { "assigned_to.user": userId },
+      { "assigned_by.user": userId },
+      { "created_by.user": userId },
+    ],
   };
 };
 
@@ -858,11 +870,11 @@ const assertTransitionPermission = ({ task, actor, toStatus }) => {
   }
 
   if (["uploaded"].includes(toStatus) && !canUploadWorkflowTask(actor, task)) {
-    throw new Error("Only the assignee or an admin can mark this task uploaded");
+    throw new Error("Only an assignee or the task creator can mark this task uploaded");
   }
 
   if (["approved"].includes(toStatus) && !canApproveWorkflowTask(actor, task)) {
-    throw new Error("Only admins can approve this task");
+    throw new Error("Only the user who assigned this task can approve it");
   }
 
   if (toStatus === "__rework__") {

@@ -63,7 +63,6 @@ const WorkflowTaskDetailModal = ({
   departments = [],
   canManageWorkflow = false,
   canAssignWorkflow = false,
-  canApproveWorkflow = false,
   canEditTaskDetails = false,
   canDeleteWorkflow = false,
   onClose,
@@ -137,12 +136,14 @@ const WorkflowTaskDetailModal = ({
       }),
     [assignedUsers, currentUserId],
   );
+  const isTaskAssigner = String(getUserId(task?.assigned_by)) === String(currentUserId);
+  const isTaskCreator = String(getUserId(task?.created_by)) === String(currentUserId);
 
   const canStart = isAssignedUser && task?.status === "assigned";
   const canComplete = isAssignedUser && task?.status === "started";
-  const canApprove = canApproveWorkflow && !isAssignedUser && task?.status === "complete";
+  const canApprove = isTaskAssigner && task?.status === "complete";
   const canUpload =
-    (isAssignedUser || canManageWorkflow || canApproveWorkflow) && task?.status === "approved";
+    (isAssignedUser || isTaskCreator) && task?.status === "approved";
   const canRework =
     canManageWorkflow && ["complete", "approved", "uploaded"].includes(task?.status);
   const canAssign = canAssignWorkflow && task?.status !== "uploaded";

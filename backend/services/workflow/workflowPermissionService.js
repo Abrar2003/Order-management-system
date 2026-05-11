@@ -1,7 +1,8 @@
 const { isAdminLikeRole, isManagerLikeRole } = require("../../helpers/userRole");
 const { normalizeRoleKey } = require("../../helpers/permissions");
 
-const normalizeId = (value) => String(value || "").trim();
+const normalizeId = (value) =>
+  String(value?._id || value?.id || value || "").trim();
 
 const isAdmin = (user = {}) =>
   isAdminLikeRole(normalizeRoleKey(user?.role));
@@ -22,17 +23,33 @@ const isTaskAssignedToUser = (task = {}, userId) => {
   );
 };
 
+const isTaskAssignedByUser = (task = {}, userId) => {
+  const normalizedUserId = normalizeId(userId);
+  if (!normalizedUserId) return false;
+  return normalizeId(task?.assigned_by?.user) === normalizedUserId;
+};
+
+const isTaskCreatedByUser = (task = {}, userId) => {
+  const normalizedUserId = normalizeId(userId);
+  if (!normalizedUserId) return false;
+  return normalizeId(task?.created_by?.user) === normalizedUserId;
+};
+
 const canReadWorkflowTask = (user = {}, task = {}) =>
-  isAdmin(user) || isTaskAssignedToUser(task, user?._id);
+  isAdmin(user) ||
+  isTaskAssignedToUser(task, user?._id || user?.id) ||
+  isTaskAssignedByUser(task, user?._id || user?.id) ||
+  isTaskCreatedByUser(task, user?._id || user?.id);
 
 const canCompleteWorkflowTask = (user = {}, task = {}) =>
-  isTaskAssignedToUser(task, user?._id);
+  isTaskAssignedToUser(task, user?._id || user?.id);
 
 const canApproveWorkflowTask = (user = {}, task = {}) =>
-  isAdmin(user) && !isTaskAssignedToUser(task, user?._id);
+  isTaskAssignedByUser(task, user?._id || user?.id);
 
 const canUploadWorkflowTask = (user = {}, task = {}) =>
-  isAdmin(user) || isTaskAssignedToUser(task, user?._id);
+  isTaskAssignedToUser(task, user?._id || user?.id) ||
+  isTaskCreatedByUser(task, user?._id || user?.id);
 
 module.exports = {
   isAdmin,

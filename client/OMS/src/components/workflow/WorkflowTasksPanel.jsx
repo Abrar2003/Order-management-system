@@ -86,26 +86,27 @@ const getTaskActionState = ({
   task = {},
   currentUserId = "",
   canManageWorkflow = false,
-  canApproveWorkflow = false,
 } = {}) => {
   const assignedToCurrentUser = Array.isArray(task?.assigned_to)
     ? task.assigned_to.some(
         (entry) => String(getTaskUserId(entry)) === String(currentUserId),
       )
     : false;
+  const assignedByCurrentUser =
+    String(getTaskUserId(task?.assigned_by)) === String(currentUserId);
+  const createdByCurrentUser =
+    String(getTaskUserId(task?.created_by)) === String(currentUserId);
 
   return {
     assignedToCurrentUser,
+    assignedByCurrentUser,
+    createdByCurrentUser,
     canStart: assignedToCurrentUser && task?.status === "assigned",
     canComplete: assignedToCurrentUser && task?.status === "started",
     canUpload:
-      (assignedToCurrentUser || canManageWorkflow || canApproveWorkflow)
-      && task?.status === "approved",
+      (assignedToCurrentUser || createdByCurrentUser) && task?.status === "approved",
     canRework: canManageWorkflow && ["complete", "approved", "uploaded"].includes(task?.status),
-    canApprove:
-      canApproveWorkflow
-      && !assignedToCurrentUser
-      && task?.status === "complete",
+    canApprove: assignedByCurrentUser && task?.status === "complete",
   };
 };
 
@@ -122,7 +123,6 @@ const WorkflowTasksPanel = ({
   const canViewWorkflow = hasPermission("workflow", "view");
   const canCreateWorkflow = !mineOnly && isManagerOrAdmin && hasPermission("workflow", "create");
   const canAssignWorkflow = isManagerOrAdmin && hasPermission("workflow", "assign");
-  const canApproveWorkflow = isAdmin && hasPermission("workflow", "approve");
   const canManageWorkflow = isManagerOrAdmin && hasPermission("workflow", "edit");
   const canDeleteWorkflow = isAdmin && hasPermission("workflow", "delete");
   const canFilterByAssignee = isAdmin && canViewWorkflow;
@@ -408,7 +408,6 @@ const WorkflowTasksPanel = ({
       task,
       currentUserId,
       canManageWorkflow,
-      canApproveWorkflow,
     });
 
     if (stepKey === "started" && actions.canStart) {
@@ -741,7 +740,6 @@ const WorkflowTasksPanel = ({
                         task,
                         currentUserId,
                         canManageWorkflow,
-                        canApproveWorkflow,
                       });
                       const isBusy = actionTaskId === task._id;
                       const isCompletePromptOpen =
@@ -994,7 +992,6 @@ const WorkflowTasksPanel = ({
           departments={departments}
           canManageWorkflow={canManageWorkflow}
           canAssignWorkflow={canAssignWorkflow}
-          canApproveWorkflow={canApproveWorkflow}
           canEditTaskDetails={isAdmin && canManageWorkflow}
           canDeleteWorkflow={canDeleteWorkflow}
           onClose={() => setSelectedTaskId("")}

@@ -172,8 +172,7 @@ router.patch(
 router.patch(
   "/tasks/:id/approve",
   auth,
-  authorize(...WORKFLOW_ADMIN_ROLES),
-  requirePermission("workflow", "approve"),
+  requirePermission("workflow", "view"),
   approveTask,
 );
 
