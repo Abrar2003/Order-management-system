@@ -19,6 +19,7 @@ import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import {
+  BOX_CARTON_REMARK_OPTIONS,
   BOX_ENTRY_TYPES,
   BOX_PACKAGING_MODES,
   BOX_SIZE_REMARK_OPTIONS,
@@ -54,11 +55,6 @@ const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
   { value: "item2", label: "Item 2" },
   { value: "item3", label: "Item 3" },
 ]);
-const BOX_SIZE_REMARK_VALUES = Object.freeze(
-  BOX_SIZE_REMARK_OPTIONS.map((option) =>
-    String(option?.value || "").trim().toLowerCase(),
-  ).filter(Boolean),
-);
 const STATUS_OPTIONS = Object.freeze([
   { value: DEFAULT_FILTER, label: "All Statuses" },
   { value: "not_set", label: "Not Set" },
@@ -398,6 +394,8 @@ const ProductDatabaseMeasuredSizeSection = ({
   const isCartonMode = mode === BOX_PACKAGING_MODES.CARTON;
   const safeCount = isCartonMode ? 2 : normalizeSizeCount(countValue, 1);
   const entryColumnClass = safeCount > 1 ? "col-md-2" : "col-md-3";
+  const getCartonRemark = (index) =>
+    index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
 
   return (
     <>
@@ -470,6 +468,15 @@ const ProductDatabaseMeasuredSizeSection = ({
         <div className="d-grid gap-2">
           {entries.slice(0, safeCount).map((entry, index) => (
             <div key={`${entriesKey}-${index}`} className="border rounded p-3">
+              {(() => {
+                const displayedRemarkOptions = isCartonMode
+                  ? BOX_CARTON_REMARK_OPTIONS
+                  : remarkOptions;
+                const displayedRemark = isCartonMode
+                  ? getCartonRemark(index)
+                  : entry.remark;
+                return (
+                  <>
               <div className="small text-secondary mb-2">
                 {isCartonMode
                   ? index === 0
@@ -477,7 +484,7 @@ const ProductDatabaseMeasuredSizeSection = ({
                     : "Master carton"
                   : safeCount === 1
                   ? "Single entry"
-                  : `Entry ${index + 1}${entry.remark ? ` | ${getRemarkLabel(remarkOptions, entry.remark)}` : ""}`}
+                  : `Entry ${index + 1}${displayedRemark ? ` | ${getRemarkLabel(displayedRemarkOptions, displayedRemark)}` : ""}`}
               </div>
 
               <div className="row g-2">
@@ -486,7 +493,7 @@ const ProductDatabaseMeasuredSizeSection = ({
                     <label className="form-label small text-secondary">Remark</label>
                     <select
                       className="form-select"
-                      value={entry.remark}
+                      value={displayedRemark}
                       onChange={(event) =>
                         onEntryChange?.(
                           entriesKey,
@@ -495,10 +502,10 @@ const ProductDatabaseMeasuredSizeSection = ({
                           event.target.value,
                         )
                       }
-                      disabled={disabled}
+                      disabled={disabled || isCartonMode}
                     >
                       <option value="">Select Remark</option>
-                      {remarkOptions.map((option) => (
+                      {displayedRemarkOptions.map((option) => (
                         <option key={option.value} value={option.value}>
                           {option.label}
                         </option>
@@ -608,6 +615,9 @@ const ProductDatabaseMeasuredSizeSection = ({
                   </div>
                 )}
               </div>
+                  </>
+                );
+              })()}
             </div>
           ))}
         </div>
@@ -691,14 +701,8 @@ const buildExistingProductDatabaseSizePayload = (item = {}) => ({
 });
 
 const normalizeMeasuredKey = (value) => normalizeTextValue(value).toLowerCase();
-const getDefaultBoxRemarkForIndex = (index = 0) =>
-  BOX_SIZE_REMARK_VALUES[index] || "";
-const normalizeAllowedBoxRemark = (value = "", index = 0) => {
-  const normalized = normalizeMeasuredKey(value);
-  return BOX_SIZE_REMARK_VALUES.includes(normalized)
-    ? normalized
-    : getDefaultBoxRemarkForIndex(index);
-};
+const getCartonRemarkForIndex = (index = 0) =>
+  index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
 
 const getPositivePayloadNumber = (value) => {
   const normalized = normalizeTextValue(value);
@@ -752,7 +756,7 @@ const toMeasuredSizeEntryFormValue = (
     }),
     remark:
       resolvedMode === BOX_PACKAGING_MODES.CARTON
-        ? normalizeAllowedBoxRemark(normalizedRemark, cartonRemarkIndex)
+        ? getCartonRemarkForIndex(cartonRemarkIndex)
         : normalizedRemark,
     box_type: resolvedBoxType,
     L: toDimensionInputValue(entry?.L),
@@ -843,7 +847,7 @@ const buildMeasuredSizeEntriesPayload = ({
     if (isBox) {
       if (isCartonMode) {
         const boxType = index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
-        payload.remark = normalizeAllowedBoxRemark(entry?.remark, index);
+        payload.remark = getCartonRemarkForIndex(index);
         payload.box_type = boxType;
         if (boxType === BOX_ENTRY_TYPES.INNER) {
           addPositivePayloadNumber(payload, "item_count_in_inner", entry?.item_count_in_inner);

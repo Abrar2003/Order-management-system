@@ -13,6 +13,7 @@ import {
   toISODateString,
 } from "../utils/date";
 import {
+  BOX_CARTON_REMARK_OPTIONS as BOX_CARTON_REMARK_OPTIONS_UTIL,
   BOX_ENTRY_TYPES as BOX_ENTRY_TYPES_UTIL,
   BOX_PACKAGING_MODES as BOX_PACKAGING_MODES_UTIL,
   BOX_SIZE_REMARK_OPTIONS as BOX_SIZE_REMARK_OPTIONS_UTIL,
@@ -221,6 +222,7 @@ const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
 const BOX_PACKAGING_MODES = BOX_PACKAGING_MODES_UTIL;
 const BOX_ENTRY_TYPES = BOX_ENTRY_TYPES_UTIL;
 const BOX_SIZE_REMARK_OPTIONS = BOX_SIZE_REMARK_OPTIONS_UTIL;
+const BOX_CARTON_REMARK_OPTIONS = BOX_CARTON_REMARK_OPTIONS_UTIL;
 const createEmptyMeasuredSizeEntry = (options = {}) =>
   createEmptyMeasuredSizeEntryUtil(options);
 const normalizeSizeCount = (value, fallback = 1) => {
@@ -2329,6 +2331,8 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
     const isCartonMode = mode === BOX_PACKAGING_MODES.CARTON;
     const safeCount = isCartonMode ? 2 : normalizeSizeCount(countValue, 1);
     const entryColumnClass = safeCount > 1 ? "col-md-2" : "col-md-3";
+    const getCartonRemark = (index) =>
+      index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
 
     return (
       <>
@@ -2399,6 +2403,15 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
           <div className="d-grid gap-2">
             {entries.slice(0, safeCount).map((entry, index) => (
               <div key={`${entriesKey}-${index}`} className="border rounded p-3">
+                {(() => {
+                  const displayedRemarkOptions = isCartonMode
+                    ? BOX_CARTON_REMARK_OPTIONS
+                    : remarkOptions;
+                  const displayedRemark = isCartonMode
+                    ? getCartonRemark(index)
+                    : entry.remark;
+                  return (
+                    <>
                 <div className="small text-secondary mb-2">
                   {isCartonMode
                     ? index === 0
@@ -2406,7 +2419,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                       : "Master carton"
                     : safeCount === 1
                     ? "Single entry"
-                    : `Entry ${index + 1}${entry.remark ? ` | ${getRemarkLabel(remarkOptions, entry.remark)}` : ""}`}
+                    : `Entry ${index + 1}${displayedRemark ? ` | ${getRemarkLabel(displayedRemarkOptions, displayedRemark)}` : ""}`}
                 </div>
                 <div className="row g-2">
                   {safeCount > 1 && (
@@ -2414,7 +2427,7 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                       <label className="form-label small text-secondary">Remark</label>
                       <select
                         className="form-select"
-                        value={entry.remark}
+                        value={displayedRemark}
                         onChange={(event) =>
                           handleSizeEntryChange(
                             entriesKey,
@@ -2423,10 +2436,10 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                             event.target.value,
                           )
                         }
-                        disabled={locked}
+                        disabled={locked || isCartonMode}
                       >
                         <option value="">Select Remark</option>
-                        {remarkOptions.map((option) => (
+                        {displayedRemarkOptions.map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label}
                           </option>
@@ -2533,6 +2546,9 @@ const UpdateQcModal = ({ qc, onClose, onUpdated, isAdmin = false }) => {
                     </div>
                   )}
                 </div>
+                    </>
+                  );
+                })()}
               </div>
             ))}
           </div>

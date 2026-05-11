@@ -4596,10 +4596,20 @@ exports.updateQC = async (req, res) => {
         const normalizedRemark = normalizeText(
           entry?.remark || entry?.type || "",
         ).toLowerCase();
+        const isCartonBoxEntry =
+          fieldName === "inspected_box_sizes" &&
+          resolvedBoxMode === BOX_PACKAGING_MODES.CARTON;
+        const cartonRemark = isCartonBoxEntry
+          ? entryIndex === 0 ? "inner" : "master"
+          : "";
         const nextRemark =
-          nonEmptyEntries.length === 1 ? "" : normalizedRemark;
+          nonEmptyEntries.length === 1
+            ? ""
+            : isCartonBoxEntry
+              ? cartonRemark
+              : normalizedRemark;
 
-        if (nonEmptyEntries.length > 1) {
+        if (nonEmptyEntries.length > 1 && !isCartonBoxEntry) {
           if (!nextRemark) {
             throw new Error(
               `${fieldName}[${entryIndex}] remark is required when multiple entries are provided`,
@@ -4634,8 +4644,8 @@ exports.updateQC = async (req, res) => {
 
         if (fieldName === "inspected_box_sizes") {
           if (resolvedBoxMode === BOX_PACKAGING_MODES.CARTON) {
-            const boxType = entryIndex === 0 ? "inner" : "master";
-            parsedEntry.remark = nextRemark;
+            const boxType = cartonRemark;
+            parsedEntry.remark = boxType;
             parsedEntry.box_type = boxType;
             parsedEntry.item_count_in_inner =
               boxType === "inner"

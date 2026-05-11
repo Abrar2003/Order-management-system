@@ -1,4 +1,6 @@
 import {
+  BOX_CARTON_REMARK_OPTIONS,
+  BOX_ENTRY_TYPES,
   BOX_PACKAGING_MODES,
   SIZE_ENTRY_LIMIT,
   getRemarkLabel,
@@ -27,6 +29,8 @@ const MeasuredSizeSection = ({
   const isCartonMode = mode === BOX_PACKAGING_MODES.CARTON;
   const safeCount = isCartonMode ? 2 : normalizeSizeCount(countValue, 1);
   const entryColumnClass = safeCount > 1 ? "col-md-2" : "col-md-3";
+  const getCartonRemark = (index) =>
+    index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
 
   return (
     <>
@@ -84,6 +88,15 @@ const MeasuredSizeSection = ({
         <div className="d-grid gap-2">
           {entries.slice(0, safeCount).map((entry, index) => (
             <div key={`${sectionKey}-${index}`} className="border rounded p-3">
+              {(() => {
+                const displayedRemarkOptions = isCartonMode
+                  ? BOX_CARTON_REMARK_OPTIONS
+                  : remarkOptions;
+                const displayedRemark = isCartonMode
+                  ? getCartonRemark(index)
+                  : entry.remark;
+                return (
+                  <>
               <div className="small text-secondary mb-2">
                 {isCartonMode
                   ? index === 0
@@ -91,7 +104,7 @@ const MeasuredSizeSection = ({
                     : "Master carton"
                   : safeCount === 1
                   ? "Single entry"
-                  : `Entry ${index + 1}${entry.remark ? ` | ${getRemarkLabel(remarkOptions, entry.remark)}` : ""}`}
+                  : `Entry ${index + 1}${displayedRemark ? ` | ${getRemarkLabel(displayedRemarkOptions, displayedRemark)}` : ""}`}
               </div>
               <div className="row g-2">
                 {safeCount > 1 && (
@@ -99,12 +112,12 @@ const MeasuredSizeSection = ({
                     <label className="form-label small text-secondary">Remark</label>
                     <select
                       className="form-select"
-                      value={entry.remark}
+                      value={displayedRemark}
                       onChange={(event) => onEntryChange?.(index, "remark", event.target.value)}
-                      disabled={disabled}
+                      disabled={disabled || isCartonMode}
                     >
                       <option value="">Select Remark</option>
-                      {remarkOptions.map((option) => (
+                      {displayedRemarkOptions.map((option) => (
                         <option key={option.value} value={option.value}>
                           {option.label}
                         </option>
@@ -193,6 +206,9 @@ const MeasuredSizeSection = ({
                   </div>
                 )}
               </div>
+                  </>
+                );
+              })()}
             </div>
           ))}
         </div>

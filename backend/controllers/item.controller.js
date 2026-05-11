@@ -435,8 +435,13 @@ const parseSizeEntriesPayload = (
       throw new Error(`${entryLabel} must have positive L, B, and H values`);
     }
 
-    const normalizedRemark = normalizeTextField(entry?.remark || "").toLowerCase();
-    if (entries.length > 1) {
+    const isCartonBoxEntry =
+      isBoxSizeField && resolvedBoxMode === BOX_PACKAGING_MODES.CARTON;
+    const cartonRemark = isCartonBoxEntry ? (index === 0 ? "inner" : "master") : "";
+    const normalizedRemark = isCartonBoxEntry
+      ? cartonRemark
+      : normalizeTextField(entry?.remark || "").toLowerCase();
+    if (entries.length > 1 && !isCartonBoxEntry) {
       if (!normalizedRemark) {
         throw new Error(`${entryLabel}.remark is required`);
       }
@@ -469,8 +474,8 @@ const parseSizeEntriesPayload = (
 
     if (isBoxSizeField) {
       if (resolvedBoxMode === BOX_PACKAGING_MODES.CARTON) {
-        const entryType = index === 0 ? "inner" : "master";
-        parsedEntry.remark = normalizedRemark;
+        const entryType = cartonRemark;
+        parsedEntry.remark = entryType;
         parsedEntry.box_type = entryType;
         parsedEntry.item_count_in_inner =
           entryType === "inner"

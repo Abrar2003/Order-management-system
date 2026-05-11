@@ -20,6 +20,7 @@ const BOX_SIZE_REMARK_OPTIONS = Object.freeze([
   "box2",
   "box3",
 ]);
+const BOX_CARTON_REMARK_OPTIONS = Object.freeze(["inner", "master"]);
 
 const escapeRegex = (value = "") =>
   String(value)
@@ -243,19 +244,8 @@ const normalizeBoxSizeEntries = (entries = [], boxMode = BOX_PACKAGING_MODES.IND
 
     if (boxMode === BOX_PACKAGING_MODES.CARTON) {
       const isInner = index === 0;
-      const remark = normalizeText(entry?.remark).toLowerCase();
-      if (normalizedEntries.length > 1) {
-        if (!remark) {
-          throw new Error(`${label}.remark is required`);
-        }
-        validateRemarkOption(remark, BOX_SIZE_REMARK_OPTIONS, `${label}.remark`);
-        if (seenRemarks.has(remark)) {
-          throw new Error("box_sizes remarks must be unique");
-        }
-        seenRemarks.add(remark);
-      } else {
-        validateRemarkOption(remark, BOX_SIZE_REMARK_OPTIONS, `${label}.remark`);
-      }
+      const remark = isInner ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
+      validateRemarkOption(remark, BOX_CARTON_REMARK_OPTIONS, `${label}.remark`);
       return {
         L,
         B,

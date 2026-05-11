@@ -29,6 +29,7 @@ const BOX_SIZE_REMARK_OPTIONS = Object.freeze([
   "box2",
   "box3",
 ]);
+const BOX_CARTON_REMARK_OPTIONS = Object.freeze(["inner", "master"]);
 const PD_STATUSES = Object.freeze({
   CREATED: "created",
   CHECKED: "checked",
@@ -193,14 +194,19 @@ const normalizeBoxSizeEntries = (
       assignPositiveNumber(payload, "L", entry?.L, `${entryLabel} L`);
       assignPositiveNumber(payload, "B", entry?.B, `${entryLabel} B`);
       assignPositiveNumber(payload, "H", entry?.H, `${entryLabel} H`);
-      const normalizedRemark = normalizeKey(entry?.remark || entry?.type || "");
+      const normalizedRemark = normalizeKey(
+        entry?.box_type ||
+          entry?.remark ||
+          entry?.type ||
+          (index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER),
+      );
       validateRemarkOption(
         normalizedRemark,
-        BOX_SIZE_REMARK_OPTIONS,
+        BOX_CARTON_REMARK_OPTIONS,
         `${entryLabel} remark`,
       );
       payload.remark = normalizedRemark;
-      payload.box_type = normalizeKey(entry?.box_type || BOX_ENTRY_TYPES.INDIVIDUAL);
+      payload.box_type = normalizedRemark;
       assignPositiveNumber(payload, "net_weight", entry?.net_weight, `${entryLabel} net weight`);
       assignPositiveNumber(
         payload,
@@ -242,22 +248,9 @@ const normalizeBoxSizeEntries = (
 
     if (resolvedMode === BOX_PACKAGING_MODES.CARTON) {
       const boxType = index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
-      const normalizedRemark = normalizeKey(entry?.remark || entry?.type || "");
-      if (!normalizedRemark) {
-        throw new ProductDatabaseError(`${entryLabel} remark is required`);
-      }
-      validateRemarkOption(
-        normalizedRemark,
-        BOX_SIZE_REMARK_OPTIONS,
-        `${entryLabel} remark`,
-      );
-      if (seenRemarks.has(normalizedRemark)) {
-        throw new ProductDatabaseError("PD box size remarks must be unique");
-      }
-      seenRemarks.add(normalizedRemark);
       const cartonEntry = {
         ...baseEntry,
-        remark: normalizedRemark,
+        remark: boxType,
         box_type: boxType,
       };
       if (boxType === BOX_ENTRY_TYPES.INNER) {

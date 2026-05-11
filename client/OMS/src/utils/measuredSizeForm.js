@@ -62,6 +62,9 @@ const normalizeAllowedBoxRemark = (value = "", index = 0) => {
     : getDefaultBoxRemarkForIndex(index);
 };
 
+const getCartonRemarkForIndex = (index = 0) =>
+  index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
+
 const LEGACY_WEIGHT_FALLBACK_BY_KEY = Object.freeze({
   total_net: "net",
   total_gross: "gross",
@@ -96,7 +99,7 @@ const createCartonEntry = (
   boxType = BOX_ENTRY_TYPES.INNER,
   index = boxType === BOX_ENTRY_TYPES.MASTER ? 1 : 0,
 ) => ({
-  remark: getDefaultBoxRemarkForIndex(index),
+  remark: getCartonRemarkForIndex(index),
   box_type: boxType,
   L: "",
   B: "",
@@ -158,7 +161,7 @@ const coerceMeasuredSizeEntry = (
 
   return {
     remark: isCartonMode
-      ? normalizeAllowedBoxRemark(normalizedRemark, index)
+      ? resolvedBoxType
       : normalizedRemark,
     box_type: resolvedBoxType,
     L: String(entry?.L || ""),
@@ -204,7 +207,7 @@ export const ensureMeasuredSizeEntryCount = (
   if (resolvedMode === BOX_PACKAGING_MODES.CARTON) {
     nextEntries.forEach((entry, index) => {
       entry.box_type = index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
-      entry.remark = normalizeAllowedBoxRemark(entry?.remark, index);
+      entry.remark = entry.box_type;
       if (entry.box_type === BOX_ENTRY_TYPES.INNER) {
         entry.box_count_in_master = "0";
       } else {
@@ -354,7 +357,7 @@ export const convertMeasuredBoxEntriesMode = (
           boxType: BOX_ENTRY_TYPES.INNER,
         }),
         ...firstEntry,
-        remark: normalizeAllowedBoxRemark(firstEntry?.remark, 0),
+        remark: BOX_ENTRY_TYPES.INNER,
         box_type: BOX_ENTRY_TYPES.INNER,
         box_count_in_master: "0",
       },
@@ -364,7 +367,7 @@ export const convertMeasuredBoxEntriesMode = (
           boxType: BOX_ENTRY_TYPES.MASTER,
         }),
         ...secondEntry,
-        remark: normalizeAllowedBoxRemark(secondEntry?.remark, 1),
+        remark: BOX_ENTRY_TYPES.MASTER,
         box_type: BOX_ENTRY_TYPES.MASTER,
         item_count_in_inner: "0",
       },
@@ -522,11 +525,14 @@ export const parseMeasuredSizeEntries = ({
 
     let normalizedRemark = "";
     if (safeCount > 1) {
-      normalizedRemark = String(entry?.remark || "").trim().toLowerCase();
+      const isCartonMode = resolvedMode === BOX_PACKAGING_MODES.CARTON;
+      normalizedRemark = isCartonMode
+        ? getCartonRemarkForIndex(index)
+        : String(entry?.remark || "").trim().toLowerCase();
       if (!normalizedRemark) {
         return { error: `${entryLabel} remark is required.` };
       }
-      if (allowedRemarkValues.size > 0 && !allowedRemarkValues.has(normalizedRemark)) {
+      if (!isCartonMode && allowedRemarkValues.size > 0 && !allowedRemarkValues.has(normalizedRemark)) {
         return {
           error: `${entryLabel} remark must be one of: ${allowedRemarkList}.`,
         };
@@ -556,7 +562,7 @@ export const parseMeasuredSizeEntries = ({
 
     if (resolvedMode === BOX_PACKAGING_MODES.CARTON) {
       const boxType = index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
-      parsedEntry.remark = normalizedRemark;
+      parsedEntry.remark = boxType;
       parsedEntry.box_type = boxType;
       if (boxType === BOX_ENTRY_TYPES.INNER) {
         const itemCountInInner = Number(String(entry?.item_count_in_inner ?? "").trim());
