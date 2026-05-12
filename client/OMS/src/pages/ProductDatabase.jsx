@@ -62,6 +62,42 @@ const STATUS_OPTIONS = Object.freeze([
   { value: "checked", label: "Checked" },
   { value: "approved", label: "Approved" },
 ]);
+const BARCODE_MODES = Object.freeze({
+  SINGLE: "single",
+  INNER_MASTER: "inner_master",
+});
+const BARCODE_MODE_OPTIONS = Object.freeze([
+  { value: BARCODE_MODES.SINGLE, label: "Single Barcode" },
+  { value: BARCODE_MODES.INNER_MASTER, label: "Inner + Master Barcodes" },
+]);
+const PRODUCT_DATABASE_TABLE_TEMPLATE_KEY = "table";
+const PRODUCT_DATABASE_TABLE_TEMPLATE_VERSION = 1;
+const PRODUCT_DATABASE_TABLE_DETAILS_GROUP_KEY = "table_details";
+const PRODUCT_DATABASE_TABLE_DETAILS_GROUP_LABEL = "Table Details";
+const PRODUCT_DATABASE_TABLE_V1_FIELDS = Object.freeze([
+  {
+    key: "table_top_thickness",
+    label: "Table Top Thickness",
+    input_type: "number",
+    value_type: "number",
+    order: 45,
+    source_headers: ["Table Top Thickness", "Table Top Thikness"],
+  },
+  {
+    key: "distances_between_legs",
+    label: "Distances Between Legs",
+    input_type: "number_list",
+    value_type: "array",
+    unit: "cm",
+    order: 75,
+    validation: { max_entries: 4 },
+    source_headers: [
+      "Distances Between Legs",
+      "Distance Between Legs",
+      "Distance Between Table Legs",
+    ],
+  },
+]);
 
 const normalizeTextValue = (value) => String(value || "").trim();
 
@@ -138,8 +174,123 @@ const formatActor = (actor = null, dateKey = "") => {
   return date ? `${name} (${date})` : name;
 };
 
+const normalizeBarcodeMode = (value) =>
+  value === BARCODE_MODES.INNER_MASTER
+    ? BARCODE_MODES.INNER_MASTER
+    : BARCODE_MODES.SINGLE;
+
+const getProductDatabaseMasterBarcode = (item = {}) =>
+  normalizeTextValue(item?.pd_master_barcode || item?.pd_barcode);
+
+const getProductDatabaseBarcodeMode = (item = {}) =>
+  normalizeTextValue(item?.pd_inner_barcode)
+    ? BARCODE_MODES.INNER_MASTER
+    : BARCODE_MODES.SINGLE;
+
+const isProductDatabaseTableV1Template = (template = {}) =>
+  normalizeTemplateKey(template?.key) === PRODUCT_DATABASE_TABLE_TEMPLATE_KEY &&
+  Number(template?.version || 0) === PRODUCT_DATABASE_TABLE_TEMPLATE_VERSION;
+
+const mergeProductDatabaseTableV1Fields = (template = null) => {
+  if (!template || !isProductDatabaseTableV1Template(template)) return template;
+
+  const groups = Array.isArray(template?.groups)
+    ? template.groups.map((group) => ({
+        ...group,
+        fields: Array.isArray(group?.fields) ? [...group.fields] : [],
+      }))
+    : [];
+  let tableDetailsGroup = groups.find(
+    (group) =>
+      normalizeTemplateKey(group?.key) === PRODUCT_DATABASE_TABLE_DETAILS_GROUP_KEY,
+  );
+
+  if (!tableDetailsGroup) {
+    tableDetailsGroup = {
+      key: PRODUCT_DATABASE_TABLE_DETAILS_GROUP_KEY,
+      label: PRODUCT_DATABASE_TABLE_DETAILS_GROUP_LABEL,
+      order: 40,
+      is_active: true,
+      fields: [],
+    };
+    groups.push(tableDetailsGroup);
+  }
+
+  let changed = groups.length !== (Array.isArray(template?.groups) ? template.groups.length : 0);
+  PRODUCT_DATABASE_TABLE_V1_FIELDS.forEach((fallbackField) => {
+    const fieldIndex = tableDetailsGroup.fields.findIndex(
+      (field) => normalizeTemplateKey(field?.key) === fallbackField.key,
+    );
+
+    if (fieldIndex === -1) {
+      tableDetailsGroup.fields.push({
+        ...fallbackField,
+        required: false,
+        searchable: false,
+        filterable: false,
+        show_in_table: false,
+        options: [],
+        default_value: fallbackField.input_type === "number_list" ? [] : null,
+        is_active: true,
+      });
+      changed = true;
+      return;
+    }
+
+    const existingField = tableDetailsGroup.fields[fieldIndex];
+    const nextField = {
+      ...fallbackField,
+      ...existingField,
+      key: fallbackField.key,
+      input_type: fallbackField.input_type,
+      value_type: fallbackField.value_type,
+      validation:
+        fallbackField.input_type === "number_list"
+          ? {
+              ...fallbackField.validation,
+              ...(existingField?.validation || {}),
+              max_entries: 4,
+            }
+          : existingField?.validation || fallbackField.validation || {},
+    };
+
+    if (stableStringify(existingField) !== stableStringify(nextField)) {
+      tableDetailsGroup.fields[fieldIndex] = nextField;
+      changed = true;
+    }
+  });
+
+  if (!changed) return template;
+
+  return {
+    ...template,
+    groups: groups
+      .map((group) => ({
+        ...group,
+        fields: [...(Array.isArray(group?.fields) ? group.fields : [])].sort(
+          (left, right) => Number(left?.order || 0) - Number(right?.order || 0),
+        ),
+      }))
+      .sort((left, right) => Number(left?.order || 0) - Number(right?.order || 0)),
+  };
+};
+
 const buildPayloadFromForm = (form = {}) => ({
   country_of_origin: normalizeTextValue(form.countryOfOrigin),
+  pd_barcode: normalizeTextValue(
+    normalizeBarcodeMode(form.barcodeMode) === BARCODE_MODES.INNER_MASTER
+      ? form.masterBarcode
+      : form.singleBarcode,
+  ),
+  pd_master_barcode: normalizeTextValue(
+    normalizeBarcodeMode(form.barcodeMode) === BARCODE_MODES.INNER_MASTER
+      ? form.masterBarcode
+      : form.singleBarcode,
+  ),
+  pd_inner_barcode:
+    normalizeBarcodeMode(form.barcodeMode) === BARCODE_MODES.INNER_MASTER
+      ? normalizeTextValue(form.innerBarcode)
+      : "",
 });
 
 const PRODUCT_DATABASE_SIZE_DIFF_TOLERANCE = 0.5;
@@ -327,6 +478,10 @@ const areProductSpecsEqualForCompare = (currentSpecs = {}, nextSpecs = {}) => {
 const arePayloadsEqualForCompare = (currentPayload = {}, initialPayload = {}) =>
   normalizeTextValue(currentPayload.country_of_origin) ===
     normalizeTextValue(initialPayload.country_of_origin) &&
+  normalizeTextValue(currentPayload.pd_master_barcode || currentPayload.pd_barcode) ===
+    normalizeTextValue(initialPayload.pd_master_barcode || initialPayload.pd_barcode) &&
+  normalizeTextValue(currentPayload.pd_inner_barcode) ===
+    normalizeTextValue(initialPayload.pd_inner_barcode) &&
   stableStringify(currentPayload.product_type || null) ===
     stableStringify(initialPayload.product_type || null) &&
   (currentPayload.pd_box_mode || BOX_PACKAGING_MODES.INDIVIDUAL) ===
@@ -937,6 +1092,10 @@ const createProductDatabaseDraft = ({
 } = {}) => ({
   form: {
     countryOfOrigin: form?.countryOfOrigin || "",
+    barcodeMode: normalizeBarcodeMode(form?.barcodeMode),
+    singleBarcode: form?.singleBarcode || "",
+    masterBarcode: form?.masterBarcode || "",
+    innerBarcode: form?.innerBarcode || "",
     productTypeKey: normalizeTemplateKey(form?.productTypeKey),
     productTypeVersion: Number(form?.productTypeVersion || 0),
   },
@@ -975,6 +1134,12 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
         ? {
             ...item,
             country_of_origin: draftPayload.country_of_origin ?? item?.country_of_origin,
+            pd_barcode: draftPayload.pd_barcode ?? item?.pd_barcode,
+            pd_master_barcode:
+              draftPayload.pd_master_barcode ??
+              draftPayload.pd_barcode ??
+              item?.pd_master_barcode,
+            pd_inner_barcode: draftPayload.pd_inner_barcode ?? item?.pd_inner_barcode,
             product_type: draftPayload.product_type || null,
             product_specs:
               draftPayload.product_specs || buildExistingProductTypePayload({}).product_specs,
@@ -994,11 +1159,24 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
       draft?.form
         ? {
             countryOfOrigin: draft.form.countryOfOrigin || "",
+            barcodeMode: normalizeBarcodeMode(
+              draft.form.barcodeMode || getProductDatabaseBarcodeMode(draftItem),
+            ),
+            singleBarcode:
+              draft.form.singleBarcode ?? getProductDatabaseMasterBarcode(draftItem),
+            masterBarcode:
+              draft.form.masterBarcode ?? getProductDatabaseMasterBarcode(draftItem),
+            innerBarcode:
+              draft.form.innerBarcode ?? normalizeTextValue(draftItem?.pd_inner_barcode),
             productTypeKey: normalizeTemplateKey(draft.form.productTypeKey),
             productTypeVersion: Number(draft.form.productTypeVersion || 0),
           }
         : {
             countryOfOrigin: normalizeTextValue(draftItem?.country_of_origin),
+            barcodeMode: getProductDatabaseBarcodeMode(draftItem),
+            singleBarcode: getProductDatabaseMasterBarcode(draftItem),
+            masterBarcode: getProductDatabaseMasterBarcode(draftItem),
+            innerBarcode: normalizeTextValue(draftItem?.pd_inner_barcode),
             productTypeKey: normalizeTemplateKey(draftItem?.product_type?.key),
             productTypeVersion: Number(draftItem?.product_type?.version || 0),
           },
@@ -1107,6 +1285,10 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
     },
     [canViewProductTypeTemplates],
   );
+  const selectedProductTypeTemplate = useMemo(
+    () => mergeProductDatabaseTableV1Fields(selectedTemplate),
+    [selectedTemplate],
+  );
 
   useEffect(() => {
     const selectedKey = normalizeTemplateKey(form.productTypeKey);
@@ -1130,19 +1312,30 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
   ]);
 
   useEffect(() => {
-    if (!selectedTemplate) {
+    if (!selectedProductTypeTemplate) {
       return;
     }
 
     setProductTypeForm(
-      getProductTypeFormState({ draft, form, item: draftItem, template: selectedTemplate }),
+      getProductTypeFormState({
+        draft,
+        form,
+        item: draftItem,
+        template: selectedProductTypeTemplate,
+      }),
     );
     setProductTypeErrors(cloneProductTypeValidation());
-  }, [draft, draftItem, form.productTypeKey, form.productTypeVersion, selectedTemplate]);
+  }, [
+    draft,
+    draftItem,
+    form.productTypeKey,
+    form.productTypeVersion,
+    selectedProductTypeTemplate,
+  ]);
 
   const templateReady =
     !normalizeTemplateKey(form.productTypeKey) ||
-    (!templateLoading && Boolean(selectedTemplate));
+    (!templateLoading && Boolean(selectedProductTypeTemplate));
 
   const currentProductTypePayload = useMemo(() => {
     if (!normalizeTemplateKey(form.productTypeKey)) {
@@ -1158,9 +1351,9 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
       };
     }
 
-    if (selectedTemplate) {
+    if (selectedProductTypeTemplate) {
       return buildProductTypePayload({
-        template: selectedTemplate,
+        template: selectedProductTypeTemplate,
         selectedProductTypeKey: form.productTypeKey,
         formState: productTypeForm,
         includeSizeFields: false,
@@ -1188,7 +1381,13 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
         raw_values: {},
       },
     };
-  }, [draftItem, form.productTypeKey, form.productTypeVersion, productTypeForm, selectedTemplate]);
+  }, [
+    draftItem,
+    form.productTypeKey,
+    form.productTypeVersion,
+    productTypeForm,
+    selectedProductTypeTemplate,
+  ]);
 
   const currentMeasuredSizePayload = useMemo(
     () => buildProductDatabaseMeasuredSizePayload(measuredSizeForm),
@@ -1208,6 +1407,10 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
     () => ({
       ...buildPayloadFromForm({
         countryOfOrigin: normalizeTextValue(item?.country_of_origin),
+        barcodeMode: getProductDatabaseBarcodeMode(item),
+        singleBarcode: getProductDatabaseMasterBarcode(item),
+        masterBarcode: getProductDatabaseMasterBarcode(item),
+        innerBarcode: normalizeTextValue(item?.pd_inner_barcode),
       }),
       ...buildExistingProductTypePayload(item),
       ...buildExistingProductDatabaseSizePayload(item),
@@ -1220,6 +1423,52 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
 
   const clearDraftMessage = () => {
     if (draftMessage) setDraftMessage("");
+  };
+
+  const handleBarcodeModeChange = (nextModeValue) => {
+    clearDraftMessage();
+    const nextMode = normalizeBarcodeMode(nextModeValue);
+    setForm((prev) => {
+      const currentMasterBarcode = normalizeTextValue(
+        prev.masterBarcode || prev.singleBarcode,
+      );
+
+      if (nextMode === BARCODE_MODES.INNER_MASTER) {
+        return {
+          ...prev,
+          barcodeMode: nextMode,
+          masterBarcode: currentMasterBarcode,
+          singleBarcode: currentMasterBarcode,
+        };
+      }
+
+      return {
+        ...prev,
+        barcodeMode: nextMode,
+        singleBarcode: currentMasterBarcode,
+        masterBarcode: currentMasterBarcode,
+        innerBarcode: "",
+      };
+    });
+  };
+
+  const handleBarcodeFieldChange = (fieldName, value) => {
+    clearDraftMessage();
+    setForm((prev) => {
+      if (fieldName === "singleBarcode") {
+        return {
+          ...prev,
+          singleBarcode: value,
+          masterBarcode: value,
+        };
+      }
+
+      return {
+        ...prev,
+        [fieldName]: value,
+        ...(fieldName === "masterBarcode" ? { singleBarcode: value } : {}),
+      };
+    });
   };
 
   const handleProductTypeChange = (nextValue) => {
@@ -1514,7 +1763,7 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
               <div className="card om-card">
                 <div className="card-body">
                   <div className="row g-3">
-                    <div className="col-lg-6">
+                    <div className="col-lg-4">
                       <label className="form-label">Country of Origin</label>
                       <select
                         className="form-select"
@@ -1536,6 +1785,62 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
                         ))}
                       </select>
                     </div>
+                    <div className="col-lg-4">
+                      <label className="form-label">Barcode Type</label>
+                      <select
+                        className="form-select"
+                        value={normalizeBarcodeMode(form.barcodeMode)}
+                        disabled={!canEdit}
+                        onChange={(event) => handleBarcodeModeChange(event.target.value)}
+                      >
+                        {BARCODE_MODE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {normalizeBarcodeMode(form.barcodeMode) === BARCODE_MODES.INNER_MASTER ? (
+                      <>
+                        <div className="col-lg-4">
+                          <label className="form-label">Master Barcode</label>
+                          <input
+                            type="text"
+                            className="form-control"
+                            value={form.masterBarcode}
+                            disabled={!canEdit}
+                            onChange={(event) =>
+                              handleBarcodeFieldChange("masterBarcode", event.target.value)
+                            }
+                          />
+                        </div>
+                        <div className="col-lg-4">
+                          <label className="form-label">Inner Barcode</label>
+                          <input
+                            type="text"
+                            className="form-control"
+                            value={form.innerBarcode}
+                            disabled={!canEdit}
+                            onChange={(event) =>
+                              handleBarcodeFieldChange("innerBarcode", event.target.value)
+                            }
+                          />
+                        </div>
+                      </>
+                    ) : (
+                      <div className="col-lg-4">
+                        <label className="form-label">Single Barcode</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          value={form.singleBarcode}
+                          disabled={!canEdit}
+                          onChange={(event) =>
+                            handleBarcodeFieldChange("singleBarcode", event.target.value)
+                          }
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1584,16 +1889,16 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
                         {templateLoading && normalizeTemplateKey(form.productTypeKey) && (
                           <span className="om-summary-chip">Loading selected template...</span>
                         )}
-                        {selectedTemplate && (
+                        {selectedProductTypeTemplate && (
                           <>
                             <span className="om-summary-chip">
-                              {selectedTemplate.label}
+                              {selectedProductTypeTemplate.label}
                             </span>
                             <span className="om-summary-chip">
-                              Version: {selectedTemplate.version}
+                              Version: {selectedProductTypeTemplate.version}
                             </span>
                             <span className="om-summary-chip">
-                              Status: {selectedTemplate.status}
+                              Status: {selectedProductTypeTemplate.status}
                             </span>
                           </>
                         )}
@@ -1629,10 +1934,10 @@ const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraf
               </div>
             </section>
 
-            {selectedTemplate && (
+            {selectedProductTypeTemplate && (
               <section className="mb-4">
                 <ProductTypeDynamicForm
-                  template={selectedTemplate}
+                  template={selectedProductTypeTemplate}
                   fieldValues={productTypeForm.fieldValues}
                   itemSizeValues={productTypeForm.itemSizeValues}
                   boxSizeValues={productTypeForm.boxSizeValues}

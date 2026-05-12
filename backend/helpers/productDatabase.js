@@ -300,8 +300,12 @@ const normalizeBoxSizeEntries = (
 
 const extractProductDatabaseFields = (item = {}) => {
   const pdBoxMode = detectBoxPackagingMode(item?.pd_box_mode, item?.pd_box_sizes);
+  const pdMasterBarcode = normalizeText(item?.pd_master_barcode || item?.pd_barcode);
   return {
     country_of_origin: normalizeText(item?.country_of_origin),
+    pd_barcode: pdMasterBarcode,
+    pd_master_barcode: pdMasterBarcode,
+    pd_inner_barcode: normalizeText(item?.pd_inner_barcode),
     pd_item_sizes: normalizeItemSizeEntries(item?.pd_item_sizes || []),
     pd_box_sizes: normalizeBoxSizeEntries(item?.pd_box_sizes || [], pdBoxMode),
     pd_box_mode: pdBoxMode,
@@ -329,6 +333,9 @@ const extractProductDatabaseFields = (item = {}) => {
 
 const normalizeProductDatabaseInput = (payload = {}) => {
   const hasCountryOfOrigin = hasOwn(payload, "country_of_origin");
+  const hasPdBarcode = hasOwn(payload, "pd_barcode");
+  const hasPdMasterBarcode = hasOwn(payload, "pd_master_barcode");
+  const hasPdInnerBarcode = hasOwn(payload, "pd_inner_barcode");
   const hasItemSizes = hasOwn(payload, "pd_item_sizes");
   const hasBoxSizes = hasOwn(payload, "pd_box_sizes");
   const hasBoxMode = hasOwn(payload, "pd_box_mode");
@@ -338,6 +345,18 @@ const normalizeProductDatabaseInput = (payload = {}) => {
 
   if (hasCountryOfOrigin) {
     data.country_of_origin = normalizeText(payload.country_of_origin);
+  }
+
+  if (hasPdBarcode || hasPdMasterBarcode) {
+    const nextMasterBarcode = normalizeText(
+      hasPdMasterBarcode ? payload.pd_master_barcode : payload.pd_barcode,
+    );
+    data.pd_barcode = nextMasterBarcode;
+    data.pd_master_barcode = nextMasterBarcode;
+  }
+
+  if (hasPdInnerBarcode) {
+    data.pd_inner_barcode = normalizeText(payload.pd_inner_barcode);
   }
 
   if (hasItemSizes) {
@@ -395,6 +414,9 @@ const normalizeProductDatabaseInput = (payload = {}) => {
   return {
     hasInput:
       hasCountryOfOrigin ||
+      hasPdBarcode ||
+      hasPdMasterBarcode ||
+      hasPdInnerBarcode ||
       hasItemSizes ||
       hasBoxSizes ||
       hasBoxMode ||
@@ -409,11 +431,20 @@ const mergeProductDatabaseFields = (currentState = {}, inputData = {}) => {
   const nextBoxSizes = hasOwn(inputData, "pd_box_sizes")
     ? normalizeBoxSizeEntries(inputData.pd_box_sizes, nextBoxMode)
     : normalizeBoxSizeEntries(currentState.pd_box_sizes || [], nextBoxMode);
+  const nextMasterBarcode =
+    hasOwn(inputData, "pd_master_barcode") || hasOwn(inputData, "pd_barcode")
+      ? normalizeText(inputData.pd_master_barcode || inputData.pd_barcode)
+      : normalizeText(currentState.pd_master_barcode || currentState.pd_barcode);
 
   return {
     country_of_origin: hasOwn(inputData, "country_of_origin")
       ? normalizeText(inputData.country_of_origin)
       : normalizeText(currentState.country_of_origin),
+    pd_barcode: nextMasterBarcode,
+    pd_master_barcode: nextMasterBarcode,
+    pd_inner_barcode: hasOwn(inputData, "pd_inner_barcode")
+      ? normalizeText(inputData.pd_inner_barcode)
+      : normalizeText(currentState.pd_inner_barcode),
     pd_item_sizes: hasOwn(inputData, "pd_item_sizes")
       ? normalizeItemSizeEntries(inputData.pd_item_sizes)
       : normalizeItemSizeEntries(currentState.pd_item_sizes || []),
@@ -559,6 +590,9 @@ const areProductDatabaseFieldValuesEqual = (field, currentValue, nextValue) => {
 const getChangedProductDatabaseFields = (currentState = {}, nextState = {}) =>
   [
     "country_of_origin",
+    "pd_barcode",
+    "pd_master_barcode",
+    "pd_inner_barcode",
     "pd_item_sizes",
     "pd_box_sizes",
     "pd_box_mode",
@@ -573,6 +607,10 @@ const getChangedProductDatabaseFields = (currentState = {}, nextState = {}) =>
   );
 
 const hasProductDatabaseData = (state = {}) =>
+  Boolean(
+    normalizeText(state?.pd_master_barcode || state?.pd_barcode) ||
+      normalizeText(state?.pd_inner_barcode),
+  ) ||
   (Array.isArray(state?.pd_item_sizes) && state.pd_item_sizes.length > 0) ||
   (Array.isArray(state?.pd_box_sizes) && state.pd_box_sizes.length > 0) ||
   (Array.isArray(state?.product_specs?.item_sizes) && state.product_specs.item_sizes.length > 0) ||
@@ -600,7 +638,11 @@ const appendPdHistory = (
 };
 
 const setProductDatabaseFields = (item, state = {}) => {
+  const pdMasterBarcode = normalizeText(state.pd_master_barcode || state.pd_barcode);
   item.country_of_origin = normalizeText(state.country_of_origin);
+  item.pd_barcode = pdMasterBarcode;
+  item.pd_master_barcode = pdMasterBarcode;
+  item.pd_inner_barcode = normalizeText(state.pd_inner_barcode);
   item.pd_item_sizes = state.pd_item_sizes || [];
   item.pd_box_sizes = state.pd_box_sizes || [];
   item.pd_box_mode = state.pd_box_mode || BOX_PACKAGING_MODES.INDIVIDUAL;
@@ -868,6 +910,9 @@ const buildProductDatabaseRow = (item = {}, user = {}) => {
     brands: Array.isArray(item?.brands) ? item.brands : [],
     vendors: Array.isArray(item?.vendors) ? item.vendors : [],
     country_of_origin: state.country_of_origin,
+    pd_barcode: state.pd_barcode,
+    pd_master_barcode: state.pd_master_barcode,
+    pd_inner_barcode: state.pd_inner_barcode,
     pd_item_sizes: state.pd_item_sizes,
     pd_box_sizes: state.pd_box_sizes,
     pd_box_mode: state.pd_box_mode,

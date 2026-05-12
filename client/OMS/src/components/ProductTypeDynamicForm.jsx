@@ -8,6 +8,8 @@ import {
 
 const normalizeText = (value) => String(value ?? "").trim();
 const NUMBER_LIST_ENTRY_LIMIT = 4;
+const TABLE_TEMPLATE_KEY = "table";
+const TABLE_DETAILS_GROUP_KEY = "table_details";
 
 const getNumberListMaxEntries = (field = {}) => {
   const parsed = Number.parseInt(
@@ -451,11 +453,23 @@ const ProductTypeDynamicForm = ({
         : groups,
     [groups, hideSizeFields],
   );
+  const defaultOpenGroups = useMemo(() => {
+    const normalizedTemplateKey = normalizeTemplateKey(template?.key);
+    return visibleGroups
+      .filter((group, index) => {
+        if (index < 2) return true;
+        return (
+          normalizedTemplateKey === TABLE_TEMPLATE_KEY &&
+          normalizeTemplateKey(group?.key) === TABLE_DETAILS_GROUP_KEY
+        );
+      })
+      .map((group) => normalizeTemplateKey(group?.key));
+  }, [template?.key, visibleGroups]);
   const [openGroups, setOpenGroups] = useState([]);
 
   useEffect(() => {
-    setOpenGroups(visibleGroups.slice(0, 2).map((group) => normalizeTemplateKey(group?.key)));
-  }, [visibleGroups]);
+    setOpenGroups(defaultOpenGroups);
+  }, [defaultOpenGroups]);
 
   if (!template) {
     return null;
