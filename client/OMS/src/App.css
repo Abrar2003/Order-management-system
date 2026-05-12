@@ -1174,6 +1174,22 @@ small,
   gap: 0.55rem;
 }
 
+.workflow-dashboard-spotlight-filter {
+  cursor: pointer;
+}
+
+.workflow-dashboard-spotlight-filter:hover:not(:disabled),
+.workflow-dashboard-spotlight-filter:focus-visible:not(:disabled) {
+  border-color: var(--om-color-accent);
+  color: var(--om-color-text);
+  background-color: var(--om-color-surface);
+}
+
+.workflow-dashboard-spotlight-filter:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 .workflow-dashboard-table th,
 .workflow-dashboard-table td {
   vertical-align: middle;

@@ -81,6 +81,16 @@ const WORKFLOW_ACTION_ICONS = Object.freeze({
   delete: "/workflow-icons/delete.png",
   rework: "/workflow-icons/rework.png",
 });
+const TASK_STATUS_FILTER_OPTIONS = Object.freeze([
+  { value: "open", label: "Open" },
+  { value: "needs_approval", label: "Needs Approval" },
+  { value: "overdue", label: "Overdue" },
+  { value: "assigned", label: "assigned" },
+  { value: "started", label: "started" },
+  { value: "complete", label: "complete" },
+  { value: "approved", label: "approved" },
+  { value: "uploaded", label: "uploaded" },
+]);
 
 const getTaskActionState = ({
   task = {},
@@ -485,11 +495,6 @@ const WorkflowTasksPanel = ({
     );
   };
 
-  const taskStatuses = useMemo(
-    () => ["assigned", "started", "complete", "approved", "uploaded"],
-    [],
-  );
-
   const visibleRows = useMemo(() => rows, [rows]);
 
   const { connectionState } = useWorkflowRealtime({
@@ -574,9 +579,9 @@ const WorkflowTasksPanel = ({
                   onChange={(event) => setStatusFilter(event.target.value)}
                 >
                   <option value="">All</option>
-                  {taskStatuses.map((status) => (
-                    <option key={status} value={status}>
-                      {status}
+                  {TASK_STATUS_FILTER_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
                     </option>
                   ))}
                 </select>

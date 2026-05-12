@@ -32,6 +32,18 @@ const formatRoleLabel = (role) =>
   ROLE_LABELS[normalizeUserRole(role)] || normalizeText(role) || "User";
 
 const getCount = (row, key) => Number(row?.counts?.[key] || 0);
+const SPOTLIGHT_TASK_FILTERS = Object.freeze([
+  { countKey: "open_tasks", label: "Open", status: "open" },
+  { countKey: "needs_approval_tasks", label: "Needs Approval", status: "needs_approval" },
+  { countKey: "overdue_tasks", label: "Overdue", status: "overdue" },
+]);
+const DASHBOARD_STATUS_OPTIONS = Object.freeze([
+  { value: "assigned", label: "assigned" },
+  { value: "started", label: "started" },
+  { value: "complete", label: "complete" },
+  { value: "approved", label: "approved" },
+  { value: "uploaded", label: "uploaded" },
+]);
 
 const WorkflowDashboard = () => {
   const navigate = useNavigate();
@@ -193,8 +205,36 @@ const WorkflowDashboard = () => {
       `${entry?.name || ""} ${entry?.email || ""} ${entry?.role || ""}`
         .toLowerCase()
         .includes(needle),
-    );
+      );
   }, [summaryUsers, userSearch]);
+
+  const navigateToTaskBoardFilter = useCallback(
+    (entry = {}, status = "") => {
+      const userId = normalizeText(entry?.user_id);
+      if (!userId) return;
+
+      const next = new URLSearchParams();
+      next.set("assignee", userId);
+      if (status) next.set("status", status);
+      if (taskTypeFilter) next.set("task_type_key", taskTypeFilter);
+      if (departmentFilter) next.set("department", departmentFilter);
+      if (brandFilter) next.set("brand", brandFilter);
+      if (search) next.set("search", search);
+      if (dueDateFrom) next.set("due_date_from", dueDateFrom);
+      if (dueDateTo) next.set("due_date_to", dueDateTo);
+
+      navigate(`/workflow/tasks?${next.toString()}`);
+    },
+    [
+      brandFilter,
+      departmentFilter,
+      dueDateFrom,
+      dueDateTo,
+      navigate,
+      search,
+      taskTypeFilter,
+    ],
+  );
 
   const focusRows = useMemo(() => {
     const overdueRows = visibleUsers
@@ -208,7 +248,7 @@ const WorkflowDashboard = () => {
     if (overdueRows.length > 0) {
       return {
         title: "Needs Attention",
-        description: "These assignees have the highest overdue workflow load right now.",
+        description: "These assignees have the highest approval-overdue workflow count.",
         rows: overdueRows.slice(0, 5),
       };
     }
@@ -240,7 +280,7 @@ const WorkflowDashboard = () => {
         key: "open",
         label: "Open Tasks",
         value: Number(overall.open_tasks || 0),
-        note: "Assigned through approved and still active.",
+        note: "Assigned or started tasks not completed yet.",
       },
       {
         key: "approval",
@@ -252,13 +292,19 @@ const WorkflowDashboard = () => {
         key: "overdue",
         label: "Overdue",
         value: Number(overall.overdue_tasks || 0),
-        note: "Past due and not yet uploaded.",
+        note: "Due date fully crossed in IST without approval.",
       },
       {
         key: "due-today",
         label: "Due Today",
         value: Number(overall.due_today_tasks || 0),
-        note: "Active tasks due before the day rolls over.",
+        note: "Due today in IST and still not approved.",
+      },
+      {
+        key: "upload-remaining",
+        label: "Upload Remaining",
+        value: Number(overall.upload_remaining_tasks || 0),
+        note: "Approved tasks still waiting to be uploaded.",
       },
       {
         key: "unassigned",
@@ -369,9 +415,9 @@ const WorkflowDashboard = () => {
                   onChange={(event) => setStatusFilter(event.target.value)}
                 >
                   <option value="">All</option>
-                  {["assigned", "started", "complete", "approved", "uploaded"].map((status) => (
-                    <option key={status} value={status}>
-                      {status}
+                  {DASHBOARD_STATUS_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
                     </option>
                   ))}
                 </select>
@@ -525,9 +571,21 @@ const WorkflowDashboard = () => {
                           </div>
                         </div>
                         <div className="workflow-dashboard-spotlight-meta">
-                          <span className="om-summary-chip">Open: {getCount(entry, "open_tasks")}</span>
-                          <span className="om-summary-chip">Needs Approval: {getCount(entry, "needs_approval_tasks")}</span>
-                          <span className="om-summary-chip">Overdue: {getCount(entry, "overdue_tasks")}</span>
+                          {SPOTLIGHT_TASK_FILTERS.map((filter) => {
+                            const count = getCount(entry, filter.countKey);
+                            return (
+                              <button
+                                key={filter.countKey}
+                                type="button"
+                                className="om-summary-chip workflow-dashboard-spotlight-filter"
+                                onClick={() => navigateToTaskBoardFilter(entry, filter.status)}
+                                disabled={!entry?.user_id || count <= 0}
+                                title={`View ${filter.label.toLowerCase()} tasks for ${entry.name}`}
+                              >
+                                {filter.label}: {count}
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
                     ))}
@@ -555,7 +613,7 @@ const WorkflowDashboard = () => {
                           <th>Started</th>
                           <th>Complete</th>
                           <th>Needs Approval</th>
-                          <th>Approved</th>
+                          <th>Upload Remaining</th>
                           <th>Rework</th>
                           <th>Uploaded</th>
                           <th>Overdue</th>
@@ -580,7 +638,7 @@ const WorkflowDashboard = () => {
                               <td>{getCount(entry, "started_tasks")}</td>
                               <td>{getCount(entry, "complete_tasks")}</td>
                               <td>{getCount(entry, "needs_approval_tasks")}</td>
-                              <td>{getCount(entry, "approved_tasks")}</td>
+                              <td>{getCount(entry, "upload_remaining_tasks")}</td>
                               <td>{getCount(entry, "reworked_tasks")}</td>
                               <td>{getCount(entry, "uploaded_tasks")}</td>
                               <td>{getCount(entry, "overdue_tasks")}</td>

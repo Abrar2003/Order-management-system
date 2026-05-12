@@ -42,11 +42,38 @@ const {
 
 const DEFAULT_PAGE_LIMIT = 20;
 const MAX_PAGE_LIMIT = 100;
-const ACTIVE_TASK_STATUSES = Object.freeze([
+const WORKFLOW_DUE_TIMEZONE = "Asia/Kolkata";
+const INDIA_TIMEZONE_OFFSET_MS = 330 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const OPEN_TASK_STATUSES = Object.freeze([
+  "assigned",
+  "started",
+]);
+const OPEN_TASK_STATUS_VALUES = Object.freeze([
+  "assigned",
+  "pending",
+  "rework",
+  "started",
+  "in_progress",
+]);
+const NEEDS_APPROVAL_STATUS_VALUES = Object.freeze([
+  "complete",
+  "submitted",
+  "review",
+]);
+const DUE_TRACKED_TASK_STATUSES = Object.freeze([
   "assigned",
   "started",
   "complete",
   "approved",
+  "uploaded",
+]);
+const DUE_TRACKED_TASK_STATUS_VALUES = Object.freeze([
+  ...OPEN_TASK_STATUS_VALUES,
+  ...NEEDS_APPROVAL_STATUS_VALUES,
+  "approved",
+  "uploaded",
+  "completed",
 ]);
 const DASHBOARD_COUNT_FIELDS = Object.freeze([
   "total_tasks",
@@ -56,6 +83,7 @@ const DASHBOARD_COUNT_FIELDS = Object.freeze([
   "complete_tasks",
   "approved_tasks",
   "uploaded_tasks",
+  "upload_remaining_tasks",
   "reworked_tasks",
   "needs_approval_tasks",
   "overdue_tasks",
@@ -78,6 +106,22 @@ const toDateOrNull = (value) => {
   const parsed = new Date(normalized);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
+
+const getIndianDayStart = (value = new Date()) => {
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  const shifted = new Date(parsed.getTime() + INDIA_TIMEZONE_OFFSET_MS);
+  return new Date(
+    Date.UTC(
+      shifted.getUTCFullYear(),
+      shifted.getUTCMonth(),
+      shifted.getUTCDate(),
+    ) - INDIA_TIMEZONE_OFFSET_MS,
+  );
+};
+
+const addDays = (value, days = 1) => new Date(value.getTime() + Number(days || 0) * DAY_MS);
 
 const escapeRegex = (value = "") =>
   String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -158,6 +202,14 @@ const buildTaskVisibilityMatch = (user = {}) => {
 };
 
 const buildStatusMatch = (status = "") => {
+  const normalizedStatus = normalizeKey(status);
+  if (normalizedStatus === "open") {
+    return { $in: OPEN_TASK_STATUS_VALUES };
+  }
+  if (normalizedStatus === "needs_approval") {
+    return { $in: NEEDS_APPROVAL_STATUS_VALUES };
+  }
+
   const values = getWorkflowStatusFilterValues(status);
   if (values.length === 0) {
     return normalizeText(status).toLowerCase();
@@ -168,12 +220,76 @@ const buildStatusMatch = (status = "") => {
   return { $in: values };
 };
 
+const buildEffectiveApprovedAtExpression = () => ({
+  $ifNull: ["$approved_at", "$reviewed_at"],
+});
+
+// Workflow due dates are date-only, so the whole IST due date remains on time.
+const buildDueDateCutoffExpression = () => ({
+  $add: [
+    {
+      $dateFromString: {
+        dateString: {
+          $dateToString: {
+            date: "$due_date",
+            format: "%Y-%m-%d",
+            timezone: WORKFLOW_DUE_TIMEZONE,
+            onNull: null,
+          },
+        },
+        format: "%Y-%m-%d",
+        timezone: WORKFLOW_DUE_TIMEZONE,
+        onError: null,
+        onNull: null,
+      },
+    },
+    DAY_MS,
+  ],
+});
+
+const buildNotApprovedByDueDateExpression = () => {
+  const effectiveApprovedAt = buildEffectiveApprovedAtExpression();
+  const dueDateCutoff = buildDueDateCutoffExpression();
+  return {
+    $or: [
+      { $eq: [effectiveApprovedAt, null] },
+      { $gte: [effectiveApprovedAt, dueDateCutoff] },
+    ],
+  };
+};
+
+const buildOverdueTaskMatch = (now = new Date()) => {
+  const dueDateCutoff = buildDueDateCutoffExpression();
+  return {
+    status: { $in: DUE_TRACKED_TASK_STATUS_VALUES },
+    due_date: { $ne: null },
+    $expr: {
+      $and: [
+        { $gte: [now, dueDateCutoff] },
+        buildNotApprovedByDueDateExpression(),
+      ],
+    },
+  };
+};
+
+const addAndMatch = (match, condition) => {
+  if (!condition || Object.keys(condition).length === 0) return;
+  if (!Array.isArray(match.$and)) {
+    match.$and = [];
+  }
+  match.$and.push(condition);
+};
+
 const buildTaskListMatch = ({ query = {}, user = {} } = {}) => {
   const privilegedReader = isAdmin(user);
   const match = buildTaskVisibilityMatch(user);
 
   if (normalizeText(query?.status)) {
-    match.status = buildStatusMatch(query.status);
+    if (normalizeKey(query.status) === "overdue") {
+      addAndMatch(match, buildOverdueTaskMatch());
+    } else {
+      match.status = buildStatusMatch(query.status);
+    }
   }
   if (normalizeText(query?.task_type_key)) {
     match.task_type_key = normalizeKey(query.task_type_key);
@@ -505,10 +621,8 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
 
   const { match } = buildTaskListMatch({ query, user });
   const now = new Date();
-  const todayStart = new Date(now);
-  todayStart.setHours(0, 0, 0, 0);
-  const tomorrowStart = new Date(todayStart);
-  tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+  const todayStart = getIndianDayStart(now);
+  const tomorrowStart = addDays(todayStart, 1);
 
   const statusCount = (status) => ({
     $sum: {
@@ -518,18 +632,23 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
 
   const openTaskCount = {
     $sum: {
-      $cond: [{ $in: ["$normalized_status", ACTIVE_TASK_STATUSES] }, 1, 0],
+      $cond: [{ $in: ["$normalized_status", OPEN_TASK_STATUSES] }, 1, 0],
     },
   };
+  const uploadRemainingCount = statusCount("approved");
+
+  const dueDateCutoff = buildDueDateCutoffExpression();
+  const notApprovedByDueDate = buildNotApprovedByDueDateExpression();
 
   const overdueCount = {
     $sum: {
       $cond: [
         {
           $and: [
-            { $in: ["$normalized_status", ACTIVE_TASK_STATUSES] },
+            { $in: ["$normalized_status", DUE_TRACKED_TASK_STATUSES] },
             { $ne: ["$due_date", null] },
-            { $lt: ["$due_date", now] },
+            { $gte: [now, dueDateCutoff] },
+            notApprovedByDueDate,
           ],
         },
         1,
@@ -543,10 +662,11 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
       $cond: [
         {
           $and: [
-            { $in: ["$normalized_status", ACTIVE_TASK_STATUSES] },
+            { $in: ["$normalized_status", DUE_TRACKED_TASK_STATUSES] },
             { $ne: ["$due_date", null] },
             { $gte: ["$due_date", todayStart] },
             { $lt: ["$due_date", tomorrowStart] },
+            notApprovedByDueDate,
           ],
         },
         1,
@@ -563,6 +683,7 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
     complete_tasks: statusCount("complete"),
     approved_tasks: statusCount("approved"),
     uploaded_tasks: statusCount("uploaded"),
+    upload_remaining_tasks: uploadRemainingCount,
     reworked_tasks: {
       $sum: {
         $cond: [{ $gt: ["$normalized_rework_count", 0] }, 1, 0],
@@ -658,6 +779,7 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
               complete_tasks: 1,
               approved_tasks: 1,
               uploaded_tasks: 1,
+              upload_remaining_tasks: 1,
               reworked_tasks: 1,
               needs_approval_tasks: 1,
               overdue_tasks: 1,
