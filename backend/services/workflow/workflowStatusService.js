@@ -1261,6 +1261,19 @@ const updateWorkflowTaskDetails = async ({
     }
   }
 
+  if (hasOwn(payload, "assigned_at") || hasOwn(payload, "assignment_date")) {
+    const assignedAtInput = hasOwn(payload, "assigned_at")
+      ? payload.assigned_at
+      : payload.assignment_date;
+    const assignedAt = parseAssignedAt(assignedAtInput);
+    const currentTime = task.assigned_at ? task.assigned_at.getTime() : null;
+    const nextTime = assignedAt ? assignedAt.getTime() : null;
+    if (currentTime !== nextTime) {
+      task.assigned_at = assignedAt;
+      changedFields.push("assigned_at");
+    }
+  }
+
   if (hasOwn(payload, "department")) {
     const department = await ensureDepartmentExists(payload.department, "department");
     const currentDepartment = normalizeId(task.department);
@@ -1277,6 +1290,20 @@ const updateWorkflowTaskDetails = async ({
 
   task.updated_by = auditActor;
   await task.save();
+
+  if (changedFields.includes("assigned_at")) {
+    await TaskAssignment.updateMany(
+      {
+        task: task._id,
+        status: "active",
+      },
+      {
+        $set: {
+          assigned_at: task.assigned_at || null,
+        },
+      },
+    );
+  }
 
   const batch = await recalculateWorkflowBatchIfPresent(task.batch);
   const taskDetail = await buildTaskDetail(task._id, actor);

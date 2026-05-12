@@ -54,6 +54,7 @@ const buildTaskEditForm = (task = {}) => ({
   brand: normalizeText(task?.brand),
   department: task?.department?._id || task?.department || "",
   priority: normalizeText(task?.priority || "normal"),
+  assignmentDate: formatDateInputValue(task?.assigned_at),
   dueDate: formatDateInputValue(task?.due_date),
 });
 
@@ -235,6 +236,7 @@ const WorkflowTaskDetailModal = ({
           brand: normalizeText(editForm.brand),
           department: normalizeText(editForm.department) || null,
           priority: normalizeText(editForm.priority) || "normal",
+          assigned_at: normalizeText(editForm.assignmentDate) || null,
           due_date: normalizeText(editForm.dueDate) || null,
         }),
       "Task details updated successfully.",
@@ -667,7 +669,7 @@ const WorkflowTaskDetailModal = ({
                               ))}
                             </select>
                           </div>
-                          <div className="col-md-3">
+                          <div className="col-md-6">
                             <label className="form-label">Priority</label>
                             <select
                               className="form-select"
@@ -681,7 +683,19 @@ const WorkflowTaskDetailModal = ({
                               <option value="urgent">Urgent</option>
                             </select>
                           </div>
-                          <div className="col-md-3">
+                          <div className="col-md-6">
+                            <label className="form-label">Assignment Date</label>
+                            <input
+                              type="date"
+                              className="form-control"
+                              value={editForm.assignmentDate}
+                              onChange={(event) =>
+                                handleEditFormChange("assignmentDate", event.target.value)
+                              }
+                              disabled={actionLoading}
+                            />
+                          </div>
+                          <div className="col-md-6">
                             <label className="form-label">Due Date</label>
                             <input
                               type="date"
