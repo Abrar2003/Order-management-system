@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { createWorkflowTask } from "../../api/workflowApi";
+import { getTodayISODate } from "../../utils/date";
 
 const normalizeText = (value) => String(value ?? "").trim();
 const normalizeDistinctValues = (values = []) =>
@@ -17,6 +18,7 @@ const createDraft = ({ defaultTaskTypeKey = "" } = {}) => ({
   assignee_ids: [],
   department: "",
   priority: "normal",
+  assignment_date: getTodayISODate(),
   due_date: "",
   brand: "",
 });
@@ -107,6 +109,10 @@ const WorkflowTaskCreateModal = ({
       setError("At least one assignee is required.");
       return;
     }
+    if (!normalizeText(form.assignment_date)) {
+      setError("Assignment date is required.");
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -117,6 +123,7 @@ const WorkflowTaskCreateModal = ({
         assignee_ids: form.assignee_ids,
         department: normalizeText(form.department) || null,
         priority: normalizeText(form.priority) || "normal",
+        assigned_at: normalizeText(form.assignment_date),
         brand: normalizeText(form.brand),
       };
 
@@ -236,7 +243,7 @@ const WorkflowTaskCreateModal = ({
                           </select>
                         </div>
 
-                        <div className="col-md-3">
+                        <div className="col-md-6">
                           <label className="form-label">Priority</label>
                           <select
                             className="form-select"
@@ -253,7 +260,19 @@ const WorkflowTaskCreateModal = ({
                           </select>
                         </div>
 
-                        <div className="col-md-3">
+                        <div className="col-md-6">
+                          <label className="form-label">Assignment Date</label>
+                          <input
+                            type="date"
+                            className="form-control"
+                            value={form.assignment_date}
+                            onChange={(event) =>
+                              setForm((prev) => ({ ...prev, assignment_date: event.target.value }))
+                            }
+                          />
+                        </div>
+
+                        <div className="col-md-6">
                           <label className="form-label">Due Date</label>
                           <input
                             type="date"
@@ -300,6 +319,9 @@ const WorkflowTaskCreateModal = ({
                         </span>
                         <span className="om-summary-chip">
                           Priority: {form.priority || "normal"}
+                        </span>
+                        <span className="om-summary-chip">
+                          Assignment Date: {form.assignment_date || "—"}
                         </span>
                         <span className="om-summary-chip">
                           Due Date: {form.due_date || "—"}

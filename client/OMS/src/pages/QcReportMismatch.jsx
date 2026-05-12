@@ -210,7 +210,7 @@ const buildSheetRows = ({
           : [];
         const inspectionEntry = inspectionEntries[index] || {};
         const mismatchKeySet = buildMismatchKeySet(inspection?.[mismatchKey]);
-        const mismatchKey = `${index}:${field.key}`;
+        const mismatchEntryKey = `${index}:${field.key}`;
         const inspectionValue = inspectionEntry?.[field.key];
         const currentValue = currentEntry?.[field.key];
 
@@ -222,7 +222,7 @@ const buildSheetRows = ({
           inspector_name: inspection?.inspector_name || "Unassigned",
           value: formatComparisonValue(inspectionValue, field.type, field.key),
           is_mismatch:
-            mismatchKeySet.has(mismatchKey) ||
+            mismatchKeySet.has(mismatchEntryKey) ||
             !valuesMatch(inspectionValue, currentValue, field.type),
         };
       });

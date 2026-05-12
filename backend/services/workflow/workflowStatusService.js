@@ -248,15 +248,19 @@ const findActiveTaskTypeForManualTask = async (taskTypeKey = "") => {
   return taskType;
 };
 
-const parseDueDate = (value) => {
+const parseWorkflowDate = (value, fieldName) => {
   const normalized = normalizeText(value);
   if (!normalized) return null;
   const parsed = new Date(normalized);
   if (Number.isNaN(parsed.getTime())) {
-    throw new Error("due_date is invalid");
+    throw new Error(`${fieldName} is invalid`);
   }
   return parsed;
 };
+
+const parseDueDate = (value) => parseWorkflowDate(value, "due_date");
+
+const parseAssignedAt = (value) => parseWorkflowDate(value, "assignment_date");
 
 const normalizeTaskPriority = (value, fallback = "normal") => {
   const normalizedPriority = normalizeText(value || fallback).toLowerCase();
@@ -265,7 +269,6 @@ const normalizeTaskPriority = (value, fallback = "normal") => {
   }
   return normalizedPriority;
 };
-
 
 const recalculateWorkflowBatchIfPresent = async (batchId) => {
   if (!batchId || !mongoose.Types.ObjectId.isValid(batchId)) {
@@ -419,7 +422,10 @@ const createWorkflowTask = async ({
   const auditActor = buildAuditActor(actor);
   const assignedUserRefs = assignees.map((user) => ({ user: user._id }));
   const initialStatus = "assigned";
-  const assignedAt = new Date();
+  const assignedAtInput = payload?.assigned_at !== undefined
+    ? payload.assigned_at
+    : payload?.assignment_date;
+  const assignedAt = parseAssignedAt(assignedAtInput) || new Date();
 
   const task = await Task.create({
     _id: taskId,
