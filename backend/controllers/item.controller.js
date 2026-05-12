@@ -49,6 +49,11 @@ const {
   compareInspectionSizeSnapshot,
 } = require("../helpers/inspectionSizeSnapshot");
 const {
+  compareBoxSizeDimensionVariance,
+  compareItemSizeDimensionVariance,
+  compareWeightVariance,
+} = require("../helpers/measurementMismatchRules");
+const {
   NOT_SET_STATUS,
   PD_STATUSES,
   ProductDatabaseError,
@@ -1283,9 +1288,7 @@ const handleProductDatabaseError = (res, error, fallbackMessage) => {
 const normalizeLookupKey = (value) => normalizeTextField(value).toLowerCase();
 
 const MEASUREMENT_COMPARE_TOLERANCE = 0.0001;
-const SIZE_DIMENSION_DIFF_TOLERANCE = 0.5;
 const CBM_COMPARE_DECIMALS = 2;
-const WEIGHT_DIFF_PERCENT_TOLERANCE = 10;
 
 const buildMeasurementEntryKey = (entry = {}, index = 0) => {
   const normalizedRemark = normalizeTextField(entry?.remark || entry?.type).toLowerCase();
@@ -1298,12 +1301,6 @@ const hasAnyPositiveMeasurementLbh = (dimensions = {}) =>
   || Number(dimensions?.H || 0) > 0;
 
 const hasPositiveMeasurementWeight = (value) => Number(value || 0) > 0;
-
-const areMeasurementNumbersEqual = (left, right) =>
-  Math.abs(toSafeNumber(left, 0) - toSafeNumber(right, 0)) < MEASUREMENT_COMPARE_TOLERANCE;
-
-const areSizeDimensionNumbersEqual = (left, right) =>
-  Math.abs(toSafeNumber(left, 0) - toSafeNumber(right, 0)) <= SIZE_DIMENSION_DIFF_TOLERANCE;
 
 const roundCbmForComparison = (value) => {
   const parsed = toSafeNumber(value, 0);
@@ -1326,18 +1323,6 @@ const compareRoundedCbmValues = (inspectedValue, pisValue) => {
     pis,
     delta,
   };
-};
-
-const isWeightDifferenceAtOrAboveTolerance = (inspectedWeight, pisWeight) => {
-  const inspectedValue = toSafeNumber(inspectedWeight, 0);
-  const pisValue = toSafeNumber(pisWeight, 0);
-  if (inspectedValue <= 0 || pisValue <= 0) {
-    return !areMeasurementNumbersEqual(inspectedValue, pisValue);
-  }
-
-  const diffPercent =
-    (Math.abs(inspectedValue - pisValue) / inspectedValue) * 100;
-  return diffPercent >= WEIGHT_DIFF_PERCENT_TOLERANCE;
 };
 
 const getNormalizedWeightFieldValue = (weight = {}, fieldKey = "") =>
@@ -1382,7 +1367,10 @@ const buildComparableMeasurementEntries = ({
 const compareMeasurementEntryGroups = (
   inspectedEntries = [],
   pisEntries = [],
-  { weightKey = "" } = {},
+  {
+    weightKey = "",
+    sizeComparator = compareItemSizeDimensionVariance,
+  } = {},
 ) => {
   const inspectedNormalized = Array.isArray(inspectedEntries) ? inspectedEntries : [];
   const pisNormalized = Array.isArray(pisEntries) ? pisEntries : [];
@@ -1416,33 +1404,23 @@ const compareMeasurementEntryGroups = (
     const hasInspectedSize = hasAnyPositiveMeasurementLbh(inspectedEntry || {});
     const hasPisSize = hasAnyPositiveMeasurementLbh(pisEntry || {});
 
-    if (hasInspectedSize !== hasPisSize) {
-      sizeMismatch = true;
-    } else if (hasInspectedSize && hasPisSize) {
-      if (
-        !areSizeDimensionNumbersEqual(inspectedEntry?.L, pisEntry?.L)
-        || !areSizeDimensionNumbersEqual(inspectedEntry?.B, pisEntry?.B)
-        || !areSizeDimensionNumbersEqual(inspectedEntry?.H, pisEntry?.H)
-      ) {
-        sizeMismatch = true;
-      }
+    if (hasInspectedSize && hasPisSize) {
+      ["L", "B", "H"].forEach((axis) => {
+        const comparison = sizeComparator(inspectedEntry?.[axis], pisEntry?.[axis]);
+        if (comparison.mismatch) {
+          sizeMismatch = true;
+        }
+      });
     }
 
     if (!weightKey) return;
 
     const hasInspectedWeight = hasPositiveMeasurementWeight(inspectedEntry?.[weightKey]);
     const hasPisWeight = hasPositiveMeasurementWeight(pisEntry?.[weightKey]);
-    if (hasInspectedWeight !== hasPisWeight) {
-      weightMismatch = true;
-    } else if (
-      hasInspectedWeight
-      && hasPisWeight
-      && isWeightDifferenceAtOrAboveTolerance(
-        inspectedEntry?.[weightKey],
-        pisEntry?.[weightKey],
-      )
-    ) {
-      weightMismatch = true;
+    if (hasInspectedWeight && hasPisWeight) {
+      if (compareWeightVariance(inspectedEntry?.[weightKey], pisEntry?.[weightKey]).mismatch) {
+        weightMismatch = true;
+      }
     }
   });
 
@@ -1515,7 +1493,10 @@ const buildPisDiffSummary = (item = {}) => {
   const boxComparison = compareMeasurementEntryGroups(
     inspectedBoxEntries,
     pisBoxEntries,
-    { weightKey: "gross_weight" },
+    {
+      weightKey: "gross_weight",
+      sizeComparator: compareBoxSizeDimensionVariance,
+    },
   );
 
   const pisBarcode = normalizeTextField(
@@ -1837,6 +1818,7 @@ const buildPisDiffMeasurementDetails = ({
   weightLabel = "Net Weight",
   weightKey = "net_weight",
   baseLabel = "Item",
+  sizeComparator = compareItemSizeDimensionVariance,
 } = {}) => {
   const inspectedEntries = buildPisDiffMeasurementEntries({
     item,
@@ -1870,39 +1852,15 @@ const buildPisDiffMeasurementDetails = ({
     const hasInspectedSize = hasAnyPositiveMeasurementLbh(inspectedEntry || {});
     const hasPisSize = hasAnyPositiveMeasurementLbh(pisEntry || {});
 
-    if (hasInspectedSize !== hasPisSize) {
-      const inspectedValue = hasInspectedSize
-        ? `${formatMeasurementLbhDisplay(inspectedEntry)} cm`
-        : "Not Set";
-      const pisValue = hasPisSize ? `${formatMeasurementLbhDisplay(pisEntry)} cm` : "Not Set";
-      const missingSide = hasInspectedSize ? "pis" : "inspected";
-
-      details.push({
-        key: `${group}-${key}-size-missing-${index}`,
-        section: sizeSection,
-        segment,
-        attribute: "L x B x H",
-        inspected: inspectedValue,
-        pis: pisValue,
-        delta: missingSide === "pis" ? "PIS not set" : "Inspected not set",
-        note: buildPisDiffDetailNote({
-          subject: `${segment} size`,
-          inspected: inspectedValue,
-          pis: pisValue,
-          missingSide,
-        }),
-      });
-    } else if (hasInspectedSize && hasPisSize) {
+    if (hasInspectedSize && hasPisSize) {
       ["L", "B", "H"].forEach((axis) => {
         const inspectedValueRaw = Number(inspectedEntry?.[axis] || 0);
         const pisValueRaw = Number(pisEntry?.[axis] || 0);
-        const delta = inspectedValueRaw - pisValueRaw;
-        if (
-          !Number.isFinite(delta)
-          || Math.abs(delta) <= SIZE_DIMENSION_DIFF_TOLERANCE
-        ) {
+        const comparison = sizeComparator(inspectedValueRaw, pisValueRaw);
+        if (!comparison.mismatch) {
           return;
         }
+        const delta = comparison.delta;
 
         const inspectedValue = formatPisDiffValueWithUnit(inspectedValueRaw, "cm");
         const pisValue = formatPisDiffValueWithUnit(pisValueRaw, "cm");
@@ -1930,25 +1888,12 @@ const buildPisDiffMeasurementDetails = ({
 
     const inspectedWeight = Number(inspectedEntry?.[weightKey] || 0);
     const pisWeight = Number(pisEntry?.[weightKey] || 0);
-    const hasInspectedWeight = inspectedWeight > 0;
-    const hasPisWeight = pisWeight > 0;
-    const weightMismatch =
-      hasInspectedWeight !== hasPisWeight
-      || (
-        hasInspectedWeight
-        && hasPisWeight
-        && isWeightDifferenceAtOrAboveTolerance(inspectedWeight, pisWeight)
-      );
+    const comparison = compareWeightVariance(inspectedWeight, pisWeight);
+    if (!comparison.mismatch) return;
 
-    if (!weightMismatch) return;
-
-    const inspectedValue = hasInspectedWeight
-      ? formatPisDiffValueWithUnit(inspectedWeight, "kg")
-      : "Not Set";
-    const pisValue = hasPisWeight
-      ? formatPisDiffValueWithUnit(pisWeight, "kg")
-      : "Not Set";
-    const delta = inspectedWeight - pisWeight;
+    const inspectedValue = formatPisDiffValueWithUnit(inspectedWeight, "kg");
+    const pisValue = formatPisDiffValueWithUnit(pisWeight, "kg");
+    const delta = comparison.delta;
 
     details.push({
       key: `${group}-${key}-${weightKey}-${index}`,
@@ -1957,19 +1902,13 @@ const buildPisDiffMeasurementDetails = ({
       attribute: weightLabel,
       inspected: inspectedValue,
       pis: pisValue,
-      delta:
-        hasInspectedWeight && hasPisWeight
-          ? formatPisDiffSignedDelta(delta, "kg")
-          : (hasInspectedWeight ? "PIS not set" : "Inspected not set"),
+      delta: formatPisDiffSignedDelta(delta, "kg"),
       note: buildPisDiffDetailNote({
         subject: `${segment} ${weightLabel.toLowerCase()}`,
         inspected: inspectedValue,
         pis: pisValue,
         delta,
         unit: "kg",
-        missingSide: hasInspectedWeight === hasPisWeight
-          ? ""
-          : (hasInspectedWeight ? "pis" : "inspected"),
       }),
     });
   });
@@ -2036,6 +1975,7 @@ const buildPisDiffDetailedComparisons = (item = {}) => {
       weightLabel: "Gross Weight",
       weightKey: "gross_weight",
       baseLabel: "Box",
+      sizeComparator: compareBoxSizeDimensionVariance,
     }),
     ...buildPisDiffCbmDetails(item),
   ];

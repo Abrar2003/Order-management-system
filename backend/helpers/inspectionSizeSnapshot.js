@@ -3,6 +3,12 @@ const {
   BOX_ENTRY_TYPES,
   detectBoxPackagingMode,
 } = require("./boxMeasurement");
+const {
+  compareBoxSizeDimensionVariance,
+  compareItemSizeDimensionVariance,
+  compareWeightVariance,
+  hasComparableNumber,
+} = require("./measurementMismatchRules");
 
 const SIZE_ENTRY_LIMIT = 4;
 const NUMBER_TOLERANCE = 0.001;
@@ -73,7 +79,7 @@ const hasMeaningfulNumber = (value) =>
 const hasMeaningfulItemEntry = (entry = {}) =>
   ["L", "B", "H", "net_weight", "gross_weight"].some((field) =>
     hasMeaningfulNumber(entry?.[field]),
-  ) || Boolean(normalizeKey(entry?.remark));
+  );
 
 const hasMeaningfulBoxEntry = (entry = {}) =>
   [
@@ -84,9 +90,7 @@ const hasMeaningfulBoxEntry = (entry = {}) =>
     "gross_weight",
     "item_count_in_inner",
     "box_count_in_master",
-  ].some((field) => hasMeaningfulNumber(entry?.[field])) ||
-  Boolean(normalizeKey(entry?.remark)) ||
-  Boolean(normalizeKey(entry?.box_type));
+  ].some((field) => hasMeaningfulNumber(entry?.[field]));
 
 const buildItemEntryKey = (entry = {}, index = 0) =>
   normalizeKey(entry?.remark) || `entry-${index + 1}`;
@@ -357,6 +361,9 @@ const numericValuesEqual = (left, right) =>
 
 const textValuesEqual = (left, right) => normalizeKey(left) === normalizeKey(right);
 
+const hasComparableText = (left, right) =>
+  Boolean(normalizeKey(left)) && Boolean(normalizeKey(right));
+
 const createMismatchEntry = ({
   index = 0,
   field = "",
@@ -371,6 +378,30 @@ const createMismatchEntry = ({
   label,
 });
 
+const compareFieldValues = (fieldConfig = {}, inspectionValue, qcValue) => {
+  if (typeof fieldConfig.compare === "function") {
+    const comparison = fieldConfig.compare(inspectionValue, qcValue);
+    return {
+      comparable: Boolean(comparison?.comparable),
+      mismatch: Boolean(comparison?.mismatch),
+    };
+  }
+
+  if (fieldConfig.type === "text") {
+    const comparable = hasComparableText(inspectionValue, qcValue);
+    return {
+      comparable,
+      mismatch: comparable && !textValuesEqual(inspectionValue, qcValue),
+    };
+  }
+
+  const comparable = hasComparableNumber(inspectionValue) && hasComparableNumber(qcValue);
+  return {
+    comparable,
+    mismatch: comparable && !numericValuesEqual(inspectionValue, qcValue),
+  };
+};
+
 const compareEntryArrays = ({
   inspectionEntries = [],
   currentEntries = [],
@@ -378,6 +409,7 @@ const compareEntryArrays = ({
   fields = [],
 } = {}) => {
   const mismatches = [];
+  let hasComparableData = false;
   const maxLength = Math.max(
     Array.isArray(inspectionEntries) ? inspectionEntries.length : 0,
     Array.isArray(currentEntries) ? currentEntries.length : 0,
@@ -390,12 +422,10 @@ const compareEntryArrays = ({
     fields.forEach((fieldConfig) => {
       const inspectionValue = inspectionEntry?.[fieldConfig.key];
       const qcValue = currentEntry?.[fieldConfig.key];
-      const isEqual =
-        fieldConfig.type === "text"
-          ? textValuesEqual(inspectionValue, qcValue)
-          : numericValuesEqual(inspectionValue, qcValue);
-
-      if (isEqual) return;
+      const comparison = compareFieldValues(fieldConfig, inspectionValue, qcValue);
+      if (!comparison.comparable) return;
+      hasComparableData = true;
+      if (!comparison.mismatch) return;
 
       mismatches.push(
         createMismatchEntry({
@@ -415,38 +445,41 @@ const compareEntryArrays = ({
     });
   }
 
-  return mismatches;
+  return {
+    mismatches,
+    hasComparableData,
+  };
 };
 
 const compareInspectionSizeSnapshot = (inspection = {}, currentSource = {}) => {
   const inspectionState = buildNormalizedInspectionSizeState(inspection);
   const currentState = buildNormalizedInspectionSizeState(currentSource);
 
-  const itemSizeMismatches = compareEntryArrays({
+  const itemSizeComparison = compareEntryArrays({
     inspectionEntries: inspectionState.inspected_item_sizes,
     currentEntries: currentState.inspected_item_sizes,
     labelPrefix: "Item Size",
     fields: [
-      { key: "L", label: "L", type: "number" },
-      { key: "B", label: "B", type: "number" },
-      { key: "H", label: "H", type: "number" },
+      { key: "L", label: "L", type: "number", compare: compareItemSizeDimensionVariance },
+      { key: "B", label: "B", type: "number", compare: compareItemSizeDimensionVariance },
+      { key: "H", label: "H", type: "number", compare: compareItemSizeDimensionVariance },
       { key: "remark", label: "Remark", type: "text" },
-      { key: "net_weight", label: "Net Weight", type: "number" },
-      { key: "gross_weight", label: "Gross Weight", type: "number" },
+      { key: "net_weight", label: "Net Weight", type: "number", compare: compareWeightVariance },
+      { key: "gross_weight", label: "Gross Weight", type: "number", compare: compareWeightVariance },
     ],
   });
 
-  const boxSizeMismatches = compareEntryArrays({
+  const boxSizeComparison = compareEntryArrays({
     inspectionEntries: inspectionState.inspected_box_sizes,
     currentEntries: currentState.inspected_box_sizes,
     labelPrefix: "Box Size",
     fields: [
-      { key: "L", label: "L", type: "number" },
-      { key: "B", label: "B", type: "number" },
-      { key: "H", label: "H", type: "number" },
+      { key: "L", label: "L", type: "number", compare: compareBoxSizeDimensionVariance },
+      { key: "B", label: "B", type: "number", compare: compareBoxSizeDimensionVariance },
+      { key: "H", label: "H", type: "number", compare: compareBoxSizeDimensionVariance },
       { key: "remark", label: "Remark", type: "text" },
-      { key: "net_weight", label: "Net Weight", type: "number" },
-      { key: "gross_weight", label: "Gross Weight", type: "number" },
+      { key: "net_weight", label: "Net Weight", type: "number", compare: compareWeightVariance },
+      { key: "gross_weight", label: "Gross Weight", type: "number", compare: compareWeightVariance },
       { key: "box_type", label: "Box Type", type: "text" },
       {
         key: "item_count_in_inner",
@@ -461,16 +494,26 @@ const compareInspectionSizeSnapshot = (inspection = {}, currentSource = {}) => {
     ],
   });
 
-  const boxModeMismatch = textValuesEqual(
-    inspectionState.inspected_box_mode,
-    currentState.inspected_box_mode,
-  )
-    ? null
-    : {
+  const hasComparableBoxMode =
+    boxSizeComparison.hasComparableData &&
+    hasComparableText(
+      inspectionState.inspected_box_mode,
+      currentState.inspected_box_mode,
+    );
+  const boxModeMismatch =
+    hasComparableBoxMode && !textValuesEqual(
+      inspectionState.inspected_box_mode,
+      currentState.inspected_box_mode,
+    )
+      ? {
         inspection_value: normalizeText(inspectionState.inspected_box_mode),
         qc_value: normalizeText(currentState.inspected_box_mode),
         label: "Box Mode",
-      };
+      }
+      : null;
+
+  const itemSizeMismatches = itemSizeComparison.mismatches;
+  const boxSizeMismatches = boxSizeComparison.mismatches;
 
   const mismatchCount =
     itemSizeMismatches.length +
@@ -483,6 +526,10 @@ const compareInspectionSizeSnapshot = (inspection = {}, currentSource = {}) => {
     item_size_mismatches: itemSizeMismatches,
     box_size_mismatches: boxSizeMismatches,
     box_mode_mismatch: boxModeMismatch,
+    has_comparable_data:
+      itemSizeComparison.hasComparableData ||
+      boxSizeComparison.hasComparableData ||
+      hasComparableBoxMode,
     inspection_snapshot: inspectionState,
     current_snapshot: currentState,
   };

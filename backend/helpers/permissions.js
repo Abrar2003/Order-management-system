@@ -172,8 +172,7 @@ const buildAdminPermissions = () => {
 };
 
 const buildManagerPermissions = () => {
-  const permissions = buildAdminPermissions();
-  return lockAdminOnlyPermissions("manager", permissions);
+  return buildAdminPermissions();
 };
 
 const buildDevPermissions = () => {
@@ -183,7 +182,7 @@ const buildDevPermissions = () => {
 
 const buildSuperAdminPermissions = () => buildAdminPermissions();
 
-const buildProductManagerPermissions = () => buildManagerPermissions();
+const buildProductManagerPermissions = () => buildAdminPermissions();
 
 const buildInspectionManagerPermissions = () => {
   return buildAdminPermissions();

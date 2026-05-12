@@ -154,22 +154,6 @@ const formatComparisonValue = (value, type = "text", fieldKey = "") => {
   return type === "number" ? formatNumberValue(value) : formatTextValue(value);
 };
 
-const normalizeComparisonValue = (value, type = "text") => {
-  if (type === "number") {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  return String(value ?? "").trim().toLowerCase();
-};
-
-const valuesMatch = (left, right, type = "text") => {
-  if (type === "number") {
-    return Math.abs(normalizeComparisonValue(left, type) - normalizeComparisonValue(right, type))
-      <= NUMBER_TOLERANCE;
-  }
-  return normalizeComparisonValue(left, type) === normalizeComparisonValue(right, type);
-};
-
 const buildMismatchKeySet = (mismatches = []) =>
   new Set(
     (Array.isArray(mismatches) ? mismatches : []).map((entry) =>
@@ -221,9 +205,7 @@ const buildSheetRows = ({
           inspection_date: inspection?.inspection_date || "",
           inspector_name: inspection?.inspector_name || "Unassigned",
           value: formatComparisonValue(inspectionValue, field.type, field.key),
-          is_mismatch:
-            mismatchKeySet.has(mismatchEntryKey) ||
-            !valuesMatch(inspectionValue, currentValue, field.type),
+          is_mismatch: mismatchKeySet.has(mismatchEntryKey),
         };
       });
 
@@ -262,14 +244,11 @@ const buildBoxModeSheetRows = ({
         inspection_date: inspection?.inspection_date || "",
         inspector_name: inspection?.inspector_name || "Unassigned",
         value: formatBoxModeLabel(inspectionMode),
-        is_mismatch:
-          Boolean(inspection?.box_mode_mismatch) ||
-          !valuesMatch(inspectionMode, currentMode, "text"),
+        is_mismatch: Boolean(inspection?.box_mode_mismatch),
       };
     }),
     is_mismatch: safeInspections.some((inspection) =>
-      Boolean(inspection?.box_mode_mismatch) ||
-      !valuesMatch(inspection?.inspection_snapshot?.inspected_box_mode, currentMode, "text"),
+      Boolean(inspection?.box_mode_mismatch),
     ),
   }];
 };
@@ -941,7 +920,7 @@ const QcReportMismatch = () => {
               <div className="text-center py-5">Loading QC report mismatch...</div>
             ) : rows.length === 0 ? (
               <div className="text-center py-5 text-secondary">
-                No inspection records found for the selected filters.
+                No comparable inspection records found for the selected filters.
               </div>
             ) : (
               <div className="table-responsive">

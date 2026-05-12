@@ -11,6 +11,12 @@ const formatActionLabel = (value = "") =>
 const clonePermissions = (permissions = {}) =>
   JSON.parse(JSON.stringify(permissions || {}));
 
+const ADMIN_PERMISSION_MIRROR_ROLES = new Set([
+  "manager",
+  "product_manager",
+  "inspection_manager",
+]);
+
 const PermissionManagement = () => {
   const { isAdmin, refreshPermissions } = usePermissions();
   const [roles, setRoles] = useState([]);
@@ -27,7 +33,8 @@ const PermissionManagement = () => {
     () => roles.find((entry) => entry.role === selectedRole) || null,
     [roles, selectedRole],
   );
-  const isAdminMirrorRole = selectedRole === "inspection_manager";
+  const isAdminMirrorRole = ADMIN_PERMISSION_MIRROR_ROLES.has(selectedRole);
+  const selectedRoleLabel = ROLE_LABELS[selectedRole] || selectedRole || "This role";
 
   const filteredModules = useMemo(() => {
     const search = moduleSearch.trim().toLowerCase();
@@ -51,9 +58,9 @@ const PermissionManagement = () => {
   const getLockMessage = useCallback(
     (moduleKey) =>
       isAdminMirrorRole
-        ? "Inspection Manager follows Admin permissions."
+        ? `${selectedRoleLabel} follows Admin permissions.`
         : meta?.locked?.[moduleKey]?.message || "",
-    [isAdminMirrorRole, meta?.locked],
+    [isAdminMirrorRole, meta?.locked, selectedRoleLabel],
   );
 
   const loadPermissions = useCallback(async () => {
@@ -239,8 +246,8 @@ const PermissionManagement = () => {
           )}
           {isAdminMirrorRole ? (
             <div className="alert alert-info py-2 mt-3 mb-0">
-              Inspection Manager follows Admin permissions. Update Admin rights to
-              change both roles.
+              {selectedRoleLabel} follows Admin permissions. Update Admin rights to
+              change this role.
             </div>
           ) : isAdminLikeRole(selectedRole) && (
             <div className="alert alert-warning py-2 mt-3 mb-0">

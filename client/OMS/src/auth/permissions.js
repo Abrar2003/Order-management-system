@@ -58,13 +58,13 @@ export const isQcOnlyUserRole = (role) =>
   normalizeUserRole(role) === "qc";
 
 export const isAdminLikeRole = (role) =>
-  ["admin", "super_admin", "inspection_manager"].includes(normalizeUserRole(role));
+  ["admin", "super_admin", "manager", "product_manager", "inspection_manager"].includes(
+    normalizeUserRole(role),
+  );
 
 export const isManagerLikeRole = (role) =>
   isAdminLikeRole(role)
-  || ["manager", "product_manager", "inspection_manager"].includes(
-    normalizeUserRole(role),
-  );
+  || ["manager", "product_manager", "inspection_manager"].includes(normalizeUserRole(role));
 
 export const hasShipmentPrivilegeRole = (role) =>
   isManagerLikeRole(role) || normalizeUserRole(role) === "dev";

@@ -3,6 +3,11 @@ const {
   BOX_ENTRY_TYPES,
   detectBoxPackagingMode,
 } = require("./boxMeasurement");
+const {
+  compareBoxSizeDimensionVariance,
+  compareItemSizeDimensionVariance,
+  compareWeightVariance,
+} = require("./measurementMismatchRules");
 
 const FINAL_PIS_CHECK_ITEM_SELECT = [
   "code",
@@ -68,7 +73,6 @@ const FINAL_PIS_CHECK_SORT_FIELDS = Object.freeze([
 ]);
 
 const COMPARE_TOLERANCE = 0.001;
-const SIZE_DIMENSION_DIFF_TOLERANCE = 0.5;
 const CBM_COMPARE_DECIMALS = 2;
 const SIZE_ENTRY_LIMIT = 4;
 const EMPTY_LABEL = "Not Set";
@@ -169,6 +173,26 @@ const compareNumericValues = (
     delta,
   };
 };
+
+const normalizeNumericComparisonResult = (comparison = {}) => ({
+  mismatch: Boolean(comparison?.mismatch),
+  hasInspected: Boolean(comparison?.hasInspected),
+  hasPis: Boolean(
+    Object.prototype.hasOwnProperty.call(comparison, "hasReference")
+      ? comparison.hasReference
+      : comparison?.hasPis,
+  ),
+  inspected: Object.prototype.hasOwnProperty.call(comparison, "inspected")
+    ? comparison.inspected
+    : 0,
+  pis: Object.prototype.hasOwnProperty.call(comparison, "reference")
+    ? comparison.reference
+    : (Object.prototype.hasOwnProperty.call(comparison, "pis") ? comparison.pis : 0),
+  delta: Object.prototype.hasOwnProperty.call(comparison, "delta")
+    ? comparison.delta
+    : 0,
+});
+
 
 const normalizeBarcodeValue = (value) => {
   const normalized = normalizeText(value);
@@ -605,11 +629,16 @@ const createNumericDifference = ({
   compareDecimals = null,
   fixedDecimals = false,
   referenceLabel = "PIS",
+  comparator = null,
 } = {}) => {
-  const comparison = compareNumericValues(inspectedValue, pisValue, {
-    tolerance: compareTolerance,
-    decimals: compareDecimals,
-  });
+  const comparison = normalizeNumericComparisonResult(
+    typeof comparator === "function"
+      ? comparator(inspectedValue, pisValue)
+      : compareNumericValues(inspectedValue, pisValue, {
+          tolerance: compareTolerance,
+          decimals: compareDecimals,
+        }),
+  );
   if (!comparison.mismatch) return null;
   const displayInspectedValue = Number.isInteger(compareDecimals)
     ? comparison.inspected
@@ -743,7 +772,7 @@ const buildItemSizeDifferences = (
         inspectedValue: inspectedEntry?.[axis],
         pisValue: pisEntry?.[axis],
         unit: "cm",
-        compareTolerance: SIZE_DIMENSION_DIFF_TOLERANCE,
+        comparator: compareItemSizeDimensionVariance,
         referenceLabel,
       });
       if (difference) differences.push(difference);
@@ -757,6 +786,7 @@ const buildItemSizeDifferences = (
       inspectedValue: inspectedEntry?.net_weight,
       pisValue: pisEntry?.net_weight,
       unit: "kg",
+      comparator: compareWeightVariance,
       referenceLabel,
     });
     if (weightDifference) differences.push(weightDifference);
@@ -807,7 +837,7 @@ const buildBoxSizeDifferences = ({
         inspectedValue: inspectedEntry?.[axis],
         pisValue: pisEntry?.[axis],
         unit: "cm",
-        compareTolerance: SIZE_DIMENSION_DIFF_TOLERANCE,
+        comparator: compareBoxSizeDimensionVariance,
         referenceLabel,
       });
       if (difference) differences.push(difference);
@@ -844,6 +874,10 @@ const buildBoxSizeDifferences = ({
         inspectedValue: entryConfig.inspectedValue,
         pisValue: entryConfig.pisValue,
         unit: entryConfig.unit,
+        comparator:
+          entryConfig.keySuffix === "gross-weight"
+            ? compareWeightVariance
+            : null,
         referenceLabel,
       });
       if (difference) differences.push(difference);
@@ -883,6 +917,7 @@ const buildOverallWeightDifferences = (item = {}) => {
         ? masterWeight
         : getWeightRecordValue(item?.pis_weight, weightField.fieldKey),
       unit: weightField.unit,
+      comparator: compareWeightVariance,
       referenceLabel,
     });
     if (difference) differences.push(difference);

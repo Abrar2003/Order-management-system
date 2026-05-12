@@ -13,7 +13,11 @@ const {
 
 const HISTORY_LIMIT = 25;
 const ADMIN_PERMISSION_SOURCE_ROLE = "admin";
-const ADMIN_PERMISSION_MIRROR_ROLES = new Set(["inspection_manager"]);
+const ADMIN_PERMISSION_MIRROR_ROLES = new Set([
+  "manager",
+  "product_manager",
+  "inspection_manager",
+]);
 
 const serializeRolePermission = (doc, role, permissionOverride = null) => {
   const roleKey = normalizeRoleKey(doc?.role || role);

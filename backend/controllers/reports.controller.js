@@ -1345,6 +1345,9 @@ exports.getQcReportMismatch = async (req, res) => {
       const currentItemDoc =
         itemDocByCode.get(normalizeLookupKey(inspection?.item_code)) || {};
       const mismatch = compareInspectionSizeSnapshot(inspection, currentItemDoc);
+      if (!mismatch.has_comparable_data) {
+        return null;
+      }
 
       return {
         id: String(inspection?._id || ""),
@@ -1387,7 +1390,7 @@ exports.getQcReportMismatch = async (req, res) => {
         box_size_mismatches: mismatch.box_size_mismatches,
         box_mode_mismatch: mismatch.box_mode_mismatch,
       };
-    });
+    }).filter(Boolean);
 
     const summary = inspectionRows.reduce(
       (accumulator, row) => {
