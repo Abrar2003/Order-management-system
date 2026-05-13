@@ -209,6 +209,9 @@ const buildStatusMatch = (status = "") => {
   if (normalizedStatus === "needs_approval") {
     return { $in: NEEDS_APPROVAL_STATUS_VALUES };
   }
+  if (normalizedStatus === "upload_remaining") {
+    return "approved";
+  }
 
   const values = getWorkflowStatusFilterValues(status);
   if (values.length === 0) {

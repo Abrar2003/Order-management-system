@@ -39,6 +39,7 @@ const getCompleteAndBeyondTaskCount = (counts = {}) =>
 const SPOTLIGHT_TASK_FILTERS = Object.freeze([
   { countKey: "open_tasks", label: "Open", status: "open" },
   { countKey: "needs_approval_tasks", label: "Needs Approval", status: "needs_approval" },
+  { countKey: "upload_remaining_tasks", label: "Upload Remaining", status: "upload_remaining" },
   { countKey: "overdue_tasks", label: "Overdue", status: "overdue" },
 ]);
 const DASHBOARD_STATUS_OPTIONS = Object.freeze([

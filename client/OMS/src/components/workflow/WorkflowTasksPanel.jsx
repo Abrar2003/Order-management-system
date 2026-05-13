@@ -84,6 +84,7 @@ const WORKFLOW_ACTION_ICONS = Object.freeze({
 const TASK_STATUS_FILTER_OPTIONS = Object.freeze([
   { value: "open", label: "Open" },
   { value: "needs_approval", label: "Needs Approval" },
+  { value: "upload_remaining", label: "Upload Remaining" },
   { value: "overdue", label: "Overdue" },
   { value: "assigned", label: "assigned" },
   { value: "started", label: "started" },
