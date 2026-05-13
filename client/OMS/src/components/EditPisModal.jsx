@@ -205,6 +205,8 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
   const [error, setError] = useState("");
   const [latestInspectionContext, setLatestInspectionContext] = useState(null);
   const [latestInspectionContextLoading, setLatestInspectionContextLoading] = useState(false);
+  const isPisDiffUpdate = updateSource === "pis_diffs";
+  const editScopeLabel = isPisDiffUpdate ? "Master" : "PIS";
 
   const itemCode = useMemo(() => toText(item?.code, "N/A"), [item?.code]);
   const itemDescription = useMemo(
@@ -357,7 +359,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
       const pisItemPayload = parseMeasuredSizeEntries({
         entries: form.pis_item_sizes,
         count: form.pis_item_count,
-        groupLabel: "PIS item size",
+        groupLabel: `${editScopeLabel} item size`,
         remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
         payloadWeightKey: "net_weight",
         weightFieldLabel: "Net weight",
@@ -370,7 +372,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
       const pisBoxPayload = parseMeasuredSizeEntries({
         entries: form.pis_box_sizes,
         count: form.pis_box_count,
-        groupLabel: "PIS box size",
+        groupLabel: `${editScopeLabel} box size`,
         remarkOptions: BOX_SIZE_REMARK_OPTIONS,
         payloadWeightKey: "gross_weight",
         weightFieldLabel: "Gross weight",
@@ -382,24 +384,26 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
       }
 
       const payload = {
-        country_of_origin: toText(form.country_of_origin),
-        pis_barcode: toText(form.master_barcode),
-        pis_master_barcode: toText(form.master_barcode),
-        pis_inner_barcode: toText(form.inner_barcode),
         pis_box_mode: form.pis_box_mode,
         pis_item_sizes: pisItemPayload.value,
         pis_box_sizes: pisBoxPayload.value,
       };
+      if (!isPisDiffUpdate) {
+        payload.country_of_origin = toText(form.country_of_origin);
+        payload.pis_barcode = toText(form.master_barcode);
+        payload.pis_master_barcode = toText(form.master_barcode);
+        payload.pis_inner_barcode = toText(form.inner_barcode);
+      }
       if (updateSource) {
         payload.pis_update_source = updateSource;
       }
-      if (updateSource === "pis_diffs") {
+      if (isPisDiffUpdate) {
         payload.sync_master_data = true;
         payload.pis_checked_flag = true;
       }
 
       const response = await api.patch(`/items/${item?._id}/pis`, payload);
-      const fallbackItem = updateSource === "pis_diffs"
+      const fallbackItem = isPisDiffUpdate
         ? { ...item, pis_checked_flag: true }
         : item;
       onUpdated?.(response?.data?.data || fallbackItem);
@@ -418,7 +422,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
       <div className="modal-dialog modal-dialog-centered modal-xl" role="document">
         <div className="modal-content">
           <div className="modal-header">
-            <h5 className="modal-title">Update PIS: {itemCode}</h5>
+            <h5 className="modal-title">Update {editScopeLabel}: {itemCode}</h5>
             <button
               type="button"
               className="btn-close"
@@ -446,46 +450,50 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
                 <label className="form-label">Description (Read Only)</label>
                 <input type="text" className="form-control" value={itemDescription} disabled />
               </div>
-              <div className="col-md-4">
-                <label className="form-label">Country of Origin</label>
-                <select
-                  className="form-select"
-                  value={form.country_of_origin}
-                  onChange={(event) => updateField("country_of_origin", event.target.value)}
-                  disabled={saving}
-                >
-                  <option value="">Select country</option>
-                  {countryOfOriginOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {!isPisDiffUpdate && (
+                <div className="col-md-4">
+                  <label className="form-label">Country of Origin</label>
+                  <select
+                    className="form-select"
+                    value={form.country_of_origin}
+                    onChange={(event) => updateField("country_of_origin", event.target.value)}
+                    disabled={saving}
+                  >
+                    <option value="">Select country</option>
+                    {countryOfOriginOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
 
-            <div className="row g-2">
-              <div className="col-md-6">
-                <label className="form-label">Master Carton Barcode</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={form.master_barcode}
-                  onChange={(event) => updateField("master_barcode", event.target.value)}
-                  disabled={saving}
-                />
+            {!isPisDiffUpdate && (
+              <div className="row g-2">
+                <div className="col-md-6">
+                  <label className="form-label">Master Carton Barcode</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={form.master_barcode}
+                    onChange={(event) => updateField("master_barcode", event.target.value)}
+                    disabled={saving}
+                  />
+                </div>
+                <div className="col-md-6">
+                  <label className="form-label">Inner Carton Barcode</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={form.inner_barcode}
+                    onChange={(event) => updateField("inner_barcode", event.target.value)}
+                    disabled={saving}
+                  />
+                </div>
               </div>
-              <div className="col-md-6">
-                <label className="form-label">Inner Carton Barcode</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={form.inner_barcode}
-                  onChange={(event) => updateField("inner_barcode", event.target.value)}
-                  disabled={saving}
-                />
-              </div>
-            </div>
+            )}
 
             {showInspectedReference && (
               <div className="border rounded p-3">
@@ -567,12 +575,12 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
 
             <div className="row g-3">
               <div className="col-12">
-                <h6 className="mb-0">PIS Measurements</h6>
+                <h6 className="mb-0">{editScopeLabel} Measurements</h6>
               </div>
 
               <MeasuredSizeSection
                 sectionKey="pis-item"
-                title="PIS Item Sizes (cm) and Net Weight"
+                title={`${editScopeLabel} Item Sizes (cm) and Net Weight`}
                 countLabel="Item Sets"
                 countValue={form.pis_item_count}
                 entries={displayedItemEntries}
@@ -589,7 +597,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
 
               <MeasuredSizeSection
                 sectionKey="pis-box"
-                title="PIS Box Sizes (cm) and Gross Weight"
+                title={`${editScopeLabel} Box Sizes (cm) and Gross Weight`}
                 countLabel="Box Sets"
                 countValue={form.pis_box_count}
                 entries={displayedBoxEntries}
@@ -608,7 +616,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
               />
 
               <div className="col-md-4">
-                <label className="form-label">Calculated PIS CBM</label>
+                <label className="form-label">Calculated {editScopeLabel} CBM</label>
                 <input
                   type="text"
                   className="form-control"
@@ -637,7 +645,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
               onClick={handleSave}
               disabled={saving}
             >
-              {saving ? "Saving..." : "Save PIS"}
+              {saving ? "Saving..." : `Save ${editScopeLabel}`}
             </button>
           </div>
         </div>

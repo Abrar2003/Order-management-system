@@ -19,6 +19,7 @@ import {
 import { useRememberSearchParams } from "../../hooks/useRememberSearchParams";
 import useWorkflowRealtime from "../../hooks/useWorkflowRealtime";
 import { areSearchParamsEquivalent } from "../../utils/searchParams";
+import HoverPortal from "../HoverPortal";
 import WorkflowBatchCreateModal from "./WorkflowBatchCreateModal";
 import WorkflowTaskCreateModal from "./WorkflowTaskCreateModal";
 import WorkflowTaskDetailModal from "./WorkflowTaskDetailModal";
@@ -91,11 +92,13 @@ const WORKFLOW_ACTION_ICONS = Object.freeze({
   rework: "/workflow-icons/rework.png",
 });
 const TASK_STATUS_FILTER_OPTIONS = Object.freeze([
+  { value: "complete_and_beyond", label: "Complete" },
   { value: "open", label: "Open" },
   { value: "needs_approval", label: "Needs Approval" },
   { value: "upload_remaining", label: "Upload Remaining" },
   { value: "upload_pending", label: "Upload Pending" },
   { value: "overdue", label: "Overdue" },
+  { value: "due_today", label: "Due Today" },
   { value: "assigned", label: "assigned" },
   { value: "started", label: "started" },
   { value: "complete", label: "complete" },
@@ -137,6 +140,55 @@ const getTaskActionState = ({
     canRework: canManageWorkflow && ["complete", "approved", "uploaded"].includes(task?.status),
     canApprove: assignedByCurrentUser && task?.status === "complete",
   };
+};
+
+const ReworkHoverBadge = ({ taskId = "", count = 0, comments = [] }) => {
+  const reworkCount = Number(count || 0);
+  const badgeClassName = [
+    "workflow-rework-badge",
+    "is-inline",
+    reworkCount > 0 ? "has-comments" : "is-empty",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const badge = (
+    <span className={badgeClassName} tabIndex={reworkCount > 0 ? 0 : -1}>
+      Reworked: {reworkCount}
+    </span>
+  );
+
+  if (reworkCount <= 0) {
+    return badge;
+  }
+
+  return (
+    <HoverPortal
+      className="workflow-rework-portal-trigger"
+      panelClassName="workflow-rework-hovercard"
+      align="left"
+      trigger={badge}
+    >
+      <span className="workflow-rework-hovercard-title">
+        Rework Comments
+      </span>
+      <span className="workflow-rework-hovercard-list">
+        {comments.map((entry, index) => (
+          <span
+            key={`${taskId}-rework-${index}`}
+            className="workflow-rework-hovercard-item"
+          >
+            <span className="workflow-rework-hovercard-comment">
+              {entry?.comment || "—"}
+            </span>
+            <span className="workflow-rework-hovercard-meta">
+              {getAuditActorName(entry?.created_by)} • {formatDateTime(entry?.created_at)}
+            </span>
+          </span>
+        ))}
+      </span>
+    </HoverPortal>
+  );
 };
 
 const WorkflowTasksPanel = ({
@@ -808,41 +860,11 @@ const WorkflowTasksPanel = ({
                                 {assigneeText}
                               </div>
                               <div className="workflow-task-rework-line">
-                                <span
-                                  className={[
-                                    "workflow-rework-badge",
-                                    "is-inline",
-                                    reworkCount > 0 ? "has-comments" : "is-empty",
-                                  ]
-                                    .filter(Boolean)
-                                    .join(" ")}
-                                  tabIndex={reworkCount > 0 ? 0 : -1}
-                                >
-                                  Reworked: {reworkCount}
-                                  {reworkCount > 0 && (
-                                    <span className="workflow-rework-hovercard">
-                                      <span className="workflow-rework-hovercard-title">
-                                        Rework Comments
-                                      </span>
-                                      <span className="workflow-rework-hovercard-list">
-                                        {reworkComments.map((entry, index) => (
-                                          <span
-                                            key={`${task._id}-rework-${index}`}
-                                            className="workflow-rework-hovercard-item"
-                                          >
-                                            <span className="workflow-rework-hovercard-comment">
-                                              {entry?.comment || "—"}
-                                            </span>
-                                            <span className="workflow-rework-hovercard-meta">
-                                              {getAuditActorName(entry?.created_by)} •{" "}
-                                              {formatDateTime(entry?.created_at)}
-                                            </span>
-                                          </span>
-                                        ))}
-                                      </span>
-                                    </span>
-                                  )}
-                                </span>
+                                <ReworkHoverBadge
+                                  taskId={task._id}
+                                  count={reworkCount}
+                                  comments={reworkComments}
+                                />
                               </div>
                             </div>
                           </td>

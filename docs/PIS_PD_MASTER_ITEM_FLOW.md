@@ -21,7 +21,7 @@ Size arrays are capped at 4 entries by the item schema. Inner + master carton mo
 | Data | Operation | Route | Controller | Business behavior |
 | --- | --- | --- | --- | --- |
 | PIS list | Read | `GET /items` | `backend/controllers/item.controller.js#getItems` | Used by the PIS and Items pages to read item rows, PIS measurements, barcodes, files, QC flags, and metadata. |
-| PIS update | Update | `PATCH /items/:id/pis` | `backend/controllers/item.controller.js#updateItemPis` | Updates PIS country, barcodes, sizes, box mode, derived weights, and calculated CBM. In PIS Diff mode it also writes master sizes and sets `pis_checked_flag`. |
+| PIS update | Update | `PATCH /items/:id/pis` | `backend/controllers/item.controller.js#updateItemPis` | Updates PIS country, barcodes, `pis_item_sizes`, `pis_box_sizes`, box mode, derived weights, and calculated CBM. Legacy PIS LBH fields are read-only. In PIS Diff mode it only writes master sizes, master box mode, and `pis_checked_flag`; PIS fields are left unchanged. |
 | PIS diffs | Read | `GET /items/pis-diffs` | `backend/controllers/item.controller.js#getPisDiffItems` | Reads unchecked rows where inspected data differs from PIS data. Checked rows are excluded by `pis_checked_flag: { $ne: true }`. |
 | Product Database | Read | `GET /items/product-database` | `backend/controllers/item.controller.js#getProductDatabaseItems` | Reads Product Database rows, status counts, filters, and row-level permissions. |
 | Product Database | Update | `PATCH /items/:id/product-database` | `backend/controllers/item.controller.js#updateProductDatabaseItem` | Saves PD fields through `backend/helpers/productDatabase.js#applyProductDatabaseSave`, moves the record to Created, and appends `pd_history`. |
@@ -38,7 +38,7 @@ There is no hard-delete route for PIS, PD, or Master item data. Clearing values 
 | --- | --- | --- | --- | --- |
 | PIS page | `client/OMS/src/pages/PIS.jsx` | `GET /items` | Opens `EditPisModal` | Shows PIS data and lets users with PIS edit permission open the PIS update modal. |
 | PIS update modal | `client/OMS/src/components/EditPisModal.jsx` | Receives selected item from PIS, PIS Diffs, or Final PIS Check page | `PATCH /items/:id/pis` | Builds PIS payload with country, barcodes, item sizes, box sizes, and box mode. Missing size fields are now allowed and logged instead of blocking the save. |
-| PIS Diffs page | `client/OMS/src/pages/PISDiffs.jsx` | `GET /items/pis-diffs` | Opens `EditPisModal` with `updateSource="pis_diffs"` | Shows unchecked diffs. When Update PIS is saved, backend requires Admin/Super Admin, updates PIS, copies PIS sizes into master fields, sets `pis_checked_flag`, removes the row from the visible list, and logs PIS + Master changes. |
+| PIS Diffs page | `client/OMS/src/pages/PISDiffs.jsx` | `GET /items/pis-diffs` | Opens `EditPisModal` with `updateSource="pis_diffs"` | Shows unchecked diffs. When Update Master is saved, backend requires Admin/Super Admin, saves the submitted size values to master fields only, sets `pis_checked_flag`, removes the row from the visible list, and logs Master changes. |
 | Final PIS Check page | `client/OMS/src/pages/FinalPISCheck.jsx` | `GET /items/final-pis-check` and related report routes | Opens `EditPisModal` | Report/checking surface that can still update PIS through the same modal and backend route. |
 | Product Database page | `client/OMS/src/pages/ProductDatabase.jsx` | `GET /items/product-database` and product type template APIs | Product Database patch/check/approve routes | Shows status-based PD workflow. The modal saves barcodes, origin, product type specs, PD sizes, and status actions. Empty/missing values are allowed on save/check/approve and are logged. |
 | Item Masters page | `client/OMS/src/pages/ItemMasters.jsx` | `GET /items/masters` | No direct update modal | Read-only master view. It displays `master_item_sizes` and `master_box_sizes`; if those are empty it falls back to PIS sizes. |
@@ -53,7 +53,7 @@ Log creation is centralized through `backend/helpers/itemUpdateAudit.js` and is 
 | Update source | Logged operation | Logged data scope |
 | --- | --- | --- |
 | PIS update modal | `pis_update` | `PIS` |
-| PIS Diff modal | `pis_diff_update` | `PIS`, `Master` |
+| PIS Diff modal | `pis_diff_update` | `Master` |
 | Product Database Save | `product_database_update` | `PD` |
 | Product Database Check | `product_database_check` | `PD` |
 | Product Database Approve | `product_database_approve` | `PD` |
@@ -98,5 +98,5 @@ There is no dedicated delete flow for PIS, PD, or Master values.
 Current delete-like behavior:
 
 - To remove PIS or PD field values, save the modal with blank values.
-- To remove master values, the current code has no direct UI. Master values are written by the PIS Diff modal when a diff is checked.
+- To remove master size values, save the PIS Diffs modal with blank size values.
 - To delete item files, use the existing item file delete route: `DELETE /items/:id/files/:fileType`.

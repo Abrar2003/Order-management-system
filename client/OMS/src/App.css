@@ -538,11 +538,8 @@ small,
 }
 
 .workflow-rework-hovercard {
-  position: absolute;
-  left: 50%;
-  top: calc(100% + 0.6rem);
-  z-index: 20;
-  display: none;
+  z-index: 1080;
+  display: block;
   width: 22rem;
   max-width: min(22rem, 70vw);
   padding: 0.8rem 0.9rem;
@@ -550,13 +547,11 @@ small,
   border-radius: 0.9rem;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 243, 236, 0.98));
   box-shadow: var(--om-shadow-md);
-  transform: translateX(-50%);
   text-align: left;
 }
 
-.workflow-rework-badge.has-comments:hover .workflow-rework-hovercard,
-.workflow-rework-badge.has-comments:focus-visible .workflow-rework-hovercard {
-  display: block;
+.workflow-rework-portal-trigger {
+  display: inline-flex;
 }
 
 .workflow-rework-hovercard-title {
@@ -753,6 +748,67 @@ small,
   color: #2d86d4;
 }
 
+.workflow-status-line-step.is-terminal .workflow-status-line-node {
+  border-color: #2d86d4;
+  background: #2d86d4;
+  box-shadow: 0 0 0 3px rgba(45, 134, 212, 0.12);
+}
+
+.workflow-status-line-step.is-terminal .workflow-status-line-label {
+  color: #2d86d4;
+}
+
+.workflow-status-line-step.has-completion-remark .workflow-status-line-node {
+  border-color: #218b4d;
+  background: #218b4d;
+  box-shadow: 0 0 0 3px rgba(33, 139, 77, 0.12);
+}
+
+.workflow-status-line-step.has-completion-remark .workflow-status-line-label {
+  color: #218b4d;
+}
+
+.workflow-status-line-node-hover {
+  display: inline-flex;
+}
+
+.workflow-completion-hovercard {
+  z-index: 1080;
+  display: grid;
+  gap: 0.32rem;
+  width: 20rem;
+  max-width: min(20rem, 70vw);
+  padding: 0.75rem 0.85rem;
+  border: 1px solid rgba(33, 139, 77, 0.28);
+  border-radius: 0.85rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(241, 249, 245, 0.98));
+  box-shadow: var(--om-shadow-md);
+  text-align: left;
+}
+
+.workflow-completion-hovercard-title {
+  color: #218b4d;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.workflow-completion-hovercard-comment {
+  color: var(--om-color-text);
+  font-size: 0.84rem;
+  font-weight: 600;
+  line-height: 1.32;
+  white-space: normal;
+}
+
+.workflow-completion-hovercard-meta {
+  color: var(--om-color-text-muted);
+  font-size: 0.72rem;
+  line-height: 1.25;
+  white-space: normal;
+}
+
 .workflow-status-line-step.is-clickable:not(:disabled) {
   cursor: pointer;
 }
@@ -762,7 +818,7 @@ small,
   box-shadow: var(--om-shadow-sm);
 }
 
-.workflow-status-line-step:disabled {
+.workflow-status-line-step.is-disabled {
   opacity: 1;
 }
 
@@ -1053,6 +1109,35 @@ small,
   box-shadow: 0 0 0 3px rgba(217, 163, 111, 0.14);
 }
 
+:root[data-theme="dark"] .workflow-status-line-step.is-terminal .workflow-status-line-node {
+  border-color: #3a8fda;
+  background: #3a8fda;
+  box-shadow: 0 0 0 3px rgba(58, 143, 218, 0.16);
+}
+
+:root[data-theme="dark"] .workflow-status-line-step.is-terminal .workflow-status-line-label {
+  color: #7eb8ec;
+}
+
+:root[data-theme="dark"] .workflow-status-line-step.has-completion-remark .workflow-status-line-node {
+  border-color: #25a75a;
+  background: #25a75a;
+  box-shadow: 0 0 0 3px rgba(37, 167, 90, 0.16);
+}
+
+:root[data-theme="dark"] .workflow-status-line-step.has-completion-remark .workflow-status-line-label {
+  color: #72d99b;
+}
+
+:root[data-theme="dark"] .workflow-completion-hovercard {
+  border-color: rgba(37, 167, 90, 0.34);
+  background: linear-gradient(180deg, rgba(34, 52, 39, 0.98), rgba(23, 36, 28, 0.98));
+}
+
+:root[data-theme="dark"] .workflow-completion-hovercard-title {
+  color: #72d99b;
+}
+
 :root[data-theme="dark"] .workflow-stage-rail-step.is-complete .workflow-stage-rail-node {
   border-color: #0e963e;
   background: #0e963e;
@@ -1108,6 +1193,24 @@ small,
 .workflow-dashboard-stat {
   position: relative;
   overflow: hidden;
+}
+
+.workflow-dashboard-stat.is-clickable {
+  width: 100%;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.workflow-dashboard-stat.is-clickable:hover,
+.workflow-dashboard-stat.is-clickable:focus-visible {
+  border-color: rgba(124, 109, 89, 0.55);
+  box-shadow: var(--om-shadow-md);
+  transform: translateY(-1px);
+  outline: none;
 }
 
 .workflow-dashboard-stat::after {

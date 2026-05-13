@@ -4256,14 +4256,19 @@ exports.updateItemPis = async (req, res) => {
       item.set(path, value);
     };
     let pisFieldsTouched = false;
+    let masterFieldsTouched = false;
     const setPisPath = (path, value) => {
       setPath(path, value);
       pisFieldsTouched = true;
     };
+    const setMasterPath = (path, value) => {
+      setPath(path, value);
+      masterFieldsTouched = true;
+    };
     const nextPisWeight = buildWeightRecord(item?.pis_weight);
     let pisWeightTouched = false;
 
-    if (payload?.pis_weight && typeof payload.pis_weight === "object") {
+    if (!requestedPisDiffCheck && payload?.pis_weight && typeof payload.pis_weight === "object") {
       for (const fieldKey of WEIGHT_FIELD_KEYS) {
         const parsedField = getPayloadWeightField(
           payload.pis_weight,
@@ -4277,20 +4282,20 @@ exports.updateItemPis = async (req, res) => {
       }
     }
 
-    if (hasOwn(payload, "pis_barcode")) {
+    if (!requestedPisDiffCheck && hasOwn(payload, "pis_barcode")) {
       const nextMasterBarcode = normalizeTextField(payload.pis_barcode);
       setPisPath("pis_barcode", nextMasterBarcode);
       setPisPath("pis_master_barcode", nextMasterBarcode);
     }
-    if (hasOwn(payload, "pis_master_barcode")) {
+    if (!requestedPisDiffCheck && hasOwn(payload, "pis_master_barcode")) {
       const nextMasterBarcode = normalizeTextField(payload.pis_master_barcode);
       setPisPath("pis_master_barcode", nextMasterBarcode);
       setPisPath("pis_barcode", nextMasterBarcode);
     }
-    if (hasOwn(payload, "pis_inner_barcode")) {
+    if (!requestedPisDiffCheck && hasOwn(payload, "pis_inner_barcode")) {
       setPisPath("pis_inner_barcode", normalizeTextField(payload.pis_inner_barcode));
     }
-    if (hasOwn(payload, "country_of_origin")) {
+    if (!requestedPisDiffCheck && hasOwn(payload, "country_of_origin")) {
       setPisPath("country_of_origin", normalizeTextField(payload.country_of_origin));
     }
 
@@ -4310,14 +4315,15 @@ exports.updateItemPis = async (req, res) => {
         },
       );
 
-      setPisPath("pis_item_sizes", parsedPisItemSizes);
       if (requestedPisDiffCheck) {
-        setPath("master_item_sizes", parsedPisItemSizes);
+        setMasterPath("master_item_sizes", parsedPisItemSizes);
+      } else {
+        setPisPath("pis_item_sizes", parsedPisItemSizes);
+        nextPisWeight.top_net = derivedPisItemLegacy.topWeight;
+        nextPisWeight.bottom_net = derivedPisItemLegacy.bottomWeight;
+        nextPisWeight.total_net = derivedPisItemLegacy.totalWeight;
+        pisWeightTouched = true;
       }
-      nextPisWeight.top_net = derivedPisItemLegacy.topWeight;
-      nextPisWeight.bottom_net = derivedPisItemLegacy.bottomWeight;
-      nextPisWeight.total_net = derivedPisItemLegacy.totalWeight;
-      pisWeightTouched = true;
     }
 
     if (hasOwn(payload, "pis_box_sizes")) {
@@ -4342,27 +4348,29 @@ exports.updateItemPis = async (req, res) => {
         },
       );
 
-      setPisPath("pis_box_sizes", parsedPisBoxSizes);
-      setPisPath("pis_box_mode", parsedPisBoxMode);
       if (requestedPisDiffCheck) {
-        setPath("master_box_sizes", parsedPisBoxSizes);
-        setPath("master_box_mode", parsedPisBoxMode);
+        setMasterPath("master_box_sizes", parsedPisBoxSizes);
+        setMasterPath("master_box_mode", parsedPisBoxMode);
+      } else {
+        setPisPath("pis_box_sizes", parsedPisBoxSizes);
+        setPisPath("pis_box_mode", parsedPisBoxMode);
+        nextPisWeight.top_gross = derivedPisBoxLegacy.topWeight;
+        nextPisWeight.bottom_gross = derivedPisBoxLegacy.bottomWeight;
+        nextPisWeight.total_gross = derivedPisBoxLegacy.totalWeight;
+        pisWeightTouched = true;
       }
-      nextPisWeight.top_gross = derivedPisBoxLegacy.topWeight;
-      nextPisWeight.bottom_gross = derivedPisBoxLegacy.bottomWeight;
-      nextPisWeight.total_gross = derivedPisBoxLegacy.totalWeight;
-      pisWeightTouched = true;
     }
 
     if (hasOwn(payload, "pis_box_mode") && !hasOwn(payload, "pis_box_sizes")) {
-      setPisPath(
-        "pis_box_mode",
-        detectBoxPackagingMode(payload?.pis_box_mode, item?.pis_box_sizes),
-      );
       if (requestedPisDiffCheck) {
-        setPath(
+        setMasterPath(
           "master_box_mode",
           detectBoxPackagingMode(payload?.pis_box_mode, item?.master_box_sizes),
+        );
+      } else {
+        setPisPath(
+          "pis_box_mode",
+          detectBoxPackagingMode(payload?.pis_box_mode, item?.pis_box_sizes),
         );
       }
     }
@@ -4371,7 +4379,14 @@ exports.updateItemPis = async (req, res) => {
       setPisPath("pis_weight", nextPisWeight);
     }
 
-    if (!pisFieldsTouched) {
+    if (requestedPisDiffCheck && !masterFieldsTouched) {
+      return res.status(400).json({
+        success: false,
+        message: "No master fields provided",
+      });
+    }
+
+    if (!requestedPisDiffCheck && !pisFieldsTouched) {
       return res.status(400).json({
         success: false,
         message: "No PIS fields provided",
@@ -4393,10 +4408,10 @@ exports.updateItemPis = async (req, res) => {
       pageName: requestedPisDiffCheck ? "PIS Diff Modal" : "PIS Update Modal",
       source: requestedPisDiffCheck ? "pis_diffs_modal" : "pis_update_modal",
       dataScopes: requestedPisDiffCheck
-        ? [AUDIT_SCOPES.PIS, AUDIT_SCOPES.MASTER]
+        ? [AUDIT_SCOPES.MASTER]
         : [AUDIT_SCOPES.PIS],
       extraRemarks: requestedPisDiffCheck
-        ? ["PIS diff was checked and the PIS values were copied into master data."]
+        ? ["PIS diff was checked and the submitted values were saved to master data only."]
         : [],
       metadata: {
         pis_update_source: normalizeTextField(payload?.pis_update_source),
@@ -4407,7 +4422,9 @@ exports.updateItemPis = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "PIS values updated successfully",
+      message: requestedPisDiffCheck
+        ? "Master values updated successfully"
+        : "PIS values updated successfully",
       data: item.toObject(),
     });
   } catch (error) {

@@ -241,6 +241,31 @@ const WorkflowDashboard = () => {
     ],
   );
 
+  const navigateToTaskBoardSummary = useCallback(
+    (status = "") => {
+      const next = new URLSearchParams();
+      if (status) next.set("status", status);
+      if (taskTypeFilter) next.set("task_type_key", taskTypeFilter);
+      if (departmentFilter) next.set("department", departmentFilter);
+      if (brandFilter) next.set("brand", brandFilter);
+      if (search) next.set("search", search);
+      if (dueDateFrom) next.set("due_date_from", dueDateFrom);
+      if (dueDateTo) next.set("due_date_to", dueDateTo);
+
+      const query = next.toString();
+      navigate(query ? `/workflow/tasks?${query}` : "/workflow/tasks");
+    },
+    [
+      brandFilter,
+      departmentFilter,
+      dueDateFrom,
+      dueDateTo,
+      navigate,
+      search,
+      taskTypeFilter,
+    ],
+  );
+
   const focusRows = useMemo(() => {
     const overdueRows = visibleUsers
       .filter((entry) => getCount(entry, "overdue_tasks") > 0)
@@ -280,42 +305,49 @@ const WorkflowDashboard = () => {
         label: "Total Tasks",
         value: Number(overall.total_tasks || 0),
         note: "All tasks in the current dashboard slice.",
+        status: "",
       },
       {
         key: "complete",
         label: "Complete",
         value: getCompleteAndBeyondTaskCount(overall),
         note: "Tasks marked complete, approved, or uploaded in this slice.",
+        status: "complete_and_beyond",
       },
       {
         key: "open",
         label: "Open Tasks",
         value: Number(overall.open_tasks || 0),
         note: "Assigned or started tasks not completed yet.",
+        status: "open",
       },
       {
         key: "approval",
         label: "Needs Approval",
         value: Number(overall.needs_approval_tasks || 0),
         note: "Completed work waiting on admin approval.",
+        status: "needs_approval",
       },
       {
         key: "overdue",
         label: "Overdue",
         value: Number(overall.overdue_tasks || 0),
         note: "Due date fully crossed in IST without approval.",
+        status: "overdue",
       },
       {
         key: "due-today",
         label: "Due Today",
         value: Number(overall.due_today_tasks || 0),
         note: "Due today in IST and still not approved.",
+        status: "due_today",
       },
       {
         key: "upload-remaining",
         label: "Upload Remaining",
         value: Number(overall.upload_remaining_tasks || 0),
         note: "Approved tasks still waiting to be uploaded.",
+        status: "upload_remaining",
       },
     ];
   }, [dashboard?.overall]);
@@ -542,13 +574,19 @@ const WorkflowDashboard = () => {
           <>
             <div className="workflow-dashboard-grid mb-3">
               {statCards.map((card) => (
-                <div key={card.key} className="card om-card workflow-dashboard-stat">
+                <button
+                  key={card.key}
+                  type="button"
+                  className="card om-card workflow-dashboard-stat is-clickable"
+                  onClick={() => navigateToTaskBoardSummary(card.status)}
+                  title={`View ${card.label.toLowerCase()} tasks`}
+                >
                   <div className="card-body">
                     <div className="workflow-dashboard-stat-label">{card.label}</div>
                     <div className="workflow-dashboard-stat-value">{card.value}</div>
                     <div className="workflow-dashboard-stat-note">{card.note}</div>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
 

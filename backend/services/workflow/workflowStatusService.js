@@ -174,7 +174,35 @@ const serializeTask = (doc = {}) => {
         ? doc.approved_by
         : doc?.reviewed_by || {},
     reworked,
+    completion_comment: doc?.completion_comment || null,
   };
+};
+
+const getLatestCompletionComment = (comments = []) =>
+  (Array.isArray(comments) ? comments : [])
+    .find((entry) => normalizeKey(entry?.comment_type) === "complete" && normalizeText(entry?.comment))
+    || null;
+
+const getLatestCompletionCommentMap = async (taskIds = []) => {
+  const ids = uniqueIds(taskIds);
+  if (ids.length === 0) return new Map();
+
+  const comments = await Comment.find({
+    task: { $in: ids },
+    comment_type: "complete",
+    is_deleted: false,
+  })
+    .populate("created_by.user", "name email role")
+    .sort({ createdAt: -1 })
+    .lean();
+
+  return comments.reduce((acc, comment) => {
+    const taskId = normalizeId(comment?.task);
+    if (taskId && !acc.has(taskId)) {
+      acc.set(taskId, comment);
+    }
+    return acc;
+  }, new Map());
 };
 
 const buildWorkflowDashboardCounts = (doc = {}) =>
@@ -283,6 +311,21 @@ const buildOverdueTaskMatch = (now = new Date()) => {
   };
 };
 
+const buildDueTodayTaskMatch = (now = new Date()) => {
+  const todayStart = getIndianDayStart(now);
+  const tomorrowStart = addDays(todayStart, 1);
+
+  return {
+    status: { $in: DUE_TRACKED_TASK_STATUS_VALUES },
+    due_date: {
+      $ne: null,
+      $gte: todayStart,
+      $lt: tomorrowStart,
+    },
+    $expr: buildNotApprovedByDueDateExpression(),
+  };
+};
+
 const addAndMatch = (match, condition) => {
   if (!condition || Object.keys(condition).length === 0) return;
   if (!Array.isArray(match.$and)) {
@@ -302,6 +345,17 @@ const buildTaskListMatch = ({ query = {}, user = {} } = {}) => {
   if (normalizeText(query?.status)) {
     if (normalizedStatusFilter === "overdue") {
       addAndMatch(match, buildOverdueTaskMatch());
+    } else if (normalizedStatusFilter === "due_today") {
+      addAndMatch(match, buildDueTodayTaskMatch());
+    } else if (normalizedStatusFilter === "complete_and_beyond") {
+      match.status = {
+        $in: [
+          ...NEEDS_APPROVAL_STATUS_VALUES,
+          "approved",
+          "uploaded",
+          "completed",
+        ],
+      };
     } else if (uploadPendingFilter) {
       match.status = "approved";
       match.upload_required = { $ne: false };
@@ -489,6 +543,7 @@ const buildTaskDetail = async (taskId, user = {}) => {
 
   return {
     ...task,
+    completion_comment: task.completion_comment || getLatestCompletionComment(comments),
     assignments,
     status_history: history,
     comments,
@@ -510,9 +565,17 @@ const listWorkflowTasks = async ({ query = {}, user = {} } = {}) => {
     ),
     Task.countDocuments(match),
   ]);
+  const completionCommentMap = await getLatestCompletionCommentMap(
+    rows.map((row) => row?._id),
+  );
 
   return {
-    rows: rows.map(serializeTask),
+    rows: rows.map((row) =>
+      serializeTask({
+        ...row,
+        completion_comment: completionCommentMap.get(normalizeId(row?._id)) || null,
+      }),
+    ),
     pagination: {
       page,
       limit,
