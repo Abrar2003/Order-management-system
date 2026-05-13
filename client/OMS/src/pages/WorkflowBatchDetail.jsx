@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { isAdminLikeRole, isManagerLikeRole } from "../auth/permissions";
+import { isManagerLikeRole, isStrictAdminRole } from "../auth/permissions";
 import Navbar from "../components/Navbar";
 import WorkflowTaskDetailModal from "../components/workflow/WorkflowTaskDetailModal";
 import { usePermissions } from "../auth/PermissionContext";
@@ -39,7 +39,7 @@ const WorkflowBatchDetail = () => {
   const { batchId } = useParams();
   const { hasPermission, role } = usePermissions();
   const isManagerOrAdmin = isManagerLikeRole(role);
-  const isAdmin = isAdminLikeRole(role);
+  const isAdmin = isStrictAdminRole(role);
   const canViewWorkflow = hasPermission("workflow", "view");
   const canEditWorkflow = isManagerOrAdmin && hasPermission("workflow", "edit");
   const canAssignWorkflow = isManagerOrAdmin && hasPermission("workflow", "assign");

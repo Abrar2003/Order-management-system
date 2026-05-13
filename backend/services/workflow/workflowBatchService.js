@@ -158,6 +158,10 @@ const createWorkflowBatchFromFolderManifest = async (
   actor = {},
   realtimeSource = null,
 ) => {
+  if (!isAdmin(actor)) {
+    throw new Error("Only admins can create workflow batches");
+  }
+
   const startCode = normalizeText(payload?.start_code);
   if (!startCode) {
     throw new Error("start_code is required");

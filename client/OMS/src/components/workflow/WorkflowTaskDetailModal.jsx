@@ -41,6 +41,13 @@ const getUserId = (entry = {}) =>
 const getUserLabel = (entry = {}) =>
   entry?.name || entry?.email || entry?.user?.name || entry?.user?.email || "User";
 
+const hasUploadAssignees = (task = {}) =>
+  Array.isArray(task?.upload_assignees) && task.upload_assignees.length > 0;
+
+const isUploadAssignedToUser = (task = {}, userId = "") =>
+  hasUploadAssignees(task) &&
+  task.upload_assignees.some((entry) => String(getUserId(entry)) === String(userId));
+
 const formatDateInputValue = (value) => {
   if (!value) return "";
   const parsed = new Date(value);
@@ -144,7 +151,13 @@ const WorkflowTaskDetailModal = ({
   const canComplete = isAssignedUser && task?.status === "started";
   const canApprove = isTaskAssigner && task?.status === "complete";
   const canUpload =
-    (isAssignedUser || isTaskCreator) && task?.status === "approved";
+    task?.upload_required !== false &&
+    task?.status === "approved" &&
+    (
+      hasUploadAssignees(task)
+        ? isUploadAssignedToUser(task, currentUserId)
+        : (isAssignedUser || isTaskCreator)
+    );
   const canRework =
     canManageWorkflow && ["complete", "approved", "uploaded"].includes(task?.status);
   const canAssign = canAssignWorkflow && task?.status !== "uploaded";
@@ -458,6 +471,20 @@ const WorkflowTaskDetailModal = ({
                       <div className="col-md-4">
                         <div className="small text-secondary mb-1">Approved At</div>
                         <div className="fw-semibold">{formatDateTime(task.approved_at)}</div>
+                      </div>
+                      <div className="col-md-4">
+                        <div className="small text-secondary mb-1">Upload Required</div>
+                        <div className="fw-semibold">{task.upload_required === false ? "No" : "Yes"}</div>
+                      </div>
+                      <div className="col-md-8">
+                        <div className="small text-secondary mb-1">Upload Pending Users</div>
+                        <div className="fw-semibold">
+                          {hasUploadAssignees(task)
+                            ? task.upload_assignees
+                                .map((entry) => getUserLabel(entry?.user || entry))
+                                .join(", ")
+                            : "—"}
+                        </div>
                       </div>
                     </div>
                   </div>

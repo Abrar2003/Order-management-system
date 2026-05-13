@@ -57,6 +57,9 @@ export const isViewOnlyUser = (user) => isViewOnlyUserRole(user?.role);
 export const isQcOnlyUserRole = (role) =>
   normalizeUserRole(role) === "qc";
 
+export const isStrictAdminRole = (role) =>
+  ["admin", "super_admin"].includes(normalizeUserRole(role));
+
 export const isAdminLikeRole = (role) =>
   ["admin", "super_admin", "manager", "product_manager", "inspection_manager"].includes(
     normalizeUserRole(role),

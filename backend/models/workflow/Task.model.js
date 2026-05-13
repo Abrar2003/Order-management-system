@@ -72,6 +72,8 @@ const TaskSchema = new mongoose.Schema(
     assigned_to: { type: [UserReferenceSchema], default: [] },
     assigned_by: { type: AuditActorSchema, default: () => ({}) },
     assigned_at: { type: Date, default: null },
+    upload_required: { type: Boolean, default: true },
+    upload_assignees: { type: [UserReferenceSchema], default: [] },
     due_date: { type: Date, default: null },
     started_at: { type: Date, default: null },
     submitted_at: { type: Date, default: null },
@@ -103,6 +105,7 @@ TaskSchema.index({ task_type_key: 1, status: 1, createdAt: -1 });
 TaskSchema.index({ brand: 1, status: 1, createdAt: -1 });
 TaskSchema.index({ department: 1, status: 1, createdAt: -1 });
 TaskSchema.index({ "assigned_to.user": 1, status: 1, createdAt: -1 });
+TaskSchema.index({ "upload_assignees.user": 1, status: 1, createdAt: -1 });
 TaskSchema.index({ due_date: 1, status: 1 });
 TaskSchema.index({ source_folder_name: 1, task_type_key: 1, createdAt: -1 });
 
@@ -116,6 +119,10 @@ TaskSchema.pre("validate", function normalizeTask() {
   this.source_folder_path = normalizeText(this.source_folder_path);
   this.blocked_reason = normalizeText(this.blocked_reason);
   this.status = normalizeWorkflowTaskStatus(this.status, { fallback: "assigned" }) || "assigned";
+  this.upload_required = this.upload_required !== false;
+  this.upload_assignees = this.upload_required && Array.isArray(this.upload_assignees)
+    ? this.upload_assignees
+    : [];
   if (["started", "complete", "approved", "uploaded"].includes(this.status) && !this.started_at) {
     this.started_at = new Date();
   }

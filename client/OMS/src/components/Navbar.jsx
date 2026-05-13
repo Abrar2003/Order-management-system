@@ -13,6 +13,7 @@ import {
 import {
   isManagerLikeRole,
   isQcOnlyUserRole,
+  isStrictAdminRole,
   normalizeUserRole,
 } from "../auth/permissions";
 import { usePermissions } from "../auth/PermissionContext";
@@ -53,6 +54,7 @@ const Navbar = () => {
   const role = user?.role;
   const normalizedRole = normalizeUserRole(role);
   const { hasPermission, isAdmin, role: permissionRole } = usePermissions();
+  const isWorkflowAdmin = isStrictAdminRole(permissionRole || role);
 
   const navigate = useNavigate();
   const navShellRef = useRef(null);
@@ -418,9 +420,10 @@ const Navbar = () => {
     if (!canViewWorkflow || isQcOnlyRole) return [];
 
     const items = [
-      ...(isAdmin ? [routeMenuItem("workflow-dashboard", "Dashboard", "/workflow/dashboard")] : []),
+      ...(isWorkflowAdmin ? [routeMenuItem("workflow-dashboard", "Dashboard", "/workflow/dashboard")] : []),
       routeMenuItem("workflow-task-board", "Task Board", "/workflow/tasks"),
       routeMenuItem("workflow-my-tasks", "My Tasks", "/workflow/my-tasks"),
+      routeMenuItem("workflow-upload-pending", "Upload Pending", "/workflow/upload-pending"),
     ];
 
     if (canManageWorkflow) {
@@ -431,7 +434,7 @@ const Navbar = () => {
     }
 
     return sortEntriesByLabel(items);
-  }, [canManageWorkflow, canViewWorkflow, isAdmin, isQcOnlyRole]);
+  }, [canManageWorkflow, canViewWorkflow, isQcOnlyRole, isWorkflowAdmin]);
 
   const settingsMenuItems = useMemo(
     () => {

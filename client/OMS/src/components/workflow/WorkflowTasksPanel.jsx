@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import api from "../../api/axios";
 import { getUserFromToken } from "../../auth/auth.service";
-import { isAdminLikeRole, isManagerLikeRole } from "../../auth/permissions";
+import { isManagerLikeRole, isStrictAdminRole } from "../../auth/permissions";
 import { usePermissions } from "../../auth/PermissionContext";
 import {
   approveWorkflowTask,
@@ -70,6 +70,15 @@ const getTaskUserName = (entry = {}) =>
 const getAuditActorName = (actor = {}) =>
   actor?.name || actor?.user?.name || actor?.user?.email || "User";
 
+const hasUploadAssignees = (task = {}) =>
+  Array.isArray(task?.upload_assignees) && task.upload_assignees.length > 0;
+
+const isUploadAssignedToCurrentUser = (task = {}, currentUserId = "") =>
+  hasUploadAssignees(task) &&
+  task.upload_assignees.some(
+    (entry) => String(getTaskUserId(entry)) === String(currentUserId),
+  );
+
 const formatRealtimeStatusLabel = (connectionState = "") => {
   if (connectionState === "live") return "Live";
   if (connectionState === "reconnecting") return "Reconnecting";
@@ -85,6 +94,7 @@ const TASK_STATUS_FILTER_OPTIONS = Object.freeze([
   { value: "open", label: "Open" },
   { value: "needs_approval", label: "Needs Approval" },
   { value: "upload_remaining", label: "Upload Remaining" },
+  { value: "upload_pending", label: "Upload Pending" },
   { value: "overdue", label: "Overdue" },
   { value: "assigned", label: "assigned" },
   { value: "started", label: "started" },
@@ -107,6 +117,8 @@ const getTaskActionState = ({
     String(getTaskUserId(task?.assigned_by)) === String(currentUserId);
   const createdByCurrentUser =
     String(getTaskUserId(task?.created_by)) === String(currentUserId);
+  const uploadAssignedToCurrentUser = isUploadAssignedToCurrentUser(task, currentUserId);
+  const uploadRequired = task?.upload_required !== false;
 
   return {
     assignedToCurrentUser,
@@ -115,7 +127,13 @@ const getTaskActionState = ({
     canStart: assignedToCurrentUser && task?.status === "assigned",
     canComplete: assignedToCurrentUser && task?.status === "started",
     canUpload:
-      (assignedToCurrentUser || createdByCurrentUser) && task?.status === "approved",
+      uploadRequired &&
+      task?.status === "approved" &&
+      (
+        hasUploadAssignees(task)
+          ? uploadAssignedToCurrentUser
+          : (assignedToCurrentUser || createdByCurrentUser)
+      ),
     canRework: canManageWorkflow && ["complete", "approved", "uploaded"].includes(task?.status),
     canApprove: assignedByCurrentUser && task?.status === "complete",
   };
@@ -123,6 +141,7 @@ const getTaskActionState = ({
 
 const WorkflowTasksPanel = ({
   mineOnly = false,
+  fixedStatusFilter = "",
   title = "Task Board",
   description = "Track workflow tasks and update their status.",
 }) => {
@@ -130,9 +149,9 @@ const WorkflowTasksPanel = ({
   const currentUser = getUserFromToken();
   const currentUserId = currentUser?._id || currentUser?.id || "";
   const isManagerOrAdmin = isManagerLikeRole(role);
-  const isAdmin = isAdminLikeRole(role);
+  const isAdmin = isStrictAdminRole(role);
   const canViewWorkflow = hasPermission("workflow", "view");
-  const canCreateWorkflow = !mineOnly && isManagerOrAdmin && hasPermission("workflow", "create");
+  const canCreateWorkflow = !mineOnly && isAdmin && hasPermission("workflow", "create");
   const canAssignWorkflow = isManagerOrAdmin && hasPermission("workflow", "assign");
   const canManageWorkflow = isManagerOrAdmin && hasPermission("workflow", "edit");
   const canDeleteWorkflow = isAdmin && hasPermission("workflow", "delete");
@@ -163,7 +182,9 @@ const WorkflowTasksPanel = ({
   const [showFolderCreateModal, setShowFolderCreateModal] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState("");
   const [search, setSearch] = useState(() => normalizeText(searchParams.get("search")));
-  const [statusFilter, setStatusFilter] = useState(() => normalizeText(searchParams.get("status")));
+  const [statusFilter, setStatusFilter] = useState(() =>
+    normalizeText(fixedStatusFilter) || normalizeText(searchParams.get("status")),
+  );
   const [taskTypeFilter, setTaskTypeFilter] = useState(() => normalizeText(searchParams.get("task_type_key")));
   const [assigneeFilter, setAssigneeFilter] = useState(() => {
     const value = normalizeText(searchParams.get("assignee"));
@@ -264,6 +285,14 @@ const WorkflowTasksPanel = ({
     }
   }, [canAssignWorkflow, canCreateWorkflow, canFilterByAssignee, canViewWorkflow]);
 
+  useEffect(() => {
+    const normalizedFixedStatus = normalizeText(fixedStatusFilter);
+    if (normalizedFixedStatus && statusFilter !== normalizedFixedStatus) {
+      setStatusFilter(normalizedFixedStatus);
+      setPage(1);
+    }
+  }, [fixedStatusFilter, statusFilter]);
+
   const loadTasks = useCallback(async () => {
     if (!canViewWorkflow) {
       setLoading(false);
@@ -338,7 +367,7 @@ const WorkflowTasksPanel = ({
   useEffect(() => {
     const next = new URLSearchParams();
     if (search) next.set("search", search);
-    if (statusFilter) next.set("status", statusFilter);
+    if (statusFilter && !fixedStatusFilter) next.set("status", statusFilter);
     if (taskTypeFilter) next.set("task_type_key", taskTypeFilter);
     if (assigneeFilter && !mineOnly) next.set("assignee", assigneeFilter);
     if (departmentFilter) next.set("department", departmentFilter);
@@ -357,6 +386,7 @@ const WorkflowTasksPanel = ({
     departmentFilter,
     dueDateFrom,
     dueDateTo,
+    fixedStatusFilter,
     limit,
     mineOnly,
     page,
@@ -500,8 +530,8 @@ const WorkflowTasksPanel = ({
 
   const { connectionState } = useWorkflowRealtime({
     enabled: canViewWorkflow,
-    joinDashboard: !mineOnly && canViewWorkflow,
-    userId: mineOnly && canViewWorkflow ? currentUserId : "",
+    joinDashboard: isAdmin && !mineOnly && canViewWorkflow,
+    userId: canViewWorkflow && (!isAdmin || mineOnly) ? currentUserId : "",
     onTaskUpdated: handleRealtimeRefresh,
     onBatchUpdated: !mineOnly ? handleRealtimeRefresh : undefined,
   });
@@ -572,21 +602,31 @@ const WorkflowTasksPanel = ({
                   placeholder="Task no, title, brand"
                 />
               </div>
-              <div className="col-md-3 col-lg-2">
-                <label className="form-label">Status</label>
-                <select
-                  className="form-select"
-                  value={statusFilter}
-                  onChange={(event) => setStatusFilter(event.target.value)}
-                >
-                  <option value="">All</option>
-                  {TASK_STATUS_FILTER_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {fixedStatusFilter ? (
+                <div className="col-md-3 col-lg-2">
+                  <label className="form-label">Status</label>
+                  <div className="form-control bg-light">
+                    {TASK_STATUS_FILTER_OPTIONS.find((option) => option.value === statusFilter)?.label
+                      || formatWorkflowStageLabel(statusFilter)}
+                  </div>
+                </div>
+              ) : (
+                <div className="col-md-3 col-lg-2">
+                  <label className="form-label">Status</label>
+                  <select
+                    className="form-select"
+                    value={statusFilter}
+                    onChange={(event) => setStatusFilter(event.target.value)}
+                  >
+                    <option value="">All</option>
+                    {TASK_STATUS_FILTER_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="col-md-3 col-lg-2">
                 <label className="form-label">Task Type</label>
                 <select
@@ -687,7 +727,7 @@ const WorkflowTasksPanel = ({
                   className="btn btn-outline-secondary"
                   onClick={() => {
                     setSearch("");
-                    setStatusFilter("");
+                    setStatusFilter(normalizeText(fixedStatusFilter));
                     setTaskTypeFilter("");
                     setAssigneeFilter(mineOnly ? currentUserId : "");
                     setDepartmentFilter("");

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { usePermissions } from "../auth/PermissionContext";
-import { ROLE_LABELS, isAdminLikeRole, normalizeUserRole } from "../auth/permissions";
+import { ROLE_LABELS, isStrictAdminRole, normalizeUserRole } from "../auth/permissions";
 import Navbar from "../components/Navbar";
 import {
   getWorkflowDashboard,
@@ -54,7 +54,7 @@ const WorkflowDashboard = () => {
   const navigate = useNavigate();
   const { hasPermission, role } = usePermissions();
   const canViewWorkflow = hasPermission("workflow", "view");
-  const canViewDashboard = canViewWorkflow && isAdminLikeRole(role);
+  const canViewDashboard = canViewWorkflow && isStrictAdminRole(role);
 
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "workflow-dashboard");

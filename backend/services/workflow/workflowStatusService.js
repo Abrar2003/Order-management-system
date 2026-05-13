@@ -91,6 +91,8 @@ const DASHBOARD_COUNT_FIELDS = Object.freeze([
 ]);
 
 const normalizeId = (value) => String(value || "").trim();
+const uniqueIds = (values = []) =>
+  [...new Set((Array.isArray(values) ? values : []).map(normalizeId).filter(Boolean))];
 
 const parsePositiveInt = (value, fallback = 1) => {
   const parsed = Number.parseInt(String(value ?? "").trim(), 10);
@@ -132,6 +134,7 @@ const populateTaskQuery = (query) =>
     .populate("task_type", "key name category auto_create_mode default_priority requires_review is_active")
     .populate("department", "name key description is_active")
     .populate("assigned_to.user", "name email role")
+    .populate("upload_assignees.user", "name email role")
     .populate("assigned_by.user", "name email role")
     .populate("created_by.user", "name email role")
     .populate("updated_by.user", "name email role")
@@ -163,6 +166,8 @@ const serializeTask = (doc = {}) => {
     status: normalizedStatus,
     task_type_key: normalizeKey(doc?.task_type_key || doc?.task_type?.key),
     task_type_name: normalizeText(doc?.task_type_name || doc?.task_type?.name),
+    upload_required: doc?.upload_required !== false,
+    upload_assignees: Array.isArray(doc?.upload_assignees) ? doc.upload_assignees : [],
     approved_at: doc?.approved_at || doc?.reviewed_at || null,
     approved_by:
       doc?.approved_by?.user || doc?.approved_by?.name || doc?.approved_by?.email
@@ -195,8 +200,11 @@ const buildTaskVisibilityMatch = (user = {}) => {
     is_deleted: false,
     $or: [
       { "assigned_to.user": userId },
-      { "assigned_by.user": userId },
-      { "created_by.user": userId },
+      {
+        status: "approved",
+        upload_required: { $ne: false },
+        "upload_assignees.user": userId,
+      },
     ],
   };
 };
@@ -286,10 +294,21 @@ const addAndMatch = (match, condition) => {
 const buildTaskListMatch = ({ query = {}, user = {} } = {}) => {
   const privilegedReader = isAdmin(user);
   const match = buildTaskVisibilityMatch(user);
+  const normalizedStatusFilter = normalizeKey(query?.status);
+  const uploadPendingFilter =
+    normalizedStatusFilter === "upload_remaining" ||
+    normalizedStatusFilter === "upload_pending";
 
   if (normalizeText(query?.status)) {
-    if (normalizeKey(query.status) === "overdue") {
+    if (normalizedStatusFilter === "overdue") {
       addAndMatch(match, buildOverdueTaskMatch());
+    } else if (uploadPendingFilter) {
+      match.status = "approved";
+      match.upload_required = { $ne: false };
+      if (!privilegedReader) {
+        delete match.$or;
+        match["upload_assignees.user"] = user?._id || user?.id;
+      }
     } else {
       match.status = buildStatusMatch(query.status);
     }
@@ -305,7 +324,8 @@ const buildTaskListMatch = ({ query = {}, user = {} } = {}) => {
     normalizeText(query?.assignee) &&
     mongoose.Types.ObjectId.isValid(query.assignee)
   ) {
-    match["assigned_to.user"] = new mongoose.Types.ObjectId(query.assignee);
+    match[uploadPendingFilter ? "upload_assignees.user" : "assigned_to.user"] =
+      new mongoose.Types.ObjectId(query.assignee);
   }
   if (normalizeText(query?.department) && mongoose.Types.ObjectId.isValid(query.department)) {
     match.department = new mongoose.Types.ObjectId(query.department);
@@ -406,11 +426,14 @@ const emitWorkflowTaskMutation = ({
   additionalUserIds = [],
 } = {}) => {
   if (!realtimeSource || !task) return;
+  const uploadAssigneeIds = (Array.isArray(task?.upload_assignees) ? task.upload_assignees : [])
+    .map((entry) => normalizeId(entry?.user?._id || entry?.user || entry))
+    .filter(Boolean);
 
   emitWorkflowTaskUpdated(realtimeSource, task, batch, {
     changedBy: buildAuditActor(actor),
     message,
-    additionalUserIds,
+    additionalUserIds: uniqueIds([...additionalUserIds, ...uploadAssigneeIds]),
   });
 
   if (batch) {
@@ -504,8 +527,8 @@ const createWorkflowTask = async ({
   actor = {},
   realtimeSource = null,
 } = {}) => {
-  if (!isManagerOrAdmin(actor)) {
-    throw new Error("Only admin or manager can create workflow tasks");
+  if (!isAdmin(actor)) {
+    throw new Error("Only admins can create workflow tasks");
   }
 
   const title = normalizeText(payload?.title || payload?.name);
@@ -523,6 +546,26 @@ const createWorkflowTask = async ({
   const assignees = await validateAssigneeUsers(assigneeIds || []);
   if (assignees.length === 0) {
     throw new Error("At least one assignee is required");
+  }
+  const uploadRequired = payload?.upload_required !== undefined
+    ? Boolean(payload.upload_required)
+    : true;
+  const defaultUploadAssigneeIds = uniqueIds([
+    actor?._id || actor?.id,
+    ...assignees.map((user) => user?._id),
+  ]);
+  const uploadAssigneeIds = uploadRequired
+    ? uniqueIds(
+        payload?.upload_assignee_ids !== undefined
+          ? payload.upload_assignee_ids
+          : defaultUploadAssigneeIds,
+      )
+    : [];
+  const uploadAssignees = uploadRequired
+    ? await validateAssigneeUsers(uploadAssigneeIds)
+    : [];
+  if (uploadRequired && uploadAssignees.length === 0) {
+    throw new Error("At least one upload user is required when upload is required");
   }
 
   const department = payload?.department !== undefined
@@ -566,6 +609,8 @@ const createWorkflowTask = async ({
     assigned_to: assignedUserRefs,
     assigned_by: auditActor,
     assigned_at: assignedAt,
+    upload_required: uploadRequired,
+    upload_assignees: uploadAssignees.map((user) => ({ user: user._id })),
     due_date: dueDate,
     review_required: reviewRequired,
     tags: [taskType.key],
@@ -638,7 +683,20 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
       $cond: [{ $in: ["$normalized_status", OPEN_TASK_STATUSES] }, 1, 0],
     },
   };
-  const uploadRemainingCount = statusCount("approved");
+  const uploadRemainingCount = {
+    $sum: {
+      $cond: [
+        {
+          $and: [
+            { $eq: ["$normalized_status", "approved"] },
+            { $ne: ["$upload_required", false] },
+          ],
+        },
+        1,
+        0,
+      ],
+    },
+  };
 
   const dueDateCutoff = buildDueDateCutoffExpression();
   const notApprovedByDueDate = buildNotApprovedByDueDateExpression();
@@ -799,6 +857,58 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
             },
           },
         ],
+        uploadUsers: [
+          {
+            $match: {
+              normalized_status: "approved",
+              upload_required: { $ne: false },
+            },
+          },
+          { $unwind: "$upload_assignees" },
+          {
+            $match: {
+              "upload_assignees.user": { $ne: null },
+            },
+          },
+          {
+            $group: {
+              _id: "$upload_assignees.user",
+              upload_remaining_tasks: { $sum: 1 },
+              last_task_update_at: { $max: "$updatedAt" },
+            },
+          },
+          {
+            $lookup: {
+              from: "users",
+              localField: "_id",
+              foreignField: "_id",
+              as: "user",
+            },
+          },
+          {
+            $unwind: {
+              path: "$user",
+              preserveNullAndEmptyArrays: true,
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              user_id: "$_id",
+              name: {
+                $ifNull: ["$user.name", "Unknown User"],
+              },
+              email: {
+                $ifNull: ["$user.email", ""],
+              },
+              role: {
+                $ifNull: ["$user.role", ""],
+              },
+              last_task_update_at: 1,
+              upload_remaining_tasks: 1,
+            },
+          },
+        ],
       },
     },
   ]);
@@ -808,16 +918,58 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
     unassigned_tasks: Number(summary?.overall?.[0]?.unassigned_tasks || 0),
   };
 
-  const users = Array.isArray(summary?.users)
-    ? summary.users.map((entry) => ({
+  const userById = new Map();
+  (Array.isArray(summary?.users) ? summary.users : []).forEach((entry) => {
+    const userId = normalizeId(entry?.user_id);
+    if (!userId) return;
+    userById.set(userId, {
         user_id: entry?.user_id || null,
         name: normalizeText(entry?.name) || "Unknown User",
         email: normalizeText(entry?.email),
         role: normalizeText(entry?.role),
         last_task_update_at: entry?.last_task_update_at || null,
-        counts: buildWorkflowDashboardCounts(entry),
-      }))
-    : [];
+        counts: {
+          ...buildWorkflowDashboardCounts(entry),
+          upload_remaining_tasks: 0,
+        },
+      });
+  });
+  (Array.isArray(summary?.uploadUsers) ? summary.uploadUsers : []).forEach((entry) => {
+    const userId = normalizeId(entry?.user_id);
+    if (!userId) return;
+    const current = userById.get(userId) || {
+      user_id: entry?.user_id || null,
+      name: normalizeText(entry?.name) || "Unknown User",
+      email: normalizeText(entry?.email),
+      role: normalizeText(entry?.role),
+      last_task_update_at: entry?.last_task_update_at || null,
+      counts: buildWorkflowDashboardCounts({}),
+    };
+    current.counts.upload_remaining_tasks = Number(entry?.upload_remaining_tasks || 0);
+    if (
+      entry?.last_task_update_at &&
+      (
+        !current.last_task_update_at ||
+        new Date(entry.last_task_update_at).getTime() >
+          new Date(current.last_task_update_at).getTime()
+      )
+    ) {
+      current.last_task_update_at = entry.last_task_update_at;
+    }
+    userById.set(userId, current);
+  });
+
+  const users = [...userById.values()].sort(
+    (left, right) =>
+      Number(right?.counts?.open_tasks || 0) - Number(left?.counts?.open_tasks || 0)
+      || Number(right?.counts?.overdue_tasks || 0) - Number(left?.counts?.overdue_tasks || 0)
+      || Number(right?.counts?.needs_approval_tasks || 0) -
+        Number(left?.counts?.needs_approval_tasks || 0)
+      || Number(right?.counts?.upload_remaining_tasks || 0) -
+        Number(left?.counts?.upload_remaining_tasks || 0)
+      || Number(right?.counts?.total_tasks || 0) - Number(left?.counts?.total_tasks || 0)
+      || normalizeText(left?.name).localeCompare(normalizeText(right?.name)),
+  );
 
   return {
     generated_at: now.toISOString(),
@@ -1001,7 +1153,10 @@ const assertTransitionPermission = ({ task, actor, toStatus }) => {
   }
 
   if (["uploaded"].includes(toStatus) && !canUploadWorkflowTask(actor, task)) {
-    throw new Error("Only an assignee or the task creator can mark this task uploaded");
+    if (task?.upload_required === false) {
+      throw new Error("Upload is not required for this task");
+    }
+    throw new Error("Only a selected upload user can mark this task uploaded");
   }
 
   if (["approved"].includes(toStatus) && !canApproveWorkflowTask(actor, task)) {

@@ -20,17 +20,26 @@ export const formatWorkflowStageLabel = (value) =>
     .replace(/_/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
 
+export const isWorkflowUploadRequired = (task = {}) => task?.upload_required !== false;
+
+export const getWorkflowStageBarSteps = (task = {}) =>
+  isWorkflowUploadRequired(task)
+    ? WORKFLOW_STAGE_BAR_STEPS
+    : WORKFLOW_STAGE_BAR_STEPS.filter((entry) => entry.key !== "uploaded");
+
 export const getWorkflowDisplayStageKey = (task = {}) => {
   const currentStatus = normalizeText(task?.status);
-  return WORKFLOW_STAGE_BAR_STEPS.some((entry) => entry.key === currentStatus)
+  const steps = getWorkflowStageBarSteps(task);
+  return steps.some((entry) => entry.key === currentStatus)
     ? currentStatus
     : "assigned";
 };
 
 export const getWorkflowReachedStageKeys = (task = {}) => {
   const activeKey = getWorkflowDisplayStageKey(task);
-  const activeIndex = WORKFLOW_STAGE_BAR_STEPS.findIndex((entry) => entry.key === activeKey);
+  const steps = getWorkflowStageBarSteps(task);
+  const activeIndex = steps.findIndex((entry) => entry.key === activeKey);
   return new Set(
-    WORKFLOW_STAGE_BAR_STEPS.slice(0, activeIndex + 1).map((entry) => entry.key),
+    steps.slice(0, activeIndex + 1).map((entry) => entry.key),
   );
 };

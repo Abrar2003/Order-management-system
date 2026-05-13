@@ -59,7 +59,7 @@ router.get(
 router.post(
   "/batches/from-folder-manifest",
   auth,
-  authorize(...WORKFLOW_MANAGER_ROLES),
+  authorize(...WORKFLOW_ADMIN_ROLES),
   requirePermission("workflow", "create"),
   createBatchFromFolderManifest,
 );
@@ -105,7 +105,7 @@ router.delete(
 router.post(
   "/tasks",
   auth,
-  authorize(...WORKFLOW_MANAGER_ROLES),
+  authorize(...WORKFLOW_ADMIN_ROLES),
   requirePermission("workflow", "create"),
   createTask,
 );

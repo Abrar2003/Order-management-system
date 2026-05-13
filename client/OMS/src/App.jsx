@@ -50,6 +50,7 @@ import ProductTypeTemplates from "./pages/ProductTypeTemplates";
 import WorkflowDashboard from "./pages/WorkflowDashboard";
 import WorkflowTasks from "./pages/WorkflowTasks";
 import WorkflowMyTasks from "./pages/WorkflowMyTasks";
+import WorkflowUploadPending from "./pages/WorkflowUploadPending";
 import WorkflowTaskTypes from "./pages/WorkflowTaskTypes";
 import WorkflowDepartments from "./pages/WorkflowDepartments";
 import PermissionManagement from "./pages/PermissionManagement";
@@ -575,6 +576,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <WorkflowMyTasks />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/workflow/upload-pending"
+            element={
+              <ProtectedRoute>
+                <WorkflowUploadPending />
               </ProtectedRoute>
             }
           />

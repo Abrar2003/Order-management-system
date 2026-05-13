@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { createWorkflowTask } from "../../api/workflowApi";
+import { getUserFromToken } from "../../auth/auth.service";
 import { getTodayISODate } from "../../utils/date";
 
 const normalizeText = (value) => String(value ?? "").trim();
@@ -11,11 +12,22 @@ const normalizeDistinctValues = (values = []) =>
   ].sort((left, right) => left.localeCompare(right));
 const PRIORITY_OPTIONS = ["low", "normal", "high", "urgent"];
 
-const createDraft = ({ defaultTaskTypeKey = "" } = {}) => ({
+const uniqueIds = (values = []) =>
+  [
+    ...new Set(
+      (Array.isArray(values) ? values : [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean),
+    ),
+  ];
+
+const createDraft = ({ defaultTaskTypeKey = "", creatorId = "" } = {}) => ({
   task_type_key: normalizeText(defaultTaskTypeKey),
   title: "",
   description: "",
   assignee_ids: [],
+  upload_required: true,
+  upload_assignee_ids: uniqueIds([creatorId]),
   department: "",
   priority: "normal",
   assignment_date: getTodayISODate(),
@@ -41,7 +53,11 @@ const WorkflowTaskCreateModal = ({
   onClose,
   onCreated,
 }) => {
-  const [form, setForm] = useState(() => createDraft({ defaultTaskTypeKey }));
+  const currentUser = getUserFromToken();
+  const currentUserId = getUserId(currentUser);
+  const [form, setForm] = useState(() =>
+    createDraft({ defaultTaskTypeKey, creatorId: currentUserId }),
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -57,6 +73,15 @@ const WorkflowTaskCreateModal = ({
     () => new Set((Array.isArray(form.assignee_ids) ? form.assignee_ids : []).map(String)),
     [form.assignee_ids],
   );
+  const availableUploadUsers = useMemo(() => {
+    const optionById = new Map();
+    [...availableUsers, currentUser].forEach((user) => {
+      const userId = getUserId(user);
+      if (!userId || optionById.has(String(userId))) return;
+      optionById.set(String(userId), user);
+    });
+    return [...optionById.values()];
+  }, [availableUsers, currentUser]);
 
   const availableBrandOptions = useMemo(
     () =>
@@ -72,6 +97,7 @@ const WorkflowTaskCreateModal = ({
       (entry) => entry?.key === taskTypeKey,
     );
 
+    const defaultAssigneeIds = getTaskTypeDefaultAssigneeIds(nextTaskType);
     setForm((prev) => ({
       ...prev,
       task_type_key: taskTypeKey,
@@ -79,17 +105,54 @@ const WorkflowTaskCreateModal = ({
         nextTaskType?.default_department?._id
         || nextTaskType?.default_department
         || "",
-      assignee_ids: getTaskTypeDefaultAssigneeIds(nextTaskType),
+      assignee_ids: defaultAssigneeIds,
+      upload_assignee_ids: prev.upload_required
+        ? uniqueIds([currentUserId, ...defaultAssigneeIds])
+        : prev.upload_assignee_ids,
       priority: normalizeText(nextTaskType?.default_priority) || "normal",
     }));
   };
 
   const toggleAssignee = (userId) => {
+    setForm((prev) => {
+      const removing = selectedAssigneeIds.has(String(userId));
+      const nextAssigneeIds = removing
+        ? prev.assignee_ids.filter((entry) => String(entry) !== String(userId))
+        : [...prev.assignee_ids, userId];
+      const nextUploadAssigneeIds = prev.upload_required
+        ? (
+            removing
+              ? prev.upload_assignee_ids.filter((entry) => String(entry) !== String(userId))
+              : uniqueIds([...prev.upload_assignee_ids, userId])
+          )
+        : prev.upload_assignee_ids;
+
+      return {
+        ...prev,
+        assignee_ids: nextAssigneeIds,
+        upload_assignee_ids: nextUploadAssigneeIds,
+      };
+    });
+  };
+
+  const handleUploadRequiredChange = (checked) => {
     setForm((prev) => ({
       ...prev,
-      assignee_ids: selectedAssigneeIds.has(String(userId))
-        ? prev.assignee_ids.filter((entry) => String(entry) !== String(userId))
-        : [...prev.assignee_ids, userId],
+      upload_required: checked,
+      upload_assignee_ids:
+        checked && (!Array.isArray(prev.upload_assignee_ids) || prev.upload_assignee_ids.length === 0)
+          ? uniqueIds([currentUserId, ...prev.assignee_ids])
+          : prev.upload_assignee_ids,
+    }));
+  };
+
+  const handleUploadAssigneeSelect = (event) => {
+    const selectedValues = Array.from(event.target.selectedOptions).map(
+      (option) => option.value,
+    );
+    setForm((prev) => ({
+      ...prev,
+      upload_assignee_ids: uniqueIds(selectedValues),
     }));
   };
 
@@ -113,6 +176,13 @@ const WorkflowTaskCreateModal = ({
       setError("Assignment date is required.");
       return;
     }
+    if (
+      form.upload_required &&
+      (!Array.isArray(form.upload_assignee_ids) || form.upload_assignee_ids.length === 0)
+    ) {
+      setError("At least one upload user is required when upload is required.");
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -125,6 +195,8 @@ const WorkflowTaskCreateModal = ({
         priority: normalizeText(form.priority) || "normal",
         assigned_at: normalizeText(form.assignment_date),
         brand: normalizeText(form.brand),
+        upload_required: Boolean(form.upload_required),
+        upload_assignee_ids: form.upload_required ? form.upload_assignee_ids : [],
       };
 
       if (normalizeText(form.due_date)) {
@@ -302,6 +374,26 @@ const WorkflowTaskCreateModal = ({
                           </select>
                         </div>
 
+                        <div className="col-12">
+                          <div className="form-check form-switch">
+                            <input
+                              id="workflow-upload-required"
+                              type="checkbox"
+                              className="form-check-input"
+                              checked={form.upload_required}
+                              onChange={(event) =>
+                                handleUploadRequiredChange(event.target.checked)
+                              }
+                            />
+                            <label
+                              className="form-check-label"
+                              htmlFor="workflow-upload-required"
+                            >
+                              Upload Required
+                            </label>
+                          </div>
+                        </div>
+
                       </div>
                     </div>
                   </section>
@@ -315,7 +407,8 @@ const WorkflowTaskCreateModal = ({
                           Task Type: {selectedTaskType?.name || "Select a task type"}
                         </span>
                         <span className="om-summary-chip">
-                          Status Flow: Assigned {"->"} Started {"->"} Complete {"->"} Approved {"->"} Uploaded
+                          Status Flow: Assigned {"->"} Started {"->"} Complete {"->"} Approved
+                          {form.upload_required ? " -> Uploaded" : ""}
                         </span>
                         <span className="om-summary-chip">
                           Priority: {form.priority || "normal"}
@@ -362,6 +455,50 @@ const WorkflowTaskCreateModal = ({
                       </div>
                     </div>
                   </section>
+
+                  {form.upload_required && (
+                    <section className="card om-card mb-3">
+                      <div className="card-body">
+                        <div className="d-flex justify-content-between align-items-center gap-2 mb-3">
+                          <div>
+                            <h6 className="mb-1">Upload Pending Users</h6>
+                            <div className="small text-secondary">
+                              These users will see this task on Upload Pending after approval.
+                            </div>
+                          </div>
+                          <span className="om-summary-chip">
+                            Selected: {form.upload_assignee_ids.length}
+                          </span>
+                        </div>
+
+                        {availableUploadUsers.length === 0 ? (
+                          <div className="alert alert-secondary mb-0">
+                            No user options are available for upload assignment.
+                          </div>
+                        ) : (
+                          <select
+                            multiple
+                            size={Math.min(6, Math.max(3, availableUploadUsers.length))}
+                            className="form-select"
+                            value={form.upload_assignee_ids}
+                            onChange={handleUploadAssigneeSelect}
+                          >
+                            {availableUploadUsers.map((user) => {
+                              const userId = getUserId(user);
+                              return (
+                                <option key={userId} value={userId}>
+                                  {user?.name || user?.username || user?.email || "User"}
+                                  {user?.role ? ` (${user.role})` : ""}
+                                  {String(userId) === String(currentUserId) ? " - creator" : ""}
+                                  {selectedAssigneeIds.has(String(userId)) ? " - assignee" : ""}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        )}
+                      </div>
+                    </section>
+                  )}
 
                   <section className="card om-card">
                     <div className="card-body">

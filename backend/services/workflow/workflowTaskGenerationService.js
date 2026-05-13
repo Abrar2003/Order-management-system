@@ -280,6 +280,11 @@ const generateTasksForBatch = async ({
   const auditActor = buildAuditActor(actor);
   const initialStatus = "assigned";
   const assignedUsers = assignees.map((user) => ({ user: user._id }));
+  const uploadAssigneeIds = uniqueIds([
+    actor?._id || actor?.id,
+    ...assignees.map((user) => user?._id),
+  ]);
+  const uploadAssignees = uploadAssigneeIds.map((userId) => ({ user: userId }));
   const now = new Date();
 
   const taskDocs = taskDefinitions.map((definition, index) => ({
@@ -306,6 +311,8 @@ const generateTasksForBatch = async ({
     assigned_to: assignedUsers,
     assigned_by: auditActor,
     assigned_at: now,
+    upload_required: true,
+    upload_assignees: uploadAssignees,
     due_date: batch?.due_date || null,
     review_required: taskType.requires_review !== false,
     tags: [taskType.key],

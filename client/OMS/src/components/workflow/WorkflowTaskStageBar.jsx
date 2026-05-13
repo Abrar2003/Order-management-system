@@ -1,5 +1,5 @@
 import {
-  WORKFLOW_STAGE_BAR_STEPS,
+  getWorkflowStageBarSteps,
   getWorkflowDisplayStageKey,
   getWorkflowReachedStageKeys,
 } from "./workflowTaskProgress";
@@ -13,12 +13,13 @@ const WorkflowTaskStageBar = ({
 }) => {
   const activeKey = getWorkflowDisplayStageKey(task);
   const reachedKeys = getWorkflowReachedStageKeys(task);
+  const steps = getWorkflowStageBarSteps(task);
 
   return (
     <div className={["workflow-status-line", className].filter(Boolean).join(" ")}>
       <div className="workflow-status-line-track" aria-hidden="true" />
       <div className="workflow-status-line-steps" role="group" aria-label="Task status flow">
-        {WORKFLOW_STAGE_BAR_STEPS.map((step, index) => {
+        {steps.map((step, index) => {
           const active = step.key === activeKey;
           const complete = reachedKeys.has(step.key) && !active;
           const clickable =
