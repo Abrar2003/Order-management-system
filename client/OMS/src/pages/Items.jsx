@@ -134,6 +134,11 @@ const hasItemQcRecord = (item = {}) =>
     ).trim(),
   );
 
+const getVendorNames = (item = {}) =>
+  Array.isArray(item?.vendors) && item.vendors.length > 0
+    ? item.vendors.filter(Boolean).join(", ")
+    : "N/A";
+
 const Items = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -363,6 +368,7 @@ const Items = () => {
           if (column === "code") return item?.code;
           if (column === "name") return item?.name;
           if (column === "brand") return item?.brand_name || item?.brand;
+          if (column === "vendor") return getVendorNames(item);
           if (column === "netWeight") return getInspectedWeight(item, "net");
           if (column === "grossWeight") return getInspectedWeight(item, "gross");
           if (column === "cbm") return Number(getCalculatedInspectedCbm(item) || 0);
@@ -714,6 +720,14 @@ const Items = () => {
                       </th>
                       <th>
                         <SortHeaderButton
+                          label="Vendor Name"
+                          isActive={sortBy === "vendor"}
+                          direction={sortOrder}
+                          onClick={() => handleSortColumn("vendor", "asc")}
+                        />
+                      </th>
+                      <th>
+                        <SortHeaderButton
                           label="Net Weight"
                           isActive={sortBy === "netWeight"}
                           direction={sortOrder}
@@ -760,7 +774,7 @@ const Items = () => {
                   <tbody>
                     {sortedRows.length === 0 && (
                       <tr>
-                        <td colSpan="9" className="text-center py-4">
+                        <td colSpan="10" className="text-center py-4">
                           No items found
                         </td>
                       </tr>
@@ -792,8 +806,7 @@ const Items = () => {
                                 ? item.brands[0]
                                 : "N/A")}
                           </td>
-                          {/* <td>{Array.isArray(item?.brands) && item.brands.length > 0 ? item.brands.join(", ") : "N/A"}</td>
-                          <td>{Array.isArray(item?.vendors) && item.vendors.length > 0 ? item.vendors.join(", ") : "N/A"}</td> */}
+                          <td>{getVendorNames(item)}</td>
                           <td>{formatFixedNumber(getInspectedWeight(item, "net"))}</td>
                           <td>{formatFixedNumber(getInspectedWeight(item, "gross"))}</td>
                           <td>{formatCbm(getCalculatedInspectedCbm(item))}</td>

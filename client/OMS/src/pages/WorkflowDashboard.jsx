@@ -32,6 +32,10 @@ const formatRoleLabel = (role) =>
   ROLE_LABELS[normalizeUserRole(role)] || normalizeText(role) || "User";
 
 const getCount = (row, key) => Number(row?.counts?.[key] || 0);
+const getCompleteAndBeyondTaskCount = (counts = {}) =>
+  Number(counts?.complete_tasks || 0) +
+  Number(counts?.approved_tasks || 0) +
+  Number(counts?.uploaded_tasks || 0);
 const SPOTLIGHT_TASK_FILTERS = Object.freeze([
   { countKey: "open_tasks", label: "Open", status: "open" },
   { countKey: "needs_approval_tasks", label: "Needs Approval", status: "needs_approval" },
@@ -277,6 +281,12 @@ const WorkflowDashboard = () => {
         note: "All tasks in the current dashboard slice.",
       },
       {
+        key: "complete",
+        label: "Complete",
+        value: getCompleteAndBeyondTaskCount(overall),
+        note: "Tasks marked complete, approved, or uploaded in this slice.",
+      },
+      {
         key: "open",
         label: "Open Tasks",
         value: Number(overall.open_tasks || 0),
@@ -305,12 +315,6 @@ const WorkflowDashboard = () => {
         label: "Upload Remaining",
         value: Number(overall.upload_remaining_tasks || 0),
         note: "Approved tasks still waiting to be uploaded.",
-      },
-      {
-        key: "unassigned",
-        label: "Unassigned",
-        value: Number(overall.unassigned_tasks || 0),
-        note: "Should normally stay at zero now that assignees are required.",
       },
     ];
   }, [dashboard?.overall]);
