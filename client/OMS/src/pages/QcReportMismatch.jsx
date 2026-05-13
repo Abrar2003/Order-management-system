@@ -963,18 +963,13 @@ const QcReportMismatch = () => {
                 <table className="table table-striped table-hover align-middle mb-0">
                   <thead className="table-primary">
                     <tr>
-                      <th>PO / Order ID</th>
                       <th>Brand</th>
                       <th>Vendor</th>
                       <th>Item Code</th>
                       <th>Item Description</th>
-                      <th>Inspector</th>
                       <th>Requested Date</th>
                       <th>Inspection Date</th>
                       <th>Status</th>
-                      <th>Checked</th>
-                      <th>Passed</th>
-                      <th>Box Mode</th>
                       <th>Mismatch Status</th>
                       <th>Actions</th>
                     </tr>
@@ -984,35 +979,13 @@ const QcReportMismatch = () => {
                       const hasMismatch = Boolean(row?.mismatch_summary?.has_mismatch);
                       return (
                         <tr key={row?.inspection_id || row?.id}>
-                          <td>{row?.order_id || "N/A"}</td>
                           <td>{row?.brand || "N/A"}</td>
                           <td>{row?.vendor || "N/A"}</td>
                           <td>{row?.item_code || "N/A"}</td>
                           <td>{row?.item_description || "N/A"}</td>
-                          <td>{row?.inspector_name || "Unassigned"}</td>
                           <td>{formatDateDDMMYYYY(row?.requested_date)}</td>
                           <td>{formatDateDDMMYYYY(row?.inspection_date)}</td>
                           <td>{row?.status || "N/A"}</td>
-                          <td>
-                            <div>{row?.checked ?? 0}</div>
-                            <div className="small text-secondary">
-                              {row?.inspection_count || 0} inspections
-                            </div>
-                          </td>
-                          <td>
-                            <div>{row?.passed ?? 0}</div>
-                            <div className="small text-secondary">
-                              Pending: {row?.pending_after ?? 0}
-                            </div>
-                          </td>
-                          <td>
-                            <div className="small">
-                              <div>Current: {formatBoxModeLabel(row?.current_qc_inspected_box_mode)}</div>
-                              <div className="text-secondary">
-                                Records: {row?.inspection_count || 0}
-                              </div>
-                            </div>
-                          </td>
                           <td>
                             <span className={`badge ${hasMismatch ? "text-bg-danger" : "text-bg-success"}`}>
                               {hasMismatch ? "Mismatch" : "Matched"}
@@ -1106,8 +1079,7 @@ const QcReportMismatch = () => {
                 <div>
                   <h5 className="modal-title">QC Report Mismatch Details</h5>
                   <div className="small text-muted">
-                    {selectedRow?.order_id || "N/A"} | {selectedRow?.item_code || "N/A"} |{" "}
-                    {selectedRow?.inspection_count || 0} inspections
+                    {selectedRow?.item_code || "N/A"} | {selectedRow?.inspection_count || 0} inspections
                   </div>
                 </div>
                 <button
@@ -1120,6 +1092,9 @@ const QcReportMismatch = () => {
 
               <div className="modal-body">
                 <div className="d-flex flex-wrap gap-2 mb-3">
+                  <span className="om-summary-chip">
+                    PO / Order ID: {selectedRow?.order_id || "N/A"}
+                  </span>
                   <span className="om-summary-chip">
                     Latest Requested: {formatDateDDMMYYYY(selectedRow?.requested_date)}
                   </span>

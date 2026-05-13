@@ -216,11 +216,7 @@ const Navbar = () => {
     return [
       routeMenuItem("items-all", "View Items", "/items"),
       routeMenuItem("item-masters", "Item Masters", "/item-masters"),
-      routeMenuItem(
-        "items-qc-report-mismatch",
-        "QC Report Mismatch",
-        "/reports/qc-report-mismatch",
-      ),
+      
       ...ITEM_FILE_OPTIONS.map((option) =>
         routeMenuItem(
           `items-file-${option.value}`,
@@ -348,8 +344,14 @@ const Navbar = () => {
       items.push(
         routeMenuItem("update-pis-qc-reports", "Final PIS Check", "/pis-diffs"),
         routeMenuItem("final-pis-check", "Update PIS / QC Reports", "/final-pis-check"),
-        routeMenuItem("PIS", "PIS", "/pis")
+        routeMenuItem("PIS", "PIS", "/pis"),
+        routeMenuItem(
+          "items-qc-report-mismatch",
+          "QC Report Mismatch",
+          "/reports/qc-report-mismatch",
+        )
       );
+      
     }
 
     if (hasPermission("containers", "edit") || hasPermission("containers", "manage")) {
