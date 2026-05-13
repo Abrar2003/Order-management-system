@@ -56,6 +56,7 @@ import PermissionManagement from "./pages/PermissionManagement";
 import PIS from "./pages/PIS";
 import PISDiffs from "./pages/PISDiffs";
 import FinalPISCheck from "./pages/FinalPISCheck";
+import PisUpdateLogs from "./pages/PisUpdateLogs";
 import WeeklySummary from "./pages/WeeklySummary";
 import DailySummary from "./pages/DailySummary";
 
@@ -448,6 +449,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <OrderEditLogs />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/pis-update-logs"
+            element={
+              <ProtectedRoute>
+                <PisUpdateLogs />
               </ProtectedRoute>
             }
           />

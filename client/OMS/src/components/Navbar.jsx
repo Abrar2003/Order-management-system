@@ -395,13 +395,22 @@ const Navbar = () => {
   ]);
 
   const logMenuItems = useMemo(() => {
-    if (!canViewOrderPages || isQcOnlyRole) return [];
+    if ((!canViewOrderPages && !canViewPis && !canManageProductDatabase) || isQcOnlyRole) {
+      return [];
+    }
 
-    return [
-      routeMenuItem("upload-logs", "Upload Logs", "/upload-logs"),
-      routeMenuItem("order-edit-logs", "Order Edit Logs", "/order-edit-logs"),
-    ];
-  }, [canViewOrderPages, isQcOnlyRole]);
+    const items = [];
+    if (canViewOrderPages) {
+      items.push(
+        routeMenuItem("upload-logs", "Upload Logs", "/upload-logs"),
+        routeMenuItem("order-edit-logs", "Order Edit Logs", "/order-edit-logs"),
+      );
+    }
+    if (canViewPis || canManageProductDatabase) {
+      items.push(routeMenuItem("pis-update-logs", "PIS Update Logs", "/pis-update-logs"));
+    }
+    return items;
+  }, [canManageProductDatabase, canViewOrderPages, canViewPis, isQcOnlyRole]);
 
   const workflowMenuItems = useMemo(() => {
     if (!canViewWorkflow || isQcOnlyRole) return [];

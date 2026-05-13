@@ -86,6 +86,7 @@ const buildLatestInspectionContext = (orders = []) =>
         order_id: toText(order?.order_id, "N/A"),
         brand: toText(order?.brand, "N/A"),
         vendor: toText(order?.vendor, "N/A"),
+        inspector_name: toText(inspection?.inspector_name, "N/A"),
         inspection_date: toText(inspection?.inspection_date),
         requested_date: toText(inspection?.requested_date),
         sort_time: Math.max(
@@ -198,7 +199,7 @@ const buildInspectedReference = (item = {}) => {
   };
 };
 
-const EditPisModal = ({ item, onClose, onUpdated }) => {
+const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
   const [form, setForm] = useState(() => buildInitialForm(item));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -360,6 +361,7 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
         remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
         payloadWeightKey: "net_weight",
         weightFieldLabel: "Net weight",
+        allowIncomplete: true,
       });
       if (pisItemPayload.error) {
         throw new Error(pisItemPayload.error);
@@ -373,6 +375,7 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
         payloadWeightKey: "gross_weight",
         weightFieldLabel: "Gross weight",
         mode: form.pis_box_mode,
+        allowIncomplete: true,
       });
       if (pisBoxPayload.error) {
         throw new Error(pisBoxPayload.error);
@@ -387,9 +390,19 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
         pis_item_sizes: pisItemPayload.value,
         pis_box_sizes: pisBoxPayload.value,
       };
+      if (updateSource) {
+        payload.pis_update_source = updateSource;
+      }
+      if (updateSource === "pis_diffs") {
+        payload.sync_master_data = true;
+        payload.pis_checked_flag = true;
+      }
 
       const response = await api.patch(`/items/${item?._id}/pis`, payload);
-      onUpdated?.(response?.data?.data || { ...item, pis_checked_flag: true });
+      const fallbackItem = updateSource === "pis_diffs"
+        ? { ...item, pis_checked_flag: true }
+        : item;
+      onUpdated?.(response?.data?.data || fallbackItem);
       onClose?.();
     } catch (saveError) {
       setError(
@@ -503,6 +516,14 @@ const EditPisModal = ({ item, onClose, onUpdated }) => {
                       {latestInspectionContextLoading
                         ? "Loading..."
                         : latestInspectionContext?.vendor || vendorsLabel}
+                    </div>
+                  </div>
+                  <div className="col-md-3">
+                    <div className="text-secondary">Inspector</div>
+                    <div className="fw-semibold">
+                      {latestInspectionContextLoading
+                        ? "Loading..."
+                        : latestInspectionContext?.inspector_name || "N/A"}
                     </div>
                   </div>
                   <div className="col-md-3">

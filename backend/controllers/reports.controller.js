@@ -204,6 +204,47 @@ const QC_REPORT_MISMATCH_ITEM_SELECT = [
   "inspected_bottom_LBH",
   "inspected_weight",
 ].join(" ");
+const QC_REPORT_MISMATCH_RECENT_INSPECTION_LIMIT = 3;
+
+const getDateTimeValue = (value) => {
+  if (!value) return 0;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const getInspectionRecencyTime = (inspection = {}) =>
+  getDateTimeValue(inspection?.inspection_date_value) ||
+  getDateTimeValue(inspection?.createdAt);
+
+const compareInspectionRecencyDesc = (left = {}, right = {}) => {
+  const timeDelta = getInspectionRecencyTime(right) - getInspectionRecencyTime(left);
+  if (timeDelta !== 0) return timeDelta;
+  return normalizeText(right?._id).localeCompare(normalizeText(left?._id));
+};
+
+const limitRecentInspectionsByItem = (
+  inspections = [],
+  limit = QC_REPORT_MISMATCH_RECENT_INSPECTION_LIMIT,
+) => {
+  const groupedByItem = new Map();
+
+  (Array.isArray(inspections) ? inspections : []).forEach((inspection, index) => {
+    const itemKey = normalizeLookupKey(inspection?.item_code);
+    const fallbackKey = normalizeText(inspection?._id) || String(index);
+    const groupKey = itemKey || `inspection:${fallbackKey}`;
+    const group = groupedByItem.get(groupKey) || [];
+    group.push(inspection);
+    groupedByItem.set(groupKey, group);
+  });
+
+  return [...groupedByItem.values()]
+    .flatMap((group) =>
+      [...group]
+        .sort(compareInspectionRecencyDesc)
+        .slice(0, Math.max(1, limit)),
+    )
+    .sort(compareInspectionRecencyDesc);
+};
 
 const buildScalarValueExpression = (fieldPath, fallbackValue = "") => ({
   $let: {
@@ -1312,10 +1353,11 @@ exports.getQcReportMismatch = async (req, res) => {
         itemCode,
       }),
     ).allowDiskUse(true);
+    const inspectionsForComparison = limitRecentInspectionsByItem(inspections);
 
     const uniqueItemCodes = [
       ...new Set(
-        (Array.isArray(inspections) ? inspections : [])
+        inspectionsForComparison
           .map((entry) => normalizeText(entry?.item_code || ""))
           .filter(Boolean),
       ),
@@ -1341,7 +1383,7 @@ exports.getQcReportMismatch = async (req, res) => {
       ]),
     );
 
-    const inspectionRows = (Array.isArray(inspections) ? inspections : []).map((inspection) => {
+    const inspectionRows = inspectionsForComparison.map((inspection) => {
       const currentItemDoc =
         itemDocByCode.get(normalizeLookupKey(inspection?.item_code)) || {};
       const mismatch = compareInspectionSizeSnapshot(inspection, currentItemDoc);
@@ -1639,6 +1681,7 @@ exports.getQcReportMismatch = async (req, res) => {
         order_id: orderId,
         item_code: itemCode,
         mismatch_only: mismatchOnly,
+        comparison_inspection_limit: QC_REPORT_MISMATCH_RECENT_INSPECTION_LIMIT,
         brand_options: sortedBrands,
         vendor_options: sortedVendors,
         inspector_options: inspectorOptions,

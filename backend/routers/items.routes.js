@@ -17,6 +17,7 @@ const {
 const {
   invalidateItemCaches,
 } = require("../services/cacheInvalidation.service");
+const { userHasPermission } = require("../services/permission.service");
 const {
   getItems,
   getItemMasters,
@@ -27,6 +28,7 @@ const {
   getFinalPisCheckOptions,
   getFinalPisCheckReportPreview,
   exportFinalPisCheckReport,
+  getPisUpdateLogs,
   getProductDatabaseItems,
   updateProductDatabaseItem,
   checkProductDatabaseItem,
@@ -47,6 +49,34 @@ const { getProductAnalytics } = require("../controllers/product.controller");
 
 const router = express.Router();
 const invalidateItemsOnSuccess = invalidateCacheOnSuccess(invalidateItemCaches);
+
+const requirePisUpdateLogsView = async (req, res, next) => {
+  try {
+    const allowed = await Promise.any([
+      userHasPermission(req.user, "pis", "view").then((value) => {
+        if (!value) throw new Error("pis.view denied");
+        return true;
+      }),
+      userHasPermission(req.user, "product_database", "view").then((value) => {
+        if (!value) throw new Error("product_database.view denied");
+        return true;
+      }),
+      userHasPermission(req.user, "items", "view").then((value) => {
+        if (!value) throw new Error("items.view denied");
+        return true;
+      }),
+    ]);
+
+    if (allowed) return next();
+    return res.status(403).json({
+      message: "Permission denied: PIS, Product Database, or Items view is required.",
+    });
+  } catch {
+    return res.status(403).json({
+      message: "Permission denied: PIS, Product Database, or Items view is required.",
+    });
+  }
+};
 
 const requiresPisAdminForPayload = (req, res, next) => {
   const hasPisFile = Boolean(req.file);
@@ -137,6 +167,13 @@ router.get(
   requirePermission("product_database", "view"),
   cacheRoute("items", MEDIUM_CACHE_TTL),
   getProductDatabaseItems,
+);
+
+router.get(
+  "/pis-update-logs",
+  auth,
+  requirePisUpdateLogsView,
+  getPisUpdateLogs,
 );
 
 router.patch(

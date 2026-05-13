@@ -136,9 +136,6 @@ const normalizeItemSizeEntries = (entries = []) => {
     const entryLabel = `PD item size ${index + 1}`;
 
     const normalizedRemark = normalizeKey(entry?.remark || entry?.type || "");
-    if (meaningfulEntries.length > 1 && !normalizedRemark) {
-      throw new ProductDatabaseError(`${entryLabel} remark is required`);
-    }
     validateRemarkOption(
       normalizedRemark,
       ITEM_SIZE_REMARK_OPTIONS,
@@ -274,9 +271,6 @@ const normalizeBoxSizeEntries = (
     }
 
     const normalizedRemark = normalizeKey(entry?.remark || entry?.type || "");
-    if (meaningfulEntries.length > 1 && !normalizedRemark) {
-      throw new ProductDatabaseError(`${entryLabel} remark is required`);
-    }
     validateRemarkOption(
       normalizedRemark,
       BOX_SIZE_REMARK_OPTIONS,

@@ -479,6 +479,7 @@ export const parseMeasuredSizeEntries = ({
   payloadWeightKey = "",
   weightFieldLabel = "Weight",
   mode = BOX_PACKAGING_MODES.INDIVIDUAL,
+  allowIncomplete = false,
 } = {}) => {
   const resolvedMode = detectBoxPackagingMode(mode, entries);
   const safeCount =
@@ -509,19 +510,30 @@ export const parseMeasuredSizeEntries = ({
   for (let index = 0; index < scopedEntries.length; index += 1) {
     const entry = scopedEntries[index] || {};
     const entryLabel = `${groupLabel} ${index + 1}`;
-    const L = Number(String(entry?.L ?? "").trim());
-    const B = Number(String(entry?.B ?? "").trim());
-    const H = Number(String(entry?.H ?? "").trim());
+    const parseEntryNumber = (value, label) => {
+      const rawValue = String(value ?? "").trim();
+      if (!rawValue) {
+        return allowIncomplete
+          ? { value: 0 }
+          : { error: `${label} must be greater than 0.` };
+      }
 
-    if (!Number.isFinite(L) || L <= 0) {
-      return { error: `${entryLabel} length must be greater than 0.` };
-    }
-    if (!Number.isFinite(B) || B <= 0) {
-      return { error: `${entryLabel} breadth must be greater than 0.` };
-    }
-    if (!Number.isFinite(H) || H <= 0) {
-      return { error: `${entryLabel} height must be greater than 0.` };
-    }
+      const parsed = Number(rawValue);
+      if (!Number.isFinite(parsed) || parsed < 0 || (!allowIncomplete && parsed <= 0)) {
+        return { error: `${label} must be greater than 0.` };
+      }
+      return { value: parsed };
+    };
+    const parsedL = parseEntryNumber(entry?.L, `${entryLabel} length`);
+    const parsedB = parseEntryNumber(entry?.B, `${entryLabel} breadth`);
+    const parsedH = parseEntryNumber(entry?.H, `${entryLabel} height`);
+
+    if (parsedL.error) return { error: parsedL.error };
+    if (parsedB.error) return { error: parsedB.error };
+    if (parsedH.error) return { error: parsedH.error };
+    const L = parsedL.value;
+    const B = parsedB.value;
+    const H = parsedH.value;
 
     let normalizedRemark = "";
     if (safeCount > 1) {
@@ -529,18 +541,25 @@ export const parseMeasuredSizeEntries = ({
       normalizedRemark = isCartonMode
         ? getCartonRemarkForIndex(index)
         : String(entry?.remark || "").trim().toLowerCase();
-      if (!normalizedRemark) {
+      if (!allowIncomplete && !normalizedRemark) {
         return { error: `${entryLabel} remark is required.` };
       }
-      if (!isCartonMode && allowedRemarkValues.size > 0 && !allowedRemarkValues.has(normalizedRemark)) {
+      if (
+        normalizedRemark &&
+        !isCartonMode &&
+        allowedRemarkValues.size > 0 &&
+        !allowedRemarkValues.has(normalizedRemark)
+      ) {
         return {
           error: `${entryLabel} remark must be one of: ${allowedRemarkList}.`,
         };
       }
-      if (seenRemarks.has(normalizedRemark)) {
+      if (normalizedRemark && seenRemarks.has(normalizedRemark)) {
         return { error: `${groupLabel} remarks must be unique.` };
       }
-      seenRemarks.add(normalizedRemark);
+      if (normalizedRemark) {
+        seenRemarks.add(normalizedRemark);
+      }
     }
 
     const parsedEntry = {
@@ -551,13 +570,16 @@ export const parseMeasuredSizeEntries = ({
     };
 
     if (payloadWeightKey) {
-      const parsedWeight = Number(String(entry?.weight ?? "").trim());
-      if (!Number.isFinite(parsedWeight) || parsedWeight <= 0) {
+      const parsedWeight = parseEntryNumber(
+        entry?.weight,
+        `${entryLabel} ${weightFieldLabel.toLowerCase()}`,
+      );
+      if (parsedWeight.error) {
         return {
-          error: `${entryLabel} ${weightFieldLabel.toLowerCase()} must be greater than 0.`,
+          error: parsedWeight.error,
         };
       }
-      parsedEntry[payloadWeightKey] = parsedWeight;
+      parsedEntry[payloadWeightKey] = parsedWeight.value;
     }
 
     if (resolvedMode === BOX_PACKAGING_MODES.CARTON) {
@@ -565,18 +587,20 @@ export const parseMeasuredSizeEntries = ({
       parsedEntry.remark = boxType;
       parsedEntry.box_type = boxType;
       if (boxType === BOX_ENTRY_TYPES.INNER) {
-        const itemCountInInner = Number(String(entry?.item_count_in_inner ?? "").trim());
-        if (!Number.isFinite(itemCountInInner) || itemCountInInner <= 0) {
-          return { error: `${entryLabel} item count in inner must be greater than 0.` };
-        }
-        parsedEntry.item_count_in_inner = itemCountInInner;
+        const itemCountInInner = parseEntryNumber(
+          entry?.item_count_in_inner,
+          `${entryLabel} item count in inner`,
+        );
+        if (itemCountInInner.error) return { error: itemCountInInner.error };
+        parsedEntry.item_count_in_inner = itemCountInInner.value;
         parsedEntry.box_count_in_master = 0;
       } else {
-        const boxCountInMaster = Number(String(entry?.box_count_in_master ?? "").trim());
-        if (!Number.isFinite(boxCountInMaster) || boxCountInMaster <= 0) {
-          return { error: `${entryLabel} box count in master must be greater than 0.` };
-        }
-        parsedEntry.box_count_in_master = boxCountInMaster;
+        const boxCountInMaster = parseEntryNumber(
+          entry?.box_count_in_master,
+          `${entryLabel} box count in master`,
+        );
+        if (boxCountInMaster.error) return { error: boxCountInMaster.error };
+        parsedEntry.box_count_in_master = boxCountInMaster.value;
         parsedEntry.item_count_in_inner = 0;
       }
     }

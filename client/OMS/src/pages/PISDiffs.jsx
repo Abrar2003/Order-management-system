@@ -24,11 +24,7 @@ import "../App.css";
 
 const DEFAULT_LIMIT = 20;
 const LIMIT_OPTIONS = [10, 20, 50, 100];
-const PIS_DIFFS_EDIT_BLOCKED_ROLES = new Set([
-  "manager",
-  "product_manager",
-  "inspection_manager",
-]);
+const PIS_DIFFS_EDIT_ALLOWED_ROLES = new Set(["admin", "super_admin"]);
 
 const parsePositiveInt = (value, fallback = 1) => {
   const parsed = Number.parseInt(value, 10);
@@ -376,7 +372,7 @@ const PISDiffs = () => {
 
   const { canEditPis, role } = usePermissions();
   const canEditPisDiffs =
-    canEditPis && !PIS_DIFFS_EDIT_BLOCKED_ROLES.has(normalizeUserRole(role));
+    canEditPis && PIS_DIFFS_EDIT_ALLOWED_ROLES.has(normalizeUserRole(role));
 
   const [rows, setRows] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
@@ -1243,6 +1239,7 @@ const PISDiffs = () => {
       {selectedItem && canEditPisDiffs && (
         <EditPisModal
           item={selectedItem}
+          updateSource="pis_diffs"
           onClose={() => setSelectedItem(null)}
           onUpdated={handlePisUpdated}
         />

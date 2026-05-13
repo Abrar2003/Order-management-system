@@ -154,6 +154,22 @@ const formatComparisonValue = (value, type = "text", fieldKey = "") => {
   return type === "number" ? formatNumberValue(value) : formatTextValue(value);
 };
 
+const hasComparableNumberValue = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && Math.abs(parsed) > NUMBER_TOLERANCE;
+};
+
+const hasComparableTextValue = (value) => Boolean(normalizeTextValue(value));
+
+const hasComparableFieldData = (inspectionValue, currentValue, field = {}) => {
+  if (field.type === "number") {
+    return hasComparableNumberValue(inspectionValue) &&
+      hasComparableNumberValue(currentValue);
+  }
+  return hasComparableTextValue(inspectionValue) &&
+    hasComparableTextValue(currentValue);
+};
+
 const buildMismatchKeySet = (mismatches = []) =>
   new Set(
     (Array.isArray(mismatches) ? mismatches : []).map((entry) =>
@@ -197,6 +213,7 @@ const buildSheetRows = ({
         const mismatchEntryKey = `${index}:${field.key}`;
         const inspectionValue = inspectionEntry?.[field.key];
         const currentValue = currentEntry?.[field.key];
+        const isComparable = hasComparableFieldData(inspectionValue, currentValue, field);
 
         return {
           key: `${inspection?.inspection_id || inspectionIndex}-${index}-${field.key}`,
@@ -204,10 +221,17 @@ const buildSheetRows = ({
           label: inspection?.sheet_label || `Inspection ${inspectionIndex + 1}`,
           inspection_date: inspection?.inspection_date || "",
           inspector_name: inspection?.inspector_name || "Unassigned",
-          value: formatComparisonValue(inspectionValue, field.type, field.key),
-          is_mismatch: mismatchKeySet.has(mismatchEntryKey),
+          value: isComparable
+            ? formatComparisonValue(inspectionValue, field.type, field.key)
+            : "No Data",
+          is_comparable: isComparable,
+          is_mismatch: isComparable && mismatchKeySet.has(mismatchEntryKey),
         };
       });
+
+      if (!inspectionCells.some((cell) => cell.is_comparable)) {
+        return;
+      }
 
       rows.push({
         key: `${labelPrefix}-${index}-${field.key}`,
@@ -231,25 +255,33 @@ const buildBoxModeSheetRows = ({
     return [];
   }
 
+  const inspectionCells = safeInspections.map((inspection, inspectionIndex) => {
+    const inspectionMode = inspection?.inspection_snapshot?.inspected_box_mode || "";
+    const isComparable = hasComparableTextValue(currentMode) &&
+      hasComparableTextValue(inspectionMode);
+
+    return {
+      key: `${inspection?.inspection_id || inspectionIndex}-box-mode`,
+      inspection_id: inspection?.inspection_id || "",
+      label: inspection?.sheet_label || `Inspection ${inspectionIndex + 1}`,
+      inspection_date: inspection?.inspection_date || "",
+      inspector_name: inspection?.inspector_name || "Unassigned",
+      value: isComparable ? formatBoxModeLabel(inspectionMode) : "No Data",
+      is_comparable: isComparable,
+      is_mismatch: isComparable && Boolean(inspection?.box_mode_mismatch),
+    };
+  });
+
+  if (!inspectionCells.some((cell) => cell.is_comparable)) {
+    return [];
+  }
+
   return [{
     key: "box-mode",
     field: "Box Mode",
     current_value: formatBoxModeLabel(currentMode),
-    inspection_cells: safeInspections.map((inspection, inspectionIndex) => {
-      const inspectionMode = inspection?.inspection_snapshot?.inspected_box_mode || "";
-      return {
-        key: `${inspection?.inspection_id || inspectionIndex}-box-mode`,
-        inspection_id: inspection?.inspection_id || "",
-        label: inspection?.sheet_label || `Inspection ${inspectionIndex + 1}`,
-        inspection_date: inspection?.inspection_date || "",
-        inspector_name: inspection?.inspector_name || "Unassigned",
-        value: formatBoxModeLabel(inspectionMode),
-        is_mismatch: Boolean(inspection?.box_mode_mismatch),
-      };
-    }),
-    is_mismatch: safeInspections.some((inspection) =>
-      Boolean(inspection?.box_mode_mismatch),
-    ),
+    inspection_cells: inspectionCells,
+    is_mismatch: inspectionCells.some((cell) => cell.is_mismatch),
   }];
 };
 
@@ -275,6 +307,7 @@ const defaultReport = {
     order_id: "",
     item_code: "",
     mismatch_only: false,
+    comparison_inspection_limit: 3,
     brand_options: [],
     vendor_options: [],
     inspector_options: [],
@@ -703,7 +736,7 @@ const QcReportMismatch = () => {
         <div className="d-flex justify-content-between align-items-center mb-3">
           <h2 className="h4 mb-0">QC Report Mismatch</h2>
           <span className="small text-secondary">
-            All inspection snapshots vs current inspected sizes
+            Latest inspection snapshots vs current inspected sizes
           </span>
         </div>
 
@@ -898,6 +931,9 @@ const QcReportMismatch = () => {
             </span>
             <span className="om-summary-chip">
               Mismatch Only: {filters.mismatch_only ? "Yes" : "No"}
+            </span>
+            <span className="om-summary-chip">
+              Per Item: Latest {filters.comparison_inspection_limit ?? 3} inspections
             </span>
             <span className="om-summary-chip">
               Page: {pagination.page ?? 1}
@@ -1148,7 +1184,9 @@ const QcReportMismatch = () => {
                                   >
                                     <div>{cell.value}</div>
                                     <div className="small text-secondary">
-                                      {cell.is_mismatch ? "Mismatch" : "Matched"}
+                                      {cell.is_comparable
+                                        ? (cell.is_mismatch ? "Mismatch" : "Matched")
+                                        : "No comparable data"}
                                     </div>
                                   </td>
                                 ))}

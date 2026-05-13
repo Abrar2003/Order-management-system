@@ -3,6 +3,7 @@ const Order = require("../models/order.model");
 const QC = require("../models/qc.model");
 const Inspection = require("../models/inspection.model");
 const ProductTypeTemplate = require("../models/productTypeTemplate.model");
+const PisUpdateLog = require("../models/pisUpdateLog.model");
 const mongoose = require("mongoose");
 const crypto = require("crypto");
 const fs = require("fs/promises");
@@ -69,6 +70,12 @@ const {
   normalizeProductSpecsPayload,
   normalizeTemplateKey,
 } = require("../helpers/productTypeTemplates");
+const {
+  AUDIT_SCOPES,
+  buildItemUpdateAuditSnapshot,
+  buildItemUpdateLogPayload,
+} = require("../helpers/itemUpdateAudit");
+const { normalizeUserRoleKey } = require("../helpers/userRole");
 
 const escapeRegex = (value = "") =>
   String(value)
@@ -404,6 +411,7 @@ const parseSizeEntriesPayload = (
     weightKey = "",
     weightLabel = "weight",
     mode = "",
+    allowIncomplete = false,
   } = {},
 ) => {
   if (!Array.isArray(entries)) {
@@ -436,7 +444,7 @@ const parseSizeEntriesPayload = (
     const B = toNonNegativeNumber(entry?.B, `${entryLabel}.B`);
     const H = toNonNegativeNumber(entry?.H, `${entryLabel}.H`);
 
-    if (L <= 0 || B <= 0 || H <= 0) {
+    if (!allowIncomplete && (L <= 0 || B <= 0 || H <= 0)) {
       throw new Error(`${entryLabel} must have positive L, B, and H values`);
     }
 
@@ -448,15 +456,23 @@ const parseSizeEntriesPayload = (
       : normalizeTextField(entry?.remark || "").toLowerCase();
     if (entries.length > 1 && !isCartonBoxEntry) {
       if (!normalizedRemark) {
-        throw new Error(`${entryLabel}.remark is required`);
+        if (!allowIncomplete) {
+          throw new Error(`${entryLabel}.remark is required`);
+        }
       }
-      if (allowedRemarkValues.size > 0 && !allowedRemarkValues.has(normalizedRemark)) {
+      if (
+        normalizedRemark &&
+        allowedRemarkValues.size > 0 &&
+        !allowedRemarkValues.has(normalizedRemark)
+      ) {
         throw new Error(`${entryLabel}.remark must be one of: ${allowedRemarkList}`);
       }
       if (seenRemarks.has(normalizedRemark)) {
         throw new Error(`${fieldLabel} remarks must be unique`);
       }
-      seenRemarks.add(normalizedRemark);
+      if (normalizedRemark) {
+        seenRemarks.add(normalizedRemark);
+      }
     }
 
     const parsedEntry = {
@@ -471,7 +487,7 @@ const parseSizeEntriesPayload = (
         entry?.[weightKey],
         `${entryLabel}.${weightLabel}`,
       );
-      if (parsedWeight <= 0) {
+      if (!allowIncomplete && parsedWeight <= 0) {
         throw new Error(`${entryLabel}.${weightLabel} must be greater than 0`);
       }
       parsedEntry[weightKey] = parsedWeight;
@@ -494,10 +510,18 @@ const parseSizeEntriesPayload = (
               )
             : 0;
 
-        if (entryType === "inner" && parsedEntry.item_count_in_inner <= 0) {
+        if (
+          !allowIncomplete &&
+          entryType === "inner" &&
+          parsedEntry.item_count_in_inner <= 0
+        ) {
           throw new Error(`${entryLabel}.item_count_in_inner must be greater than 0`);
         }
-        if (entryType === "master" && parsedEntry.box_count_in_master <= 0) {
+        if (
+          !allowIncomplete &&
+          entryType === "master" &&
+          parsedEntry.box_count_in_master <= 0
+        ) {
           throw new Error(`${entryLabel}.box_count_in_master must be greater than 0`);
         }
       } else {
@@ -640,6 +664,58 @@ const normalizeDistinctValues = (values = []) =>
       .map((value) => String(value ?? "").trim())
       .filter(Boolean),
   )].sort((a, b) => a.localeCompare(b));
+
+const PIS_UPDATE_LOG_OPERATION_TYPES = new Set([
+  "pis_update",
+  "pis_diff_update",
+  "product_database_update",
+  "product_database_check",
+  "product_database_approve",
+  "master_update",
+]);
+
+const normalizePisUpdateLogScope = (value = "") => {
+  const normalized = normalizeTextField(value).toLowerCase();
+  if (normalized === "pd") return AUDIT_SCOPES.PD;
+  if (normalized === "master") return AUDIT_SCOPES.MASTER;
+  if (normalized === "item") return AUDIT_SCOPES.ITEM;
+  if (normalized === "pis") return AUDIT_SCOPES.PIS;
+  return "";
+};
+
+const createPisUpdateLog = async ({
+  reqUser = {},
+  beforeSnapshot = {},
+  afterSnapshot = {},
+  operationType = "pis_update",
+  pageName = "PIS Update Modal",
+  source = "pis_update_modal",
+  dataScopes = [AUDIT_SCOPES.PIS],
+  extraRemarks = [],
+  metadata = {},
+} = {}) => {
+  try {
+    await PisUpdateLog.create(
+      buildItemUpdateLogPayload({
+        reqUser,
+        beforeSnapshot,
+        afterSnapshot,
+        operationType,
+        pageName,
+        source,
+        dataScopes,
+        extraRemarks,
+        metadata,
+      }),
+    );
+  } catch (error) {
+    console.error("PIS update log save failed:", {
+      item_code: afterSnapshot?.item_code || beforeSnapshot?.item_code,
+      operationType,
+      error: error?.message || String(error),
+    });
+  }
+};
 
 const ACTIVE_ORDER_MATCH = {
   archived: { $ne: true },
@@ -2377,6 +2453,116 @@ exports.getProductDatabaseItems = async (req, res) => {
   }
 };
 
+exports.getPisUpdateLogs = async (req, res) => {
+  try {
+    const page = parsePositiveInt(req.query.page, 1);
+    const limit = Math.min(100, parsePositiveInt(req.query.limit, 20));
+    const skip = (page - 1) * limit;
+
+    const search = normalizeFilterValue(req.query.search);
+    const brand = normalizeFilterValue(req.query.brand);
+    const vendor = normalizeFilterValue(req.query.vendor);
+    const dataScope = normalizePisUpdateLogScope(
+      req.query.data_scope ?? req.query.dataScope,
+    );
+    const operationType = normalizeTextField(
+      req.query.operation_type ?? req.query.operationType,
+    ).toLowerCase();
+    const missingOnly =
+      String(req.query.missing_only ?? req.query.missingOnly ?? "")
+        .trim()
+        .toLowerCase() === "true";
+
+    const match = {};
+
+    if (search) {
+      const escaped = escapeRegex(search);
+      match.$or = [
+        { item_code: { $regex: escaped, $options: "i" } },
+        { item_name: { $regex: escaped, $options: "i" } },
+        { description: { $regex: escaped, $options: "i" } },
+      ];
+    }
+
+    if (brand) {
+      match.brand = brand;
+    }
+
+    if (vendor) {
+      match.vendors = vendor;
+    }
+
+    if (dataScope) {
+      match.data_scope = dataScope;
+    }
+
+    if (operationType && PIS_UPDATE_LOG_OPERATION_TYPES.has(operationType)) {
+      match.operation_type = operationType;
+    }
+
+    if (missingOnly) {
+      match.missing_fields_count = { $gt: 0 };
+    }
+
+    const [logs, totalRecords, brandsRaw, vendorsRaw, scopesRaw, operationsRaw, totalsRaw] =
+      await Promise.all([
+        PisUpdateLog.find(match)
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limit)
+          .lean(),
+        PisUpdateLog.countDocuments(match),
+        PisUpdateLog.distinct("brand", match),
+        PisUpdateLog.distinct("vendors", match),
+        PisUpdateLog.distinct("data_scope", match),
+        PisUpdateLog.distinct("operation_type", match),
+        PisUpdateLog.aggregate([
+          { $match: match },
+          {
+            $group: {
+              _id: null,
+              total_logs: { $sum: 1 },
+              total_field_changes: { $sum: "$changed_fields_count" },
+              total_missing_fields: { $sum: "$missing_fields_count" },
+            },
+          },
+        ]),
+      ]);
+
+    const totals =
+      Array.isArray(totalsRaw) && totalsRaw.length > 0 ? totalsRaw[0] : null;
+
+    return res.status(200).json({
+      success: true,
+      data: logs,
+      pagination: {
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(totalRecords / limit)),
+        totalRecords,
+      },
+      filters: {
+        brands: normalizeDistinctValues(brandsRaw),
+        vendors: normalizeDistinctValues(vendorsRaw),
+        data_scopes: normalizeDistinctValues(scopesRaw),
+        operation_types: normalizeDistinctValues(operationsRaw),
+      },
+      summary: {
+        total_logs: Number(totals?.total_logs || 0),
+        total_field_changes: Number(totals?.total_field_changes || 0),
+        total_missing_fields: Number(totals?.total_missing_fields || 0),
+      },
+    });
+  } catch (error) {
+    console.error("Get PIS Update Logs Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch PIS update logs",
+      error: error?.message || String(error),
+    });
+  }
+};
+
 exports.updateProductDatabaseItem = async (req, res) => {
   try {
     const itemId = String(req.params.id || "").trim();
@@ -2394,6 +2580,7 @@ exports.updateProductDatabaseItem = async (req, res) => {
         message: "Item not found",
       });
     }
+    const beforeAuditSnapshot = buildItemUpdateAuditSnapshot(item.toObject());
 
     const result = applyProductDatabaseSave({
       item,
@@ -2401,6 +2588,20 @@ exports.updateProductDatabaseItem = async (req, res) => {
       user: req.user,
     });
     await item.save();
+    const afterAuditSnapshot = buildItemUpdateAuditSnapshot(item.toObject());
+    await createPisUpdateLog({
+      reqUser: req.user,
+      beforeSnapshot: beforeAuditSnapshot,
+      afterSnapshot: afterAuditSnapshot,
+      operationType: "product_database_update",
+      pageName: "Product Database Modal",
+      source: "product_database_modal",
+      dataScopes: [AUDIT_SCOPES.PD],
+      metadata: {
+        product_database_status: result?.status || item?.pd_checked || "",
+        changed: Boolean(result?.changed),
+      },
+    });
 
     return res.status(200).json({
       success: true,
@@ -2433,6 +2634,7 @@ exports.checkProductDatabaseItem = async (req, res) => {
         message: "Item not found",
       });
     }
+    const beforeAuditSnapshot = buildItemUpdateAuditSnapshot(item.toObject());
 
     const result = applyProductDatabaseCheck({
       item,
@@ -2440,6 +2642,21 @@ exports.checkProductDatabaseItem = async (req, res) => {
       user: req.user,
     });
     await item.save();
+    const afterAuditSnapshot = buildItemUpdateAuditSnapshot(item.toObject());
+    await createPisUpdateLog({
+      reqUser: req.user,
+      beforeSnapshot: beforeAuditSnapshot,
+      afterSnapshot: afterAuditSnapshot,
+      operationType: "product_database_check",
+      pageName: "Product Database Modal",
+      source: "product_database_modal",
+      dataScopes: [AUDIT_SCOPES.PD],
+      metadata: {
+        product_database_status: result?.status || item?.pd_checked || "",
+        changed: Boolean(result?.changed),
+        checked: Boolean(result?.checked),
+      },
+    });
 
     return res.status(200).json({
       success: true,
@@ -2472,6 +2689,7 @@ exports.approveProductDatabaseItem = async (req, res) => {
         message: "Item not found",
       });
     }
+    const beforeAuditSnapshot = buildItemUpdateAuditSnapshot(item.toObject());
 
     const result = applyProductDatabaseApprove({
       item,
@@ -2479,6 +2697,21 @@ exports.approveProductDatabaseItem = async (req, res) => {
       user: req.user,
     });
     await item.save();
+    const afterAuditSnapshot = buildItemUpdateAuditSnapshot(item.toObject());
+    await createPisUpdateLog({
+      reqUser: req.user,
+      beforeSnapshot: beforeAuditSnapshot,
+      afterSnapshot: afterAuditSnapshot,
+      operationType: "product_database_approve",
+      pageName: "Product Database Modal",
+      source: "product_database_modal",
+      dataScopes: [AUDIT_SCOPES.PD],
+      metadata: {
+        product_database_status: result?.status || item?.pd_checked || "",
+        changed: Boolean(result?.changed),
+        approved: Boolean(result?.approved),
+      },
+    });
 
     return res.status(200).json({
       success: true,
@@ -3979,6 +4212,19 @@ exports.updateItemPis = async (req, res) => {
     }
 
     const payload = req.body && typeof req.body === "object" ? req.body : {};
+    const roleKey = normalizeUserRoleKey(req.user?.role);
+    const canCreatePisDiffMasterData = ["admin", "super_admin"].includes(roleKey);
+    const requestedPisDiffCheck =
+      normalizeTextField(payload?.pis_update_source).toLowerCase() === "pis_diffs" ||
+      payload?.sync_master_data === true ||
+      payload?.pis_checked_flag === true;
+    if (requestedPisDiffCheck && !canCreatePisDiffMasterData) {
+      return res.status(403).json({
+        success: false,
+        message: "Only Admin or Super Admin can check PIS diffs and create master data.",
+      });
+    }
+
     const legacyPisSizeFields = [
       "pis_item_LBH",
       "pis_item_top_LBH",
@@ -4004,6 +4250,7 @@ exports.updateItemPis = async (req, res) => {
         message: "Item not found",
       });
     }
+    const beforeAuditSnapshot = buildItemUpdateAuditSnapshot(item.toObject());
 
     const setPath = (path, value) => {
       item.set(path, value);
@@ -4053,6 +4300,7 @@ exports.updateItemPis = async (req, res) => {
         remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
         weightKey: "net_weight",
         weightLabel: "net_weight",
+        allowIncomplete: true,
       });
       const derivedPisItemLegacy = buildLegacyLbhAndWeightFromSizeEntries(
         parsedPisItemSizes,
@@ -4063,7 +4311,9 @@ exports.updateItemPis = async (req, res) => {
       );
 
       setPisPath("pis_item_sizes", parsedPisItemSizes);
-      setPisPath("master_item_sizes", parsedPisItemSizes);
+      if (requestedPisDiffCheck) {
+        setPath("master_item_sizes", parsedPisItemSizes);
+      }
       nextPisWeight.top_net = derivedPisItemLegacy.topWeight;
       nextPisWeight.bottom_net = derivedPisItemLegacy.bottomWeight;
       nextPisWeight.total_net = derivedPisItemLegacy.totalWeight;
@@ -4081,6 +4331,7 @@ exports.updateItemPis = async (req, res) => {
         weightKey: "gross_weight",
         weightLabel: "gross_weight",
         mode: parsedPisBoxMode,
+        allowIncomplete: true,
       });
       const derivedPisBoxLegacy = buildLegacyLbhAndWeightFromSizeEntries(
         parsedPisBoxSizes,
@@ -4093,8 +4344,10 @@ exports.updateItemPis = async (req, res) => {
 
       setPisPath("pis_box_sizes", parsedPisBoxSizes);
       setPisPath("pis_box_mode", parsedPisBoxMode);
-      setPisPath("master_box_sizes", parsedPisBoxSizes);
-      setPisPath("master_box_mode", parsedPisBoxMode);
+      if (requestedPisDiffCheck) {
+        setPath("master_box_sizes", parsedPisBoxSizes);
+        setPath("master_box_mode", parsedPisBoxMode);
+      }
       nextPisWeight.top_gross = derivedPisBoxLegacy.topWeight;
       nextPisWeight.bottom_gross = derivedPisBoxLegacy.bottomWeight;
       nextPisWeight.total_gross = derivedPisBoxLegacy.totalWeight;
@@ -4106,10 +4359,12 @@ exports.updateItemPis = async (req, res) => {
         "pis_box_mode",
         detectBoxPackagingMode(payload?.pis_box_mode, item?.pis_box_sizes),
       );
-      setPisPath(
-        "master_box_mode",
-        detectBoxPackagingMode(payload?.pis_box_mode, item?.master_box_sizes),
-      );
+      if (requestedPisDiffCheck) {
+        setPath(
+          "master_box_mode",
+          detectBoxPackagingMode(payload?.pis_box_mode, item?.master_box_sizes),
+        );
+      }
     }
 
     if (pisWeightTouched) {
@@ -4123,10 +4378,32 @@ exports.updateItemPis = async (req, res) => {
       });
     }
 
-    setPath("pis_checked_flag", true);
+    if (requestedPisDiffCheck) {
+      setPath("pis_checked_flag", true);
+    }
 
     applyCalculatedCbmTotals(item, setPath);
     await item.save();
+    const afterAuditSnapshot = buildItemUpdateAuditSnapshot(item.toObject());
+    await createPisUpdateLog({
+      reqUser: req.user,
+      beforeSnapshot: beforeAuditSnapshot,
+      afterSnapshot: afterAuditSnapshot,
+      operationType: requestedPisDiffCheck ? "pis_diff_update" : "pis_update",
+      pageName: requestedPisDiffCheck ? "PIS Diff Modal" : "PIS Update Modal",
+      source: requestedPisDiffCheck ? "pis_diffs_modal" : "pis_update_modal",
+      dataScopes: requestedPisDiffCheck
+        ? [AUDIT_SCOPES.PIS, AUDIT_SCOPES.MASTER]
+        : [AUDIT_SCOPES.PIS],
+      extraRemarks: requestedPisDiffCheck
+        ? ["PIS diff was checked and the PIS values were copied into master data."]
+        : [],
+      metadata: {
+        pis_update_source: normalizeTextField(payload?.pis_update_source),
+        sync_master_data: Boolean(payload?.sync_master_data),
+        pis_checked_flag_requested: Boolean(payload?.pis_checked_flag),
+      },
+    });
 
     return res.status(200).json({
       success: true,
