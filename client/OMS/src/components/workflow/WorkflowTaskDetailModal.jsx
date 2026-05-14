@@ -20,6 +20,14 @@ import {
 } from "./workflowTaskProgress";
 
 const normalizeText = (value) => String(value ?? "").trim();
+const uniqueIds = (values = []) =>
+  [
+    ...new Set(
+      (Array.isArray(values) ? values : [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean),
+    ),
+  ];
 
 const formatDateTime = (value) => {
   if (!value) return "—";
@@ -88,6 +96,9 @@ const buildTaskEditForm = (task = {}) => ({
   assignmentDate: formatDateInputValue(task?.assigned_at),
   dueDate: formatDateInputValue(task?.due_date),
   uploadRequired: task?.upload_required !== false,
+  uploadAssigneeIds: Array.isArray(task?.upload_assignees)
+    ? task.upload_assignees.map((entry) => getUserId(entry)).filter(Boolean)
+    : [],
 });
 
 const WorkflowTaskDetailModal = ({
@@ -180,12 +191,12 @@ const WorkflowTaskDetailModal = ({
   const canEditCurrentTaskDetails =
     canEditTaskDetails &&
     (canEditAnyTaskDetails || isTaskCreator || isAssignedUser || isTaskAssigner);
-	const canUpload =
-	  task?.upload_required !== false &&
-	  task?.status === "approved" &&
-	  (
-	    hasUploadAssignees(task)
-	      ? isUploadAssignedToUser(task, currentUserId)
+  const canUpload =
+    task?.upload_required !== false &&
+    task?.status === "approved" &&
+    (
+      hasUploadAssignees(task)
+        ? isUploadAssignedToUser(task, currentUserId)
         : (isAssignedUser || isTaskCreator)
     );
   const canRework =
@@ -212,6 +223,34 @@ const WorkflowTaskDetailModal = ({
     }
     return options;
   }, [departments, task?.department]);
+
+  const selectedUploadAssigneeIds = useMemo(
+    () =>
+      new Set(
+        (Array.isArray(editForm.uploadAssigneeIds)
+          ? editForm.uploadAssigneeIds
+          : []
+        ).map(String),
+      ),
+    [editForm.uploadAssigneeIds],
+  );
+
+  const availableUploadUsers = useMemo(() => {
+    const optionById = new Map();
+    [
+      ...availableUsers,
+      ...assignedUsers,
+      ...(Array.isArray(task?.upload_assignees)
+        ? task.upload_assignees.map((entry) => entry?.user || entry)
+        : []),
+      currentUser,
+    ].forEach((user) => {
+      const userId = getUserId(user);
+      if (!userId || optionById.has(String(userId))) return;
+      optionById.set(String(userId), user);
+    });
+    return [...optionById.values()];
+  }, [availableUsers, assignedUsers, currentUser, task?.upload_assignees]);
 
   const handleTaskAction = async (action, message, { onSuccess } = {}) => {
     setActionLoading(true);
@@ -267,9 +306,36 @@ const WorkflowTaskDetailModal = ({
     }));
   };
 
+  const handleEditUploadRequiredChange = (checked) => {
+    setEditForm((prev) => ({
+      ...prev,
+      uploadRequired: checked,
+      uploadAssigneeIds:
+        checked && (!Array.isArray(prev.uploadAssigneeIds) || prev.uploadAssigneeIds.length === 0)
+          ? uniqueIds([currentUserId, ...assignIds])
+          : prev.uploadAssigneeIds,
+    }));
+  };
+
+  const toggleEditUploadAssignee = (userId) => {
+    setEditForm((prev) => ({
+      ...prev,
+      uploadAssigneeIds: selectedUploadAssigneeIds.has(String(userId))
+        ? prev.uploadAssigneeIds.filter((entry) => String(entry) !== String(userId))
+        : uniqueIds([...(prev.uploadAssigneeIds || []), userId]),
+    }));
+  };
+
   const handleSaveTaskDetails = async () => {
     if (!normalizeText(editForm.title)) {
       setActionError("Task name is required.");
+      return;
+    }
+    if (
+      editForm.uploadRequired &&
+      (!Array.isArray(editForm.uploadAssigneeIds) || editForm.uploadAssigneeIds.length === 0)
+    ) {
+      setActionError("At least one upload user is required when upload is required.");
       return;
     }
 
@@ -284,6 +350,7 @@ const WorkflowTaskDetailModal = ({
           assigned_at: normalizeText(editForm.assignmentDate) || null,
           due_date: normalizeText(editForm.dueDate) || null,
           upload_required: Boolean(editForm.uploadRequired),
+          upload_assignee_ids: editForm.uploadRequired ? editForm.uploadAssigneeIds : [],
         }),
       "Task details updated successfully.",
       {
@@ -618,11 +685,11 @@ const WorkflowTaskDetailModal = ({
                         (stepKey === "started" && canStart)
                         || (stepKey === "complete" && canComplete)
                         || (stepKey === "approved" && canApprove)
-	                        || (
-	                          (stepKey === "uploaded" || isWorkflowUploadStepKey(stepKey)) &&
-	                          canUpload &&
-	                          isUploadStepPending(task, stepKey)
-	                        )
+                        || (
+                          (stepKey === "uploaded" || isWorkflowUploadStepKey(stepKey)) &&
+                          canUpload &&
+                          isUploadStepPending(task, stepKey)
+                        )
                       }
                       onStepClick={handleStageBarClick}
                     />
@@ -806,7 +873,7 @@ const WorkflowTaskDetailModal = ({
                                 id="workflow-task-upload-required"
                                 checked={Boolean(editForm.uploadRequired)}
                                 onChange={(event) =>
-                                  handleEditFormChange("uploadRequired", event.target.checked)
+                                  handleEditUploadRequiredChange(event.target.checked)
                                 }
                                 disabled={actionLoading}
                               />
@@ -818,6 +885,48 @@ const WorkflowTaskDetailModal = ({
                               </label>
                             </div>
                           </div>
+                          {editForm.uploadRequired && (
+                            <div className="col-12">
+                              <div className="d-flex justify-content-between align-items-center gap-2 mb-2">
+                                <label className="form-label mb-0">Upload Pending Users</label>
+                                <span className="om-summary-chip">
+                                  Selected: {editForm.uploadAssigneeIds.length}
+                                </span>
+                              </div>
+                              {availableUploadUsers.length === 0 ? (
+                                <div className="alert alert-secondary mb-0 py-2">
+                                  No user options available for upload assignment.
+                                </div>
+                              ) : (
+                                <div className="workflow-user-picker">
+                                  {availableUploadUsers.map((user) => {
+                                    const userId = getUserId(user);
+                                    const checked = selectedUploadAssigneeIds.has(String(userId));
+                                    return (
+                                      <label
+                                        key={userId}
+                                        className="form-check d-flex align-items-center gap-2 mb-0"
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          className="form-check-input mt-0"
+                                          checked={checked}
+                                          onChange={() => toggleEditUploadAssignee(userId)}
+                                          disabled={actionLoading}
+                                        />
+                                        <span>
+                                          {user?.name || user?.username || user?.email || "User"}{" "}
+                                          <span className="small text-secondary">
+                                            ({user?.role || "user"})
+                                          </span>
+                                        </span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          )}
                           <div className="col-12">
                             <label className="form-label">Description</label>
                             <textarea

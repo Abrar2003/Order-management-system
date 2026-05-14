@@ -1847,6 +1847,37 @@ const updateWorkflowTaskDetails = async ({
     }
   }
 
+  if (hasOwn(payload, "upload_assignee_ids")) {
+    const uploadRequired = task.upload_required !== false;
+    const nextUploadAssigneeIds = uploadRequired
+      ? uniqueIds(payload.upload_assignee_ids)
+      : [];
+    const nextUploadAssignees = uploadRequired
+      ? await validateAssigneeUsers(nextUploadAssigneeIds)
+      : [];
+
+    if (uploadRequired && nextUploadAssignees.length === 0) {
+      throw new Error("At least one upload user is required when upload is required");
+    }
+
+    const currentUploadAssigneeIds = (Array.isArray(task.upload_assignees)
+      ? task.upload_assignees
+      : [])
+      .map((entry) => normalizeId(entry?.user?._id || entry?.user || entry?._id || entry))
+      .filter(Boolean);
+    const normalizedNextIds = nextUploadAssignees.map((user) => normalizeId(user._id));
+    const hasUploadAssigneeChange =
+      currentUploadAssigneeIds.length !== normalizedNextIds.length ||
+      currentUploadAssigneeIds.some((id) => !normalizedNextIds.includes(id)) ||
+      normalizedNextIds.some((id) => !currentUploadAssigneeIds.includes(id));
+
+    if (hasUploadAssigneeChange) {
+      task.upload_assignees = nextUploadAssignees.map((user) => ({ user: user._id }));
+      resetTaskUploadStatuses(task);
+      changedFields.push("upload_assignees");
+    }
+  }
+
   if (hasOwn(payload, "assigned_at") || hasOwn(payload, "assignment_date")) {
     const assignedAtInput = hasOwn(payload, "assigned_at")
       ? payload.assigned_at

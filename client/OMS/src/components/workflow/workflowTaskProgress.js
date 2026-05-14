@@ -94,14 +94,19 @@ export const getWorkflowStageBarSteps = (task = {}) => {
 
   return [
     ...WORKFLOW_STAGE_BAR_STEPS.filter((entry) => entry.key !== "uploaded"),
-    ...uploadStatuses.map((entry, index) => ({
-      key: getWorkflowUploadStepKey(entry),
-      label: normalizeText(entry?.status) === "uploaded"
-        ? `Upload ${index + 1}: ${getAuditActorLabel(entry?.uploaded_by) || "Uploaded"}`
-        : `Upload ${index + 1}`,
-      uploadUserId: getUserId(entry),
-      uploadStatus: entry.status,
-    })),
+    ...uploadStatuses.map((entry, index) => {
+      const assignedUserLabel = getUserLabel(entry);
+      const uploadedByLabel = getAuditActorLabel(entry?.uploaded_by);
+
+      return {
+        key: getWorkflowUploadStepKey(entry),
+        label: normalizeText(entry?.status) === "uploaded"
+          ? `Upload ${index + 1}: ${uploadedByLabel || assignedUserLabel || "Uploaded"}`
+          : `Upload ${index + 1}: ${assignedUserLabel}`,
+        uploadUserId: getUserId(entry),
+        uploadStatus: entry.status,
+      };
+    }),
   ];
 };
 

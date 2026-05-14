@@ -73,6 +73,13 @@ const WorkflowTaskCreateModal = ({
     () => new Set((Array.isArray(form.assignee_ids) ? form.assignee_ids : []).map(String)),
     [form.assignee_ids],
   );
+  const selectedUploadAssigneeIds = useMemo(
+    () =>
+      new Set(
+        (Array.isArray(form.upload_assignee_ids) ? form.upload_assignee_ids : []).map(String),
+      ),
+    [form.upload_assignee_ids],
+  );
   const availableUploadUsers = useMemo(() => {
     const optionById = new Map();
     [...availableUsers, currentUser].forEach((user) => {
@@ -146,13 +153,12 @@ const WorkflowTaskCreateModal = ({
     }));
   };
 
-  const handleUploadAssigneeSelect = (event) => {
-    const selectedValues = Array.from(event.target.selectedOptions).map(
-      (option) => option.value,
-    );
+  const toggleUploadAssignee = (userId) => {
     setForm((prev) => ({
       ...prev,
-      upload_assignee_ids: uniqueIds(selectedValues),
+      upload_assignee_ids: selectedUploadAssigneeIds.has(String(userId))
+        ? prev.upload_assignee_ids.filter((entry) => String(entry) !== String(userId))
+        : uniqueIds([...prev.upload_assignee_ids, userId]),
     }));
   };
 
@@ -476,25 +482,31 @@ const WorkflowTaskCreateModal = ({
                             No user options are available for upload assignment.
                           </div>
                         ) : (
-                          <select
-                            multiple
-                            size={Math.min(6, Math.max(3, availableUploadUsers.length))}
-                            className="form-select"
-                            value={form.upload_assignee_ids}
-                            onChange={handleUploadAssigneeSelect}
-                          >
+                          <div className="workflow-user-picker">
                             {availableUploadUsers.map((user) => {
                               const userId = getUserId(user);
+                              const checked = selectedUploadAssigneeIds.has(String(userId));
                               return (
-                                <option key={userId} value={userId}>
-                                  {user?.name || user?.username || user?.email || "User"}
-                                  {user?.role ? ` (${user.role})` : ""}
-                                  {String(userId) === String(currentUserId) ? " - creator" : ""}
-                                  {selectedAssigneeIds.has(String(userId)) ? " - assignee" : ""}
-                                </option>
+                                <label
+                                  key={userId}
+                                  className="form-check d-flex align-items-center gap-2 mb-0"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    className="form-check-input mt-0"
+                                    checked={checked}
+                                    onChange={() => toggleUploadAssignee(userId)}
+                                  />
+                                  <span>
+                                    {user?.name || user?.username || user?.email || "User"}{" "}
+                                    <span className="small text-secondary">
+                                      ({user?.role || "user"})
+                                    </span>
+                                  </span>
+                                </label>
                               );
                             })}
-                          </select>
+                          </div>
                         )}
                       </div>
                     </section>
