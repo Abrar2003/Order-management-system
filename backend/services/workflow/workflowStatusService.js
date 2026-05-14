@@ -590,10 +590,6 @@ const createWorkflowTask = async ({
   actor = {},
   realtimeSource = null,
 } = {}) => {
-  if (!isAdmin(actor)) {
-    throw new Error("Only admins can create workflow tasks");
-  }
-
   const title = normalizeText(payload?.title || payload?.name);
   if (!title) {
     throw new Error("Task name is required");
@@ -1232,9 +1228,6 @@ const assertTransitionPermission = ({ task, actor, toStatus }) => {
     }
   }
 
-  if (toStatus === "assigned" && !isManagerOrAdmin(actor)) {
-    throw new Error("Only admin or manager can assign a task");
-  }
 };
 
 const assignWorkflowTask = async ({

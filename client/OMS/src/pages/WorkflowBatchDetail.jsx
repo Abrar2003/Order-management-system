@@ -42,7 +42,7 @@ const WorkflowBatchDetail = () => {
   const isAdmin = isStrictAdminRole(role);
   const canViewWorkflow = hasPermission("workflow", "view");
   const canEditWorkflow = isManagerOrAdmin && hasPermission("workflow", "edit");
-  const canAssignWorkflow = isManagerOrAdmin && hasPermission("workflow", "assign");
+  const canAssignWorkflow = canViewWorkflow;
   const canDeleteWorkflow = isAdmin && hasPermission("workflow", "delete");
 
   const [batch, setBatch] = useState(null);

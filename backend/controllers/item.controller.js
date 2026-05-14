@@ -1592,8 +1592,8 @@ const buildPisDiffSummary = (item = {}) => {
   const hasInspectedData =
     itemComparison.hasInspectedData
     || boxComparison.hasInspectedData
-    || cbmComparison.hasData
-    || Boolean(pisBarcode || inspectedBarcode);
+    || cbmComparison.hasInspected
+    || Boolean(inspectedBarcode);
   if (!hasInspectedData) {
     return null;
   }
@@ -1813,6 +1813,14 @@ const buildPisDiffRows = (items = []) =>
       };
     })
     .filter(Boolean);
+
+const getPisDiffRowsForMatch = async (match = {}, sort = { updatedAt: -1, code: 1 }) => {
+  const items = await Item.find(match)
+    .select(PIS_DIFF_ITEM_SELECT)
+    .sort(sort)
+    .lean();
+  return buildPisDiffRows(items);
+};
 
 const formatPisDiffValueWithUnit = (value, unit = "") => {
   const parsed = Number(value);
@@ -2896,20 +2904,15 @@ exports.getPisDiffItems = async (req, res) => {
       uncheckedPisMatch,
     );
 
-    const [items, brandsRaw, brandNamesRaw, brandsPrimaryRaw, vendorsRaw, codesRaw] =
+    const [diffRowsBase, brandOptionRows, vendorOptionRows, codeOptionRows] =
       await Promise.all([
-        Item.find(match)
-          .select(PIS_DIFF_ITEM_SELECT)
-          .sort({ updatedAt: -1, code: 1 })
-          .lean(),
-        Item.distinct("brands", brandOptionsMatch),
-        Item.distinct("brand_name", brandOptionsMatch),
-        Item.distinct("brand", brandOptionsMatch),
-        Item.distinct("vendors", vendorOptionsMatch),
-        Item.distinct("code", codeOptionsMatch),
+        getPisDiffRowsForMatch(match),
+        getPisDiffRowsForMatch(brandOptionsMatch, { code: 1 }),
+        getPisDiffRowsForMatch(vendorOptionsMatch, { code: 1 }),
+        getPisDiffRowsForMatch(codeOptionsMatch, { code: 1 }),
       ]);
-    const mismatchLookup = await buildInspectionReportMismatchLookup(items);
-    const diffRows = buildPisDiffRows(items).map((item) => {
+    const mismatchLookup = await buildInspectionReportMismatchLookup(diffRowsBase);
+    const diffRows = diffRowsBase.map((item) => {
       const mismatchEntry = mismatchLookup.get(normalizeLookupKey(item?.code)) || {};
       return {
         ...item,
@@ -2932,13 +2935,19 @@ exports.getPisDiffItems = async (req, res) => {
         totalRecords: diffRows.length,
       },
       filters: {
-        brands: normalizeDistinctValues([
-          ...(brandsPrimaryRaw || []),
-          ...(brandsRaw || []),
-          ...(brandNamesRaw || []),
-        ]),
-        vendors: normalizeDistinctValues(vendorsRaw),
-        item_codes: normalizeDistinctValues(codesRaw),
+        brands: normalizeDistinctValues(
+          brandOptionRows.flatMap((item) => [
+            item?.brand,
+            item?.brand_name,
+            ...(Array.isArray(item?.brands) ? item.brands : []),
+          ]),
+        ),
+        vendors: normalizeDistinctValues(
+          vendorOptionRows.flatMap((item) =>
+            Array.isArray(item?.vendors) ? item.vendors : [],
+          ),
+        ),
+        item_codes: normalizeDistinctValues(codeOptionRows.map((item) => item?.code)),
       },
     });
   } catch (error) {

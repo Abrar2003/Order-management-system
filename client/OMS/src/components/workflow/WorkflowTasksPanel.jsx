@@ -203,8 +203,9 @@ const WorkflowTasksPanel = ({
   const isManagerOrAdmin = isManagerLikeRole(role);
   const isAdmin = isStrictAdminRole(role);
   const canViewWorkflow = hasPermission("workflow", "view");
-  const canCreateWorkflow = !mineOnly && isAdmin && hasPermission("workflow", "create");
-  const canAssignWorkflow = isManagerOrAdmin && hasPermission("workflow", "assign");
+  const canCreateWorkflow = !mineOnly && canViewWorkflow;
+  const canCreateFolderWorkflow = !mineOnly && isAdmin && hasPermission("workflow", "create");
+  const canAssignWorkflow = canViewWorkflow;
   const canManageWorkflow = isManagerOrAdmin && hasPermission("workflow", "edit");
   const canDeleteWorkflow = isAdmin && hasPermission("workflow", "delete");
   const canFilterByAssignee = isAdmin && canViewWorkflow;
@@ -611,15 +612,17 @@ const WorkflowTasksPanel = ({
             </div>
             <div className="text-secondary">{description}</div>
           </div>
-          {canCreateWorkflow && (
+          {(canCreateWorkflow || canCreateFolderWorkflow) && (
             <div className="d-flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="btn btn-outline-primary"
-                onClick={() => setShowFolderCreateModal(true)}
-              >
-                Create Tasks from Folder
-              </button>
+              {canCreateFolderWorkflow && (
+                <button
+                  type="button"
+                  className="btn btn-outline-primary"
+                  onClick={() => setShowFolderCreateModal(true)}
+                >
+                  Create Tasks from Folder
+                </button>
+              )}
               <button
                 type="button"
                 className="btn btn-primary"

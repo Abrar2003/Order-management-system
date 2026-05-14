@@ -105,8 +105,6 @@ router.delete(
 router.post(
   "/tasks",
   auth,
-  authorize(...WORKFLOW_ADMIN_ROLES),
-  requirePermission("workflow", "create"),
   createTask,
 );
 
@@ -135,8 +133,6 @@ router.patch(
 router.patch(
   "/tasks/:id/assign",
   auth,
-  authorize(...WORKFLOW_MANAGER_ROLES),
-  requirePermission("workflow", "assign"),
   assignTask,
 );
 
