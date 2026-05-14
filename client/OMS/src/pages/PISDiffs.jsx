@@ -58,6 +58,18 @@ const getVendors = (item = {}) =>
 
 const isPisChecked = (item = {}) => item?.pis_checked_flag === true;
 
+const normalizePrimaryMeasurementEntries = (entries = [], weightKey = "") =>
+  (Array.isArray(entries) ? entries : [])
+    .map((entry) => ({
+      ...entry,
+      remark: String(entry?.remark || entry?.type || "").trim().toLowerCase(),
+      L: Number(entry?.L || 0) || 0,
+      B: Number(entry?.B || 0) || 0,
+      H: Number(entry?.H || 0) || 0,
+      weight: Number(weightKey ? entry?.[weightKey] : entry?.weight) || 0,
+    }))
+    .filter((entry) => hasMeaningfulMeasuredSize(entry));
+
 const formatRemarkLabel = (remark = "", fallback = "Value") => {
   const normalized = String(remark || "").trim().toLowerCase();
   if (!normalized) return fallback;
@@ -76,11 +88,15 @@ const buildMeasurementEntries = ({
   const isPis = source === "pis";
   const isItemGroup = group === "item";
   const weight = isPis ? item?.pis_weight : item?.inspected_weight;
+  const primaryEntries = isPis
+    ? (isItemGroup ? item?.pis_item_sizes : item?.pis_box_sizes)
+    : (isItemGroup ? item?.inspected_item_sizes : item?.inspected_box_sizes);
+  const weightKey = isItemGroup ? "net_weight" : "gross_weight";
+  const directEntries = normalizePrimaryMeasurementEntries(primaryEntries, weightKey);
+  if (directEntries.length > 0) return directEntries;
 
   return buildMeasuredSizeEntriesFromLegacy({
-    primaryEntries: isPis
-      ? (isItemGroup ? item?.pis_item_sizes : item?.pis_box_sizes)
-      : (isItemGroup ? item?.inspected_item_sizes : item?.inspected_box_sizes),
+    primaryEntries,
     singleLbh: isPis
       ? (isItemGroup ? item?.pis_item_LBH : item?.pis_box_LBH)
       : (isItemGroup
@@ -108,7 +124,7 @@ const buildMeasurementEntries = ({
       weight,
       isItemGroup ? "bottom_net" : "bottom_gross",
     ),
-    weightKey: isItemGroup ? "net_weight" : "gross_weight",
+    weightKey,
     topRemark: "top",
     bottomRemark: "base",
   }).filter((entry) => hasMeaningfulMeasuredSize(entry));

@@ -27,10 +27,7 @@ const hasEntryValue = (entry = {}, weightKey = "") => {
     Number(entry?.B || 0) > 0 ||
     Number(entry?.H || 0) > 0;
   const hasWeight = Number(getEntryWeight(entry, weightKey) || 0) > 0;
-  const hasCount =
-    Number(entry?.item_count_in_inner || 0) > 0 ||
-    Number(entry?.box_count_in_master || 0) > 0;
-  return hasSize || hasWeight || hasCount || Boolean(String(entry?.remark || "").trim());
+  return hasSize || hasWeight || Boolean(String(entry?.remark || "").trim());
 };
 
 const normalizeEntries = (entries = [], weightKey = "") =>
@@ -56,7 +53,6 @@ const MeasuredSizeDisplayTable = ({
             <th>Part</th>
             <th>L x B x H</th>
             <th>Weight</th>
-            <th>Counts</th>
           </tr>
         </thead>
         <tbody>
@@ -67,17 +63,6 @@ const MeasuredSizeDisplayTable = ({
                 {formatNumber(entry?.L)} x {formatNumber(entry?.B)} x {formatNumber(entry?.H)}
               </td>
               <td>{formatNumber(getEntryWeight(entry, weightKey), 3)}</td>
-              <td>
-                {Number(entry?.item_count_in_inner || 0) > 0 && (
-                  <span className="me-2">Inner: {formatNumber(entry.item_count_in_inner, 0)}</span>
-                )}
-                {Number(entry?.box_count_in_master || 0) > 0 && (
-                  <span>Master: {formatNumber(entry.box_count_in_master, 0)}</span>
-                )}
-                {Number(entry?.item_count_in_inner || 0) <= 0 &&
-                  Number(entry?.box_count_in_master || 0) <= 0 &&
-                  "-"}
-              </td>
             </tr>
           ))}
         </tbody>

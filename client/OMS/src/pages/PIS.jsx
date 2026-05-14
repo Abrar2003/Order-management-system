@@ -19,7 +19,6 @@ import "../App.css";
 
 const DEFAULT_LIMIT = 20;
 const LIMIT_OPTIONS = [10, 20, 50, 100];
-const MEASUREMENT_ENTRY_DISPLAY_LIMIT = 4;
 
 const parsePositiveInt = (value, fallback = 1) => {
   const parsed = Number.parseInt(value, 10);
@@ -55,8 +54,7 @@ const normalizeMeasurementEntries = (entries = [], weightKey = "") =>
         weight: Number.isFinite(weight) ? weight : 0,
       };
     })
-    .filter((entry) => entry.L > 0 && entry.B > 0 && entry.H > 0)
-    .slice(0, MEASUREMENT_ENTRY_DISPLAY_LIMIT);
+    .filter((entry) => entry.L > 0 && entry.B > 0 && entry.H > 0);
 const getPrimaryMeasurementLbh = (entries = []) =>
   normalizeMeasurementEntries(entries)[0] || {};
 const sumMeasurementWeights = (entries = [], weightKey = "") =>
