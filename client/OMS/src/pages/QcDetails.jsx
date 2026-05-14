@@ -343,6 +343,7 @@ const QcDetails = () => {
   const [showRejectAllModal, setShowRejectAllModal] = useState(false);
   const [showTransferRequestModal, setShowTransferRequestModal] = useState(false);
   const [transferInspectionRecord, setTransferInspectionRecord] = useState(null);
+  const [inspectionRecordToUpdate, setInspectionRecordToUpdate] = useState(null);
   const [showQcImageGallery, setShowQcImageGallery] = useState(false);
   const [activeQcImageIndex, setActiveQcImageIndex] = useState(0);
   const [selectedQcImageIds, setSelectedQcImageIds] = useState([]);
@@ -2097,9 +2098,18 @@ const QcDetails = () => {
                           {showInspectionActions && (
                             <td>
                               {row.rowType === "Inspection" && row.recordId ? (
-                                <div className="d-flex flex-wrap gap-2">
-                                  {canTransferInspectionRecords && (
-                                    <button
+	                                <div className="d-flex flex-wrap gap-2">
+	                                  {isAdmin && (
+	                                    <button
+	                                      type="button"
+	                                      className="btn btn-outline-secondary btn-sm"
+	                                      onClick={() => setInspectionRecordToUpdate(row.inspectionRecord)}
+	                                    >
+	                                      Update
+	                                    </button>
+	                                  )}
+	                                  {canTransferInspectionRecords && (
+	                                    <button
                                       type="button"
                                       className="btn btn-outline-primary btn-sm"
                                       disabled={Number(row?.passedQty || 0) <= 0}
@@ -2363,19 +2373,32 @@ const QcDetails = () => {
         </div>
       </div>
 
-      {showUpdateModal && !isViewOnly && canUpdateQc && (
-        <UpdateQcModal
-          qc={qc}
-          isAdmin={isOnlyAdmin}
+	      {showUpdateModal && !isViewOnly && canUpdateQc && (
+	        <UpdateQcModal
+	          qc={qc}
+	          isAdmin={isOnlyAdmin}
           onClose={() => setShowUpdateModal(false)}
           onUpdated={() => {
             setShowUpdateModal(false);
             fetchQcDetails();
           }}
-        />
-      )}
+	        />
+	      )}
 
-      {showShippingModal && canFinalizeShipping && !isViewOnly && (
+	      {inspectionRecordToUpdate && !isViewOnly && isAdmin && (
+	        <UpdateQcModal
+	          qc={qc}
+	          isAdmin={isOnlyAdmin}
+	          inspectionRecord={inspectionRecordToUpdate}
+	          onClose={() => setInspectionRecordToUpdate(null)}
+	          onUpdated={() => {
+	            setInspectionRecordToUpdate(null);
+	            fetchQcDetails();
+	          }}
+	        />
+	      )}
+
+	      {showShippingModal && canFinalizeShipping && !isViewOnly && (
         <ShippingModal
           order={qc?.order}
           onClose={() => setShowShippingModal(false)}

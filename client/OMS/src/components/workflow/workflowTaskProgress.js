@@ -25,6 +25,18 @@ const WORKFLOW_UPLOAD_ROLE_RANK = Object.freeze({
 const getWorkflowUploadRoleRank = (entry = {}) =>
   WORKFLOW_UPLOAD_ROLE_RANK[normalizeRoleKey(entry?.user?.role || entry?.role)] || 999;
 
+const getWorkflowUploadStepLabel = (entry = {}, index = 0, { showIndex = true } = {}) => {
+  const assignedUserLabel = getUserLabel(entry);
+  const uploadedByLabel = getAuditActorLabel(entry?.uploaded_by);
+  const prefix = showIndex ? `Upload ${index + 1}` : "Uploaded";
+
+  if (normalizeText(entry?.status) === "uploaded") {
+    return `${prefix}: ${uploadedByLabel || assignedUserLabel || "Uploaded"}`;
+  }
+
+  return showIndex ? `${prefix}: ${assignedUserLabel}` : "Uploaded";
+};
+
 export const WORKFLOW_STAGE_BAR_STEPS = Object.freeze([
   { key: "assigned", label: "Assigned" },
   { key: "started", label: "Started" },
@@ -90,23 +102,30 @@ export const getWorkflowStageBarSteps = (task = {}) => {
   }
 
   const uploadStatuses = getWorkflowUploadStatuses(task);
-  if (uploadStatuses.length <= 1) return WORKFLOW_STAGE_BAR_STEPS;
+  if (uploadStatuses.length <= 1) {
+    const [uploadStatus] = uploadStatuses;
+    if (!uploadStatus) return WORKFLOW_STAGE_BAR_STEPS;
+
+    return WORKFLOW_STAGE_BAR_STEPS.map((entry) =>
+      entry.key === "uploaded"
+        ? {
+            ...entry,
+            label: getWorkflowUploadStepLabel(uploadStatus, 0, { showIndex: false }),
+            uploadUserId: getUserId(uploadStatus),
+            uploadStatus: uploadStatus.status,
+          }
+        : entry,
+    );
+  }
 
   return [
     ...WORKFLOW_STAGE_BAR_STEPS.filter((entry) => entry.key !== "uploaded"),
-    ...uploadStatuses.map((entry, index) => {
-      const assignedUserLabel = getUserLabel(entry);
-      const uploadedByLabel = getAuditActorLabel(entry?.uploaded_by);
-
-      return {
-        key: getWorkflowUploadStepKey(entry),
-        label: normalizeText(entry?.status) === "uploaded"
-          ? `Upload ${index + 1}: ${uploadedByLabel || assignedUserLabel || "Uploaded"}`
-          : `Upload ${index + 1}: ${assignedUserLabel}`,
-        uploadUserId: getUserId(entry),
-        uploadStatus: entry.status,
-      };
-    }),
+    ...uploadStatuses.map((entry, index) => ({
+      key: getWorkflowUploadStepKey(entry),
+      label: getWorkflowUploadStepLabel(entry, index),
+      uploadUserId: getUserId(entry),
+      uploadStatus: entry.status,
+    })),
   ];
 };
 

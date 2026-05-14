@@ -10186,13 +10186,111 @@ exports.editInspectionRecords = async (req, res) => {
       return inspectorId;
     };
 
-    const parseNonNegativeField = (value, fieldName) => {
-      const parsed = Number(value);
-      if (!Number.isFinite(parsed) || parsed < 0) {
-        throw new Error(`${fieldName} must be a valid non-negative number`);
-      }
-      return parsed;
-    };
+	    const parseNonNegativeField = (value, fieldName) => {
+	      const parsed = Number(value);
+	      if (!Number.isFinite(parsed) || parsed < 0) {
+	        throw new Error(`${fieldName} must be a valid non-negative number`);
+	      }
+	      return parsed;
+	    };
+
+	    const parseOptionalNonNegativeField = (value, fieldName) => {
+	      if (value === undefined) return { hasInput: false, value: null };
+	      const parsed = Number(value);
+	      if (!Number.isFinite(parsed) || parsed < 0) {
+	        throw new Error(`${fieldName} must be a valid non-negative number`);
+	      }
+	      return { hasInput: true, value: parsed };
+	    };
+
+	    const parseInspectionSizeEntries = (
+	      value,
+	      fieldName,
+	      { weightKey = "", mode = BOX_PACKAGING_MODES.INDIVIDUAL } = {},
+	    ) => {
+	      if (value === undefined) return { hasInput: false, value: null };
+	      if (value === null) return { hasInput: true, value: [] };
+	      if (!Array.isArray(value)) {
+	        throw new Error(`${fieldName} must be an array`);
+	      }
+	      if (value.length > SIZE_ENTRY_LIMIT) {
+	        throw new Error(`${fieldName} cannot exceed ${SIZE_ENTRY_LIMIT} entries`);
+	      }
+
+	      const isBoxSizeField = fieldName === "inspected_box_sizes";
+	      const resolvedBoxMode = isBoxSizeField
+	        ? detectBoxPackagingMode(mode, value)
+	        : BOX_PACKAGING_MODES.INDIVIDUAL;
+	      const seenRemarks = new Set();
+
+	      const parsedEntries = value.map((entry = {}, entryIndex) => {
+	        const entryLabel = `${fieldName}[${entryIndex}]`;
+	        const L = parseNonNegativeField(entry?.L, `${entryLabel}.L`);
+	        const B = parseNonNegativeField(entry?.B, `${entryLabel}.B`);
+	        const H = parseNonNegativeField(entry?.H, `${entryLabel}.H`);
+	        const isCartonEntry =
+	          isBoxSizeField && resolvedBoxMode === BOX_PACKAGING_MODES.CARTON;
+	        const cartonRemark = isCartonEntry
+	          ? entryIndex === 0 ? "inner" : "master"
+	          : "";
+	        const normalizedRemark = isCartonEntry
+	          ? cartonRemark
+	          : normalizeText(entry?.remark || entry?.type || "").toLowerCase();
+
+	        if (value.length > 1 && !isCartonEntry) {
+	          if (!normalizedRemark) {
+	            throw new Error(`${entryLabel}.remark is required`);
+	          }
+	          if (seenRemarks.has(normalizedRemark)) {
+	            throw new Error(`${fieldName} remarks must be unique`);
+	          }
+	          seenRemarks.add(normalizedRemark);
+	        }
+
+	        const parsedEntry = {
+	          L,
+	          B,
+	          H,
+	          remark: value.length > 1 ? normalizedRemark : "",
+	        };
+
+	        if (weightKey) {
+	          parsedEntry[weightKey] = parseNonNegativeField(
+	            entry?.[weightKey],
+	            `${entryLabel}.${weightKey}`,
+	          );
+	        }
+
+	        if (isBoxSizeField) {
+	          if (resolvedBoxMode === BOX_PACKAGING_MODES.CARTON) {
+	            parsedEntry.remark = cartonRemark;
+	            parsedEntry.box_type = cartonRemark;
+	            parsedEntry.item_count_in_inner =
+	              cartonRemark === "inner"
+	                ? parseNonNegativeField(
+	                    entry?.item_count_in_inner,
+	                    `${entryLabel}.item_count_in_inner`,
+	                  )
+	                : 0;
+	            parsedEntry.box_count_in_master =
+	              cartonRemark === "master"
+	                ? parseNonNegativeField(
+	                    entry?.box_count_in_master,
+	                    `${entryLabel}.box_count_in_master`,
+	                  )
+	                : 0;
+	          } else {
+	            parsedEntry.box_type = "individual";
+	            parsedEntry.item_count_in_inner = 0;
+	            parsedEntry.box_count_in_master = 0;
+	          }
+	        }
+
+	        return parsedEntry;
+	      });
+
+	      return { hasInput: true, value: parsedEntries, mode: resolvedBoxMode };
+	    };
 
     const buildLabelsFromRanges = (ranges = []) => {
       const normalizedRanges = [];
@@ -10329,11 +10427,41 @@ exports.editInspectionRecords = async (req, res) => {
       if (checked > vendorOffered) {
         throw new Error("Checked quantity cannot exceed offered quantity");
       }
-      if (passed > vendorOffered) {
-        throw new Error("Passed quantity cannot exceed offered quantity");
-      }
+	      if (passed > vendorOffered) {
+	        throw new Error("Passed quantity cannot exceed offered quantity");
+	      }
 
-      const cbmInput = row?.cbm && typeof row.cbm === "object" ? row.cbm : null;
+	      const parsedBarcode = parseOptionalNonNegativeField(
+	        row?.barcode,
+	        "Barcode",
+	      );
+	      const parsedMasterBarcode = parseOptionalNonNegativeField(
+	        row?.master_barcode,
+	        "Master barcode",
+	      );
+	      const parsedInnerBarcode = parseOptionalNonNegativeField(
+	        row?.inner_barcode,
+	        "Inner barcode",
+	      );
+	      const parsedInspectedBoxMode = detectBoxPackagingMode(
+	        row?.inspected_box_mode ?? record?.inspected_box_mode,
+	        row?.inspected_box_sizes ?? record?.inspected_box_sizes,
+	      );
+	      const parsedInspectedItemSizes = parseInspectionSizeEntries(
+	        row?.inspected_item_sizes,
+	        "inspected_item_sizes",
+	        { weightKey: "net_weight" },
+	      );
+	      const parsedInspectedBoxSizes = parseInspectionSizeEntries(
+	        row?.inspected_box_sizes,
+	        "inspected_box_sizes",
+	        {
+	          weightKey: "gross_weight",
+	          mode: parsedInspectedBoxMode,
+	        },
+	      );
+
+	      const cbmInput = row?.cbm && typeof row.cbm === "object" ? row.cbm : null;
       const existingCbmSnapshot = buildNormalizedCbmSnapshot(record?.cbm);
       const hasExplicitBoxUpdate = hasExplicitCbmBoxInput(cbmInput);
       const hasExplicitTotalUpdate = cbmInput?.total !== undefined;
@@ -10449,7 +10577,7 @@ exports.editInspectionRecords = async (req, res) => {
       record.passed = passed;
       record.pending_after = pendingAfter;
       record.cbm = nextCbmSnapshot;
-      record.status = resolveInspectionRecordStatus({
+	      record.status = resolveInspectionRecordStatus({
         checked,
         passed,
         vendorOffered,
@@ -10458,11 +10586,40 @@ exports.editInspectionRecords = async (req, res) => {
         goodsNotReady: record?.goods_not_ready,
         requestType: qc?.request_type,
       });
-      record.label_ranges = nextLabelRanges;
-      record.labels_added = nextLabelsAdded;
-      record.remarks = remarks;
-      record.updated_by = buildAuditActor(req.user);
-    }
+	      record.label_ranges = nextLabelRanges;
+	      record.labels_added = nextLabelsAdded;
+	      if (parsedBarcode.hasInput) {
+	        record.barcode = parsedBarcode.value;
+	      }
+	      if (parsedMasterBarcode.hasInput) {
+	        record.master_barcode = parsedMasterBarcode.value;
+	        record.barcode = parsedMasterBarcode.value;
+	      }
+	      if (parsedInnerBarcode.hasInput) {
+	        record.inner_barcode = parsedInnerBarcode.value;
+	      }
+	      if (hasOwn(row, "packed_size")) {
+	        record.packed_size = Boolean(row.packed_size);
+	      }
+	      if (hasOwn(row, "finishing")) {
+	        record.finishing = Boolean(row.finishing);
+	      }
+	      if (hasOwn(row, "branding")) {
+	        record.branding = Boolean(row.branding);
+	      }
+	      if (parsedInspectedItemSizes.hasInput) {
+	        record.inspected_item_sizes = parsedInspectedItemSizes.value;
+	      }
+	      if (parsedInspectedBoxSizes.hasInput) {
+	        record.inspected_box_mode =
+	          parsedInspectedBoxSizes.mode || parsedInspectedBoxMode;
+	        record.inspected_box_sizes = parsedInspectedBoxSizes.value;
+	      } else if (hasOwn(row, "inspected_box_mode")) {
+	        record.inspected_box_mode = parsedInspectedBoxMode;
+	      }
+	      record.remarks = remarks;
+	      record.updated_by = buildAuditActor(req.user);
+	    }
 
     const requestHistoryUpdatedAt = new Date();
     for (const [requestHistoryId, nextRequestedDate] of requestHistoryDateUpdates) {
@@ -10480,11 +10637,11 @@ exports.editInspectionRecords = async (req, res) => {
 
     await Promise.all(inspectionDocs.map((doc) => doc.save()));
 
-    const refreshedInspections = await Inspection.find({ qc: qc._id })
-      .select(
-        "inspection_date requested_date request_history_id inspector checked passed vendor_requested vendor_offered labels_added label_ranges goods_not_ready status createdAt",
-      )
-      .lean();
+	    const refreshedInspections = await Inspection.find({ qc: qc._id })
+	      .select(
+	        "inspection_date requested_date request_history_id inspector checked passed vendor_requested vendor_offered labels_added label_ranges goods_not_ready status createdAt barcode master_barcode inner_barcode packed_size finishing branding inspected_item_sizes inspected_box_sizes inspected_box_mode",
+	      )
+	      .lean();
 
     const mergedLabels = normalizeLabels(
       refreshedInspections.flatMap((record) =>
