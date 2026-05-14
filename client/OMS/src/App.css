@@ -673,8 +673,11 @@ small,
 .workflow-status-line-steps {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--workflow-step-count, 5), minmax(4.6rem, 1fr));
   gap: 0.2rem;
+  overflow-x: auto;
+  overflow-y: visible;
+  padding-bottom: 0.2rem;
 }
 
 .workflow-status-line-step {

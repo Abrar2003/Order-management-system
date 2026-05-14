@@ -29,6 +29,25 @@ const TaskReworkedSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const TaskUploadStatusSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "users",
+      required: true,
+    },
+    status: {
+      type: String,
+      enum: ["pending", "uploaded"],
+      default: "pending",
+      trim: true,
+    },
+    uploaded_by: { type: AuditActorSchema, default: () => ({}) },
+    uploaded_at: { type: Date, default: null },
+  },
+  { _id: false },
+);
+
 const TaskSchema = new mongoose.Schema(
   {
     batch: {
@@ -74,6 +93,7 @@ const TaskSchema = new mongoose.Schema(
     assigned_at: { type: Date, default: null },
     upload_required: { type: Boolean, default: true },
     upload_assignees: { type: [UserReferenceSchema], default: [] },
+    upload_statuses: { type: [TaskUploadStatusSchema], default: [] },
     due_date: { type: Date, default: null },
     started_at: { type: Date, default: null },
     submitted_at: { type: Date, default: null },
@@ -122,6 +142,9 @@ TaskSchema.pre("validate", function normalizeTask() {
   this.upload_required = this.upload_required !== false;
   this.upload_assignees = this.upload_required && Array.isArray(this.upload_assignees)
     ? this.upload_assignees
+    : [];
+  this.upload_statuses = this.upload_required && Array.isArray(this.upload_statuses)
+    ? this.upload_statuses
     : [];
   if (["started", "complete", "approved", "uploaded"].includes(this.status) && !this.started_at) {
     this.started_at = new Date();

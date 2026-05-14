@@ -204,8 +204,7 @@ router.post(
 router.delete(
   "/tasks/:id",
   auth,
-  authorize(...WORKFLOW_ADMIN_ROLES),
-  requirePermission("workflow", "delete"),
+  requirePermission("workflow", "view"),
   removeTask,
 );
 

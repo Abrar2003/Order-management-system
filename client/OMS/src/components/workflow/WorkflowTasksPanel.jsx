@@ -24,7 +24,10 @@ import WorkflowBatchCreateModal from "./WorkflowBatchCreateModal";
 import WorkflowTaskCreateModal from "./WorkflowTaskCreateModal";
 import WorkflowTaskDetailModal from "./WorkflowTaskDetailModal";
 import WorkflowTaskStageBar from "./WorkflowTaskStageBar";
-import { formatWorkflowStageLabel } from "./workflowTaskProgress";
+import {
+  formatWorkflowStageLabel,
+  isWorkflowUploadStepKey,
+} from "./workflowTaskProgress";
 
 const DEFAULT_LIMIT = 20;
 const LIMIT_OPTIONS = [10, 20, 50, 100];
@@ -80,6 +83,20 @@ const isUploadAssignedToCurrentUser = (task = {}, currentUserId = "") =>
     (entry) => String(getTaskUserId(entry)) === String(currentUserId),
   );
 
+const isUploadCompletedByCurrentUser = (task = {}, currentUserId = "") =>
+  (Array.isArray(task?.upload_statuses) ? task.upload_statuses : []).some(
+    (entry) =>
+      String(getTaskUserId(entry)) === String(currentUserId) &&
+      normalizeText(entry?.status).toLowerCase() === "uploaded",
+  );
+
+const isUploadStepForCurrentUser = (stepKey = "", currentUserId = "") =>
+  stepKey === "uploaded" ||
+  (
+    isWorkflowUploadStepKey(stepKey) &&
+    stepKey.split(":").slice(1).join(":") === String(currentUserId)
+  );
+
 const formatRealtimeStatusLabel = (connectionState = "") => {
   if (connectionState === "live") return "Live";
   if (connectionState === "reconnecting") return "Reconnecting";
@@ -121,6 +138,7 @@ const getTaskActionState = ({
   const createdByCurrentUser =
     String(getTaskUserId(task?.created_by)) === String(currentUserId);
   const uploadAssignedToCurrentUser = isUploadAssignedToCurrentUser(task, currentUserId);
+  const uploadCompletedByCurrentUser = isUploadCompletedByCurrentUser(task, currentUserId);
   const uploadRequired = task?.upload_required !== false;
 
   return {
@@ -132,6 +150,7 @@ const getTaskActionState = ({
     canUpload:
       uploadRequired &&
       task?.status === "approved" &&
+      !uploadCompletedByCurrentUser &&
       (
         hasUploadAssignees(task)
           ? uploadAssignedToCurrentUser
@@ -532,7 +551,11 @@ const WorkflowTasksPanel = ({
       return;
     }
 
-    if (stepKey === "uploaded" && actions.canUpload) {
+    if (
+      (stepKey === "uploaded" || isWorkflowUploadStepKey(stepKey)) &&
+      actions.canUpload &&
+      isUploadStepForCurrentUser(stepKey, currentUserId)
+    ) {
       await handleQuickAction(
         () => uploadWorkflowTask(task._id),
         "Task marked uploaded successfully.",
@@ -911,7 +934,11 @@ const WorkflowTasksPanel = ({
                                   (stepKey === "started" && actions.canStart)
                                   || (stepKey === "complete" && actions.canComplete)
                                   || (stepKey === "approved" && actions.canApprove)
-                                  || (stepKey === "uploaded" && actions.canUpload)
+                                  || (
+                                    (stepKey === "uploaded" || isWorkflowUploadStepKey(stepKey)) &&
+                                    actions.canUpload &&
+                                    isUploadStepForCurrentUser(stepKey, currentUserId)
+                                  )
                                 }
                                 onStepClick={(stepKey) => handleStageClick(task, stepKey)}
                               />
@@ -1008,7 +1035,7 @@ const WorkflowTasksPanel = ({
                                   <img src={WORKFLOW_ACTION_ICONS.rework} alt="" />
                                 </button>
                               )}
-                              {canDeleteWorkflow && (
+                              {(canDeleteWorkflow || actions.createdByCurrentUser) && (
                                 <button
                                   type="button"
                                   className="workflow-icon-button is-danger"
@@ -1067,6 +1094,7 @@ const WorkflowTasksPanel = ({
           canEditTaskDetails={canEditWorkflow}
           canEditAnyTaskDetails={isAdmin && canEditWorkflow}
           canDeleteWorkflow={canDeleteWorkflow}
+          canDeleteOwnTask={canViewWorkflow}
           onClose={() => setSelectedTaskId("")}
           onUpdated={() => {
             setRefreshTick((prev) => prev + 1);

@@ -1,4 +1,27 @@
 const normalizeText = (value) => String(value ?? "").trim().toLowerCase();
+const normalizeRoleKey = (value) =>
+  String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+const getUserId = (entry = {}) =>
+  String(entry?.user?._id || entry?.user?.id || entry?.user || entry?._id || entry?.id || "").trim();
+const getUserLabel = (entry = {}) =>
+  String(entry?.user?.name || entry?.user?.email || entry?.name || entry?.email || "Upload").trim();
+
+const WORKFLOW_UPLOAD_ROLE_RANK = Object.freeze({
+  super_admin: 10,
+  admin: 20,
+  manager: 30,
+  product_manager: 40,
+  inspection_manager: 50,
+  qc: 60,
+  dev: 70,
+  user: 80,
+});
+
+const getWorkflowUploadRoleRank = (entry = {}) =>
+  WORKFLOW_UPLOAD_ROLE_RANK[normalizeRoleKey(entry?.user?.role || entry?.role)] || 999;
 
 export const WORKFLOW_STAGE_BAR_STEPS = Object.freeze([
   { key: "assigned", label: "Assigned" },
@@ -22,14 +45,81 @@ export const formatWorkflowStageLabel = (value) =>
 
 export const isWorkflowUploadRequired = (task = {}) => task?.upload_required !== false;
 
-export const getWorkflowStageBarSteps = (task = {}) =>
-  isWorkflowUploadRequired(task)
-    ? WORKFLOW_STAGE_BAR_STEPS
-    : WORKFLOW_STAGE_BAR_STEPS.filter((entry) => entry.key !== "uploaded");
+export const getWorkflowUploadStatuses = (task = {}) => {
+  if (!isWorkflowUploadRequired(task)) return [];
+
+  const statusByUserId = new Map(
+    (Array.isArray(task?.upload_statuses) ? task.upload_statuses : [])
+      .map((entry) => [getUserId(entry), entry])
+      .filter(([userId]) => Boolean(userId)),
+  );
+
+  return (Array.isArray(task?.upload_assignees) ? task.upload_assignees : [])
+    .map((entry) => {
+      const userId = getUserId(entry);
+      if (!userId) return null;
+
+      const existingStatus = statusByUserId.get(userId) || {};
+      return {
+        ...existingStatus,
+        user: entry?.user || entry,
+        status: normalizeText(existingStatus?.status) === "uploaded"
+          ? "uploaded"
+          : "pending",
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      const leftRank = getWorkflowUploadRoleRank(left);
+      const rightRank = getWorkflowUploadRoleRank(right);
+      if (leftRank !== rightRank) return leftRank - rightRank;
+      return getUserLabel(left).localeCompare(getUserLabel(right));
+    });
+};
+
+export const getWorkflowUploadStepKey = (entry = {}) => `uploaded:${getUserId(entry)}`;
+
+export const isWorkflowUploadStepKey = (key = "") =>
+  String(key || "").startsWith("uploaded:");
+
+export const getWorkflowStageBarSteps = (task = {}) => {
+  if (!isWorkflowUploadRequired(task)) {
+    return WORKFLOW_STAGE_BAR_STEPS.filter((entry) => entry.key !== "uploaded");
+  }
+
+  const uploadStatuses = getWorkflowUploadStatuses(task);
+  if (uploadStatuses.length <= 1) return WORKFLOW_STAGE_BAR_STEPS;
+
+  return [
+    ...WORKFLOW_STAGE_BAR_STEPS.filter((entry) => entry.key !== "uploaded"),
+    ...uploadStatuses.map((entry, index) => ({
+      key: getWorkflowUploadStepKey(entry),
+      label: `Upload ${index + 1}: ${getUserLabel(entry)}`,
+      uploadUserId: getUserId(entry),
+      uploadStatus: entry.status,
+    })),
+  ];
+};
 
 export const getWorkflowDisplayStageKey = (task = {}) => {
   const currentStatus = normalizeText(task?.status);
   const steps = getWorkflowStageBarSteps(task);
+  const uploadStatuses = getWorkflowUploadStatuses(task);
+  const uploadSteps = steps.filter((entry) => isWorkflowUploadStepKey(entry.key));
+
+  if (currentStatus === "approved" && uploadSteps.length > 0) {
+    const firstPendingUpload = uploadStatuses.find(
+      (entry) => normalizeText(entry?.status) !== "uploaded",
+    );
+    return firstPendingUpload
+      ? getWorkflowUploadStepKey(firstPendingUpload)
+      : uploadSteps[uploadSteps.length - 1].key;
+  }
+
+  if (currentStatus === "uploaded" && uploadSteps.length > 0) {
+    return uploadSteps[uploadSteps.length - 1].key;
+  }
+
   return steps.some((entry) => entry.key === currentStatus)
     ? currentStatus
     : "assigned";
@@ -39,7 +129,13 @@ export const getWorkflowReachedStageKeys = (task = {}) => {
   const activeKey = getWorkflowDisplayStageKey(task);
   const steps = getWorkflowStageBarSteps(task);
   const activeIndex = steps.findIndex((entry) => entry.key === activeKey);
-  return new Set(
-    steps.slice(0, activeIndex + 1).map((entry) => entry.key),
-  );
+  const reachedKeys = new Set(steps.slice(0, activeIndex + 1).map((entry) => entry.key));
+
+  getWorkflowUploadStatuses(task).forEach((entry) => {
+    if (normalizeText(entry?.status) === "uploaded") {
+      reachedKeys.add(getWorkflowUploadStepKey(entry));
+    }
+  });
+
+  return reachedKeys;
 };

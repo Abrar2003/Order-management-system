@@ -58,7 +58,10 @@ const WorkflowTaskStageBar = ({
   const hasCompletionRemark = Boolean(completionRemark);
 
   return (
-    <div className={["workflow-status-line", className].filter(Boolean).join(" ")}>
+    <div
+      className={["workflow-status-line", className].filter(Boolean).join(" ")}
+      style={{ "--workflow-step-count": Math.max(1, steps.length) }}
+    >
       <div className="workflow-status-line-track" aria-hidden="true" />
       <div className="workflow-status-line-steps" role="group" aria-label="Task status flow">
         {steps.map((step, index) => {

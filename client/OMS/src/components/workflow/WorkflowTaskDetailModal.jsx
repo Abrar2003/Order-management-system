@@ -14,7 +14,10 @@ import {
 } from "../../api/workflowApi";
 import { formatBytes } from "../../utils/workflowManifest";
 import WorkflowTaskStageBar from "./WorkflowTaskStageBar";
-import { formatWorkflowStageLabel } from "./workflowTaskProgress";
+import {
+  formatWorkflowStageLabel,
+  isWorkflowUploadStepKey,
+} from "./workflowTaskProgress";
 
 const normalizeText = (value) => String(value ?? "").trim();
 
@@ -48,6 +51,20 @@ const isUploadAssignedToUser = (task = {}, userId = "") =>
   hasUploadAssignees(task) &&
   task.upload_assignees.some((entry) => String(getUserId(entry)) === String(userId));
 
+const isUploadCompletedByUser = (task = {}, userId = "") =>
+  (Array.isArray(task?.upload_statuses) ? task.upload_statuses : []).some(
+    (entry) =>
+      String(getUserId(entry)) === String(userId) &&
+      normalizeText(entry?.status).toLowerCase() === "uploaded",
+  );
+
+const isUploadStepForUser = (stepKey = "", userId = "") =>
+  stepKey === "uploaded" ||
+  (
+    isWorkflowUploadStepKey(stepKey) &&
+    stepKey.split(":").slice(1).join(":") === String(userId)
+  );
+
 const formatDateInputValue = (value) => {
   if (!value) return "";
   const parsed = new Date(value);
@@ -75,6 +92,7 @@ const WorkflowTaskDetailModal = ({
   canEditTaskDetails = false,
   canEditAnyTaskDetails = false,
   canDeleteWorkflow = false,
+  canDeleteOwnTask = false,
   onClose,
   onDeleted,
   onUpdated,
@@ -158,6 +176,7 @@ const WorkflowTaskDetailModal = ({
   const canUpload =
     task?.upload_required !== false &&
     task?.status === "approved" &&
+    !isUploadCompletedByUser(task, currentUserId) &&
     (
       hasUploadAssignees(task)
         ? isUploadAssignedToUser(task, currentUserId)
@@ -166,7 +185,9 @@ const WorkflowTaskDetailModal = ({
   const canRework =
     canManageWorkflow && ["complete", "approved", "uploaded"].includes(task?.status);
   const canAssign = canAssignWorkflow && canEditCurrentTaskDetails && task?.status !== "uploaded";
-  const canDelete = canDeleteWorkflow && Boolean(task?._id);
+  const canDelete =
+    Boolean(task?._id) &&
+    (canDeleteWorkflow || (canDeleteOwnTask && isTaskCreator));
   const canComment = Boolean(task?._id);
 
   const departmentOptions = useMemo(() => {
@@ -308,7 +329,11 @@ const WorkflowTaskDetailModal = ({
       return;
     }
 
-    if (stepKey === "uploaded" && canUpload) {
+    if (
+      (stepKey === "uploaded" || isWorkflowUploadStepKey(stepKey)) &&
+      canUpload &&
+      isUploadStepForUser(stepKey, currentUserId)
+    ) {
       await handleTaskAction(
         () => uploadWorkflowTask(taskId),
         "Task marked uploaded successfully.",
@@ -581,7 +606,11 @@ const WorkflowTaskDetailModal = ({
                         (stepKey === "started" && canStart)
                         || (stepKey === "complete" && canComplete)
                         || (stepKey === "approved" && canApprove)
-                        || (stepKey === "uploaded" && canUpload)
+                        || (
+                          (stepKey === "uploaded" || isWorkflowUploadStepKey(stepKey)) &&
+                          canUpload &&
+                          isUploadStepForUser(stepKey, currentUserId)
+                        )
                       }
                       onStepClick={handleStageBarClick}
                     />

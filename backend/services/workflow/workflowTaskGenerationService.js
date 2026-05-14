@@ -22,6 +22,21 @@ const normalizeId = (value) => String(value || "").trim();
 const uniqueIds = (values = []) =>
   [...new Set((Array.isArray(values) ? values : []).map(normalizeId).filter(Boolean))];
 
+const buildUploadStatusEntries = (assignees = []) =>
+  (Array.isArray(assignees) ? assignees : [])
+    .map((entry) => {
+      const userId = normalizeId(entry?.user || entry?._id || entry?.id || entry);
+      return userId
+        ? {
+            user: userId,
+            status: "pending",
+            uploaded_by: {},
+            uploaded_at: null,
+          }
+        : null;
+    })
+    .filter(Boolean);
+
 const normalizeExtensionsSet = (values = []) => {
   const arr = Array.isArray(values) ? values : (typeof values === "string" ? [values] : []);
   const set = new Set();
@@ -313,6 +328,7 @@ const generateTasksForBatch = async ({
     assigned_at: now,
     upload_required: true,
     upload_assignees: uploadAssignees,
+    upload_statuses: buildUploadStatusEntries(uploadAssignees),
     due_date: batch?.due_date || null,
     review_required: taskType.requires_review !== false,
     tags: [taskType.key],

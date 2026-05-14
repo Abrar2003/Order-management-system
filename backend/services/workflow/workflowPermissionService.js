@@ -50,7 +50,7 @@ const canReadWorkflowTask = (user = {}, task = {}) =>
   isTaskCreatedByUser(task, user?._id || user?.id) ||
   isTaskAssignedByUser(task, user?._id || user?.id) ||
   (
-    String(task?.status || "").trim() === "approved" &&
+    task?.upload_required !== false &&
     isTaskUploadAssignedToUser(task, user?._id || user?.id)
   );
 
@@ -77,10 +77,15 @@ const canEditWorkflowTaskDetails = (user = {}, task = {}) =>
   isTaskCreatedByUser(task, user?._id || user?.id) ||
   isTaskAssignedByUser(task, user?._id || user?.id);
 
+const canDeleteWorkflowTask = (user = {}, task = {}) =>
+  isAdmin(user) ||
+  isTaskCreatedByUser(task, user?._id || user?.id);
+
 module.exports = {
   isAdmin,
   canApproveWorkflowTask,
   canCompleteWorkflowTask,
+  canDeleteWorkflowTask,
   canEditWorkflowTaskDetails,
   canReadWorkflowTask,
   canUploadWorkflowTask,
