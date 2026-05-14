@@ -63,6 +63,7 @@ const buildTaskEditForm = (task = {}) => ({
   priority: normalizeText(task?.priority || "normal"),
   assignmentDate: formatDateInputValue(task?.assigned_at),
   dueDate: formatDateInputValue(task?.due_date),
+  uploadRequired: task?.upload_required !== false,
 });
 
 const WorkflowTaskDetailModal = ({
@@ -251,6 +252,7 @@ const WorkflowTaskDetailModal = ({
           priority: normalizeText(editForm.priority) || "normal",
           assigned_at: normalizeText(editForm.assignmentDate) || null,
           due_date: normalizeText(editForm.dueDate) || null,
+          upload_required: Boolean(editForm.uploadRequired),
         }),
       "Task details updated successfully.",
       {
@@ -731,6 +733,28 @@ const WorkflowTaskDetailModal = ({
                               onChange={(event) => handleEditFormChange("dueDate", event.target.value)}
                               disabled={actionLoading}
                             />
+                          </div>
+                          <div className="col-md-6">
+                            <label className="form-label d-block">Upload Required</label>
+                            <div className="form-check form-switch">
+                              <input
+                                className="form-check-input"
+                                type="checkbox"
+                                role="switch"
+                                id="workflow-task-upload-required"
+                                checked={Boolean(editForm.uploadRequired)}
+                                onChange={(event) =>
+                                  handleEditFormChange("uploadRequired", event.target.checked)
+                                }
+                                disabled={actionLoading}
+                              />
+                              <label
+                                className="form-check-label"
+                                htmlFor="workflow-task-upload-required"
+                              >
+                                {editForm.uploadRequired ? "On" : "Off"}
+                              </label>
+                            </div>
                           </div>
                           <div className="col-12">
                             <label className="form-label">Description</label>

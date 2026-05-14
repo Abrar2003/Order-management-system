@@ -1597,6 +1597,15 @@ const updateWorkflowTaskDetails = async ({
     }
   }
 
+  if (hasOwn(payload, "upload_required")) {
+    const uploadRequired = Boolean(payload.upload_required);
+    const currentUploadRequired = task.upload_required !== false;
+    if (currentUploadRequired !== uploadRequired) {
+      task.upload_required = uploadRequired;
+      changedFields.push("upload_required");
+    }
+  }
+
   if (hasOwn(payload, "assigned_at") || hasOwn(payload, "assignment_date")) {
     const assignedAtInput = hasOwn(payload, "assigned_at")
       ? payload.assigned_at
