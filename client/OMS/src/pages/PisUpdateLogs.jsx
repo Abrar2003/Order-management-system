@@ -17,6 +17,7 @@ const LIMIT_OPTIONS = [10, 20, 50, 100];
 const OPERATION_LABELS = {
   pis_update: "PIS Update",
   pis_diff_update: "PIS Diff Update",
+  pis_database_sync: "PIS Database Sync",
   product_database_update: "Product Database Update",
   product_database_check: "Product Database Check",
   product_database_approve: "Product Database Approve",

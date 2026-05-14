@@ -38,7 +38,6 @@ const {
 const {
   BOX_PACKAGING_MODES,
   BOX_SIZE_REMARK_OPTIONS,
-  buildBoxLegacyFieldsFromEntries,
   buildBoxMeasurementCbmSummary,
   calculateEffectiveBoxEntriesCbmTotal,
   detectBoxPackagingMode,
@@ -232,11 +231,6 @@ const ACTIVE_ORDER_MATCH = {
   archived: { $ne: true },
   status: { $ne: "Cancelled" },
 };
-const EMPTY_LBH = Object.freeze({
-  L: 0,
-  B: 0,
-  H: 0,
-});
 const SIZE_ENTRY_LIMIT = 4;
 const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
   "item",
@@ -4685,53 +4679,23 @@ exports.updateQC = async (req, res) => {
             : BOX_PACKAGING_MODES.INDIVIDUAL,
       };
     };
-    const sortSizeEntriesForLegacy = (entries = [], remarkOptions = []) =>
-      [...(Array.isArray(entries) ? entries : [])].sort((left, right) => {
-        const leftIndex = remarkOptions.indexOf(normalizeText(left?.remark).toLowerCase());
-        const rightIndex = remarkOptions.indexOf(normalizeText(right?.remark).toLowerCase());
-        const safeLeftIndex = leftIndex >= 0 ? leftIndex : SIZE_ENTRY_LIMIT + 1;
-        const safeRightIndex = rightIndex >= 0 ? rightIndex : SIZE_ENTRY_LIMIT + 1;
-        return safeLeftIndex - safeRightIndex;
-      });
-    const toLegacyLbhGroup = (entry = null) =>
-      entry && hasCompletePositiveLbh(entry)
-        ? {
-            L: toNonNegativeNumber(entry?.L, 0),
-            B: toNonNegativeNumber(entry?.B, 0),
-            H: toNonNegativeNumber(entry?.H, 0),
-          }
-        : { ...EMPTY_LBH };
-    const deriveLegacySizeFields = (
-      entries = [],
-      { remarkOptions = [], weightKey = "", mode = "" } = {},
-    ) => {
-      if (Array.isArray(remarkOptions) && remarkOptions === BOX_SIZE_REMARK_OPTIONS) {
-        return buildBoxLegacyFieldsFromEntries(entries, { weightKey, mode });
-      }
-
-      const sortedEntries = sortSizeEntriesForLegacy(entries, remarkOptions);
-      const totalWeight = weightKey
-        ? sortedEntries.reduce(
-            (sum, entry) => sum + toNonNegativeNumber(entry?.[weightKey], 0),
-            0,
-          )
-        : 0;
-
+    const buildSizeEntryWeightSummary = (entries = [], weightKey = "") => {
+      const safeEntries = Array.isArray(entries) ? entries : [];
       return {
-        single: sortedEntries.length === 1 ? toLegacyLbhGroup(sortedEntries[0]) : { ...EMPTY_LBH },
-        top: sortedEntries.length >= 2 ? toLegacyLbhGroup(sortedEntries[0]) : { ...EMPTY_LBH },
-        bottom: sortedEntries.length >= 2 ? toLegacyLbhGroup(sortedEntries[1]) : { ...EMPTY_LBH },
-        totalWeight,
+        totalWeight: safeEntries.reduce(
+          (sum, entry) => sum + toNonNegativeNumber(entry?.[weightKey], 0),
+          0,
+        ),
         topWeight:
-          sortedEntries.length >= 2 && weightKey
-            ? toNonNegativeNumber(sortedEntries[0]?.[weightKey], 0)
+          safeEntries.length >= 2
+            ? toNonNegativeNumber(safeEntries[0]?.[weightKey], 0)
             : 0,
         bottomWeight:
-          sortedEntries.length >= 2 && weightKey
-            ? toNonNegativeNumber(sortedEntries[1]?.[weightKey], 0)
+          safeEntries.length >= 2
+            ? toNonNegativeNumber(safeEntries[1]?.[weightKey], 0)
             : 0,
-        };
       };
+    };
     const parseInspectedWeightPayloadField = (value, fieldName) => {
       if (value === undefined) return { hasInput: false, value: null };
       const normalized = String(value ?? "").trim();
@@ -4773,18 +4737,17 @@ exports.updateQC = async (req, res) => {
         mode: parsedInspectedBoxMode,
       },
     );
-    const derivedLegacyItemSizeFields = parsedInspectedItemSizeEntries.hasInput
-      ? deriveLegacySizeFields(parsedInspectedItemSizeEntries.value || [], {
-          remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
-          weightKey: "net_weight",
-        })
+    const inspectedItemWeightSummary = parsedInspectedItemSizeEntries.hasInput
+      ? buildSizeEntryWeightSummary(
+          parsedInspectedItemSizeEntries.value || [],
+          "net_weight",
+        )
       : null;
-    const derivedLegacyBoxSizeFields = parsedInspectedBoxSizeEntries.hasInput
-      ? deriveLegacySizeFields(parsedInspectedBoxSizeEntries.value || [], {
-          remarkOptions: BOX_SIZE_REMARK_OPTIONS,
-          weightKey: "gross_weight",
-          mode: parsedInspectedBoxSizeEntries.mode || parsedInspectedBoxMode,
-        })
+    const inspectedBoxWeightSummary = parsedInspectedBoxSizeEntries.hasInput
+      ? buildSizeEntryWeightSummary(
+          parsedInspectedBoxSizeEntries.value || [],
+          "gross_weight",
+        )
       : null;
 
     const hasInspectedSizeEntryUpdate = Boolean(
@@ -4808,17 +4771,17 @@ exports.updateQC = async (req, res) => {
         if (parsedInspectedItemSizeEntries.hasInput || parsedInspectedBoxSizeEntries.hasInput) {
           const derivedWeightValue =
             fieldKey === "total_net"
-              ? derivedLegacyItemSizeFields?.totalWeight
+              ? inspectedItemWeightSummary?.totalWeight
               : fieldKey === "top_net"
-                ? derivedLegacyItemSizeFields?.topWeight
+                ? inspectedItemWeightSummary?.topWeight
                 : fieldKey === "bottom_net"
-                  ? derivedLegacyItemSizeFields?.bottomWeight
+                  ? inspectedItemWeightSummary?.bottomWeight
                   : fieldKey === "total_gross"
-                    ? derivedLegacyBoxSizeFields?.totalWeight
+                    ? inspectedBoxWeightSummary?.totalWeight
                     : fieldKey === "top_gross"
-                      ? derivedLegacyBoxSizeFields?.topWeight
+                      ? inspectedBoxWeightSummary?.topWeight
                       : fieldKey === "bottom_gross"
-                        ? derivedLegacyBoxSizeFields?.bottomWeight
+                        ? inspectedBoxWeightSummary?.bottomWeight
                         : undefined;
           accumulator[fieldKey] = {
             hasInput: true,

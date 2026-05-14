@@ -385,6 +385,8 @@ const itemSchema = new mongoose.Schema(
     pis_barcode: { type: String, default: "", trim: true },
     pis_master_barcode: { type: String, default: "", trim: true },
     pis_inner_barcode: { type: String, default: "", trim: true },
+    pis_product_database_synced_at: { type: Date, default: undefined },
+    pis_product_database_synced_by: { type: productDatabaseActorSchema, default: undefined },
     qc: {
       packed_size: { type: Boolean, default: false },
       finishing: { type: Boolean, default: false },

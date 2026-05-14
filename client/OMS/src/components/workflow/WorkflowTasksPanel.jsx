@@ -205,7 +205,8 @@ const WorkflowTasksPanel = ({
   const canViewWorkflow = hasPermission("workflow", "view");
   const canCreateWorkflow = !mineOnly && canViewWorkflow;
   const canCreateFolderWorkflow = !mineOnly && isAdmin && hasPermission("workflow", "create");
-  const canAssignWorkflow = canViewWorkflow;
+  const canEditWorkflow = hasPermission("workflow", "edit");
+  const canAssignWorkflow = canEditWorkflow;
   const canManageWorkflow = isManagerOrAdmin && hasPermission("workflow", "edit");
   const canDeleteWorkflow = isAdmin && hasPermission("workflow", "delete");
   const canFilterByAssignee = isAdmin && canViewWorkflow;
@@ -1063,7 +1064,8 @@ const WorkflowTasksPanel = ({
           departments={departments}
           canManageWorkflow={canManageWorkflow}
           canAssignWorkflow={canAssignWorkflow}
-          canEditTaskDetails={isAdmin && canManageWorkflow}
+          canEditTaskDetails={canEditWorkflow}
+          canEditAnyTaskDetails={isAdmin && canEditWorkflow}
           canDeleteWorkflow={canDeleteWorkflow}
           onClose={() => setSelectedTaskId("")}
           onUpdated={() => {

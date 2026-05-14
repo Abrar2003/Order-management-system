@@ -125,7 +125,6 @@ router.get(
 router.patch(
   "/tasks/:id",
   auth,
-  authorize(...WORKFLOW_ADMIN_ROLES),
   requirePermission("workflow", "edit"),
   patchTask,
 );
@@ -133,6 +132,7 @@ router.patch(
 router.patch(
   "/tasks/:id/assign",
   auth,
+  requirePermission("workflow", "edit"),
   assignTask,
 );
 

@@ -55,6 +55,7 @@ const PisUpdateLogSchema = new mongoose.Schema(
       enum: [
         "pis_update",
         "pis_diff_update",
+        "pis_database_sync",
         "product_database_update",
         "product_database_check",
         "product_database_approve",

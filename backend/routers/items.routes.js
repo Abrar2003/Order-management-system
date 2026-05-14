@@ -39,6 +39,8 @@ const {
   syncItemsFromOrders,
   updateItem,
   updateItemPis,
+  syncAllProductDatabaseToPis,
+  syncProductDatabaseToPis,
   getItemFileUrl,
   getItemPisFileUrl,
   uploadItemFile,
@@ -268,6 +270,24 @@ router.patch(
   requirePermission("pis", "edit"),
   invalidateItemsOnSuccess,
   updateItemPis,
+);
+
+router.post(
+  "/pis/sync-product-database",
+  auth,
+  requireAdminOnlyPisEdit,
+  requirePermission("pis", "edit"),
+  invalidateItemsOnSuccess,
+  syncAllProductDatabaseToPis,
+);
+
+router.post(
+  "/:id/pis/sync-product-database",
+  auth,
+  requireAdminOnlyPisEdit,
+  requirePermission("pis", "edit"),
+  invalidateItemsOnSuccess,
+  syncProductDatabaseToPis,
 );
 
 router.post(

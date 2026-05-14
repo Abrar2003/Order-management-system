@@ -73,6 +73,7 @@ const WorkflowTaskDetailModal = ({
   canManageWorkflow = false,
   canAssignWorkflow = false,
   canEditTaskDetails = false,
+  canEditAnyTaskDetails = false,
   canDeleteWorkflow = false,
   onClose,
   onDeleted,
@@ -151,6 +152,9 @@ const WorkflowTaskDetailModal = ({
   const canStart = isAssignedUser && task?.status === "assigned";
   const canComplete = isAssignedUser && task?.status === "started";
   const canApprove = isTaskAssigner && task?.status === "complete";
+  const canEditCurrentTaskDetails =
+    canEditTaskDetails &&
+    (canEditAnyTaskDetails || isTaskCreator || isAssignedUser || isTaskAssigner);
   const canUpload =
     task?.upload_required !== false &&
     task?.status === "approved" &&
@@ -161,7 +165,7 @@ const WorkflowTaskDetailModal = ({
     );
   const canRework =
     canManageWorkflow && ["complete", "approved", "uploaded"].includes(task?.status);
-  const canAssign = canAssignWorkflow && task?.status !== "uploaded";
+  const canAssign = canAssignWorkflow && canEditCurrentTaskDetails && task?.status !== "uploaded";
   const canDelete = canDeleteWorkflow && Boolean(task?._id);
   const canComment = Boolean(task?._id);
 
@@ -502,7 +506,7 @@ const WorkflowTaskDetailModal = ({
                         </div>
                       </div>
                       <div className="d-flex flex-wrap gap-2">
-                        {canEditTaskDetails && (
+                        {canEditCurrentTaskDetails && (
                           <button
                             type="button"
                             className="btn btn-outline-primary btn-sm"

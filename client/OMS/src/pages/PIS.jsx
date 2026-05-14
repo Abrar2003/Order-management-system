@@ -121,6 +121,7 @@ const PIS = () => {
   const [selectedItem, setSelectedItem] = useState(null);
   const [showUploadFinishModal, setShowUploadFinishModal] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [syncingDatabase, setSyncingDatabase] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [searchInput, setSearchInput] = useState(() =>
@@ -299,6 +300,41 @@ const PIS = () => {
     [sortBy, sortOrder],
   );
 
+  const handleSyncProductDatabase = useCallback(
+    async () => {
+      const confirmed = window.confirm(
+        "Sync available Product Database measurements/barcodes into PIS for all unsynced items? Each item can only be synced once; later changes must be updated manually.",
+      );
+      if (!confirmed) return;
+
+      try {
+        setError("");
+        setSuccess("");
+        setSyncingDatabase(true);
+
+        const response = await api.post("/items/pis/sync-product-database");
+
+        const message =
+          response?.data?.message ||
+          "Product Database values synced into PIS for all available items.";
+        if (response?.data?.success === false) {
+          setError(message);
+        } else {
+          setSuccess(message);
+        }
+        await fetchItems();
+      } catch (syncError) {
+        setError(
+          syncError?.response?.data?.message ||
+            "Failed to sync Product Database values into PIS.",
+        );
+      } finally {
+        setSyncingDatabase(false);
+      }
+    },
+    [fetchItems],
+  );
+
   const sortedRows = useMemo(
     () =>
       sortClientRows(rows, {
@@ -332,15 +368,27 @@ const PIS = () => {
       <div className="page-shell py-3">
         <div className="d-flex justify-content-between align-items-center mb-3">
           <h2 className="h4 mb-0">PIS</h2>
-          {canUploadFinish ? (
+          {canUploadFinish || canEditPis ? (
             <div className="d-flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="btn btn-outline-primary btn-sm"
-                onClick={() => setShowUploadFinishModal(true)}
-              >
-                Upload Finish
-              </button>
+              {canUploadFinish && (
+                <button
+                  type="button"
+                  className="btn btn-outline-primary btn-sm"
+                  onClick={() => setShowUploadFinishModal(true)}
+                >
+                  Upload Finish
+                </button>
+              )}
+              {canEditPis && (
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary btn-sm"
+                  onClick={handleSyncProductDatabase}
+                  disabled={syncingDatabase}
+                >
+                  {syncingDatabase ? "Syncing..." : "Sync Database"}
+                </button>
+              )}
             </div>
           ) : (
             <span className="d-none d-md-inline" />

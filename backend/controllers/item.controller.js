@@ -328,6 +328,98 @@ const buildWeightRecord = (weight = {}) =>
     return accumulator;
   }, {});
 
+const hasPositiveSizeEntryValue = (entry = {}, fields = []) =>
+  fields.some((field) => toSafeNumber(entry?.[field], 0) > 0);
+
+const getMeaningfulPdItemSizeEntries = (entries = []) =>
+  (Array.isArray(entries) ? entries : []).filter((entry) =>
+    hasPositiveSizeEntryValue(entry, ["L", "B", "H", "net_weight"]),
+  );
+
+const getMeaningfulPdBoxSizeEntries = (entries = []) =>
+  (Array.isArray(entries) ? entries : []).filter((entry) =>
+    hasPositiveSizeEntryValue(entry, [
+      "L",
+      "B",
+      "H",
+      "gross_weight",
+      "item_count_in_inner",
+      "box_count_in_master",
+    ]),
+  );
+
+const hasSyncableProductDatabaseData = (item = {}) =>
+  getMeaningfulPdItemSizeEntries(item?.pd_item_sizes).length > 0 ||
+  getMeaningfulPdBoxSizeEntries(item?.pd_box_sizes).length > 0 ||
+  Boolean(normalizeTextField(item?.pd_master_barcode || item?.pd_barcode)) ||
+  Boolean(normalizeTextField(item?.pd_inner_barcode));
+
+const buildPisProductDatabaseSyncActor = (user = {}) => ({
+  user: user?._id || user?.id || null,
+  name:
+    normalizeTextField(user?.name) ||
+    normalizeTextField(user?.email) ||
+    normalizeTextField(user?.username) ||
+    normalizeTextField(user?.role) ||
+    "Unknown",
+  created_at: new Date(),
+  updated_at: new Date(),
+});
+
+const toComparableValue = (value) => {
+  if (Array.isArray(value)) return value.map(toComparableValue);
+  if (!value || typeof value !== "object") return value ?? null;
+  if (typeof value.toObject === "function") {
+    return toComparableValue(value.toObject());
+  }
+
+  return Object.keys(value)
+    .filter((key) => key !== "_id")
+    .sort()
+    .reduce((accumulator, key) => {
+      accumulator[key] = toComparableValue(value[key]);
+      return accumulator;
+    }, {});
+};
+
+const areNormalizedValuesEqual = (left, right) =>
+  JSON.stringify(toComparableValue(left)) === JSON.stringify(toComparableValue(right));
+
+const buildPisWeightFromSizeEntries = ({
+  currentWeight = {},
+  itemSizes = null,
+  boxSizes = null,
+} = {}) => {
+  const nextWeight = buildWeightRecord(currentWeight);
+  const buildWeightSummary = (entries = [], weightKey = "") => {
+    const safeEntries = Array.isArray(entries) ? entries : [];
+    return {
+      total: safeEntries.reduce(
+        (sum, entry) => sum + toSafeNumber(entry?.[weightKey], 0),
+        0,
+      ),
+      first: safeEntries.length >= 2 ? toSafeNumber(safeEntries[0]?.[weightKey], 0) : 0,
+      second: safeEntries.length >= 2 ? toSafeNumber(safeEntries[1]?.[weightKey], 0) : 0,
+    };
+  };
+
+  if (Array.isArray(itemSizes)) {
+    const itemWeights = buildWeightSummary(itemSizes, "net_weight");
+    nextWeight.top_net = itemWeights.first;
+    nextWeight.bottom_net = itemWeights.second;
+    nextWeight.total_net = itemWeights.total;
+  }
+
+  if (Array.isArray(boxSizes)) {
+    const boxWeights = buildWeightSummary(boxSizes, "gross_weight");
+    nextWeight.top_gross = boxWeights.first;
+    nextWeight.bottom_gross = boxWeights.second;
+    nextWeight.total_gross = boxWeights.total;
+  }
+
+  return nextWeight;
+};
+
 const getPayloadWeightField = (payloadWeight = {}, fieldKey = "", fieldLabelPrefix = "weight") => {
   if (!payloadWeight || typeof payloadWeight !== "object") {
     return { provided: false, value: 0 };
@@ -668,6 +760,7 @@ const normalizeDistinctValues = (values = []) =>
 const PIS_UPDATE_LOG_OPERATION_TYPES = new Set([
   "pis_update",
   "pis_diff_update",
+  "pis_database_sync",
   "product_database_update",
   "product_database_check",
   "product_database_approve",
@@ -4441,6 +4534,274 @@ exports.updateItemPis = async (req, res) => {
     return res.status(400).json({
       success: false,
       message: error.message || "Failed to update PIS values",
+    });
+  }
+};
+
+const syncProductDatabaseValuesIntoPisItem = async ({ item, user } = {}) => {
+  if (!item) {
+    return { status: "missing", changedFields: [], syncMessages: [] };
+  }
+
+  if (item?.pis_product_database_synced_at) {
+    return { status: "already_synced", changedFields: [], syncMessages: [] };
+  }
+
+  if (!hasSyncableProductDatabaseData(item)) {
+    return { status: "no_data", changedFields: [], syncMessages: [] };
+  }
+
+  const beforeAuditSnapshot = buildItemUpdateAuditSnapshot(item.toObject());
+  const changedFields = [];
+  const syncMessages = [];
+  let touched = false;
+  let copiedItemSizes = null;
+  let copiedBoxSizes = null;
+  let copiedBoxMode = "";
+
+  const setPathIfChanged = (path, value) => {
+    if (areNormalizedValuesEqual(item.get(path), value)) return false;
+    item.set(path, value);
+    touched = true;
+    changedFields.push(path);
+    return true;
+  };
+
+  const meaningfulPdItemSizes = getMeaningfulPdItemSizeEntries(item?.pd_item_sizes);
+  if (meaningfulPdItemSizes.length > 0) {
+    copiedItemSizes = parseSizeEntriesPayload(meaningfulPdItemSizes, {
+      fieldLabel: "pis_item_sizes",
+      remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
+      weightKey: "net_weight",
+      weightLabel: "net_weight",
+      allowIncomplete: true,
+    });
+    if (setPathIfChanged("pis_item_sizes", copiedItemSizes)) {
+      syncMessages.push("PIS item sizes synced from Product Database.");
+    }
+  }
+
+  const meaningfulPdBoxSizes = getMeaningfulPdBoxSizeEntries(item?.pd_box_sizes);
+  if (meaningfulPdBoxSizes.length > 0) {
+    copiedBoxMode = detectBoxPackagingMode(item?.pd_box_mode, meaningfulPdBoxSizes);
+    copiedBoxSizes = parseSizeEntriesPayload(meaningfulPdBoxSizes, {
+      fieldLabel: "pis_box_sizes",
+      remarkOptions: BOX_SIZE_REMARK_OPTIONS,
+      weightKey: "gross_weight",
+      weightLabel: "gross_weight",
+      mode: copiedBoxMode,
+      allowIncomplete: true,
+    });
+    if (setPathIfChanged("pis_box_sizes", copiedBoxSizes)) {
+      syncMessages.push("PIS box sizes synced from Product Database.");
+    }
+    if (setPathIfChanged("pis_box_mode", copiedBoxMode)) {
+      syncMessages.push("PIS box mode synced from Product Database.");
+    }
+  }
+
+  const pdMasterBarcode = normalizeTextField(item?.pd_master_barcode);
+  const pdBarcode = normalizeTextField(item?.pd_barcode);
+  const nextMasterBarcode = pdMasterBarcode || pdBarcode;
+  if (nextMasterBarcode) {
+    if (setPathIfChanged("pis_barcode", nextMasterBarcode)) {
+      syncMessages.push("PIS barcode synced from Product Database.");
+    }
+    if (setPathIfChanged("pis_master_barcode", nextMasterBarcode)) {
+      syncMessages.push("PIS master barcode synced from Product Database.");
+    }
+  }
+
+  const pdInnerBarcode = normalizeTextField(item?.pd_inner_barcode);
+  if (pdInnerBarcode && setPathIfChanged("pis_inner_barcode", pdInnerBarcode)) {
+    syncMessages.push("PIS inner barcode synced from Product Database.");
+  }
+
+  if (Array.isArray(copiedItemSizes) || Array.isArray(copiedBoxSizes)) {
+    const nextPisWeight = buildPisWeightFromSizeEntries({
+      currentWeight: item?.pis_weight,
+      itemSizes: copiedItemSizes,
+      boxSizes: copiedBoxSizes,
+    });
+    setPathIfChanged("pis_weight", nextPisWeight);
+  }
+
+  const syncedAt = new Date();
+  item.set("pis_product_database_synced_at", syncedAt);
+  item.set("pis_product_database_synced_by", {
+    ...buildPisProductDatabaseSyncActor(user),
+    created_at: syncedAt,
+    updated_at: syncedAt,
+  });
+  changedFields.push("pis_product_database_synced_at");
+
+  if (touched) {
+    item.set("pis_checked_flag", false);
+    if (!changedFields.includes("pis_checked_flag")) {
+      changedFields.push("pis_checked_flag");
+    }
+    applyCalculatedCbmTotals(item, (path, value) => {
+      item.set(path, value);
+    });
+  }
+
+  await item.save();
+
+  if (touched) {
+    const afterAuditSnapshot = buildItemUpdateAuditSnapshot(item.toObject());
+    await createPisUpdateLog({
+      reqUser: user,
+      beforeSnapshot: beforeAuditSnapshot,
+      afterSnapshot: afterAuditSnapshot,
+      operationType: "pis_database_sync",
+      pageName: "PIS Page",
+      source: "pis_sync_database_button",
+      dataScopes: [AUDIT_SCOPES.PIS],
+      extraRemarks: [
+        "Available Product Database measurements and barcodes were synced into PIS; empty Product Database values were skipped.",
+      ],
+      metadata: {
+        source: "product_database",
+        changed_fields: changedFields,
+        synced_sections: syncMessages,
+      },
+    });
+  }
+
+  return {
+    status: touched ? "updated" : "marked_synced",
+    changedFields,
+    syncMessages,
+    data: item.toObject(),
+  };
+};
+
+exports.syncProductDatabaseToPis = async (req, res) => {
+  try {
+    const itemId = String(req.params.id || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(itemId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid item id",
+      });
+    }
+
+    const item = await Item.findById(itemId);
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: "Item not found",
+      });
+    }
+
+    const result = await syncProductDatabaseValuesIntoPisItem({
+      item,
+      user: req.user,
+    });
+
+    if (result.status === "already_synced") {
+      return res.status(409).json({
+        success: false,
+        message:
+          "This item was already synced from Product Database once. Please update PIS manually for later changes.",
+      });
+    }
+
+    if (result.status === "no_data") {
+      return res.status(200).json({
+        success: true,
+        message: "No Product Database values available to sync.",
+        data: item.toObject(),
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message:
+        result.status === "marked_synced"
+          ? "Product Database values already match PIS. This item has been marked as synced once."
+          : "Product Database values synced into PIS for admin review.",
+      data: result.data || item.toObject(),
+    });
+  } catch (error) {
+    console.error("Sync Product Database To PIS Error:", error);
+    return res.status(400).json({
+      success: false,
+      message: error.message || "Failed to sync Product Database values into PIS.",
+    });
+  }
+};
+
+exports.syncAllProductDatabaseToPis = async (req, res) => {
+  try {
+    const candidateMatch = {
+      $and: [
+        {
+          $or: [
+            { pis_product_database_synced_at: { $exists: false } },
+            { pis_product_database_synced_at: null },
+          ],
+        },
+        {
+          $or: [
+            { pd_barcode: { $exists: true, $ne: "" } },
+            { pd_master_barcode: { $exists: true, $ne: "" } },
+            { pd_inner_barcode: { $exists: true, $ne: "" } },
+            { pd_item_sizes: { $exists: true, $ne: [] } },
+            { pd_box_sizes: { $exists: true, $ne: [] } },
+          ],
+        },
+      ],
+    };
+
+    const items = await Item.find(candidateMatch);
+    const summary = {
+      scanned: items.length,
+      updated: 0,
+      marked_synced: 0,
+      skipped_no_data: 0,
+      skipped_already_synced: 0,
+      failed: 0,
+    };
+    const failedItems = [];
+
+    for (const item of items) {
+      try {
+        const result = await syncProductDatabaseValuesIntoPisItem({
+          item,
+          user: req.user,
+        });
+
+        if (result.status === "updated") summary.updated += 1;
+        else if (result.status === "marked_synced") summary.marked_synced += 1;
+        else if (result.status === "no_data") summary.skipped_no_data += 1;
+        else if (result.status === "already_synced") summary.skipped_already_synced += 1;
+      } catch (error) {
+        summary.failed += 1;
+        failedItems.push({
+          id: String(item?._id || ""),
+          code: normalizeTextField(item?.code),
+          message: error?.message || "Failed to sync item",
+        });
+      }
+    }
+
+    const changedTotal = summary.updated + summary.marked_synced;
+
+    return res.status(summary.failed > 0 ? 207 : 200).json({
+      success: summary.failed === 0,
+      message:
+        changedTotal > 0
+          ? `Product Database sync finished. ${summary.updated} item(s) updated and ${summary.marked_synced} item(s) marked as already matching.`
+          : "No unsynced Product Database values available to sync.",
+      summary,
+      failed_items: failedItems,
+    });
+  } catch (error) {
+    console.error("Sync All Product Database To PIS Error:", error);
+    return res.status(400).json({
+      success: false,
+      message: error.message || "Failed to sync Product Database values into PIS.",
     });
   }
 };

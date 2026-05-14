@@ -24,6 +24,7 @@ const {
 const {
   canApproveWorkflowTask,
   canCompleteWorkflowTask,
+  canEditWorkflowTaskDetails,
   canReadWorkflowTask,
   canUploadWorkflowTask,
   isAdmin,
@@ -228,6 +229,8 @@ const buildTaskVisibilityMatch = (user = {}) => {
     is_deleted: false,
     $or: [
       { "assigned_to.user": userId },
+      { "created_by.user": userId },
+      { "assigned_by.user": userId },
       {
         status: "approved",
         upload_required: { $ne: false },
@@ -404,13 +407,15 @@ const buildTaskListMatch = ({ query = {}, user = {} } = {}) => {
 
   if (normalizeText(query?.search)) {
     const regex = new RegExp(escapeRegex(normalizeText(query.search)), "i");
-    match.$or = [
-      { task_no: regex },
-      { title: regex },
-      { source_folder_name: regex },
-      { source_folder_path: regex },
-      { brand: regex },
-    ];
+    addAndMatch(match, {
+      $or: [
+        { task_no: regex },
+        { title: regex },
+        { source_folder_name: regex },
+        { source_folder_path: regex },
+        { brand: regex },
+      ],
+    });
   }
 
   return {
@@ -1238,6 +1243,10 @@ const assignWorkflowTask = async ({
   realtimeSource = null,
 }) => {
   const task = await getMutableTaskById(taskId);
+  if (!canEditWorkflowTaskDetails(actor, task)) {
+    throw new Error("Only admins, task creators, or assigned users can reassign this workflow task");
+  }
+
   if (normalizeWorkflowTaskStatus(task.status, { fallback: "" }) === "uploaded") {
     throw new Error("Uploaded tasks cannot be reassigned");
   }
@@ -1544,11 +1553,11 @@ const updateWorkflowTaskDetails = async ({
   actor = {},
   realtimeSource = null,
 } = {}) => {
-  if (!isAdmin(actor)) {
-    throw new Error("Only admins can edit workflow task details");
+  const task = await getMutableTaskById(taskId);
+  if (!canEditWorkflowTaskDetails(actor, task)) {
+    throw new Error("Only admins, task creators, or assigned users can edit this workflow task");
   }
 
-  const task = await getMutableTaskById(taskId);
   const auditActor = buildAuditActor(actor);
   const changedFields = [];
 

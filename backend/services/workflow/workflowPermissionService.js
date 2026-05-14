@@ -47,6 +47,8 @@ const hasExplicitUploadAssignees = (task = {}) =>
 const canReadWorkflowTask = (user = {}, task = {}) =>
   isAdmin(user) ||
   isTaskAssignedToUser(task, user?._id || user?.id) ||
+  isTaskCreatedByUser(task, user?._id || user?.id) ||
+  isTaskAssignedByUser(task, user?._id || user?.id) ||
   (
     String(task?.status || "").trim() === "approved" &&
     isTaskUploadAssignedToUser(task, user?._id || user?.id)
@@ -69,14 +71,23 @@ const canUploadWorkflowTask = (user = {}, task = {}) =>
         )
   );
 
+const canEditWorkflowTaskDetails = (user = {}, task = {}) =>
+  isAdmin(user) ||
+  isTaskAssignedToUser(task, user?._id || user?.id) ||
+  isTaskCreatedByUser(task, user?._id || user?.id) ||
+  isTaskAssignedByUser(task, user?._id || user?.id);
+
 module.exports = {
   isAdmin,
   canApproveWorkflowTask,
   canCompleteWorkflowTask,
+  canEditWorkflowTaskDetails,
   canReadWorkflowTask,
   canUploadWorkflowTask,
   isManagerOrAdmin,
   isPrivilegedWorkflowReader,
+  isTaskAssignedByUser,
   isTaskUploadAssignedToUser,
   isTaskAssignedToUser,
+  isTaskCreatedByUser,
 };
