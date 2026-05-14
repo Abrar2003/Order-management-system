@@ -4,15 +4,11 @@ import {
   getWorkflowReachedStageKeys,
 } from "./workflowTaskProgress";
 import HoverPortal from "../HoverPortal";
+import { formatDateTimeIST } from "../../utils/date";
 
 const normalizeText = (value) => String(value ?? "").trim();
 
-const formatDateTime = (value) => {
-  if (!value) return "";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "";
-  return parsed.toLocaleString();
-};
+const formatDateTime = (value) => formatDateTimeIST(value, "");
 
 const getAuditActorName = (actor = {}) =>
   actor?.name || actor?.user?.name || actor?.user?.email || "User";

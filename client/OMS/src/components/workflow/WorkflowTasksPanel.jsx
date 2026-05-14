@@ -18,6 +18,7 @@ import {
 } from "../../api/workflowApi";
 import { useRememberSearchParams } from "../../hooks/useRememberSearchParams";
 import useWorkflowRealtime from "../../hooks/useWorkflowRealtime";
+import { formatDateOnlyIST, formatDateTimeIST } from "../../utils/date";
 import { areSearchParamsEquivalent } from "../../utils/searchParams";
 import HoverPortal from "../HoverPortal";
 import WorkflowBatchCreateModal from "./WorkflowBatchCreateModal";
@@ -51,19 +52,9 @@ const parseLimit = (value) => {
   return LIMIT_OPTIONS.includes(parsed) ? parsed : DEFAULT_LIMIT;
 };
 
-const formatDateTime = (value) => {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "—";
-  return parsed.toLocaleString("en-GB");
-};
+const formatDateTime = (value) => formatDateTimeIST(value);
 
-const formatDateOnly = (value) => {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "—";
-  return parsed.toLocaleDateString("en-GB");
-};
+const formatDateOnly = (value) => formatDateOnlyIST(value);
 
 const getTaskUserId = (entry = {}) =>
   entry?.user?._id || entry?.user?.id || entry?.user || entry?._id || entry?.id || "";

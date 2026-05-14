@@ -140,3 +140,23 @@ export const isValidDDMMYYYY = (value) =>
 export const getTodayISODate = () => toISODateString(new Date());
 
 export const getTodayDDMMYYYY = () => formatDateDDMMYYYY(new Date(), "");
+
+export const formatDateTimeIST = (value, fallback = "—") => {
+  if (!value) return fallback;
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return fallback;
+
+  return parsed.toLocaleString("en-GB", {
+    timeZone: APP_DATE_TIMEZONE,
+  });
+};
+
+export const formatDateOnlyIST = (value, fallback = "—") => {
+  if (!value) return fallback;
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return fallback;
+
+  return parsed.toLocaleDateString("en-GB", {
+    timeZone: APP_DATE_TIMEZONE,
+  });
+};

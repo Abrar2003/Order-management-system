@@ -192,6 +192,7 @@ const WorkflowTaskCreateModal = ({
 
     setSubmitting(true);
     try {
+      const assignmentDate = normalizeText(form.assignment_date);
       const payload = {
         task_type_key: normalizeText(form.task_type_key),
         title: normalizeText(form.title),
@@ -199,7 +200,9 @@ const WorkflowTaskCreateModal = ({
         assignee_ids: form.assignee_ids,
         department: normalizeText(form.department) || null,
         priority: normalizeText(form.priority) || "normal",
-        assigned_at: normalizeText(form.assignment_date),
+        assigned_at: assignmentDate === getTodayISODate()
+          ? new Date().toISOString()
+          : assignmentDate,
         brand: normalizeText(form.brand),
         upload_required: Boolean(form.upload_required),
         upload_assignee_ids: form.upload_required ? form.upload_assignee_ids : [],

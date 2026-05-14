@@ -537,6 +537,24 @@ const findActiveTaskTypeForManualTask = async (taskTypeKey = "") => {
 const parseWorkflowDate = (value, fieldName) => {
   const normalized = normalizeText(value);
   if (!normalized) return null;
+  const dateOnlyMatch = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateOnlyMatch) {
+    const year = Number(dateOnlyMatch[1]);
+    const month = Number(dateOnlyMatch[2]);
+    const day = Number(dateOnlyMatch[3]);
+    const parsed = new Date(
+      Date.UTC(year, month - 1, day) - INDIA_TIMEZONE_OFFSET_MS,
+    );
+    const shifted = new Date(parsed.getTime() + INDIA_TIMEZONE_OFFSET_MS);
+    if (
+      shifted.getUTCFullYear() !== year ||
+      shifted.getUTCMonth() !== month - 1 ||
+      shifted.getUTCDate() !== day
+    ) {
+      throw new Error(`${fieldName} is invalid`);
+    }
+    return parsed;
+  }
   const parsed = new Date(normalized);
   if (Number.isNaN(parsed.getTime())) {
     throw new Error(`${fieldName} is invalid`);

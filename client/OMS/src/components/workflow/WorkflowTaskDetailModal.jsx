@@ -12,6 +12,7 @@ import {
   updateWorkflowTask,
   uploadWorkflowTask,
 } from "../../api/workflowApi";
+import { formatDateOnlyIST, formatDateTimeIST, toISODateString } from "../../utils/date";
 import { formatBytes } from "../../utils/workflowManifest";
 import WorkflowTaskStageBar from "./WorkflowTaskStageBar";
 import {
@@ -29,19 +30,9 @@ const uniqueIds = (values = []) =>
     ),
   ];
 
-const formatDateTime = (value) => {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "—";
-  return parsed.toLocaleString();
-};
+const formatDateTime = (value) => formatDateTimeIST(value);
 
-const formatDateOnly = (value) => {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "—";
-  return parsed.toLocaleDateString();
-};
+const formatDateOnly = (value) => formatDateOnlyIST(value);
 
 const getAuditActorName = (actor = {}) =>
   actor?.name || actor?.user?.name || actor?.user?.email || "N/A";
@@ -81,10 +72,7 @@ const isUploadStepPending = (task = {}, stepKey = "") => {
 };
 
 const formatDateInputValue = (value) => {
-  if (!value) return "";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "";
-  return parsed.toISOString().slice(0, 10);
+  return toISODateString(value);
 };
 
 const buildTaskEditForm = (task = {}) => ({
