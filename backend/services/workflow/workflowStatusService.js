@@ -181,6 +181,8 @@ const getTaskReworkPayload = (doc = {}) => {
 const buildWorkflowUploadStatuses = (doc = {}) => {
   if (doc?.upload_required === false) return [];
 
+  const taskStatus = normalizeWorkflowTaskStatus(doc?.status, { fallback: "" });
+  const taskUploadedByUserId = getUserRefId(doc?.uploaded_by);
   const existingStatusByUserId = new Map(
     (Array.isArray(doc?.upload_statuses) ? doc.upload_statuses : [])
       .map((entry) => [getUserRefId(entry), entry])
@@ -198,11 +200,8 @@ const buildWorkflowUploadStatuses = (doc = {}) => {
         normalizeKey(existingStatus?.status) === "uploaded" ||
         Boolean(existingStatus?.uploaded_at) ||
         (
-          normalizeWorkflowTaskStatus(doc?.status, { fallback: "" }) === "uploaded" &&
-          (
-            getUserRefId(doc?.uploaded_by) === userId ||
-            !existingStatusByUserId.size
-          )
+          taskStatus === "uploaded" &&
+          taskUploadedByUserId === userId
         );
 
       return {
@@ -227,15 +226,21 @@ const serializeTask = (doc = {}) => {
     fallback: "assigned",
   }) || "assigned";
   const reworked = getTaskReworkPayload(doc);
+  const uploadStatuses = buildWorkflowUploadStatuses(doc);
+  const hasPendingUploads =
+    doc?.upload_required !== false &&
+    normalizedStatus === "uploaded" &&
+    uploadStatuses.some((entry) => normalizeKey(entry?.status) !== "uploaded");
+  const displayStatus = hasPendingUploads ? "approved" : normalizedStatus;
 
   return {
     ...doc,
-    status: normalizedStatus,
+    status: displayStatus,
     task_type_key: normalizeKey(doc?.task_type_key || doc?.task_type?.key),
     task_type_name: normalizeText(doc?.task_type_name || doc?.task_type?.name),
     upload_required: doc?.upload_required !== false,
     upload_assignees: Array.isArray(doc?.upload_assignees) ? doc.upload_assignees : [],
-    upload_statuses: buildWorkflowUploadStatuses(doc),
+    upload_statuses: uploadStatuses,
     approved_at: doc?.approved_at || doc?.reviewed_at || null,
     approved_by:
       doc?.approved_by?.user || doc?.approved_by?.name || doc?.approved_by?.email
@@ -426,12 +431,26 @@ const buildTaskListMatch = ({ query = {}, user = {} } = {}) => {
         ],
       };
     } else if (uploadPendingFilter) {
-      match.status = "approved";
       match.upload_required = { $ne: false };
       if (!privilegedReader) {
-        delete match.$or;
         match["upload_assignees.user"] = user?._id || user?.id;
       }
+      addAndMatch(match, {
+        status: { $in: ["approved", "uploaded"] },
+        $or: [
+          {
+            upload_statuses: {
+              $elemMatch: privilegedReader
+                ? { status: { $ne: "uploaded" } }
+                : {
+                    user: user?._id || user?.id,
+                    status: { $ne: "uploaded" },
+                  },
+            },
+          },
+          { "upload_statuses.0": { $exists: false } },
+        ],
+      });
     } else {
       match.status = buildStatusMatch(query.status);
     }
@@ -449,6 +468,9 @@ const buildTaskListMatch = ({ query = {}, user = {} } = {}) => {
   ) {
     match[uploadPendingFilter ? "upload_assignees.user" : "assigned_to.user"] =
       new mongoose.Types.ObjectId(query.assignee);
+  }
+  if (normalizeText(query?.creator) && mongoose.Types.ObjectId.isValid(query.creator)) {
+    match["created_by.user"] = new mongoose.Types.ObjectId(query.creator);
   }
   if (normalizeText(query?.department) && mongoose.Types.ObjectId.isValid(query.department)) {
     match.department = new mongoose.Types.ObjectId(query.department);
@@ -1485,6 +1507,7 @@ const uploadWorkflowTask = async ({
   taskId,
   actor = {},
   note = "",
+  uploadUserId = "",
   realtimeSource = null,
 } = {}) => {
   const task = await getMutableTaskById(taskId);
@@ -1493,11 +1516,9 @@ const uploadWorkflowTask = async ({
   const fromStatus = normalizeWorkflowTaskStatus(task.status, {
     fallback: "assigned",
   }) || "assigned";
-  if (fromStatus !== "approved") {
-    throw new Error("Only approved tasks can be marked uploaded");
-  }
 
   const actorId = normalizeId(actor?._id || actor?.id);
+  const targetUploadUserId = normalizeId(uploadUserId);
   const auditActor = buildAuditActor(actor);
   const currentUploadStatuses = buildWorkflowUploadStatuses(task);
   const nextUploadStatuses = currentUploadStatuses.length > 0
@@ -1506,19 +1527,27 @@ const uploadWorkflowTask = async ({
         ...task.toObject(),
         upload_statuses: buildUploadStatusEntriesFromAssignees(task.upload_assignees),
       });
-  const uploadIndex = nextUploadStatuses.findIndex((entry) => getUserRefId(entry) === actorId);
+  const hasPendingUploadsBefore = nextUploadStatuses.some(
+    (entry) => normalizeKey(entry?.status) !== "uploaded",
+  );
+  if (fromStatus !== "approved" && !(fromStatus === "uploaded" && hasPendingUploadsBefore)) {
+    throw new Error("Only approved tasks can be marked uploaded");
+  }
+  const uploadIndex = targetUploadUserId
+    ? nextUploadStatuses.findIndex((entry) => getUserRefId(entry) === targetUploadUserId)
+    : nextUploadStatuses.findIndex((entry) => normalizeKey(entry?.status) !== "uploaded");
 
   if (uploadIndex < 0) {
-    throw new Error("Only a selected upload user can mark this task uploaded");
+    throw new Error("Select a pending upload stage before marking this task uploaded");
   }
 
   if (normalizeKey(nextUploadStatuses[uploadIndex]?.status) === "uploaded") {
-    throw new Error("Your upload status is already marked uploaded");
+    throw new Error("This upload stage is already marked uploaded");
   }
 
   const uploadedAt = new Date();
   nextUploadStatuses[uploadIndex] = {
-    user: actorId,
+    user: getUserRefId(nextUploadStatuses[uploadIndex]),
     status: "uploaded",
     uploaded_by: auditActor,
     uploaded_at: uploadedAt,
@@ -1533,14 +1562,21 @@ const uploadWorkflowTask = async ({
 
   const allUploadsComplete = task.upload_statuses.length > 0 &&
     task.upload_statuses.every((entry) => normalizeKey(entry?.status) === "uploaded");
+  const transitionFromStatus = fromStatus === "uploaded" && hasPendingUploadsBefore
+    ? "approved"
+    : fromStatus;
 
   if (allUploadsComplete) {
-    ensureAllowedStatusTransition(fromStatus, "uploaded");
+    ensureAllowedStatusTransition(transitionFromStatus, "uploaded");
     task.status = "uploaded";
     task.started_at = task.started_at || new Date();
     task.completed_at = task.completed_at || new Date();
     task.uploaded_by = auditActor;
     task.uploaded_at = uploadedAt;
+  } else if (fromStatus === "uploaded") {
+    task.status = "approved";
+    task.uploaded_by = {};
+    task.uploaded_at = null;
   }
 
   await task.save();
@@ -1549,7 +1585,7 @@ const uploadWorkflowTask = async ({
     await TaskStatusHistory.create({
       task: task._id,
       batch: task.batch || null,
-      from_status: fromStatus,
+      from_status: transitionFromStatus,
       to_status: "uploaded",
       changed_by: auditActor,
       changed_at: uploadedAt,
@@ -1607,6 +1643,7 @@ const reworkWorkflowTask = async ({
   taskId,
   actor = {},
   note = "",
+  dueDate = "",
   realtimeSource = null,
 } = {}) => {
   if (!normalizeText(note)) {
@@ -1626,6 +1663,7 @@ const reworkWorkflowTask = async ({
 
   const auditActor = buildAuditActor(actor);
   const currentReworked = getTaskReworkPayload(task);
+  const nextDueDate = normalizeText(dueDate) ? parseDueDate(dueDate) : null;
   task.status = "assigned";
   task.started_at = null;
   task.completed_at = null;
@@ -1634,6 +1672,9 @@ const reworkWorkflowTask = async ({
   task.uploaded_at = null;
   task.uploaded_by = {};
   resetTaskUploadStatuses(task);
+  if (nextDueDate) {
+    task.due_date = nextDueDate;
+  }
   task.updated_by = auditActor;
   task.reworked = {
     count: currentReworked.count + 1,
@@ -1660,6 +1701,8 @@ const reworkWorkflowTask = async ({
     metadata: {
       rework: true,
       rework_count: task.reworked.count,
+      due_date_updated: Boolean(nextDueDate),
+      due_date: nextDueDate,
     },
   });
   await updateAssignmentCompletionState(task, "assigned", actor, note);
@@ -1688,6 +1731,7 @@ const updateWorkflowTaskStatus = async ({
   actor = {},
   toStatus,
   note = "",
+  uploadUserId = "",
   realtimeSource = null,
 }) => {
   const normalizedStatus = normalizeWorkflowTaskStatus(toStatus, { fallback: "" });
@@ -1696,6 +1740,15 @@ const updateWorkflowTaskStatus = async ({
   }
   if (normalizedStatus === "assigned") {
     throw new Error("Use the task assignment or rework action to move a task back to assigned");
+  }
+  if (normalizedStatus === "uploaded") {
+    return uploadWorkflowTask({
+      taskId,
+      actor,
+      note,
+      uploadUserId,
+      realtimeSource,
+    });
   }
 
   const task = await getMutableTaskById(taskId);

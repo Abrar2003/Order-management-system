@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import EditPisModal from "../components/EditPisModal";
+import MeasuredSizeDisplayTable from "../components/MeasuredSizeDisplayTable";
 import SortHeaderButton from "../components/SortHeaderButton";
 import UploadFinishModal from "../components/UploadFinishModal";
 import { usePermissions } from "../auth/PermissionContext";
@@ -12,7 +13,7 @@ import {
   sortClientRows,
 } from "../utils/clientSort";
 import { formatCbm } from "../utils/cbm";
-import { formatFixedNumber, formatLbhValue } from "../utils/measurementDisplay";
+import { formatFixedNumber } from "../utils/measurementDisplay";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
 
@@ -63,33 +64,6 @@ const sumMeasurementWeights = (entries = [], weightKey = "") =>
     (sum, entry) => sum + (Number(entry?.weight || 0) || 0),
     0,
   );
-
-const formatMeasurementRemark = (remark = "", fallback = "") => {
-  const normalized = String(remark || "").trim().toLowerCase();
-  if (!normalized) return fallback;
-  if (normalized === "top") return "Top";
-  if (normalized === "base") return "Base";
-  return normalized.replace(/([a-z]+)(\d+)/i, (_, prefix, number) =>
-    `${prefix.charAt(0).toUpperCase()}${prefix.slice(1)} ${number}`,
-  );
-};
-
-const formatMeasurementEntriesLbh = (
-  entries = [],
-  { fallback = "0.00 x 0.00 x 0.00" } = {},
-) => {
-  const normalizedEntries = normalizeMeasurementEntries(entries);
-  if (normalizedEntries.length === 0) return fallback;
-
-  return normalizedEntries
-    .map((entry, index) => {
-      const display = formatLbhValue(entry, { fallback });
-      if (normalizedEntries.length === 1 && !entry.remark) return display;
-      const label = formatMeasurementRemark(entry.remark, `Entry ${index + 1}`);
-      return `${label}: ${display}`;
-    })
-    .join(" | ");
-};
 
 const getBrand = (item) =>
   item?.brand_name
@@ -586,8 +560,20 @@ const PIS = () => {
                         <td>{getVendors(item)}</td>
                         <td>{formatFixedNumber(getPisWeight(item, "net"))}</td>
                         <td>{formatFixedNumber(getPisWeight(item, "gross"))}</td>
-                        <td>{formatMeasurementEntriesLbh(item?.pis_item_sizes)}</td>
-                        <td>{formatMeasurementEntriesLbh(item?.pis_box_sizes)}</td>
+                        <td>
+                          <MeasuredSizeDisplayTable
+                            entries={item?.pis_item_sizes}
+                            weightKey="net_weight"
+                            emptyLabel="No item sizes saved"
+                          />
+                        </td>
+                        <td>
+                          <MeasuredSizeDisplayTable
+                            entries={item?.pis_box_sizes}
+                            weightKey="gross_weight"
+                            emptyLabel="No box sizes saved"
+                          />
+                        </td>
                         <td>{formatCbm(item?.cbm?.calculated_pis_total)}</td>
                         {canEditPis && (
                           <td>

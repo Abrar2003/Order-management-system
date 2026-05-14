@@ -249,6 +249,7 @@ const uploadTask = async (req, res) => {
       taskId: req.params.id,
       actor: req.user,
       note: req.body?.note || "",
+      uploadUserId: req.body?.upload_user_id || req.body?.uploadUserId || "",
       realtimeSource: req,
     });
 
@@ -272,6 +273,7 @@ const reworkTask = async (req, res) => {
       taskId: req.params.id,
       actor: req.user,
       note: req.body?.note || req.body?.reason || "",
+      dueDate: req.body?.due_date || req.body?.next_due_date || "",
       realtimeSource: req,
     });
 
@@ -296,6 +298,7 @@ const patchTaskStatus = async (req, res) => {
       actor: req.user,
       toStatus: req.body?.status,
       note: req.body?.note || req.body?.reason || "",
+      uploadUserId: req.body?.upload_user_id || req.body?.uploadUserId || "",
       realtimeSource: req,
     });
 

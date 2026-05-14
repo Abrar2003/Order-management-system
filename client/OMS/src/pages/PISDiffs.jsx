@@ -5,6 +5,7 @@ import { jsPDF } from "jspdf";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import EditPisModal from "../components/EditPisModal";
+import MeasuredSizeDisplayTable from "../components/MeasuredSizeDisplayTable";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { usePermissions } from "../auth/PermissionContext";
 import { normalizeUserRole } from "../auth/permissions";
@@ -160,13 +161,13 @@ const MeasurementCell = ({
   weightLabel,
 }) => {
   const entries = buildMeasurementEntries({ item, source, group });
-  const { sizeDisplay, weightDisplay } = formatMeasurementBlock(entries);
 
   return (
-    <div className="d-flex flex-column gap-1">
-      <span>Size: {sizeDisplay}</span>
-      <span>{weightLabel}: {weightDisplay}</span>
-    </div>
+    <MeasuredSizeDisplayTable
+      entries={entries}
+      weightKey="weight"
+      emptyLabel={`No ${weightLabel.toLowerCase()} size data`}
+    />
   );
 };
 
@@ -1039,14 +1040,12 @@ const PISDiffs = () => {
                           <td>{getVendors(item)}</td>
                           <td>
                             <div className="d-flex flex-wrap gap-1">
-                              <span
-                                className="badge text-bg-warning"
-                              >
+                              <span className="badge pis-diff-pill">
                                 Needs PIS Check
                               </span>
                               {(Array.isArray(item?.pis_diff?.fields) ? item.pis_diff.fields : []).map(
                                 (field) => (
-                                  <span key={field} className="badge text-bg-warning">
+                                  <span key={field} className="badge pis-diff-pill">
                                     {field}
                                   </span>
                                 ),

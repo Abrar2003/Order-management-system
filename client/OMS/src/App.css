@@ -1,6 +1,6 @@
 :root {
   color-scheme: light;
-  --om-font-sans: Inter, "Helvetica Neue", Arial, sans-serif;
+  --om-font-sans: "Quicksand", "Helvetica Neue", Arial, sans-serif;
   --om-color-bg: #f5f0e8;
   --om-color-surface: #fffdfa;
   --om-color-surface-alt: #efe7dc;
@@ -159,6 +159,7 @@ body {
   color: var(--bs-body-color);
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+  letter-spacing: 0.01em;
 }
 
 :root[data-theme="dark"] body {
@@ -181,7 +182,7 @@ h6,
 .h6 {
   color: var(--om-color-text);
   font-weight: 600;
-  letter-spacing: -0.02em;
+  letter-spacing: 0.01em;
 }
 
 small,
@@ -218,7 +219,7 @@ small,
   margin: 0;
   font-size: clamp(1.8rem, 1.45rem + 0.7vw, 2.35rem);
   font-weight: 600;
-  letter-spacing: -0.03em;
+  letter-spacing: 0.01em;
 }
 
 .om-navbar {
@@ -261,7 +262,7 @@ small,
   color: inherit;
   font-size: clamp(1.05rem, 0.95rem + 0.35vw, 1.4rem);
   font-weight: 600;
-  letter-spacing: -0.03em;
+  letter-spacing: 0.01em;
   text-decoration: none;
 }
 
@@ -1670,7 +1671,7 @@ small,
 
 .modal-title {
   font-weight: 600;
-  letter-spacing: -0.02em;
+  letter-spacing: 0.01em;
 }
 
 .list-group-item {
@@ -2523,13 +2524,35 @@ small,
   display: inline-flex;
   align-items: center;
   min-height: 1.35rem;
-  border: 1px solid #c9a89b;
-  background: #f4e6e0;
-  color: #6f3f31;
+  border: 1px solid #d5cabd;
+  background: #ffffff;
+  color: #2e2925;
   padding: 0.12rem 0.45rem;
   font-size: 0.75rem;
   font-weight: 700;
   white-space: nowrap;
+}
+
+.om-size-data-table {
+  min-width: 360px;
+}
+
+.om-size-data-table th {
+  font-size: 0.72rem;
+  color: var(--om-color-text-muted);
+  background: var(--om-color-surface-muted);
+  white-space: nowrap;
+}
+
+.om-size-data-table td {
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.pis-diff-pill {
+  background: #ffffff !important;
+  color: var(--om-color-text) !important;
+  border: 1px solid var(--om-color-border-strong) !important;
 }
 
 .pis-diff-report-measure-grid {

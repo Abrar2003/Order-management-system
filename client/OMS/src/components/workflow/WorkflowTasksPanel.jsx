@@ -83,19 +83,26 @@ const isUploadAssignedToCurrentUser = (task = {}, currentUserId = "") =>
     (entry) => String(getTaskUserId(entry)) === String(currentUserId),
   );
 
-const isUploadCompletedByCurrentUser = (task = {}, currentUserId = "") =>
-  (Array.isArray(task?.upload_statuses) ? task.upload_statuses : []).some(
-    (entry) =>
-      String(getTaskUserId(entry)) === String(currentUserId) &&
-      normalizeText(entry?.status).toLowerCase() === "uploaded",
-  );
+const getUploadUserIdFromStepKey = (stepKey = "") =>
+  isWorkflowUploadStepKey(stepKey)
+    ? stepKey.split(":").slice(1).join(":")
+    : "";
 
-const isUploadStepForCurrentUser = (stepKey = "", currentUserId = "") =>
-  stepKey === "uploaded" ||
-  (
-    isWorkflowUploadStepKey(stepKey) &&
-    stepKey.split(":").slice(1).join(":") === String(currentUserId)
+const isUploadStepPending = (task = {}, stepKey = "") => {
+  if (stepKey === "uploaded") {
+    return !(Array.isArray(task?.upload_statuses) ? task.upload_statuses : []).some(
+      (entry) => normalizeText(entry?.status).toLowerCase() === "uploaded",
+    );
+  }
+
+  const uploadUserId = getUploadUserIdFromStepKey(stepKey);
+  if (!uploadUserId) return false;
+  return (Array.isArray(task?.upload_statuses) ? task.upload_statuses : []).some(
+    (entry) =>
+      String(getTaskUserId(entry)) === String(uploadUserId) &&
+      normalizeText(entry?.status).toLowerCase() !== "uploaded",
   );
+};
 
 const formatRealtimeStatusLabel = (connectionState = "") => {
   if (connectionState === "live") return "Live";
@@ -138,7 +145,6 @@ const getTaskActionState = ({
   const createdByCurrentUser =
     String(getTaskUserId(task?.created_by)) === String(currentUserId);
   const uploadAssignedToCurrentUser = isUploadAssignedToCurrentUser(task, currentUserId);
-  const uploadCompletedByCurrentUser = isUploadCompletedByCurrentUser(task, currentUserId);
   const uploadRequired = task?.upload_required !== false;
 
   return {
@@ -148,12 +154,11 @@ const getTaskActionState = ({
     canStart: assignedToCurrentUser && task?.status === "assigned",
     canComplete: assignedToCurrentUser && task?.status === "started",
     canUpload:
-      uploadRequired &&
-      task?.status === "approved" &&
-      !uploadCompletedByCurrentUser &&
-      (
-        hasUploadAssignees(task)
-          ? uploadAssignedToCurrentUser
+	      uploadRequired &&
+	      task?.status === "approved" &&
+	      (
+	        hasUploadAssignees(task)
+	          ? uploadAssignedToCurrentUser
           : (assignedToCurrentUser || createdByCurrentUser)
       ),
     canRework: canManageWorkflow && ["complete", "approved", "uploaded"].includes(task?.status),
@@ -264,6 +269,7 @@ const WorkflowTasksPanel = ({
     if (mineOnly) return currentUserId;
     return value;
   });
+  const [creatorFilter, setCreatorFilter] = useState(() => normalizeText(searchParams.get("creator")));
   const [departmentFilter, setDepartmentFilter] = useState(() => normalizeText(searchParams.get("department")));
   const [brandFilter, setBrandFilter] = useState(() => normalizeText(searchParams.get("brand")));
   const [dueDateFrom, setDueDateFrom] = useState(() => normalizeText(searchParams.get("due_date_from")));
@@ -276,6 +282,7 @@ const WorkflowTasksPanel = ({
     taskId: "",
     type: "",
     note: "",
+    dueDate: "",
   });
 
   const handleRealtimeRefresh = useCallback(() => {
@@ -384,6 +391,7 @@ const WorkflowTasksPanel = ({
           mineOnly && isAdmin
             ? currentUserId || undefined
             : assigneeFilter || undefined,
+        creator: !mineOnly ? creatorFilter || undefined : undefined,
         department: departmentFilter || undefined,
         brand: brandFilter || undefined,
         search: search || undefined,
@@ -416,6 +424,7 @@ const WorkflowTasksPanel = ({
     assigneeFilter,
     brandFilter,
     canViewWorkflow,
+    creatorFilter,
     currentUserId,
     departmentFilter,
     dueDateFrom,
@@ -443,6 +452,7 @@ const WorkflowTasksPanel = ({
     if (statusFilter && !fixedStatusFilter) next.set("status", statusFilter);
     if (taskTypeFilter) next.set("task_type_key", taskTypeFilter);
     if (assigneeFilter && !mineOnly) next.set("assignee", assigneeFilter);
+    if (creatorFilter && !mineOnly) next.set("creator", creatorFilter);
     if (departmentFilter) next.set("department", departmentFilter);
     if (brandFilter) next.set("brand", brandFilter);
     if (dueDateFrom) next.set("due_date_from", dueDateFrom);
@@ -456,6 +466,7 @@ const WorkflowTasksPanel = ({
   }, [
     assigneeFilter,
     brandFilter,
+    creatorFilter,
     departmentFilter,
     dueDateFrom,
     dueDateTo,
@@ -486,6 +497,7 @@ const WorkflowTasksPanel = ({
           taskId: "",
           type: "",
           note: "",
+          dueDate: "",
         });
       }
       setRefreshTick((prev) => prev + 1);
@@ -538,6 +550,7 @@ const WorkflowTasksPanel = ({
         taskId: task._id,
         type: "complete",
         note: "",
+        dueDate: "",
       });
       return;
     }
@@ -554,10 +567,12 @@ const WorkflowTasksPanel = ({
     if (
       (stepKey === "uploaded" || isWorkflowUploadStepKey(stepKey)) &&
       actions.canUpload &&
-      isUploadStepForCurrentUser(stepKey, currentUserId)
+      isUploadStepPending(task, stepKey)
     ) {
       await handleQuickAction(
-        () => uploadWorkflowTask(task._id),
+        () => uploadWorkflowTask(task._id, {
+          upload_user_id: getUploadUserIdFromStepKey(stepKey),
+        }),
         "Task marked uploaded successfully.",
         { taskId: task._id },
       );
@@ -571,6 +586,7 @@ const WorkflowTasksPanel = ({
       taskId: task._id,
       type: "rework",
       note: "",
+      dueDate: "",
     });
   };
 
@@ -594,7 +610,11 @@ const WorkflowTasksPanel = ({
     }
 
     await handleQuickAction(
-      () => sendWorkflowTaskToRework(task._id, { note }),
+      () =>
+        sendWorkflowTaskToRework(task._id, {
+          note,
+          due_date: normalizeText(notePrompt.dueDate) || undefined,
+        }),
       "Task sent to rework.",
       {
         taskId: task._id,
@@ -714,13 +734,13 @@ const WorkflowTasksPanel = ({
                   onChange={(event) => setTaskTypeFilter(event.target.value)}
                 >
                   <option value="">All</option>
-                  {taskTypes.map((taskType) => (
-                    <option key={taskType._id || taskType.key} value={taskType.key}>
-                      {taskType.name}
-                    </option>
-                    ))}
-                </select>
-              </div>
+	                  {taskTypes.map((taskType) => (
+	                    <option key={taskType._id || taskType.key} value={taskType.key}>
+	                      {taskType.name}
+	                    </option>
+	                  ))}
+	                </select>
+	              </div>
               {canFilterByAssignee && !mineOnly && (
                 <div className="col-md-3 col-lg-2">
                   <label className="form-label">Assignee</label>
@@ -733,6 +753,23 @@ const WorkflowTasksPanel = ({
                     {users.map((user) => (
                       <option key={user._id || user.id} value={user._id || user.id}>
                         {user.name || user.username}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {!mineOnly && (
+                <div className="col-md-3 col-lg-2">
+                  <label className="form-label">Creator</label>
+                  <select
+                    className="form-select"
+                    value={creatorFilter}
+                    onChange={(event) => setCreatorFilter(event.target.value)}
+                  >
+                    <option value="">All</option>
+                    {users.map((user) => (
+                      <option key={user._id || user.id} value={user._id || user.id}>
+                        {user.name || user.username || user.email}
                       </option>
                     ))}
                   </select>
@@ -804,13 +841,14 @@ const WorkflowTasksPanel = ({
                 <button
                   type="button"
                   className="btn btn-outline-secondary"
-                  onClick={() => {
-                    setSearch("");
-                    setStatusFilter(normalizeText(fixedStatusFilter));
-                    setTaskTypeFilter("");
-                    setAssigneeFilter(mineOnly ? currentUserId : "");
-                    setDepartmentFilter("");
-                    setBrandFilter("");
+	                  onClick={() => {
+	                    setSearch("");
+	                    setStatusFilter(normalizeText(fixedStatusFilter));
+	                    setTaskTypeFilter("");
+	                    setAssigneeFilter(mineOnly ? currentUserId : "");
+	                    setCreatorFilter("");
+	                    setDepartmentFilter("");
+	                    setBrandFilter("");
                     setDueDateFrom("");
                     setDueDateTo("");
                     setLimit(DEFAULT_LIMIT);
@@ -934,11 +972,11 @@ const WorkflowTasksPanel = ({
                                   (stepKey === "started" && actions.canStart)
                                   || (stepKey === "complete" && actions.canComplete)
                                   || (stepKey === "approved" && actions.canApprove)
-                                  || (
-                                    (stepKey === "uploaded" || isWorkflowUploadStepKey(stepKey)) &&
-                                    actions.canUpload &&
-                                    isUploadStepForCurrentUser(stepKey, currentUserId)
-                                  )
+	                                  || (
+	                                    (stepKey === "uploaded" || isWorkflowUploadStepKey(stepKey)) &&
+	                                    actions.canUpload &&
+	                                    isUploadStepPending(task, stepKey)
+	                                  )
                                 }
                                 onStepClick={(stepKey) => handleStageClick(task, stepKey)}
                               />
@@ -962,6 +1000,7 @@ const WorkflowTasksPanel = ({
                                           taskId: "",
                                           type: "",
                                           note: "",
+                                          dueDate: "",
                                         })
                                       }
                                       disabled={isBusy}
@@ -991,6 +1030,7 @@ const WorkflowTasksPanel = ({
                                           taskId: "",
                                           type: "",
                                           note: "",
+                                          dueDate: "",
                                         })
                                       }
                                       disabled={isBusy}
@@ -1146,6 +1186,7 @@ const WorkflowTasksPanel = ({
               taskId: "",
               type: "",
               note: "",
+              dueDate: "",
             })
           }
         >
@@ -1171,10 +1212,26 @@ const WorkflowTasksPanel = ({
                       taskId: "",
                       type: "",
                       note: "",
+                      dueDate: "",
                     })
                   }
                   disabled={actionTaskId === notePrompt.taskId}
                 />
+                <div className="mt-3">
+                  <label className="form-label">Next Due Date</label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={notePrompt.dueDate}
+                    onChange={(event) =>
+                      setNotePrompt((prev) => ({
+                        ...prev,
+                        dueDate: event.target.value,
+                      }))
+                    }
+                    disabled={actionTaskId === notePrompt.taskId}
+                  />
+                </div>
               </div>
               <div className="modal-body">
                 <label className="form-label">Rework Comment</label>
@@ -1200,6 +1257,7 @@ const WorkflowTasksPanel = ({
                       taskId: "",
                       type: "",
                       note: "",
+                      dueDate: "",
                     })
                   }
                   disabled={actionTaskId === notePrompt.taskId}

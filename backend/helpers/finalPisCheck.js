@@ -73,6 +73,8 @@ const FINAL_PIS_CHECK_SORT_FIELDS = Object.freeze([
 ]);
 
 const COMPARE_TOLERANCE = 0.001;
+const CBM_COMPARE_TOLERANCE = 0.03;
+const CBM_COMPARE_EPSILON = 0.000000001;
 const CBM_COMPARE_DECIMALS = 2;
 const SIZE_ENTRY_LIMIT = 4;
 const EMPTY_LABEL = "Not Set";
@@ -935,6 +937,7 @@ const buildCbmDifferences = (item = {}) => {
     pisValue: item?.cbm?.calculated_pis_total,
     unit: "cbm",
     decimals: CBM_COMPARE_DECIMALS,
+    compareTolerance: CBM_COMPARE_TOLERANCE + CBM_COMPARE_EPSILON,
     compareDecimals: CBM_COMPARE_DECIMALS,
     fixedDecimals: true,
   });

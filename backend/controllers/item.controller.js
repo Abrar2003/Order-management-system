@@ -1457,6 +1457,8 @@ const handleProductDatabaseError = (res, error, fallbackMessage) => {
 const normalizeLookupKey = (value) => normalizeTextField(value).toLowerCase();
 
 const MEASUREMENT_COMPARE_TOLERANCE = 0.0001;
+const CBM_COMPARE_TOLERANCE = 0.03;
+const CBM_COMPARE_EPSILON = 0.000000001;
 const CBM_COMPARE_DECIMALS = 2;
 
 const buildMeasurementEntryKey = (entry = {}, index = 0) => {
@@ -1484,7 +1486,9 @@ const compareRoundedCbmValues = (inspectedValue, pisValue) => {
   const delta = inspected - pis;
 
   return {
-    mismatch: hasInspected !== hasPis || (hasInspected && hasPis && delta !== 0),
+    mismatch:
+      hasInspected !== hasPis ||
+      (hasInspected && hasPis && Math.abs(delta) > CBM_COMPARE_TOLERANCE + CBM_COMPARE_EPSILON),
     hasData: hasInspected || hasPis,
     hasInspected,
     hasPis,

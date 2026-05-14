@@ -51,19 +51,26 @@ const isUploadAssignedToUser = (task = {}, userId = "") =>
   hasUploadAssignees(task) &&
   task.upload_assignees.some((entry) => String(getUserId(entry)) === String(userId));
 
-const isUploadCompletedByUser = (task = {}, userId = "") =>
-  (Array.isArray(task?.upload_statuses) ? task.upload_statuses : []).some(
-    (entry) =>
-      String(getUserId(entry)) === String(userId) &&
-      normalizeText(entry?.status).toLowerCase() === "uploaded",
-  );
+const getUploadUserIdFromStepKey = (stepKey = "") =>
+  isWorkflowUploadStepKey(stepKey)
+    ? stepKey.split(":").slice(1).join(":")
+    : "";
 
-const isUploadStepForUser = (stepKey = "", userId = "") =>
-  stepKey === "uploaded" ||
-  (
-    isWorkflowUploadStepKey(stepKey) &&
-    stepKey.split(":").slice(1).join(":") === String(userId)
+const isUploadStepPending = (task = {}, stepKey = "") => {
+  if (stepKey === "uploaded") {
+    return !(Array.isArray(task?.upload_statuses) ? task.upload_statuses : []).some(
+      (entry) => normalizeText(entry?.status).toLowerCase() === "uploaded",
+    );
+  }
+
+  const uploadUserId = getUploadUserIdFromStepKey(stepKey);
+  if (!uploadUserId) return false;
+  return (Array.isArray(task?.upload_statuses) ? task.upload_statuses : []).some(
+    (entry) =>
+      String(getUserId(entry)) === String(uploadUserId) &&
+      normalizeText(entry?.status).toLowerCase() !== "uploaded",
   );
+};
 
 const formatDateInputValue = (value) => {
   if (!value) return "";
@@ -109,7 +116,7 @@ const WorkflowTaskDetailModal = ({
   const [openPanel, setOpenPanel] = useState("");
   const [assignIds, setAssignIds] = useState([]);
   const [assignNote, setAssignNote] = useState("");
-  const [notePrompt, setNotePrompt] = useState({ type: "", note: "" });
+  const [notePrompt, setNotePrompt] = useState({ type: "", note: "", dueDate: "" });
   const [commentText, setCommentText] = useState("");
   const [commentType, setCommentType] = useState("general");
   const [editForm, setEditForm] = useState(() => buildTaskEditForm());
@@ -173,13 +180,12 @@ const WorkflowTaskDetailModal = ({
   const canEditCurrentTaskDetails =
     canEditTaskDetails &&
     (canEditAnyTaskDetails || isTaskCreator || isAssignedUser || isTaskAssigner);
-  const canUpload =
-    task?.upload_required !== false &&
-    task?.status === "approved" &&
-    !isUploadCompletedByUser(task, currentUserId) &&
-    (
-      hasUploadAssignees(task)
-        ? isUploadAssignedToUser(task, currentUserId)
+	const canUpload =
+	  task?.upload_required !== false &&
+	  task?.status === "approved" &&
+	  (
+	    hasUploadAssignees(task)
+	      ? isUploadAssignedToUser(task, currentUserId)
         : (isAssignedUser || isTaskCreator)
     );
   const canRework =
@@ -216,7 +222,7 @@ const WorkflowTaskDetailModal = ({
       await loadTask({ keepMessages: true });
       setActionSuccess(message);
       setAssignNote("");
-      setNotePrompt({ type: "", note: "" });
+      setNotePrompt({ type: "", note: "", dueDate: "" });
       onSuccess?.();
       onUpdated?.();
     } catch (submitError) {
@@ -317,7 +323,7 @@ const WorkflowTaskDetailModal = ({
       setActionError("");
       setActionSuccess("");
       setOpenPanel("");
-      setNotePrompt({ type: "complete", note: "" });
+      setNotePrompt({ type: "complete", note: "", dueDate: "" });
       return;
     }
 
@@ -332,10 +338,12 @@ const WorkflowTaskDetailModal = ({
     if (
       (stepKey === "uploaded" || isWorkflowUploadStepKey(stepKey)) &&
       canUpload &&
-      isUploadStepForUser(stepKey, currentUserId)
+      isUploadStepPending(task, stepKey)
     ) {
       await handleTaskAction(
-        () => uploadWorkflowTask(taskId),
+        () => uploadWorkflowTask(taskId, {
+          upload_user_id: getUploadUserIdFromStepKey(stepKey),
+        }),
         "Task marked uploaded successfully.",
       );
     }
@@ -357,7 +365,11 @@ const WorkflowTaskDetailModal = ({
     }
 
     await handleTaskAction(
-      () => sendWorkflowTaskToRework(taskId, { note: normalizedNote }),
+      () =>
+        sendWorkflowTaskToRework(taskId, {
+          note: normalizedNote,
+          due_date: normalizeText(notePrompt.dueDate) || undefined,
+        }),
       "Task sent to rework.",
     );
   };
@@ -537,7 +549,7 @@ const WorkflowTaskDetailModal = ({
                             className="btn btn-outline-primary btn-sm"
                             disabled={actionLoading}
                             onClick={() => {
-                              setNotePrompt({ type: "", note: "" });
+                              setNotePrompt({ type: "", note: "", dueDate: "" });
                               setOpenPanel((prev) => (prev === "edit" ? "" : "edit"));
                             }}
                           >
@@ -550,7 +562,7 @@ const WorkflowTaskDetailModal = ({
                             className="btn btn-outline-dark btn-sm"
                             disabled={actionLoading}
                             onClick={() => {
-                              setNotePrompt({ type: "", note: "" });
+                              setNotePrompt({ type: "", note: "", dueDate: "" });
                               setOpenPanel((prev) => (prev === "assign" ? "" : "assign"));
                             }}
                           >
@@ -563,7 +575,7 @@ const WorkflowTaskDetailModal = ({
                             className="btn btn-outline-secondary btn-sm"
                             disabled={actionLoading}
                             onClick={() => {
-                              setNotePrompt({ type: "", note: "" });
+                              setNotePrompt({ type: "", note: "", dueDate: "" });
                               setOpenPanel((prev) => (prev === "comment" ? "" : "comment"));
                             }}
                           >
@@ -579,7 +591,7 @@ const WorkflowTaskDetailModal = ({
                               setActionError("");
                               setActionSuccess("");
                               setOpenPanel("");
-                              setNotePrompt({ type: "rework", note: "" });
+                              setNotePrompt({ type: "rework", note: "", dueDate: "" });
                             }}
                           >
                             Rework
@@ -606,11 +618,11 @@ const WorkflowTaskDetailModal = ({
                         (stepKey === "started" && canStart)
                         || (stepKey === "complete" && canComplete)
                         || (stepKey === "approved" && canApprove)
-                        || (
-                          (stepKey === "uploaded" || isWorkflowUploadStepKey(stepKey)) &&
-                          canUpload &&
-                          isUploadStepForUser(stepKey, currentUserId)
-                        )
+	                        || (
+	                          (stepKey === "uploaded" || isWorkflowUploadStepKey(stepKey)) &&
+	                          canUpload &&
+	                          isUploadStepPending(task, stepKey)
+	                        )
                       }
                       onStepClick={handleStageBarClick}
                     />
@@ -631,7 +643,7 @@ const WorkflowTaskDetailModal = ({
                           <button
                             type="button"
                             className="btn btn-outline-secondary btn-sm"
-                            onClick={() => setNotePrompt({ type: "", note: "" })}
+                            onClick={() => setNotePrompt({ type: "", note: "", dueDate: "" })}
                             disabled={actionLoading}
                           >
                             Close
@@ -653,6 +665,23 @@ const WorkflowTaskDetailModal = ({
                             setNotePrompt((prev) => ({ ...prev, note: event.target.value }))
                           }
                         />
+                        {notePrompt.type === "rework" && (
+                          <div className="mt-3">
+                            <label className="form-label">Next Due Date</label>
+                            <input
+                              type="date"
+                              className="form-control"
+                              value={notePrompt.dueDate}
+                              onChange={(event) =>
+                                setNotePrompt((prev) => ({
+                                  ...prev,
+                                  dueDate: event.target.value,
+                                }))
+                              }
+                              disabled={actionLoading}
+                            />
+                          </div>
+                        )}
                         <div className="d-flex justify-content-end mt-3">
                           <button
                             type="button"
