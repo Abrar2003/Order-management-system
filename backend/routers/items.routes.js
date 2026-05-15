@@ -30,6 +30,8 @@ const {
   exportFinalPisCheckReport,
   getPisUpdateLogs,
   getProductDatabaseItems,
+  getItemDatabaseItems,
+  getItemDatabaseProductDetails,
   updateProductDatabaseItem,
   checkProductDatabaseItem,
   approveProductDatabaseItem,
@@ -169,6 +171,22 @@ router.get(
   requirePermission("product_database", "view"),
   cacheRoute("items", MEDIUM_CACHE_TTL),
   getProductDatabaseItems,
+);
+
+router.get(
+  "/item-database",
+  auth,
+  requirePermission("product_database", "view"),
+  cacheRoute("items", MEDIUM_CACHE_TTL),
+  getItemDatabaseItems,
+);
+
+router.get(
+  "/item-database/:id",
+  auth,
+  requirePermission("product_database", "view"),
+  cacheRoute("items", MEDIUM_CACHE_TTL),
+  getItemDatabaseProductDetails,
 );
 
 router.get(

@@ -1,4 +1,4 @@
-const EAN13_BODY_LENGTH = 12;
+  const EAN13_BODY_LENGTH = 12;
 const EAN13_LENGTH = 13;
 
 const normalizeDigits = (value) => String(value ?? "").replace(/\D/g, "");

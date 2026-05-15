@@ -218,7 +218,8 @@ const Navbar = () => {
     return [
       routeMenuItem("items-all", "View Items", "/items"),
       routeMenuItem("item-masters", "Item Masters", "/item-masters"),
-      
+      routeMenuItem("item-database", "Item Database", "/item-database"),
+
       ...ITEM_FILE_OPTIONS.map((option) =>
         routeMenuItem(
           `items-file-${option.value}`,
@@ -339,7 +340,9 @@ const Navbar = () => {
     const items = [];
 
     if (canManageProductDatabase) {
-      items.push(routeMenuItem("product-database", "Product Database", "/product-database"));
+      items.push(
+        routeMenuItem("product-database", "Product Database", "/product-database"),
+      );
     }
 
     if (canViewPis) {
@@ -474,7 +477,7 @@ const Navbar = () => {
   const menuSections = useMemo(
     () =>
       [
-        { key: "items", label: "Items Database", items: itemMenuItems },
+        { key: "items", label: "Items", items: itemMenuItems },
         { key: "orders", label: "Orders", items: orderMenuItems },
         { key: "reports", label: "Reports", items: reportMenuItems },
         { key: "workflow", label: "Production Workflow", items: workflowMenuItems },

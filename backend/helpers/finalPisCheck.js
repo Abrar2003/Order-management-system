@@ -21,6 +21,8 @@ const FINAL_PIS_CHECK_ITEM_SELECT = [
   "pis_barcode",
   "pis_master_barcode",
   "pis_inner_barcode",
+  "pis_k_d",
+  "inspected_k_d",
   "pis_weight",
   "inspected_weight",
   "pis_item_LBH",

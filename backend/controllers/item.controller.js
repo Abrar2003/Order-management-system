@@ -1411,6 +1411,7 @@ const PRODUCT_DATABASE_ITEM_SELECT = [
   "pd_checked_by",
   "pd_approved_by",
   "pd_last_changed_by",
+  "pd_history",
   "updatedAt",
 ].join(" ");
 
@@ -2555,6 +2556,212 @@ exports.getProductDatabaseItems = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error?.message || "Failed to fetch Product Database items",
+    });
+  }
+};
+
+const RUNNING_ORDER_STATUSES = ["Pending", "Under Inspection", "Inspection Done", "Partial Shipped"];
+
+const buildRunningPoLookup = async (itemCodes = []) => {
+  const normalizedCodes = [...new Set(
+    (Array.isArray(itemCodes) ? itemCodes : [])
+      .map((code) => normalizeTextField(code))
+      .filter(Boolean),
+  )];
+
+  if (normalizedCodes.length === 0) {
+    return new Map();
+  }
+
+  const rows = await Order.aggregate([
+    {
+      $match: {
+        archived: { $ne: true },
+        status: { $in: RUNNING_ORDER_STATUSES },
+        $expr: {
+          $in: [
+            { $toLower: { $trim: { input: "$item.item_code" } } },
+            normalizedCodes.map((code) => normalizeLookupKey(code)),
+          ],
+        },
+      },
+    },
+    {
+      $group: {
+        _id: { $toLower: { $trim: { input: "$item.item_code" } } },
+        count: { $sum: 1 },
+        order_ids: { $addToSet: "$order_id" },
+      },
+    },
+  ]);
+
+  return new Map(
+    (Array.isArray(rows) ? rows : []).map((row) => [
+      normalizeLookupKey(row?._id),
+      {
+        count: Number(row?.count || 0),
+        order_ids: normalizeDistinctValues(row?.order_ids || []),
+      },
+    ]),
+  );
+};
+
+const buildItemDatabaseRow = ({
+  item = {},
+  productDatabaseRow = {},
+  runningPo = {},
+  latestInspectionReport = {},
+} = {}) => ({
+  id: String(item?._id || productDatabaseRow?.id || ""),
+  item_code: item?.code || productDatabaseRow?.code || "",
+  brand: item?.brand || item?.brand_name || productDatabaseRow?.brand || productDatabaseRow?.brand_name || "",
+  brands: Array.isArray(item?.brands) ? item.brands : [],
+  vendor:
+    Array.isArray(item?.vendors) && item.vendors.length > 0
+      ? item.vendors.filter(Boolean).join(", ")
+      : "",
+  vendors: Array.isArray(item?.vendors) ? item.vendors : [],
+  current_running_pos: Number(runningPo?.count || 0),
+  current_running_po_ids: Array.isArray(runningPo?.order_ids) ? runningPo.order_ids : [],
+  last_inspected_date: latestInspectionReport?.last_inspected_date || "",
+  latest_inspection_report_qc_id: latestInspectionReport?.qc_id || "",
+  product_database_status: productDatabaseRow?.pd_checked || NOT_SET_STATUS,
+  product_database: productDatabaseRow,
+});
+
+exports.getItemDatabaseItems = async (req, res) => {
+  try {
+    const search = req.query.search;
+    const brand = req.query.brand;
+    const vendor = req.query.vendor;
+    const status = req.query.status;
+    const runningPo = String(req.query.running_po || "all").trim().toLowerCase();
+    const page = parsePositiveInt(req.query.page, 1);
+    const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
+    const skip = (page - 1) * limit;
+
+    const baseMatch = buildItemMatch({ search, brand, vendor });
+    const statusMatch = buildProductDatabaseStatusMatch(status);
+    const match = combineMongoMatches(baseMatch, statusMatch);
+
+    const [
+      allMatchedItems,
+      brandsRaw,
+      brandNamesRaw,
+      brandsPrimaryRaw,
+      vendorsRaw,
+    ] = await Promise.all([
+      Item.find(match)
+        .select(PRODUCT_DATABASE_ITEM_SELECT)
+        .sort({ updatedAt: -1, code: 1 })
+        .lean(),
+      Item.distinct("brands", buildItemMatch({ search, vendor })),
+      Item.distinct("brand_name", buildItemMatch({ search, vendor })),
+      Item.distinct("brand", buildItemMatch({ search, vendor })),
+      Item.distinct("vendors", buildItemMatch({ search, brand })),
+    ]);
+
+    const itemCodes = (Array.isArray(allMatchedItems) ? allMatchedItems : []).map((item) => item?.code);
+    const [runningPoLookup, latestInspectionReportLookup] = await Promise.all([
+      buildRunningPoLookup(itemCodes),
+      buildLatestInspectionReportLookup(itemCodes),
+    ]);
+
+    const allRows = (Array.isArray(allMatchedItems) ? allMatchedItems : [])
+      .map((item) => {
+        const itemCodeKey = normalizeLookupKey(item?.code);
+        return buildItemDatabaseRow({
+          item,
+          productDatabaseRow: buildProductDatabaseRow(item, req.user),
+          runningPo: runningPoLookup.get(itemCodeKey) || {},
+          latestInspectionReport: latestInspectionReportLookup.get(itemCodeKey) || {},
+        });
+      })
+      .filter((row) => {
+        if (runningPo === "yes" || runningPo === "running") {
+          return Number(row?.current_running_pos || 0) > 0;
+        }
+        if (runningPo === "no" || runningPo === "none") {
+          return Number(row?.current_running_pos || 0) === 0;
+        }
+        return true;
+      });
+
+    const totalRecords = allRows.length;
+    const rows = allRows.slice(skip, skip + limit);
+
+    return res.status(200).json({
+      success: true,
+      rows,
+      filters: {
+        search: normalizeFilterValue(search) || "",
+        brand: normalizeFilterValue(brand) || "",
+        vendor: normalizeFilterValue(vendor) || "",
+        status: String(status || "").trim() || "all",
+        running_po: runningPo || "all",
+        brand_options: normalizeDistinctValues([
+          ...(brandsPrimaryRaw || []),
+          ...(brandsRaw || []),
+          ...(brandNamesRaw || []),
+        ]),
+        vendor_options: normalizeDistinctValues(vendorsRaw),
+      },
+      pagination: {
+        page,
+        limit,
+        total: totalRecords,
+        totalPages: Math.max(1, Math.ceil(totalRecords / limit)),
+      },
+    });
+  } catch (error) {
+    console.error("Get Item Database Items Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to fetch Item Database items",
+    });
+  }
+};
+
+exports.getItemDatabaseProductDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid item id.",
+      });
+    }
+
+    const item = await Item.findById(id).select(PRODUCT_DATABASE_ITEM_SELECT).lean();
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: "Item not found.",
+      });
+    }
+
+    const itemCode = item?.code || "";
+    const [runningPoLookup, latestInspectionReportLookup] = await Promise.all([
+      buildRunningPoLookup([itemCode]),
+      buildLatestInspectionReportLookup([itemCode]),
+    ]);
+    const itemCodeKey = normalizeLookupKey(itemCode);
+    const productDatabaseRow = buildProductDatabaseRow(item, req.user);
+
+    return res.status(200).json({
+      success: true,
+      data: buildItemDatabaseRow({
+        item,
+        productDatabaseRow,
+        runningPo: runningPoLookup.get(itemCodeKey) || {},
+        latestInspectionReport: latestInspectionReportLookup.get(itemCodeKey) || {},
+      }),
+    });
+  } catch (error) {
+    console.error("Get Item Database Product Details Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to fetch Product Database details",
     });
   }
 };
@@ -4086,6 +4293,13 @@ exports.updateItem = async (req, res) => {
       setPath("description", normalizeTextField(payload.description));
     }
 
+    if (hasOwn(payload, "inspected_k_d")) {
+      setPath(
+        "inspected_k_d",
+        toBooleanValue(payload.inspected_k_d, "inspected_k_d"),
+      );
+    }
+
     if (productTypeContext.productTypeSnapshot) {
       setPath("product_type", productTypeContext.productTypeSnapshot);
     }
@@ -4408,6 +4622,9 @@ exports.updateItemPis = async (req, res) => {
     }
     if (!requestedPisDiffCheck && hasOwn(payload, "country_of_origin")) {
       setPisPath("country_of_origin", normalizeTextField(payload.country_of_origin));
+    }
+    if (!requestedPisDiffCheck && hasOwn(payload, "pis_k_d")) {
+      setPisPath("pis_k_d", toBooleanValue(payload.pis_k_d, "pis_k_d"));
     }
 
     if (hasOwn(payload, "pis_item_sizes")) {

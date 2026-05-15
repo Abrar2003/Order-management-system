@@ -2285,6 +2285,12 @@ const upsertInspectionRecordForRequest = async ({
     currentSource: currentSizeSource,
     updatePayload: sizeSnapshotPayload,
   });
+  const inspectionInspectedKd = hasOwn(sizeSnapshotPayload, "inspected_k_d")
+    ? Boolean(sizeSnapshotPayload.inspected_k_d)
+    : Boolean(currentSizeSource?.inspected_k_d);
+  const inspectionPisKd = hasOwn(sizeSnapshotPayload, "pis_k_d")
+    ? Boolean(sizeSnapshotPayload.pis_k_d)
+    : Boolean(currentSizeSource?.pis_k_d);
 
   if (!inspectionRecord) {
     inspectionRecord = await Inspection.create({
@@ -2312,6 +2318,8 @@ const upsertInspectionRecordForRequest = async ({
       inspected_item_sizes: inspectionSizeSnapshot.inspected_item_sizes,
       inspected_box_sizes: inspectionSizeSnapshot.inspected_box_sizes,
       inspected_box_mode: inspectionSizeSnapshot.inspected_box_mode,
+      inspected_k_d: inspectionInspectedKd,
+      pis_k_d: inspectionPisKd,
       label_ranges: labelRangesToAppend,
       labels_added: labelsToAppend,
       ...(normalizedGoodsNotReady
@@ -2365,6 +2373,8 @@ const upsertInspectionRecordForRequest = async ({
     inspectionSizeSnapshot.inspected_box_sizes;
   inspectionRecord.inspected_box_mode =
     inspectionSizeSnapshot.inspected_box_mode;
+  inspectionRecord.inspected_k_d = inspectionInspectedKd;
+  inspectionRecord.pis_k_d = inspectionPisKd;
 
   if (replaceCbmSnapshot) {
     inspectionRecord.cbm = qcCbmSnapshot;
@@ -2518,6 +2528,8 @@ const INSPECTION_SIZE_SOURCE_SELECT = [
   "inspected_top_LBH",
   "inspected_bottom_LBH",
   "inspected_weight",
+  "inspected_k_d",
+  "pis_k_d",
 ].join(" ");
 
 const resolveQcInspectionSizeItemCode = (qcDoc = {}) =>
@@ -4312,6 +4324,7 @@ exports.updateQC = async (req, res) => {
       packed_size,
       finishing,
       branding,
+      inspected_k_d,
       last_inspected_date,
       CBM_box1,
       CBM_box2,
@@ -4810,11 +4823,18 @@ exports.updateQC = async (req, res) => {
       (fieldKey) => parsedInspectedWeightFields[fieldKey]?.hasInput,
     );
     const hasInspectedBoxModeUpdate = inspected_box_mode !== undefined;
+    const hasInspectedKdUpdate = hasOwn(req.body || {}, "inspected_k_d");
+    if (hasInspectedKdUpdate && typeof inspected_k_d !== "boolean") {
+      return res.status(400).json({
+        message: "inspected_k_d must be boolean",
+      });
+    }
 
     const hasItemMasterUpdate =
       hasInspectedSizeEntryUpdate ||
       hasInspectedWeightUpdate ||
-      hasInspectedBoxModeUpdate;
+      hasInspectedBoxModeUpdate ||
+      hasInspectedKdUpdate;
     const itemCodeForInspectedSizeUpdate =
       hasItemMasterUpdate || hasCbmUpdate
         ? normalizeText(qc?.item?.item_code || "")
@@ -5235,6 +5255,15 @@ exports.updateQC = async (req, res) => {
       return { generatedLabels, normalizedRanges };
     };
 
+    const parseOptionalBooleanField = (value, fallback = false) => {
+      if (value === undefined) return fallback;
+      if (typeof value === "boolean") return value;
+      const normalized = String(value ?? "").trim().toLowerCase();
+      if (["true", "1", "yes", "y"].includes(normalized)) return true;
+      if (["false", "0", "no", "n", ""].includes(normalized)) return false;
+      throw new Error("K/D fields must be boolean");
+    };
+
     // If user is updating passed quantity or labels, they must provide checked in same visit
     if (
       !allowAdminRewrite &&
@@ -5573,6 +5602,7 @@ exports.updateQC = async (req, res) => {
         isQcUser ||
         isVisitUpdate ||
         hasCbmUpdate ||
+        hasInspectedKdUpdate ||
         (last_inspected_date !== undefined &&
           String(last_inspected_date).trim() !== "") ||
         remarks !== undefined
@@ -5828,7 +5858,7 @@ exports.updateQC = async (req, res) => {
         const pisBoxSummary = buildBoxMeasurementCbmSummary({
           sizes: itemDoc?.pis_box_sizes,
           mode: pisBoxMode,
-          singleLbh: itemDoc?.pis_box_LBH || itemDoc?.box_LBH,
+        singleLbh: itemDoc?.pis_box_LBH || itemDoc?.box_LBH,
           topLbh: pisBoxMode === BOX_PACKAGING_MODES.CARTON ? null : itemDoc?.pis_box_top_LBH,
           bottomLbh:
             pisBoxMode === BOX_PACKAGING_MODES.CARTON ? null : itemDoc?.pis_box_bottom_LBH,
@@ -5871,6 +5901,15 @@ exports.updateQC = async (req, res) => {
         ) {
           qc.cbm = buildItemInspectedBoxCbmSnapshot(itemDoc);
         }
+      }
+
+      if (
+        hasInspectedKdUpdate &&
+        Boolean(itemDoc?.inspected_k_d) !== Boolean(inspected_k_d)
+      ) {
+        itemDoc.set("inspected_k_d", Boolean(inspected_k_d));
+        itemDoc.markModified("inspected_k_d");
+        hasItemDocChanges = true;
       }
 
       if (hasItemDocChanges) {
@@ -7741,6 +7780,8 @@ exports.rejectAllQc = async (req, res) => {
         inspected_item_sizes: inspectionSizeSnapshot.inspected_item_sizes,
         inspected_box_sizes: inspectionSizeSnapshot.inspected_box_sizes,
         inspected_box_mode: inspectionSizeSnapshot.inspected_box_mode,
+        inspected_k_d: Boolean(inspectionSizeSource?.inspected_k_d),
+        pis_k_d: Boolean(inspectionSizeSource?.pis_k_d),
         label_ranges: [],
         labels_added: [],
         goods_not_ready: {
@@ -7768,6 +7809,8 @@ exports.rejectAllQc = async (req, res) => {
         inspectionSizeSnapshot.inspected_box_sizes;
       inspectionRecord.inspected_box_mode =
         inspectionSizeSnapshot.inspected_box_mode;
+      inspectionRecord.inspected_k_d = Boolean(inspectionSizeSource?.inspected_k_d);
+      inspectionRecord.pis_k_d = Boolean(inspectionSizeSource?.pis_k_d);
       inspectionRecord.goods_not_ready = {
         ready: false,
         reason: "",
@@ -9947,7 +9990,7 @@ exports.getQCById = async (req, res) => {
           },
         })
           .select(
-            "code name description brand_name brands vendors finish inspected_weight pis_weight weight cbm pis_barcode pis_master_barcode pis_inner_barcode qc.barcode qc.master_barcode qc.inner_barcode inspected_item_LBH inspected_item_sizes inspected_item_top_LBH inspected_item_bottom_LBH pis_item_LBH pis_item_sizes pis_item_top_LBH pis_item_bottom_LBH item_LBH inspected_box_LBH inspected_box_sizes inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_box_LBH pis_box_sizes pis_box_top_LBH pis_box_bottom_LBH box_LBH image cad_file pis_file assembly_file packeging_ppt",
+            "code name description brand_name brands vendors finish inspected_weight pis_weight weight cbm pis_k_d inspected_k_d pis_barcode pis_master_barcode pis_inner_barcode qc.barcode qc.master_barcode qc.inner_barcode inspected_item_LBH inspected_item_sizes inspected_item_top_LBH inspected_item_bottom_LBH pis_item_LBH pis_item_sizes pis_item_top_LBH pis_item_bottom_LBH item_LBH inspected_box_LBH inspected_box_sizes inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_box_LBH pis_box_sizes pis_box_top_LBH pis_box_bottom_LBH box_LBH image cad_file pis_file assembly_file packeging_ppt",
           )
           .lean()
       : null;
@@ -10591,6 +10634,14 @@ exports.editInspectionRecords = async (req, res) => {
       });
 	      record.label_ranges = nextLabelRanges;
 	      record.labels_added = nextLabelsAdded;
+	      record.inspected_k_d = parseOptionalBooleanField(
+	        row?.inspected_k_d,
+	        Boolean(record?.inspected_k_d),
+	      );
+	      record.pis_k_d = parseOptionalBooleanField(
+	        row?.pis_k_d,
+	        Boolean(record?.pis_k_d),
+	      );
 	      if (parsedBarcode.hasInput) {
 	        record.barcode = parsedBarcode.value;
 	      }
@@ -10642,7 +10693,7 @@ exports.editInspectionRecords = async (req, res) => {
 
 	    const refreshedInspections = await Inspection.find({ qc: qc._id })
 	      .select(
-	        "inspection_date requested_date request_history_id inspector checked passed vendor_requested vendor_offered labels_added label_ranges goods_not_ready status createdAt barcode master_barcode inner_barcode packed_size finishing branding inspected_item_sizes inspected_box_sizes inspected_box_mode",
+	        "inspection_date requested_date request_history_id inspector checked passed vendor_requested vendor_offered labels_added label_ranges goods_not_ready status createdAt barcode master_barcode inner_barcode packed_size finishing branding inspected_k_d pis_k_d inspected_item_sizes inspected_box_sizes inspected_box_mode",
 	      )
 	      .lean();
 

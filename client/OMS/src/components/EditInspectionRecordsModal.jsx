@@ -84,6 +84,8 @@ const buildInitialRows = (qc) =>
       pending_after: toSafeNumberString(record?.pending_after),
       cbm_total: formatNumberInputValue(record?.cbm?.total, { allowZero: true }) || "0.00",
       remarks: String(record?.remarks || ""),
+      inspected_k_d: Boolean(record?.inspected_k_d),
+      pis_k_d: Boolean(record?.pis_k_d),
       labels_added: normalizeLabels(record?.labels_added),
       label_ranges: normalizeLabelRanges(record?.label_ranges),
       original_labels_added: normalizeLabels(record?.labels_added),
@@ -243,6 +245,8 @@ const EditInspectionRecordsModal = ({ qc, onClose, onSuccess }) => {
           },
           label_ranges: normalizeLabelRanges(row.label_ranges),
           labels_added: normalizeLabels(row.labels_added),
+          inspected_k_d: Boolean(row.inspected_k_d),
+          pis_k_d: Boolean(row.pis_k_d),
           remarks: String(row.remarks || "").trim(),
         };
       });
@@ -284,6 +288,8 @@ const EditInspectionRecordsModal = ({ qc, onClose, onSuccess }) => {
                     <th>Passed</th>
                     <th>Pending</th>
                     <th>CBM</th>
+                    <th>Inspected K/D</th>
+                    <th>PIS K/D</th>
                     <th>Labels</th>
                     <th>Remarks</th>
                   </tr>
@@ -291,7 +297,7 @@ const EditInspectionRecordsModal = ({ qc, onClose, onSuccess }) => {
                 <tbody>
                   {rows.length === 0 && (
                     <tr>
-                      <td colSpan="11" className="text-center text-secondary py-3">
+                      <td colSpan="13" className="text-center text-secondary py-3">
                         No inspection records found
                       </td>
                     </tr>
@@ -398,6 +404,42 @@ const EditInspectionRecordsModal = ({ qc, onClose, onSuccess }) => {
                         />
                       </td>
                       <td>
+                        <div className="btn-group btn-group-sm" role="group" aria-label="Inspected K/D">
+                          <button
+                            type="button"
+                            className={`btn ${row.inspected_k_d ? "btn-primary" : "btn-outline-secondary"}`}
+                            onClick={() => updateRow(index, "inspected_k_d", true)}
+                          >
+                            Yes
+                          </button>
+                          <button
+                            type="button"
+                            className={`btn ${!row.inspected_k_d ? "btn-primary" : "btn-outline-secondary"}`}
+                            onClick={() => updateRow(index, "inspected_k_d", false)}
+                          >
+                            No
+                          </button>
+                        </div>
+                      </td>
+                      <td>
+                        <div className="btn-group btn-group-sm" role="group" aria-label="PIS K/D">
+                          <button
+                            type="button"
+                            className={`btn ${row.pis_k_d ? "btn-primary" : "btn-outline-secondary"}`}
+                            onClick={() => updateRow(index, "pis_k_d", true)}
+                          >
+                            Yes
+                          </button>
+                          <button
+                            type="button"
+                            className={`btn ${!row.pis_k_d ? "btn-primary" : "btn-outline-secondary"}`}
+                            onClick={() => updateRow(index, "pis_k_d", false)}
+                          >
+                            No
+                          </button>
+                        </div>
+                      </td>
+                      <td>
                         <div className="d-flex flex-column gap-1">
                           <span className="small">
                             Count: {Array.isArray(row.labels_added) ? row.labels_added.length : 0}
@@ -439,6 +481,8 @@ const EditInspectionRecordsModal = ({ qc, onClose, onSuccess }) => {
                       <td>{totals.checked}</td>
                       <td>{totals.passed}</td>
                       <td>{totals.pending_after}</td>
+                      <td>-</td>
+                      <td>-</td>
                       <td>-</td>
                       <td>-</td>
                       <td>-</td>

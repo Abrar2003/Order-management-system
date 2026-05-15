@@ -1883,13 +1883,11 @@ small,
 }
 
 .orders-action-col {
-  width: 18%;
-  min-width: 300px;
+  width: 20%;
 }
 
 .orders-cbm-col {
-  min-width: 170px;
-  width: 12%;
+  width: 10%;
 }
 
 .orders-action-stack {
@@ -1918,6 +1916,110 @@ small,
 
 .orders-action-main-row .btn {
   width: 100%;
+}
+
+.orders-table-wrap {
+  overflow-x: visible;
+}
+
+.orders-table {
+  table-layout: fixed;
+  width: 100%;
+  font-size: 0.82rem;
+}
+
+.orders-table > :not(caption) > * > * {
+  padding: 0.65rem 0.45rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.orders-table .om-sort-header {
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+}
+
+.orders-table .btn {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.orders-table .orders-action-main-row {
+  gap: 0.35rem;
+}
+
+.orders-table .orders-action-stack {
+  gap: 0.35rem;
+}
+
+.item-database-table th,
+.item-database-table td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.item-database-table th:nth-child(1) {
+  width: 14%;
+}
+
+.item-database-table th:nth-child(4) {
+  width: 18%;
+}
+
+.item-database-table th:nth-child(7) {
+  width: 9rem;
+}
+
+.product-database-details-page .badge {
+  font-size: 0.85rem;
+}
+
+.product-database-detail-card .card-body {
+  height: 100%;
+}
+
+.product-database-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.9rem;
+}
+
+.product-database-detail-field {
+  min-width: 0;
+  padding-bottom: 0.7rem;
+  border-bottom: 1px solid var(--om-color-border);
+}
+
+.product-database-detail-field .fw-semibold {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+@media (max-width: 1200px) {
+  .orders-table {
+    font-size: 0.76rem;
+  }
+
+  .orders-table > :not(caption) > * > * {
+    padding: 0.5rem 0.3rem;
+  }
+
+  .orders-table .btn-sm {
+    --bs-btn-padding-x: 0.35rem;
+    --bs-btn-padding-y: 0.2rem;
+    --bs-btn-font-size: 0.72rem;
+  }
+
+  .orders-action-col {
+    width: 18%;
+  }
+
+  .orders-cbm-col {
+    width: 9%;
+  }
 }
 
 .table-clickable {

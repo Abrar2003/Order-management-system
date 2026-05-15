@@ -173,6 +173,8 @@ const InspectionSchema = new mongoose.Schema(
       default: BOX_PACKAGING_MODES.INDIVIDUAL,
       trim: true,
     },
+    inspected_k_d: { type: Boolean, default: false },
+    pis_k_d: { type: Boolean, default: false },
     // ranges selected during this visit (supports multiple ranges)
     label_ranges: [
       {

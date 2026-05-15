@@ -917,6 +917,7 @@ const buildProductDatabaseRow = (item = {}, user = {}) => {
     pd_checked_by: item?.pd_checked_by || null,
     pd_approved_by: item?.pd_approved_by || null,
     pd_last_changed_by: item?.pd_last_changed_by || null,
+    pd_history: Array.isArray(item?.pd_history) ? item.pd_history : [],
     permissions: buildProductDatabasePermissions(item, user),
     updated_at: item?.updatedAt || null,
   };

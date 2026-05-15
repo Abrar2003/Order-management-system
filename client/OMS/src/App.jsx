@@ -46,6 +46,8 @@ import PendingPoReport from "./pages/PendingPoReport";
 import ProductAnalytics from "./pages/ProductAnalytics";
 import QcReportMismatch from "./pages/QcReportMismatch";
 import ProductDatabase from "./pages/ProductDatabase";
+import ItemDatabase from "./pages/ItemDatabase";
+import ProductDatabaseDetails from "./pages/ProductDatabaseDetails";
 import ProductTypeTemplates from "./pages/ProductTypeTemplates";
 import WorkflowDashboard from "./pages/WorkflowDashboard";
 import WorkflowTasks from "./pages/WorkflowTasks";
@@ -315,6 +317,24 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <ProductDatabase />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/item-database"
+            element={
+              <ProtectedRoute>
+                <ItemDatabase />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/product-database-details/:id"
+            element={
+              <ProtectedRoute>
+                <ProductDatabaseDetails />
               </ProtectedRoute>
             }
           />

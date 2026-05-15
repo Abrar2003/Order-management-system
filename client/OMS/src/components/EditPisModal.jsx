@@ -141,6 +141,7 @@ const buildInitialForm = (item = {}) => {
 
   return {
     country_of_origin: toText(item?.country_of_origin),
+    pis_k_d: Boolean(item?.pis_k_d),
     master_barcode: toText(item?.pis_master_barcode || item?.pis_barcode),
     inner_barcode: toText(item?.pis_inner_barcode),
     pis_item_count: String(pisItemCount),
@@ -398,6 +399,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
         payload.pis_barcode = toText(form.master_barcode);
         payload.pis_master_barcode = toText(form.master_barcode);
         payload.pis_inner_barcode = toText(form.inner_barcode);
+        payload.pis_k_d = Boolean(form.pis_k_d);
       }
       if (updateSource) {
         payload.pis_update_source = updateSource;
@@ -471,6 +473,29 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
                       </option>
                     ))}
                   </select>
+                </div>
+              )}
+              {!isPisDiffUpdate && (
+                <div className="col-md-4">
+                  <label className="form-label">PIS K/D</label>
+                  <div className="btn-group w-100" role="group" aria-label="PIS K/D">
+                    <button
+                      type="button"
+                      className={`btn ${form.pis_k_d ? "btn-primary" : "btn-outline-secondary"}`}
+                      onClick={() => updateField("pis_k_d", true)}
+                      disabled={saving}
+                    >
+                      Yes
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn ${!form.pis_k_d ? "btn-primary" : "btn-outline-secondary"}`}
+                      onClick={() => updateField("pis_k_d", false)}
+                      disabled={saving}
+                    >
+                      No
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

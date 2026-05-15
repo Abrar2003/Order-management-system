@@ -445,6 +445,8 @@ const itemSchema = new mongoose.Schema(
       link: { type: String, default: "", trim: true },
       public_id: { type: String, default: "", trim: true },
     },
+    inspected_k_d: { type: Boolean, default: false },
+    pis_k_d: { type: Boolean, default: false },
     pis_checked_flag: { type: Boolean, default: false },
     finish: {
       type: [finishAssignmentSchema],
