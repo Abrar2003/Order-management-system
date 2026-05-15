@@ -4,6 +4,7 @@ const {
   BOX_PACKAGING_MODES,
   detectBoxPackagingMode,
 } = require("./boxMeasurement");
+const { formatEan13BarcodeDisplay } = require("./barcodeFormat");
 
 const AUDIT_SCOPES = Object.freeze({
   PIS: "PIS",
@@ -166,12 +167,12 @@ const buildItemUpdateAuditSnapshot = (item = {}) => {
       {
         key: "pis_master_barcode",
         label: "PIS Master Barcode",
-        value: formatText(item?.pis_master_barcode || item?.pis_barcode),
+        value: formatEan13BarcodeDisplay(item?.pis_master_barcode || item?.pis_barcode),
       },
       {
         key: "pis_inner_barcode",
         label: "PIS Inner Barcode",
-        value: formatText(item?.pis_inner_barcode),
+        value: formatEan13BarcodeDisplay(item?.pis_inner_barcode),
       },
       {
         key: "pis_item_sizes",
@@ -210,12 +211,12 @@ const buildItemUpdateAuditSnapshot = (item = {}) => {
       {
         key: "pd_master_barcode",
         label: "PD Master Barcode",
-        value: formatText(item?.pd_master_barcode || item?.pd_barcode),
+        value: formatEan13BarcodeDisplay(item?.pd_master_barcode || item?.pd_barcode),
       },
       {
         key: "pd_inner_barcode",
         label: "PD Inner Barcode",
-        value: formatText(item?.pd_inner_barcode),
+        value: formatEan13BarcodeDisplay(item?.pd_inner_barcode),
       },
       {
         key: "product_type",

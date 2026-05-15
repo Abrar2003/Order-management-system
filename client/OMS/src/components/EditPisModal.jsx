@@ -17,6 +17,7 @@ import {
   parseMeasuredSizeEntries,
   resolvePreferredMeasuredSizeCbm,
 } from "../utils/measuredSizeForm";
+import { formatEan13BarcodeDisplay } from "../utils/barcode";
 import "../App.css";
 
 const toText = (value, fallback = "") => String(value ?? fallback).trim();
@@ -185,8 +186,12 @@ const buildInspectedReference = (item = {}) => {
   });
 
   return {
-    masterBarcode: formatFallback(item?.qc?.master_barcode || item?.qc?.barcode),
-    innerBarcode: formatFallback(item?.qc?.inner_barcode),
+    masterBarcode: formatEan13BarcodeDisplay(
+      formatFallback(item?.qc?.master_barcode || item?.qc?.barcode, ""),
+    ),
+    innerBarcode: formatEan13BarcodeDisplay(
+      formatFallback(item?.qc?.inner_barcode, ""),
+    ),
     boxMode: formatBoxMode(inspectedBoxMode),
     itemSizes: formatEntries(inspectedItemEntries, "Net"),
     boxSizes: formatEntries(inspectedBoxEntries, "Gross"),

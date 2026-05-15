@@ -8,6 +8,7 @@ const {
   compareItemSizeDimensionVariance,
   compareWeightVariance,
 } = require("./measurementMismatchRules");
+const { formatEan13BarcodeDisplay } = require("./barcodeFormat");
 
 const FINAL_PIS_CHECK_ITEM_SELECT = [
   "code",
@@ -705,8 +706,13 @@ const createTextDifference = ({
   const comparison = compareTextValues(inspectedValue, pisValue);
   if (!comparison.mismatch) return null;
 
-  const inspectedDisplay = comparison.inspected || EMPTY_LABEL;
-  const pisDisplay = comparison.pis || EMPTY_LABEL;
+  const shouldFormatBarcode = normalizeKey(section) === "barcode";
+  const inspectedDisplay = shouldFormatBarcode
+    ? formatEan13BarcodeDisplay(comparison.inspected)
+    : comparison.inspected || EMPTY_LABEL;
+  const pisDisplay = shouldFormatBarcode
+    ? formatEan13BarcodeDisplay(comparison.pis)
+    : comparison.pis || EMPTY_LABEL;
 
   return {
     key,

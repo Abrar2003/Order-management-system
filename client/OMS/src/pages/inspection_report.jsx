@@ -12,6 +12,7 @@ import {
   hasStoredItemFile,
   ITEM_FILE_OPTIONS as ITEM_MASTER_FILE_OPTIONS,
 } from "../constants/itemFiles";
+import { formatEan13BarcodeDisplay, toEan13BarcodeValue } from "../utils/barcode";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { getDerivedOrderStatus } from "../utils/orderStatus";
 import { formatPositiveCbm } from "../utils/cbm";
@@ -1208,12 +1209,17 @@ const InspectionReport = () => {
       || "",
     ).trim();
     const pisInnerBarcodeRaw = String(itemMaster?.pis_inner_barcode || "").trim();
-    const pisBarcodeValue = pisBarcodeRaw || "Not Set";
-    const inspectedBarcodeValue = inspectedBarcodeRaw || "Not Set";
+    const pisBarcodeValue = formatEan13BarcodeDisplay(pisBarcodeRaw);
+    const inspectedBarcodeValue = formatEan13BarcodeDisplay(inspectedBarcodeRaw);
     const barcodeMismatch =
-      toComparableValue(pisBarcodeValue) !== toComparableValue(inspectedBarcodeValue);
+      toComparableValue(pisBarcodeRaw || "Not Set") !==
+      toComparableValue(inspectedBarcodeRaw || "Not Set");
     const unifiedBarcodeValue =
       pisBarcodeValue !== "Not Set" ? pisBarcodeValue : inspectedBarcodeValue;
+    const pisBarcodeRenderValue = toEan13BarcodeValue(pisBarcodeRaw);
+    const inspectedBarcodeRenderValue = toEan13BarcodeValue(inspectedBarcodeRaw);
+    const unifiedBarcodeRenderValue =
+      pisBarcodeRenderValue || inspectedBarcodeRenderValue;
 
     const rows = [
       ...buildMeasurementComparisonRows({
@@ -1257,10 +1263,13 @@ const InspectionReport = () => {
     return {
       pisBarcodeValue,
       inspectedBarcodeValue,
+      pisBarcodeRenderValue,
+      inspectedBarcodeRenderValue,
       barcodeMismatch,
       unifiedBarcodeValue,
-      pisInnerBarcodeValue: pisInnerBarcodeRaw || "Not Set",
-      inspectedInnerBarcodeValue: inspectedInnerBarcodeRaw || "Not Set",
+      unifiedBarcodeRenderValue,
+      pisInnerBarcodeValue: formatEan13BarcodeDisplay(pisInnerBarcodeRaw),
+      inspectedInnerBarcodeValue: formatEan13BarcodeDisplay(inspectedInnerBarcodeRaw),
       rows,
     };
   }, [qc]);
@@ -1991,9 +2000,12 @@ const InspectionReport = () => {
                     <div className="fw-semibold mb-1">
                       PIS Barcode: {itemMasterSummary.pisBarcodeValue}
                     </div>
-                    {itemMasterSummary.pisBarcodeValue !== "Not Set" ? (
+                    {itemMasterSummary.pisBarcodeRenderValue ? (
                       <div className="qc-barcode-wrapper">
-                        <Barcode value={itemMasterSummary.pisBarcodeValue} />
+                        <Barcode
+                          value={itemMasterSummary.pisBarcodeRenderValue}
+                          format="EAN13"
+                        />
                       </div>
                     ) : (
                       <div className="text-secondary small">Not Set</div>
@@ -2003,9 +2015,12 @@ const InspectionReport = () => {
                     <div className="fw-semibold mb-1">
                       QC Barcode: {itemMasterSummary.inspectedBarcodeValue}
                     </div>
-                    {itemMasterSummary.inspectedBarcodeValue !== "Not Set" ? (
+                    {itemMasterSummary.inspectedBarcodeRenderValue ? (
                       <div className="qc-barcode-wrapper">
-                        <Barcode value={itemMasterSummary.inspectedBarcodeValue} />
+                        <Barcode
+                          value={itemMasterSummary.inspectedBarcodeRenderValue}
+                          format="EAN13"
+                        />
                       </div>
                     ) : (
                       <div className="text-secondary small">Not Set</div>
@@ -2017,9 +2032,12 @@ const InspectionReport = () => {
                   <div className="fw-semibold mb-1">
                     Barcode (PIS/QC): {itemMasterSummary.unifiedBarcodeValue}
                   </div>
-                  {itemMasterSummary.unifiedBarcodeValue !== "Not Set" ? (
+                  {itemMasterSummary.unifiedBarcodeRenderValue ? (
                     <div className="qc-barcode-wrapper">
-                      <Barcode value={itemMasterSummary.unifiedBarcodeValue} />
+                      <Barcode
+                        value={itemMasterSummary.unifiedBarcodeRenderValue}
+                        format="EAN13"
+                      />
                     </div>
                   ) : (
                     <div className="text-secondary small">Not Set</div>

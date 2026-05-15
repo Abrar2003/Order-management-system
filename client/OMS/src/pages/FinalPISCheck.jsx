@@ -8,6 +8,7 @@ import EditPisModal from "../components/EditPisModal";
 import { usePermissions } from "../auth/PermissionContext";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
+import { formatEan13BarcodeDisplay } from "../utils/barcode";
 import "../App.css";
 
 const DEFAULT_LIMIT = 20;
@@ -97,6 +98,12 @@ const formatPreviewDateTime = (value) => {
 
 const formatPreviewList = (values = []) =>
   Array.isArray(values) && values.length > 0 ? values.join(", ") : "All";
+
+const formatDifferenceCellValue = (difference = {}, field = "") => {
+  const value = difference?.[field] || "Not Set";
+  if (String(difference?.section || "").toLowerCase() !== "barcode") return value;
+  return formatEan13BarcodeDisplay(value);
+};
 
 const waitForFontsReady = async () => {
   if (typeof document !== "undefined" && document.fonts?.ready) {
@@ -311,8 +318,8 @@ const FinalPisCheckReport = ({
                                 {difference?.attribute || "-"}
                               </div>
                             </td>
-                            <td>{difference?.inspected || "Not Set"}</td>
-                            <td>{difference?.pis || "Not Set"}</td>
+                            <td>{formatDifferenceCellValue(difference, "inspected")}</td>
+                            <td>{formatDifferenceCellValue(difference, "pis")}</td>
                             <td>
                               <span className="pis-diff-delta-badge">
                                 {difference?.delta || "Mismatch"}

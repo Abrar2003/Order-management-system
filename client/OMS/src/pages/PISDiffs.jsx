@@ -20,6 +20,7 @@ import {
   hasMeaningfulMeasuredSize,
 } from "../utils/measuredSizeForm";
 import { formatFixedNumber, formatLbhValue } from "../utils/measurementDisplay";
+import { formatEan13BarcodeDisplay } from "../utils/barcode";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
 
@@ -168,6 +169,12 @@ const formatMeasurementBlock = (entries = [], fallbackWeight = "Not Set") => {
     sizeDisplay,
     weightDisplay,
   };
+};
+
+const formatDifferenceCellValue = (difference = {}, field = "") => {
+  const value = difference?.[field] || "Not Set";
+  if (String(difference?.section || "").toLowerCase() !== "barcode") return value;
+  return formatEan13BarcodeDisplay(value);
 };
 
 const MeasurementCell = ({
@@ -360,8 +367,8 @@ const PisDiffPdfReport = ({ report, reportRef = null }) => {
                               {difference?.attribute || "-"}
                             </div>
                           </td>
-                          <td>{difference?.inspected || "Not Set"}</td>
-                          <td>{difference?.pis || "Not Set"}</td>
+                          <td>{formatDifferenceCellValue(difference, "inspected")}</td>
+                          <td>{formatDifferenceCellValue(difference, "pis")}</td>
                           <td>
                             <span className="pis-diff-delta-badge">
                               {difference?.delta || "Mismatch"}

@@ -71,6 +71,7 @@ const {
 const {
   buildQcImagesArchive,
 } = require("../services/qcImageDownload.service");
+const { formatEan13BarcodeDisplay } = require("../helpers/barcodeFormat");
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
 
@@ -845,8 +846,8 @@ const buildQcEditLogSnapshot = (qcDoc = {}, inspectionRecords = []) => ({
   pending: String(toNonNegativeNumber(qcDoc?.quantities?.pending, 0)),
   qc_rejected: String(toNonNegativeNumber(qcDoc?.quantities?.qc_rejected, 0)),
   barcode: [
-    `master ${toNonNegativeNumber(qcDoc?.master_barcode ?? qcDoc?.barcode, 0)}`,
-    `inner ${toNonNegativeNumber(qcDoc?.inner_barcode, 0)}`,
+    `master ${formatEan13BarcodeDisplay(qcDoc?.master_barcode ?? qcDoc?.barcode)}`,
+    `inner ${formatEan13BarcodeDisplay(qcDoc?.inner_barcode)}`,
   ].join(" | "),
   packed_size: formatAuditBoolean(qcDoc?.packed_size),
   finishing: formatAuditBoolean(qcDoc?.finishing),

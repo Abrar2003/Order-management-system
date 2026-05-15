@@ -75,6 +75,7 @@ const {
   buildItemUpdateAuditSnapshot,
   buildItemUpdateLogPayload,
 } = require("../helpers/itemUpdateAudit");
+const { formatEan13BarcodeDisplay } = require("../helpers/barcodeFormat");
 const { normalizeUserRoleKey } = require("../helpers/userRole");
 
 const escapeRegex = (value = "") =>
@@ -2177,10 +2178,10 @@ const buildPisDiffDetailedComparisons = (item = {}) => {
       section: "Barcode",
       segment: "Master",
       attribute: "Barcode",
-      inspected: inspectedBarcode,
-      pis: pisBarcode,
+      inspected: formatEan13BarcodeDisplay(inspectedBarcode),
+      pis: formatEan13BarcodeDisplay(pisBarcode),
       delta: "Mismatch",
-      note: `Inspected barcode ${inspectedBarcode} does not match PIS barcode ${pisBarcode}.`,
+      note: `Inspected barcode ${formatEan13BarcodeDisplay(inspectedBarcode)} does not match PIS barcode ${formatEan13BarcodeDisplay(pisBarcode)}.`,
     });
   }
 
@@ -3172,11 +3173,15 @@ exports.exportPisDiffCheckedReport = async (req, res) => {
         inspected_box_weight: inspectedBoxBlock.weightDisplay,
         pis_box_size: pisBoxBlock.sizeDisplay,
         pis_box_weight: pisBoxBlock.weightDisplay,
-        inspected_barcode:
-          normalizeTextField(item?.qc?.master_barcode || item?.qc?.barcode) || "Not Set",
-        pis_barcode:
-          normalizeTextField(item?.pis_master_barcode || item?.pis_barcode) || "Not Set",
-        pis_inner_barcode: normalizeTextField(item?.pis_inner_barcode) || "Not Set",
+        inspected_barcode: formatEan13BarcodeDisplay(
+          normalizeTextField(item?.qc?.master_barcode || item?.qc?.barcode),
+        ),
+        pis_barcode: formatEan13BarcodeDisplay(
+          normalizeTextField(item?.pis_master_barcode || item?.pis_barcode),
+        ),
+        pis_inner_barcode: formatEan13BarcodeDisplay(
+          normalizeTextField(item?.pis_inner_barcode),
+        ),
         updated_at: item?.updatedAt
           ? new Date(item.updatedAt).toISOString().slice(0, 10)
           : "",

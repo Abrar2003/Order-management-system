@@ -29,6 +29,7 @@ import {
   sortClientRows,
 } from "../utils/clientSort";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
+import { formatEan13BarcodeDisplay, toEan13BarcodeValue } from "../utils/barcode";
 import { formatPositiveCbm } from "../utils/cbm";
 import { formatFixedNumber, formatLbhValue } from "../utils/measurementDisplay";
 import {
@@ -562,8 +563,11 @@ const QcDetails = () => {
     (qc?.master_barcode || qc?.barcode) > 0
       ? String(qc?.master_barcode || qc?.barcode)
       : "";
+  const ean13BarcodeValue = toEan13BarcodeValue(barcodeValue);
+  const displayedBarcodeValue = formatEan13BarcodeDisplay(barcodeValue);
   const innerBarcodeValue =
     qc?.inner_barcode > 0 ? String(qc.inner_barcode) : "";
+  const displayedInnerBarcodeValue = formatEan13BarcodeDisplay(innerBarcodeValue);
 
   const cbmData = useMemo(() => {
     if (!qc) return { top: "", bottom: "", total: "" };
@@ -2296,20 +2300,20 @@ const QcDetails = () => {
                 <div className="col-lg-6">
                   <div className="qc-info-label">Master Barcode</div>
                   <div className="qc-info-value">
-                    {barcodeValue || "Not Set"}
+                    {barcodeValue ? displayedBarcodeValue : "Not Set"}
                   </div>
                 </div>
-                {barcodeValue && (
+                {ean13BarcodeValue && (
                   <div className="col-lg-6">
                     <div className="qc-barcode-wrapper">
-                      <Barcode value={barcodeValue} />
+                      <Barcode value={ean13BarcodeValue} format="EAN13" />
                     </div>
                   </div>
                 )}
                 {innerBarcodeValue && (
                   <div className="col-lg-6">
                     <div className="qc-info-label">Inner Carton Barcode</div>
-                    <div className="qc-info-value">{innerBarcodeValue}</div>
+                    <div className="qc-info-value">{displayedInnerBarcodeValue}</div>
                   </div>
                 )}
               </div>
