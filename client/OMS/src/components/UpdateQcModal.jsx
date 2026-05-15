@@ -376,11 +376,11 @@ const buildLabelRangesFromLabels = (labels = []) => {
 const getInitialLabelRanges = (record) => {
   const existingRanges = Array.isArray(record?.label_ranges)
     ? record.label_ranges
-        .map((range) => ({
-          start: String(range?.start ?? "").trim(),
-          end: String(range?.end ?? "").trim(),
-        }))
-        .filter((range) => range.start !== "" || range.end !== "")
+      .map((range) => ({
+        start: String(range?.start ?? "").trim(),
+        end: String(range?.end ?? "").trim(),
+      }))
+      .filter((range) => range.start !== "" || range.end !== "")
     : [];
 
   if (existingRanges.length > 0) return existingRanges;
@@ -427,18 +427,18 @@ const resolveLatestInspectionRecordForRequestEntry = (
 
   const requestHistoryId = String(
     requestEntry?._id ||
-      requestEntry?.request_history_id ||
-      requestEntry?.id ||
-      "",
+    requestEntry?.request_history_id ||
+    requestEntry?.id ||
+    "",
   ).trim();
   const requestDateKey = toISODateString(
     requestEntry?.request_date || requestEntry?.requested_date,
   );
   const requestInspectorId = String(
     requestEntry?.inspector?._id ||
-      requestEntry?.inspector ||
-      requestEntry?.inspector_id ||
-      "",
+    requestEntry?.inspector ||
+    requestEntry?.inspector_id ||
+    "",
   ).trim();
   const canUseDateFallbackRecord = (record = {}) => {
     const linkedRequestHistoryId = String(record?.request_history_id || "").trim();
@@ -762,6 +762,119 @@ const UpdateQcModal = ({
   const barcodeReaderRef = useRef(null);
   const barcodeReaderControlsRef = useRef(null);
   const barcodeUploadInputRef = useRef(null);
+  const barcodeFocusPointRef = useRef(null);
+  const barcodeFocusResetTimerRef = useRef(null);
+
+  const getBarcodeVideoTrack = () =>
+    barcodeStreamRef.current?.getVideoTracks?.()[0] || null;
+
+  const getSupportedCameraValue = (capabilities, key, preferredValue) => {
+    const values = capabilities?.[key];
+    return Array.isArray(values) && values.includes(preferredValue)
+      ? preferredValue
+      : undefined;
+  };
+
+  const applyBarcodeCameraPrecisionSettings = async ({
+    focusPoint = null,
+    preferContinuousFocus = true,
+  } = {}) => {
+    const track = getBarcodeVideoTrack();
+    if (!track || typeof track.applyConstraints !== "function") return false;
+
+    const capabilities =
+      typeof track.getCapabilities === "function" ? track.getCapabilities() : {};
+
+    const advanced = [];
+
+    const continuousFocus = getSupportedCameraValue(
+      capabilities,
+      "focusMode",
+      "continuous",
+    );
+
+    const singleShotFocus = getSupportedCameraValue(
+      capabilities,
+      "focusMode",
+      "single-shot",
+    );
+
+    if (preferContinuousFocus && continuousFocus) {
+      advanced.push({ focusMode: continuousFocus });
+    } else if (singleShotFocus) {
+      advanced.push({ focusMode: singleShotFocus });
+    }
+
+    if (focusPoint && Array.isArray(capabilities?.pointsOfInterest)) {
+      advanced.push({
+        pointsOfInterest: [
+          {
+            x: Math.max(0, Math.min(1, focusPoint.x)),
+            y: Math.max(0, Math.min(1, focusPoint.y)),
+          },
+        ],
+      });
+    }
+
+    if (Array.isArray(capabilities?.exposureMode)) {
+      if (capabilities.exposureMode.includes("continuous")) {
+        advanced.push({ exposureMode: "continuous" });
+      }
+    }
+
+    if (Array.isArray(capabilities?.whiteBalanceMode)) {
+      if (capabilities.whiteBalanceMode.includes("continuous")) {
+        advanced.push({ whiteBalanceMode: "continuous" });
+      }
+    }
+
+    if (capabilities?.zoom) {
+      const min = Number(capabilities.zoom.min ?? 1);
+      const max = Number(capabilities.zoom.max ?? min);
+      const barcodeZoom = Math.min(max, Math.max(min, 2));
+
+      if (Number.isFinite(barcodeZoom)) {
+        advanced.push({ zoom: barcodeZoom });
+      }
+    }
+
+    if (advanced.length === 0) return false;
+
+    try {
+      await track.applyConstraints({ advanced });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleBarcodeVideoClick = async (event) => {
+    const video = barcodeVideoRef.current;
+    if (!video) return;
+
+    const rect = video.getBoundingClientRect();
+    const x = (event.clientX - rect.left) / rect.width;
+    const y = (event.clientY - rect.top) / rect.height;
+
+    barcodeFocusPointRef.current = { x, y };
+
+    const focused = await applyBarcodeCameraPrecisionSettings({
+      focusPoint: { x, y },
+      preferContinuousFocus: false,
+    });
+
+    setBarcodeScannerStatus(
+      focused ? "Focused. Scanning..." : "Tap focus is not supported on this device. Scanning...",
+    );
+
+    if (barcodeFocusResetTimerRef.current) {
+      clearTimeout(barcodeFocusResetTimerRef.current);
+    }
+
+    barcodeFocusResetTimerRef.current = setTimeout(() => {
+      applyBarcodeCameraPrecisionSettings({ preferContinuousFocus: true });
+    }, 1500);
+  };
   const canEditLockedQcFields =
     isInspectionRecordUpdate || canRewriteLatestInspectionRecord || isQcUser;
   const canEditLockedQcSizeFields =
@@ -806,8 +919,8 @@ const UpdateQcModal = ({
         : null;
     const defaultInspectorId = String(
       adminRecord?.inspector?._id ||
-        adminRecord?.inspector ||
-        assignedInspectorId,
+      adminRecord?.inspector ||
+      assignedInspectorId,
     );
     const initialLabelRanges = adminRecord
       ? getInitialLabelRanges(adminRecord)
@@ -955,9 +1068,9 @@ const UpdateQcModal = ({
       ),
       last_inspected_date: toDDMMYYYYInputValue(
         adminRecord?.inspection_date ||
-          latestRequestEntry?.request_date ||
-          qc.request_date ||
-          qc.last_inspected_date,
+        latestRequestEntry?.request_date ||
+        qc.request_date ||
+        qc.last_inspected_date,
         "",
       ),
     });
@@ -1045,6 +1158,11 @@ const UpdateQcModal = ({
         }
         barcodeVideoRef.current.srcObject = null;
       }
+      if (barcodeFocusResetTimerRef.current) {
+        clearTimeout(barcodeFocusResetTimerRef.current);
+        barcodeFocusResetTimerRef.current = null;
+      }
+      barcodeFocusPointRef.current = null;
 
       barcodeDetectorRef.current = null;
     };
@@ -1090,7 +1208,15 @@ const UpdateQcModal = ({
       }
 
       const stream = await mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" } },
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          frameRate: { ideal: 30, max: 30 },
+          focusMode: { ideal: "continuous" },
+          exposureMode: { ideal: "continuous" },
+          whiteBalanceMode: { ideal: "continuous" },
+        },
         audio: false,
       });
 
@@ -1100,6 +1226,9 @@ const UpdateQcModal = ({
       }
 
       barcodeStreamRef.current = stream;
+      await applyBarcodeCameraPrecisionSettings({
+        preferContinuousFocus: true,
+      });
 
       const videoElement = barcodeVideoRef.current;
       if (!videoElement) {
@@ -1158,6 +1287,12 @@ const UpdateQcModal = ({
         {
           video: {
             facingMode: { ideal: "environment" },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+            frameRate: { ideal: 30, max: 30 },
+            focusMode: { ideal: "continuous" },
+            exposureMode: { ideal: "continuous" },
+            whiteBalanceMode: { ideal: "continuous" },
           },
           audio: false,
         },
@@ -1182,6 +1317,13 @@ const UpdateQcModal = ({
       );
 
       barcodeReaderControlsRef.current = controls;
+      const attachedStream = videoElement.srcObject;
+      if (attachedStream && typeof attachedStream.getVideoTracks === "function") {
+        barcodeStreamRef.current = attachedStream;
+        await applyBarcodeCameraPrecisionSettings({
+          preferContinuousFocus: true,
+        });
+      }
     };
 
     const startScanner = async () => {
@@ -1288,9 +1430,9 @@ const UpdateQcModal = ({
           [name]: nextValue,
           ...(hasTotalWeightValue
             ? buildClearedFormFields([
-                ...INSPECTED_WEIGHT_TOP_FORM_KEYS,
-                ...INSPECTED_WEIGHT_BOTTOM_FORM_KEYS,
-              ])
+              ...INSPECTED_WEIGHT_TOP_FORM_KEYS,
+              ...INSPECTED_WEIGHT_BOTTOM_FORM_KEYS,
+            ])
             : {}),
         };
       }
@@ -1316,9 +1458,9 @@ const UpdateQcModal = ({
           [name]: nextValue,
           ...(hasTotalItemLbhValue
             ? buildClearedFormFields([
-                ...INSPECTED_ITEM_TOP_LBH_FORM_KEYS,
-                ...INSPECTED_ITEM_BOTTOM_LBH_FORM_KEYS,
-              ])
+              ...INSPECTED_ITEM_TOP_LBH_FORM_KEYS,
+              ...INSPECTED_ITEM_BOTTOM_LBH_FORM_KEYS,
+            ])
             : {}),
         };
       }
@@ -1344,9 +1486,9 @@ const UpdateQcModal = ({
           [name]: nextValue,
           ...(hasTotalBoxLbhValue
             ? buildClearedFormFields([
-                ...INSPECTED_BOX_TOP_LBH_FORM_KEYS,
-                ...INSPECTED_BOX_BOTTOM_LBH_FORM_KEYS,
-              ])
+              ...INSPECTED_BOX_TOP_LBH_FORM_KEYS,
+              ...INSPECTED_BOX_BOTTOM_LBH_FORM_KEYS,
+            ])
             : {}),
         };
       }
@@ -1448,9 +1590,9 @@ const UpdateQcModal = ({
       setBarcodeUploadStatus("");
       setBarcodeUploadError(
         error?.response?.data?.message ||
-          error?.response?.data?.details ||
-          error?.message ||
-          "Failed to scan barcode file.",
+        error?.response?.data?.details ||
+        error?.message ||
+        "Failed to scan barcode file.",
       );
     } finally {
       setBarcodeUploadLoading(false);
@@ -1474,12 +1616,12 @@ const UpdateQcModal = ({
         prev[groupKey].map((entry, entryIndex) =>
           entryIndex === index
             ? {
-                ...entry,
-                [field]:
-                  field === "remark"
-                    ? String(value || "").trim().toLowerCase()
-                    : value,
-              }
+              ...entry,
+              [field]:
+                field === "remark"
+                  ? String(value || "").trim().toLowerCase()
+                  : value,
+            }
             : entry,
         ),
         prev[groupKey]?.length || 1,
@@ -1588,7 +1730,7 @@ const UpdateQcModal = ({
     if (isQcUpdateBlockedByMissingRequest) {
       setError(
         qcUserRequestAvailability.reason ||
-          "A new QC request is required before QC can update this record.",
+        "A new QC request is required before QC can update this record.",
       );
       return;
     }
@@ -1658,10 +1800,10 @@ const UpdateQcModal = ({
       0,
       Number(
         currentRequestInspectionRecord?.vendor_requested ||
-          latestRequestEntry?.quantity_requested ||
-          requestedQuantityLimit ||
-          aqlRequestedQuantity ||
-          0,
+        latestRequestEntry?.quantity_requested ||
+        requestedQuantityLimit ||
+        aqlRequestedQuantity ||
+        0,
       ) || 0,
     );
     const currentRequestCheckedBefore = Math.max(
@@ -1910,13 +2052,13 @@ const UpdateQcModal = ({
       : 0;
     const labelBoxMode = inspectedBoxSizePayload.hasAnyInput
       ? detectBoxPackagingMode(
-          inspectedBoxSizePayload.mode || form.inspected_box_mode,
-          boxSizesForLabelValidation,
-        )
+        inspectedBoxSizePayload.mode || form.inspected_box_mode,
+        boxSizesForLabelValidation,
+      )
       : detectBoxPackagingMode(
-          form.inspected_box_mode || existingInspectedBoxMode,
-          boxSizesForLabelValidation,
-        );
+        form.inspected_box_mode || existingInspectedBoxMode,
+        boxSizesForLabelValidation,
+      );
     const requiresBoxSizeCountForLabels =
       labelBoxMode !== BOX_PACKAGING_MODES.CARTON;
 
@@ -1947,10 +2089,10 @@ const UpdateQcModal = ({
       : "";
     const currentMasterBarcodeValue = Number(
       existingItemMaster?.master_barcode ||
-        existingItemMaster?.barcode ||
-        qc?.master_barcode ||
-        qc?.barcode ||
-        0,
+      existingItemMaster?.barcode ||
+      qc?.master_barcode ||
+      qc?.barcode ||
+      0,
     );
     const currentInnerBarcodeValue = Number(
       existingItemMaster?.inner_barcode || qc?.inner_barcode || 0,
@@ -1998,16 +2140,16 @@ const UpdateQcModal = ({
         isAdminRewriteMode && Boolean(qc?.item_master?._id);
       const payload = isAdminRewriteMode
         ? {
-            admin_rewrite_latest_record: true,
-            remarks: normalizedRemarks,
-            packed_size: Boolean(form.packed_size),
-            finishing: Boolean(form.finishing),
-            branding: Boolean(form.branding),
-            last_inspected_date: lastInspectedDateIso,
-          }
+          admin_rewrite_latest_record: true,
+          remarks: normalizedRemarks,
+          packed_size: Boolean(form.packed_size),
+          finishing: Boolean(form.finishing),
+          branding: Boolean(form.branding),
+          last_inspected_date: lastInspectedDateIso,
+        }
         : {
-            remarks: normalizedRemarks || undefined,
-          };
+          remarks: normalizedRemarks || undefined,
+        };
 
       if (!isAdminRewriteMode) {
         if (form.qc_checked !== "") payload.qc_checked = qcChecked;
@@ -2131,9 +2273,9 @@ const UpdateQcModal = ({
       );
       const requestedDateIso = toISODateString(
         inspectionRecord?.requested_date ||
-          inspectionRecord?.request_date ||
-          qc?.request_date ||
-          lastInspectedDateIso,
+        inspectionRecord?.request_date ||
+        qc?.request_date ||
+        lastInspectedDateIso,
       );
 
       if (!requestedDateIso) {
@@ -2260,9 +2402,9 @@ const UpdateQcModal = ({
       );
       const requestedDateIso = toISODateString(
         rewriteTargetRecord?.requested_date ||
-          rewriteTargetRecord?.request_date ||
-          qc?.request_date ||
-          lastInspectedDateIso,
+        rewriteTargetRecord?.request_date ||
+        qc?.request_date ||
+        lastInspectedDateIso,
       );
 
       if (!requestedDateIso) {
@@ -2451,12 +2593,12 @@ const UpdateQcModal = ({
   const requestedInspectorId = String(qc?.inspector?._id || qc?.inspector || "").trim();
   const requestedInspectorName = String(
     qc?.inspector?.name
-      || (
-        requestedInspectorId
-        && requestedInspectorId === currentUserId
-        && user?.name
-      )
-      || "",
+    || (
+      requestedInspectorId
+      && requestedInspectorId === currentUserId
+      && user?.name
+    )
+    || "",
   ).trim();
   const disableInspectorSelection =
     isQcUser || (!hasElevatedAccess && (qc?.quantities?.qc_checked || 0) > 0);
@@ -2608,140 +2750,140 @@ const UpdateQcModal = ({
                     : entry.remark;
                   return (
                     <>
-                <div className="small text-secondary mb-2">
-                  {isCartonMode
-                    ? index === 0
-                      ? "Inner carton"
-                      : "Master carton"
-                    : safeCount === 1
-                    ? "Single entry"
-                    : `Entry ${index + 1}${displayedRemark ? ` | ${getRemarkLabel(displayedRemarkOptions, displayedRemark)}` : ""}`}
-                </div>
-                <div className="row g-2">
-                  {safeCount > 1 && (
-                    <div className="col-md-3">
-                      <label className="form-label small text-secondary">Remark</label>
-                      <select
-                        className="form-select"
-                        value={displayedRemark}
-                        onChange={(event) =>
-                          handleSizeEntryChange(
-                            entriesKey,
-                            index,
-                            "remark",
-                            event.target.value,
-                          )
-                        }
-                        disabled={locked || isCartonMode}
-                      >
-                        <option value="">Select Remark</option>
-                        {displayedRemarkOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                  <div className={entryColumnClass}>
-                    <label className="form-label small text-secondary">L</label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      value={entry.L}
-                      onChange={(event) =>
-                        handleSizeEntryChange(entriesKey, index, "L", event.target.value)
-                      }
-                      min="0"
-                      step="any"
-                      disabled={locked}
-                    />
-                  </div>
-                  <div className={entryColumnClass}>
-                    <label className="form-label small text-secondary">B</label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      value={entry.B}
-                      onChange={(event) =>
-                        handleSizeEntryChange(entriesKey, index, "B", event.target.value)
-                      }
-                      min="0"
-                      step="any"
-                      disabled={locked}
-                    />
-                  </div>
-                  <div className={entryColumnClass}>
-                    <label className="form-label small text-secondary">H</label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      value={entry.H}
-                      onChange={(event) =>
-                        handleSizeEntryChange(entriesKey, index, "H", event.target.value)
-                      }
-                      min="0"
-                      step="any"
-                      disabled={locked}
-                    />
-                  </div>
-                  <div className={safeCount > 1 ? "col-md-3" : "col-md-3"}>
-                    <label className="form-label small text-secondary">{weightLabel}</label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      value={entry.weight}
-                      onChange={(event) =>
-                        handleSizeEntryChange(entriesKey, index, "weight", event.target.value)
-                      }
-                      min="0"
-                      step="any"
-                      disabled={locked}
-                    />
-                  </div>
-                  {isCartonMode && index === 0 && (
-                    <div className="col-md-3">
-                      <label className="form-label small text-secondary">Item Count In Inner</label>
-                      <input
-                        type="number"
-                        className="form-control"
-                        value={entry.item_count_in_inner}
-                        onChange={(event) =>
-                          handleSizeEntryChange(
-                            entriesKey,
-                            index,
-                            "item_count_in_inner",
-                            event.target.value,
-                          )
-                        }
-                        min="0"
-                        step="1"
-                        disabled={locked}
-                      />
-                    </div>
-                  )}
-                  {isCartonMode && index === 1 && (
-                    <div className="col-md-3">
-                      <label className="form-label small text-secondary">Box Count In Master</label>
-                      <input
-                        type="number"
-                        className="form-control"
-                        value={entry.box_count_in_master}
-                        onChange={(event) =>
-                          handleSizeEntryChange(
-                            entriesKey,
-                            index,
-                            "box_count_in_master",
-                            event.target.value,
-                          )
-                        }
-                        min="0"
-                        step="1"
-                        disabled={locked}
-                      />
-                    </div>
-                  )}
-                </div>
+                      <div className="small text-secondary mb-2">
+                        {isCartonMode
+                          ? index === 0
+                            ? "Inner carton"
+                            : "Master carton"
+                          : safeCount === 1
+                            ? "Single entry"
+                            : `Entry ${index + 1}${displayedRemark ? ` | ${getRemarkLabel(displayedRemarkOptions, displayedRemark)}` : ""}`}
+                      </div>
+                      <div className="row g-2">
+                        {safeCount > 1 && (
+                          <div className="col-md-3">
+                            <label className="form-label small text-secondary">Remark</label>
+                            <select
+                              className="form-select"
+                              value={displayedRemark}
+                              onChange={(event) =>
+                                handleSizeEntryChange(
+                                  entriesKey,
+                                  index,
+                                  "remark",
+                                  event.target.value,
+                                )
+                              }
+                              disabled={locked || isCartonMode}
+                            >
+                              <option value="">Select Remark</option>
+                              {displayedRemarkOptions.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                        <div className={entryColumnClass}>
+                          <label className="form-label small text-secondary">L</label>
+                          <input
+                            type="number"
+                            className="form-control"
+                            value={entry.L}
+                            onChange={(event) =>
+                              handleSizeEntryChange(entriesKey, index, "L", event.target.value)
+                            }
+                            min="0"
+                            step="any"
+                            disabled={locked}
+                          />
+                        </div>
+                        <div className={entryColumnClass}>
+                          <label className="form-label small text-secondary">B</label>
+                          <input
+                            type="number"
+                            className="form-control"
+                            value={entry.B}
+                            onChange={(event) =>
+                              handleSizeEntryChange(entriesKey, index, "B", event.target.value)
+                            }
+                            min="0"
+                            step="any"
+                            disabled={locked}
+                          />
+                        </div>
+                        <div className={entryColumnClass}>
+                          <label className="form-label small text-secondary">H</label>
+                          <input
+                            type="number"
+                            className="form-control"
+                            value={entry.H}
+                            onChange={(event) =>
+                              handleSizeEntryChange(entriesKey, index, "H", event.target.value)
+                            }
+                            min="0"
+                            step="any"
+                            disabled={locked}
+                          />
+                        </div>
+                        <div className={safeCount > 1 ? "col-md-3" : "col-md-3"}>
+                          <label className="form-label small text-secondary">{weightLabel}</label>
+                          <input
+                            type="number"
+                            className="form-control"
+                            value={entry.weight}
+                            onChange={(event) =>
+                              handleSizeEntryChange(entriesKey, index, "weight", event.target.value)
+                            }
+                            min="0"
+                            step="any"
+                            disabled={locked}
+                          />
+                        </div>
+                        {isCartonMode && index === 0 && (
+                          <div className="col-md-3">
+                            <label className="form-label small text-secondary">Item Count In Inner</label>
+                            <input
+                              type="number"
+                              className="form-control"
+                              value={entry.item_count_in_inner}
+                              onChange={(event) =>
+                                handleSizeEntryChange(
+                                  entriesKey,
+                                  index,
+                                  "item_count_in_inner",
+                                  event.target.value,
+                                )
+                              }
+                              min="0"
+                              step="1"
+                              disabled={locked}
+                            />
+                          </div>
+                        )}
+                        {isCartonMode && index === 1 && (
+                          <div className="col-md-3">
+                            <label className="form-label small text-secondary">Box Count In Master</label>
+                            <input
+                              type="number"
+                              className="form-control"
+                              value={entry.box_count_in_master}
+                              onChange={(event) =>
+                                handleSizeEntryChange(
+                                  entriesKey,
+                                  index,
+                                  "box_count_in_master",
+                                  event.target.value,
+                                )
+                              }
+                              min="0"
+                              step="1"
+                              disabled={locked}
+                            />
+                          </div>
+                        )}
+                      </div>
                     </>
                   );
                 })()}
@@ -2774,10 +2916,10 @@ const UpdateQcModal = ({
         role="document"
       >
         <div className="modal-content">
-	          <div className="modal-header">
-	            <h5 className="modal-title">
-	              {isInspectionRecordUpdate ? "Update Inspection Record" : "Update QC Record"}
-	            </h5>
+          <div className="modal-header">
+            <h5 className="modal-title">
+              {isInspectionRecordUpdate ? "Update Inspection Record" : "Update QC Record"}
+            </h5>
             <button
               type="button"
               className="btn-close"
@@ -2786,7 +2928,7 @@ const UpdateQcModal = ({
             />
           </div>
 
-          <div style={{ marginBottom: "30px"}} className="modal-body d-grid gap-3">
+          <div style={{ marginBottom: "30px" }} className="modal-body d-grid gap-3">
             <div className="row g-3 qc-modal-summary-row">
               <div className="col qc-modal-summary-item">
                 <div className="small text-secondary">Order ID</div>
@@ -2823,10 +2965,10 @@ const UpdateQcModal = ({
               </div>
             </div>
 
-	            {canRewriteLatestInspectionRecord && latestInspectionRecord && (
-	              <div className="small text-secondary">
-	                Admin updates rewrite the latest inspection record and sync the QC totals.
-	              </div>
+            {canRewriteLatestInspectionRecord && latestInspectionRecord && (
+              <div className="small text-secondary">
+                Admin updates rewrite the latest inspection record and sync the QC totals.
+              </div>
             )}
 
             {isQcUpdateBlockedByMissingRequest && (
@@ -2985,6 +3127,7 @@ const UpdateQcModal = ({
                       autoPlay
                       muted
                       playsInline
+                      onClick={handleBarcodeVideoClick}
                       className="w-100 rounded"
                       style={{ maxHeight: "240px", objectFit: "cover", background: "#111827" }}
                     />
@@ -3053,6 +3196,7 @@ const UpdateQcModal = ({
                         autoPlay
                         muted
                         playsInline
+                        onClick={handleBarcodeVideoClick}
                         className="w-100 rounded"
                         style={{ maxHeight: "240px", objectFit: "cover", background: "#111827" }}
                       />
@@ -3131,7 +3275,7 @@ const UpdateQcModal = ({
                 </div>
               </div>
 
-              
+
 
               <div className="col-md-2">
                 <label className="form-label">Finishing</label>
@@ -3177,25 +3321,25 @@ const UpdateQcModal = ({
 
               <div className="col-md-6 d-flex flex-column">{canManageLabels && (
                 <>
-                <label
+                  <label
                     htmlFor="branding"
                     className="form-label"
                   >
                     Allocate Label
                   </label>
                   <div>
-                          <button
-                            type="button"
-                            className="btn btn-outline-secondary"
-                            onClick={() => {
-                              setShowAllocateModal(true);
-                            }}
-                            >
-                            Allocate 
-                          </button>
-                              </div>
-                            </>
-                        )}</div>
+                    <button
+                      type="button"
+                      className="btn btn-outline-secondary"
+                      onClick={() => {
+                        setShowAllocateModal(true);
+                      }}
+                    >
+                      Allocate
+                    </button>
+                  </div>
+                </>
+              )}</div>
 
               <div className="col-md-6">
                 <label className="form-label d-block">Label Ranges</label>
@@ -3294,12 +3438,12 @@ const UpdateQcModal = ({
         </div>
       </div>
       {showAllocateModal && (
-              <AllocateLabelsModal
-                onClose={() => {
-                  setShowAllocateModal(false);
-                }}
-              />
-            )}
+        <AllocateLabelsModal
+          onClose={() => {
+            setShowAllocateModal(false);
+          }}
+        />
+      )}
     </div>
   );
 };
