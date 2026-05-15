@@ -72,6 +72,8 @@ const {
   buildQcImagesArchive,
 } = require("../services/qcImageDownload.service");
 
+const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
+
 const normalizeLabels = (labels = []) => {
   if (!Array.isArray(labels)) return [];
   const numericLabels = labels

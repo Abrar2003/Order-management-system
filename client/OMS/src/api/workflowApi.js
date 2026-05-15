@@ -206,6 +206,6 @@ export const updateWorkflowDepartment = async (id, payload = {}) => {
 };
 
 export const getWorkflowUsers = async (params = {}) => {
-  const res = await api.get("/auth", { params });
-  return res.data;
+  const res = await api.get("/workflow/users", { params });
+  return res.data?.data || [];
 };

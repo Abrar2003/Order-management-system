@@ -307,9 +307,7 @@ const WorkflowTasksPanel = ({
         await Promise.allSettled([
           getWorkflowTaskTypes(),
           getWorkflowDepartments(),
-          canAssignWorkflow || canFilterByAssignee || canCreateWorkflow
-            ? getWorkflowUsers()
-            : Promise.resolve([]),
+          getWorkflowUsers(),
           api.get("/orders/brands-and-vendors"),
         ]);
 
@@ -354,7 +352,7 @@ const WorkflowTasksPanel = ({
     } finally {
       setLookupLoading(false);
     }
-  }, [canAssignWorkflow, canCreateWorkflow, canFilterByAssignee, canViewWorkflow]);
+  }, [canViewWorkflow]);
 
   useEffect(() => {
     const normalizedFixedStatus = normalizeText(fixedStatusFilter);

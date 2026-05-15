@@ -16,6 +16,7 @@ const {
   completeTask,
   createTask,
   getWorkflowDashboard,
+  getWorkflowAssignableUsers,
   getWorkflowTask,
   getWorkflowTasks,
   patchTask,
@@ -109,6 +110,13 @@ router.post(
 );
 
 router.get(
+  "/users",
+  auth,
+  requirePermission("workflow", "view"),
+  getWorkflowAssignableUsers,
+);
+
+router.get(
   "/tasks",
   auth,
   requirePermission("workflow", "view"),
@@ -125,14 +133,14 @@ router.get(
 router.patch(
   "/tasks/:id",
   auth,
-  requirePermission("workflow", "edit"),
+  requirePermission("workflow", "view"),
   patchTask,
 );
 
 router.patch(
   "/tasks/:id/assign",
   auth,
-  requirePermission("workflow", "edit"),
+  requirePermission("workflow", "view"),
   assignTask,
 );
 

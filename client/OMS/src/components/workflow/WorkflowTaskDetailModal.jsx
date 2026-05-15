@@ -177,8 +177,8 @@ const WorkflowTaskDetailModal = ({
   const canComplete = isAssignedUser && task?.status === "started";
   const canApprove = isTaskAssigner && task?.status === "complete";
   const canEditCurrentTaskDetails =
-    canEditTaskDetails &&
-    (canEditAnyTaskDetails || isTaskCreator || isAssignedUser || isTaskAssigner);
+    isTaskCreator ||
+    (canEditTaskDetails && (canEditAnyTaskDetails || isAssignedUser || isTaskAssigner));
   const canUpload =
     task?.upload_required !== false &&
     task?.status === "approved" &&
@@ -189,7 +189,8 @@ const WorkflowTaskDetailModal = ({
     );
   const canRework =
     canManageWorkflow && ["complete", "approved", "uploaded"].includes(task?.status);
-  const canAssign = canAssignWorkflow && canEditCurrentTaskDetails && task?.status !== "uploaded";
+  const canAssign =
+    (canAssignWorkflow || isTaskCreator) && canEditCurrentTaskDetails && task?.status !== "uploaded";
   const canDelete =
     Boolean(task?._id) &&
     (canDeleteWorkflow || (canDeleteOwnTask && isTaskCreator));

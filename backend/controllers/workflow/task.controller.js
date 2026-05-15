@@ -16,6 +16,8 @@ const {
   updateWorkflowTaskDetails,
   updateWorkflowTaskStatus,
 } = require("../../services/workflow/workflowStatusService");
+const User = require("../../models/user.model");
+const { normalizeUserRole } = require("../../helpers/userRole");
 const { getErrorStatusCode } = require("./_utils");
 
 const getWorkflowDashboard = async (req, res) => {
@@ -55,6 +57,29 @@ const getWorkflowTasks = async (req, res) => {
     return res.status(getErrorStatusCode(error)).json({
       success: false,
       message: error.message || "Failed to fetch workflow tasks",
+    });
+  }
+};
+
+const getWorkflowAssignableUsers = async (_req, res) => {
+  try {
+    const users = await User.find({})
+      .lean()
+      .select("_id name role email username")
+      .sort({ name: 1 });
+
+    return res.status(200).json({
+      success: true,
+      data: users.map((user) => ({
+        ...user,
+        role: normalizeUserRole(user.role, String(user.role || "").trim()),
+      })),
+    });
+  } catch (error) {
+    console.error("List Workflow Assignable Users Error:", error);
+    return res.status(getErrorStatusCode(error)).json({
+      success: false,
+      message: error.message || "Failed to fetch workflow assignable users",
     });
   }
 };
@@ -392,6 +417,7 @@ module.exports = {
   completeTask,
   createTask,
   getWorkflowDashboard,
+  getWorkflowAssignableUsers,
   getWorkflowTask,
   getWorkflowTasks,
   patchTask,
