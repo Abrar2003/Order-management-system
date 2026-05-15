@@ -618,6 +618,55 @@ const PREFERRED_BARCODE_FORMATS = [
   "codabar",
 ];
 
+const hasMeasuredSizeEntries = (entries = []) =>
+  Array.isArray(entries) && entries.length > 0;
+
+const buildInspectionRecordMeasurementSource = (inspectionRecord = {}, itemMaster = {}) => {
+  const hasInspectionItemSizes = hasMeasuredSizeEntries(inspectionRecord?.inspected_item_sizes);
+  const hasInspectionBoxSizes = hasMeasuredSizeEntries(inspectionRecord?.inspected_box_sizes);
+
+  return {
+    ...itemMaster,
+    ...inspectionRecord,
+    inspected_item_sizes: hasInspectionItemSizes
+      ? inspectionRecord.inspected_item_sizes
+      : itemMaster?.inspected_item_sizes,
+    inspected_box_sizes: hasInspectionBoxSizes
+      ? inspectionRecord.inspected_box_sizes
+      : itemMaster?.inspected_box_sizes,
+    inspected_box_mode: hasInspectionBoxSizes
+      ? inspectionRecord?.inspected_box_mode
+      : itemMaster?.inspected_box_mode,
+    inspected_item_LBH: hasInspectionItemSizes
+      ? inspectionRecord?.inspected_item_LBH
+      : itemMaster?.inspected_item_LBH,
+    inspected_item_top_LBH: hasInspectionItemSizes
+      ? inspectionRecord?.inspected_item_top_LBH
+      : itemMaster?.inspected_item_top_LBH,
+    inspected_item_bottom_LBH: hasInspectionItemSizes
+      ? inspectionRecord?.inspected_item_bottom_LBH
+      : itemMaster?.inspected_item_bottom_LBH,
+    inspected_box_LBH: hasInspectionBoxSizes
+      ? inspectionRecord?.inspected_box_LBH
+      : itemMaster?.inspected_box_LBH,
+    inspected_box_top_LBH: hasInspectionBoxSizes
+      ? inspectionRecord?.inspected_box_top_LBH
+      : itemMaster?.inspected_box_top_LBH,
+    inspected_box_bottom_LBH: hasInspectionBoxSizes
+      ? inspectionRecord?.inspected_box_bottom_LBH
+      : itemMaster?.inspected_box_bottom_LBH,
+    inspected_top_LBH: hasInspectionBoxSizes
+      ? inspectionRecord?.inspected_top_LBH
+      : itemMaster?.inspected_top_LBH,
+    inspected_bottom_LBH: hasInspectionBoxSizes
+      ? inspectionRecord?.inspected_bottom_LBH
+      : itemMaster?.inspected_bottom_LBH,
+    inspected_weight: hasInspectionItemSizes || hasInspectionBoxSizes
+      ? inspectionRecord?.inspected_weight
+      : itemMaster?.inspected_weight,
+  };
+};
+
 const UpdateQcModal = ({
   qc,
   onClose,
@@ -750,11 +799,11 @@ const UpdateQcModal = ({
   useEffect(() => {
     if (!qc) return;
     const assignedInspectorId = String(qc?.inspector?._id || qc?.inspector || "");
-	    const adminRecord = isInspectionRecordUpdate
-	      ? inspectionRecord
-	      : canRewriteLatestInspectionRecord
-	        ? latestInspectionRecord
-	        : null;
+    const adminRecord = isInspectionRecordUpdate
+      ? inspectionRecord
+      : canRewriteLatestInspectionRecord
+        ? latestInspectionRecord
+        : null;
     const defaultInspectorId = String(
       adminRecord?.inspector?._id ||
         adminRecord?.inspector ||
@@ -767,9 +816,9 @@ const UpdateQcModal = ({
       adminRecord?.remarks !== undefined
         ? String(adminRecord.remarks || "")
         : String(qc?.remarks || "");
-	    const itemMaster = isInspectionRecordUpdate
-	      ? inspectionRecord || {}
-	      : qc?.item_master || {};
+    const itemMaster = isInspectionRecordUpdate
+      ? buildInspectionRecordMeasurementSource(inspectionRecord, qc?.item_master || {})
+      : qc?.item_master || {};
     const inspectedItemLbh = itemMaster?.inspected_item_LBH || itemMaster?.item_LBH || {};
     const inspectedBoxLbh = itemMaster?.inspected_box_LBH || itemMaster?.box_LBH || {};
     const inspectedTopLbh =
@@ -841,19 +890,21 @@ const UpdateQcModal = ({
       offeredQuantity: adminRecord
         ? toQuantityInputValue(adminRecord?.vendor_offered)
         : "",
-	      barcode:
-	        (itemMaster?.master_barcode || itemMaster?.barcode || qc?.master_barcode || qc?.barcode) > 0
-	          ? String(itemMaster?.master_barcode || itemMaster?.barcode || qc?.master_barcode || qc?.barcode)
-	          : "",
-	      inner_barcode:
-	        (itemMaster?.inner_barcode || qc?.inner_barcode) > 0
-	          ? String(itemMaster?.inner_barcode || qc.inner_barcode)
-	          : "",
-	      packed_size: Boolean(itemMaster?.packed_size ?? qc?.packed_size),
-	      finishing: Boolean(itemMaster?.finishing ?? qc?.finishing),
-	      branding: Boolean(itemMaster?.branding ?? qc?.branding),
+      barcode:
+        (itemMaster?.master_barcode || itemMaster?.barcode || qc?.master_barcode || qc?.barcode) > 0
+          ? String(itemMaster?.master_barcode || itemMaster?.barcode || qc?.master_barcode || qc?.barcode)
+          : "",
+      inner_barcode:
+        (itemMaster?.inner_barcode || qc?.inner_barcode) > 0
+          ? String(itemMaster?.inner_barcode || qc.inner_barcode)
+          : "",
+      packed_size: Boolean(itemMaster?.packed_size ?? qc?.packed_size),
+      finishing: Boolean(itemMaster?.finishing ?? qc?.finishing),
+      branding: Boolean(itemMaster?.branding ?? qc?.branding),
       labelRanges: initialLabelRanges,
-      remarks: canRewriteLatestInspectionRecord ? initialRemarks : "",
+      remarks: isInspectionRecordUpdate || canRewriteLatestInspectionRecord
+        ? initialRemarks
+        : "",
       inspected_weight_top_net: toDimensionInputValue(
         getWeightValueFromModel(inspectedWeight, "top_net"),
       ),
@@ -922,14 +973,14 @@ const UpdateQcModal = ({
     if (barcodeUploadInputRef.current) {
       barcodeUploadInputRef.current.value = "";
     }
-	  }, [
-	    qc,
-	    canRewriteLatestInspectionRecord,
-	    isInspectionRecordUpdate,
-	    inspectionRecord,
-	    latestInspectionRecord,
-	    latestRequestEntry,
-	  ]);
+  }, [
+    qc,
+    canRewriteLatestInspectionRecord,
+    isInspectionRecordUpdate,
+    inspectionRecord,
+    latestInspectionRecord,
+    latestRequestEntry,
+  ]);
 
   useEffect(() => {
     const shouldCloseScanner =
@@ -1573,9 +1624,9 @@ const UpdateQcModal = ({
     const labels = parsedLabelRangeData.labels;
     const normalizedLabelRanges = parsedLabelRangeData.ranges;
     const labelsForUpdate = normalizeLabels(labels);
-	    const isAdminRewriteMode =
-	      canRewriteLatestInspectionRecord && Boolean(latestInspectionRecord?._id);
-	    const isInspectionRewriteMode = isInspectionRecordUpdate || isAdminRewriteMode;
+    const isAdminRewriteMode =
+      canRewriteLatestInspectionRecord && Boolean(latestInspectionRecord?._id);
+    const isInspectionRewriteMode = isInspectionRecordUpdate || isAdminRewriteMode;
     const hasQuantityUpdate = isAdminRewriteMode
       ? qcChecked > 0 || qcPassed > 0 || offeredQuantity > 0
       : (
@@ -1649,9 +1700,9 @@ const UpdateQcModal = ({
       return;
     }
 
-	    const existingItemMaster = isInspectionRecordUpdate
-	      ? inspectionRecord || {}
-	      : qc?.item_master || {};
+    const existingItemMaster = isInspectionRecordUpdate
+      ? buildInspectionRecordMeasurementSource(inspectionRecord, qc?.item_master || {})
+      : qc?.item_master || {};
     const existingInspectedWeight = existingItemMaster?.inspected_weight || {};
     const existingInspectedBoxMode = detectBoxPackagingMode(
       existingItemMaster?.inspected_box_mode,
@@ -1694,9 +1745,9 @@ const UpdateQcModal = ({
       groupLabel: "Inspected item size",
       remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
       payloadWeightKey: "net_weight",
-	      weightFieldLabel: "Net weight",
-	      treatEmptyAsInput: isInspectionRewriteMode,
-	    });
+      weightFieldLabel: "Net weight",
+      treatEmptyAsInput: isInspectionRewriteMode,
+    });
     if (inspectedItemSizePayload.error) {
       setError(inspectedItemSizePayload.error);
       return;
@@ -1708,10 +1759,10 @@ const UpdateQcModal = ({
       groupLabel: "Inspected box size",
       remarkOptions: BOX_SIZE_REMARK_OPTIONS,
       payloadWeightKey: "gross_weight",
-	      weightFieldLabel: "Gross weight",
-	      treatEmptyAsInput: isInspectionRewriteMode,
-	      mode: form.inspected_box_mode,
-	    });
+      weightFieldLabel: "Gross weight",
+      treatEmptyAsInput: isInspectionRewriteMode,
+      mode: form.inspected_box_mode,
+    });
     if (inspectedBoxSizePayload.error) {
       setError(inspectedBoxSizePayload.error);
       return;
@@ -1894,16 +1945,16 @@ const UpdateQcModal = ({
     const innerBarcodeValue = isCartonPackagingMode
       ? form.inner_barcode.trim()
       : "";
-	    const currentMasterBarcodeValue = Number(
-	      existingItemMaster?.master_barcode ||
-	        existingItemMaster?.barcode ||
-	        qc?.master_barcode ||
-	        qc?.barcode ||
-	        0,
-	    );
-	    const currentInnerBarcodeValue = Number(
-	      existingItemMaster?.inner_barcode || qc?.inner_barcode || 0,
-	    );
+    const currentMasterBarcodeValue = Number(
+      existingItemMaster?.master_barcode ||
+        existingItemMaster?.barcode ||
+        qc?.master_barcode ||
+        qc?.barcode ||
+        0,
+    );
+    const currentInnerBarcodeValue = Number(
+      existingItemMaster?.inner_barcode || qc?.inner_barcode || 0,
+    );
     const barcodeParsed = barcodeValue === "" ? null : Number(barcodeValue);
     const innerBarcodeParsed =
       innerBarcodeValue === "" ? null : Number(innerBarcodeValue);
@@ -2036,116 +2087,116 @@ const UpdateQcModal = ({
         }
       }
 
-	      return payload;
-	    };
+      return payload;
+    };
 
-	    if (isInspectionRecordUpdate) {
-	      if (!inspectionRecord?._id) {
-	        setError("Inspection record could not be resolved for update.");
-	        return;
-	      }
+    if (isInspectionRecordUpdate) {
+      if (!inspectionRecord?._id) {
+        setError("Inspection record could not be resolved for update.");
+        return;
+      }
 
-	      const otherInspectionRecords = inspectionRecords.filter(
-	        (record) => String(record?._id || "") !== String(inspectionRecord?._id || ""),
-	      );
-	      const otherOffered = otherInspectionRecords.reduce(
-	        (sum, record) => sum + (Number(record?.vendor_offered || 0) || 0),
-	        0,
-	      );
-	      const otherChecked = otherInspectionRecords.reduce(
-	        (sum, record) => sum + (Number(record?.checked || 0) || 0),
-	        0,
-	      );
-	      const otherPassed = otherInspectionRecords.reduce(
-	        (sum, record) => sum + (Number(record?.passed || 0) || 0),
-	        0,
-	      );
-	      const totalOfferedAfterUpdate = otherOffered + offeredQuantity;
-	      const totalCheckedAfterUpdate = otherChecked + qcChecked;
-	      const totalSamplePassedAfterUpdate = otherPassed + qcPassed;
-	      const currentRequestEffectivePassedAfterUpdate = getEffectiveRequestPassedQuantity({
-	        requestType,
-	        samplePassed: qcPassed,
-	        requestedQuantity: currentRequestRequestedQuantity,
-	      });
-	      const otherEffectivePassed = Math.max(
-	        0,
-	        currentEffectivePassedTotal - currentRequestEffectivePassedBefore,
-	      );
-	      const totalEffectivePassedAfterUpdate =
-	        otherEffectivePassed + currentRequestEffectivePassedAfterUpdate;
-	      const pendingAfterUpdate = Math.max(
-	        0,
-	        clientDemandQuantity - totalEffectivePassedAfterUpdate,
-	      );
-	      const requestedDateIso = toISODateString(
-	        inspectionRecord?.requested_date ||
-	          inspectionRecord?.request_date ||
-	          qc?.request_date ||
-	          lastInspectedDateIso,
-	      );
+      const otherInspectionRecords = inspectionRecords.filter(
+        (record) => String(record?._id || "") !== String(inspectionRecord?._id || ""),
+      );
+      const otherOffered = otherInspectionRecords.reduce(
+        (sum, record) => sum + (Number(record?.vendor_offered || 0) || 0),
+        0,
+      );
+      const otherChecked = otherInspectionRecords.reduce(
+        (sum, record) => sum + (Number(record?.checked || 0) || 0),
+        0,
+      );
+      const otherPassed = otherInspectionRecords.reduce(
+        (sum, record) => sum + (Number(record?.passed || 0) || 0),
+        0,
+      );
+      const totalOfferedAfterUpdate = otherOffered + offeredQuantity;
+      const totalCheckedAfterUpdate = otherChecked + qcChecked;
+      const totalSamplePassedAfterUpdate = otherPassed + qcPassed;
+      const currentRequestEffectivePassedAfterUpdate = getEffectiveRequestPassedQuantity({
+        requestType,
+        samplePassed: qcPassed,
+        requestedQuantity: currentRequestRequestedQuantity,
+      });
+      const otherEffectivePassed = Math.max(
+        0,
+        currentEffectivePassedTotal - currentRequestEffectivePassedBefore,
+      );
+      const totalEffectivePassedAfterUpdate =
+        otherEffectivePassed + currentRequestEffectivePassedAfterUpdate;
+      const pendingAfterUpdate = Math.max(
+        0,
+        clientDemandQuantity - totalEffectivePassedAfterUpdate,
+      );
+      const requestedDateIso = toISODateString(
+        inspectionRecord?.requested_date ||
+          inspectionRecord?.request_date ||
+          qc?.request_date ||
+          lastInspectedDateIso,
+      );
 
-	      if (!requestedDateIso) {
-	        setError("Requested date is missing on the inspection record.");
-	        return;
-	      }
-	      if (totalCheckedAfterUpdate > totalOfferedAfterUpdate) {
-	        setError("QC checked cannot exceed offered quantity.");
-	        return;
-	      }
-	      if (totalSamplePassedAfterUpdate > totalOfferedAfterUpdate) {
-	        setError("Passed quantity cannot exceed offered quantity.");
-	        return;
-	      }
+      if (!requestedDateIso) {
+        setError("Requested date is missing on the inspection record.");
+        return;
+      }
+      if (totalCheckedAfterUpdate > totalOfferedAfterUpdate) {
+        setError("QC checked cannot exceed offered quantity.");
+        return;
+      }
+      if (totalSamplePassedAfterUpdate > totalOfferedAfterUpdate) {
+        setError("Passed quantity cannot exceed offered quantity.");
+        return;
+      }
 
-	      try {
-	        setSaving(true);
-	        await api.patch(`/qc/${qc._id}/inspection-records`, {
-	          records: [
-	            {
-	              _id: inspectionRecord._id,
-	              requested_date: requestedDateIso,
-	              inspection_date: lastInspectedDateIso,
-	              inspector: selectedInspectorId,
-	              vendor_requested:
-	                Number(inspectionRecord?.vendor_requested || 0) ||
-	                requestedQuantityLimit ||
-	                aqlRequestedQuantity ||
-	                0,
-	              vendor_offered: offeredQuantity,
-	              checked: qcChecked,
-	              passed: qcPassed,
-	              pending_after: pendingAfterUpdate,
-	              cbm: inspectionRecord?.cbm || { total: 0 },
-	              label_ranges: normalizedLabelRanges,
-	              labels_added: labelsForUpdate,
-	              remarks: normalizedRemarks,
-	              barcode: barcodeParsed ?? 0,
-	              master_barcode: barcodeParsed ?? 0,
-	              inner_barcode: isCartonPackagingMode ? innerBarcodeParsed ?? 0 : 0,
-	              packed_size: Boolean(form.packed_size),
-	              finishing: Boolean(form.finishing),
-	              branding: Boolean(form.branding),
-	              inspected_item_sizes: inspectedItemSizePayload.value,
-	              inspected_box_mode: form.inspected_box_mode,
-	              inspected_box_sizes: inspectedBoxSizePayload.value,
-	            },
-	          ],
-	        });
-	        alert("Inspection record updated successfully.");
-	        onUpdated?.();
-	        onClose();
-	      } catch (err) {
-	        setError(
-	          err.response?.data?.message || "Failed to update inspection record.",
-	        );
-	      } finally {
-	        setSaving(false);
-	      }
-		      return;
-		    }
+      try {
+        setSaving(true);
+        await api.patch(`/qc/${qc._id}/inspection-records`, {
+          records: [
+            {
+              _id: inspectionRecord._id,
+              requested_date: requestedDateIso,
+              inspection_date: lastInspectedDateIso,
+              inspector: selectedInspectorId,
+              vendor_requested:
+                Number(inspectionRecord?.vendor_requested || 0) ||
+                requestedQuantityLimit ||
+                aqlRequestedQuantity ||
+                0,
+              vendor_offered: offeredQuantity,
+              checked: qcChecked,
+              passed: qcPassed,
+              pending_after: pendingAfterUpdate,
+              cbm: inspectionRecord?.cbm || { total: 0 },
+              label_ranges: normalizedLabelRanges,
+              labels_added: labelsForUpdate,
+              remarks: normalizedRemarks,
+              barcode: barcodeParsed ?? 0,
+              master_barcode: barcodeParsed ?? 0,
+              inner_barcode: isCartonPackagingMode ? innerBarcodeParsed ?? 0 : 0,
+              packed_size: Boolean(form.packed_size),
+              finishing: Boolean(form.finishing),
+              branding: Boolean(form.branding),
+              inspected_item_sizes: inspectedItemSizePayload.value,
+              inspected_box_mode: form.inspected_box_mode,
+              inspected_box_sizes: inspectedBoxSizePayload.value,
+            },
+          ],
+        });
+        alert("Inspection record updated successfully.");
+        onUpdated?.();
+        onClose();
+      } catch (err) {
+        setError(
+          err.response?.data?.message || "Failed to update inspection record.",
+        );
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
 
-	    if (isAdminRewriteMode) {
+    if (isAdminRewriteMode) {
       const rewriteTargetRecord = currentRequestInspectionRecord || latestInspectionRecord;
       if (!rewriteTargetRecord?._id) {
         setError("Latest inspection record could not be resolved for rewrite.");
@@ -2409,9 +2460,9 @@ const UpdateQcModal = ({
   ).trim();
   const disableInspectorSelection =
     isQcUser || (!hasElevatedAccess && (qc?.quantities?.qc_checked || 0) > 0);
-	  const existingItemMaster = isInspectionRecordUpdate
-	    ? inspectionRecord || {}
-	    : qc?.item_master || {};
+  const existingItemMaster = isInspectionRecordUpdate
+    ? buildInspectionRecordMeasurementSource(inspectionRecord, qc?.item_master || {})
+    : qc?.item_master || {};
   const existingInspectedWeight = existingItemMaster?.inspected_weight || {};
   const existingInspectedBoxMode = detectBoxPackagingMode(
     existingItemMaster?.inspected_box_mode,
