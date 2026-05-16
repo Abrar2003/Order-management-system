@@ -345,12 +345,12 @@ small,
 }
 
 .product-database-modal-dialog .table {
-  table-layout: auto;
+  table-layout: fixed;
 }
 
 .product-database-modal-dialog .form-control-sm,
 .product-database-modal-dialog .form-select-sm {
-  min-width: 6.5rem;
+  min-width: 0;
 }
 
 .product-database-status-badge {
@@ -443,7 +443,7 @@ small,
   letter-spacing: 0.02em;
   text-transform: uppercase;
   color: var(--om-color-text-muted);
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .workflow-task-table > thead > tr > th:nth-child(1),
@@ -1370,7 +1370,9 @@ small,
 
 .table-responsive {
   position: relative;
-  overflow: auto;
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
   scrollbar-color: var(--om-color-border-strong) transparent;
 }
 
@@ -1383,6 +1385,9 @@ small,
   margin-bottom: 0;
   color: var(--om-color-text);
   font-size: var(--om-font-size-table);
+  width: 100%;
+  max-width: 100%;
+  table-layout: fixed;
 }
 
 .table > :not(caption) > * > * {
@@ -1391,6 +1396,27 @@ small,
   background-color: transparent;
   vertical-align: middle;
   font-variant-numeric: tabular-nums;
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.table .btn,
+.table .badge,
+.table .form-control,
+.table .form-select,
+.table .input-group,
+.table .dropdown,
+.table .dropdown-toggle {
+  max-width: 100%;
+}
+
+.table .btn,
+.table .badge,
+.table .dropdown-toggle {
+  white-space: normal;
 }
 
 .table-sm > :not(caption) > * > * {
@@ -1504,6 +1530,56 @@ small,
 
 .om-report-page .table td .btn.btn-link {
   text-align: center;
+}
+
+.pis-table-wrap {
+  overflow-x: hidden;
+}
+
+.pis-table {
+  font-size: 0.86rem;
+}
+
+.pis-table > :not(caption) > * > * {
+  padding: 0.68rem 0.52rem;
+}
+
+.pis-table th:nth-child(1),
+.pis-table td:nth-child(1) {
+  width: 9%;
+}
+
+.pis-table th:nth-child(2),
+.pis-table td:nth-child(2) {
+  width: 18%;
+}
+
+.pis-table th:nth-child(3),
+.pis-table td:nth-child(3),
+.pis-table th:nth-child(4),
+.pis-table td:nth-child(4) {
+  width: 10%;
+}
+
+.pis-table th:nth-child(5),
+.pis-table td:nth-child(5),
+.pis-table th:nth-child(6),
+.pis-table td:nth-child(6),
+.pis-table th:nth-child(9),
+.pis-table td:nth-child(9) {
+  width: 7%;
+}
+
+.pis-table th:nth-child(7),
+.pis-table td:nth-child(7),
+.pis-table th:nth-child(8),
+.pis-table td:nth-child(8) {
+  width: 13%;
+}
+
+.pis-table th:nth-child(10),
+.pis-table td:nth-child(10) {
+  width: 8%;
 }
 
 .form-label {
@@ -1711,8 +1787,9 @@ small,
 }
 
 .po-status-report-table {
-  table-layout: auto !important;
-  min-width: 760px;
+  table-layout: fixed !important;
+  width: 100%;
+  max-width: 100%;
 }
 
 .po-status-report-table th,
@@ -1732,12 +1809,13 @@ small,
 }
 
 .po-status-item-counts > div {
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .pending-po-report-table {
-  table-layout: auto !important;
-  min-width: 760px;
+  table-layout: fixed !important;
+  width: 100%;
+  max-width: 100%;
 }
 
 .pending-po-report-table th,
@@ -1751,13 +1829,14 @@ small,
 }
 
 .vendor-wise-qa-table {
-  table-layout: auto !important;
-  min-width: 920px;
+  table-layout: fixed !important;
+  width: 100%;
+  max-width: 100%;
 }
 
 .vendor-wise-qa-table th,
 .vendor-wise-qa-table td {
-  white-space: nowrap;
+  white-space: normal;
   overflow-wrap: normal;
   word-break: normal;
 }
@@ -1891,7 +1970,7 @@ small,
 
 .align-qc-request-table th,
 .align-qc-request-table td {
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .orders-action-col {
@@ -1931,7 +2010,7 @@ small,
 }
 
 .orders-table-wrap {
-  overflow-x: visible;
+  overflow-x: hidden;
 }
 
 .orders-table {
@@ -2695,19 +2774,20 @@ small,
 }
 
 .om-size-data-table {
-  min-width: 300px;
+  width: 100%;
+  max-width: 100%;
 }
 
 .om-size-data-table th {
   font-size: 0.72rem;
   color: var(--om-color-text-muted);
   background: var(--om-color-surface-muted);
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .om-size-data-table td {
   font-size: 0.82rem;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .pis-diff-pill {
@@ -3061,13 +3141,13 @@ small,
 }
 
 .shipments-table-wrap {
-  overflow-x: auto;
+  overflow-x: hidden;
 }
 
 .shipments-table {
-  table-layout: auto;
+  table-layout: fixed;
   width: 100%;
-  min-width: 1600px;
+  max-width: 100%;
   font-size: 0.84rem;
 }
 
@@ -3078,9 +3158,9 @@ small,
 
 .shipments-table th,
 .shipments-table td {
-  overflow-wrap: normal;
-  word-break: normal;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
   vertical-align: middle;
 }
 
@@ -3095,7 +3175,7 @@ small,
   align-items: flex-start;
   justify-content: flex-start;
   text-align: left;
-  white-space: nowrap;
+  white-space: normal;
   line-height: 1.15;
   font-size: inherit;
 }
@@ -3174,7 +3254,6 @@ small,
 
 .shipments-col-action {
   width: 6.5rem;
-  min-width: 6.5rem;
   text-align: center;
 }
 
@@ -3182,7 +3261,7 @@ small,
   width: 100%;
   min-width: 0;
   padding-inline: 0.55rem;
-  white-space: nowrap;
+  white-space: normal;
   line-height: 1.15;
 }
 

@@ -463,8 +463,8 @@ const PIS = () => {
             {loading ? (
               <div className="text-center py-4">Loading...</div>
             ) : (
-              <div className="table-responsive">
-                <table className="table table-striped table-hover align-middle om-table mb-0">
+              <div className="table-responsive pis-table-wrap">
+                <table className="table table-striped table-hover align-middle om-table pis-table mb-0">
                   <thead className="table-primary">
                     <tr>
                       <th>

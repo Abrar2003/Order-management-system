@@ -414,13 +414,13 @@ const CheckLabelsModal = ({ onClose }) => {
                   <table className="table table-sm align-middle mb-0">
                     <thead>
                       <tr>
-                        <th style={{ minWidth: "220px" }}>QC Name</th>
-                        <th style={{ minWidth: "240px" }}>Allocated Labels</th>
-                        <th style={{ minWidth: "240px" }}>Available To Use</th>
-                        <th style={{ minWidth: "240px" }}>Used Labels</th>
-                        <th style={{ minWidth: "240px" }}>Rejected Labels</th>
-                        <th style={{ minWidth: "300px" }}>Allocation History</th>
-                        <th style={{ minWidth: "320px" }}>Used History</th>
+                        <th>QC Name</th>
+                        <th>Allocated Labels</th>
+                        <th>Available To Use</th>
+                        <th>Used Labels</th>
+                        <th>Rejected Labels</th>
+                        <th>Allocation History</th>
+                        <th>Used History</th>
                       </tr>
                     </thead>
                     <tbody>
