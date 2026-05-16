@@ -34,6 +34,18 @@ const formatDateTime = (value) => formatDateTimeIST(value);
 
 const formatDateOnly = (value) => formatDateOnlyIST(value);
 
+const formatOrdinal = (value) => {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number) || number <= 0) return "Due Date";
+  const mod100 = number % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${number}th Due Date`;
+  const mod10 = number % 10;
+  if (mod10 === 1) return `${number}st Due Date`;
+  if (mod10 === 2) return `${number}nd Due Date`;
+  if (mod10 === 3) return `${number}rd Due Date`;
+  return `${number}th Due Date`;
+};
+
 const getAuditActorName = (actor = {}) =>
   actor?.name || actor?.user?.name || actor?.user?.email || "N/A";
 
@@ -176,7 +188,7 @@ const WorkflowTaskDetailModal = ({
   const reworkDueDateHistory = useMemo(
     () =>
       Array.isArray(task?.rework_due_dates)
-        ? [...task.rework_due_dates].filter((entry) => entry?.date).reverse()
+        ? task.rework_due_dates.filter((entry) => entry?.date)
         : [],
     [task?.rework_due_dates],
   );
@@ -614,12 +626,11 @@ const WorkflowTaskDetailModal = ({
                               key={`${task._id}-rework-date-${index}`}
                               className="workflow-rework-date-history-item"
                             >
-                              <div className="fw-semibold">{formatDateOnly(entry?.date)}</div>
-                              <div className="small text-secondary">
-                                {entry?.comment || "No rework comment"}
+                              <div className="fw-semibold">
+                                {formatOrdinal(reworkDueDateHistory.length - index)}
                               </div>
                               <div className="small text-secondary">
-                                {getAuditActorName(entry?.created_by)} • {formatDateTime(entry?.created_at)}
+                                {formatDateOnly(entry?.date)}
                               </div>
                             </div>
                           ))}

@@ -56,6 +56,18 @@ const formatDateTime = (value) => formatDateTimeIST(value);
 
 const formatDateOnly = (value) => formatDateOnlyIST(value);
 
+const formatOrdinal = (value) => {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number) || number <= 0) return "Due Date";
+  const mod100 = number % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${number}th Due Date`;
+  const mod10 = number % 10;
+  if (mod10 === 1) return `${number}st Due Date`;
+  if (mod10 === 2) return `${number}nd Due Date`;
+  if (mod10 === 3) return `${number}rd Due Date`;
+  return `${number}th Due Date`;
+};
+
 const getTaskUserId = (entry = {}) =>
   entry?.user?._id || entry?.user?.id || entry?.user || entry?._id || entry?.id || "";
 
@@ -232,19 +244,24 @@ const ReworkDueDateHover = ({ taskId = "", dueDate = "", entries = [] }) => {
         Rework Due Date History
       </span>
       <span className="workflow-rework-hovercard-list">
+        <span className="workflow-rework-hovercard-item">
+          <span className="workflow-rework-hovercard-comment">
+            Main Due Date
+          </span>
+          <span className="workflow-rework-hovercard-meta">
+            {formatDateOnly(dueDate)}
+          </span>
+        </span>
         {history.map((entry, index) => (
           <span
             key={`${taskId}-rework-due-${index}`}
             className="workflow-rework-hovercard-item"
           >
             <span className="workflow-rework-hovercard-comment">
+              {formatOrdinal(history.length - index)}
+            </span>
+            <span className="workflow-rework-hovercard-meta">
               {formatDateOnly(entry?.date)}
-            </span>
-            <span className="workflow-rework-hovercard-meta">
-              {entry?.comment || "No rework comment"}
-            </span>
-            <span className="workflow-rework-hovercard-meta">
-              {getAuditActorName(entry?.created_by)} • {formatDateTime(entry?.created_at)}
             </span>
           </span>
         ))}
@@ -958,7 +975,7 @@ const WorkflowTasksPanel = ({
                         ? [...task.reworked.comments].reverse()
                         : [];
                       const reworkDueDateHistory = Array.isArray(task?.rework_due_dates)
-                        ? [...task.rework_due_dates].reverse()
+                        ? task.rework_due_dates
                         : [];
 
                       return (
