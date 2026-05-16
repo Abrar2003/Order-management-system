@@ -187,6 +187,7 @@ const ItemFilesPage = () => {
           search: searchInput,
           brand: brandFilter,
           vendor: vendorFilter,
+          file_type: activeFileType,
           page,
           limit,
         },
@@ -219,7 +220,7 @@ const ItemFilesPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, limit, page, searchInput, vendorFilter]);
+  }, [activeFileType, brandFilter, limit, page, searchInput, vendorFilter]);
 
   useEffect(() => {
     fetchItems();

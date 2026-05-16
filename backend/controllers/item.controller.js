@@ -1442,6 +1442,18 @@ const combineMongoMatches = (...matches) => {
   return { $and: activeMatches };
 };
 
+const buildItemFileViewMatch = (fileType = "") => {
+  const normalizedFileType = normalizeTextField(fileType).toLowerCase();
+  if (normalizedFileType !== "assembly_file") return {};
+
+  return {
+    $or: [
+      { inspected_k_d: true },
+      { pis_k_d: true },
+    ],
+  };
+};
+
 const handleProductDatabaseError = (res, error, fallbackMessage) => {
   if (error instanceof ProductDatabaseError) {
     return res.status(error.statusCode || 400).json({
@@ -3046,11 +3058,28 @@ exports.getItems = async (req, res) => {
     const search = req.query.search;
     const brand = req.query.brand;
     const vendor = req.query.vendor;
+    const fileType = req.query.file_type ?? req.query.fileType;
     const page = parsePositiveInt(req.query.page, 1);
     const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
     const skip = (page - 1) * limit;
 
-    const match = buildItemMatch({ search, brand, vendor });
+    const fileViewMatch = buildItemFileViewMatch(fileType);
+    const match = combineMongoMatches(
+      buildItemMatch({ search, brand, vendor }),
+      fileViewMatch,
+    );
+    const brandOptionsMatch = combineMongoMatches(
+      buildItemMatch({ search, vendor }),
+      fileViewMatch,
+    );
+    const vendorOptionsMatch = combineMongoMatches(
+      buildItemMatch({ search, brand }),
+      fileViewMatch,
+    );
+    const codeOptionsMatch = combineMongoMatches(
+      buildItemMatch({ brand, vendor }),
+      fileViewMatch,
+    );
 
     const [items, totalRecords, brandsRaw, brandNamesRaw, brandsPrimaryRaw, vendorsRaw, codesRaw] =
       await Promise.all([
@@ -3060,11 +3089,11 @@ exports.getItems = async (req, res) => {
           .limit(limit)
           .lean(),
         Item.countDocuments(match),
-        Item.distinct("brands", buildItemMatch({ search, vendor })),
-        Item.distinct("brand_name", buildItemMatch({ search, vendor })),
-        Item.distinct("brand", buildItemMatch({ search, vendor })),
-        Item.distinct("vendors", buildItemMatch({ search, brand })),
-        Item.distinct("code", buildItemMatch({ brand, vendor })),
+        Item.distinct("brands", brandOptionsMatch),
+        Item.distinct("brand_name", brandOptionsMatch),
+        Item.distinct("brand", brandOptionsMatch),
+        Item.distinct("vendors", vendorOptionsMatch),
+        Item.distinct("code", codeOptionsMatch),
       ]);
 
     const latestInspectionReportLookup = await buildLatestInspectionReportLookup(

@@ -10266,6 +10266,9 @@ exports.editInspectionRecords = async (req, res) => {
     const touchedInspectors = new Set();
     const requestHistoryDateUpdates = new Map();
     const qcRequestedQuantityCap = resolveRequestedQuantityFromQc(qc);
+    const hasInspectedKdPayload = payloadRecords.some((row) =>
+      hasOwn(row || {}, "inspected_k_d"),
+    );
 
     const parseRequiredDate = (value, fieldName) => {
       const rawValue = String(value || "").trim();
@@ -10777,8 +10780,9 @@ exports.editInspectionRecords = async (req, res) => {
     });
     syncQcCurrentRequestFieldsFromHistory(qc, refreshedInspections);
 
+    let latestRecord = null;
     if (refreshedInspections.length > 0) {
-      const latestRecord = [...refreshedInspections].sort((a, b) => {
+      latestRecord = [...refreshedInspections].sort((a, b) => {
         const aTime = Math.max(
           toSortableTimestamp(a?.inspection_date),
           toSortableTimestamp(a?.createdAt),
@@ -10801,6 +10805,27 @@ exports.editInspectionRecords = async (req, res) => {
       qc.last_inspected_date = String(
         qc.request_date || qc.last_inspected_date || "",
       );
+    }
+
+    if (hasInspectedKdPayload && latestRecord) {
+      const itemCode = normalizeText(qc?.item?.item_code || "");
+      if (itemCode) {
+        const itemDoc = await Item.findOne({
+          code: {
+            $regex: `^${escapeRegex(itemCode)}$`,
+            $options: "i",
+          },
+        });
+
+        if (
+          itemDoc &&
+          Boolean(itemDoc?.inspected_k_d) !== Boolean(latestRecord?.inspected_k_d)
+        ) {
+          itemDoc.set("inspected_k_d", Boolean(latestRecord.inspected_k_d));
+          itemDoc.markModified("inspected_k_d");
+          await itemDoc.save();
+        }
+      }
     }
 
     qc.updated_by = buildAuditActor(req.user);
