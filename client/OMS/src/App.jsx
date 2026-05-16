@@ -45,6 +45,7 @@ import PoStatusReport from "./pages/PoStatusReport";
 import PendingPoReport from "./pages/PendingPoReport";
 import ProductAnalytics from "./pages/ProductAnalytics";
 import QcReportMismatch from "./pages/QcReportMismatch";
+import InspectedItemsReport from "./pages/InspectedItemsReport";
 import ProductDatabase from "./pages/ProductDatabase";
 import ItemDatabase from "./pages/ItemDatabase";
 import ProductDatabaseDetails from "./pages/ProductDatabaseDetails";
@@ -308,6 +309,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <ProductAnalytics />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/reports/inspected-items"
+            element={
+              <ProtectedRoute>
+                <InspectedItemsReport />
               </ProtectedRoute>
             }
           />

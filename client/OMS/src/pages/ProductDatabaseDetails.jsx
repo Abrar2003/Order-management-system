@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import { ProductDatabaseModal } from "./ProductDatabase";
 import { formatDateDDMMYYYY } from "../utils/date";
 import "../App.css";
 
@@ -80,6 +81,27 @@ const normalizeRawValues = (value) => {
       value: formatValue(entryValue),
     }));
 };
+const buildProductDatabaseActionPayload = (productDatabase = {}) => ({
+  country_of_origin: productDatabase.country_of_origin || "",
+  pd_barcode: productDatabase.pd_barcode || "",
+  pd_master_barcode: productDatabase.pd_master_barcode || productDatabase.pd_barcode || "",
+  pd_inner_barcode: productDatabase.pd_inner_barcode || "",
+  product_type: productDatabase.product_type || null,
+  product_specs: productDatabase.product_specs || {
+    fields: [],
+    item_sizes: [],
+    box_sizes: [],
+    box_mode: "individual",
+    raw_values: {},
+  },
+  pd_item_sizes: Array.isArray(productDatabase.pd_item_sizes)
+    ? productDatabase.pd_item_sizes
+    : [],
+  pd_box_sizes: Array.isArray(productDatabase.pd_box_sizes)
+    ? productDatabase.pd_box_sizes
+    : [],
+  pd_box_mode: productDatabase.pd_box_mode || productDatabase.product_specs?.box_mode || "individual",
+});
 
 const DetailCard = ({ title, children }) => (
   <div className="card om-card h-100 product-database-detail-card">
@@ -147,6 +169,9 @@ const ProductDatabaseDetails = () => {
   const [row, setRow] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  const [actionLoading, setActionLoading] = useState("");
+  const [showEditModal, setShowEditModal] = useState(false);
 
   const fetchDetails = useCallback(async () => {
     try {
@@ -167,6 +192,42 @@ const ProductDatabaseDetails = () => {
   }, [fetchDetails]);
 
   const productDatabase = row?.product_database || {};
+  const productDatabasePermissions = productDatabase?.permissions || {};
+  const canEditProductDatabase = Boolean(productDatabasePermissions.can_edit);
+  const canCheckProductDatabase = Boolean(productDatabasePermissions.can_check);
+  const canApproveProductDatabase = Boolean(productDatabasePermissions.can_approve);
+
+  const runProductDatabaseAction = async (action) => {
+    if (!row?.id) return;
+    if (action === "approve" && !window.confirm("Approve this Product Database record?")) {
+      return;
+    }
+
+    try {
+      setActionLoading(action);
+      setError("");
+      setSuccessMessage("");
+      const payload = buildProductDatabaseActionPayload(productDatabase);
+      const endpoint =
+        action === "check"
+          ? `/items/${row.id}/product-database/check`
+          : `/items/${row.id}/product-database/approve`;
+      const response = await api.post(endpoint, payload);
+      setSuccessMessage(response?.data?.message || "Product Database record updated.");
+      await fetchDetails();
+    } catch (actionError) {
+      setError(actionError?.response?.data?.message || "Failed to update Product Database record.");
+    } finally {
+      setActionLoading("");
+    }
+  };
+
+  const handleModalSaved = async (message) => {
+    setSuccessMessage(message || "Product Database record updated.");
+    setShowEditModal(false);
+    await fetchDetails();
+  };
+
   const specGroups = useMemo(() => {
     const fields = Array.isArray(productDatabase?.product_specs?.fields)
       ? productDatabase.product_specs.fields
@@ -203,14 +264,41 @@ const ProductDatabaseDetails = () => {
             </div>
           </div>
           {row && (
-            <span className={`badge ${getStatusBadgeClass(row.product_database_status)}`}>
-              {getStatusLabel(row.product_database_status)}
-            </span>
+            <div className="d-flex flex-wrap align-items-center justify-content-end gap-2">
+              <span className={`badge ${getStatusBadgeClass(row.product_database_status)}`}>
+                {getStatusLabel(row.product_database_status)}
+              </span>
+              <button
+                type="button"
+                className="btn btn-outline-primary btn-sm"
+                disabled={!canEditProductDatabase || actionLoading !== ""}
+                onClick={() => setShowEditModal(true)}
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                disabled={!canCheckProductDatabase || actionLoading !== ""}
+                onClick={() => runProductDatabaseAction("check")}
+              >
+                {actionLoading === "check" ? "Checking..." : "Check"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-success btn-sm"
+                disabled={!canApproveProductDatabase || actionLoading !== ""}
+                onClick={() => runProductDatabaseAction("approve")}
+              >
+                {actionLoading === "approve" ? "Approving..." : "Approve"}
+              </button>
+            </div>
           )}
         </div>
 
         {loading && <div className="card om-card"><div className="card-body text-center">Loading...</div></div>}
         {error && <div className="alert alert-danger">{error}</div>}
+        {successMessage && <div className="alert alert-success">{successMessage}</div>}
 
         {!loading && row && (
           <div className="row g-4">
@@ -363,6 +451,13 @@ const ProductDatabaseDetails = () => {
           </div>
         )}
       </div>
+      {showEditModal && row?.product_database && (
+        <ProductDatabaseModal
+          item={row.product_database}
+          onClose={() => setShowEditModal(false)}
+          onSaved={handleModalSaved}
+        />
+      )}
     </>
   );
 };

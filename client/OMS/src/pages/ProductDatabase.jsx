@@ -1119,7 +1119,7 @@ const parseTemplateOptionValue = (value = "") => {
   };
 };
 
-const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraft }) => {
+export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onSaveDraft }) => {
   const { hasPermission } = usePermissions();
   const user = getUserFromToken();
   const normalizedRole = normalizeUserRole(user?.role);

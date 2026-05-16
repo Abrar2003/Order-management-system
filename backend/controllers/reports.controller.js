@@ -10,6 +10,10 @@ const {
 } = require("../helpers/inspectionSizeSnapshot");
 
 const normalizeText = (value) => String(value ?? "").trim();
+const escapeRegex = (value = "") =>
+  String(value)
+    .trim()
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const toISODateString = (value) => {
   if (!value) return "";
@@ -60,6 +64,154 @@ const parseCustomDaysInput = (value, fallback = 30) => {
   const parsed = Number.parseInt(String(value ?? "").trim(), 10);
   if (!Number.isFinite(parsed) || parsed < 1) return fallback;
   return Math.min(parsed, 3650);
+};
+
+const INSPECTED_ITEMS_REPORT_LIMIT = 200;
+const INSPECTED_ITEMS_REPORT_SELECT = [
+  "code",
+  "name",
+  "description",
+  "brand",
+  "brand_name",
+  "brands",
+  "vendors",
+  "image",
+  "cad_file",
+  "pis_file",
+  "packeging_ppt",
+  "finish",
+  "qc",
+  "source",
+  "inspected_item_sizes",
+  "inspected_box_sizes",
+  "updatedAt",
+].join(" ");
+
+const INSPECTED_ITEM_CRITERIA = Object.freeze({
+  INSPECTED: "inspected",
+  CAD: "cad",
+  PIS: "pis",
+  PACKAGING_PPT: "packaging_ppt",
+  PRODUCT_IMAGE: "product_image",
+  FINISH: "finish",
+});
+
+const buildInspectedItemsReportMatch = ({ search, brand, vendor } = {}) => {
+  const conditions = [];
+  const normalizedSearch = normalizeText(search);
+  const normalizedBrand = normalizeText(brand);
+  const normalizedVendor = normalizeText(vendor);
+
+  if (normalizedSearch && normalizedSearch.toLowerCase() !== "all") {
+    const escaped = escapeRegex(normalizedSearch);
+    conditions.push({
+      $or: [
+        { code: { $regex: escaped, $options: "i" } },
+        { name: { $regex: escaped, $options: "i" } },
+        { description: { $regex: escaped, $options: "i" } },
+        { brand: { $regex: escaped, $options: "i" } },
+        { brand_name: { $regex: escaped, $options: "i" } },
+      ],
+    });
+  }
+
+  if (normalizedBrand && normalizedBrand.toLowerCase() !== "all") {
+    conditions.push({
+      $or: [
+        { brand: normalizedBrand },
+        { brand_name: normalizedBrand },
+        { brands: normalizedBrand },
+      ],
+    });
+  }
+
+  if (normalizedVendor && normalizedVendor.toLowerCase() !== "all") {
+    conditions.push({ vendors: normalizedVendor });
+  }
+
+  if (conditions.length === 0) return {};
+  if (conditions.length === 1) return conditions[0];
+  return { $and: conditions };
+};
+
+const hasStoredItemFile = (file = {}) =>
+  Boolean(normalizeText(file?.key || file?.url || file?.link || file?.public_id));
+
+const hasFinishUploaded = (item = {}) =>
+  Array.isArray(item?.finish) && item.finish.some((entry) =>
+    normalizeText(entry?.unique_code || entry?.color || entry?.finish_id || entry?.image?.key),
+  );
+
+const hasItemBeenInspected = (item = {}) =>
+  Boolean(
+    normalizeText(item?.qc?.last_inspected_date) ||
+      Number(item?.qc?.quantities?.checked || 0) > 0 ||
+      Number(item?.qc?.quantities?.passed || 0) > 0 ||
+      item?.source?.from_qc === true ||
+      (Array.isArray(item?.inspected_item_sizes) && item.inspected_item_sizes.length > 0) ||
+      (Array.isArray(item?.inspected_box_sizes) && item.inspected_box_sizes.length > 0),
+  );
+
+const buildInspectedItemsReportFlags = (item = {}) => ({
+  inspected: hasItemBeenInspected(item),
+  cad: hasStoredItemFile(item?.cad_file),
+  pis: hasStoredItemFile(item?.pis_file),
+  packaging_ppt: hasStoredItemFile(item?.packeging_ppt),
+  product_image: hasStoredItemFile(item?.image),
+  finish: hasFinishUploaded(item),
+});
+
+const matchesInspectedItemsCriterion = (flags = {}, criterion = "all", status = "all") => {
+  const normalizedCriterion = normalizeText(criterion).toLowerCase() || "all";
+  const normalizedStatus = normalizeText(status).toLowerCase() || "all";
+  if (normalizedCriterion === "all" || normalizedStatus === "all") return true;
+  const value = Boolean(flags[normalizedCriterion]);
+  if (normalizedStatus === "yes") return value;
+  if (normalizedStatus === "no") return !value;
+  return true;
+};
+
+const buildInspectedItemsReportRow = (item = {}) => {
+  const flags = buildInspectedItemsReportFlags(item);
+  return {
+    id: String(item?._id || ""),
+    code: normalizeText(item?.code),
+    name: normalizeText(item?.name),
+    description: normalizeText(item?.description),
+    brand: normalizeText(item?.brand || item?.brand_name || (Array.isArray(item?.brands) ? item.brands[0] : "")),
+    brands: Array.isArray(item?.brands) ? item.brands.filter(Boolean) : [],
+    vendors: Array.isArray(item?.vendors) ? item.vendors.filter(Boolean) : [],
+    last_inspected_date: normalizeText(item?.qc?.last_inspected_date),
+    flags,
+    files: {
+      image: item?.image || {},
+      cad_file: item?.cad_file || {},
+      pis_file: item?.pis_file || {},
+      packeging_ppt: item?.packeging_ppt || {},
+      finish_count: Array.isArray(item?.finish) ? item.finish.length : 0,
+    },
+    updated_at: item?.updatedAt || null,
+  };
+};
+
+const buildInspectedItemsSummary = (rows = []) => {
+  const total = rows.length;
+  const createSummaryEntry = (key, label) => ({
+    key,
+    label,
+    count: rows.filter((row) => Boolean(row?.flags?.[key])).length,
+    total,
+  });
+
+  return {
+    total_items: total,
+    inspected: createSummaryEntry(INSPECTED_ITEM_CRITERIA.INSPECTED, "Inspected Items"),
+    cad: createSummaryEntry(INSPECTED_ITEM_CRITERIA.CAD, "CAD Uploaded"),
+    pis: createSummaryEntry(INSPECTED_ITEM_CRITERIA.PIS, "PIS Uploaded"),
+    packaging_ppt: createSummaryEntry(INSPECTED_ITEM_CRITERIA.PACKAGING_PPT, "Packaging PPT Uploaded"),
+    product_image: createSummaryEntry(INSPECTED_ITEM_CRITERIA.PRODUCT_IMAGE, "Product Image Uploaded"),
+    finish: createSummaryEntry(INSPECTED_ITEM_CRITERIA.FINISH, "Finish Uploaded"),
+  };
 };
 
 const resolveTimelineRange = ({ timeline = "1m", customDays = "" } = {}) => {
@@ -148,11 +300,6 @@ const normalizeOptionalFilter = (value) => {
   }
   return normalized;
 };
-
-const escapeRegex = (value = "") =>
-  String(value)
-    .trim()
-    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const parsePositiveInt = (value, fallback = 1) => {
   const parsed = Number.parseInt(String(value ?? "").trim(), 10);
@@ -1279,6 +1426,76 @@ exports.getVendorWiseQaDetailed = async (req, res) => {
     console.error("Vendor Wise QA Detailed Error:", error);
     return res.status(500).json({
       message: error?.message || "Failed to fetch vendor wise QA detailed report",
+    });
+  }
+};
+
+exports.getInspectedItemsReport = async (req, res) => {
+  try {
+    const search = req.query.search;
+    const brand = req.query.brand;
+    const vendor = req.query.vendor;
+    const criterion = normalizeText(req.query.criterion).toLowerCase() || "all";
+    const status = normalizeText(req.query.status).toLowerCase() || "all";
+    const page = parsePositiveInt(req.query.page, 1);
+    const limit = Math.min(
+      INSPECTED_ITEMS_REPORT_LIMIT,
+      parsePositiveInt(req.query.limit, 20),
+    );
+    const skip = (page - 1) * limit;
+
+    const baseMatch = buildInspectedItemsReportMatch({ search, brand, vendor });
+
+    const [items, brandsRaw, brandNamesRaw, brandsPrimaryRaw, vendorsRaw] = await Promise.all([
+      Item.find(baseMatch)
+        .select(INSPECTED_ITEMS_REPORT_SELECT)
+        .sort({ updatedAt: -1, code: 1 })
+        .lean(),
+      Item.distinct("brands", buildInspectedItemsReportMatch({ search, vendor })),
+      Item.distinct("brand_name", buildInspectedItemsReportMatch({ search, vendor })),
+      Item.distinct("brand", buildInspectedItemsReportMatch({ search, vendor })),
+      Item.distinct("vendors", buildInspectedItemsReportMatch({ search, brand })),
+    ]);
+
+    const baseRows = (Array.isArray(items) ? items : []).map(buildInspectedItemsReportRow);
+    const summary = buildInspectedItemsSummary(baseRows);
+    const filteredRows = baseRows.filter((row) =>
+      matchesInspectedItemsCriterion(row?.flags, criterion, status),
+    );
+
+    return res.status(200).json({
+      success: true,
+      rows: filteredRows.slice(skip, skip + limit),
+      summary,
+      filters: {
+        search: normalizeText(search),
+        brand: normalizeText(brand) || "all",
+        vendor: normalizeText(vendor) || "all",
+        criterion,
+        status,
+        brand_options: [
+          ...new Set([
+            ...(brandsPrimaryRaw || []),
+            ...(brandsRaw || []),
+            ...(brandNamesRaw || []),
+          ].map(normalizeText).filter(Boolean)),
+        ].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" })),
+        vendor_options: [
+          ...new Set((vendorsRaw || []).map(normalizeText).filter(Boolean)),
+        ].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" })),
+      },
+      pagination: {
+        page,
+        limit,
+        total: filteredRows.length,
+        totalPages: Math.max(1, Math.ceil(filteredRows.length / limit)),
+      },
+    });
+  } catch (error) {
+    console.error("Get Inspected Items Report Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to fetch inspected items report.",
     });
   }
 };

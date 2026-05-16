@@ -1998,6 +1998,35 @@ small,
   white-space: normal;
 }
 
+.inspected-items-report-pill-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.85rem;
+}
+
+.inspected-items-report-pill {
+  border: 1px solid var(--om-color-border);
+  border-radius: var(--om-radius-md);
+  background: var(--om-color-surface);
+  box-shadow: var(--om-shadow-sm);
+  padding: 0.85rem 1rem;
+}
+
+.inspected-items-report-pill .fw-semibold {
+  font-size: 1.2rem;
+}
+
+.inspected-items-report-table th,
+.inspected-items-report-table td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.inspected-items-report-table th:nth-child(n + 5),
+.inspected-items-report-table td:nth-child(n + 5) {
+  text-align: center;
+}
+
 @media (max-width: 1200px) {
   .orders-table {
     font-size: 0.76rem;

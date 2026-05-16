@@ -31,4 +31,12 @@ router.get(
   reportsController.getQcReportMismatch,
 );
 
+router.get(
+  "/inspected-items",
+  auth,
+  requirePermission("reports", "view"),
+  cacheRoute("reports", MEDIUM_CACHE_TTL),
+  reportsController.getInspectedItemsReport,
+);
+
 module.exports = router;

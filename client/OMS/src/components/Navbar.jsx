@@ -284,6 +284,7 @@ const Navbar = () => {
       ...(canManageLabels
         ? [actionMenuItem("check-labels", "Check Labels", "check-labels")]
         : []),
+      routeMenuItem("inspected-items-report", "Inspected Items Report", "/reports/inspected-items"),
       routeMenuItem("samples", "Shipped Samples", "/shipped-samples"),
       routeMenuItem("qc-report-mismatch", "QC Mismatch Report", "/reports/qc-report-mismatch"),
     ];

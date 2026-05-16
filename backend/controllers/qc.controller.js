@@ -10585,7 +10585,14 @@ exports.editInspectionRecords = async (req, res) => {
 
         nextLabelRanges = hasLabelRangesField ? normalizedRanges : [];
       }
-
+      const parseOptionalBooleanField = (value, fallback = false) => {
+        if (value === undefined) return fallback;
+        if (typeof value === "boolean") return value;
+        const normalized = String(value ?? "").trim().toLowerCase();
+        if (["true", "1", "yes", "y"].includes(normalized)) return true;
+        if (["false", "0", "no", "n", ""].includes(normalized)) return false;
+        throw new Error("K/D fields must be boolean");
+      };
       const remarks =
         row?.remarks !== undefined
           ? String(row.remarks || "")
