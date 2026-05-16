@@ -29,6 +29,9 @@ const MeasuredSizeSection = ({
   const isCartonMode = mode === BOX_PACKAGING_MODES.CARTON;
   const safeCount = isCartonMode ? 2 : normalizeSizeCount(countValue, 1);
   const entryColumnClass = safeCount > 1 ? "col-md-2" : "col-md-3";
+  const singleEntryLabel = String(countLabel || "").toLowerCase().includes("box")
+    ? "Box"
+    : "Item";
   const getCartonRemark = (index) =>
     index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
 
@@ -103,7 +106,7 @@ const MeasuredSizeSection = ({
                     ? "Inner carton"
                     : "Master carton"
                   : safeCount === 1
-                  ? "Single entry"
+                  ? singleEntryLabel
                   : `Entry ${index + 1}${displayedRemark ? ` | ${getRemarkLabel(displayedRemarkOptions, displayedRemark)}` : ""}`}
               </div>
               <div className="row g-2">
@@ -214,7 +217,7 @@ const MeasuredSizeSection = ({
         </div>
         {safeCount === 1 && !isCartonMode && (
           <div className="small text-secondary mt-2">
-            Single-entry measurements do not use remarks.
+            Single-entry measurements use {singleEntryLabel.toLowerCase()} as the remark.
           </div>
         )}
         {isCartonMode && (

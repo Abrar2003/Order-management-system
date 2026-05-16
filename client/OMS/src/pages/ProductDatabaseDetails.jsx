@@ -264,13 +264,15 @@ const ProductDatabaseDetails = () => {
             </div>
           </div>
           {row && (
-            <div className="d-flex flex-wrap align-items-center justify-content-end gap-2">
-              <span className={`badge ${getStatusBadgeClass(row.product_database_status)}`}>
+            <div className="product-database-details-actions">
+              <span
+                className={`badge product-database-action-pill product-database-status-badge ${getStatusBadgeClass(row.product_database_status)}`}
+              >
                 {getStatusLabel(row.product_database_status)}
               </span>
               <button
                 type="button"
-                className="btn btn-outline-primary btn-sm"
+                className="btn btn-outline-primary btn-sm product-database-action-pill"
                 disabled={!canEditProductDatabase || actionLoading !== ""}
                 onClick={() => setShowEditModal(true)}
               >
@@ -278,7 +280,7 @@ const ProductDatabaseDetails = () => {
               </button>
               <button
                 type="button"
-                className="btn btn-primary btn-sm"
+                className="btn btn-primary btn-sm product-database-action-pill"
                 disabled={!canCheckProductDatabase || actionLoading !== ""}
                 onClick={() => runProductDatabaseAction("check")}
               >
@@ -286,7 +288,7 @@ const ProductDatabaseDetails = () => {
               </button>
               <button
                 type="button"
-                className="btn btn-success btn-sm"
+                className="btn btn-success btn-sm product-database-action-pill"
                 disabled={!canApproveProductDatabase || actionLoading !== ""}
                 onClick={() => runProductDatabaseAction("approve")}
               >

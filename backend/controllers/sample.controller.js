@@ -16,6 +16,7 @@ const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
 const BOX_SIZE_REMARK_OPTIONS = Object.freeze([
   "top",
   "base",
+  "box",
   "box1",
   "box2",
   "box3",
@@ -182,7 +183,9 @@ const normalizeItemSizeEntries = (entries = []) => {
       entry?.gross_weight ?? 0,
       `${label}.gross_weight`,
     );
-    const remark = normalizeText(entry?.remark).toLowerCase();
+    const remark =
+      normalizeText(entry?.remark).toLowerCase() ||
+      (normalizedEntries.length === 1 ? "item" : "");
 
     if ((L > 0 || B > 0 || H > 0) && (!L || !B || !H)) {
       throw new Error(`${label} must include positive L, B, and H values`);
@@ -205,7 +208,7 @@ const normalizeItemSizeEntries = (entries = []) => {
       L,
       B,
       H,
-      remark: normalizedEntries.length > 1 ? remark : "",
+      remark,
       net_weight: netWeight,
       gross_weight: grossWeight,
     };
@@ -266,7 +269,9 @@ const normalizeBoxSizeEntries = (entries = [], boxMode = BOX_PACKAGING_MODES.IND
       };
     }
 
-    const remark = normalizeText(entry?.remark).toLowerCase();
+    const remark =
+      normalizeText(entry?.remark).toLowerCase() ||
+      (normalizedEntries.length === 1 ? "box" : "");
     if (normalizedEntries.length > 1) {
       if (!remark) {
         throw new Error(`${label}.remark is required`);

@@ -11,6 +11,7 @@ import { useShippingInspectors } from "../hooks/useShippingInspectors";
 import {
   SHIPPED_BY_VENDOR_OPTION,
 } from "../hooks/useShippingInspectors";
+import useBrandOptions from "../hooks/useBrandOptions";
 import "../App.css";
 
 const normalizeShipmentDraftInvoiceNumber = (value) => {
@@ -61,6 +62,10 @@ const EditSampleModal = ({ sample, onClose, onSuccess }) => {
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const {
+    brandOptions,
+    loadingBrands,
+  } = useBrandOptions([sample?.brand]);
   const {
     inspectors,
     inspectorById,
@@ -253,14 +258,21 @@ const EditSampleModal = ({ sample, onClose, onSuccess }) => {
               </div>
               <div className="col-md-6">
                 <label className="form-label">Brand</label>
-                <input
-                  type="text"
-                  className="form-control"
+                <select
+                  className="form-select"
                   value={form.brand}
                   onChange={(event) =>
                     setForm((prev) => ({ ...prev, brand: event.target.value }))
                   }
-                />
+                  disabled={saving || loadingBrands}
+                >
+                  <option value="">{loadingBrands ? "Loading brands..." : "Select Brand"}</option>
+                  {brandOptions.map((brand) => (
+                    <option key={brand} value={brand}>
+                      {brand}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="col-md-6">
                 <label className="form-label">Vendor</label>

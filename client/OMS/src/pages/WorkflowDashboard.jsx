@@ -9,6 +9,7 @@ import {
   getWorkflowTaskTypes,
 } from "../api/workflowApi";
 import useWorkflowRealtime from "../hooks/useWorkflowRealtime";
+import useBrandOptions from "../hooks/useBrandOptions";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
@@ -74,6 +75,7 @@ const WorkflowDashboard = () => {
   const [dueDateTo, setDueDateTo] = useState(() => normalizeText(searchParams.get("due_date_to")));
   const [userSearch, setUserSearch] = useState(() => normalizeText(searchParams.get("user_search")));
   const [refreshTick, setRefreshTick] = useState(0);
+  const { brandOptions, loadingBrands } = useBrandOptions([brandFilter]);
 
   const handleRealtimeRefresh = useCallback(() => {
     setRefreshTick((prev) => prev + 1);
@@ -491,12 +493,19 @@ const WorkflowDashboard = () => {
               </div>
               <div className="col-md-3 col-lg-2">
                 <label className="form-label">Brand</label>
-                <input
-                  type="text"
-                  className="form-control"
+                <select
+                  className="form-select"
                   value={brandFilter}
                   onChange={(event) => setBrandFilter(event.target.value)}
-                />
+                  disabled={loadingBrands}
+                >
+                  <option value="">All Brands</option>
+                  {brandOptions.map((brand) => (
+                    <option key={brand} value={brand}>
+                      {brand}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="col-md-3 col-lg-2">
                 <label className="form-label">Due From</label>

@@ -549,6 +549,9 @@ const ProductDatabaseMeasuredSizeSection = ({
   const isCartonMode = mode === BOX_PACKAGING_MODES.CARTON;
   const safeCount = isCartonMode ? 2 : normalizeSizeCount(countValue, 1);
   const entryColumnClass = safeCount > 1 ? "col-md-2" : "col-md-3";
+  const singleEntryLabel = String(countLabel || "").toLowerCase().includes("box")
+    ? "Box"
+    : "Item";
   const getCartonRemark = (index) =>
     index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
 
@@ -638,7 +641,7 @@ const ProductDatabaseMeasuredSizeSection = ({
                     ? "Inner carton"
                     : "Master carton"
                   : safeCount === 1
-                  ? "Single entry"
+                  ? singleEntryLabel
                   : `Entry ${index + 1}${displayedRemark ? ` | ${getRemarkLabel(displayedRemarkOptions, displayedRemark)}` : ""}`}
               </div>
 
@@ -779,7 +782,7 @@ const ProductDatabaseMeasuredSizeSection = ({
 
         {safeCount === 1 && !isCartonMode && (
           <div className="small text-secondary mt-2">
-            Single-entry measurements do not use remarks.
+            Single-entry measurements use {singleEntryLabel.toLowerCase()} as the remark.
           </div>
         )}
         {isCartonMode && (
@@ -944,11 +947,14 @@ const createProductDatabaseMeasuredSizeFormState = (item = {}) => {
 
   return {
     itemCount,
-    itemEntries: ensureMeasuredSizeEntryCount(itemEntries, itemCount),
+    itemEntries: ensureMeasuredSizeEntryCount(itemEntries, itemCount, {
+      singleRemark: "item",
+    }),
     boxMode: resolvedBoxMode,
     boxCount,
     boxEntries: ensureMeasuredSizeEntryCount(boxEntries, boxCount, {
       mode: resolvedBoxMode,
+      singleRemark: "box",
     }),
   };
 };
@@ -983,6 +989,7 @@ const buildMeasuredSizeEntriesPayload = ({
       : normalizeSizeCount(count, 1);
   const scopedEntries = ensureMeasuredSizeEntryCount(entries, safeCount, {
     mode: resolvedMode,
+    singleRemark: isBox ? "box" : "item",
   }).slice(0, safeCount);
 
   return scopedEntries.reduce((payloadEntries, entry, index) => {
@@ -1012,11 +1019,11 @@ const buildMeasuredSizeEntriesPayload = ({
         }
       } else {
         payload.box_type = BOX_ENTRY_TYPES.INDIVIDUAL;
-        const remark = normalizeMeasuredKey(entry?.remark);
+        const remark = normalizeMeasuredKey(entry?.remark) || (safeCount === 1 ? "box" : "");
         if (remark) payload.remark = remark;
       }
     } else {
-      const remark = normalizeMeasuredKey(entry?.remark);
+      const remark = normalizeMeasuredKey(entry?.remark) || (safeCount === 1 ? "item" : "");
       if (remark) payload.remark = remark;
     }
 
@@ -1575,7 +1582,7 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
           boxEntries: ensureMeasuredSizeEntryCount(
             convertMeasuredBoxEntriesMode(prev.boxEntries, nextMode),
             nextMode === BOX_PACKAGING_MODES.CARTON ? 2 : prev.boxCount,
-            { mode: nextMode },
+            { mode: nextMode, singleRemark: "box" },
           ),
         };
       }
@@ -1586,7 +1593,9 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
           return {
             ...prev,
             itemCount: safeCount,
-            itemEntries: ensureMeasuredSizeEntryCount(prev.itemEntries, safeCount),
+            itemEntries: ensureMeasuredSizeEntryCount(prev.itemEntries, safeCount, {
+              singleRemark: "item",
+            }),
           };
         }
 
@@ -1595,6 +1604,7 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
           boxCount: safeCount,
           boxEntries: ensureMeasuredSizeEntryCount(prev.boxEntries, safeCount, {
             mode: prev.boxMode,
+            singleRemark: "box",
           }),
         };
       }
@@ -1632,14 +1642,16 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
           boxEntries: ensureMeasuredSizeEntryCount(
             nextEntries,
             prev.boxCount,
-            { mode: prev.boxMode },
+            { mode: prev.boxMode, singleRemark: "box" },
           ),
         };
       }
 
       return {
         ...prev,
-        itemEntries: ensureMeasuredSizeEntryCount(nextEntries, prev.itemCount),
+        itemEntries: ensureMeasuredSizeEntryCount(nextEntries, prev.itemCount, {
+          singleRemark: "item",
+        }),
       };
     });
   };
@@ -1701,11 +1713,12 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
   const displayedItemEntries = ensureMeasuredSizeEntryCount(
     measuredSizeForm.itemEntries,
     measuredSizeForm.itemCount,
+    { singleRemark: "item" },
   );
   const displayedBoxEntries = ensureMeasuredSizeEntryCount(
     measuredSizeForm.boxEntries,
     measuredSizeForm.boxCount,
-    { mode: measuredSizeForm.boxMode },
+    { mode: measuredSizeForm.boxMode, singleRemark: "box" },
   );
 
   return (
@@ -1742,7 +1755,7 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
             )}
 
             <div className="d-flex flex-wrap gap-2 mb-3">
-              <span className={`badge ${getStatusBadgeClass(item?.pd_checked)}`}>
+              <span className={`badge product-database-status-badge ${getStatusBadgeClass(item?.pd_checked)}`}>
                 {getStatusLabel(item?.pd_checked)}
               </span>
               <span className="om-summary-chip">

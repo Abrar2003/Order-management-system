@@ -544,6 +544,7 @@ const parseSizeEntriesPayload = (
     const isCartonBoxEntry =
       isBoxSizeField && resolvedBoxMode === BOX_PACKAGING_MODES.CARTON;
     const cartonRemark = isCartonBoxEntry ? (index === 0 ? "inner" : "master") : "";
+    const defaultSingleRemark = isBoxSizeField ? "box" : "item";
     const normalizedRemark = isCartonBoxEntry
       ? cartonRemark
       : normalizeTextField(entry?.remark || "").toLowerCase();
@@ -572,7 +573,7 @@ const parseSizeEntriesPayload = (
       L,
       B,
       H,
-      remark: entries.length > 1 ? normalizedRemark : "",
+      remark: entries.length > 1 ? normalizedRemark : normalizedRemark || defaultSingleRemark,
     };
 
     if (weightKey) {

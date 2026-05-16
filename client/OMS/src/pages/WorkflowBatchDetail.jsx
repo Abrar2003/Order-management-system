@@ -4,6 +4,7 @@ import { isManagerLikeRole, isStrictAdminRole } from "../auth/permissions";
 import Navbar from "../components/Navbar";
 import WorkflowTaskDetailModal from "../components/workflow/WorkflowTaskDetailModal";
 import { usePermissions } from "../auth/PermissionContext";
+import useBrandOptions from "../hooks/useBrandOptions";
 import {
   cancelWorkflowBatch,
   deleteWorkflowBatch,
@@ -61,6 +62,10 @@ const WorkflowBatchDetail = () => {
     totalRecords: 0,
   });
   const [refreshTick, setRefreshTick] = useState(0);
+  const { brandOptions } = useBrandOptions([
+    batch?.brand,
+    ...tasks.map((task) => task?.brand),
+  ]);
 
   const handleRealtimeRefresh = useCallback(() => {
     setRefreshTick((prev) => prev + 1);
@@ -534,6 +539,7 @@ const WorkflowBatchDetail = () => {
         <WorkflowTaskDetailModal
           taskId={selectedTaskId}
           availableUsers={users}
+          brandOptions={brandOptions}
           canManageWorkflow={canEditWorkflow}
           canAssignWorkflow={canAssignWorkflow}
           canDeleteWorkflow={canDeleteWorkflow}

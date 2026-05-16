@@ -93,6 +93,7 @@ const WorkflowTaskDetailModal = ({
   taskId,
   availableUsers = [],
   departments = [],
+  brandOptions = [],
   canManageWorkflow = false,
   canAssignWorkflow = false,
   canEditTaskDetails = false,
@@ -119,6 +120,17 @@ const WorkflowTaskDetailModal = ({
   const [commentText, setCommentText] = useState("");
   const [commentType, setCommentType] = useState("general");
   const [editForm, setEditForm] = useState(() => buildTaskEditForm());
+  const availableBrandOptions = useMemo(
+    () =>
+      [
+        ...new Set(
+          [...(Array.isArray(brandOptions) ? brandOptions : []), editForm.brand]
+            .map(normalizeText)
+            .filter(Boolean),
+        ),
+      ].sort((left, right) => left.localeCompare(right)),
+    [brandOptions, editForm.brand],
+  );
 
   const loadTask = async ({ keepMessages = false } = {}) => {
     if (!taskId) return;
@@ -789,13 +801,19 @@ const WorkflowTaskDetailModal = ({
                           </div>
                           <div className="col-md-6">
                             <label className="form-label">Brand</label>
-                            <input
-                              type="text"
-                              className="form-control"
+                            <select
+                              className="form-select"
                               value={editForm.brand}
                               onChange={(event) => handleEditFormChange("brand", event.target.value)}
                               disabled={actionLoading}
-                            />
+                            >
+                              <option value="">Select brand</option>
+                              {availableBrandOptions.map((brand) => (
+                                <option key={brand} value={brand}>
+                                  {brand}
+                                </option>
+                              ))}
+                            </select>
                           </div>
                           <div className="col-md-6">
                             <label className="form-label">Department</label>

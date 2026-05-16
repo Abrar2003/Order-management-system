@@ -16,6 +16,7 @@ const isDuplicateBatchMessage = (message = "") =>
 const WorkflowBatchCreateModal = ({
   taskTypes = [],
   availableUsers = [],
+  brandOptions = [],
   onClose,
   onCreated,
 }) => {
@@ -41,6 +42,17 @@ const WorkflowBatchCreateModal = ({
         (taskType) => taskType?.key === form.task_type_key,
       ) || null,
     [form.task_type_key, taskTypes],
+  );
+  const availableBrandOptions = useMemo(
+    () =>
+      [
+        ...new Set(
+          [...(Array.isArray(brandOptions) ? brandOptions : []), form.brand]
+            .map(normalizeText)
+            .filter(Boolean),
+        ),
+      ].sort((left, right) => left.localeCompare(right)),
+    [brandOptions, form.brand],
   );
 
   const previewTasks = useMemo(
@@ -304,14 +316,20 @@ const WorkflowBatchCreateModal = ({
 
                         <div className="col-12">
                           <label className="form-label">Brand</label>
-                          <input
-                            type="text"
-                            className="form-control"
+                          <select
+                            className="form-select"
                             value={form.brand}
                             onChange={(event) =>
                               setForm((prev) => ({ ...prev, brand: event.target.value }))
                             }
-                          />
+                          >
+                            <option value="">Select brand</option>
+                            {availableBrandOptions.map((brand) => (
+                              <option key={brand} value={brand}>
+                                {brand}
+                              </option>
+                            ))}
+                          </select>
                         </div>
 
                         <div className="col-12">

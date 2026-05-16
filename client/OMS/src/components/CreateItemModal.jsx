@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import api from "../api/axios";
 import MeasuredSizeSection from "./MeasuredSizeSection";
+import useBrandOptions from "../hooks/useBrandOptions";
 import {
   BOX_PACKAGING_MODES,
   BOX_SIZE_REMARK_OPTIONS,
@@ -51,15 +52,23 @@ const CreateItemModal = ({
   const [pisSheetFile, setPisSheetFile] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const {
+    brandOptions: availableBrandOptions,
+    loadingBrands,
+  } = useBrandOptions(brandOptions);
 
   const displayedItemEntries = useMemo(
-    () => ensureMeasuredSizeEntryCount(form.pis_item_sizes, form.pis_item_count),
+    () =>
+      ensureMeasuredSizeEntryCount(form.pis_item_sizes, form.pis_item_count, {
+        singleRemark: "item",
+      }),
     [form.pis_item_sizes, form.pis_item_count],
   );
   const displayedBoxEntries = useMemo(
     () =>
       ensureMeasuredSizeEntryCount(form.pis_box_sizes, form.pis_box_count, {
         mode: form.pis_box_mode,
+        singleRemark: "box",
       }),
     [form.pis_box_count, form.pis_box_mode, form.pis_box_sizes],
   );
@@ -93,7 +102,9 @@ const CreateItemModal = ({
     setForm((prev) => ({
       ...prev,
       [countKey]: safeCount,
-      [entriesKey]: ensureMeasuredSizeEntryCount(prev[entriesKey], safeCount),
+      [entriesKey]: ensureMeasuredSizeEntryCount(prev[entriesKey], safeCount, {
+        singleRemark: entriesKey.includes("box") ? "box" : "item",
+      }),
     }));
   };
 
@@ -106,6 +117,7 @@ const CreateItemModal = ({
       pis_box_count: nextCount,
       pis_box_sizes: ensureMeasuredSizeEntryCount(prev.pis_box_sizes, nextCount, {
         mode: nextMode,
+        singleRemark: "box",
       }),
     }));
   };
@@ -172,6 +184,7 @@ const CreateItemModal = ({
         remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
         payloadWeightKey: "net_weight",
         weightFieldLabel: "Net weight",
+        singleRemark: "item",
       });
       if (pisItemPayload.error) {
         throw new Error(pisItemPayload.error);
@@ -185,6 +198,7 @@ const CreateItemModal = ({
         payloadWeightKey: "gross_weight",
         weightFieldLabel: "Gross weight",
         mode: form.pis_box_mode,
+        singleRemark: "box",
       });
       if (pisBoxPayload.error) {
         throw new Error(pisBoxPayload.error);
@@ -257,19 +271,19 @@ const CreateItemModal = ({
               </div>
               <div className="col-md-6">
                 <label className="form-label">Brand</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  list="create-item-brand-options"
+                <select
+                  className="form-select"
                   value={form.brand}
                   onChange={(event) => handleFieldChange("brand", event.target.value)}
-                  disabled={saving}
-                />
-                <datalist id="create-item-brand-options">
-                  {brandOptions.map((option) => (
-                    <option key={option} value={option} />
+                  disabled={saving || loadingBrands}
+                >
+                  <option value="">{loadingBrands ? "Loading brands..." : "Select Brand"}</option>
+                  {availableBrandOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
                   ))}
-                </datalist>
+                </select>
               </div>
               <div className="col-md-6">
                 <label className="form-label">Vendor</label>

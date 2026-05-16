@@ -147,9 +147,12 @@ const buildInitialForm = (item = {}) => {
     pis_item_count: String(pisItemCount),
     pis_box_mode: pisBoxMode,
     pis_box_count: String(pisBoxCount),
-    pis_item_sizes: ensureMeasuredSizeEntryCount(pisItemEntries, pisItemCount),
+    pis_item_sizes: ensureMeasuredSizeEntryCount(pisItemEntries, pisItemCount, {
+      singleRemark: "item",
+    }),
     pis_box_sizes: ensureMeasuredSizeEntryCount(pisBoxEntries, pisBoxCount, {
       mode: pisBoxMode,
+      singleRemark: "box",
     }),
   };
 };
@@ -228,13 +231,17 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
   const showInspectedReference = !isPisChecked(item);
   const inspectedReference = useMemo(() => buildInspectedReference(item), [item]);
   const displayedItemEntries = useMemo(
-    () => ensureMeasuredSizeEntryCount(form.pis_item_sizes, form.pis_item_count),
+    () =>
+      ensureMeasuredSizeEntryCount(form.pis_item_sizes, form.pis_item_count, {
+        singleRemark: "item",
+      }),
     [form.pis_item_sizes, form.pis_item_count],
   );
   const displayedBoxEntries = useMemo(
     () =>
       ensureMeasuredSizeEntryCount(form.pis_box_sizes, form.pis_box_count, {
         mode: form.pis_box_mode,
+        singleRemark: "box",
       }),
     [form.pis_box_count, form.pis_box_mode, form.pis_box_sizes],
   );
@@ -312,7 +319,9 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
     setForm((prev) => ({
       ...prev,
       [countKey]: safeCount,
-      [entriesKey]: ensureMeasuredSizeEntryCount(prev[entriesKey], safeCount),
+      [entriesKey]: ensureMeasuredSizeEntryCount(prev[entriesKey], safeCount, {
+        singleRemark: entriesKey.includes("box") ? "box" : "item",
+      }),
     }));
   };
 
@@ -325,6 +334,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
       pis_box_count: nextCount,
       pis_box_sizes: ensureMeasuredSizeEntryCount(prev.pis_box_sizes, nextCount, {
         mode: nextMode,
+        singleRemark: "box",
       }),
     }));
   };
@@ -352,7 +362,10 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
             : entry,
         ),
         prev[entriesKey]?.length || 1,
-        entriesKey === "pis_box_sizes" ? { mode: prev.pis_box_mode } : {},
+        {
+          ...(entriesKey === "pis_box_sizes" ? { mode: prev.pis_box_mode } : {}),
+          singleRemark: entriesKey.includes("box") ? "box" : "item",
+        },
       ),
     }));
   };
@@ -370,6 +383,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
         payloadWeightKey: "net_weight",
         weightFieldLabel: "Net weight",
         allowIncomplete: true,
+        singleRemark: "item",
       });
       if (pisItemPayload.error) {
         throw new Error(pisItemPayload.error);
@@ -384,6 +398,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
         weightFieldLabel: "Gross weight",
         mode: form.pis_box_mode,
         allowIncomplete: true,
+        singleRemark: "box",
       });
       if (pisBoxPayload.error) {
         throw new Error(pisBoxPayload.error);

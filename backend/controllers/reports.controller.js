@@ -352,6 +352,7 @@ const QC_REPORT_MISMATCH_ITEM_SELECT = [
   "inspected_weight",
 ].join(" ");
 const QC_REPORT_MISMATCH_RECENT_INSPECTION_LIMIT = 3;
+const QC_REPORT_MISMATCH_STATUS = "Inspection Done";
 
 const getDateTimeValue = (value) => {
   if (!value) return 0;
@@ -751,6 +752,8 @@ const buildInitialInspectionMatch = ({
   inspectorObjectId = null,
 } = {}) => {
   const baseMatch = {
+    status: QC_REPORT_MISMATCH_STATUS,
+    passed: { $gt: 0 },
     $or: [
       {
         inspection_date: {

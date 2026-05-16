@@ -856,14 +856,18 @@ const UploadOrdersModal = ({
                               )}
                             </td>
                             <td>
-                              <input
-                                type="text"
-                                className="form-control form-control-sm"
+                              <select
+                                className="form-select form-select-sm"
                                 value={row.brand}
-                                list="manual-brand-options"
-                                placeholder="Select or type brand"
                                 onChange={(e) => handleManualRowChange(row.id, "brand", e.target.value)}
-                              />
+                              >
+                                <option value="">Select brand</option>
+                                {mergedBrandOptions.map((brand) => (
+                                  <option key={brand} value={brand}>
+                                    {brand}
+                                  </option>
+                                ))}
+                              </select>
                             </td>
                             <td>
                               <input
@@ -920,11 +924,6 @@ const UploadOrdersModal = ({
                 <datalist id="manual-item-code-options">
                   {mergedItemCodeOptions.map((itemCode) => (
                     <option key={itemCode} value={itemCode} />
-                  ))}
-                </datalist>
-                <datalist id="manual-brand-options">
-                  {mergedBrandOptions.map((brand) => (
-                    <option key={brand} value={brand} />
                   ))}
                 </datalist>
                 <datalist id="manual-vendor-options">

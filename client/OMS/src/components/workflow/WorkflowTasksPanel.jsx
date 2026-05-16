@@ -781,12 +781,18 @@ const WorkflowTasksPanel = ({
               </div>
               <div className="col-md-3 col-lg-2">
                 <label className="form-label">Brand</label>
-                <input
-                  type="text"
-                  className="form-control"
+                <select
+                  className="form-select"
                   value={brandFilter}
                   onChange={(event) => setBrandFilter(event.target.value)}
-                />
+                >
+                  <option value="">All</option>
+                  {availableBrandOptions.map((brand) => (
+                    <option key={brand} value={brand}>
+                      {brand}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="col-md-3 col-lg-2">
                 <label className="form-label">Due From</label>
@@ -1118,6 +1124,7 @@ const WorkflowTasksPanel = ({
           taskId={selectedTaskId}
           availableUsers={users}
           departments={departments}
+          brandOptions={availableBrandOptions}
           canManageWorkflow={canManageWorkflow}
           canAssignWorkflow={canAssignWorkflow}
           canEditTaskDetails={canEditWorkflow}
@@ -1139,6 +1146,7 @@ const WorkflowTasksPanel = ({
         <WorkflowBatchCreateModal
           taskTypes={taskTypes}
           availableUsers={users}
+          brandOptions={availableBrandOptions}
           onClose={() => setShowFolderCreateModal(false)}
           onCreated={() => {
             setShowFolderCreateModal(false);

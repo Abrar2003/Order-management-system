@@ -285,6 +285,7 @@ const parseMeasuredSizeEntries = ({
   weightFieldLabel = "Weight",
   treatEmptyAsInput = false,
   mode = BOX_PACKAGING_MODES.INDIVIDUAL,
+  singleRemark = "",
 } = {}) => {
   const parsed = parseMeasuredSizeEntriesUtil({
     entries,
@@ -294,6 +295,7 @@ const parseMeasuredSizeEntries = ({
     payloadWeightKey,
     weightFieldLabel,
     mode,
+    singleRemark,
   });
 
   if (!parsed.hasAnyInput && treatEmptyAsInput) {
@@ -1062,11 +1064,12 @@ const UpdateQcModal = ({
       inspected_item_sizes: ensureMeasuredSizeEntryCount(
         inspectedItemSizeEntries,
         initialInspectedItemCount,
+        { singleRemark: "item" },
       ),
       inspected_box_sizes: ensureMeasuredSizeEntryCount(
         inspectedBoxSizeEntries,
         initialInspectedBoxCount,
-        { mode: inspectedBoxMode },
+        { mode: inspectedBoxMode, singleRemark: "box" },
       ),
       last_inspected_date: toDDMMYYYYInputValue(
         adminRecord?.inspection_date ||
@@ -1403,7 +1406,7 @@ const UpdateQcModal = ({
           inspected_box_sizes: ensureMeasuredSizeEntryCount(
             convertMeasuredBoxEntriesMode(prev.inspected_box_sizes, nextMode),
             nextMode === BOX_PACKAGING_MODES.CARTON ? 2 : prev.inspected_box_count,
-            { mode: nextMode },
+            { mode: nextMode, singleRemark: "box" },
           ),
         };
       }
@@ -1416,8 +1419,8 @@ const UpdateQcModal = ({
             : "inspected_box_sizes";
         const modeOption =
           name === "inspected_box_count"
-            ? { mode: prev.inspected_box_mode }
-            : {};
+            ? { mode: prev.inspected_box_mode, singleRemark: "box" }
+            : { singleRemark: "item" };
         return {
           ...prev,
           [name]: safeCount,
@@ -1628,8 +1631,8 @@ const UpdateQcModal = ({
         ),
         prev[groupKey]?.length || 1,
         groupKey === "inspected_box_sizes"
-          ? { mode: prev.inspected_box_mode }
-          : {},
+          ? { mode: prev.inspected_box_mode, singleRemark: "box" }
+          : { singleRemark: "item" },
       ),
     }));
   };
@@ -1891,6 +1894,7 @@ const UpdateQcModal = ({
       payloadWeightKey: "net_weight",
       weightFieldLabel: "Net weight",
       treatEmptyAsInput: isInspectionRewriteMode,
+      singleRemark: "item",
     });
     if (inspectedItemSizePayload.error) {
       setError(inspectedItemSizePayload.error);
@@ -1906,6 +1910,7 @@ const UpdateQcModal = ({
       weightFieldLabel: "Gross weight",
       treatEmptyAsInput: isInspectionRewriteMode,
       mode: form.inspected_box_mode,
+      singleRemark: "box",
     });
     if (inspectedBoxSizePayload.error) {
       setError(inspectedBoxSizePayload.error);
@@ -2656,11 +2661,12 @@ const UpdateQcModal = ({
   const displayedItemEntries = ensureMeasuredSizeEntryCount(
     form.inspected_item_sizes,
     form.inspected_item_count,
+    { singleRemark: "item" },
   );
   const displayedBoxEntries = ensureMeasuredSizeEntryCount(
     form.inspected_box_sizes,
     form.inspected_box_count,
-    { mode: form.inspected_box_mode },
+    { mode: form.inspected_box_mode, singleRemark: "box" },
   );
   const renderMeasuredSizeSection = ({
     title,
@@ -2679,6 +2685,9 @@ const UpdateQcModal = ({
     const isCartonMode = mode === BOX_PACKAGING_MODES.CARTON;
     const safeCount = isCartonMode ? 2 : normalizeSizeCount(countValue, 1);
     const entryColumnClass = safeCount > 1 ? "col-md-2" : "col-md-3";
+    const singleEntryLabel = String(countLabel || "").toLowerCase().includes("box")
+      ? "Box"
+      : "Item";
     const getCartonRemark = (index) =>
       index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
 
@@ -2766,8 +2775,8 @@ const UpdateQcModal = ({
                             ? "Inner carton"
                             : "Master carton"
                           : safeCount === 1
-                            ? "Single entry"
-                            : `Entry ${index + 1}${displayedRemark ? ` | ${getRemarkLabel(displayedRemarkOptions, displayedRemark)}` : ""}`}
+                          ? singleEntryLabel
+                          : `Entry ${index + 1}${displayedRemark ? ` | ${getRemarkLabel(displayedRemarkOptions, displayedRemark)}` : ""}`}
                       </div>
                       <div className="row g-2">
                         {safeCount > 1 && (
@@ -2902,7 +2911,7 @@ const UpdateQcModal = ({
           </div>
           {safeCount === 1 && !isCartonMode && (
             <div className="small text-secondary mt-2">
-              Single-entry measurements do not use remarks.
+              Single-entry measurements use {singleEntryLabel.toLowerCase()} as the remark.
             </div>
           )}
           {isCartonMode && (

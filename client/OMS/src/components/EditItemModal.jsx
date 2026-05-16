@@ -98,11 +98,12 @@ const buildInitialForm = (item = {}) => {
     inspected_item_sizes: ensureMeasuredSizeEntryCount(
       inspectedItemEntries,
       inspectedItemCount,
+      { singleRemark: "item" },
     ),
     inspected_box_sizes: ensureMeasuredSizeEntryCount(
       inspectedBoxEntries,
       inspectedBoxCount,
-      { mode: inspectedBoxMode },
+      { mode: inspectedBoxMode, singleRemark: "box" },
     ),
     qc: {
       packed_size: Boolean(item?.qc?.packed_size),
@@ -136,13 +137,17 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
   const brandLabel = useMemo(() => getBrandLabel(item), [item]);
   const vendorsLabel = useMemo(() => getVendorsLabel(item), [item]);
   const displayedItemEntries = useMemo(
-    () => ensureMeasuredSizeEntryCount(form.inspected_item_sizes, form.inspected_item_count),
+    () =>
+      ensureMeasuredSizeEntryCount(form.inspected_item_sizes, form.inspected_item_count, {
+        singleRemark: "item",
+      }),
     [form.inspected_item_sizes, form.inspected_item_count],
   );
   const displayedBoxEntries = useMemo(
     () =>
       ensureMeasuredSizeEntryCount(form.inspected_box_sizes, form.inspected_box_count, {
         mode: form.inspected_box_mode,
+        singleRemark: "box",
       }),
     [form.inspected_box_count, form.inspected_box_mode, form.inspected_box_sizes],
   );
@@ -185,7 +190,9 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
     setForm((prev) => ({
       ...prev,
       [countKey]: safeCount,
-      [entriesKey]: ensureMeasuredSizeEntryCount(prev[entriesKey], safeCount),
+      [entriesKey]: ensureMeasuredSizeEntryCount(prev[entriesKey], safeCount, {
+        singleRemark: entriesKey.includes("box") ? "box" : "item",
+      }),
     }));
   };
 
@@ -200,7 +207,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
       inspected_box_sizes: ensureMeasuredSizeEntryCount(
         prev.inspected_box_sizes,
         nextCount,
-        { mode: nextMode },
+        { mode: nextMode, singleRemark: "box" },
       ),
     }));
   };
@@ -228,9 +235,12 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
             : entry,
         ),
         prev[entriesKey]?.length || 1,
-        entriesKey === "inspected_box_sizes"
-          ? { mode: prev.inspected_box_mode }
-          : {},
+        {
+          ...(entriesKey === "inspected_box_sizes"
+            ? { mode: prev.inspected_box_mode }
+            : {}),
+          singleRemark: entriesKey.includes("box") ? "box" : "item",
+        },
       ),
     }));
   };
@@ -247,6 +257,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
         remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
         payloadWeightKey: "net_weight",
         weightFieldLabel: "Net weight",
+        singleRemark: "item",
       });
       if (inspectedItemPayload.error) {
         throw new Error(inspectedItemPayload.error);
@@ -260,6 +271,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
         payloadWeightKey: "gross_weight",
         weightFieldLabel: "Gross weight",
         mode: form.inspected_box_mode,
+        singleRemark: "box",
       });
       if (inspectedBoxPayload.error) {
         throw new Error(inspectedBoxPayload.error);

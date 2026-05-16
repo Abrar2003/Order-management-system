@@ -19,12 +19,8 @@ const TIMELINE_DAYS = Object.freeze({
 });
 const NUMBER_TOLERANCE = 0.001;
 const STATUS_OPTIONS = Object.freeze([
-  { value: DEFAULT_FILTER, label: "All Statuses" },
-  { value: "pending", label: "Pending" },
+  { value: DEFAULT_FILTER, label: "All Eligible Inspections" },
   { value: "Inspection Done", label: "Inspection Done" },
-  { value: "goods not ready", label: "Goods Not Ready" },
-  { value: "rejected", label: "Rejected" },
-  { value: "transfered", label: "Transferred" },
 ]);
 const ITEM_SIZE_FIELDS = Object.freeze([
   { key: "L", label: "L", type: "number" },

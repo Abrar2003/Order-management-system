@@ -353,6 +353,18 @@ small,
   min-width: 6.5rem;
 }
 
+.product-database-status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.2rem;
+  min-width: 5.25rem;
+  padding: 0.45rem 0.9rem;
+  color: #fff !important;
+  text-align: center;
+  line-height: 1;
+}
+
 .product-database-product-type-card {
   border-style: dashed;
 }
@@ -1975,6 +1987,24 @@ small,
 
 .product-database-details-page .badge {
   font-size: 0.85rem;
+}
+
+.product-database-details-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.product-database-details-actions .product-database-action-pill {
+  width: 5.25rem;
+  min-height: 2.2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 0.75rem;
+  white-space: nowrap;
 }
 
 .product-database-detail-card .card-body {

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { applyRectifiedRows, rectifyPdfOrders } from "../services/orders.service";
 import PreviousOrderCheckModal from "./PreviousOrderCheckModal";
 import { formatDateDDMMYYYY } from "../utils/date";
+import useBrandOptions from "../hooks/useBrandOptions";
 import "../App.css";
 
 const decodeBase64ToBlob = (base64String, mimeType) => {
@@ -56,6 +57,7 @@ const RectifyPdfModal = ({
   const [previewRows, setPreviewRows] = useState([]);
   const [checkedRows, setCheckedRows] = useState({});
   const [activePreviousOrderRow, setActivePreviousOrderRow] = useState(null);
+  const { brandOptions, loadingBrands } = useBrandOptions([brand]);
 
   const toDateText = (value) => {
     const formatted = formatDateDDMMYYYY(value, "");
@@ -234,14 +236,19 @@ const RectifyPdfModal = ({
               </div>
               <div className="col-md-6">
                 <label className="form-label">Brand</label>
-                <input
-                  type="text"
-                  className="form-control"
+                <select
+                  className="form-select"
                   value={brand}
                   onChange={(e) => setBrand(e.target.value)}
-                  disabled={loading}
-                  placeholder="e.g. BB"
-                />
+                  disabled={loading || loadingBrands}
+                >
+                  <option value="">{loadingBrands ? "Loading brands..." : "Select Brand"}</option>
+                  {brandOptions.map((brandValue) => (
+                    <option key={brandValue} value={brandValue}>
+                      {brandValue}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="col-md-6">
                 <label className="form-label">Vendor</label>

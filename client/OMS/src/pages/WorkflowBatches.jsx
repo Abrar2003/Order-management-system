@@ -4,6 +4,7 @@ import { isManagerLikeRole, isStrictAdminRole } from "../auth/permissions";
 import Navbar from "../components/Navbar";
 import WorkflowBatchCreateModal from "../components/workflow/WorkflowBatchCreateModal";
 import { usePermissions } from "../auth/PermissionContext";
+import useBrandOptions from "../hooks/useBrandOptions";
 import {
   cancelWorkflowBatch,
   deleteWorkflowBatch,
@@ -83,6 +84,10 @@ const WorkflowBatches = () => {
     totalRecords: 0,
   });
   const [refreshTick, setRefreshTick] = useState(0);
+  const {
+    brandOptions,
+    loadingBrands,
+  } = useBrandOptions([brandFilter, ...rows.map((row) => row?.brand)]);
 
   const handleRealtimeRefresh = useCallback(() => {
     setRefreshTick((prev) => prev + 1);
@@ -348,12 +353,19 @@ const WorkflowBatches = () => {
               </div>
               <div className="col-md-3 col-lg-2">
                 <label className="form-label">Brand</label>
-                <input
-                  type="text"
-                  className="form-control"
+                <select
+                  className="form-select"
                   value={brandFilter}
                   onChange={(event) => setBrandFilter(event.target.value)}
-                />
+                  disabled={loadingBrands}
+                >
+                  <option value="">{loadingBrands ? "Loading brands..." : "All"}</option>
+                  {brandOptions.map((brand) => (
+                    <option key={brand} value={brand}>
+                      {brand}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="col-md-3 col-lg-2">
                 <label className="form-label">Task Type</label>
@@ -572,6 +584,7 @@ const WorkflowBatches = () => {
         <WorkflowBatchCreateModal
           taskTypes={taskTypes.filter((taskType) => taskType?.is_active !== false)}
           availableUsers={users}
+          brandOptions={brandOptions}
           onClose={() => setShowCreateModal(false)}
           onCreated={(createdBatch) => {
             setShowCreateModal(false);

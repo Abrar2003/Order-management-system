@@ -25,6 +25,7 @@ const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
 const BOX_SIZE_REMARK_OPTIONS = Object.freeze([
   "top",
   "base",
+  "box",
   "box1",
   "box2",
   "box3",
@@ -135,7 +136,9 @@ const normalizeItemSizeEntries = (entries = []) => {
   return meaningfulEntries.map((entry, index) => {
     const entryLabel = `PD item size ${index + 1}`;
 
-    const normalizedRemark = normalizeKey(entry?.remark || entry?.type || "");
+    const normalizedRemark =
+      normalizeKey(entry?.remark || entry?.type || "") ||
+      (meaningfulEntries.length === 1 ? "item" : "");
     validateRemarkOption(
       normalizedRemark,
       ITEM_SIZE_REMARK_OPTIONS,
@@ -270,7 +273,9 @@ const normalizeBoxSizeEntries = (
       return cartonEntry;
     }
 
-    const normalizedRemark = normalizeKey(entry?.remark || entry?.type || "");
+    const normalizedRemark =
+      normalizeKey(entry?.remark || entry?.type || "") ||
+      (meaningfulEntries.length === 1 ? "box" : "");
     validateRemarkOption(
       normalizedRemark,
       BOX_SIZE_REMARK_OPTIONS,

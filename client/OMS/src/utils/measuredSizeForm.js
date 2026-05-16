@@ -24,6 +24,7 @@ export const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
 export const BOX_SIZE_REMARK_OPTIONS = Object.freeze([
   { value: "top", label: "Top" },
   { value: "base", label: "Base" },
+  { value: "box", label: "Box" },
   { value: "box1", label: "Box 1" },
   { value: "box2", label: "Box 2" },
   { value: "box3", label: "Box 3" },
@@ -176,7 +177,7 @@ const coerceMeasuredSizeEntry = (
 export const ensureMeasuredSizeEntryCount = (
   entries = [],
   count = 1,
-  { mode = BOX_PACKAGING_MODES.INDIVIDUAL } = {},
+  { mode = BOX_PACKAGING_MODES.INDIVIDUAL, singleRemark = "" } = {},
 ) => {
   const resolvedMode = detectBoxPackagingMode(mode, entries);
   const safeCount =
@@ -215,7 +216,7 @@ export const ensureMeasuredSizeEntryCount = (
       }
     });
   } else if (safeCount === 1 && nextEntries[0]) {
-    nextEntries[0].remark = "";
+    nextEntries[0].remark = normalizeRemarkValue(singleRemark);
     nextEntries[0].box_type = BOX_ENTRY_TYPES.INDIVIDUAL;
   }
 
@@ -246,6 +247,14 @@ export const hasMeaningfulMeasuredSize = (entry = {}) =>
   String(entry?.H || "").trim() !== "" ||
   String(entry?.weight || "").trim() !== "" ||
   String(entry?.remark || "").trim() !== "" ||
+  String(entry?.item_count_in_inner || "").trim() !== "" ||
+  String(entry?.box_count_in_master || "").trim() !== "";
+
+const hasMeasurementInput = (entry = {}) =>
+  String(entry?.L || "").trim() !== "" ||
+  String(entry?.B || "").trim() !== "" ||
+  String(entry?.H || "").trim() !== "" ||
+  String(entry?.weight || "").trim() !== "" ||
   String(entry?.item_count_in_inner || "").trim() !== "" ||
   String(entry?.box_count_in_master || "").trim() !== "";
 
@@ -480,6 +489,7 @@ export const parseMeasuredSizeEntries = ({
   weightFieldLabel = "Weight",
   mode = BOX_PACKAGING_MODES.INDIVIDUAL,
   allowIncomplete = false,
+  singleRemark = "",
 } = {}) => {
   const resolvedMode = detectBoxPackagingMode(mode, entries);
   const safeCount =
@@ -489,9 +499,19 @@ export const parseMeasuredSizeEntries = ({
   const scopedEntries = ensureMeasuredSizeEntryCount(
     entries,
     safeCount,
-    { mode: resolvedMode },
+    { mode: resolvedMode, singleRemark },
   ).slice(0, safeCount);
-  const hasMeaningfulInput = scopedEntries.some((entry) => hasMeaningfulMeasuredSize(entry));
+  const defaultSingleRemark = normalizeRemarkValue(singleRemark);
+  const hasMeaningfulInput = scopedEntries.some((entry) => {
+    const isDefaultSingleRemarkOnly =
+      safeCount === 1 &&
+      resolvedMode !== BOX_PACKAGING_MODES.CARTON &&
+      defaultSingleRemark &&
+      normalizeRemarkValue(entry?.remark) === defaultSingleRemark;
+    return isDefaultSingleRemarkOnly
+      ? hasMeasurementInput(entry)
+      : hasMeaningfulMeasuredSize(entry);
+  });
 
   if (!hasMeaningfulInput) {
     return {
@@ -536,8 +556,12 @@ export const parseMeasuredSizeEntries = ({
     const H = parsedH.value;
 
     let normalizedRemark = "";
-    if (safeCount > 1) {
-      const isCartonMode = resolvedMode === BOX_PACKAGING_MODES.CARTON;
+    const isCartonMode = resolvedMode === BOX_PACKAGING_MODES.CARTON;
+    if (safeCount === 1 && !isCartonMode) {
+      normalizedRemark =
+        String(entry?.remark || "").trim().toLowerCase() ||
+        normalizeRemarkValue(singleRemark);
+    } else if (safeCount > 1) {
       normalizedRemark = isCartonMode
         ? getCartonRemarkForIndex(index)
         : String(entry?.remark || "").trim().toLowerCase();

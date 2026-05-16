@@ -4612,9 +4612,11 @@ exports.updateQC = async (req, res) => {
         const cartonRemark = isCartonBoxEntry
           ? entryIndex === 0 ? "inner" : "master"
           : "";
+        const defaultSingleRemark =
+          fieldName === "inspected_box_sizes" ? "box" : "item";
         const nextRemark =
           nonEmptyEntries.length === 1
-            ? ""
+            ? normalizedRemark || defaultSingleRemark
             : isCartonBoxEntry
               ? cartonRemark
               : normalizedRemark;
@@ -10282,6 +10284,7 @@ exports.editInspectionRecords = async (req, res) => {
 	        const normalizedRemark = isCartonEntry
 	          ? cartonRemark
 	          : normalizeText(entry?.remark || entry?.type || "").toLowerCase();
+	        const defaultSingleRemark = isBoxSizeField ? "box" : "item";
 
 	        if (value.length > 1 && !isCartonEntry) {
 	          if (!normalizedRemark) {
@@ -10297,7 +10300,7 @@ exports.editInspectionRecords = async (req, res) => {
 	          L,
 	          B,
 	          H,
-	          remark: value.length > 1 ? normalizedRemark : "",
+	          remark: value.length > 1 ? normalizedRemark : normalizedRemark || defaultSingleRemark,
 	        };
 
 	        if (weightKey) {

@@ -12,6 +12,7 @@ const BOX_ENTRY_TYPES = Object.freeze({
 const BOX_INDIVIDUAL_REMARK_OPTIONS = Object.freeze([
   "top",
   "base",
+  "box",
   "box1",
   "box2",
   "box3",
