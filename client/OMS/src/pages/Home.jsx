@@ -416,7 +416,7 @@ const Home = () => {
               <div className="text-center py-4">Loading...</div>
             ) : (
               <div className="table-responsive">
-                <table className="table table-striped table-hover align-middle om-table mb-0">
+                <table className="table table-striped table-hover align-middle om-table mb-0 home-orders-by-brand-table">
                   <thead className="table-primary">
                     <tr>
                       <th>Vendor</th>

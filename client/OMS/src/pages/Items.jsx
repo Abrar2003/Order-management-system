@@ -6,6 +6,7 @@ import CreateItemModal from "../components/CreateItemModal";
 import SampleModal from "../components/SampleModal";
 import EditItemModal from "../components/EditItemModal";
 import ItemOrderPresenceTooltip from "../components/ItemOrderPresenceTooltip";
+import ProductImageThumbnail from "../components/ProductImageThumbnail";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { usePermissions } from "../auth/PermissionContext";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
@@ -205,6 +206,7 @@ const Items = () => {
           search: searchInput,
           brand: brandFilter,
           vendor: vendorFilter,
+          include_product_image_thumbnail: true,
           page,
           limit,
         },
@@ -702,6 +704,7 @@ const Items = () => {
                           onClick={() => handleSortColumn("code", "asc")}
                         />
                       </th>
+                      <th>Image</th>
                       <th>
                         <SortHeaderButton
                           label="Name"
@@ -774,7 +777,7 @@ const Items = () => {
                   <tbody>
                     {sortedRows.length === 0 && (
                       <tr>
-                        <td colSpan="10" className="text-center py-4">
+                        <td colSpan="11" className="text-center py-4">
                           No items found
                         </td>
                       </tr>
@@ -798,6 +801,14 @@ const Items = () => {
                             ) : (
                               "N/A"
                             )}
+                          </td>
+                          <td>
+                            <ProductImageThumbnail
+                              src={item?.product_image_url}
+                              originalName={item?.product_image?.originalName}
+                              alt={`${item?.code || "Item"} product image`}
+                              size="sm"
+                            />
                           </td>
                           <td>{item?.name || "N/A"}</td>
                           <td>

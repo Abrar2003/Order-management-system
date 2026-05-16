@@ -4,6 +4,7 @@ import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import FilePreviewModal from "../components/FilePreviewModal";
 import ItemOrderPresenceTooltip from "../components/ItemOrderPresenceTooltip";
+import ProductImageThumbnail from "../components/ProductImageThumbnail";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { usePermissions } from "../auth/PermissionContext";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
@@ -114,6 +115,9 @@ const getCalculatedInspectedCbm = (item) =>
   ?? item?.cbm?.qc_total
   ?? item?.cbm?.total
   ?? "0";
+
+const isProductImageFileType = (fileType = "") =>
+  String(fileType || "").trim().toLowerCase() === "product_image";
 
 const ItemFilesPage = () => {
   const navigate = useNavigate();
@@ -733,13 +737,19 @@ const ItemFilesPage = () => {
                           <td>{formatLbhValue(getInspectedBoxLbh(item), { fallback: "0.00 x 0.00 x 0.00" })}</td>
                           <td>
                             {hasFile ? (
-                              <div className="d-flex flex-column gap-1">
-                                <span className="fw-semibold">
-                                  {String(storedFile?.originalName || activeFileOption.label).trim()}
-                                </span>
-                                <span className="badge text-bg-success align-self-start">
-                                  Uploaded
-                                </span>
+                              <div className="item-file-product-image-cell">
+                                {isProductImageFileType(activeFileType) && (
+                                  <ProductImageThumbnail
+                                    src={item?.product_image_url}
+                                    originalName={storedFile?.originalName}
+                                    alt={`${item?.code || "Item"} product image`}
+                                  />
+                                )}
+                                {!isProductImageFileType(activeFileType) && (
+                                  <span className="badge text-bg-success align-self-start">
+                                    Uploaded
+                                  </span>
+                                )}
                               </div>
                             ) : (
                               <div className="d-flex flex-column gap-1">

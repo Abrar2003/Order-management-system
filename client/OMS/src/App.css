@@ -2250,10 +2250,52 @@ small,
   object-fit: contain;
 }
 
+.product-image-thumbnail {
+  display: block;
+  width: 4.5rem;
+  height: 4.5rem;
+  border: 1px solid var(--om-color-border);
+  border-radius: 0.5rem;
+  background: var(--om-color-surface-muted);
+  object-fit: contain;
+}
+
+.product-image-thumbnail.is-sm {
+  width: 3.5rem;
+  height: 3.5rem;
+}
+
+.product-image-thumbnail.is-empty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--om-color-text-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.1;
+  text-align: center;
+}
+
+.item-file-product-image-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.item-file-product-image-cell > div {
+  min-width: 0;
+}
+
 .home-order-brand-logo {
   width: 3rem;
   height: 1.75rem;
   object-fit: contain;
+}
+
+.home-orders-by-brand-table tbody td:nth-child(n+2),
+.home-orders-by-brand-table tfoot td:nth-child(n+2) {
+  font-weight: 700;
 }
 
 .home-calendar-wrapper {

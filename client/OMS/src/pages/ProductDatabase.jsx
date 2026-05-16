@@ -9,6 +9,7 @@ import {
 } from "../auth/permissions";
 import { usePermissions } from "../auth/PermissionContext";
 import Navbar from "../components/Navbar";
+import ProductImageThumbnail from "../components/ProductImageThumbnail";
 import ProductTypeDynamicForm from "../components/ProductTypeDynamicForm";
 import {
   getProductTypeTemplateByKey,
@@ -2132,6 +2133,7 @@ const ProductDatabase = () => {
       if (brandFilter !== DEFAULT_FILTER) params.brand = brandFilter;
       if (vendorFilter !== DEFAULT_FILTER) params.vendor = vendorFilter;
       if (statusFilter !== DEFAULT_FILTER) params.status = statusFilter;
+      params.include_product_image_thumbnail = true;
 
       const response = await api.get("/items/product-database", { params });
       const data = response?.data || {};
@@ -2363,6 +2365,7 @@ const ProductDatabase = () => {
                   <thead className="table-primary">
                     <tr>
                       <th>Item Code</th>
+                      <th>Image</th>
                       <th>Name / Description</th>
                       <th>Brand</th>
                       <th>Vendor</th>
@@ -2377,6 +2380,14 @@ const ProductDatabase = () => {
                     {rows.map((row) => (
                       <tr key={row.id}>
                         <td className="fw-semibold">{row.code || "N/A"}</td>
+                        <td>
+                          <ProductImageThumbnail
+                            src={row.product_image_url}
+                            originalName={row.product_image?.originalName}
+                            alt={`${row.code || "Item"} product image`}
+                            size="sm"
+                          />
+                        </td>
                         <td>
                           <div>{row.name || "N/A"}</div>
                           <div className="small text-secondary">{row.description || "N/A"}</div>

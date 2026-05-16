@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import ProductImageThumbnail from "../components/ProductImageThumbnail";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -84,6 +85,7 @@ const ItemDatabase = () => {
           vendor: vendorFilter,
           status: statusFilter,
           running_po: runningPoFilter,
+          include_product_image_thumbnail: true,
           page,
           limit,
         },
@@ -268,6 +270,7 @@ const ItemDatabase = () => {
                   <thead className="table-primary">
                     <tr>
                       <th>Item Code</th>
+                      <th>Image</th>
                       <th>Brand</th>
                       <th>Vendor</th>
                       <th>Current Running POs</th>
@@ -280,6 +283,14 @@ const ItemDatabase = () => {
                     {rows.map((row) => (
                       <tr key={row.id}>
                         <td className="fw-semibold">{row.item_code || "N/A"}</td>
+                        <td>
+                          <ProductImageThumbnail
+                            src={row.product_image_url}
+                            originalName={row.product_image?.originalName}
+                            alt={`${row.item_code || "Item"} product image`}
+                            size="sm"
+                          />
+                        </td>
                         <td>{row.brand || (row.brands || []).join(", ") || "N/A"}</td>
                         <td>{row.vendor || "N/A"}</td>
                         <td>
@@ -310,7 +321,7 @@ const ItemDatabase = () => {
                     ))}
                     {rows.length === 0 && (
                       <tr>
-                        <td className="text-center py-4" colSpan={7}>No items found</td>
+                        <td className="text-center py-4" colSpan={8}>No items found</td>
                       </tr>
                     )}
                   </tbody>

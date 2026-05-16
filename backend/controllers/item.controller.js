@@ -1031,6 +1031,66 @@ const buildItemFileResponse = async (
   };
 };
 
+const shouldIncludeProductImageThumbnails = (req) => {
+  const rawValue =
+    req?.query?.include_product_image_thumbnail
+    ?? req?.query?.includeProductImageThumbnail
+    ?? req?.query?.include_product_image_thumb
+    ?? "";
+  return ["1", "true", "yes"].includes(String(rawValue || "").trim().toLowerCase());
+};
+
+const hasStoredProductImage = (file = {}) => {
+  const normalizedFile = normalizeStoredItemFile(file);
+  return Boolean(normalizedFile.key || normalizedFile.link);
+};
+
+const buildProductImageThumbnailPayload = async (item = {}) => {
+  if (!hasStoredProductImage(item?.image)) {
+    return {
+      product_image: normalizeStoredItemFile(item?.image || {}),
+      product_image_url: "",
+    };
+  }
+
+  const filePayload = await buildItemFileResponse(item.image, {
+    itemCode: normalizeTextField(item?.code || item?._id),
+    fallbackBaseName: "product-image",
+    extension: ITEM_FILE_CONFIG.product_image.defaultExtension,
+  });
+
+  return {
+    product_image: filePayload
+      ? {
+          key: filePayload.key,
+          originalName: filePayload.originalName,
+          contentType: filePayload.contentType,
+          size: filePayload.size,
+          public_id: filePayload.public_id,
+        }
+      : normalizeStoredItemFile(item?.image || {}),
+    product_image_url: filePayload?.link || "",
+  };
+};
+
+const attachProductImageThumbnails = async (rows = [], itemLookup = new Map(), include = false) => {
+  if (!include || !Array.isArray(rows) || rows.length === 0) {
+    return rows;
+  }
+
+  return Promise.all(
+    rows.map(async (row) => {
+      const itemId = normalizeTextField(row?.id || row?._id);
+      const sourceItem = itemLookup.get(itemId) || row;
+      const thumbnailPayload = await buildProductImageThumbnailPayload(sourceItem);
+      return {
+        ...row,
+        ...thumbnailPayload,
+      };
+    }),
+  );
+};
+
 const validatePisSpreadsheetUpload = (file) => {
   if (!file) {
     throw createHttpError(400, "No spreadsheet file uploaded");
@@ -1398,6 +1458,7 @@ const PRODUCT_DATABASE_ITEM_SELECT = [
   "brand_name",
   "brands",
   "vendors",
+  "image",
   "country_of_origin",
   "pd_barcode",
   "pd_master_barcode",
@@ -2534,11 +2595,21 @@ exports.getProductDatabaseItems = async (req, res) => {
       ),
     ]);
 
+    const itemLookup = new Map(
+      (Array.isArray(items) ? items : []).map((item) => [normalizeTextField(item?._id), item]),
+    );
+    const rows = (Array.isArray(items) ? items : []).map((item) =>
+      buildProductDatabaseRow(item, req.user),
+    );
+    const rowsWithThumbnails = await attachProductImageThumbnails(
+      rows,
+      itemLookup,
+      shouldIncludeProductImageThumbnails(req),
+    );
+
     return res.status(200).json({
       success: true,
-      rows: (Array.isArray(items) ? items : []).map((item) =>
-        buildProductDatabaseRow(item, req.user),
-      ),
+      rows: rowsWithThumbnails,
       summary: {
         not_set: notSetCount,
         created: createdCount,
@@ -2702,10 +2773,19 @@ exports.getItemDatabaseItems = async (req, res) => {
 
     const totalRecords = allRows.length;
     const rows = allRows.slice(skip, skip + limit);
+    const itemLookup = new Map(
+      (Array.isArray(allMatchedItems) ? allMatchedItems : [])
+        .map((item) => [normalizeTextField(item?._id), item]),
+    );
+    const rowsWithThumbnails = await attachProductImageThumbnails(
+      rows,
+      itemLookup,
+      shouldIncludeProductImageThumbnails(req),
+    );
 
     return res.status(200).json({
       success: true,
-      rows,
+      rows: rowsWithThumbnails,
       filters: {
         search: normalizeFilterValue(search) || "",
         brand: normalizeFilterValue(brand) || "",
@@ -3111,10 +3191,18 @@ exports.getItems = async (req, res) => {
           latestInspectionReport?.last_inspected_date || "",
       };
     });
+    const shouldAttachThumbnails =
+      normalizeTextField(fileType).toLowerCase() === "product_image" ||
+      shouldIncludeProductImageThumbnails(req);
+    const itemsWithThumbnails = await attachProductImageThumbnails(
+      itemsWithLatestInspectionReport,
+      new Map(),
+      shouldAttachThumbnails,
+    );
 
     return res.status(200).json({
       success: true,
-      data: itemsWithLatestInspectionReport,
+      data: itemsWithThumbnails,
       pagination: {
         page,
         limit,
