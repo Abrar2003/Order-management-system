@@ -349,7 +349,7 @@ const Navbar = () => {
     if (canViewPis) {
       items.push(
         routeMenuItem("update-pis-qc-reports", "Final PIS Check", "/pis-diffs"),
-        routeMenuItem("final-pis-check", "Update PIS v/s QC Reports", "/final-pis-check"),
+        routeMenuItem("final-pis-check", "Master v/s QC Reports", "/final-pis-check"),
         routeMenuItem("PIS", "PIS", "/pis"),
         routeMenuItem(
           "items-qc-report-mismatch",
