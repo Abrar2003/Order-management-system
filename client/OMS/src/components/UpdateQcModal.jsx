@@ -68,6 +68,15 @@ const NON_NEGATIVE_FIELDS = new Set([
   "inspected_item_bottom_H",
 ]);
 
+const normalizeComparableBarcode = (value) => {
+  const normalized = String(value ?? "").trim().replace(/\s+/g, "");
+  if (!normalized) return "";
+  if (!/^\d+$/.test(normalized)) return normalized;
+
+  const withoutLeadingZeroes = normalized.replace(/^0+/, "");
+  return withoutLeadingZeroes || "0";
+};
+
 const INSPECTED_WEIGHT_FIELDS = Object.freeze([
   {
     formKey: "inspected_weight_top_net",
@@ -765,6 +774,7 @@ const UpdateQcModal = ({
   const barcodeReaderRef = useRef(null);
   const barcodeReaderControlsRef = useRef(null);
   const barcodeUploadInputRef = useRef(null);
+  const barcodeUploadTargetRef = useRef("barcode");
   const barcodeFocusPointRef = useRef(null);
   const barcodeFocusResetTimerRef = useRef(null);
 
@@ -879,7 +889,10 @@ const UpdateQcModal = ({
     }, 1500);
   };
   const canEditLockedQcFields =
-    isInspectionRecordUpdate || canRewriteLatestInspectionRecord || isQcUser;
+    isInspectionRecordUpdate ||
+    canRewriteLatestInspectionRecord ||
+    isQcUser ||
+    isCurrentUserLabelExempt;
   const canEditLockedQcSizeFields =
     isInspectionRecordUpdate || canRewriteLatestInspectionRecord || isQcUser || isManager;
   const lockBarcodeField =
@@ -1544,11 +1557,15 @@ const UpdateQcModal = ({
     setBarcodeScannerOpen(true);
   };
 
-  const openBarcodeUploadDialog = () => {
-    if (lockBarcodeField || barcodeUploadLoading) {
+  const openBarcodeUploadDialog = (targetField = "barcode") => {
+    const isTargetLocked =
+      targetField === "inner_barcode" ? lockInnerBarcodeField : lockBarcodeField;
+    if ((!isCurrentUserLabelExempt && isTargetLocked) || barcodeUploadLoading) {
       return;
     }
 
+    barcodeUploadTargetRef.current = targetField;
+    setBarcodeScannerTarget(targetField);
     setBarcodeUploadError("");
     setBarcodeUploadStatus("");
     if (barcodeUploadInputRef.current) {
@@ -1578,19 +1595,24 @@ const UpdateQcModal = ({
         throw new Error("No barcode value was returned from the scan.");
       }
 
+      const uploadTarget = barcodeUploadTargetRef.current || "barcode";
       setForm((prev) => ({
         ...prev,
-        barcode: scannedBarcode,
+        [uploadTarget]: scannedBarcode,
       }));
 
-      if (isQcUser) {
+      if (isQcUser && uploadTarget === "inner_barcode") {
+        setInnerBarcodeScannedInSession(true);
+      } else if (isQcUser) {
         setBarcodeScannedInSession(true);
       }
 
       setBarcodeScannerOpen(false);
       setBarcodeScannerError("");
       setBarcodeScannerStatus("");
-      setBarcodeUploadStatus(`Barcode scanned: ${scannedBarcode}`);
+      setBarcodeUploadStatus(
+        `${uploadTarget === "inner_barcode" ? "Inner barcode" : "Barcode"} scanned: ${scannedBarcode}`,
+      );
     } catch (error) {
       setBarcodeUploadStatus("");
       setBarcodeUploadError(
@@ -2133,6 +2155,23 @@ const UpdateQcModal = ({
       return;
     }
 
+    if (isQcUser) {
+      const pisMasterBarcode = normalizeComparableBarcode(
+        existingItemMaster?.pis_master_barcode || existingItemMaster?.pis_barcode,
+      );
+      const scannedMasterBarcode = normalizeComparableBarcode(effectiveMasterBarcodeValue);
+
+      if (!pisMasterBarcode) {
+        setError("PIS master barcode is required before QC can update this record.");
+        return;
+      }
+
+      if (scannedMasterBarcode !== pisMasterBarcode) {
+        setError("Scanned master barcode does not match the PIS master barcode.");
+        return;
+      }
+    }
+
     if (
       isQcUser &&
       isCartonPackagingMode &&
@@ -2140,6 +2179,21 @@ const UpdateQcModal = ({
     ) {
       setError("QC users must scan the inner carton barcode before updating this QC record.");
       return;
+    }
+
+    if (isQcUser && isCartonPackagingMode) {
+      const pisInnerBarcode = normalizeComparableBarcode(existingItemMaster?.pis_inner_barcode);
+      const scannedInnerBarcode = normalizeComparableBarcode(effectiveInnerBarcodeValue);
+
+      if (!pisInnerBarcode) {
+        setError("PIS inner barcode is required before QC can update this carton record.");
+        return;
+      }
+
+      if (scannedInnerBarcode !== pisInnerBarcode) {
+        setError("Scanned inner barcode does not match the PIS inner barcode.");
+        return;
+      }
     }
 
     const buildQcPayload = () => {
@@ -3125,8 +3179,8 @@ const UpdateQcModal = ({
                     <button
                       type="button"
                       className="btn btn-outline-secondary flex-shrink-0"
-                      onClick={openBarcodeUploadDialog}
-                      disabled={lockBarcodeField || barcodeUploadLoading}
+                      onClick={() => openBarcodeUploadDialog("barcode")}
+                      disabled={barcodeUploadLoading}
                     >
                       {barcodeUploadLoading ? "Uploading..." : "Upload Barcode"}
                     </button>
@@ -3178,7 +3232,8 @@ const UpdateQcModal = ({
               {form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON && (
                 <div className="col-md-6">
                   <label className="form-label">Inner Carton Barcode</label>
-                  <div className="input-group">
+                  <div className="d-flex flex-wrap gap-2 align-items-stretch">
+                    <div className="input-group flex-grow-1">
                     <input
                       type="number"
                       className="form-control"
@@ -3207,6 +3262,17 @@ const UpdateQcModal = ({
                         ? "Stop Scan"
                         : "Scan"}
                     </button>
+                    </div>
+                    {isCurrentUserLabelExempt && (
+                      <button
+                        type="button"
+                        className="btn btn-outline-secondary flex-shrink-0"
+                        onClick={() => openBarcodeUploadDialog("inner_barcode")}
+                        disabled={barcodeUploadLoading}
+                      >
+                        {barcodeUploadLoading ? "Uploading..." : "Upload Barcode"}
+                      </button>
+                    )}
                   </div>
                   {barcodeScannerOpen && barcodeScannerTarget === "inner_barcode" && (
                     <div className="border rounded p-2 mt-2">

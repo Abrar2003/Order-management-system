@@ -180,6 +180,14 @@ const toNormalizedCbmString = (value) => {
 };
 
 const normalizeText = (value) => String(value ?? "").trim();
+const normalizeComparableBarcode = (value) => {
+  const normalized = normalizeText(value).replace(/\s+/g, "");
+  if (!normalized) return "";
+  if (!/^\d+$/.test(normalized)) return normalized;
+
+  const withoutLeadingZeroes = normalized.replace(/^0+/, "");
+  return withoutLeadingZeroes || "0";
+};
 const getQcInspectionRecordCount = (qc = {}) =>
   Array.isArray(qc?.inspection_record) ? qc.inspection_record.length : 0;
 const getQcImageUploadTotalLimit = (qc = {}) =>
@@ -5034,7 +5042,7 @@ exports.updateQC = async (req, res) => {
           message: "QC users must scan the master barcode. Manual barcode entry is not allowed.",
         });
       }
-      if (!allowQcFieldEdits && !isAdmin) {
+      if (!allowQcFieldEdits && !isAdmin && !isCurrentUserLabelExempt) {
         if (currentMasterBarcode > 0 && nextMasterBarcode !== currentMasterBarcode) {
           return res
             .status(400)
@@ -5064,7 +5072,7 @@ exports.updateQC = async (req, res) => {
           message: "QC users must scan the inner barcode. Manual inner barcode entry is not allowed.",
         });
       }
-      if (!allowQcFieldEdits && !isAdmin) {
+      if (!allowQcFieldEdits && !isAdmin && !isCurrentUserLabelExempt) {
         if (currentInnerBarcode > 0 && nextInnerBarcode !== currentInnerBarcode) {
           return res
             .status(400)
@@ -5097,6 +5105,32 @@ exports.updateQC = async (req, res) => {
       });
     }
 
+    if (isQcUser) {
+      if (!itemDocForBarcodeRequirement) {
+        return res.status(400).json({
+          message: "Item master with PIS barcode is required before QC can update this record.",
+        });
+      }
+
+      const pisMasterBarcode = normalizeComparableBarcode(
+        itemDocForBarcodeRequirement?.pis_master_barcode ||
+          itemDocForBarcodeRequirement?.pis_barcode,
+      );
+      const scannedMasterBarcode = normalizeComparableBarcode(resolvedMasterBarcode);
+
+      if (!pisMasterBarcode) {
+        return res.status(400).json({
+          message: "PIS master barcode is required before QC can update this record.",
+        });
+      }
+
+      if (scannedMasterBarcode !== pisMasterBarcode) {
+        return res.status(400).json({
+          message: "Scanned master barcode does not match the PIS master barcode.",
+        });
+      }
+    }
+
     if (
       isQcUser &&
       effectiveBoxModeForQcBarcodeRequirement === BOX_PACKAGING_MODES.CARTON &&
@@ -5105,6 +5139,28 @@ exports.updateQC = async (req, res) => {
       return res.status(400).json({
         message: "QC users must scan the inner barcode before updating this QC record.",
       });
+    }
+
+    if (
+      isQcUser &&
+      effectiveBoxModeForQcBarcodeRequirement === BOX_PACKAGING_MODES.CARTON
+    ) {
+      const pisInnerBarcode = normalizeComparableBarcode(
+        itemDocForBarcodeRequirement?.pis_inner_barcode,
+      );
+      const scannedInnerBarcode = normalizeComparableBarcode(resolvedInnerBarcode);
+
+      if (!pisInnerBarcode) {
+        return res.status(400).json({
+          message: "PIS inner barcode is required before QC can update this carton record.",
+        });
+      }
+
+      if (scannedInnerBarcode !== pisInnerBarcode) {
+        return res.status(400).json({
+          message: "Scanned inner barcode does not match the PIS inner barcode.",
+        });
+      }
     }
 
     /* ────────────────────────
