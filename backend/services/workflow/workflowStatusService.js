@@ -162,6 +162,7 @@ const populateTaskQuery = (query) =>
     .populate("created_by.user", "name email role")
     .populate("updated_by.user", "name email role")
     .populate("reviewed_by.user", "name email role")
+    .populate("rework_due_dates.created_by.user", "name email role")
     .lean();
 
 const getTaskReworkPayload = (doc = {}) => {
@@ -177,6 +178,16 @@ const getTaskReworkPayload = (doc = {}) => {
     comments,
   };
 };
+
+const getTaskReworkDueDatePayload = (doc = {}) =>
+  (Array.isArray(doc?.rework_due_dates) ? doc.rework_due_dates : [])
+    .map((entry) => ({
+      date: entry?.date || entry?.due_date || null,
+      comment: normalizeText(entry?.comment),
+      created_at: entry?.created_at || null,
+      created_by: entry?.created_by || {},
+    }))
+    .filter((entry) => Boolean(entry.date));
 
 const buildWorkflowUploadStatuses = (doc = {}) => {
   if (doc?.upload_required === false) return [];
@@ -226,6 +237,7 @@ const serializeTask = (doc = {}) => {
     fallback: "assigned",
   }) || "assigned";
   const reworked = getTaskReworkPayload(doc);
+  const reworkDueDates = getTaskReworkDueDatePayload(doc);
   const uploadStatuses = buildWorkflowUploadStatuses(doc);
   const hasPendingUploads =
     doc?.upload_required !== false &&
@@ -247,6 +259,7 @@ const serializeTask = (doc = {}) => {
         ? doc.approved_by
         : doc?.reviewed_by || {},
     reworked,
+    rework_due_dates: reworkDueDates,
     completion_comment: doc?.completion_comment || null,
   };
 };
@@ -1681,7 +1694,9 @@ const reworkWorkflowTask = async ({
 
   const auditActor = buildAuditActor(actor);
   const currentReworked = getTaskReworkPayload(task);
+  const currentReworkDueDates = getTaskReworkDueDatePayload(task);
   const nextDueDate = normalizeText(dueDate) ? parseDueDate(dueDate) : null;
+  const reworkedAt = new Date();
   task.status = "assigned";
   task.started_at = null;
   task.completed_at = null;
@@ -1700,11 +1715,22 @@ const reworkWorkflowTask = async ({
       ...currentReworked.comments,
       {
         comment: normalizeText(note),
-        created_at: new Date(),
+        created_at: reworkedAt,
         created_by: auditActor,
       },
     ],
   };
+  if (nextDueDate) {
+    task.rework_due_dates = [
+      ...currentReworkDueDates,
+      {
+        date: nextDueDate,
+        comment: normalizeText(note),
+        created_at: reworkedAt,
+        created_by: auditActor,
+      },
+    ];
+  }
   task.rework_count = task.reworked.count;
   await task.save();
 

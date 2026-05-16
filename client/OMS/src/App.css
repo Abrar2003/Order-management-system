@@ -500,6 +500,23 @@ small,
   color: var(--om-color-text-muted);
 }
 
+.workflow-due-date-value.has-history {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  cursor: help;
+  color: #8c4c1d;
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 0.18rem;
+}
+
+.workflow-due-date-value.has-history:focus-visible {
+  outline: 2px solid rgba(182, 110, 54, 0.32);
+  outline-offset: 2px;
+}
+
 .workflow-rework-cell {
   position: relative;
   min-width: 0;
@@ -610,6 +627,25 @@ small,
   font-size: 0.73rem;
   line-height: 1.25;
   white-space: normal;
+}
+
+.workflow-rework-date-history {
+  border-top: 1px solid rgba(203, 189, 170, 0.45);
+  padding-top: 0.85rem;
+}
+
+.workflow-rework-date-history-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.workflow-rework-date-history-item {
+  display: grid;
+  gap: 0.18rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgba(203, 189, 170, 0.45);
+  border-radius: 0.5rem;
+  background: var(--om-color-surface-muted);
 }
 
 .workflow-task-flow-cell {
@@ -1098,6 +1134,10 @@ small,
   border-color: rgba(217, 163, 111, 0.28);
 }
 
+:root[data-theme="dark"] .workflow-due-date-value.has-history {
+  color: #d9a36f;
+}
+
 :root[data-theme="dark"] .workflow-rework-hovercard {
   border-color: rgba(145, 128, 110, 0.4);
   background: linear-gradient(180deg, rgba(59, 49, 41, 0.96), rgba(39, 32, 27, 0.98));
@@ -1109,6 +1149,11 @@ small,
 
 :root[data-theme="dark"] .workflow-rework-hovercard-item + .workflow-rework-hovercard-item {
   border-top-color: rgba(145, 128, 110, 0.35);
+}
+
+:root[data-theme="dark"] .workflow-rework-date-history,
+:root[data-theme="dark"] .workflow-rework-date-history-item {
+  border-color: rgba(145, 128, 110, 0.35);
 }
 
 :root[data-theme="dark"] .workflow-status-line-track {

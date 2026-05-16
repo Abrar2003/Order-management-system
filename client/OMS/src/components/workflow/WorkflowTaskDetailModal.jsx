@@ -173,6 +173,13 @@ const WorkflowTaskDetailModal = ({
         : [],
     [task?.assigned_to],
   );
+  const reworkDueDateHistory = useMemo(
+    () =>
+      Array.isArray(task?.rework_due_dates)
+        ? [...task.rework_due_dates].filter((entry) => entry?.date).reverse()
+        : [],
+    [task?.rework_due_dates],
+  );
 
   const isAssignedUser = useMemo(
     () =>
@@ -598,6 +605,27 @@ const WorkflowTaskDetailModal = ({
                         </div>
                       </div>
                     </div>
+                    {reworkDueDateHistory.length > 0 && (
+                      <div className="workflow-rework-date-history mt-3">
+                        <div className="small text-secondary mb-2">Rework Date History</div>
+                        <div className="workflow-rework-date-history-list">
+                          {reworkDueDateHistory.map((entry, index) => (
+                            <div
+                              key={`${task._id}-rework-date-${index}`}
+                              className="workflow-rework-date-history-item"
+                            >
+                              <div className="fw-semibold">{formatDateOnly(entry?.date)}</div>
+                              <div className="small text-secondary">
+                                {entry?.comment || "No rework comment"}
+                              </div>
+                              <div className="small text-secondary">
+                                {getAuditActorName(entry?.created_by)} • {formatDateTime(entry?.created_at)}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </section>
 

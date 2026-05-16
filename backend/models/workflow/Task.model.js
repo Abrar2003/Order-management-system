@@ -29,6 +29,16 @@ const TaskReworkedSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const TaskReworkDueDateSchema = new mongoose.Schema(
+  {
+    date: { type: Date, default: null },
+    comment: { type: String, default: "", trim: true },
+    created_at: { type: Date, default: Date.now },
+    created_by: { type: AuditActorSchema, default: () => ({}) },
+  },
+  { _id: false },
+);
+
 const TaskUploadStatusSchema = new mongoose.Schema(
   {
     user: {
@@ -106,6 +116,7 @@ const TaskSchema = new mongoose.Schema(
     reviewed_by: { type: AuditActorSchema, default: () => ({}) },
     reviewed_at: { type: Date, default: null },
     reworked: { type: TaskReworkedSchema, default: () => ({}) },
+    rework_due_dates: { type: [TaskReworkDueDateSchema], default: [] },
     rework_count: { type: Number, default: 0, min: 0 },
     blocked_reason: { type: String, default: "", trim: true },
     tags: { type: [String], default: [] },
@@ -173,6 +184,16 @@ TaskSchema.pre("validate", function normalizeTask() {
     Number(this.rework_count || 0),
   );
   this.rework_count = this.reworked.count;
+  this.rework_due_dates = Array.isArray(this.rework_due_dates)
+    ? this.rework_due_dates
+        .map((entry) => ({
+          date: entry?.date || entry?.due_date || null,
+          comment: normalizeText(entry?.comment),
+          created_at: entry?.created_at || new Date(),
+          created_by: entry?.created_by || {},
+        }))
+        .filter((entry) => Boolean(entry.date))
+    : [];
   this.tags = Array.isArray(this.tags)
     ? [...new Set(this.tags.map((value) => normalizeText(value)).filter(Boolean))]
     : [];

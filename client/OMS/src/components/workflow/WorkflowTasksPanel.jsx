@@ -206,6 +206,53 @@ const ReworkHoverBadge = ({ taskId = "", count = 0, comments = [] }) => {
   );
 };
 
+const ReworkDueDateHover = ({ taskId = "", dueDate = "", entries = [] }) => {
+  const history = Array.isArray(entries) ? entries.filter((entry) => entry?.date) : [];
+  const trigger = (
+    <span
+      className={`workflow-due-date-value ${history.length > 0 ? "has-history" : ""}`}
+      tabIndex={history.length > 0 ? 0 : -1}
+    >
+      {formatDateOnly(dueDate)}
+    </span>
+  );
+
+  if (history.length === 0) {
+    return trigger;
+  }
+
+  return (
+    <HoverPortal
+      className="workflow-rework-portal-trigger"
+      panelClassName="workflow-rework-hovercard"
+      align="left"
+      trigger={trigger}
+    >
+      <span className="workflow-rework-hovercard-title">
+        Rework Due Date History
+      </span>
+      <span className="workflow-rework-hovercard-list">
+        {history.map((entry, index) => (
+          <span
+            key={`${taskId}-rework-due-${index}`}
+            className="workflow-rework-hovercard-item"
+          >
+            <span className="workflow-rework-hovercard-comment">
+              {formatDateOnly(entry?.date)}
+            </span>
+            <span className="workflow-rework-hovercard-meta">
+              {entry?.comment || "No rework comment"}
+            </span>
+            <span className="workflow-rework-hovercard-meta">
+              {getAuditActorName(entry?.created_by)} • {formatDateTime(entry?.created_at)}
+            </span>
+          </span>
+        ))}
+      </span>
+    </HoverPortal>
+  );
+};
+
 const WorkflowTasksPanel = ({
   mineOnly = false,
   fixedStatusFilter = "",
@@ -910,6 +957,9 @@ const WorkflowTasksPanel = ({
                       const reworkComments = Array.isArray(task?.reworked?.comments)
                         ? [...task.reworked.comments].reverse()
                         : [];
+                      const reworkDueDateHistory = Array.isArray(task?.rework_due_dates)
+                        ? [...task.rework_due_dates].reverse()
+                        : [];
 
                       return (
                         <tr key={task._id}>
@@ -950,7 +1000,11 @@ const WorkflowTasksPanel = ({
                               </div>
                               <div>
                                 <span className="workflow-task-dates-label">Due</span>
-                                <span>{formatDateOnly(task.due_date)}</span>
+                                <ReworkDueDateHover
+                                  taskId={task._id}
+                                  dueDate={task.due_date}
+                                  entries={reworkDueDateHistory}
+                                />
                               </div>
                               <div>
                                 <span className="workflow-task-dates-label">Complete</span>
