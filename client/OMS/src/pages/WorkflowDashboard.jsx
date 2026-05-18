@@ -33,15 +33,12 @@ const formatRoleLabel = (role) =>
   ROLE_LABELS[normalizeUserRole(role)] || normalizeText(role) || "User";
 
 const getCount = (row, key) => Number(row?.counts?.[key] || 0);
-const getCompleteAndBeyondTaskCount = (counts = {}) =>
-  Number(counts?.complete_tasks || 0) +
-  Number(counts?.approved_tasks || 0) +
-  Number(counts?.uploaded_tasks || 0);
 const SPOTLIGHT_TASK_FILTERS = Object.freeze([
   { countKey: "open_tasks", label: "Open", status: "open" },
   { countKey: "needs_approval_tasks", label: "Needs Approval", status: "needs_approval" },
   { countKey: "upload_remaining_tasks", label: "Upload Remaining", status: "upload_remaining" },
   { countKey: "overdue_tasks", label: "Overdue", status: "overdue" },
+  { countKey: "delayed_tasks", label: "Delayed", status: "delayed" },
 ]);
 const DASHBOARD_STATUS_OPTIONS = Object.freeze([
   { value: "assigned", label: "assigned" },
@@ -280,7 +277,7 @@ const WorkflowDashboard = () => {
     if (overdueRows.length > 0) {
       return {
         title: "Needs Attention",
-        description: "These assignees have the highest approval-overdue workflow count.",
+        description: "These assignees have the highest open overdue workflow count.",
         rows: overdueRows.slice(0, 5),
       };
     }
@@ -312,9 +309,9 @@ const WorkflowDashboard = () => {
       {
         key: "complete",
         label: "Complete",
-        value: getCompleteAndBeyondTaskCount(overall),
-        note: "Tasks marked complete, approved, or uploaded in this slice.",
-        status: "complete_and_beyond",
+        value: Number(overall.complete_tasks || 0),
+        note: "Tasks whose upload is fully done in this slice.",
+        status: "uploaded",
       },
       {
         key: "open",
@@ -334,8 +331,15 @@ const WorkflowDashboard = () => {
         key: "overdue",
         label: "Overdue",
         value: Number(overall.overdue_tasks || 0),
-        note: "Due date fully crossed in IST without approval.",
+        note: "Open tasks whose due date fully crossed in IST.",
         status: "overdue",
+      },
+      {
+        key: "delayed",
+        label: "Delayed",
+        value: Number(overall.delayed_tasks || 0),
+        note: "Completed tasks uploaded after their due cutoff.",
+        status: "delayed",
       },
       {
         key: "due-today",
@@ -669,6 +673,7 @@ const WorkflowDashboard = () => {
                           <th>Rework</th>
                           <th>Uploaded</th>
                           <th>Overdue</th>
+                          <th>Delayed</th>
                           <th>Due Today</th>
                           <th>Last Update</th>
                           <th>Actions</th>
@@ -694,6 +699,7 @@ const WorkflowDashboard = () => {
                               <td>{getCount(entry, "reworked_tasks")}</td>
                               <td>{getCount(entry, "uploaded_tasks")}</td>
                               <td>{getCount(entry, "overdue_tasks")}</td>
+                              <td>{getCount(entry, "delayed_tasks")}</td>
                               <td>{getCount(entry, "due_today_tasks")}</td>
                               <td>{formatDateTime(entry.last_task_update_at)}</td>
                               <td>

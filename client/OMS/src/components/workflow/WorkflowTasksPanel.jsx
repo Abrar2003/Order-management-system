@@ -125,6 +125,7 @@ const TASK_STATUS_FILTER_OPTIONS = Object.freeze([
   { value: "upload_remaining", label: "Upload Remaining" },
   { value: "upload_pending", label: "Upload Pending" },
   { value: "overdue", label: "Overdue" },
+  { value: "delayed", label: "Delayed" },
   { value: "due_today", label: "Due Today" },
   { value: "assigned", label: "assigned" },
   { value: "started", label: "started" },
