@@ -60,16 +60,14 @@ const NEEDS_APPROVAL_STATUS_VALUES = Object.freeze([
   "submitted",
   "review",
 ]);
-const NOT_UPLOADED_TASK_STATUSES = Object.freeze([
+const PRE_TERMINAL_TASK_STATUSES = Object.freeze([
   "assigned",
   "started",
   "complete",
-  "approved",
 ]);
-const NOT_UPLOADED_TASK_STATUS_VALUES = Object.freeze([
+const PRE_TERMINAL_TASK_STATUS_VALUES = Object.freeze([
   ...OPEN_TASK_STATUS_VALUES,
   ...NEEDS_APPROVAL_STATUS_VALUES,
-  "approved",
 ]);
 const DUE_TRACKED_TASK_STATUSES = Object.freeze([
   "assigned",
@@ -85,8 +83,6 @@ const DUE_TRACKED_TASK_STATUS_VALUES = Object.freeze([
   "uploaded",
   "completed",
 ]);
-const OVERDUE_TASK_STATUSES = NOT_UPLOADED_TASK_STATUSES;
-const OVERDUE_TASK_STATUS_VALUES = NOT_UPLOADED_TASK_STATUS_VALUES;
 const DASHBOARD_COUNT_FIELDS = Object.freeze([
   "total_tasks",
   "open_tasks",
@@ -338,7 +334,7 @@ const buildTaskVisibilityMatch = (user = {}) => {
 const buildStatusMatch = (status = "") => {
   const normalizedStatus = normalizeKey(status);
   if (normalizedStatus === "open") {
-    return { $in: NOT_UPLOADED_TASK_STATUS_VALUES };
+    return { $in: PRE_TERMINAL_TASK_STATUS_VALUES };
   }
   if (normalizedStatus === "needs_approval") {
     return { $in: NEEDS_APPROVAL_STATUS_VALUES };
@@ -361,8 +357,48 @@ const buildEffectiveApprovedAtExpression = () => ({
   $ifNull: ["$approved_at", "$reviewed_at"],
 });
 
-const buildEffectiveTaskDoneAtExpression = () => ({
-  $ifNull: ["$uploaded_at", "$completed_at"],
+const buildOpenTaskMatch = () => ({
+  $or: [
+    { status: { $in: PRE_TERMINAL_TASK_STATUS_VALUES } },
+    {
+      status: "approved",
+      upload_required: { $ne: false },
+    },
+  ],
+});
+
+const buildCompleteTaskMatch = () => ({
+  $or: [
+    { status: { $in: ["uploaded", "completed"] } },
+    {
+      status: "approved",
+      upload_required: false,
+    },
+  ],
+});
+
+const buildOpenTaskExpression = () => ({
+  $or: [
+    { $in: ["$normalized_status", PRE_TERMINAL_TASK_STATUSES] },
+    {
+      $and: [
+        { $eq: ["$normalized_status", "approved"] },
+        { $ne: ["$upload_required", false] },
+      ],
+    },
+  ],
+});
+
+const buildCompleteTaskExpression = () => ({
+  $or: [
+    { $eq: ["$normalized_status", "uploaded"] },
+    {
+      $and: [
+        { $eq: ["$normalized_status", "approved"] },
+        { $eq: ["$upload_required", false] },
+      ],
+    },
+  ],
 });
 
 // Workflow due dates are date-only, so the whole IST due date remains on time.
@@ -406,7 +442,7 @@ const buildNotApprovedByDueDateExpression = () => {
 const buildOverdueTaskMatch = (now = new Date()) => {
   const dueDateCutoff = buildOverdueDateCutoffExpression();
   return {
-    status: { $in: OVERDUE_TASK_STATUS_VALUES },
+    ...buildOpenTaskMatch(),
     due_date: { $ne: null },
     $expr: {
       $gte: [now, dueDateCutoff],
@@ -415,15 +451,26 @@ const buildOverdueTaskMatch = (now = new Date()) => {
 };
 
 const buildDelayedTaskMatch = () => {
-  const dueDateCutoff = buildOverdueDateCutoffExpression();
-  const effectiveDoneAt = buildEffectiveTaskDoneAtExpression();
+  const dueDateCutoff = buildDueDateCutoffExpression();
   return {
-    status: { $in: ["uploaded", "completed"] },
+    ...buildCompleteTaskMatch(),
     due_date: { $ne: null },
     $expr: {
-      $and: [
-        { $ne: [effectiveDoneAt, null] },
-        { $gte: [effectiveDoneAt, dueDateCutoff] },
+      $or: [
+        {
+          $and: [
+            { $ne: ["$upload_required", false] },
+            { $ne: ["$uploaded_at", null] },
+            { $gt: ["$uploaded_at", dueDateCutoff] },
+          ],
+        },
+        {
+          $and: [
+            { $eq: ["$upload_required", false] },
+            { $ne: ["$approved_at", null] },
+            { $gt: ["$approved_at", dueDateCutoff] },
+          ],
+        },
       ],
     },
   };
@@ -461,7 +508,11 @@ const buildTaskListMatch = ({ query = {}, user = {} } = {}) => {
     normalizedStatusFilter === "upload_pending";
 
   if (normalizeText(query?.status)) {
-    if (normalizedStatusFilter === "overdue") {
+    if (normalizedStatusFilter === "open") {
+      addAndMatch(match, buildOpenTaskMatch());
+    } else if (normalizedStatusFilter === "complete_done") {
+      addAndMatch(match, buildCompleteTaskMatch());
+    } else if (normalizedStatusFilter === "overdue") {
       addAndMatch(match, buildOverdueTaskMatch());
     } else if (normalizedStatusFilter === "delayed") {
       addAndMatch(match, buildDelayedTaskMatch());
@@ -917,9 +968,11 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
     },
   });
 
+  const openTaskExpression = buildOpenTaskExpression();
+  const completeTaskExpression = buildCompleteTaskExpression();
   const openTaskCount = {
     $sum: {
-      $cond: [{ $in: ["$normalized_status", NOT_UPLOADED_TASK_STATUSES] }, 1, 0],
+      $cond: [openTaskExpression, 1, 0],
     },
   };
   const uploadRemainingCount = {
@@ -957,15 +1010,15 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
   };
 
   const dueDateCutoff = buildOverdueDateCutoffExpression();
+  const delayedDueDateCutoff = buildDueDateCutoffExpression();
   const notApprovedByDueDate = buildNotApprovedByDueDateExpression();
-  const effectiveDoneAt = buildEffectiveTaskDoneAtExpression();
 
   const overdueCount = {
     $sum: {
       $cond: [
         {
           $and: [
-            { $in: ["$normalized_status", OVERDUE_TASK_STATUSES] },
+            openTaskExpression,
             { $ne: ["$due_date", null] },
             { $gte: [now, dueDateCutoff] },
           ],
@@ -981,10 +1034,26 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
       $cond: [
         {
           $and: [
-            { $eq: ["$normalized_status", "uploaded"] },
+            completeTaskExpression,
             { $ne: ["$due_date", null] },
-            { $ne: [effectiveDoneAt, null] },
-            { $gte: [effectiveDoneAt, dueDateCutoff] },
+            {
+              $or: [
+                {
+                  $and: [
+                    { $ne: ["$upload_required", false] },
+                    { $ne: ["$uploaded_at", null] },
+                    { $gt: ["$uploaded_at", delayedDueDateCutoff] },
+                  ],
+                },
+                {
+                  $and: [
+                    { $eq: ["$upload_required", false] },
+                    { $ne: ["$approved_at", null] },
+                    { $gt: ["$approved_at", delayedDueDateCutoff] },
+                  ],
+                },
+              ],
+            },
           ],
         },
         1,
@@ -1016,7 +1085,11 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
     open_tasks: openTaskCount,
     assigned_tasks: statusCount("assigned"),
     started_tasks: statusCount("started"),
-    complete_tasks: statusCount("uploaded"),
+    complete_tasks: {
+      $sum: {
+        $cond: [completeTaskExpression, 1, 0],
+      },
+    },
     approved_tasks: statusCount("approved"),
     uploaded_tasks: statusCount("uploaded"),
     upload_remaining_tasks: uploadRemainingCount,

@@ -310,8 +310,8 @@ const WorkflowDashboard = () => {
         key: "complete",
         label: "Complete",
         value: Number(overall.complete_tasks || 0),
-        note: "Tasks whose upload is fully done in this slice.",
-        status: "uploaded",
+        note: "Tasks fully done in this slice.",
+        status: "complete_done",
       },
       {
         key: "open",

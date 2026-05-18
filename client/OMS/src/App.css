@@ -1583,48 +1583,88 @@ small,
 
 .pis-table {
   font-size: 0.86rem;
+  table-layout: fixed;
 }
 
 .pis-table > :not(caption) > * > * {
-  padding: 0.68rem 0.52rem;
+  padding: 0.58rem 0.38rem;
 }
 
 .pis-table th:nth-child(1),
 .pis-table td:nth-child(1) {
-  width: 9%;
+  width: 7%;
 }
 
 .pis-table th:nth-child(2),
 .pis-table td:nth-child(2) {
-  width: 18%;
+  width: 13%;
 }
 
 .pis-table th:nth-child(3),
-.pis-table td:nth-child(3),
+.pis-table td:nth-child(3) {
+  width: 7%;
+}
+
 .pis-table th:nth-child(4),
 .pis-table td:nth-child(4) {
-  width: 10%;
+  width: 7%;
 }
 
 .pis-table th:nth-child(5),
 .pis-table td:nth-child(5),
 .pis-table th:nth-child(6),
-.pis-table td:nth-child(6),
+.pis-table td:nth-child(6) {
+  width: 5%;
+}
+
 .pis-table th:nth-child(9),
 .pis-table td:nth-child(9) {
-  width: 7%;
+  width: 5%;
 }
 
 .pis-table th:nth-child(7),
 .pis-table td:nth-child(7),
 .pis-table th:nth-child(8),
 .pis-table td:nth-child(8) {
-  width: 13%;
+  width: 20%;
 }
 
 .pis-table th:nth-child(10),
 .pis-table td:nth-child(10) {
   width: 8%;
+}
+
+.pis-table th,
+.pis-table td {
+  overflow-wrap: anywhere;
+}
+
+.pis-table .om-size-data-table {
+  table-layout: fixed;
+}
+
+.pis-table .om-size-data-table th,
+.pis-table .om-size-data-table td {
+  padding: 0.44rem 0.5rem;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.pis-table .om-size-data-table th:nth-child(1),
+.pis-table .om-size-data-table td:nth-child(1) {
+  width: 30%;
+}
+
+.pis-table .om-size-data-table th:nth-child(2),
+.pis-table .om-size-data-table td:nth-child(2) {
+  width: 48%;
+  white-space: nowrap;
+}
+
+.pis-table .om-size-data-table th:nth-child(3),
+.pis-table .om-size-data-table td:nth-child(3) {
+  width: 22%;
+  white-space: nowrap;
 }
 
 .form-label {

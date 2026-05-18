@@ -119,7 +119,8 @@ const WORKFLOW_ACTION_ICONS = Object.freeze({
   rework: "/workflow-icons/rework.png",
 });
 const TASK_STATUS_FILTER_OPTIONS = Object.freeze([
-  { value: "complete_and_beyond", label: "Complete" },
+  { value: "complete_done", label: "Complete" },
+  { value: "complete_and_beyond", label: "Complete + Later" },
   { value: "open", label: "Open" },
   { value: "needs_approval", label: "Needs Approval" },
   { value: "upload_remaining", label: "Upload Remaining" },
@@ -1028,6 +1029,12 @@ const WorkflowTasksPanel = ({
                                 <span className="workflow-task-dates-label">Complete</span>
                                 <span>{formatDateTime(task.completed_at)}</span>
                               </div>
+                              {task?.upload_required !== false && (
+                                <div>
+                                  <span className="workflow-task-dates-label">Uploaded</span>
+                                  <span>{formatDateTime(task.uploaded_at)}</span>
+                                </div>
+                              )}
                             </div>
                           </td>
                           <td>
