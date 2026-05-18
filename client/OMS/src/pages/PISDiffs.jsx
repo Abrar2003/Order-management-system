@@ -5,7 +5,6 @@ import { jsPDF } from "jspdf";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import EditPisModal from "../components/EditPisModal";
-import MeasuredSizeDisplayTable from "../components/MeasuredSizeDisplayTable";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { usePermissions } from "../auth/PermissionContext";
 import { normalizeUserRole } from "../auth/permissions";
@@ -177,20 +176,63 @@ const formatDifferenceCellValue = (difference = {}, field = "") => {
   return formatEan13BarcodeDisplay(value);
 };
 
-const MeasurementCell = ({
-  item,
-  source,
-  group,
-  weightLabel,
-}) => {
-  const entries = buildMeasurementEntries({ item, source, group });
+const formatSizeTableNumber = (value, decimals = 2) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return "-";
+  return parsed.toFixed(decimals).replace(/\.?0+$/, "");
+};
+
+const buildCombinedMeasurementRows = ({ item, source } = {}) => [
+  ...buildMeasurementEntries({ item, source, group: "item" }).map((entry, index) => ({
+    ...entry,
+    groupLabel: "Item",
+    partLabel: formatRemarkLabel(entry?.remark, `Entry ${index + 1}`),
+    weightLabel: "Net",
+  })),
+  ...buildMeasurementEntries({ item, source, group: "box" }).map((entry, index) => ({
+    ...entry,
+    groupLabel: "Box",
+    partLabel: formatRemarkLabel(entry?.remark, `Entry ${index + 1}`),
+    weightLabel: "Gross",
+  })),
+];
+
+const CombinedMeasurementCell = ({ item, source }) => {
+  const entries = buildCombinedMeasurementRows({ item, source });
+
+  if (entries.length === 0) {
+    return <span className="text-secondary">No size data</span>;
+  }
 
   return (
-    <MeasuredSizeDisplayTable
-      entries={entries}
-      weightKey="weight"
-      emptyLabel={`No ${weightLabel.toLowerCase()} size data`}
-    />
+    <div className="table-responsive">
+      <table className="table table-sm align-middle mb-0 om-size-data-table pis-diff-combined-size-table">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Part</th>
+            <th>L x B x H</th>
+            <th>Weight</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map((entry, index) => (
+            <tr key={`${entry.groupLabel}-${entry?.remark || "entry"}-${index}`}>
+              <td>{entry.groupLabel}</td>
+              <td>{entry.partLabel}</td>
+              <td>
+                {formatSizeTableNumber(entry?.L)} x {formatSizeTableNumber(entry?.B)} x{" "}
+                {formatSizeTableNumber(entry?.H)}
+              </td>
+              <td>
+                {formatSizeTableNumber(entry?.weight, 3)}
+                <span className="pis-diff-size-weight-label"> {entry.weightLabel}</span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 };
 
@@ -620,14 +662,18 @@ const PISDiffs = () => {
               : [];
             return `${statusLabel} | ${diffFields.join(", ")}`;
           }
-          if (column === "inspectedItem") {
-            return getMeasurementSortValue(item, "inspected", "item");
+          if (column === "inspectedSize") {
+            return [
+              getMeasurementSortValue(item, "inspected", "item"),
+              getMeasurementSortValue(item, "inspected", "box"),
+            ].join(" | ");
           }
-          if (column === "pisItem") return getMeasurementSortValue(item, "pis", "item");
-          if (column === "inspectedBox") {
-            return getMeasurementSortValue(item, "inspected", "box");
+          if (column === "pisSize") {
+            return [
+              getMeasurementSortValue(item, "pis", "item"),
+              getMeasurementSortValue(item, "pis", "box"),
+            ].join(" | ");
           }
-          if (column === "pisBox") return getMeasurementSortValue(item, "pis", "box");
           return "";
         },
       }),
@@ -964,7 +1010,7 @@ const PISDiffs = () => {
               <div className="text-center py-4">Loading...</div>
             ) : (
               <div className="table-responsive">
-                <table className="table table-striped table-hover align-middle om-table mb-0">
+                <table className="table table-striped table-hover align-middle om-table pis-diffs-table mb-0">
                   <thead className="table-primary">
                     <tr>
                       <th>
@@ -1009,34 +1055,18 @@ const PISDiffs = () => {
                       </th>
                       <th>
                         <SortHeaderButton
-                          label="Inspected Item"
-                          isActive={sortBy === "inspectedItem"}
+                          label="Inspected Size"
+                          isActive={sortBy === "inspectedSize"}
                           direction={sortOrder}
-                          onClick={() => handleSortColumn("inspectedItem", "asc")}
+                          onClick={() => handleSortColumn("inspectedSize", "asc")}
                         />
                       </th>
                       <th>
                         <SortHeaderButton
-                          label="PIS Item"
-                          isActive={sortBy === "pisItem"}
+                          label="PIS Size"
+                          isActive={sortBy === "pisSize"}
                           direction={sortOrder}
-                          onClick={() => handleSortColumn("pisItem", "asc")}
-                        />
-                      </th>
-                      <th>
-                        <SortHeaderButton
-                          label="Inspected Box"
-                          isActive={sortBy === "inspectedBox"}
-                          direction={sortOrder}
-                          onClick={() => handleSortColumn("inspectedBox", "asc")}
-                        />
-                      </th>
-                      <th>
-                        <SortHeaderButton
-                          label="PIS Box"
-                          isActive={sortBy === "pisBox"}
-                          direction={sortOrder}
-                          onClick={() => handleSortColumn("pisBox", "asc")}
+                          onClick={() => handleSortColumn("pisSize", "asc")}
                         />
                       </th>
                       <th>Inspection Report</th>
@@ -1044,12 +1074,12 @@ const PISDiffs = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedRows.length === 0 && (
-                      <tr>
-                        <td colSpan={canEditPisDiffs ? 11 : 10} className="text-center py-4">
-                          No unchecked PIS diffs found
-                        </td>
-                      </tr>
+	                    {sortedRows.length === 0 && (
+	                      <tr>
+	                        <td colSpan={canEditPisDiffs ? 9 : 8} className="text-center py-4">
+	                          No unchecked PIS diffs found
+	                        </td>
+	                      </tr>
                     )}
 
                     {sortedRows.map((item) => {
@@ -1074,39 +1104,19 @@ const PISDiffs = () => {
                                 ),
                               )}
                             </div>
-                          </td>
-                          <td>
-                            <MeasurementCell
-                              item={item}
-                              source="inspected"
-                              group="item"
-                              weightLabel="Net"
-                            />
-                          </td>
-                          <td>
-                            <MeasurementCell
-                              item={item}
-                              source="pis"
-                              group="item"
-                              weightLabel="Net"
-                            />
-                          </td>
-                          <td>
-                            <MeasurementCell
-                              item={item}
-                              source="inspected"
-                              group="box"
-                              weightLabel="Gross"
-                            />
-                          </td>
-                          <td>
-                            <MeasurementCell
-                              item={item}
-                              source="pis"
-                              group="box"
-                              weightLabel="Gross"
-                            />
-                          </td>
+	                          </td>
+	                          <td>
+	                            <CombinedMeasurementCell
+	                              item={item}
+	                              source="inspected"
+	                            />
+	                          </td>
+	                          <td>
+	                            <CombinedMeasurementCell
+	                              item={item}
+	                              source="pis"
+	                            />
+	                          </td>
                           <td>
                             {item?.inspection_report_mismatch ? (
                               <span className="badge text-bg-danger">

@@ -1029,12 +1029,18 @@ const WorkflowTasksPanel = ({
                                 <span className="workflow-task-dates-label">Complete</span>
                                 <span>{formatDateTime(task.completed_at)}</span>
                               </div>
-                              {task?.upload_required !== false && (
-                                <div>
-                                  <span className="workflow-task-dates-label">Uploaded</span>
-                                  <span>{formatDateTime(task.uploaded_at)}</span>
-                                </div>
-                              )}
+                              <div>
+                                <span className="workflow-task-dates-label">
+                                  {task?.upload_required === false ? "Approved" : "Uploaded"}
+                                </span>
+                                <span>
+                                  {formatDateTime(
+                                    task?.upload_required === false
+                                      ? task.approved_at
+                                      : task.uploaded_at,
+                                  )}
+                                </span>
+                              </div>
                             </div>
                           </td>
                           <td>

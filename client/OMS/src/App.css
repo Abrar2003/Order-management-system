@@ -2917,6 +2917,122 @@ small,
   white-space: normal;
 }
 
+.pis-diffs-table {
+  font-size: 0.78rem;
+}
+
+.pis-diffs-table > :not(caption) > * > th,
+.pis-diffs-table > :not(caption) > * > td {
+  padding: 0.58rem 0.42rem;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.pis-diffs-table th:nth-child(1),
+.pis-diffs-table td:nth-child(1) {
+  width: 8%;
+}
+
+.pis-diffs-table th:nth-child(2),
+.pis-diffs-table td:nth-child(2) {
+  width: 12%;
+}
+
+.pis-diffs-table th:nth-child(3),
+.pis-diffs-table td:nth-child(3) {
+  width: 6%;
+}
+
+.pis-diffs-table th:nth-child(4),
+.pis-diffs-table td:nth-child(4) {
+  width: 7%;
+}
+
+.pis-diffs-table th:nth-child(5),
+.pis-diffs-table td:nth-child(5) {
+  width: 8%;
+}
+
+.pis-diffs-table th:nth-child(6),
+.pis-diffs-table td:nth-child(6),
+.pis-diffs-table th:nth-child(7),
+.pis-diffs-table td:nth-child(7) {
+  width: 24%;
+}
+
+.pis-diffs-table th:nth-child(8),
+.pis-diffs-table td:nth-child(8) {
+  width: 5%;
+}
+
+.pis-diffs-table th:nth-child(9),
+.pis-diffs-table td:nth-child(9) {
+  width: 6%;
+}
+
+.pis-diffs-table .om-sort-header {
+  gap: 0.2rem;
+  font-size: 0.7rem;
+  line-height: 1.15;
+}
+
+.pis-diffs-table .pis-diff-pill,
+.pis-diffs-table .badge,
+.pis-diffs-table .btn-sm {
+  font-size: 0.64rem;
+  line-height: 1.15;
+  padding: 0.22rem 0.32rem;
+}
+
+.pis-diffs-table .om-size-data-table {
+  table-layout: fixed;
+}
+
+.pis-diffs-table .om-size-data-table th,
+.pis-diffs-table .om-size-data-table td {
+  padding: 0.35rem 0.28rem;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.pis-diffs-table .om-size-data-table th {
+  font-size: 0.64rem;
+  line-height: 1.1;
+  white-space: nowrap !important;
+}
+
+.pis-diffs-table .om-size-data-table td {
+  font-size: 0.72rem;
+  line-height: 1.18;
+}
+
+.pis-diffs-table .pis-diff-combined-size-table th:nth-child(1),
+.pis-diffs-table .pis-diff-combined-size-table td:nth-child(1) {
+  width: 18%;
+}
+
+.pis-diffs-table .pis-diff-combined-size-table th:nth-child(2),
+.pis-diffs-table .pis-diff-combined-size-table td:nth-child(2) {
+  width: 22%;
+}
+
+.pis-diffs-table .pis-diff-combined-size-table th:nth-child(3),
+.pis-diffs-table .pis-diff-combined-size-table td:nth-child(3) {
+  width: 38%;
+  white-space: nowrap !important;
+}
+
+.pis-diffs-table .pis-diff-combined-size-table th:nth-child(4),
+.pis-diffs-table .pis-diff-combined-size-table td:nth-child(4) {
+  width: 22%;
+  white-space: nowrap !important;
+}
+
+.pis-diff-size-weight-label {
+  color: var(--om-color-text-muted);
+  font-size: 0.6rem;
+}
+
 .pis-diff-pill {
   background: #ffffff !important;
   color: var(--om-color-text) !important;
