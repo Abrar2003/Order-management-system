@@ -48,10 +48,6 @@ const WORKFLOW_DUE_TIMEZONE = "Asia/Kolkata";
 const INDIA_TIMEZONE_OFFSET_MS = 330 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const OVERDUE_COUNT_DELAY_MS = 1000;
-const OPEN_TASK_STATUSES = Object.freeze([
-  "assigned",
-  "started",
-]);
 const OPEN_TASK_STATUS_VALUES = Object.freeze([
   "assigned",
   "pending",
@@ -63,6 +59,17 @@ const NEEDS_APPROVAL_STATUS_VALUES = Object.freeze([
   "complete",
   "submitted",
   "review",
+]);
+const NOT_UPLOADED_TASK_STATUSES = Object.freeze([
+  "assigned",
+  "started",
+  "complete",
+  "approved",
+]);
+const NOT_UPLOADED_TASK_STATUS_VALUES = Object.freeze([
+  ...OPEN_TASK_STATUS_VALUES,
+  ...NEEDS_APPROVAL_STATUS_VALUES,
+  "approved",
 ]);
 const DUE_TRACKED_TASK_STATUSES = Object.freeze([
   "assigned",
@@ -78,8 +85,8 @@ const DUE_TRACKED_TASK_STATUS_VALUES = Object.freeze([
   "uploaded",
   "completed",
 ]);
-const OVERDUE_TASK_STATUSES = OPEN_TASK_STATUSES;
-const OVERDUE_TASK_STATUS_VALUES = OPEN_TASK_STATUS_VALUES;
+const OVERDUE_TASK_STATUSES = NOT_UPLOADED_TASK_STATUSES;
+const OVERDUE_TASK_STATUS_VALUES = NOT_UPLOADED_TASK_STATUS_VALUES;
 const DASHBOARD_COUNT_FIELDS = Object.freeze([
   "total_tasks",
   "open_tasks",
@@ -331,7 +338,7 @@ const buildTaskVisibilityMatch = (user = {}) => {
 const buildStatusMatch = (status = "") => {
   const normalizedStatus = normalizeKey(status);
   if (normalizedStatus === "open") {
-    return { $in: OPEN_TASK_STATUS_VALUES };
+    return { $in: NOT_UPLOADED_TASK_STATUS_VALUES };
   }
   if (normalizedStatus === "needs_approval") {
     return { $in: NEEDS_APPROVAL_STATUS_VALUES };
@@ -912,7 +919,7 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
 
   const openTaskCount = {
     $sum: {
-      $cond: [{ $in: ["$normalized_status", OPEN_TASK_STATUSES] }, 1, 0],
+      $cond: [{ $in: ["$normalized_status", NOT_UPLOADED_TASK_STATUSES] }, 1, 0],
     },
   };
   const uploadRemainingCount = {
@@ -920,8 +927,27 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
       $cond: [
         {
           $and: [
-            { $eq: ["$normalized_status", "approved"] },
+            { $in: ["$normalized_status", ["approved", "uploaded"]] },
             { $ne: ["$upload_required", false] },
+            {
+              $or: [
+                {
+                  $gt: [
+                    {
+                      $size: {
+                        $filter: {
+                          input: { $ifNull: ["$upload_statuses", []] },
+                          as: "uploadStatus",
+                          cond: { $ne: ["$$uploadStatus.status", "uploaded"] },
+                        },
+                      },
+                    },
+                    0,
+                  ],
+                },
+                { $eq: [{ $size: { $ifNull: ["$upload_statuses", []] } }, 0] },
+              ],
+            },
           ],
         },
         1,

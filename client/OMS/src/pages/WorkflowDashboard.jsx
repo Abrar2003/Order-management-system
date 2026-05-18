@@ -317,7 +317,7 @@ const WorkflowDashboard = () => {
         key: "open",
         label: "Open Tasks",
         value: Number(overall.open_tasks || 0),
-        note: "Assigned or started tasks not completed yet.",
+        note: "Tasks still not fully uploaded.",
         status: "open",
       },
       {
