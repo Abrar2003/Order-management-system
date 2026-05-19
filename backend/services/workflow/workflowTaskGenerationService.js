@@ -196,7 +196,7 @@ const createOncePerBatchDefinition = ({ batch, taskType, manifestEntries = [] })
 
   return [
     {
-      titleSuffix: batch?.source_folder_name || batch?.name || "Batch",
+      titleSuffix: batch?.name || batch?.source_folder_name || "Batch",
       source_folder_path: batch?.source_folder_name || "",
       source_files: filteredEntries,
     },
@@ -264,14 +264,12 @@ const buildGeneratedTaskTitle = ({
   batch = {},
   taskType = {},
   definition = {},
-  index = 0,
 }) => {
-  const startCode = normalizeText(batch?.start_code);
-  if (startCode) {
-    return `${startCode}${Number(index) + 1}`;
-  }
-
-  return `${taskType.name} - ${definition.titleSuffix}`;
+  return normalizeText(definition?.titleSuffix)
+    || normalizeText(batch?.source_folder_name)
+    || normalizeText(batch?.name)
+    || normalizeText(taskType?.name)
+    || "Workflow Task";
 };
 
 const generateTasksForBatch = async ({
@@ -279,6 +277,8 @@ const generateTasksForBatch = async ({
   taskType,
   manifestEntries = [],
   assignees = [],
+  uploadRequired = true,
+  uploadAssignees = [],
   actor = {},
 }) => {
   if (!batch?._id) {
@@ -295,11 +295,18 @@ const generateTasksForBatch = async ({
   const auditActor = buildAuditActor(actor);
   const initialStatus = "assigned";
   const assignedUsers = assignees.map((user) => ({ user: user._id }));
-  const uploadAssigneeIds = uniqueIds([
+  const normalizedUploadRequired = uploadRequired !== false;
+  const defaultUploadAssigneeIds = uniqueIds([
     actor?._id || actor?.id,
     ...assignees.map((user) => user?._id),
   ]);
-  const uploadAssignees = uploadAssigneeIds.map((userId) => ({ user: userId }));
+  const selectedUploadAssignees = normalizedUploadRequired
+    ? (
+        Array.isArray(uploadAssignees) && uploadAssignees.length > 0
+          ? uploadAssignees
+          : defaultUploadAssigneeIds.map((userId) => ({ user: userId }))
+      )
+    : [];
   const now = new Date();
 
   const taskDocs = taskDefinitions.map((definition, index) => ({
@@ -326,9 +333,9 @@ const generateTasksForBatch = async ({
     assigned_to: assignedUsers,
     assigned_by: auditActor,
     assigned_at: now,
-    upload_required: true,
-    upload_assignees: uploadAssignees,
-    upload_statuses: buildUploadStatusEntries(uploadAssignees),
+    upload_required: normalizedUploadRequired,
+    upload_assignees: selectedUploadAssignees,
+    upload_statuses: buildUploadStatusEntries(selectedUploadAssignees),
     due_date: batch?.due_date || null,
     review_required: taskType.requires_review !== false,
     tags: [taskType.key],

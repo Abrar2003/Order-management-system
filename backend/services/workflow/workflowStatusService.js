@@ -15,6 +15,7 @@ const {
 } = require("../../helpers/workflow");
 const {
   Comment,
+  Batch,
   Department,
   Task,
   TaskAssignment,
@@ -459,6 +460,195 @@ const getLatestCompletionCommentMap = async (taskIds = []) => {
     }
     return acc;
   }, new Map());
+};
+
+const getBatchRefId = (task = {}) =>
+  normalizeId(task?.batch?._id || task?.batch?.id || task?.batch || "");
+
+const getUniqueUserRefs = (tasks = [], field = "assigned_to") => {
+  const refsById = new Map();
+  (Array.isArray(tasks) ? tasks : []).forEach((task) => {
+    (Array.isArray(task?.[field]) ? task[field] : []).forEach((entry) => {
+      const userId = getUserRefId(entry);
+      if (userId && !refsById.has(userId)) {
+        refsById.set(userId, entry?.user ? entry : { user: entry });
+      }
+    });
+  });
+  return [...refsById.values()];
+};
+
+const getMaxDate = (tasks = [], field = "") =>
+  (Array.isArray(tasks) ? tasks : [])
+    .map((task) => getDateOrNull(task?.[field]))
+    .filter(Boolean)
+    .reduce((latest, value) => (
+      !latest || value.getTime() > latest.getTime() ? value : latest
+    ), null);
+
+const deriveBatchTaskLikeStatus = (tasks = []) => {
+  const normalizedTasks = (Array.isArray(tasks) ? tasks : []).map((task) => ({
+    ...task,
+    normalized_status: normalizeWorkflowTaskStatus(task?.status, { fallback: "assigned" }) || "assigned",
+  }));
+  const totalTasks = normalizedTasks.length;
+  if (totalTasks <= 0) return "assigned";
+
+  const isTerminal = (task) =>
+    ["uploaded", "completed"].includes(task.normalized_status) ||
+    (task.normalized_status === "approved" && task?.upload_required === false);
+  const atLeastApproved = (task) =>
+    isTerminal(task) || task.normalized_status === "approved";
+  const atLeastComplete = (task) =>
+    atLeastApproved(task) || task.normalized_status === "complete";
+  const hasStarted = normalizedTasks.some((task) =>
+    ["started", "complete", "approved", "uploaded", "completed"].includes(task.normalized_status),
+  );
+
+  if (normalizedTasks.every(isTerminal)) return "uploaded";
+  if (normalizedTasks.every(atLeastApproved)) return "approved";
+  if (normalizedTasks.every(atLeastComplete)) return "complete";
+  if (hasStarted) return "started";
+  return "assigned";
+};
+
+const buildBatchChildCounts = (tasks = []) => {
+  const counts = {
+    total_tasks: 0,
+    started_tasks: 0,
+    complete_tasks: 0,
+    approved_tasks: 0,
+    uploaded_tasks: 0,
+    complete_done_tasks: 0,
+  };
+
+  (Array.isArray(tasks) ? tasks : []).forEach((task) => {
+    const status = normalizeWorkflowTaskStatus(task?.status, { fallback: "assigned" }) || "assigned";
+    counts.total_tasks += 1;
+    if (status === "started") counts.started_tasks += 1;
+    if (status === "complete") counts.complete_tasks += 1;
+    if (status === "approved") counts.approved_tasks += 1;
+    if (status === "uploaded") counts.uploaded_tasks += 1;
+    if (status === "uploaded" || (status === "approved" && task?.upload_required === false)) {
+      counts.complete_done_tasks += 1;
+    }
+  });
+
+  return counts;
+};
+
+const serializeBatchTaskGroup = ({ batch = {}, tasks = [] } = {}) => {
+  const childTasks = (Array.isArray(tasks) ? tasks : []).map(serializeTask);
+  const status = deriveBatchTaskLikeStatus(childTasks);
+  const counts = buildBatchChildCounts(childTasks);
+  const completedAt = status === "uploaded" ? getMaxDate(childTasks, "completed_at") : null;
+  const approvedAt = counts.approved_tasks + counts.uploaded_tasks + counts.complete_done_tasks > 0
+    ? getMaxDate(childTasks, "approved_at")
+    : null;
+  const uploadedAt = status === "uploaded" ? getMaxDate(childTasks, "uploaded_at") : null;
+  const assignedTo = getUniqueUserRefs(childTasks, "assigned_to");
+  const uploadAssignees = getUniqueUserRefs(childTasks, "upload_assignees");
+  const batchDoc = batch || childTasks[0]?.batch || {};
+  const groupDoc = {
+    _id: `batch:${normalizeId(batchDoc?._id || childTasks[0]?.batch)}`,
+    batch: batchDoc,
+    batch_no: batchDoc?.batch_no || childTasks[0]?.batch_no || "",
+    task_no: batchDoc?.batch_no || childTasks[0]?.batch_no || "",
+    title: batchDoc?.name || batchDoc?.source_folder_name || childTasks[0]?.source_folder_name || "Workflow Batch",
+    task_type: batchDoc?.task_type || childTasks[0]?.task_type || null,
+    task_type_key: batchDoc?.task_type_key || childTasks[0]?.task_type_key || "",
+    task_type_name:
+      batchDoc?.selected_task_type?.name ||
+      childTasks[0]?.task_type_name ||
+      childTasks[0]?.task_type?.name ||
+      "",
+    department: childTasks[0]?.department || null,
+    brand: batchDoc?.brand || childTasks[0]?.brand || "",
+    source_folder_name: batchDoc?.source_folder_name || childTasks[0]?.source_folder_name || "",
+    source_folder_path: batchDoc?.source_folder_name || childTasks[0]?.source_folder_path || "",
+    status,
+    assigned_to: assignedTo,
+    assigned_by: childTasks[0]?.assigned_by || {},
+    assigned_at: childTasks.reduce((earliest, task) => {
+      const value = getDateOrNull(task?.assigned_at || task?.createdAt);
+      if (!value) return earliest;
+      return !earliest || value.getTime() < earliest.getTime() ? value : earliest;
+    }, null),
+    upload_required: childTasks.some((task) => task?.upload_required !== false),
+    upload_assignees: uploadAssignees,
+    upload_statuses: [],
+    due_date: batchDoc?.due_date || childTasks[0]?.due_date || null,
+    active_due_date: batchDoc?.due_date || childTasks[0]?.active_due_date || childTasks[0]?.due_date || null,
+    started_at: batchDoc?.started_at || getMaxDate(childTasks, "started_at"),
+    completed_at: completedAt,
+    approved_at: approvedAt,
+    uploaded_at: uploadedAt,
+    created_by: batchDoc?.created_by || childTasks[0]?.created_by || {},
+    updated_by: batchDoc?.updated_by || childTasks[0]?.updated_by || {},
+    reworked: {
+      count: childTasks.reduce((sum, task) => sum + Number(task?.reworked?.count || task?.rework_count || 0), 0),
+      comments: childTasks.flatMap((task) => Array.isArray(task?.reworked?.comments) ? task.reworked.comments : []),
+    },
+    rework_due_dates: childTasks.flatMap((task) =>
+      Array.isArray(task?.rework_due_dates) ? task.rework_due_dates : [],
+    ),
+    is_batch_group: true,
+    batch_status: batchDoc?.status || "",
+    batch_counts: counts,
+    child_tasks: childTasks,
+  };
+  const deadlineSummary = getWorkflowDeadlineSummary(groupDoc);
+  return {
+    ...groupDoc,
+    deadline_summary: deadlineSummary,
+    delay_stage: deadlineSummary.delay_stage,
+    overdue_stage: deadlineSummary.overdue_stage,
+  };
+};
+
+const groupTaskRowsForBoard = async (rows = []) => {
+  const batchIds = uniqueIds((Array.isArray(rows) ? rows : []).map(getBatchRefId));
+  if (batchIds.length === 0) {
+    return rows.map((row) => serializeTask(row));
+  }
+
+  const [batchDocs, batchTaskRows] = await Promise.all([
+    Batch.find({ _id: { $in: batchIds }, is_deleted: false }).lean(),
+    populateTaskQuery(
+      Task.find({
+        batch: { $in: batchIds },
+        is_deleted: false,
+      }).sort({ task_no: 1, createdAt: 1 }),
+    ),
+  ]);
+  const batchById = new Map(batchDocs.map((batch) => [normalizeId(batch?._id), batch]));
+  const tasksByBatchId = batchTaskRows.reduce((acc, row) => {
+    const batchId = getBatchRefId(row);
+    if (!batchId) return acc;
+    if (!acc.has(batchId)) acc.set(batchId, []);
+    acc.get(batchId).push(row);
+    return acc;
+  }, new Map());
+  const emittedBatchIds = new Set();
+  const groupedRows = [];
+
+  rows.forEach((row) => {
+    const batchId = getBatchRefId(row);
+    if (!batchId) {
+      groupedRows.push(serializeTask(row));
+      return;
+    }
+    if (emittedBatchIds.has(batchId)) return;
+    emittedBatchIds.add(batchId);
+    groupedRows.push(
+      serializeBatchTaskGroup({
+        batch: batchById.get(batchId) || row?.batch || {},
+        tasks: tasksByBatchId.get(batchId) || [row],
+      }),
+    );
+  });
+
+  return groupedRows;
 };
 
 const buildWorkflowDashboardCounts = (doc = {}) =>
@@ -1172,13 +1362,13 @@ const listWorkflowTasks = async ({ query = {}, user = {} } = {}) => {
     rows.map((row) => row?._id),
   );
 
+  const rowsWithCompletionComments = rows.map((row) => ({
+    ...row,
+    completion_comment: completionCommentMap.get(normalizeId(row?._id)) || null,
+  }));
+
   return {
-    rows: rows.map((row) =>
-      serializeTask({
-        ...row,
-        completion_comment: completionCommentMap.get(normalizeId(row?._id)) || null,
-      }),
-    ),
+    rows: await groupTaskRowsForBoard(rowsWithCompletionComments),
     pagination: {
       page,
       limit,
@@ -1657,6 +1847,221 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
     ...buildWorkflowDashboardCounts(summary?.overall?.[0]),
     unassigned_tasks: Number(summary?.overall?.[0]?.unassigned_tasks || 0),
   };
+
+  const [unitOverallSummary] = await Task.aggregate([
+    { $match: match },
+    {
+      $addFields: {
+        normalized_status: buildWorkflowTaskStatusNormalizationExpression(),
+        normalized_rework_count: {
+          $ifNull: ["$reworked.count", { $ifNull: ["$rework_count", 0] }],
+        },
+      },
+    },
+    {
+      $addFields: {
+        workflow_unit_key: {
+          $cond: [
+            { $ne: ["$batch", null] },
+            { $concat: ["batch:", { $toString: "$batch" }] },
+            { $concat: ["task:", { $toString: "$_id" }] },
+          ],
+        },
+        unit_is_open: openTaskExpression,
+        unit_is_complete_done: completeTaskExpression,
+        unit_is_started_or_beyond: {
+          $in: ["$normalized_status", ["started", "complete", "approved", "uploaded"]],
+        },
+        unit_is_complete_or_beyond: {
+          $or: [
+            { $in: ["$normalized_status", ["complete", "approved", "uploaded"]] },
+            completeTaskExpression,
+          ],
+        },
+        unit_is_approved_or_beyond: {
+          $or: [
+            { $in: ["$normalized_status", ["approved", "uploaded"]] },
+            completeTaskExpression,
+          ],
+        },
+        unit_is_overdue: completionOverdueExpression,
+        unit_is_approval_overdue: approvalOverdueExpression,
+        unit_is_upload_overdue: uploadOverdueExpression,
+        unit_is_delayed: {
+          $and: [
+            completionDelayExpression,
+            { $not: [approvalDelayExpression] },
+            { $not: [uploadDelayExpression] },
+          ],
+        },
+        unit_is_approval_delayed: {
+          $and: [
+            approvalDelayExpression,
+            { $not: [uploadDelayExpression] },
+          ],
+        },
+        unit_is_upload_delayed: uploadDelayExpression,
+        unit_is_due_today: {
+          $and: [
+            { $in: ["$normalized_status", DUE_TRACKED_TASK_STATUSES] },
+            { $ne: [buildActiveDueDateExpression(), null] },
+            { $gte: [buildActiveDueDateExpression(), todayStart] },
+            { $lt: [buildActiveDueDateExpression(), tomorrowStart] },
+            notApprovedByDueDate,
+          ],
+        },
+      },
+    },
+    {
+      $group: {
+        _id: "$workflow_unit_key",
+        child_count: { $sum: 1 },
+        open_count: { $sum: { $cond: ["$unit_is_open", 1, 0] } },
+        complete_done_count: { $sum: { $cond: ["$unit_is_complete_done", 1, 0] } },
+        started_or_beyond_count: { $sum: { $cond: ["$unit_is_started_or_beyond", 1, 0] } },
+        complete_or_beyond_count: { $sum: { $cond: ["$unit_is_complete_or_beyond", 1, 0] } },
+        approved_or_beyond_count: { $sum: { $cond: ["$unit_is_approved_or_beyond", 1, 0] } },
+        reworked_count: {
+          $sum: {
+            $cond: [{ $gt: ["$normalized_rework_count", 0] }, 1, 0],
+          },
+        },
+        overdue_count: { $sum: { $cond: ["$unit_is_overdue", 1, 0] } },
+        approval_overdue_count: { $sum: { $cond: ["$unit_is_approval_overdue", 1, 0] } },
+        upload_overdue_count: { $sum: { $cond: ["$unit_is_upload_overdue", 1, 0] } },
+        delayed_count: { $sum: { $cond: ["$unit_is_delayed", 1, 0] } },
+        approval_delayed_count: { $sum: { $cond: ["$unit_is_approval_delayed", 1, 0] } },
+        upload_delayed_count: { $sum: { $cond: ["$unit_is_upload_delayed", 1, 0] } },
+        due_today_count: { $sum: { $cond: ["$unit_is_due_today", 1, 0] } },
+      },
+    },
+    {
+      $addFields: {
+        is_uploaded_unit: { $eq: ["$complete_done_count", "$child_count"] },
+        is_approved_unit: { $eq: ["$approved_or_beyond_count", "$child_count"] },
+        is_complete_unit: { $eq: ["$complete_or_beyond_count", "$child_count"] },
+        is_started_unit: { $gt: ["$started_or_beyond_count", 0] },
+        is_open_unit: { $gt: ["$open_count", 0] },
+        is_reworked_unit: { $gt: ["$reworked_count", 0] },
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        total_tasks: { $sum: 1 },
+        open_tasks: { $sum: { $cond: ["$is_open_unit", 1, 0] } },
+        assigned_tasks: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  { $not: ["$is_started_unit"] },
+                  { $not: ["$is_complete_unit"] },
+                  { $not: ["$is_approved_unit"] },
+                  { $not: ["$is_uploaded_unit"] },
+                ],
+              },
+              1,
+              0,
+            ],
+          },
+        },
+        started_tasks: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  "$is_started_unit",
+                  { $not: ["$is_complete_unit"] },
+                  { $not: ["$is_approved_unit"] },
+                  { $not: ["$is_uploaded_unit"] },
+                ],
+              },
+              1,
+              0,
+            ],
+          },
+        },
+        complete_tasks: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  "$is_complete_unit",
+                  { $not: ["$is_approved_unit"] },
+                  { $not: ["$is_uploaded_unit"] },
+                ],
+              },
+              1,
+              0,
+            ],
+          },
+        },
+        approved_tasks: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  "$is_approved_unit",
+                  { $not: ["$is_uploaded_unit"] },
+                ],
+              },
+              1,
+              0,
+            ],
+          },
+        },
+        uploaded_tasks: { $sum: { $cond: ["$is_uploaded_unit", 1, 0] } },
+        upload_remaining_tasks: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  "$is_approved_unit",
+                  { $not: ["$is_uploaded_unit"] },
+                ],
+              },
+              1,
+              0,
+            ],
+          },
+        },
+        reworked_tasks: { $sum: { $cond: ["$is_reworked_unit", 1, 0] } },
+        needs_approval_tasks: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  "$is_complete_unit",
+                  { $not: ["$is_approved_unit"] },
+                  { $not: ["$is_uploaded_unit"] },
+                ],
+              },
+              1,
+              0,
+            ],
+          },
+        },
+        overdue_tasks: { $sum: { $cond: [{ $gt: ["$overdue_count", 0] }, 1, 0] } },
+        approval_overdue_tasks: {
+          $sum: { $cond: [{ $gt: ["$approval_overdue_count", 0] }, 1, 0] },
+        },
+        upload_overdue_tasks: {
+          $sum: { $cond: [{ $gt: ["$upload_overdue_count", 0] }, 1, 0] },
+        },
+        delayed_tasks: { $sum: { $cond: [{ $gt: ["$delayed_count", 0] }, 1, 0] } },
+        approval_delayed_tasks: {
+          $sum: { $cond: [{ $gt: ["$approval_delayed_count", 0] }, 1, 0] },
+        },
+        upload_delayed_tasks: {
+          $sum: { $cond: [{ $gt: ["$upload_delayed_count", 0] }, 1, 0] },
+        },
+        due_today_tasks: { $sum: { $cond: [{ $gt: ["$due_today_count", 0] }, 1, 0] } },
+      },
+    },
+  ]);
+
+  Object.assign(overall, buildWorkflowDashboardCounts(unitOverallSummary || overall));
 
   const userById = new Map();
   (Array.isArray(summary?.users) ? summary.users : []).forEach((entry) => {

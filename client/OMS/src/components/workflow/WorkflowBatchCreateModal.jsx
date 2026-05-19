@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createBatchFromFolderManifest } from "../../api/workflowApi";
+import { getUserFromToken } from "../../auth/auth.service";
 import {
   buildFileManifest,
   buildTaskPreview,
@@ -9,6 +10,16 @@ import {
 } from "../../utils/workflowManifest";
 
 const normalizeText = (value) => String(value ?? "").trim();
+const uniqueIds = (values = []) =>
+  [
+    ...new Set(
+      (Array.isArray(values) ? values : [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean),
+    ),
+  ];
+
+const getUserId = (entry = {}) => entry?._id || entry?.id || "";
 
 const isDuplicateBatchMessage = (message = "") =>
   normalizeText(message).toLowerCase().includes("already exists");
@@ -20,14 +31,18 @@ const WorkflowBatchCreateModal = ({
   onClose,
   onCreated,
 }) => {
+  const currentUser = getUserFromToken();
+  const currentUserId = getUserId(currentUser);
   const fileInputRef = useRef(null);
   const [form, setForm] = useState({
-    start_code: "",
+    name: "",
     brand: "",
     due_date: "",
     description: "",
     task_type_key: "",
     assignee_ids: [],
+    upload_required: true,
+    upload_assignee_ids: uniqueIds([currentUserId]),
   });
   const [manifest, setManifest] = useState([]);
   const [rootFolder, setRootFolder] = useState("");
@@ -54,6 +69,26 @@ const WorkflowBatchCreateModal = ({
       ].sort((left, right) => left.localeCompare(right)),
     [brandOptions, form.brand],
   );
+  const selectedAssigneeIds = useMemo(
+    () => new Set((Array.isArray(form.assignee_ids) ? form.assignee_ids : []).map(String)),
+    [form.assignee_ids],
+  );
+  const selectedUploadAssigneeIds = useMemo(
+    () =>
+      new Set(
+        (Array.isArray(form.upload_assignee_ids) ? form.upload_assignee_ids : []).map(String),
+      ),
+    [form.upload_assignee_ids],
+  );
+  const availableUploadUsers = useMemo(() => {
+    const optionById = new Map();
+    [...availableUsers, currentUser].forEach((user) => {
+      const userId = getUserId(user);
+      if (!userId || optionById.has(String(userId))) return;
+      optionById.set(String(userId), user);
+    });
+    return [...optionById.values()];
+  }, [availableUsers, currentUser]);
 
   const previewTasks = useMemo(
     () =>
@@ -61,9 +96,9 @@ const WorkflowBatchCreateModal = ({
         manifest,
         rootFolder,
         taskType: selectedTaskType,
-        startCode: form.start_code,
+        batchName: form.name,
       }),
-    [form.start_code, manifest, rootFolder, selectedTaskType],
+    [form.name, manifest, rootFolder, selectedTaskType],
   );
 
   const previewError = useMemo(() => {
@@ -107,14 +142,43 @@ const WorkflowBatchCreateModal = ({
 
   const toggleAssignee = (userId) => {
     setForm((prev) => {
-      const nextIds = prev.assignee_ids.includes(userId)
+      const removing = selectedAssigneeIds.has(String(userId));
+      const nextIds = removing
         ? prev.assignee_ids.filter((entry) => entry !== userId)
         : [...prev.assignee_ids, userId];
+      const nextUploadAssigneeIds = prev.upload_required
+        ? (
+            removing
+              ? prev.upload_assignee_ids.filter((entry) => String(entry) !== String(userId))
+              : uniqueIds([...prev.upload_assignee_ids, userId])
+          )
+        : prev.upload_assignee_ids;
       return {
         ...prev,
         assignee_ids: nextIds,
+        upload_assignee_ids: nextUploadAssigneeIds,
       };
     });
+  };
+
+  const handleUploadRequiredChange = (checked) => {
+    setForm((prev) => ({
+      ...prev,
+      upload_required: checked,
+      upload_assignee_ids:
+        checked && (!Array.isArray(prev.upload_assignee_ids) || prev.upload_assignee_ids.length === 0)
+          ? uniqueIds([currentUserId, ...prev.assignee_ids])
+          : prev.upload_assignee_ids,
+    }));
+  };
+
+  const toggleUploadAssignee = (userId) => {
+    setForm((prev) => ({
+      ...prev,
+      upload_assignee_ids: selectedUploadAssigneeIds.has(String(userId))
+        ? prev.upload_assignee_ids.filter((entry) => String(entry) !== String(userId))
+        : uniqueIds([...prev.upload_assignee_ids, userId]),
+    }));
   };
 
   const handleSubmit = async (event) => {
@@ -130,8 +194,8 @@ const WorkflowBatchCreateModal = ({
       setError("A valid root folder is required.");
       return;
     }
-    if (!normalizeText(form.start_code)) {
-      setError("Start code is required.");
+    if (!normalizeText(form.name)) {
+      setError("Batch name is required.");
       return;
     }
     if (!normalizeText(form.task_type_key)) {
@@ -150,18 +214,27 @@ const WorkflowBatchCreateModal = ({
       setError("Due date is required.");
       return;
     }
+    if (
+      form.upload_required &&
+      (!Array.isArray(form.upload_assignee_ids) || form.upload_assignee_ids.length === 0)
+    ) {
+      setError("Select at least one upload user when upload is required.");
+      return;
+    }
 
     setSubmitting(true);
     try {
       const payload = {
-        name: normalizeText(form.start_code) || normalizeText(rootFolder),
-        start_code: normalizeText(form.start_code),
+        name: normalizeText(form.name),
+        start_code: "",
         source_folder_name: normalizeText(rootFolder),
         brand: normalizeText(form.brand),
         description: normalizeText(form.description),
         task_type_key: normalizeText(form.task_type_key),
         assignment_mode: "manual",
         assignee_ids: form.assignee_ids,
+        upload_required: Boolean(form.upload_required),
+        upload_assignee_ids: form.upload_required ? form.upload_assignee_ids : [],
         due_date: normalizeText(form.due_date),
         file_manifest: manifest.map((entry) => ({
           name: entry.name,
@@ -293,25 +366,19 @@ const WorkflowBatchCreateModal = ({
 
                       <div className="row g-3">
                         <div className="col-12">
-                          <label className="form-label">Start Code</label>
+                          <label className="form-label">Batch Name</label>
                           <input
                             type="text"
                             className="form-control"
-                            value={form.start_code}
+                            value={form.name}
                             onChange={(event) =>
-                              setForm((prev) => ({ ...prev, start_code: event.target.value }))
+                              setForm((prev) => ({ ...prev, name: event.target.value }))
                             }
                           />
                           <div className="form-text">
-                            Generated task names will become
-                            {" "}
-                            <code>{normalizeText(form.start_code) || "CODE"}1</code>,
-                            {" "}
-                            <code>{normalizeText(form.start_code) || "CODE"}2</code>,
-                            {" "}
-                            <code>{normalizeText(form.start_code) || "CODE"}3</code>
-                            {" "}
-                            and so on.
+                            This names the batch container. Generated task titles still use
+                            the matched file name, direct subfolder name, or this batch name
+                            based on the selected task type.
                           </div>
                         </div>
 
@@ -390,7 +457,7 @@ const WorkflowBatchCreateModal = ({
                         <div className="col-12">
                           <div className="d-flex justify-content-between align-items-center gap-2 mb-2">
                             <label className="form-label mb-0">Assignees</label>
-                            <span className="small text-secondary">Optional</span>
+                            <span className="small text-secondary">Required</span>
                           </div>
                           {availableUsers.length === 0 ? (
                             <div className="alert alert-secondary mb-0 py-2">
@@ -425,6 +492,74 @@ const WorkflowBatchCreateModal = ({
                             </div>
                           )}
                         </div>
+
+                        <div className="col-12">
+                          <div className="form-check form-switch">
+                            <input
+                              id="workflow-batch-upload-required"
+                              type="checkbox"
+                              className="form-check-input"
+                              checked={form.upload_required}
+                              onChange={(event) =>
+                                handleUploadRequiredChange(event.target.checked)
+                              }
+                            />
+                            <label
+                              className="form-check-label"
+                              htmlFor="workflow-batch-upload-required"
+                            >
+                              Upload Required
+                            </label>
+                          </div>
+                        </div>
+
+                        {form.upload_required && (
+                          <div className="col-12">
+                            <div className="d-flex justify-content-between align-items-center gap-2 mb-2">
+                              <div>
+                                <label className="form-label mb-0">Upload Pending Users</label>
+                                <div className="small text-secondary">
+                                  These users will get upload steps on every task created by this batch.
+                                </div>
+                              </div>
+                              <span className="om-summary-chip">
+                                Selected: {form.upload_assignee_ids.length}
+                              </span>
+                            </div>
+
+                            {availableUploadUsers.length === 0 ? (
+                              <div className="alert alert-secondary mb-0 py-2">
+                                No user options are available for upload assignment.
+                              </div>
+                            ) : (
+                              <div className="workflow-user-picker">
+                                {availableUploadUsers.map((user) => {
+                                  const userId = getUserId(user);
+                                  const checked = selectedUploadAssigneeIds.has(String(userId));
+                                  return (
+                                    <label
+                                      key={userId}
+                                      className="form-check d-flex align-items-center gap-2 mb-0"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        className="form-check-input mt-0"
+                                        checked={checked}
+                                        onChange={() => toggleUploadAssignee(userId)}
+                                      />
+                                      <span>
+                                        {user?.name || user?.username || user?.email || "User"}{" "}
+                                        <span className="text-secondary small">
+                                          ({user?.role || "user"})
+                                        </span>
+                                      </span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
 
                       </div>
                     </div>
@@ -468,6 +603,14 @@ const WorkflowBatchCreateModal = ({
                           {normalizeText(form.due_date) && (
                             <span className="om-summary-chip">
                               Due Date: {form.due_date}
+                            </span>
+                          )}
+                          <span className="om-summary-chip">
+                            Upload: {form.upload_required ? "Required" : "Not Required"}
+                          </span>
+                          {form.upload_required && (
+                            <span className="om-summary-chip">
+                              Upload Users: {form.upload_assignee_ids.length}
                             </span>
                           )}
                         </div>

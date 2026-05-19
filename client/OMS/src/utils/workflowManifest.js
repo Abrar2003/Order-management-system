@@ -235,18 +235,11 @@ const applyTaskTypeRule = (manifest = [], taskType = null) => {
 };
 
 export const previewPerFileTasks = (manifest = [], taskType = null) => {
-  const label =
-    normalizeText(taskType?.name)
-    || normalizeText(taskType?.label)
-    || "Workflow Task";
-
   return applyTaskTypeRule(manifest, taskType)
     .map((entry, index) => ({
       id: `per-file-${index + 1}`,
       title: buildPreviewTaskTitle({
-        startCode: taskType?.preview_start_code,
-        index,
-        fallbackTitle: `${label} - ${entry.name}`,
+        fallbackTitle: entry.name,
       }),
       source_folder_path: entry.folder_path,
       source_files: [entry],
@@ -255,16 +248,9 @@ export const previewPerFileTasks = (manifest = [], taskType = null) => {
 };
 
 const buildPreviewTaskTitle = ({
-  startCode = "",
-  index = 0,
   fallbackTitle = "",
 }) => {
-  const normalizedStartCode = normalizeText(startCode);
-  if (normalizedStartCode) {
-    return `${normalizedStartCode}${Number(index) + 1}`;
-  }
-
-  return fallbackTitle;
+  return normalizeText(fallbackTitle) || "Workflow Task";
 };
 
 export const previewPerDirectSubfolderTasks = (
@@ -273,10 +259,6 @@ export const previewPerDirectSubfolderTasks = (
   taskType = null,
 ) => {
   const grouped = new Map();
-  const label =
-    normalizeText(taskType?.name)
-    || normalizeText(taskType?.label)
-    || "Workflow Task";
 
   applyTaskTypeRule(manifest, taskType).forEach((entry) => {
     const directSubfolder = getDirectSubfolder(rootFolder, entry?.folder_path);
@@ -292,9 +274,7 @@ export const previewPerDirectSubfolderTasks = (
     .map(([folderName, entries], index) => ({
       id: `per-subfolder-${index + 1}`,
       title: buildPreviewTaskTitle({
-        startCode: taskType?.preview_start_code,
-        index,
-        fallbackTitle: `${label} - ${folderName}`,
+        fallbackTitle: folderName,
       }),
       source_folder_path: entries[0]?.folder_path || `${normalizeText(rootFolder)}/${folderName}`,
       source_files: entries,
@@ -313,19 +293,13 @@ export const previewOncePerBatchTask = (
   const filteredEntries = applyTaskTypeRule(manifest, taskType);
   if (!filteredEntries.length) return [];
 
-  const label =
-    normalizeText(taskType?.name)
-    || normalizeText(taskType?.label)
-    || "Workflow Task";
   const suffix = normalizeText(batchName) || normalizeText(sourceFolderName) || "Batch";
 
   return [
     {
       id: "once-per-batch-1",
       title: buildPreviewTaskTitle({
-        startCode: taskType?.preview_start_code,
-        index: 0,
-        fallbackTitle: `${label} - ${suffix}`,
+        fallbackTitle: suffix,
       }),
       source_folder_path: normalizeText(sourceFolderName),
       source_files: filteredEntries,
@@ -340,35 +314,29 @@ export const buildTaskPreview = ({
   taskType = null,
   batchName = "",
   sourceFolderName = "",
-  startCode = "",
 } = {}) => {
   const autoCreateMode = normalizeText(taskType?.auto_create_mode).toLowerCase();
-  const taskTypeWithPreviewStartCode = taskType
-    ? {
-        ...taskType,
-        preview_start_code: normalizeText(startCode),
-      }
-    : null;
+  const previewTaskType = taskType || null;
 
-  if (!Array.isArray(manifest) || manifest.length === 0 || !taskTypeWithPreviewStartCode) {
+  if (!Array.isArray(manifest) || manifest.length === 0 || !previewTaskType) {
     return [];
   }
 
   if (autoCreateMode === "per_file") {
-    return previewPerFileTasks(manifest, taskTypeWithPreviewStartCode);
+    return previewPerFileTasks(manifest, previewTaskType);
   }
 
   if (autoCreateMode === "per_direct_subfolder") {
     return previewPerDirectSubfolderTasks(
       manifest,
       rootFolder,
-      taskTypeWithPreviewStartCode,
+      previewTaskType,
     );
   }
 
   return previewOncePerBatchTask(
     manifest,
-    taskTypeWithPreviewStartCode,
+    previewTaskType,
     batchName,
     sourceFolderName || rootFolder,
   );

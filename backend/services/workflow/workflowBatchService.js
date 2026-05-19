@@ -182,10 +182,6 @@ const createWorkflowBatchFromFolderManifest = async (
   }
 
   const startCode = normalizeText(payload?.start_code);
-  if (!startCode) {
-    throw new Error("start_code is required");
-  }
-
   const name = normalizeText(payload?.name || startCode || payload?.source_folder_name);
   if (!name) {
     throw new Error("Batch name is required");
@@ -199,6 +195,26 @@ const createWorkflowBatchFromFolderManifest = async (
   const sourceFolderKey = normalizeSourceFolderKey(sourceFolderName);
   const taskType = await findActiveTaskTypeByKey(payload?.task_type_key);
   const assignees = await validateAssigneeUsers(payload?.assignee_ids || []);
+  const uploadRequired = payload?.upload_required !== undefined
+    ? Boolean(payload.upload_required)
+    : true;
+  const defaultUploadAssigneeIds = [
+    actor?._id || actor?.id,
+    ...assignees.map((assignee) => assignee?._id),
+  ];
+  const uploadAssigneeIds = uploadRequired
+    ? (
+        payload?.upload_assignee_ids !== undefined
+          ? payload.upload_assignee_ids
+          : defaultUploadAssigneeIds
+      )
+    : [];
+  const uploadAssignees = uploadRequired
+    ? await validateAssigneeUsers(uploadAssigneeIds)
+    : [];
+  if (uploadRequired && uploadAssignees.length === 0) {
+    throw new Error("At least one upload user is required when upload is required");
+  }
   const dueDate = parseDueDate(payload?.due_date);
   if (!dueDate) {
     throw new Error("due_date is required");
@@ -276,6 +292,8 @@ const createWorkflowBatchFromFolderManifest = async (
       taskType,
       manifestEntries,
       assignees,
+      uploadRequired,
+      uploadAssignees: uploadAssignees.map((user) => ({ user: user._id })),
       actor,
     });
 

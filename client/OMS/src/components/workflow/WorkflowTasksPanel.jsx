@@ -7,6 +7,7 @@ import { usePermissions } from "../../auth/PermissionContext";
 import {
   approveWorkflowTask,
   completeWorkflowTask,
+  deleteWorkflowBatch,
   deleteWorkflowTask,
   getWorkflowDepartments,
   getWorkflowTaskTypes,
@@ -124,7 +125,6 @@ const TASK_STATUS_FILTER_OPTIONS = Object.freeze([
   { value: "open", label: "Open" },
   { value: "needs_approval", label: "Needs Approval" },
   { value: "upload_remaining", label: "Upload Remaining" },
-  { value: "upload_pending", label: "Upload Pending" },
   { value: "overdue", label: "Overdue" },
   { value: "approval_overdue", label: "Approval Overdue" },
   { value: "upload_overdue", label: "Upload Overdue" },
@@ -339,6 +339,7 @@ const WorkflowTasksPanel = ({
   const [limit, setLimit] = useState(() => parseLimit(searchParams.get("limit")));
   const [refreshTick, setRefreshTick] = useState(0);
   const [actionTaskId, setActionTaskId] = useState("");
+  const [expandedBatchIds, setExpandedBatchIds] = useState(() => new Set());
   const [notePrompt, setNotePrompt] = useState({
     taskId: "",
     type: "",
@@ -588,6 +589,29 @@ const WorkflowTasksPanel = ({
     );
   };
 
+  const handleDeleteBatchGroup = async (batchRow) => {
+    const batchId = batchRow?.batch?._id || batchRow?.batch?.id || "";
+    if (!batchId) {
+      setError("Batch id is missing for this row.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete workflow batch ${batchRow?.batch_no || batchRow?.title || "this batch"} and all tasks inside it?`,
+    );
+    if (!confirmed) return;
+
+    const reason = window.prompt("Enter delete note (optional)") || "";
+    await handleQuickAction(
+      () =>
+        deleteWorkflowBatch(batchId, {
+          note: normalizeText(reason),
+        }),
+      "Workflow batch and all tasks inside it deleted successfully.",
+      { taskId: batchRow?._id },
+    );
+  };
+
   const handleStageClick = async (task, stepKey) => {
     const actions = getTaskActionState({
       task,
@@ -682,7 +706,36 @@ const WorkflowTasksPanel = ({
     );
   };
 
-  const visibleRows = useMemo(() => rows, [rows]);
+  const toggleBatchExpanded = useCallback((batchId = "") => {
+    const normalizedBatchId = normalizeText(batchId);
+    if (!normalizedBatchId) return;
+    setExpandedBatchIds((current) => {
+      const next = new Set(current);
+      if (next.has(normalizedBatchId)) {
+        next.delete(normalizedBatchId);
+      } else {
+        next.add(normalizedBatchId);
+      }
+      return next;
+    });
+  }, []);
+
+  const visibleRows = useMemo(() => {
+    const flattenedRows = [];
+    rows.forEach((row) => {
+      flattenedRows.push(row);
+      if (row?.is_batch_group && expandedBatchIds.has(String(row._id))) {
+        (Array.isArray(row.child_tasks) ? row.child_tasks : []).forEach((childTask) => {
+          flattenedRows.push({
+            ...childTask,
+            _is_batch_child: true,
+            _parent_batch_row_id: row._id,
+          });
+        });
+      }
+    });
+    return flattenedRows;
+  }, [expandedBatchIds, rows]);
 
   const { connectionState } = useWorkflowRealtime({
     enabled: canViewWorkflow,
@@ -964,10 +1017,12 @@ const WorkflowTasksPanel = ({
                   </thead>
                   <tbody>
                     {visibleRows.map((task) => {
+                      const isBatchGroup = Boolean(task?.is_batch_group);
+                      const isBatchChild = Boolean(task?._is_batch_child);
                       const actions = getTaskActionState({
                         task,
                         currentUserId,
-                        canManageWorkflow,
+                        canManageWorkflow: isBatchGroup ? false : canManageWorkflow,
                       });
                       const isBusy = actionTaskId === task._id;
                       const isCompletePromptOpen =
@@ -985,13 +1040,51 @@ const WorkflowTasksPanel = ({
                         : [];
 
                       return (
-                        <tr key={task._id}>
+                        <tr
+                          key={`${task._parent_batch_row_id || ""}-${task._id}`}
+                          className={[
+                            isBatchGroup ? "workflow-batch-group-row" : "",
+                            isBatchChild ? "workflow-batch-child-row" : "",
+                          ].filter(Boolean).join(" ")}
+                        >
                           <td>
                             <div className="workflow-task-name-cell">
-                              <div className="fw-semibold">{task.title}</div>
+                              <div className="d-flex align-items-center gap-2">
+                                {isBatchGroup && (
+                                  <button
+                                    type="button"
+                                    className="workflow-batch-accordion-button"
+                                    onClick={() => toggleBatchExpanded(task._id)}
+                                    aria-expanded={expandedBatchIds.has(String(task._id))}
+                                    title={expandedBatchIds.has(String(task._id)) ? "Collapse batch tasks" : "Expand batch tasks"}
+                                  >
+                                    {expandedBatchIds.has(String(task._id)) ? "−" : "+"}
+                                  </button>
+                                )}
+                                {isBatchChild && (
+                                  <span className="workflow-batch-child-marker" aria-hidden="true" />
+                                )}
+                                <div>
+                                  <div className="fw-semibold">
+                                    {task.title}
+                                  </div>
+                                  {isBatchGroup && (
+                                    <div className="small text-secondary">
+                                      Batch: {task.batch_no || task?.batch?.batch_no || "—"} • {Number(task?.batch_counts?.total_tasks || task?.child_tasks?.length || 0)} tasks
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
                               <div className="small text-secondary mt-1">
                                 {assigneeText}
                               </div>
+                              {isBatchGroup && (
+                                <div className="workflow-batch-count-line">
+                                  <span>Started: {Number(task?.batch_counts?.started_tasks || 0)}</span>
+                                  <span>Completed: {Number(task?.batch_counts?.complete_done_tasks || 0)}</span>
+                                  <span>Approved: {Number(task?.batch_counts?.approved_tasks || 0)}</span>
+                                </div>
+                              )}
                               <div className="workflow-task-rework-line">
                                 <ReworkHoverBadge
                                   taskId={task._id}
@@ -1063,6 +1156,7 @@ const WorkflowTasksPanel = ({
                                 task={task}
                                 disabled={isBusy}
                                 isStepClickable={(stepKey) =>
+                                  !isBatchGroup && (
                                   (stepKey === "started" && actions.canStart)
                                   || (stepKey === "complete" && actions.canComplete)
                                   || (stepKey === "approved" && actions.canApprove)
@@ -1071,6 +1165,7 @@ const WorkflowTasksPanel = ({
 	                                    actions.canUpload &&
 	                                    isUploadStepPending(task, stepKey)
 	                                  )
+                                  )
                                 }
                                 onStepClick={(stepKey) => handleStageClick(task, stepKey)}
                               />
@@ -1148,15 +1243,17 @@ const WorkflowTasksPanel = ({
                           </td>
                           <td>
                             <div className="workflow-task-actions">
-                              <button
-                                type="button"
-                                className="workflow-icon-button"
-                                onClick={() => setSelectedTaskId(task._id)}
-                                title="View task details"
-                                aria-label="View task details"
-                              >
-                                <img src={WORKFLOW_ACTION_ICONS.info} alt="" />
-                              </button>
+                              {!isBatchGroup && (
+                                <button
+                                  type="button"
+                                  className="workflow-icon-button"
+                                  onClick={() => setSelectedTaskId(task._id)}
+                                  title="View task details"
+                                  aria-label="View task details"
+                                >
+                                  <img src={WORKFLOW_ACTION_ICONS.info} alt="" />
+                                </button>
+                              )}
                               {actions.canRework && (
                                 <button
                                   type="button"
@@ -1169,7 +1266,19 @@ const WorkflowTasksPanel = ({
                                   <img src={WORKFLOW_ACTION_ICONS.rework} alt="" />
                                 </button>
                               )}
-                              {(canDeleteWorkflow || actions.createdByCurrentUser) && (
+                              {isBatchGroup && canDeleteWorkflow && (
+                                <button
+                                  type="button"
+                                  className="workflow-icon-button is-danger"
+                                  disabled={isBusy}
+                                  onClick={() => handleDeleteBatchGroup(task)}
+                                  title="Delete batch and all tasks"
+                                  aria-label="Delete batch and all tasks"
+                                >
+                                  <img src={WORKFLOW_ACTION_ICONS.delete} alt="" />
+                                </button>
+                              )}
+                              {!isBatchGroup && (canDeleteWorkflow || actions.createdByCurrentUser) && (
                                 <button
                                   type="button"
                                   className="workflow-icon-button is-danger"

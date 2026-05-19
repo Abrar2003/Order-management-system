@@ -406,6 +406,31 @@ small,
   max-width: min(1440px, calc(100vw - 2rem));
 }
 
+.workflow-modal-dialog .modal-content {
+  max-height: calc(100vh - 2rem);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.workflow-modal-dialog .modal-content > form {
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.workflow-modal-dialog .modal-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
+
+.workflow-modal-dialog .modal-header,
+.workflow-modal-dialog .modal-footer {
+  flex: 0 0 auto;
+}
+
 .workflow-quick-modal-dialog {
   width: min(34rem, calc(100vw - 2rem));
   max-width: min(34rem, calc(100vw - 2rem));
@@ -421,6 +446,21 @@ small,
   border: 1px solid rgba(203, 189, 170, 0.55);
   border-radius: 1rem;
   background: var(--om-color-surface-muted);
+}
+
+.workflow-user-picker .form-check {
+  min-width: 0;
+  align-items: flex-start !important;
+  line-height: 1.25;
+}
+
+.workflow-user-picker .form-check-input {
+  flex: 0 0 auto;
+}
+
+.workflow-user-picker .form-check span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .workflow-task-table-wrap {
@@ -477,6 +517,61 @@ small,
   display: grid;
   gap: 0.2rem;
   overflow-wrap: anywhere;
+}
+
+.workflow-batch-group-row > td {
+  background: rgba(246, 249, 252, 0.9);
+  border-top: 1px solid rgba(148, 163, 184, 0.32);
+}
+
+.workflow-batch-child-row > td {
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.workflow-batch-accordion-button {
+  width: 1.7rem;
+  height: 1.7rem;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(99, 102, 241, 0.28);
+  border-radius: 0.45rem;
+  background: #ffffff;
+  color: #334155;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.workflow-batch-accordion-button:hover {
+  border-color: rgba(99, 102, 241, 0.55);
+  box-shadow: 0 0.25rem 0.75rem rgba(15, 23, 42, 0.08);
+}
+
+.workflow-batch-child-marker {
+  width: 1.7rem;
+  height: 1.7rem;
+  flex: 0 0 auto;
+  border-left: 2px solid rgba(99, 102, 241, 0.35);
+  border-bottom: 2px solid rgba(99, 102, 241, 0.35);
+  border-radius: 0 0 0 0.45rem;
+}
+
+.workflow-batch-count-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+  font-size: 0.74rem;
+  color: var(--om-color-text-muted);
+}
+
+.workflow-batch-count-line span {
+  display: inline-flex;
+  padding: 0.12rem 0.4rem;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .workflow-task-dates {

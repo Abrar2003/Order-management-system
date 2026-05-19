@@ -332,6 +332,7 @@ const buildEmptyTaskCounts = () => ({
   review_tasks: 0,
   uploaded_tasks: 0,
   completed_tasks: 0,
+  complete_done_tasks: 0,
   reworked_tasks: 0,
   rework_tasks: 0,
 });
@@ -362,6 +363,9 @@ const buildDerivedTaskCounts = (taskCounts = {}) => {
   normalized.uploaded_tasks = Number(normalized.uploaded_tasks || 0);
   normalized.completed_tasks = Number(
     normalized.completed_tasks || normalized.uploaded_tasks || 0,
+  );
+  normalized.complete_done_tasks = Number(
+    normalized.complete_done_tasks || normalized.completed_tasks || normalized.uploaded_tasks || 0,
   );
   normalized.reworked_tasks = Number(normalized.reworked_tasks || 0);
   normalized.rework_tasks = Number(
