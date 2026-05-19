@@ -176,6 +176,7 @@ const TransferInspectionModal = ({
     () => normalizeLabels(inspectionRecord?.labels_added),
     [inspectionRecord?.labels_added],
   );
+  const hasSourceLabels = sourceLabels.length > 0;
 
   const [po, setPo] = useState("");
   const [quantity, setQuantity] = useState(
@@ -250,8 +251,9 @@ const TransferInspectionModal = ({
   }, [lookupResult?.target?.open_quantity, sourcePassedQuantity]);
 
   const requiredLabelsCount = labelRequirement.requiredCount;
-  const requiredLabelsText =
-    labelRequirement.boxMode === BOX_PACKAGING_MODES.CARTON
+  const requiredLabelsText = !hasSourceLabels
+    ? "No source labels on this inspection record; labels are not required."
+    : labelRequirement.boxMode === BOX_PACKAGING_MODES.CARTON
       ? `Required labels: ${requiredLabelsCount} = passed quantity ${toPositiveInteger(quantity) || 0}`
       : `Required labels: ${requiredLabelsCount} = passed quantity ${toPositiveInteger(quantity) || 0} x box sizes ${boxSizesCount}`;
 
@@ -324,7 +326,9 @@ const TransferInspectionModal = ({
     const trimmedPo = String(po || "").trim();
     const transferQuantity = toPositiveInteger(quantity);
     const sourceAvailableLabelSet = new Set(sourceLabels);
-    const selectedLabels = normalizeLabels(parsedLabelRangeData.labels);
+    const selectedLabels = hasSourceLabels
+      ? normalizeLabels(parsedLabelRangeData.labels)
+      : [];
 
     setError("");
 
@@ -353,12 +357,13 @@ const TransferInspectionModal = ({
       return;
     }
 
-    if (parsedLabelRangeData.error) {
+    if (hasSourceLabels && parsedLabelRangeData.error) {
       setError(parsedLabelRangeData.error);
       return;
     }
 
     if (
+      hasSourceLabels &&
       transferQuantity > 0 &&
       requiresBoxSizeCountForLabels &&
       boxSizesCount === 0
@@ -367,7 +372,7 @@ const TransferInspectionModal = ({
       return;
     }
 
-    if (selectedLabels.length !== requiredLabelsCount) {
+    if (hasSourceLabels && selectedLabels.length !== requiredLabelsCount) {
       setError(
         buildQcLabelRequirementMessage({
           totalPassed: transferQuantity,
@@ -380,13 +385,13 @@ const TransferInspectionModal = ({
       return;
     }
 
-    if (selectedLabels.length > sourceLabels.length) {
+    if (hasSourceLabels && selectedLabels.length > sourceLabels.length) {
       setError("Labels count cannot be greater than the labels available on this inspection record.");
       return;
     }
 
     const invalidLabels = selectedLabels.filter((label) => !sourceAvailableLabelSet.has(label));
-    if (invalidLabels.length > 0) {
+    if (hasSourceLabels && invalidLabels.length > 0) {
       setError(`Some labels are not available on this inspection record: ${invalidLabels.join(", ")}`);
       return;
     }
@@ -533,78 +538,86 @@ const TransferInspectionModal = ({
                   disabled
                 />
                 <div className="form-text">
-                  Label requirement uses transfer quantity × box sizes count.
+                  {hasSourceLabels
+                    ? "Label requirement uses transfer quantity × box sizes count."
+                    : "Skipped because this source record has no labels."}
                 </div>
               </div>
             </div>
 
             <div>
               <label className="form-label d-block">Label Ranges</label>
-              <div className="d-grid gap-2">
-                {labelRanges.map((range, index) => (
-                  <div
-                    key={`transfer-label-range-${index}`}
-                    className="row g-2 align-items-end"
-                  >
-                    <div className="col-sm-5">
-                      <input
-                        type="number"
-                        className="form-control"
-                        value={range.start}
-                        onChange={(event) =>
-                          handleLabelRangeChange(index, "start", event.target.value)
-                        }
-                        min="0"
-                        step="1"
-                        placeholder={`Start label ${index + 1}`}
-                        disabled={!lookupResult || saving}
-                      />
-                    </div>
-                    <div className="col-sm-5">
-                      <input
-                        type="number"
-                        className="form-control"
-                        value={range.end}
-                        onChange={(event) =>
-                          handleLabelRangeChange(index, "end", event.target.value)
-                        }
-                        min="0"
-                        step="1"
-                        placeholder={`End label ${index + 1}`}
-                        disabled={!lookupResult || saving}
-                      />
-                    </div>
-                    <div className="col-sm-2 d-flex gap-2">
-                      <button
-                        type="button"
-                        className="btn btn-outline-secondary btn-sm"
-                        onClick={addLabelRange}
-                        title="Add another range"
-                        disabled={!lookupResult || saving}
-                      >
-                        +
-                      </button>
-                      {labelRanges.length > 1 && (
+              {hasSourceLabels ? (
+                <div className="d-grid gap-2">
+                  {labelRanges.map((range, index) => (
+                    <div
+                      key={`transfer-label-range-${index}`}
+                      className="row g-2 align-items-end"
+                    >
+                      <div className="col-sm-5">
+                        <input
+                          type="number"
+                          className="form-control"
+                          value={range.start}
+                          onChange={(event) =>
+                            handleLabelRangeChange(index, "start", event.target.value)
+                          }
+                          min="0"
+                          step="1"
+                          placeholder={`Start label ${index + 1}`}
+                          disabled={!lookupResult || saving}
+                        />
+                      </div>
+                      <div className="col-sm-5">
+                        <input
+                          type="number"
+                          className="form-control"
+                          value={range.end}
+                          onChange={(event) =>
+                            handleLabelRangeChange(index, "end", event.target.value)
+                          }
+                          min="0"
+                          step="1"
+                          placeholder={`End label ${index + 1}`}
+                          disabled={!lookupResult || saving}
+                        />
+                      </div>
+                      <div className="col-sm-2 d-flex gap-2">
                         <button
                           type="button"
-                          className="btn btn-outline-danger btn-sm"
-                          onClick={() => removeLabelRange(index)}
-                          title="Remove this range"
+                          className="btn btn-outline-secondary btn-sm"
+                          onClick={addLabelRange}
+                          title="Add another range"
                           disabled={!lookupResult || saving}
                         >
-                          -
+                          +
                         </button>
-                      )}
+                        {labelRanges.length > 1 && (
+                          <button
+                            type="button"
+                            className="btn btn-outline-danger btn-sm"
+                            onClick={() => removeLabelRange(index)}
+                            title="Remove this range"
+                            disabled={!lookupResult || saving}
+                          >
+                            -
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="alert alert-light border mb-0">
+                  This inspection record has no source labels, so the transfer will not require labels.
+                </div>
+              )}
               <div className="form-text">
                 {requiredLabelsText}
               </div>
             </div>
 
-            {!parsedLabelRangeData.error && parsedLabelRangeData.labels.length > 0 && (
+            {hasSourceLabels && !parsedLabelRangeData.error && parsedLabelRangeData.labels.length > 0 && (
               <div className="border rounded p-3">
                 <div className="small text-secondary mb-1">Selected Labels</div>
                 <div className="fw-semibold mb-1">{parsedLabelRangeData.labels.length}</div>

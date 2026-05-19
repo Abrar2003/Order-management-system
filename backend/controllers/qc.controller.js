@@ -8404,6 +8404,7 @@ exports.transferInspectionRecord = async (req, res) => {
     }
 
     const sourceLabels = normalizeLabels(sourceInspection?.labels_added);
+    const sourceHasLabels = sourceLabels.length > 0;
     const invalidTransferLabels = transferLabels.filter(
       (label) => !sourceLabels.includes(label),
     );
@@ -8492,6 +8493,7 @@ exports.transferInspectionRecord = async (req, res) => {
       boxSizes: transferBoxSizes,
     });
     if (
+      sourceHasLabels &&
       transferBoxMode !== BOX_PACKAGING_MODES.CARTON &&
       transferBoxSizesCount === 0
     ) {
@@ -8499,7 +8501,10 @@ exports.transferInspectionRecord = async (req, res) => {
         message: "At least 1 box size is required to validate labels",
       });
     }
-    if (transferLabels.length !== transferLabelRequirement.requiredCount) {
+    if (
+      sourceHasLabels &&
+      transferLabels.length !== transferLabelRequirement.requiredCount
+    ) {
       return res.status(400).json({
         message: buildQcLabelRequirementMessage({
           totalPassed: transferQuantityRaw,

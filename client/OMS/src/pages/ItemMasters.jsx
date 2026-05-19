@@ -120,17 +120,43 @@ const resolveBoxSizeData = (item = {}) => {
   };
 };
 
-const renderSizeEntries = (entries = [], { weightKey = "", emptyLabel = "No master sizes saved" } = {}) => {
-  const normalizedEntries = normalizeEntries(entries, weightKey);
+const buildCombinedSizeRows = (item = {}) => {
+  const boxSizeData = resolveBoxSizeData(item);
+  return {
+    boxMode: boxSizeData.mode,
+    rows: [
+      ...resolveItemSizeEntries(item).map((entry, index) => ({
+        ...entry,
+        groupLabel: "Item",
+        partLabel: formatRemark(entry, `Entry ${index + 1}`),
+        weightKey: "net_weight",
+        weightLabel: "Net",
+      })),
+      ...boxSizeData.entries.map((entry, index) => ({
+        ...entry,
+        groupLabel: "Box",
+        partLabel: formatRemark(entry, `Entry ${index + 1}`),
+        weightKey: "gross_weight",
+        weightLabel: "Gross",
+      })),
+    ],
+  };
+};
+
+const renderSizeEntries = (entries = [], { emptyLabel = "No master sizes saved" } = {}) => {
+  const normalizedEntries = (Array.isArray(entries) ? entries : [])
+    .filter((entry) => entry && typeof entry === "object")
+    .filter((entry) => hasEntryValue(entry, entry?.weightKey));
   if (normalizedEntries.length === 0) {
     return <span className="text-secondary">{emptyLabel}</span>;
   }
 
   return (
     <div className="table-responsive">
-      <table className="table table-sm align-middle mb-0">
+      <table className="table table-sm align-middle mb-0 item-master-size-table">
         <thead>
           <tr>
+            <th>Type</th>
             <th>Part</th>
             <th>L x B x H</th>
             <th>Weight</th>
@@ -139,12 +165,16 @@ const renderSizeEntries = (entries = [], { weightKey = "", emptyLabel = "No mast
         </thead>
         <tbody>
           {normalizedEntries.map((entry, index) => (
-            <tr key={`${entry?.remark || entry?.box_type || "entry"}-${index}`}>
-              <td>{formatRemark(entry, `Entry ${index + 1}`)}</td>
+            <tr key={`${entry?.groupLabel || "size"}-${entry?.remark || entry?.box_type || "entry"}-${index}`}>
+              <td>{entry?.groupLabel || "-"}</td>
+              <td>{entry?.partLabel || formatRemark(entry, `Entry ${index + 1}`)}</td>
               <td>
                 {formatNumber(entry?.L)} x {formatNumber(entry?.B)} x {formatNumber(entry?.H)}
               </td>
-              <td>{formatNumber(entry?.[weightKey], 3)}</td>
+              <td>
+                {formatNumber(entry?.[entry?.weightKey], 3)}
+                <span className="item-master-size-weight-label"> {entry?.weightLabel || ""}</span>
+              </td>
               <td>
                 {Number(entry?.item_count_in_inner || 0) > 0 && (
                   <span className="me-2">Inner: {formatNumber(entry.item_count_in_inner, 0)}</span>
@@ -346,32 +376,31 @@ const ItemMasters = () => {
         <div className="card om-card">
           <div className="card-body p-0">
             <div className="table-responsive">
-              <table className="table table-hover align-middle mb-0">
+              <table className="table table-hover align-middle mb-0 item-masters-table">
                 <thead>
                   <tr>
                     <th>Item</th>
                     <th>Details</th>
-                    <th>Item Sizes</th>
-                    <th>Box Sizes</th>
+                    <th>Sizes</th>
                     <th>Updated</th>
                   </tr>
                 </thead>
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={5} className="text-center text-secondary py-4">
+                      <td colSpan={4} className="text-center text-secondary py-4">
                         Loading...
                       </td>
                     </tr>
                   ) : rows.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="text-center text-secondary py-4">
+                      <td colSpan={4} className="text-center text-secondary py-4">
                         No items found.
                       </td>
                     </tr>
                   ) : (
                     rows.map((item) => {
-                      const boxSizeData = resolveBoxSizeData(item);
+                      const combinedSizeData = buildCombinedSizeRows(item);
 
                       return (
                         <tr key={item?._id || item?.code}>
@@ -395,18 +424,11 @@ const ItemMasters = () => {
                             )}
                           </td>
                           <td>
-                            {renderSizeEntries(resolveItemSizeEntries(item), {
-                              weightKey: "net_weight",
-                              emptyLabel: "No item sizes saved",
-                            })}
-                          </td>
-                          <td>
                             <div className="small text-secondary mb-1">
-                              {formatBoxMode(boxSizeData.mode)}
+                              Box mode: {formatBoxMode(combinedSizeData.boxMode)}
                             </div>
-                            {renderSizeEntries(boxSizeData.entries, {
-                              weightKey: "gross_weight",
-                              emptyLabel: "No box sizes saved",
+                            {renderSizeEntries(combinedSizeData.rows, {
+                              emptyLabel: "No sizes saved",
                             })}
                           </td>
                           <td>{formatDate(item?.updatedAt)}</td>

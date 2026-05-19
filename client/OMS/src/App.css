@@ -3039,6 +3039,91 @@ small,
   border: 1px solid var(--om-color-border-strong) !important;
 }
 
+.item-masters-table {
+  font-size: 0.82rem;
+}
+
+.item-masters-table > :not(caption) > * > th,
+.item-masters-table > :not(caption) > * > td {
+  padding: 0.68rem 0.55rem;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.item-masters-table th:nth-child(1),
+.item-masters-table td:nth-child(1) {
+  width: 18%;
+}
+
+.item-masters-table th:nth-child(2),
+.item-masters-table td:nth-child(2) {
+  width: 24%;
+}
+
+.item-masters-table th:nth-child(3),
+.item-masters-table td:nth-child(3) {
+  width: 48%;
+}
+
+.item-masters-table th:nth-child(4),
+.item-masters-table td:nth-child(4) {
+  width: 10%;
+}
+
+.item-masters-table .item-master-size-table {
+  table-layout: fixed;
+}
+
+.item-masters-table .item-master-size-table th,
+.item-masters-table .item-master-size-table td {
+  padding: 0.38rem 0.32rem;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.item-masters-table .item-master-size-table th {
+  font-size: 0.66rem;
+  line-height: 1.1;
+  white-space: nowrap !important;
+}
+
+.item-masters-table .item-master-size-table td {
+  font-size: 0.74rem;
+  line-height: 1.18;
+}
+
+.item-masters-table .item-master-size-table th:nth-child(1),
+.item-masters-table .item-master-size-table td:nth-child(1) {
+  width: 13%;
+}
+
+.item-masters-table .item-master-size-table th:nth-child(2),
+.item-masters-table .item-master-size-table td:nth-child(2) {
+  width: 18%;
+}
+
+.item-masters-table .item-master-size-table th:nth-child(3),
+.item-masters-table .item-master-size-table td:nth-child(3) {
+  width: 30%;
+  white-space: nowrap !important;
+}
+
+.item-masters-table .item-master-size-table th:nth-child(4),
+.item-masters-table .item-master-size-table td:nth-child(4) {
+  width: 17%;
+  white-space: nowrap !important;
+}
+
+.item-masters-table .item-master-size-table th:nth-child(5),
+.item-masters-table .item-master-size-table td:nth-child(5) {
+  width: 22%;
+}
+
+.item-master-size-weight-label {
+  color: var(--om-color-text-muted);
+  font-size: 0.62rem;
+}
+
 .pis-diff-report-measure-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   padding: 0.75rem;
