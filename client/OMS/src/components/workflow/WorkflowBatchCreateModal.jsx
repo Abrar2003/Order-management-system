@@ -146,6 +146,10 @@ const WorkflowBatchCreateModal = ({
       setError(previewError || "No matching tasks can be created from this folder.");
       return;
     }
+    if (!normalizeText(form.due_date)) {
+      setError("Due date is required.");
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -158,6 +162,7 @@ const WorkflowBatchCreateModal = ({
         task_type_key: normalizeText(form.task_type_key),
         assignment_mode: "manual",
         assignee_ids: form.assignee_ids,
+        due_date: normalizeText(form.due_date),
         file_manifest: manifest.map((entry) => ({
           name: entry.name,
           relative_path: entry.relative_path,
@@ -167,10 +172,6 @@ const WorkflowBatchCreateModal = ({
           size_bytes: entry.size_bytes,
         })),
       };
-      if (normalizeText(form.due_date)) {
-        payload.due_date = normalizeText(form.due_date);
-      }
-
       const result = await createBatchFromFolderManifest(payload);
       onCreated?.(result?.data || result);
     } catch (submitError) {
@@ -341,6 +342,7 @@ const WorkflowBatchCreateModal = ({
                             onChange={(event) =>
                               setForm((prev) => ({ ...prev, due_date: event.target.value }))
                             }
+                            required
                           />
                           <div className="form-text">
                             This due date is saved internally and copied to the generated tasks.

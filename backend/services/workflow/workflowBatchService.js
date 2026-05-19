@@ -31,6 +31,7 @@ const {
 
 const DEFAULT_PAGE_LIMIT = 20;
 const MAX_PAGE_LIMIT = 100;
+const INDIA_TIMEZONE_OFFSET_MS = 330 * 60 * 1000;
 
 const parsePositiveInt = (value, fallback = 1) => {
   const parsed = Number.parseInt(String(value ?? "").trim(), 10);
@@ -48,6 +49,24 @@ const toDateOrNull = (value) => {
 const parseDueDate = (value) => {
   const normalized = normalizeText(value);
   if (!normalized) return null;
+  const dateOnlyMatch = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateOnlyMatch) {
+    const year = Number(dateOnlyMatch[1]);
+    const month = Number(dateOnlyMatch[2]);
+    const day = Number(dateOnlyMatch[3]);
+    const parsed = new Date(
+      Date.UTC(year, month - 1, day) - INDIA_TIMEZONE_OFFSET_MS,
+    );
+    const shifted = new Date(parsed.getTime() + INDIA_TIMEZONE_OFFSET_MS);
+    if (
+      shifted.getUTCFullYear() !== year ||
+      shifted.getUTCMonth() !== month - 1 ||
+      shifted.getUTCDate() !== day
+    ) {
+      throw new Error("due_date is invalid");
+    }
+    return parsed;
+  }
   const parsed = new Date(normalized);
   if (Number.isNaN(parsed.getTime())) {
     throw new Error("due_date is invalid");
@@ -181,6 +200,9 @@ const createWorkflowBatchFromFolderManifest = async (
   const taskType = await findActiveTaskTypeByKey(payload?.task_type_key);
   const assignees = await validateAssigneeUsers(payload?.assignee_ids || []);
   const dueDate = parseDueDate(payload?.due_date);
+  if (!dueDate) {
+    throw new Error("due_date is required");
+  }
   const manifestEntries = normalizeFileManifest(payload?.file_manifest, {
     sourceFolderName,
   });
@@ -392,7 +414,11 @@ const updateWorkflowBatch = async (
     batch.assignment_mode = normalizeText(payload.assignment_mode).toLowerCase() || batch.assignment_mode;
   }
   if (payload?.due_date !== undefined) {
-    batch.due_date = parseDueDate(payload.due_date);
+    const dueDate = parseDueDate(payload.due_date);
+    if (!dueDate) {
+      throw new Error("due_date is required");
+    }
+    batch.due_date = dueDate;
   }
 
   batch.updated_by = buildAuditActor(actor);

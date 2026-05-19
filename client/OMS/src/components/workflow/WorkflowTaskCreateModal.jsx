@@ -182,6 +182,10 @@ const WorkflowTaskCreateModal = ({
       setError("Assignment date is required.");
       return;
     }
+    if (!normalizeText(form.due_date)) {
+      setError("Due date is required.");
+      return;
+    }
     if (
       form.upload_required &&
       (!Array.isArray(form.upload_assignee_ids) || form.upload_assignee_ids.length === 0)
@@ -206,11 +210,8 @@ const WorkflowTaskCreateModal = ({
         brand: normalizeText(form.brand),
         upload_required: Boolean(form.upload_required),
         upload_assignee_ids: form.upload_required ? form.upload_assignee_ids : [],
+        due_date: normalizeText(form.due_date),
       };
-
-      if (normalizeText(form.due_date)) {
-        payload.due_date = normalizeText(form.due_date);
-      }
 
       const result = await createWorkflowTask(payload);
       onCreated?.(result?.data || result);
@@ -362,6 +363,7 @@ const WorkflowTaskCreateModal = ({
                             onChange={(event) =>
                               setForm((prev) => ({ ...prev, due_date: event.target.value }))
                             }
+                            required
                           />
                         </div>
 

@@ -1354,12 +1354,125 @@ small,
   opacity: 0.58;
 }
 
+.workflow-dashboard-workload-table-wrap {
+  overflow-x: auto;
+}
+
+.workflow-dashboard-table {
+  min-width: 1040px;
+  table-layout: fixed;
+}
+
 .workflow-dashboard-table th,
 .workflow-dashboard-table td {
-  vertical-align: middle;
+  vertical-align: top;
+  padding: 0.85rem 0.75rem;
 }
 
 .workflow-dashboard-table th {
+  color: var(--om-color-text-muted);
+  font-size: var(--om-font-size-meta);
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.workflow-dashboard-table th:nth-child(1),
+.workflow-dashboard-table td:nth-child(1) {
+  width: 18%;
+}
+
+.workflow-dashboard-table th:nth-child(2),
+.workflow-dashboard-table td:nth-child(2) {
+  width: 9%;
+}
+
+.workflow-dashboard-table th:nth-child(3),
+.workflow-dashboard-table td:nth-child(3) {
+  width: 18%;
+}
+
+.workflow-dashboard-table th:nth-child(4),
+.workflow-dashboard-table td:nth-child(4) {
+  width: 22%;
+}
+
+.workflow-dashboard-table th:nth-child(5),
+.workflow-dashboard-table td:nth-child(5) {
+  width: 22%;
+}
+
+.workflow-dashboard-table th:nth-child(6),
+.workflow-dashboard-table td:nth-child(6) {
+  width: 7.5rem;
+}
+
+.workflow-dashboard-table th:nth-child(7),
+.workflow-dashboard-table td:nth-child(7) {
+  width: 7rem;
+}
+
+.workflow-dashboard-user-cell {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.workflow-dashboard-count-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(6.6rem, 1fr));
+  gap: 0.4rem;
+}
+
+.workflow-dashboard-count-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  width: 100%;
+  min-height: 2.05rem;
+  padding: 0.32rem 0.5rem;
+  border: 1px solid rgba(203, 189, 170, 0.6);
+  border-radius: 0.45rem;
+  background: var(--om-color-surface-muted);
+  color: var(--om-color-text-muted);
+  font: inherit;
+  font-size: var(--om-font-size-meta);
+  line-height: 1.15;
+  text-align: left;
+}
+
+.workflow-dashboard-count-chip strong {
+  flex: 0 0 auto;
+  color: var(--om-color-text);
+  font-size: 0.95rem;
+}
+
+.workflow-dashboard-count-chip.has-count:not(:disabled) {
+  cursor: pointer;
+  background: var(--om-color-surface);
+  color: var(--om-color-text);
+}
+
+.workflow-dashboard-count-chip.has-count:not(:disabled):hover,
+.workflow-dashboard-count-chip.has-count:not(:disabled):focus-visible {
+  border-color: var(--om-color-accent);
+}
+
+.workflow-dashboard-count-chip:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.workflow-dashboard-last-update {
+  overflow-wrap: anywhere;
+  color: var(--om-color-text-muted);
+  font-size: var(--om-font-size-meta);
+}
+
+.workflow-dashboard-view-button {
+  width: 100%;
+  min-width: 5.75rem;
   white-space: nowrap;
 }
 

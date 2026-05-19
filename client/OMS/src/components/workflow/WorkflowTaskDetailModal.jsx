@@ -132,6 +132,7 @@ const WorkflowTaskDetailModal = ({
   const [commentText, setCommentText] = useState("");
   const [commentType, setCommentType] = useState("general");
   const [editForm, setEditForm] = useState(() => buildTaskEditForm());
+  const [dueDateNote, setDueDateNote] = useState("");
   const availableBrandOptions = useMemo(
     () =>
       [
@@ -157,6 +158,7 @@ const WorkflowTaskDetailModal = ({
       const nextTask = response?.data || null;
       setTask(nextTask);
       setEditForm(buildTaskEditForm(nextTask || {}));
+      setDueDateNote("");
       setAssignIds(
         Array.isArray(nextTask?.assigned_to)
           ? nextTask.assigned_to.map((entry) => getUserId(entry)).filter(Boolean)
@@ -191,6 +193,17 @@ const WorkflowTaskDetailModal = ({
         ? task.rework_due_dates.filter((entry) => entry?.date)
         : [],
     [task?.rework_due_dates],
+  );
+  const dueDateUpdateHistory = useMemo(
+    () =>
+      (Array.isArray(task?.status_history) ? task.status_history : [])
+        .filter((entry) => entry?.metadata?.due_date_updated)
+        .map((entry) => ({
+          ...entry,
+          date: entry?.metadata?.due_date || entry?.metadata?.next_due_date || null,
+          previousDate: entry?.metadata?.previous_due_date || null,
+        })),
+    [task?.status_history],
   );
 
   const isAssignedUser = useMemo(
@@ -351,6 +364,16 @@ const WorkflowTaskDetailModal = ({
       setActionError("Task name is required.");
       return;
     }
+    if (!normalizeText(editForm.dueDate)) {
+      setActionError("Due date is required.");
+      return;
+    }
+    const currentDueDate = formatDateInputValue(task?.due_date);
+    const dueDateChanged = normalizeText(editForm.dueDate) !== normalizeText(currentDueDate);
+    if (dueDateChanged && !normalizeText(dueDateNote)) {
+      setActionError("Due date update comment is required.");
+      return;
+    }
     if (
       editForm.uploadRequired &&
       (!Array.isArray(editForm.uploadAssigneeIds) || editForm.uploadAssigneeIds.length === 0)
@@ -368,13 +391,17 @@ const WorkflowTaskDetailModal = ({
           department: normalizeText(editForm.department) || null,
           priority: normalizeText(editForm.priority) || "normal",
           assigned_at: normalizeText(editForm.assignmentDate) || null,
-          due_date: normalizeText(editForm.dueDate) || null,
+          due_date: normalizeText(editForm.dueDate),
+          due_date_note: dueDateChanged ? normalizeText(dueDateNote) : undefined,
           upload_required: Boolean(editForm.uploadRequired),
           upload_assignee_ids: editForm.uploadRequired ? editForm.uploadAssigneeIds : [],
         }),
       "Task details updated successfully.",
       {
-        onSuccess: () => setOpenPanel(""),
+        onSuccess: () => {
+          setDueDateNote("");
+          setOpenPanel("");
+        },
       },
     );
   };
@@ -583,6 +610,13 @@ const WorkflowTaskDetailModal = ({
                         <div className="fw-semibold">{formatDateOnly(task.due_date)}</div>
                       </div>
                       <div className="col-md-4">
+                        <div className="small text-secondary mb-1">Active Due Date</div>
+                        <div className="fw-semibold">
+                          {formatDateOnly(task.active_due_date || task.due_date)}
+                          {task?.deadline_summary?.active_due_source === "rework" ? " (Rework)" : ""}
+                        </div>
+                      </div>
+                      <div className="col-md-4">
                         <div className="small text-secondary mb-1">Created By</div>
                         <div className="fw-semibold">{getAuditActorName(task.created_by)}</div>
                       </div>
@@ -616,6 +650,77 @@ const WorkflowTaskDetailModal = ({
                             : "—"}
                         </div>
                       </div>
+                      <div className="col-md-4">
+                        <div className="small text-secondary mb-1">Approval Deadline</div>
+                        <div className="fw-semibold">
+                          {formatDateOnly(task?.deadline_summary?.approval_deadline)}
+                        </div>
+                      </div>
+                      <div className="col-md-4">
+                        <div className="small text-secondary mb-1">Upload Deadline</div>
+                        <div className="fw-semibold">
+                          {task.upload_required === false
+                            ? "Not required"
+                            : formatDateOnly(task?.deadline_summary?.upload_deadline)}
+                        </div>
+                      </div>
+                      <div className="col-md-4">
+                        <div className="small text-secondary mb-1">SLA Stage</div>
+                        <div className="fw-semibold">
+                          {task.delay_stage
+                            ? formatWorkflowStageLabel(task.delay_stage)
+                            : task.overdue_stage
+                              ? formatWorkflowStageLabel(task.overdue_stage)
+                              : "On Time"}
+                        </div>
+                      </div>
+                      {(task?.deadline_summary?.completion_days_late > 0 ||
+                        task?.deadline_summary?.approval_days_late > 0 ||
+                        task?.deadline_summary?.upload_days_late > 0 ||
+                        task?.deadline_summary?.completion_overdue_days > 0 ||
+                        task?.deadline_summary?.approval_overdue_days > 0 ||
+                        task?.deadline_summary?.upload_overdue_days > 0) && (
+                        <div className="col-12">
+                          <div className="small text-secondary mb-1">SLA Days</div>
+                          <div className="d-flex flex-wrap gap-2">
+                            <span className="om-summary-chip">
+                              Completion: {task?.deadline_summary?.completion_days_late || task?.deadline_summary?.completion_overdue_days || 0} day(s)
+                            </span>
+                            <span className="om-summary-chip">
+                              Approval: {task?.deadline_summary?.approval_days_late || task?.deadline_summary?.approval_overdue_days || 0} day(s)
+                            </span>
+                            <span className="om-summary-chip">
+                              Upload: {task?.deadline_summary?.upload_days_late || task?.deadline_summary?.upload_overdue_days || 0} day(s)
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                      {Array.isArray(task?.deadline_summary?.upload_delayed_assignees) &&
+                        task.deadline_summary.upload_delayed_assignees.length > 0 && (
+                          <div className="col-12">
+                            <div className="small text-secondary mb-1">Delayed Upload Users</div>
+                            <div className="fw-semibold">
+                              {task.deadline_summary.upload_delayed_assignees
+                                .map((entry) =>
+                                  `${getUserLabel(entry?.user)} (${entry.days_late || 0} day(s))`,
+                                )
+                                .join(", ")}
+                            </div>
+                          </div>
+                        )}
+                      {Array.isArray(task?.deadline_summary?.upload_overdue_assignees) &&
+                        task.deadline_summary.upload_overdue_assignees.length > 0 && (
+                          <div className="col-12">
+                            <div className="small text-secondary mb-1">Upload Overdue Users</div>
+                            <div className="fw-semibold">
+                              {task.deadline_summary.upload_overdue_assignees
+                                .map((entry) =>
+                                  `${getUserLabel(entry?.user)} (${entry.days_late || 0} day(s))`,
+                                )
+                                .join(", ")}
+                            </div>
+                          </div>
+                        )}
                     </div>
                     {reworkDueDateHistory.length > 0 && (
                       <div className="workflow-rework-date-history mt-3">
@@ -631,6 +736,24 @@ const WorkflowTaskDetailModal = ({
                               </div>
                               <div className="small text-secondary">
                                 {formatDateOnly(entry?.date)}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {dueDateUpdateHistory.length > 0 && (
+                      <div className="workflow-rework-date-history mt-3">
+                        <div className="small text-secondary mb-2">Due Date Update History</div>
+                        <div className="workflow-rework-date-history-list">
+                          {dueDateUpdateHistory.map((entry, index) => (
+                            <div
+                              key={`${task._id}-due-date-update-${entry?._id || index}`}
+                              className="workflow-rework-date-history-item"
+                            >
+                              <div className="fw-semibold">{formatDateOnly(entry?.date)}</div>
+                              <div className="small text-secondary">
+                                {entry?.note || "No comment"}
                               </div>
                             </div>
                           ))}
@@ -907,8 +1030,22 @@ const WorkflowTaskDetailModal = ({
                               value={editForm.dueDate}
                               onChange={(event) => handleEditFormChange("dueDate", event.target.value)}
                               disabled={actionLoading}
+                              required
                             />
                           </div>
+                          {normalizeText(editForm.dueDate) !== normalizeText(formatDateInputValue(task?.due_date)) && (
+                            <div className="col-12">
+                              <label className="form-label">Due Date Update Comment</label>
+                              <textarea
+                                className="form-control"
+                                rows={2}
+                                value={dueDateNote}
+                                onChange={(event) => setDueDateNote(event.target.value)}
+                                disabled={actionLoading}
+                                placeholder="Explain why the due date is changing"
+                              />
+                            </div>
+                          )}
                           <div className="col-md-6">
                             <label className="form-label d-block">Upload Required</label>
                             <div className="form-check form-switch">

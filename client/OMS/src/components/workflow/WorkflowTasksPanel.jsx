@@ -126,7 +126,11 @@ const TASK_STATUS_FILTER_OPTIONS = Object.freeze([
   { value: "upload_remaining", label: "Upload Remaining" },
   { value: "upload_pending", label: "Upload Pending" },
   { value: "overdue", label: "Overdue" },
+  { value: "approval_overdue", label: "Approval Overdue" },
+  { value: "upload_overdue", label: "Upload Overdue" },
   { value: "delayed", label: "Delayed" },
+  { value: "approval_delay", label: "Approval Delay" },
+  { value: "upload_delay", label: "Upload Delay" },
   { value: "due_today", label: "Due Today" },
   { value: "assigned", label: "assigned" },
   { value: "started", label: "started" },
@@ -1021,10 +1025,20 @@ const WorkflowTasksPanel = ({
                                 <span className="workflow-task-dates-label">Due</span>
                                 <ReworkDueDateHover
                                   taskId={task._id}
-                                  dueDate={task.due_date}
+                                  dueDate={task.active_due_date || task.due_date}
                                   entries={reworkDueDateHistory}
                                 />
                               </div>
+                              <div>
+                                <span className="workflow-task-dates-label">Approval Limit</span>
+                                <span>{formatDateOnly(task?.deadline_summary?.approval_deadline)}</span>
+                              </div>
+                              {task?.upload_required !== false && (
+                                <div>
+                                  <span className="workflow-task-dates-label">Upload Limit</span>
+                                  <span>{formatDateOnly(task?.deadline_summary?.upload_deadline)}</span>
+                                </div>
+                              )}
                               <div>
                                 <span className="workflow-task-dates-label">Complete</span>
                                 <span>{formatDateTime(task.completed_at)}</span>

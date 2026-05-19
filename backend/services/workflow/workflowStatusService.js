@@ -95,7 +95,11 @@ const DASHBOARD_COUNT_FIELDS = Object.freeze([
   "reworked_tasks",
   "needs_approval_tasks",
   "overdue_tasks",
+  "approval_overdue_tasks",
+  "upload_overdue_tasks",
   "delayed_tasks",
+  "approval_delayed_tasks",
+  "upload_delayed_tasks",
   "due_today_tasks",
 ]);
 const WORKFLOW_UPLOAD_ROLE_RANK = Object.freeze({
@@ -153,6 +157,24 @@ const getIndianDayStart = (value = new Date()) => {
 
 const addDays = (value, days = 1) => new Date(value.getTime() + Number(days || 0) * DAY_MS);
 
+const getDateOrNull = (value) => {
+  if (!value) return null;
+  const parsed = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const getWholeIstDayCutoff = (value, delayMs = 0) => {
+  const dayStart = getIndianDayStart(value);
+  return dayStart ? new Date(dayStart.getTime() + DAY_MS + Number(delayMs || 0)) : null;
+};
+
+const getDaysPastCutoff = (value, cutoff) => {
+  const parsedValue = getDateOrNull(value);
+  const parsedCutoff = getDateOrNull(cutoff);
+  if (!parsedValue || !parsedCutoff || parsedValue <= parsedCutoff) return 0;
+  return Math.max(1, Math.ceil((parsedValue.getTime() - parsedCutoff.getTime()) / DAY_MS));
+};
+
 const escapeRegex = (value = "") =>
   String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -195,6 +217,138 @@ const getTaskReworkDueDatePayload = (doc = {}) =>
       created_by: entry?.created_by || {},
     }))
     .filter((entry) => Boolean(entry.date));
+
+const getActiveWorkflowDueDate = (doc = {}) => {
+  const reworkDueDates = getTaskReworkDueDatePayload(doc);
+  const latestReworkDueDate = reworkDueDates.length > 0
+    ? getDateOrNull(reworkDueDates[reworkDueDates.length - 1]?.date)
+    : null;
+  return latestReworkDueDate || getDateOrNull(doc?.due_date);
+};
+
+const getWorkflowDeadlineSummary = (doc = {}) => {
+  const normalizedStatus = normalizeWorkflowTaskStatus(doc?.status, {
+    fallback: "assigned",
+  }) || "assigned";
+  const activeDueDate = getActiveWorkflowDueDate(doc);
+  const completedAt = getDateOrNull(doc?.completed_at);
+  const approvedAt = getDateOrNull(doc?.approved_at || doc?.reviewed_at);
+  const uploadedAt = getDateOrNull(doc?.uploaded_at);
+  const now = new Date();
+  const activeDueDayStart = activeDueDate ? getIndianDayStart(activeDueDate) : null;
+  const completedDeadlineCutoff = activeDueDate
+    ? getWholeIstDayCutoff(activeDueDate, OVERDUE_COUNT_DELAY_MS)
+    : null;
+
+  const completedPlusTwoDayStart = completedAt
+    ? addDays(getIndianDayStart(completedAt), 2)
+    : null;
+  const approvalDeadlineDayStart = activeDueDayStart
+    ? (
+        completedPlusTwoDayStart
+          ? new Date(Math.max(activeDueDayStart.getTime(), completedPlusTwoDayStart.getTime()))
+          : addDays(activeDueDayStart, 2)
+      )
+    : null;
+  const approvalDeadlineCutoff = approvalDeadlineDayStart
+    ? addDays(approvalDeadlineDayStart, 1)
+    : null;
+  const uploadDeadlineDayStart = approvedAt
+    ? addDays(getIndianDayStart(approvedAt), 2)
+    : (approvalDeadlineDayStart ? addDays(approvalDeadlineDayStart, 2) : null);
+  const uploadDeadlineCutoff = uploadDeadlineDayStart
+    ? addDays(uploadDeadlineDayStart, 1)
+    : null;
+
+  const uploadStatuses = buildWorkflowUploadStatuses(doc);
+  const pendingUploads = doc?.upload_required !== false
+    ? uploadStatuses.filter((entry) => normalizeKey(entry?.status) !== "uploaded")
+    : [];
+  const uploadDelayedAssignees = doc?.upload_required !== false && uploadDeadlineCutoff
+    ? uploadStatuses
+        .filter((entry) => {
+          const entryUploadedAt = getDateOrNull(entry?.uploaded_at);
+          return entryUploadedAt && entryUploadedAt > uploadDeadlineCutoff;
+        })
+        .map((entry) => ({
+          user: entry?.user || null,
+          status: normalizeKey(entry?.status) || "pending",
+          uploaded_at: entry?.uploaded_at || null,
+          days_late: getDaysPastCutoff(entry?.uploaded_at, uploadDeadlineCutoff),
+        }))
+    : [];
+  const uploadOverdueAssignees = doc?.upload_required !== false && uploadDeadlineCutoff
+    ? pendingUploads
+        .filter(() => now > uploadDeadlineCutoff)
+        .map((entry) => ({
+          user: entry?.user || null,
+          status: normalizeKey(entry?.status) || "pending",
+          uploaded_at: entry?.uploaded_at || null,
+          days_late: getDaysPastCutoff(now, uploadDeadlineCutoff),
+        }))
+    : [];
+
+  const completionDaysLate = getDaysPastCutoff(completedAt, completedDeadlineCutoff);
+  const approvalDaysLate = getDaysPastCutoff(approvedAt, approvalDeadlineCutoff);
+  const uploadDaysLate = doc?.upload_required !== false
+    ? Math.max(
+        getDaysPastCutoff(uploadedAt, uploadDeadlineCutoff),
+        ...uploadDelayedAssignees.map((entry) => Number(entry?.days_late || 0)),
+        0,
+      )
+    : 0;
+
+  const completionOverdueDays = !completedAt
+    ? getDaysPastCutoff(now, completedDeadlineCutoff)
+    : 0;
+  const approvalOverdueDays = completedAt && !approvedAt
+    ? getDaysPastCutoff(now, approvalDeadlineCutoff)
+    : 0;
+  const uploadOverdueDays = doc?.upload_required !== false && approvedAt && pendingUploads.length > 0
+    ? getDaysPastCutoff(now, uploadDeadlineCutoff)
+    : 0;
+
+  const delayStage = uploadDaysLate > 0
+    ? "upload_delay"
+    : approvalDaysLate > 0
+      ? "approval_delay"
+      : completionDaysLate > 0
+        ? "delayed"
+        : "";
+  const overdueStage = uploadOverdueDays > 0
+    ? "upload_overdue"
+    : approvalOverdueDays > 0
+      ? "approval_overdue"
+      : completionOverdueDays > 0
+        ? "overdue"
+        : "";
+
+  return {
+    active_due_date: activeDueDate,
+    original_due_date: doc?.due_date || null,
+    active_due_source: getTaskReworkDueDatePayload(doc).length > 0 ? "rework" : "due_date",
+    completed_at: completedAt,
+    approved_at: approvedAt,
+    uploaded_at: uploadedAt,
+    approval_deadline: approvalDeadlineDayStart,
+    upload_deadline: doc?.upload_required === false ? null : uploadDeadlineDayStart,
+    completion_cutoff: completedDeadlineCutoff,
+    approval_cutoff: approvalDeadlineCutoff,
+    upload_cutoff: doc?.upload_required === false ? null : uploadDeadlineCutoff,
+    delay_stage: delayStage,
+    overdue_stage: overdueStage,
+    completion_days_late: completionDaysLate,
+    approval_days_late: approvalDaysLate,
+    upload_days_late: uploadDaysLate,
+    completion_overdue_days: completionOverdueDays,
+    approval_overdue_days: approvalOverdueDays,
+    upload_overdue_days: uploadOverdueDays,
+    pending_upload_count: pendingUploads.length,
+    upload_delayed_assignees: uploadDelayedAssignees,
+    upload_overdue_assignees: uploadOverdueAssignees,
+    status: normalizedStatus,
+  };
+};
 
 const buildWorkflowUploadStatuses = (doc = {}) => {
   if (doc?.upload_required === false) return [];
@@ -246,6 +400,11 @@ const serializeTask = (doc = {}) => {
   const reworked = getTaskReworkPayload(doc);
   const reworkDueDates = getTaskReworkDueDatePayload(doc);
   const uploadStatuses = buildWorkflowUploadStatuses(doc);
+  const deadlineSummary = getWorkflowDeadlineSummary({
+    ...doc,
+    status: normalizedStatus,
+    upload_statuses: uploadStatuses,
+  });
   const hasPendingUploads =
     doc?.upload_required !== false &&
     normalizedStatus === "uploaded" &&
@@ -267,6 +426,10 @@ const serializeTask = (doc = {}) => {
         : doc?.reviewed_by || {},
     reworked,
     rework_due_dates: reworkDueDates,
+    active_due_date: deadlineSummary.active_due_date,
+    deadline_summary: deadlineSummary,
+    delay_stage: deadlineSummary.delay_stage,
+    overdue_stage: deadlineSummary.overdue_stage,
     completion_comment: doc?.completion_comment || null,
   };
 };
@@ -377,55 +540,220 @@ const buildCompleteTaskMatch = () => ({
   ],
 });
 
-const buildOpenTaskExpression = () => ({
+const buildOpenTaskExpression = (statusExpression = "$normalized_status") => ({
   $or: [
-    { $in: ["$normalized_status", PRE_TERMINAL_TASK_STATUSES] },
+    { $in: [statusExpression, PRE_TERMINAL_TASK_STATUSES] },
     {
       $and: [
-        { $eq: ["$normalized_status", "approved"] },
+        { $eq: [statusExpression, "approved"] },
         { $ne: ["$upload_required", false] },
       ],
     },
   ],
 });
 
-const buildCompleteTaskExpression = () => ({
+const buildCompleteTaskExpression = (statusExpression = "$normalized_status") => ({
   $or: [
-    { $eq: ["$normalized_status", "uploaded"] },
+    { $in: [statusExpression, ["uploaded", "completed"]] },
     {
       $and: [
-        { $eq: ["$normalized_status", "approved"] },
+        { $eq: [statusExpression, "approved"] },
         { $eq: ["$upload_required", false] },
       ],
     },
   ],
 });
 
-// Workflow due dates are date-only, so the whole IST due date remains on time.
-const buildDueDateCutoffExpression = () => ({
-  $add: [
-    {
-      $dateFromString: {
-        dateString: {
-          $dateToString: {
-            date: "$due_date",
-            format: "%Y-%m-%d",
-            timezone: WORKFLOW_DUE_TIMEZONE,
-            onNull: null,
-          },
-        },
+const buildIndianDayStartExpression = (dateExpression) => ({
+  $dateFromString: {
+    dateString: {
+      $dateToString: {
+        date: dateExpression,
         format: "%Y-%m-%d",
         timezone: WORKFLOW_DUE_TIMEZONE,
-        onError: null,
         onNull: null,
       },
     },
-    DAY_MS,
-  ],
+    format: "%Y-%m-%d",
+    timezone: WORKFLOW_DUE_TIMEZONE,
+    onError: null,
+    onNull: null,
+  },
+});
+
+const buildLatestReworkDueDateExpression = () => ({
+  $let: {
+    vars: {
+      dates: {
+        $map: {
+          input: {
+            $filter: {
+              input: { $ifNull: ["$rework_due_dates", []] },
+              as: "reworkDueDate",
+              cond: { $ne: ["$$reworkDueDate.date", null] },
+            },
+          },
+          as: "reworkDueDate",
+          in: "$$reworkDueDate.date",
+        },
+      },
+    },
+    in: { $arrayElemAt: ["$$dates", -1] },
+  },
+});
+
+const buildActiveDueDateExpression = () => ({
+  $ifNull: [buildLatestReworkDueDateExpression(), "$due_date"],
+});
+
+// Workflow due dates are date-only, so the whole IST due date remains on time.
+const buildDueDateCutoffExpression = () => ({
+  $add: [buildIndianDayStartExpression(buildActiveDueDateExpression()), DAY_MS],
 });
 
 const buildOverdueDateCutoffExpression = () => ({
   $add: [buildDueDateCutoffExpression(), OVERDUE_COUNT_DELAY_MS],
+});
+
+const buildApprovalDeadlineDayStartExpression = () => {
+  const activeDueDayStart = buildIndianDayStartExpression(buildActiveDueDateExpression());
+  const completedPlusTwo = {
+    $add: [buildIndianDayStartExpression("$completed_at"), 2 * DAY_MS],
+  };
+  return {
+    $cond: [
+      { $ne: ["$completed_at", null] },
+      { $max: [activeDueDayStart, completedPlusTwo] },
+      { $add: [activeDueDayStart, 2 * DAY_MS] },
+    ],
+  };
+};
+
+const buildApprovalDeadlineCutoffExpression = () => ({
+  $add: [buildApprovalDeadlineDayStartExpression(), DAY_MS],
+});
+
+const buildUploadDeadlineDayStartExpression = () => {
+  const effectiveApprovedAt = buildEffectiveApprovedAtExpression();
+  return {
+    $cond: [
+      { $ne: [effectiveApprovedAt, null] },
+      { $add: [buildIndianDayStartExpression(effectiveApprovedAt), 2 * DAY_MS] },
+      { $add: [buildApprovalDeadlineDayStartExpression(), 2 * DAY_MS] },
+    ],
+  };
+};
+
+const buildUploadDeadlineCutoffExpression = () => ({
+  $add: [buildUploadDeadlineDayStartExpression(), DAY_MS],
+});
+
+const buildPendingUploadExpression = (statusExpression = "$normalized_status") => ({
+  $and: [
+    { $ne: ["$upload_required", false] },
+    { $in: [statusExpression, ["approved", "uploaded", "completed"]] },
+    {
+      $or: [
+        {
+          $gt: [
+            {
+              $size: {
+                $filter: {
+                  input: { $ifNull: ["$upload_statuses", []] },
+                  as: "uploadStatus",
+                  cond: { $ne: ["$$uploadStatus.status", "uploaded"] },
+                },
+              },
+            },
+            0,
+          ],
+        },
+        { $eq: [{ $size: { $ifNull: ["$upload_statuses", []] } }, 0] },
+      ],
+    },
+  ],
+});
+
+const buildCompletionDelayExpression = (statusExpression = "$normalized_status") => ({
+  $and: [
+    buildCompleteTaskExpression(statusExpression),
+    { $ne: [buildActiveDueDateExpression(), null] },
+    { $ne: ["$completed_at", null] },
+    { $gt: ["$completed_at", buildDueDateCutoffExpression()] },
+  ],
+});
+
+const buildApprovalDelayExpression = (statusExpression = "$normalized_status") => {
+  const effectiveApprovedAt = buildEffectiveApprovedAtExpression();
+  return {
+    $and: [
+      buildCompleteTaskExpression(statusExpression),
+      { $ne: [buildActiveDueDateExpression(), null] },
+      { $ne: ["$completed_at", null] },
+      { $ne: [effectiveApprovedAt, null] },
+      { $gt: [effectiveApprovedAt, buildApprovalDeadlineCutoffExpression()] },
+    ],
+  };
+};
+
+const buildUploadDelayExpression = (statusExpression = "$normalized_status") => ({
+  $and: [
+    buildCompleteTaskExpression(statusExpression),
+    { $ne: ["$upload_required", false] },
+    { $ne: [buildActiveDueDateExpression(), null] },
+    { $ne: [buildEffectiveApprovedAtExpression(), null] },
+    {
+      $or: [
+        { $gt: ["$uploaded_at", buildUploadDeadlineCutoffExpression()] },
+        {
+          $gt: [
+            {
+              $size: {
+                $filter: {
+                  input: { $ifNull: ["$upload_statuses", []] },
+                  as: "uploadStatus",
+                  cond: {
+                    $and: [
+                      { $ne: ["$$uploadStatus.uploaded_at", null] },
+                      { $gt: ["$$uploadStatus.uploaded_at", buildUploadDeadlineCutoffExpression()] },
+                    ],
+                  },
+                },
+              },
+            },
+            0,
+          ],
+        },
+      ],
+    },
+  ],
+});
+
+const buildCompletionOverdueExpression = (now = new Date(), statusExpression = "$normalized_status") => ({
+  $and: [
+    { $in: [statusExpression, OPEN_TASK_STATUS_VALUES] },
+    { $ne: [buildActiveDueDateExpression(), null] },
+    { $gte: [now, buildOverdueDateCutoffExpression()] },
+  ],
+});
+
+const buildApprovalOverdueExpression = (now = new Date(), statusExpression = "$normalized_status") => ({
+  $and: [
+    { $in: [statusExpression, NEEDS_APPROVAL_STATUS_VALUES] },
+    { $ne: [buildActiveDueDateExpression(), null] },
+    { $ne: ["$completed_at", null] },
+    { $eq: [buildEffectiveApprovedAtExpression(), null] },
+    { $gte: [now, { $add: [buildApprovalDeadlineCutoffExpression(), OVERDUE_COUNT_DELAY_MS] }] },
+  ],
+});
+
+const buildUploadOverdueExpression = (now = new Date(), statusExpression = "$normalized_status") => ({
+  $and: [
+    buildPendingUploadExpression(statusExpression),
+    { $ne: [buildActiveDueDateExpression(), null] },
+    { $ne: [buildEffectiveApprovedAtExpression(), null] },
+    { $gte: [now, { $add: [buildUploadDeadlineCutoffExpression(), OVERDUE_COUNT_DELAY_MS] }] },
+  ],
 });
 
 const buildNotApprovedByDueDateExpression = () => {
@@ -440,41 +768,75 @@ const buildNotApprovedByDueDateExpression = () => {
 };
 
 const buildOverdueTaskMatch = (now = new Date()) => {
-  const dueDateCutoff = buildOverdueDateCutoffExpression();
   return {
-    ...buildOpenTaskMatch(),
-    due_date: { $ne: null },
+    status: { $in: OPEN_TASK_STATUS_VALUES },
     $expr: {
-      $gte: [now, dueDateCutoff],
+      $and: [
+        { $ne: [buildActiveDueDateExpression(), null] },
+        { $gte: [now, buildOverdueDateCutoffExpression()] },
+      ],
     },
   };
 };
 
 const buildDelayedTaskMatch = () => {
-  const dueDateCutoff = buildDueDateCutoffExpression();
   return {
     ...buildCompleteTaskMatch(),
-    due_date: { $ne: null },
     $expr: {
-      $or: [
-        {
-          $and: [
-            { $ne: ["$upload_required", false] },
-            { $ne: ["$uploaded_at", null] },
-            { $gt: ["$uploaded_at", dueDateCutoff] },
-          ],
-        },
-        {
-          $and: [
-            { $eq: ["$upload_required", false] },
-            { $ne: ["$approved_at", null] },
-            { $gt: ["$approved_at", dueDateCutoff] },
-          ],
-        },
+      $and: [
+        { $ne: [buildActiveDueDateExpression(), null] },
+        { $ne: ["$completed_at", null] },
+        { $gt: ["$completed_at", buildDueDateCutoffExpression()] },
+        { $not: [buildApprovalDelayExpression("$status")] },
+        { $not: [buildUploadDelayExpression("$status")] },
       ],
     },
   };
 };
+
+const buildApprovalOverdueTaskMatch = (now = new Date()) => ({
+  status: { $in: NEEDS_APPROVAL_STATUS_VALUES },
+  completed_at: { $ne: null },
+  $expr: {
+    $and: [
+      { $ne: [buildActiveDueDateExpression(), null] },
+      { $eq: [buildEffectiveApprovedAtExpression(), null] },
+      { $gte: [now, { $add: [buildApprovalDeadlineCutoffExpression(), OVERDUE_COUNT_DELAY_MS] }] },
+    ],
+  },
+});
+
+const buildUploadOverdueTaskMatch = (now = new Date()) => ({
+  upload_required: { $ne: false },
+  status: { $in: ["approved", "uploaded"] },
+  $expr: {
+    $and: [
+      { $ne: [buildActiveDueDateExpression(), null] },
+      { $ne: [buildEffectiveApprovedAtExpression(), null] },
+      { $gte: [now, { $add: [buildUploadDeadlineCutoffExpression(), OVERDUE_COUNT_DELAY_MS] }] },
+    ],
+  },
+  $or: [
+    { upload_statuses: { $elemMatch: { status: { $ne: "uploaded" } } } },
+    { "upload_statuses.0": { $exists: false } },
+  ],
+});
+
+const buildApprovalDelayedTaskMatch = () => ({
+  ...buildCompleteTaskMatch(),
+  $expr: {
+    $and: [
+      buildApprovalDelayExpression("$status"),
+      { $not: [buildUploadDelayExpression("$status")] },
+    ],
+  },
+});
+
+const buildUploadDelayedTaskMatch = () => ({
+  ...buildCompleteTaskMatch(),
+  upload_required: { $ne: false },
+  $expr: buildUploadDelayExpression("$status"),
+});
 
 const buildDueTodayTaskMatch = (now = new Date()) => {
   const todayStart = getIndianDayStart(now);
@@ -482,12 +844,14 @@ const buildDueTodayTaskMatch = (now = new Date()) => {
 
   return {
     status: { $in: DUE_TRACKED_TASK_STATUS_VALUES },
-    due_date: {
-      $ne: null,
-      $gte: todayStart,
-      $lt: tomorrowStart,
+    $expr: {
+      $and: [
+        { $ne: [buildActiveDueDateExpression(), null] },
+        { $gte: [buildActiveDueDateExpression(), todayStart] },
+        { $lt: [buildActiveDueDateExpression(), tomorrowStart] },
+        buildNotApprovedByDueDateExpression(),
+      ],
     },
-    $expr: buildNotApprovedByDueDateExpression(),
   };
 };
 
@@ -514,8 +878,16 @@ const buildTaskListMatch = ({ query = {}, user = {} } = {}) => {
       addAndMatch(match, buildCompleteTaskMatch());
     } else if (normalizedStatusFilter === "overdue") {
       addAndMatch(match, buildOverdueTaskMatch());
+    } else if (normalizedStatusFilter === "approval_overdue") {
+      addAndMatch(match, buildApprovalOverdueTaskMatch());
+    } else if (normalizedStatusFilter === "upload_overdue") {
+      addAndMatch(match, buildUploadOverdueTaskMatch());
     } else if (normalizedStatusFilter === "delayed") {
       addAndMatch(match, buildDelayedTaskMatch());
+    } else if (normalizedStatusFilter === "approval_delay") {
+      addAndMatch(match, buildApprovalDelayedTaskMatch());
+    } else if (normalizedStatusFilter === "upload_delay") {
+      addAndMatch(match, buildUploadDelayedTaskMatch());
     } else if (normalizedStatusFilter === "due_today") {
       addAndMatch(match, buildDueTodayTaskMatch());
     } else if (normalizedStatusFilter === "complete_and_beyond") {
@@ -579,15 +951,16 @@ const buildTaskListMatch = ({ query = {}, user = {} } = {}) => {
   const dueFrom = toDateOrNull(query?.due_date_from);
   const dueTo = toDateOrNull(query?.due_date_to);
   if (dueFrom || dueTo) {
-    match.due_date = {};
+    const dueDateRangeConditions = [{ $ne: [buildActiveDueDateExpression(), null] }];
     if (dueFrom) {
-      match.due_date.$gte = dueFrom;
+      dueDateRangeConditions.push({ $gte: [buildActiveDueDateExpression(), dueFrom] });
     }
     if (dueTo) {
       const nextDay = new Date(dueTo);
       nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-      match.due_date.$lt = nextDay;
+      dueDateRangeConditions.push({ $lt: [buildActiveDueDateExpression(), nextDay] });
     }
+    addAndMatch(match, { $expr: { $and: dueDateRangeConditions } });
   }
 
   if (normalizeText(query?.search)) {
@@ -860,7 +1233,10 @@ const createWorkflowTask = async ({
   const department = payload?.department !== undefined
     ? await ensureDepartmentExists(payload.department)
     : (taskType?.default_department || null);
-  const dueDate = payload?.due_date !== undefined ? parseDueDate(payload.due_date) : null;
+  const dueDate = parseDueDate(payload?.due_date);
+  if (!dueDate) {
+    throw new Error("due_date is required");
+  }
   const reviewRequired = payload?.review_required !== undefined
     ? Boolean(payload.review_required)
     : taskType?.requires_review !== false;
@@ -1009,23 +1385,27 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
     },
   };
 
-  const dueDateCutoff = buildOverdueDateCutoffExpression();
-  const delayedDueDateCutoff = buildDueDateCutoffExpression();
   const notApprovedByDueDate = buildNotApprovedByDueDateExpression();
+  const completionOverdueExpression = buildCompletionOverdueExpression(now);
+  const approvalOverdueExpression = buildApprovalOverdueExpression(now);
+  const uploadOverdueExpression = buildUploadOverdueExpression(now);
+  const uploadDelayExpression = buildUploadDelayExpression();
+  const approvalDelayExpression = buildApprovalDelayExpression();
+  const completionDelayExpression = buildCompletionDelayExpression();
 
   const overdueCount = {
     $sum: {
-      $cond: [
-        {
-          $and: [
-            openTaskExpression,
-            { $ne: ["$due_date", null] },
-            { $gte: [now, dueDateCutoff] },
-          ],
-        },
-        1,
-        0,
-      ],
+      $cond: [completionOverdueExpression, 1, 0],
+    },
+  };
+  const approvalOverdueCount = {
+    $sum: {
+      $cond: [approvalOverdueExpression, 1, 0],
+    },
+  };
+  const uploadOverdueCount = {
+    $sum: {
+      $cond: [uploadOverdueExpression, 1, 0],
     },
   };
 
@@ -1034,31 +1414,33 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
       $cond: [
         {
           $and: [
-            completeTaskExpression,
-            { $ne: ["$due_date", null] },
-            {
-              $or: [
-                {
-                  $and: [
-                    { $ne: ["$upload_required", false] },
-                    { $ne: ["$uploaded_at", null] },
-                    { $gt: ["$uploaded_at", delayedDueDateCutoff] },
-                  ],
-                },
-                {
-                  $and: [
-                    { $eq: ["$upload_required", false] },
-                    { $ne: ["$approved_at", null] },
-                    { $gt: ["$approved_at", delayedDueDateCutoff] },
-                  ],
-                },
-              ],
-            },
+            completionDelayExpression,
+            { $not: [approvalDelayExpression] },
+            { $not: [uploadDelayExpression] },
           ],
         },
         1,
         0,
       ],
+    },
+  };
+  const approvalDelayedCount = {
+    $sum: {
+      $cond: [
+        {
+          $and: [
+            approvalDelayExpression,
+            { $not: [uploadDelayExpression] },
+          ],
+        },
+        1,
+        0,
+      ],
+    },
+  };
+  const uploadDelayedCount = {
+    $sum: {
+      $cond: [uploadDelayExpression, 1, 0],
     },
   };
 
@@ -1068,9 +1450,9 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
         {
           $and: [
             { $in: ["$normalized_status", DUE_TRACKED_TASK_STATUSES] },
-            { $ne: ["$due_date", null] },
-            { $gte: ["$due_date", todayStart] },
-            { $lt: ["$due_date", tomorrowStart] },
+            { $ne: [buildActiveDueDateExpression(), null] },
+            { $gte: [buildActiveDueDateExpression(), todayStart] },
+            { $lt: [buildActiveDueDateExpression(), tomorrowStart] },
             notApprovedByDueDate,
           ],
         },
@@ -1100,7 +1482,11 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
     },
     needs_approval_tasks: statusCount("complete"),
     overdue_tasks: overdueCount,
+    approval_overdue_tasks: approvalOverdueCount,
+    upload_overdue_tasks: uploadOverdueCount,
     delayed_tasks: delayedCount,
+    approval_delayed_tasks: approvalDelayedCount,
+    upload_delayed_tasks: uploadDelayedCount,
     due_today_tasks: dueTodayCount,
   };
 
@@ -1193,7 +1579,11 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
               reworked_tasks: 1,
               needs_approval_tasks: 1,
               overdue_tasks: 1,
+              approval_overdue_tasks: 1,
+              upload_overdue_tasks: 1,
               delayed_tasks: 1,
+              approval_delayed_tasks: 1,
+              upload_delayed_tasks: 1,
               due_today_tasks: 1,
             },
           },
@@ -1327,7 +1717,11 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
       ...overall,
       users_with_tasks: users.length,
       users_with_overdue_tasks: users.filter(
-        (entry) => Number(entry?.counts?.overdue_tasks || 0) > 0,
+        (entry) =>
+          Number(entry?.counts?.overdue_tasks || 0) +
+            Number(entry?.counts?.approval_overdue_tasks || 0) +
+            Number(entry?.counts?.upload_overdue_tasks || 0) >
+          0,
       ).length,
     },
     users,
@@ -1849,9 +2243,6 @@ const reworkWorkflowTask = async ({
   task.uploaded_at = null;
   task.uploaded_by = {};
   resetTaskUploadStatuses(task);
-  if (nextDueDate) {
-    task.due_date = nextDueDate;
-  }
   task.updated_by = auditActor;
   task.reworked = {
     count: currentReworked.count + 1,
@@ -1979,6 +2370,7 @@ const updateWorkflowTaskDetails = async ({
 
   const auditActor = buildAuditActor(actor);
   const changedFields = [];
+  let dueDateHistoryPayload = null;
 
   if (hasOwn(payload, "title") || hasOwn(payload, "name")) {
     const title = normalizeText(payload?.title || payload?.name);
@@ -2017,9 +2409,21 @@ const updateWorkflowTaskDetails = async ({
 
   if (hasOwn(payload, "due_date")) {
     const dueDate = parseDueDate(payload.due_date);
+    if (!dueDate) {
+      throw new Error("due_date is required");
+    }
     const currentTime = task.due_date ? task.due_date.getTime() : null;
     const nextTime = dueDate ? dueDate.getTime() : null;
     if (currentTime !== nextTime) {
+      const dueDateNote = normalizeText(payload?.due_date_note || payload?.note || payload?.comment);
+      if (!dueDateNote) {
+        throw new Error("A due date update comment is required");
+      }
+      dueDateHistoryPayload = {
+        previous_due_date: task.due_date || null,
+        next_due_date: dueDate,
+        note: dueDateNote,
+      };
       task.due_date = dueDate;
       changedFields.push("due_date");
     }
@@ -2108,6 +2512,32 @@ const updateWorkflowTaskDetails = async ({
         },
       },
     );
+  }
+
+  if (dueDateHistoryPayload) {
+    const currentStatus = normalizeWorkflowTaskStatus(task.status, {
+      fallback: "assigned",
+    }) || "assigned";
+    await TaskStatusHistory.create({
+      task: task._id,
+      batch: task.batch || null,
+      from_status: currentStatus,
+      to_status: currentStatus,
+      changed_by: auditActor,
+      changed_at: new Date(),
+      note: dueDateHistoryPayload.note,
+      metadata: {
+        due_date_updated: true,
+        previous_due_date: dueDateHistoryPayload.previous_due_date,
+        due_date: dueDateHistoryPayload.next_due_date,
+      },
+    });
+    await createTransitionCommentIfNeeded({
+      task,
+      actor,
+      note: dueDateHistoryPayload.note,
+      commentType: "system",
+    });
   }
 
   const batch = await recalculateWorkflowBatchIfPresent(task.batch);
