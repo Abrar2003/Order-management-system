@@ -391,9 +391,9 @@ const itemSchema = new mongoose.Schema(
       packed_size: { type: Boolean, default: false },
       finishing: { type: Boolean, default: false },
       branding: { type: Boolean, default: false },
-      barcode: { type: Number, default: 0, min: 0 },
-      master_barcode: { type: Number, default: 0, min: 0 },
-      inner_barcode: { type: Number, default: 0, min: 0 },
+      barcode: { type: String, default: "", trim: true },
+      master_barcode: { type: String, default: "", trim: true },
+      inner_barcode: { type: String, default: "", trim: true },
       last_inspected_date: { type: String, default: "", trim: true },
       quantities: {
         checked: { type: Number, default: 0, min: 0 },
@@ -483,20 +483,13 @@ itemSchema.pre("validate", function syncBarcodeAliases() {
     this.qc = {};
   }
 
-  const resolvedQcMasterBarcode = Number(
-    this.qc.master_barcode || this.qc.barcode || 0,
-  );
-  this.qc.master_barcode =
-    Number.isFinite(resolvedQcMasterBarcode) && resolvedQcMasterBarcode > 0
-      ? resolvedQcMasterBarcode
-      : 0;
+  const resolvedQcMasterBarcode = String(
+    this.qc.master_barcode || this.qc.barcode || "",
+  ).trim();
+  this.qc.master_barcode = resolvedQcMasterBarcode;
   this.qc.barcode = this.qc.master_barcode;
 
-  const resolvedQcInnerBarcode = Number(this.qc.inner_barcode || 0);
-  this.qc.inner_barcode =
-    Number.isFinite(resolvedQcInnerBarcode) && resolvedQcInnerBarcode > 0
-      ? resolvedQcInnerBarcode
-      : 0;
+  this.qc.inner_barcode = String(this.qc.inner_barcode || "").trim();
 
   if (this.product_type && typeof this.product_type === "object") {
     this.product_type.key = String(this.product_type.key || "").trim().toLowerCase();

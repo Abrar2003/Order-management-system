@@ -5083,22 +5083,6 @@ exports.updateQC = async (req, res) => {
       qc.inner_barcode = nextInnerBarcode;
     }
 
-    const effectiveBoxModeForQcBarcodeRequirement =
-      parsedInspectedBoxSizeEntries.hasInput
-        ? detectBoxPackagingMode(
-            parsedInspectedBoxSizeEntries.mode || parsedInspectedBoxMode,
-            parsedInspectedBoxSizeEntries.value,
-          )
-        : hasInspectedBoxModeUpdate
-          ? detectBoxPackagingMode(
-              parsedInspectedBoxMode,
-              itemDocForBarcodeRequirement?.inspected_box_sizes,
-            )
-          : detectBoxPackagingMode(
-              itemDocForBarcodeRequirement?.inspected_box_mode,
-              itemDocForBarcodeRequirement?.inspected_box_sizes,
-            );
-
     if (isQcUser && resolvedMasterBarcode <= 0) {
       return res.status(400).json({
         message: "QC users must scan the master barcode before updating this QC record.",
@@ -5127,38 +5111,6 @@ exports.updateQC = async (req, res) => {
       if (scannedMasterBarcode !== pisMasterBarcode) {
         return res.status(400).json({
           message: "Scanned master barcode does not match the PIS master barcode.",
-        });
-      }
-    }
-
-    if (
-      isQcUser &&
-      effectiveBoxModeForQcBarcodeRequirement === BOX_PACKAGING_MODES.CARTON &&
-      resolvedInnerBarcode <= 0
-    ) {
-      return res.status(400).json({
-        message: "QC users must scan the inner barcode before updating this QC record.",
-      });
-    }
-
-    if (
-      isQcUser &&
-      effectiveBoxModeForQcBarcodeRequirement === BOX_PACKAGING_MODES.CARTON
-    ) {
-      const pisInnerBarcode = normalizeComparableBarcode(
-        itemDocForBarcodeRequirement?.pis_inner_barcode,
-      );
-      const scannedInnerBarcode = normalizeComparableBarcode(resolvedInnerBarcode);
-
-      if (!pisInnerBarcode) {
-        return res.status(400).json({
-          message: "PIS inner barcode is required before QC can update this carton record.",
-        });
-      }
-
-      if (scannedInnerBarcode !== pisInnerBarcode) {
-        return res.status(400).json({
-          message: "Scanned inner barcode does not match the PIS inner barcode.",
         });
       }
     }

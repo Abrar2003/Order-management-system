@@ -493,30 +493,45 @@ small,
 
 .workflow-task-table > thead > tr > th:nth-child(2),
 .workflow-task-table > tbody > tr > td:nth-child(2) {
-  width: 13%;
+  width: 10%;
 }
 
 .workflow-task-table > thead > tr > th:nth-child(3),
 .workflow-task-table > tbody > tr > td:nth-child(3) {
-  width: 15%;
+  width: 13%;
 }
 
 .workflow-task-table > thead > tr > th:nth-child(4),
 .workflow-task-table > tbody > tr > td:nth-child(4) {
-  width: 42%;
+  width: 17%;
 }
 
 .workflow-task-table > thead > tr > th:nth-child(5),
 .workflow-task-table > tbody > tr > td:nth-child(5) {
-  width: 12%;
+  width: 32%;
+}
+
+.workflow-task-table > thead > tr > th:nth-child(6),
+.workflow-task-table > tbody > tr > td:nth-child(6) {
+  width: 10%;
+}
+
+.workflow-task-name-cell,
+.workflow-task-type-cell,
+.workflow-task-brand-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .workflow-task-name-cell,
 .workflow-task-type-cell {
-  min-width: 0;
   display: grid;
   gap: 0.2rem;
-  overflow-wrap: anywhere;
+}
+
+.workflow-task-brand-value {
+  display: inline-block;
+  font-weight: 600;
 }
 
 .workflow-batch-group-row > td {

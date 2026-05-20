@@ -1010,6 +1010,7 @@ const WorkflowTasksPanel = ({
                   <thead>
                     <tr>
                       <th>Task Name</th>
+                      <th>Brand</th>
                       <th>Task Type</th>
                       <th>Dates</th>
                       <th>Status Flow</th>
@@ -1039,6 +1040,7 @@ const WorkflowTasksPanel = ({
                       const reworkDueDateHistory = Array.isArray(task?.rework_due_dates)
                         ? task.rework_due_dates
                         : [];
+                      const taskBrand = normalizeText(task?.brand || task?.batch?.brand);
 
                       return (
                         <tr
@@ -1094,6 +1096,11 @@ const WorkflowTasksPanel = ({
                                 />
                               </div>
                             </div>
+                          </td>
+                          <td>
+                            <span className="workflow-task-brand-value">
+                              {taskBrand || "—"}
+                            </span>
                           </td>
                           <td>
                             <div className="workflow-task-type-cell">

@@ -2131,9 +2131,6 @@ const UpdateQcModal = ({
       innerBarcodeValue === "" ? null : Number(innerBarcodeValue);
     const effectiveMasterBarcodeValue =
       barcodeParsed !== null ? barcodeParsed : currentMasterBarcodeValue;
-    const effectiveInnerBarcodeValue =
-      innerBarcodeParsed !== null ? innerBarcodeParsed : currentInnerBarcodeValue;
-
     if (
       barcodeParsed !== null &&
       (!Number.isInteger(barcodeParsed) || barcodeParsed <= 0)
@@ -2168,30 +2165,6 @@ const UpdateQcModal = ({
 
       if (scannedMasterBarcode !== pisMasterBarcode) {
         setError("Scanned master barcode does not match the PIS master barcode.");
-        return;
-      }
-    }
-
-    if (
-      isQcUser &&
-      isCartonPackagingMode &&
-      (!Number.isInteger(effectiveInnerBarcodeValue) || effectiveInnerBarcodeValue <= 0)
-    ) {
-      setError("QC users must scan the inner carton barcode before updating this QC record.");
-      return;
-    }
-
-    if (isQcUser && isCartonPackagingMode) {
-      const pisInnerBarcode = normalizeComparableBarcode(existingItemMaster?.pis_inner_barcode);
-      const scannedInnerBarcode = normalizeComparableBarcode(effectiveInnerBarcodeValue);
-
-      if (!pisInnerBarcode) {
-        setError("PIS inner barcode is required before QC can update this carton record.");
-        return;
-      }
-
-      if (scannedInnerBarcode !== pisInnerBarcode) {
-        setError("Scanned inner barcode does not match the PIS inner barcode.");
         return;
       }
     }
@@ -3295,7 +3268,7 @@ const UpdateQcModal = ({
                   )}
                   {isQcUser && !lockInnerBarcodeField && (
                     <div className="small text-secondary mt-2">
-                      QC users must scan the inner carton barcode before saving.
+                      Inner carton barcode is optional for QC update.
                     </div>
                   )}
                 </div>
