@@ -2640,6 +2640,25 @@ small,
   object-fit: contain;
 }
 
+.home-page,
+.home-table-wrap {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.home-brand-list {
+  min-width: 0;
+}
+
+.home-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.home-today-etd-table {
+  min-width: 760px;
+}
+
 .home-orders-by-brand-table tbody td:nth-child(n+2),
 .home-orders-by-brand-table tfoot td:nth-child(n+2) {
   font-weight: 700;
@@ -2701,6 +2720,8 @@ small,
   min-height: 2.4rem;
   display: flex;
   align-items: center;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .qc-order-inline-grid {
@@ -2741,6 +2762,13 @@ small,
   padding: 0.75rem;
   display: flex;
   justify-content: center;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.qc-barcode-wrapper svg {
+  max-width: 100%;
+  height: auto;
 }
 
 .inspection-report-meta-row {
@@ -3001,6 +3029,42 @@ small,
   padding: 0.15rem 0.55rem;
   font-size: 0.8rem;
   background: var(--om-color-surface-muted);
+}
+
+.inspection-report-page,
+.inspection-report-card,
+.inspection-report-card .card-body,
+.inspection-report-table-wrap {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.inspection-report-header {
+  min-width: 0;
+}
+
+.inspection-report-header .btn {
+  white-space: normal;
+}
+
+.inspection-report-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.inspection-report-finish-table,
+.inspection-report-record-table,
+.inspection-report-remarks-table {
+  min-width: 640px;
+}
+
+.inspection-report-barcode-wrapper {
+  max-width: 100%;
+}
+
+.inspection-report-barcode-wrapper svg {
+  max-width: 100%;
+  height: auto;
 }
 
 .pis-diff-preview-dialog {
@@ -3601,6 +3665,308 @@ small,
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.qc-update-modal-dialog {
+  width: min(1180px, calc(100vw - 1rem));
+  max-width: min(1180px, calc(100vw - 1rem));
+  margin: 0.5rem auto;
+}
+
+.qc-update-modal-dialog .modal-content {
+  max-height: calc(100dvh - 1rem);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.qc-update-modal-dialog .modal-header,
+.qc-update-modal-dialog .modal-footer {
+  flex: 0 0 auto;
+}
+
+.qc-update-modal-dialog .modal-footer {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.qc-update-modal-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: clamp(0.85rem, 2vw, 1rem);
+}
+
+.qc-update-modal-body .row,
+.qc-update-modal-body [class*="col-"],
+.qc-measurement-controls,
+.qc-measurement-entries,
+.qc-measurement-entry-card {
+  min-width: 0;
+}
+
+.qc-measurement-entry-card {
+  overflow: hidden;
+  background: var(--om-color-surface);
+}
+
+.qc-measurement-entry-card .form-control,
+.qc-measurement-entry-card .form-select {
+  min-width: 0;
+}
+
+.qc-barcode-input-row {
+  min-width: 0;
+}
+
+.qc-barcode-input-row .input-group {
+  min-width: min(100%, 16rem);
+}
+
+.qc-barcode-input-row .btn {
+  white-space: normal;
+}
+
+.qc-details-page {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+.qc-details-header,
+.qc-details-actions,
+.qc-details-toolbar {
+  min-width: 0;
+}
+
+.qc-details-actions {
+  width: min(100%, 48rem);
+}
+
+.qc-details-toolbar {
+  width: 100%;
+}
+
+.qc-details-toolbar-select,
+.qc-details-comment-input {
+  width: auto;
+  min-width: 10rem;
+  max-width: 100%;
+}
+
+.qc-details-comment-input {
+  width: 14rem;
+}
+
+.qc-details-upload-progress {
+  width: min(100%, 260px);
+}
+
+.qc-details-section-title {
+  overflow-wrap: anywhere;
+}
+
+.qc-details-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.qc-details-table-wrap table {
+  min-width: 680px;
+}
+
+.qc-details-action-row .btn {
+  white-space: normal;
+}
+
+.qc-details-file-actions {
+  min-width: 0;
+}
+
+.qc-details-file-actions .btn {
+  max-width: 100%;
+  white-space: normal;
+}
+
+.qc-list-mobile-filters {
+  display: none;
+}
+
+.qc-list-date-filter {
+  width: 100%;
+  min-width: 0;
+}
+
+.qc-list-date-filter .d-flex {
+  align-items: center;
+}
+
+.qc-list-date-filter label {
+  min-width: 2.5rem;
+  margin-bottom: 0;
+  font-size: 0.72rem;
+  color: var(--om-color-text-muted);
+}
+
+.qc-list-table-wrap {
+  max-width: 100%;
+}
+
+.qc-list-table td,
+.qc-list-table th {
+  min-width: 0;
+}
+
+.edit-inspection-records-dialog {
+  width: min(1180px, calc(100vw - 1rem));
+  max-width: min(1180px, calc(100vw - 1rem));
+  margin: 0.5rem auto;
+}
+
+.edit-inspection-records-dialog .modal-content {
+  max-height: calc(100dvh - 1rem);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.edit-inspection-records-dialog .modal-header,
+.edit-inspection-records-dialog .modal-footer {
+  flex: 0 0 auto;
+}
+
+.edit-inspection-records-dialog .modal-footer {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.edit-inspection-records-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.edit-inspection-totals {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.edit-inspection-totals > div {
+  min-width: 0;
+  border: 1px solid var(--om-color-border);
+  border-radius: 0.8rem;
+  background: var(--om-color-surface-muted);
+  padding: 0.55rem 0.7rem;
+}
+
+.edit-inspection-totals span {
+  display: block;
+  color: var(--om-color-text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.edit-inspection-totals strong {
+  display: block;
+  margin-top: 0.1rem;
+  overflow-wrap: anywhere;
+}
+
+.edit-inspection-record-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.edit-inspection-record-card {
+  min-width: 0;
+  border: 1px solid var(--om-color-border);
+  border-radius: var(--om-radius-md);
+  background: var(--om-color-surface);
+  overflow: hidden;
+}
+
+.edit-inspection-record-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid rgba(203, 189, 170, 0.55);
+  background: var(--om-color-surface-muted);
+}
+
+.edit-inspection-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.edit-inspection-card-meta span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.65rem;
+  border: 1px solid var(--om-color-border);
+  border-radius: 999px;
+  background: var(--om-color-surface);
+  color: var(--om-color-text-muted);
+  padding: 0.15rem 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.edit-inspection-form-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.8rem;
+  padding: 1rem;
+}
+
+.edit-inspection-field {
+  min-width: 0;
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+}
+
+.edit-inspection-field > span,
+.edit-inspection-label-title {
+  color: var(--om-color-text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.edit-inspection-field-wide {
+  grid-column: span 2;
+}
+
+.edit-inspection-field-remarks {
+  grid-column: span 2;
+}
+
+.edit-inspection-label-panel {
+  grid-column: span 2;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 0.75rem;
+  border: 1px solid var(--om-color-border);
+  border-radius: 0.8rem;
+  background: var(--om-color-surface-muted);
+  padding: 0.65rem;
+}
+
+.edit-inspection-label-panel .btn {
+  white-space: normal;
 }
 
 .weekly-summary-export-surface {
@@ -4330,6 +4696,29 @@ small,
   .qc-image-gallery-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+
+  .qc-order-inline-grid {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+  }
+
+  .qc-order-inline-grid .qc-info-label,
+  .qc-order-inline-grid .qc-info-value {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  .qc-details-header {
+    align-items: flex-start !important;
+  }
+
+  .qc-details-actions,
+  .qc-details-toolbar {
+    align-items: stretch !important;
+    justify-content: flex-start !important;
+  }
 }
 
 @media (min-width: 992px) {
@@ -4343,6 +4732,804 @@ small,
 }
 
 @media (max-width: 575.98px) {
+  .inspection-report-page {
+    width: calc(100% - 0.75rem);
+    overflow-x: hidden;
+  }
+
+  .inspection-report-header {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch !important;
+    gap: 0.75rem !important;
+  }
+
+  .inspection-report-header > .btn,
+  .inspection-report-header > h2 {
+    width: 100%;
+  }
+
+  .inspection-report-header > h2 {
+    text-align: left;
+  }
+
+  .inspection-report-card .card-body {
+    padding: 1rem;
+    gap: 1.35rem !important;
+  }
+
+  .inspection-report-card section,
+  .inspection-report-summary-block,
+  .inspection-report-summary-column {
+    min-width: 0;
+  }
+
+  .inspection-report-card section > .d-flex.justify-content-between {
+    align-items: flex-start !important;
+    gap: 0.5rem;
+  }
+
+  .inspection-report-summary-block {
+    padding: 0.85rem;
+    gap: 0.9rem;
+  }
+
+  .inspection-report-brand-panel,
+  .inspection-report-image-skeleton {
+    min-height: 10rem;
+  }
+
+  .inspection-report-brand-logo,
+  .inspection-report-brand-logo--brand,
+  .inspection-report-brand-logo--product {
+    max-width: 100%;
+    max-height: 12rem;
+  }
+
+  .inspection-report-table-wrap {
+    overflow-x: hidden;
+  }
+
+  .inspection-report-finish-table,
+  .inspection-report-finish-table thead,
+  .inspection-report-finish-table tbody,
+  .inspection-report-finish-table tr,
+  .inspection-report-finish-table th,
+  .inspection-report-finish-table td,
+  .inspection-report-record-table,
+  .inspection-report-record-table thead,
+  .inspection-report-record-table tbody,
+  .inspection-report-record-table tr,
+  .inspection-report-record-table th,
+  .inspection-report-record-table td,
+  .inspection-report-packing-table,
+  .inspection-report-packing-table thead,
+  .inspection-report-packing-table tbody,
+  .inspection-report-packing-table tr,
+  .inspection-report-packing-table th,
+  .inspection-report-packing-table td,
+  .inspection-report-remarks-table,
+  .inspection-report-remarks-table thead,
+  .inspection-report-remarks-table tbody,
+  .inspection-report-remarks-table tr,
+  .inspection-report-remarks-table th,
+  .inspection-report-remarks-table td {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .inspection-report-finish-table,
+  .inspection-report-record-table,
+  .inspection-report-packing-table,
+  .inspection-report-remarks-table {
+    border-collapse: separate;
+    border-spacing: 0 0.75rem;
+  }
+
+  .inspection-report-finish-table thead,
+  .inspection-report-record-table thead,
+  .inspection-report-packing-table thead,
+  .inspection-report-remarks-table thead {
+    display: none;
+  }
+
+  .inspection-report-finish-table tbody,
+  .inspection-report-record-table tbody,
+  .inspection-report-packing-table tbody,
+  .inspection-report-remarks-table tbody {
+    display: grid;
+    gap: 0.75rem;
+  }
+
+  .inspection-report-finish-table tr,
+  .inspection-report-record-table tr,
+  .inspection-report-packing-table tr,
+  .inspection-report-remarks-table tr {
+    padding: 0.75rem;
+    border: 1px solid var(--om-color-border);
+    border-radius: 0.8rem;
+    background: var(--om-color-surface-muted);
+  }
+
+  .inspection-report-finish-table > :not(caption) > * > *,
+  .inspection-report-record-table > :not(caption) > * > *,
+  .inspection-report-packing-table > :not(caption) > * > *,
+  .inspection-report-remarks-table > :not(caption) > * > * {
+    padding: 0.45rem 0;
+    border: 0;
+    border-bottom: 1px solid rgba(203, 189, 170, 0.45);
+    background: transparent;
+  }
+
+  .inspection-report-finish-table td,
+  .inspection-report-record-table td,
+  .inspection-report-packing-table td,
+  .inspection-report-remarks-table td {
+    display: grid;
+    grid-template-columns: minmax(6.8rem, 42%) minmax(0, 1fr);
+    gap: 0.75rem;
+    align-items: start;
+    overflow-wrap: anywhere;
+    word-break: normal;
+  }
+
+  .inspection-report-finish-table td::before,
+  .inspection-report-record-table td::before,
+  .inspection-report-packing-table td::before,
+  .inspection-report-remarks-table td::before {
+    color: var(--om-color-text-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .inspection-report-finish-table td:last-child,
+  .inspection-report-record-table td:last-child,
+  .inspection-report-packing-table td:last-child,
+  .inspection-report-remarks-table td:last-child {
+    border-bottom: 0;
+  }
+
+  .inspection-report-finish-table td:nth-child(1)::before { content: "Unique Code"; }
+  .inspection-report-finish-table td:nth-child(2)::before { content: "Vendor"; }
+  .inspection-report-finish-table td:nth-child(3)::before { content: "Vendor Code"; }
+  .inspection-report-finish-table td:nth-child(4)::before { content: "Color"; }
+  .inspection-report-finish-table td:nth-child(5)::before { content: "Color Code"; }
+
+  .inspection-report-record-table td:nth-child(1)::before { content: "Request Date"; }
+  .inspection-report-record-table td:nth-child(2)::before { content: "Inspection Date"; }
+  .inspection-report-record-table td:nth-child(3)::before { content: "Inspector"; }
+  .inspection-report-record-table td:nth-child(4)::before { content: "Requested"; }
+  .inspection-report-record-table td:nth-child(5)::before { content: "Offered"; }
+  .inspection-report-record-table td:nth-child(6)::before { content: "Inspected"; }
+  .inspection-report-record-table td:nth-child(7)::before { content: "Passed"; }
+  .inspection-report-record-table td:nth-child(8)::before { content: "Pending"; }
+
+  .inspection-report-packing-table td:nth-child(1)::before { content: "Attribute"; }
+  .inspection-report-packing-table td:nth-child(2)::before { content: "PIS"; }
+  .inspection-report-packing-table td:nth-child(3)::before { content: "Inspected"; }
+
+  .inspection-report-remarks-table td:nth-child(1)::before { content: "Inspection Date"; }
+  .inspection-report-remarks-table td:nth-child(2)::before { content: "Inspector"; }
+  .inspection-report-remarks-table td:nth-child(3)::before { content: "Remark"; }
+
+  .inspection-report-barcode-wrapper {
+    justify-content: flex-start;
+    overflow: hidden;
+    padding: 0.5rem;
+  }
+
+  .inspection-report-barcode-wrapper svg {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-height: 120px;
+  }
+
+  .qc-update-modal-dialog {
+    width: calc(100vw - 0.5rem);
+    max-width: calc(100vw - 0.5rem);
+    margin: 0.25rem auto;
+  }
+
+  .qc-update-modal-dialog .modal-content {
+    max-height: calc(100dvh - 0.5rem);
+    border-radius: 0.75rem;
+  }
+
+  .qc-update-modal-dialog .modal-header,
+  .qc-update-modal-dialog .modal-footer {
+    padding: 0.8rem;
+  }
+
+  .qc-update-modal-dialog .modal-footer .btn {
+    flex: 1 1 8rem;
+  }
+
+  .qc-modal-summary-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .qc-modal-summary-item {
+    padding: 0.15rem 0;
+  }
+
+  .qc-measurement-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.35rem;
+  }
+
+  .qc-barcode-input-row {
+    align-items: stretch !important;
+  }
+
+  .qc-barcode-input-row .input-group,
+  .qc-barcode-input-row > .btn {
+    width: 100%;
+    flex: 1 1 100%;
+  }
+
+  .qc-details-header {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.75rem !important;
+  }
+
+  .qc-details-header > .btn,
+  .qc-details-header > h2,
+  .qc-details-actions,
+  .qc-details-toolbar,
+  .qc-details-toolbar .btn,
+  .qc-details-toolbar-select,
+  .qc-details-comment-input,
+  .qc-details-upload-progress {
+    width: 100%;
+  }
+
+  .qc-details-header > h2 {
+    text-align: left;
+  }
+
+  .qc-details-toolbar-select,
+  .qc-details-comment-input {
+    min-width: 0;
+  }
+
+  .qc-order-inline-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .qc-details-table-wrap table {
+    min-width: 0;
+  }
+
+  .qc-details-page {
+    width: calc(100% - 0.75rem);
+    overflow-x: hidden;
+  }
+
+  .qc-details-page .card-body {
+    padding: 1rem;
+  }
+
+  .qc-details-page section {
+    min-width: 0;
+  }
+
+  .qc-details-file-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .qc-details-file-actions .btn {
+    width: 100%;
+    min-width: 0;
+    padding-inline: 0.55rem;
+  }
+
+  .qc-barcode-wrapper {
+    justify-content: flex-start;
+    padding: 0.5rem;
+    overflow: hidden;
+  }
+
+  .qc-barcode-wrapper svg {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-height: 120px;
+  }
+
+  .qc-details-table-wrap {
+    overflow-x: hidden;
+  }
+
+  .qc-details-record-table,
+  .qc-details-record-table thead,
+  .qc-details-record-table tbody,
+  .qc-details-record-table tr,
+  .qc-details-record-table th,
+  .qc-details-record-table td,
+  .qc-details-shipping-table,
+  .qc-details-shipping-table thead,
+  .qc-details-shipping-table tbody,
+  .qc-details-shipping-table tr,
+  .qc-details-shipping-table th,
+  .qc-details-shipping-table td,
+  .qc-details-batch-table,
+  .qc-details-batch-table thead,
+  .qc-details-batch-table tbody,
+  .qc-details-batch-table tr,
+  .qc-details-batch-table th,
+  .qc-details-batch-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .qc-details-record-table,
+  .qc-details-shipping-table,
+  .qc-details-batch-table {
+    border-collapse: separate;
+    border-spacing: 0 0.75rem;
+  }
+
+  .qc-details-record-table thead,
+  .qc-details-shipping-table thead,
+  .qc-details-batch-table thead {
+    display: none;
+  }
+
+  .qc-details-record-table tbody,
+  .qc-details-shipping-table tbody,
+  .qc-details-batch-table tbody {
+    display: grid;
+    gap: 0.75rem;
+  }
+
+  .qc-details-record-table tr,
+  .qc-details-shipping-table tr,
+  .qc-details-batch-table tr {
+    padding: 0.75rem;
+    border: 1px solid var(--om-color-border);
+    border-radius: 0.8rem;
+    background: var(--om-color-surface-muted);
+  }
+
+  .qc-details-record-table > :not(caption) > * > *,
+  .qc-details-shipping-table > :not(caption) > * > *,
+  .qc-details-batch-table > :not(caption) > * > * {
+    padding: 0.45rem 0;
+    border-bottom: 1px solid rgba(203, 189, 170, 0.45);
+    background: transparent;
+  }
+
+  .qc-details-record-table td,
+  .qc-details-shipping-table td,
+  .qc-details-batch-table td {
+    display: grid;
+    grid-template-columns: minmax(7rem, 42%) minmax(0, 1fr);
+    gap: 0.75rem;
+    align-items: start;
+    overflow-wrap: anywhere;
+  }
+
+  .qc-details-record-table td::before,
+  .qc-details-shipping-table td::before,
+  .qc-details-batch-table td::before {
+    color: var(--om-color-text-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .qc-details-record-table td:last-child,
+  .qc-details-shipping-table td:last-child,
+  .qc-details-batch-table td:last-child {
+    border-bottom: 0;
+  }
+
+  .qc-details-record-table td:nth-child(1)::before { content: "Request Date"; }
+  .qc-details-record-table td:nth-child(2)::before { content: "Inspection Date"; }
+  .qc-details-record-table td:nth-child(3)::before { content: "Inspector"; }
+  .qc-details-record-table td:nth-child(4)::before { content: "Requested"; }
+  .qc-details-record-table td:nth-child(5)::before { content: "Offered"; }
+  .qc-details-record-table td:nth-child(6)::before { content: "Inspected"; }
+  .qc-details-record-table td:nth-child(7)::before { content: "Passed"; }
+  .qc-details-record-table td:nth-child(8)::before { content: "CBM"; }
+  .qc-details-record-table td:nth-child(9)::before { content: "Pending"; }
+  .qc-details-record-table td:nth-child(10)::before { content: "Remarks"; }
+  .qc-details-record-table td:nth-child(11)::before { content: "Action"; }
+
+  .qc-details-shipping-table td:nth-child(1)::before { content: "Stuffing Date"; }
+  .qc-details-shipping-table td:nth-child(2)::before { content: "Container"; }
+  .qc-details-shipping-table td:nth-child(3)::before { content: "Invoice"; }
+  .qc-details-shipping-table td:nth-child(4)::before { content: "Quantity"; }
+  .qc-details-shipping-table td:nth-child(5)::before { content: "Remaining"; }
+  .qc-details-shipping-table td:nth-child(6)::before { content: "Remarks"; }
+
+  .qc-details-batch-table td:nth-child(1)::before { content: "Batch"; }
+  .qc-details-batch-table td:nth-child(2)::before { content: "Status"; }
+  .qc-details-batch-table td:nth-child(3)::before { content: "Files"; }
+  .qc-details-batch-table td:nth-child(4)::before { content: "Progress"; }
+  .qc-details-batch-table td:nth-child(5)::before { content: "Result"; }
+
+  .qc-details-record-table td .d-flex {
+    justify-content: flex-start;
+  }
+
+  .qc-details-action-row {
+    justify-content: stretch !important;
+  }
+
+  .qc-details-action-row .btn {
+    flex: 1 1 100%;
+  }
+
+  .qc-list-page {
+    width: calc(100% - 0.75rem);
+    overflow-x: hidden;
+  }
+
+  .qc-list-header {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch !important;
+    gap: 0.75rem !important;
+  }
+
+  .qc-list-header > .btn,
+  .qc-list-export-actions,
+  .qc-list-export-actions .btn {
+    width: 100%;
+  }
+
+  .qc-list-export-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .qc-list-filter-actions {
+    justify-content: stretch !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 0.85rem !important;
+  }
+
+  .qc-list-filter-actions .btn {
+    width: 100%;
+  }
+
+  .qc-list-mobile-filters {
+    display: block;
+  }
+
+  .qc-list-mobile-filter-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.75rem;
+  }
+
+  .qc-list-table-wrap {
+    overflow-x: hidden;
+  }
+
+  .qc-list-table,
+  .qc-list-table thead,
+  .qc-list-table tbody,
+  .qc-list-table tr,
+  .qc-list-table th,
+  .qc-list-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .qc-list-table {
+    min-width: 0;
+    border-collapse: separate;
+    border-spacing: 0 0.75rem;
+  }
+
+  .qc-list-table thead {
+    display: none;
+  }
+
+  .qc-list-table tbody {
+    display: grid;
+    gap: 0.75rem;
+    padding: 0.85rem;
+  }
+
+  .qc-list-table tr {
+    padding: 0.75rem;
+    border: 1px solid var(--om-color-border);
+    border-radius: 0.8rem;
+    background: var(--om-color-surface-muted);
+    box-shadow: var(--om-shadow-xs);
+  }
+
+  .qc-list-table > :not(caption) > * > * {
+    padding: 0.45rem 0;
+    border-bottom: 1px solid rgba(203, 189, 170, 0.45);
+    background: transparent;
+  }
+
+  .qc-list-table td {
+    display: grid;
+    grid-template-columns: minmax(6.5rem, 40%) minmax(0, 1fr);
+    gap: 0.75rem;
+    align-items: start;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .qc-list-table td::before {
+    color: var(--om-color-text-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .qc-list-table td:last-child {
+    border-bottom: 0;
+  }
+
+  .qc-list-table td[colspan] {
+    display: block;
+    text-align: center;
+  }
+
+  .qc-list-table td[colspan]::before {
+    content: none;
+  }
+
+  .qc-list-table td:nth-child(1)::before { content: "PO"; }
+  .qc-list-table td:nth-child(2)::before { content: "Vendor"; }
+  .qc-list-table td:nth-child(3)::before { content: "Item"; }
+  .qc-list-table td:nth-child(4)::before { content: "Request Date"; }
+  .qc-list-table td:nth-child(5)::before { content: "Last Inspected"; }
+  .qc-list-table td:nth-child(6)::before { content: "Order Qty"; }
+  .qc-list-table td:nth-child(7)::before { content: "Status"; }
+  .qc-list-table td:nth-child(8)::before { content: "QC Passed"; }
+  .qc-list-table td:nth-child(9)::before { content: "Pending"; }
+  .qc-list-table td:nth-child(10)::before { content: "CBM"; }
+  .qc-list-table td:nth-child(11)::before { content: "Inspector"; }
+  .qc-list-table td:nth-child(12)::before { content: "Actions"; }
+
+  .qc-list-row-actions {
+    gap: 0.5rem !important;
+  }
+
+  .qc-list-row-actions .btn {
+    width: 100%;
+    white-space: normal;
+  }
+
+  .edit-inspection-records-dialog {
+    width: calc(100vw - 0.5rem);
+    max-width: calc(100vw - 0.5rem);
+    margin: 0.25rem auto;
+  }
+
+  .edit-inspection-records-dialog .modal-content {
+    max-height: calc(100dvh - 0.5rem);
+    border-radius: 0.75rem;
+  }
+
+  .edit-inspection-records-dialog .modal-header,
+  .edit-inspection-records-dialog .modal-footer {
+    padding: 0.8rem;
+  }
+
+  .edit-inspection-records-dialog .modal-title {
+    font-size: 1rem;
+    line-height: 1.25;
+  }
+
+  .edit-inspection-records-dialog .modal-footer .btn {
+    flex: 1 1 8rem;
+  }
+
+  .edit-inspection-records-body {
+    padding: 0.8rem;
+  }
+
+  .edit-inspection-totals {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .edit-inspection-record-card-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.65rem;
+    padding: 0.75rem;
+  }
+
+  .edit-inspection-card-meta {
+    justify-content: flex-start;
+  }
+
+  .edit-inspection-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.75rem;
+    padding: 0.75rem;
+  }
+
+  .edit-inspection-field-wide,
+  .edit-inspection-field-remarks,
+  .edit-inspection-label-panel {
+    grid-column: auto;
+  }
+
+  .edit-inspection-label-panel {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .edit-inspection-label-panel .btn {
+    width: 100%;
+  }
+
+  .home-page {
+    width: calc(100% - 0.75rem);
+    overflow-x: hidden;
+  }
+
+  .home-page .card-body {
+    padding: 1rem;
+  }
+
+  .home-page .card-body.p-0 {
+    padding: 0 !important;
+  }
+
+  .home-brand-list {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch !important;
+  }
+
+  .home-brand-list > .fw-semibold {
+    grid-column: 1 / -1;
+  }
+
+  .home-brand-list .brand-logo-btn {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .home-table-wrap {
+    overflow-x: hidden;
+  }
+
+  .home-orders-by-brand-table,
+  .home-orders-by-brand-table thead,
+  .home-orders-by-brand-table tbody,
+  .home-orders-by-brand-table tfoot,
+  .home-orders-by-brand-table tr,
+  .home-orders-by-brand-table th,
+  .home-orders-by-brand-table td,
+  .home-today-etd-table,
+  .home-today-etd-table thead,
+  .home-today-etd-table tbody,
+  .home-today-etd-table tfoot,
+  .home-today-etd-table tr,
+  .home-today-etd-table th,
+  .home-today-etd-table td {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .home-orders-by-brand-table,
+  .home-today-etd-table {
+    border-collapse: separate;
+    border-spacing: 0 0.75rem;
+  }
+
+  .home-orders-by-brand-table thead,
+  .home-today-etd-table thead {
+    display: none;
+  }
+
+  .home-orders-by-brand-table tbody,
+  .home-today-etd-table tbody,
+  .home-orders-by-brand-table tfoot,
+  .home-today-etd-table tfoot {
+    display: grid;
+    gap: 0.75rem;
+    padding: 0.85rem;
+  }
+
+  .home-orders-by-brand-table tr,
+  .home-today-etd-table tr {
+    padding: 0.75rem;
+    border: 1px solid var(--om-color-border);
+    border-radius: 0.8rem;
+    background: var(--om-color-surface-muted);
+    box-shadow: var(--om-shadow-xs);
+  }
+
+  .home-orders-by-brand-table tfoot tr,
+  .home-today-etd-table tfoot tr {
+    background: var(--om-color-accent-soft);
+  }
+
+  .home-orders-by-brand-table > :not(caption) > * > *,
+  .home-today-etd-table > :not(caption) > * > * {
+    padding: 0.45rem 0;
+    border-bottom: 1px solid rgba(203, 189, 170, 0.45);
+    background: transparent;
+  }
+
+  .home-orders-by-brand-table td,
+  .home-today-etd-table td {
+    display: grid;
+    grid-template-columns: minmax(7rem, 42%) minmax(0, 1fr);
+    gap: 0.75rem;
+    align-items: start;
+    overflow-wrap: anywhere;
+    white-space: normal;
+    text-align: left;
+  }
+
+  .home-orders-by-brand-table tbody td:nth-child(n+2),
+  .home-orders-by-brand-table tfoot td:nth-child(n+2) {
+    text-align: left;
+  }
+
+  .home-orders-by-brand-table td::before,
+  .home-today-etd-table td::before {
+    color: var(--om-color-text-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .home-orders-by-brand-table td:last-child,
+  .home-today-etd-table td:last-child {
+    border-bottom: 0;
+  }
+
+  .home-orders-by-brand-table td[colspan],
+  .home-today-etd-table td[colspan] {
+    display: block;
+    text-align: center;
+  }
+
+  .home-orders-by-brand-table td[colspan]::before,
+  .home-today-etd-table td[colspan]::before {
+    content: none;
+  }
+
+  .home-orders-by-brand-table td:nth-child(1)::before { content: "Vendor"; }
+  .home-orders-by-brand-table td:nth-child(2)::before { content: "Total Orders"; }
+  .home-orders-by-brand-table td:nth-child(3)::before { content: "Pending"; }
+  .home-orders-by-brand-table td:nth-child(4)::before { content: "On Time"; }
+  .home-orders-by-brand-table td:nth-child(5)::before { content: "Delayed"; }
+  .home-orders-by-brand-table td:nth-child(6)::before { content: "Partial Shipped"; }
+  .home-orders-by-brand-table td:nth-child(7)::before { content: "Shipped"; }
+
+  .home-today-etd-table td:nth-child(1)::before { content: "Brand"; }
+  .home-today-etd-table td:nth-child(2)::before { content: "Vendor"; }
+  .home-today-etd-table td:nth-child(3)::before { content: "Order Number"; }
+  .home-today-etd-table td:nth-child(4)::before { content: "ETD"; }
+  .home-today-etd-table td:nth-child(5)::before { content: "Item Count"; }
+  .home-today-etd-table td:nth-child(6)::before { content: "Status"; }
+  .home-today-etd-table td:nth-child(7)::before { content: "Shipped"; }
+  .home-today-etd-table td:nth-child(8)::before { content: "Inspection Done"; }
+  .home-today-etd-table td:nth-child(9)::before { content: "Pending"; }
+  .home-today-etd-table td:nth-child(10)::before { content: "Under Inspection"; }
+
+  .home-order-brand-logo {
+    width: 4rem;
+    max-width: 100%;
+  }
+
   .pis-diff-pdf-preview-scroll {
     padding: 0.6rem;
   }

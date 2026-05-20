@@ -1645,8 +1645,8 @@ const InspectionReport = () => {
   return (
     <>
       <Navbar />
-      <div className="page-shell py-3">
-        <div className="d-flex justify-content-between align-items-center mb-3">
+      <div className="page-shell py-3 inspection-report-page">
+        <div className="d-flex justify-content-between align-items-center mb-3 inspection-report-header">
           <button
             type="button"
             className="btn btn-outline-secondary btn-sm"
@@ -1674,7 +1674,7 @@ const InspectionReport = () => {
           </button>
         </div>
 
-        <div className="card om-card" ref={reportRef}>
+        <div className="card om-card inspection-report-card" ref={reportRef}>
           <div className="card-body d-grid gap-4">
             <section>
                 <div className="d-flex justify-center align-center text-center mb-4">
@@ -1813,8 +1813,8 @@ const InspectionReport = () => {
             <section>
               <h3 className="h6 mb-3">Finish Details</h3>
               {sortedFinishRows.length > 0 ? (
-                <div className="table-responsive">
-                  <table className="table table-sm table-striped align-middle mb-0">
+                <div className="table-responsive inspection-report-table-wrap">
+                  <table className="table table-sm table-striped align-middle mb-0 inspection-report-finish-table">
                     <thead>
                       <tr>
                         <th>
@@ -1880,8 +1880,8 @@ const InspectionReport = () => {
             <section>
               <h3 className="h6 mb-3">Inspection Records</h3>
               {sortedInspectionRows.length > 0 ? (
-                <div className="table-responsive">
-                  <table className="table table-sm table-striped align-middle mb-0">
+                <div className="table-responsive inspection-report-table-wrap">
+                  <table className="table table-sm table-striped align-middle mb-0 inspection-report-record-table">
                     <thead>
                       <tr>
                         <th>
@@ -1973,7 +1973,7 @@ const InspectionReport = () => {
 
             <section>
               <h3 className="h6 mb-3">Product Packing Details</h3>
-              <div className="table-responsive mb-3">
+              <div className="table-responsive mb-3 inspection-report-table-wrap">
                 <table className="table table-sm table-striped table-bordered align-middle mb-0 inspection-report-packing-table">
                   <thead>
                     <tr>
@@ -2001,7 +2001,7 @@ const InspectionReport = () => {
                       PIS Barcode: {itemMasterSummary.pisBarcodeValue}
                     </div>
                     {itemMasterSummary.pisBarcodeRenderValue ? (
-                      <div className="qc-barcode-wrapper">
+                      <div className="qc-barcode-wrapper inspection-report-barcode-wrapper">
                         <Barcode
                           value={itemMasterSummary.pisBarcodeRenderValue}
                           format="EAN13"
@@ -2016,7 +2016,7 @@ const InspectionReport = () => {
                       QC Barcode: {itemMasterSummary.inspectedBarcodeValue}
                     </div>
                     {itemMasterSummary.inspectedBarcodeRenderValue ? (
-                      <div className="qc-barcode-wrapper">
+                      <div className="qc-barcode-wrapper inspection-report-barcode-wrapper">
                         <Barcode
                           value={itemMasterSummary.inspectedBarcodeRenderValue}
                           format="EAN13"
@@ -2033,7 +2033,7 @@ const InspectionReport = () => {
                     Barcode (PIS/QC): {itemMasterSummary.unifiedBarcodeValue}
                   </div>
                   {itemMasterSummary.unifiedBarcodeRenderValue ? (
-                    <div className="qc-barcode-wrapper">
+                    <div className="qc-barcode-wrapper inspection-report-barcode-wrapper">
                       <Barcode
                         value={itemMasterSummary.unifiedBarcodeRenderValue}
                         format="EAN13"
@@ -2102,8 +2102,8 @@ const InspectionReport = () => {
                 <div>
                   <div className="fw-semibold mb-2">Inspection Remarks</div>
                   {sortedInspectionRemarkRows.length > 0 ? (
-                    <div className="table-responsive">
-                      <table className="table table-sm table-striped align-middle mb-0">
+                    <div className="table-responsive inspection-report-table-wrap">
+                      <table className="table table-sm table-striped align-middle mb-0 inspection-report-remarks-table">
                         <thead>
                           <tr>
                             <th>

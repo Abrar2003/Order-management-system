@@ -376,9 +376,9 @@ const Home = () => {
     <>
       <Navbar />
 
-      <div className="page-shell py-3">
-        <div className="card om-card mb-3">
-          <div className="card-body d-flex flex-wrap gap-2 align-items-center">
+      <div className="page-shell py-3 home-page">
+        <div className="card om-card mb-3 home-brand-card">
+          <div className="card-body d-flex flex-wrap gap-2 align-items-center home-brand-list">
             <span className="fw-semibold me-1">Brands:</span>
             {brands.map((brand) => {
               const brandName = getBrandName(brand);
@@ -415,7 +415,7 @@ const Home = () => {
             {loading ? (
               <div className="text-center py-4">Loading...</div>
             ) : (
-              <div className="table-responsive">
+              <div className="table-responsive home-table-wrap">
                 <table className="table table-striped table-hover align-middle om-table mb-0 home-orders-by-brand-table">
                   <thead className="table-primary">
                     <tr>
@@ -531,8 +531,8 @@ const Home = () => {
             {todayEtdLoading ? (
               <div className="text-center py-4">Loading...</div>
             ) : (
-              <div className="table-responsive">
-                <table className="table table-striped table-hover align-middle om-table mb-0">
+              <div className="table-responsive home-table-wrap">
+                <table className="table table-striped table-hover align-middle om-table mb-0 home-today-etd-table">
                   <thead className="table-primary">
                     <tr>
                       <th>Brand</th>

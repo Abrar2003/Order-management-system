@@ -1449,7 +1449,7 @@ const QcDetails = () => {
     <>
       <Navbar />
 
-      <div className="page-shell py-3">
+      <div className="page-shell py-3 qc-details-page">
         <input
           ref={relatedFileInputRef}
           type="file"
@@ -1463,7 +1463,7 @@ const QcDetails = () => {
           onChange={handleRelatedFileChange}
         />
 
-        <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3 qc-details-header">
           <button
             type="button"
             className="btn btn-outline-secondary btn-sm"
@@ -1472,13 +1472,12 @@ const QcDetails = () => {
             Back
           </button>
           <h2 className="h4 mb-0">QC Details</h2>
-          <div className="d-flex flex-column align-items-end gap-2">
-            <div className="d-flex align-items-center flex-wrap justify-content-end gap-2">
+          <div className="d-flex flex-column align-items-end gap-2 qc-details-actions">
+            <div className="d-flex align-items-center flex-wrap justify-content-end gap-2 qc-details-toolbar">
               {!isViewOnly && (
                 <>
                   <select
-                    className="form-select form-select-sm"
-                    style={{ width: "auto", minWidth: "160px" }}
+                    className="form-select form-select-sm qc-details-toolbar-select"
                     value={relatedFileType}
                     onChange={(e) => setRelatedFileType(String(e.target.value || "product_image"))}
                     disabled={
@@ -1499,8 +1498,7 @@ const QcDetails = () => {
                   {activeRelatedFileConfig?.value === "qc_images" && (
                     <>
                       <select
-                        className="form-select form-select-sm"
-                        style={{ width: "auto", minWidth: "140px" }}
+                        className="form-select form-select-sm qc-details-toolbar-select qc-details-mode-select"
                         value={qcImageUploadMode}
                         onChange={(e) => setQcImageUploadMode(String(e.target.value || "single"))}
                         disabled={!canUploadActiveRelatedFile || isRelatedUploadBusy || deletingRelatedFile}
@@ -1512,8 +1510,7 @@ const QcDetails = () => {
                       {qcImageUploadMode === "single" && (
                         <input
                           type="text"
-                          className="form-control form-control-sm"
-                          style={{ width: "220px" }}
+                          className="form-control form-control-sm qc-details-comment-input"
                           value={qcSingleImageComment}
                           onChange={(e) => setQcSingleImageComment(String(e.target.value || ""))}
                           placeholder="Comment (optional)"
@@ -1601,8 +1598,7 @@ const QcDetails = () => {
 
             {isRelatedUploadBusy && (
               <div
-                className="d-flex flex-column align-items-end"
-                style={{ width: "min(100%, 260px)" }}
+                className="d-flex flex-column align-items-end qc-details-upload-progress"
               >
                 <div
                   className="progress w-100"
@@ -1696,8 +1692,8 @@ const QcDetails = () => {
               </div>
 
               {qcImageUploadState.batchStatuses.length > 0 && (
-                <div className="table-responsive">
-                  <table className="table table-sm align-middle mb-0">
+                <div className="table-responsive qc-details-table-wrap">
+                  <table className="table table-sm align-middle mb-0 qc-details-batch-table">
                     <thead>
                       <tr>
                         <th>Batch</th>
@@ -1788,8 +1784,8 @@ const QcDetails = () => {
         <div className="card om-card">
           <div className="card-body d-grid gap-4">
             <section>
-              <h3 className="h6 mb-3">{`Order Information | ${qc.order.order_id} | ${qc.order.brand} | ${qc.order.vendor} |  Request Date: ${formatDateDDMMYYYY(qc.request_date)}`}</h3>
-              <h3 className="h6 mb-3">{`Status: ${derivedOrderStatus} | Inspector: ${qc?.inspector?.name}`}</h3>
+              <h3 className="h6 mb-3 qc-details-section-title">{`Order Information | ${qc.order.order_id} | ${qc.order.brand} | ${qc.order.vendor} |  Request Date: ${formatDateDDMMYYYY(qc.request_date)}`}</h3>
+              <h3 className="h6 mb-3 qc-details-section-title">{`Status: ${derivedOrderStatus} | Inspector: ${qc?.inspector?.name}`}</h3>
               <div className="qc-order-inline-grid">
                 <InfoBox compact label="Item Code" value={qc.item.item_code} />
                 <InfoBox
@@ -1834,7 +1830,7 @@ const QcDetails = () => {
                   value={itemMasterDetails.calculatedPisCbm}
                 />
               </div>
-              <div className="d-flex flex-wrap gap-2 mt-3">
+              <div className="d-flex flex-wrap gap-2 mt-3 qc-details-file-actions">
                 {itemMasterFiles.map((entry) => {
                   const hasFile = hasStoredFile(entry.file);
                   const isOpening = openingRelatedFileType === entry.value;
@@ -1999,8 +1995,8 @@ const QcDetails = () => {
                 )}
               </div>
               {sortedRequestInspectionTimeline.length > 0 ? (
-                <div className="table-responsive">
-                  <table className="table table-sm table-striped align-middle mb-0">
+                <div className="table-responsive qc-details-table-wrap">
+                  <table className="table table-sm table-striped align-middle mb-0 qc-details-record-table">
                     <thead>
                       <tr>
                         <th>
@@ -2177,8 +2173,8 @@ const QcDetails = () => {
                   Shipping Pending
                 </div>
               ) : (
-                <div className="table-responsive">
-                  <table className="table table-sm table-striped align-middle mb-0">
+                <div className="table-responsive qc-details-table-wrap">
+                  <table className="table table-sm table-striped align-middle mb-0 qc-details-shipping-table">
                     <thead>
                       <tr>
                         <th>
@@ -2320,7 +2316,7 @@ const QcDetails = () => {
             </section>
 
             {!isViewOnly && (
-              <div className="d-flex justify-content-end flex-wrap gap-2">
+              <div className="d-flex justify-content-end flex-wrap gap-2 qc-details-action-row">
                 {canFinalizeShipping &&
                   canFinalizeMoreShipping && (
                     <button

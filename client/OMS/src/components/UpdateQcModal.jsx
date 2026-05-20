@@ -2738,7 +2738,7 @@ const UpdateQcModal = ({
   }) => {
     const isCartonMode = mode === BOX_PACKAGING_MODES.CARTON;
     const safeCount = isCartonMode ? 2 : normalizeSizeCount(countValue, 1);
-    const entryColumnClass = safeCount > 1 ? "col-md-2" : "col-md-3";
+    const entryColumnClass = safeCount > 1 ? "col-6 col-md-2" : "col-6 col-md-3";
     const singleEntryLabel = String(countLabel || "").toLowerCase().includes("box")
       ? "Box"
       : "Item";
@@ -2747,7 +2747,7 @@ const UpdateQcModal = ({
 
     return (
       <>
-        <div className="col-md-2">
+        <div className="col-md-3 col-xl-2 qc-measurement-controls">
           {showModeSelector ? (
             <>
               <label className="form-label">Packaging Mode</label>
@@ -2809,11 +2809,11 @@ const UpdateQcModal = ({
             </>
           )}
         </div>
-        <div className="col-md-10">
+        <div className="col-md-9 col-xl-10 qc-measurement-entries">
           <label className="form-label">{title}</label>
           <div className="d-grid gap-2">
             {entries.slice(0, safeCount).map((entry, index) => (
-              <div key={`${entriesKey}-${index}`} className="border rounded p-3">
+              <div key={`${entriesKey}-${index}`} className="border rounded p-3 qc-measurement-entry-card">
                 {(() => {
                   const displayedRemarkOptions = isCartonMode
                     ? BOX_CARTON_REMARK_OPTIONS
@@ -2832,9 +2832,9 @@ const UpdateQcModal = ({
                           ? singleEntryLabel
                           : `Entry ${index + 1}${displayedRemark ? ` | ${getRemarkLabel(displayedRemarkOptions, displayedRemark)}` : ""}`}
                       </div>
-                      <div className="row g-2">
+                      <div className="row g-2 qc-measurement-entry-grid">
                         {safeCount > 1 && (
-                          <div className="col-md-3">
+                          <div className="col-12 col-md-3">
                             <label className="form-label small text-secondary">Remark</label>
                             <select
                               className="form-select"
@@ -2900,7 +2900,7 @@ const UpdateQcModal = ({
                             disabled={locked}
                           />
                         </div>
-                        <div className={safeCount > 1 ? "col-md-3" : "col-md-3"}>
+                        <div className={safeCount > 1 ? "col-6 col-md-3" : "col-6 col-md-3"}>
                           <label className="form-label small text-secondary">{weightLabel}</label>
                           <input
                             type="number"
@@ -2915,7 +2915,7 @@ const UpdateQcModal = ({
                           />
                         </div>
                         {isCartonMode && index === 0 && (
-                          <div className="col-md-3">
+                          <div className="col-12 col-md-3">
                             <label className="form-label small text-secondary">Item Count In Inner</label>
                             <input
                               type="number"
@@ -2936,7 +2936,7 @@ const UpdateQcModal = ({
                           </div>
                         )}
                         {isCartonMode && index === 1 && (
-                          <div className="col-md-3">
+                          <div className="col-12 col-md-3">
                             <label className="form-label small text-secondary">Box Count In Master</label>
                             <input
                               type="number"
@@ -2985,7 +2985,7 @@ const UpdateQcModal = ({
       role="dialog"
     >
       <div
-        className="modal-dialog modal-dialog-centered modal-xl"
+        className="modal-dialog modal-dialog-centered modal-xl qc-update-modal-dialog"
         role="document"
       >
         <div className="modal-content">
@@ -3001,7 +3001,7 @@ const UpdateQcModal = ({
             />
           </div>
 
-          <div style={{ marginBottom: "30px" }} className="modal-body d-grid gap-3">
+          <div className="modal-body d-grid gap-3 qc-update-modal-body">
             <div className="row g-3 qc-modal-summary-row">
               <div className="col qc-modal-summary-item">
                 <div className="small text-secondary">Order ID</div>
@@ -3144,7 +3144,7 @@ const UpdateQcModal = ({
                     ? "Master Carton Barcode"
                     : "Barcode"}
                 </label>
-                <div className="d-flex flex-wrap gap-2 align-items-stretch">
+                <div className="d-flex flex-wrap gap-2 align-items-stretch qc-barcode-input-row">
                   <div className="input-group flex-grow-1">
                     <input
                       type="number"
@@ -3232,7 +3232,7 @@ const UpdateQcModal = ({
               {form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON && (
                 <div className="col-md-6">
                   <label className="form-label">Inner Carton Barcode</label>
-                  <div className="d-flex flex-wrap gap-2 align-items-stretch">
+                  <div className="d-flex flex-wrap gap-2 align-items-stretch qc-barcode-input-row">
                     <div className="input-group flex-grow-1">
                     <input
                       type="number"
@@ -3301,7 +3301,7 @@ const UpdateQcModal = ({
                 </div>
               )}
 
-              <div className="col-md-12">{"   "}</div>
+              <div className="col-12 d-none d-md-block" aria-hidden="true" />
 
               <div className="col-md-4">
                 <label className="form-label">Quantity Offered</label>
@@ -3513,7 +3513,7 @@ const UpdateQcModal = ({
 
               {/* <div className="col-md-12">{"   "}</div> */}
 
-              <div className="col-6">
+              <div className="col-12 col-md-6">
                 <label className="form-label">Remarks</label>
                 <textarea
                   className="form-control"

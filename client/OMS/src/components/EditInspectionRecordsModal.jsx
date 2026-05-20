@@ -264,232 +264,259 @@ const EditInspectionRecordsModal = ({ qc, onClose, onSuccess }) => {
 
   return (
     <div className="modal d-block om-modal-backdrop" tabIndex="-1" role="dialog">
-      <div className="modal-dialog modal-dialog-centered modal-xl" role="document">
+      <div className="modal-dialog modal-dialog-centered modal-xl edit-inspection-records-dialog" role="document">
         <div className="modal-content">
           <div className="modal-header">
             <h5 className="modal-title">Edit Inspection Records And Labels</h5>
             <button type="button" className="btn-close" onClick={onClose} aria-label="Close" />
           </div>
 
-          <div className="modal-body d-grid gap-3">
+          <div className="modal-body d-grid gap-3 edit-inspection-records-body">
             <div className="alert alert-info mb-0" role="alert">
               Removing labels from a QC record here will free them for reuse after save.
             </div>
-            <div className="table-responsive">
-              <table className="table table-sm table-striped align-middle mb-0">
-                <thead>
-                  <tr>
-                    <th>Request Date</th>
-                    <th>Inspection Date</th>
-                    <th>Inspector</th>
-                    <th>Requested</th>
-                    <th>Offered</th>
-                    <th>Inspected</th>
-                    <th>Passed</th>
-                    <th>Pending</th>
-                    <th>CBM</th>
-                    <th>Inspected K/D</th>
-                    <th>PIS K/D</th>
-                    <th>Labels</th>
-                    <th>Remarks</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.length === 0 && (
-                    <tr>
-                      <td colSpan="13" className="text-center text-secondary py-3">
-                        No inspection records found
-                      </td>
-                    </tr>
-                  )}
-                  {rows.map((row, index) => (
-                    <tr key={row._id || `inspection-row-${index}`}>
-                      <td>
-                        <input
-                          type="date"
-                          lang="en-GB"
-                          className="form-control form-control-sm"
-                          value={toISODateString(row.requested_date)}
-                          onChange={(e) =>
-                            updateRow(
-                              index,
-                              "requested_date",
-                              toDDMMYYYYInputValue(e.target.value, ""),
-                            )
-                          }
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="date"
-                          lang="en-GB"
-                          className="form-control form-control-sm"
-                          value={toISODateString(row.inspection_date)}
-                          onChange={(e) =>
-                            updateRow(
-                              index,
-                              "inspection_date",
-                              toDDMMYYYYInputValue(e.target.value, ""),
-                            )
-                          }
-                        />
-                      </td>
-                      <td>
-                        <select
-                          className="form-select form-select-sm"
-                          value={row.inspector}
-                          onChange={(e) => updateRow(index, "inspector", e.target.value)}
+            {rows.length > 0 && (
+              <div className="edit-inspection-totals" aria-label="Inspection record totals">
+                <div>
+                  <span>Requested</span>
+                  <strong>{totals.vendor_requested}</strong>
+                </div>
+                <div>
+                  <span>Offered</span>
+                  <strong>{totals.vendor_offered}</strong>
+                </div>
+                <div>
+                  <span>Inspected</span>
+                  <strong>{totals.checked}</strong>
+                </div>
+                <div>
+                  <span>Passed</span>
+                  <strong>{totals.passed}</strong>
+                </div>
+                <div>
+                  <span>Pending</span>
+                  <strong>{totals.pending_after}</strong>
+                </div>
+              </div>
+            )}
+
+            <div className="edit-inspection-record-list">
+              {rows.length === 0 && (
+                <div className="text-center text-secondary py-3">
+                  No inspection records found
+                </div>
+              )}
+
+              {rows.map((row, index) => (
+                <section
+                  key={row._id || `inspection-row-${index}`}
+                  className="edit-inspection-record-card"
+                >
+                  <div className="edit-inspection-record-card-head">
+                    <div>
+                      <div className="small text-secondary">Record</div>
+                      <h6 className="mb-0">Inspection #{index + 1}</h6>
+                    </div>
+                    <div className="edit-inspection-card-meta">
+                      <span>Passed {row.passed || 0}</span>
+                      <span>Pending {row.pending_after || 0}</span>
+                    </div>
+                  </div>
+
+                  <div className="edit-inspection-form-grid">
+                    <label className="edit-inspection-field">
+                      <span>Request Date</span>
+                      <input
+                        type="date"
+                        lang="en-GB"
+                        className="form-control form-control-sm"
+                        value={toISODateString(row.requested_date)}
+                        onChange={(e) =>
+                          updateRow(
+                            index,
+                            "requested_date",
+                            toDDMMYYYYInputValue(e.target.value, ""),
+                          )
+                        }
+                      />
+                    </label>
+
+                    <label className="edit-inspection-field">
+                      <span>Inspection Date</span>
+                      <input
+                        type="date"
+                        lang="en-GB"
+                        className="form-control form-control-sm"
+                        value={toISODateString(row.inspection_date)}
+                        onChange={(e) =>
+                          updateRow(
+                            index,
+                            "inspection_date",
+                            toDDMMYYYYInputValue(e.target.value, ""),
+                          )
+                        }
+                      />
+                    </label>
+
+                    <label className="edit-inspection-field edit-inspection-field-wide">
+                      <span>Inspector</span>
+                      <select
+                        className="form-select form-select-sm"
+                        value={row.inspector}
+                        onChange={(e) => updateRow(index, "inspector", e.target.value)}
+                      >
+                        <option value="">Select inspector</option>
+                        {inspectors.map((inspector) => (
+                          <option key={inspector._id} value={inspector._id}>
+                            {inspector.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="edit-inspection-field">
+                      <span>Requested</span>
+                      <input
+                        type="number"
+                        min="0"
+                        className="form-control form-control-sm"
+                        value={row.vendor_requested}
+                        onChange={(e) => updateRow(index, "vendor_requested", e.target.value)}
+                      />
+                    </label>
+
+                    <label className="edit-inspection-field">
+                      <span>Offered</span>
+                      <input
+                        type="number"
+                        min="0"
+                        className="form-control form-control-sm"
+                        value={row.vendor_offered}
+                        onChange={(e) => updateRow(index, "vendor_offered", e.target.value)}
+                      />
+                    </label>
+
+                    <label className="edit-inspection-field">
+                      <span>Inspected</span>
+                      <input
+                        type="number"
+                        min="0"
+                        className="form-control form-control-sm"
+                        value={row.checked}
+                        onChange={(e) => updateRow(index, "checked", e.target.value)}
+                      />
+                    </label>
+
+                    <label className="edit-inspection-field">
+                      <span>Passed</span>
+                      <input
+                        type="number"
+                        min="0"
+                        className="form-control form-control-sm"
+                        value={row.passed}
+                        onChange={(e) => updateRow(index, "passed", e.target.value)}
+                      />
+                    </label>
+
+                    <label className="edit-inspection-field">
+                      <span>Pending</span>
+                      <input
+                        type="number"
+                        min="0"
+                        className="form-control form-control-sm"
+                        value={row.pending_after}
+                        onChange={(e) => updateRow(index, "pending_after", e.target.value)}
+                      />
+                    </label>
+
+                    <label className="edit-inspection-field">
+                      <span>CBM</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        className="form-control form-control-sm"
+                        value={row.cbm_total}
+                        onChange={(e) => updateRow(index, "cbm_total", e.target.value)}
+                      />
+                    </label>
+
+                    <div className="edit-inspection-field">
+                      <span>Inspected K/D</span>
+                      <div className="btn-group btn-group-sm w-100" role="group" aria-label="Inspected K/D">
+                        <button
+                          type="button"
+                          className={`btn ${row.inspected_k_d ? "btn-primary" : "btn-outline-secondary"}`}
+                          onClick={() => updateRow(index, "inspected_k_d", true)}
                         >
-                          <option value="">Select inspector</option>
-                          {inspectors.map((inspector) => (
-                            <option key={inspector._id} value={inspector._id}>
-                              {inspector.name}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          min="0"
-                          className="form-control form-control-sm"
-                          value={row.vendor_requested}
-                          onChange={(e) => updateRow(index, "vendor_requested", e.target.value)}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          min="0"
-                          className="form-control form-control-sm"
-                          value={row.vendor_offered}
-                          onChange={(e) => updateRow(index, "vendor_offered", e.target.value)}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          min="0"
-                          className="form-control form-control-sm"
-                          value={row.checked}
-                          onChange={(e) => updateRow(index, "checked", e.target.value)}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          min="0"
-                          className="form-control form-control-sm"
-                          value={row.passed}
-                          onChange={(e) => updateRow(index, "passed", e.target.value)}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          min="0"
-                          className="form-control form-control-sm"
-                          value={row.pending_after}
-                          onChange={(e) => updateRow(index, "pending_after", e.target.value)}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          className="form-control form-control-sm"
-                          value={row.cbm_total}
-                          onChange={(e) => updateRow(index, "cbm_total", e.target.value)}
-                        />
-                      </td>
-                      <td>
-                        <div className="btn-group btn-group-sm" role="group" aria-label="Inspected K/D">
-                          <button
-                            type="button"
-                            className={`btn ${row.inspected_k_d ? "btn-primary" : "btn-outline-secondary"}`}
-                            onClick={() => updateRow(index, "inspected_k_d", true)}
-                          >
-                            Yes
-                          </button>
-                          <button
-                            type="button"
-                            className={`btn ${!row.inspected_k_d ? "btn-primary" : "btn-outline-secondary"}`}
-                            onClick={() => updateRow(index, "inspected_k_d", false)}
-                          >
-                            No
-                          </button>
+                          Yes
+                        </button>
+                        <button
+                          type="button"
+                          className={`btn ${!row.inspected_k_d ? "btn-primary" : "btn-outline-secondary"}`}
+                          onClick={() => updateRow(index, "inspected_k_d", false)}
+                        >
+                          No
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="edit-inspection-field">
+                      <span>PIS K/D</span>
+                      <div className="btn-group btn-group-sm w-100" role="group" aria-label="PIS K/D">
+                        <button
+                          type="button"
+                          className={`btn ${row.pis_k_d ? "btn-primary" : "btn-outline-secondary"}`}
+                          onClick={() => updateRow(index, "pis_k_d", true)}
+                        >
+                          Yes
+                        </button>
+                        <button
+                          type="button"
+                          className={`btn ${!row.pis_k_d ? "btn-primary" : "btn-outline-secondary"}`}
+                          onClick={() => updateRow(index, "pis_k_d", false)}
+                        >
+                          No
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="edit-inspection-label-panel">
+                      <div>
+                        <span className="edit-inspection-label-title">Labels</span>
+                        <div className="small">
+                          Count: {Array.isArray(row.labels_added) ? row.labels_added.length : 0}
                         </div>
-                      </td>
-                      <td>
-                        <div className="btn-group btn-group-sm" role="group" aria-label="PIS K/D">
-                          <button
-                            type="button"
-                            className={`btn ${row.pis_k_d ? "btn-primary" : "btn-outline-secondary"}`}
-                            onClick={() => updateRow(index, "pis_k_d", true)}
-                          >
-                            Yes
-                          </button>
-                          <button
-                            type="button"
-                            className={`btn ${!row.pis_k_d ? "btn-primary" : "btn-outline-secondary"}`}
-                            onClick={() => updateRow(index, "pis_k_d", false)}
-                          >
-                            No
-                          </button>
+                        <div className="small text-muted">
+                          Ranges: {formatLabelRanges(row.label_ranges)}
                         </div>
-                      </td>
-                      <td>
-                        <div className="d-flex flex-column gap-1">
-                          <span className="small">
-                            Count: {Array.isArray(row.labels_added) ? row.labels_added.length : 0}
-                          </span>
-                          <span className="small text-muted">
-                            Ranges: {formatLabelRanges(row.label_ranges)}
-                          </span>
-                          <button
-                            type="button"
-                            className={`btn btn-sm ${row.labels_removed ? "btn-outline-secondary" : "btn-outline-danger"}`}
-                            onClick={() => toggleRemoveLabels(index)}
-                            disabled={
-                              !row.labels_removed &&
-                              (!Array.isArray(row.original_labels_added) ||
-                                row.original_labels_added.length === 0)
-                            }
-                          >
-                            {row.labels_removed ? "Restore Labels" : "Remove Labels"}
-                          </button>
-                        </div>
-                      </td>
-                      <td>
-                        <input
-                          type="text"
-                          className="form-control form-control-sm"
-                          value={row.remarks}
-                          onChange={(e) => updateRow(index, "remarks", e.target.value)}
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                {rows.length > 0 && (
-                  <tfoot>
-                    <tr className="table-light fw-semibold">
-                      <td colSpan="3">Totals</td>
-                      <td>{totals.vendor_requested}</td>
-                      <td>{totals.vendor_offered}</td>
-                      <td>{totals.checked}</td>
-                      <td>{totals.passed}</td>
-                      <td>{totals.pending_after}</td>
-                      <td>-</td>
-                      <td>-</td>
-                      <td>-</td>
-                      <td>-</td>
-                      <td>-</td>
-                    </tr>
-                  </tfoot>
-                )}
-              </table>
+                      </div>
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${row.labels_removed ? "btn-outline-secondary" : "btn-outline-danger"}`}
+                        onClick={() => toggleRemoveLabels(index)}
+                        disabled={
+                          !row.labels_removed &&
+                          (!Array.isArray(row.original_labels_added) ||
+                            row.original_labels_added.length === 0)
+                        }
+                      >
+                        {row.labels_removed ? "Restore Labels" : "Remove Labels"}
+                      </button>
+                    </div>
+
+                    <label className="edit-inspection-field edit-inspection-field-remarks">
+                      <span>Remarks</span>
+                      <input
+                        type="text"
+                        className="form-control form-control-sm"
+                        value={row.remarks}
+                        onChange={(e) => updateRow(index, "remarks", e.target.value)}
+                      />
+                    </label>
+                  </div>
+                </section>
+              ))}
             </div>
 
             {error && <div className="alert alert-danger mb-0">{error}</div>}

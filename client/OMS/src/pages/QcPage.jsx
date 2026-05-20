@@ -601,8 +601,8 @@ const QCPage = () => {
     <>
       <Navbar />
 
-      <div className="page-shell py-3">
-        <div className="d-flex justify-content-between align-items-center mb-3">
+      <div className="page-shell py-3 qc-list-page">
+        <div className="d-flex justify-content-between align-items-center mb-3 qc-list-header">
           <button
             type="button"
             className="btn btn-outline-secondary btn-sm"
@@ -612,7 +612,7 @@ const QCPage = () => {
           </button>
           <h2 className="h4 mb-0">QC Records</h2>
           {canExportQcList ? (
-            <div className="d-flex gap-2">
+            <div className="d-flex gap-2 qc-list-export-actions">
               <button
                 type="button"
                 className="btn btn-outline-primary btn-sm"
@@ -641,7 +641,7 @@ const QCPage = () => {
 
         <div className="card om-card">
           <div className="card-body p-0">
-            <div className="d-flex justify-content-end gap-2 p-3 border-bottom bg-body-tertiary">
+            <div className="d-flex justify-content-end gap-2 p-3 border-bottom bg-body-tertiary qc-list-filter-actions">
               <button
                 type="button"
                 className="btn btn-primary btn-sm"
@@ -659,8 +659,105 @@ const QCPage = () => {
                 Clear Filters
               </button>
             </div>
-            <div className="table-responsive">
-              <table className="table table-striped table-hover align-middle om-table mb-0">
+            <div className="qc-list-mobile-filters border-bottom bg-body-tertiary p-3">
+              <div className="qc-list-mobile-filter-grid">
+                <div>
+                  <label className="form-label small text-secondary">PO</label>
+                  <input
+                    type="text"
+                    className="form-control form-control-sm"
+                    placeholder="PO"
+                    list="qc-po-options"
+                    value={order}
+                    onChange={(e) => setOrder(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="form-label small text-secondary">Vendor</label>
+                  <select
+                    className="form-select form-select-sm"
+                    value={vendor}
+                    onChange={(e) => setVendor(e.target.value)}
+                  >
+                    <option value="">All</option>
+                    {vendors.map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label small text-secondary">Item</label>
+                  <input
+                    type="text"
+                    className="form-control form-control-sm"
+                    placeholder="Item code"
+                    list="qc-item-code-options"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="form-label small text-secondary">Status</label>
+                  <select
+                    className="form-select form-select-sm"
+                    value={inspectionStatus}
+                    onChange={(e) => setInspectionStatus(e.target.value)}
+                  >
+                    <option value="">All</option>
+                    {INSPECTION_STATUS_OPTIONS.map((status) => (
+                      <option key={status} value={status}>
+                        {status}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {canUseInspectorFilter && (
+                  <div>
+                    <label className="form-label small text-secondary">Inspector</label>
+                    <select
+                      className="form-select form-select-sm"
+                      value={inspector}
+                      onChange={(e) => setInspector(e.target.value)}
+                    >
+                      <option value="">All</option>
+                      {inspectors.map((qc) => (
+                        <option key={qc._id} value={qc._id}>
+                          {qc.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <div>
+                  <label className="form-label small text-secondary">From</label>
+                  <input
+                    type="date"
+                    lang="en-GB"
+                    className="form-control form-control-sm"
+                    value={toISODateString(from)}
+                    onChange={(e) => {
+                      setFrom(toDDMMYYYYInputValue(e.target.value, ""));
+                    }}
+                  />
+                </div>
+                <div>
+                  <label className="form-label small text-secondary">To</label>
+                  <input
+                    type="date"
+                    lang="en-GB"
+                    className="form-control form-control-sm"
+                    value={toISODateString(to)}
+                    onChange={(e) => {
+                      setTo(toDDMMYYYYInputValue(e.target.value, ""));
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="table-responsive qc-list-table-wrap">
+              <table className="table table-striped table-hover align-middle om-table mb-0 qc-list-table">
                 <thead className="table-primary">
                   {/* Column titles */}
                   <tr>
@@ -749,7 +846,7 @@ const QCPage = () => {
 
                     {/* Request date range */}
                     <th>
-                      <div className="d-flex flex-column gap-1 justify-right" style={{width: "60%"}} >
+                      <div className="d-flex flex-column gap-1 qc-list-date-filter">
                         <div className="d-flex gap-1">
                           <label>From</label>
                           <input
@@ -951,7 +1048,7 @@ const QCPage = () => {
                           <td>{qc?.inspector?.name || "N/A"}</td>
                           {showActionColumn && (
                             <td>
-                              <div className="d-flex flex-column gap-2">
+                                <div className="d-flex flex-column gap-2 qc-list-row-actions">
                                 <button
                                   type="button"
                                   className="btn btn-outline-secondary btn-sm"
