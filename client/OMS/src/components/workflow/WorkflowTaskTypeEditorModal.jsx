@@ -8,6 +8,19 @@ const splitCsv = (value) =>
     .map((entry) => entry.trim())
     .filter(Boolean);
 
+const normalizeAutoCreateMode = (value) => {
+  const normalized = normalizeText(value).toLowerCase().replace(/[\s-]+/g, "_");
+  if (
+    normalized === "per_sub_folder" ||
+    normalized === "per_subfolder" ||
+    normalized === "per_sub_directory" ||
+    normalized === "per_direct_sub_folder"
+  ) {
+    return "per_direct_subfolder";
+  }
+  return normalized;
+};
+
 const WORKFLOW_TASK_TYPE_CATEGORIES = [
   "image",
   "pis",
@@ -25,6 +38,13 @@ const WORKFLOW_AUTO_CREATE_MODES = [
   "manual",
 ];
 
+const WORKFLOW_AUTO_CREATE_MODE_LABELS = {
+  per_file: "Per file",
+  per_direct_subfolder: "Per sub-folder",
+  once_per_batch: "Once per batch",
+  manual: "Manual",
+};
+
 const WORKFLOW_PRIORITIES = ["low", "normal", "high", "urgent"];
 
 const createDraft = (taskType = null) => ({
@@ -39,7 +59,7 @@ const createDraft = (taskType = null) => ({
         .filter(Boolean)
     : [],
   default_priority: normalizeText(taskType?.default_priority) || "normal",
-  auto_create_mode: normalizeText(taskType?.auto_create_mode) || "once_per_batch",
+  auto_create_mode: normalizeAutoCreateMode(taskType?.auto_create_mode) || "once_per_batch",
   extensions_text: Array.isArray(taskType?.file_match_rule?.extensions)
     ? taskType.file_match_rule.extensions.join(", ")
     : "",
@@ -98,7 +118,7 @@ const WorkflowTaskTypeEditorModal = ({
       default_department: normalizeText(draft.default_department) || null,
       default_assignees: draft.default_assignees.map((userId) => ({ user: userId })),
       default_priority: normalizeText(draft.default_priority) || "normal",
-      auto_create_mode: normalizeText(draft.auto_create_mode) || "once_per_batch",
+      auto_create_mode: normalizeAutoCreateMode(draft.auto_create_mode) || "once_per_batch",
       file_match_rule: {
         extensions: splitCsv(draft.extensions_text),
         mime_types: splitCsv(draft.mime_types_text),
@@ -238,7 +258,7 @@ const WorkflowTaskTypeEditorModal = ({
                   >
                     {WORKFLOW_AUTO_CREATE_MODES.map((entry) => (
                       <option key={entry} value={entry}>
-                        {entry}
+                        {WORKFLOW_AUTO_CREATE_MODE_LABELS[entry] || entry}
                       </option>
                     ))}
                   </select>

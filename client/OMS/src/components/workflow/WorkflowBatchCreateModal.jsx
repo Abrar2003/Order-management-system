@@ -5,7 +5,9 @@ import {
   buildFileManifest,
   buildTaskPreview,
   formatBytes,
+  getDirectSubfolderNames,
   getRootFolder,
+  normalizeWorkflowAutoCreateMode,
   summarizeManifest,
 } from "../../utils/workflowManifest";
 
@@ -80,6 +82,10 @@ const WorkflowBatchCreateModal = ({
       ),
     [form.upload_assignee_ids],
   );
+  const directSubfolderNames = useMemo(
+    () => getDirectSubfolderNames(manifest, rootFolder),
+    [manifest, rootFolder],
+  );
   const availableUploadUsers = useMemo(() => {
     const optionById = new Map();
     [...availableUsers, currentUser].forEach((user) => {
@@ -132,11 +138,18 @@ const WorkflowBatchCreateModal = ({
     const nextRootFolder = getRootFolder(selectedFiles);
     const nextManifest = buildFileManifest(selectedFiles);
     const nextSummary = summarizeManifest(nextManifest, nextRootFolder);
+    const hasFolderMetadata = nextManifest.some((entry) =>
+      normalizeText(entry?.relative_path).includes("/"),
+    );
 
     setRootFolder(nextRootFolder);
     setManifest(nextManifest);
     setSummary(nextSummary);
-    setError("");
+    setError(
+      hasFolderMetadata
+        ? ""
+        : "Selected files did not include folder paths. Use Choose Folder and allow folder upload so sub-folder tasks can be detected.",
+    );
     setDuplicateError("");
   };
 
@@ -236,15 +249,18 @@ const WorkflowBatchCreateModal = ({
         upload_required: Boolean(form.upload_required),
         upload_assignee_ids: form.upload_required ? form.upload_assignee_ids : [],
         due_date: normalizeText(form.due_date),
-        file_manifest: manifest.map((entry) => ({
+        direct_subfolders: directSubfolderNames,
+      };
+      if (normalizeWorkflowAutoCreateMode(selectedTaskType?.auto_create_mode) !== "per_direct_subfolder") {
+        payload.file_manifest = manifest.map((entry) => ({
           name: entry.name,
           relative_path: entry.relative_path,
           folder_path: entry.folder_path,
           extension: entry.extension,
           mime_type: entry.mime_type,
           size_bytes: entry.size_bytes,
-        })),
-      };
+        }));
+      }
       const result = await createBatchFromFolderManifest(payload);
       onCreated?.(result?.data || result);
     } catch (submitError) {
@@ -661,24 +677,30 @@ const WorkflowBatchCreateModal = ({
                                 Folder: {task.source_folder_path || rootFolder || "N/A"}
                               </div>
 
-                              <div className="workflow-preview-files">
-                                {task.source_files.slice(0, 8).map((entry) => (
-                                  <div
-                                    key={`${task.id}:${entry.relative_path}`}
-                                    className="workflow-preview-file-row"
-                                  >
-                                    <div className="fw-medium">{entry.name}</div>
-                                    <div className="small text-secondary">
-                                      {entry.relative_path}
+                              {task.source_files.length > 0 ? (
+                                <div className="workflow-preview-files">
+                                  {task.source_files.slice(0, 8).map((entry) => (
+                                    <div
+                                      key={`${task.id}:${entry.relative_path}`}
+                                      className="workflow-preview-file-row"
+                                    >
+                                      <div className="fw-medium">{entry.name}</div>
+                                      <div className="small text-secondary">
+                                        {entry.relative_path}
+                                      </div>
                                     </div>
-                                  </div>
-                                ))}
-                                {task.source_files.length > 8 && (
-                                  <div className="small text-secondary">
-                                    + {task.source_files.length - 8} more files
-                                  </div>
-                                )}
-                              </div>
+                                  ))}
+                                  {task.source_files.length > 8 && (
+                                    <div className="small text-secondary">
+                                      + {task.source_files.length - 8} more files
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="small text-secondary">
+                                  Task will be created from the direct sub-folder name only.
+                                </div>
+                              )}
                             </div>
                           ))}
                         </div>

@@ -7,8 +7,10 @@ const {
   buildEmptyTaskCounts,
   buildWorkflowTaskNo,
   getDirectSubfolderName,
+  normalizeDirectSubfolderNames,
   normalizeKey,
   normalizeText,
+  normalizeWorkflowAutoCreateMode,
 } = require("../../helpers/workflow");
 const {
   Task,
@@ -90,10 +92,11 @@ const matchesTaskTypeRule = (entry = {}, taskType = {}) => {
 };
 
 const ensureTaskGenerationModeSupported = (taskType = {}) => {
-  if (!WORKFLOW_AUTO_CREATE_MODES.includes(taskType?.auto_create_mode)) {
+  const autoCreateMode = normalizeWorkflowAutoCreateMode(taskType?.auto_create_mode);
+  if (!WORKFLOW_AUTO_CREATE_MODES.includes(autoCreateMode)) {
     throw new Error("Task type has an invalid auto_create_mode");
   }
-  if (taskType?.auto_create_mode === "manual") {
+  if (autoCreateMode === "manual") {
     throw new Error("This task type is configured for manual task creation and cannot generate tasks from a folder manifest");
   }
 };
@@ -114,7 +117,10 @@ const findActiveTaskTypeByKey = async (taskTypeKey = "") => {
   }
 
   ensureTaskGenerationModeSupported(taskType);
-  return taskType;
+  return {
+    ...taskType,
+    auto_create_mode: normalizeWorkflowAutoCreateMode(taskType.auto_create_mode),
+  };
 };
 
 const validateAssigneeUsers = async (assigneeIds = []) => {
@@ -158,30 +164,28 @@ const createPerDirectSubfolderDefinitions = ({
   batch,
   taskType,
   manifestEntries = [],
+  directSubfolders = [],
 }) => {
-  const filteredEntries = manifestEntries.filter((entry) => matchesTaskTypeRule(entry, taskType));
-  const grouped = new Map();
+  const subfolderNames = normalizeDirectSubfolderNames(directSubfolders, batch?.source_folder_name);
+  const resolvedSubfolderNames = subfolderNames.length > 0
+    ? subfolderNames
+    : normalizeDirectSubfolderNames(
+        manifestEntries
+          .map((entry) => getDirectSubfolderName(entry, batch?.source_folder_name))
+          .filter(Boolean),
+        batch?.source_folder_name,
+      );
 
-  filteredEntries.forEach((entry) => {
-    const subfolderName = getDirectSubfolderName(entry, batch?.source_folder_name);
-    if (!subfolderName) return;
-    if (!grouped.has(subfolderName)) {
-      grouped.set(subfolderName, []);
-    }
-    grouped.get(subfolderName).push(entry);
-  });
-
-  const definitions = [...grouped.entries()]
-    .sort((left, right) => left[0].localeCompare(right[0]))
-    .map(([subfolderName, entries]) => ({
+  const definitions = resolvedSubfolderNames
+    .map((subfolderName) => ({
       titleSuffix: subfolderName,
-      source_folder_path: entries[0]?.folder_path || `${batch?.source_folder_name}/${subfolderName}`,
-      source_files: entries,
+      source_folder_path: `${batch?.source_folder_name || ""}/${subfolderName}`.replace(/^\/+|\/+$/g, ""),
+      source_files: [],
     }));
 
   if (definitions.length === 0) {
     throw new Error(
-      `No direct subfolders with files were found for ${taskType.name || taskType.key}`,
+      `No direct subfolders were found for ${taskType.name || taskType.key}`,
     );
   }
 
@@ -203,12 +207,17 @@ const createOncePerBatchDefinition = ({ batch, taskType, manifestEntries = [] })
   ];
 };
 
-const buildTaskDefinitions = ({ batch, taskType, manifestEntries = [] }) => {
-  switch (taskType?.auto_create_mode) {
+const buildTaskDefinitions = ({ batch, taskType, manifestEntries = [], directSubfolders = [] }) => {
+  switch (normalizeWorkflowAutoCreateMode(taskType?.auto_create_mode)) {
     case "per_file":
       return createPerFileTaskDefinitions({ batch, taskType, manifestEntries });
     case "per_direct_subfolder":
-      return createPerDirectSubfolderDefinitions({ batch, taskType, manifestEntries });
+      return createPerDirectSubfolderDefinitions({
+        batch,
+        taskType,
+        manifestEntries,
+        directSubfolders,
+      });
     case "once_per_batch":
       return createOncePerBatchDefinition({ batch, taskType, manifestEntries });
     default:
@@ -216,8 +225,13 @@ const buildTaskDefinitions = ({ batch, taskType, manifestEntries = [] }) => {
   }
 };
 
-const previewTaskDefinitionsForBatch = ({ batch, taskType, manifestEntries = [] }) =>
-  buildTaskDefinitions({ batch, taskType, manifestEntries });
+const previewTaskDefinitionsForBatch = ({
+  batch,
+  taskType,
+  manifestEntries = [],
+  directSubfolders = [],
+}) =>
+  buildTaskDefinitions({ batch, taskType, manifestEntries, directSubfolders });
 
 const countTaskStatuses = (tasks = []) => {
   const counts = buildEmptyTaskCounts();
@@ -276,6 +290,7 @@ const generateTasksForBatch = async ({
   batch,
   taskType,
   manifestEntries = [],
+  directSubfolders = [],
   assignees = [],
   uploadRequired = true,
   uploadAssignees = [],
@@ -291,7 +306,12 @@ const generateTasksForBatch = async ({
 
   await ensureBatchHasNoGeneratedTasks(batch._id);
 
-  const taskDefinitions = buildTaskDefinitions({ batch, taskType, manifestEntries });
+  const taskDefinitions = buildTaskDefinitions({
+    batch,
+    taskType,
+    manifestEntries,
+    directSubfolders,
+  });
   const auditActor = buildAuditActor(actor);
   const initialStatus = "assigned";
   const assignedUsers = assignees.map((user) => ({ user: user._id }));

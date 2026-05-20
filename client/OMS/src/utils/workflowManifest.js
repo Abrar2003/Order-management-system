@@ -1,4 +1,18 @@
 const normalizeText = (value) => String(value ?? "").trim();
+const normalizeKey = (value) => normalizeText(value).toLowerCase().replace(/[\s-]+/g, "_");
+
+export const normalizeWorkflowAutoCreateMode = (value = "") => {
+  const normalized = normalizeKey(value);
+  if (
+    normalized === "per_sub_folder" ||
+    normalized === "per_subfolder" ||
+    normalized === "per_sub_directory" ||
+    normalized === "per_direct_sub_folder"
+  ) {
+    return "per_direct_subfolder";
+  }
+  return normalized;
+};
 
 export const WORKFLOW_IMAGE_EXTENSIONS = Object.freeze([
   "jpg",
@@ -216,6 +230,20 @@ export const summarizeManifest = (manifest = [], rootFolder = "") => {
   return summary;
 };
 
+export const getDirectSubfolderNames = (manifest = [], rootFolder = "") =>
+  [
+    ...new Set(
+      (Array.isArray(manifest) ? manifest : [])
+        .map((entry) =>
+          getDirectSubfolder(
+            rootFolder,
+            entry?.folder_path || entry?.relative_path,
+          ),
+        )
+        .filter(Boolean),
+    ),
+  ].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }));
+
 const applyTaskTypeRule = (manifest = [], taskType = null) => {
   const rule = taskType?.file_match_rule || {};
   const extensionSet = normalizeExtensionsSet(rule.extensions);
@@ -258,29 +286,19 @@ export const previewPerDirectSubfolderTasks = (
   rootFolder = "",
   taskType = null,
 ) => {
-  const grouped = new Map();
+  const directSubfolders = getDirectSubfolderNames(manifest, rootFolder);
 
-  applyTaskTypeRule(manifest, taskType).forEach((entry) => {
-    const directSubfolder = getDirectSubfolder(rootFolder, entry?.folder_path);
-    if (!directSubfolder) return;
-    if (!grouped.has(directSubfolder)) {
-      grouped.set(directSubfolder, []);
-    }
-    grouped.get(directSubfolder).push(entry);
-  });
-
-  return [...grouped.entries()]
-    .sort((left, right) => left[0].localeCompare(right[0], undefined, { sensitivity: "base" }))
-    .map(([folderName, entries], index) => ({
+  return directSubfolders
+    .map((folderName, index) => ({
       id: `per-subfolder-${index + 1}`,
       title: buildPreviewTaskTitle({
         fallbackTitle: folderName,
       }),
-      source_folder_path: entries[0]?.folder_path || `${normalizeText(rootFolder)}/${folderName}`,
-      source_files: entries,
-      source_file_count: entries.length,
+      source_folder_path: `${normalizeText(rootFolder)}/${folderName}`.replace(/^\/+|\/+$/g, ""),
+      source_files: [],
+      source_file_count: 0,
       folder_name: folderName,
-      sample_files: entries.slice(0, 5).map((entry) => entry.name),
+      sample_files: [],
     }));
 };
 
@@ -315,7 +333,7 @@ export const buildTaskPreview = ({
   batchName = "",
   sourceFolderName = "",
 } = {}) => {
-  const autoCreateMode = normalizeText(taskType?.auto_create_mode).toLowerCase();
+  const autoCreateMode = normalizeWorkflowAutoCreateMode(taskType?.auto_create_mode);
   const previewTaskType = taskType || null;
 
   if (!Array.isArray(manifest) || manifest.length === 0 || !previewTaskType) {

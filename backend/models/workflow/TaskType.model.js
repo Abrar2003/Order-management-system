@@ -5,6 +5,7 @@ const {
   WORKFLOW_TASK_TYPE_CATEGORIES,
   normalizeKey,
   normalizeText,
+  normalizeWorkflowAutoCreateMode,
 } = require("../../helpers/workflow");
 const { AuditActorSchema, UserReferenceSchema } = require("./shared");
 
@@ -71,6 +72,7 @@ TaskTypeSchema.pre("validate", function normalizeTaskType() {
   this.name = normalizeText(this.name);
   this.key = normalizeKey(this.key || this.name);
   this.description = normalizeText(this.description);
+  this.auto_create_mode = normalizeWorkflowAutoCreateMode(this.auto_create_mode, "manual");
 
   const rule = this.file_match_rule || {};
   rule.extensions = Array.isArray(rule.extensions)

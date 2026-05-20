@@ -4,12 +4,14 @@ const {
   WORKFLOW_BATCH_STATUSES,
   buildBatchCounts,
   buildWorkflowBatchNo,
+  normalizeDirectSubfolderNames,
   normalizeFileManifest,
   normalizeKey,
   normalizeNameKey,
   normalizeSourceFolderKey,
   normalizeSourceFolderName,
   normalizeText,
+  normalizeWorkflowAutoCreateMode,
   summarizeManifestCounts,
 } = require("../../helpers/workflow");
 const { Batch, Comment, Task, TaskAssignment, TaskStatusHistory } = require("../../models/workflow");
@@ -219,9 +221,16 @@ const createWorkflowBatchFromFolderManifest = async (
   if (!dueDate) {
     throw new Error("due_date is required");
   }
-  const manifestEntries = normalizeFileManifest(payload?.file_manifest, {
+  const autoCreateMode = normalizeWorkflowAutoCreateMode(taskType?.auto_create_mode);
+  const directSubfolders = normalizeDirectSubfolderNames(
+    payload?.direct_subfolders || [],
     sourceFolderName,
-  });
+  );
+  const manifestEntries = autoCreateMode === "per_direct_subfolder" && directSubfolders.length > 0
+    ? []
+    : normalizeFileManifest(payload?.file_manifest, {
+        sourceFolderName,
+      });
   const fileCounts = summarizeManifestCounts(manifestEntries);
 
   const duplicateBatch = await Batch.findOne({
@@ -249,6 +258,7 @@ const createWorkflowBatchFromFolderManifest = async (
     },
     taskType,
     manifestEntries,
+    directSubfolders,
   });
 
   const batchId = new mongoose.Types.ObjectId();
@@ -291,6 +301,7 @@ const createWorkflowBatchFromFolderManifest = async (
       batch: batchDoc.toObject(),
       taskType,
       manifestEntries,
+      directSubfolders,
       assignees,
       uploadRequired,
       uploadAssignees: uploadAssignees.map((user) => ({ user: user._id })),

@@ -66,9 +66,17 @@ const WORKFLOW_TASK_TYPE_CATEGORIES = Object.freeze([
 const WORKFLOW_AUTO_CREATE_MODES = Object.freeze([
   "per_file",
   "per_direct_subfolder",
+  "per_sub_folder",
   "once_per_batch",
   "manual",
 ]);
+
+const WORKFLOW_AUTO_CREATE_MODE_ALIASES = Object.freeze({
+  per_sub_folder: "per_direct_subfolder",
+  per_subfolder: "per_direct_subfolder",
+  per_sub_directory: "per_direct_subfolder",
+  per_direct_sub_folder: "per_direct_subfolder",
+});
 
 const WORKFLOW_ALLOWED_STATUS_TRANSITIONS = Object.freeze({
   assigned: ["started"],
@@ -152,6 +160,11 @@ const normalizeFolderKey = (value) =>
 const normalizeSourceFolderName = (value) => sanitizeManifestPath(value || "", { allowEmpty: false });
 
 const normalizeSourceFolderKey = (value) => normalizeFolderKey(value);
+
+const normalizeWorkflowAutoCreateMode = (value, fallback = "") => {
+  const normalized = normalizeKey(value);
+  return WORKFLOW_AUTO_CREATE_MODE_ALIASES[normalized] || normalized || fallback;
+};
 
 const normalizeExtension = (value, fallbackName = "") => {
   const rawValue = normalizeText(value).replace(/^\./, "").toLowerCase();
@@ -280,6 +293,23 @@ const getDirectSubfolderName = (entry = {}, sourceFolderName = "") => {
   const normalizedRelative = stripRootFolderPrefix(targetPath, sourceFolderName);
   const segments = normalizedRelative.split("/").filter(Boolean);
   return segments.length > 0 ? segments[0] : "";
+};
+
+const normalizeDirectSubfolderNames = (values = [], sourceFolderName = "") => {
+  const entries = Array.isArray(values) ? values : [];
+  const names = entries
+    .map((entry) => {
+      const rawValue = typeof entry === "string"
+        ? entry
+        : entry?.name || entry?.folder_name || entry?.folder_path || entry?.relative_path || "";
+      const normalizedPath = stripRootFolderPrefix(rawValue, sourceFolderName);
+      const firstSegment = normalizedPath.split("/").filter(Boolean)[0] || "";
+      return firstSegment ? normalizeFolderSegment(firstSegment) : "";
+    })
+    .filter(Boolean);
+  return [...new Set(names)].sort((left, right) =>
+    left.localeCompare(right, undefined, { sensitivity: "base" }),
+  );
 };
 
 const summarizeManifestCounts = (entries = []) => {
@@ -525,11 +555,13 @@ module.exports = {
   getDirectSubfolderName,
   isObjectIdLike,
   normalizeFileManifest,
+  normalizeDirectSubfolderNames,
   normalizeFolderKey,
   normalizeKey,
   normalizeNameKey,
   normalizeSourceFolderKey,
   normalizeSourceFolderName,
+  normalizeWorkflowAutoCreateMode,
   normalizeWorkflowTaskStatus,
   normalizeText,
   sanitizeManifestPath,

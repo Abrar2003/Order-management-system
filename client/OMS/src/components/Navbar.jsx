@@ -185,7 +185,10 @@ const Navbar = () => {
 
   const desktopDirectLinks = useMemo(() => {
     if (isQcOnlyRole) {
-      return [routeMenuItem("qc", "QC", "/qc")];
+      return [
+        routeMenuItem("qc", "QC", "/qc"),
+        routeMenuItem("inspector-reports", "Inspections Report", "/reports/inspectors"),
+      ];
     }
 
     const links = [];
@@ -249,9 +252,7 @@ const Navbar = () => {
     ];
 
     if (isQcOnlyRole) {
-      return [
-        groupMenuItem("inspection-reports", "Inspection Reports", inspectionReports),
-      ];
+      return [];
     }
 
     if (!hasPermission("reports", "view")) return [];
