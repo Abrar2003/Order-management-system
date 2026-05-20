@@ -15,6 +15,13 @@ const {
 const TaskReworkedCommentSchema = new mongoose.Schema(
   {
     comment: { type: String, default: "", trim: true },
+    rework_type: {
+      type: String,
+      enum: ["before_approval", "after_approval", ""],
+      default: "",
+      trim: true,
+    },
+    from_status: { type: String, default: "", trim: true },
     created_at: { type: Date, default: Date.now },
     created_by: { type: AuditActorSchema, default: () => ({}) },
   },
@@ -24,6 +31,8 @@ const TaskReworkedCommentSchema = new mongoose.Schema(
 const TaskReworkedSchema = new mongoose.Schema(
   {
     count: { type: Number, default: 0, min: 0 },
+    before_approval_count: { type: Number, default: 0, min: 0 },
+    after_approval_count: { type: Number, default: 0, min: 0 },
     comments: { type: [TaskReworkedCommentSchema], default: [] },
   },
   { _id: false },
@@ -174,6 +183,8 @@ TaskSchema.pre("validate", function normalizeTask() {
   this.reworked.comments = Array.isArray(this.reworked.comments)
     ? this.reworked.comments.map((entry) => ({
         comment: normalizeText(entry?.comment),
+        rework_type: normalizeKey(entry?.rework_type),
+        from_status: normalizeText(entry?.from_status).toLowerCase(),
         created_at: entry?.created_at || new Date(),
         created_by: entry?.created_by || {},
       }))
@@ -182,6 +193,14 @@ TaskSchema.pre("validate", function normalizeTask() {
     0,
     Number(this.reworked.count || 0),
     Number(this.rework_count || 0),
+  );
+  this.reworked.before_approval_count = Math.max(
+    0,
+    Number(this.reworked.before_approval_count || 0),
+  );
+  this.reworked.after_approval_count = Math.max(
+    0,
+    Number(this.reworked.after_approval_count || 0),
   );
   this.rework_count = this.reworked.count;
   this.rework_due_dates = Array.isArray(this.rework_due_dates)

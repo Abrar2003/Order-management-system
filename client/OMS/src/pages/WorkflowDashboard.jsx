@@ -44,6 +44,8 @@ const SPOTLIGHT_TASK_FILTERS = Object.freeze([
   { countKey: "approval_delayed_tasks", label: "Approval Delay", status: "approval_delay" },
   { countKey: "upload_delayed_tasks", label: "Upload Delay", status: "upload_delay" },
 ]);
+const getSpotlightTotal = (entry = {}) =>
+  SPOTLIGHT_TASK_FILTERS.reduce((sum, filter) => sum + getCount(entry, filter.countKey), 0);
 const DASHBOARD_STATUS_OPTIONS = Object.freeze([
   { value: "open", label: "Open" },
   { value: "needs_approval", label: "Needs Approval" },
@@ -80,6 +82,8 @@ const WORKLOAD_TABLE_GROUPS = Object.freeze([
       { countKey: "upload_remaining_tasks", label: "Upload Left", status: "upload_remaining" },
       { countKey: "uploaded_tasks", label: "Uploaded", status: "uploaded" },
       { countKey: "reworked_tasks", label: "Rework", status: "" },
+      { countKey: "reworked_before_approval_tasks", label: "Before Appr Rework", status: "" },
+      { countKey: "reworked_after_approval_tasks", label: "After Appr Rework", status: "" },
     ],
   },
   {
@@ -430,6 +434,22 @@ const WorkflowDashboard = () => {
         status: "due_today",
       },
       {
+        key: "rework-before-approval",
+        label: "Rework Before Approval",
+        value: Number(overall.reworked_before_approval_tasks || 0),
+        note: "Tasks sent to rework from the completed stage before approval.",
+        status: "",
+        disableNavigation: true,
+      },
+      {
+        key: "rework-after-approval",
+        label: "Rework After Approval",
+        value: Number(overall.reworked_after_approval_tasks || 0),
+        note: "Tasks sent to rework after approval or upload.",
+        status: "",
+        disableNavigation: true,
+      },
+      {
         key: "upload-remaining",
         label: "Upload Remaining",
         value: Number(overall.upload_remaining_tasks || 0),
@@ -672,8 +692,17 @@ const WorkflowDashboard = () => {
                   key={card.key}
                   type="button"
                   className="card om-card workflow-dashboard-stat is-clickable"
-                  onClick={() => navigateToTaskBoardSummary(card.status)}
-                  title={`View ${card.label.toLowerCase()} tasks`}
+                  disabled={card.disableNavigation}
+                  onClick={() => {
+                    if (!card.disableNavigation) {
+                      navigateToTaskBoardSummary(card.status);
+                    }
+                  }}
+                  title={
+                    card.disableNavigation
+                      ? card.label
+                      : `View ${card.label.toLowerCase()} tasks`
+                  }
                 >
                   <div className="card-body">
                     <div className="workflow-dashboard-stat-label">{card.label}</div>
@@ -698,34 +727,61 @@ const WorkflowDashboard = () => {
                   <div className="text-secondary">No workload rows matched the current filters.</div>
                 ) : (
                   <div className="workflow-dashboard-spotlight-list">
-                    {focusRows.rows.map((entry) => (
+                    {focusRows.rows.map((entry, index) => {
+                      const activeFilters = SPOTLIGHT_TASK_FILTERS
+                        .map((filter) => ({
+                          ...filter,
+                          count: getCount(entry, filter.countKey),
+                        }))
+                        .filter((filter) => filter.count > 0);
+                      const spotlightTotal = getSpotlightTotal(entry);
+
+                      return (
                       <div key={entry.user_id || entry.email || entry.name} className="workflow-dashboard-spotlight-item">
-                        <div>
-                          <div className="fw-semibold">{entry.name}</div>
-                          <div className="small text-secondary">
-                            {formatRoleLabel(entry.role)}
-                            {entry.email ? ` • ${entry.email}` : ""}
+                        <div className="workflow-dashboard-spotlight-person">
+                          <span className="workflow-dashboard-spotlight-rank">
+                            {index + 1}
+                          </span>
+                          <div className="workflow-dashboard-spotlight-user">
+                            <div className="fw-semibold">{entry.name}</div>
+                            <div className="small text-secondary">
+                              {formatRoleLabel(entry.role)}
+                            </div>
+                            {entry.email && (
+                              <div className="workflow-dashboard-spotlight-email">
+                                {entry.email}
+                              </div>
+                            )}
+                          </div>
+                          <div className="workflow-dashboard-spotlight-total">
+                            <span>Total</span>
+                            <strong>{spotlightTotal}</strong>
                           </div>
                         </div>
                         <div className="workflow-dashboard-spotlight-meta">
-                          {SPOTLIGHT_TASK_FILTERS.map((filter) => {
-                            const count = getCount(entry, filter.countKey);
-                            return (
+                          {activeFilters.length === 0 ? (
+                            <span className="workflow-dashboard-spotlight-empty">
+                              No active workload counts
+                            </span>
+                          ) : (
+                            activeFilters.map((filter) => (
                               <button
                                 key={filter.countKey}
                                 type="button"
-                                className="om-summary-chip workflow-dashboard-spotlight-filter"
+                                className="workflow-dashboard-spotlight-filter"
                                 onClick={() => navigateToTaskBoardFilter(entry, filter.status)}
-                                disabled={!entry?.user_id || count <= 0}
+                                disabled={!entry?.user_id}
                                 title={`View ${filter.label.toLowerCase()} tasks for ${entry.name}`}
                               >
-                                {filter.label}: {count}
+                                <span>{filter.label}</span>
+                                <strong>{filter.count}</strong>
                               </button>
-                            );
-                          })}
+                            ))
+                          )}
                         </div>
                       </div>
-                    ))}
+                    );
+                    })}
                   </div>
                 )}
               </div>

@@ -155,6 +155,24 @@ const recalculateWorkflowBatchFromTasks = async (batchId) => {
               ],
             },
           },
+          reworked_before_approval_tasks: {
+            $sum: {
+              $cond: [
+                { $gt: [{ $ifNull: ["$reworked.before_approval_count", 0] }, 0] },
+                1,
+                0,
+              ],
+            },
+          },
+          reworked_after_approval_tasks: {
+            $sum: {
+              $cond: [
+                { $gt: [{ $ifNull: ["$reworked.after_approval_count", 0] }, 0] },
+                1,
+                0,
+              ],
+            },
+          },
         },
       },
     ]),
@@ -183,6 +201,12 @@ const recalculateWorkflowBatchFromTasks = async (batchId) => {
     ]),
   ]);
   taskCounts.reworked_tasks = Number(reworkedSummary?.[0]?.reworked_tasks || 0);
+  taskCounts.reworked_before_approval_tasks = Number(
+    reworkedSummary?.[0]?.reworked_before_approval_tasks || 0,
+  );
+  taskCounts.reworked_after_approval_tasks = Number(
+    reworkedSummary?.[0]?.reworked_after_approval_tasks || 0,
+  );
   taskCounts.complete_done_tasks = Number(terminalSummary?.[0]?.complete_done_tasks || 0);
 
   batch.counts = buildBatchCounts(batch.counts || {}, taskCounts);

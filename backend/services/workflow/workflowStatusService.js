@@ -94,6 +94,8 @@ const DASHBOARD_COUNT_FIELDS = Object.freeze([
   "uploaded_tasks",
   "upload_remaining_tasks",
   "reworked_tasks",
+  "reworked_before_approval_tasks",
+  "reworked_after_approval_tasks",
   "needs_approval_tasks",
   "overdue_tasks",
   "approval_overdue_tasks",
@@ -205,6 +207,8 @@ const getTaskReworkPayload = (doc = {}) => {
 
   return {
     count,
+    before_approval_count: Math.max(0, Number(doc?.reworked?.before_approval_count || 0)),
+    after_approval_count: Math.max(0, Number(doc?.reworked?.after_approval_count || 0)),
     comments,
   };
 };
@@ -587,6 +591,14 @@ const serializeBatchTaskGroup = ({ batch = {}, tasks = [] } = {}) => {
     updated_by: batchDoc?.updated_by || childTasks[0]?.updated_by || {},
     reworked: {
       count: childTasks.reduce((sum, task) => sum + Number(task?.reworked?.count || task?.rework_count || 0), 0),
+      before_approval_count: childTasks.reduce(
+        (sum, task) => sum + Number(task?.reworked?.before_approval_count || 0),
+        0,
+      ),
+      after_approval_count: childTasks.reduce(
+        (sum, task) => sum + Number(task?.reworked?.after_approval_count || 0),
+        0,
+      ),
       comments: childTasks.flatMap((task) => Array.isArray(task?.reworked?.comments) ? task.reworked.comments : []),
     },
     rework_due_dates: childTasks.flatMap((task) =>
@@ -1670,6 +1682,16 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
         $cond: [{ $gt: ["$normalized_rework_count", 0] }, 1, 0],
       },
     },
+    reworked_before_approval_tasks: {
+      $sum: {
+        $cond: [{ $gt: ["$normalized_rework_before_approval_count", 0] }, 1, 0],
+      },
+    },
+    reworked_after_approval_tasks: {
+      $sum: {
+        $cond: [{ $gt: ["$normalized_rework_after_approval_count", 0] }, 1, 0],
+      },
+    },
     needs_approval_tasks: statusCount("complete"),
     overdue_tasks: overdueCount,
     approval_overdue_tasks: approvalOverdueCount,
@@ -1687,6 +1709,12 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
         normalized_status: buildWorkflowTaskStatusNormalizationExpression(),
         normalized_rework_count: {
           $ifNull: ["$reworked.count", { $ifNull: ["$rework_count", 0] }],
+        },
+        normalized_rework_before_approval_count: {
+          $ifNull: ["$reworked.before_approval_count", 0],
+        },
+        normalized_rework_after_approval_count: {
+          $ifNull: ["$reworked.after_approval_count", 0],
         },
       },
     },
@@ -1767,6 +1795,8 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
               uploaded_tasks: 1,
               upload_remaining_tasks: 1,
               reworked_tasks: 1,
+              reworked_before_approval_tasks: 1,
+              reworked_after_approval_tasks: 1,
               needs_approval_tasks: 1,
               overdue_tasks: 1,
               approval_overdue_tasks: 1,
@@ -1856,6 +1886,12 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
         normalized_rework_count: {
           $ifNull: ["$reworked.count", { $ifNull: ["$rework_count", 0] }],
         },
+        normalized_rework_before_approval_count: {
+          $ifNull: ["$reworked.before_approval_count", 0],
+        },
+        normalized_rework_after_approval_count: {
+          $ifNull: ["$reworked.after_approval_count", 0],
+        },
       },
     },
     {
@@ -1926,6 +1962,16 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
             $cond: [{ $gt: ["$normalized_rework_count", 0] }, 1, 0],
           },
         },
+        reworked_before_approval_count: {
+          $sum: {
+            $cond: [{ $gt: ["$normalized_rework_before_approval_count", 0] }, 1, 0],
+          },
+        },
+        reworked_after_approval_count: {
+          $sum: {
+            $cond: [{ $gt: ["$normalized_rework_after_approval_count", 0] }, 1, 0],
+          },
+        },
         overdue_count: { $sum: { $cond: ["$unit_is_overdue", 1, 0] } },
         approval_overdue_count: { $sum: { $cond: ["$unit_is_approval_overdue", 1, 0] } },
         upload_overdue_count: { $sum: { $cond: ["$unit_is_upload_overdue", 1, 0] } },
@@ -1943,6 +1989,8 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
         is_started_unit: { $gt: ["$started_or_beyond_count", 0] },
         is_open_unit: { $gt: ["$open_count", 0] },
         is_reworked_unit: { $gt: ["$reworked_count", 0] },
+        is_reworked_before_approval_unit: { $gt: ["$reworked_before_approval_count", 0] },
+        is_reworked_after_approval_unit: { $gt: ["$reworked_after_approval_count", 0] },
       },
     },
     {
@@ -2027,6 +2075,12 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
           },
         },
         reworked_tasks: { $sum: { $cond: ["$is_reworked_unit", 1, 0] } },
+        reworked_before_approval_tasks: {
+          $sum: { $cond: ["$is_reworked_before_approval_unit", 1, 0] },
+        },
+        reworked_after_approval_tasks: {
+          $sum: { $cond: ["$is_reworked_after_approval_unit", 1, 0] },
+        },
         needs_approval_tasks: {
           $sum: {
             $cond: [
@@ -2640,6 +2694,7 @@ const reworkWorkflowTask = async ({
   const currentReworkDueDates = getTaskReworkDueDatePayload(task);
   const nextDueDate = normalizeText(dueDate) ? parseDueDate(dueDate) : null;
   const reworkedAt = new Date();
+  const reworkType = fromStatus === "complete" ? "before_approval" : "after_approval";
   task.status = "assigned";
   task.started_at = null;
   task.completed_at = null;
@@ -2651,10 +2706,18 @@ const reworkWorkflowTask = async ({
   task.updated_by = auditActor;
   task.reworked = {
     count: currentReworked.count + 1,
+    before_approval_count:
+      Number(currentReworked.before_approval_count || 0) +
+      (reworkType === "before_approval" ? 1 : 0),
+    after_approval_count:
+      Number(currentReworked.after_approval_count || 0) +
+      (reworkType === "after_approval" ? 1 : 0),
     comments: [
       ...currentReworked.comments,
       {
         comment: normalizeText(note),
+        rework_type: reworkType,
+        from_status: fromStatus,
         created_at: reworkedAt,
         created_by: auditActor,
       },
@@ -2684,7 +2747,11 @@ const reworkWorkflowTask = async ({
     note: normalizeText(note),
     metadata: {
       rework: true,
+      rework_type: reworkType,
+      from_status: fromStatus,
       rework_count: task.reworked.count,
+      before_approval_rework_count: task.reworked.before_approval_count,
+      after_approval_rework_count: task.reworked.after_approval_count,
       due_date_updated: Boolean(nextDueDate),
       due_date: nextDueDate,
     },

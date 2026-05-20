@@ -44,6 +44,8 @@ const BatchCountsSchema = new mongoose.Schema(
     completed_tasks: { type: Number, default: 0, min: 0 },
     complete_done_tasks: { type: Number, default: 0, min: 0 },
     reworked_tasks: { type: Number, default: 0, min: 0 },
+    reworked_before_approval_tasks: { type: Number, default: 0, min: 0 },
+    reworked_after_approval_tasks: { type: Number, default: 0, min: 0 },
     rework_tasks: { type: Number, default: 0, min: 0 },
   },
   { _id: false },
