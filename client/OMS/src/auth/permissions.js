@@ -71,3 +71,6 @@ export const isManagerLikeRole = (role) =>
 
 export const hasShipmentPrivilegeRole = (role) =>
   isManagerLikeRole(role) || normalizeUserRole(role) === "dev";
+
+export const hasShipmentEditRole = (role) =>
+  ["admin", "super_admin", "inspection_manager"].includes(normalizeUserRole(role));

@@ -4142,7 +4142,7 @@ small,
 }
 
 .shipments-table-wrap {
-  overflow-x: hidden;
+  overflow-x: auto;
 }
 
 .shipments-table {

@@ -42,6 +42,12 @@ const TaskReworkDueDateSchema = new mongoose.Schema(
   {
     date: { type: Date, default: null },
     comment: { type: String, default: "", trim: true },
+    source: {
+      type: String,
+      enum: ["rework", "due_date"],
+      default: "rework",
+      trim: true,
+    },
     created_at: { type: Date, default: Date.now },
     created_by: { type: AuditActorSchema, default: () => ({}) },
   },
@@ -208,6 +214,7 @@ TaskSchema.pre("validate", function normalizeTask() {
         .map((entry) => ({
           date: entry?.date || entry?.due_date || null,
           comment: normalizeText(entry?.comment),
+          source: normalizeKey(entry?.source) === "due_date" ? "due_date" : "rework",
           created_at: entry?.created_at || new Date(),
           created_by: entry?.created_by || {},
         }))

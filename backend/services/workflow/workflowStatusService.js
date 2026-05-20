@@ -90,6 +90,7 @@ const DASHBOARD_COUNT_FIELDS = Object.freeze([
   "assigned_tasks",
   "started_tasks",
   "complete_tasks",
+  "complete_done_tasks",
   "approved_tasks",
   "uploaded_tasks",
   "upload_remaining_tasks",
@@ -160,6 +161,31 @@ const getIndianDayStart = (value = new Date()) => {
 
 const addDays = (value, days = 1) => new Date(value.getTime() + Number(days || 0) * DAY_MS);
 
+const isSundayInIndia = (value) => {
+  const parsed = getDateOrNull(value);
+  if (!parsed) return false;
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: WORKFLOW_DUE_TIMEZONE,
+    weekday: "short",
+  }).format(parsed) === "Sun";
+};
+
+const addWorkflowDaysSkippingSunday = (dayStart, days = 2) => {
+  const parsedStart = getDateOrNull(dayStart);
+  const targetDays = Math.max(0, Number(days || 0));
+  if (!parsedStart || targetDays === 0) return parsedStart;
+
+  let cursor = parsedStart;
+  let addedDays = 0;
+  while (addedDays < targetDays) {
+    cursor = addDays(cursor, 1);
+    if (!isSundayInIndia(cursor)) {
+      addedDays += 1;
+    }
+  }
+  return cursor;
+};
+
 const getDateOrNull = (value) => {
   if (!value) return null;
   const parsed = value instanceof Date ? value : new Date(value);
@@ -218,6 +244,7 @@ const getTaskReworkDueDatePayload = (doc = {}) =>
     .map((entry) => ({
       date: entry?.date || entry?.due_date || null,
       comment: normalizeText(entry?.comment),
+      source: normalizeKey(entry?.source) === "due_date" ? "due_date" : "rework",
       created_at: entry?.created_at || null,
       created_by: entry?.created_by || {},
     }))
@@ -235,6 +262,10 @@ const getWorkflowDeadlineSummary = (doc = {}) => {
   const normalizedStatus = normalizeWorkflowTaskStatus(doc?.status, {
     fallback: "assigned",
   }) || "assigned";
+  const reworkDueDates = getTaskReworkDueDatePayload(doc);
+  const latestDueDateEntry = reworkDueDates.length > 0
+    ? reworkDueDates[reworkDueDates.length - 1]
+    : null;
   const activeDueDate = getActiveWorkflowDueDate(doc);
   const completedAt = getDateOrNull(doc?.completed_at);
   const approvedAt = getDateOrNull(doc?.approved_at || doc?.reviewed_at);
@@ -246,21 +277,21 @@ const getWorkflowDeadlineSummary = (doc = {}) => {
     : null;
 
   const completedPlusTwoDayStart = completedAt
-    ? addDays(getIndianDayStart(completedAt), 2)
+    ? addWorkflowDaysSkippingSunday(getIndianDayStart(completedAt), 2)
     : null;
   const approvalDeadlineDayStart = activeDueDayStart
     ? (
         completedPlusTwoDayStart
           ? new Date(Math.max(activeDueDayStart.getTime(), completedPlusTwoDayStart.getTime()))
-          : addDays(activeDueDayStart, 2)
+          : addWorkflowDaysSkippingSunday(activeDueDayStart, 2)
       )
     : null;
   const approvalDeadlineCutoff = approvalDeadlineDayStart
     ? addDays(approvalDeadlineDayStart, 1)
     : null;
   const uploadDeadlineDayStart = approvedAt
-    ? addDays(getIndianDayStart(approvedAt), 2)
-    : (approvalDeadlineDayStart ? addDays(approvalDeadlineDayStart, 2) : null);
+    ? addWorkflowDaysSkippingSunday(getIndianDayStart(approvedAt), 2)
+    : (approvalDeadlineDayStart ? addWorkflowDaysSkippingSunday(approvalDeadlineDayStart, 2) : null);
   const uploadDeadlineCutoff = uploadDeadlineDayStart
     ? addDays(uploadDeadlineDayStart, 1)
     : null;
@@ -331,7 +362,7 @@ const getWorkflowDeadlineSummary = (doc = {}) => {
   return {
     active_due_date: activeDueDate,
     original_due_date: doc?.due_date || null,
-    active_due_source: getTaskReworkDueDatePayload(doc).length > 0 ? "rework" : "due_date",
+    active_due_source: latestDueDateEntry?.source || "due_date",
     completed_at: completedAt,
     approved_at: approvedAt,
     uploaded_at: uploadedAt,
@@ -783,6 +814,63 @@ const buildIndianDayStartExpression = (dateExpression) => ({
   },
 });
 
+const buildAddWorkflowDaysSkippingSundayExpression = (dayStartExpression, days = 2) => {
+  const targetDays = Math.max(0, Number(days || 0));
+  if (targetDays !== 2) {
+    return { $add: [dayStartExpression, targetDays * DAY_MS] };
+  }
+  return {
+    $let: {
+      vars: {
+        dayStart: dayStartExpression,
+      },
+      in: {
+        $cond: [
+          { $eq: ["$$dayStart", null] },
+          null,
+          {
+            $add: [
+              "$$dayStart",
+              {
+                $cond: [
+                  {
+                    $or: [
+                      {
+                        $eq: [
+                          {
+                            $dayOfWeek: {
+                              date: { $add: ["$$dayStart", DAY_MS] },
+                              timezone: WORKFLOW_DUE_TIMEZONE,
+                            },
+                          },
+                          1,
+                        ],
+                      },
+                      {
+                        $eq: [
+                          {
+                            $dayOfWeek: {
+                              date: { $add: ["$$dayStart", 2 * DAY_MS] },
+                              timezone: WORKFLOW_DUE_TIMEZONE,
+                            },
+                          },
+                          1,
+                        ],
+                      },
+                    ],
+                  },
+                  3 * DAY_MS,
+                  2 * DAY_MS,
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    },
+  };
+};
+
 const buildLatestReworkDueDateExpression = () => ({
   $let: {
     vars: {
@@ -819,14 +907,15 @@ const buildOverdueDateCutoffExpression = () => ({
 
 const buildApprovalDeadlineDayStartExpression = () => {
   const activeDueDayStart = buildIndianDayStartExpression(buildActiveDueDateExpression());
-  const completedPlusTwo = {
-    $add: [buildIndianDayStartExpression("$completed_at"), 2 * DAY_MS],
-  };
+  const completedPlusTwo = buildAddWorkflowDaysSkippingSundayExpression(
+    buildIndianDayStartExpression("$completed_at"),
+    2,
+  );
   return {
     $cond: [
       { $ne: ["$completed_at", null] },
       { $max: [activeDueDayStart, completedPlusTwo] },
-      { $add: [activeDueDayStart, 2 * DAY_MS] },
+      buildAddWorkflowDaysSkippingSundayExpression(activeDueDayStart, 2),
     ],
   };
 };
@@ -840,8 +929,11 @@ const buildUploadDeadlineDayStartExpression = () => {
   return {
     $cond: [
       { $ne: [effectiveApprovedAt, null] },
-      { $add: [buildIndianDayStartExpression(effectiveApprovedAt), 2 * DAY_MS] },
-      { $add: [buildApprovalDeadlineDayStartExpression(), 2 * DAY_MS] },
+      buildAddWorkflowDaysSkippingSundayExpression(
+        buildIndianDayStartExpression(effectiveApprovedAt),
+        2,
+      ),
+      buildAddWorkflowDaysSkippingSundayExpression(buildApprovalDeadlineDayStartExpression(), 2),
     ],
   };
 };
@@ -1359,6 +1451,45 @@ const listWorkflowTasks = async ({ query = {}, user = {} } = {}) => {
   const page = parsePositiveInt(query?.page, 1);
   const limit = Math.min(MAX_PAGE_LIMIT, parsePositiveInt(query?.limit, DEFAULT_PAGE_LIMIT));
   const skip = (page - 1) * limit;
+  const normalizedStatusFilter = normalizeKey(query?.status);
+
+  if (normalizedStatusFilter === "complete" || normalizedStatusFilter === "complete_done") {
+    const queryWithoutStatus = { ...query, status: "" };
+    const { match: unitMatch } = buildTaskListMatch({ query: queryWithoutStatus, user });
+    const rows = await populateTaskQuery(
+      Task.find(unitMatch).sort({ createdAt: -1, task_no: 1 }),
+    );
+    const completionCommentMap = await getLatestCompletionCommentMap(
+      rows.map((row) => row?._id),
+    );
+    const rowsWithCompletionComments = rows.map((row) => ({
+      ...row,
+      completion_comment: completionCommentMap.get(normalizeId(row?._id)) || null,
+    }));
+    const groupedRows = await groupTaskRowsForBoard(rowsWithCompletionComments);
+    const completeRows = groupedRows.filter((row) => {
+      const rowStatus = normalizeWorkflowTaskStatus(row?.status, { fallback: "" });
+      if (normalizedStatusFilter === "complete") {
+        return rowStatus === "complete";
+      }
+      return (
+        ["uploaded", "completed"].includes(rowStatus) ||
+        (rowStatus === "approved" && row?.upload_required === false)
+      );
+    });
+    const pagedRows = completeRows.slice(skip, skip + limit);
+
+    return {
+      rows: pagedRows,
+      pagination: {
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(completeRows.length / limit)),
+        totalRecords: completeRows.length,
+      },
+    };
+  }
+
   const { match } = buildTaskListMatch({ query, user });
 
   const [rows, totalRecords] = await Promise.all([
@@ -1669,7 +1800,8 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
     open_tasks: openTaskCount,
     assigned_tasks: statusCount("assigned"),
     started_tasks: statusCount("started"),
-    complete_tasks: {
+    complete_tasks: statusCount("complete"),
+    complete_done_tasks: {
       $sum: {
         $cond: [completeTaskExpression, 1, 0],
       },
@@ -1791,6 +1923,7 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
               assigned_tasks: 1,
               started_tasks: 1,
               complete_tasks: 1,
+              complete_done_tasks: 1,
               approved_tasks: 1,
               uploaded_tasks: 1,
               upload_remaining_tasks: 1,
@@ -2045,6 +2178,7 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
             ],
           },
         },
+        complete_done_tasks: { $sum: { $cond: ["$is_uploaded_unit", 1, 0] } },
         approved_tasks: {
           $sum: {
             $cond: [
@@ -2729,6 +2863,7 @@ const reworkWorkflowTask = async ({
       {
         date: nextDueDate,
         comment: normalizeText(note),
+        source: "rework",
         created_at: reworkedAt,
         created_by: auditActor,
       },
@@ -2897,6 +3032,16 @@ const updateWorkflowTaskDetails = async ({
         note: dueDateNote,
       };
       task.due_date = dueDate;
+      task.rework_due_dates = [
+        ...getTaskReworkDueDatePayload(task),
+        {
+          date: dueDate,
+          comment: dueDateNote,
+          source: "due_date",
+          created_at: new Date(),
+          created_by: auditActor,
+        },
+      ];
       changedFields.push("due_date");
     }
   }

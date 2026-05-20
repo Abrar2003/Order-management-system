@@ -121,6 +121,7 @@ const WORKFLOW_ACTION_ICONS = Object.freeze({
 });
 const TASK_STATUS_FILTER_OPTIONS = Object.freeze([
   { value: "complete_done", label: "Complete" },
+  { value: "complete", label: "Stage Complete" },
   { value: "complete_and_beyond", label: "Complete + Later" },
   { value: "open", label: "Open" },
   { value: "needs_approval", label: "Needs Approval" },

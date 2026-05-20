@@ -1,6 +1,9 @@
 const express = require("express");
 const auth = require("../middlewares/auth.middleware");
-const { requirePermission } = require("../middlewares/permission.middleware");
+const {
+  requirePermission,
+  requireShipmentEditAccess,
+} = require("../middlewares/permission.middleware");
 const {
   getSamples,
   createSample,
@@ -35,14 +38,14 @@ router.post(
 router.patch(
   "/:id",
   auth,
-  requirePermission("samples", "edit"),
+  requireShipmentEditAccess("samples"),
   updateSample,
 );
 
 router.patch(
   "/:id/finalize-shipment",
   auth,
-  requirePermission("samples", "edit"),
+  requireShipmentEditAccess("samples"),
   finalizeSampleShipment,
 );
 

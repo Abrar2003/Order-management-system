@@ -9,7 +9,7 @@ import EditOrderModal from "../components/EditOrderModal";
 import EditSampleModal from "../components/EditSampleModal";
 import SampleModal from "../components/SampleModal";
 import { getUserFromToken } from "../auth/auth.service";
-import { hasShipmentPrivilegeRole } from "../auth/permissions";
+import { hasShipmentEditRole, hasShipmentPrivilegeRole } from "../auth/permissions";
 import { usePermissions } from "../auth/PermissionContext";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
@@ -104,13 +104,14 @@ const Shipments = () => {
   );
   const user = getUserFromToken();
   const hasRoleShipmentAccess = hasShipmentPrivilegeRole(user?.role);
+  const hasRoleShipmentEditAccess = hasShipmentEditRole(user?.role);
   const { hasPermission } = usePermissions();
   const canFinalizeShipping =
     hasPermission("shipments", "edit") || hasRoleShipmentAccess;
   const canCheckShipments =
     hasPermission("shipments", "edit") || hasRoleShipmentAccess;
   const canEditShipments =
-    hasPermission("shipments", "edit") || hasRoleShipmentAccess;
+    hasPermission("shipments", "edit") || hasRoleShipmentEditAccess;
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -876,6 +877,14 @@ const Shipments = () => {
                           />
                         </th>
                       )}
+                      {canEditShipments && <th className="shipments-col-action">
+                        <button
+                          type="button"
+                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
+                        >
+                          Edit
+                        </button>
+                      </th>}
                       <th className="shipments-col-po">
                         <SortHeaderButton
                           label="PO"
@@ -994,14 +1003,6 @@ const Shipments = () => {
                           Finalize
                         </button>
                       </th>}
-                      {canEditShipments && <th className="shipments-col-action">
-                        <button
-                          type="button"
-                          className="btn btn-link p-0 text-decoration-none text-reset fw-semibold"
-                        >
-                          Edit
-                        </button>
-                      </th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -1053,6 +1054,21 @@ const Shipments = () => {
                             />
                           </td>
                         )}
+                        {canEditShipments && (
+                          <td className="shipments-col-action">
+                            {canShowEditAction(row) ? (
+                              <button
+                                type="button"
+                                className="btn btn-outline-primary btn-sm shipments-action-btn"
+                                onClick={() => handleOpenEditModal(row)}
+                              >
+                                Edit
+                              </button>
+                            ) : (
+                              <span className="text-secondary small">N/A</span>
+                            )}
+                          </td>
+                        )}
                         <td className="shipments-col-po">{getShipmentPoDisplay(row)}</td>
                         <td className="shipments-col-item">{getShipmentItemDisplay(row)}</td>
                         <td className="shipments-col-vendor">{row?.vendor || "N/A"}</td>
@@ -1080,21 +1096,6 @@ const Shipments = () => {
                               </button>
                             ) : isSampleShipmentRow(row) ? (
                               <span className="text-secondary small">Added via sample</span>
-                            ) : (
-                              <span className="text-secondary small">N/A</span>
-                            )}
-                          </td>
-                        )}
-                        {canEditShipments && (
-                          <td className="shipments-col-action">
-                            {canShowEditAction(row) ? (
-                              <button
-                                type="button"
-                                className="btn btn-outline-primary btn-sm shipments-action-btn"
-                                onClick={() => handleOpenEditModal(row)}
-                              >
-                                Edit
-                              </button>
                             ) : (
                               <span className="text-secondary small">N/A</span>
                             )}

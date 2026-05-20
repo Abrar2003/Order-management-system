@@ -1,7 +1,10 @@
 const express = require("express");
 const upload = require("../config/multer.config");
 const authenticate = require("../middlewares/auth.middleware");
-const { requirePermission } = require("../middlewares/permission.middleware");
+const {
+  requirePermission,
+  requireShipmentEditAccess,
+} = require("../middlewares/permission.middleware");
 const {
   cacheRoute,
   invalidateCacheOnSuccess,
@@ -212,7 +215,7 @@ router.get(
 router.patch(
   "/shipments/check",
   authenticate,
-  requirePermission("shipments", "edit"),
+  requireShipmentEditAccess("shipments"),
   invalidateOrdersOnSuccess,
   checkShipmentRows,
 );
@@ -221,7 +224,7 @@ router.patch(
 router.patch(
   "/edit-order/:id",
   authenticate,
-  requirePermission("orders", "edit"),
+  requireShipmentEditAccess("orders"),
   invalidateOrdersOnSuccess,
   editOrder,
 );

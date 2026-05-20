@@ -77,7 +77,7 @@ const WORKLOAD_TABLE_GROUPS = Object.freeze([
     key: "progress",
     label: "Progress",
     items: [
-      { countKey: "complete_tasks", label: "Complete", status: "complete_done" },
+      { countKey: "complete_done_tasks", label: "Complete", status: "complete_done" },
       { countKey: "needs_approval_tasks", label: "Approval", status: "needs_approval" },
       { countKey: "upload_remaining_tasks", label: "Upload Left", status: "upload_remaining" },
       { countKey: "uploaded_tasks", label: "Uploaded", status: "uploaded" },
@@ -366,8 +366,8 @@ const WorkflowDashboard = () => {
       {
         key: "complete",
         label: "Complete",
-        value: Number(overall.complete_tasks || 0),
-        note: "Tasks fully done in this slice.",
+        value: Number(overall.complete_done_tasks || 0),
+        note: "Uploaded tasks, plus approved tasks that do not need upload.",
         status: "complete_done",
       },
       {
