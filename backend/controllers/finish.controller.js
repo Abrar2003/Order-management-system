@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 
 const Finish = require("../models/finish.model");
 const Item = require("../models/item.model");
+const { applyDataAccessMatch } = require("../services/userDataAccess.service");
 const {
   isConfigured: isWasabiConfigured,
   createStorageKey,
@@ -168,7 +169,14 @@ exports.getVendorItemsForFinish = async (req, res) => {
       });
     }
 
-    const match = buildVendorItemMatch({ vendor, search });
+    const match = applyDataAccessMatch(
+      buildVendorItemMatch({ vendor, search }),
+      req.user,
+      {
+        brandFields: ["brand", "brand_name", "brands"],
+        vendorFields: ["vendors"],
+      },
+    );
     const items = await Item.find(match)
       .select("code name description brand brand_name vendors finish")
       .sort({ code: 1, name: 1 })

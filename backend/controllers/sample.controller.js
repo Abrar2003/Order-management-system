@@ -1,6 +1,7 @@
 const Sample = require("../models/sample.model");
 const { BOX_PACKAGING_MODES, BOX_ENTRY_TYPES } = require("../helpers/boxMeasurement");
 const { calculateTotalPoCbm } = require("../services/orderCbm.service");
+const { applyDataAccessMatch } = require("../services/userDataAccess.service");
 
 const SHIPPED_BY_VENDOR_ID = "shipped_by_vendor";
 const SHIPPED_BY_VENDOR_NAME = "Shipped By Vendor";
@@ -418,7 +419,11 @@ exports.getSamples = async (req, res) => {
     const page = parsePositiveInt(req.query.page, 1);
     const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
     const skip = (page - 1) * limit;
-    const match = buildSampleMatch({ search, brand, vendor });
+    const match = applyDataAccessMatch(
+      buildSampleMatch({ search, brand, vendor }),
+      req.user,
+      { vendorFields: ["vendor"] },
+    );
 
     const [samples, totalRecords, brandsRaw, vendorsRaw, codesRaw] = await Promise.all([
       Sample.find(match)
@@ -427,9 +432,9 @@ exports.getSamples = async (req, res) => {
         .limit(limit)
         .lean(),
       Sample.countDocuments(match),
-      Sample.distinct("brand", buildSampleMatch({ search, vendor })),
-      Sample.distinct("vendor", buildSampleMatch({ search, brand })),
-      Sample.distinct("code", buildSampleMatch({ brand, vendor })),
+      Sample.distinct("brand", applyDataAccessMatch(buildSampleMatch({ search, vendor }), req.user, { vendorFields: ["vendor"] })),
+      Sample.distinct("vendor", applyDataAccessMatch(buildSampleMatch({ search, brand }), req.user, { vendorFields: ["vendor"] })),
+      Sample.distinct("code", applyDataAccessMatch(buildSampleMatch({ brand, vendor }), req.user, { vendorFields: ["vendor"] })),
     ]);
 
     return res.status(200).json({
@@ -710,7 +715,11 @@ exports.getShippedSamples = async (req, res) => {
     const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
 
     const samples = await Sample.find(
-      buildSampleMatch({ search, brand, vendor, shippedOnly: true }),
+      applyDataAccessMatch(
+        buildSampleMatch({ search, brand, vendor, shippedOnly: true }),
+        req.user,
+        { vendorFields: ["vendor"] },
+      ),
     )
       .sort({ updatedAt: -1, code: 1 })
       .lean();

@@ -39,6 +39,7 @@ const {
   calculateEffectiveBoxEntriesCbmTotal,
   detectBoxPackagingMode,
 } = require("../helpers/boxMeasurement");
+const { applyDataAccessMatch } = require("../services/userDataAccess.service");
 const {
   QUEUE_NAMES,
   enqueueAllOrderCbmRecalc,
@@ -702,6 +703,7 @@ const buildOrderListMatch = ({
   includeStatus = true,
   includeOrder = true,
   includeItemCode = true,
+  user = null,
 } = {}) => {
   const match = { ...ACTIVE_ORDER_MATCH };
   const normalizedBrand = normalizeFilterValue(brand);
@@ -749,7 +751,7 @@ const buildOrderListMatch = ({
     match.status = { $nin: ["Shipped"] };
   }
 
-  return match;
+  return applyDataAccessMatch(match, user);
 };
 
 const buildShipmentMatch = ({
@@ -765,6 +767,7 @@ const buildShipmentMatch = ({
   includeItemCode = true,
   includeContainer = true,
   includeStatus = true,
+  user = null,
 } = {}) => {
   const match = {
     ...ACTIVE_ORDER_MATCH,
@@ -803,7 +806,7 @@ const buildShipmentMatch = ({
   void includeStatus;
   void normalizedStatus;
 
-  return match;
+  return applyDataAccessMatch(match, user);
 };
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
@@ -3039,6 +3042,7 @@ const buildPoBucketDataset = async ({
   sortOrder = "desc",
   orderDateRange = null,
   etdRange = null,
+  user = null,
 } = {}) => {
   const selectedBucket = normalizePoBucket(poBucket);
   const matchStage = buildOrderListMatch({
@@ -3047,6 +3051,7 @@ const buildPoBucketDataset = async ({
     order,
     itemCode,
     includeStatus: false,
+    user,
   });
 
   if (orderDateRange) {
@@ -3691,6 +3696,7 @@ const getShipmentDataset = async ({
   sortToken,
   sortByInput,
   sortOrderInput,
+  user = null,
 } = {}) => {
   const { sortBy, sortOrder, sortDirection } = resolveShipmentSortConfig({
     sortToken,
@@ -3706,7 +3712,7 @@ const getShipmentDataset = async ({
     container,
   };
 
-  const orders = await Order.find(buildShipmentMatch(filterInput))
+  const orders = await Order.find(buildShipmentMatch({ ...filterInput, user }))
     .select(
       "order_id item brand vendor ETD status quantity shipment order_date updatedAt qc_record total_po_cbm",
     )
@@ -3718,12 +3724,16 @@ const getShipmentDataset = async ({
     .lean();
 
   const samples = await Sample.find(
-    buildSampleShipmentMatch({
-      brand,
-      vendor,
-      orderId,
-      itemCode,
-    }),
+    applyDataAccessMatch(
+      buildSampleShipmentMatch({
+        brand,
+        vendor,
+        orderId,
+        itemCode,
+      }),
+      user,
+      { vendorFields: ["vendor"] },
+    ),
   )
     .select("code name description brand vendor cbm box_sizes box_mode shipment createdAt updatedAt")
     .sort({ updatedAt: -1, code: 1 })
@@ -3944,6 +3954,7 @@ const getContainerDataset = async ({
   checked_status,
   fromDate,
   toDate,
+  user = null,
 } = {}) => {
   const shipmentData = await getShipmentDataset({
     brand,
@@ -3953,6 +3964,7 @@ const getContainerDataset = async ({
     toDate,
     sortByInput: "stuffing_date",
     sortOrderInput: "desc",
+    user,
   });
 
   const groupedByContainer = new Map();
@@ -6288,6 +6300,7 @@ exports.getVendorSummaryByBrand = async (req, res) => {
       poBucket: "all",
       sortBy: "order_date",
       sortOrder: "desc",
+      user: req.user,
     });
 
     const vendorMap = new Map();
@@ -6434,6 +6447,7 @@ exports.getTodayEtdOrdersByBrand = async (req, res) => {
       poBucket: "all",
       sortBy,
       sortOrder,
+      user: req.user,
     });
 
     const resolveTodaySortValue = (row, key) => {
@@ -6616,6 +6630,7 @@ exports.getOrdersByBrandAndStatus = async (req, res) => {
       poBucket: "all",
       sortBy,
       sortOrder,
+      user: req.user,
     });
 
     const orders = dataset.rows.filter((row) => {
@@ -6750,6 +6765,7 @@ exports.getOrdersByFiltersDb = async (req, res) => {
       poBucket,
       sortBy,
       sortOrder,
+      user: req.user,
     });
     const totalRecords = dataset.rows.length;
     const data = dataset.rows.slice(skip, skip + limit);
@@ -6887,6 +6903,7 @@ exports.exportOrdersDb = async (req, res) => {
         sortOrder,
         orderDateRange: orderDateRangeQuery.range,
         etdRange: etdRangeQuery.range,
+        user: req.user,
       });
 
       const visibleOrderIds = new Set(
@@ -6930,6 +6947,7 @@ exports.exportOrdersDb = async (req, res) => {
         status,
         order,
         itemCode,
+        user: req.user,
       });
 
       if (orderDateRangeQuery.range) {
@@ -9022,6 +9040,7 @@ exports.getShipmentsDb = async (req, res) => {
       sortToken: req.query.sort,
       sortByInput: req.query.sort_by ?? req.query.sortBy,
       sortOrderInput: req.query.sort_order ?? req.query.sortOrder,
+      user: req.user,
     });
     const totalRecords = shipmentData.rows.length;
     const totalPages = Math.max(1, Math.ceil(totalRecords / limit));
@@ -9260,6 +9279,7 @@ exports.exportShipmentsDb = async (req, res) => {
       sortToken: req.query.sort,
       sortByInput: req.query.sort_by ?? req.query.sortBy,
       sortOrderInput: req.query.sort_order ?? req.query.sortOrder,
+      user: req.user,
     });
 
     const columns = [
@@ -9383,6 +9403,7 @@ exports.getContainersDb = async (req, res) => {
         req.query.toDate ??
         req.query.end_date ??
         req.query.endDate,
+      user: req.user,
     });
 
     return res.status(200).json({

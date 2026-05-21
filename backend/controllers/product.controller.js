@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const Order = require("../models/order.model");
+const { applyDataAccessMatch } = require("../services/userDataAccess.service");
 
 exports.getProductAnalytics = async (req, res) => {
   console.log("🔥 NEW CONTROLLER v2");
@@ -25,17 +26,20 @@ exports.getProductAnalytics = async (req, res) => {
     if (brand && brand !== "all") matchStage.brand = brand;
     if (vendor && vendor !== "all") matchStage.vendor = vendor;
 
+    const scopedMatchStage = applyDataAccessMatch(matchStage, req.user);
+    const scopedOptionsMatch = applyDataAccessMatch({ archived: { $ne: true } }, req.user);
+
     // Fetch available filters for dropdowns
     const [brandOptions, vendorOptions] = await Promise.all([
-      Order.distinct("brand", { archived: { $ne: true } }),
-      Order.distinct("vendor", { archived: { $ne: true } }),
+      Order.distinct("brand", scopedOptionsMatch),
+      Order.distinct("vendor", scopedOptionsMatch),
     ]);
 
     // -------------------------------
     // AGGREGATION PIPELINE
     // -------------------------------
     const pipeline = [
-      { $match: matchStage },
+      { $match: scopedMatchStage },
 
       // JOIN QC
       {

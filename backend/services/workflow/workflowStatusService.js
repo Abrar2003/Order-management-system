@@ -34,6 +34,7 @@ const {
   isPrivilegedWorkflowReader,
   isTaskCreatedByUser,
 } = require("./workflowPermissionService");
+const { applyDataAccessMatch } = require("../userDataAccess.service");
 const { validateAssigneeUsers } = require("./workflowTaskGenerationService");
 const {
   recalculateWorkflowBatchFromTasks,
@@ -1349,7 +1350,7 @@ const buildTaskListMatch = ({ query = {}, user = {} } = {}) => {
   }
 
   return {
-    match,
+    match: applyDataAccessMatch(match, user),
     privilegedReader,
   };
 };
@@ -1477,7 +1478,9 @@ const getTaskByIdForUser = async (id, user = {}) => {
 
   const match = buildTaskVisibilityMatch(user);
   match._id = id;
-  const task = await populateTaskQuery(Task.findOne(match));
+  const task = await populateTaskQuery(
+    Task.findOne(applyDataAccessMatch(match, user)),
+  );
   return task ? serializeTask(task) : null;
 };
 

@@ -162,11 +162,91 @@ const serializeUserDataAccess = (user = {}, brandMap = new Map()) => {
   };
 };
 
+const getAllowedBrandNames = (user = {}) => {
+  const brands = toArray(user.allowed_brands);
+  if (brands.length === 0) return null;
+  return brands
+    .map((entry) => normalizeText(
+      typeof entry === "object" && entry !== null ? entry.name : "",
+    ))
+    .filter(Boolean);
+};
+
+const getAllowedVendorNames = (user = {}) => {
+  const vendors = normalizeVendorList(user.allowed_vendors);
+  if (
+    vendors.length === 0 ||
+    vendors.some((vendor) => vendor.toLowerCase() === ALL_VENDOR_TOKEN)
+  ) {
+    return null;
+  }
+  return vendors;
+};
+
+const combineMongoMatches = (...matches) => {
+  const cleaned = matches.filter((match) => (
+    match &&
+    typeof match === "object" &&
+    Object.keys(match).length > 0
+  ));
+
+  if (cleaned.length === 0) return {};
+  if (cleaned.length === 1) return cleaned[0];
+  return { $and: cleaned };
+};
+
+const buildFieldAccessCondition = (fields = [], values = []) => {
+  const normalizedFields = toArray(fields).map(normalizeText).filter(Boolean);
+  const normalizedValues = toArray(values).map(normalizeText).filter(Boolean);
+  if (normalizedFields.length === 0 || normalizedValues.length === 0) {
+    return { _id: null };
+  }
+
+  if (normalizedFields.length === 1) {
+    return { [normalizedFields[0]]: { $in: normalizedValues } };
+  }
+
+  return {
+    $or: normalizedFields.map((field) => ({
+      [field]: { $in: normalizedValues },
+    })),
+  };
+};
+
+const buildDataAccessMatch = (
+  user = {},
+  {
+    brandFields = ["brand"],
+    vendorFields = ["vendor"],
+  } = {},
+) => {
+  const allowedBrands = getAllowedBrandNames(user);
+  const allowedVendors = getAllowedVendorNames(user);
+  const conditions = [];
+
+  if (allowedBrands) {
+    conditions.push(buildFieldAccessCondition(brandFields, allowedBrands));
+  }
+  if (allowedVendors) {
+    conditions.push(buildFieldAccessCondition(vendorFields, allowedVendors));
+  }
+
+  return combineMongoMatches(...conditions);
+};
+
+const applyDataAccessMatch = (match = {}, user = {}, options = {}) =>
+  combineMongoMatches(match, buildDataAccessMatch(user, options));
+
 module.exports = {
   ALL_VENDOR_TOKEN,
+  applyDataAccessMatch,
   assertBrandIdsExist,
+  buildDataAccessMatch,
   buildUserAccessUpdate,
+  combineMongoMatches,
   getBrandIdsFromPayload,
+  getAllowedBrandNames,
+  getAllowedVendorNames,
   getVendorNamesFromPayload,
   normalizeObjectIdList,
   normalizeVendorList,

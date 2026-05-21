@@ -165,8 +165,16 @@ const toBrandResponse = async (brandDoc = {}) => ({
 // Get all brands
 exports.getAllBrands = async (req, res) => {
   try {
+    const allowedBrandIds = Array.isArray(req.user?.allowed_brands)
+      ? req.user.allowed_brands
+          .map((brand) => String(brand?._id || brand || "").trim())
+          .filter(Boolean)
+      : [];
+    const match = allowedBrandIds.length > 0
+      ? { _id: { $in: allowedBrandIds } }
+      : {};
     const brands = await Brand.find(
-      {},
+      match,
       "name logo logo_file logo_url logo_storage_key logo_content_type logo_size calendar",
     ).lean();
 

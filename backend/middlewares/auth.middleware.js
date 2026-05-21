@@ -26,7 +26,9 @@ module.exports = async (req, res, next) => {
       return res.status(401).json({ message: "Invalid token" });
     }
 
-    const user = await User.findById(decodedUserId).select("-password");
+    const user = await User.findById(decodedUserId)
+      .select("-password")
+      .populate("allowed_brands", "name");
 
     if (!user) {
       return res.status(401).json({ message: "User not found" });

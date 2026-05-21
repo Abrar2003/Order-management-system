@@ -4,6 +4,7 @@ const EmailLogs = require("../models/emailLogs.model");
 const Order = require("../models/order.model");
 const Brand = require("../models/brand.model");
 const { parseDateOnly, toDateOnlyIso } = require("../helpers/dateOnly");
+const { applyDataAccessMatch } = require("../services/userDataAccess.service");
 
 const DEFAULT_PAGE_LIMIT = 30;
 const PAGE_LIMIT_OPTIONS = [7, 30, 50, 90];
@@ -349,12 +350,17 @@ exports.getAllEmailLogs = async (req, res) => {
       query["vendor.name"] = vendor;
     }
 
-    const totalRecords = await EmailLogs.countDocuments(query);
+    const scopedQuery = applyDataAccessMatch(query, req.user, {
+      brandFields: ["brand.name"],
+      vendorFields: ["vendor.name"],
+    });
+
+    const totalRecords = await EmailLogs.countDocuments(scopedQuery);
     const totalPages = Math.max(1, Math.ceil(totalRecords / limit));
     const page = Math.min(requestedPage, totalPages);
     const skip = (page - 1) * limit;
 
-    const emailLogs = await EmailLogs.find(query)
+    const emailLogs = await EmailLogs.find(scopedQuery)
       .sort({ creation_date: 1 })
       .skip(skip)
       .limit(limit)
@@ -635,8 +641,12 @@ exports.updateEmailLog = async (req, res) => {
  */
 exports.getFilterOptions = async (req, res) => {
   try {
-    const brands = await EmailLogs.distinct("brand.name");
-    const vendors = await EmailLogs.distinct("vendor.name");
+    const scopedQuery = applyDataAccessMatch({}, req.user, {
+      brandFields: ["brand.name"],
+      vendorFields: ["vendor.name"],
+    });
+    const brands = await EmailLogs.distinct("brand.name", scopedQuery);
+    const vendors = await EmailLogs.distinct("vendor.name", scopedQuery);
 
     res.status(200).json({
       success: true,

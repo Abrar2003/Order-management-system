@@ -24,6 +24,7 @@ const {
   deleteObject,
 } = require("../services/wasabiStorage.service");
 const { convertExcelToPdf } = require("../services/convertXlsxToPDF.service");
+const { applyDataAccessMatch } = require("../services/userDataAccess.service");
 const {
   deriveOrderProgress,
   deriveOrderStatus,
@@ -1503,6 +1504,14 @@ const combineMongoMatches = (...matches) => {
   return { $and: activeMatches };
 };
 
+const ITEM_DATA_ACCESS_FIELDS = {
+  brandFields: ["brand", "brand_name", "brands"],
+  vendorFields: ["vendors"],
+};
+
+const applyItemDataAccess = (match = {}, user = {}) =>
+  applyDataAccessMatch(match, user, ITEM_DATA_ACCESS_FIELDS);
+
 const buildItemFileViewMatch = (fileType = "") => {
   const normalizedFileType = normalizeTextField(fileType).toLowerCase();
   if (normalizedFileType !== "assembly_file") return {};
@@ -2554,7 +2563,10 @@ exports.getProductDatabaseItems = async (req, res) => {
     const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
     const skip = (page - 1) * limit;
 
-    const baseMatch = buildItemMatch({ search, brand, vendor });
+    const baseMatch = applyItemDataAccess(
+      buildItemMatch({ search, brand, vendor }),
+      req.user,
+    );
     const statusMatch = buildProductDatabaseStatusMatch(status);
     const match = combineMongoMatches(baseMatch, statusMatch);
 
@@ -2577,10 +2589,10 @@ exports.getProductDatabaseItems = async (req, res) => {
         .limit(limit)
         .lean(),
       Item.countDocuments(match),
-      Item.distinct("brands", buildItemMatch({ search, vendor })),
-      Item.distinct("brand_name", buildItemMatch({ search, vendor })),
-      Item.distinct("brand", buildItemMatch({ search, vendor })),
-      Item.distinct("vendors", buildItemMatch({ search, brand })),
+      Item.distinct("brands", applyItemDataAccess(buildItemMatch({ search, vendor }), req.user)),
+      Item.distinct("brand_name", applyItemDataAccess(buildItemMatch({ search, vendor }), req.user)),
+      Item.distinct("brand", applyItemDataAccess(buildItemMatch({ search, vendor }), req.user)),
+      Item.distinct("vendors", applyItemDataAccess(buildItemMatch({ search, brand }), req.user)),
       Item.countDocuments(
         combineMongoMatches(baseMatch, buildProductDatabaseStatusMatch(NOT_SET_STATUS)),
       ),
@@ -2724,7 +2736,10 @@ exports.getItemDatabaseItems = async (req, res) => {
     const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
     const skip = (page - 1) * limit;
 
-    const baseMatch = buildItemMatch({ search, brand, vendor });
+    const baseMatch = applyItemDataAccess(
+      buildItemMatch({ search, brand, vendor }),
+      req.user,
+    );
     const statusMatch = buildProductDatabaseStatusMatch(status);
     const match = combineMongoMatches(baseMatch, statusMatch);
 
@@ -2739,10 +2754,10 @@ exports.getItemDatabaseItems = async (req, res) => {
         .select(PRODUCT_DATABASE_ITEM_SELECT)
         .sort({ updatedAt: -1, code: 1 })
         .lean(),
-      Item.distinct("brands", buildItemMatch({ search, vendor })),
-      Item.distinct("brand_name", buildItemMatch({ search, vendor })),
-      Item.distinct("brand", buildItemMatch({ search, vendor })),
-      Item.distinct("vendors", buildItemMatch({ search, brand })),
+      Item.distinct("brands", applyItemDataAccess(buildItemMatch({ search, vendor }), req.user)),
+      Item.distinct("brand_name", applyItemDataAccess(buildItemMatch({ search, vendor }), req.user)),
+      Item.distinct("brand", applyItemDataAccess(buildItemMatch({ search, vendor }), req.user)),
+      Item.distinct("vendors", applyItemDataAccess(buildItemMatch({ search, brand }), req.user)),
     ]);
 
     const itemCodes = (Array.isArray(allMatchedItems) ? allMatchedItems : []).map((item) => item?.code);
@@ -3145,19 +3160,19 @@ exports.getItems = async (req, res) => {
 
     const fileViewMatch = buildItemFileViewMatch(fileType);
     const match = combineMongoMatches(
-      buildItemMatch({ search, brand, vendor }),
+      applyItemDataAccess(buildItemMatch({ search, brand, vendor }), req.user),
       fileViewMatch,
     );
     const brandOptionsMatch = combineMongoMatches(
-      buildItemMatch({ search, vendor }),
+      applyItemDataAccess(buildItemMatch({ search, vendor }), req.user),
       fileViewMatch,
     );
     const vendorOptionsMatch = combineMongoMatches(
-      buildItemMatch({ search, brand }),
+      applyItemDataAccess(buildItemMatch({ search, brand }), req.user),
       fileViewMatch,
     );
     const codeOptionsMatch = combineMongoMatches(
-      buildItemMatch({ brand, vendor }),
+      applyItemDataAccess(buildItemMatch({ brand, vendor }), req.user),
       fileViewMatch,
     );
 
@@ -3239,19 +3254,19 @@ exports.getItemMasters = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const match = combineMongoMatches(
-      buildItemMatch({ search, brand, vendor }),
+      applyItemDataAccess(buildItemMatch({ search, brand, vendor }), req.user),
       ITEM_MASTER_ELIGIBLE_MATCH,
     );
     const brandOptionsMatch = combineMongoMatches(
-      buildItemMatch({ search, vendor }),
+      applyItemDataAccess(buildItemMatch({ search, vendor }), req.user),
       ITEM_MASTER_ELIGIBLE_MATCH,
     );
     const vendorOptionsMatch = combineMongoMatches(
-      buildItemMatch({ search, brand }),
+      applyItemDataAccess(buildItemMatch({ search, brand }), req.user),
       ITEM_MASTER_ELIGIBLE_MATCH,
     );
     const codeOptionsMatch = combineMongoMatches(
-      buildItemMatch({ brand, vendor }),
+      applyItemDataAccess(buildItemMatch({ brand, vendor }), req.user),
       ITEM_MASTER_ELIGIBLE_MATCH,
     );
 
@@ -3311,19 +3326,19 @@ exports.getPisDiffItems = async (req, res) => {
 
     const uncheckedPisMatch = { pis_checked_flag: { $ne: true } };
     const match = combineMongoMatches(
-      buildItemMatch({ search, brand, vendor }),
+      applyItemDataAccess(buildItemMatch({ search, brand, vendor }), req.user),
       uncheckedPisMatch,
     );
     const brandOptionsMatch = combineMongoMatches(
-      buildItemMatch({ search, vendor }),
+      applyItemDataAccess(buildItemMatch({ search, vendor }), req.user),
       uncheckedPisMatch,
     );
     const vendorOptionsMatch = combineMongoMatches(
-      buildItemMatch({ search, brand }),
+      applyItemDataAccess(buildItemMatch({ search, brand }), req.user),
       uncheckedPisMatch,
     );
     const codeOptionsMatch = combineMongoMatches(
-      buildItemMatch({ brand, vendor }),
+      applyItemDataAccess(buildItemMatch({ brand, vendor }), req.user),
       uncheckedPisMatch,
     );
 

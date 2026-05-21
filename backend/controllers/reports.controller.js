@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const Inspection = require("../models/inspection.model");
 const QC = require("../models/qc.model");
 const Item = require("../models/item.model");
+const { applyDataAccessMatch } = require("../services/userDataAccess.service");
 const {
   buildNormalizedInspectionSizeState,
   compareInspectionSizeSnapshot,
@@ -1447,17 +1448,25 @@ exports.getInspectedItemsReport = async (req, res) => {
     );
     const skip = (page - 1) * limit;
 
-    const baseMatch = buildInspectedItemsReportMatch({ search, brand, vendor });
+    const accessOptions = {
+      brandFields: ["brand", "brand_name", "brands"],
+      vendorFields: ["vendors"],
+    };
+    const baseMatch = applyDataAccessMatch(
+      buildInspectedItemsReportMatch({ search, brand, vendor }),
+      req.user,
+      accessOptions,
+    );
 
     const [items, brandsRaw, brandNamesRaw, brandsPrimaryRaw, vendorsRaw] = await Promise.all([
       Item.find(baseMatch)
         .select(INSPECTED_ITEMS_REPORT_SELECT)
         .sort({ updatedAt: -1, code: 1 })
         .lean(),
-      Item.distinct("brands", buildInspectedItemsReportMatch({ search, vendor })),
-      Item.distinct("brand_name", buildInspectedItemsReportMatch({ search, vendor })),
-      Item.distinct("brand", buildInspectedItemsReportMatch({ search, vendor })),
-      Item.distinct("vendors", buildInspectedItemsReportMatch({ search, brand })),
+      Item.distinct("brands", applyDataAccessMatch(buildInspectedItemsReportMatch({ search, vendor }), req.user, accessOptions)),
+      Item.distinct("brand_name", applyDataAccessMatch(buildInspectedItemsReportMatch({ search, vendor }), req.user, accessOptions)),
+      Item.distinct("brand", applyDataAccessMatch(buildInspectedItemsReportMatch({ search, vendor }), req.user, accessOptions)),
+      Item.distinct("vendors", applyDataAccessMatch(buildInspectedItemsReportMatch({ search, brand }), req.user, accessOptions)),
     ]);
 
     const baseRows = (Array.isArray(items) ? items : []).map(buildInspectedItemsReportRow);

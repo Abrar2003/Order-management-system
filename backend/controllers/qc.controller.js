@@ -21,6 +21,7 @@ const {
   applyTotalPoCbmToOrder,
   syncTotalPoCbmForItem,
 } = require("../services/orderCbm.service");
+const { applyDataAccessMatch } = require("../services/userDataAccess.service");
 const {
   getSignedObjectUrl,
   isConfigured: isWasabiConfigured,
@@ -3296,7 +3297,14 @@ exports.getQCList = async (req, res) => {
       from,
       to,
     };
-    const match = buildQcListMatch(filterInput);
+    const match = applyDataAccessMatch(
+      buildQcListMatch(filterInput),
+      req.user,
+      {
+        brandFields: ["order_meta.brand"],
+        vendorFields: ["order_meta.vendor"],
+      },
+    );
     const inspectionStatusStages =
       buildQcInspectionStatusStages(selectedInspectionStatus);
     const optionInspectionStatusStages = selectedInspectionStatus
@@ -3343,7 +3351,7 @@ exports.getQCList = async (req, res) => {
     const [result, vendorsRaw, ordersRaw, itemCodesRaw] = await Promise.all([
       QC.aggregate(pipeline).allowDiskUse(true),
       QC.aggregate([
-        { $match: buildQcListMatch({ ...filterInput, includeVendor: false }) },
+        { $match: applyDataAccessMatch(buildQcListMatch({ ...filterInput, includeVendor: false }), req.user, { brandFields: ["order_meta.brand"], vendorFields: ["order_meta.vendor"] }) },
         buildActiveOrderLookupStage("order"),
         { $unwind: { path: "$order", preserveNullAndEmptyArrays: false } },
         ...optionInspectionStatusStages,
@@ -3351,7 +3359,7 @@ exports.getQCList = async (req, res) => {
         { $project: { _id: 0, value: "$_id" } },
       ]).allowDiskUse(true),
       QC.aggregate([
-        { $match: buildQcListMatch({ ...filterInput, includeOrder: false }) },
+        { $match: applyDataAccessMatch(buildQcListMatch({ ...filterInput, includeOrder: false }), req.user, { brandFields: ["order_meta.brand"], vendorFields: ["order_meta.vendor"] }) },
         buildActiveOrderLookupStage("order"),
         { $unwind: { path: "$order", preserveNullAndEmptyArrays: false } },
         ...optionInspectionStatusStages,
@@ -3359,7 +3367,7 @@ exports.getQCList = async (req, res) => {
         { $project: { _id: 0, value: "$_id" } },
       ]).allowDiskUse(true),
       QC.aggregate([
-        { $match: buildQcListMatch({ ...filterInput, includeSearch: false }) },
+        { $match: applyDataAccessMatch(buildQcListMatch({ ...filterInput, includeSearch: false }), req.user, { brandFields: ["order_meta.brand"], vendorFields: ["order_meta.vendor"] }) },
         buildActiveOrderLookupStage("order"),
         { $unwind: { path: "$order", preserveNullAndEmptyArrays: false } },
         ...optionInspectionStatusStages,
