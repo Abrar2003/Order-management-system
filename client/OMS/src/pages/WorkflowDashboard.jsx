@@ -35,6 +35,8 @@ const formatRoleLabel = (role) =>
 const getCount = (row, key) => Number(row?.counts?.[key] || 0);
 const SPOTLIGHT_TASK_FILTERS = Object.freeze([
   { countKey: "open_tasks", label: "Open", status: "open" },
+  { countKey: "hold_tasks", label: "Hold", status: "hold" },
+  { countKey: "hold_approval_pending_tasks", label: "Hold Pending", status: "hold_approval_pending" },
   { countKey: "needs_approval_tasks", label: "Needs Approval", status: "needs_approval" },
   { countKey: "upload_remaining_tasks", label: "Upload Remaining", status: "upload_remaining" },
   { countKey: "overdue_tasks", label: "Overdue", status: "overdue" },
@@ -48,6 +50,8 @@ const getSpotlightTotal = (entry = {}) =>
   SPOTLIGHT_TASK_FILTERS.reduce((sum, filter) => sum + getCount(entry, filter.countKey), 0);
 const DASHBOARD_STATUS_OPTIONS = Object.freeze([
   { value: "open", label: "Open" },
+  { value: "hold", label: "Hold" },
+  { value: "hold_approval_pending", label: "Hold Approval Pending" },
   { value: "needs_approval", label: "Needs Approval" },
   { value: "upload_remaining", label: "Upload Remaining" },
   { value: "overdue", label: "Overdue" },
@@ -69,6 +73,8 @@ const WORKLOAD_TABLE_GROUPS = Object.freeze([
     items: [
       { countKey: "total_tasks", label: "Total", status: "" },
       { countKey: "open_tasks", label: "Open", status: "open" },
+      { countKey: "hold_tasks", label: "Hold", status: "hold" },
+      { countKey: "hold_approval_pending_tasks", label: "Hold Pending", status: "hold_approval_pending" },
       { countKey: "assigned_tasks", label: "Assigned", status: "assigned" },
       { countKey: "started_tasks", label: "Started", status: "started" },
     ],
@@ -376,6 +382,20 @@ const WorkflowDashboard = () => {
         value: Number(overall.open_tasks || 0),
         note: "Tasks still not fully uploaded.",
         status: "open",
+      },
+      {
+        key: "hold",
+        label: "Hold",
+        value: Number(overall.hold_tasks || 0),
+        note: "Tasks paused by an approved hold request.",
+        status: "hold",
+      },
+      {
+        key: "hold-approval-pending",
+        label: "Hold Approval Pending",
+        value: Number(overall.hold_approval_pending_tasks || 0),
+        note: "Hold requests waiting for creator or admin approval.",
+        status: "hold_approval_pending",
       },
       {
         key: "approval",

@@ -6,6 +6,7 @@ const WORKFLOW_TASK_STATUSES = Object.freeze([
   "complete",
   "approved",
   "uploaded",
+  "hold",
 ]);
 
 const WORKFLOW_LEGACY_TASK_STATUSES = Object.freeze([
@@ -46,6 +47,7 @@ const WORKFLOW_TASK_COMMENT_TYPES = Object.freeze([
   "upload",
   "review",
   "rework",
+  "hold",
   "system",
 ]);
 const WORKFLOW_TASK_PRIORITIES = Object.freeze([
@@ -363,6 +365,7 @@ const buildEmptyTaskCounts = () => ({
   uploaded_tasks: 0,
   completed_tasks: 0,
   complete_done_tasks: 0,
+  hold_tasks: 0,
   reworked_tasks: 0,
   reworked_before_approval_tasks: 0,
   reworked_after_approval_tasks: 0,
@@ -399,6 +402,7 @@ const buildDerivedTaskCounts = (taskCounts = {}) => {
   normalized.complete_done_tasks = Number(
     normalized.complete_done_tasks || normalized.completed_tasks || normalized.uploaded_tasks || 0,
   );
+  normalized.hold_tasks = Number(normalized.hold_tasks || 0);
   normalized.reworked_tasks = Number(normalized.reworked_tasks || 0);
   normalized.reworked_before_approval_tasks = Number(
     normalized.reworked_before_approval_tasks || 0,
@@ -465,6 +469,8 @@ const normalizeWorkflowTaskStatus = (value, { fallback = "" } = {}) => {
     case "uploaded":
     case "completed":
       return "uploaded";
+    case "hold":
+      return "hold";
     case "cancelled":
     case "blocked":
       return fallback;
@@ -479,6 +485,7 @@ const WORKFLOW_STATUS_QUERY_ALIASES = Object.freeze({
   complete: ["complete", "submitted", "review"],
   approved: ["approved"],
   uploaded: ["uploaded", "completed"],
+  hold: ["hold"],
 });
 
 const getWorkflowStatusFilterValues = (value) => {
@@ -518,6 +525,12 @@ const buildWorkflowTaskStatusNormalizationExpression = (fieldPath = "$status") =
           $in: [fieldPath, ["uploaded", "completed"]],
         },
         then: "uploaded",
+      },
+      {
+        case: {
+          $eq: [fieldPath, "hold"],
+        },
+        then: "hold",
       },
     ],
     default: fieldPath,

@@ -436,6 +436,51 @@ small,
   max-width: min(34rem, calc(100vw - 2rem));
 }
 
+.workflow-quick-modal-dialog .modal-content {
+  position: relative;
+}
+
+.workflow-quick-modal-header {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(10.5rem, 11.5rem);
+  gap: 1rem;
+  align-items: start;
+  padding-right: 3.25rem;
+}
+
+.workflow-quick-modal-title-block {
+  min-width: 0;
+  padding-top: 0.25rem;
+}
+
+.workflow-quick-modal-close {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 2;
+  margin: 0;
+}
+
+.workflow-quick-modal-date {
+  min-width: 0;
+}
+
+.workflow-quick-modal-date .form-label {
+  margin-bottom: 0.35rem;
+}
+
+@media (max-width: 575.98px) {
+  .workflow-quick-modal-header {
+    grid-template-columns: 1fr;
+    padding-right: 3rem;
+  }
+
+  .workflow-quick-modal-date {
+    width: 100%;
+  }
+}
+
 .workflow-user-picker {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -667,6 +712,10 @@ small,
 }
 
 .workflow-task-rework-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
   margin-top: 0.2rem;
 }
 
@@ -675,6 +724,34 @@ small,
   height: 1.55rem;
   padding: 0 0.5rem;
   font-size: 0.72rem;
+}
+
+.workflow-hold-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 1.55rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  border: 1px solid rgba(180, 83, 9, 0.26);
+  background: rgba(255, 237, 213, 0.82);
+  color: #9a3412;
+}
+
+.workflow-hold-badge.is-active {
+  border-color: rgba(180, 83, 9, 0.4);
+  background: rgba(251, 191, 36, 0.22);
+}
+
+.workflow-hold-badge.is-pending {
+  border-color: rgba(112, 106, 95, 0.32);
+  background: rgba(246, 241, 234, 0.88);
+  color: var(--om-color-text-muted);
 }
 
 .workflow-rework-hovercard {

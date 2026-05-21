@@ -1,5 +1,6 @@
 const {
   addWorkflowTaskComment,
+  approveWorkflowTaskHold,
   approveWorkflowTask,
   assignWorkflowTask,
   buildTaskDetail,
@@ -10,6 +11,8 @@ const {
   listWorkflowTasks,
   reviewWorkflowTask,
   reworkWorkflowTask,
+  requestWorkflowTaskHold,
+  resumeWorkflowTask,
   startWorkflowTask,
   submitWorkflowTask,
   uploadWorkflowTask,
@@ -316,6 +319,78 @@ const reworkTask = async (req, res) => {
   }
 };
 
+const requestHoldTask = async (req, res) => {
+  try {
+    const data = await requestWorkflowTaskHold({
+      taskId: req.params.id,
+      actor: req.user,
+      note: req.body?.note || req.body?.comment || "",
+      realtimeSource: req,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: data?.status === "hold"
+        ? "Workflow task put on hold successfully"
+        : "Workflow task hold requested successfully",
+      data,
+    });
+  } catch (error) {
+    console.error("Request Workflow Task Hold Error:", error);
+    return res.status(getErrorStatusCode(error)).json({
+      success: false,
+      message: error.message || "Failed to request workflow task hold",
+    });
+  }
+};
+
+const approveHoldTask = async (req, res) => {
+  try {
+    const data = await approveWorkflowTaskHold({
+      taskId: req.params.id,
+      actor: req.user,
+      note: req.body?.note || req.body?.comment || "",
+      realtimeSource: req,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Workflow task hold approved successfully",
+      data,
+    });
+  } catch (error) {
+    console.error("Approve Workflow Task Hold Error:", error);
+    return res.status(getErrorStatusCode(error)).json({
+      success: false,
+      message: error.message || "Failed to approve workflow task hold",
+    });
+  }
+};
+
+const resumeTask = async (req, res) => {
+  try {
+    const data = await resumeWorkflowTask({
+      taskId: req.params.id,
+      actor: req.user,
+      note: req.body?.note || req.body?.comment || "",
+      dueDate: req.body?.due_date || req.body?.next_due_date || "",
+      realtimeSource: req,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Workflow task resumed successfully",
+      data,
+    });
+  } catch (error) {
+    console.error("Resume Workflow Task Error:", error);
+    return res.status(getErrorStatusCode(error)).json({
+      success: false,
+      message: error.message || "Failed to resume workflow task",
+    });
+  }
+};
+
 const patchTaskStatus = async (req, res) => {
   try {
     const data = await updateWorkflowTaskStatus({
@@ -413,6 +488,7 @@ const removeTask = async (req, res) => {
 
 module.exports = {
   approveTask,
+  approveHoldTask,
   assignTask,
   completeTask,
   createTask,
@@ -426,6 +502,8 @@ module.exports = {
   removeTask,
   reviewTask,
   reworkTask,
+  requestHoldTask,
+  resumeTask,
   startTask,
   submitTask,
   uploadTask,

@@ -73,6 +73,29 @@ const TaskUploadStatusSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const TaskHoldSchema = new mongoose.Schema(
+  {
+    status: {
+      type: String,
+      enum: ["none", "pending", "hold"],
+      default: "none",
+      trim: true,
+    },
+    previous_status: { type: String, default: "", trim: true },
+    requested_comment: { type: String, default: "", trim: true },
+    requested_by: { type: AuditActorSchema, default: () => ({}) },
+    requested_at: { type: Date, default: null },
+    approved_comment: { type: String, default: "", trim: true },
+    approved_by: { type: AuditActorSchema, default: () => ({}) },
+    approved_at: { type: Date, default: null },
+    resumed_comment: { type: String, default: "", trim: true },
+    resumed_by: { type: AuditActorSchema, default: () => ({}) },
+    resumed_at: { type: Date, default: null },
+    total_paused_ms: { type: Number, default: 0, min: 0 },
+  },
+  { _id: false },
+);
+
 const TaskSchema = new mongoose.Schema(
   {
     batch: {
@@ -133,6 +156,7 @@ const TaskSchema = new mongoose.Schema(
     reworked: { type: TaskReworkedSchema, default: () => ({}) },
     rework_due_dates: { type: [TaskReworkDueDateSchema], default: [] },
     rework_count: { type: Number, default: 0, min: 0 },
+    hold: { type: TaskHoldSchema, default: () => ({}) },
     blocked_reason: { type: String, default: "", trim: true },
     tags: { type: [String], default: [] },
     created_by: { type: AuditActorSchema, default: () => ({}) },
@@ -186,6 +210,19 @@ TaskSchema.pre("validate", function normalizeTask() {
   if (!this.reworked || typeof this.reworked !== "object") {
     this.reworked = { count: 0, comments: [] };
   }
+  if (!this.hold || typeof this.hold !== "object") {
+    this.hold = { status: "none" };
+  }
+  this.hold.status = ["pending", "hold"].includes(normalizeKey(this.hold.status))
+    ? normalizeKey(this.hold.status)
+    : "none";
+  this.hold.previous_status = normalizeWorkflowTaskStatus(this.hold.previous_status, {
+    fallback: "",
+  });
+  this.hold.requested_comment = normalizeText(this.hold.requested_comment);
+  this.hold.approved_comment = normalizeText(this.hold.approved_comment);
+  this.hold.resumed_comment = normalizeText(this.hold.resumed_comment);
+  this.hold.total_paused_ms = Math.max(0, Number(this.hold.total_paused_ms || 0));
   this.reworked.comments = Array.isArray(this.reworked.comments)
     ? this.reworked.comments.map((entry) => ({
         comment: normalizeText(entry?.comment),

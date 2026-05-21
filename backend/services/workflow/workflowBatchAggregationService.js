@@ -64,6 +64,7 @@ const deriveWorkflowBatchStatusFromCounts = (
   const completedTasks = Number(counts?.complete_tasks || 0);
   const approvedTasks = Number(counts?.approved_tasks || 0);
   const uploadedTasks = Number(counts?.uploaded_tasks || 0);
+  const holdTasks = Number(counts?.hold_tasks || 0);
   const terminalTasks = Number(counts?.complete_done_tasks || uploadedTasks || 0);
   const blockedTasks = Number(meta?.blocked_tasks || 0);
   const cancelledTasks = Number(meta?.cancelled_tasks || 0);
@@ -86,6 +87,7 @@ const deriveWorkflowBatchStatusFromCounts = (
     approvedTasks > 0 ||
     uploadedTasks > 0 ||
     terminalTasks > 0 ||
+    holdTasks > 0 ||
     blockedTasks > 0
   ) {
     return "in_progress";
@@ -222,6 +224,7 @@ const recalculateWorkflowBatchFromTasks = async (batchId) => {
     Number(taskCounts.approved_tasks || 0) > 0 ||
     Number(taskCounts.uploaded_tasks || 0) > 0 ||
     Number(taskCounts.complete_done_tasks || 0) > 0 ||
+    Number(taskCounts.hold_tasks || 0) > 0 ||
     Number(meta.blocked_tasks || 0) > 0;
 
   if (!batch.started_at && hasStarted) {

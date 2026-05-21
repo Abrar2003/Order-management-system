@@ -12,6 +12,7 @@ const {
 } = require("../controllers/workflow/batch.controller");
 const {
   approveTask,
+  approveHoldTask,
   assignTask,
   completeTask,
   createTask,
@@ -25,6 +26,8 @@ const {
   removeTask,
   reviewTask,
   reworkTask,
+  requestHoldTask,
+  resumeTask,
   startTask,
   submitTask,
   uploadTask,
@@ -193,6 +196,27 @@ router.patch(
   authorize(...WORKFLOW_MANAGER_ROLES),
   requirePermission("workflow", "edit"),
   reworkTask,
+);
+
+router.patch(
+  "/tasks/:id/hold",
+  auth,
+  requirePermission("workflow", "view"),
+  requestHoldTask,
+);
+
+router.patch(
+  "/tasks/:id/hold/approve",
+  auth,
+  requirePermission("workflow", "view"),
+  approveHoldTask,
+);
+
+router.patch(
+  "/tasks/:id/resume",
+  auth,
+  requirePermission("workflow", "view"),
+  resumeTask,
 );
 
 router.patch(

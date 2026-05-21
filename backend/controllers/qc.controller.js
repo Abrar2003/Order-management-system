@@ -8121,29 +8121,6 @@ exports.transferQcRequest = async (req, res) => {
       updated_by: buildAuditActor(req.user),
     });
 
-    const latestTransferredRequestEntry =
-      qc.request_history[qc.request_history.length - 1] || null;
-
-    await upsertInspectionRecordForRequest({
-      qcDoc: qc,
-      inspectorId: targetInspectorId,
-      requestDate: transferDate,
-      requestHistoryId: latestTransferredRequestEntry?._id || null,
-      requestedQuantity: requestedQuantity,
-      inspectionDate: transferDate,
-      remarks: newRequestRemarks,
-      createdBy: req.user._id,
-      auditUser: req.user,
-      addChecked: 0,
-      addPassed: 0,
-      addProvision: 0,
-      appendLabelRanges: [],
-      appendLabels: [],
-      replaceCbmSnapshot: false,
-      allowRequestedDateFallback: false,
-      currentSizeSource: await findInspectionSizeSourceForQc(qc),
-    });
-
     const refreshedInspectionRecords = await Inspection.find({ qc: qc._id }).lean();
     syncQcCurrentRequestFieldsFromHistory(qc, refreshedInspectionRecords);
     syncQcRequestHistoryStatuses(qc, refreshedInspectionRecords, {

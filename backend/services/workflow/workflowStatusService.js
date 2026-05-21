@@ -32,6 +32,7 @@ const {
   isAdmin,
   isManagerOrAdmin,
   isPrivilegedWorkflowReader,
+  isTaskCreatedByUser,
 } = require("./workflowPermissionService");
 const { validateAssigneeUsers } = require("./workflowTaskGenerationService");
 const {
@@ -91,6 +92,8 @@ const DASHBOARD_COUNT_FIELDS = Object.freeze([
   "started_tasks",
   "complete_tasks",
   "complete_done_tasks",
+  "hold_tasks",
+  "hold_approval_pending_tasks",
   "approved_tasks",
   "uploaded_tasks",
   "upload_remaining_tasks",
@@ -250,6 +253,30 @@ const getTaskReworkDueDatePayload = (doc = {}) =>
     }))
     .filter((entry) => Boolean(entry.date));
 
+const getTaskHoldPayload = (doc = {}) => {
+  const hold = doc?.hold && typeof doc.hold === "object" ? doc.hold : {};
+  const status = ["pending", "hold"].includes(normalizeKey(hold?.status))
+    ? normalizeKey(hold.status)
+    : "none";
+  return {
+    status,
+    previous_status: normalizeWorkflowTaskStatus(hold?.previous_status, { fallback: "" }),
+    requested_comment: normalizeText(hold?.requested_comment),
+    requested_by: hold?.requested_by || {},
+    requested_at: hold?.requested_at || null,
+    approved_comment: normalizeText(hold?.approved_comment),
+    approved_by: hold?.approved_by || {},
+    approved_at: hold?.approved_at || null,
+    resumed_comment: normalizeText(hold?.resumed_comment),
+    resumed_by: hold?.resumed_by || {},
+    resumed_at: hold?.resumed_at || null,
+    total_paused_ms: Math.max(0, Number(hold?.total_paused_ms || 0)),
+  };
+};
+
+const isTaskHoldApprover = (actor = {}, task = {}) =>
+  isAdmin(actor) || isTaskCreatedByUser(task, actor?._id || actor?.id);
+
 const getActiveWorkflowDueDate = (doc = {}) => {
   const reworkDueDates = getTaskReworkDueDatePayload(doc);
   const latestReworkDueDate = reworkDueDates.length > 0
@@ -271,6 +298,8 @@ const getWorkflowDeadlineSummary = (doc = {}) => {
   const approvedAt = getDateOrNull(doc?.approved_at || doc?.reviewed_at);
   const uploadedAt = getDateOrNull(doc?.uploaded_at);
   const now = new Date();
+  const hold = getTaskHoldPayload(doc);
+  const isHeld = normalizedStatus === "hold" || hold.status === "hold";
   const activeDueDayStart = activeDueDate ? getIndianDayStart(activeDueDate) : null;
   const completedDeadlineCutoff = activeDueDate
     ? getWholeIstDayCutoff(activeDueDate, OVERDUE_COUNT_DELAY_MS)
@@ -290,7 +319,14 @@ const getWorkflowDeadlineSummary = (doc = {}) => {
     ? addDays(approvalDeadlineDayStart, 1)
     : null;
   const uploadDeadlineDayStart = approvedAt
-    ? addWorkflowDaysSkippingSunday(getIndianDayStart(approvedAt), 2)
+    ? addWorkflowDaysSkippingSunday(
+        getIndianDayStart(
+          hold.resumed_at && activeDueDayStart
+            ? new Date(Math.max(approvedAt.getTime(), activeDueDayStart.getTime()))
+            : approvedAt,
+        ),
+        2,
+      )
     : (approvalDeadlineDayStart ? addWorkflowDaysSkippingSunday(approvalDeadlineDayStart, 2) : null);
   const uploadDeadlineCutoff = uploadDeadlineDayStart
     ? addDays(uploadDeadlineDayStart, 1)
@@ -344,20 +380,25 @@ const getWorkflowDeadlineSummary = (doc = {}) => {
     ? getDaysPastCutoff(now, uploadDeadlineCutoff)
     : 0;
 
-  const delayStage = uploadDaysLate > 0
+  let delayStage = uploadDaysLate > 0
     ? "upload_delay"
     : approvalDaysLate > 0
       ? "approval_delay"
       : completionDaysLate > 0
         ? "delayed"
         : "";
-  const overdueStage = uploadOverdueDays > 0
+  let overdueStage = uploadOverdueDays > 0
     ? "upload_overdue"
     : approvalOverdueDays > 0
       ? "approval_overdue"
       : completionOverdueDays > 0
         ? "overdue"
         : "";
+
+  if (isHeld) {
+    delayStage = "";
+    overdueStage = "";
+  }
 
   return {
     active_due_date: activeDueDate,
@@ -373,16 +414,19 @@ const getWorkflowDeadlineSummary = (doc = {}) => {
     upload_cutoff: doc?.upload_required === false ? null : uploadDeadlineCutoff,
     delay_stage: delayStage,
     overdue_stage: overdueStage,
-    completion_days_late: completionDaysLate,
-    approval_days_late: approvalDaysLate,
-    upload_days_late: uploadDaysLate,
-    completion_overdue_days: completionOverdueDays,
-    approval_overdue_days: approvalOverdueDays,
-    upload_overdue_days: uploadOverdueDays,
-    pending_upload_count: pendingUploads.length,
+    completion_days_late: isHeld ? 0 : completionDaysLate,
+    approval_days_late: isHeld ? 0 : approvalDaysLate,
+    upload_days_late: isHeld ? 0 : uploadDaysLate,
+    completion_overdue_days: isHeld ? 0 : completionOverdueDays,
+    approval_overdue_days: isHeld ? 0 : approvalOverdueDays,
+    upload_overdue_days: isHeld ? 0 : uploadOverdueDays,
+    pending_upload_count: isHeld ? 0 : pendingUploads.length,
     upload_delayed_assignees: uploadDelayedAssignees,
     upload_overdue_assignees: uploadOverdueAssignees,
     status: normalizedStatus,
+    paused: isHeld,
+    hold_started_at: isHeld ? hold.approved_at : null,
+    hold_total_paused_ms: hold.total_paused_ms,
   };
 };
 
@@ -462,6 +506,7 @@ const serializeTask = (doc = {}) => {
         : doc?.reviewed_by || {},
     reworked,
     rework_due_dates: reworkDueDates,
+    hold: getTaskHoldPayload(doc),
     active_due_date: deadlineSummary.active_due_date,
     deadline_summary: deadlineSummary,
     delay_stage: deadlineSummary.delay_stage,
@@ -540,6 +585,7 @@ const deriveBatchTaskLikeStatus = (tasks = []) => {
     ["started", "complete", "approved", "uploaded", "completed"].includes(task.normalized_status),
   );
 
+  if (normalizedTasks.some((task) => task.normalized_status === "hold")) return "hold";
   if (normalizedTasks.every(isTerminal)) return "uploaded";
   if (normalizedTasks.every(atLeastApproved)) return "approved";
   if (normalizedTasks.every(atLeastComplete)) return "complete";
@@ -555,6 +601,7 @@ const buildBatchChildCounts = (tasks = []) => {
     approved_tasks: 0,
     uploaded_tasks: 0,
     complete_done_tasks: 0,
+    hold_tasks: 0,
   };
 
   (Array.isArray(tasks) ? tasks : []).forEach((task) => {
@@ -564,6 +611,7 @@ const buildBatchChildCounts = (tasks = []) => {
     if (status === "complete") counts.complete_tasks += 1;
     if (status === "approved") counts.approved_tasks += 1;
     if (status === "uploaded") counts.uploaded_tasks += 1;
+    if (status === "hold") counts.hold_tasks += 1;
     if (status === "uploaded" || (status === "approved" && task?.upload_required === false)) {
       counts.complete_done_tasks += 1;
     }
@@ -926,11 +974,24 @@ const buildApprovalDeadlineCutoffExpression = () => ({
 
 const buildUploadDeadlineDayStartExpression = () => {
   const effectiveApprovedAt = buildEffectiveApprovedAtExpression();
+  const activeDueDayStart = buildIndianDayStartExpression(buildActiveDueDateExpression());
+  const approvedDayStart = buildIndianDayStartExpression(effectiveApprovedAt);
   return {
     $cond: [
       { $ne: [effectiveApprovedAt, null] },
       buildAddWorkflowDaysSkippingSundayExpression(
-        buildIndianDayStartExpression(effectiveApprovedAt),
+        {
+          $cond: [
+            {
+              $and: [
+                { $ne: ["$hold.resumed_at", null] },
+                { $ne: [activeDueDayStart, null] },
+              ],
+            },
+            { $max: [approvedDayStart, activeDueDayStart] },
+            approvedDayStart,
+          ],
+        },
         2,
       ),
       buildAddWorkflowDaysSkippingSundayExpression(buildApprovalDeadlineDayStartExpression(), 2),
@@ -1170,6 +1231,8 @@ const buildTaskListMatch = ({ query = {}, user = {} } = {}) => {
       addAndMatch(match, buildOpenTaskMatch());
     } else if (normalizedStatusFilter === "complete_done") {
       addAndMatch(match, buildCompleteTaskMatch());
+    } else if (normalizedStatusFilter === "hold_approval_pending") {
+      match["hold.status"] = "pending";
     } else if (normalizedStatusFilter === "overdue") {
       addAndMatch(match, buildOverdueTaskMatch());
     } else if (normalizedStatusFilter === "approval_overdue") {
@@ -1806,6 +1869,12 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
         $cond: [completeTaskExpression, 1, 0],
       },
     },
+    hold_tasks: statusCount("hold"),
+    hold_approval_pending_tasks: {
+      $sum: {
+        $cond: [{ $eq: ["$hold.status", "pending"] }, 1, 0],
+      },
+    },
     approved_tasks: statusCount("approved"),
     uploaded_tasks: statusCount("uploaded"),
     upload_remaining_tasks: uploadRemainingCount,
@@ -1924,6 +1993,8 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
               started_tasks: 1,
               complete_tasks: 1,
               complete_done_tasks: 1,
+              hold_tasks: 1,
+              hold_approval_pending_tasks: 1,
               approved_tasks: 1,
               uploaded_tasks: 1,
               upload_remaining_tasks: 1,
@@ -2038,6 +2109,8 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
         },
         unit_is_open: openTaskExpression,
         unit_is_complete_done: completeTaskExpression,
+        unit_is_hold: { $eq: ["$normalized_status", "hold"] },
+        unit_is_hold_approval_pending: { $eq: ["$hold.status", "pending"] },
         unit_is_started_or_beyond: {
           $in: ["$normalized_status", ["started", "complete", "approved", "uploaded"]],
         },
@@ -2087,6 +2160,10 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
         child_count: { $sum: 1 },
         open_count: { $sum: { $cond: ["$unit_is_open", 1, 0] } },
         complete_done_count: { $sum: { $cond: ["$unit_is_complete_done", 1, 0] } },
+        hold_count: { $sum: { $cond: ["$unit_is_hold", 1, 0] } },
+        hold_approval_pending_count: {
+          $sum: { $cond: ["$unit_is_hold_approval_pending", 1, 0] },
+        },
         started_or_beyond_count: { $sum: { $cond: ["$unit_is_started_or_beyond", 1, 0] } },
         complete_or_beyond_count: { $sum: { $cond: ["$unit_is_complete_or_beyond", 1, 0] } },
         approved_or_beyond_count: { $sum: { $cond: ["$unit_is_approved_or_beyond", 1, 0] } },
@@ -2117,6 +2194,8 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
     {
       $addFields: {
         is_uploaded_unit: { $eq: ["$complete_done_count", "$child_count"] },
+        is_hold_unit: { $gt: ["$hold_count", 0] },
+        is_hold_approval_pending_unit: { $gt: ["$hold_approval_pending_count", 0] },
         is_approved_unit: { $eq: ["$approved_or_beyond_count", "$child_count"] },
         is_complete_unit: { $eq: ["$complete_or_beyond_count", "$child_count"] },
         is_started_unit: { $gt: ["$started_or_beyond_count", 0] },
@@ -2140,6 +2219,7 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
                   { $not: ["$is_complete_unit"] },
                   { $not: ["$is_approved_unit"] },
                   { $not: ["$is_uploaded_unit"] },
+                  { $not: ["$is_hold_unit"] },
                 ],
               },
               1,
@@ -2156,6 +2236,7 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
                   { $not: ["$is_complete_unit"] },
                   { $not: ["$is_approved_unit"] },
                   { $not: ["$is_uploaded_unit"] },
+                  { $not: ["$is_hold_unit"] },
                 ],
               },
               1,
@@ -2171,6 +2252,7 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
                   "$is_complete_unit",
                   { $not: ["$is_approved_unit"] },
                   { $not: ["$is_uploaded_unit"] },
+                  { $not: ["$is_hold_unit"] },
                 ],
               },
               1,
@@ -2179,6 +2261,10 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
           },
         },
         complete_done_tasks: { $sum: { $cond: ["$is_uploaded_unit", 1, 0] } },
+        hold_tasks: { $sum: { $cond: ["$is_hold_unit", 1, 0] } },
+        hold_approval_pending_tasks: {
+          $sum: { $cond: ["$is_hold_approval_pending_unit", 1, 0] },
+        },
         approved_tasks: {
           $sum: {
             $cond: [
@@ -2186,6 +2272,7 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
                 $and: [
                   "$is_approved_unit",
                   { $not: ["$is_uploaded_unit"] },
+                  { $not: ["$is_hold_unit"] },
                 ],
               },
               1,
@@ -2912,6 +2999,267 @@ const reworkWorkflowTask = async ({
   return taskDetail;
 };
 
+const requestWorkflowTaskHold = async ({
+  taskId,
+  actor = {},
+  note = "",
+  realtimeSource = null,
+} = {}) => {
+  const normalizedNote = normalizeText(note);
+  if (!normalizedNote) {
+    throw new Error("A hold comment is required");
+  }
+
+  const task = await getMutableTaskById(taskId);
+  const adminHold = isAdmin(actor);
+  if (!adminHold && !canCompleteWorkflowTask(actor, task)) {
+    throw new Error("Only admins or assigned users can put workflow tasks on hold");
+  }
+
+  const fromStatus = normalizeWorkflowTaskStatus(task.status, {
+    fallback: "assigned",
+  }) || "assigned";
+  if (fromStatus === "uploaded") {
+    throw new Error("Uploaded tasks cannot be put on hold");
+  }
+  if (fromStatus === "hold") {
+    throw new Error("This task is already on hold");
+  }
+
+  const auditActor = buildAuditActor(actor);
+  const requestedAt = new Date();
+  const currentHold = getTaskHoldPayload(task);
+
+  task.hold = {
+    ...currentHold,
+    status: adminHold ? "hold" : "pending",
+    previous_status: fromStatus,
+    requested_comment: normalizedNote,
+    requested_by: auditActor,
+    requested_at: requestedAt,
+    approved_comment: adminHold ? normalizedNote : "",
+    approved_by: adminHold ? auditActor : {},
+    approved_at: adminHold ? requestedAt : null,
+    resumed_comment: "",
+    resumed_by: {},
+    resumed_at: null,
+    total_paused_ms: currentHold.total_paused_ms,
+  };
+  task.updated_by = auditActor;
+  if (adminHold) {
+    task.status = "hold";
+  }
+  await task.save();
+
+  await TaskStatusHistory.create({
+    task: task._id,
+    batch: task.batch || null,
+    from_status: fromStatus,
+    to_status: adminHold ? "hold" : fromStatus,
+    changed_by: auditActor,
+    changed_at: requestedAt,
+    note: normalizedNote,
+    metadata: {
+      hold_requested: true,
+      hold_approved: adminHold,
+      hold_previous_status: fromStatus,
+    },
+  });
+  await createTransitionCommentIfNeeded({
+    task,
+    actor,
+    note: normalizedNote,
+    commentType: "hold",
+  });
+
+  const batch = await recalculateWorkflowBatchIfPresent(task.batch);
+  const taskDetail = await buildTaskDetail(task._id, actor);
+
+  emitWorkflowTaskMutation({
+    realtimeSource,
+    task: taskDetail,
+    batch,
+    actor,
+    message: adminHold ? "Workflow task put on hold" : "Workflow task hold requested",
+  });
+
+  return taskDetail;
+};
+
+const approveWorkflowTaskHold = async ({
+  taskId,
+  actor = {},
+  note = "",
+  realtimeSource = null,
+} = {}) => {
+  const task = await getMutableTaskById(taskId);
+  if (!isTaskHoldApprover(actor, task)) {
+    throw new Error("Only the task creator or admin can approve hold");
+  }
+
+  const hold = getTaskHoldPayload(task);
+  if (hold.status !== "pending") {
+    throw new Error("This task does not have a pending hold request");
+  }
+
+  const fromStatus = normalizeWorkflowTaskStatus(task.status, {
+    fallback: hold.previous_status || "assigned",
+  }) || hold.previous_status || "assigned";
+  if (fromStatus === "hold") {
+    throw new Error("This task is already on hold");
+  }
+
+  const auditActor = buildAuditActor(actor);
+  const approvedAt = new Date();
+  const approvalNote = normalizeText(note) || hold.requested_comment;
+
+  task.status = "hold";
+  task.hold = {
+    ...hold,
+    status: "hold",
+    previous_status: fromStatus,
+    approved_comment: approvalNote,
+    approved_by: auditActor,
+    approved_at: approvedAt,
+    resumed_comment: "",
+    resumed_by: {},
+    resumed_at: null,
+  };
+  task.updated_by = auditActor;
+  await task.save();
+
+  await TaskStatusHistory.create({
+    task: task._id,
+    batch: task.batch || null,
+    from_status: fromStatus,
+    to_status: "hold",
+    changed_by: auditActor,
+    changed_at: approvedAt,
+    note: approvalNote,
+    metadata: {
+      hold_approved: true,
+      hold_previous_status: fromStatus,
+    },
+  });
+  await createTransitionCommentIfNeeded({
+    task,
+    actor,
+    note: approvalNote,
+    commentType: "hold",
+  });
+
+  const batch = await recalculateWorkflowBatchIfPresent(task.batch);
+  const taskDetail = await buildTaskDetail(task._id, actor);
+
+  emitWorkflowTaskMutation({
+    realtimeSource,
+    task: taskDetail,
+    batch,
+    actor,
+    message: "Workflow task hold approved",
+  });
+
+  return taskDetail;
+};
+
+const resumeWorkflowTask = async ({
+  taskId,
+  actor = {},
+  note = "",
+  dueDate = "",
+  realtimeSource = null,
+} = {}) => {
+  const task = await getMutableTaskById(taskId);
+  if (!isTaskHoldApprover(actor, task)) {
+    throw new Error("Only the task creator or admin can resume this task");
+  }
+
+  const hold = getTaskHoldPayload(task);
+  const fromStatus = normalizeWorkflowTaskStatus(task.status, { fallback: "" });
+  if (fromStatus !== "hold" || hold.status !== "hold") {
+    throw new Error("Only held tasks can be resumed");
+  }
+
+  const toStatus = normalizeWorkflowTaskStatus(hold.previous_status, {
+    fallback: "assigned",
+  }) || "assigned";
+  if (toStatus === "hold" || toStatus === "uploaded") {
+    throw new Error("This held task does not have a resumable previous status");
+  }
+  const nextDueDate = parseDueDate(dueDate);
+  if (!nextDueDate) {
+    throw new Error("A new due date is required to resume this task");
+  }
+
+  const auditActor = buildAuditActor(actor);
+  const resumedAt = new Date();
+  const pausedFrom = getDateOrNull(hold.approved_at);
+  const pausedMs = pausedFrom
+    ? Math.max(0, resumedAt.getTime() - pausedFrom.getTime())
+    : 0;
+  const resumeNote = normalizeText(note);
+
+  task.status = toStatus;
+  task.due_date = nextDueDate;
+  task.rework_due_dates = [
+    ...getTaskReworkDueDatePayload(task),
+    {
+      date: nextDueDate,
+      comment: resumeNote || "Task resumed with new due date",
+      source: "due_date",
+      created_at: resumedAt,
+      created_by: auditActor,
+    },
+  ];
+  task.hold = {
+    ...hold,
+    status: "none",
+    resumed_comment: resumeNote,
+    resumed_by: auditActor,
+    resumed_at: resumedAt,
+    total_paused_ms: hold.total_paused_ms + pausedMs,
+  };
+  task.updated_by = auditActor;
+  await task.save();
+
+  await TaskStatusHistory.create({
+    task: task._id,
+    batch: task.batch || null,
+    from_status: "hold",
+    to_status: toStatus,
+    changed_by: auditActor,
+    changed_at: resumedAt,
+    note: resumeNote,
+    metadata: {
+      hold_resumed: true,
+      hold_previous_status: toStatus,
+      paused_ms: pausedMs,
+      total_paused_ms: task.hold.total_paused_ms,
+      due_date_updated: true,
+      due_date: nextDueDate,
+    },
+  });
+  await createTransitionCommentIfNeeded({
+    task,
+    actor,
+    note: resumeNote,
+    commentType: "hold",
+  });
+
+  const batch = await recalculateWorkflowBatchIfPresent(task.batch);
+  const taskDetail = await buildTaskDetail(task._id, actor);
+
+  emitWorkflowTaskMutation({
+    realtimeSource,
+    task: taskDetail,
+    batch,
+    actor,
+    message: "Workflow task resumed",
+  });
+
+  return taskDetail;
+};
+
 const updateWorkflowTaskStatus = async ({
   taskId,
   actor = {},
@@ -3497,6 +3845,7 @@ const updateWorkflowDepartment = async (id, payload = {}, actor = {}) => {
 
 module.exports = {
   addWorkflowTaskComment,
+  approveWorkflowTaskHold,
   approveWorkflowTask,
   assignWorkflowTask,
   buildTaskDetail,
@@ -3512,6 +3861,8 @@ module.exports = {
   listWorkflowTasks,
   reviewWorkflowTask,
   reworkWorkflowTask,
+  requestWorkflowTaskHold,
+  resumeWorkflowTask,
   startWorkflowTask,
   submitWorkflowTask,
   uploadWorkflowTask,

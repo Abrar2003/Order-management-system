@@ -6,6 +6,7 @@ import { isManagerLikeRole, isStrictAdminRole } from "../../auth/permissions";
 import { usePermissions } from "../../auth/PermissionContext";
 import {
   approveWorkflowTask,
+  approveWorkflowTaskHold,
   completeWorkflowTask,
   deleteWorkflowBatch,
   deleteWorkflowTask,
@@ -13,6 +14,8 @@ import {
   getWorkflowTaskTypes,
   getWorkflowTasks,
   getWorkflowUsers,
+  requestWorkflowTaskHold,
+  resumeWorkflowTask,
   sendWorkflowTaskToRework,
   startWorkflowTask,
   uploadWorkflowTask,
@@ -124,6 +127,8 @@ const TASK_STATUS_FILTER_OPTIONS = Object.freeze([
   { value: "complete", label: "Stage Complete" },
   { value: "complete_and_beyond", label: "Complete + Later" },
   { value: "open", label: "Open" },
+  { value: "hold", label: "Hold" },
+  { value: "hold_approval_pending", label: "Hold Approval Pending" },
   { value: "needs_approval", label: "Needs Approval" },
   { value: "upload_remaining", label: "Upload Remaining" },
   { value: "overdue", label: "Overdue" },
@@ -144,6 +149,7 @@ const getTaskActionState = ({
   task = {},
   currentUserId = "",
   canManageWorkflow = false,
+  canAdminWorkflow = false,
 } = {}) => {
   const assignedToCurrentUser = Array.isArray(task?.assigned_to)
     ? task.assigned_to.some(
@@ -173,6 +179,18 @@ const getTaskActionState = ({
       ),
     canRework: canManageWorkflow && ["complete", "approved", "uploaded"].includes(task?.status),
     canApprove: assignedByCurrentUser && task?.status === "complete",
+    canRequestHold:
+      task?.status !== "hold" &&
+      task?.status !== "uploaded" &&
+      (assignedToCurrentUser || canAdminWorkflow) &&
+      task?.hold?.status !== "pending",
+    canApproveHold:
+      task?.status !== "hold" &&
+      task?.hold?.status === "pending" &&
+      (createdByCurrentUser || canAdminWorkflow),
+    canResume:
+      task?.status === "hold" &&
+      canAdminWorkflow,
   };
 };
 
@@ -222,6 +240,24 @@ const ReworkHoverBadge = ({ taskId = "", count = 0, comments = [] }) => {
         ))}
       </span>
     </HoverPortal>
+  );
+};
+
+const HoldPill = ({ hold = {} }) => {
+  if (!["pending", "hold"].includes(normalizeText(hold?.status).toLowerCase())) {
+    return null;
+  }
+
+  const isPending = normalizeText(hold.status).toLowerCase() === "pending";
+  const label = isPending ? "Hold Pending" : "HOLD";
+  const comment = hold?.approved_comment || hold?.requested_comment || "";
+  return (
+    <span
+      className={`workflow-hold-badge ${isPending ? "is-pending" : "is-active"}`}
+      title={comment || label}
+    >
+      {label}
+    </span>
   );
 };
 
@@ -618,6 +654,7 @@ const WorkflowTasksPanel = ({
       task,
       currentUserId,
       canManageWorkflow,
+      canAdminWorkflow: isAdmin,
     });
 
     if (stepKey === "started" && actions.canStart) {
@@ -674,6 +711,17 @@ const WorkflowTasksPanel = ({
     });
   };
 
+  const handleHoldAction = (task, type = "hold") => {
+    setError("");
+    setSuccess("");
+    setNotePrompt({
+      taskId: task._id,
+      type,
+      note: "",
+      dueDate: "",
+    });
+  };
+
   const handleConfirmNote = async (task) => {
     const note = normalizeText(notePrompt.note);
     if (notePrompt.type === "rework" && !note) {
@@ -681,10 +729,60 @@ const WorkflowTasksPanel = ({
       return;
     }
 
+    if (notePrompt.type === "hold" && !note) {
+      setError("Hold comment is required.");
+      return;
+    }
+
+    if (notePrompt.type === "resume" && !normalizeText(notePrompt.dueDate)) {
+      setError("New due date is required to resume this task.");
+      return;
+    }
+
     if (notePrompt.type === "complete") {
       await handleQuickAction(
         () => completeWorkflowTask(task._id, { note }),
         "Task marked complete successfully.",
+        {
+          taskId: task._id,
+          closeNotePrompt: true,
+        },
+      );
+      return;
+    }
+
+    if (notePrompt.type === "hold") {
+      await handleQuickAction(
+        () => requestWorkflowTaskHold(task._id, { note }),
+        isAdmin ? "Task put on hold." : "Task hold request submitted.",
+        {
+          taskId: task._id,
+          closeNotePrompt: true,
+        },
+      );
+      return;
+    }
+
+    if (notePrompt.type === "approve_hold") {
+      await handleQuickAction(
+        () => approveWorkflowTaskHold(task._id, { note }),
+        "Task hold approved.",
+        {
+          taskId: task._id,
+          closeNotePrompt: true,
+        },
+      );
+      return;
+    }
+
+    if (notePrompt.type === "resume") {
+      await handleQuickAction(
+        () =>
+          resumeWorkflowTask(task._id, {
+            note,
+            due_date: normalizeText(notePrompt.dueDate),
+          }),
+        "Task resumed successfully.",
         {
           taskId: task._id,
           closeNotePrompt: true,
@@ -1025,6 +1123,7 @@ const WorkflowTasksPanel = ({
                         task,
                         currentUserId,
                         canManageWorkflow: isBatchGroup ? false : canManageWorkflow,
+                        canAdminWorkflow: isBatchGroup ? false : isAdmin,
                       });
                       const isBusy = actionTaskId === task._id;
                       const isCompletePromptOpen =
@@ -1094,6 +1193,7 @@ const WorkflowTasksPanel = ({
                                   count={reworkCount}
                                   comments={reworkComments}
                                 />
+                                <HoldPill hold={task?.hold} />
                               </div>
                             </div>
                           </td>
@@ -1274,6 +1374,45 @@ const WorkflowTasksPanel = ({
                                   <img src={WORKFLOW_ACTION_ICONS.rework} alt="" />
                                 </button>
                               )}
+                              {actions.canApproveHold && (
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-warning btn-sm"
+                                  disabled={isBusy}
+                                  onClick={() => handleHoldAction(task, "approve_hold")}
+                                  title="Approve hold request"
+                                >
+                                  Hold
+                                </button>
+                              )}
+                              {!actions.canApproveHold && actions.canRequestHold && (
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-warning btn-sm"
+                                  disabled={isBusy || task?.hold?.status === "pending"}
+                                  onClick={() => handleHoldAction(task, "hold")}
+                                  title={
+                                    task?.hold?.status === "pending"
+                                      ? "Hold request is pending"
+                                      : isAdmin
+                                      ? "Put task on hold"
+                                      : "Request hold"
+                                  }
+                                >
+                                  Hold
+                                </button>
+                              )}
+                              {actions.canResume && (
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-success btn-sm"
+                                  disabled={isBusy}
+                                  onClick={() => handleHoldAction(task, "resume")}
+                                  title="Resume held task"
+                                >
+                                  Resume
+                                </button>
+                              )}
                               {isBatchGroup && canDeleteWorkflow && (
                                 <button
                                   type="button"
@@ -1388,7 +1527,7 @@ const WorkflowTasksPanel = ({
         />
       )}
 
-      {notePrompt.type === "rework" && notePrompt.taskId && (
+      {["rework", "hold", "approve_hold", "resume"].includes(notePrompt.type) && notePrompt.taskId && (
         <div
           className="modal d-block om-modal-backdrop"
           tabIndex="-1"
@@ -1409,16 +1548,10 @@ const WorkflowTasksPanel = ({
             onClick={(event) => event.stopPropagation()}
           >
             <div className="modal-content">
-              <div className="modal-header">
-                <div>
-                  <h5 className="modal-title">Send to Rework</h5>
-                  <div className="small text-muted">
-                    {activePromptTask?.title || activePromptTask?.task_no || "Add a rework note"}
-                  </div>
-                </div>
+              <div className="modal-header workflow-quick-modal-header">
                 <button
                   type="button"
-                  className="btn-close"
+                  className="btn-close workflow-quick-modal-close"
                   aria-label="Close"
                   onClick={() =>
                     setNotePrompt({
@@ -1430,11 +1563,29 @@ const WorkflowTasksPanel = ({
                   }
                   disabled={actionTaskId === notePrompt.taskId}
                 />
-                <div className="mt-3">
-                  <label className="form-label">Next Due Date</label>
+                <div className="workflow-quick-modal-title-block">
+                  <h5 className="modal-title">
+                    {notePrompt.type === "rework"
+                      ? "Send to Rework"
+                      : notePrompt.type === "approve_hold"
+                      ? "Approve Hold"
+                      : notePrompt.type === "resume"
+                      ? "Resume Task"
+                      : "Request Hold"}
+                  </h5>
+                  <div className="small text-muted">
+                    {activePromptTask?.title || activePromptTask?.task_no || "Add a note"}
+                  </div>
+                </div>
+                {["rework", "resume"].includes(notePrompt.type) && (
+                <div className="workflow-quick-modal-date">
+                  <label className="form-label">
+                    {notePrompt.type === "resume" ? "New Due Date" : "Next Due Date"}
+                  </label>
                   <input
                     type="date"
                     className="form-control"
+                    required={notePrompt.type === "resume"}
                     value={notePrompt.dueDate}
                     onChange={(event) =>
                       setNotePrompt((prev) => ({
@@ -1445,13 +1596,26 @@ const WorkflowTasksPanel = ({
                     disabled={actionTaskId === notePrompt.taskId}
                   />
                 </div>
+                )}
               </div>
               <div className="modal-body">
-                <label className="form-label">Rework Comment</label>
+                <label className="form-label">
+                  {notePrompt.type === "rework"
+                    ? "Rework Comment"
+                    : notePrompt.type === "resume"
+                    ? "Resume Comment"
+                    : "Hold Comment"}
+                </label>
                 <textarea
                   rows="3"
                   className="form-control"
-                  placeholder="Explain what needs to be fixed"
+                  placeholder={
+                    notePrompt.type === "rework"
+                      ? "Explain what needs to be fixed"
+                      : notePrompt.type === "resume"
+                      ? "Add an optional resume note"
+                      : "Explain why this task should be on hold"
+                  }
                   value={notePrompt.note}
                   onChange={(event) =>
                     setNotePrompt((prev) => ({
@@ -1479,11 +1643,25 @@ const WorkflowTasksPanel = ({
                 </button>
                 <button
                   type="button"
-                  className="btn btn-danger"
+                  className={
+                    notePrompt.type === "rework"
+                      ? "btn btn-danger"
+                      : notePrompt.type === "resume"
+                      ? "btn btn-success"
+                      : "btn btn-warning"
+                  }
                   onClick={() => handleConfirmNote(activePromptTask || { _id: notePrompt.taskId })}
                   disabled={actionTaskId === notePrompt.taskId}
                 >
-                  {actionTaskId === notePrompt.taskId ? "Saving..." : "Confirm Rework"}
+                  {actionTaskId === notePrompt.taskId
+                    ? "Saving..."
+                    : notePrompt.type === "rework"
+                    ? "Confirm Rework"
+                    : notePrompt.type === "approve_hold"
+                    ? "Approve Hold"
+                    : notePrompt.type === "resume"
+                    ? "Resume Task"
+                    : "Submit Hold"}
                 </button>
               </div>
             </div>

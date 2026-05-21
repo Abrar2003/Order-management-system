@@ -131,12 +131,17 @@ export const getWorkflowStageBarSteps = (task = {}) => {
 
 export const getWorkflowDisplayStageKey = (task = {}) => {
   const currentStatus = normalizeText(task?.status);
+  const previousHoldStatus = normalizeText(task?.hold?.previous_status);
   const steps = getWorkflowStageBarSteps(task);
   const uploadStatuses = getWorkflowUploadStatuses(task);
   const uploadSteps = steps.filter((entry) => isWorkflowUploadStepKey(entry.key));
   const lastUploadedStatus = [...uploadStatuses]
     .reverse()
     .find((entry) => normalizeText(entry?.status) === "uploaded");
+
+  if (currentStatus === "hold" && steps.some((entry) => entry.key === previousHoldStatus)) {
+    return previousHoldStatus;
+  }
 
   if (currentStatus === "approved" && uploadSteps.length > 0) {
     return lastUploadedStatus
