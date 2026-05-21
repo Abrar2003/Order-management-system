@@ -157,7 +157,8 @@ const getUsers = async (req, res) => {
 
     const users = await User.find(filter)
       .lean()
-      .select("_id name role email username") // never send password
+      .select("_id name role email username allowed_brands allowed_vendors") // never send password
+      .populate("allowed_brands", "name")
       .sort({ name: 1 });
 
     res.json(

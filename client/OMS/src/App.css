@@ -1789,6 +1789,28 @@ small,
   background: var(--om-color-surface);
 }
 
+.data-access-panel {
+  border: 1px solid var(--om-color-border);
+  border-radius: 8px;
+  min-height: 260px;
+  padding: 1rem;
+}
+
+.data-access-options {
+  display: grid;
+  gap: 0.45rem;
+  max-height: 300px;
+  overflow: auto;
+  padding-right: 0.25rem;
+}
+
+.data-access-options .form-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0;
+}
+
 .card,
 .om-card {
   border: 1px solid var(--om-color-border);

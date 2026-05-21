@@ -14,6 +14,7 @@ import {
   getWorkflowTaskTypes,
   getWorkflowTasks,
   getWorkflowUsers,
+  rejectWorkflowTaskHold,
   requestWorkflowTaskHold,
   resumeWorkflowTask,
   sendWorkflowTaskToRework,
@@ -185,6 +186,10 @@ const getTaskActionState = ({
       (assignedToCurrentUser || canAdminWorkflow) &&
       task?.hold?.status !== "pending",
     canApproveHold:
+      task?.status !== "hold" &&
+      task?.hold?.status === "pending" &&
+      (createdByCurrentUser || canAdminWorkflow),
+    canRejectHold:
       task?.status !== "hold" &&
       task?.hold?.status === "pending" &&
       (createdByCurrentUser || canAdminWorkflow),
@@ -767,6 +772,18 @@ const WorkflowTasksPanel = ({
       await handleQuickAction(
         () => approveWorkflowTaskHold(task._id, { note }),
         "Task hold approved.",
+        {
+          taskId: task._id,
+          closeNotePrompt: true,
+        },
+      );
+      return;
+    }
+
+    if (notePrompt.type === "reject_hold") {
+      await handleQuickAction(
+        () => rejectWorkflowTaskHold(task._id, { note }),
+        "Task hold rejected.",
         {
           taskId: task._id,
           closeNotePrompt: true,
@@ -1375,15 +1392,28 @@ const WorkflowTasksPanel = ({
                                 </button>
                               )}
                               {actions.canApproveHold && (
-                                <button
-                                  type="button"
-                                  className="btn btn-outline-warning btn-sm"
-                                  disabled={isBusy}
-                                  onClick={() => handleHoldAction(task, "approve_hold")}
-                                  title="Approve hold request"
-                                >
-                                  Hold
-                                </button>
+                                <>
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-warning btn-sm"
+                                    disabled={isBusy}
+                                    onClick={() => handleHoldAction(task, "approve_hold")}
+                                    title="Approve hold request"
+                                  >
+                                    Hold
+                                  </button>
+                                  {actions.canRejectHold && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-outline-secondary btn-sm"
+                                      disabled={isBusy}
+                                      onClick={() => handleHoldAction(task, "reject_hold")}
+                                      title="Reject hold request"
+                                    >
+                                      Reject
+                                    </button>
+                                  )}
+                                </>
                               )}
                               {!actions.canApproveHold && actions.canRequestHold && (
                                 <button
@@ -1527,7 +1557,7 @@ const WorkflowTasksPanel = ({
         />
       )}
 
-      {["rework", "hold", "approve_hold", "resume"].includes(notePrompt.type) && notePrompt.taskId && (
+      {["rework", "hold", "approve_hold", "reject_hold", "resume"].includes(notePrompt.type) && notePrompt.taskId && (
         <div
           className="modal d-block om-modal-backdrop"
           tabIndex="-1"
@@ -1569,6 +1599,8 @@ const WorkflowTasksPanel = ({
                       ? "Send to Rework"
                       : notePrompt.type === "approve_hold"
                       ? "Approve Hold"
+                      : notePrompt.type === "reject_hold"
+                      ? "Reject Hold"
                       : notePrompt.type === "resume"
                       ? "Resume Task"
                       : "Request Hold"}
@@ -1604,6 +1636,8 @@ const WorkflowTasksPanel = ({
                     ? "Rework Comment"
                     : notePrompt.type === "resume"
                     ? "Resume Comment"
+                    : notePrompt.type === "reject_hold"
+                    ? "Reject Comment"
                     : "Hold Comment"}
                 </label>
                 <textarea
@@ -1614,6 +1648,8 @@ const WorkflowTasksPanel = ({
                       ? "Explain what needs to be fixed"
                       : notePrompt.type === "resume"
                       ? "Add an optional resume note"
+                      : notePrompt.type === "reject_hold"
+                      ? "Add an optional reject note"
                       : "Explain why this task should be on hold"
                   }
                   value={notePrompt.note}
@@ -1646,6 +1682,8 @@ const WorkflowTasksPanel = ({
                   className={
                     notePrompt.type === "rework"
                       ? "btn btn-danger"
+                      : notePrompt.type === "reject_hold"
+                      ? "btn btn-secondary"
                       : notePrompt.type === "resume"
                       ? "btn btn-success"
                       : "btn btn-warning"
@@ -1659,6 +1697,8 @@ const WorkflowTasksPanel = ({
                     ? "Confirm Rework"
                     : notePrompt.type === "approve_hold"
                     ? "Approve Hold"
+                    : notePrompt.type === "reject_hold"
+                    ? "Reject Hold"
                     : notePrompt.type === "resume"
                     ? "Resume Task"
                     : "Submit Hold"}

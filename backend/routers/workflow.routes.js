@@ -26,6 +26,7 @@ const {
   removeTask,
   reviewTask,
   reworkTask,
+  rejectHoldTask,
   requestHoldTask,
   resumeTask,
   startTask,
@@ -210,6 +211,13 @@ router.patch(
   auth,
   requirePermission("workflow", "view"),
   approveHoldTask,
+);
+
+router.patch(
+  "/tasks/:id/hold/reject",
+  auth,
+  requirePermission("workflow", "view"),
+  rejectHoldTask,
 );
 
 router.patch(

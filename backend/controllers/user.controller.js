@@ -2,6 +2,10 @@ const bcrypt = require("bcryptjs");
 const User = require("../models/user.model");
 const Inspector = require("../models/inspector.model");
 const { USER_ROLES, normalizeUserRole } = require("../helpers/userRole");
+const {
+  assertBrandIdsExist,
+  buildUserAccessUpdate,
+} = require("../services/userDataAccess.service");
 
 const ALLOWED_ROLES = new Set(USER_ROLES);
 
@@ -51,6 +55,9 @@ exports.createUser = async (req, res) => {
       return res.status(409).json({ message: "User already exists" });
     }
 
+    const accessUpdate = buildUserAccessUpdate(req.body);
+    await assertBrandIdsExist(accessUpdate.allowed_brands);
+
     const hashedPassword = await bcrypt.hash(password, 10);
 
     createdUser = await User.create({
@@ -61,6 +68,8 @@ exports.createUser = async (req, res) => {
       phone,
       name,
       isQC: role === "QC",
+      allowed_brands: accessUpdate.allowed_brands,
+      allowed_vendors: accessUpdate.allowed_vendors,
     });
 
     if (createdUser.role === "QC") {
@@ -73,7 +82,10 @@ exports.createUser = async (req, res) => {
       await createdUser.save();
     }
 
-    const safeUser = await User.findById(createdUser._id).select("-password");
+    const safeUser = await User.findById(createdUser._id)
+      .select("-password")
+      .populate("allowed_brands", "name")
+      .lean();
 
     return res.status(201).json({
       message: "User created successfully",

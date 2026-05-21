@@ -86,6 +86,28 @@ const buildUpdateForTask = (task = {}) => {
   };
 };
 
+const taskNeedsUpdate = (task = {}) => {
+  const reworkCount = getReworkCount(task);
+  if (reworkCount <= 0) return false;
+
+  const beforeApprovalCount = toNonNegativeInteger(task?.reworked?.before_approval_count);
+  const afterApprovalCount = toNonNegativeInteger(task?.reworked?.after_approval_count);
+  const legacyReworkCount = toNonNegativeInteger(task?.rework_count);
+  const normalizedReworkCount = toNonNegativeInteger(task?.reworked?.count);
+  const hasBlankCommentType = (Array.isArray(task?.reworked?.comments) ? task.reworked.comments : [])
+    .some((entry) => !String(entry?.rework_type || "").trim());
+
+  return (
+    afterApprovalCount <= 0 &&
+    (
+      beforeApprovalCount !== reworkCount ||
+      legacyReworkCount !== reworkCount ||
+      normalizedReworkCount !== reworkCount ||
+      hasBlankCommentType
+    )
+  );
+};
+
 const main = async () => {
   const { apply, limit, sampleSize } = parseArgs();
   await connectDB();
@@ -100,7 +122,8 @@ const main = async () => {
     query.limit(limit);
   }
 
-  const tasks = await query;
+  const candidateTasks = await query;
+  const tasks = candidateTasks.filter(taskNeedsUpdate);
   const samples = tasks.slice(0, sampleSize).map((task) => ({
     _id: String(task._id),
     task_no: task.task_no,

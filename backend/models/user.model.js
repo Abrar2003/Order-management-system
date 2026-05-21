@@ -15,7 +15,9 @@ const user_Schema = new mongoose.Schema({
     phone: { type: String },
     name: { type: String, required: true },
     isQC: { type: Boolean, default: false },
-    inspector_id: { type: mongoose.Schema.Types.ObjectId, ref: "users", default: null }
+    inspector_id: { type: mongoose.Schema.Types.ObjectId, ref: "users", default: null },
+    allowed_brands: [{ type: mongoose.Schema.Types.ObjectId, ref: "brands" }],
+    allowed_vendors: [{ type: String, default: "all", trim: true }],
 
 }, { timestamps: true });
 

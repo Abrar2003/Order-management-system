@@ -10,6 +10,7 @@ const {
   normalizeRoleKey,
   sanitizePermissionsForRole,
 } = require("../helpers/permissions");
+const { serializeUserDataAccess } = require("./userDataAccess.service");
 
 const HISTORY_LIMIT = 25;
 const ADMIN_PERMISSION_SOURCE_ROLE = "admin";
@@ -94,6 +95,7 @@ const getEffectivePermissionsForUser = async (user = {}) => {
     role: roleKey,
     permissions: rolePermissions.permissions,
     meta: buildPermissionMeta(),
+    data_access: serializeUserDataAccess(user),
   };
 };
 

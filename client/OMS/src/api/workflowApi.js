@@ -161,6 +161,14 @@ export const approveWorkflowTaskHold = async (id, payload = {}) => {
   return res.data;
 };
 
+export const rejectWorkflowTaskHold = async (id, payload = {}) => {
+  const res = await api.patch(
+    `/workflow/tasks/${encodeURIComponent(requireId(id, "Task id"))}/hold/reject`,
+    payload,
+  );
+  return res.data;
+};
+
 export const resumeWorkflowTask = async (id, payload = {}) => {
   const res = await api.patch(
     `/workflow/tasks/${encodeURIComponent(requireId(id, "Task id"))}/resume`,

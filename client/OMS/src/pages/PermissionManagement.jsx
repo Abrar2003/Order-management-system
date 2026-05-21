@@ -11,6 +11,19 @@ const formatActionLabel = (value = "") =>
 const clonePermissions = (permissions = {}) =>
   JSON.parse(JSON.stringify(permissions || {}));
 
+const ALL_VENDOR_TOKEN = "all";
+
+const cloneAccess = (access = {}) => ({
+  all_brands: Boolean(access?.all_brands ?? true),
+  allowed_brand_ids: Array.isArray(access?.allowed_brand_ids)
+    ? access.allowed_brand_ids.map((id) => String(id))
+    : [],
+  all_vendors: Boolean(access?.all_vendors ?? true),
+  allowed_vendors: Array.isArray(access?.allowed_vendors)
+    ? access.allowed_vendors.map((vendor) => String(vendor))
+    : [ALL_VENDOR_TOKEN],
+});
+
 const ADMIN_PERMISSION_MIRROR_ROLES = new Set([
   "manager",
   "product_manager",
@@ -28,6 +41,13 @@ const PermissionManagement = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [accessUsers, setAccessUsers] = useState([]);
+  const [brandOptions, setBrandOptions] = useState([]);
+  const [vendorOptions, setVendorOptions] = useState([]);
+  const [selectedAccessUserId, setSelectedAccessUserId] = useState("");
+  const [accessDraft, setAccessDraft] = useState(cloneAccess());
+  const [accessLoading, setAccessLoading] = useState(true);
+  const [accessSaving, setAccessSaving] = useState(false);
 
   const selectedRoleRecord = useMemo(
     () => roles.find((entry) => entry.role === selectedRole) || null,
@@ -35,6 +55,10 @@ const PermissionManagement = () => {
   );
   const isAdminMirrorRole = ADMIN_PERMISSION_MIRROR_ROLES.has(selectedRole);
   const selectedRoleLabel = ROLE_LABELS[selectedRole] || selectedRole || "This role";
+  const selectedAccessUser = useMemo(
+    () => accessUsers.find((user) => user._id === selectedAccessUserId) || null,
+    [accessUsers, selectedAccessUserId],
+  );
 
   const filteredModules = useMemo(() => {
     const search = moduleSearch.trim().toLowerCase();
@@ -94,15 +118,60 @@ const PermissionManagement = () => {
     }
   }, [isAdmin, selectedRole]);
 
+  const loadUserAccess = useCallback(async () => {
+    if (!isAdmin) {
+      setAccessLoading(false);
+      return;
+    }
+
+    setAccessLoading(true);
+    setError("");
+    try {
+      const response = await api.get("/permissions/users/access");
+      const users = response?.data?.users || [];
+      setAccessUsers(users);
+      setBrandOptions(response?.data?.brands || []);
+      setVendorOptions(response?.data?.vendors || []);
+      setSelectedAccessUserId((current) => {
+        const nextSelected =
+          users.find((user) => user._id === current) || users[0] || null;
+        if (nextSelected?._id) {
+          setAccessDraft(cloneAccess(nextSelected.data_access));
+          return nextSelected._id;
+        }
+        setAccessDraft(cloneAccess());
+        return "";
+      });
+    } catch (loadError) {
+      setError(
+        loadError?.response?.data?.message ||
+          loadError?.message ||
+          "Failed to load user data access.",
+      );
+    } finally {
+      setAccessLoading(false);
+    }
+  }, [isAdmin]);
+
   useEffect(() => {
     loadPermissions();
   }, [loadPermissions]);
+
+  useEffect(() => {
+    loadUserAccess();
+  }, [loadUserAccess]);
 
   useEffect(() => {
     if (selectedRoleRecord) {
       setDraftPermissions(clonePermissions(selectedRoleRecord.permissions));
     }
   }, [selectedRoleRecord]);
+
+  useEffect(() => {
+    if (selectedAccessUser) {
+      setAccessDraft(cloneAccess(selectedAccessUser.data_access));
+    }
+  }, [selectedAccessUser]);
 
   const updateRoleRecord = useCallback((updatedRole) => {
     setRoles((prev) =>
@@ -172,6 +241,82 @@ const PermissionManagement = () => {
     }
   };
 
+  const handleRefreshAll = () => {
+    loadPermissions();
+    loadUserAccess();
+  };
+
+  const toggleBrandAccess = (brandId) => {
+    setAccessDraft((prev) => {
+      const current = new Set(prev.allowed_brand_ids || []);
+      if (current.has(brandId)) current.delete(brandId);
+      else current.add(brandId);
+      return {
+        ...prev,
+        all_brands: false,
+        allowed_brand_ids: Array.from(current),
+      };
+    });
+  };
+
+  const toggleVendorAccess = (vendorName) => {
+    setAccessDraft((prev) => {
+      const current = new Set(
+        (prev.allowed_vendors || []).filter((vendor) => vendor !== ALL_VENDOR_TOKEN),
+      );
+      if (current.has(vendorName)) current.delete(vendorName);
+      else current.add(vendorName);
+      return {
+        ...prev,
+        all_vendors: false,
+        allowed_vendors: Array.from(current),
+      };
+    });
+  };
+
+  const handleSaveUserAccess = async () => {
+    if (!selectedAccessUserId) return;
+
+    if (!accessDraft.all_brands && accessDraft.allowed_brand_ids.length === 0) {
+      setError("Select at least one brand or keep All brands enabled.");
+      return;
+    }
+    if (!accessDraft.all_vendors && accessDraft.allowed_vendors.length === 0) {
+      setError("Select at least one vendor or keep All vendors enabled.");
+      return;
+    }
+
+    setAccessSaving(true);
+    setError("");
+    setSuccess("");
+    try {
+      const response = await api.patch(`/permissions/users/${selectedAccessUserId}/access`, {
+        all_brands: accessDraft.all_brands,
+        allowed_brand_ids: accessDraft.all_brands ? [] : accessDraft.allowed_brand_ids,
+        all_vendors: accessDraft.all_vendors,
+        allowed_vendors: accessDraft.all_vendors
+          ? [ALL_VENDOR_TOKEN]
+          : accessDraft.allowed_vendors,
+      });
+      const updatedUser = response?.data?.user;
+      setAccessUsers((prev) =>
+        prev.map((user) => (user._id === updatedUser?._id ? updatedUser : user)),
+      );
+      if (updatedUser?._id) {
+        setAccessDraft(cloneAccess(updatedUser.data_access));
+      }
+      setSuccess("User data access saved successfully.");
+    } catch (saveError) {
+      setError(
+        saveError?.response?.data?.message ||
+          saveError?.message ||
+          "Failed to save user data access.",
+      );
+    } finally {
+      setAccessSaving(false);
+    }
+  };
+
   if (!isAdmin) {
     return (
       <div className="page-shell py-4">
@@ -198,8 +343,8 @@ const PermissionManagement = () => {
         <button
           type="button"
           className="btn btn-outline-secondary"
-          onClick={loadPermissions}
-          disabled={loading || saving}
+          onClick={handleRefreshAll}
+          disabled={loading || saving || accessLoading || accessSaving}
         >
           Refresh
         </button>
@@ -329,6 +474,154 @@ const PermissionManagement = () => {
           >
             {saving ? "Saving..." : "Save Permissions"}
           </button>
+        </div>
+      </div>
+
+      <div className="card om-card shadow-sm mt-3">
+        <div className="card-body">
+          <div className="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+            <div>
+              <h3 className="h5 mb-1">User Data Access</h3>
+              <p className="text-secondary mb-0">
+                Assign brand and vendor access for each user.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleSaveUserAccess}
+              disabled={accessLoading || accessSaving || !selectedAccessUserId}
+            >
+              {accessSaving ? "Saving..." : "Save User Access"}
+            </button>
+          </div>
+
+          {accessLoading ? (
+            <div className="text-center text-secondary py-3">Loading user access...</div>
+          ) : accessUsers.length === 0 ? (
+            <div className="text-center text-secondary py-3">No users found.</div>
+          ) : (
+            <>
+              <div className="row g-3 align-items-end mb-3">
+                <div className="col-md-6 col-lg-4">
+                  <label className="form-label">User</label>
+                  <select
+                    className="form-select"
+                    value={selectedAccessUserId}
+                    onChange={(event) => setSelectedAccessUserId(event.target.value)}
+                    disabled={accessSaving}
+                  >
+                    {accessUsers.map((user) => (
+                      <option key={user._id} value={user._id}>
+                        {user.name || user.username} ({ROLE_LABELS[user.role] || user.role})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {selectedAccessUser && (
+                  <div className="col-md-6 text-secondary small">
+                    {selectedAccessUser.email || selectedAccessUser.username}
+                  </div>
+                )}
+              </div>
+
+              <div className="row g-3">
+                <div className="col-lg-6">
+                  <div className="data-access-panel">
+                    <div className="d-flex justify-content-between align-items-center mb-2">
+                      <h4 className="h6 mb-0">Brands</h4>
+                      <label className="form-check form-switch mb-0">
+                        <input
+                          type="checkbox"
+                          className="form-check-input"
+                          checked={accessDraft.all_brands}
+                          onChange={(event) =>
+                            setAccessDraft((prev) => ({
+                              ...prev,
+                              all_brands: event.target.checked,
+                              allowed_brand_ids: event.target.checked
+                                ? []
+                                : prev.allowed_brand_ids,
+                            }))
+                          }
+                        />
+                        <span className="form-check-label">All</span>
+                      </label>
+                    </div>
+                    <div className="data-access-options">
+                      {brandOptions.length === 0 ? (
+                        <div className="text-secondary small">No brands found.</div>
+                      ) : (
+                        brandOptions.map((brand) => (
+                          <label key={brand._id} className="form-check">
+                            <input
+                              type="checkbox"
+                              className="form-check-input"
+                              checked={
+                                accessDraft.all_brands ||
+                                accessDraft.allowed_brand_ids.includes(String(brand._id))
+                              }
+                              disabled={accessDraft.all_brands || accessSaving}
+                              onChange={() => toggleBrandAccess(String(brand._id))}
+                            />
+                            <span className="form-check-label">{brand.name}</span>
+                          </label>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="col-lg-6">
+                  <div className="data-access-panel">
+                    <div className="d-flex justify-content-between align-items-center mb-2">
+                      <h4 className="h6 mb-0">Vendors</h4>
+                      <label className="form-check form-switch mb-0">
+                        <input
+                          type="checkbox"
+                          className="form-check-input"
+                          checked={accessDraft.all_vendors}
+                          onChange={(event) =>
+                            setAccessDraft((prev) => ({
+                              ...prev,
+                              all_vendors: event.target.checked,
+                              allowed_vendors: event.target.checked
+                                ? [ALL_VENDOR_TOKEN]
+                                : prev.allowed_vendors.filter(
+                                    (vendor) => vendor !== ALL_VENDOR_TOKEN,
+                                  ),
+                            }))
+                          }
+                        />
+                        <span className="form-check-label">All</span>
+                      </label>
+                    </div>
+                    <div className="data-access-options">
+                      {vendorOptions.length === 0 ? (
+                        <div className="text-secondary small">No vendors found.</div>
+                      ) : (
+                        vendorOptions.map((vendor) => (
+                          <label key={vendor._id} className="form-check">
+                            <input
+                              type="checkbox"
+                              className="form-check-input"
+                              checked={
+                                accessDraft.all_vendors ||
+                                accessDraft.allowed_vendors.includes(vendor.name)
+                              }
+                              disabled={accessDraft.all_vendors || accessSaving}
+                              onChange={() => toggleVendorAccess(vendor.name)}
+                            />
+                            <span className="form-check-label">{vendor.name}</span>
+                          </label>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

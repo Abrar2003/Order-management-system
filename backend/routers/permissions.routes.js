@@ -6,7 +6,9 @@ const {
 const {
   getMyPermissions,
   getPermissions,
+  getUserDataAccessSettings,
   resetRolePermissionDefaults,
+  updateUserDataAccessSettings,
   updateRolePermissions,
 } = require("../controllers/permission.controller");
 
@@ -17,6 +19,8 @@ router.get("/me", auth, getMyPermissions);
 router.use(auth, requireAdminOnlyPermissionManagement);
 
 router.get("/", getPermissions);
+router.get("/users/access", getUserDataAccessSettings);
+router.patch("/users/:userId/access", updateUserDataAccessSettings);
 router.patch("/:role", updateRolePermissions);
 router.post("/reset/:role", resetRolePermissionDefaults);
 

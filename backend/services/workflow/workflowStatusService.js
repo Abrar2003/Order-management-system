@@ -270,6 +270,9 @@ const getTaskHoldPayload = (doc = {}) => {
     resumed_comment: normalizeText(hold?.resumed_comment),
     resumed_by: hold?.resumed_by || {},
     resumed_at: hold?.resumed_at || null,
+    rejected_comment: normalizeText(hold?.rejected_comment),
+    rejected_by: hold?.rejected_by || {},
+    rejected_at: hold?.rejected_at || null,
     total_paused_ms: Math.max(0, Number(hold?.total_paused_ms || 0)),
   };
 };
@@ -295,8 +298,11 @@ const getWorkflowDeadlineSummary = (doc = {}) => {
     : null;
   const activeDueDate = getActiveWorkflowDueDate(doc);
   const completedAt = getDateOrNull(doc?.completed_at);
-  const approvedAt = getDateOrNull(doc?.approved_at || doc?.reviewed_at);
-  const uploadedAt = getDateOrNull(doc?.uploaded_at);
+  const statusCanHaveApproval = ["approved", "uploaded"].includes(normalizedStatus);
+  const approvedAt = statusCanHaveApproval
+    ? getDateOrNull(doc?.approved_at || doc?.reviewed_at)
+    : null;
+  const uploadedAt = normalizedStatus === "uploaded" ? getDateOrNull(doc?.uploaded_at) : null;
   const now = new Date();
   const hold = getTaskHoldPayload(doc);
   const isHeld = normalizedStatus === "hold" || hold.status === "hold";
@@ -333,7 +339,7 @@ const getWorkflowDeadlineSummary = (doc = {}) => {
     : null;
 
   const uploadStatuses = buildWorkflowUploadStatuses(doc);
-  const pendingUploads = doc?.upload_required !== false
+  const pendingUploads = doc?.upload_required !== false && statusCanHaveApproval
     ? uploadStatuses.filter((entry) => normalizeKey(entry?.status) !== "uploaded")
     : [];
   const uploadDelayedAssignees = doc?.upload_required !== false && uploadDeadlineCutoff
@@ -490,6 +496,17 @@ const serializeTask = (doc = {}) => {
     normalizedStatus === "uploaded" &&
     uploadStatuses.some((entry) => normalizeKey(entry?.status) !== "uploaded");
   const displayStatus = hasPendingUploads ? "approved" : normalizedStatus;
+  const displayStatusCanHaveApproval = ["approved", "uploaded"].includes(displayStatus);
+  const serializedApprovedAt = displayStatusCanHaveApproval
+    ? doc?.approved_at || doc?.reviewed_at || null
+    : null;
+  const serializedApprovedBy = displayStatusCanHaveApproval
+    ? (
+        doc?.approved_by?.user || doc?.approved_by?.name || doc?.approved_by?.email
+          ? doc.approved_by
+          : doc?.reviewed_by || {}
+      )
+    : {};
 
   return {
     ...doc,
@@ -499,11 +516,8 @@ const serializeTask = (doc = {}) => {
     upload_required: doc?.upload_required !== false,
     upload_assignees: Array.isArray(doc?.upload_assignees) ? doc.upload_assignees : [],
     upload_statuses: uploadStatuses,
-    approved_at: doc?.approved_at || doc?.reviewed_at || null,
-    approved_by:
-      doc?.approved_by?.user || doc?.approved_by?.name || doc?.approved_by?.email
-        ? doc.approved_by
-        : doc?.reviewed_by || {},
+    approved_at: serializedApprovedAt,
+    approved_by: serializedApprovedBy,
     reworked,
     rework_due_dates: reworkDueDates,
     hold: getTaskHoldPayload(doc),
@@ -1116,6 +1130,7 @@ const buildNotApprovedByDueDateExpression = () => {
   const dueDateCutoff = buildDueDateCutoffExpression();
   return {
     $or: [
+      { $in: ["$status", PRE_TERMINAL_TASK_STATUS_VALUES] },
       { $eq: [effectiveApprovedAt, null] },
       { $gte: [effectiveApprovedAt, dueDateCutoff] },
     ],
@@ -2507,6 +2522,8 @@ const applyTaskTransition = async ({
     task.completed_at = null;
     task.approved_at = null;
     task.approved_by = {};
+    task.reviewed_at = null;
+    task.reviewed_by = {};
     task.uploaded_at = null;
     task.uploaded_by = {};
     resetTaskUploadStatuses(task);
@@ -2516,6 +2533,8 @@ const applyTaskTransition = async ({
     task.completed_at = new Date();
     task.approved_at = null;
     task.approved_by = {};
+    task.reviewed_at = null;
+    task.reviewed_by = {};
     task.uploaded_at = null;
     task.uploaded_by = {};
     resetTaskUploadStatuses(task);
@@ -2921,6 +2940,8 @@ const reworkWorkflowTask = async ({
   task.completed_at = null;
   task.approved_at = null;
   task.approved_by = {};
+  task.reviewed_at = null;
+  task.reviewed_by = {};
   task.uploaded_at = null;
   task.uploaded_by = {};
   resetTaskUploadStatuses(task);
@@ -3043,6 +3064,9 @@ const requestWorkflowTaskHold = async ({
     resumed_comment: "",
     resumed_by: {},
     resumed_at: null,
+    rejected_comment: "",
+    rejected_by: {},
+    rejected_at: null,
     total_paused_ms: currentHold.total_paused_ms,
   };
   task.updated_by = auditActor;
@@ -3124,6 +3148,9 @@ const approveWorkflowTaskHold = async ({
     resumed_comment: "",
     resumed_by: {},
     resumed_at: null,
+    rejected_comment: "",
+    rejected_by: {},
+    rejected_at: null,
   };
   task.updated_by = auditActor;
   await task.save();
@@ -3157,6 +3184,73 @@ const approveWorkflowTaskHold = async ({
     batch,
     actor,
     message: "Workflow task hold approved",
+  });
+
+  return taskDetail;
+};
+
+const rejectWorkflowTaskHold = async ({
+  taskId,
+  actor = {},
+  note = "",
+  realtimeSource = null,
+} = {}) => {
+  const task = await getMutableTaskById(taskId);
+  if (!isTaskHoldApprover(actor, task)) {
+    throw new Error("Only the task creator or admin can reject hold");
+  }
+
+  const hold = getTaskHoldPayload(task);
+  if (hold.status !== "pending") {
+    throw new Error("This task does not have a pending hold request");
+  }
+
+  const currentStatus = normalizeWorkflowTaskStatus(task.status, {
+    fallback: hold.previous_status || "assigned",
+  }) || hold.previous_status || "assigned";
+  const auditActor = buildAuditActor(actor);
+  const rejectedAt = new Date();
+  const rejectNote = normalizeText(note);
+
+  task.hold = {
+    ...hold,
+    status: "none",
+    rejected_comment: rejectNote,
+    rejected_by: auditActor,
+    rejected_at: rejectedAt,
+  };
+  task.updated_by = auditActor;
+  await task.save();
+
+  await TaskStatusHistory.create({
+    task: task._id,
+    batch: task.batch || null,
+    from_status: currentStatus,
+    to_status: currentStatus,
+    changed_by: auditActor,
+    changed_at: rejectedAt,
+    note: rejectNote,
+    metadata: {
+      hold_rejected: true,
+      hold_previous_status: hold.previous_status || currentStatus,
+    },
+  });
+  await createTransitionCommentIfNeeded({
+    task,
+    actor,
+    note: rejectNote || "Hold request rejected",
+    commentType: "hold",
+  });
+
+  const batch = await recalculateWorkflowBatchIfPresent(task.batch);
+  const taskDetail = await buildTaskDetail(task._id, actor);
+
+  emitWorkflowTaskMutation({
+    realtimeSource,
+    task: taskDetail,
+    batch,
+    actor,
+    message: "Workflow task hold rejected",
   });
 
   return taskDetail;
@@ -3861,6 +3955,7 @@ module.exports = {
   listWorkflowTasks,
   reviewWorkflowTask,
   reworkWorkflowTask,
+  rejectWorkflowTaskHold,
   requestWorkflowTaskHold,
   resumeWorkflowTask,
   startWorkflowTask,

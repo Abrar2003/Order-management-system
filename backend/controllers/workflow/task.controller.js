@@ -11,6 +11,7 @@ const {
   listWorkflowTasks,
   reviewWorkflowTask,
   reworkWorkflowTask,
+  rejectWorkflowTaskHold,
   requestWorkflowTaskHold,
   resumeWorkflowTask,
   startWorkflowTask,
@@ -367,6 +368,29 @@ const approveHoldTask = async (req, res) => {
   }
 };
 
+const rejectHoldTask = async (req, res) => {
+  try {
+    const data = await rejectWorkflowTaskHold({
+      taskId: req.params.id,
+      actor: req.user,
+      note: req.body?.note || req.body?.comment || "",
+      realtimeSource: req,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Workflow task hold rejected successfully",
+      data,
+    });
+  } catch (error) {
+    console.error("Reject Workflow Task Hold Error:", error);
+    return res.status(getErrorStatusCode(error)).json({
+      success: false,
+      message: error.message || "Failed to reject workflow task hold",
+    });
+  }
+};
+
 const resumeTask = async (req, res) => {
   try {
     const data = await resumeWorkflowTask({
@@ -502,6 +526,7 @@ module.exports = {
   removeTask,
   reviewTask,
   reworkTask,
+  rejectHoldTask,
   requestHoldTask,
   resumeTask,
   startTask,
