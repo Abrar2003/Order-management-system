@@ -56,8 +56,8 @@ const getInspectionRecordSortTime = (record = {}) =>
 const formatDisplayLbhValue = (value) =>
   formatLbhValue(value, { fallback: "Not Set", suffix: SIZE_UNIT });
 
-const ITEM_INDEXED_REMARKS = ["item1", "item2", "item3", "item4"];
-const BOX_INDEXED_REMARKS = ["box1", "box2", "box3", "box4"];
+const ITEM_INDEXED_REMARKS = ["top", "base", "item", "item1", "item2", "item3", "item4"];
+const BOX_INDEXED_REMARKS = ["top", "base", "box", "inner", "master", "box1", "box2", "box3", "box4"];
 
 const formatMeasurementRemark = (remark = "") => {
   const normalized = String(remark || "").trim().toLowerCase();
@@ -297,6 +297,34 @@ const normalizeMeasurementEntries = (
     remarkOrder,
   );
 
+const toLegacyMeasurementEntry = (remark = "", value = null) => {
+  if (!hasAnyPositiveLbh(value || {})) return null;
+  return {
+    remark,
+    L: Number(value?.L || 0),
+    B: Number(value?.B || 0),
+    H: Number(value?.H || 0),
+    weight: 0,
+  };
+};
+
+const buildLegacyLbhEntries = ({
+  top = null,
+  bottom = null,
+  single = null,
+  fallback = null,
+  singleRemark = "item",
+  remarkOrder = [],
+} = {}) =>
+  sortMeasurementEntries(
+    [
+      toLegacyMeasurementEntry("top", top),
+      toLegacyMeasurementEntry("base", bottom),
+      toLegacyMeasurementEntry(singleRemark, pickDisplayableLbh(single, fallback)),
+    ].filter(Boolean),
+    remarkOrder,
+  ).slice(0, MEASUREMENT_ENTRY_DISPLAY_LIMIT);
+
 const toMeasurementRowEntry = (entry = {}, index = 0, value, display = "") => ({
   key: buildMeasurementEntryKey(entry, index),
   label: formatMeasurementRemark(entry?.remark) || `Entry ${index + 1}`,
@@ -313,7 +341,7 @@ const toStructuredLbhFromEntries = (
   if (normalizedEntries.length === 0) {
     return formatStructuredLbhValue({ single: fallback, fallback });
   }
-  if (hasIndexedMeasurementEntries(normalizedEntries, indexedRemarks)) {
+  if (normalizedEntries.length > 1 || hasIndexedMeasurementEntries(normalizedEntries, indexedRemarks)) {
     return {
       mode: "indexed",
       entries: normalizedEntries.map((entry, index) =>
@@ -354,7 +382,7 @@ const toStructuredWeightFromEntries = (
   if (normalizedEntries.length === 0) {
     return formatStructuredWeightValue({ single: fallback, fallback });
   }
-  if (hasIndexedMeasurementEntries(normalizedEntries, indexedRemarks)) {
+  if (normalizedEntries.length > 1 || hasIndexedMeasurementEntries(normalizedEntries, indexedRemarks)) {
     const indexedEntries = normalizedEntries.map((entry, index) =>
       toMeasurementRowEntry(
         entry,
@@ -1073,23 +1101,55 @@ const InspectionReport = () => {
     const pisItemEntries = normalizeMeasurementEntries(
       itemMaster?.pis_item_sizes,
       "net_weight",
-      ["top", "base", ...ITEM_INDEXED_REMARKS],
+      ITEM_INDEXED_REMARKS,
     );
     const inspectedItemEntries = normalizeMeasurementEntries(
       inspectedItemSizesSource,
       "net_weight",
-      ["top", "base", ...ITEM_INDEXED_REMARKS],
+      ITEM_INDEXED_REMARKS,
     );
     const pisBoxEntries = normalizeMeasurementEntries(
       itemMaster?.pis_box_sizes,
       "gross_weight",
-      ["top", "base", ...BOX_INDEXED_REMARKS],
+      BOX_INDEXED_REMARKS,
     );
     const inspectedBoxEntries = normalizeMeasurementEntries(
       inspectedBoxSizesSource,
       "gross_weight",
-      ["top", "base", ...BOX_INDEXED_REMARKS],
+      BOX_INDEXED_REMARKS,
     );
+    const inspectedItemLegacyEntries = useLatestItemSizes
+      ? []
+      : buildLegacyLbhEntries({
+          top: itemMaster?.inspected_item_top_LBH,
+          bottom: itemMaster?.inspected_item_bottom_LBH,
+          single: itemMaster?.inspected_item_LBH,
+          fallback: itemMaster?.item_LBH,
+          singleRemark: "item",
+          remarkOrder: ITEM_INDEXED_REMARKS,
+        });
+    const inspectedBoxLegacyEntries = useLatestBoxSizes
+      ? []
+      : buildLegacyLbhEntries({
+          top:
+            itemMaster?.inspected_box_top_LBH ||
+            itemMaster?.inspected_top_LBH ||
+            itemMaster?.inspected_item_top_LBH,
+          bottom:
+            itemMaster?.inspected_box_bottom_LBH ||
+            itemMaster?.inspected_bottom_LBH ||
+            itemMaster?.inspected_item_bottom_LBH,
+          single:
+            itemMaster?.inspected_box_LBH ||
+            itemMaster?.inspected_item_LBH,
+          fallback: itemMaster?.box_LBH || itemMaster?.item_LBH,
+          singleRemark: "box",
+          remarkOrder: BOX_INDEXED_REMARKS,
+        });
+    const inspectedItemLbhEntries =
+      inspectedItemEntries.length > 0 ? inspectedItemEntries : inspectedItemLegacyEntries;
+    const inspectedBoxLbhEntries =
+      inspectedBoxEntries.length > 0 ? inspectedBoxEntries : inspectedBoxLegacyEntries;
     const pisProductLbh =
       pisItemEntries.length > 0
         ? toStructuredLbhFromEntries(pisItemEntries, null, {
@@ -1097,9 +1157,9 @@ const InspectionReport = () => {
           })
         : formatStructuredLbhValue();
     const checkedProductLbh =
-      inspectedItemEntries.length > 0
+      inspectedItemLbhEntries.length > 0
         ? toStructuredLbhFromEntries(
-            inspectedItemEntries,
+            inspectedItemLbhEntries,
             useLatestItemSizes
               ? null
               : itemMaster?.inspected_item_LBH || itemMaster?.item_LBH,
@@ -1132,9 +1192,9 @@ const InspectionReport = () => {
           || itemMaster?.inspected_item_bottom_LBH
           || {};
     const checkedPackedSize =
-      inspectedBoxEntries.length > 0
+      inspectedBoxLbhEntries.length > 0
         ? toStructuredLbhFromEntries(
-            inspectedBoxEntries,
+            inspectedBoxLbhEntries,
             useLatestBoxSizes
               ? null
               : itemMaster?.inspected_box_LBH
