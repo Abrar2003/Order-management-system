@@ -3464,7 +3464,8 @@ const updateWorkflowTaskDetails = async ({
     if (!dueDate) {
       throw new Error("due_date is required");
     }
-    const currentTime = task.due_date ? task.due_date.getTime() : null;
+    const currentActiveDueDate = getActiveWorkflowDueDate(task) || task.due_date || null;
+    const currentTime = currentActiveDueDate ? currentActiveDueDate.getTime() : null;
     const nextTime = dueDate ? dueDate.getTime() : null;
     if (currentTime !== nextTime) {
       const dueDateNote = normalizeText(payload?.due_date_note || payload?.note || payload?.comment);
@@ -3472,7 +3473,7 @@ const updateWorkflowTaskDetails = async ({
         throw new Error("A due date update comment is required");
       }
       dueDateHistoryPayload = {
-        previous_due_date: task.due_date || null,
+        previous_due_date: currentActiveDueDate,
         next_due_date: dueDate,
         note: dueDateNote,
       };

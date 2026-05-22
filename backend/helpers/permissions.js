@@ -39,6 +39,7 @@ const PERMISSION_MODULES = Object.freeze([
   { key: "users", label: "Users" },
   { key: "settings", label: "Settings" },
   { key: "brands", label: "Brands" },
+  { key: "vendors", label: "Vendors" },
   { key: "finishes", label: "Finishes" },
   { key: "images_documents", label: "Images / Documents" },
   { key: "labels", label: "Labels" },
@@ -207,6 +208,7 @@ const buildUserPermissions = () => {
     "reports",
     "calendar",
     "brands",
+    "vendors",
     "finishes",
     "images_documents",
   ].forEach((moduleKey) => grant(permissions, moduleKey, ["view"]));
@@ -238,6 +240,7 @@ const buildQcPermissions = () => {
     "samples",
     "reports",
     "brands",
+    "vendors",
     "finishes",
     "images_documents",
   ].forEach((moduleKey) => grant(permissions, moduleKey, ["view"]));

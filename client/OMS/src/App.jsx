@@ -21,6 +21,7 @@ import QCPage from "./pages/QcPage";
 import QcDetails from "./pages/QcDetails";
 import OrdersByBrand from "./pages/OrdersByBrand";
 import Signup from "./pages/Signup";
+import CreateVendor from "./pages/CreateVendor";
 import OpenOrders from "./pages/OpenOrders";
 import PackedGoods from "./pages/PackedGoods";
 import DailyReport from "./pages/DailyReport";
@@ -543,6 +544,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <Signup />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/vendors/new"
+            element={
+              <ProtectedRoute>
+                <CreateVendor />
               </ProtectedRoute>
             }
           />

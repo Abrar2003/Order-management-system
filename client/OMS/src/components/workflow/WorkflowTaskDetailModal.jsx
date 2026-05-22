@@ -87,6 +87,9 @@ const formatDateInputValue = (value) => {
   return toISODateString(value);
 };
 
+const getEditableDueDateValue = (task = {}) =>
+  formatDateInputValue(task?.active_due_date || task?.due_date);
+
 const buildTaskEditForm = (task = {}) => ({
   title: normalizeText(task?.title),
   description: normalizeText(task?.description),
@@ -94,7 +97,7 @@ const buildTaskEditForm = (task = {}) => ({
   department: task?.department?._id || task?.department || "",
   priority: normalizeText(task?.priority || "normal"),
   assignmentDate: formatDateInputValue(task?.assigned_at),
-  dueDate: formatDateInputValue(task?.due_date),
+  dueDate: getEditableDueDateValue(task),
   uploadRequired: task?.upload_required !== false,
   uploadAssigneeIds: Array.isArray(task?.upload_assignees)
     ? task.upload_assignees.map((entry) => getUserId(entry)).filter(Boolean)
@@ -368,7 +371,7 @@ const WorkflowTaskDetailModal = ({
       setActionError("Due date is required.");
       return;
     }
-    const currentDueDate = formatDateInputValue(task?.due_date);
+    const currentDueDate = getEditableDueDateValue(task);
     const dueDateChanged = normalizeText(editForm.dueDate) !== normalizeText(currentDueDate);
     if (dueDateChanged && !normalizeText(dueDateNote)) {
       setActionError("Due date update comment is required.");
@@ -1033,7 +1036,7 @@ const WorkflowTaskDetailModal = ({
                               required
                             />
                           </div>
-                          {normalizeText(editForm.dueDate) !== normalizeText(formatDateInputValue(task?.due_date)) && (
+                          {normalizeText(editForm.dueDate) !== normalizeText(getEditableDueDateValue(task)) && (
                             <div className="col-12">
                               <label className="form-label">Due Date Update Comment</label>
                               <textarea

@@ -92,6 +92,7 @@ const Navbar = () => {
   const canManageLabels =
     hasPermission("labels", "manage") || hasPermission("labels", "assign");
   const canCreateUsers = hasPermission("users", "create");
+  const canCreateVendors = hasPermission("vendors", "create");
   const canAccessAnalytics = hasPermission("reports", "view");
   const canManageProductDatabase = hasPermission("product_database", "view");
   const canUploadFinish = hasPermission("finishes", "upload");
@@ -449,6 +450,10 @@ const Navbar = () => {
         items.push(routeMenuItem("create-users", "Create User", "/users/new"));
       }
 
+      if (canCreateVendors) {
+        items.push(routeMenuItem("create-vendors", "Create Vendor", "/vendors/new"));
+      }
+
       if (hasPermission("product_type_templates", "view") && isManagerLikeRole(permissionRole)) {
         items.push(
           routeMenuItem(
@@ -473,7 +478,7 @@ const Navbar = () => {
 
       return items;
     },
-    [canCreateUsers, hasPermission, isAdmin, permissionRole, themeLabel],
+    [canCreateUsers, canCreateVendors, hasPermission, isAdmin, permissionRole, themeLabel],
   );
 
   const menuSections = useMemo(

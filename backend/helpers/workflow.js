@@ -64,6 +64,7 @@ const WORKFLOW_TASK_TYPE_CATEGORIES = Object.freeze([
   "carton",
   "sticker",
   "other",
+  "operations",
 ]);
 const WORKFLOW_AUTO_CREATE_MODES = Object.freeze([
   "per_file",
@@ -365,7 +366,6 @@ const buildEmptyTaskCounts = () => ({
   uploaded_tasks: 0,
   completed_tasks: 0,
   complete_done_tasks: 0,
-  hold_tasks: 0,
   reworked_tasks: 0,
   reworked_before_approval_tasks: 0,
   reworked_after_approval_tasks: 0,
@@ -402,7 +402,6 @@ const buildDerivedTaskCounts = (taskCounts = {}) => {
   normalized.complete_done_tasks = Number(
     normalized.complete_done_tasks || normalized.completed_tasks || normalized.uploaded_tasks || 0,
   );
-  normalized.hold_tasks = Number(normalized.hold_tasks || 0);
   normalized.reworked_tasks = Number(normalized.reworked_tasks || 0);
   normalized.reworked_before_approval_tasks = Number(
     normalized.reworked_before_approval_tasks || 0,

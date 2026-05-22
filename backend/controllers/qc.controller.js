@@ -8011,18 +8011,30 @@ exports.transferQcRequest = async (req, res) => {
       return res.status(404).json({ message: "Selected request history row not found" });
     }
 
-    if (
-      normalizeRequestHistoryStatus(requestEntry?.status) ===
-      normalizeRequestHistoryStatus(REQUEST_HISTORY_STATUS.TRANSFERRED)
-    ) {
+    const selectedRequestStatus = normalizeRequestHistoryStatus(
+      requestEntry?.status || REQUEST_HISTORY_STATUS.OPEN,
+    );
+    const latestRequestEntry = resolveLatestRequestEntry(qc.request_history || []);
+    const latestRequestHistoryId = String(latestRequestEntry?._id || "").trim();
+
+    if (String(requestEntry?._id || "").trim() !== latestRequestHistoryId) {
+      return res.status(400).json({
+        message: "Only the latest QC request can be transferred",
+      });
+    }
+
+    if (selectedRequestStatus === REQUEST_HISTORY_STATUS.TRANSFERRED) {
       return res.status(400).json({ message: "This request is already transferred" });
     }
 
-    if (
-      normalizeRequestHistoryStatus(requestEntry?.status) ===
-      normalizeRequestHistoryStatus(REQUEST_HISTORY_STATUS.REJECTED)
-    ) {
+    if (selectedRequestStatus === REQUEST_HISTORY_STATUS.REJECTED) {
       return res.status(400).json({ message: "Rejected requests cannot be transferred" });
+    }
+
+    if (selectedRequestStatus !== REQUEST_HISTORY_STATUS.OPEN) {
+      return res.status(400).json({
+        message: "Only open QC requests can be transferred",
+      });
     }
 
     const currentRequestInspectorId = String(
@@ -8039,33 +8051,45 @@ exports.transferQcRequest = async (req, res) => {
       request_history_id: requestEntry._id,
     }).sort({ createdAt: -1 });
 
-    if (!latestInspection) {
-      return res.status(400).json({
-        message: "No linked inspection record found for the selected request",
+    let latestInspectionStatus = INSPECTION_RECORD_STATUS.PENDING;
+    if (latestInspection) {
+      latestInspectionStatus = resolveInspectionRecordStatus({
+        checked: latestInspection?.checked,
+        goodsNotReady: latestInspection?.goods_not_ready,
+        explicitStatus: latestInspection?.status,
       });
-    }
+      if (
+        normalizeInspectionStatus(latestInspectionStatus) ===
+        normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED)
+      ) {
+        return res.status(400).json({
+          message: "The latest inspection record is already transferred",
+        });
+      }
 
-    const latestInspectionStatus = resolveInspectionRecordStatus({
-      checked: latestInspection?.checked,
-      goodsNotReady: latestInspection?.goods_not_ready,
-      explicitStatus: latestInspection?.status,
-    });
-    if (
-      normalizeInspectionStatus(latestInspectionStatus) ===
-      normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED)
-    ) {
-      return res.status(400).json({
-        message: "The latest inspection record is already transferred",
-      });
-    }
+      if (
+        normalizeInspectionStatus(latestInspectionStatus) ===
+        normalizeInspectionStatus(INSPECTION_RECORD_STATUS.REJECTED)
+      ) {
+        return res.status(400).json({
+          message: "Rejected requests cannot be transferred",
+        });
+      }
 
-    if (
-      normalizeInspectionStatus(latestInspectionStatus) ===
-      normalizeInspectionStatus(INSPECTION_RECORD_STATUS.REJECTED)
-    ) {
-      return res.status(400).json({
-        message: "Rejected requests cannot be transferred",
+      const latestInspectionHasActivity = hasInspectionRecordActivity({
+        checked: latestInspection?.checked,
+        passed: latestInspection?.passed,
+        vendorOffered: latestInspection?.vendor_offered,
+        labelsAdded: latestInspection?.labels_added,
+        labelRanges: latestInspection?.label_ranges,
+        goodsNotReady: latestInspection?.goods_not_ready,
+        status: latestInspectionStatus,
       });
+      if (latestInspectionHasActivity) {
+        return res.status(400).json({
+          message: "This request has already been worked on and cannot be transferred",
+        });
+      }
     }
 
     const requestedQuantity = toNonNegativeNumber(
@@ -8101,11 +8125,13 @@ exports.transferQcRequest = async (req, res) => {
       ? `Transferred from ${previousInspectorName}`
       : "";
 
-    latestInspection.status = INSPECTION_RECORD_STATUS.TRANSFERRED;
-    latestInspection.inspection_date = transferDate;
-    latestInspection.remarks = transferNote;
-    latestInspection.updated_by = buildAuditActor(req.user);
-    await latestInspection.save();
+    if (latestInspection) {
+      latestInspection.status = INSPECTION_RECORD_STATUS.TRANSFERRED;
+      latestInspection.inspection_date = transferDate;
+      latestInspection.remarks = transferNote;
+      latestInspection.updated_by = buildAuditActor(req.user);
+      await latestInspection.save();
+    }
 
     requestEntry.status = REQUEST_HISTORY_STATUS.TRANSFERRED;
     requestEntry.remarks = transferNote;
@@ -8120,7 +8146,7 @@ exports.transferQcRequest = async (req, res) => {
       request_type: normalizeQcRequestType(
         requestEntry?.request_type || qc?.request_type,
       ),
-      quantity_requested: requestedQuantity,
+      quantity_requested: pendingQuantity,
       inspector: targetInspectorId,
       status: REQUEST_HISTORY_STATUS.OPEN,
       remarks: newRequestRemarks,
@@ -8168,8 +8194,10 @@ exports.transferQcRequest = async (req, res) => {
           name: targetInspector.name || "Selected Inspector",
         },
         source_request_status: REQUEST_HISTORY_STATUS.TRANSFERRED,
-        source_inspection_status: INSPECTION_RECORD_STATUS.TRANSFERRED,
-        transfer_quantity: requestedQuantity,
+        source_inspection_status: latestInspection
+          ? INSPECTION_RECORD_STATUS.TRANSFERRED
+          : INSPECTION_RECORD_STATUS.PENDING,
+        transfer_quantity: pendingQuantity,
         pending_quantity: pendingQuantity,
       },
     });

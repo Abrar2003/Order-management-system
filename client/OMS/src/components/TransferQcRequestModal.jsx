@@ -3,8 +3,14 @@ import api from "../api/axios";
 import { formatDateDDMMYYYY } from "../utils/date";
 
 const normalizeStatus = (value) => String(value || "").trim().toLowerCase();
-const formatStatusLabel = (value) => {
+const normalizeRequestStatus = (value) => {
   const normalized = normalizeStatus(value);
+  if (normalized === "transferred") return "transfered";
+  if (normalized === "pending") return "open";
+  return normalized || "open";
+};
+const formatStatusLabel = (value) => {
+  const normalized = normalizeRequestStatus(value);
   if (normalized === "transfered" || normalized === "transferred") {
     return "Transferred";
   }
@@ -51,13 +57,18 @@ const TransferQcRequestModal = ({ qc, onClose, onTransferred }) => {
 
   const requestRows = useMemo(() => {
     const requestHistory = Array.isArray(qc?.request_history) ? qc.request_history : [];
+    const latestRequestId = requestHistory[requestHistory.length - 1]?._id;
 
     return requestHistory.map((entry) => {
       const requestHistoryId = String(entry?._id || "").trim();
       const requestedQuantity = Number(entry?.quantity_requested || 0);
-      const status = normalizeStatus(entry?.status);
+      const status = normalizeRequestStatus(entry?.status);
       const isTransferred = status === "transfered" || status === "transferred";
       const isRejected = status === "rejected";
+      const isOpen = status === "open";
+      const isLatestRequest =
+        requestHistoryId &&
+        String(latestRequestId || "").trim() === requestHistoryId;
 
       return {
         id: requestHistoryId,
@@ -69,7 +80,12 @@ const TransferQcRequestModal = ({ qc, onClose, onTransferred }) => {
         quantity_transferable: requestedQuantity,
         status: entry?.status || "open",
         remarks: String(entry?.remarks || "").trim(),
-        selectable: !isTransferred && !isRejected && requestedQuantity > 0,
+        selectable:
+          isOpen &&
+          !isTransferred &&
+          !isRejected &&
+          isLatestRequest &&
+          requestedQuantity > 0,
       };
     });
   }, [qc?.request_history]);

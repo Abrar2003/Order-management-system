@@ -16,6 +16,30 @@ const vendorSchema = new mongoose.Schema({
   address: {
     type: String,
   },
+  vendor_code: {
+    type: String,
+    required: true,
+  },
+  contact_person: [{
+    name: { type: String },
+    email: { type: String },
+    phone: { type: String },
+  }],
+  is_active: {
+    type: Boolean,
+    default: true,
+  },
+  created_at: {
+    type: Date,
+    default: Date.now,
+  },
+  updated_at: {
+    type: Date,
+    default: Date.now,
+  },
+  deleted_at: {
+    type: Date,
+  },
 });
 
 module.exports = mongoose.model("vendors", vendorSchema);

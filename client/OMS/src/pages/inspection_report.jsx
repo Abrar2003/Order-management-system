@@ -47,6 +47,12 @@ const toTimestamp = (value) => {
   return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
 };
 
+const getInspectionRecordSortTime = (record = {}) =>
+  toTimestamp(record?.inspection_date) ||
+  toTimestamp(record?.createdAt) ||
+  toTimestamp(record?.requested_date) ||
+  0;
+
 const formatDisplayLbhValue = (value) =>
   formatLbhValue(value, { fallback: "Not Set", suffix: SIZE_UNIT });
 
@@ -88,6 +94,14 @@ const hasIndexedMeasurementEntries = (entries = [], indexedRemarks = []) =>
     (Array.isArray(indexedRemarks) ? indexedRemarks : []).includes(
       String(entry?.remark || "").trim().toLowerCase(),
     ));
+
+const hasMeasurementEntryData = (entry = {}) =>
+  hasAnyPositiveLbh(entry) ||
+  toPositiveWeightOrNull(entry?.net_weight) !== null ||
+  toPositiveWeightOrNull(entry?.gross_weight) !== null;
+
+const hasMeasurementEntriesData = (entries = []) =>
+  Array.isArray(entries) && entries.some((entry) => hasMeasurementEntryData(entry));
 
 const toPositiveWeightOrNull = (value) => {
   const parsed = Number(value);
@@ -805,13 +819,28 @@ const InspectionReport = () => {
         passedQty: Number(record?.passed ?? 0),
         pendingAfter: Number(record?.pending_after ?? 0),
         remarks: toDisplayValue(record?.remarks, "None"),
-        sortTime:
-          toTimestamp(record?.inspection_date) ||
-          toTimestamp(record?.createdAt) ||
-          toTimestamp(record?.requested_date),
+        sortTime: getInspectionRecordSortTime(record),
       }))
       .sort((a, b) => (b.sortTime || 0) - (a.sortTime || 0));
   }, [qc?.inspection_record, qc?.request_date]);
+
+  const latestInspectionRecord = useMemo(() => {
+    const sourceRows = Array.isArray(qc?.inspection_record) ? qc.inspection_record : [];
+
+    return sourceRows.reduce((latest, record) => {
+      if (!latest) return record;
+
+      const latestSortTime = getInspectionRecordSortTime(latest);
+      const recordSortTime = getInspectionRecordSortTime(record);
+      if (recordSortTime !== latestSortTime) {
+        return recordSortTime > latestSortTime ? record : latest;
+      }
+
+      const latestCreatedTime = toTimestamp(latest?.createdAt);
+      const recordCreatedTime = toTimestamp(record?.createdAt);
+      return recordCreatedTime > latestCreatedTime ? record : latest;
+    }, null);
+  }, [qc?.inspection_record]);
 
   const inspectionRemarkRows = useMemo(
     () =>
@@ -1025,13 +1054,29 @@ const InspectionReport = () => {
 
   const itemMasterSummary = useMemo(() => {
     const itemMaster = qc?.item_master || {};
+    const inspectedSource = latestInspectionRecord || null;
+    const hasLatestInspectionRecord = Boolean(inspectedSource);
+    const latestInspectedItemSizes = hasMeasurementEntriesData(
+      inspectedSource?.inspected_item_sizes,
+    )
+      ? inspectedSource.inspected_item_sizes
+      : null;
+    const latestInspectedBoxSizes = hasMeasurementEntriesData(
+      inspectedSource?.inspected_box_sizes,
+    )
+      ? inspectedSource.inspected_box_sizes
+      : null;
+    const inspectedItemSizesSource = latestInspectedItemSizes || itemMaster?.inspected_item_sizes;
+    const inspectedBoxSizesSource = latestInspectedBoxSizes || itemMaster?.inspected_box_sizes;
+    const useLatestItemSizes = Boolean(latestInspectedItemSizes);
+    const useLatestBoxSizes = Boolean(latestInspectedBoxSizes);
     const pisItemEntries = normalizeMeasurementEntries(
       itemMaster?.pis_item_sizes,
       "net_weight",
       ["top", "base", ...ITEM_INDEXED_REMARKS],
     );
     const inspectedItemEntries = normalizeMeasurementEntries(
-      itemMaster?.inspected_item_sizes,
+      inspectedItemSizesSource,
       "net_weight",
       ["top", "base", ...ITEM_INDEXED_REMARKS],
     );
@@ -1041,7 +1086,7 @@ const InspectionReport = () => {
       ["top", "base", ...BOX_INDEXED_REMARKS],
     );
     const inspectedBoxEntries = normalizeMeasurementEntries(
-      itemMaster?.inspected_box_sizes,
+      inspectedBoxSizesSource,
       "gross_weight",
       ["top", "base", ...BOX_INDEXED_REMARKS],
     );
@@ -1055,14 +1100,16 @@ const InspectionReport = () => {
       inspectedItemEntries.length > 0
         ? toStructuredLbhFromEntries(
             inspectedItemEntries,
-            itemMaster?.inspected_item_LBH || itemMaster?.item_LBH,
+            useLatestItemSizes
+              ? null
+              : itemMaster?.inspected_item_LBH || itemMaster?.item_LBH,
             { indexedRemarks: ITEM_INDEXED_REMARKS },
           )
         : formatStructuredLbhValue({
-            top: itemMaster?.inspected_item_top_LBH,
-            bottom: itemMaster?.inspected_item_bottom_LBH,
-            single: itemMaster?.inspected_item_LBH,
-            fallback: itemMaster?.item_LBH,
+            top: useLatestItemSizes ? null : itemMaster?.inspected_item_top_LBH,
+            bottom: useLatestItemSizes ? null : itemMaster?.inspected_item_bottom_LBH,
+            single: useLatestItemSizes ? null : itemMaster?.inspected_item_LBH,
+            fallback: useLatestItemSizes ? null : itemMaster?.item_LBH,
           });
     const pisPackedSize =
       pisBoxEntries.length > 0
@@ -1071,34 +1118,42 @@ const InspectionReport = () => {
           })
         : formatStructuredLbhValue();
     const inspectedTopLbh =
-      itemMaster?.inspected_box_top_LBH
-      || itemMaster?.inspected_top_LBH
-      || itemMaster?.inspected_item_top_LBH
-      || {};
+      useLatestBoxSizes
+        ? {}
+        : itemMaster?.inspected_box_top_LBH
+          || itemMaster?.inspected_top_LBH
+          || itemMaster?.inspected_item_top_LBH
+          || {};
     const inspectedBottomLbh =
-      itemMaster?.inspected_box_bottom_LBH
-      || itemMaster?.inspected_bottom_LBH
-      || itemMaster?.inspected_item_bottom_LBH
-      || {};
+      useLatestBoxSizes
+        ? {}
+        : itemMaster?.inspected_box_bottom_LBH
+          || itemMaster?.inspected_bottom_LBH
+          || itemMaster?.inspected_item_bottom_LBH
+          || {};
     const checkedPackedSize =
       inspectedBoxEntries.length > 0
         ? toStructuredLbhFromEntries(
             inspectedBoxEntries,
-            itemMaster?.inspected_box_LBH
-              || itemMaster?.inspected_item_LBH
-              || itemMaster?.box_LBH
-              || itemMaster?.item_LBH,
+            useLatestBoxSizes
+              ? null
+              : itemMaster?.inspected_box_LBH
+                || itemMaster?.inspected_item_LBH
+                || itemMaster?.box_LBH
+                || itemMaster?.item_LBH,
             { indexedRemarks: BOX_INDEXED_REMARKS },
           )
         : formatStructuredLbhValue({
             top: inspectedTopLbh,
             bottom: inspectedBottomLbh,
             single:
-              itemMaster?.inspected_box_LBH
-              || itemMaster?.inspected_item_LBH
-              || itemMaster?.box_LBH
-              || itemMaster?.item_LBH,
-            fallback: itemMaster?.box_LBH || itemMaster?.item_LBH,
+              useLatestBoxSizes
+                ? null
+                : itemMaster?.inspected_box_LBH
+                  || itemMaster?.inspected_item_LBH
+                  || itemMaster?.box_LBH
+                  || itemMaster?.item_LBH,
+            fallback: useLatestBoxSizes ? null : itemMaster?.box_LBH || itemMaster?.item_LBH,
           });
     const pisNetWeight =
       pisItemEntries.length > 0
@@ -1117,14 +1172,14 @@ const InspectionReport = () => {
       inspectedItemEntries.length > 0
         ? toStructuredWeightFromEntries(
             inspectedItemEntries,
-            itemMaster?.weight?.net,
+            useLatestItemSizes ? null : itemMaster?.weight?.net,
             { indexedRemarks: ITEM_INDEXED_REMARKS },
           )
         : formatStructuredWeightValue({
-            top: getWeightValue(itemMaster?.inspected_weight, "top_net"),
-            bottom: getWeightValue(itemMaster?.inspected_weight, "bottom_net"),
-            single: getWeightValue(itemMaster?.inspected_weight, "total_net"),
-            fallback: itemMaster?.weight?.net,
+            top: useLatestItemSizes ? null : getWeightValue(itemMaster?.inspected_weight, "top_net"),
+            bottom: useLatestItemSizes ? null : getWeightValue(itemMaster?.inspected_weight, "bottom_net"),
+            single: useLatestItemSizes ? null : getWeightValue(itemMaster?.inspected_weight, "total_net"),
+            fallback: useLatestItemSizes ? null : itemMaster?.weight?.net,
           });
     const pisGrossWeight =
       pisBoxEntries.length > 0
@@ -1143,20 +1198,22 @@ const InspectionReport = () => {
       inspectedBoxEntries.length > 0
         ? toStructuredWeightFromEntries(
             inspectedBoxEntries,
-            itemMaster?.weight?.gross,
+            useLatestBoxSizes ? null : itemMaster?.weight?.gross,
             { indexedRemarks: BOX_INDEXED_REMARKS },
           )
         : formatStructuredWeightValue({
-            top: getWeightValue(itemMaster?.inspected_weight, "top_gross"),
-            bottom: getWeightValue(itemMaster?.inspected_weight, "bottom_gross"),
-            single: getWeightValue(itemMaster?.inspected_weight, "total_gross"),
-            fallback: itemMaster?.weight?.gross,
+            top: useLatestBoxSizes ? null : getWeightValue(itemMaster?.inspected_weight, "top_gross"),
+            bottom: useLatestBoxSizes ? null : getWeightValue(itemMaster?.inspected_weight, "bottom_gross"),
+            single: useLatestBoxSizes ? null : getWeightValue(itemMaster?.inspected_weight, "total_gross"),
+            fallback: useLatestBoxSizes ? null : itemMaster?.weight?.gross,
           });
     const calculatedInspectedCbmRaw =
-      itemMaster?.cbm?.calculated_inspected_total ??
-      itemMaster?.cbm?.calculated_total ??
-      itemMaster?.cbm?.qc_total ??
-      qc?.cbm?.total ??
+      hasLatestInspectionRecord
+        ? inspectedSource?.cbm?.total
+        : itemMaster?.cbm?.calculated_inspected_total ??
+          itemMaster?.cbm?.calculated_total ??
+          itemMaster?.cbm?.qc_total ??
+          qc?.cbm?.total ??
       "0";
     const calculatedPisCbmRaw =
       itemMaster?.cbm?.calculated_pis_total ??
@@ -1168,16 +1225,20 @@ const InspectionReport = () => {
       itemMaster?.cbm?.bottom ??
       "0";
     const checkedCbmTopRaw =
-      itemMaster?.cbm?.inspected_top ??
-      itemMaster?.cbm?.qc_top ??
-      qc?.cbm?.box1 ??
-      qc?.cbm?.top ??
+      hasLatestInspectionRecord
+        ? inspectedSource?.cbm?.box1
+        : itemMaster?.cbm?.inspected_top ??
+          itemMaster?.cbm?.qc_top ??
+          qc?.cbm?.box1 ??
+          qc?.cbm?.top ??
       "0";
     const checkedCbmBottomRaw =
-      itemMaster?.cbm?.inspected_bottom ??
-      itemMaster?.cbm?.qc_bottom ??
-      qc?.cbm?.box2 ??
-      qc?.cbm?.bottom ??
+      hasLatestInspectionRecord
+        ? inspectedSource?.cbm?.box2
+        : itemMaster?.cbm?.inspected_bottom ??
+          itemMaster?.cbm?.qc_bottom ??
+          qc?.cbm?.box2 ??
+          qc?.cbm?.bottom ??
       "0";
     const calculatedInspectedCbm = formatPositiveCbm(calculatedInspectedCbmRaw, "Not Set");
     const calculatedPisCbm = formatPositiveCbm(calculatedPisCbmRaw, "Not Set");
@@ -1187,17 +1248,32 @@ const InspectionReport = () => {
     const checkedCbmBottom = formatPositiveCbm(checkedCbmBottomRaw, "Not Set");
     const showCbmTop = pisCbmTop !== "Not Set" || checkedCbmTop !== "Not Set";
     const showCbmBottom = pisCbmBottom !== "Not Set" || checkedCbmBottom !== "Not Set";
-    const inspectedTotalCbm = formatPositiveCbm(itemMaster?.cbm?.inspected_total, "Not Set");
+    const inspectedTotalCbm = formatPositiveCbm(
+      hasLatestInspectionRecord ? inspectedSource?.cbm?.total : itemMaster?.cbm?.inspected_total,
+      "Not Set",
+    );
     const baseTotalCbm = formatPositiveCbm(itemMaster?.cbm?.total, "Not Set");
     const checkedCbmTotal = calculatedInspectedCbm !== "Not Set"
       ? calculatedInspectedCbm
       : (inspectedTotalCbm !== "Not Set" ? inspectedTotalCbm : baseTotalCbm);
     const inspectedBarcodeRaw =
-      Number(qc?.master_barcode || qc?.barcode || 0) > 0
-        ? String(qc?.master_barcode || qc?.barcode).trim()
+      Number(
+        hasLatestInspectionRecord
+          ? inspectedSource?.master_barcode || inspectedSource?.barcode || 0
+          : qc?.master_barcode || qc?.barcode || 0,
+      ) > 0
+        ? String(
+            hasLatestInspectionRecord
+              ? inspectedSource?.master_barcode || inspectedSource?.barcode
+              : qc?.master_barcode || qc?.barcode,
+          ).trim()
         : "";
     const inspectedInnerBarcodeRaw =
-      Number(qc?.inner_barcode || 0) > 0 ? String(qc.inner_barcode).trim() : "";
+      Number(
+        hasLatestInspectionRecord ? inspectedSource?.inner_barcode || 0 : qc?.inner_barcode || 0,
+      ) > 0
+        ? String(hasLatestInspectionRecord ? inspectedSource?.inner_barcode : qc?.inner_barcode).trim()
+        : "";
     const pisBarcodeRaw = String(
       itemMaster?.pis_master_barcode
       || itemMaster?.pis_barcode
@@ -1272,7 +1348,7 @@ const InspectionReport = () => {
       inspectedInnerBarcodeValue: formatEan13BarcodeDisplay(inspectedInnerBarcodeRaw),
       rows,
     };
-  }, [qc]);
+  }, [latestInspectionRecord, qc]);
 
   const bannerFinish = useMemo(
     () =>
