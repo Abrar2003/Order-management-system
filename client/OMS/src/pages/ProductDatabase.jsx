@@ -67,10 +67,6 @@ const BARCODE_MODES = Object.freeze({
   SINGLE: "single",
   INNER_MASTER: "inner_master",
 });
-const BARCODE_MODE_OPTIONS = Object.freeze([
-  { value: BARCODE_MODES.SINGLE, label: "Single Barcode" },
-  { value: BARCODE_MODES.INNER_MASTER, label: "Inner + Master Barcodes" },
-]);
 const PRODUCT_DATABASE_TABLE_TEMPLATE_KEY = "table";
 const PRODUCT_DATABASE_TABLE_TEMPLATE_VERSION = 1;
 const PRODUCT_DATABASE_TABLE_DETAILS_GROUP_KEY = "table_details";
@@ -276,23 +272,27 @@ const mergeProductDatabaseTableV1Fields = (template = null) => {
   };
 };
 
-const buildPayloadFromForm = (form = {}) => ({
-  country_of_origin: normalizeTextValue(form.countryOfOrigin),
-  pd_barcode: normalizeTextValue(
-    normalizeBarcodeMode(form.barcodeMode) === BARCODE_MODES.INNER_MASTER
+const buildPayloadFromForm = (form = {}, boxMode = null) => {
+  const effectiveBarcodeMode = boxMode
+    ? detectBoxPackagingMode(boxMode) === BOX_PACKAGING_MODES.CARTON
+      ? BARCODE_MODES.INNER_MASTER
+      : BARCODE_MODES.SINGLE
+    : normalizeBarcodeMode(form.barcodeMode);
+  const primaryBarcode =
+    effectiveBarcodeMode === BARCODE_MODES.INNER_MASTER
       ? form.masterBarcode
-      : form.singleBarcode,
-  ),
-  pd_master_barcode: normalizeTextValue(
-    normalizeBarcodeMode(form.barcodeMode) === BARCODE_MODES.INNER_MASTER
-      ? form.masterBarcode
-      : form.singleBarcode,
-  ),
-  pd_inner_barcode:
-    normalizeBarcodeMode(form.barcodeMode) === BARCODE_MODES.INNER_MASTER
-      ? normalizeTextValue(form.innerBarcode)
-      : "",
-});
+      : form.singleBarcode;
+
+  return {
+    country_of_origin: normalizeTextValue(form.countryOfOrigin),
+    pd_barcode: normalizeTextValue(primaryBarcode),
+    pd_master_barcode: normalizeTextValue(primaryBarcode),
+    pd_inner_barcode:
+      effectiveBarcodeMode === BARCODE_MODES.INNER_MASTER
+        ? normalizeTextValue(form.innerBarcode)
+        : "",
+  };
+};
 
 const PRODUCT_DATABASE_SIZE_DIFF_TOLERANCE = 0.5;
 const PRODUCT_DATABASE_CBM_DECIMALS = 2;
@@ -1404,7 +1404,7 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
 
   const currentPayload = useMemo(
     () => ({
-      ...buildPayloadFromForm(form),
+      ...buildPayloadFromForm(form, currentMeasuredSizePayload.pd_box_mode),
       ...currentProductTypePayload,
       ...currentMeasuredSizePayload,
     }),
@@ -1412,17 +1412,20 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
   );
 
   const initialPayload = useMemo(
-    () => ({
-      ...buildPayloadFromForm({
-        countryOfOrigin: normalizeTextValue(item?.country_of_origin),
-        barcodeMode: getProductDatabaseBarcodeMode(item),
-        singleBarcode: getProductDatabaseMasterBarcode(item),
-        masterBarcode: getProductDatabaseMasterBarcode(item),
-        innerBarcode: normalizeTextValue(item?.pd_inner_barcode),
-      }),
-      ...buildExistingProductTypePayload(item),
-      ...buildExistingProductDatabaseSizePayload(item),
-    }),
+    () => {
+      const initialMeasuredSizePayload = buildExistingProductDatabaseSizePayload(item);
+      return {
+        ...buildPayloadFromForm({
+          countryOfOrigin: normalizeTextValue(item?.country_of_origin),
+          barcodeMode: getProductDatabaseBarcodeMode(item),
+          singleBarcode: getProductDatabaseMasterBarcode(item),
+          masterBarcode: getProductDatabaseMasterBarcode(item),
+          innerBarcode: normalizeTextValue(item?.pd_inner_barcode),
+        }, initialMeasuredSizePayload.pd_box_mode),
+        ...buildExistingProductTypePayload(item),
+        ...initialMeasuredSizePayload,
+      };
+    },
     [item],
   );
   const hasChanges = !arePayloadsEqualForCompare(currentPayload, initialPayload);
@@ -1431,33 +1434,6 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
 
   const clearDraftMessage = () => {
     if (draftMessage) setDraftMessage("");
-  };
-
-  const handleBarcodeModeChange = (nextModeValue) => {
-    clearDraftMessage();
-    const nextMode = normalizeBarcodeMode(nextModeValue);
-    setForm((prev) => {
-      const currentMasterBarcode = normalizeTextValue(
-        prev.masterBarcode || prev.singleBarcode,
-      );
-
-      if (nextMode === BARCODE_MODES.INNER_MASTER) {
-        return {
-          ...prev,
-          barcodeMode: nextMode,
-          masterBarcode: currentMasterBarcode,
-          singleBarcode: currentMasterBarcode,
-        };
-      }
-
-      return {
-        ...prev,
-        barcodeMode: nextMode,
-        singleBarcode: currentMasterBarcode,
-        masterBarcode: currentMasterBarcode,
-        innerBarcode: "",
-      };
-    });
   };
 
   const handleBarcodeFieldChange = (fieldName, value) => {
@@ -1569,6 +1545,32 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
   const handleMeasuredSizeControlChange = (event) => {
     const { name, value } = event.target;
     clearDraftMessage();
+    const nextBoxModeForBarcode =
+      name === "pd_box_mode"
+        ? detectBoxPackagingMode(value, measuredSizeForm.boxEntries)
+        : null;
+
+    if (nextBoxModeForBarcode) {
+      setForm((currentForm) => {
+        const currentMasterBarcode = normalizeTextValue(
+          currentForm.masterBarcode || currentForm.singleBarcode,
+        );
+
+        return {
+          ...currentForm,
+          barcodeMode:
+            nextBoxModeForBarcode === BOX_PACKAGING_MODES.CARTON
+              ? BARCODE_MODES.INNER_MASTER
+              : BARCODE_MODES.SINGLE,
+          singleBarcode: currentMasterBarcode,
+          masterBarcode: currentMasterBarcode,
+          innerBarcode:
+            nextBoxModeForBarcode === BOX_PACKAGING_MODES.CARTON
+              ? currentForm.innerBarcode
+              : "",
+        };
+      });
+    }
 
     setMeasuredSizeForm((prev) => {
       if (name === "pd_box_mode") {
@@ -1721,6 +1723,9 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
     measuredSizeForm.boxCount,
     { mode: measuredSizeForm.boxMode, singleRemark: "box" },
   );
+  const isProductDatabaseCartonMode =
+    detectBoxPackagingMode(measuredSizeForm.boxMode, measuredSizeForm.boxEntries) ===
+    BOX_PACKAGING_MODES.CARTON;
 
   return (
     <div
@@ -1799,25 +1804,10 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
                         ))}
                       </select>
                     </div>
-                    <div className="col-lg-4">
-                      <label className="form-label">Barcode Type</label>
-                      <select
-                        className="form-select"
-                        value={normalizeBarcodeMode(form.barcodeMode)}
-                        disabled={!canEdit}
-                        onChange={(event) => handleBarcodeModeChange(event.target.value)}
-                      >
-                        {BARCODE_MODE_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    {normalizeBarcodeMode(form.barcodeMode) === BARCODE_MODES.INNER_MASTER ? (
+                    {isProductDatabaseCartonMode ? (
                       <>
                         <div className="col-lg-4">
-                          <label className="form-label">Master Barcode</label>
+                          <label className="form-label">Master Carton Barcode</label>
                           <input
                             type="text"
                             className="form-control"
@@ -1829,7 +1819,7 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
                           />
                         </div>
                         <div className="col-lg-4">
-                          <label className="form-label">Inner Barcode</label>
+                          <label className="form-label">Inner Carton Barcode</label>
                           <input
                             type="text"
                             className="form-control"
@@ -1842,8 +1832,8 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
                         </div>
                       </>
                     ) : (
-                      <div className="col-lg-4">
-                        <label className="form-label">Single Barcode</label>
+                      <div className="col-lg-8">
+                        <label className="form-label">Barcode</label>
                         <input
                           type="text"
                           className="form-control"

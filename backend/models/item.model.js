@@ -351,6 +351,11 @@ const itemSchema = new mongoose.Schema(
       default: BOX_PACKAGING_MODES.INDIVIDUAL,
       trim: true,
     },
+    master_country_of_origin: { type: String, default: "", trim: true },
+    master_barcode: { type: String, default: "", trim: true },
+    master_master_barcode: { type: String, default: "", trim: true },
+    master_inner_barcode: { type: String, default: "", trim: true },
+    master_k_d: { type: Boolean, default: false },
     pd_box_sizes: {
       type: [productSpecBoxSizeEntrySchema],
       default: [],
@@ -448,6 +453,7 @@ const itemSchema = new mongoose.Schema(
     inspected_k_d: { type: Boolean, default: false },
     pis_k_d: { type: Boolean, default: false },
     pis_checked_flag: { type: Boolean, default: false },
+    barcode_exempted: { type: Boolean, default: false },
     finish: {
       type: [finishAssignmentSchema],
       default: [],
@@ -478,6 +484,14 @@ itemSchema.pre("validate", function syncBarcodeAliases() {
   this.pis_master_barcode = normalizedPisMasterBarcode;
   this.pis_barcode = normalizedPisMasterBarcode;
   this.pis_inner_barcode = String(this.pis_inner_barcode || "").trim();
+
+  const normalizedMasterBarcode = String(
+    this.master_master_barcode || this.master_barcode || "",
+  ).trim();
+  this.master_master_barcode = normalizedMasterBarcode;
+  this.master_barcode = normalizedMasterBarcode;
+  this.master_inner_barcode = String(this.master_inner_barcode || "").trim();
+  this.master_country_of_origin = String(this.master_country_of_origin || "").trim();
 
   if (!this.qc || typeof this.qc !== "object") {
     this.qc = {};

@@ -1765,7 +1765,9 @@ const buildPisDiffSummary = (item = {}) => {
       ? String(item?.qc?.master_barcode || item?.qc?.barcode).trim()
       : "";
   const barcodeMismatch =
-    Boolean(pisBarcode || inspectedBarcode) && pisBarcode !== inspectedBarcode;
+    item?.barcode_exempted === true
+      ? false
+      : Boolean(pisBarcode || inspectedBarcode) && pisBarcode !== inspectedBarcode;
   const cbmComparison = compareRoundedCbmValues(
     item?.cbm?.calculated_inspected_total,
     item?.cbm?.calculated_pis_total,
@@ -1813,9 +1815,17 @@ const PIS_DIFF_ITEM_SELECT = [
   "brand_name",
   "brands",
   "vendors",
+  "country_of_origin",
+  "barcode_exempted",
   "pis_barcode",
   "pis_master_barcode",
   "pis_inner_barcode",
+  "pis_k_d",
+  "master_country_of_origin",
+  "master_barcode",
+  "master_master_barcode",
+  "master_inner_barcode",
+  "master_k_d",
   "pis_weight",
   "inspected_weight",
   "pis_item_LBH",
@@ -1843,6 +1853,7 @@ const PIS_DIFF_ITEM_SELECT = [
   "qc.barcode",
   "qc.master_barcode",
   "qc.inner_barcode",
+  "image",
   "updatedAt",
 ].join(" ");
 
@@ -2254,7 +2265,8 @@ const buildPisDiffDetailedComparisons = (item = {}) => {
       : "Not Set";
 
   if (
-    item?.pis_diff?.flags?.barcode
+    item?.barcode_exempted !== true
+    && item?.pis_diff?.flags?.barcode
     && pisBarcode.toLowerCase() !== inspectedBarcode.toLowerCase()
   ) {
     details.push({
@@ -2308,6 +2320,16 @@ const buildPisDiffReportPreviewRow = (item = {}) => {
     },
     differences: buildPisDiffDetailedComparisons(item),
   };
+};
+
+const formatPisDiffMismatchStatus = (row = {}) => {
+  if (row?.inspection_report_mismatch) return "Inspection report mismatch";
+  const diffFields = Array.isArray(row?.diff_fields)
+    ? row.diff_fields
+    : Array.isArray(row?.pis_diff?.fields)
+      ? row.pis_diff.fields
+      : [];
+  return diffFields.length > 0 ? "PIS mismatch" : "No mismatch";
 };
 
 const buildPisDiffReportPayload = ({
@@ -3362,10 +3384,18 @@ exports.getPisDiffItems = async (req, res) => {
     });
 
     const paginatedRows = diffRows.slice(skip, skip + limit);
+    const itemLookup = new Map(
+      paginatedRows.map((item) => [normalizeTextField(item?._id), item]),
+    );
+    const rowsWithThumbnails = await attachProductImageThumbnails(
+      paginatedRows,
+      itemLookup,
+      shouldIncludeProductImageThumbnails(req),
+    );
 
     return res.status(200).json({
       success: true,
-      data: paginatedRows,
+      data: rowsWithThumbnails,
       pagination: {
         page,
         limit,
@@ -3502,9 +3532,7 @@ exports.exportPisDiffCheckedReport = async (req, res) => {
         diff_fields: Array.isArray(item?.pis_diff?.fields)
           ? item.pis_diff.fields.join(", ")
           : "N/A",
-        inspection_report: item?.inspection_report_mismatch
-          ? "Inspection report mismatch"
-          : "No mismatch",
+        inspection_report: formatPisDiffMismatchStatus(item),
         inspected_item_size: inspectedItemBlock.sizeDisplay,
         inspected_item_weight: inspectedItemBlock.weightDisplay,
         pis_item_size: pisItemBlock.sizeDisplay,
@@ -3803,9 +3831,7 @@ exports.exportFinalPisCheckReport = async (req, res) => {
       brand: row?.brand || "N/A",
       vendors: row?.vendors || "N/A",
       diff_fields: Array.isArray(row?.diff_fields) ? row.diff_fields.join(", ") : "",
-      inspection_report: row?.inspection_report_mismatch
-        ? "Inspection report mismatch"
-        : "No mismatch",
+      inspection_report: formatPisDiffMismatchStatus(row),
       inspected_item_size: row?.measurements?.inspected_item?.sizeDisplay || "Not Set",
       inspected_item_weight: row?.measurements?.inspected_item?.weightDisplay || "Not Set",
       pis_item_size: row?.measurements?.pis_item?.sizeDisplay || "Not Set",
@@ -4740,24 +4766,63 @@ exports.updateItemPis = async (req, res) => {
       }
     }
 
-    if (!requestedPisDiffCheck && hasOwn(payload, "pis_barcode")) {
+    if (hasOwn(payload, "pis_barcode")) {
       const nextMasterBarcode = normalizeTextField(payload.pis_barcode);
-      setPisPath("pis_barcode", nextMasterBarcode);
-      setPisPath("pis_master_barcode", nextMasterBarcode);
+      if (requestedPisDiffCheck) {
+        setMasterPath("master_barcode", nextMasterBarcode);
+        setMasterPath("master_master_barcode", nextMasterBarcode);
+        setPisPath("pis_barcode", nextMasterBarcode);
+        setPisPath("pis_master_barcode", nextMasterBarcode);
+      } else {
+        setPisPath("pis_barcode", nextMasterBarcode);
+        setPisPath("pis_master_barcode", nextMasterBarcode);
+      }
     }
-    if (!requestedPisDiffCheck && hasOwn(payload, "pis_master_barcode")) {
+    if (hasOwn(payload, "pis_master_barcode")) {
       const nextMasterBarcode = normalizeTextField(payload.pis_master_barcode);
-      setPisPath("pis_master_barcode", nextMasterBarcode);
-      setPisPath("pis_barcode", nextMasterBarcode);
+      if (requestedPisDiffCheck) {
+        setMasterPath("master_master_barcode", nextMasterBarcode);
+        setMasterPath("master_barcode", nextMasterBarcode);
+        setPisPath("pis_master_barcode", nextMasterBarcode);
+        setPisPath("pis_barcode", nextMasterBarcode);
+      } else {
+        setPisPath("pis_master_barcode", nextMasterBarcode);
+        setPisPath("pis_barcode", nextMasterBarcode);
+      }
     }
-    if (!requestedPisDiffCheck && hasOwn(payload, "pis_inner_barcode")) {
-      setPisPath("pis_inner_barcode", normalizeTextField(payload.pis_inner_barcode));
+    if (hasOwn(payload, "pis_inner_barcode")) {
+      const nextInnerBarcode = normalizeTextField(payload.pis_inner_barcode);
+      if (requestedPisDiffCheck) {
+        setMasterPath("master_inner_barcode", nextInnerBarcode);
+        setPisPath("pis_inner_barcode", nextInnerBarcode);
+      } else {
+        setPisPath("pis_inner_barcode", nextInnerBarcode);
+      }
     }
-    if (!requestedPisDiffCheck && hasOwn(payload, "country_of_origin")) {
-      setPisPath("country_of_origin", normalizeTextField(payload.country_of_origin));
+    if (hasOwn(payload, "country_of_origin")) {
+      const nextCountryOfOrigin = normalizeTextField(payload.country_of_origin);
+      if (requestedPisDiffCheck) {
+        setMasterPath("master_country_of_origin", nextCountryOfOrigin);
+        setPisPath("country_of_origin", nextCountryOfOrigin);
+      } else {
+        setPisPath("country_of_origin", nextCountryOfOrigin);
+      }
     }
-    if (!requestedPisDiffCheck && hasOwn(payload, "pis_k_d")) {
-      setPisPath("pis_k_d", toBooleanValue(payload.pis_k_d, "pis_k_d"));
+    if (hasOwn(payload, "pis_k_d")) {
+      const nextPisKd = toBooleanValue(payload.pis_k_d, "pis_k_d");
+      if (requestedPisDiffCheck) {
+        setMasterPath("master_k_d", nextPisKd);
+        setPisPath("pis_k_d", nextPisKd);
+      } else {
+        setPisPath("pis_k_d", nextPisKd);
+      }
+    }
+
+    if (hasOwn(payload, "barcode_exempted")) {
+      setPisPath(
+        "barcode_exempted",
+        toBooleanValue(payload.barcode_exempted, "barcode_exempted"),
+      );
     }
 
     if (hasOwn(payload, "pis_item_sizes")) {
@@ -4869,10 +4934,10 @@ exports.updateItemPis = async (req, res) => {
       pageName: requestedPisDiffCheck ? "PIS Diff Modal" : "PIS Update Modal",
       source: requestedPisDiffCheck ? "pis_diffs_modal" : "pis_update_modal",
       dataScopes: requestedPisDiffCheck
-        ? [AUDIT_SCOPES.MASTER]
+        ? [AUDIT_SCOPES.MASTER, AUDIT_SCOPES.PIS]
         : [AUDIT_SCOPES.PIS],
       extraRemarks: requestedPisDiffCheck
-        ? ["PIS diff was checked and the submitted values were saved to master data only."]
+        ? ["PIS diff was checked and submitted values were saved to master and PIS data."]
         : [],
       metadata: {
         pis_update_source: normalizeTextField(payload?.pis_update_source),

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
 import MeasuredSizeSection from "./MeasuredSizeSection";
+import ProductImageThumbnail from "./ProductImageThumbnail";
 import { getCountryOfOriginOptions } from "../constants/countryOfOrigin";
 import { formatDateDDMMYYYY } from "../utils/date";
 import {
@@ -141,6 +142,7 @@ const buildInitialForm = (item = {}) => {
 
   return {
     country_of_origin: toText(item?.country_of_origin),
+    barcode_exempted: item?.barcode_exempted === true,
     pis_k_d: Boolean(item?.pis_k_d),
     master_barcode: toText(item?.pis_master_barcode || item?.pis_barcode),
     inner_barcode: toText(item?.pis_inner_barcode),
@@ -262,6 +264,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
       calculatedPisItemCbm,
     );
   }, [calculatedPisBoxCbm, calculatedPisItemCbm]);
+  const isPisCartonMode = form.pis_box_mode === BOX_PACKAGING_MODES.CARTON;
 
   useEffect(() => {
     if (!showInspectedReference || !itemCode || itemCode === "N/A") {
@@ -332,6 +335,8 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
       ...prev,
       pis_box_mode: nextMode,
       pis_box_count: nextCount,
+      inner_barcode:
+        nextMode === BOX_PACKAGING_MODES.CARTON ? prev.inner_barcode : "",
       pis_box_sizes: ensureMeasuredSizeEntryCount(prev.pis_box_sizes, nextCount, {
         mode: nextMode,
         singleRemark: "box",
@@ -409,13 +414,12 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
         pis_item_sizes: pisItemPayload.value,
         pis_box_sizes: pisBoxPayload.value,
       };
-      if (!isPisDiffUpdate) {
-        payload.country_of_origin = toText(form.country_of_origin);
-        payload.pis_barcode = toText(form.master_barcode);
-        payload.pis_master_barcode = toText(form.master_barcode);
-        payload.pis_inner_barcode = toText(form.inner_barcode);
-        payload.pis_k_d = Boolean(form.pis_k_d);
-      }
+      payload.country_of_origin = toText(form.country_of_origin);
+      payload.pis_barcode = toText(form.master_barcode);
+      payload.pis_master_barcode = toText(form.master_barcode);
+      payload.pis_inner_barcode = isPisCartonMode ? toText(form.inner_barcode) : "";
+      payload.pis_k_d = Boolean(form.pis_k_d);
+      payload.barcode_exempted = Boolean(form.barcode_exempted);
       if (updateSource) {
         payload.pis_update_source = updateSource;
       }
@@ -426,7 +430,21 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
 
       const response = await api.patch(`/items/${item?._id}/pis`, payload);
       const fallbackItem = isPisDiffUpdate
-        ? { ...item, pis_checked_flag: true }
+        ? {
+            ...item,
+            country_of_origin: payload.country_of_origin,
+            pis_barcode: payload.pis_barcode,
+            pis_master_barcode: payload.pis_master_barcode,
+            pis_inner_barcode: payload.pis_inner_barcode,
+            pis_k_d: payload.pis_k_d,
+            barcode_exempted: payload.barcode_exempted,
+            master_country_of_origin: payload.country_of_origin,
+            master_barcode: payload.pis_master_barcode,
+            master_master_barcode: payload.pis_master_barcode,
+            master_inner_barcode: payload.pis_inner_barcode,
+            master_k_d: payload.pis_k_d,
+            pis_checked_flag: true,
+          }
         : item;
       onUpdated?.(response?.data?.data || fallbackItem);
       onClose?.();
@@ -472,61 +490,80 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
                 <label className="form-label">Description (Read Only)</label>
                 <input type="text" className="form-control" value={itemDescription} disabled />
               </div>
-              {!isPisDiffUpdate && (
-                <div className="col-md-4">
-                  <label className="form-label">Country of Origin</label>
-                  <select
-                    className="form-select"
-                    value={form.country_of_origin}
-                    onChange={(event) => updateField("country_of_origin", event.target.value)}
+              <div className="col-md-4">
+                <label className="form-label">Country of Origin</label>
+                <select
+                  className="form-select"
+                  value={form.country_of_origin}
+                  onChange={(event) => updateField("country_of_origin", event.target.value)}
+                  disabled={saving}
+                >
+                  <option value="">Select country</option>
+                  {countryOfOriginOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-md-4">
+                <label className="form-label">PIS K/D</label>
+                <div className="btn-group w-100" role="group" aria-label="PIS K/D">
+                  <button
+                    type="button"
+                    className={`btn ${form.pis_k_d ? "btn-primary" : "btn-outline-secondary"}`}
+                    onClick={() => updateField("pis_k_d", true)}
                     disabled={saving}
                   >
-                    <option value="">Select country</option>
-                    {countryOfOriginOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                    Yes
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn ${!form.pis_k_d ? "btn-primary" : "btn-outline-secondary"}`}
+                    onClick={() => updateField("pis_k_d", false)}
+                    disabled={saving}
+                  >
+                    No
+                  </button>
                 </div>
-              )}
-              {!isPisDiffUpdate && (
-                <div className="col-md-4">
-                  <label className="form-label">PIS K/D</label>
-                  <div className="btn-group w-100" role="group" aria-label="PIS K/D">
-                    <button
-                      type="button"
-                      className={`btn ${form.pis_k_d ? "btn-primary" : "btn-outline-secondary"}`}
-                      onClick={() => updateField("pis_k_d", true)}
-                      disabled={saving}
-                    >
-                      Yes
-                    </button>
-                    <button
-                      type="button"
-                      className={`btn ${!form.pis_k_d ? "btn-primary" : "btn-outline-secondary"}`}
-                      onClick={() => updateField("pis_k_d", false)}
-                      disabled={saving}
-                    >
-                      No
-                    </button>
-                  </div>
+              </div>
+              <div className="col-md-4">
+                <label className="form-label">Barcode Exempted Item</label>
+                <div className="btn-group w-100" role="group" aria-label="Barcode Exempted Item">
+                  <button
+                    type="button"
+                    className={`btn ${form.barcode_exempted ? "btn-primary" : "btn-outline-secondary"}`}
+                    onClick={() => updateField("barcode_exempted", true)}
+                    disabled={saving}
+                  >
+                    Yes
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn ${!form.barcode_exempted ? "btn-primary" : "btn-outline-secondary"}`}
+                    onClick={() => updateField("barcode_exempted", false)}
+                    disabled={saving}
+                  >
+                    No
+                  </button>
                 </div>
-              )}
+              </div>
             </div>
 
-            {!isPisDiffUpdate && (
-              <div className="row g-2">
-                <div className="col-md-6">
-                  <label className="form-label">Master Carton Barcode</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={form.master_barcode}
-                    onChange={(event) => updateField("master_barcode", event.target.value)}
-                    disabled={saving}
-                  />
-                </div>
+            <div className="row g-2">
+              <div className={isPisCartonMode ? "col-md-6" : "col-md-12"}>
+                <label className="form-label">
+                  {isPisCartonMode ? "Master Carton Barcode" : "Barcode"}
+                </label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={form.master_barcode}
+                  onChange={(event) => updateField("master_barcode", event.target.value)}
+                  disabled={saving}
+                />
+              </div>
+              {isPisCartonMode && (
                 <div className="col-md-6">
                   <label className="form-label">Inner Carton Barcode</label>
                   <input
@@ -537,8 +574,8 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
                     disabled={saving}
                   />
                 </div>
-              </div>
-            )}
+              )}
+            </div>
 
             {showInspectedReference && (
               <div className="border rounded p-3">
@@ -610,6 +647,17 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
                     <div className="text-secondary">Inspected Box Mode</div>
                     <div>{inspectedReference.boxMode}</div>
                   </div>
+                  {isPisDiffUpdate && (
+                    <div className="col-md-4 ms-md-auto">
+                      <div className="text-secondary mb-2">Product Image</div>
+                      <ProductImageThumbnail
+                        src={item?.product_image_url}
+                        originalName={item?.product_image?.originalName}
+                        alt={`${itemCode} product image`}
+                        size="md"
+                      />
+                    </div>
+                  )}
                   <div className="col-md-8">
                     <div className="text-secondary">Inspected CBM</div>
                     <div>{inspectedReference.cbm}</div>

@@ -5091,13 +5091,16 @@ exports.updateQC = async (req, res) => {
       qc.inner_barcode = nextInnerBarcode;
     }
 
-    if (isQcUser && resolvedMasterBarcode <= 0) {
+    const isBarcodeExemptedItem =
+      itemDocForBarcodeRequirement?.barcode_exempted === true;
+
+    if (isQcUser && !isBarcodeExemptedItem && resolvedMasterBarcode <= 0) {
       return res.status(400).json({
         message: "QC users must scan the master barcode before updating this QC record.",
       });
     }
 
-    if (isQcUser) {
+    if (isQcUser && !isBarcodeExemptedItem) {
       if (!itemDocForBarcodeRequirement) {
         return res.status(400).json({
           message: "Item master with PIS barcode is required before QC can update this record.",
@@ -10018,7 +10021,7 @@ exports.getQCById = async (req, res) => {
           },
         })
           .select(
-            "code name description brand_name brands vendors finish inspected_weight pis_weight weight cbm pis_k_d inspected_k_d pis_barcode pis_master_barcode pis_inner_barcode qc.barcode qc.master_barcode qc.inner_barcode inspected_item_LBH inspected_item_sizes inspected_item_top_LBH inspected_item_bottom_LBH pis_item_LBH pis_item_sizes pis_item_top_LBH pis_item_bottom_LBH item_LBH inspected_box_LBH inspected_box_sizes inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_box_LBH pis_box_sizes pis_box_top_LBH pis_box_bottom_LBH box_LBH image cad_file pis_file assembly_file packeging_ppt",
+            "code name description brand_name brands vendors finish barcode_exempted inspected_weight pis_weight weight cbm pis_k_d inspected_k_d pis_barcode pis_master_barcode pis_inner_barcode qc.barcode qc.master_barcode qc.inner_barcode inspected_item_LBH inspected_item_sizes inspected_item_top_LBH inspected_item_bottom_LBH pis_item_LBH pis_item_sizes pis_item_top_LBH pis_item_bottom_LBH item_LBH inspected_box_LBH inspected_box_sizes inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_box_LBH pis_box_sizes pis_box_top_LBH pis_box_bottom_LBH box_LBH image cad_file pis_file assembly_file packeging_ppt",
           )
           .lean()
       : null;

@@ -170,6 +170,8 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
       calculatedInspectedItemCbm,
     );
   }, [calculatedInspectedBoxCbm, calculatedInspectedItemCbm]);
+  const isInspectedCartonMode =
+    form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON;
 
   const updateField = (path, value) => {
     setForm((prev) => {
@@ -204,6 +206,11 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
       ...prev,
       inspected_box_mode: nextMode,
       inspected_box_count: nextCount,
+      qc: {
+        ...prev.qc,
+        inner_barcode:
+          nextMode === BOX_PACKAGING_MODES.CARTON ? prev.qc.inner_barcode : "0",
+      },
       inspected_box_sizes: ensureMeasuredSizeEntryCount(
         prev.inspected_box_sizes,
         nextCount,
@@ -295,10 +302,12 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
             form.qc.master_barcode,
             "QC master barcode",
           ),
-          inner_barcode: parseNonNegativeNumber(
-            form.qc.inner_barcode,
-            "QC inner barcode",
-          ),
+          inner_barcode: isInspectedCartonMode
+            ? parseNonNegativeNumber(
+                form.qc.inner_barcode,
+                "QC inner barcode",
+              )
+            : 0,
           last_inspected_date: toText(form.qc.last_inspected_date),
           quantities: {
             checked: parseNonNegativeNumber(form.qc.quantities.checked, "QC checked"),
@@ -479,8 +488,10 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
                   </label>
                 </div>
               </div>
-              <div className="col-md-3">
-                <label className="form-label">Master Barcode</label>
+              <div className={isInspectedCartonMode ? "col-md-3" : "col-md-6"}>
+                <label className="form-label">
+                  {isInspectedCartonMode ? "Master Carton Barcode" : "Barcode"}
+                </label>
                 <input
                   type="number"
                   min="0"
@@ -491,18 +502,20 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
                   disabled={saving}
                 />
               </div>
-              <div className="col-md-3">
-                <label className="form-label">Inner Barcode</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  className="form-control"
-                  value={form.qc.inner_barcode}
-                  onChange={(event) => updateField("qc.inner_barcode", event.target.value)}
-                  disabled={saving}
-                />
-              </div>
+              {isInspectedCartonMode && (
+                <div className="col-md-3">
+                  <label className="form-label">Inner Carton Barcode</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    className="form-control"
+                    value={form.qc.inner_barcode}
+                    onChange={(event) => updateField("qc.inner_barcode", event.target.value)}
+                    disabled={saving}
+                  />
+                </div>
+              )}
               <div className="col-md-4">
                 <label className="form-label">Last Inspected Date</label>
                 <input

@@ -10,6 +10,7 @@ const args = process.argv.slice(2);
 const shouldApply = args.includes("--apply");
 
 const fileArgIndex = args.indexOf("--file");
+
 const filePath =
   fileArgIndex >= 0
     ? path.resolve(process.cwd(), args[fileArgIndex + 1])
@@ -17,12 +18,27 @@ const filePath =
 
 function cleanCell(value) {
   if (value === null || value === undefined) return "";
-  return String(value).replace(/\.0$/, "").trim();
+
+  return String(value)
+    .replace(/\.0$/, "")
+    .trim();
+}
+
+function normalizeBarcode(value) {
+  return cleanCell(value).toLowerCase();
+}
+
+function isNotRequired(value) {
+  return normalizeBarcode(value) === "not required";
 }
 
 function chunkArray(arr, size) {
   const chunks = [];
-  for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
+
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+
   return chunks;
 }
 
@@ -49,27 +65,56 @@ function readBarcodeRows(xlsxPath) {
 
   for (const row of rows) {
     const code = cleanCell(
-      row.item_code || row.Item_Code || row.ITEM_CODE || row.code || row.Code,
+      row.item_code ||
+        row.Item_Code ||
+        row.ITEM_CODE ||
+        row.code ||
+        row.Code,
     );
+
+    if (!code) continue;
 
     const barcode = cleanCell(
       row.barcode ||
         row.Barcode ||
         row.BARCODE ||
         row.ean ||
-        row.EAN ||
+        row.EAN,
+    );
+
+    const masterBarcode = cleanCell(
+      row.master_barcode ||
+        row.Master_Barcode ||
+        row.MASTER_BARCODE ||
+        row.master ||
+        row.master_carton ||
         row["Master EAN"],
     );
 
-    if (!code || !barcode) continue;
+    const innerBarcode = cleanCell(
+      row.inner_barcode ||
+        row.Inner_Barcode ||
+        row.INNER_BARCODE ||
+        row.inner ||
+        row.inner_carton ||
+        row["Inner EAN"],
+    );
 
-    byCode.set(code, barcode);
+    const exempted =
+      isNotRequired(barcode) ||
+      isNotRequired(masterBarcode) ||
+      isNotRequired(innerBarcode);
+
+    byCode.set(code, {
+      code,
+      barcode,
+      masterBarcode,
+      innerBarcode,
+      exempted,
+    });
   }
 
-  return Array.from(byCode.entries()).map(([code, barcode]) => ({
-    code,
-    barcode,
-  }));
+  return Array.from(byCode.values());
 }
 
 async function main() {
@@ -82,7 +127,7 @@ async function main() {
   const rows = readBarcodeRows(filePath);
 
   if (!rows.length) {
-    throw new Error("No valid item_code + barcode rows found in XLSX");
+    throw new Error("No valid barcode rows found in XLSX");
   }
 
   await mongoose.connect(mongoUri);
@@ -93,16 +138,33 @@ async function main() {
 
   const existingItems = await items
     .find(
-      { code: { $in: codes } },
-      { projection: { code: 1 } },
+      {
+        code: { $in: codes },
+      },
+      {
+        projection: { code: 1 },
+      },
     )
     .toArray();
 
-  const existingCodeSet = new Set(existingItems.map((item) => item.code));
+  const existingCodeSet = new Set(
+    existingItems.map((item) => item.code),
+  );
 
-  const matchedRows = rows.filter((row) => existingCodeSet.has(row.code));
-  const unmatchedRows = rows.filter((row) => !existingCodeSet.has(row.code));
+  const matchedRows = rows.filter((row) =>
+    existingCodeSet.has(row.code),
+  );
+  
 
+  const unmatchedRows = rows.filter(
+    (row) => !existingCodeSet.has(row.code),
+  );
+  rows.map((row) => { console.log(row.code, {
+      barcode: row.barcode,
+      masterBarcode: row.masterBarcode,
+      innerBarcode: row.innerBarcode,
+    });
+  });
   console.log({
     xlsxRows: rows.length,
     matchedItems: matchedRows.length,
@@ -113,38 +175,110 @@ async function main() {
   if (unmatchedRows.length) {
     const unmatchedPath = path.resolve(
       process.cwd(),
-      "unmatched-pis-master-barcodes.json",
+      "unmatched-pis-barcodes.json",
     );
 
-    fs.writeFileSync(unmatchedPath, JSON.stringify(unmatchedRows, null, 2));
+    fs.writeFileSync(
+      unmatchedPath,
+      JSON.stringify(unmatchedRows, null, 2),
+    );
+
     console.log(`Unmatched rows saved to: ${unmatchedPath}`);
   }
 
   if (!shouldApply) {
     console.log("Dry run only. Re-run with --apply to update MongoDB.");
-    console.log("Sample rows:", matchedRows.slice(0, 5));
+
+    console.log(
+      "Sample rows:",
+      matchedRows.slice(0, 5),
+    );
+
     await mongoose.disconnect();
+
     return;
   }
 
-  const ops = matchedRows.map((row) => ({
-    updateOne: {
-      filter: { code: row.code },
-      update: {
-        $set: {
-          pis_master_barcode: row.barcode,
-          pis_barcode: row.barcode,
-          updatedAt: new Date(),
+  const ops = matchedRows.map((row) => {
+    const updateData = {
+      updatedAt: new Date(),
+    };
+
+    // If barcode is exempted
+    if (row.exempted) {
+      updateData.barcode_exempted = true;
+
+      return {
+        updateOne: {
+          filter: { code: row.code },
+          update: {
+            $set: updateData,
+          },
+        },
+      };
+    }
+
+    // Case 1:
+    // Only one barcode available
+    // save into pis_barcode + pis_master_barcode
+
+    
+    if (
+      row.barcode &&
+      !row.masterBarcode &&
+      !row.innerBarcode
+    ) {
+      updateData.pis_barcode = row.barcode;
+      updateData.pis_master_barcode = row.barcode;
+    }
+
+    // Case 2:
+    // master + inner available
+
+    else if (
+      row.masterBarcode &&
+      row.innerBarcode
+    ) {
+      updateData.pis_master_barcode = row.masterBarcode;
+      updateData.pis_inner_barcode = row.innerBarcode;
+
+      // pis_barcode should always mirror master
+      updateData.pis_barcode = row.masterBarcode;
+    }
+
+    // Fallback:
+    // only master available
+
+    else if (row.masterBarcode) {
+      updateData.pis_master_barcode = row.masterBarcode;
+      updateData.pis_barcode = row.masterBarcode;
+    }
+
+    // Fallback:
+    // only inner available
+
+    else if (row.innerBarcode) {
+      updateData.pis_inner_barcode = row.innerBarcode;
+    }
+
+    return {
+      updateOne: {
+        filter: { code: row.code },
+        update: {
+          $set: updateData,
         },
       },
-    },
-  }));
+    };
+  });
 
   let matchedCount = 0;
   let modifiedCount = 0;
 
   for (const chunk of chunkArray(ops, 500)) {
-    const result = await items.bulkWrite(chunk, { ordered: false });
+    const result = await items.bulkWrite(chunk, {
+      ordered: false,
+    });
+
     matchedCount += result.matchedCount || 0;
     modifiedCount += result.modifiedCount || 0;
   }
@@ -160,8 +294,10 @@ async function main() {
 
 main().catch(async (error) => {
   console.error(error);
+
   try {
     await mongoose.disconnect();
   } catch (_) {}
+
   process.exit(1);
 });

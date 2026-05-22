@@ -32,6 +32,7 @@ import WorkflowTaskDetailModal from "./WorkflowTaskDetailModal";
 import WorkflowTaskStageBar from "./WorkflowTaskStageBar";
 import {
   formatWorkflowStageLabel,
+  getWorkflowUploadStatuses,
   isWorkflowUploadStepKey,
 } from "./workflowTaskProgress";
 
@@ -78,6 +79,13 @@ const getTaskUserId = (entry = {}) =>
 
 const getTaskUserName = (entry = {}) =>
   entry?.user?.name || entry?.user?.email || entry?.name || entry?.email || "User";
+
+const getPendingUploadUserNames = (task = {}) =>
+  normalizeDistinctValues(
+    getWorkflowUploadStatuses(task)
+      .filter((entry) => normalizeText(entry?.status).toLowerCase() !== "uploaded")
+      .map((entry) => getTaskUserName(entry)),
+  );
 
 const getAuditActorName = (actor = {}) =>
   actor?.name || actor?.user?.name || actor?.user?.email || "User";
@@ -1149,6 +1157,7 @@ const WorkflowTasksPanel = ({
                         Array.isArray(task.assigned_to) && task.assigned_to.length > 0
                           ? task.assigned_to.map((entry) => getTaskUserName(entry)).join(", ")
                           : "Unassigned";
+                      const uploadPendingUserNames = getPendingUploadUserNames(task);
                       const reworkCount = Number(task?.reworked?.count || task?.rework_count || 0);
                       const reworkComments = Array.isArray(task?.reworked?.comments)
                         ? [...task.reworked.comments].reverse()
@@ -1197,6 +1206,11 @@ const WorkflowTasksPanel = ({
                               <div className="small text-secondary mt-1">
                                 {assigneeText}
                               </div>
+                              {uploadPendingUserNames.length > 0 && (
+                                <div className="small text-secondary">
+                                  Upload Pending: {uploadPendingUserNames.join(", ")}
+                                </div>
+                              )}
                               {isBatchGroup && (
                                 <div className="workflow-batch-count-line">
                                   <span>Started: {Number(task?.batch_counts?.started_tasks || 0)}</span>

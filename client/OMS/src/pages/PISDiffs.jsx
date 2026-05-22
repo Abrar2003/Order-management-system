@@ -58,6 +58,16 @@ const getVendors = (item = {}) =>
 
 const isPisChecked = (item = {}) => item?.pis_checked_flag === true;
 
+const getVisiblePisDiffFields = (item = {}) =>
+  (Array.isArray(item?.pis_diff?.fields) ? item.pis_diff.fields : [])
+    .filter((field) =>
+      item?.barcode_exempted === true
+        ? String(field || "").trim().toLowerCase() !== "barcode"
+        : true,
+    );
+
+const hasPisDiffFields = (item = {}) => getVisiblePisDiffFields(item).length > 0;
+
 const normalizePrimaryMeasurementEntries = (entries = [], weightKey = "") =>
   (Array.isArray(entries) ? entries : [])
     .map((entry) => ({
@@ -495,6 +505,7 @@ const PISDiffs = () => {
           vendor: vendorFilter,
           page,
           limit,
+          include_product_image_thumbnail: true,
         },
       });
 
@@ -657,9 +668,7 @@ const PISDiffs = () => {
           if (column === "vendors") return getVendors(item);
           if (column === "diffs") {
             const statusLabel = isPisChecked(item) ? "PIS Checked" : "Needs PIS Check";
-            const diffFields = Array.isArray(item?.pis_diff?.fields)
-              ? item.pis_diff.fields
-              : [];
+            const diffFields = getVisiblePisDiffFields(item);
             return `${statusLabel} | ${diffFields.join(", ")}`;
           }
           if (column === "inspectedSize") {
@@ -1096,7 +1105,7 @@ const PISDiffs = () => {
                               <span className="badge pis-diff-pill">
                                 Needs PIS Check
                               </span>
-                              {(Array.isArray(item?.pis_diff?.fields) ? item.pis_diff.fields : []).map(
+                              {getVisiblePisDiffFields(item).map(
                                 (field) => (
                                   <span key={field} className="badge pis-diff-pill">
                                     {field}
@@ -1121,6 +1130,10 @@ const PISDiffs = () => {
                             {item?.inspection_report_mismatch ? (
                               <span className="badge text-bg-danger">
                                 Inspection report mismatch
+                              </span>
+                            ) : hasPisDiffFields(item) ? (
+                              <span className="badge text-bg-warning">
+                                PIS mismatch
                               </span>
                             ) : (
                               <span className="badge text-bg-light border text-secondary">

@@ -1872,6 +1872,7 @@ const UpdateQcModal = ({
     const existingItemMaster = isInspectionRecordUpdate
       ? buildInspectionRecordMeasurementSource(inspectionRecord, qc?.item_master || {})
       : qc?.item_master || {};
+    const isBarcodeExemptedItem = existingItemMaster?.barcode_exempted === true;
     const existingInspectedWeight = existingItemMaster?.inspected_weight || {};
     const existingInspectedBoxMode = detectBoxPackagingMode(
       existingItemMaster?.inspected_box_mode,
@@ -2147,12 +2148,16 @@ const UpdateQcModal = ({
       return;
     }
 
-    if (isQcUser && (!Number.isInteger(effectiveMasterBarcodeValue) || effectiveMasterBarcodeValue <= 0)) {
+    if (
+      isQcUser
+      && !isBarcodeExemptedItem
+      && (!Number.isInteger(effectiveMasterBarcodeValue) || effectiveMasterBarcodeValue <= 0)
+    ) {
       setError("QC users must scan the master barcode before updating this QC record.");
       return;
     }
 
-    if (isQcUser) {
+    if (isQcUser && !isBarcodeExemptedItem) {
       const pisMasterBarcode = normalizeComparableBarcode(
         existingItemMaster?.pis_master_barcode || existingItemMaster?.pis_barcode,
       );

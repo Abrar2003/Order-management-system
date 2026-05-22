@@ -18,6 +18,7 @@ const FINAL_PIS_CHECK_ITEM_SELECT = [
   "brand_name",
   "brands",
   "vendors",
+  "barcode_exempted",
   "pis_barcode",
   "pis_master_barcode",
   "pis_inner_barcode",
@@ -954,6 +955,8 @@ const buildCbmDifferences = (item = {}) => {
 };
 
 const buildBarcodeDifferences = (item = {}) => {
+  if (item?.barcode_exempted === true) return [];
+
   const differences = [];
   const masterDifference = createTextDifference({
     key: "barcode-master",
