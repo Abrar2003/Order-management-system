@@ -42,7 +42,8 @@ const formatDateTime = (value) => {
 
 const formatRealtimeStatusLabel = (connectionState = "") => {
   if (connectionState === "live") return "Live";
-  if (connectionState === "reconnecting") return "Reconnecting";
+  if (connectionState === "connecting") return "Connecting";
+  if (connectionState === "error") return "Realtime offline";
   return "Offline";
 };
 
@@ -88,10 +89,6 @@ const WorkflowBatches = () => {
     brandOptions,
     loadingBrands,
   } = useBrandOptions([brandFilter, ...rows.map((row) => row?.brand)]);
-
-  const handleRealtimeRefresh = useCallback(() => {
-    setRefreshTick((prev) => prev + 1);
-  }, []);
 
   const loadLookups = useCallback(async () => {
     if (!canViewWorkflow) {
@@ -189,10 +186,31 @@ const WorkflowBatches = () => {
     loadBatches();
   }, [loadBatches, refreshTick]);
 
+  const handleRealtimeBatchUpdated = useCallback((payload) => {
+    if (!payload?._id) return;
+    if (payload?.is_deleted) {
+      setRows((currentRows) => currentRows.filter((row) => String(row._id) !== String(payload._id)));
+      return;
+    }
+    let patched = false;
+    setRows((currentRows) =>
+      currentRows.map((row) => {
+        if (String(row._id) !== String(payload._id)) return row;
+        patched = true;
+        return { ...row, ...payload };
+      }),
+    );
+    if (payload?.shouldRefetch && !patched) {
+      setRefreshTick((prev) => prev + 1);
+    }
+  }, []);
+
   const { connectionState } = useWorkflowRealtime({
-    enabled: canViewWorkflow,
-    joinDashboard: canViewWorkflow,
-    onBatchUpdated: handleRealtimeRefresh,
+    enabled: isAdmin && canViewWorkflow,
+    joinDashboard: isAdmin && canViewWorkflow,
+    onBatchUpdated: handleRealtimeBatchUpdated,
+    onForceRefetch: loadBatches,
+    onSyncRequired: loadBatches,
   });
 
   useEffect(() => {

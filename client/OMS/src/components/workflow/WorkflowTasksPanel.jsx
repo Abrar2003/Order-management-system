@@ -58,6 +58,13 @@ const parseLimit = (value) => {
   return LIMIT_OPTIONS.includes(parsed) ? parsed : DEFAULT_LIMIT;
 };
 
+const formatRealtimeStatusLabel = (connectionState = "") => {
+  if (connectionState === "live") return "Live";
+  if (connectionState === "connecting") return "Connecting";
+  if (connectionState === "error") return "Realtime offline";
+  return "Offline";
+};
+
 const formatDateTime = (value) => formatDateTimeIST(value);
 
 const formatDateOnly = (value) => formatDateOnlyIST(value);
@@ -120,10 +127,39 @@ const isUploadStepPending = (task = {}, stepKey = "") => {
   );
 };
 
-const formatRealtimeStatusLabel = (connectionState = "") => {
-  if (connectionState === "live") return "Live";
-  if (connectionState === "reconnecting") return "Reconnecting";
-  return "Offline";
+const getTaskId = (task = {}) => String(task?._id || task?.taskId || "");
+
+const taskMatchesVisibleFilters = (task = {}, filters = {}) => {
+  if (!getTaskId(task)) return false;
+  const search = normalizeText(filters.search).toLowerCase();
+  if (search) {
+    const haystack = [task.task_no, task.title, task.brand, task.task_type_name, task.task_type_key]
+      .map(normalizeText)
+      .join(" ")
+      .toLowerCase();
+    if (!haystack.includes(search)) return false;
+  }
+  if (filters.statusFilter) {
+    if (filters.statusFilter === "upload_pending") {
+      const hasPendingUpload = (Array.isArray(task.upload_statuses) ? task.upload_statuses : [])
+        .some((entry) => normalizeText(entry?.status).toLowerCase() !== "uploaded");
+      if (!(task.status === "approved" && hasPendingUpload)) return false;
+    } else if (!["open", "complete_and_beyond", "upload_remaining"].includes(filters.statusFilter)) {
+      if (normalizeText(task.status) !== normalizeText(filters.statusFilter)) return false;
+    }
+  }
+  if (filters.taskTypeFilter && normalizeText(task.task_type_key) !== normalizeText(filters.taskTypeFilter)) {
+    return false;
+  }
+  if (filters.brandFilter && normalizeText(task.brand) !== normalizeText(filters.brandFilter)) {
+    return false;
+  }
+  if (filters.assigneeFilter) {
+    const assigneeIds = (Array.isArray(task.assigned_to) ? task.assigned_to : [])
+      .map((entry) => String(entry?.user?._id || entry?.user || entry?._id || entry || ""));
+    if (!assigneeIds.includes(String(filters.assigneeFilter))) return false;
+  }
+  return true;
 };
 
 const WORKFLOW_ACTION_ICONS = Object.freeze({
@@ -388,6 +424,7 @@ const WorkflowTasksPanel = ({
   const [page, setPage] = useState(() => parsePositiveInt(searchParams.get("page"), 1));
   const [limit, setLimit] = useState(() => parseLimit(searchParams.get("limit")));
   const [refreshTick, setRefreshTick] = useState(0);
+  const [pendingRealtimeUpdates, setPendingRealtimeUpdates] = useState(0);
   const [actionTaskId, setActionTaskId] = useState("");
   const [expandedBatchIds, setExpandedBatchIds] = useState(() => new Set());
   const [notePrompt, setNotePrompt] = useState({
@@ -396,10 +433,6 @@ const WorkflowTasksPanel = ({
     note: "",
     dueDate: "",
   });
-
-  const handleRealtimeRefresh = useCallback(() => {
-    setRefreshTick((prev) => prev + 1);
-  }, []);
 
   const activePromptTask = useMemo(
     () => rows.find((task) => String(task?._id) === String(notePrompt.taskId)) || null,
@@ -510,6 +543,7 @@ const WorkflowTasksPanel = ({
       });
 
       setRows(Array.isArray(response?.data) ? response.data : []);
+      setPendingRealtimeUpdates(0);
       setPagination({
         page: Number(response?.pagination?.page || 1),
         totalPages: Number(response?.pagination?.totalPages || 1),
@@ -547,6 +581,116 @@ const WorkflowTasksPanel = ({
     statusFilter,
     taskTypeFilter,
   ]);
+
+  const currentTaskFilters = useMemo(
+    () => ({
+      search,
+      statusFilter,
+      taskTypeFilter,
+      assigneeFilter: mineOnly && isAdmin ? currentUserId : assigneeFilter,
+      brandFilter,
+    }),
+    [assigneeFilter, brandFilter, currentUserId, isAdmin, mineOnly, search, statusFilter, taskTypeFilter],
+  );
+
+  const patchVisibleTask = useCallback((nextTask) => {
+    const nextTaskId = getTaskId(nextTask);
+    if (!nextTaskId) return false;
+    let patched = false;
+    setRows((currentRows) =>
+      currentRows.map((row) => {
+        if (getTaskId(row) === nextTaskId) {
+          patched = true;
+          return { ...row, ...nextTask };
+        }
+        if (row?.is_batch_group && Array.isArray(row.child_tasks)) {
+          const childTasks = row.child_tasks.map((childTask) => {
+            if (getTaskId(childTask) !== nextTaskId) return childTask;
+            patched = true;
+            return { ...childTask, ...nextTask };
+          });
+          return patched ? { ...row, child_tasks: childTasks } : row;
+        }
+        return row;
+      }),
+    );
+    return patched;
+  }, []);
+
+  const removeVisibleTask = useCallback((taskId) => {
+    if (!taskId) return;
+    setRows((currentRows) =>
+      currentRows
+        .filter((row) => getTaskId(row) !== String(taskId))
+        .map((row) => {
+          if (!row?.is_batch_group || !Array.isArray(row.child_tasks)) return row;
+          return {
+            ...row,
+            child_tasks: row.child_tasks.filter((childTask) => getTaskId(childTask) !== String(taskId)),
+          };
+        }),
+    );
+  }, []);
+
+  const handleRealtimeTaskCreated = useCallback((payload) => {
+    if (payload?.shouldRefetch) {
+      setPendingRealtimeUpdates((count) => count + 1);
+      return;
+    }
+    if (page === 1 && taskMatchesVisibleFilters(payload, currentTaskFilters)) {
+      setRows((currentRows) =>
+        currentRows.some((row) => getTaskId(row) === getTaskId(payload))
+          ? currentRows
+          : [payload, ...currentRows].slice(0, limit),
+      );
+      setPagination((current) => ({
+        ...current,
+        totalRecords: Number(current.totalRecords || 0) + 1,
+      }));
+      return;
+    }
+    setPendingRealtimeUpdates((count) => count + 1);
+  }, [currentTaskFilters, limit, page]);
+
+  const handleRealtimeTaskUpdated = useCallback((payload) => {
+    const taskId = getTaskId(payload);
+    if (!taskId) return;
+    if (payload?.shouldRefetch && !taskMatchesVisibleFilters(payload, currentTaskFilters)) {
+      removeVisibleTask(taskId);
+      setPendingRealtimeUpdates((count) => count + 1);
+      return;
+    }
+    const patched = patchVisibleTask(payload);
+    if (!patched && payload?.shouldRefetch) {
+      setPendingRealtimeUpdates((count) => count + 1);
+    }
+  }, [currentTaskFilters, patchVisibleTask, removeVisibleTask]);
+
+  const handleRealtimeTaskDeleted = useCallback((payload) => {
+    removeVisibleTask(payload?._id || payload?.taskId);
+    setPagination((current) => ({
+      ...current,
+      totalRecords: Math.max(0, Number(current.totalRecords || 0) - 1),
+    }));
+  }, [removeVisibleTask]);
+
+  const handleRealtimeBatchUpdated = useCallback((payload) => {
+    if (payload?.shouldRefetch) {
+      setPendingRealtimeUpdates((count) => count + 1);
+    }
+  }, []);
+
+  const { connectionState } = useWorkflowRealtime({
+    enabled: canViewWorkflow,
+    joinDashboard: isAdmin && !mineOnly && canViewWorkflow,
+    userId: canViewWorkflow && (!isAdmin || mineOnly) ? currentUserId : "",
+    onTaskCreated: handleRealtimeTaskCreated,
+    onTaskUpdated: handleRealtimeTaskUpdated,
+    onTaskDeleted: handleRealtimeTaskDeleted,
+    onBatchUpdated: !mineOnly ? handleRealtimeBatchUpdated : undefined,
+    onForceRefetch: loadTasks,
+    onSyncRequired: loadTasks,
+  });
 
   useEffect(() => {
     loadLookups();
@@ -861,14 +1005,6 @@ const WorkflowTasksPanel = ({
     return flattenedRows;
   }, [expandedBatchIds, rows]);
 
-  const { connectionState } = useWorkflowRealtime({
-    enabled: canViewWorkflow,
-    joinDashboard: isAdmin && !mineOnly && canViewWorkflow,
-    userId: canViewWorkflow && (!isAdmin || mineOnly) ? currentUserId : "",
-    onTaskUpdated: handleRealtimeRefresh,
-    onBatchUpdated: !mineOnly ? handleRealtimeRefresh : undefined,
-  });
-
   if (!canViewWorkflow) {
     return (
       <div className="page-shell py-3">
@@ -889,6 +1025,15 @@ const WorkflowTasksPanel = ({
               <span className="om-summary-chip">
                 {formatRealtimeStatusLabel(connectionState)}
               </span>
+              {pendingRealtimeUpdates > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-primary"
+                  onClick={() => setRefreshTick((prev) => prev + 1)}
+                >
+                  {pendingRealtimeUpdates} update{pendingRealtimeUpdates === 1 ? "" : "s"}
+                </button>
+              )}
             </div>
             <div className="text-secondary">{description}</div>
           </div>

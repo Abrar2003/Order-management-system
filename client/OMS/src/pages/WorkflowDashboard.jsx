@@ -25,7 +25,8 @@ const formatDateTime = (value) => {
 
 const formatRealtimeStatusLabel = (connectionState = "") => {
   if (connectionState === "live") return "Live";
-  if (connectionState === "reconnecting") return "Reconnecting";
+  if (connectionState === "connecting") return "Connecting";
+  if (connectionState === "error") return "Realtime offline";
   return "Offline";
 };
 
@@ -133,10 +134,6 @@ const WorkflowDashboard = () => {
   const [refreshTick, setRefreshTick] = useState(0);
   const { brandOptions, loadingBrands } = useBrandOptions([brandFilter]);
 
-  const handleRealtimeRefresh = useCallback(() => {
-    setRefreshTick((prev) => prev + 1);
-  }, []);
-
   const loadLookups = useCallback(async () => {
     if (!canViewDashboard) {
       setLookupLoading(false);
@@ -225,8 +222,12 @@ const WorkflowDashboard = () => {
   const { connectionState } = useWorkflowRealtime({
     enabled: canViewDashboard,
     joinDashboard: canViewDashboard,
-    onTaskUpdated: handleRealtimeRefresh,
-    onBatchUpdated: handleRealtimeRefresh,
+    onTaskCreated: loadDashboard,
+    onTaskUpdated: loadDashboard,
+    onTaskDeleted: loadDashboard,
+    onBatchUpdated: loadDashboard,
+    onForceRefetch: loadDashboard,
+    onSyncRequired: loadDashboard,
   });
 
   useEffect(() => {

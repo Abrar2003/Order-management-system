@@ -31,7 +31,7 @@ const productTypeTemplatesRouter = require("./routers/productTypeTemplates.route
 const workflowRouter = require("./routers/workflow.routes");
 const { closeRedisClients } = require("./config/redis");
 const { closeQueues } = require("./queues");
-const { createSocketServer } = require("./realtime/socket");
+const { createWorkflowSocketServer } = require("./realtime/workflowSocket");
 
 const app = express();
 const PORT = Number.parseInt(String(process.env.PORT || "8008"), 10) || 8008;
@@ -166,7 +166,7 @@ const startServer = async () => {
     await connectDB();
 
     const server = http.createServer(app);
-    const io = createSocketServer({
+    const io = createWorkflowSocketServer({
       server,
       allowedOrigins: effectiveAllowedOrigins,
       allowCredentials: corsOptions.credentials,

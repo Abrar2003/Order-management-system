@@ -3,11 +3,9 @@ import { getToken } from "../auth/auth.service";
 
 const normalizeText = (value) => String(value || "").trim();
 
-const resolveSocketBaseUrl = () => {
-  const configuredSocketUrl = normalizeText(import.meta.env.VITE_SOCKET_BASE_URL);
-  if (configuredSocketUrl) {
-    return configuredSocketUrl;
-  }
+const resolveWorkflowSocketBaseUrl = () => {
+  const configuredSocketUrl = normalizeText(import.meta.env.VITE_WORKFLOW_SOCKET_BASE_URL);
+  if (configuredSocketUrl) return configuredSocketUrl;
 
   const apiBaseUrl = normalizeText(import.meta.env.VITE_API_BASE_URL);
   if (/^https?:\/\//i.test(apiBaseUrl)) {
@@ -34,7 +32,7 @@ let workflowSocket = null;
 
 export const getWorkflowSocket = () => {
   if (!workflowSocket) {
-    workflowSocket = io(resolveSocketBaseUrl(), {
+    workflowSocket = io(resolveWorkflowSocketBaseUrl(), {
       autoConnect: false,
       withCredentials: true,
       transports: ["websocket", "polling"],

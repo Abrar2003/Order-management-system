@@ -22,9 +22,7 @@ const getSocketToken = (socket = {}) => {
   const authToken = normalizeText(socket?.handshake?.auth?.token);
   if (authToken) return authToken;
 
-  const authorizationHeader = normalizeText(
-    socket?.handshake?.headers?.authorization,
-  );
+  const authorizationHeader = normalizeText(socket?.handshake?.headers?.authorization);
   if (authorizationHeader.toLowerCase().startsWith("bearer ")) {
     return normalizeText(authorizationHeader.slice("bearer ".length));
   }
@@ -57,58 +55,43 @@ const authenticateSocketUser = async (socket = {}) => {
   return user;
 };
 
+const hasWorkflowView = (user = {}) => userHasPermission(user, "workflow", "view");
+
 const canJoinWorkflowDashboard = async (user = {}) =>
-  userHasPermission(user, "workflow", "view");
+  Boolean(await hasWorkflowView(user)) && isPrivilegedWorkflowReader(user);
 
 const canJoinWorkflowBatch = async (user = {}, batchId = "") => {
-  if (!mongoose.Types.ObjectId.isValid(batchId)) {
-    return false;
-  }
+  if (!mongoose.Types.ObjectId.isValid(batchId)) return false;
+  if (!(await hasWorkflowView(user))) return false;
+  if (isPrivilegedWorkflowReader(user)) return true;
 
-  if (!(await userHasPermission(user, "workflow", "view"))) {
-    return false;
-  }
-
-  if (isPrivilegedWorkflowReader(user)) {
-    return true;
-  }
-
+  const userId = user?._id || user?.id || null;
   const accessibleTask = await Task.exists({
     batch: batchId,
     is_deleted: false,
-    "assigned_to.user": user?._id || null,
+    $or: [
+      { "assigned_to.user": userId },
+      { "upload_assignees.user": userId },
+      { "assigned_by.user": userId },
+      { "created_by.user": userId },
+    ],
   });
 
   return Boolean(accessibleTask);
 };
 
 const canJoinWorkflowUserRoom = async (user = {}, targetUserId = "") => {
-  if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
-    return false;
-  }
+  if (!mongoose.Types.ObjectId.isValid(targetUserId)) return false;
+  if (!(await hasWorkflowView(user))) return false;
 
-  if (!(await userHasPermission(user, "workflow", "view"))) {
-    return false;
-  }
-
-  const normalizedUserId = normalizeText(user?._id);
-  if (normalizedUserId && normalizedUserId === normalizeText(targetUserId)) {
-    return true;
-  }
-
+  const socketUserId = normalizeText(user?._id || user?.id);
+  if (socketUserId && socketUserId === normalizeText(targetUserId)) return true;
   return isPrivilegedWorkflowReader(user);
 };
 
-const autoJoinWorkflowRooms = async (socket) => {
-  const user = socket?.data?.user || {};
-  const socketUserId = normalizeText(socket?.data?.userId || user?._id);
-
-  if (await canJoinWorkflowDashboard(user)) {
-    socket.join(WORKFLOW_DASHBOARD_ROOM);
-  }
-
-  if (socketUserId && (await canJoinWorkflowUserRoom(user, socketUserId))) {
-    socket.join(buildWorkflowUserRoom(socketUserId));
+const acknowledgeResult = (acknowledge, payload) => {
+  if (typeof acknowledge === "function") {
+    acknowledge(payload);
   }
 };
 
@@ -125,43 +108,39 @@ const registerWorkflowRealtimeHandlers = (io) => {
   });
 
   io.on("connection", (socket) => {
-    autoJoinWorkflowRooms(socket).catch((error) => {
-      console.error("workflow socket auto-join failed:", error);
-    });
-
     socket.on("workflow:join_dashboard", async (acknowledge) => {
       try {
-        const allowed = await canJoinWorkflowDashboard(socket.data.user);
-        if (!allowed) {
-          acknowledge?.({ success: false, message: "Workflow access is required" });
+        if (!(await canJoinWorkflowDashboard(socket.data.user))) {
+          acknowledgeResult(acknowledge, { success: false, message: "Dashboard access denied" });
           return;
         }
 
         socket.join(WORKFLOW_DASHBOARD_ROOM);
-        acknowledge?.({ success: true });
+        acknowledgeResult(acknowledge, { success: true });
       } catch (error) {
         console.error("workflow:join_dashboard failed:", error);
-        acknowledge?.({ success: false, message: "Failed to join workflow dashboard" });
+        acknowledgeResult(acknowledge, { success: false, message: "Failed to join dashboard" });
       }
+    });
+
+    socket.on("workflow:leave_dashboard", (acknowledge) => {
+      socket.leave(WORKFLOW_DASHBOARD_ROOM);
+      acknowledgeResult(acknowledge, { success: true });
     });
 
     socket.on("workflow:join_batch", async (batchId, acknowledge) => {
       try {
         const normalizedBatchId = normalizeText(batchId);
-        const allowed = await canJoinWorkflowBatch(
-          socket.data.user,
-          normalizedBatchId,
-        );
-        if (!allowed) {
-          acknowledge?.({ success: false, message: "Batch access denied" });
+        if (!(await canJoinWorkflowBatch(socket.data.user, normalizedBatchId))) {
+          acknowledgeResult(acknowledge, { success: false, message: "Batch access denied" });
           return;
         }
 
         socket.join(buildWorkflowBatchRoom(normalizedBatchId));
-        acknowledge?.({ success: true });
+        acknowledgeResult(acknowledge, { success: true });
       } catch (error) {
         console.error("workflow:join_batch failed:", error);
-        acknowledge?.({ success: false, message: "Failed to join workflow batch" });
+        acknowledgeResult(acknowledge, { success: false, message: "Failed to join batch" });
       }
     });
 
@@ -170,32 +149,36 @@ const registerWorkflowRealtimeHandlers = (io) => {
       if (normalizedBatchId) {
         socket.leave(buildWorkflowBatchRoom(normalizedBatchId));
       }
-      acknowledge?.({ success: true });
+      acknowledgeResult(acknowledge, { success: true });
     });
 
     socket.on("workflow:join_user", async (userId, acknowledge) => {
       try {
         const normalizedUserId = normalizeText(userId);
-        const allowed = await canJoinWorkflowUserRoom(
-          socket.data.user,
-          normalizedUserId,
-        );
-        if (!allowed) {
-          acknowledge?.({ success: false, message: "User room access denied" });
+        if (!(await canJoinWorkflowUserRoom(socket.data.user, normalizedUserId))) {
+          acknowledgeResult(acknowledge, { success: false, message: "User room access denied" });
           return;
         }
 
         socket.join(buildWorkflowUserRoom(normalizedUserId));
-        acknowledge?.({ success: true });
+        acknowledgeResult(acknowledge, { success: true });
       } catch (error) {
         console.error("workflow:join_user failed:", error);
-        acknowledge?.({ success: false, message: "Failed to join workflow user room" });
+        acknowledgeResult(acknowledge, { success: false, message: "Failed to join user room" });
       }
+    });
+
+    socket.on("workflow:leave_user", (userId, acknowledge) => {
+      const normalizedUserId = normalizeText(userId);
+      if (normalizedUserId) {
+        socket.leave(buildWorkflowUserRoom(normalizedUserId));
+      }
+      acknowledgeResult(acknowledge, { success: true });
     });
   });
 };
 
-const createSocketServer = ({
+const createWorkflowSocketServer = ({
   server,
   allowedOrigins = [],
   allowCredentials = false,
@@ -216,5 +199,5 @@ module.exports = {
   WORKFLOW_DASHBOARD_ROOM,
   buildWorkflowBatchRoom,
   buildWorkflowUserRoom,
-  createSocketServer,
+  createWorkflowSocketServer,
 };

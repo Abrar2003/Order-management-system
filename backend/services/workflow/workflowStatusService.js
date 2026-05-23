@@ -42,6 +42,8 @@ const {
 const {
   emitWorkflowBatchUpdated,
   emitWorkflowCommentAdded,
+  emitWorkflowTaskCreated,
+  emitWorkflowTaskDeleted,
   emitWorkflowTaskUpdated,
 } = require("./workflowRealtimeService");
 
@@ -161,6 +163,13 @@ const getIndianDayStart = (value = new Date()) => {
       shifted.getUTCDate(),
     ) - INDIA_TIMEZONE_OFFSET_MS,
   );
+};
+
+const isSameIndianDay = (left, right) => {
+  const leftDayStart = getIndianDayStart(left);
+  const rightDayStart = getIndianDayStart(right);
+  if (!leftDayStart || !rightDayStart) return false;
+  return leftDayStart.getTime() === rightDayStart.getTime();
 };
 
 const addDays = (value, days = 1) => new Date(value.getTime() + Number(days || 0) * DAY_MS);
@@ -1432,20 +1441,36 @@ const emitWorkflowTaskMutation = ({
   actor = {},
   message = "",
   additionalUserIds = [],
+  eventType = "updated",
+  changedFields = [],
+  shouldRefetch = false,
 } = {}) => {
   if (!realtimeSource || !task) return;
   const uploadAssigneeIds = (Array.isArray(task?.upload_assignees) ? task.upload_assignees : [])
     .map((entry) => normalizeId(entry?.user?._id || entry?.user || entry))
     .filter(Boolean);
 
-  emitWorkflowTaskUpdated(realtimeSource, task, batch, {
+  const emitTaskEvent = eventType === "created"
+    ? emitWorkflowTaskCreated
+    : eventType === "deleted"
+      ? emitWorkflowTaskDeleted
+      : emitWorkflowTaskUpdated;
+
+  emitTaskEvent(realtimeSource, task, batch, {
     changedBy: buildAuditActor(actor),
     message,
     additionalUserIds: uniqueIds([...additionalUserIds, ...uploadAssigneeIds]),
+    changedFields,
+    shouldRefetch,
   });
 
   if (batch) {
-    emitWorkflowBatchUpdated(realtimeSource, batch, { message });
+    emitWorkflowBatchUpdated(realtimeSource, batch, {
+      message,
+      changedFields: ["counts"],
+      shouldRefetch: true,
+      additionalUserIds: uniqueIds([...additionalUserIds, ...uploadAssigneeIds]),
+    });
   }
 };
 
@@ -1737,6 +1762,9 @@ const createWorkflowTask = async ({
     batch,
     actor,
     message: "Workflow task created",
+    eventType: "created",
+    changedFields: ["created"],
+    shouldRefetch: false,
   });
 
   return taskDetail;
@@ -2587,6 +2615,8 @@ const applyTaskTransition = async ({
     batch,
     actor,
     message: successMessage || `Workflow task moved to ${toStatus}`,
+    changedFields: ["status"],
+    shouldRefetch: true,
   });
 
   return taskDetail;
@@ -2731,6 +2761,8 @@ const assignWorkflowTask = async ({
     actor,
     message: "Workflow task assignment updated",
     additionalUserIds: currentAssigneeIds,
+    changedFields: ["assigned_to", "status"],
+    shouldRefetch: true,
   });
 
   return taskDetail;
@@ -2886,6 +2918,10 @@ const uploadWorkflowTask = async ({
     message: allUploadsComplete
       ? "Workflow task marked uploaded"
       : "Workflow task upload status updated",
+    changedFields: allUploadsComplete
+      ? ["status", "upload_statuses"]
+      : ["upload_statuses"],
+    shouldRefetch: allUploadsComplete,
   });
 
   return taskDetail;
@@ -3018,6 +3054,8 @@ const reworkWorkflowTask = async ({
     batch,
     actor,
     message: "Workflow task sent to rework",
+    changedFields: ["status", "rework", "due_date"],
+    shouldRefetch: true,
   });
 
   return taskDetail;
@@ -3108,6 +3146,8 @@ const requestWorkflowTaskHold = async ({
     batch,
     actor,
     message: adminHold ? "Workflow task put on hold" : "Workflow task hold requested",
+    changedFields: ["hold", "status"],
+    shouldRefetch: true,
   });
 
   return taskDetail;
@@ -3187,6 +3227,8 @@ const approveWorkflowTaskHold = async ({
     batch,
     actor,
     message: "Workflow task hold approved",
+    changedFields: ["hold", "status"],
+    shouldRefetch: true,
   });
 
   return taskDetail;
@@ -3254,6 +3296,8 @@ const rejectWorkflowTaskHold = async ({
     batch,
     actor,
     message: "Workflow task hold rejected",
+    changedFields: ["hold"],
+    shouldRefetch: true,
   });
 
   return taskDetail;
@@ -3352,6 +3396,8 @@ const resumeWorkflowTask = async ({
     batch,
     actor,
     message: "Workflow task resumed",
+    changedFields: ["hold", "status", "due_date"],
+    shouldRefetch: true,
   });
 
   return taskDetail;
@@ -3422,6 +3468,7 @@ const updateWorkflowTaskDetails = async ({
 
   const auditActor = buildAuditActor(actor);
   const changedFields = [];
+  const additionalRealtimeUserIds = [];
   let dueDateHistoryPayload = null;
 
   if (hasOwn(payload, "title") || hasOwn(payload, "name")) {
@@ -3465,9 +3512,7 @@ const updateWorkflowTaskDetails = async ({
       throw new Error("due_date is required");
     }
     const currentActiveDueDate = getActiveWorkflowDueDate(task) || task.due_date || null;
-    const currentTime = currentActiveDueDate ? currentActiveDueDate.getTime() : null;
-    const nextTime = dueDate ? dueDate.getTime() : null;
-    if (currentTime !== nextTime) {
+    if (!isSameIndianDay(currentActiveDueDate, dueDate)) {
       const dueDateNote = normalizeText(payload?.due_date_note || payload?.note || payload?.comment);
       if (!dueDateNote) {
         throw new Error("A due date update comment is required");
@@ -3527,6 +3572,7 @@ const updateWorkflowTaskDetails = async ({
       normalizedNextIds.some((id) => !currentUploadAssigneeIds.includes(id));
 
     if (hasUploadAssigneeChange) {
+      additionalRealtimeUserIds.push(...currentUploadAssigneeIds, ...normalizedNextIds);
       task.upload_assignees = nextUploadAssignees.map((user) => ({ user: user._id }));
       resetTaskUploadStatuses(task);
       changedFields.push("upload_assignees");
@@ -3612,6 +3658,20 @@ const updateWorkflowTaskDetails = async ({
     batch,
     actor,
     message: "Workflow task details updated",
+    additionalUserIds: additionalRealtimeUserIds,
+    changedFields,
+    shouldRefetch: changedFields.some((field) =>
+      [
+        "status",
+        "assigned_to",
+        "upload_assignees",
+        "upload_required",
+        "due_date",
+        "department",
+        "brand",
+        "task_type_key",
+      ].includes(field),
+    ),
   });
 
   return taskDetail;
@@ -3732,6 +3792,9 @@ const deleteWorkflowTask = async ({
     batch,
     actor,
     message: "Workflow task deleted",
+    eventType: "deleted",
+    changedFields: ["is_deleted"],
+    shouldRefetch: true,
   });
 
   return {

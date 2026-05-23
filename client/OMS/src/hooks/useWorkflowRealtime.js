@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { connectWorkflowSocket } from "../realtime/socket";
+import { connectWorkflowSocket } from "../realtime/workflowSocket";
 
 const normalizeText = (value) => String(value || "").trim();
 const ROOM_JOIN_TIMEOUT_MS = 4000;
@@ -41,32 +41,50 @@ export const useWorkflowRealtime = ({
   joinDashboard = false,
   batchId = "",
   userId = "",
+  onTaskCreated,
   onTaskUpdated,
+  onTaskDeleted,
   onBatchUpdated,
   onCommentAdded,
+  onForceRefetch,
+  onSyncRequired,
 } = {}) => {
-  const [connectionState, setConnectionState] = useState("offline");
-  const onTaskUpdatedRef = useRef(onTaskUpdated);
-  const onBatchUpdatedRef = useRef(onBatchUpdated);
-  const onCommentAddedRef = useRef(onCommentAdded);
-  const hasSyncedRef = useRef(false);
+  const [connectionState, setConnectionState] = useState("disconnected");
+  const callbackRefs = useRef({
+    onTaskCreated,
+    onTaskUpdated,
+    onTaskDeleted,
+    onBatchUpdated,
+    onCommentAdded,
+    onForceRefetch,
+    onSyncRequired,
+  });
+  const hasConnectedRef = useRef(false);
 
   useEffect(() => {
-    onTaskUpdatedRef.current = onTaskUpdated;
-  }, [onTaskUpdated]);
-
-  useEffect(() => {
-    onBatchUpdatedRef.current = onBatchUpdated;
-  }, [onBatchUpdated]);
-
-  useEffect(() => {
-    onCommentAddedRef.current = onCommentAdded;
-  }, [onCommentAdded]);
+    callbackRefs.current = {
+      onTaskCreated,
+      onTaskUpdated,
+      onTaskDeleted,
+      onBatchUpdated,
+      onCommentAdded,
+      onForceRefetch,
+      onSyncRequired,
+    };
+  }, [
+    onBatchUpdated,
+    onCommentAdded,
+    onForceRefetch,
+    onSyncRequired,
+    onTaskCreated,
+    onTaskDeleted,
+    onTaskUpdated,
+  ]);
 
   useEffect(() => {
     if (!enabled) {
-      setConnectionState("offline");
-      hasSyncedRef.current = false;
+      setConnectionState("disconnected");
+      hasConnectedRef.current = false;
       return undefined;
     }
 
@@ -74,33 +92,16 @@ export const useWorkflowRealtime = ({
     const normalizedBatchId = normalizeText(batchId);
     const normalizedUserId = normalizeText(userId);
 
-    const syncCurrentView = () => {
-      const callbacks = [
-        onTaskUpdatedRef.current,
-        onBatchUpdatedRef.current,
-      ].filter(Boolean);
-
-      [...new Set(callbacks)].forEach((callback) => {
-        callback?.({
-          reason: "realtime_sync",
-        });
-      });
-    };
-
     const joinRooms = async () => {
       const joinRequests = [];
       if (joinDashboard) {
         joinRequests.push(emitWithAck(socket, "workflow:join_dashboard"));
       }
       if (normalizedBatchId) {
-        joinRequests.push(
-          emitWithAck(socket, "workflow:join_batch", normalizedBatchId),
-        );
+        joinRequests.push(emitWithAck(socket, "workflow:join_batch", normalizedBatchId));
       }
       if (normalizedUserId) {
-        joinRequests.push(
-          emitWithAck(socket, "workflow:join_user", normalizedUserId),
-        );
+        joinRequests.push(emitWithAck(socket, "workflow:join_user", normalizedUserId));
       }
 
       const results = await Promise.all(joinRequests);
@@ -110,46 +111,49 @@ export const useWorkflowRealtime = ({
       }
     };
 
+    const syncCurrentView = (reason) => {
+      callbackRefs.current.onSyncRequired?.({
+        reason,
+      });
+    };
+
     const handleConnect = async () => {
-      setConnectionState("reconnecting");
+      setConnectionState("connecting");
       try {
         await joinRooms();
         setConnectionState("live");
-        if (hasSyncedRef.current) {
-          syncCurrentView();
-          return;
+        if (hasConnectedRef.current) {
+          syncCurrentView("reconnected");
         }
-
-        hasSyncedRef.current = true;
-        syncCurrentView();
+        hasConnectedRef.current = true;
       } catch (error) {
         console.error("Workflow realtime room join failed:", error);
-        setConnectionState("offline");
+        setConnectionState("error");
       }
     };
 
     const handleDisconnect = () => {
-      setConnectionState("offline");
+      setConnectionState("disconnected");
     };
 
     const handleReconnectAttempt = () => {
-      setConnectionState("reconnecting");
+      setConnectionState("connecting");
     };
 
     const handleConnectError = () => {
-      setConnectionState("offline");
+      setConnectionState("error");
     };
 
-    const handleTaskUpdated = (payload) => {
-      onTaskUpdatedRef.current?.(payload);
-    };
-
-    const handleBatchUpdated = (payload) => {
-      onBatchUpdatedRef.current?.(payload);
-    };
-
-    const handleCommentAdded = (payload) => {
-      onCommentAddedRef.current?.(payload);
+    const handleTaskCreated = (payload) => callbackRefs.current.onTaskCreated?.(payload);
+    const handleTaskUpdated = (payload) => callbackRefs.current.onTaskUpdated?.(payload);
+    const handleTaskDeleted = (payload) => callbackRefs.current.onTaskDeleted?.(payload);
+    const handleBatchUpdated = (payload) => callbackRefs.current.onBatchUpdated?.(payload);
+    const handleCommentAdded = (payload) => callbackRefs.current.onCommentAdded?.(payload);
+    const handleForceRefetch = (payload) => {
+      callbackRefs.current.onForceRefetch?.(payload);
+      callbackRefs.current.onSyncRequired?.({
+        reason: payload?.reason || "force_refetch",
+      });
     };
 
     socket.on("connect", handleConnect);
@@ -158,20 +162,29 @@ export const useWorkflowRealtime = ({
     socket.io.on("reconnect_attempt", handleReconnectAttempt);
     socket.io.on("reconnect_error", handleConnectError);
     socket.io.on("reconnect_failed", handleConnectError);
+    socket.on("workflow:task_created", handleTaskCreated);
     socket.on("workflow:task_updated", handleTaskUpdated);
+    socket.on("workflow:task_deleted", handleTaskDeleted);
     socket.on("workflow:batch_updated", handleBatchUpdated);
     socket.on("workflow:comment_added", handleCommentAdded);
+    socket.on("workflow:force_refetch", handleForceRefetch);
 
     if (socket.connected) {
       void handleConnect();
     } else {
-      setConnectionState("reconnecting");
+      setConnectionState("connecting");
       socket.connect();
     }
 
     return () => {
+      if (joinDashboard) {
+        socket.emit("workflow:leave_dashboard");
+      }
       if (normalizedBatchId) {
         socket.emit("workflow:leave_batch", normalizedBatchId);
+      }
+      if (normalizedUserId) {
+        socket.emit("workflow:leave_user", normalizedUserId);
       }
 
       socket.off("connect", handleConnect);
@@ -180,9 +193,12 @@ export const useWorkflowRealtime = ({
       socket.io.off("reconnect_attempt", handleReconnectAttempt);
       socket.io.off("reconnect_error", handleConnectError);
       socket.io.off("reconnect_failed", handleConnectError);
+      socket.off("workflow:task_created", handleTaskCreated);
       socket.off("workflow:task_updated", handleTaskUpdated);
+      socket.off("workflow:task_deleted", handleTaskDeleted);
       socket.off("workflow:batch_updated", handleBatchUpdated);
       socket.off("workflow:comment_added", handleCommentAdded);
+      socket.off("workflow:force_refetch", handleForceRefetch);
     };
   }, [batchId, enabled, joinDashboard, userId]);
 

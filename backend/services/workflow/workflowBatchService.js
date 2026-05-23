@@ -27,7 +27,7 @@ const {
 const { isAdmin, isPrivilegedWorkflowReader } = require("./workflowPermissionService");
 const {
   emitWorkflowBatchUpdated,
-  emitWorkflowTaskUpdated,
+  emitWorkflowForceRefetch,
   extractAssignedUserIds,
 } = require("./workflowRealtimeService");
 
@@ -81,22 +81,6 @@ const escapeRegex = (value = "") =>
 
 const normalizeId = (value) => String(value || "").trim();
 
-const buildRealtimeSummaryTask = ({
-  batch = null,
-  assignedUserIds = [],
-  status = "assigned",
-  actor = {},
-} = {}) => ({
-  _id: null,
-  batch: batch?._id || batch || null,
-  status,
-  assigned_to: (Array.isArray(assignedUserIds) ? assignedUserIds : [])
-    .filter(Boolean)
-    .map((userId) => ({ user: userId })),
-  updatedAt: new Date(),
-  updated_by: buildAuditActor(actor),
-});
-
 const collectTaskAssigneeIds = (tasks = []) =>
   [
     ...new Set(
@@ -115,24 +99,18 @@ const emitWorkflowBatchMutation = ({
 } = {}) => {
   if (!realtimeSource || !batch) return;
 
-  emitWorkflowBatchUpdated(realtimeSource, batch, { message });
+  emitWorkflowBatchUpdated(realtimeSource, batch, {
+    message,
+    changedFields: ["counts", "status"],
+    shouldRefetch: true,
+    additionalUserIds: affectedAssigneeIds,
+  });
 
-  if (Array.isArray(affectedAssigneeIds) && affectedAssigneeIds.length > 0) {
-    emitWorkflowTaskUpdated(
-      realtimeSource,
-      buildRealtimeSummaryTask({
-        batch,
-        assignedUserIds: affectedAssigneeIds,
-        actor,
-      }),
-      batch,
-      {
-        changedBy: buildAuditActor(actor),
-        message,
-        additionalUserIds: affectedAssigneeIds,
-      },
-    );
-  }
+  emitWorkflowForceRefetch(realtimeSource, {
+    batchId: batch?._id || batch,
+    userIds: affectedAssigneeIds,
+    reason: message || "workflow_batch_changed",
+  });
 };
 
 const getAccessibleBatchIdsForUser = async (user = {}) => {
@@ -329,6 +307,8 @@ const createWorkflowBatchFromFolderManifest = async (
     await batchDoc.save().catch(() => {});
     emitWorkflowBatchUpdated(realtimeSource, batchDoc, {
       message: "Workflow batch failed during task generation",
+      changedFields: ["status"],
+      shouldRefetch: true,
     });
     throw error;
   }
@@ -454,6 +434,8 @@ const updateWorkflowBatch = async (
   await batch.save();
   emitWorkflowBatchUpdated(realtimeSource, batch, {
     message: "Workflow batch updated",
+    changedFields: ["batch"],
+    shouldRefetch: true,
   });
   return populateBatchQuery(Batch.findById(batch._id));
 };

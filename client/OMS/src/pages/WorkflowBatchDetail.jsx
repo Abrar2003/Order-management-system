@@ -28,9 +28,12 @@ const formatDateTime = (value) => {
 
 const formatRealtimeStatusLabel = (connectionState = "") => {
   if (connectionState === "live") return "Live";
-  if (connectionState === "reconnecting") return "Reconnecting";
+  if (connectionState === "connecting") return "Connecting";
+  if (connectionState === "error") return "Realtime offline";
   return "Offline";
 };
+
+const getTaskId = (task = {}) => String(task?._id || task?.taskId || "");
 
 const getAuditActorName = (actor = {}) =>
   actor?.name || actor?.user?.name || actor?.user?.email || "N/A";
@@ -66,10 +69,6 @@ const WorkflowBatchDetail = () => {
     batch?.brand,
     ...tasks.map((task) => task?.brand),
   ]);
-
-  const handleRealtimeRefresh = useCallback(() => {
-    setRefreshTick((prev) => prev + 1);
-  }, []);
 
   const loadBatchDetail = useCallback(async () => {
     if (!canViewWorkflow || !batchId) {
@@ -153,12 +152,44 @@ const WorkflowBatchDetail = () => {
     loadBatchTasks();
   }, [loadBatchTasks, refreshTick]);
 
+  const patchTask = useCallback((payload) => {
+    const taskId = getTaskId(payload);
+    if (!taskId) return;
+    setTasks((currentTasks) =>
+      currentTasks.map((task) =>
+        getTaskId(task) === taskId ? { ...task, ...payload } : task,
+      ),
+    );
+  }, []);
+
+  const removeTask = useCallback((payload) => {
+    const taskId = getTaskId(payload);
+    if (!taskId) return;
+    setTasks((currentTasks) => currentTasks.filter((task) => getTaskId(task) !== taskId));
+  }, []);
+
+  const handleBatchRealtime = useCallback((payload) => {
+    if (payload?._id && String(payload._id) === String(batchId)) {
+      setBatch((currentBatch) => currentBatch ? { ...currentBatch, ...payload } : currentBatch);
+    }
+    if (payload?.shouldRefetch) {
+      void loadBatchDetail();
+    }
+  }, [batchId, loadBatchDetail]);
+
   const { connectionState } = useWorkflowRealtime({
     enabled: canViewWorkflow,
     batchId: canViewWorkflow ? batchId : "",
-    onTaskUpdated: handleRealtimeRefresh,
-    onBatchUpdated: handleRealtimeRefresh,
-    onCommentAdded: handleRealtimeRefresh,
+    onTaskCreated: loadBatchTasks,
+    onTaskUpdated: patchTask,
+    onTaskDeleted: removeTask,
+    onBatchUpdated: handleBatchRealtime,
+    onCommentAdded: patchTask,
+    onForceRefetch: loadBatchTasks,
+    onSyncRequired: () => {
+      void loadBatchDetail();
+      void loadBatchTasks();
+    },
   });
 
   const handleCancelBatch = async () => {

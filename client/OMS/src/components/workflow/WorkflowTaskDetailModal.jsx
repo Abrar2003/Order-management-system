@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { getUserFromToken } from "../../auth/auth.service";
 import {
   addWorkflowTaskComment,
@@ -12,6 +12,7 @@ import {
   updateWorkflowTask,
   uploadWorkflowTask,
 } from "../../api/workflowApi";
+import useWorkflowRealtime from "../../hooks/useWorkflowRealtime";
 import { formatDateOnlyIST, formatDateTimeIST, toISODateString } from "../../utils/date";
 import { formatBytes } from "../../utils/workflowManifest";
 import WorkflowTaskStageBar from "./WorkflowTaskStageBar";
@@ -182,6 +183,36 @@ const WorkflowTaskDetailModal = ({
   useEffect(() => {
     loadTask();
   }, [taskId]);
+
+  const handleRealtimeTaskUpdated = useCallback((payload = {}) => {
+    if (String(payload?._id || payload?.taskId || "") !== String(taskId)) return;
+    setTask((currentTask) => currentTask ? { ...currentTask, ...payload } : currentTask);
+  }, [taskId]);
+
+  const handleRealtimeCommentAdded = useCallback((payload = {}) => {
+    if (String(payload?.taskId || "") !== String(taskId)) return;
+    setTask((currentTask) => {
+      if (!currentTask) return currentTask;
+      const comments = Array.isArray(currentTask.comments) ? currentTask.comments : [];
+      if (comments.some((entry) => String(entry?._id) === String(payload?._id || payload?.commentId))) {
+        return currentTask;
+      }
+      return {
+        ...currentTask,
+        comments: [payload, ...comments],
+      };
+    });
+  }, [taskId]);
+
+  useWorkflowRealtime({
+    enabled: Boolean(taskId && task),
+    batchId: task?.batch?._id || task?.batch || "",
+    userId: currentUserId,
+    onTaskUpdated: handleRealtimeTaskUpdated,
+    onCommentAdded: handleRealtimeCommentAdded,
+    onForceRefetch: () => loadTask({ keepMessages: true }),
+    onSyncRequired: () => loadTask({ keepMessages: true }),
+  });
 
   const assignedUsers = useMemo(
     () =>
