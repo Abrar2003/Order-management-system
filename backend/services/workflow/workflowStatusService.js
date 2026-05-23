@@ -46,6 +46,10 @@ const {
   emitWorkflowTaskDeleted,
   emitWorkflowTaskUpdated,
 } = require("./workflowRealtimeService");
+const {
+  notifyWorkflowCommentAdded,
+  notifyWorkflowTaskEvent,
+} = require("../notificationService");
 
 const DEFAULT_PAGE_LIMIT = 20;
 const MAX_PAGE_LIMIT = 100;
@@ -1472,6 +1476,18 @@ const emitWorkflowTaskMutation = ({
       additionalUserIds: uniqueIds([...additionalUserIds, ...uploadAssigneeIds]),
     });
   }
+
+  notifyWorkflowTaskEvent({
+    realtimeSource,
+    task,
+    actor,
+    eventType,
+    changedFields,
+    additionalUserIds: uniqueIds([...additionalUserIds, ...uploadAssigneeIds]),
+    message,
+  }).catch((error) => {
+    console.error("Workflow notification creation failed:", error);
+  });
 };
 
 const buildUploadStatusEntriesFromAssignees = (assignees = []) =>
@@ -3713,6 +3729,14 @@ const addWorkflowTaskComment = async ({
 
   emitWorkflowCommentAdded(realtimeSource, commentDetail, task, {
     message: "Workflow task comment added",
+  });
+  notifyWorkflowCommentAdded({
+    realtimeSource,
+    task,
+    comment: commentDetail,
+    actor,
+  }).catch((error) => {
+    console.error("Workflow comment notification failed:", error);
   });
 
   return commentDetail;

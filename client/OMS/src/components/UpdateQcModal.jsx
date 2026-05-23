@@ -2494,9 +2494,9 @@ const UpdateQcModal = ({
       }
 
       const qcPayload = buildQcPayload();
-      qcPayload.vendor_provision = totalOfferedAfterRewrite;
-      qcPayload.qc_checked = totalCheckedAfterRewrite;
-      qcPayload.qc_passed = totalSamplePassedAfterRewrite;
+      qcPayload.vendor_provision = offeredQuantity;
+      qcPayload.qc_checked = qcChecked;
+      qcPayload.qc_passed = qcPassed;
       qcPayload.labels = allLabelsAfterRewrite;
 
       try {

@@ -18,6 +18,9 @@ const buildWorkflowBatchRoom = (batchId) =>
 const buildWorkflowUserRoom = (userId) =>
   `workflow:user:${normalizeText(userId)}`;
 
+const buildNotificationUserRoom = (userId) =>
+  `notification:user:${normalizeText(userId)}`;
+
 const getSocketToken = (socket = {}) => {
   const authToken = normalizeText(socket?.handshake?.auth?.token);
   if (authToken) return authToken;
@@ -108,6 +111,10 @@ const registerWorkflowRealtimeHandlers = (io) => {
   });
 
   io.on("connection", (socket) => {
+    if (socket.data.userId) {
+      socket.join(buildNotificationUserRoom(socket.data.userId));
+    }
+
     socket.on("workflow:join_dashboard", async (acknowledge) => {
       try {
         if (!(await canJoinWorkflowDashboard(socket.data.user))) {
@@ -175,6 +182,29 @@ const registerWorkflowRealtimeHandlers = (io) => {
       }
       acknowledgeResult(acknowledge, { success: true });
     });
+
+    socket.on("notification:join_user", async (acknowledge) => {
+      try {
+        const userId = normalizeText(socket.data.userId);
+        if (!userId) {
+          acknowledgeResult(acknowledge, { success: false, message: "User room access denied" });
+          return;
+        }
+        socket.join(buildNotificationUserRoom(userId));
+        acknowledgeResult(acknowledge, { success: true });
+      } catch (error) {
+        console.error("notification:join_user failed:", error);
+        acknowledgeResult(acknowledge, { success: false, message: "Failed to join notification room" });
+      }
+    });
+
+    socket.on("notification:leave_user", (acknowledge) => {
+      const userId = normalizeText(socket.data.userId);
+      if (userId) {
+        socket.leave(buildNotificationUserRoom(userId));
+      }
+      acknowledgeResult(acknowledge, { success: true });
+    });
   });
 };
 
@@ -197,6 +227,7 @@ const createWorkflowSocketServer = ({
 
 module.exports = {
   WORKFLOW_DASHBOARD_ROOM,
+  buildNotificationUserRoom,
   buildWorkflowBatchRoom,
   buildWorkflowUserRoom,
   createWorkflowSocketServer,

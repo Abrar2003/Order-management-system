@@ -1316,23 +1316,30 @@ const InspectionReport = () => {
     const checkedCbmTotal = calculatedInspectedCbm !== "Not Set"
       ? calculatedInspectedCbm
       : (inspectedTotalCbm !== "Not Set" ? inspectedTotalCbm : baseTotalCbm);
+    const inspectedMasterBarcodeCandidate =
+      inspectedSource?.master_barcode ||
+      inspectedSource?.barcode ||
+      itemMaster?.qc?.master_barcode ||
+      itemMaster?.qc?.barcode ||
+      qc?.master_barcode ||
+      qc?.barcode ||
+      0;
     const inspectedBarcodeRaw =
-      Number(
-        hasLatestInspectionRecord
-          ? inspectedSource?.master_barcode || inspectedSource?.barcode || 0
-          : qc?.master_barcode || qc?.barcode || 0,
-      ) > 0
-        ? String(
-            hasLatestInspectionRecord
-              ? inspectedSource?.master_barcode || inspectedSource?.barcode
-              : qc?.master_barcode || qc?.barcode,
-          ).trim()
+      Number(inspectedMasterBarcodeCandidate) > 0
+        ? String(inspectedMasterBarcodeCandidate).trim()
         : "";
     const inspectedInnerBarcodeRaw =
       Number(
-        hasLatestInspectionRecord ? inspectedSource?.inner_barcode || 0 : qc?.inner_barcode || 0,
+        inspectedSource?.inner_barcode ||
+          itemMaster?.qc?.inner_barcode ||
+          qc?.inner_barcode ||
+          0,
       ) > 0
-        ? String(hasLatestInspectionRecord ? inspectedSource?.inner_barcode : qc?.inner_barcode).trim()
+        ? String(
+            inspectedSource?.inner_barcode ||
+              itemMaster?.qc?.inner_barcode ||
+              qc?.inner_barcode,
+          ).trim()
         : "";
     const pisBarcodeRaw = String(
       itemMaster?.pis_master_barcode

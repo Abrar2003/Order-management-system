@@ -30,6 +30,9 @@ const {
   emitWorkflowForceRefetch,
   extractAssignedUserIds,
 } = require("./workflowRealtimeService");
+const {
+  notifyWorkflowBatchEvent,
+} = require("../notificationService");
 
 const DEFAULT_PAGE_LIMIT = 20;
 const MAX_PAGE_LIMIT = 100;
@@ -110,6 +113,17 @@ const emitWorkflowBatchMutation = ({
     batchId: batch?._id || batch,
     userIds: affectedAssigneeIds,
     reason: message || "workflow_batch_changed",
+  });
+  notifyWorkflowBatchEvent({
+    realtimeSource,
+    batch,
+    userIds: affectedAssigneeIds,
+    actor,
+    type: "workflow_batch_updated",
+    title: "Workflow batch updated",
+    message,
+  }).catch((error) => {
+    console.error("Workflow batch notification failed:", error);
   });
 };
 

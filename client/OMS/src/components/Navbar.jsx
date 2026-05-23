@@ -10,6 +10,7 @@ import {
   buildItemFilesPagePath,
   ITEM_FILE_OPTIONS,
 } from "../constants/itemFiles";
+import NotificationBell from "../notifications/NotificationBell";
 import {
   isManagerLikeRole,
   isQcOnlyUserRole,
@@ -713,6 +714,8 @@ const Navbar = () => {
               <div className="d-none d-lg-flex ms-auto align-items-center small text-secondary">
                 {user?.name || "User"} ({role || "N/A"})
               </div>
+
+              <NotificationBell enabled={canViewWorkflow} />
 
               <div className="position-relative d-lg-none ms-auto">
                 <button

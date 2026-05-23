@@ -5309,10 +5309,9 @@ exports.updateQC = async (req, res) => {
     let nextCurrentRequestOffered = currentRequestOfferedBefore;
 
     if (allowAdminRewrite && hasExplicitQuantityPayload) {
-      nextVendorProvision = toNonNegativeNumber(vendor_provision, 0);
-      nextChecked = toNonNegativeNumber(qc_checked, 0);
-      nextSamplePassedTotal = toNonNegativeNumber(qc_passed, 0);
-
+      // Admin rewrite quantities are replacement values for the target
+      // inspection record. Rebuild QC totals around that row instead of
+      // treating the payload as already-aggregated totals.
       const otherChecked = Math.max(
         0,
         currentCheckedTotal - currentRequestCheckedBefore,
@@ -5326,12 +5325,22 @@ exports.updateQC = async (req, res) => {
         currentSamplePassedTotal - currentRequestSamplePassedBefore,
       );
 
-      nextCurrentRequestChecked = Math.max(0, nextChecked - otherChecked);
-      nextCurrentRequestOffered = Math.max(0, nextVendorProvision - otherOffered);
-      nextCurrentRequestSamplePassed = Math.max(
-        0,
-        nextSamplePassedTotal - otherSamplePassed,
-      );
+      nextCurrentRequestChecked =
+        qc_checked !== undefined
+          ? toNonNegativeNumber(qc_checked, 0)
+          : currentRequestCheckedBefore;
+      nextCurrentRequestOffered =
+        vendor_provision !== undefined
+          ? toNonNegativeNumber(vendor_provision, 0)
+          : currentRequestOfferedBefore;
+      nextCurrentRequestSamplePassed =
+        qc_passed !== undefined
+          ? toNonNegativeNumber(qc_passed, 0)
+          : currentRequestSamplePassedBefore;
+
+      nextVendorProvision = otherOffered + nextCurrentRequestOffered;
+      nextChecked = otherChecked + nextCurrentRequestChecked;
+      nextSamplePassedTotal = otherSamplePassed + nextCurrentRequestSamplePassed;
     } else {
       nextVendorProvision = currentVendorOfferedTotal + addProvision;
       nextChecked = currentCheckedTotal + addChecked;
