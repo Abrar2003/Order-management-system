@@ -90,11 +90,14 @@ const toUserRefs = (entries = []) =>
     };
   }).filter((entry) => entry.user);
 
-const buildTaskPayload = (task = {}, {
+const buildTaskPayload = (task = {}, options = {}) => {
+  const safeOptions = options || {};
+  const {
   changedFields = [],
   shouldRefetch = false,
   message = "",
-} = {}) => ({
+  } = safeOptions;
+  return {
   _id: normalizeText(task?._id),
   task_no: normalizeText(task?.task_no),
   title: normalizeText(task?.title),
@@ -114,13 +117,17 @@ const buildTaskPayload = (task = {}, {
   changedFields: uniqueIds(changedFields),
   shouldRefetch: Boolean(shouldRefetch),
   message: normalizeText(message),
-});
+  };
+};
 
-const buildBatchPayload = (batch = {}, {
+const buildBatchPayload = (batch = {}, options = {}) => {
+  const safeOptions = options || {};
+  const {
   changedFields = [],
   shouldRefetch = false,
   message = "",
-} = {}) => ({
+  } = safeOptions;
+  return {
   _id: normalizeText(batch?._id),
   batchId: normalizeText(batch?._id),
   batch_no: normalizeText(batch?.batch_no),
@@ -136,11 +143,13 @@ const buildBatchPayload = (batch = {}, {
   changedFields: uniqueIds(changedFields),
   shouldRefetch: Boolean(shouldRefetch),
   message: normalizeText(message),
-});
+  };
+};
 
-const buildCommentPayload = (comment = {}, task = {}, {
-  message = "",
-} = {}) => ({
+const buildCommentPayload = (comment = {}, task = {}, options = {}) => {
+  const safeOptions = options || {};
+  const { message = "" } = safeOptions;
+  return {
   _id: normalizeText(comment?._id),
   commentId: normalizeText(comment?._id),
   taskId: normalizeText(task?._id || comment?.task?._id || comment?.task),
@@ -151,7 +160,8 @@ const buildCommentPayload = (comment = {}, task = {}, {
   createdAt: comment?.createdAt || comment?.created_at || new Date(),
   created_by: comment?.created_by || {},
   message: normalizeText(message),
-});
+  };
+};
 
 const buildTaskRooms = (task = {}, additionalUserIds = []) => {
   const batchId = normalizeText(task?.batch?._id || task?.batch);
@@ -162,7 +172,7 @@ const buildTaskRooms = (task = {}, additionalUserIds = []) => {
   ];
 };
 
-const emitWorkflowTaskCreated = (reqOrIo, task, options = {}) => {
+const emitWorkflowTaskCreated = (reqOrIo, task, _batch = null, options = {}) => {
   const io = resolveIo(reqOrIo);
   if (!io || !task) return null;
   const payload = buildTaskPayload(task, options);
