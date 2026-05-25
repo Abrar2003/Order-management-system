@@ -1,4 +1,4 @@
-import { useLayoutEffect } from "react";
+import { useEffect, useLayoutEffect } from "react";
 import {
   BrowserRouter as Router,
   Routes,
@@ -103,6 +103,49 @@ const clearStaleUiOverlays = ({ removeCustomModalRoots = false } = {}) => {
     });
 };
 
+const isModalNumberInput = (element) =>
+  element instanceof HTMLInputElement &&
+  element.type === "number" &&
+  Boolean(element.closest(".modal, .om-modal-backdrop"));
+
+const ModalNumberInputGuard = () => {
+  useEffect(() => {
+    const handleWheel = (event) => {
+      const target = event.target;
+      if (!isModalNumberInput(target) || document.activeElement !== target) {
+        return;
+      }
+
+      event.preventDefault();
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
+        return;
+      }
+
+      if (!isModalNumberInput(event.target)) {
+        return;
+      }
+
+      event.preventDefault();
+    };
+
+    document.addEventListener("wheel", handleWheel, {
+      capture: true,
+      passive: false,
+    });
+    document.addEventListener("keydown", handleKeyDown, true);
+
+    return () => {
+      document.removeEventListener("wheel", handleWheel, true);
+      document.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, []);
+
+  return null;
+};
+
 const RouteUiCleanup = () => {
   const location = useLocation();
 
@@ -154,6 +197,7 @@ const App = () => {
     <div className="app-shell">
       <Router>
         <PermissionProvider>
+          <ModalNumberInputGuard />
           <RouteUiCleanup />
           <Routes>
           {/* Public */}

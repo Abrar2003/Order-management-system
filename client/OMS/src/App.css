@@ -6407,6 +6407,20 @@ button.om-item-order-presence-label {
   gap: 0.2rem;
 }
 
+.modal input[type="number"],
+.om-modal-backdrop input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.modal input[type="number"]::-webkit-outer-spin-button,
+.modal input[type="number"]::-webkit-inner-spin-button,
+.om-modal-backdrop input[type="number"]::-webkit-outer-spin-button,
+.om-modal-backdrop input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 @media (max-width: 575.98px) {
   .om-notification-dock {
     width: 100vw;
