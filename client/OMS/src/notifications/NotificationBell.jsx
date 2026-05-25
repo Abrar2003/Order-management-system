@@ -4,7 +4,7 @@ import NotificationPopupModal from "./NotificationPopupModal";
 import NotificationToast from "./NotificationToast";
 import { useNotifications } from "./useNotifications";
 
-const NotificationBell = ({ enabled = true }) => {
+const NotificationBell = ({ className = "", enabled = true }) => {
   const notifications = useNotifications({ enabled });
 
   if (!enabled) return null;
@@ -50,12 +50,12 @@ const NotificationBell = ({ enabled = true }) => {
     <>
       <button
         type="button"
-        className="btn btn-outline-primary btn-sm rounded-pill om-notification-bell"
+        className={`btn btn-outline-primary btn-sm om-notification-bell ${className}`.trim()}
         onClick={() => notifications.setDockOpen(true)}
         aria-label={`Open notifications. ${notifications.unreadCount} unread.`}
+        title="Alerts"
       >
-        <span aria-hidden="true">!</span>
-        <span>Alerts</span>
+        <img src="/chat.png" alt="" aria-hidden="true" className="om-notification-bell-icon" />
         {notifications.unreadCount > 0 && (
           <span className="om-notification-badge">
             {notifications.unreadCount > 99 ? "99+" : notifications.unreadCount}

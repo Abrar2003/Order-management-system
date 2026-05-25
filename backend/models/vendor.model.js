@@ -24,6 +24,7 @@ const vendorSchema = new mongoose.Schema({
     name: { type: String },
     email: { type: String },
     phone: { type: String },
+    type: { type: String, enum: ['merchant', 'shipment'] },
   }],
   is_active: {
     type: Boolean,

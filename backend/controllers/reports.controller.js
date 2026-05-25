@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const XLSX = require("xlsx");
 
 const Inspection = require("../models/inspection.model");
 const QC = require("../models/qc.model");
@@ -212,6 +213,77 @@ const buildInspectedItemsSummary = (rows = []) => {
     packaging_ppt: createSummaryEntry(INSPECTED_ITEM_CRITERIA.PACKAGING_PPT, "Packaging PPT Uploaded"),
     product_image: createSummaryEntry(INSPECTED_ITEM_CRITERIA.PRODUCT_IMAGE, "Product Image Uploaded"),
     finish: createSummaryEntry(INSPECTED_ITEM_CRITERIA.FINISH, "Finish Uploaded"),
+  };
+};
+
+const getInspectedItemsReportDataset = async ({
+  search,
+  brand,
+  vendor,
+  criterion = "all",
+  status = "all",
+  user,
+} = {}) => {
+  const accessOptions = {
+    brandFields: ["brand", "brand_name", "brands"],
+    vendorFields: ["vendors"],
+  };
+  const baseMatch = applyDataAccessMatch(
+    buildInspectedItemsReportMatch({ search, brand, vendor }),
+    user,
+    accessOptions,
+  );
+
+  const [items, brandsRaw, brandNamesRaw, brandsPrimaryRaw, vendorsRaw] = await Promise.all([
+    Item.find(baseMatch)
+      .select(INSPECTED_ITEMS_REPORT_SELECT)
+      .sort({ updatedAt: -1, code: 1 })
+      .lean(),
+    Item.distinct(
+      "brands",
+      applyDataAccessMatch(buildInspectedItemsReportMatch({ search, vendor }), user, accessOptions),
+    ),
+    Item.distinct(
+      "brand_name",
+      applyDataAccessMatch(buildInspectedItemsReportMatch({ search, vendor }), user, accessOptions),
+    ),
+    Item.distinct(
+      "brand",
+      applyDataAccessMatch(buildInspectedItemsReportMatch({ search, vendor }), user, accessOptions),
+    ),
+    Item.distinct(
+      "vendors",
+      applyDataAccessMatch(buildInspectedItemsReportMatch({ search, brand }), user, accessOptions),
+    ),
+  ]);
+
+  const baseRows = (Array.isArray(items) ? items : []).map(buildInspectedItemsReportRow);
+  const normalizedCriterion = normalizeText(criterion).toLowerCase() || "all";
+  const normalizedStatus = normalizeText(status).toLowerCase() || "all";
+  const filteredRows = baseRows.filter((row) =>
+    matchesInspectedItemsCriterion(row?.flags, normalizedCriterion, normalizedStatus),
+  );
+
+  return {
+    rows: filteredRows,
+    summary: buildInspectedItemsSummary(baseRows),
+    filters: {
+      search: normalizeText(search),
+      brand: normalizeText(brand) || "all",
+      vendor: normalizeText(vendor) || "all",
+      criterion: normalizedCriterion,
+      status: normalizedStatus,
+      brand_options: [
+        ...new Set([
+          ...(brandsPrimaryRaw || []),
+          ...(brandsRaw || []),
+          ...(brandNamesRaw || []),
+        ].map(normalizeText).filter(Boolean)),
+      ].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" })),
+      vendor_options: [
+        ...new Set((vendorsRaw || []).map(normalizeText).filter(Boolean)),
+      ].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" })),
+    },
   };
 };
 
@@ -1448,59 +1520,25 @@ exports.getInspectedItemsReport = async (req, res) => {
     );
     const skip = (page - 1) * limit;
 
-    const accessOptions = {
-      brandFields: ["brand", "brand_name", "brands"],
-      vendorFields: ["vendors"],
-    };
-    const baseMatch = applyDataAccessMatch(
-      buildInspectedItemsReportMatch({ search, brand, vendor }),
-      req.user,
-      accessOptions,
-    );
-
-    const [items, brandsRaw, brandNamesRaw, brandsPrimaryRaw, vendorsRaw] = await Promise.all([
-      Item.find(baseMatch)
-        .select(INSPECTED_ITEMS_REPORT_SELECT)
-        .sort({ updatedAt: -1, code: 1 })
-        .lean(),
-      Item.distinct("brands", applyDataAccessMatch(buildInspectedItemsReportMatch({ search, vendor }), req.user, accessOptions)),
-      Item.distinct("brand_name", applyDataAccessMatch(buildInspectedItemsReportMatch({ search, vendor }), req.user, accessOptions)),
-      Item.distinct("brand", applyDataAccessMatch(buildInspectedItemsReportMatch({ search, vendor }), req.user, accessOptions)),
-      Item.distinct("vendors", applyDataAccessMatch(buildInspectedItemsReportMatch({ search, brand }), req.user, accessOptions)),
-    ]);
-
-    const baseRows = (Array.isArray(items) ? items : []).map(buildInspectedItemsReportRow);
-    const summary = buildInspectedItemsSummary(baseRows);
-    const filteredRows = baseRows.filter((row) =>
-      matchesInspectedItemsCriterion(row?.flags, criterion, status),
-    );
+    const dataset = await getInspectedItemsReportDataset({
+      search,
+      brand,
+      vendor,
+      criterion,
+      status,
+      user: req.user,
+    });
 
     return res.status(200).json({
       success: true,
-      rows: filteredRows.slice(skip, skip + limit),
-      summary,
-      filters: {
-        search: normalizeText(search),
-        brand: normalizeText(brand) || "all",
-        vendor: normalizeText(vendor) || "all",
-        criterion,
-        status,
-        brand_options: [
-          ...new Set([
-            ...(brandsPrimaryRaw || []),
-            ...(brandsRaw || []),
-            ...(brandNamesRaw || []),
-          ].map(normalizeText).filter(Boolean)),
-        ].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" })),
-        vendor_options: [
-          ...new Set((vendorsRaw || []).map(normalizeText).filter(Boolean)),
-        ].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" })),
-      },
+      rows: dataset.rows.slice(skip, skip + limit),
+      summary: dataset.summary,
+      filters: dataset.filters,
       pagination: {
         page,
         limit,
-        total: filteredRows.length,
-        totalPages: Math.max(1, Math.ceil(filteredRows.length / limit)),
+        total: dataset.rows.length,
+        totalPages: Math.max(1, Math.ceil(dataset.rows.length / limit)),
       },
     });
   } catch (error) {
@@ -1508,6 +1546,70 @@ exports.getInspectedItemsReport = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error?.message || "Failed to fetch inspected items report.",
+    });
+  }
+};
+
+exports.exportInspectedItemsReport = async (req, res) => {
+  try {
+    const dataset = await getInspectedItemsReportDataset({
+      search: req.query.search,
+      brand: req.query.brand,
+      vendor: req.query.vendor,
+      criterion: normalizeText(req.query.criterion).toLowerCase() || "all",
+      status: normalizeText(req.query.status).toLowerCase() || "all",
+      user: req.user,
+    });
+
+    const columns = [
+      { header: "Item Code", value: (row) => row.code || "N/A" },
+      { header: "Description", value: (row) => row.description || row.name || "N/A" },
+      { header: "Brand", value: (row) => row.brand || (row.brands || []).join(", ") || "N/A" },
+      { header: "Vendors", value: (row) => (row.vendors || []).join(", ") || "N/A" },
+      { header: "Inspected", value: (row) => (row.flags?.inspected ? "Yes" : "No") },
+      { header: "CAD", value: (row) => (row.flags?.cad ? "Yes" : "No") },
+      { header: "PIS", value: (row) => (row.flags?.pis ? "Yes" : "No") },
+      { header: "Packaging PPT", value: (row) => (row.flags?.packaging_ppt ? "Yes" : "No") },
+      { header: "Product Image", value: (row) => (row.flags?.product_image ? "Yes" : "No") },
+      { header: "Finish", value: (row) => (row.flags?.finish ? "Yes" : "No") },
+      {
+        header: "Finish Count",
+        value: (row) => Number(row.files?.finish_count || 0),
+      },
+      {
+        header: "Last Inspected",
+        value: (row) => toISODateString(row.last_inspected_date) || "N/A",
+      },
+    ];
+    const headerRow = columns.map((column) => column.header);
+    const dataRows = dataset.rows.map((row) =>
+      columns.map((column) => column.value(row)),
+    );
+    const worksheet = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
+    worksheet["!cols"] = columns.map((column, columnIndex) => {
+      const maxDataLength = Math.max(
+        column.header.length,
+        ...dataRows.map((row) => String(row[columnIndex] ?? "").length),
+      );
+      return { wch: Math.min(34, Math.max(12, maxDataLength + 2)) };
+    });
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Inspected Items");
+    const fileBuffer = XLSX.write(workbook, { type: "buffer", bookType: "xls" });
+    const fileDate = new Date().toISOString().slice(0, 10);
+
+    res.setHeader("Content-Type", "application/vnd.ms-excel");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="inspected-items-report-${fileDate}.xls"`,
+    );
+    return res.status(200).send(fileBuffer);
+  } catch (error) {
+    console.error("Export Inspected Items Report Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to export inspected items report.",
     });
   }
 };

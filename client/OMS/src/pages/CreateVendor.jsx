@@ -11,11 +11,25 @@ const initialForm = {
   phone: "",
   address: "",
   vendor_code: "",
-  contact_person: [{ name: "", email: "", phone: "" }],
+  contact_person: [{ name: "", email: "", phone: "", type: "merchant" }],
   is_active: true,
 };
 
-const emptyContactPerson = { name: "", email: "", phone: "" };
+const CONTACT_PERSON_TYPE_OPTIONS = [
+  { value: "merchant", label: "Merchant" },
+  { value: "shipment", label: "Shipment" },
+];
+
+const emptyContactPerson = { name: "", email: "", phone: "", type: "merchant" };
+const normalizeContactPersonType = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  return CONTACT_PERSON_TYPE_OPTIONS.some((option) => option.value === normalized)
+    ? normalized
+    : "merchant";
+};
+const getContactPersonTypeLabel = (value) =>
+  CONTACT_PERSON_TYPE_OPTIONS.find((option) => option.value === normalizeContactPersonType(value))
+    ?.label || "Merchant";
 
 const normalizeContactPersons = (contacts = []) =>
   (Array.isArray(contacts) ? contacts : [])
@@ -23,6 +37,7 @@ const normalizeContactPersons = (contacts = []) =>
       name: String(contact?.name || "").trim(),
       email: String(contact?.email || "").trim(),
       phone: String(contact?.phone || "").trim(),
+      type: normalizeContactPersonType(contact?.type),
     }))
     .filter((contact) => contact.name || contact.email || contact.phone);
 
@@ -74,6 +89,7 @@ const CreateVendor = () => {
               contact?.name,
               contact?.email,
               contact?.phone,
+              contact?.type,
             ])
           : []),
       ]
@@ -282,7 +298,7 @@ const CreateVendor = () => {
                 {(Array.isArray(form.contact_person) ? form.contact_person : []).map(
                   (contact, index) => (
                     <div className="row g-2 align-items-end mb-2" key={`contact-${index}`}>
-                      <div className="col-md-4">
+                      <div className="col-md-3">
                         <input
                           className="form-control"
                           value={contact.name}
@@ -292,7 +308,7 @@ const CreateVendor = () => {
                           placeholder="Contact name"
                         />
                       </div>
-                      <div className="col-md-4">
+                      <div className="col-md-3">
                         <input
                           className="form-control"
                           type="email"
@@ -303,7 +319,7 @@ const CreateVendor = () => {
                           placeholder="Contact email"
                         />
                       </div>
-                      <div className="col-md-3">
+                      <div className="col-md-2">
                         <input
                           className="form-control"
                           value={contact.phone}
@@ -312,6 +328,21 @@ const CreateVendor = () => {
                           }
                           placeholder="Contact phone"
                         />
+                      </div>
+                      <div className="col-md-2">
+                        <select
+                          className="form-select"
+                          value={normalizeContactPersonType(contact.type)}
+                          onChange={(event) =>
+                            handleContactChange(index, "type", event.target.value)
+                          }
+                        >
+                          {CONTACT_PERSON_TYPE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                       <div className="col-md-auto d-grid">
                         <button
@@ -405,6 +436,9 @@ const CreateVendor = () => {
                                     contact?.name,
                                     contact?.email,
                                     contact?.phone,
+                                    contact?.type
+                                      ? `Type: ${getContactPersonTypeLabel(contact.type)}`
+                                      : "",
                                   ]
                                     .filter(Boolean)
                                     .join(" / "),

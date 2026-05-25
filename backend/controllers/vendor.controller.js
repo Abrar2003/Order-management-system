@@ -3,16 +3,29 @@ const Vendor = require("../models/vendor.model");
 const normalizeText = (value = "") => String(value ?? "").trim();
 const normalizeEmail = (value = "") => normalizeText(value).toLowerCase();
 const escapeRegex = (value = "") => normalizeText(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const CONTACT_PERSON_TYPES = new Set(["merchant", "shipment"]);
+
+const normalizeContactPersonType = (value = "") => {
+  const normalized = normalizeText(value).toLowerCase();
+  return CONTACT_PERSON_TYPES.has(normalized) ? normalized : undefined;
+};
 
 const normalizeContactPersons = (value = []) => {
   if (!Array.isArray(value)) return [];
 
   return value
-    .map((contact = {}) => ({
-      name: normalizeText(contact?.name),
-      email: normalizeEmail(contact?.email),
-      phone: normalizeText(contact?.phone),
-    }))
+    .map((contact = {}) => {
+      const normalizedContact = {
+        name: normalizeText(contact?.name),
+        email: normalizeEmail(contact?.email),
+        phone: normalizeText(contact?.phone),
+      };
+      const type = normalizeContactPersonType(contact?.type);
+      if (type) {
+        normalizedContact.type = type;
+      }
+      return normalizedContact;
+    })
     .filter((contact) => contact.name || contact.email || contact.phone);
 };
 

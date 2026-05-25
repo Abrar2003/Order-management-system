@@ -6080,8 +6080,19 @@ button.om-item-order-presence-label {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  min-height: 32px;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0.25rem;
+  border-radius: 50%;
+  overflow: visible;
+}
+
+.om-notification-bell-icon {
+  display: block;
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
 }
 
 .om-notification-badge {

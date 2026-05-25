@@ -50,6 +50,24 @@ const parseLimit = (value) => {
   return LIMIT_OPTIONS.includes(parsed) ? parsed : DEFAULT_LIMIT;
 };
 const getFlagBadgeClass = (value) => (value ? "text-bg-success" : "text-bg-secondary");
+const downloadBlobResponse = (response, fallbackName, fallbackType) => {
+  const disposition = String(response?.headers?.["content-disposition"] || "");
+  const match = disposition.match(/filename\*?=(?:UTF-8''|"?)([^";]+)/i);
+  const fileName = match?.[1]
+    ? decodeURIComponent(match[1].trim())
+    : fallbackName;
+  const blob = new Blob([response.data], {
+    type: response?.headers?.["content-type"] || fallbackType,
+  });
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(url);
+};
 
 const SummaryPill = ({ entry }) => (
   <div className="inspected-items-report-pill">
@@ -74,6 +92,7 @@ const InspectedItemsReport = () => {
   const [summary, setSummary] = useState({ total_items: 0 });
   const [filters, setFilters] = useState({ brand_options: [], vendor_options: [] });
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
   const [searchInput, setSearchInput] = useState(() => normalizeText(searchParams.get("search")));
   const [draftSearchInput, setDraftSearchInput] = useState(() => normalizeText(searchParams.get("search")));
@@ -177,6 +196,32 @@ const InspectedItemsReport = () => {
     setPage(1);
   };
 
+  const handleExportXls = useCallback(async () => {
+    try {
+      setExporting(true);
+      const response = await api.get("/reports/inspected-items/export", {
+        responseType: "blob",
+        params: {
+          search: searchInput,
+          brand: brandFilter,
+          vendor: vendorFilter,
+          criterion: criterionFilter,
+          status: statusFilter,
+        },
+      });
+      downloadBlobResponse(
+        response,
+        `inspected-items-report-${new Date().toISOString().slice(0, 10)}.xls`,
+        "application/vnd.ms-excel",
+      );
+    } catch (exportError) {
+      console.error(exportError);
+      alert("Failed to export inspected items report as XLS.");
+    } finally {
+      setExporting(false);
+    }
+  }, [brandFilter, criterionFilter, searchInput, statusFilter, vendorFilter]);
+
   return (
     <>
       <Navbar />
@@ -188,6 +233,14 @@ const InspectedItemsReport = () => {
               Showing {totalRecords} item{totalRecords === 1 ? "" : "s"} after filters
             </div>
           </div>
+          <button
+            type="button"
+            className="btn btn-outline-primary btn-sm"
+            onClick={handleExportXls}
+            disabled={exporting || loading || totalRecords === 0}
+          >
+            {exporting ? "Exporting..." : "Export XLS"}
+          </button>
         </div>
 
         <div className="inspected-items-report-pill-row mb-4">

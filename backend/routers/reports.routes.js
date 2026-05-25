@@ -32,6 +32,13 @@ router.get(
 );
 
 router.get(
+  "/inspected-items/export",
+  auth,
+  requirePermission("reports", "view"),
+  reportsController.exportInspectedItemsReport,
+);
+
+router.get(
   "/inspected-items",
   auth,
   requirePermission("reports", "view"),

@@ -715,8 +715,6 @@ const Navbar = () => {
                 {user?.name || "User"} ({role || "N/A"})
               </div>
 
-              <NotificationBell enabled={canViewWorkflow} />
-
               <div className="position-relative d-lg-none ms-auto">
                 <button
                   type="button"
@@ -808,47 +806,51 @@ const Navbar = () => {
               )
             )}
 
-            {(generalMenuItems.length > 0 || desktopOverflowSections.length > 0) && (
-              <div className="position-relative ms-auto">
-                <button
-                  type="button"
-                  className={`btn btn-sm rounded-pill ${openDesktopDropdown === "menu" ? "btn-primary" : "btn-outline-primary"}`}
-                  aria-expanded={openDesktopDropdown === "menu"}
-                  onClick={() => toggleDesktopDropdown("menu")}
-                >
-                  Menu
-                </button>
+            <div className="d-flex align-items-center gap-2 ms-auto">
+              <NotificationBell enabled={canViewWorkflow} />
 
-                {openDesktopDropdown === "menu" && (
-                  <div
-                    className="card om-main-menu-dropdown shadow-sm"
-                    style={{ left: "auto", right: 0 }}
+              {(generalMenuItems.length > 0 || desktopOverflowSections.length > 0) && (
+                <div className="position-relative">
+                  <button
+                    type="button"
+                    className={`btn btn-sm rounded-pill ${openDesktopDropdown === "menu" ? "btn-primary" : "btn-outline-primary"}`}
+                    aria-expanded={openDesktopDropdown === "menu"}
+                    onClick={() => toggleDesktopDropdown("menu")}
                   >
-                    <div className="list-group list-group-flush">
-                      {generalMenuItems.map((item) => renderMenuItem(item))}
+                    Menu
+                  </button>
 
-                      {desktopOverflowSections.map((section) => (
-                        <div key={`desktop-overflow-${section.key}`}>
-                          <button
-                            type="button"
-                            className="list-group-item list-group-item-action text-start d-flex justify-content-between align-items-center"
-                            aria-expanded={openDesktopMenuSection === section.key}
-                            onClick={() => toggleDesktopMenuSection(section.key)}
-                          >
-                            <span>{section.label}</span>
-                            <span className="small text-secondary">
-                              {openDesktopMenuSection === section.key ? "Hide" : "Show"}
-                            </span>
-                          </button>
-                          {openDesktopMenuSection === section.key &&
-                            section.items.map((item) => renderMenuItem(item, "ps-4"))}
-                        </div>
-                      ))}
+                  {openDesktopDropdown === "menu" && (
+                    <div
+                      className="card om-main-menu-dropdown shadow-sm"
+                      style={{ left: "auto", right: 0 }}
+                    >
+                      <div className="list-group list-group-flush">
+                        {generalMenuItems.map((item) => renderMenuItem(item))}
+
+                        {desktopOverflowSections.map((section) => (
+                          <div key={`desktop-overflow-${section.key}`}>
+                            <button
+                              type="button"
+                              className="list-group-item list-group-item-action text-start d-flex justify-content-between align-items-center"
+                              aria-expanded={openDesktopMenuSection === section.key}
+                              onClick={() => toggleDesktopMenuSection(section.key)}
+                            >
+                              <span>{section.label}</span>
+                              <span className="small text-secondary">
+                                {openDesktopMenuSection === section.key ? "Hide" : "Show"}
+                              </span>
+                            </button>
+                            {openDesktopMenuSection === section.key &&
+                              section.items.map((item) => renderMenuItem(item, "ps-4"))}
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            )}
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
