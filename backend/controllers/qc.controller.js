@@ -5635,6 +5635,8 @@ exports.updateQC = async (req, res) => {
         isQcUser ||
         isVisitUpdate ||
         hasCbmUpdate ||
+        hasInspectedSizeEntryUpdate ||
+        hasInspectedBoxModeUpdate ||
         hasInspectedKdUpdate ||
         (last_inspected_date !== undefined &&
           String(last_inspected_date).trim() !== "") ||
@@ -5734,6 +5736,22 @@ exports.updateQC = async (req, res) => {
 
       if (inspectionRecord) {
         await recalculateInspectorUsedLabels([inspectionInspectorId]);
+        try {
+          const itemInspectionSyncResult = await syncItemInspectedDataFromInspection({
+            qcDoc: qc,
+            inspectionRecord,
+            itemDoc: itemDocForInspectedSizeUpdate,
+          });
+          if (itemInspectionSyncResult?.updated && itemInspectionSyncResult?.item_doc) {
+            await syncTotalPoCbmForItem(itemInspectionSyncResult.item_doc.toObject());
+          }
+        } catch (itemInspectionSyncError) {
+          console.error("Item inspected data sync after QC update failed:", {
+            qcId: qc?._id,
+            inspectionId: inspectionRecord?._id,
+            error: itemInspectionSyncError?.message || String(itemInspectionSyncError),
+          });
+        }
       }
     }
 
@@ -10251,6 +10269,33 @@ exports.editInspectionRecords = async (req, res) => {
     const touchedInspectors = new Set();
     const requestHistoryDateUpdates = new Map();
     const qcRequestedQuantityCap = resolveRequestedQuantityFromQc(qc);
+    const normalizedRole = normalizeUserRoleKey(req.user?.role);
+    const canEditAllInspectionRecords = isManagerLikeRole(normalizedRole);
+    const currentUserId = String(req.user?._id || req.user?.id || "").trim();
+    const isCurrentUserLabelExempt = isLabelExemptUser(currentUserId);
+    const latestRequestEntryForPermission = resolveLatestRequestEntry(
+      requestHistoryEntries,
+    );
+    const alignedInspectorId = String(
+      latestRequestEntryForPermission?.inspector?._id ||
+        latestRequestEntryForPermission?.inspector ||
+        qc?.inspector?._id ||
+        qc?.inspector ||
+        "",
+    ).trim();
+    const isCurrentUserAlignedToQc =
+      Boolean(currentUserId) &&
+      Boolean(alignedInspectorId) &&
+      alignedInspectorId === currentUserId;
+    const canLabelExemptUserEditInspectionRecord = (record = {}) => {
+      if (!isCurrentUserLabelExempt || !currentUserId) return false;
+      if (isCurrentUserAlignedToQc) return true;
+
+      const recordInspectorId = String(
+        record?.inspector?._id || record?.inspector || "",
+      ).trim();
+      return Boolean(recordInspectorId) && recordInspectorId === currentUserId;
+    };
     const parseRequiredDate = (value, fieldName) => {
       const rawValue = String(value || "").trim();
       if (!rawValue) {
@@ -10469,6 +10514,15 @@ exports.editInspectionRecords = async (req, res) => {
         );
       }
 
+      const canEditRecord =
+        canEditAllInspectionRecords ||
+        canLabelExemptUserEditInspectionRecord(record);
+      if (!canEditRecord) {
+        return res.status(403).json({
+          message: "You are not allowed to update this inspection record",
+        });
+      }
+
       const requestedDate = parseRequiredDate(
         row?.requested_date ?? row?.request_date ?? record.requested_date,
         "Requested date",
@@ -10480,6 +10534,15 @@ exports.editInspectionRecords = async (req, res) => {
       const inspectorId = parseRequiredInspector(
         row?.inspector ?? row?.inspector_id ?? record.inspector,
       );
+      if (
+        !canEditAllInspectionRecords &&
+        isCurrentUserLabelExempt &&
+        inspectorId !== String(record?.inspector || "").trim()
+      ) {
+        return res.status(403).json({
+          message: "Label-exempt users cannot reassign inspection records",
+        });
+      }
 
       const rawVendorRequested =
         row?.vendor_requested ??

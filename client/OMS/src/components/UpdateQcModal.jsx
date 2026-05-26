@@ -2648,7 +2648,9 @@ const UpdateQcModal = ({
     || "",
   ).trim();
   const disableInspectorSelection =
-    isQcUser || (!hasElevatedAccess && (qc?.quantities?.qc_checked || 0) > 0);
+    isQcUser ||
+    (isInspectionRecordUpdate && !isManagerLikeRole(normalizedRole)) ||
+    (!hasElevatedAccess && (qc?.quantities?.qc_checked || 0) > 0);
   const existingItemMaster = isInspectionRecordUpdate
     ? buildInspectionRecordMeasurementSource(inspectionRecord, qc?.item_master || {})
     : qc?.item_master || {};

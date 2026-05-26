@@ -37,6 +37,7 @@ import {
   getQcUserUpdateRequestAvailability,
   resolveLatestRequestEntry,
 } from "../utils/qcRequests";
+import { isLabelExemptUser } from "../utils/qcUpdateAccess";
 import useBulkQcImageUpload from "../hooks/useBulkQcImageUpload";
 import {
   getDerivedOrderStatus,
@@ -391,9 +392,9 @@ const QcDetails = () => {
   const isQcUser = normalizedRole === "qc";
   const isAdmin = isManagerLikeRole(normalizedRole);
   const isOnlyAdmin = isAdminLikeRole(normalizedRole);
+  const isCurrentUserLabelExempt = isLabelExemptUser(currentUserId);
   const canTransferInspectionRecords = isAdmin;
   const canDeleteInspectionRecords = isAdmin;
-  const showInspectionActions = canTransferInspectionRecords || isOnlyAdmin;
   const canFinalizeShipping = hasShipmentPrivilegeRole(normalizedRole);
   const derivedOrderStatus = useMemo(
     () => getDerivedOrderStatus({ order: qc?.order || {}, qc }),
@@ -430,6 +431,34 @@ const QcDetails = () => {
       qc?.inspector ||
       "",
   ).trim();
+  const isLabelExemptAlignedInspectionEditor =
+    isCurrentUserLabelExempt &&
+    Boolean(currentUserId) &&
+    Boolean(alignedInspectorId) &&
+    alignedInspectorId === currentUserId;
+  const canUpdateInspectionRecord = useCallback(
+    (record = {}) => {
+      if (isAdmin) return true;
+      if (!isCurrentUserLabelExempt || !currentUserId) return false;
+      if (isLabelExemptAlignedInspectionEditor) return true;
+
+      const recordInspectorId = String(
+        record?.inspector?._id || record?.inspector || "",
+      ).trim();
+      return Boolean(recordInspectorId) && recordInspectorId === currentUserId;
+    },
+    [
+      currentUserId,
+      isAdmin,
+      isCurrentUserLabelExempt,
+      isLabelExemptAlignedInspectionEditor,
+    ],
+  );
+  const showInspectionActions =
+    canTransferInspectionRecords ||
+    canDeleteInspectionRecords ||
+    isOnlyAdmin ||
+    isCurrentUserLabelExempt;
   const isQcAlignedRecord = !isQcUser || (
     Boolean(currentUserId) &&
     Boolean(alignedInspectorId) &&
@@ -2099,7 +2128,7 @@ const QcDetails = () => {
                             <td>
                               {row.rowType === "Inspection" && row.recordId ? (
 	                                <div className="d-flex flex-wrap gap-2">
-	                                  {isAdmin && (
+	                                  {canUpdateInspectionRecord(row.inspectionRecord) && (
 	                                    <button
 	                                      type="button"
 	                                      className="btn btn-outline-secondary btn-sm"
@@ -2385,7 +2414,9 @@ const QcDetails = () => {
 	        />
 	      )}
 
-	      {inspectionRecordToUpdate && !isViewOnly && isAdmin && (
+	      {inspectionRecordToUpdate &&
+          !isViewOnly &&
+          canUpdateInspectionRecord(inspectionRecordToUpdate) && (
 	        <UpdateQcModal
 	          qc={qc}
 	          isAdmin={isOnlyAdmin}
