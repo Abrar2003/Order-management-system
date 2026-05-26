@@ -2393,7 +2393,18 @@ const getCheckedPisDiffRowsForReport = async ({ search, brand, vendor } = {}) =>
 };
 
 const buildFinalPisCheckMatch = ({ search, brand, vendor } = {}) => {
-  const conditions = [{ pis_checked_flag: true }];
+  const conditions = [
+    { pis_checked_flag: true },
+    {
+      $or: [
+        { "master_item_sizes.0": { $exists: true } },
+        { "master_box_sizes.0": { $exists: true } },
+        { master_barcode: { $exists: true, $ne: "" } },
+        { master_master_barcode: { $exists: true, $ne: "" } },
+        { master_inner_barcode: { $exists: true, $ne: "" } },
+      ],
+    },
+  ];
   const normalizedSearch = normalizeFilterValue(search);
   const normalizedBrand = normalizeFilterValue(brand);
   const normalizedVendor = normalizeFilterValue(vendor);
@@ -2423,7 +2434,7 @@ const buildFinalPisCheckMatch = ({ search, brand, vendor } = {}) => {
     conditions.push({ vendors: normalizedVendor });
   }
 
-  return conditions.length === 1 ? conditions[0] : { $and: conditions };
+  return { $and: conditions };
 };
 
 const getFinalPisCheckRowsForQuery = async ({

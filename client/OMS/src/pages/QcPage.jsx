@@ -635,29 +635,147 @@ const QCPage = () => {
           )}
         </div>
 
-        {/* Removed the separate filter card UI? You asked filters in table head.
-            If you want to keep the card too, we can keep it.
-            For now: ONLY table head filters. */}
-
         <div className="card om-card">
           <div className="card-body p-0">
-            <div className="d-flex justify-content-end gap-2 p-3 border-bottom bg-body-tertiary qc-list-filter-actions">
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={handleApplyFilters}
-                disabled={loading || !hasPendingFilterChanges}
-              >
-                Apply Filters
-              </button>
-              <button
-                type="button"
-                className="btn btn-outline-secondary btn-sm"
-                onClick={handleClearFilters}
-                disabled={loading && !hasPendingFilterChanges}
-              >
-                Clear Filters
-              </button>
+            <div className="qc-list-toolbar">
+              <div className="qc-list-toolbar-copy">
+                <span className="qc-list-toolbar-title">Filters</span>
+                <span className="qc-list-toolbar-note">
+                  Refine the table using the controls below.
+                </span>
+              </div>
+              <div className="qc-list-filter-actions">
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={handleApplyFilters}
+                  disabled={loading || !hasPendingFilterChanges}
+                >
+                  Apply Filters
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary btn-sm"
+                  onClick={handleClearFilters}
+                  disabled={loading && !hasPendingFilterChanges}
+                >
+                  Clear Filters
+                </button>
+              </div>
+            </div>
+            <div className="qc-list-desktop-filters">
+              <div className="qc-list-filter-field">
+                <label>PO</label>
+                <input
+                  type="text"
+                  className="form-control form-control-sm"
+                  placeholder="PO"
+                  list="qc-po-options"
+                  value={order}
+                  onChange={(e) => setOrder(e.target.value)}
+                />
+                <datalist id="qc-po-options">
+                  {orders.map((o) => (
+                    <option key={o} value={o} />
+                  ))}
+                </datalist>
+              </div>
+              <div className="qc-list-filter-field">
+                <label>Vendor</label>
+                <select
+                  className="form-select form-select-sm"
+                  value={vendor}
+                  onChange={(e) => setVendor(e.target.value)}
+                >
+                  <option value="">All</option>
+                  {vendors.map((v) => (
+                    <option key={v} value={v}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="qc-list-filter-field">
+                <label>Item</label>
+                <input
+                  type="text"
+                  className="form-control form-control-sm"
+                  placeholder="Item code"
+                  list="qc-item-code-options"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+                <datalist id="qc-item-code-options">
+                  {itemCodes.map((itemCode) => (
+                    <option key={itemCode} value={itemCode} />
+                  ))}
+                </datalist>
+              </div>
+              <div className="qc-list-filter-field qc-list-filter-date-field">
+                <label>Request Date</label>
+                <div className="qc-list-desktop-date-range">
+                  <input
+                    type="date"
+                    lang="en-GB"
+                    className="form-control form-control-sm"
+                    aria-label="Request date from"
+                    value={toISODateString(from)}
+                    onChange={(e) => {
+                      setFrom(toDDMMYYYYInputValue(e.target.value, ""));
+                    }}
+                  />
+                  <input
+                    type="date"
+                    lang="en-GB"
+                    className="form-control form-control-sm"
+                    aria-label="Request date to"
+                    value={toISODateString(to)}
+                    onChange={(e) => {
+                      setTo(toDDMMYYYYInputValue(e.target.value, ""));
+                    }}
+                  />
+                </div>
+              </div>
+              <div className="qc-list-filter-field">
+                <label>Status</label>
+                <select
+                  className="form-select form-select-sm"
+                  value={inspectionStatus}
+                  onChange={(e) => setInspectionStatus(e.target.value)}
+                >
+                  <option value="">All</option>
+                  {INSPECTION_STATUS_OPTIONS.map((status) => (
+                    <option key={status} value={status}>
+                      {status}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="qc-list-filter-field">
+                <label>Inspector</label>
+                {canUseInspectorFilter ? (
+                  <select
+                    className="form-select form-select-sm"
+                    value={inspector}
+                    onChange={(e) => setInspector(e.target.value)}
+                  >
+                    <option value="">All</option>
+                    {inspectors.map((qc) => (
+                      <option key={qc._id} value={qc._id}>
+                        {qc.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    className="form-control form-control-sm"
+                    value="Self"
+                    disabled
+                    readOnly
+                  />
+                )}
+              </div>
             </div>
             <div className="qc-list-mobile-filters border-bottom bg-body-tertiary p-3">
               <div className="qc-list-mobile-filter-grid">
@@ -760,7 +878,7 @@ const QCPage = () => {
               <table className="table table-striped table-hover align-middle om-table mb-0 qc-list-table">
                 <thead className="table-primary">
                   {/* Column titles */}
-                  <tr>
+                  <tr className="qc-list-heading-row">
                     <th>
                       <SortHeaderButton
                         label="PO"
@@ -787,188 +905,10 @@ const QCPage = () => {
                     <th>Inspection Status</th>
                     <th>QC Passed</th>
                     <th>Pending</th>
-                    <th>CBM</th>
                     <th>Inspector</th>
-                    {showActionColumn && <th>Actions</th>}
+                    {showActionColumn && <th className="qc-list-action-col">Actions</th>}
                   </tr>
 
-                  {/* Excel-like filters row (same table classes) */}
-                  <tr>
-                    {/* PO search (item-like input + suggestions) */}
-                    <th>
-                      <input
-                        type="text"
-                        className="form-control form-control-sm"
-                        placeholder="PO"
-                        list="qc-po-options"
-                        value={order}
-                        onChange={(e) => setOrder(e.target.value)}
-                      />
-                      <datalist id="qc-po-options">
-                        {orders.map((o) => (
-                          <option key={o} value={o} />
-                        ))}
-                      </datalist>
-                    </th>
-
-                    {/* Vendor filter */}
-                    <th>
-                      <select
-                        className="form-select form-select-sm"
-                        value={vendor}
-                        onChange={(e) => setVendor(e.target.value)}
-                      >
-                        <option value="">All</option>
-                        {vendors.map((v) => (
-                          <option key={v} value={v}>
-                            {v}
-                          </option>
-                        ))}
-                      </select>
-                    </th>
-
-                    {/* Item code search */}
-                    <th>
-                      <input
-                        type="text"
-                        className="form-control form-control-sm"
-                        placeholder="Item code"
-                        list="qc-item-code-options"
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                      />
-                      <datalist id="qc-item-code-options">
-                        {itemCodes.map((itemCode) => (
-                          <option key={itemCode} value={itemCode} />
-                        ))}
-                      </datalist>
-                    </th>
-
-                    {/* Request date range */}
-                    <th>
-                      <div className="d-flex flex-column gap-1 qc-list-date-filter">
-                        <div className="d-flex gap-1">
-                          <label>From</label>
-                          <input
-                            type="date"
-                            lang="en-GB"
-                            className="form-control form-control-sm"
-                            value={toISODateString(from)}
-                            onChange={(e) => {
-                              setFrom(toDDMMYYYYInputValue(e.target.value, ""));
-                            }}
-                          />
-                        </div>
-                        <div className="d-flex gap-1">
-                          <label>To</label>
-                          <input
-                            type="date"
-                            lang="en-GB"
-                            className="form-control form-control-sm"
-                            value={toISODateString(to)}
-                            onChange={(e) => {
-                              setTo(toDDMMYYYYInputValue(e.target.value, ""));
-                            }}
-                          />
-                        </div>
-                      </div>
-                    </th>
-
-                    {/* Non-filtered columns */}
-                    {/* <th>
-                      <input
-                        type="text"
-                        className="form-control form-control-sm"
-                        placeholder="-"
-                        disabled
-                      />
-                    </th> */}
-                    <th>
-                      <input
-                        type="text"
-                        className="form-control form-control-sm"
-                        placeholder="-"
-                        disabled
-                      />
-                    </th>
-                    <th>
-                      <input
-                        type="text"
-                        className="form-control form-control-sm"
-                        placeholder="-"
-                        disabled
-                      />
-                    </th>
-                    <th>
-                      <select
-                        className="form-select form-select-sm"
-                        value={inspectionStatus}
-                        onChange={(e) => setInspectionStatus(e.target.value)}
-                      >
-                        <option value="">All</option>
-                        {INSPECTION_STATUS_OPTIONS.map((status) => (
-                          <option key={status} value={status}>
-                            {status}
-                          </option>
-                        ))}
-                      </select>
-                    </th>
-                    <th>
-                      <input
-                        type="text"
-                        className="form-control form-control-sm"
-                        placeholder="-"
-                        disabled
-                      />
-                    </th>
-                    <th>
-                      <input
-                        type="text"
-                        className="form-control form-control-sm"
-                        placeholder="-"
-                        disabled
-                      />
-                    </th>
-                    <th>
-                      <input
-                        type="text"
-                        className="form-control form-control-sm"
-                        placeholder="-"
-                        disabled
-                      />
-                    </th>
-
-                    {/* Inspector filter */}
-                    <th>
-                      {canUseInspectorFilter ? (
-                        <select
-                          className="form-select form-select-sm"
-                          value={inspector}
-                          onChange={(e) => setInspector(e.target.value)}
-                        >
-                          <option value="">All</option>
-                          {inspectors.map((qc) => (
-                            <option key={qc._id} value={qc._id}>
-                              {qc.name}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <input
-                          type="text"
-                          className="form-control form-control-sm"
-                          value="Self"
-                          disabled
-                          readOnly
-                        />
-                      )}
-                    </th>
-
-                    {/* Clear filters button area */}
-                    {showActionColumn && (
-                      <th />
-                    )}
-                  </tr>
                 </thead>
 
                 <tbody>
@@ -1044,14 +984,13 @@ const QCPage = () => {
                               {pendingAlignmentInfo.pendingQty}
                             </span>
                           </td>
-                          <td>{formatPositiveCbm(qc?.cbm?.total, "NA")}</td>
                           <td>{qc?.inspector?.name || "N/A"}</td>
                           {showActionColumn && (
-                            <td>
-                                <div className="d-flex flex-column gap-2 qc-list-row-actions">
+                            <td className="qc-list-action-col">
+                              <div className="d-flex flex-column gap-2 qc-list-row-actions">
                                 <button
                                   type="button"
-                                  className="btn btn-outline-secondary btn-sm"
+                                  className="btn btn-outline-secondary btn-sm qc-list-action-btn"
                                   onClick={(e) => {
                                     e.preventDefault();
                                     handleDetailsClick(qc);
@@ -1062,7 +1001,7 @@ const QCPage = () => {
                                 {canRaiseNewRequest && (
                                   <button
                                     type="button"
-                                    className="btn btn-outline-primary btn-sm"
+                                    className="btn btn-outline-primary btn-sm qc-list-action-btn"
                                     onClick={(e) => {
                                       e.preventDefault();
                                       openAlignModal(qc);
@@ -1074,7 +1013,7 @@ const QCPage = () => {
                                 {canShowTransferRequest && (
                                   <button
                                     type="button"
-                                    className="btn btn-outline-warning btn-sm"
+                                    className="btn btn-outline-warning btn-sm qc-list-action-btn"
                                     onClick={(e) => {
                                       e.preventDefault();
                                       setTransferRequestQc(qc);

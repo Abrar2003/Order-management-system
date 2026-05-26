@@ -3908,19 +3908,108 @@ small,
   display: none;
 }
 
-.qc-list-date-filter {
-  width: 100%;
+.qc-list-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--om-color-border);
+  background: linear-gradient(180deg, #fffdf9 0%, #fbf8f2 100%);
+}
+
+.qc-list-toolbar-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
   min-width: 0;
 }
 
-.qc-list-date-filter .d-flex {
+.qc-list-toolbar-title {
+  font-weight: 700;
+  color: var(--om-color-text);
+}
+
+.qc-list-toolbar-note {
+  color: var(--om-color-text-muted);
+  font-size: 0.82rem;
+}
+
+.qc-list-filter-actions {
+  display: flex;
   align-items: center;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  flex: 0 0 auto;
+}
+
+.qc-list-filter-actions .btn {
+  min-width: 7.5rem;
+  border-radius: 999px;
+}
+
+.qc-list-desktop-filters {
+  display: grid;
+  grid-template-columns:
+    minmax(8rem, 0.9fr)
+    minmax(10rem, 1.15fr)
+    minmax(9rem, 1fr)
+    minmax(17rem, 1.6fr)
+    minmax(10rem, 1.1fr)
+    minmax(10rem, 1.1fr);
+  gap: 0.85rem;
+  align-items: end;
+  padding: 1rem 1.25rem 1.15rem;
+  border-bottom: 1px solid var(--om-color-border);
+  background: #f4ede3;
+}
+
+.qc-list-filter-field {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.qc-list-filter-field label {
+  margin: 0;
+  color: var(--om-color-text-muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.qc-list-filter-field .form-control,
+.qc-list-filter-field .form-select {
+  min-height: 2.55rem;
+  border-radius: 0.75rem;
+  background-color: var(--om-color-surface);
+}
+
+.qc-list-desktop-date-range {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.qc-list-date-filter {
+  display: grid;
+  gap: 0.45rem;
+  width: min(12rem, 100%);
+  min-width: 10.25rem;
 }
 
 .qc-list-date-filter label {
-  min-width: 2.5rem;
-  margin-bottom: 0;
+  display: grid;
+  grid-template-columns: 2.75rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+}
+
+.qc-list-date-filter span {
   font-size: 0.72rem;
+  font-weight: 700;
   color: var(--om-color-text-muted);
 }
 
@@ -3928,9 +4017,56 @@ small,
   max-width: 100%;
 }
 
+.qc-list-table {
+  table-layout: fixed;
+  min-width: 1240px;
+}
+
 .qc-list-table td,
 .qc-list-table th {
   min-width: 0;
+}
+
+.qc-list-heading-row th {
+  padding: 0.95rem 1rem;
+  color: var(--om-color-text);
+  font-weight: 700;
+  vertical-align: middle;
+}
+
+.qc-list-filter-row th {
+  padding: 0.85rem 1rem;
+  vertical-align: middle;
+  background: #f5eee3;
+}
+
+.qc-list-filter-row .form-control,
+.qc-list-filter-row .form-select {
+  min-height: 2.75rem;
+  border-radius: 0.75rem;
+  background-color: var(--om-color-surface);
+}
+
+.qc-list-filter-row .form-control:disabled {
+  color: transparent;
+  background-color: rgba(255, 255, 255, 0.58);
+  border-style: dashed;
+}
+
+.qc-list-action-col {
+  width: 9.25rem;
+  min-width: 9.25rem;
+}
+
+.qc-list-row-actions {
+  min-width: 7.75rem;
+}
+
+.qc-list-action-btn {
+  width: 100%;
+  min-height: 2.55rem;
+  border-radius: 999px;
+  white-space: nowrap;
 }
 
 .edit-inspection-records-dialog {
@@ -5305,15 +5441,30 @@ small,
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .qc-list-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.85rem;
+    padding: 0.9rem;
+  }
+
+  .qc-list-toolbar-note {
+    font-size: 0.78rem;
+  }
+
+  .qc-list-desktop-filters {
+    display: none;
+  }
+
   .qc-list-filter-actions {
     justify-content: stretch !important;
     display: grid !important;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    padding: 0.85rem !important;
   }
 
   .qc-list-filter-actions .btn {
     width: 100%;
+    min-width: 0;
   }
 
   .qc-list-mobile-filters {
@@ -6117,6 +6268,124 @@ button.om-item-order-presence-label {
   background: rgba(32, 28, 24, 0.28);
   display: flex;
   justify-content: flex-end;
+}
+
+.complaints-table th,
+.complaints-table td {
+  vertical-align: middle;
+}
+
+.complaint-comment-cell {
+  max-width: 360px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.complaint-row-muted {
+  opacity: 0.62;
+}
+
+.complaint-action-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.35rem);
+  z-index: 50;
+  min-width: 180px;
+  padding: 0.35rem;
+  border: 1px solid rgba(25, 32, 48, 0.12);
+  border-radius: 8px;
+  background: var(--bs-body-bg, #fff);
+}
+
+.complaint-action-menu button {
+  display: block;
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font-size: 0.9rem;
+}
+
+.complaint-action-menu button:hover,
+.complaint-action-menu button:focus-visible {
+  background: rgba(13, 110, 253, 0.08);
+}
+
+.complaint-details-panel {
+  padding: 1rem;
+  background: rgba(248, 249, 250, 0.75);
+}
+
+.complaint-details-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.85rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid rgba(25, 32, 48, 0.12);
+}
+
+.complaint-detail-section {
+  padding-top: 1rem;
+}
+
+.complaint-timeline {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.complaint-timeline-entry {
+  padding: 0.7rem 0.85rem;
+  border: 1px solid rgba(25, 32, 48, 0.1);
+  border-radius: 8px;
+  background: var(--bs-body-bg, #fff);
+}
+
+.complaint-file-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.complaint-file-link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgba(25, 32, 48, 0.1);
+  border-radius: 8px;
+  color: inherit;
+  text-decoration: none;
+  background: var(--bs-body-bg, #fff);
+}
+
+.complaint-file-link:hover,
+.complaint-file-link:focus-visible {
+  border-color: rgba(13, 110, 253, 0.45);
+  color: inherit;
+}
+
+.complaint-toast {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 2100;
+  max-width: min(360px, calc(100vw - 2rem));
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  color: #fff;
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.2);
+}
+
+.complaint-toast--success {
+  background: #198754;
+}
+
+.complaint-toast--danger {
+  background: #dc3545;
 }
 
 .om-notification-dock {

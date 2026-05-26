@@ -64,6 +64,7 @@ import FinalPISCheck from "./pages/FinalPISCheck";
 import PisUpdateLogs from "./pages/PisUpdateLogs";
 import WeeklySummary from "./pages/WeeklySummary";
 import DailySummary from "./pages/DailySummary";
+import Complaints from "./pages/Complaints";
 
 // import Users from "./pages/Users"; // later
 const clearStaleUiOverlays = ({ removeCustomModalRoots = false } = {}) => {
@@ -597,6 +598,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <CreateVendor />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/complaints"
+            element={
+              <ProtectedRoute>
+                <Complaints />
               </ProtectedRoute>
             }
           />

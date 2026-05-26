@@ -135,7 +135,7 @@ const FinalPisCheckReport = ({
             <div className="pis-diff-report-eyebrow">{eyebrow}</div>
             <h2 className="pis-diff-report-title">{title}</h2>
             <div className="pis-diff-report-subtitle">
-              Checked PIS items still having differences
+              Checked items with master vs inspected differences
             </div>
             <div className="pis-diff-report-subtitle">
               Generated {formatPreviewDateTime(report?.generated_at)}
@@ -194,7 +194,7 @@ const FinalPisCheckReport = ({
         {rows.length === 0 ? (
           <section className="pis-diff-report-item">
             <div className="p-4 text-center text-secondary">
-              No checked PIS items with remaining differences were found for the current filters.
+              No checked items with master vs inspected differences were found for the current filters.
             </div>
           </section>
         ) : (
@@ -202,8 +202,8 @@ const FinalPisCheckReport = ({
             const measurements = row?.measurements || {};
             const differences = Array.isArray(row?.differences) ? row.differences : [];
             const references = row?.references || {};
-            const itemReferenceLabel = references.item_label || "PIS";
-            const boxReferenceLabel = references.box_label || "PIS";
+            const itemReferenceLabel = references.item_label || "Master";
+            const boxReferenceLabel = references.box_label || "Master";
             const measurementCards = [
               {
                 label: "Inspected Item",

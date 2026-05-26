@@ -209,8 +209,12 @@ const Navbar = () => {
       links.push(routeMenuItem("containers", "Containers", "/containers"));
     }
 
+    if (hasPermission("complaints", "view") && isManagerLikeRole(permissionRole)) {
+      links.push(routeMenuItem("complaints", "Complaints", "/complaints"));
+    }
+
     return links;
-  }, [canAccessQc, hasPermission, isQcOnlyRole]);
+  }, [canAccessQc, hasPermission, isQcOnlyRole, permissionRole]);
 
   const generalMenuItems = useMemo(
     () => (isQcOnlyRole ? [] : [routeMenuItem("home", "Home", "/")]),

@@ -30,6 +30,7 @@ const permissionsRouter = require("./routers/permissions.routes");
 const productTypeTemplatesRouter = require("./routers/productTypeTemplates.routes");
 const workflowRouter = require("./routers/workflow.routes");
 const notificationsRouter = require("./routers/notifications.routes");
+const complaintsRouter = require("./routers/complaints.routes");
 const { closeRedisClients } = require("./config/redis");
 const { closeQueues } = require("./queues");
 const { createWorkflowSocketServer } = require("./realtime/workflowSocket");
@@ -120,6 +121,8 @@ app.use("/product-type-templates", productTypeTemplatesRouter);
 app.use("/workflow", workflowRouter);
 app.use("/notifications", notificationsRouter);
 app.use("/api/notifications", notificationsRouter);
+app.use("/complaints", complaintsRouter);
+app.use("/api/complaints", complaintsRouter);
 
 app.get("/", (req, res) => {
   res.send({ message: "Server OK v2" });
