@@ -721,7 +721,8 @@ const UpdateQcModal = ({
     packed_size: false,
     finishing: false,
     branding: false,
-    inspected_k_d: false,
+    kd: false,
+    mounting_file_needed: false,
     labelRanges: [createEmptyLabelRange()],
     remarks: "",
     inspected_weight_top_net: "",
@@ -1030,7 +1031,8 @@ const UpdateQcModal = ({
       packed_size: Boolean(itemMaster?.packed_size ?? qc?.packed_size),
       finishing: Boolean(itemMaster?.finishing ?? qc?.finishing),
       branding: Boolean(itemMaster?.branding ?? qc?.branding),
-      inspected_k_d: Boolean(itemMaster?.inspected_k_d),
+      kd: Boolean(itemMaster?.kd),
+      mounting_file_needed: Boolean(itemMaster?.mounting_file_needed),
       labelRanges: initialLabelRanges,
       remarks: isInspectionRecordUpdate || canRewriteLatestInspectionRecord
         ? initialRemarks
@@ -2184,7 +2186,8 @@ const UpdateQcModal = ({
           packed_size: Boolean(form.packed_size),
           finishing: Boolean(form.finishing),
           branding: Boolean(form.branding),
-          inspected_k_d: Boolean(form.inspected_k_d),
+          kd: Boolean(form.kd),
+          mounting_file_needed: Boolean(form.mounting_file_needed),
           last_inspected_date: lastInspectedDateIso,
         }
         : {
@@ -2267,8 +2270,14 @@ const UpdateQcModal = ({
         if (Boolean(qc?.branding) !== Boolean(form.branding)) {
           payload.branding = Boolean(form.branding);
         }
-        if (Boolean(qc?.item_master?.inspected_k_d) !== Boolean(form.inspected_k_d)) {
-          payload.inspected_k_d = Boolean(form.inspected_k_d);
+        if (Boolean(qc?.item_master?.kd) !== Boolean(form.kd)) {
+          payload.kd = Boolean(form.kd);
+        }
+        if (
+          Boolean(qc?.item_master?.mounting_file_needed) !==
+          Boolean(form.mounting_file_needed)
+        ) {
+          payload.mounting_file_needed = Boolean(form.mounting_file_needed);
         }
       }
 
@@ -2362,8 +2371,8 @@ const UpdateQcModal = ({
               packed_size: Boolean(form.packed_size),
               finishing: Boolean(form.finishing),
               branding: Boolean(form.branding),
-              inspected_k_d: Boolean(form.inspected_k_d),
-              pis_k_d: Boolean(qc?.item_master?.pis_k_d),
+              kd: Boolean(form.kd),
+              mounting_file_needed: Boolean(form.mounting_file_needed),
               inspected_item_sizes: inspectedItemSizePayload.value,
               inspected_box_mode: form.inspected_box_mode,
               inspected_box_sizes: inspectedBoxSizePayload.value,
@@ -2528,8 +2537,8 @@ const UpdateQcModal = ({
               label_ranges: normalizedLabelRanges,
               labels_added: labelsForUpdate,
               remarks: normalizedRemarks,
-              inspected_k_d: Boolean(form.inspected_k_d),
-              pis_k_d: Boolean(qc?.item_master?.pis_k_d),
+              kd: Boolean(form.kd),
+              mounting_file_needed: Boolean(form.mounting_file_needed),
             },
           ],
         });
@@ -3385,13 +3394,13 @@ const UpdateQcModal = ({
               </div>
 
               <div className="col-md-2">
-                <label className="form-label">Inspected K/D</label>
-                <div className="btn-group w-100" role="group" aria-label="Inspected K/D">
+                <label className="form-label">K/D</label>
+                <div className="btn-group w-100" role="group" aria-label="K/D">
                   <button
                     type="button"
-                    className={`btn btn-sm ${form.inspected_k_d ? "btn-primary" : "btn-outline-secondary"}`}
+                    className={`btn btn-sm ${form.kd ? "btn-primary" : "btn-outline-secondary"}`}
                     onClick={() =>
-                      setForm((prev) => ({ ...prev, inspected_k_d: true }))
+                      setForm((prev) => ({ ...prev, kd: true }))
                     }
                     disabled={saving}
                   >
@@ -3399,9 +3408,34 @@ const UpdateQcModal = ({
                   </button>
                   <button
                     type="button"
-                    className={`btn btn-sm ${!form.inspected_k_d ? "btn-primary" : "btn-outline-secondary"}`}
+                    className={`btn btn-sm ${!form.kd ? "btn-primary" : "btn-outline-secondary"}`}
                     onClick={() =>
-                      setForm((prev) => ({ ...prev, inspected_k_d: false }))
+                      setForm((prev) => ({ ...prev, kd: false }))
+                    }
+                    disabled={saving}
+                  >
+                    No
+                  </button>
+                </div>
+              </div>
+              <div className="col-md-2">
+                <label className="form-label">Mounting File</label>
+                <div className="btn-group w-100" role="group" aria-label="Mounting File Needed">
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${form.mounting_file_needed ? "btn-primary" : "btn-outline-secondary"}`}
+                    onClick={() =>
+                      setForm((prev) => ({ ...prev, mounting_file_needed: true }))
+                    }
+                    disabled={saving}
+                  >
+                    Yes
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${!form.mounting_file_needed ? "btn-primary" : "btn-outline-secondary"}`}
+                    onClick={() =>
+                      setForm((prev) => ({ ...prev, mounting_file_needed: false }))
                     }
                     disabled={saving}
                   >

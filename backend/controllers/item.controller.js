@@ -354,7 +354,8 @@ const hasSyncableProductDatabaseData = (item = {}) =>
   getMeaningfulPdItemSizeEntries(item?.pd_item_sizes).length > 0 ||
   getMeaningfulPdBoxSizeEntries(item?.pd_box_sizes).length > 0 ||
   Boolean(normalizeTextField(item?.pd_master_barcode || item?.pd_barcode)) ||
-  Boolean(normalizeTextField(item?.pd_inner_barcode));
+  Boolean(normalizeTextField(item?.pd_inner_barcode)) ||
+  item?.kd === true;
 
 const buildPisProductDatabaseSyncActor = (user = {}) => ({
   user: user?._id || user?.id || null,
@@ -876,6 +877,16 @@ const ITEM_FILE_CONFIG = Object.freeze({
     defaultExtension: ".pdf",
     invalidTypeMessage: "Only PDF files are allowed for Assembly files",
   },
+  mounting_file: {
+    field: "mounting_file",
+    folder: "item-mounting",
+    label: "Mounting file",
+    mimeTypes: ITEM_PDF_MIME_TYPES,
+    extensions: ITEM_PDF_EXTENSIONS,
+    defaultExtension: ".pdf",
+    invalidTypeMessage: "Only PDF files are allowed for Mounting files",
+    requiresMountingFileNeeded: true,
+  },
   packeging_ppt: {
     field: "packeging_ppt",
     folder: "item-packaging-ppt",
@@ -911,6 +922,9 @@ const toSafeNumber = (value, fallback = 0) => {
 
 const getItemFileConfig = (fileType = "") =>
   ITEM_FILE_CONFIG[normalizeTextField(fileType).toLowerCase()] || null;
+
+const isItemFileAllowedForItem = (item = {}, fileConfig = {}) =>
+  !fileConfig?.requiresMountingFileNeeded || item?.mounting_file_needed === true;
 
 const normalizeStoredItemFile = (file = {}) => {
   const parsedSize = Number(file?.size || 0);
@@ -1464,6 +1478,9 @@ const PRODUCT_DATABASE_ITEM_SELECT = [
   "pd_barcode",
   "pd_master_barcode",
   "pd_inner_barcode",
+  "kd",
+  "mounting_file_needed",
+  "mounting_file",
   "product_type",
   "product_specs",
   "pd_item_sizes",
@@ -1514,13 +1531,13 @@ const applyItemDataAccess = (match = {}, user = {}) =>
 
 const buildItemFileViewMatch = (fileType = "") => {
   const normalizedFileType = normalizeTextField(fileType).toLowerCase();
+  if (normalizedFileType === "mounting_file") {
+    return { mounting_file_needed: true };
+  }
   if (normalizedFileType !== "assembly_file") return {};
 
   return {
-    $or: [
-      { inspected_k_d: true },
-      { pis_k_d: true },
-    ],
+    kd: true,
   };
 };
 
@@ -1820,12 +1837,13 @@ const PIS_DIFF_ITEM_SELECT = [
   "pis_barcode",
   "pis_master_barcode",
   "pis_inner_barcode",
-  "pis_k_d",
+  "kd",
   "master_country_of_origin",
   "master_barcode",
   "master_master_barcode",
   "master_inner_barcode",
-  "master_k_d",
+  "mounting_file_needed",
+  "mounting_file",
   "pis_weight",
   "inspected_weight",
   "pis_item_LBH",
@@ -4310,6 +4328,11 @@ exports.createItem = async (req, res) => {
       pis_item_sizes: parsedPisItemSizes,
       pis_box_sizes: parsedPisBoxSizes,
       pis_box_mode: parsedPisBoxMode,
+      kd: toBooleanValue(payload.kd, "kd"),
+      mounting_file_needed: toBooleanValue(
+        payload.mounting_file_needed,
+        "mounting_file_needed",
+      ),
       pis_weight: {
         top_net: derivedPisItemLegacy.topWeight,
         bottom_net: derivedPisItemLegacy.bottomWeight,
@@ -4463,10 +4486,16 @@ exports.updateItem = async (req, res) => {
       setPath("description", normalizeTextField(payload.description));
     }
 
-    if (hasOwn(payload, "inspected_k_d")) {
+    if (hasOwn(payload, "kd")) {
       setPath(
-        "inspected_k_d",
-        toBooleanValue(payload.inspected_k_d, "inspected_k_d"),
+        "kd",
+        toBooleanValue(payload.kd, "kd"),
+      );
+    }
+    if (hasOwn(payload, "mounting_file_needed")) {
+      setPath(
+        "mounting_file_needed",
+        toBooleanValue(payload.mounting_file_needed, "mounting_file_needed"),
       );
     }
 
@@ -4819,14 +4848,14 @@ exports.updateItemPis = async (req, res) => {
         setPisPath("country_of_origin", nextCountryOfOrigin);
       }
     }
-    if (hasOwn(payload, "pis_k_d")) {
-      const nextPisKd = toBooleanValue(payload.pis_k_d, "pis_k_d");
-      if (requestedPisDiffCheck) {
-        setMasterPath("master_k_d", nextPisKd);
-        setPisPath("pis_k_d", nextPisKd);
-      } else {
-        setPisPath("pis_k_d", nextPisKd);
-      }
+    if (hasOwn(payload, "kd")) {
+      setPisPath("kd", toBooleanValue(payload.kd, "kd"));
+    }
+    if (hasOwn(payload, "mounting_file_needed")) {
+      setPisPath(
+        "mounting_file_needed",
+        toBooleanValue(payload.mounting_file_needed, "mounting_file_needed"),
+      );
     }
 
     if (hasOwn(payload, "barcode_exempted")) {
@@ -5052,6 +5081,10 @@ const syncProductDatabaseValuesIntoPisItem = async ({ item, user } = {}) => {
     syncMessages.push("PIS inner barcode synced from Product Database.");
   }
 
+  if (setPathIfChanged("kd", item?.kd === true)) {
+    syncMessages.push("K/D synced from Product Database.");
+  }
+
   if (Array.isArray(copiedItemSizes) || Array.isArray(copiedBoxSizes)) {
     const nextPisWeight = buildPisWeightFromSizeEntries({
       currentWeight: item?.pis_weight,
@@ -5263,12 +5296,18 @@ exports.getItemFileUrl = async (req, res) => {
     }
 
     const item = await Item.findById(itemId).select(
-      `code ${fileConfig.field}`,
+      `code mounting_file_needed ${fileConfig.field}`,
     );
     if (!item) {
       return res.status(404).json({
         success: false,
         message: "Item not found",
+      });
+    }
+    if (!isItemFileAllowedForItem(item, fileConfig)) {
+      return res.status(400).json({
+        success: false,
+        message: `${fileConfig.label} can only be used when mounting file is needed for this item`,
       });
     }
 
@@ -5365,6 +5404,12 @@ exports.uploadItemFile = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: "Item not found",
+      });
+    }
+    if (!isItemFileAllowedForItem(item, fileConfig)) {
+      return res.status(400).json({
+        success: false,
+        message: `${fileConfig.label} can only be uploaded when mounting file is needed for this item`,
       });
     }
 
@@ -5513,6 +5558,12 @@ exports.uploadItemPisFile = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: "Item not found",
+      });
+    }
+    if (!isItemFileAllowedForItem(item, fileConfig)) {
+      return res.status(400).json({
+        success: false,
+        message: `${fileConfig.label} can only be deleted when mounting file is needed for this item`,
       });
     }
 

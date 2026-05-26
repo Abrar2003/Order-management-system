@@ -84,8 +84,7 @@ const buildInitialRows = (qc) =>
       pending_after: toSafeNumberString(record?.pending_after),
       cbm_total: formatNumberInputValue(record?.cbm?.total, { allowZero: true }) || "0.00",
       remarks: String(record?.remarks || ""),
-      inspected_k_d: Boolean(record?.inspected_k_d),
-      pis_k_d: Boolean(record?.pis_k_d),
+      kd: Boolean(record?.kd),
       labels_added: normalizeLabels(record?.labels_added),
       label_ranges: normalizeLabelRanges(record?.label_ranges),
       original_labels_added: normalizeLabels(record?.labels_added),
@@ -245,8 +244,7 @@ const EditInspectionRecordsModal = ({ qc, onClose, onSuccess }) => {
           },
           label_ranges: normalizeLabelRanges(row.label_ranges),
           labels_added: normalizeLabels(row.labels_added),
-          inspected_k_d: Boolean(row.inspected_k_d),
-          pis_k_d: Boolean(row.pis_k_d),
+          kd: Boolean(row.kd),
           remarks: String(row.remarks || "").trim(),
         };
       });
@@ -442,39 +440,19 @@ const EditInspectionRecordsModal = ({ qc, onClose, onSuccess }) => {
                     </label>
 
                     <div className="edit-inspection-field">
-                      <span>Inspected K/D</span>
-                      <div className="btn-group btn-group-sm w-100" role="group" aria-label="Inspected K/D">
+                      <span>K/D</span>
+                      <div className="btn-group btn-group-sm w-100" role="group" aria-label="K/D">
                         <button
                           type="button"
-                          className={`btn ${row.inspected_k_d ? "btn-primary" : "btn-outline-secondary"}`}
-                          onClick={() => updateRow(index, "inspected_k_d", true)}
+                          className={`btn ${row.kd ? "btn-primary" : "btn-outline-secondary"}`}
+                          onClick={() => updateRow(index, "kd", true)}
                         >
                           Yes
                         </button>
                         <button
                           type="button"
-                          className={`btn ${!row.inspected_k_d ? "btn-primary" : "btn-outline-secondary"}`}
-                          onClick={() => updateRow(index, "inspected_k_d", false)}
-                        >
-                          No
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="edit-inspection-field">
-                      <span>PIS K/D</span>
-                      <div className="btn-group btn-group-sm w-100" role="group" aria-label="PIS K/D">
-                        <button
-                          type="button"
-                          className={`btn ${row.pis_k_d ? "btn-primary" : "btn-outline-secondary"}`}
-                          onClick={() => updateRow(index, "pis_k_d", true)}
-                        >
-                          Yes
-                        </button>
-                        <button
-                          type="button"
-                          className={`btn ${!row.pis_k_d ? "btn-primary" : "btn-outline-secondary"}`}
-                          onClick={() => updateRow(index, "pis_k_d", false)}
+                          className={`btn ${!row.kd ? "btn-primary" : "btn-outline-secondary"}`}
+                          onClick={() => updateRow(index, "kd", false)}
                         >
                           No
                         </button>

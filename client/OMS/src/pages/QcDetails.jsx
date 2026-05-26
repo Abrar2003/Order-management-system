@@ -23,6 +23,7 @@ import {
 import {
   buildItemFileUploadRequest,
   ITEM_FILE_OPTIONS,
+  isItemFileOptionAvailableForItem,
 } from "../constants/itemFiles";
 import {
   getNextClientSortState,
@@ -482,12 +483,15 @@ const QcDetails = () => {
     () =>
       isQcUser
         ? RELATED_FILE_OPTIONS.filter((option) => option.scope === "qc")
-        : RELATED_FILE_OPTIONS,
-    [isQcUser],
+        : RELATED_FILE_OPTIONS.filter((option) =>
+            option.scope !== "item_master" ||
+            isItemFileOptionAvailableForItem(option, qc?.item_master),
+          ),
+    [isQcUser, qc?.item_master],
   );
   const activeRelatedFileConfig = useMemo(
     () =>
-      RELATED_FILE_OPTIONS_BY_VALUE[relatedFileType]
+      availableRelatedFileOptions.find((option) => option.value === relatedFileType)
       || availableRelatedFileOptions[0]
       || RELATED_FILE_OPTIONS[0],
     [availableRelatedFileOptions, relatedFileType],
@@ -689,7 +693,9 @@ const QcDetails = () => {
   }, [qc?.item_master?.finish]);
   const itemMasterFiles = useMemo(
     () =>
-      ITEM_MASTER_FILE_OPTIONS.map((option) => ({
+      ITEM_MASTER_FILE_OPTIONS.filter((option) =>
+        isItemFileOptionAvailableForItem(option, qc?.item_master),
+      ).map((option) => ({
         ...option,
         file: qc?.item_master?.[option.field] || null,
       })),

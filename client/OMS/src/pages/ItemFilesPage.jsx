@@ -13,6 +13,7 @@ import {
   DEFAULT_ITEM_FILE_TYPE,
   getItemFileOption,
   hasStoredItemFile,
+  isItemFileOptionAvailableForItem,
   isPisSpreadsheetUploadType,
 } from "../constants/itemFiles";
 import {
@@ -388,6 +389,10 @@ const ItemFilesPage = () => {
 
   const handleOpenItemFilePicker = useCallback((item) => {
     if (!canUploadActiveFile || uploadingItemId) return;
+    if (!isItemFileOptionAvailableForItem(activeFileOption, item)) {
+      setError(`${activeFileOption.label} is not enabled for this item.`);
+      return;
+    }
 
     const itemId = String(item?._id || "").trim();
     if (!itemId) return;
@@ -397,7 +402,7 @@ const ItemFilesPage = () => {
     window.setTimeout(() => {
       itemFileInputRef.current?.click();
     }, 0);
-  }, [canUploadActiveFile, uploadingItemId]);
+  }, [activeFileOption, canUploadActiveFile, uploadingItemId]);
 
   const handleItemFileChange = useCallback(async (event) => {
     const inputElement = event.target;

@@ -355,7 +355,7 @@ const itemSchema = new mongoose.Schema(
     master_barcode: { type: String, default: "", trim: true },
     master_master_barcode: { type: String, default: "", trim: true },
     master_inner_barcode: { type: String, default: "", trim: true },
-    master_k_d: { type: Boolean, default: false },
+    kd: { type: Boolean, default: false },
     pd_box_sizes: {
       type: [productSpecBoxSizeEntrySchema],
       default: [],
@@ -442,6 +442,15 @@ const itemSchema = new mongoose.Schema(
       link: { type: String, default: "", trim: true },
       public_id: { type: String, default: "", trim: true },
     },
+    mounting_file: {
+      key: { type: String, default: "", trim: true },
+      originalName: { type: String, default: "", trim: true },
+      contentType: { type: String, default: "", trim: true },
+      size: { type: Number, default: 0, min: 0 },
+      link: { type: String, default: "", trim: true },
+      public_id: { type: String, default: "", trim: true },
+    },
+    mounting_file_needed: { type: Boolean, default: false },
     packeging_ppt: {
       key: { type: String, default: "", trim: true },
       originalName: { type: String, default: "", trim: true },
@@ -450,8 +459,6 @@ const itemSchema = new mongoose.Schema(
       link: { type: String, default: "", trim: true },
       public_id: { type: String, default: "", trim: true },
     },
-    inspected_k_d: { type: Boolean, default: false },
-    pis_k_d: { type: Boolean, default: false },
     pis_checked_flag: { type: Boolean, default: false },
     barcode_exempted: { type: Boolean, default: false },
     finish: {

@@ -23,7 +23,7 @@ const FINAL_PIS_CHECK_ITEM_SELECT = [
   "master_barcode",
   "master_master_barcode",
   "master_inner_barcode",
-  "inspected_k_d",
+  "kd",
   "inspected_weight",
   "master_item_sizes",
   "master_box_sizes",

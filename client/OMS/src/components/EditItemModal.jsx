@@ -92,6 +92,8 @@ const buildInitialForm = (item = {}) => {
   return {
     name: toText(item?.name),
     description: toText(item?.description),
+    kd: Boolean(item?.kd),
+    mounting_file_needed: Boolean(item?.mounting_file_needed),
     inspected_item_count: String(inspectedItemCount),
     inspected_box_mode: inspectedBoxMode,
     inspected_box_count: String(inspectedBoxCount),
@@ -287,6 +289,8 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
       const payload = {
         name: toText(form.name),
         description: toText(form.description),
+        kd: Boolean(form.kd),
+        mounting_file_needed: Boolean(form.mounting_file_needed),
         inspected_item_sizes: inspectedItemPayload.value,
         inspected_box_mode: form.inspected_box_mode,
         inspected_box_sizes: inspectedBoxPayload.value,
@@ -486,6 +490,48 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
                   <label htmlFor="item-qc-branding" className="form-check-label">
                     Branding Check
                   </label>
+                </div>
+              </div>
+              <div className="col-md-3">
+                <label className="form-label">K/D</label>
+                <div className="btn-group w-100" role="group" aria-label="K/D">
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${form.kd ? "btn-primary" : "btn-outline-secondary"}`}
+                    onClick={() => updateField("kd", true)}
+                    disabled={saving}
+                  >
+                    Yes
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${!form.kd ? "btn-primary" : "btn-outline-secondary"}`}
+                    onClick={() => updateField("kd", false)}
+                    disabled={saving}
+                  >
+                    No
+                  </button>
+                </div>
+              </div>
+              <div className="col-md-3">
+                <label className="form-label">Mounting File Needed</label>
+                <div className="btn-group w-100" role="group" aria-label="Mounting File Needed">
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${form.mounting_file_needed ? "btn-primary" : "btn-outline-secondary"}`}
+                    onClick={() => updateField("mounting_file_needed", true)}
+                    disabled={saving}
+                  >
+                    Yes
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${!form.mounting_file_needed ? "btn-primary" : "btn-outline-secondary"}`}
+                    onClick={() => updateField("mounting_file_needed", false)}
+                    disabled={saving}
+                  >
+                    No
+                  </button>
                 </div>
               </div>
               <div className={isInspectedCartonMode ? "col-md-3" : "col-md-6"}>

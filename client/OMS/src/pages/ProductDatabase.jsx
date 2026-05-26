@@ -291,6 +291,8 @@ const buildPayloadFromForm = (form = {}, boxMode = null) => {
       effectiveBarcodeMode === BARCODE_MODES.INNER_MASTER
         ? normalizeTextValue(form.innerBarcode)
         : "",
+    kd: form.kd === true,
+    mounting_file_needed: form.mountingFileNeeded === true,
   };
 };
 
@@ -1176,6 +1178,8 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
               draft.form.masterBarcode ?? getProductDatabaseMasterBarcode(draftItem),
             innerBarcode:
               draft.form.innerBarcode ?? normalizeTextValue(draftItem?.pd_inner_barcode),
+            kd: draft.form.kd === true,
+            mountingFileNeeded: draft.form.mountingFileNeeded === true,
             productTypeKey: normalizeTemplateKey(draft.form.productTypeKey),
             productTypeVersion: Number(draft.form.productTypeVersion || 0),
           }
@@ -1185,6 +1189,8 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
             singleBarcode: getProductDatabaseMasterBarcode(draftItem),
             masterBarcode: getProductDatabaseMasterBarcode(draftItem),
             innerBarcode: normalizeTextValue(draftItem?.pd_inner_barcode),
+            kd: draftItem?.kd === true,
+            mountingFileNeeded: draftItem?.mounting_file_needed === true,
             productTypeKey: normalizeTemplateKey(draftItem?.product_type?.key),
             productTypeVersion: Number(draftItem?.product_type?.version || 0),
           },
@@ -1845,6 +1851,60 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
                         />
                       </div>
                     )}
+                    <div className="col-lg-4">
+                      <label className="form-label">K/D</label>
+                      <div className="btn-group w-100" role="group" aria-label="K/D">
+                        <button
+                          type="button"
+                          className={`btn ${form.kd ? "btn-primary" : "btn-outline-secondary"}`}
+                          disabled={!canEdit}
+                          onClick={() => {
+                            clearDraftMessage();
+                            setForm((prev) => ({ ...prev, kd: true }));
+                          }}
+                        >
+                          Yes
+                        </button>
+                        <button
+                          type="button"
+                          className={`btn ${!form.kd ? "btn-primary" : "btn-outline-secondary"}`}
+                          disabled={!canEdit}
+                          onClick={() => {
+                            clearDraftMessage();
+                            setForm((prev) => ({ ...prev, kd: false }));
+                          }}
+                        >
+                          No
+                        </button>
+                      </div>
+                    </div>
+                    <div className="col-lg-4">
+                      <label className="form-label">Mounting File Needed</label>
+                      <div className="btn-group w-100" role="group" aria-label="Mounting File Needed">
+                        <button
+                          type="button"
+                          className={`btn ${form.mountingFileNeeded ? "btn-primary" : "btn-outline-secondary"}`}
+                          disabled={!canEdit}
+                          onClick={() => {
+                            clearDraftMessage();
+                            setForm((prev) => ({ ...prev, mountingFileNeeded: true }));
+                          }}
+                        >
+                          Yes
+                        </button>
+                        <button
+                          type="button"
+                          className={`btn ${!form.mountingFileNeeded ? "btn-primary" : "btn-outline-secondary"}`}
+                          disabled={!canEdit}
+                          onClick={() => {
+                            clearDraftMessage();
+                            setForm((prev) => ({ ...prev, mountingFileNeeded: false }));
+                          }}
+                        >
+                          No
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>

@@ -33,6 +33,8 @@ const createInitialForm = () => ({
   description: "",
   brand: "",
   vendor: "",
+  kd: false,
+  mounting_file_needed: false,
   pis_item_count: "1",
   pis_box_mode: BOX_PACKAGING_MODES.INDIVIDUAL,
   pis_box_count: "1",
@@ -210,6 +212,8 @@ const CreateItemModal = ({
       formData.append("description", description);
       formData.append("brand", brand);
       formData.append("vendor", vendor);
+      formData.append("kd", String(form.kd === true));
+      formData.append("mounting_file_needed", String(form.mounting_file_needed === true));
       formData.append("pis_box_mode", form.pis_box_mode);
       formData.append("pis_item_sizes", JSON.stringify(pisItemPayload.value));
       formData.append("pis_box_sizes", JSON.stringify(pisBoxPayload.value));
@@ -310,6 +314,48 @@ const CreateItemModal = ({
                   onChange={(event) => handleFieldChange("description", event.target.value)}
                   disabled={saving}
                 />
+              </div>
+              <div className="col-md-6">
+                <label className="form-label">K/D</label>
+                <div className="btn-group w-100" role="group" aria-label="K/D">
+                  <button
+                    type="button"
+                    className={`btn ${form.kd ? "btn-primary" : "btn-outline-secondary"}`}
+                    onClick={() => handleFieldChange("kd", true)}
+                    disabled={saving}
+                  >
+                    Yes
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn ${!form.kd ? "btn-primary" : "btn-outline-secondary"}`}
+                    onClick={() => handleFieldChange("kd", false)}
+                    disabled={saving}
+                  >
+                    No
+                  </button>
+                </div>
+              </div>
+              <div className="col-md-6">
+                <label className="form-label">Mounting File Needed</label>
+                <div className="btn-group w-100" role="group" aria-label="Mounting File Needed">
+                  <button
+                    type="button"
+                    className={`btn ${form.mounting_file_needed ? "btn-primary" : "btn-outline-secondary"}`}
+                    onClick={() => handleFieldChange("mounting_file_needed", true)}
+                    disabled={saving}
+                  >
+                    Yes
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn ${!form.mounting_file_needed ? "btn-primary" : "btn-outline-secondary"}`}
+                    onClick={() => handleFieldChange("mounting_file_needed", false)}
+                    disabled={saving}
+                  >
+                    No
+                  </button>
+                </div>
               </div>
               <div className="col-12">
                 <label className="form-label">PIS Sheet</label>

@@ -143,7 +143,8 @@ const buildInitialForm = (item = {}) => {
   return {
     country_of_origin: toText(item?.country_of_origin),
     barcode_exempted: item?.barcode_exempted === true,
-    pis_k_d: Boolean(item?.pis_k_d),
+    kd: Boolean(item?.kd),
+    mounting_file_needed: Boolean(item?.mounting_file_needed),
     master_barcode: toText(item?.pis_master_barcode || item?.pis_barcode),
     inner_barcode: toText(item?.pis_inner_barcode),
     pis_item_count: String(pisItemCount),
@@ -418,7 +419,8 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
       payload.pis_barcode = toText(form.master_barcode);
       payload.pis_master_barcode = toText(form.master_barcode);
       payload.pis_inner_barcode = isPisCartonMode ? toText(form.inner_barcode) : "";
-      payload.pis_k_d = Boolean(form.pis_k_d);
+      payload.kd = Boolean(form.kd);
+      payload.mounting_file_needed = Boolean(form.mounting_file_needed);
       payload.barcode_exempted = Boolean(form.barcode_exempted);
       if (updateSource) {
         payload.pis_update_source = updateSource;
@@ -436,13 +438,13 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
             pis_barcode: payload.pis_barcode,
             pis_master_barcode: payload.pis_master_barcode,
             pis_inner_barcode: payload.pis_inner_barcode,
-            pis_k_d: payload.pis_k_d,
+            kd: payload.kd,
+            mounting_file_needed: payload.mounting_file_needed,
             barcode_exempted: payload.barcode_exempted,
             master_country_of_origin: payload.country_of_origin,
             master_barcode: payload.pis_master_barcode,
             master_master_barcode: payload.pis_master_barcode,
             master_inner_barcode: payload.pis_inner_barcode,
-            master_k_d: payload.pis_k_d,
             pis_checked_flag: true,
           }
         : item;
@@ -507,20 +509,41 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
                 </select>
               </div>
               <div className="col-md-4">
-                <label className="form-label">PIS K/D</label>
-                <div className="btn-group w-100" role="group" aria-label="PIS K/D">
+                <label className="form-label">K/D</label>
+                <div className="btn-group w-100" role="group" aria-label="K/D">
                   <button
                     type="button"
-                    className={`btn ${form.pis_k_d ? "btn-primary" : "btn-outline-secondary"}`}
-                    onClick={() => updateField("pis_k_d", true)}
+                    className={`btn ${form.kd ? "btn-primary" : "btn-outline-secondary"}`}
+                    onClick={() => updateField("kd", true)}
                     disabled={saving}
                   >
                     Yes
                   </button>
                   <button
                     type="button"
-                    className={`btn ${!form.pis_k_d ? "btn-primary" : "btn-outline-secondary"}`}
-                    onClick={() => updateField("pis_k_d", false)}
+                    className={`btn ${!form.kd ? "btn-primary" : "btn-outline-secondary"}`}
+                    onClick={() => updateField("kd", false)}
+                    disabled={saving}
+                  >
+                    No
+                  </button>
+                </div>
+              </div>
+              <div className="col-md-4">
+                <label className="form-label">Mounting File Needed</label>
+                <div className="btn-group w-100" role="group" aria-label="Mounting File Needed">
+                  <button
+                    type="button"
+                    className={`btn ${form.mounting_file_needed ? "btn-primary" : "btn-outline-secondary"}`}
+                    onClick={() => updateField("mounting_file_needed", true)}
+                    disabled={saving}
+                  >
+                    Yes
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn ${!form.mounting_file_needed ? "btn-primary" : "btn-outline-secondary"}`}
+                    onClick={() => updateField("mounting_file_needed", false)}
                     disabled={saving}
                   >
                     No

@@ -71,6 +71,18 @@ export const ITEM_FILE_OPTIONS = Object.freeze([
     invalidMessage: "Only PDF files are allowed for Assembly.",
   },
   {
+    value: "mounting_file",
+    label: "Mounting File",
+    buttonLabel: "Mounting file",
+    field: "mounting_file",
+    previewMode: "pdf",
+    accept: ".pdf,application/pdf",
+    extensions: [".pdf"],
+    mimeTypes: ["application/pdf"],
+    invalidMessage: "Only PDF files are allowed for Mounting files.",
+    requiresMountingFileNeeded: true,
+  },
+  {
     value: "packeging_ppt",
     label: "Packaging PPT",
     buttonLabel: "Packaging PPT",
@@ -102,6 +114,14 @@ export const DEFAULT_ITEM_FILE_TYPE = ITEM_FILE_OPTIONS[0]?.value || "product_im
 export const getItemFileOption = (value) => {
   const normalizedValue = String(value || "").trim().toLowerCase();
   return ITEM_FILE_OPTIONS_BY_VALUE[normalizedValue] || null;
+};
+
+export const isItemFileOptionAvailableForItem = (option, item = {}) => {
+  const resolvedOption =
+    typeof option === "string" ? getItemFileOption(option) : option;
+  if (!resolvedOption) return false;
+  if (!resolvedOption.requiresMountingFileNeeded) return true;
+  return item?.mounting_file_needed === true;
 };
 
 export const hasStoredItemFile = (file = {}) =>

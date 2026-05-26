@@ -15,6 +15,7 @@ import {
   DEFAULT_ITEM_FILE_TYPE,
   ITEM_FILE_OPTIONS,
   ITEM_FILE_OPTIONS_BY_VALUE,
+  isItemFileOptionAvailableForItem,
 } from "../constants/itemFiles";
 import {
   getNextClientSortState,
@@ -457,7 +458,13 @@ const Items = () => {
 
       const itemId = String(item?._id || "").trim();
       if (!itemId) return;
-      const fileType = getSelectedItemFileType(itemId);
+      const availableOptions = ITEM_FILE_OPTIONS.filter((option) =>
+        isItemFileOptionAvailableForItem(option, item),
+      );
+      const storedFileType = getSelectedItemFileType(itemId);
+      const fileType = availableOptions.some((option) => option.value === storedFileType)
+        ? storedFileType
+        : availableOptions[0]?.value || DEFAULT_ITEM_FILE_TYPE;
       if (fileType === "qc_images" && !hasItemQcRecord(item)) {
         setSuccess("");
         setError("QC images can only be uploaded after a QC record exists for this item.");
@@ -784,7 +791,15 @@ const Items = () => {
                     )}
                     {sortedRows.map((item) => {
                       const itemId = String(item?._id || "").trim();
-                      const selectedFileType = getSelectedItemFileType(itemId);
+                      const availableItemFileOptions = ITEM_FILE_OPTIONS.filter((option) =>
+                        isItemFileOptionAvailableForItem(option, item),
+                      );
+                      const storedSelectedFileType = getSelectedItemFileType(itemId);
+                      const selectedFileType = availableItemFileOptions.some(
+                        (option) => option.value === storedSelectedFileType,
+                      )
+                        ? storedSelectedFileType
+                        : availableItemFileOptions[0]?.value || DEFAULT_ITEM_FILE_TYPE;
                       const isUploadingThisItem = uploadingItemId === itemId;
                       const isQcImageLocked =
                         selectedFileType === "qc_images" && !hasItemQcRecord(item);
@@ -858,7 +873,7 @@ const Items = () => {
                                       handleItemFileTypeChange(itemId, e.target.value)
                                     }
                                   >
-                                    {ITEM_FILE_OPTIONS.map((option) => (
+                                    {availableItemFileOptions.map((option) => (
                                       <option key={option.value} value={option.value}>
                                         {option.label}
                                       </option>

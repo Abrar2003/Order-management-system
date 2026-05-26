@@ -64,7 +64,7 @@ const main = async () => {
         "packed_size",
         "finishing",
         "branding",
-        "inspected_k_d",
+        "kd",
         "inspected_item_sizes",
         "inspected_box_sizes",
         "inspected_box_mode",

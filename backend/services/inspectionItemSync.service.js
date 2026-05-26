@@ -136,7 +136,14 @@ const applyLatestInspectionToItem = ({
   setIfChanged("inspected_box_sizes", boxSizes);
   setIfChanged("inspected_box_mode", boxMode);
   setIfChanged("inspected_weight", inspectedWeight);
-  setIfChanged("inspected_k_d", Boolean(inspectionRecord?.inspected_k_d));
+  setIfChanged(
+    "kd",
+    Boolean(
+      inspectionRecord?.kd ??
+        inspectionRecord?.inspected_k_d ??
+        inspectionRecord?.pis_k_d,
+    ),
+  );
 
   const currentCbm = itemDoc?.cbm || {};
   const nextCbm = {

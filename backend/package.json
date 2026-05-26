@@ -14,6 +14,7 @@
     "export:pis:pdf": "node scripts/exportPisPdfExample.js",
     "sync:pis": "node scripts/syncPisWorkbooks.js",
     "backfill:po-cbm": "node scripts/backfillTotalPoCbm.js",
+    "backfill:item-kd": "node scripts/backfillItemKdFromLegacyFields.js",
     "sync:items-inspected-from-latest-inspections": "node scripts/syncItemsInspectedDataFromLatestInspections.js",
     "upload:pis:folder": "node scripts/uploadPisFolderViaApi.js",
     "test": "echo \"Error: no test specified\" && exit 1",

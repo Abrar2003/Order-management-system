@@ -305,6 +305,8 @@ const extractProductDatabaseFields = (item = {}) => {
     pd_barcode: pdMasterBarcode,
     pd_master_barcode: pdMasterBarcode,
     pd_inner_barcode: normalizeText(item?.pd_inner_barcode),
+    kd: item?.kd === true,
+    mounting_file_needed: item?.mounting_file_needed === true,
     pd_item_sizes: normalizeItemSizeEntries(item?.pd_item_sizes || []),
     pd_box_sizes: normalizeBoxSizeEntries(item?.pd_box_sizes || [], pdBoxMode),
     pd_box_mode: pdBoxMode,
@@ -335,6 +337,8 @@ const normalizeProductDatabaseInput = (payload = {}) => {
   const hasPdBarcode = hasOwn(payload, "pd_barcode");
   const hasPdMasterBarcode = hasOwn(payload, "pd_master_barcode");
   const hasPdInnerBarcode = hasOwn(payload, "pd_inner_barcode");
+  const hasKd = hasOwn(payload, "kd");
+  const hasMountingFileNeeded = hasOwn(payload, "mounting_file_needed");
   const hasItemSizes = hasOwn(payload, "pd_item_sizes");
   const hasBoxSizes = hasOwn(payload, "pd_box_sizes");
   const hasBoxMode = hasOwn(payload, "pd_box_mode");
@@ -356,6 +360,14 @@ const normalizeProductDatabaseInput = (payload = {}) => {
 
   if (hasPdInnerBarcode) {
     data.pd_inner_barcode = normalizeText(payload.pd_inner_barcode);
+  }
+
+  if (hasKd) {
+    data.kd = payload.kd === true;
+  }
+
+  if (hasMountingFileNeeded) {
+    data.mounting_file_needed = payload.mounting_file_needed === true;
   }
 
   if (hasItemSizes) {
@@ -416,6 +428,8 @@ const normalizeProductDatabaseInput = (payload = {}) => {
       hasPdBarcode ||
       hasPdMasterBarcode ||
       hasPdInnerBarcode ||
+      hasKd ||
+      hasMountingFileNeeded ||
       hasItemSizes ||
       hasBoxSizes ||
       hasBoxMode ||
@@ -444,6 +458,12 @@ const mergeProductDatabaseFields = (currentState = {}, inputData = {}) => {
     pd_inner_barcode: hasOwn(inputData, "pd_inner_barcode")
       ? normalizeText(inputData.pd_inner_barcode)
       : normalizeText(currentState.pd_inner_barcode),
+    kd: hasOwn(inputData, "kd")
+      ? inputData.kd === true
+      : currentState.kd === true,
+    mounting_file_needed: hasOwn(inputData, "mounting_file_needed")
+      ? inputData.mounting_file_needed === true
+      : currentState.mounting_file_needed === true,
     pd_item_sizes: hasOwn(inputData, "pd_item_sizes")
       ? normalizeItemSizeEntries(inputData.pd_item_sizes)
       : normalizeItemSizeEntries(currentState.pd_item_sizes || []),
@@ -592,6 +612,8 @@ const getChangedProductDatabaseFields = (currentState = {}, nextState = {}) =>
     "pd_barcode",
     "pd_master_barcode",
     "pd_inner_barcode",
+    "kd",
+    "mounting_file_needed",
     "pd_item_sizes",
     "pd_box_sizes",
     "pd_box_mode",
@@ -612,6 +634,8 @@ const hasProductDatabaseData = (state = {}) =>
   ) ||
   (Array.isArray(state?.pd_item_sizes) && state.pd_item_sizes.length > 0) ||
   (Array.isArray(state?.pd_box_sizes) && state.pd_box_sizes.length > 0) ||
+  state?.kd === true ||
+  state?.mounting_file_needed === true ||
   (Array.isArray(state?.product_specs?.item_sizes) && state.product_specs.item_sizes.length > 0) ||
   (Array.isArray(state?.product_specs?.box_sizes) && state.product_specs.box_sizes.length > 0);
 
@@ -642,6 +666,8 @@ const setProductDatabaseFields = (item, state = {}) => {
   item.pd_barcode = pdMasterBarcode;
   item.pd_master_barcode = pdMasterBarcode;
   item.pd_inner_barcode = normalizeText(state.pd_inner_barcode);
+  item.kd = state.kd === true;
+  item.mounting_file_needed = state.mounting_file_needed === true;
   item.pd_item_sizes = state.pd_item_sizes || [];
   item.pd_box_sizes = state.pd_box_sizes || [];
   item.pd_box_mode = state.pd_box_mode || BOX_PACKAGING_MODES.INDIVIDUAL;
