@@ -4971,6 +4971,209 @@ small,
   }
 }
 
+@media (min-width: 576px) and (max-width: 991.98px) {
+  .qc-list-page,
+  .qc-details-page {
+    width: min(100%, calc(100vw - 1.25rem));
+    overflow-x: hidden;
+  }
+
+  .qc-list-header,
+  .qc-details-header {
+    display: grid !important;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center !important;
+    gap: 0.85rem !important;
+  }
+
+  .qc-list-header > h2,
+  .qc-details-header > h2 {
+    text-align: center;
+  }
+
+  .qc-list-export-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-width: min(15rem, 100%);
+  }
+
+  .qc-list-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 1rem;
+    padding: 0.95rem 1rem;
+  }
+
+  .qc-list-filter-actions {
+    display: flex !important;
+    justify-content: flex-end !important;
+  }
+
+  .qc-list-filter-actions .btn {
+    min-width: 6.75rem;
+  }
+
+  .qc-list-desktop-filters {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+    padding: 0.95rem 1rem 1.05rem;
+  }
+
+  .qc-list-filter-date-field {
+    grid-column: span 2;
+  }
+
+  .qc-list-desktop-date-range {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .qc-list-mobile-filters {
+    display: none;
+  }
+
+  .qc-list-table-wrap,
+  .qc-details-table-wrap {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+
+  .qc-list-table {
+    min-width: 1120px;
+  }
+
+  .qc-list-heading-row th {
+    padding: 0.85rem 0.75rem;
+  }
+
+  .qc-list-action-col {
+    width: 8.5rem;
+    min-width: 8.5rem;
+  }
+
+  .qc-list-action-btn {
+    min-height: 2.35rem;
+    font-size: 0.8rem;
+  }
+
+  .qc-details-actions {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .qc-details-toolbar {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .qc-details-toolbar .btn,
+  .qc-details-toolbar-select,
+  .qc-details-comment-input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .qc-details-upload-progress {
+    width: 100%;
+  }
+
+  .qc-details-table-wrap table {
+    min-width: 920px;
+  }
+
+  .qc-details-record-table th,
+  .qc-details-record-table td,
+  .qc-details-shipping-table th,
+  .qc-details-shipping-table td,
+  .qc-details-batch-table th,
+  .qc-details-batch-table td {
+    padding: 0.65rem 0.75rem;
+    white-space: normal;
+  }
+
+  .qc-details-record-table td:last-child .d-flex {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.4rem !important;
+  }
+
+  .qc-details-record-table td:last-child .btn {
+    width: 100%;
+    white-space: nowrap;
+  }
+
+  .qc-details-file-actions .btn {
+    flex: 1 1 calc(33.333% - 0.5rem);
+    min-width: 9rem;
+  }
+
+  .qc-details-action-row {
+    justify-content: stretch !important;
+  }
+
+  .qc-details-action-row .btn {
+    flex: 1 1 calc(33.333% - 0.5rem);
+    min-width: 9rem;
+  }
+
+  .qc-update-modal-dialog,
+  .edit-inspection-records-dialog {
+    width: calc(100vw - 1.25rem);
+    max-width: calc(100vw - 1.25rem);
+    margin: 0.5rem auto;
+  }
+
+  .qc-update-modal-dialog .modal-content,
+  .edit-inspection-records-dialog .modal-content {
+    max-height: calc(100dvh - 1rem);
+  }
+
+  .qc-modal-summary-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .qc-update-modal-body {
+    padding: 0.95rem;
+  }
+
+  .qc-update-modal-body > .row.g-3 {
+    --bs-gutter-x: 0.75rem;
+    --bs-gutter-y: 0.85rem;
+  }
+
+  .qc-measurement-controls,
+  .qc-measurement-entries {
+    flex: 0 0 100%;
+    max-width: 100%;
+  }
+
+  .qc-measurement-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.6rem;
+  }
+
+  .qc-measurement-entry-grid > [class*="col-"] {
+    flex: 0 0 50%;
+    max-width: 50%;
+  }
+
+  .qc-measurement-entry-grid > .col-12 {
+    flex-basis: 100%;
+    max-width: 100%;
+  }
+
+  .qc-barcode-input-row .input-group {
+    min-width: 0;
+  }
+
+  .qc-update-modal-dialog .modal-footer .btn,
+  .edit-inspection-records-dialog .modal-footer .btn {
+    flex: 1 1 10rem;
+  }
+}
+
 @media (min-width: 992px) {
   .om-menu-mobile-only {
     display: none;

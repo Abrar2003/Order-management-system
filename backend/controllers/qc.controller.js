@@ -18,6 +18,9 @@ const Order = require("../models/order.model");
 const mongoose = require("mongoose");
 const { upsertItemFromQc } = require("../services/itemSync");
 const {
+  syncItemInspectedDataFromInspection,
+} = require("../services/inspectionItemSync.service");
+const {
   applyTotalPoCbmToOrder,
   syncTotalPoCbmForItem,
 } = require("../services/orderCbm.service");
@@ -10248,10 +10251,6 @@ exports.editInspectionRecords = async (req, res) => {
     const touchedInspectors = new Set();
     const requestHistoryDateUpdates = new Map();
     const qcRequestedQuantityCap = resolveRequestedQuantityFromQc(qc);
-    const hasInspectedKdPayload = payloadRecords.some((row) =>
-      hasOwn(row || {}, "inspected_k_d"),
-    );
-
     const parseRequiredDate = (value, fieldName) => {
       const rawValue = String(value || "").trim();
       if (!rawValue) {
@@ -10789,29 +10788,26 @@ exports.editInspectionRecords = async (req, res) => {
       );
     }
 
-    if (hasInspectedKdPayload && latestRecord) {
-      const itemCode = normalizeText(qc?.item?.item_code || "");
-      if (itemCode) {
-        const itemDoc = await Item.findOne({
-          code: {
-            $regex: `^${escapeRegex(itemCode)}$`,
-            $options: "i",
-          },
-        });
-
-        if (
-          itemDoc &&
-          Boolean(itemDoc?.inspected_k_d) !== Boolean(latestRecord?.inspected_k_d)
-        ) {
-          itemDoc.set("inspected_k_d", Boolean(latestRecord.inspected_k_d));
-          itemDoc.markModified("inspected_k_d");
-          await itemDoc.save();
-        }
-      }
-    }
-
     qc.updated_by = buildAuditActor(req.user);
     await qc.save();
+
+    if (latestRecord) {
+      try {
+        const itemInspectionSyncResult = await syncItemInspectedDataFromInspection({
+          qcDoc: qc,
+          inspectionRecord: latestRecord,
+        });
+        if (itemInspectionSyncResult?.updated && itemInspectionSyncResult?.item_doc) {
+          await syncTotalPoCbmForItem(itemInspectionSyncResult.item_doc.toObject());
+        }
+      } catch (itemInspectionSyncError) {
+        console.error("Item inspected data sync after inspection edit failed:", {
+          qcId: qc?._id,
+          inspectionId: latestRecord?._id,
+          error: itemInspectionSyncError?.message || String(itemInspectionSyncError),
+        });
+      }
+    }
 
     const orderId = qc?.order?._id || qc.order;
     const orderRecord = await Order.findById(orderId);
