@@ -16,6 +16,8 @@ const CRITERIA_OPTIONS = [
   { value: "inspected", label: "Inspected Items" },
   { value: "cad", label: "CAD Uploaded" },
   { value: "pis", label: "PIS Uploaded" },
+  { value: "assembly", label: "Assembly Uploaded" },
+  { value: "mounting_file", label: "Mounting File Uploaded" },
   { value: "packaging_ppt", label: "Packaging PPT Uploaded" },
   { value: "product_image", label: "Product Image Uploaded" },
   { value: "finish", label: "Finish Uploaded" },
@@ -31,6 +33,8 @@ const SUMMARY_KEYS = [
   "inspected",
   "cad",
   "pis",
+  "assembly",
+  "mounting_file",
   "packaging_ppt",
   "product_image",
   "finish",
@@ -78,9 +82,9 @@ const SummaryPill = ({ entry }) => (
   </div>
 );
 
-const FlagBadge = ({ value }) => (
-  <span className={`badge ${getFlagBadgeClass(value)}`}>
-    {value ? "Yes" : "No"}
+const FlagBadge = ({ value, applicable = true }) => (
+  <span className={`badge ${applicable ? getFlagBadgeClass(value) : "text-bg-light text-secondary"}`}>
+    {applicable ? (value ? "Yes" : "No") : "N/A"}
   </span>
 );
 
@@ -356,6 +360,8 @@ const InspectedItemsReport = () => {
                       <th>Inspected</th>
                       <th>CAD</th>
                       <th>PIS</th>
+                      <th>Assembly</th>
+                      <th>Mounting File</th>
                       <th>Packaging PPT</th>
                       <th>Product Image</th>
                       <th>Finish</th>
@@ -372,6 +378,18 @@ const InspectedItemsReport = () => {
                         <td><FlagBadge value={row.flags?.inspected} /></td>
                         <td><FlagBadge value={row.flags?.cad} /></td>
                         <td><FlagBadge value={row.flags?.pis} /></td>
+                        <td>
+                          <FlagBadge
+                            value={row.flags?.assembly}
+                            applicable={row.requirements?.assembly === true}
+                          />
+                        </td>
+                        <td>
+                          <FlagBadge
+                            value={row.flags?.mounting_file}
+                            applicable={row.requirements?.mounting_file === true}
+                          />
+                        </td>
                         <td><FlagBadge value={row.flags?.packaging_ppt} /></td>
                         <td><FlagBadge value={row.flags?.product_image} /></td>
                         <td>

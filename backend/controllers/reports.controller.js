@@ -80,7 +80,11 @@ const INSPECTED_ITEMS_REPORT_SELECT = [
   "image",
   "cad_file",
   "pis_file",
+  "assembly_file",
+  "mounting_file",
+  "mounting_file_needed",
   "packeging_ppt",
+  "kd",
   "finish",
   "qc",
   "source",
@@ -93,6 +97,8 @@ const INSPECTED_ITEM_CRITERIA = Object.freeze({
   INSPECTED: "inspected",
   CAD: "cad",
   PIS: "pis",
+  ASSEMBLY: "assembly",
+  MOUNTING_FILE: "mounting_file",
   PACKAGING_PPT: "packaging_ppt",
   PRODUCT_IMAGE: "product_image",
   FINISH: "finish",
@@ -158,16 +164,30 @@ const buildInspectedItemsReportFlags = (item = {}) => ({
   inspected: hasItemBeenInspected(item),
   cad: hasStoredItemFile(item?.cad_file),
   pis: hasStoredItemFile(item?.pis_file),
+  assembly: item?.kd === true ? hasStoredItemFile(item?.assembly_file) : null,
+  mounting_file: item?.mounting_file_needed === true ? hasStoredItemFile(item?.mounting_file) : null,
   packaging_ppt: hasStoredItemFile(item?.packeging_ppt),
   product_image: hasStoredItemFile(item?.image),
   finish: hasFinishUploaded(item),
 });
 
-const matchesInspectedItemsCriterion = (flags = {}, criterion = "all", status = "all") => {
+const isInspectedItemsCriterionApplicable = (row = {}, criterion = "all") => {
+  const normalizedCriterion = normalizeText(criterion).toLowerCase() || "all";
+  if (normalizedCriterion === INSPECTED_ITEM_CRITERIA.ASSEMBLY) {
+    return row?.requirements?.assembly === true;
+  }
+  if (normalizedCriterion === INSPECTED_ITEM_CRITERIA.MOUNTING_FILE) {
+    return row?.requirements?.mounting_file === true;
+  }
+  return true;
+};
+
+const matchesInspectedItemsCriterion = (row = {}, criterion = "all", status = "all") => {
   const normalizedCriterion = normalizeText(criterion).toLowerCase() || "all";
   const normalizedStatus = normalizeText(status).toLowerCase() || "all";
   if (normalizedCriterion === "all" || normalizedStatus === "all") return true;
-  const value = Boolean(flags[normalizedCriterion]);
+  if (!isInspectedItemsCriterionApplicable(row, normalizedCriterion)) return false;
+  const value = Boolean(row?.flags?.[normalizedCriterion]);
   if (normalizedStatus === "yes") return value;
   if (normalizedStatus === "no") return !value;
   return true;
@@ -185,10 +205,16 @@ const buildInspectedItemsReportRow = (item = {}) => {
     vendors: Array.isArray(item?.vendors) ? item.vendors.filter(Boolean) : [],
     last_inspected_date: normalizeText(item?.qc?.last_inspected_date),
     flags,
+    requirements: {
+      assembly: item?.kd === true,
+      mounting_file: item?.mounting_file_needed === true,
+    },
     files: {
       image: item?.image || {},
       cad_file: item?.cad_file || {},
       pis_file: item?.pis_file || {},
+      assembly_file: item?.assembly_file || {},
+      mounting_file: item?.mounting_file || {},
       packeging_ppt: item?.packeging_ppt || {},
       finish_count: Array.isArray(item?.finish) ? item.finish.length : 0,
     },
@@ -198,18 +224,22 @@ const buildInspectedItemsReportRow = (item = {}) => {
 
 const buildInspectedItemsSummary = (rows = []) => {
   const total = rows.length;
-  const createSummaryEntry = (key, label) => ({
+  const createSummaryEntry = (key, label, totalRows = rows) => ({
     key,
     label,
-    count: rows.filter((row) => Boolean(row?.flags?.[key])).length,
-    total,
+    count: totalRows.filter((row) => Boolean(row?.flags?.[key])).length,
+    total: totalRows.length,
   });
+  const assemblyRows = rows.filter((row) => row?.requirements?.assembly === true);
+  const mountingFileRows = rows.filter((row) => row?.requirements?.mounting_file === true);
 
   return {
     total_items: total,
     inspected: createSummaryEntry(INSPECTED_ITEM_CRITERIA.INSPECTED, "Inspected Items"),
     cad: createSummaryEntry(INSPECTED_ITEM_CRITERIA.CAD, "CAD Uploaded"),
     pis: createSummaryEntry(INSPECTED_ITEM_CRITERIA.PIS, "PIS Uploaded"),
+    assembly: createSummaryEntry(INSPECTED_ITEM_CRITERIA.ASSEMBLY, "Assembly Uploaded", assemblyRows),
+    mounting_file: createSummaryEntry(INSPECTED_ITEM_CRITERIA.MOUNTING_FILE, "Mounting File Uploaded", mountingFileRows),
     packaging_ppt: createSummaryEntry(INSPECTED_ITEM_CRITERIA.PACKAGING_PPT, "Packaging PPT Uploaded"),
     product_image: createSummaryEntry(INSPECTED_ITEM_CRITERIA.PRODUCT_IMAGE, "Product Image Uploaded"),
     finish: createSummaryEntry(INSPECTED_ITEM_CRITERIA.FINISH, "Finish Uploaded"),
@@ -261,7 +291,7 @@ const getInspectedItemsReportDataset = async ({
   const normalizedCriterion = normalizeText(criterion).toLowerCase() || "all";
   const normalizedStatus = normalizeText(status).toLowerCase() || "all";
   const filteredRows = baseRows.filter((row) =>
-    matchesInspectedItemsCriterion(row?.flags, normalizedCriterion, normalizedStatus),
+    matchesInspectedItemsCriterion(row, normalizedCriterion, normalizedStatus),
   );
 
   return {
@@ -1569,6 +1599,8 @@ exports.exportInspectedItemsReport = async (req, res) => {
       { header: "Inspected", value: (row) => (row.flags?.inspected ? "Yes" : "No") },
       { header: "CAD", value: (row) => (row.flags?.cad ? "Yes" : "No") },
       { header: "PIS", value: (row) => (row.flags?.pis ? "Yes" : "No") },
+      { header: "Assembly", value: (row) => row.requirements?.assembly ? (row.flags?.assembly ? "Yes" : "No") : "N/A" },
+      { header: "Mounting File", value: (row) => row.requirements?.mounting_file ? (row.flags?.mounting_file ? "Yes" : "No") : "N/A" },
       { header: "Packaging PPT", value: (row) => (row.flags?.packaging_ppt ? "Yes" : "No") },
       { header: "Product Image", value: (row) => (row.flags?.product_image ? "Yes" : "No") },
       { header: "Finish", value: (row) => (row.flags?.finish ? "Yes" : "No") },
