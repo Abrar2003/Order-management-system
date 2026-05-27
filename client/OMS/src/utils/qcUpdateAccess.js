@@ -2,7 +2,6 @@ import { isAdminLikeRole, isManagerLikeRole, normalizeUserRole } from "../auth/p
 
 const MANAGER_ALLOWED_PAST_DAYS = 2;
 const QC_ALLOWED_PAST_DAYS = 1;
-const LABEL_EXEMPT_QC_ALLOWED_PAST_DAYS = 5;
 
 const UPDATE_QC_PAST_DAYS_OVERRIDE_BY_USER = Object.freeze({
   "6993ff47473290fa1cf76b65": 3,
@@ -37,7 +36,7 @@ export const getUpdateQcPastDaysLimit = ({
 } = {}) => {
   const normalizedUserId = normalizeUserId(userId);
   if (isLabelExemptUser(normalizedUserId)) {
-    return LABEL_EXEMPT_QC_ALLOWED_PAST_DAYS;
+    return null;
   }
 
   const override = UPDATE_QC_PAST_DAYS_OVERRIDE_BY_USER[normalizedUserId];

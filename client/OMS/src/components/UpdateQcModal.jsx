@@ -705,10 +705,12 @@ const UpdateQcModal = ({
     userId: currentUserId,
   });
   const updateQcMinAllowedDateIso = (() => {
+    if (updateQcPastDaysLimit === null) return "";
     const minDate = new Date();
     minDate.setDate(minDate.getDate() - updateQcPastDaysLimit);
     return toISODateString(minDate);
   })();
+  const hasUpdateQcDateWindow = updateQcPastDaysLimit !== null;
 
 
   const [form, setForm] = useState({
@@ -2020,6 +2022,7 @@ const UpdateQcModal = ({
     }
     if (
       isManager &&
+      hasUpdateQcDateWindow &&
       lastInspectedDateIso &&
       (
         lastInspectedDateIso < updateQcMinAllowedDateIso
@@ -2029,7 +2032,7 @@ const UpdateQcModal = ({
       setError(buildUpdateQcPastDaysMessage(normalizedRole, updateQcPastDaysLimit));
       return;
     }
-    if (isQcUser && lastInspectedDateIso) {
+    if (isQcUser && hasUpdateQcDateWindow && lastInspectedDateIso) {
       const qcDateOffset = getUtcDayOffsetFromToday(lastInspectedDateIso);
       if (
         qcDateOffset === null
@@ -3125,8 +3128,16 @@ const UpdateQcModal = ({
                   className="form-control"
                   name="last_inspected_date"
                   value={toISODateString(form.last_inspected_date)}
-                  min={(isManager || isQcUser) ? updateQcMinAllowedDateIso : undefined}
-                  max={(isManager || isQcUser) ? todayIso : undefined}
+                  min={
+                    (isManager || isQcUser) && hasUpdateQcDateWindow
+                      ? updateQcMinAllowedDateIso
+                      : undefined
+                  }
+                  max={
+                    (isManager || isQcUser) && hasUpdateQcDateWindow
+                      ? todayIso
+                      : undefined
+                  }
                   onChange={(e) =>
                     setForm((prev) => ({
                       ...prev,

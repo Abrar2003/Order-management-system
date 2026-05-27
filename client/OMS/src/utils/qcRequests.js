@@ -125,6 +125,7 @@ const getUtcDayOffsetFromToday = (isoDateValue) => {
 };
 
 const isWithinPastDaysInclusive = (value, daysBack = 0) => {
+  if (daysBack === null) return true;
   const offset = getUtcDayOffsetFromToday(value);
   return offset !== null && offset >= 0 && offset <= Math.max(0, Number(daysBack) || 0);
 };

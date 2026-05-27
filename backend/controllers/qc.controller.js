@@ -36,7 +36,6 @@ const {
   toDateOnlyIso,
 } = require("../helpers/dateOnly");
 const {
-  LABEL_EXEMPT_QC_ALLOWED_PAST_DAYS,
   isLabelExemptUser,
 } = require("../helpers/labelExemptUsers");
 const {
@@ -747,7 +746,7 @@ const isIsoDateWithinPastDaysInclusive = (isoDate, daysBack = 0) => {
 const getUpdateQcPastDaysLimit = (role = "", userId = "") => {
   const normalizedUserId = String(userId || "").trim();
   if (isLabelExemptUser(normalizedUserId)) {
-    return LABEL_EXEMPT_QC_ALLOWED_PAST_DAYS;
+    return null;
   }
 
   const override = UPDATE_QC_PAST_DAYS_OVERRIDE_BY_USER[normalizedUserId];
@@ -2015,7 +2014,10 @@ const getQcUserLatestRequestAvailability = (
     };
   }
 
-  if (!isIsoDateWithinPastDaysInclusive(requestDateIso, qcUserPastDaysLimit)) {
+  if (
+    qcUserPastDaysLimit !== null &&
+    !isIsoDateWithinPastDaysInclusive(requestDateIso, qcUserPastDaysLimit)
+  ) {
     return {
       isAvailable: false,
       latestRequestEntry,
@@ -2027,6 +2029,7 @@ const getQcUserLatestRequestAvailability = (
   const submittedInspectionDateIso = toISODateString(inspectionDate);
   if (
     inspectionDate &&
+    qcUserPastDaysLimit !== null &&
     (!submittedInspectionDateIso ||
       !isIsoDateWithinPastDaysInclusive(
         submittedInspectionDateIso,
@@ -5006,6 +5009,7 @@ exports.updateQC = async (req, res) => {
       }
       if (
         isManager &&
+        updateQcPastDaysLimit !== null &&
         !isIsoDateWithinPastDaysInclusive(
           normalizedLastInspectedDate,
           updateQcPastDaysLimit,
@@ -5688,6 +5692,7 @@ exports.updateQC = async (req, res) => {
       }
       if (
         isManager &&
+        updateQcPastDaysLimit !== null &&
         !isIsoDateWithinPastDaysInclusive(
           inspectionDateForRecord,
           updateQcPastDaysLimit,
