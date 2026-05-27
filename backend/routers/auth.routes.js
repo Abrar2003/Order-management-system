@@ -2,6 +2,9 @@ const express = require("express");
 const {
   signup,
   signin,
+  refresh,
+  logout,
+  me,
   getUsers,
   changePassword,
   forceChangeUserPassword,
@@ -20,6 +23,9 @@ const authRateLimit = createRateLimiter({
 
 router.post("/signup", authRateLimit, signup);
 router.post("/signin", authRateLimit, signin);
+router.post("/refresh", authRateLimit, refresh);
+router.post("/logout", logout);
+router.get("/me", auth, me);
 router.patch("/change-password", auth, changePassword);
 router.patch(
   "/force-change-password",

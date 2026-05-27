@@ -236,7 +236,6 @@ const QCPage = () => {
     searchParams.get("sort_order"),
     initialSortBy,
   );
-  const token = localStorage.getItem("token");
   const navigate = useNavigate();
   const location = useLocation();
   const currentUser = getUserFromToken();
@@ -295,7 +294,6 @@ const QCPage = () => {
 
     try {
       const res = await axios.get("/qc/list", {
-        headers: { Authorization: `Bearer ${token}` },
         params: {
           order: appliedFilters.order,
           page,
@@ -331,7 +329,6 @@ const QCPage = () => {
   }, [
     appliedFilters,
     canUseInspectorFilter,
-    token,
     page,
     sortBy,
     sortOrder,
@@ -344,13 +341,12 @@ const QCPage = () => {
     }
     try {
       const res = await axios.get("/auth/?role=QC", {
-        headers: { Authorization: `Bearer ${token}` },
       });
       setInspectors(Array.isArray(res?.data) ? res.data : []);
     } catch {
       setInspectors([]);
     }
-  }, [canUseInspectorFilter, token]);
+  }, [canUseInspectorFilter]);
 
   useEffect(() => {
     fetchQC();
@@ -542,7 +538,6 @@ const QCPage = () => {
       const fromIso = toISODateString(appliedFilters.from);
       const toIso = toISODateString(appliedFilters.to);
       const response = await axios.get("/qc/export", {
-        headers: { Authorization: `Bearer ${token}` },
         responseType: "blob",
         params: {
           order: appliedFilters.order,
@@ -594,7 +589,6 @@ const QCPage = () => {
     canUseInspectorFilter,
     sortBy,
     sortOrder,
-    token,
   ]);
 
   return (

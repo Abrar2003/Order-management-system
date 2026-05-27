@@ -1,5 +1,23 @@
-const jwt = require("jsonwebtoken");
 const User = require("../models/user.model");
+const {
+  ACCESS_COOKIE_NAME,
+  getCookie,
+  verifyAccessToken,
+} = require("../services/authToken.service");
+
+const normalizeText = (value) => String(value || "").trim();
+
+const getRequestToken = (req) => {
+  const cookieToken = normalizeText(getCookie(req, ACCESS_COOKIE_NAME));
+  if (cookieToken) return cookieToken;
+
+  const authHeader = normalizeText(req.headers.authorization);
+  if (authHeader.toLowerCase().startsWith("bearer ")) {
+    return normalizeText(authHeader.slice("bearer ".length));
+  }
+
+  return "";
+};
 
 module.exports = async (req, res, next) => {
   try {
@@ -9,18 +27,12 @@ module.exports = async (req, res, next) => {
       return res.status(500).json({ message: "Authentication is not configured" });
     }
 
-    const authHeader = req.headers.authorization;
-
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({ message: "No token provided" });
-    }
-
-    const token = authHeader.slice("Bearer ".length).trim();
+    const token = getRequestToken(req);
     if (!token) {
       return res.status(401).json({ message: "No token provided" });
     }
 
-    const decoded = jwt.verify(token, jwtSecret);
+    const decoded = verifyAccessToken(token);
     const decodedUserId = String(decoded?.id || decoded?._id || "").trim();
     if (!decodedUserId) {
       return res.status(401).json({ message: "Invalid token" });

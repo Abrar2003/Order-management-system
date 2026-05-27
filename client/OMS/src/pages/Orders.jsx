@@ -307,11 +307,7 @@ const Orders = () => {
     setLoading(true);
 
     try {
-      const token = localStorage.getItem("token");
       const res = await axios.get(`/orders/order-by-id/${orderId}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
       });
       setOrders(Array.isArray(res.data) ? res.data : []);
     } catch (err) {

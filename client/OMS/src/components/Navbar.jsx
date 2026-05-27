@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { logout, getToken, getUserFromToken } from "../auth/auth.service";
+import { logout, getUserFromToken } from "../auth/auth.service";
 import UploadOrdersModal from "./UploadOrdersModal";
 import RectifyPdfModal from "./RectifyPdfModal";
 import AllocateLabelsModal from "./AllocateLabelsModal";
@@ -50,7 +50,6 @@ const sortEntriesByLabel = (entries) =>
   );
 
 const Navbar = () => {
-  const token = getToken();
   const user = getUserFromToken();
   const role = user?.role;
   const normalizedRole = normalizeUserRole(role);
@@ -125,9 +124,9 @@ const Navbar = () => {
     });
   }, []);
 
-  const handleLogout = useCallback(() => {
+  const handleLogout = useCallback(async () => {
     closeAllMenus();
-    logout();
+    await logout();
     navigate("/signin");
   }, [closeAllMenus, navigate]);
 
@@ -209,10 +208,6 @@ const Navbar = () => {
       links.push(routeMenuItem("containers", "Containers", "/containers"));
     }
 
-    if (hasPermission("complaints", "view") && isManagerLikeRole(permissionRole)) {
-      links.push(routeMenuItem("complaints", "Complaints", "/complaints"));
-    }
-
     return links;
   }, [canAccessQc, hasPermission, isQcOnlyRole, permissionRole]);
 
@@ -284,9 +279,7 @@ const Navbar = () => {
 
     const otherReports = [
       ...(canAccessAnalytics
-        ? [
-        routeMenuItem("product-analytics", "Product Analytics", "/reports/product-analytics"),
-          ]
+        ? [routeMenuItem("product-analytics", "Product Analytics", "/reports/product-analytics")]
         : []),
       ...(canManageLabels
         ? [actionMenuItem("check-labels", "Check Labels", "check-labels")]
@@ -294,6 +287,9 @@ const Navbar = () => {
       routeMenuItem("inspected-items-report", "Inspected Items Report", "/reports/inspected-items"),
       routeMenuItem("samples", "Shipped Samples", "/shipped-samples"),
       routeMenuItem("qc-report-mismatch", "QC Mismatch Report", "/reports/qc-report-mismatch"),
+      ...(hasPermission("complaints", "view") && isManagerLikeRole(permissionRole)
+        ? [routeMenuItem("complaints", "Complaints", "/complaints")]
+        : []),
     ];
 
     return [
@@ -698,8 +694,6 @@ const Navbar = () => {
       </div>
     );
   };
-
-  if (!token) return null;
 
   return (
     <>

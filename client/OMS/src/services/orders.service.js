@@ -1,31 +1,23 @@
 import axios from "../api/axios";
 
 export const uploadOrders = async (file) => {
-  const token = localStorage.getItem("token");
 
   const formData = new FormData();
   formData.append("file", file);
 
   const res = await axios.post("/orders/upload-orders", formData, {
-    headers: {
-      Authorization: `Bearer ${token}`
-    },
   });
 
   return res.data;
 };
 
 export const previewUploadOrders = async (file) => {
-  const token = localStorage.getItem("token");
 
   const formData = new FormData();
   formData.append("file", file);
   formData.append("preview_only", "true");
 
   const res = await axios.post("/orders/upload-orders", formData, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
   });
 
   return res.data;
@@ -39,8 +31,6 @@ export const applyUploadedRows = async ({
   if (selectedRows.length === 0) {
     throw new Error("At least one row is required");
   }
-
-  const token = localStorage.getItem("token");
   const res = await axios.post(
     "/orders/upload-orders",
     {
@@ -48,9 +38,6 @@ export const applyUploadedRows = async ({
       source_filename: String(sourceFileName || "").trim(),
     },
     {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
     },
   );
 
@@ -58,15 +45,11 @@ export const applyUploadedRows = async ({
 };
 
 export const createManualOrders = async (orders = []) => {
-  const token = localStorage.getItem("token");
 
   const res = await axios.post(
     "/orders/manual-orders",
     { orders },
     {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
     },
   );
 
@@ -87,15 +70,10 @@ export const checkPreviousOrder = async ({
   if (!normalizedItemCode) {
     throw new Error("Item code is required");
   }
-
-  const token = localStorage.getItem("token");
   const res = await axios.get("/orders/previous-order-check", {
     params: {
       order_id: normalizedOrderId,
       item_code: normalizedItemCode,
-    },
-    headers: {
-      Authorization: `Bearer ${token}`,
     },
   });
 
@@ -121,8 +99,6 @@ export const rectifyPdfOrders = async ({
   if (!normalizedVendor) {
     throw new Error("Vendor is required");
   }
-
-  const token = localStorage.getItem("token");
   const formData = new FormData();
   formData.append("file", file);
   formData.append("brand", normalizedBrand);
@@ -130,9 +106,6 @@ export const rectifyPdfOrders = async ({
   formData.append("apply_changes", applyChanges ? "true" : "false");
 
   const res = await axios.post("/orders/rectify-pdf", formData, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
   });
 
   return res.data;
@@ -148,8 +121,6 @@ export const applyRectifiedRows = async ({
   if (selectedRows.length === 0) {
     throw new Error("At least one row is required");
   }
-
-  const token = localStorage.getItem("token");
   const res = await axios.post(
     "/orders/rectify-pdf",
     {
@@ -160,9 +131,6 @@ export const applyRectifiedRows = async ({
       source_filename: String(sourceFileName || "").trim(),
     },
     {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
     },
   );
 
@@ -170,11 +138,7 @@ export const applyRectifiedRows = async ({
 };
 
 export const getUploadLogs = async (params = {}) => {
-  const token = localStorage.getItem("token");
   const res = await axios.get("/orders/upload-logs", {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
     params,
   });
 
@@ -182,11 +146,7 @@ export const getUploadLogs = async (params = {}) => {
 };
 
 export const getOrderEditLogs = async (params = {}) => {
-  const token = localStorage.getItem("token");
   const res = await axios.get("/orders/edit-logs", {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
     params,
   });
 
@@ -194,97 +154,65 @@ export const getOrderEditLogs = async (params = {}) => {
 };
 
 export const exportOrders = async (params = {}, format = "xlsx") => {
-  const token = localStorage.getItem("token");
   return axios.get("/orders/export", {
     responseType: "blob",
     params: {
       ...params,
       format: String(format || "").trim().toLowerCase() === "csv" ? "csv" : "xlsx",
     },
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
   });
 };
 
 export const getDelayedPoReport = async (params = {}) => {
-  const token = localStorage.getItem("token");
   const res = await axios.get("/orders/delayed-po-report", {
     params,
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
   });
 
   return res.data;
 };
 
 export const getPoStatusReport = async (params = {}) => {
-  const token = localStorage.getItem("token");
   const res = await axios.get("/orders/po-status-report", {
     params,
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
   });
 
   return res.data;
 };
 
 export const getPendingPoReport = async (params = {}) => {
-  const token = localStorage.getItem("token");
   const res = await axios.get("/orders/pending-po-report", {
     params,
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
   });
 
   return res.data;
 };
 
 export const getUpcomingEtdReport = async (params = {}) => {
-  const token = localStorage.getItem("token");
   const res = await axios.get("/orders/upcoming-etd-report", {
     params,
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
   });
 
   return res.data;
 };
 
 export const exportDelayedPoReport = async (params = {}) => {
-  const token = localStorage.getItem("token");
   return axios.get("/orders/delayed-po-report/export", {
     responseType: "blob",
     params,
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
   });
 };
 
 export const exportPendingPoReport = async (params = {}) => {
-  const token = localStorage.getItem("token");
   return axios.get("/orders/pending-po-report/export", {
     responseType: "blob",
     params,
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
   });
 };
 
 export const exportUpcomingEtdReport = async (params = {}) => {
-  const token = localStorage.getItem("token");
   return axios.get("/orders/upcoming-etd-report/export", {
     responseType: "blob",
     params,
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
   });
 };
 
@@ -292,12 +220,7 @@ export const editOrder = async (id, payload) => {
   if (!id) {
     throw new Error("Order id is required");
   }
-
-  const token = localStorage.getItem("token");
   const res = await axios.patch(`/orders/edit-order/${id}`, payload, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
   });
 
   return res.data;
@@ -313,8 +236,6 @@ export const bulkUpdateRevisedEtd = async ({
   if (normalizedOrderIds.length === 0) {
     throw new Error("At least one order id is required");
   }
-
-  const token = localStorage.getItem("token");
   const res = await axios.patch(
     "/orders/bulk-revised-etd",
     {
@@ -322,9 +243,6 @@ export const bulkUpdateRevisedEtd = async ({
       revised_ETD: String(revised_ETD || "").trim(),
     },
     {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
     },
   );
 
@@ -339,15 +257,10 @@ export const getOrderRevisedEtdHistory = async ({
   if (!normalizedOrderId) {
     throw new Error("Order id is required");
   }
-
-  const token = localStorage.getItem("token");
   const res = await axios.get("/orders/revised-etd-history", {
     params: {
       order_id: normalizedOrderId,
       item_code: String(itemCode || "").trim(),
-    },
-    headers: {
-      Authorization: `Bearer ${token}`,
     },
   });
 
@@ -358,12 +271,7 @@ export const editCompleteOrder = async (id, payload) => {
   if (!id) {
     throw new Error("Order id is required");
   }
-
-  const token = localStorage.getItem("token");
   const res = await axios.patch(`/orders/edit-complete-order/${id}`, payload, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
   });
 
   return res.data;
@@ -378,15 +286,10 @@ export const archiveOrder = async (id, remark) => {
   if (!normalizedRemark) {
     throw new Error("Archive remark is required");
   }
-
-  const token = localStorage.getItem("token");
   const res = await axios.patch(
     `/orders/archive-order/${id}`,
     { remark: normalizedRemark },
     {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
     },
   );
 
@@ -397,15 +300,10 @@ export const unarchiveOrder = async (id) => {
   if (!id) {
     throw new Error("Order id is required");
   }
-
-  const token = localStorage.getItem("token");
   const res = await axios.patch(
     `/orders/unarchive-order/${id}`,
     {},
     {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
     },
   );
 
@@ -413,11 +311,7 @@ export const unarchiveOrder = async (id) => {
 };
 
 export const getArchivedOrders = async (params = {}) => {
-  const token = localStorage.getItem("token");
   const res = await axios.get("/orders/archived", {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
     params,
   });
 
@@ -425,7 +319,6 @@ export const getArchivedOrders = async (params = {}) => {
 };
 
 export const syncZeroQuantityOrdersArchive = async (remark = "") => {
-  const token = localStorage.getItem("token");
   const payload = {};
   const normalizedRemark = String(remark || "").trim();
   if (normalizedRemark) {
@@ -433,9 +326,6 @@ export const syncZeroQuantityOrdersArchive = async (remark = "") => {
   }
 
   const res = await axios.post("/orders/sync-zero-quantity-archive", payload, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
   });
 
   return res.data;

@@ -33,7 +33,6 @@ const toNumber = (value) => {
 };
 
 const Home = () => {
-  const token = localStorage.getItem("token");
   const [brands, setBrands] = useState([]);
   const [vendorSummary, setVendorSummary] = useState([]);
   const [todayEtdOrders, setTodayEtdOrders] = useState([]);
@@ -175,9 +174,6 @@ const Home = () => {
     const fetchBrands = async () => {
       try {
         const res = await axios.get("/brands/", {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
         });
 
         if (res.data.data && res.data.data.length > 0) {
@@ -188,10 +184,8 @@ const Home = () => {
       }
     };
 
-    if (token) {
-      fetchBrands();
-    }
-  }, [token]);
+    fetchBrands();
+  }, []);
 
   useEffect(() => {
     const nextTodayEtdSortBy = parseTodayEtdSortBy(searchParams.get("today_sort_by"));
@@ -242,9 +236,6 @@ const Home = () => {
       try {
         setLoading(true);
         const res = await axios.get(`/orders/${selectedBrand}/vendor-summary`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
         });
 
         if (!isMounted) return;
@@ -264,10 +255,10 @@ const Home = () => {
     return () => {
       isMounted = false;
     };
-  }, [selectedBrand, page, token]);
+  }, [selectedBrand, page]);
 
   useEffect(() => {
-    if (!token || !selectedBrand) {
+    if (!selectedBrand) {
       setCalendarEmbedUrl("");
       setCalendarError("");
       return;
@@ -284,9 +275,6 @@ const Home = () => {
         const response = await axios.get(
           `/brands/${encodeURIComponent(selectedBrand)}/calendar`,
           {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
           },
         );
 
@@ -312,10 +300,10 @@ const Home = () => {
     return () => {
       isMounted = false;
     };
-  }, [selectedBrand, token]);
+  }, [selectedBrand]);
 
   useEffect(() => {
-    if (!token || !selectedBrand) {
+    if (!selectedBrand) {
       setTodayEtdOrders([]);
       setTodayEtdError("");
       return;
@@ -343,9 +331,6 @@ const Home = () => {
               date: todayLocalIso,
               tz_offset_minutes: now.getTimezoneOffset(),
             },
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
           },
         );
 
@@ -370,7 +355,7 @@ const Home = () => {
     return () => {
       isMounted = false;
     };
-  }, [selectedBrand, token, todayEtdSortBy, todayEtdSortOrder]);
+  }, [selectedBrand, todayEtdSortBy, todayEtdSortOrder]);
 
   return (
     <>

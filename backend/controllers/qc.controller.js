@@ -5646,7 +5646,7 @@ exports.updateQC = async (req, res) => {
         hasCbmUpdate ||
         hasInspectedSizeEntryUpdate ||
         hasInspectedBoxModeUpdate ||
-        hasInspectedKdUpdate ||
+        hasKdUpdate ||
         (last_inspected_date !== undefined &&
           String(last_inspected_date).trim() !== "") ||
         remarks !== undefined

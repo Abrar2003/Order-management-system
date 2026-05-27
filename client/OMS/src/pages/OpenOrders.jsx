@@ -156,7 +156,6 @@ const OpenOrders = ({ bucket = "open" }) => {
   const [syncedQuery, setSyncedQuery] = useState(null);
 
   const navigate = useNavigate();
-  const token = localStorage.getItem("token");
 
   const statusOptions = useMemo(
     () =>
@@ -188,9 +187,6 @@ const OpenOrders = ({ bucket = "open" }) => {
           limit,
           sort_by: sortBy,
           sort_order: sortOrder,
-        },
-        headers: {
-          Authorization: `Bearer ${token}`,
         },
       });
 
@@ -237,7 +233,6 @@ const OpenOrders = ({ bucket = "open" }) => {
     page,
     sortBy,
     sortOrder,
-    token,
     poBucket,
   ]);
 

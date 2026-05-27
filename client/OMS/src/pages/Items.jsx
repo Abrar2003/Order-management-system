@@ -3,13 +3,16 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import CreateItemModal from "../components/CreateItemModal";
+import AddComplaintModal from "../components/complaints/AddComplaintModal";
 import SampleModal from "../components/SampleModal";
 import EditItemModal from "../components/EditItemModal";
 import ItemOrderPresenceTooltip from "../components/ItemOrderPresenceTooltip";
 import ProductImageThumbnail from "../components/ProductImageThumbnail";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { usePermissions } from "../auth/PermissionContext";
+import { isManagerLikeRole } from "../auth/permissions";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
+import { createComplaint } from "../services/complaints.service";
 import {
   buildItemFileUploadRequest,
   DEFAULT_ITEM_FILE_TYPE,
@@ -141,23 +144,47 @@ const getVendorNames = (item = {}) =>
     ? item.vendors.filter(Boolean).join(", ")
     : "N/A";
 
+const normalizeTextOptions = (values = []) =>
+  [
+    ...new Set(
+      (Array.isArray(values) ? values : [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean),
+    ),
+  ].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }));
+
+const getPrimaryBrand = (item = {}) =>
+  String(
+    item?.brand_name ||
+      (Array.isArray(item?.brands) && item.brands.length > 0 ? item.brands[0] : "") ||
+      item?.brand ||
+      "",
+  ).trim();
+
+const getPrimaryVendor = (item = {}) =>
+  String(Array.isArray(item?.vendors) && item.vendors.length > 0 ? item.vendors[0] : "").trim();
+
 const Items = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "items");
-  const { canEditPis, hasPermission } = usePermissions();
+  const { canEditPis, hasPermission, role } = usePermissions();
   const canSyncItems = hasPermission("items", "sync");
   const canEditItems = hasPermission("items", "edit");
   const canCreateItems = hasPermission("items", "create") && canEditPis;
   const canUploadItemFiles = hasPermission("images_documents", "upload");
+  const canCreateComplaints =
+    hasPermission("complaints", "create") && isManagerLikeRole(role);
 
   const [rows, setRows] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
+  const [complaintItem, setComplaintItem] = useState(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showCreateSampleModal, setShowCreateSampleModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [savingComplaint, setSavingComplaint] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [searchInput, setSearchInput] = useState(() =>
@@ -194,6 +221,9 @@ const Items = () => {
   const [uploadingItemId, setUploadingItemId] = useState("");
   const [itemFilePickerContext, setItemFilePickerContext] = useState(null);
   const itemFileInputRef = useRef(null);
+  const [complaintBrandOptions, setComplaintBrandOptions] = useState([]);
+  const [complaintVendorOptions, setComplaintVendorOptions] = useState([]);
+  const [loadingComplaintOptions, setLoadingComplaintOptions] = useState(false);
   const [sortBy, setSortBy] = useState("code");
   const [sortOrder, setSortOrder] = useState("asc");
 
@@ -245,6 +275,33 @@ const Items = () => {
   useEffect(() => {
     fetchItems();
   }, [fetchItems]);
+
+  useEffect(() => {
+    if (!canCreateComplaints) return undefined;
+    let cancelled = false;
+
+    const loadComplaintOptions = async () => {
+      try {
+        setLoadingComplaintOptions(true);
+        const response = await api.get("/orders/brands-and-vendors");
+        if (cancelled) return;
+        setComplaintBrandOptions(normalizeTextOptions(response?.data?.brands));
+        setComplaintVendorOptions(normalizeTextOptions(response?.data?.vendors));
+      } catch {
+        if (!cancelled) {
+          setComplaintBrandOptions([]);
+          setComplaintVendorOptions([]);
+        }
+      } finally {
+        if (!cancelled) setLoadingComplaintOptions(false);
+      }
+    };
+
+    loadComplaintOptions();
+    return () => {
+      cancelled = true;
+    };
+  }, [canCreateComplaints]);
 
   useEffect(() => {
     const currentQuery = searchParams.toString();
@@ -418,6 +475,38 @@ const Items = () => {
     },
     [location.pathname, location.search, navigate],
   );
+
+  const complaintInitialValues = useMemo(
+    () => ({
+      brand: getPrimaryBrand(complaintItem),
+      vendor: getPrimaryVendor(complaintItem),
+      item_code: String(complaintItem?.code || "").trim(),
+      po: "",
+      first_comment: "",
+    }),
+    [complaintItem],
+  );
+
+  const handleOpenComplaintModal = useCallback((item) => {
+    setError("");
+    setSuccess("");
+    setComplaintItem(item);
+  }, []);
+
+  const handleCreateComplaint = useCallback(async (formData) => {
+    try {
+      setSavingComplaint(true);
+      setError("");
+      setSuccess("");
+      await createComplaint(formData);
+      setComplaintItem(null);
+      setSuccess("Complaint created successfully.");
+    } catch (createError) {
+      setError(createError?.response?.data?.message || "Failed to create complaint.");
+    } finally {
+      setSavingComplaint(false);
+    }
+  }, []);
 
   const activeItemFilePickerConfig = useMemo(
     () =>
@@ -862,6 +951,16 @@ const Items = () => {
                                   Edit
                                 </button>
                               )}
+                              {canCreateComplaints && (
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-danger btn-sm"
+                                  onClick={() => handleOpenComplaintModal(item)}
+                                  disabled={savingComplaint}
+                                >
+                                  Create Complaint
+                                </button>
+                              )}
                               {canUploadItemFiles && itemId && (
                                 <>
                                   <select
@@ -981,6 +1080,18 @@ const Items = () => {
             );
             fetchItems();
           }}
+        />
+      )}
+
+      {complaintItem && canCreateComplaints && (
+        <AddComplaintModal
+          brandOptions={complaintBrandOptions}
+          initialValues={complaintInitialValues}
+          loadingOptions={loadingComplaintOptions}
+          onClose={() => setComplaintItem(null)}
+          onSubmit={handleCreateComplaint}
+          saving={savingComplaint}
+          vendorOptions={complaintVendorOptions}
         />
       )}
 

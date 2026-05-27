@@ -1,91 +1,57 @@
-import axios from "../api/axios";
-import { jwtDecode } from "jwt-decode";
+import api from "../api/axios";
 
-const TOKEN_KEY = "token";
+let currentUser = null;
 
-/**
- * Sign in user
- */
+const normalizeUser = (user = null) => {
+  if (!user) return null;
+  const userId = user.id || user._id || user.sub || "";
+  return {
+    ...user,
+    id: userId,
+    _id: userId,
+  };
+};
+
 export const signin = async (credentials) => {
-  const res = await axios.post("/auth/signin", credentials);
-
-  // assuming backend returns { token: "..." }
-  if (res.data?.token) {
-    localStorage.setItem("token", res.data.token);
-  }
-
+  const res = await api.post("/auth/signin", credentials, {
+    skipAuthRefresh: true,
+  });
+  currentUser = normalizeUser(res.data?.user || null);
   return res.data;
+};
+
+export const refreshSession = async () => {
+  const res = await api.post("/auth/refresh", null, {
+    skipAuthRefresh: true,
+  });
+  currentUser = normalizeUser(res.data?.user || null);
+  return currentUser;
+};
+
+export const getSessionUser = async () => {
+  const res = await api.get("/auth/me");
+  currentUser = normalizeUser(res.data?.user || null);
+  return currentUser;
 };
 
 export const changePassword = async (payload) => {
-  const res = await axios.patch("/auth/change-password", payload);
+  const res = await api.patch("/auth/change-password", payload);
   return res.data;
 };
 
-/**
- * Get token from localStorage
- */
-export const getToken = () => {
-  return localStorage.getItem(TOKEN_KEY);
-};
+export const getToken = () => null;
 
-/**
- * Check if token is expired
- */
-export const isTokenExpired = () => {
+export const isTokenExpired = () => false;
+
+export const getUserFromToken = () => currentUser;
+
+export const logout = async () => {
+  currentUser = null;
   try {
-    const token = getToken();
-    if (!token) return true;
-
-    const decoded = jwtDecode(token);
-    const currentTime = Date.now() / 1000;
-
-    // Check if token exp exists and if it's less than current time
-    if (decoded.exp && decoded.exp < currentTime) {
-      return true;
-    }
-
-    return false;
-  } catch (error) {
-    console.error("Error checking token expiry:", error);
-    return true; // treat invalid token as expired
+    await api.post("/auth/logout", null, {
+      skipAuthRefresh: true,
+    });
+  } catch {
+    // Session is already gone or unreachable; local state is cleared either way.
   }
-};
-
-/**
- * Decode user from JWT token
- */
-export const getUserFromToken = () => {
-  try {
-    const token = getToken();
-    if (!token) return null;
-
-    // Check if token is expired
-    if (isTokenExpired()) {
-      logout();
-      return null;
-    }
-
-    const decoded = jwtDecode(token);
-    const userId = decoded.id || decoded._id || decoded.sub || "";
-
-    return {
-      id: userId,
-      _id: userId,
-      name: decoded.name,
-      role: decoded.role,
-      email: decoded.email,
-    };
-  } catch (error) {
-    console.error("Invalid token:", error);
-    logout(); // clear broken token
-    return null;
-  }
-};
-
-/**
- * Logout user
- */
-export const logout = () => {
-  localStorage.removeItem(TOKEN_KEY);
 };

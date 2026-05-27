@@ -46,8 +46,8 @@ const SignIn = () => {
     try {
       const res = await signin(form);
 
-      if (!res.token) {
-        throw new Error("Token missing");
+      if (!res.user) {
+        throw new Error("Session missing");
       }
 
       clearSigninOverlays();

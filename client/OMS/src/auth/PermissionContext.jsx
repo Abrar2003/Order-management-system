@@ -8,7 +8,7 @@ import {
 } from "react";
 import { useLocation } from "react-router-dom";
 import api from "../api/axios";
-import { getToken, getUserFromToken } from "./auth.service";
+import { getSessionUser } from "./auth.service";
 import { isAdminLikeRole, normalizeUserRole } from "./permissions";
 
 const PermissionContext = createContext({
@@ -22,6 +22,8 @@ const PermissionContext = createContext({
   refreshPermissions: async () => {},
 });
 
+const PUBLIC_AUTH_PATHS = new Set(["/signin"]);
+
 export const PermissionProvider = ({ children }) => {
   const location = useLocation();
   const [permissions, setPermissions] = useState({});
@@ -31,12 +33,16 @@ export const PermissionProvider = ({ children }) => {
   const [error, setError] = useState("");
 
   const refreshPermissions = useCallback(async () => {
-    const token = getToken();
-    const user = getUserFromToken();
+    let user = null;
+    try {
+      user = await getSessionUser();
+    } catch {
+      user = null;
+    }
     const normalizedRole = normalizeUserRole(user?.role);
     setRole(normalizedRole);
 
-    if (!token) {
+    if (!user) {
       setPermissions({});
       setPermissionMeta(null);
       setError("");
@@ -64,6 +70,15 @@ export const PermissionProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
+    if (PUBLIC_AUTH_PATHS.has(location.pathname)) {
+      setPermissions({});
+      setPermissionMeta(null);
+      setRole("");
+      setError("");
+      setLoading(false);
+      return;
+    }
+
     refreshPermissions();
   }, [location.pathname, refreshPermissions]);
 

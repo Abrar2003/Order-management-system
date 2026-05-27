@@ -5543,7 +5543,7 @@ exports.getItemPisFileUrl = async (req, res) => {
 exports.uploadItemPisFile = async (req, res) => {
   let itemId = "";
   let stagedPisFilePath = "";
-
+  const fileConfig = getItemFileConfig("pis_file");
   try {
     itemId = getRequestedItemId(req);
     if (!mongoose.Types.ObjectId.isValid(itemId)) {

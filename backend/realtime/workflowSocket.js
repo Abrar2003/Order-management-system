@@ -1,7 +1,11 @@
-const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const { Server } = require("socket.io");
 const User = require("../models/user.model");
+const {
+  ACCESS_COOKIE_NAME,
+  getCookie,
+  verifyAccessToken,
+} = require("../services/authToken.service");
 const { Task } = require("../models/workflow");
 const { userHasPermission } = require("../services/permission.service");
 const {
@@ -22,6 +26,11 @@ const buildNotificationUserRoom = (userId) =>
   `notification:user:${normalizeText(userId)}`;
 
 const getSocketToken = (socket = {}) => {
+  const cookieToken = normalizeText(
+    getCookie({ headers: { cookie: socket?.handshake?.headers?.cookie || "" } }, ACCESS_COOKIE_NAME),
+  );
+  if (cookieToken) return cookieToken;
+
   const authToken = normalizeText(socket?.handshake?.auth?.token);
   if (authToken) return authToken;
 
@@ -44,7 +53,7 @@ const authenticateSocketUser = async (socket = {}) => {
     throw new Error("Socket token is required");
   }
 
-  const decoded = jwt.verify(token, jwtSecret);
+  const decoded = verifyAccessToken(token);
   const userId = normalizeText(decoded?.id || decoded?._id || decoded?.sub);
   if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
     throw new Error("Socket token is invalid");

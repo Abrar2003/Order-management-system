@@ -1,5 +1,4 @@
 import { io } from "socket.io-client";
-import { getToken } from "../auth/auth.service";
 
 const normalizeText = (value) => String(value || "").trim();
 
@@ -46,9 +45,6 @@ export const getWorkflowSocket = () => {
 
 export const connectWorkflowSocket = () => {
   const socket = getWorkflowSocket();
-  socket.auth = {
-    token: getToken(),
-  };
 
   if (!socket.connected) {
     socket.connect();

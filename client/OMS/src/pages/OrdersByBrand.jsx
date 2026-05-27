@@ -73,8 +73,6 @@ const OrdersByBrand = () => {
       try {
         setLoading(true);
         setError("");
-
-        const token = localStorage.getItem("token");
         const effectiveStatus = status ?? "all";
 
         const res = await axios.get(
@@ -84,9 +82,6 @@ const OrdersByBrand = () => {
               isDelayed: effectiveStatus === "delayed" ? "true" : "false",
               sort_by: sortBy,
               sort_order: sortOrder,
-            },
-            headers: {
-              Authorization: `Bearer ${token}`,
             },
           },
         );

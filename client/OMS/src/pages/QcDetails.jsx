@@ -929,9 +929,6 @@ const QcDetails = () => {
   const fetchQcDetails = useCallback(async () => {
     try {
       const res = await api.get(`/qc/${id}`, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
-        },
       });
       setQc(res.data.data);
     } catch (err) {
@@ -969,9 +966,6 @@ const QcDetails = () => {
       const response = await api.get(
         `/items/${encodeURIComponent(qc.item_master._id)}/files/${encodeURIComponent(fileConfig.value)}/url`,
         {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
         },
       );
 
@@ -1255,9 +1249,6 @@ const QcDetails = () => {
       try {
         setDeletingInspectionId(String(recordId));
         const response = await api.delete(`/qc/${id}/inspection-record/${recordId}`, {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
         });
         if (response?.data?.qc_deleted) {
           alert(

@@ -9,6 +9,7 @@ const requiredVars = [
   "PORT",
   "MONGO_URI",
   "JWT_SECRET",
+  "JWT_REFRESH_SECRET",
 ];
 
 const googleVars = [

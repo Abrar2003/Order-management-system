@@ -2,28 +2,44 @@ import axios from "axios";
 
 const instance = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || "/api",
+  withCredentials: true,
 });
 
-// Add request interceptor to include token in headers.
-instance.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem("token");
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => Promise.reject(error),
-);
+let refreshRequest = null;
 
-// Add response interceptor to handle 401 errors.
+const redirectToSignin = () => {
+  if (window.location.pathname !== "/signin") {
+    window.location.assign("/signin");
+  }
+};
+
 instance.interceptors.response.use(
   (res) => res,
-  (err) => {
-    if (err.response?.status === 401) {
-      console.warn("Unauthorized - token expired or invalid");
-      localStorage.removeItem("token");
-      window.location.href = "/signin";
+  async (err) => {
+    const originalRequest = err.config || {};
+
+    if (
+      err.response?.status === 401 &&
+      !originalRequest._retry &&
+      !originalRequest.skipAuthRefresh
+    ) {
+      originalRequest._retry = true;
+      try {
+        refreshRequest =
+          refreshRequest ||
+          instance.post("/auth/refresh", null, { skipAuthRefresh: true });
+        await refreshRequest;
+        refreshRequest = null;
+        return instance(originalRequest);
+      } catch (refreshError) {
+        refreshRequest = null;
+        redirectToSignin();
+        return Promise.reject(refreshError);
+      }
+    }
+
+    if (err.response?.status === 401 && !originalRequest.skipAuthRefresh) {
+      redirectToSignin();
     }
     return Promise.reject(err);
   },

@@ -1534,9 +1534,6 @@ const InspectionReport = () => {
     try {
       setLoading(true);
       const response = await api.get(`/qc/${id}`, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
-        },
       });
       setQc(response?.data?.data || null);
     } catch (error) {

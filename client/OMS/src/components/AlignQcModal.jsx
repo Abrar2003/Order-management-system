@@ -83,13 +83,9 @@ const AlignQCModal = ({
     : 0;
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
 
     axios
       .get("/auth/?role=QC", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
       })
       .then((res) => {
         setInspectors(Array.isArray(res.data) ? res.data : []);
@@ -167,7 +163,6 @@ const AlignQCModal = ({
   }, [request_date]);
 
   const handleSubmit = async () => {
-    const token = localStorage.getItem("token");
     const requestDateIso = toISODateString(request_date);
     let shouldResetSubmitting = true;
 
@@ -222,9 +217,6 @@ const AlignQCModal = ({
 
     const submitAlignmentRequest = async (ignoreUnworkedRequest = false) =>
       axios.post("/qc/align-qc", buildPayload(ignoreUnworkedRequest), {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
       });
 
     try {

@@ -8,7 +8,7 @@ import {
   markNotificationPopupSeen,
   markNotificationRead,
 } from "./notificationApi";
-import { getToken } from "../auth/auth.service";
+import { getUserFromToken } from "../auth/auth.service";
 import { connectNotificationSocket, leaveNotificationSocket } from "./notificationSocket";
 
 const DEFAULT_LIMIT = 20;
@@ -28,8 +28,9 @@ export const NOTIFICATION_TABS = Object.freeze([
 const normalizeText = (value) => String(value || "").trim();
 
 const getPopupAckKey = () => {
-  const token = normalizeText(getToken());
-  return `${POPUP_ACK_PREFIX}:${token || "anonymous"}`;
+  const user = getUserFromToken();
+  const userKey = normalizeText(user?.id || user?._id);
+  return `${POPUP_ACK_PREFIX}:${userKey || "anonymous"}`;
 };
 
 const getTabParams = (tabKey) => {

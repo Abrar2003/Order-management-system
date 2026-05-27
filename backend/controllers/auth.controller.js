@@ -1,7 +1,18 @@
 const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
+const AuthSession = require("../models/authSession.model");
 const User = require("../models/user.model");
+const {
+  REFRESH_COOKIE_MAX_AGE_MS,
+  clearAuthCookies,
+  getCookie,
+  hashToken,
+  setAuthCookies,
+  signAccessToken,
+  signRefreshToken,
+  verifyRefreshToken,
+  REFRESH_COOKIE_NAME,
+} = require("../services/authToken.service");
 const {
   isAdminLikeRole,
   normalizeUserRole,
@@ -19,12 +30,48 @@ const getStringField = (source = {}, key) => {
   return String(value).trim();
 };
 
-const getRequiredJwtSecret = () => {
-  const secret = String(process.env.JWT_SECRET || "").trim();
-  if (!secret) {
-    throw new Error("JWT_SECRET is not configured");
+const buildSafeUser = (user = {}) => ({
+  id: user._id,
+  username: user.username,
+  role: normalizeUserRole(user.role, String(user.role || "").trim()),
+  name: user.name,
+  email: user.email,
+});
+
+const createAuthSession = async ({ user, req }) => {
+  const session = await AuthSession.create({
+    user: user._id,
+    token_hash: "pending",
+    expires_at: new Date(Date.now() + REFRESH_COOKIE_MAX_AGE_MS),
+    user_agent: getStringField(req.headers, "user-agent"),
+    ip: getStringField(req.headers, "x-forwarded-for") || req.ip || "",
+  });
+  const refreshToken = signRefreshToken({ user, sessionId: session._id });
+  session.token_hash = hashToken(refreshToken);
+  await session.save();
+  return { session, refreshToken };
+};
+
+const issueAuthCookies = async ({ res, req, user, session = null }) => {
+  const accessToken = signAccessToken(user);
+  let refreshToken = "";
+  let activeSession = session;
+
+  if (activeSession) {
+    refreshToken = signRefreshToken({ user, sessionId: activeSession._id });
+    activeSession.token_hash = hashToken(refreshToken);
+    activeSession.expires_at = new Date(Date.now() + REFRESH_COOKIE_MAX_AGE_MS);
+    activeSession.rotated_at = new Date();
+    activeSession.last_used_at = new Date();
+    await activeSession.save();
+  } else {
+    const created = await createAuthSession({ user, req });
+    activeSession = created.session;
+    refreshToken = created.refreshToken;
   }
-  return secret;
+
+  setAuthCookies(res, { accessToken, refreshToken });
+  return activeSession;
 };
 
 /**
@@ -106,31 +153,112 @@ const signin = async (req, res) => {
 
     const normalizedRole = normalizeUserRole(user.role, String(user.role || "").trim());
 
-    const token = jwt.sign(
-      {
-        id: user._id,
+    await issueAuthCookies({
+      res,
+      req,
+      user: {
+        ...user.toObject(),
         role: normalizedRole,
-        email: user.email,
-        name: user.name,
       },
-      getRequiredJwtSecret(),
-      { expiresIn: "1d" },
-    );
+    });
 
     return res.json({
-      token,
-      user: {
-        id: user._id,
-        username: user.username,
-        role: normalizedRole,
-        name: user.name,
-      },
+      user: buildSafeUser({ ...user.toObject(), role: normalizedRole }),
     });
   } catch (err) {
     console.error("Signin Error:", err);
     return res.status(500).json({ message: "Failed to sign in" });
   }
 };
+
+const refresh = async (req, res) => {
+  try {
+    const refreshToken = getCookie(req, REFRESH_COOKIE_NAME);
+    if (!refreshToken) {
+      clearAuthCookies(res);
+      return res.status(401).json({ message: "Refresh token is required" });
+    }
+
+    const decoded = verifyRefreshToken(refreshToken);
+    const sessionId = getStringField(decoded, "sid");
+    const userId = getStringField(decoded, "sub");
+    if (
+      decoded?.typ !== "refresh" ||
+      !mongoose.Types.ObjectId.isValid(sessionId) ||
+      !mongoose.Types.ObjectId.isValid(userId)
+    ) {
+      clearAuthCookies(res);
+      return res.status(401).json({ message: "Invalid refresh token" });
+    }
+
+    const session = await AuthSession.findById(sessionId);
+    if (!session || String(session.user) !== userId) {
+      clearAuthCookies(res);
+      return res.status(401).json({ message: "Invalid refresh session" });
+    }
+
+    if (session.revoked_at || session.expires_at <= new Date()) {
+      clearAuthCookies(res);
+      return res.status(401).json({ message: "Refresh session expired" });
+    }
+
+    if (session.token_hash !== hashToken(refreshToken)) {
+      await AuthSession.updateMany(
+        { user: session.user, revoked_at: null },
+        { $set: { revoked_at: new Date() } },
+      );
+      clearAuthCookies(res);
+      return res.status(401).json({ message: "Refresh token was reused" });
+    }
+
+    const user = await User.findById(userId).select("-password");
+    if (!user) {
+      session.revoked_at = new Date();
+      await session.save();
+      clearAuthCookies(res);
+      return res.status(401).json({ message: "User not found" });
+    }
+
+    await issueAuthCookies({ res, req, user, session });
+
+    return res.json({
+      user: buildSafeUser(user),
+    });
+  } catch (err) {
+    clearAuthCookies(res);
+    return res.status(401).json({ message: "Invalid refresh token" });
+  }
+};
+
+const logout = async (req, res) => {
+  try {
+    const refreshToken = getCookie(req, REFRESH_COOKIE_NAME);
+    if (refreshToken) {
+      try {
+        const decoded = verifyRefreshToken(refreshToken);
+        const sessionId = getStringField(decoded, "sid");
+        if (mongoose.Types.ObjectId.isValid(sessionId)) {
+          await AuthSession.findByIdAndUpdate(sessionId, {
+            $set: { revoked_at: new Date() },
+          });
+        }
+      } catch {
+        // Always clear cookies even if the refresh token is already invalid.
+      }
+    }
+
+    clearAuthCookies(res);
+    return res.json({ message: "Logged out successfully" });
+  } catch (err) {
+    clearAuthCookies(res);
+    return res.json({ message: "Logged out successfully" });
+  }
+};
+
+const me = async (req, res) =>
+  res.json({
+    user: buildSafeUser(req.user),
+  });
 
 // GET /users?role=QC
 const getUsers = async (req, res) => {
@@ -321,6 +449,9 @@ const forceChangeUserPassword = async (req, res) => {
 module.exports = {
   signup,
   signin,
+  refresh,
+  logout,
+  me,
   getUsers,
   changePassword,
   forceChangeUserPassword,

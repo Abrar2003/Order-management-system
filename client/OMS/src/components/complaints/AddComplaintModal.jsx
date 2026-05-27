@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { COMPLAINT_FILE_ACCEPT } from "./complaintConstants";
 
 const initialForm = {
@@ -9,19 +9,50 @@ const initialForm = {
   first_comment: "",
 };
 
+const EMPTY_INITIAL_VALUES = {};
+
 const AddComplaintModal = ({
   brandOptions = [],
+  initialValues = EMPTY_INITIAL_VALUES,
   loadingOptions = false,
   onClose,
   onSubmit,
   saving = false,
   vendorOptions = [],
 }) => {
-  const [form, setForm] = useState(initialForm);
+  const [form, setForm] = useState(() => ({ ...initialForm, ...initialValues }));
   const [files, setFiles] = useState([]);
   const [error, setError] = useState("");
 
   const fileNames = useMemo(() => files.map((file) => file.name), [files]);
+  const resolvedBrandOptions = useMemo(
+    () =>
+      [
+        ...new Set(
+          [...brandOptions, form.brand]
+            .map((value) => String(value || "").trim())
+            .filter(Boolean),
+        ),
+      ].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" })),
+    [brandOptions, form.brand],
+  );
+  const resolvedVendorOptions = useMemo(
+    () =>
+      [
+        ...new Set(
+          [...vendorOptions, form.vendor]
+            .map((value) => String(value || "").trim())
+            .filter(Boolean),
+        ),
+      ].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" })),
+    [form.vendor, vendorOptions],
+  );
+
+  useEffect(() => {
+    setForm({ ...initialForm, ...initialValues });
+    setFiles([]);
+    setError("");
+  }, [initialValues]);
 
   const handleChange = (event) => {
     const { name, value } = event.target;
@@ -69,7 +100,7 @@ const AddComplaintModal = ({
                     disabled={saving || loadingOptions}
                   >
                     <option value="">Select Brand</option>
-                    {brandOptions.map((brand) => (
+                    {resolvedBrandOptions.map((brand) => (
                       <option key={brand} value={brand}>
                         {brand}
                       </option>
@@ -87,7 +118,7 @@ const AddComplaintModal = ({
                     disabled={saving || loadingOptions}
                   >
                     <option value="">Select Vendor</option>
-                    {vendorOptions.map((vendor) => (
+                    {resolvedVendorOptions.map((vendor) => (
                       <option key={vendor} value={vendor}>
                         {vendor}
                       </option>
