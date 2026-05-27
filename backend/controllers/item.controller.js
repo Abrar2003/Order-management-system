@@ -78,6 +78,9 @@ const {
 } = require("../helpers/itemUpdateAudit");
 const { formatEan13BarcodeDisplay } = require("../helpers/barcodeFormat");
 const { normalizeUserRoleKey } = require("../helpers/userRole");
+const {
+  buildComparisonRows,
+} = require("../helpers/pisInspectionMasterComparison");
 
 const escapeRegex = (value = "") =>
   String(value)
@@ -1894,6 +1897,49 @@ const ITEM_MASTER_SELECT = [
   "master_box_mode",
   "updatedAt",
 ].join(" ");
+
+const PIS_INSPECTION_MASTER_ITEM_SELECT = [
+  "code",
+  "name",
+  "description",
+  "brand",
+  "brand_name",
+  "brands",
+  "vendors",
+  "pis_item_sizes",
+  "pis_box_sizes",
+  "pis_box_mode",
+  "master_item_sizes",
+  "master_box_sizes",
+  "master_box_mode",
+  "pis_barcode",
+  "pis_master_barcode",
+  "pis_inner_barcode",
+  "master_barcode",
+  "master_master_barcode",
+  "master_inner_barcode",
+  "pis_weight",
+  "cbm",
+].join(" ");
+
+const ITEM_SIZE_COMPARISON_FIELDS = Object.freeze([
+  { key: "L", label: "L" },
+  { key: "B", label: "B" },
+  { key: "H", label: "H" },
+  { key: "net_weight", label: "Net Weight" },
+  { key: "gross_weight", label: "Gross Weight" },
+]);
+
+const BOX_SIZE_COMPARISON_FIELDS = Object.freeze([
+  { key: "L", label: "L" },
+  { key: "B", label: "B" },
+  { key: "H", label: "H" },
+  { key: "net_weight", label: "Net Weight" },
+  { key: "gross_weight", label: "Gross Weight" },
+  { key: "box_type", label: "Box Type" },
+  { key: "item_count_in_inner", label: "Item Count In Inner" },
+  { key: "box_count_in_master", label: "Box Count In Master" },
+]);
 
 const ITEM_MASTER_ELIGIBLE_MATCH = Object.freeze({
   $or: [
@@ -4124,6 +4170,348 @@ exports.getItemOrdersHistory = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch item order history",
+      error: error.message,
+    });
+  }
+};
+
+const isCompletedInspectionForComparison = (inspection = {}) => {
+  const status = normalizeTextField(inspection?.status).toLowerCase();
+  if (status === "pending" || status === "goods not ready" || status === "rejected") {
+    return false;
+  }
+  if (status === "transfered" || status === "transferred") return false;
+
+  return (
+    status === "inspection done" ||
+    Math.max(0, toSafeNumber(inspection?.checked, 0)) > 0 ||
+    Math.max(0, toSafeNumber(inspection?.passed, 0)) > 0
+  );
+};
+
+const buildComparisonInspectionRow = (inspection = {}, order = {}) => ({
+  inspection_id: String(inspection?._id || ""),
+  qc_id: String(inspection?.qc || order?.qc_record || ""),
+  order_id: String(order?.order_id || "").trim(),
+  order_date: order?.order_date || null,
+  createdAt: inspection?.createdAt || null,
+  inspection_date: String(inspection?.inspection_date || "").trim(),
+  brand: String(order?.brand || "").trim(),
+  vendor: String(order?.vendor || "").trim(),
+  status: String(inspection?.status || "").trim(),
+  checked: Math.max(0, toSafeNumber(inspection?.checked, 0)),
+  passed: Math.max(0, toSafeNumber(inspection?.passed, 0)),
+  pending_after: Math.max(0, toSafeNumber(inspection?.pending_after, 0)),
+  cbm: inspection?.cbm || {},
+  barcode: inspection?.barcode ?? "",
+  master_barcode: inspection?.master_barcode ?? "",
+  inner_barcode: inspection?.inner_barcode ?? "",
+  inspected_item_sizes: Array.isArray(inspection?.inspected_item_sizes)
+    ? inspection.inspected_item_sizes
+    : [],
+  inspected_box_sizes: Array.isArray(inspection?.inspected_box_sizes)
+    ? inspection.inspected_box_sizes
+    : [],
+  inspected_box_mode: String(inspection?.inspected_box_mode || "").trim(),
+});
+
+exports.getPisInspectionMasterComparison = async (req, res) => {
+  try {
+    const itemCodeInput = String(req.params.code || req.params.itemCode || "").trim();
+    if (!itemCodeInput) {
+      return res.status(400).json({
+        success: false,
+        message: "Item code is required",
+      });
+    }
+
+    const escapedItemCode = escapeRegex(itemCodeInput);
+    const itemCodeMatch = new RegExp(`^\\s*${escapedItemCode}\\s*$`, "i");
+    const item = await Item.findOne({ code: itemCodeMatch })
+      .select(PIS_INSPECTION_MASTER_ITEM_SELECT)
+      .lean();
+
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: "Item not found",
+      });
+    }
+
+    const orders = await Order.find({
+      "item.item_code": itemCodeMatch,
+      qc_record: { $ne: null },
+    })
+      .select("order_id item.item_code brand vendor quantity qc_record order_date updatedAt status")
+      .sort({ order_date: -1, updatedAt: -1, order_id: 1 })
+      .lean();
+
+    const orderByQcId = new Map(
+      (Array.isArray(orders) ? orders : [])
+        .map((order) => [String(order?.qc_record || ""), order])
+        .filter(([qcId]) => mongoose.Types.ObjectId.isValid(qcId)),
+    );
+    const qcObjectIds = [...orderByQcId.keys()].map(
+      (qcId) => new mongoose.Types.ObjectId(qcId),
+    );
+
+    const inspections = qcObjectIds.length > 0
+      ? await Inspection.find({ qc: { $in: qcObjectIds } })
+          .select(
+            "qc createdAt inspection_date status inspected_item_sizes inspected_box_sizes inspected_box_mode checked passed pending_after cbm barcode master_barcode inner_barcode",
+          )
+          .lean()
+      : [];
+
+    const validInspectionRows = (Array.isArray(inspections) ? inspections : [])
+      .filter(isCompletedInspectionForComparison)
+      .map((inspection) => {
+        const order = orderByQcId.get(String(inspection?.qc || "")) || {};
+        return {
+          ...buildComparisonInspectionRow(inspection, order),
+          __sortTime: Math.max(
+            toTimestamp(inspection?.createdAt),
+            toTimestamp(inspection?.inspection_date),
+          ),
+        };
+      })
+      .sort((left, right) => (right.__sortTime || 0) - (left.__sortTime || 0));
+
+    const comparisonInspectionsByPo = [];
+    const seenOrderIds = new Set();
+    validInspectionRows.forEach((inspection) => {
+      const orderKey = normalizeTextField(inspection?.order_id).toLowerCase();
+      if (!orderKey || seenOrderIds.has(orderKey)) return;
+      seenOrderIds.add(orderKey);
+      comparisonInspectionsByPo.push(inspection);
+    });
+
+    const hasRequiredPoInspectionCount = comparisonInspectionsByPo.length >= 3;
+    const comparisonInspections = hasRequiredPoInspectionCount
+      ? comparisonInspectionsByPo
+          .slice(0, 3)
+          .map(({ __sortTime, ...inspection }) => inspection)
+      : [];
+
+    const inspectionSizeSources = [0, 1, 2].map((index) =>
+      comparisonInspections[index] || {},
+    );
+
+    const sections = hasRequiredPoInspectionCount
+      ? [
+          {
+            key: "item_sizes",
+            title: "Item Sizes",
+            rows: buildComparisonRows({
+              pisEntries: item?.pis_item_sizes,
+              inspectionEntries: inspectionSizeSources.map(
+                (inspection) => inspection?.inspected_item_sizes || [],
+              ),
+              masterEntries: item?.master_item_sizes,
+              fields: ITEM_SIZE_COMPARISON_FIELDS,
+            }),
+          },
+          {
+            key: "box_sizes",
+            title: "Box Sizes",
+            rows: buildComparisonRows({
+              pisEntries: item?.pis_box_sizes,
+              inspectionEntries: inspectionSizeSources.map(
+                (inspection) => inspection?.inspected_box_sizes || [],
+              ),
+              masterEntries: item?.master_box_sizes,
+              fields: BOX_SIZE_COMPARISON_FIELDS,
+            }),
+          },
+        ]
+      : [];
+
+    return res.status(200).json({
+      success: true,
+      item: {
+        code: item?.code || itemCodeInput,
+        description: item?.description || item?.name || "",
+        brand:
+          item?.brand_name ||
+          item?.brand ||
+          (Array.isArray(item?.brands) ? item.brands[0] : "") ||
+          "",
+        brands: Array.isArray(item?.brands) ? item.brands : [],
+        vendors: Array.isArray(item?.vendors) ? item.vendors : [],
+        pis_box_mode: item?.pis_box_mode || "",
+        master_box_mode: item?.master_box_mode || "",
+        barcodes: {
+          pis_barcode: item?.pis_barcode || "",
+          pis_master_barcode: item?.pis_master_barcode || "",
+          pis_inner_barcode: item?.pis_inner_barcode || "",
+          master_barcode: item?.master_barcode || "",
+          master_master_barcode: item?.master_master_barcode || "",
+          master_inner_barcode: item?.master_inner_barcode || "",
+        },
+        pis_weight: item?.pis_weight || {},
+        cbm: item?.cbm || {},
+      },
+      inspections: comparisonInspections.map(
+        ({
+          inspected_item_sizes,
+          inspected_box_sizes,
+          inspected_box_mode,
+          cbm,
+          barcode,
+          master_barcode,
+          inner_barcode,
+          ...inspection
+        }) => ({
+          ...inspection,
+          inspected_box_mode,
+          cbm,
+          barcode,
+          master_barcode,
+          inner_barcode,
+        }),
+      ),
+      sections,
+      summary: {
+        total_orders: orders.length,
+        total_valid_inspections: comparisonInspections.length,
+        total_distinct_po_inspections: comparisonInspectionsByPo.length,
+        required_distinct_po_inspections: 3,
+        has_required_po_inspection_count: hasRequiredPoInspectionCount,
+      },
+    });
+  } catch (error) {
+    console.error("PIS Inspection Master Comparison Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch PIS inspection master comparison",
+      error: error.message,
+    });
+  }
+};
+
+exports.getPisInspectionMasterComparisonRecords = async (req, res) => {
+  try {
+    const limit = Math.min(
+      Math.max(parsePositiveInt(req.query.limit, 10), 1),
+      50,
+    );
+
+    const rows = await Order.aggregate([
+      {
+        $match: {
+          qc_record: { $ne: null },
+          "item.item_code": { $nin: [null, ""] },
+        },
+      },
+      {
+        $lookup: {
+          from: "inspections",
+          localField: "qc_record",
+          foreignField: "qc",
+          as: "inspection_rows",
+        },
+      },
+      { $unwind: "$inspection_rows" },
+      {
+        $addFields: {
+          normalized_inspection_status: {
+            $toLower: { $ifNull: ["$inspection_rows.status", ""] },
+          },
+        },
+      },
+      {
+        $match: {
+          normalized_inspection_status: {
+            $nin: ["pending", "goods not ready", "rejected", "transfered", "transferred"],
+          },
+          $or: [
+            { normalized_inspection_status: "inspection done" },
+            { "inspection_rows.checked": { $gt: 0 } },
+            { "inspection_rows.passed": { $gt: 0 } },
+          ],
+        },
+      },
+      {
+        $group: {
+          _id: {
+            item_code_lower: { $toLower: { $trim: { input: "$item.item_code" } } },
+            order_id: "$order_id",
+          },
+          item_code: { $first: { $trim: { input: "$item.item_code" } } },
+          order_id: { $first: "$order_id" },
+          brand: { $first: "$brand" },
+          vendor: { $first: "$vendor" },
+          latest_inspection_created_at: { $max: "$inspection_rows.createdAt" },
+          latest_inspection_date: { $max: "$inspection_rows.inspection_date" },
+        },
+      },
+      {
+        $group: {
+          _id: "$_id.item_code_lower",
+          code: { $first: "$item_code" },
+          brands: { $addToSet: "$brand" },
+          vendors: { $addToSet: "$vendor" },
+          distinct_po_count: { $sum: 1 },
+          latest_inspection_created_at: { $max: "$latest_inspection_created_at" },
+          latest_inspection_date: { $max: "$latest_inspection_date" },
+        },
+      },
+      { $match: { distinct_po_count: { $gte: 3 } } },
+      { $sort: { latest_inspection_created_at: -1, latest_inspection_date: -1, code: 1 } },
+      { $limit: limit },
+      {
+        $lookup: {
+          from: "items",
+          localField: "code",
+          foreignField: "code",
+          as: "item_doc",
+        },
+      },
+      { $unwind: { path: "$item_doc", preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          _id: 0,
+          code: 1,
+          description: {
+            $ifNull: ["$item_doc.description", "$item_doc.name"],
+          },
+          brand: {
+            $ifNull: [
+              "$item_doc.brand_name",
+              {
+                $ifNull: [
+                  "$item_doc.brand",
+                  { $arrayElemAt: ["$brands", 0] },
+                ],
+              },
+            ],
+          },
+          vendors: {
+            $cond: [
+              { $gt: [{ $size: { $ifNull: ["$item_doc.vendors", []] } }, 0] },
+              "$item_doc.vendors",
+              "$vendors",
+            ],
+          },
+          distinct_po_count: 1,
+          latest_inspection_date: 1,
+        },
+      },
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      rows,
+      pagination: {
+        limit,
+        count: rows.length,
+      },
+    });
+  } catch (error) {
+    console.error("PIS Inspection Master Comparison Records Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch PIS inspection master comparison records",
       error: error.message,
     });
   }

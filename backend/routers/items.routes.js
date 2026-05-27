@@ -37,6 +37,8 @@ const {
   approveProductDatabaseItem,
   getItemOrderPresence,
   getItemOrdersHistory,
+  getPisInspectionMasterComparison,
+  getPisInspectionMasterComparisonRecords,
   createItem,
   syncItemsFromOrders,
   updateItem,
@@ -239,6 +241,22 @@ router.post(
   requirePermission("items", "sync"),
   invalidateItemsOnSuccess,
   syncItemsFromOrders,
+);
+
+router.get(
+  "/pis-inspection-master-comparison",
+  auth,
+  requirePermission("reports", "view"),
+  cacheRoute("items", SHORT_CACHE_TTL),
+  getPisInspectionMasterComparisonRecords,
+);
+
+router.get(
+  "/:code/pis-inspection-master-comparison",
+  auth,
+  requirePermission("reports", "view"),
+  cacheRoute("items", SHORT_CACHE_TTL),
+  getPisInspectionMasterComparison,
 );
 
 router.get(

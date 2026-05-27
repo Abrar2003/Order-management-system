@@ -285,6 +285,11 @@ const Navbar = () => {
         ? [actionMenuItem("check-labels", "Check Labels", "check-labels")]
         : []),
       routeMenuItem("inspected-items-report", "Inspected Items Report", "/reports/inspected-items"),
+      routeMenuItem(
+        "pis-inspection-master-comparison",
+        "PIS Inspection Master Comparison",
+        "/reports/pis-inspection-master-comparison",
+      ),
       routeMenuItem("samples", "Shipped Samples", "/shipped-samples"),
       routeMenuItem("qc-report-mismatch", "QC Mismatch Report", "/reports/qc-report-mismatch"),
       ...(hasPermission("complaints", "view") && isManagerLikeRole(permissionRole)

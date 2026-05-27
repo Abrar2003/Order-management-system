@@ -6893,12 +6893,103 @@ button.om-item-order-presence-label {
   margin: 0;
 }
 
+.pimc-inspection-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.pimc-inspection-card {
+  border: 1px solid var(--bs-border-color);
+  border-radius: 8px;
+  background: var(--bs-body-bg);
+  padding: 0.85rem;
+  min-height: 132px;
+}
+
+.pimc-inspection-card-empty {
+  color: var(--bs-secondary-color);
+  background: var(--bs-tertiary-bg);
+}
+
+.pimc-card-grid {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.8fr) minmax(0, 1fr);
+  gap: 0.25rem 0.75rem;
+  font-size: 0.86rem;
+}
+
+.pimc-card-grid span {
+  color: var(--bs-secondary-color);
+}
+
+.pimc-section + .pimc-section {
+  margin-top: 1rem;
+}
+
+.pimc-table-wrap {
+  max-width: 100%;
+}
+
+.pimc-table {
+  min-width: 1120px;
+}
+
+.pimc-table th {
+  white-space: nowrap;
+}
+
+.pimc-remark-cell {
+  border-top-width: 2px;
+}
+
+.pimc-remark-cell-muted {
+  background: var(--bs-tertiary-bg);
+}
+
+.pimc-cell {
+  min-width: 130px;
+}
+
+.pimc-cell > span:first-child {
+  display: block;
+  font-weight: 600;
+}
+
+.pimc-cell-status {
+  display: inline-block;
+  margin-top: 0.2rem;
+  font-size: 0.72rem;
+  color: var(--bs-secondary-color);
+}
+
+.pimc-cell-mismatch {
+  background: #fdecec;
+  color: #842029;
+}
+
+.pimc-cell-missing {
+  background: #fff8e1;
+  color: #7a5b00;
+}
+
+.pimc-row-mismatch td:first-child,
+.pimc-row-mismatch td:nth-child(2) {
+  background: #fff5f5;
+}
+
 @media (max-width: 575.98px) {
   .om-notification-dock {
     width: 100vw;
   }
 
   .om-notification-summary-strip {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 991.98px) {
+  .pimc-inspection-grid {
     grid-template-columns: 1fr;
   }
 }

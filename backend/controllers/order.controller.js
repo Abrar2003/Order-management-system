@@ -3073,6 +3073,51 @@ const buildPoBucketDataset = async ({
     .sort({ order_date: -1, order_id: 1 })
     .lean();
 
+  const normalizedItemFilter = normalizeFilterValue(itemCode);
+  const fullOrderItemCounts = new Map();
+
+  if (normalizedItemFilter && sourceOrders.length > 0) {
+    const visibleOrderIds = normalizeDistinctValues(
+      sourceOrders.map((orderEntry) => orderEntry?.order_id),
+    );
+
+    if (visibleOrderIds.length > 0) {
+      const fullOrderMatch = buildOrderListMatch({
+        brand,
+        vendor,
+        order,
+        includeStatus: false,
+        includeOrder: false,
+        includeItemCode: false,
+        user,
+      });
+      fullOrderMatch.order_id = { $in: visibleOrderIds };
+
+      if (orderDateRange) {
+        fullOrderMatch.order_date = orderDateRange;
+      }
+
+      if (etdRange) {
+        fullOrderMatch.ETD = etdRange;
+      }
+
+      const fullOrderRows = await Order.find(fullOrderMatch)
+        .select("order_id")
+        .lean();
+
+      fullOrderRows.forEach((orderEntry) => {
+        const fullOrderKey =
+          normalizeOrderKey(orderEntry?.order_id) ||
+          normalizeLooseString(orderEntry?.order_id);
+        if (!fullOrderKey) return;
+        fullOrderItemCounts.set(
+          fullOrderKey,
+          (fullOrderItemCounts.get(fullOrderKey) || 0) + 1,
+        );
+      });
+    }
+  }
+
   const orderObjectIds = [
     ...new Set(
       sourceOrders
@@ -3236,9 +3281,12 @@ const buildPoBucketDataset = async ({
     groupedEntry.statuses.forEach((statusValue) =>
       incrementPoStatusCounts(statusCounts, statusValue));
     const resolvedTotalCbm = toRoundedCbmValue(groupedEntry.total_cbm);
+    const groupedOrderKey =
+      normalizeOrderKey(groupedEntry.order_id) ||
+      normalizeLooseString(groupedEntry.order_id);
     return {
       order_id: groupedEntry.order_id,
-      items: groupedEntry.items,
+      items: fullOrderItemCounts.get(groupedOrderKey) || groupedEntry.items,
       brand: groupedEntry.brand,
       vendor: groupedEntry.vendor,
       ETD: groupedEntry.ETD,
