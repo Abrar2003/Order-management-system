@@ -441,19 +441,30 @@ const getInitialLabelRanges = (record) => {
   return rangesFromLabels.length > 0 ? rangesFromLabels : [createEmptyLabelRange()];
 };
 
-const getLatestInspectionRecord = (qc = {}) =>
-  (Array.isArray(qc?.inspection_record) ? [...qc.inspection_record] : [])
-    .sort((left, right) => {
-      const leftTime = Math.max(
-        toSortableTimestamp(left?.inspection_date),
-        toSortableTimestamp(left?.createdAt),
-      );
-      const rightTime = Math.max(
-        toSortableTimestamp(right?.inspection_date),
-        toSortableTimestamp(right?.createdAt),
-      );
-      return rightTime - leftTime;
-    })[0] || null;
+const getInspectionRecordRequestTimestamp = (record = {}) =>
+  toSortableTimestamp(record?.requested_date || record?.request_date);
+
+const getInspectionRecordActivityTimestamp = (record = {}) =>
+  Math.max(
+    toSortableTimestamp(record?.inspection_date),
+    toSortableTimestamp(record?.createdAt),
+  );
+
+const getLatestInspectionRecord = (qc = {}) => {
+  const records = Array.isArray(qc?.inspection_record) ? qc.inspection_record : [];
+  const recordsWithRequestDate = records.filter(
+    (record) => getInspectionRecordRequestTimestamp(record) > 0,
+  );
+  const candidates = recordsWithRequestDate.length > 0 ? recordsWithRequestDate : records;
+
+  return [...candidates].sort((left, right) => {
+    const leftRequestTime = getInspectionRecordRequestTimestamp(left);
+    const rightRequestTime = getInspectionRecordRequestTimestamp(right);
+    if (leftRequestTime !== rightRequestTime) return rightRequestTime - leftRequestTime;
+
+    return getInspectionRecordActivityTimestamp(right) - getInspectionRecordActivityTimestamp(left);
+  })[0] || null;
+};
 
 const getLatestRequestEntry = (qc = {}) =>
   (Array.isArray(qc?.request_history) ? [...qc.request_history] : [])
@@ -765,49 +776,54 @@ const PREFERRED_BARCODE_FORMATS = [
 const hasMeasuredSizeEntries = (entries = []) =>
   Array.isArray(entries) && entries.length > 0;
 
-const buildInspectionRecordMeasurementSource = (inspectionRecord = {}, itemMaster = {}) => {
+const buildInspectionRecordMeasurementSource = (
+  inspectionRecord = {},
+  itemMaster = {},
+  { allowFallback = false } = {},
+) => {
   const hasInspectionItemSizes = hasMeasuredSizeEntries(inspectionRecord?.inspected_item_sizes);
   const hasInspectionBoxSizes = hasMeasuredSizeEntries(inspectionRecord?.inspected_box_sizes);
+  const fallbackSource = allowFallback ? itemMaster : {};
 
   return {
-    ...itemMaster,
+    ...fallbackSource,
     ...inspectionRecord,
     inspected_item_sizes: hasInspectionItemSizes
       ? inspectionRecord.inspected_item_sizes
-      : itemMaster?.inspected_item_sizes,
+      : fallbackSource?.inspected_item_sizes,
     inspected_box_sizes: hasInspectionBoxSizes
       ? inspectionRecord.inspected_box_sizes
-      : itemMaster?.inspected_box_sizes,
+      : fallbackSource?.inspected_box_sizes,
     inspected_box_mode: hasInspectionBoxSizes
       ? inspectionRecord?.inspected_box_mode
-      : itemMaster?.inspected_box_mode,
+      : fallbackSource?.inspected_box_mode,
     inspected_item_LBH: hasInspectionItemSizes
       ? inspectionRecord?.inspected_item_LBH
-      : itemMaster?.inspected_item_LBH,
+      : fallbackSource?.inspected_item_LBH,
     inspected_item_top_LBH: hasInspectionItemSizes
       ? inspectionRecord?.inspected_item_top_LBH
-      : itemMaster?.inspected_item_top_LBH,
+      : fallbackSource?.inspected_item_top_LBH,
     inspected_item_bottom_LBH: hasInspectionItemSizes
       ? inspectionRecord?.inspected_item_bottom_LBH
-      : itemMaster?.inspected_item_bottom_LBH,
+      : fallbackSource?.inspected_item_bottom_LBH,
     inspected_box_LBH: hasInspectionBoxSizes
       ? inspectionRecord?.inspected_box_LBH
-      : itemMaster?.inspected_box_LBH,
+      : fallbackSource?.inspected_box_LBH,
     inspected_box_top_LBH: hasInspectionBoxSizes
       ? inspectionRecord?.inspected_box_top_LBH
-      : itemMaster?.inspected_box_top_LBH,
+      : fallbackSource?.inspected_box_top_LBH,
     inspected_box_bottom_LBH: hasInspectionBoxSizes
       ? inspectionRecord?.inspected_box_bottom_LBH
-      : itemMaster?.inspected_box_bottom_LBH,
+      : fallbackSource?.inspected_box_bottom_LBH,
     inspected_top_LBH: hasInspectionBoxSizes
       ? inspectionRecord?.inspected_top_LBH
-      : itemMaster?.inspected_top_LBH,
+      : fallbackSource?.inspected_top_LBH,
     inspected_bottom_LBH: hasInspectionBoxSizes
       ? inspectionRecord?.inspected_bottom_LBH
-      : itemMaster?.inspected_bottom_LBH,
+      : fallbackSource?.inspected_bottom_LBH,
     inspected_weight: hasInspectionItemSizes || hasInspectionBoxSizes
       ? inspectionRecord?.inspected_weight
-      : itemMaster?.inspected_weight,
+      : fallbackSource?.inspected_weight,
   };
 };
 
@@ -1039,7 +1055,7 @@ const UpdateQcModal = ({
     (qc?.master_barcode || qc?.barcode) > 0 && !canEditLockedQcFields;
   const lockInnerBarcodeField = qc?.inner_barcode > 0 && !canEditLockedQcFields;
   const barcodeValidationItemMaster = isInspectionRecordUpdate
-    ? buildInspectionRecordMeasurementSource(inspectionRecord, qc?.item_master || {})
+    ? buildInspectionRecordMeasurementSource(inspectionRecord)
     : qc?.item_master || {};
   const requiresBarcodeValidation =
     isQcUser && barcodeValidationItemMaster?.barcode_exempted !== true;
@@ -1093,20 +1109,21 @@ const UpdateQcModal = ({
       : canRewriteLatestInspectionRecord
         ? latestInspectionRecord
         : null;
-    const defaultInspectorId = String(
-      adminRecord?.inspector?._id ||
-      adminRecord?.inspector ||
-      assignedInspectorId,
-    );
+    const defaultInspectorId = isInspectionRecordUpdate
+      ? String(adminRecord?.inspector?._id || adminRecord?.inspector || "")
+      : String(
+          adminRecord?.inspector?._id ||
+          adminRecord?.inspector ||
+          assignedInspectorId,
+        );
     const initialLabelRanges = adminRecord
       ? getInitialLabelRanges(adminRecord)
       : [createEmptyLabelRange()];
-    const initialRemarks =
-      adminRecord?.remarks !== undefined
-        ? String(adminRecord.remarks || "")
-        : String(qc?.remarks || "");
+    const initialRemarks = adminRecord
+      ? String(adminRecord.remarks || "")
+      : String(qc?.remarks || "");
     const itemMaster = isInspectionRecordUpdate
-      ? buildInspectionRecordMeasurementSource(inspectionRecord, qc?.item_master || {})
+      ? buildInspectionRecordMeasurementSource(inspectionRecord)
       : qc?.item_master || {};
     const inspectedItemLbh = itemMaster?.inspected_item_LBH || itemMaster?.item_LBH || {};
     const inspectedBoxLbh = itemMaster?.inspected_box_LBH || itemMaster?.box_LBH || {};
@@ -1179,17 +1196,27 @@ const UpdateQcModal = ({
       offeredQuantity: adminRecord
         ? toQuantityInputValue(adminRecord?.vendor_offered)
         : "",
-      barcode:
-        (itemMaster?.master_barcode || itemMaster?.barcode || qc?.master_barcode || qc?.barcode) > 0
-          ? String(itemMaster?.master_barcode || itemMaster?.barcode || qc?.master_barcode || qc?.barcode)
-          : "",
-      inner_barcode:
-        (itemMaster?.inner_barcode || qc?.inner_barcode) > 0
-          ? String(itemMaster?.inner_barcode || qc.inner_barcode)
-          : "",
-      packed_size: Boolean(itemMaster?.packed_size ?? qc?.packed_size),
-      finishing: Boolean(itemMaster?.finishing ?? qc?.finishing),
-      branding: Boolean(itemMaster?.branding ?? qc?.branding),
+      barcode: isInspectionRecordUpdate
+        ? ((itemMaster?.master_barcode || itemMaster?.barcode) > 0
+            ? String(itemMaster?.master_barcode || itemMaster?.barcode)
+            : "")
+        : ((itemMaster?.master_barcode || itemMaster?.barcode || qc?.master_barcode || qc?.barcode) > 0
+            ? String(itemMaster?.master_barcode || itemMaster?.barcode || qc?.master_barcode || qc?.barcode)
+            : ""),
+      inner_barcode: isInspectionRecordUpdate
+        ? (itemMaster?.inner_barcode > 0 ? String(itemMaster.inner_barcode) : "")
+        : ((itemMaster?.inner_barcode || qc?.inner_barcode) > 0
+            ? String(itemMaster?.inner_barcode || qc.inner_barcode)
+            : ""),
+      packed_size: isInspectionRecordUpdate
+        ? Boolean(itemMaster?.packed_size)
+        : Boolean(itemMaster?.packed_size ?? qc?.packed_size),
+      finishing: isInspectionRecordUpdate
+        ? Boolean(itemMaster?.finishing)
+        : Boolean(itemMaster?.finishing ?? qc?.finishing),
+      branding: isInspectionRecordUpdate
+        ? Boolean(itemMaster?.branding)
+        : Boolean(itemMaster?.branding ?? qc?.branding),
       kd: Boolean(itemMaster?.kd),
       mounting_file_needed: Boolean(itemMaster?.mounting_file_needed),
       labelRanges: initialLabelRanges,
@@ -1246,10 +1273,12 @@ const UpdateQcModal = ({
         { mode: inspectedBoxMode, singleRemark: "box" },
       ),
       last_inspected_date: toDDMMYYYYInputValue(
-        adminRecord?.inspection_date ||
-        latestRequestEntry?.request_date ||
-        qc.request_date ||
-        qc.last_inspected_date,
+        isInspectionRecordUpdate
+          ? adminRecord?.inspection_date
+          : adminRecord?.inspection_date ||
+            latestRequestEntry?.request_date ||
+            qc.request_date ||
+            qc.last_inspected_date,
         "",
       ),
     });
@@ -2080,10 +2109,13 @@ const UpdateQcModal = ({
       ? qc.inspection_record
       : [];
     const latestRequestEntry = getLatestRequestEntry(qc);
-    const currentRequestInspectionRecord = resolveLatestInspectionRecordForRequestEntry(
-      inspectionRecords,
-      latestRequestEntry,
-    );
+    const currentRequestInspectionRecord = isInspectionRecordUpdate
+      ? inspectionRecord
+      : latestInspectionRecord ||
+        resolveLatestInspectionRecordForRequestEntry(
+          inspectionRecords,
+          latestRequestEntry,
+        );
     const requestedQuantityLimit = getLatestRequestedQuantity(qc);
     const aqlRequestedQuantity =
       requestedQuantityLimit > 0 ? requestedQuantityLimit : clientDemandQuantity;
@@ -2134,7 +2166,7 @@ const UpdateQcModal = ({
     }
 
     const existingItemMaster = isInspectionRecordUpdate
-      ? buildInspectionRecordMeasurementSource(inspectionRecord, qc?.item_master || {})
+      ? buildInspectionRecordMeasurementSource(inspectionRecord)
       : qc?.item_master || {};
     const isBarcodeExemptedItem = existingItemMaster?.barcode_exempted === true;
     const existingInspectedWeight = existingItemMaster?.inspected_weight || {};
@@ -2648,7 +2680,7 @@ const UpdateQcModal = ({
               inspector: selectedInspectorId,
               vendor_requested:
                 Number(inspectionRecord?.vendor_requested || 0) ||
-                requestedQuantityLimit ||
+                currentRequestRequestedQuantity ||
                 aqlRequestedQuantity ||
                 0,
               vendor_offered: offeredQuantity,
@@ -2815,7 +2847,7 @@ const UpdateQcModal = ({
               inspector: selectedInspectorId,
               vendor_requested:
                 Number(rewriteTargetRecord?.vendor_requested || 0)
-                || requestedQuantityLimit
+                || currentRequestRequestedQuantity
                 || aqlRequestedQuantity
                 || 0,
               vendor_offered: offeredQuantity,
@@ -2964,7 +2996,7 @@ const UpdateQcModal = ({
     (isInspectionRecordUpdate && !isManagerLikeRole(normalizedRole)) ||
     (!hasElevatedAccess && (qc?.quantities?.qc_checked || 0) > 0);
   const existingItemMaster = isInspectionRecordUpdate
-    ? buildInspectionRecordMeasurementSource(inspectionRecord, qc?.item_master || {})
+    ? buildInspectionRecordMeasurementSource(inspectionRecord)
     : qc?.item_master || {};
   const existingInspectedWeight = existingItemMaster?.inspected_weight || {};
   const existingInspectedBoxMode = detectBoxPackagingMode(

@@ -1981,19 +1981,35 @@ const getInspectionRecordsForRequestEntry = (
 };
 
 const resolveLatestInspectionRecordFromList = (inspectionRecords = []) => {
+  const records = Array.isArray(inspectionRecords) ? inspectionRecords : [];
+  const recordsWithRequestDate = records.filter(
+    (record) =>
+      toSortableTimestamp(record?.requested_date || record?.request_date) > 0,
+  );
+  const candidates = recordsWithRequestDate.length > 0 ? recordsWithRequestDate : records;
   let latestRecord = null;
-  let latestTimestamp = 0;
+  let latestRequestTimestamp = 0;
+  let latestActivityTimestamp = 0;
 
-  for (const record of Array.isArray(inspectionRecords) ? inspectionRecords : []) {
-    const recordTimestamp = Math.max(
-      toSortableTimestamp(record?.inspection_date),
-      toSortableTimestamp(record?.requested_date),
-      toSortableTimestamp(record?.createdAt),
-      toSortableTimestamp(record?.updatedAt),
+  for (const record of candidates) {
+    const requestTimestamp = toSortableTimestamp(
+      record?.requested_date || record?.request_date,
     );
-    if (!latestRecord || recordTimestamp >= latestTimestamp) {
+    const activityTimestamp = Math.max(
+      toSortableTimestamp(record?.inspection_date),
+      toSortableTimestamp(record?.createdAt),
+    );
+    if (
+      !latestRecord ||
+      requestTimestamp > latestRequestTimestamp ||
+      (
+        requestTimestamp === latestRequestTimestamp &&
+        activityTimestamp >= latestActivityTimestamp
+      )
+    ) {
       latestRecord = record;
-      latestTimestamp = recordTimestamp;
+      latestRequestTimestamp = requestTimestamp;
+      latestActivityTimestamp = activityTimestamp;
     }
   }
 
@@ -5271,13 +5287,23 @@ exports.updateQC = async (req, res) => {
     const currentVendorOfferedTotal =
       currentAggregateMetrics.totalVendorOffered;
     const currentRequestInspectionRecord =
+      resolveLatestInspectionRecordFromList(beforeInspectionRecords) ||
       resolveLatestInspectionRecordForRequestEntry(
         beforeInspectionRecords,
         latestRequestEntry,
       );
+    const currentRequestHistoryId = String(
+      currentRequestInspectionRecord?.request_history_id || "",
+    ).trim();
+    const currentRequestHistoryEntry = currentRequestHistoryId
+      ? (Array.isArray(qc?.request_history) ? qc.request_history : []).find(
+          (entry) => String(entry?._id || "").trim() === currentRequestHistoryId,
+        )
+      : null;
     const currentRequestRequestedQuantity =
       [
         currentRequestInspectionRecord?.vendor_requested,
+        currentRequestHistoryEntry?.quantity_requested,
         latestRequestEntry?.quantity_requested,
         quantityRequestedCap,
         clientDemandQuantity,
@@ -5779,8 +5805,10 @@ exports.updateQC = async (req, res) => {
         });
       }
 
+      const targetRequestEntry = currentRequestHistoryEntry || latestRequestEntry;
       const requestedDateForRecordRaw = String(
-        latestRequestEntry?.request_date ||
+        currentRequestInspectionRecord?.requested_date ||
+          targetRequestEntry?.request_date ||
           qc.request_date ||
           inspectionDateForRecord,
       ).trim();
@@ -5791,13 +5819,16 @@ exports.updateQC = async (req, res) => {
         });
       }
 
-      const requestedQuantityForRecord = quantityRequestedCap;
+      const requestedQuantityForRecord = currentRequestRequestedQuantity;
 
       const inspectionRecord = await upsertInspectionRecordForRequest({
         qcDoc: qc,
         inspectorId: inspectionInspectorId,
         requestDate: requestedDateForRecord,
-        requestHistoryId: latestRequestEntry?._id || null,
+        requestHistoryId:
+          currentRequestInspectionRecord?.request_history_id ||
+          targetRequestEntry?._id ||
+          null,
         requestedQuantity: requestedQuantityForRecord,
         inspectionDate: inspectionDateForRecord,
         remarks: remarks || "",
@@ -5814,9 +5845,9 @@ exports.updateQC = async (req, res) => {
         sizeSnapshotPayload: req.body || {},
       });
 
-      if (latestRequestEntry && inspectionRecord && (isVisitUpdate || isQcUser)) {
-        latestRequestEntry.status = REQUEST_HISTORY_STATUS.INSPECTED;
-        stampRequestHistoryEntry(latestRequestEntry, {
+      if (targetRequestEntry && inspectionRecord && (isVisitUpdate || isQcUser)) {
+        targetRequestEntry.status = REQUEST_HISTORY_STATUS.INSPECTED;
+        stampRequestHistoryEntry(targetRequestEntry, {
           user: req.user,
         });
       }
