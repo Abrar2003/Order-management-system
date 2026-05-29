@@ -3845,7 +3845,7 @@ small,
 
 .qc-details-page {
   max-width: 100%;
-  overflow-x: clip;
+  overflow-x: visible;
 }
 
 .qc-details-header,
@@ -4015,6 +4015,8 @@ small,
 
 .qc-list-table-wrap {
   max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .qc-list-table {
@@ -6403,6 +6405,321 @@ button.om-item-order-presence-label {
 .packed-goods-pdf-report {
   width: 100%;
   background: #fff;
+}
+
+@media (max-width: 1199.98px) {
+  .qc-list-page,
+  .qc-details-page {
+    width: min(100%, calc(100vw - 0.75rem));
+    max-width: calc(100vw - 0.75rem);
+    overflow-x: visible;
+  }
+
+  .qc-list-page .card,
+  .qc-details-page .card,
+  .qc-list-page .card-body,
+  .qc-details-page .card-body,
+  .qc-list-page section,
+  .qc-details-page section,
+  .qc-list-page .row,
+  .qc-details-page .row,
+  .qc-list-page [class*="col-"],
+  .qc-details-page [class*="col-"] {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .qc-list-header,
+  .qc-details-header {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch !important;
+    gap: 0.75rem !important;
+  }
+
+  .qc-list-header > .btn,
+  .qc-list-header > h2,
+  .qc-list-export-actions,
+  .qc-list-export-actions .btn,
+  .qc-details-header > .btn,
+  .qc-details-header > h2,
+  .qc-details-actions,
+  .qc-details-toolbar,
+  .qc-details-toolbar .btn,
+  .qc-details-toolbar-select,
+  .qc-details-comment-input,
+  .qc-details-upload-progress {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .qc-list-header > h2,
+  .qc-details-header > h2 {
+    text-align: left;
+  }
+
+  .qc-list-export-actions,
+  .qc-details-toolbar {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.6rem !important;
+  }
+
+  .qc-details-actions {
+    align-items: stretch !important;
+  }
+
+  .qc-list-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.85rem;
+    padding: 0.9rem;
+  }
+
+  .qc-list-filter-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    justify-content: stretch !important;
+  }
+
+  .qc-list-filter-actions .btn {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .qc-list-desktop-filters {
+    display: none;
+  }
+
+  .qc-list-mobile-filters {
+    display: block;
+  }
+
+  .qc-list-mobile-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+  }
+
+  .qc-order-inline-grid {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+  }
+
+  .qc-order-inline-grid .qc-info-label,
+  .qc-order-inline-grid .qc-info-value,
+  .qc-info-value,
+  .qc-details-section-title {
+    white-space: normal;
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+  }
+
+  .qc-details-page .row > [class*="col-lg-"] {
+    flex: 0 0 100%;
+    max-width: 100%;
+  }
+
+  .qc-barcode-wrapper {
+    justify-content: flex-start;
+    padding: 0.5rem;
+    overflow: hidden;
+  }
+
+  .qc-barcode-wrapper svg {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-height: 120px;
+  }
+
+  .qc-list-table-wrap,
+  .qc-details-table-wrap {
+    overflow-x: hidden;
+  }
+
+  .qc-list-table,
+  .qc-list-table thead,
+  .qc-list-table tbody,
+  .qc-list-table tr,
+  .qc-list-table th,
+  .qc-list-table td,
+  .qc-details-record-table,
+  .qc-details-record-table thead,
+  .qc-details-record-table tbody,
+  .qc-details-record-table tr,
+  .qc-details-record-table th,
+  .qc-details-record-table td,
+  .qc-details-shipping-table,
+  .qc-details-shipping-table thead,
+  .qc-details-shipping-table tbody,
+  .qc-details-shipping-table tr,
+  .qc-details-shipping-table th,
+  .qc-details-shipping-table td,
+  .qc-details-batch-table,
+  .qc-details-batch-table thead,
+  .qc-details-batch-table tbody,
+  .qc-details-batch-table tr,
+  .qc-details-batch-table th,
+  .qc-details-batch-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .qc-list-table,
+  .qc-details-record-table,
+  .qc-details-shipping-table,
+  .qc-details-batch-table {
+    min-width: 0;
+    border-collapse: separate;
+    border-spacing: 0 0.75rem;
+  }
+
+  .qc-list-table thead,
+  .qc-details-record-table thead,
+  .qc-details-shipping-table thead,
+  .qc-details-batch-table thead {
+    display: none;
+  }
+
+  .qc-list-table tbody,
+  .qc-details-record-table tbody,
+  .qc-details-shipping-table tbody,
+  .qc-details-batch-table tbody {
+    display: grid;
+    gap: 0.75rem;
+  }
+
+  .qc-list-table tbody {
+    padding: 0.85rem;
+  }
+
+  .qc-list-table tr,
+  .qc-details-record-table tr,
+  .qc-details-shipping-table tr,
+  .qc-details-batch-table tr {
+    padding: 0.75rem;
+    border: 1px solid var(--om-color-border);
+    border-radius: 0.8rem;
+    background: var(--om-color-surface-muted);
+    box-shadow: var(--om-shadow-xs);
+  }
+
+  .qc-list-table > :not(caption) > * > *,
+  .qc-details-record-table > :not(caption) > * > *,
+  .qc-details-shipping-table > :not(caption) > * > *,
+  .qc-details-batch-table > :not(caption) > * > * {
+    padding: 0.45rem 0;
+    border-bottom: 1px solid rgba(203, 189, 170, 0.45);
+    background: transparent;
+  }
+
+  .qc-list-table td,
+  .qc-details-record-table td,
+  .qc-details-shipping-table td,
+  .qc-details-batch-table td {
+    display: grid;
+    grid-template-columns: minmax(7rem, 38%) minmax(0, 1fr);
+    gap: 0.75rem;
+    align-items: start;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .qc-list-table td::before,
+  .qc-details-record-table td::before,
+  .qc-details-shipping-table td::before,
+  .qc-details-batch-table td::before {
+    color: var(--om-color-text-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .qc-list-table td:last-child,
+  .qc-details-record-table td:last-child,
+  .qc-details-shipping-table td:last-child,
+  .qc-details-batch-table td:last-child {
+    border-bottom: 0;
+  }
+
+  .qc-list-table td[colspan] {
+    display: block;
+    text-align: center;
+  }
+
+  .qc-list-table td[colspan]::before {
+    content: none;
+  }
+
+  .qc-list-table td:nth-child(1)::before { content: "PO"; }
+  .qc-list-table td:nth-child(2)::before { content: "Vendor"; }
+  .qc-list-table td:nth-child(3)::before { content: "Item"; }
+  .qc-list-table td:nth-child(4)::before { content: "Request Date"; }
+  .qc-list-table td:nth-child(5)::before { content: "Last Inspected"; }
+  .qc-list-table td:nth-child(6)::before { content: "Order Qty"; }
+  .qc-list-table td:nth-child(7)::before { content: "Status"; }
+  .qc-list-table td:nth-child(8)::before { content: "QC Passed"; }
+  .qc-list-table td:nth-child(9)::before { content: "Pending"; }
+  .qc-list-table td:nth-child(10)::before { content: "Inspector"; }
+  .qc-list-table td:nth-child(11)::before { content: "Actions"; }
+
+  .qc-details-record-table td:nth-child(1)::before { content: "Request Date"; }
+  .qc-details-record-table td:nth-child(2)::before { content: "Inspection Date"; }
+  .qc-details-record-table td:nth-child(3)::before { content: "Inspector"; }
+  .qc-details-record-table td:nth-child(4)::before { content: "Requested"; }
+  .qc-details-record-table td:nth-child(5)::before { content: "Offered"; }
+  .qc-details-record-table td:nth-child(6)::before { content: "Inspected"; }
+  .qc-details-record-table td:nth-child(7)::before { content: "Passed"; }
+  .qc-details-record-table td:nth-child(8)::before { content: "CBM"; }
+  .qc-details-record-table td:nth-child(9)::before { content: "Pending"; }
+  .qc-details-record-table td:nth-child(10)::before { content: "Remarks"; }
+  .qc-details-record-table td:nth-child(11)::before { content: "Action"; }
+
+  .qc-details-shipping-table td:nth-child(1)::before { content: "Stuffing Date"; }
+  .qc-details-shipping-table td:nth-child(2)::before { content: "Container"; }
+  .qc-details-shipping-table td:nth-child(3)::before { content: "Invoice"; }
+  .qc-details-shipping-table td:nth-child(4)::before { content: "Quantity"; }
+  .qc-details-shipping-table td:nth-child(5)::before { content: "Remaining"; }
+  .qc-details-shipping-table td:nth-child(6)::before { content: "Remarks"; }
+
+  .qc-details-batch-table td:nth-child(1)::before { content: "Batch"; }
+  .qc-details-batch-table td:nth-child(2)::before { content: "Status"; }
+  .qc-details-batch-table td:nth-child(3)::before { content: "Files"; }
+  .qc-details-batch-table td:nth-child(4)::before { content: "Progress"; }
+  .qc-details-batch-table td:nth-child(5)::before { content: "Result"; }
+
+  .qc-list-row-actions,
+  .qc-details-record-table td .d-flex,
+  .qc-details-action-row {
+    justify-content: stretch !important;
+  }
+
+  .qc-list-row-actions .btn,
+  .qc-details-record-table td .btn,
+  .qc-details-action-row .btn {
+    width: 100%;
+    white-space: normal;
+  }
+}
+
+@media (max-width: 767.98px) {
+  .qc-list-mobile-filter-grid,
+  .qc-order-inline-grid,
+  .qc-list-export-actions,
+  .qc-details-toolbar,
+  .qc-list-filter-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .qc-list-table td,
+  .qc-details-record-table td,
+  .qc-details-shipping-table td,
+  .qc-details-batch-table td {
+    grid-template-columns: minmax(6.5rem, 40%) minmax(0, 1fr);
+  }
 }
 
 @media (min-width: 1200px) {

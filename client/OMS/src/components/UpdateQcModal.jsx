@@ -569,6 +569,23 @@ const toQuantityInputValue = (value) => {
   return String(parsed);
 };
 
+const toQuantitySummaryValue = (value, fallback = "N/A") => {
+  if (value === null || value === undefined || String(value).trim() === "") {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return parsed;
+};
+
+const getInspectionRecordSortTime = (record = {}) =>
+  Math.max(
+    toSortableTimestamp(record?.inspection_date),
+    toSortableTimestamp(record?.requested_date),
+    toSortableTimestamp(record?.createdAt),
+  );
+
 const getEffectiveRequestPassedQuantity = ({
   requestType = "",
   samplePassed = 0,
@@ -580,6 +597,81 @@ const getEffectiveRequestPassedQuantity = ({
   }
 
   return safeSamplePassed > 0 ? Math.max(0, Number(requestedQuantity) || 0) : 0;
+};
+
+const getInspectionRecordPendingAfter = ({ qc = {}, inspectionRecord = null } = {}) => {
+  const targetRecordId = String(inspectionRecord?._id || "").trim();
+  if (!targetRecordId) return "N/A";
+
+  const clientDemandQuantity = Number(qc?.quantities?.client_demand);
+  if (!Number.isFinite(clientDemandQuantity)) return "N/A";
+
+  const records = Array.isArray(qc?.inspection_record) ? qc.inspection_record : [];
+  const sortedRecords = records
+    .map((record, index) => ({ record, index }))
+    .sort((left, right) => {
+      const leftTime = getInspectionRecordSortTime(left.record);
+      const rightTime = getInspectionRecordSortTime(right.record);
+      if (leftTime !== rightTime) return leftTime - rightTime;
+      return left.index - right.index;
+    });
+  const targetIndex = sortedRecords.findIndex(
+    ({ record }) => String(record?._id || "").trim() === targetRecordId,
+  );
+
+  if (targetIndex < 0) {
+    return toQuantitySummaryValue(inspectionRecord?.pending_after);
+  }
+
+  const requestType = String(qc?.request_type || "").trim();
+  const requestHistoryQuantityById = new Map(
+    (Array.isArray(qc?.request_history) ? qc.request_history : [])
+      .map((entry) => [
+        String(entry?._id || "").trim(),
+        Number(entry?.quantity_requested),
+      ])
+      .filter(([requestHistoryId, quantity]) =>
+        requestHistoryId && Number.isFinite(quantity),
+      ),
+  );
+  const passedByRequestGroup = new Map();
+
+  sortedRecords.slice(0, targetIndex + 1).forEach(({ record }, index) => {
+    const requestHistoryId = String(record?.request_history_id || "").trim();
+    const requestedQuantity = Number(
+      requestHistoryId
+        ? requestHistoryQuantityById.get(requestHistoryId) ?? record?.vendor_requested
+        : record?.vendor_requested,
+    );
+    const requestGroupKey =
+      requestHistoryId ||
+      toISODateString(record?.requested_date || record?.inspection_date || record?.createdAt) ||
+      `record:${index}`;
+    const currentGroup = passedByRequestGroup.get(requestGroupKey) || {
+      requestedQuantity: 0,
+      samplePassed: 0,
+    };
+
+    currentGroup.requestedQuantity = Math.max(
+      currentGroup.requestedQuantity,
+      Number.isFinite(requestedQuantity) ? requestedQuantity : 0,
+    );
+    currentGroup.samplePassed += Number(record?.passed || 0) || 0;
+    passedByRequestGroup.set(requestGroupKey, currentGroup);
+  });
+
+  const effectivePassedThroughRecord = Array.from(passedByRequestGroup.values()).reduce(
+    (total, group) =>
+      total +
+      getEffectiveRequestPassedQuantity({
+        requestType,
+        samplePassed: group.samplePassed,
+        requestedQuantity: group.requestedQuantity,
+      }),
+    0,
+  );
+
+  return Math.max(0, clientDemandQuantity - effectivePassedThroughRecord);
 };
 
 const getQcLabelRequirement = ({
@@ -961,6 +1053,19 @@ const UpdateQcModal = ({
   );
   const isQcUpdateBlockedByMissingRequest =
     !isInspectionRecordUpdate && isQcUser && !qcUserRequestAvailability.isAvailable;
+  const summaryRequestedQuantity = isInspectionRecordUpdate
+    ? toQuantitySummaryValue(
+        inspectionRecord?.vendor_requested ??
+          inspectionRecord?.quantity_requested ??
+          inspectionRecord?.requested_quantity,
+      )
+    : toQuantitySummaryValue(qc?.quantities?.quantity_requested);
+  const summaryPassedQuantity = isInspectionRecordUpdate
+    ? toQuantitySummaryValue(inspectionRecord?.passed)
+    : toQuantitySummaryValue(qc?.quantities?.qc_passed);
+  const summaryPendingQuantity = isInspectionRecordUpdate
+    ? getInspectionRecordPendingAfter({ qc, inspectionRecord })
+    : toQuantitySummaryValue(qc?.quantities?.pending);
 
   useEffect(() => {
     if (isQcUser) {
@@ -1196,7 +1301,8 @@ const UpdateQcModal = ({
       ((barcodeScannerTarget === "barcode" && lockBarcodeField) ||
         (barcodeScannerTarget === "inner_barcode" &&
           (lockInnerBarcodeField ||
-            form.inspected_box_mode !== BOX_PACKAGING_MODES.CARTON)));
+            (!requiresBarcodeValidation &&
+              form.inspected_box_mode !== BOX_PACKAGING_MODES.CARTON))));
 
     if (shouldCloseScanner) {
       setBarcodeScannerOpen(false);
@@ -1204,6 +1310,7 @@ const UpdateQcModal = ({
   }, [
     lockBarcodeField,
     lockInnerBarcodeField,
+    requiresBarcodeValidation,
     barcodeScannerOpen,
     barcodeScannerTarget,
     form.inspected_box_mode,
@@ -3206,20 +3313,20 @@ const UpdateQcModal = ({
               <div className="col qc-modal-summary-item">
                 <div className="small text-secondary">Requested Quantity</div>
                 <div className="fw-semibold">
-                  {qc.quantities?.quantity_requested ?? "N/A"}
+                  {summaryRequestedQuantity}
                 </div>
               </div>
               <div className="col qc-modal-summary-item">
                 <div className="small text-secondary">Passed</div>
                 <div className="fw-semibold">
-                  {qc.quantities?.qc_passed ?? "N/A"}
+                  {summaryPassedQuantity}
                 </div>
               </div>
 
               <div className="col qc-modal-summary-item">
                 <div className="small text-secondary">Pending</div>
                 <div className="fw-semibold">
-                  {qc.quantities?.pending ?? "N/A"}
+                  {summaryPendingQuantity}
                 </div>
               </div>
             </div>

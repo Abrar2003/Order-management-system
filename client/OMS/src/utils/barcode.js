@@ -2,6 +2,10 @@ const EAN13_BODY_LENGTH = 12;
 const EAN13_LENGTH = 13;
 
 const normalizeDigits = (value) => String(value ?? "").replace(/\D/g, "");
+const isDefaultBarcodeValue = (value) => {
+  const digits = normalizeDigits(value);
+  return digits.length > 0 && /^0+$/.test(digits);
+};
 
 const calculateEan13CheckDigit = (body = "") => {
   const digits = normalizeDigits(body).slice(0, EAN13_BODY_LENGTH);
@@ -17,7 +21,7 @@ const calculateEan13CheckDigit = (body = "") => {
 
 export const toEan13BarcodeValue = (value) => {
   const digits = normalizeDigits(value);
-  if (!digits || digits.length > EAN13_LENGTH) return "";
+  if (!digits || digits.length > EAN13_LENGTH || isDefaultBarcodeValue(value)) return "";
 
   const body = digits.slice(0, EAN13_BODY_LENGTH).padStart(EAN13_BODY_LENGTH, "0");
   const checkDigit = calculateEan13CheckDigit(body);
@@ -26,7 +30,7 @@ export const toEan13BarcodeValue = (value) => {
 
 export const formatEan13BarcodeDisplay = (value, fallback = "Not Set") => {
   const rawText = String(value ?? "").trim();
-  if (!rawText || rawText === "0") return fallback;
+  if (!rawText || isDefaultBarcodeValue(rawText)) return fallback;
 
   return toEan13BarcodeValue(rawText) || rawText;
 };

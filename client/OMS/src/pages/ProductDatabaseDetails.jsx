@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import { ProductDatabaseModal } from "./ProductDatabase";
+import { formatEan13BarcodeDisplay } from "../utils/barcode";
 import { formatDateDDMMYYYY } from "../utils/date";
 import "../App.css";
 
@@ -340,8 +341,14 @@ const ProductDatabaseDetails = () => {
               <DetailCard title="Barcodes">
                 <KeyValueGrid
                   rows={[
-                    { label: "Single / Master Barcode", value: productDatabase.pd_master_barcode || productDatabase.pd_barcode },
-                    { label: "Inner Barcode", value: productDatabase.pd_inner_barcode },
+                    {
+                      label: "Single / Master Barcode",
+                      value: formatEan13BarcodeDisplay(productDatabase.pd_master_barcode || productDatabase.pd_barcode),
+                    },
+                    {
+                      label: "Inner Barcode",
+                      value: formatEan13BarcodeDisplay(productDatabase.pd_inner_barcode),
+                    },
                   ]}
                 />
               </DetailCard>
