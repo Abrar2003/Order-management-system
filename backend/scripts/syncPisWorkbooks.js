@@ -18,6 +18,9 @@ const {
   uploadBuffer,
   deleteObject,
 } = require("../services/wasabiStorage.service");
+const {
+  cleanupLegacyItemSizeFields,
+} = require("../helpers/itemLegacySizeCleanup");
 
 const SIZE_ENTRY_LIMIT = 4;
 const ITEM_REMARKS = ["item", "item1", "item2", "item3"];
@@ -996,7 +999,6 @@ const applyWorkbookPayload = (item, payload) => {
 
   applyValueIfChanged(item, "pis_item_sizes", payload.pis_item_sizes, changedPaths);
   applyValueIfChanged(item, "pis_box_sizes", payload.pis_box_sizes, changedPaths);
-  applyValueIfChanged(item, "pis_weight", payload.pis_weight, changedPaths);
   applyValueIfChanged(item, "cbm.top", payload?.cbm?.top || "0", changedPaths);
   applyValueIfChanged(item, "cbm.bottom", payload?.cbm?.bottom || "0", changedPaths);
   applyValueIfChanged(item, "cbm.total", payload?.cbm?.total || "0", changedPaths);
@@ -1010,6 +1012,13 @@ const applyWorkbookPayload = (item, payload) => {
   if (normalizeText(payload?.pis_barcode)) {
     applyValueIfChanged(item, "pis_barcode", normalizeText(payload.pis_barcode), changedPaths);
   }
+
+  const cleanupResult = cleanupLegacyItemSizeFields(item, {
+    groups: ["pis_item", "pis_box"],
+  });
+  cleanupResult.changedPaths.forEach((path) => {
+    if (!changedPaths.includes(path)) changedPaths.push(path);
+  });
 
   return changedPaths;
 };

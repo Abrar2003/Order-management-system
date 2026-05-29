@@ -32,7 +32,6 @@ const {
 const {
   BOX_PACKAGING_MODES,
   BOX_SIZE_REMARK_OPTIONS,
-  buildBoxLegacyFieldsFromEntries,
   buildBoxMeasurementCbmSummary,
   detectBoxPackagingMode,
 } = require("../helpers/boxMeasurement");
@@ -81,6 +80,9 @@ const { normalizeUserRoleKey } = require("../helpers/userRole");
 const {
   buildComparisonRows,
 } = require("../helpers/pisInspectionMasterComparison");
+const {
+  cleanupLegacyItemSizeFields,
+} = require("../helpers/itemLegacySizeCleanup");
 
 const escapeRegex = (value = "") =>
   String(value)
@@ -271,58 +273,6 @@ const buildSizeEntriesFromLegacy = ({
   ];
 };
 
-const buildLegacyLbhAndWeightFromSizeEntries = (
-  entries = [],
-  { weightKey = "", remarkOptions = [], mode = "" } = {},
-) => {
-  if (Array.isArray(remarkOptions) && remarkOptions === BOX_SIZE_REMARK_OPTIONS) {
-    return buildBoxLegacyFieldsFromEntries(entries, { weightKey, mode });
-  }
-
-  const normalizedEntries = sortSizeEntriesByRemark(
-    normalizeStoredSizeEntries(entries, { weightKey }),
-    remarkOptions,
-  );
-
-  const toLbh = (entry = null) =>
-    hasCompletePositiveLbh(entry)
-      ? {
-          L: toSafeNumber(entry?.L, 0),
-          B: toSafeNumber(entry?.B, 0),
-          H: toSafeNumber(entry?.H, 0),
-        }
-      : { L: 0, B: 0, H: 0 };
-
-  const firstEntry = normalizedEntries[0] || null;
-  const secondEntry = normalizedEntries[1] || null;
-  const totalWeight = weightKey
-    ? normalizedEntries.reduce(
-        (sum, entry) => sum + toSafeNumber(entry?.[weightKey], 0),
-        0,
-      )
-    : 0;
-
-  if (normalizedEntries.length === 1) {
-    return {
-      single: toLbh(firstEntry),
-      top: { L: 0, B: 0, H: 0 },
-      bottom: { L: 0, B: 0, H: 0 },
-      totalWeight,
-      topWeight: 0,
-      bottomWeight: 0,
-    };
-  }
-
-  return {
-    single: { L: 0, B: 0, H: 0 },
-    top: toLbh(firstEntry),
-    bottom: toLbh(secondEntry),
-    totalWeight,
-    topWeight: weightKey ? toSafeNumber(firstEntry?.[weightKey], 0) : 0,
-    bottomWeight: weightKey ? toSafeNumber(secondEntry?.[weightKey], 0) : 0,
-  };
-};
-
 const buildWeightRecord = (weight = {}) =>
   WEIGHT_FIELD_KEYS.reduce((accumulator, fieldKey) => {
     const legacyKey = LEGACY_WEIGHT_FALLBACK_BY_KEY[fieldKey];
@@ -390,41 +340,6 @@ const toComparableValue = (value) => {
 
 const areNormalizedValuesEqual = (left, right) =>
   JSON.stringify(toComparableValue(left)) === JSON.stringify(toComparableValue(right));
-
-const buildPisWeightFromSizeEntries = ({
-  currentWeight = {},
-  itemSizes = null,
-  boxSizes = null,
-} = {}) => {
-  const nextWeight = buildWeightRecord(currentWeight);
-  const buildWeightSummary = (entries = [], weightKey = "") => {
-    const safeEntries = Array.isArray(entries) ? entries : [];
-    return {
-      total: safeEntries.reduce(
-        (sum, entry) => sum + toSafeNumber(entry?.[weightKey], 0),
-        0,
-      ),
-      first: safeEntries.length >= 2 ? toSafeNumber(safeEntries[0]?.[weightKey], 0) : 0,
-      second: safeEntries.length >= 2 ? toSafeNumber(safeEntries[1]?.[weightKey], 0) : 0,
-    };
-  };
-
-  if (Array.isArray(itemSizes)) {
-    const itemWeights = buildWeightSummary(itemSizes, "net_weight");
-    nextWeight.top_net = itemWeights.first;
-    nextWeight.bottom_net = itemWeights.second;
-    nextWeight.total_net = itemWeights.total;
-  }
-
-  if (Array.isArray(boxSizes)) {
-    const boxWeights = buildWeightSummary(boxSizes, "gross_weight");
-    nextWeight.top_gross = boxWeights.first;
-    nextWeight.bottom_gross = boxWeights.second;
-    nextWeight.total_gross = boxWeights.total;
-  }
-
-  return nextWeight;
-};
 
 const getPayloadWeightField = (payloadWeight = {}, fieldKey = "", fieldLabelPrefix = "weight") => {
   if (!payloadWeight || typeof payloadWeight !== "object") {
@@ -4189,6 +4104,40 @@ const isCompletedInspectionForComparison = (inspection = {}) => {
   );
 };
 
+const hasInspectionSizeDataForComparison = (inspection = {}) => {
+  const hasSizeEntries = (entries = [], fields = []) =>
+    (Array.isArray(entries) ? entries : []).some((entry = {}) =>
+      entry &&
+      typeof entry === "object" &&
+      fields.some((field) => {
+        const value = entry?.[field];
+        if (value === null || value === undefined) return false;
+        if (typeof value === "string") return value.trim() !== "";
+        return true;
+      }),
+    );
+
+  return (
+    hasSizeEntries(inspection?.inspected_item_sizes, [
+      "L",
+      "B",
+      "H",
+      "net_weight",
+      "gross_weight",
+    ]) ||
+    hasSizeEntries(inspection?.inspected_box_sizes, [
+      "L",
+      "B",
+      "H",
+      "net_weight",
+      "gross_weight",
+      "box_type",
+      "item_count_in_inner",
+      "box_count_in_master",
+    ])
+  );
+};
+
 const buildComparisonInspectionRow = (inspection = {}, order = {}) => ({
   inspection_id: String(inspection?._id || ""),
   qc_id: String(inspection?.qc || order?.qc_record || ""),
@@ -4256,7 +4205,13 @@ exports.getPisInspectionMasterComparison = async (req, res) => {
     );
 
     const inspections = qcObjectIds.length > 0
-      ? await Inspection.find({ qc: { $in: qcObjectIds } })
+      ? await Inspection.find({
+          qc: { $in: qcObjectIds },
+          $or: [
+            { "inspected_item_sizes.0": { $exists: true } },
+            { "inspected_box_sizes.0": { $exists: true } },
+          ],
+        })
           .select(
             "qc createdAt inspection_date status inspected_item_sizes inspected_box_sizes inspected_box_mode checked passed pending_after cbm barcode master_barcode inner_barcode",
           )
@@ -4264,7 +4219,9 @@ exports.getPisInspectionMasterComparison = async (req, res) => {
       : [];
 
     const validInspectionRows = (Array.isArray(inspections) ? inspections : [])
-      .filter(isCompletedInspectionForComparison)
+      .filter((inspection) =>
+        isCompletedInspectionForComparison(inspection) &&
+        hasInspectionSizeDataForComparison(inspection))
       .map((inspection) => {
         const order = orderByQcId.get(String(inspection?.qc || "")) || {};
         return {
@@ -4424,6 +4381,14 @@ exports.getPisInspectionMasterComparisonRecords = async (req, res) => {
           normalized_inspection_status: {
             $nin: ["pending", "goods not ready", "rejected", "transfered", "transferred"],
           },
+          $or: [
+            { "inspection_rows.inspected_item_sizes.0": { $exists: true } },
+            { "inspection_rows.inspected_box_sizes.0": { $exists: true } },
+          ],
+        },
+      },
+      {
+        $match: {
           $or: [
             { normalized_inspection_status: "inspection done" },
             { "inspection_rows.checked": { $gt: 0 } },
@@ -4683,22 +4648,6 @@ exports.createItem = async (req, res) => {
       },
     );
 
-    const derivedPisItemLegacy = buildLegacyLbhAndWeightFromSizeEntries(
-      parsedPisItemSizes,
-      {
-        weightKey: "net_weight",
-        remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
-      },
-    );
-    const derivedPisBoxLegacy = buildLegacyLbhAndWeightFromSizeEntries(
-      parsedPisBoxSizes,
-      {
-        weightKey: "gross_weight",
-        remarkOptions: BOX_SIZE_REMARK_OPTIONS,
-        mode: parsedPisBoxMode,
-      },
-    );
-
     const item = new Item({
       code,
       name,
@@ -4721,14 +4670,6 @@ exports.createItem = async (req, res) => {
         payload.mounting_file_needed,
         "mounting_file_needed",
       ),
-      pis_weight: {
-        top_net: derivedPisItemLegacy.topWeight,
-        bottom_net: derivedPisItemLegacy.bottomWeight,
-        total_net: derivedPisItemLegacy.totalWeight,
-        top_gross: derivedPisBoxLegacy.topWeight,
-        bottom_gross: derivedPisBoxLegacy.bottomWeight,
-        total_gross: derivedPisBoxLegacy.totalWeight,
-      },
       source: {
         from_orders: false,
         from_qc: false,
@@ -4923,19 +4864,8 @@ exports.updateItem = async (req, res) => {
         weightKey: "net_weight",
         weightLabel: "net_weight",
       });
-      const derivedItemLegacy = buildLegacyLbhAndWeightFromSizeEntries(
-        parsedInspectedItemSizes,
-        {
-          weightKey: "net_weight",
-          remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
-        },
-      );
 
       setPath("inspected_item_sizes", parsedInspectedItemSizes);
-      nextInspectedWeight.top_net = derivedItemLegacy.topWeight;
-      nextInspectedWeight.bottom_net = derivedItemLegacy.bottomWeight;
-      nextInspectedWeight.total_net = derivedItemLegacy.totalWeight;
-      inspectedWeightTouched = true;
     }
 
     if (hasOwn(payload, "inspected_box_sizes")) {
@@ -4950,21 +4880,9 @@ exports.updateItem = async (req, res) => {
         weightLabel: "gross_weight",
         mode: parsedInspectedBoxMode,
       });
-      const derivedBoxLegacy = buildLegacyLbhAndWeightFromSizeEntries(
-        parsedInspectedBoxSizes,
-        {
-          weightKey: "gross_weight",
-          remarkOptions: BOX_SIZE_REMARK_OPTIONS,
-          mode: parsedInspectedBoxMode,
-        },
-      );
 
       setPath("inspected_box_sizes", parsedInspectedBoxSizes);
       setPath("inspected_box_mode", parsedInspectedBoxMode);
-      nextInspectedWeight.top_gross = derivedBoxLegacy.topWeight;
-      nextInspectedWeight.bottom_gross = derivedBoxLegacy.bottomWeight;
-      nextInspectedWeight.total_gross = derivedBoxLegacy.totalWeight;
-      inspectedWeightTouched = true;
       inspectedBoxTouched = true;
     }
 
@@ -5074,6 +4992,18 @@ exports.updateItem = async (req, res) => {
 
     if (touched) {
       applyCalculatedCbmTotals(item, setPath);
+    }
+
+    const inspectedCleanupGroups = [];
+    if (hasOwn(payload, "inspected_item_sizes")) inspectedCleanupGroups.push("inspected_item");
+    if (hasOwn(payload, "inspected_box_sizes")) inspectedCleanupGroups.push("inspected_box");
+    if (inspectedCleanupGroups.length > 0) {
+      const cleanupResult = cleanupLegacyItemSizeFields(item, {
+        groups: inspectedCleanupGroups,
+      });
+      if (cleanupResult.changed) {
+        touched = true;
+      }
     }
 
     if (!touched) {
@@ -5261,22 +5191,11 @@ exports.updateItemPis = async (req, res) => {
         weightLabel: "net_weight",
         allowIncomplete: true,
       });
-      const derivedPisItemLegacy = buildLegacyLbhAndWeightFromSizeEntries(
-        parsedPisItemSizes,
-        {
-          weightKey: "net_weight",
-          remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
-        },
-      );
 
       if (requestedPisDiffCheck) {
         setMasterPath("master_item_sizes", parsedPisItemSizes);
       } else {
         setPisPath("pis_item_sizes", parsedPisItemSizes);
-        nextPisWeight.top_net = derivedPisItemLegacy.topWeight;
-        nextPisWeight.bottom_net = derivedPisItemLegacy.bottomWeight;
-        nextPisWeight.total_net = derivedPisItemLegacy.totalWeight;
-        pisWeightTouched = true;
       }
     }
 
@@ -5293,14 +5212,6 @@ exports.updateItemPis = async (req, res) => {
         mode: parsedPisBoxMode,
         allowIncomplete: true,
       });
-      const derivedPisBoxLegacy = buildLegacyLbhAndWeightFromSizeEntries(
-        parsedPisBoxSizes,
-        {
-          weightKey: "gross_weight",
-          remarkOptions: BOX_SIZE_REMARK_OPTIONS,
-          mode: parsedPisBoxMode,
-        },
-      );
 
       if (requestedPisDiffCheck) {
         setMasterPath("master_box_sizes", parsedPisBoxSizes);
@@ -5308,10 +5219,6 @@ exports.updateItemPis = async (req, res) => {
       } else {
         setPisPath("pis_box_sizes", parsedPisBoxSizes);
         setPisPath("pis_box_mode", parsedPisBoxMode);
-        nextPisWeight.top_gross = derivedPisBoxLegacy.topWeight;
-        nextPisWeight.bottom_gross = derivedPisBoxLegacy.bottomWeight;
-        nextPisWeight.total_gross = derivedPisBoxLegacy.totalWeight;
-        pisWeightTouched = true;
       }
     }
 
@@ -5349,6 +5256,20 @@ exports.updateItemPis = async (req, res) => {
 
     if (requestedPisDiffCheck) {
       setPath("pis_checked_flag", true);
+    }
+
+    if (!requestedPisDiffCheck) {
+      const pisCleanupGroups = [];
+      if (hasOwn(payload, "pis_item_sizes")) pisCleanupGroups.push("pis_item");
+      if (hasOwn(payload, "pis_box_sizes")) pisCleanupGroups.push("pis_box");
+      if (pisCleanupGroups.length > 0) {
+        const cleanupResult = cleanupLegacyItemSizeFields(item, {
+          groups: pisCleanupGroups,
+        });
+        if (cleanupResult.changed) {
+          pisFieldsTouched = true;
+        }
+      }
     }
 
     applyCalculatedCbmTotals(item, setPath);
@@ -5474,12 +5395,21 @@ const syncProductDatabaseValuesIntoPisItem = async ({ item, user } = {}) => {
   }
 
   if (Array.isArray(copiedItemSizes) || Array.isArray(copiedBoxSizes)) {
-    const nextPisWeight = buildPisWeightFromSizeEntries({
-      currentWeight: item?.pis_weight,
-      itemSizes: copiedItemSizes,
-      boxSizes: copiedBoxSizes,
+    const cleanupGroups = [];
+    if (Array.isArray(copiedItemSizes)) cleanupGroups.push("pis_item");
+    if (Array.isArray(copiedBoxSizes)) cleanupGroups.push("pis_box");
+    const cleanupResult = cleanupLegacyItemSizeFields(item, {
+      groups: cleanupGroups,
     });
-    setPathIfChanged("pis_weight", nextPisWeight);
+    cleanupResult.changedPaths.forEach((path) => {
+      if (!changedFields.includes(path)) {
+        changedFields.push(path);
+      }
+    });
+    if (cleanupResult.changed) {
+      touched = true;
+      syncMessages.push("Legacy PIS size fallback fields cleaned after Product Database sync.");
+    }
   }
 
   const syncedAt = new Date();

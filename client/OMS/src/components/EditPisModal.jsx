@@ -5,9 +5,11 @@ import ProductImageThumbnail from "./ProductImageThumbnail";
 import { getCountryOfOriginOptions } from "../constants/countryOfOrigin";
 import { formatDateDDMMYYYY } from "../utils/date";
 import {
+  BOX_ENTRY_TYPES,
   BOX_PACKAGING_MODES,
   BOX_SIZE_REMARK_OPTIONS,
   ITEM_SIZE_REMARK_OPTIONS,
+  SIZE_ENTRY_LIMIT,
   buildMeasuredSizeEntriesFromLegacy,
   calculateMeasuredSizeEntriesCbm,
   detectBoxPackagingMode,
@@ -99,6 +101,119 @@ const buildLatestInspectionContext = (orders = []) =>
       })),
     )
     .sort((left, right) => (right.sort_time || 0) - (left.sort_time || 0))[0] || null;
+
+const normalizeRemark = (value = "") => String(value || "").trim().toLowerCase();
+
+const hasFetchableMeasuredValue = (entry = {}) => {
+  const hasDimensionOrWeight = ["L", "B", "H", "weight"].some(
+    (field) => toText(entry?.[field]) !== "",
+  );
+  if (hasDimensionOrWeight) return true;
+
+  return ["item_count_in_inner", "box_count_in_master"].some((field) => {
+    const text = toText(entry?.[field]);
+    return text !== "" && text !== "0";
+  });
+};
+
+const sortMeasuredEntriesByRemark = (entries = [], preferredOrder = []) => {
+  const orderLookup = new Map(
+    preferredOrder.map((remark, index) => [normalizeRemark(remark), index]),
+  );
+
+  return [...(Array.isArray(entries) ? entries : [])].sort((left, right) => {
+    const leftRemark = normalizeRemark(left?.remark || left?.type || left?.box_type);
+    const rightRemark = normalizeRemark(right?.remark || right?.type || right?.box_type);
+    const leftRank = orderLookup.has(leftRemark)
+      ? orderLookup.get(leftRemark)
+      : preferredOrder.length;
+    const rightRank = orderLookup.has(rightRemark)
+      ? orderLookup.get(rightRemark)
+      : preferredOrder.length;
+
+    if (leftRank !== rightRank) return leftRank - rightRank;
+    return leftRemark.localeCompare(rightRemark, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
+  });
+};
+
+const createBlankCartonFetchEntry = (boxType = BOX_ENTRY_TYPES.INNER) => ({
+  remark: boxType,
+  box_type: boxType,
+  L: "",
+  B: "",
+  H: "",
+  weight: "",
+  item_count_in_inner: boxType === BOX_ENTRY_TYPES.INNER ? "" : "0",
+  box_count_in_master: boxType === BOX_ENTRY_TYPES.MASTER ? "" : "0",
+});
+
+const arrangeCartonEntriesForFetch = (entries = []) => {
+  const cartonEntries = Array.isArray(entries) ? entries : [];
+  const findEntry = (boxType) =>
+    cartonEntries.find((entry) => {
+      const remark = normalizeRemark(entry?.remark || entry?.type);
+      const entryBoxType = normalizeRemark(entry?.box_type);
+      return remark === boxType || entryBoxType === boxType;
+    });
+
+  const innerEntry = findEntry(BOX_ENTRY_TYPES.INNER);
+  const masterEntry = findEntry(BOX_ENTRY_TYPES.MASTER);
+  return [
+    innerEntry || createBlankCartonFetchEntry(BOX_ENTRY_TYPES.INNER),
+    masterEntry || createBlankCartonFetchEntry(BOX_ENTRY_TYPES.MASTER),
+  ];
+};
+
+const buildInspectedMeasurementDetails = (item = {}) => {
+  const inspectedWeight = item?.inspected_weight || {};
+  const inspectedBoxMode = detectBoxPackagingMode(
+    item?.inspected_box_mode,
+    item?.inspected_box_sizes,
+  );
+  const itemEntries = buildMeasuredSizeEntriesFromLegacy({
+    primaryEntries: item?.inspected_item_sizes,
+    singleLbh: item?.inspected_item_LBH,
+    topLbh: item?.inspected_item_top_LBH,
+    bottomLbh: item?.inspected_item_bottom_LBH,
+    totalWeight: getWeightValueFromModel(inspectedWeight, "total_net"),
+    topWeight: getWeightValueFromModel(inspectedWeight, "top_net"),
+    bottomWeight: getWeightValueFromModel(inspectedWeight, "bottom_net"),
+    weightKey: "net_weight",
+    topRemark: "top",
+    bottomRemark: "base",
+  }).filter((entry) => hasFetchableMeasuredValue(entry));
+  const boxEntries = buildMeasuredSizeEntriesFromLegacy({
+    primaryEntries: item?.inspected_box_sizes,
+    mode: inspectedBoxMode,
+    singleLbh: item?.inspected_box_LBH,
+    topLbh: item?.inspected_box_top_LBH || item?.inspected_top_LBH,
+    bottomLbh: item?.inspected_box_bottom_LBH || item?.inspected_bottom_LBH,
+    totalWeight: getWeightValueFromModel(inspectedWeight, "total_gross"),
+    topWeight: getWeightValueFromModel(inspectedWeight, "top_gross"),
+    bottomWeight: getWeightValueFromModel(inspectedWeight, "bottom_gross"),
+    weightKey: "gross_weight",
+    topRemark: "top",
+    bottomRemark: "base",
+  }).filter((entry) => hasFetchableMeasuredValue(entry));
+
+  const sortedItemEntries = sortMeasuredEntriesByRemark(itemEntries, ["item", "top", "base"]);
+  const sortedBoxEntries =
+    inspectedBoxMode === BOX_PACKAGING_MODES.CARTON
+      ? (boxEntries.length > 0 ? arrangeCartonEntriesForFetch(boxEntries) : [])
+      : sortMeasuredEntriesByRemark(boxEntries, ["box", "top", "base"]);
+
+  return {
+    inspectedBoxMode,
+    itemEntries: sortedItemEntries.slice(0, SIZE_ENTRY_LIMIT),
+    boxEntries: sortedBoxEntries.slice(
+      0,
+      inspectedBoxMode === BOX_PACKAGING_MODES.CARTON ? 2 : SIZE_ENTRY_LIMIT,
+    ),
+  };
+};
 
 const buildInitialForm = (item = {}) => {
   const pisWeight = item?.pis_weight || {};
@@ -233,6 +348,10 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
   );
   const showInspectedReference = !isPisChecked(item);
   const inspectedReference = useMemo(() => buildInspectedReference(item), [item]);
+  const inspectedMeasurementDetails = useMemo(
+    () => buildInspectedMeasurementDetails(item),
+    [item],
+  );
   const displayedItemEntries = useMemo(
     () =>
       ensureMeasuredSizeEntryCount(form.pis_item_sizes, form.pis_item_count, {
@@ -374,6 +493,51 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
         },
       ),
     }));
+  };
+
+  const handleFetchDetails = () => {
+    const hasItemEntries = inspectedMeasurementDetails.itemEntries.length > 0;
+    const hasBoxEntries = inspectedMeasurementDetails.boxEntries.length > 0;
+
+    if (!hasItemEntries && !hasBoxEntries) {
+      setError("No inspected size details found to fetch.");
+      return;
+    }
+
+    setError("");
+    setForm((prev) => {
+      const next = { ...prev };
+
+      if (hasItemEntries) {
+        const itemCount = normalizeSizeCount(
+          inspectedMeasurementDetails.itemEntries.length,
+          1,
+        );
+        next.pis_item_count = String(itemCount);
+        next.pis_item_sizes = ensureMeasuredSizeEntryCount(
+          inspectedMeasurementDetails.itemEntries,
+          itemCount,
+          { singleRemark: "item" },
+        );
+      }
+
+      if (hasBoxEntries) {
+        const boxMode = inspectedMeasurementDetails.inspectedBoxMode;
+        const boxCount =
+          boxMode === BOX_PACKAGING_MODES.CARTON
+            ? 2
+            : normalizeSizeCount(inspectedMeasurementDetails.boxEntries.length, 1);
+        next.pis_box_mode = boxMode;
+        next.pis_box_count = String(boxCount);
+        next.pis_box_sizes = ensureMeasuredSizeEntryCount(
+          inspectedMeasurementDetails.boxEntries,
+          boxCount,
+          { mode: boxMode, singleRemark: "box" },
+        );
+      }
+
+      return next;
+    });
   };
 
   const handleSave = async () => {
@@ -604,7 +768,17 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
               <div className="border rounded p-3">
                 <div className="d-flex flex-wrap justify-content-between gap-2 align-items-center mb-3">
                   <h6 className="mb-0">Latest Inspected Reference</h6>
-                  <span className="badge text-bg-warning">Needs PIS Check</span>
+                  <div className="d-flex flex-wrap gap-2 align-items-center">
+                    <button
+                      type="button"
+                      className="btn btn-outline-primary btn-sm"
+                      onClick={handleFetchDetails}
+                      disabled={saving}
+                    >
+                      Fetch details
+                    </button>
+                    <span className="badge text-bg-warning">Needs PIS Check</span>
+                  </div>
                 </div>
                 <div className="row g-3 small">
                   <div className="col-md-3">

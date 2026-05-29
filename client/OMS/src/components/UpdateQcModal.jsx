@@ -77,6 +77,47 @@ const normalizeComparableBarcode = (value) => {
   return withoutLeadingZeroes || "0";
 };
 
+const QC_BARCODE_VALIDATION_TYPES = Object.freeze([
+  { value: "individual", label: "Individual" },
+  { value: "inner_master", label: "Inner + Master" },
+]);
+
+const QC_BARCODE_VALIDATION_TYPE_MAP = QC_BARCODE_VALIDATION_TYPES.reduce(
+  (accumulator, option) => {
+    accumulator[option.value] = option;
+    return accumulator;
+  },
+  {},
+);
+
+const getQcBarcodeValidationOption = (type = "") =>
+  QC_BARCODE_VALIDATION_TYPE_MAP[type] || QC_BARCODE_VALIDATION_TYPE_MAP.individual;
+
+const getQcBarcodeValidationRequirements = (type = "") =>
+  getQcBarcodeValidationOption(type).value === "inner_master"
+    ? [
+      {
+        key: "master",
+        label: "Master",
+        pisKey: "pis_master_barcode",
+        inputKey: "barcode",
+      },
+      {
+        key: "inner",
+        label: "Inner",
+        pisKey: "pis_inner_barcode",
+        inputKey: "inner_barcode",
+      },
+    ]
+    : [
+      {
+        key: "individual",
+        label: "Individual",
+        pisKey: "pis_barcode",
+        inputKey: "barcode",
+      },
+    ];
+
 const INSPECTED_WEIGHT_FIELDS = Object.freeze([
   {
     formKey: "inspected_weight_top_net",
@@ -768,6 +809,10 @@ const UpdateQcModal = ({
   const [barcodeScannerStatus, setBarcodeScannerStatus] = useState("");
   const [barcodeScannedInSession, setBarcodeScannedInSession] = useState(false);
   const [innerBarcodeScannedInSession, setInnerBarcodeScannedInSession] = useState(false);
+  const [barcodeValidationType, setBarcodeValidationType] = useState("individual");
+  const [barcodeValidated, setBarcodeValidated] = useState(false);
+  const [barcodeValidationError, setBarcodeValidationError] = useState("");
+  const [barcodeValidationStatus, setBarcodeValidationStatus] = useState("");
   const [barcodeUploadLoading, setBarcodeUploadLoading] = useState(false);
   const [barcodeUploadError, setBarcodeUploadError] = useState("");
   const [barcodeUploadStatus, setBarcodeUploadStatus] = useState("");
@@ -901,6 +946,13 @@ const UpdateQcModal = ({
   const lockBarcodeField =
     (qc?.master_barcode || qc?.barcode) > 0 && !canEditLockedQcFields;
   const lockInnerBarcodeField = qc?.inner_barcode > 0 && !canEditLockedQcFields;
+  const barcodeValidationItemMaster = isInspectionRecordUpdate
+    ? buildInspectionRecordMeasurementSource(inspectionRecord, qc?.item_master || {})
+    : qc?.item_master || {};
+  const requiresBarcodeValidation =
+    isQcUser && barcodeValidationItemMaster?.barcode_exempted !== true;
+  const qcBarcodeValidationLocked =
+    requiresBarcodeValidation && !barcodeValidated;
   const latestInspectionRecord = getLatestInspectionRecord(qc);
   const latestRequestEntry = getLatestRequestEntry(qc);
   const qcUserRequestAvailability = useMemo(
@@ -1103,6 +1155,10 @@ const UpdateQcModal = ({
     setBarcodeUploadLoading(false);
     setBarcodeUploadError("");
     setBarcodeUploadStatus("");
+    setBarcodeValidationType("individual");
+    setBarcodeValidated(false);
+    setBarcodeValidationError("");
+    setBarcodeValidationStatus("");
     setBarcodeScannerTarget("barcode");
     setBarcodeScannerOpen(false);
     if (barcodeUploadInputRef.current) {
@@ -1115,6 +1171,23 @@ const UpdateQcModal = ({
     inspectionRecord,
     latestInspectionRecord,
     latestRequestEntry,
+  ]);
+
+  useEffect(() => {
+    if (!requiresBarcodeValidation) {
+      setBarcodeValidated(true);
+      setBarcodeValidationError("");
+      setBarcodeValidationStatus("");
+      return;
+    }
+
+    setBarcodeValidated(false);
+    setBarcodeValidationStatus("");
+  }, [
+    requiresBarcodeValidation,
+    barcodeValidationType,
+    form.barcode,
+    form.inner_barcode,
   ]);
 
   useEffect(() => {
@@ -1204,7 +1277,9 @@ const UpdateQcModal = ({
         setBarcodeScannerStatus(`Inner barcode scanned: ${parsedNumericBarcode}`);
       } else {
         setBarcodeScannedInSession(true);
-        setBarcodeScannerStatus(`Master barcode scanned: ${parsedNumericBarcode}`);
+        setBarcodeScannerStatus(
+          `${barcodeValidationType === "individual" ? "Individual" : "Master"} barcode scanned: ${parsedNumericBarcode}`,
+        );
       }
       setBarcodeScannerOpen(false);
       return true;
@@ -1382,10 +1457,14 @@ const UpdateQcModal = ({
       cancelled = true;
       stopScannerResources();
     };
-  }, [barcodeScannerOpen, barcodeScannerTarget]);
+	  }, [barcodeScannerOpen, barcodeScannerTarget, barcodeValidationType]);
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
+
+    if (qcBarcodeValidationLocked && name !== "barcode" && name !== "inner_barcode") {
+      return;
+    }
 
     if (isQcUser && (name === "barcode" || name === "inner_barcode")) {
       return;
@@ -1615,7 +1694,13 @@ const UpdateQcModal = ({
       setBarcodeScannerError("");
       setBarcodeScannerStatus("");
       setBarcodeUploadStatus(
-        `${uploadTarget === "inner_barcode" ? "Inner barcode" : "Barcode"} scanned: ${scannedBarcode}`,
+        `${
+          uploadTarget === "inner_barcode"
+            ? "Inner barcode"
+            : barcodeValidationType === "individual"
+              ? "Individual barcode"
+              : "Master barcode"
+        } scanned: ${scannedBarcode}`,
       );
     } catch (error) {
       setBarcodeUploadStatus("");
@@ -1634,6 +1719,8 @@ const UpdateQcModal = ({
   };
 
   const handleSizeEntryChange = (groupKey, index, field, value) => {
+    if (qcBarcodeValidationLocked) return;
+
     if (field !== "remark" && value !== "") {
       const parsedValue = Number(value);
       if (!Number.isFinite(parsedValue) || parsedValue < 0) {
@@ -1664,6 +1751,8 @@ const UpdateQcModal = ({
   };
 
   const handleLabelRangeChange = (index, field, value) => {
+    if (qcBarcodeValidationLocked) return;
+
     if (value !== "") {
       const parsedValue = Number(value);
       if (!Number.isFinite(parsedValue) || parsedValue < 0) {
@@ -1680,6 +1769,8 @@ const UpdateQcModal = ({
   };
 
   const addLabelRange = () => {
+    if (qcBarcodeValidationLocked) return;
+
     setForm((prev) => ({
       ...prev,
       labelRanges: [...prev.labelRanges, createEmptyLabelRange()],
@@ -1687,6 +1778,8 @@ const UpdateQcModal = ({
   };
 
   const removeLabelRange = (index) => {
+    if (qcBarcodeValidationLocked) return;
+
     setForm((prev) => {
       if (prev.labelRanges.length <= 1) {
         return { ...prev, labelRanges: [createEmptyLabelRange()] };
@@ -1754,6 +1847,61 @@ const UpdateQcModal = ({
     return { ranges: normalizedRanges, labels };
   };
 
+  const validateSelectedBarcode = () => {
+    const validationOption = getQcBarcodeValidationOption(barcodeValidationType);
+    const requirements = getQcBarcodeValidationRequirements(validationOption.value);
+
+    setBarcodeValidationError("");
+    setBarcodeValidationStatus("");
+
+    for (const requirement of requirements) {
+      const scannedValue =
+        requirement.inputKey === "inner_barcode"
+          ? form.inner_barcode
+          : form.barcode;
+      const expectedValue = barcodeValidationItemMaster?.[requirement.pisKey];
+      const wasScanned =
+        requirement.inputKey === "inner_barcode"
+          ? innerBarcodeScannedInSession
+          : barcodeScannedInSession;
+      const typeLabel = requirement.label.toLowerCase();
+      const normalizedScanned = normalizeComparableBarcode(scannedValue);
+      const normalizedExpected = normalizeComparableBarcode(expectedValue);
+
+      if (!wasScanned) {
+        setBarcodeValidated(false);
+        setBarcodeValidationError(`Scan the ${typeLabel} barcode before validating.`);
+        return false;
+      }
+
+      if (!normalizedScanned) {
+        setBarcodeValidated(false);
+        setBarcodeValidationError(`No ${typeLabel} barcode was scanned.`);
+        return false;
+      }
+
+      if (!normalizedExpected) {
+        setBarcodeValidated(false);
+        setBarcodeValidationError(
+          `PIS ${typeLabel} barcode is required before QC can update this record.`,
+        );
+        return false;
+      }
+
+      if (normalizedScanned !== normalizedExpected) {
+        setBarcodeValidated(false);
+        setBarcodeValidationError(
+          `Scanned ${typeLabel} barcode does not match the PIS ${typeLabel} barcode.`,
+        );
+        return false;
+      }
+    }
+
+    setBarcodeValidated(true);
+    setBarcodeValidationStatus(`${validationOption.label} barcode validated. You can proceed.`);
+    return true;
+  };
+
   const handleSubmit = async () => {
     if (!qc) return;
     setError("");
@@ -1763,6 +1911,11 @@ const UpdateQcModal = ({
         qcUserRequestAvailability.reason ||
         "A new QC request is required before QC can update this record.",
       );
+      return;
+    }
+
+    if (requiresBarcodeValidation && !barcodeValidated) {
+      setError("Validate the barcode before updating this QC record.");
       return;
     }
 
@@ -2118,8 +2271,12 @@ const UpdateQcModal = ({
 
     const isCartonPackagingMode =
       form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON;
+    const selectedBarcodeValidationOption =
+      getQcBarcodeValidationOption(barcodeValidationType);
+    const shouldReadInnerBarcode =
+      isCartonPackagingMode || selectedBarcodeValidationOption.value === "inner_master";
     const barcodeValue = form.barcode.trim();
-    const innerBarcodeValue = isCartonPackagingMode
+    const innerBarcodeValue = shouldReadInnerBarcode
       ? form.inner_barcode.trim()
       : "";
     const currentMasterBarcodeValue = Number(
@@ -2153,29 +2310,47 @@ const UpdateQcModal = ({
       return;
     }
 
-    if (
-      isQcUser
-      && !isBarcodeExemptedItem
-      && (!Number.isInteger(effectiveMasterBarcodeValue) || effectiveMasterBarcodeValue <= 0)
-    ) {
-      setError("QC users must scan the master barcode before updating this QC record.");
-      return;
-    }
-
     if (isQcUser && !isBarcodeExemptedItem) {
-      const pisMasterBarcode = normalizeComparableBarcode(
-        existingItemMaster?.pis_master_barcode || existingItemMaster?.pis_barcode,
-      );
-      const scannedMasterBarcode = normalizeComparableBarcode(effectiveMasterBarcodeValue);
+      const typeLabel = selectedBarcodeValidationOption.label.toLowerCase();
 
-      if (!pisMasterBarcode) {
-        setError("PIS master barcode is required before QC can update this record.");
+      if (!barcodeValidated) {
+        setError(`Validate the ${typeLabel} barcode before updating this QC record.`);
         return;
       }
 
-      if (scannedMasterBarcode !== pisMasterBarcode) {
-        setError("Scanned master barcode does not match the PIS master barcode.");
-        return;
+      for (const requirement of getQcBarcodeValidationRequirements(
+        selectedBarcodeValidationOption.value,
+      )) {
+        const expectedPisBarcode = normalizeComparableBarcode(
+          existingItemMaster?.[requirement.pisKey],
+        );
+        const scannedBarcode = normalizeComparableBarcode(
+          requirement.inputKey === "inner_barcode"
+            ? innerBarcodeParsed
+            : effectiveMasterBarcodeValue,
+        );
+        const requiredScanWasCaptured =
+          requirement.inputKey === "inner_barcode"
+            ? innerBarcodeScannedInSession
+            : barcodeScannedInSession;
+        const requirementLabel = requirement.label.toLowerCase();
+
+        if (!requiredScanWasCaptured) {
+          setError(`Validate the ${requirementLabel} barcode before updating this QC record.`);
+          return;
+        }
+
+        if (!expectedPisBarcode) {
+          setError(`PIS ${requirementLabel} barcode is required before QC can update this record.`);
+          return;
+        }
+
+        if (!scannedBarcode || scannedBarcode !== expectedPisBarcode) {
+          setError(
+            `Scanned ${requirementLabel} barcode does not match the PIS ${requirementLabel} barcode.`,
+          );
+          return;
+        }
       }
     }
 
@@ -2221,7 +2396,7 @@ const UpdateQcModal = ({
       if (isAdminRewriteMode) {
         payload.barcode = barcodeParsed ?? 0;
         payload.master_barcode = barcodeParsed ?? 0;
-        if (isCartonPackagingMode) {
+        if (shouldReadInnerBarcode) {
           payload.inner_barcode = innerBarcodeParsed ?? 0;
         }
       } else if (barcodeParsed !== null && barcodeParsed !== currentMasterBarcodeValue) {
@@ -2233,12 +2408,21 @@ const UpdateQcModal = ({
       }
 
       if (
-        isCartonPackagingMode &&
+        shouldReadInnerBarcode &&
         innerBarcodeParsed !== null &&
         innerBarcodeParsed !== currentInnerBarcodeValue
       ) {
         payload.inner_barcode = innerBarcodeParsed;
         if (isQcUser) {
+          payload.inner_barcode_scanned = innerBarcodeScannedInSession;
+        }
+      }
+
+      if (isQcUser && !isBarcodeExemptedItem) {
+        payload.barcode_validation_type = selectedBarcodeValidationOption.value;
+        payload.barcode_validated = true;
+        payload.barcode_scanned = barcodeScannedInSession;
+        if (selectedBarcodeValidationOption.value === "inner_master") {
           payload.inner_barcode_scanned = innerBarcodeScannedInSession;
         }
       }
@@ -2736,9 +2920,10 @@ const UpdateQcModal = ({
     mode = BOX_PACKAGING_MODES.INDIVIDUAL,
     modeName = "",
     showModeSelector = false,
-  }) => {
-    const isCartonMode = mode === BOX_PACKAGING_MODES.CARTON;
-    const safeCount = isCartonMode ? 2 : normalizeSizeCount(countValue, 1);
+	  }) => {
+	    const isCartonMode = mode === BOX_PACKAGING_MODES.CARTON;
+	    const sectionLocked = locked || qcBarcodeValidationLocked || saving;
+	    const safeCount = isCartonMode ? 2 : normalizeSizeCount(countValue, 1);
     const entryColumnClass = safeCount > 1 ? "col-6 col-md-2" : "col-6 col-md-3";
     const singleEntryLabel = String(countLabel || "").toLowerCase().includes("box")
       ? "Box"
@@ -2757,7 +2942,7 @@ const UpdateQcModal = ({
                 name={modeName}
                 value={mode}
                 onChange={handleChange}
-                disabled={locked}
+	                disabled={sectionLocked}
               >
                 <option value={BOX_PACKAGING_MODES.INDIVIDUAL}>Individual Boxes</option>
                 <option value={BOX_PACKAGING_MODES.CARTON}>Inner + Master Carton</option>
@@ -2771,7 +2956,7 @@ const UpdateQcModal = ({
                 name={countName}
                 value={String(safeCount)}
                 onChange={handleChange}
-                disabled={locked}
+	                  disabled={sectionLocked}
               >
                 {SIZE_COUNT_OPTIONS.map((option) => (
                   <option key={option} value={option}>
@@ -2798,7 +2983,7 @@ const UpdateQcModal = ({
                   name={countName}
                   value={String(safeCount)}
                   onChange={handleChange}
-                  disabled={locked}
+	                  disabled={sectionLocked}
                 >
                   {SIZE_COUNT_OPTIONS.map((option) => (
                     <option key={option} value={option}>
@@ -2848,7 +3033,7 @@ const UpdateQcModal = ({
                                   event.target.value,
                                 )
                               }
-                              disabled={locked || isCartonMode}
+	                              disabled={sectionLocked || isCartonMode}
                             >
                               <option value="">Select Remark</option>
                               {displayedRemarkOptions.map((option) => (
@@ -2870,7 +3055,7 @@ const UpdateQcModal = ({
                             }
                             min="0"
                             step="any"
-                            disabled={locked}
+	                            disabled={sectionLocked}
                           />
                         </div>
                         <div className={entryColumnClass}>
@@ -2884,7 +3069,7 @@ const UpdateQcModal = ({
                             }
                             min="0"
                             step="any"
-                            disabled={locked}
+	                            disabled={sectionLocked}
                           />
                         </div>
                         <div className={entryColumnClass}>
@@ -2898,7 +3083,7 @@ const UpdateQcModal = ({
                             }
                             min="0"
                             step="any"
-                            disabled={locked}
+	                            disabled={sectionLocked}
                           />
                         </div>
                         <div className={safeCount > 1 ? "col-6 col-md-3" : "col-6 col-md-3"}>
@@ -2912,7 +3097,7 @@ const UpdateQcModal = ({
                             }
                             min="0"
                             step="any"
-                            disabled={locked}
+	                            disabled={sectionLocked}
                           />
                         </div>
                         {isCartonMode && index === 0 && (
@@ -2932,7 +3117,7 @@ const UpdateQcModal = ({
                               }
                               min="0"
                               step="1"
-                              disabled={locked}
+	                              disabled={sectionLocked}
                             />
                           </div>
                         )}
@@ -2953,7 +3138,7 @@ const UpdateQcModal = ({
                               }
                               min="0"
                               step="1"
-                              disabled={locked}
+	                              disabled={sectionLocked}
                             />
                           </div>
                         )}
@@ -3079,11 +3264,167 @@ const UpdateQcModal = ({
                     ))}
                   </select>
                 )}
-              </div>
+	              </div>
 
-              <div className="col-12">
-                <h6 className="mb-0">Inspected Measurements</h6>
-              </div>
+	              {requiresBarcodeValidation && (
+	                <div className="col-12">
+	                  <div className="border rounded p-3">
+	                    <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+	                      <div>
+	                        <div className="small text-secondary text-uppercase">Barcode validation</div>
+	                        {barcodeValidated ? (
+	                          <span className="badge bg-success mt-1">Validated. You can proceed.</span>
+	                        ) : (
+	                          <span className="badge bg-warning text-dark mt-1">Validation required</span>
+	                        )}
+	                      </div>
+	                      <div className="btn-group" role="group" aria-label="Barcode Type">
+	                        {QC_BARCODE_VALIDATION_TYPES.map((option) => (
+	                          <button
+	                            key={option.value}
+	                            type="button"
+	                            className={`btn btn-sm ${
+	                              barcodeValidationType === option.value
+	                                ? "btn-primary"
+	                                : "btn-outline-secondary"
+	                            }`}
+	                            onClick={() => {
+	                              setBarcodeValidationType(option.value);
+	                              setBarcodeScannerTarget(
+	                                getQcBarcodeValidationRequirements(option.value)[0].inputKey,
+	                              );
+	                              setBarcodeValidationError("");
+	                              setBarcodeValidationStatus("");
+	                            }}
+	                            disabled={saving}
+	                          >
+	                            {option.label}
+	                          </button>
+	                        ))}
+	                      </div>
+	                    </div>
+	                    <div className="row g-2 align-items-end">
+	                      {getQcBarcodeValidationRequirements(barcodeValidationType).map((requirement) => {
+	                        const targetIsInner = requirement.inputKey === "inner_barcode";
+	                        const targetLocked = targetIsInner ? lockInnerBarcodeField : lockBarcodeField;
+	                        const targetValue = targetIsInner ? form.inner_barcode : form.barcode;
+	                        const targetScanned = targetIsInner
+	                          ? innerBarcodeScannedInSession
+	                          : barcodeScannedInSession;
+	                        return (
+	                          <div
+	                            key={requirement.key}
+	                            className={
+	                              barcodeValidationType === "inner_master"
+	                                ? "col-12 col-lg-6"
+	                                : "col-12 col-lg-8"
+	                            }
+	                          >
+	                            <label className="form-label">
+	                              {requirement.label} Barcode
+	                              {targetScanned && (
+	                                <span className="badge bg-success ms-2">Scanned</span>
+	                              )}
+	                            </label>
+	                            <div className="input-group">
+	                              <input
+	                                type="number"
+	                                className="form-control"
+	                                name={requirement.inputKey}
+	                                value={targetValue}
+	                                onChange={handleChange}
+	                                min="1"
+	                                step="1"
+	                                disabled={targetLocked}
+	                                readOnly={isQcUser}
+	                                placeholder={`Scan ${requirement.label.toLowerCase()} barcode`}
+	                              />
+	                              <button
+	                                type="button"
+	                                className="btn btn-outline-secondary"
+	                                onClick={() => toggleBarcodeScanner(requirement.inputKey)}
+	                                disabled={targetLocked}
+	                              >
+	                                {barcodeScannerOpen && barcodeScannerTarget === requirement.inputKey
+	                                  ? "Stop"
+	                                  : "Scan"}
+	                              </button>
+	                            </div>
+	                          </div>
+	                        );
+	                      })}
+	                      {isCurrentUserLabelExempt && (
+	                        <div className="col-auto">
+	                          <button
+	                            type="button"
+	                            className="btn btn-outline-secondary"
+	                            onClick={() => openBarcodeUploadDialog(barcodeScannerTarget)}
+	                            disabled={barcodeUploadLoading || saving}
+	                          >
+	                            {barcodeUploadLoading ? "Uploading..." : "Upload Barcode"}
+	                          </button>
+	                        </div>
+	                      )}
+	                      <div className="col-auto">
+	                        <button
+	                          type="button"
+	                          className="btn btn-primary"
+	                          onClick={validateSelectedBarcode}
+	                          disabled={saving}
+	                        >
+	                          Validate
+	                        </button>
+	                      </div>
+	                    </div>
+	                    <input
+	                      ref={barcodeUploadInputRef}
+	                      type="file"
+	                      className="d-none"
+	                      accept=".jpg,.jpeg,.png,.webp,.pdf,image/*,application/pdf"
+	                      onChange={handleBarcodeUploadChange}
+	                    />
+	                    {barcodeScannerOpen && (
+	                      <div className="border rounded p-2 mt-3">
+	                        <video
+	                          ref={barcodeVideoRef}
+	                          autoPlay
+	                          muted
+	                          playsInline
+	                          onClick={handleBarcodeVideoClick}
+	                          className="w-100 rounded"
+	                          style={{ maxHeight: "240px", objectFit: "cover", background: "#111827" }}
+	                        />
+	                        {barcodeScannerStatus && (
+	                          <div className="small text-muted mt-2">{barcodeScannerStatus}</div>
+	                        )}
+	                        {barcodeScannerError && (
+	                          <div className="small text-danger mt-1">{barcodeScannerError}</div>
+	                        )}
+	                      </div>
+	                    )}
+	                    {(barcodeValidationStatus || barcodeValidationError || barcodeUploadStatus || barcodeUploadError) && (
+	                      <div className="mt-2">
+	                        {barcodeValidationStatus && (
+	                          <span className="badge bg-success me-2">{barcodeValidationStatus}</span>
+	                        )}
+	                        {barcodeValidationError && (
+	                          <span className="text-danger small">{barcodeValidationError}</span>
+	                        )}
+	                        {barcodeUploadStatus && (
+	                          <span className="text-success small me-2">{barcodeUploadStatus}</span>
+	                        )}
+	                        {barcodeUploadError && (
+	                          <span className="text-danger small">{barcodeUploadError}</span>
+	                        )}
+	                      </div>
+	                    )}
+	                  </div>
+	                </div>
+	              )}
+
+	              <div className="col-12">
+	                <h6 className="mb-0">Inspected Measurements</h6>
+	              </div>
 
               {hasAnyLockedInspectedLbh && !canEditLockedQcSizeFields && (
                 <div className="col-12">
@@ -3138,16 +3479,18 @@ const UpdateQcModal = ({
                       ? todayIso
                       : undefined
                   }
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      last_inspected_date: toDDMMYYYYInputValue(e.target.value, ""),
-                    }))
-                  }
-                />
-              </div>
+	                  onChange={(e) =>
+	                    setForm((prev) => ({
+	                      ...prev,
+	                      last_inspected_date: toDDMMYYYYInputValue(e.target.value, ""),
+	                    }))
+	                  }
+	                  disabled={qcBarcodeValidationLocked || saving}
+	                />
+	              </div>
 
-              <div className="col-md-6">
+	              {!requiresBarcodeValidation && (
+	              <div className="col-md-6">
                 <label className="form-label">
                   {form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON
                     ? "Master Carton Barcode"
@@ -3237,8 +3580,9 @@ const UpdateQcModal = ({
                 {barcodeUploadError && (
                   <div className="small text-danger mt-1">{barcodeUploadError}</div>
                 )}
-              </div>
-              {form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON && (
+	              </div>
+	              )}
+	              {!requiresBarcodeValidation && form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON && (
                 <div className="col-md-6">
                   <label className="form-label">Inner Carton Barcode</label>
                   <div className="d-flex flex-wrap gap-2 align-items-stretch qc-barcode-input-row">
@@ -3318,10 +3662,11 @@ const UpdateQcModal = ({
                   type="number"
                   className="form-control"
                   name="offeredQuantity"
-                  value={form.offeredQuantity}
-                  onChange={handleChange}
-                  min="0"
-                />
+	                  value={form.offeredQuantity}
+	                  onChange={handleChange}
+	                  min="0"
+	                  disabled={qcBarcodeValidationLocked || saving}
+	                />
               </div>
 
               <div className="col-md-4">
@@ -3330,10 +3675,11 @@ const UpdateQcModal = ({
                   type="number"
                   className="form-control"
                   name="qc_checked"
-                  value={form.qc_checked}
-                  onChange={handleChange}
-                  min="0"
-                />
+	                  value={form.qc_checked}
+	                  onChange={handleChange}
+	                  min="0"
+	                  disabled={qcBarcodeValidationLocked || saving}
+	                />
               </div>
 
               <div className="col-md-4">
@@ -3342,10 +3688,11 @@ const UpdateQcModal = ({
                   type="number"
                   className="form-control"
                   name="qc_passed"
-                  value={form.qc_passed}
-                  onChange={handleChange}
-                  min="0"
-                />
+	                  value={form.qc_passed}
+	                  onChange={handleChange}
+	                  min="0"
+	                  disabled={qcBarcodeValidationLocked || saving}
+	                />
               </div>
 
               <div className="col-md-2">
@@ -3358,7 +3705,7 @@ const UpdateQcModal = ({
                     name="packed_size"
                     checked={form.packed_size}
                     onChange={handleChange}
-                    disabled={!canEditLockedQcFields && qc.packed_size}
+	                    disabled={qcBarcodeValidationLocked || saving || (!canEditLockedQcFields && qc.packed_size)}
                   />
                   <label
                     htmlFor="packed_size"
@@ -3381,7 +3728,7 @@ const UpdateQcModal = ({
                     name="finishing"
                     checked={form.finishing}
                     onChange={handleChange}
-                    disabled={!canEditLockedQcFields && qc.finishing}
+	                    disabled={qcBarcodeValidationLocked || saving || (!canEditLockedQcFields && qc.finishing)}
                   />
                   <label
                     htmlFor="finishing"
@@ -3402,7 +3749,7 @@ const UpdateQcModal = ({
                     name="branding"
                     checked={form.branding}
                     onChange={handleChange}
-                    disabled={!canEditLockedQcFields && qc.branding}
+	                    disabled={qcBarcodeValidationLocked || saving || (!canEditLockedQcFields && qc.branding)}
                   />
                   <label
                     htmlFor="branding"
@@ -3422,7 +3769,7 @@ const UpdateQcModal = ({
                     onClick={() =>
                       setForm((prev) => ({ ...prev, kd: true }))
                     }
-                    disabled={saving}
+	                    disabled={saving || qcBarcodeValidationLocked}
                   >
                     Yes
                   </button>
@@ -3432,7 +3779,7 @@ const UpdateQcModal = ({
                     onClick={() =>
                       setForm((prev) => ({ ...prev, kd: false }))
                     }
-                    disabled={saving}
+	                    disabled={saving || qcBarcodeValidationLocked}
                   >
                     No
                   </button>
@@ -3447,7 +3794,7 @@ const UpdateQcModal = ({
                     onClick={() =>
                       setForm((prev) => ({ ...prev, mounting_file_needed: true }))
                     }
-                    disabled={saving}
+	                    disabled={saving || qcBarcodeValidationLocked}
                   >
                     Yes
                   </button>
@@ -3457,7 +3804,7 @@ const UpdateQcModal = ({
                     onClick={() =>
                       setForm((prev) => ({ ...prev, mounting_file_needed: false }))
                     }
-                    disabled={saving}
+	                    disabled={saving || qcBarcodeValidationLocked}
                   >
                     No
                   </button>
@@ -3476,10 +3823,11 @@ const UpdateQcModal = ({
                     <button
                       type="button"
                       className="btn btn-outline-secondary"
-                      onClick={() => {
-                        setShowAllocateModal(true);
-                      }}
-                    >
+	                      onClick={() => {
+	                        setShowAllocateModal(true);
+	                      }}
+	                      disabled={saving || qcBarcodeValidationLocked}
+	                    >
                       Allocate
                     </button>
                   </div>
@@ -3502,10 +3850,11 @@ const UpdateQcModal = ({
                           onChange={(e) =>
                             handleLabelRangeChange(index, "start", e.target.value)
                           }
-                          min="0"
-                          step="1"
-                          placeholder={`Start label ${index + 1}`}
-                        />
+	                          min="0"
+	                          step="1"
+	                          placeholder={`Start label ${index + 1}`}
+	                          disabled={saving || qcBarcodeValidationLocked}
+	                        />
                       </div>
                       <div className="col-sm-5">
                         <input
@@ -3515,27 +3864,30 @@ const UpdateQcModal = ({
                           onChange={(e) =>
                             handleLabelRangeChange(index, "end", e.target.value)
                           }
-                          min="0"
-                          step="1"
-                          placeholder={`End label ${index + 1}`}
-                        />
+	                          min="0"
+	                          step="1"
+	                          placeholder={`End label ${index + 1}`}
+	                          disabled={saving || qcBarcodeValidationLocked}
+	                        />
                       </div>
                       <div className="col-sm-2 d-flex gap-2">
                         <button
                           type="button"
                           className="btn btn-outline-secondary btn-sm"
-                          onClick={addLabelRange}
-                          title="Add another range"
-                        >
+	                          onClick={addLabelRange}
+	                          title="Add another range"
+	                          disabled={saving || qcBarcodeValidationLocked}
+	                        >
                           +
                         </button>
                         {form.labelRanges.length > 1 && (
                           <button
                             type="button"
                             className="btn btn-outline-danger btn-sm"
-                            onClick={() => removeLabelRange(index)}
-                            title="Remove this range"
-                          >
+	                            onClick={() => removeLabelRange(index)}
+	                            title="Remove this range"
+	                            disabled={saving || qcBarcodeValidationLocked}
+	                          >
                             -
                           </button>
                         )}
@@ -3552,10 +3904,11 @@ const UpdateQcModal = ({
                 <textarea
                   className="form-control"
                   name="remarks"
-                  value={form.remarks}
-                  onChange={handleChange}
-                  rows="3"
-                />
+	                  value={form.remarks}
+	                  onChange={handleChange}
+	                  rows="3"
+	                  disabled={saving || qcBarcodeValidationLocked}
+	                />
               </div>
             </div>
 
@@ -3575,7 +3928,7 @@ const UpdateQcModal = ({
               type="button"
               className="btn btn-primary"
               onClick={handleSubmit}
-              disabled={saving || isQcUpdateBlockedByMissingRequest}
+	              disabled={saving || isQcUpdateBlockedByMissingRequest || qcBarcodeValidationLocked}
             >
               {saving ? "Updating..." : "Update"}
             </button>

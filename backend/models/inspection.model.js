@@ -218,3 +218,4 @@ InspectionSchema.index({ inspection_date: -1 });
 InspectionSchema.index({ inspector: 1, inspection_date: -1 });
 
 module.exports = mongoose.model("inspections", InspectionSchema);
+

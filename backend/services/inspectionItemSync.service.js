@@ -9,6 +9,9 @@ const {
   normalizeBoxSizes,
   normalizeItemSizes,
 } = require("../helpers/inspectionSizeSnapshot");
+const {
+  cleanupLegacyItemSizeFields,
+} = require("../helpers/itemLegacySizeCleanup");
 
 const normalizeText = (value) => String(value ?? "").trim();
 
@@ -48,21 +51,6 @@ const pickLatestInspectionRecord = (records = []) =>
   [...(Array.isArray(records) ? records : [])].sort(
     (left, right) => getInspectionSortTime(right) - getInspectionSortTime(left),
   )[0] || null;
-
-const sumEntries = (entries = [], key = "") =>
-  (Array.isArray(entries) ? entries : []).reduce(
-    (sum, entry) => sum + toNumber(entry?.[key], 0),
-    0,
-  );
-
-const buildInspectedWeightFromEntries = (itemSizes = [], boxSizes = []) => ({
-  top_net: toNumber(itemSizes?.[0]?.net_weight, 0),
-  top_gross: toNumber(boxSizes?.[0]?.gross_weight, 0),
-  bottom_net: toNumber(itemSizes?.[1]?.net_weight, 0),
-  bottom_gross: toNumber(boxSizes?.[1]?.gross_weight, 0),
-  total_net: sumEntries(itemSizes, "net_weight"),
-  total_gross: sumEntries(boxSizes, "gross_weight"),
-});
 
 const buildInspectedCbmSnapshot = ({
   itemSizes = [],
@@ -116,7 +104,6 @@ const applyLatestInspectionToItem = ({
     rawBoxMode,
   );
   const boxMode = detectBoxPackagingMode(rawBoxMode, boxSizes);
-  const inspectedWeight = buildInspectedWeightFromEntries(itemSizes, boxSizes);
   const inspectedCbm = buildInspectedCbmSnapshot({
     itemSizes,
     boxSizes,
@@ -135,7 +122,10 @@ const applyLatestInspectionToItem = ({
   setIfChanged("inspected_item_sizes", itemSizes);
   setIfChanged("inspected_box_sizes", boxSizes);
   setIfChanged("inspected_box_mode", boxMode);
-  setIfChanged("inspected_weight", inspectedWeight);
+  const cleanupResult = cleanupLegacyItemSizeFields(itemDoc, {
+    groups: ["inspected_item", "inspected_box"],
+  });
+  changed = cleanupResult.changed || changed;
   setIfChanged(
     "kd",
     Boolean(

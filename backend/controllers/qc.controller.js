@@ -50,6 +50,9 @@ const {
   buildInspectionSizeSnapshot,
 } = require("../helpers/inspectionSizeSnapshot");
 const {
+  cleanupLegacyItemSizeFields,
+} = require("../helpers/itemLegacySizeCleanup");
+const {
   deriveGroupedOrderStatus,
   deriveOrderProgress,
   deriveOrderStatus,
@@ -190,6 +193,37 @@ const normalizeComparableBarcode = (value) => {
 
   const withoutLeadingZeroes = normalized.replace(/^0+/, "");
   return withoutLeadingZeroes || "0";
+};
+const QC_BARCODE_VALIDATION_TYPES = Object.freeze({
+  individual: {
+    label: "individual",
+    requirements: [
+      {
+        label: "individual",
+        pisKey: "pis_barcode",
+        scannedField: "master",
+      },
+    ],
+  },
+  inner_master: {
+    label: "inner + master",
+    requirements: [
+      {
+        label: "master",
+        pisKey: "pis_master_barcode",
+        scannedField: "master",
+      },
+      {
+        label: "inner",
+        pisKey: "pis_inner_barcode",
+        scannedField: "inner",
+      },
+    ],
+  },
+});
+const resolveQcBarcodeValidationType = (value) => {
+  const normalized = normalizeText(value).toLowerCase();
+  return QC_BARCODE_VALIDATION_TYPES[normalized] ? normalized : "";
 };
 const getQcInspectionRecordCount = (qc = {}) =>
   Array.isArray(qc?.inspection_record) ? qc.inspection_record.length : 0;
@@ -4341,6 +4375,8 @@ exports.updateQC = async (req, res) => {
       inner_barcode,
       barcode_scanned,
       inner_barcode_scanned,
+      barcode_validation_type,
+      barcode_validated,
       packed_size,
       finishing,
       branding,
@@ -4414,6 +4450,9 @@ exports.updateQC = async (req, res) => {
     const innerBarcodeScannedByQcUser =
       inner_barcode_scanned === true ||
       String(inner_barcode_scanned || "").trim().toLowerCase() === "true";
+    const barcodeValidatedByQcUser =
+      barcode_validated === true ||
+      String(barcode_validated || "").trim().toLowerCase() === "true";
 
     const requestedInspectorId =
       inspector !== undefined &&
@@ -5110,12 +5149,6 @@ exports.updateQC = async (req, res) => {
     const isBarcodeExemptedItem =
       itemDocForBarcodeRequirement?.barcode_exempted === true;
 
-    if (isQcUser && !isBarcodeExemptedItem && resolvedMasterBarcode <= 0) {
-      return res.status(400).json({
-        message: "QC users must scan the master barcode before updating this QC record.",
-      });
-    }
-
     if (isQcUser && !isBarcodeExemptedItem) {
       if (!itemDocForBarcodeRequirement) {
         return res.status(400).json({
@@ -5123,22 +5156,62 @@ exports.updateQC = async (req, res) => {
         });
       }
 
-      const pisMasterBarcode = normalizeComparableBarcode(
-        itemDocForBarcodeRequirement?.pis_master_barcode ||
-          itemDocForBarcodeRequirement?.pis_barcode,
-      );
-      const scannedMasterBarcode = normalizeComparableBarcode(resolvedMasterBarcode);
-
-      if (!pisMasterBarcode) {
+      const selectedBarcodeValidationType =
+        resolveQcBarcodeValidationType(barcode_validation_type);
+      if (!selectedBarcodeValidationType) {
         return res.status(400).json({
-          message: "PIS master barcode is required before QC can update this record.",
+          message: "Select and validate a barcode type before updating this QC record.",
         });
       }
 
-      if (scannedMasterBarcode !== pisMasterBarcode) {
-        return res.status(400).json({
-          message: "Scanned master barcode does not match the PIS master barcode.",
+      const barcodeValidationConfig =
+        QC_BARCODE_VALIDATION_TYPES[selectedBarcodeValidationType];
+      const typeLabel = barcodeValidationConfig.label;
+
+      if (!barcodeValidatedByQcUser) {
+        return res.status(403).json({
+          message: `QC users must scan and validate the ${typeLabel} barcode before updating this QC record.`,
         });
+      }
+
+      for (const requirement of barcodeValidationConfig.requirements) {
+        const pisBarcode = normalizeComparableBarcode(
+          itemDocForBarcodeRequirement?.[requirement.pisKey],
+        );
+        const scannedBarcode = normalizeComparableBarcode(
+          requirement.scannedField === "inner"
+            ? resolvedInnerBarcode
+            : resolvedMasterBarcode,
+        );
+        const scannedByQcUser =
+          requirement.scannedField === "inner"
+            ? innerBarcodeScannedByQcUser
+            : barcodeScannedByQcUser;
+        const requirementLabel = requirement.label;
+
+        if (!scannedByQcUser) {
+          return res.status(403).json({
+            message: `QC users must scan and validate the ${requirementLabel} barcode before updating this QC record.`,
+          });
+        }
+
+        if (!scannedBarcode) {
+          return res.status(400).json({
+            message: `QC users must scan the ${requirementLabel} barcode before updating this QC record.`,
+          });
+        }
+
+        if (!pisBarcode) {
+          return res.status(400).json({
+            message: `PIS ${requirementLabel} barcode is required before QC can update this record.`,
+          });
+        }
+
+        if (scannedBarcode !== pisBarcode) {
+          return res.status(400).json({
+            message: `Scanned ${requirementLabel} barcode does not match the PIS ${requirementLabel} barcode.`,
+          });
+        }
       }
     }
 
@@ -5876,6 +5949,16 @@ exports.updateQC = async (req, res) => {
           itemDoc.markModified("inspected_weight");
           hasItemDocChanges = true;
         }
+      }
+
+      const cleanupGroups = [];
+      if (parsedInspectedItemSizeEntries.hasInput) cleanupGroups.push("inspected_item");
+      if (parsedInspectedBoxSizeEntries.hasInput) cleanupGroups.push("inspected_box");
+      if (cleanupGroups.length > 0) {
+        const cleanupResult = cleanupLegacyItemSizeFields(itemDoc, {
+          groups: cleanupGroups,
+        });
+        hasItemDocChanges = cleanupResult.changed || hasItemDocChanges;
       }
 
       if (hasInspectedSizeEntryUpdate || hasInspectedBoxModeUpdate) {

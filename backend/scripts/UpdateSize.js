@@ -4,6 +4,9 @@ dns.setServers(["8.8.8.8", "1.1.1.1"]);
 const Item = require("../models/item.model"); // adjust path
 require("dotenv").config();
 const mongoose = require("mongoose");
+const {
+  cleanupLegacyItemSizeFields,
+} = require("../helpers/itemLegacySizeCleanup");
 
 function cleanString(value) {
   return value == null ? "" : String(value).trim();
@@ -101,30 +104,6 @@ function buildSizeEntries({ singleEntry, topEntry, bottomEntry, dimensionKey, we
   }
 
   return entries.slice(0, 4);
-}
-
-function buildPisWeight(itemSizeEntries, boxSizeEntries) {
-  const itemTop = itemSizeEntries.find((entry) => entry.remark === "top");
-  const itemBottom = itemSizeEntries.find((entry) => entry.remark === "base");
-  const boxTop = boxSizeEntries.find((entry) => entry.remark === "top");
-  const boxBottom = boxSizeEntries.find((entry) => entry.remark === "base");
-  const totalNet = itemSizeEntries.reduce(
-    (sum, entry) => sum + (Number(entry.net_weight) || 0),
-    0,
-  );
-  const totalGross = boxSizeEntries.reduce(
-    (sum, entry) => sum + (Number(entry.gross_weight) || 0),
-    0,
-  );
-
-  return {
-    top_net: toFixedWeight(itemTop?.net_weight || 0),
-    top_gross: toFixedWeight(boxTop?.gross_weight || 0),
-    bottom_net: toFixedWeight(itemBottom?.net_weight || 0),
-    bottom_gross: toFixedWeight(boxBottom?.gross_weight || 0),
-    total_net: toFixedWeight(totalNet),
-    total_gross: toFixedWeight(totalGross),
-  };
 }
 
 function parseFlag(value) {
@@ -235,31 +214,28 @@ async function run() {
       dimensionKey: "box",
       weightKey: "gross_weight",
     });
-    const pisWeight = buildPisWeight(itemSizeEntries, boxSizeEntries);
     const cbmSource = boxSizeEntries.length > 0 ? boxSizeEntries : itemSizeEntries;
     const totalPiCbm = Number(
       cbmSource.reduce((sum, entry) => sum + calculateCbmFromLbh(entry), 0).toFixed(6),
     );
 
-    const update = {
-      $set: {
-        brand_name: mainEntry?.brandName || "",
-        pis_item_sizes: itemSizeEntries,
-        pis_box_sizes: boxSizeEntries,
-        pis_box_mode: "individual",
-        pis_weight: pisWeight,
-        "cbm.top": cbmSource[0] ? String(calculateCbmFromLbh(cbmSource[0])) : "0",
-        "cbm.bottom": cbmSource[1] ? String(calculateCbmFromLbh(cbmSource[1])) : "0",
-        "cbm.total": String(totalPiCbm),
-        "cbm.calculated_pis_total": String(totalPiCbm),
-      },
-    };
+    const itemDoc = await Item.findOne({ code });
 
-    const result = await Item.updateOne({ code }, update);
-
-    if (result.matchedCount > 0) {
+    if (itemDoc) {
       matched++;
-      if (result.modifiedCount > 0) updated++;
+      itemDoc.set("brand_name", mainEntry?.brandName || "");
+      itemDoc.set("pis_item_sizes", itemSizeEntries);
+      itemDoc.set("pis_box_sizes", boxSizeEntries);
+      itemDoc.set("pis_box_mode", "individual");
+      itemDoc.set("cbm.top", cbmSource[0] ? String(calculateCbmFromLbh(cbmSource[0])) : "0");
+      itemDoc.set("cbm.bottom", cbmSource[1] ? String(calculateCbmFromLbh(cbmSource[1])) : "0");
+      itemDoc.set("cbm.total", String(totalPiCbm));
+      itemDoc.set("cbm.calculated_pis_total", String(totalPiCbm));
+      cleanupLegacyItemSizeFields(itemDoc, { groups: ["pis_item", "pis_box"] });
+      if (itemDoc.isModified()) {
+        await itemDoc.save();
+        updated++;
+      }
     } else {
       notFound++;
       console.log(`Item not found for code: ${code}`);
