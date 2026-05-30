@@ -455,11 +455,7 @@ const QcDetails = () => {
       isLabelExemptAlignedInspectionEditor,
     ],
   );
-  const showInspectionActions =
-    canTransferInspectionRecords ||
-    canDeleteInspectionRecords ||
-    isOnlyAdmin ||
-    isCurrentUserLabelExempt;
+  const showInspectionActions = true;
   const isQcAlignedRecord = !isQcUser || (
     Boolean(currentUserId) &&
     Boolean(alignedInspectorId) &&
@@ -2124,11 +2120,27 @@ const QcDetails = () => {
                           {showInspectionActions && (
                             <td>
                               {row.rowType === "Inspection" && row.recordId ? (
-	                                <div className="d-flex flex-wrap gap-2">
+	                                <div className="qc-inspection-actions">
+                                    <button
+                                      type="button"
+                                      className="btn btn-sm qc-inspection-action-btn qc-inspection-action-btn--report"
+                                      onClick={() =>
+                                        navigate(
+                                          `/qc/${encodeURIComponent(id)}/inspection-report?inspection_record_id=${encodeURIComponent(row.recordId)}`,
+                                          {
+                                            state: {
+                                              fromQcDetails: location.pathname + location.search,
+                                            },
+                                          },
+                                        )
+                                      }
+                                    >
+                                      View Detailed Report
+                                    </button>
 	                                  {canUpdateInspectionRecord(row.inspectionRecord) && (
 	                                    <button
 	                                      type="button"
-	                                      className="btn btn-outline-secondary btn-sm"
+	                                      className="btn btn-sm qc-inspection-action-btn qc-inspection-action-btn--neutral"
 	                                      onClick={() => setInspectionRecordToUpdate(row.inspectionRecord)}
 	                                    >
 	                                      Update
@@ -2137,7 +2149,7 @@ const QcDetails = () => {
 	                                  {canTransferInspectionRecords && (
 	                                    <button
                                       type="button"
-                                      className="btn btn-outline-primary btn-sm"
+                                      className="btn btn-sm qc-inspection-action-btn qc-inspection-action-btn--transfer"
                                       disabled={Number(row?.passedQty || 0) <= 0}
                                       title={
                                         Number(row?.passedQty || 0) <= 0
@@ -2152,7 +2164,7 @@ const QcDetails = () => {
                                   {canDeleteInspectionRecords && (
                                     <button
                                       type="button"
-                                      className="btn btn-outline-danger btn-sm"
+                                      className="btn btn-sm qc-inspection-action-btn qc-inspection-action-btn--danger"
                                       disabled={deletingInspectionId === String(row.recordId)}
                                       onClick={() => handleDeleteInspectionRecord(row.recordId)}
                                     >

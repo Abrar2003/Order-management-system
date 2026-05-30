@@ -3895,6 +3895,72 @@ small,
   white-space: normal;
 }
 
+.qc-inspection-actions {
+  display: grid;
+  grid-template-columns: minmax(8.5rem, 1fr);
+  gap: 0.45rem;
+  align-items: stretch;
+  min-width: 8.5rem;
+}
+
+.qc-inspection-action-btn {
+  --qc-action-border: var(--om-color-border);
+  --qc-action-bg: var(--om-color-surface);
+  --qc-action-color: var(--om-color-text);
+  border: 1px solid var(--qc-action-border);
+  border-radius: 999px;
+  background: var(--qc-action-bg);
+  color: var(--qc-action-color);
+  box-shadow: 0 1px 2px rgba(31, 41, 55, 0.06);
+  font-weight: 600;
+  line-height: 1.15;
+  min-height: 2rem;
+  padding: 0.35rem 0.8rem;
+  white-space: normal;
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    color 0.16s ease,
+    transform 0.16s ease;
+}
+
+.qc-inspection-action-btn:hover:not(:disabled) {
+  box-shadow: 0 7px 18px rgba(31, 41, 55, 0.14);
+  transform: translateY(-1px);
+}
+
+.qc-inspection-action-btn--report {
+  --qc-action-border: #2f6fed;
+  --qc-action-bg: #2f6fed;
+  --qc-action-color: #fff;
+  min-height: 2.35rem;
+}
+
+.qc-inspection-action-btn--neutral {
+  --qc-action-border: #d6c7b8;
+  --qc-action-bg: #fffaf4;
+  --qc-action-color: #6b4b2d;
+}
+
+.qc-inspection-action-btn--transfer {
+  --qc-action-border: #b7d5c2;
+  --qc-action-bg: #f3fbf6;
+  --qc-action-color: #23633d;
+}
+
+.qc-inspection-action-btn--danger {
+  --qc-action-border: #ef9a9a;
+  --qc-action-bg: #fff6f6;
+  --qc-action-color: #c62828;
+}
+
+.qc-inspection-action-btn:disabled {
+  opacity: 0.55;
+  box-shadow: none;
+  transform: none;
+}
+
 .qc-details-file-actions {
   min-width: 0;
 }
@@ -5100,9 +5166,13 @@ small,
     gap: 0.4rem !important;
   }
 
-  .qc-details-record-table td:last-child .btn {
+  .qc-details-record-table td:last-child .btn:not(.qc-inspection-action-btn) {
     width: 100%;
     white-space: nowrap;
+  }
+
+  .qc-inspection-actions {
+    min-width: 8rem;
   }
 
   .qc-details-file-actions .btn {
@@ -6698,10 +6768,19 @@ button.om-item-order-presence-label {
   }
 
   .qc-list-row-actions .btn,
-  .qc-details-record-table td .btn,
+  .qc-details-record-table td .btn:not(.qc-inspection-action-btn),
   .qc-details-action-row .btn {
     width: 100%;
     white-space: normal;
+  }
+
+  .qc-inspection-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .qc-inspection-action-btn--report {
+    grid-column: 1 / -1;
   }
 }
 
@@ -7308,5 +7387,101 @@ button.om-item-order-presence-label {
 @media (max-width: 991.98px) {
   .pimc-inspection-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Final QC record-table guardrails: keep action buttons inside their cell. */
+.qc-details-table-wrap {
+  width: 100%;
+  max-width: 100%;
+}
+
+.qc-inspection-actions,
+.qc-inspection-action-btn {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.qc-inspection-action-btn {
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 992px) {
+  .qc-details-table-wrap {
+    overflow-x: hidden;
+    overflow-y: hidden;
+  }
+
+  .qc-details-record-table {
+    width: 100%;
+    min-width: 0;
+    table-layout: fixed;
+  }
+
+  .qc-details-record-table th:nth-child(1),
+  .qc-details-record-table td:nth-child(1),
+  .qc-details-record-table th:nth-child(2),
+  .qc-details-record-table td:nth-child(2) {
+    width: 7.25rem;
+  }
+
+  .qc-details-record-table th:nth-child(3),
+  .qc-details-record-table td:nth-child(3) {
+    width: 8.5rem;
+  }
+
+  .qc-details-record-table th:nth-child(10),
+  .qc-details-record-table td:nth-child(10) {
+    width: 8rem;
+  }
+
+  .qc-details-record-table th:nth-child(11),
+  .qc-details-record-table td:nth-child(11) {
+    width: 10.5rem;
+    min-width: 10.5rem;
+  }
+
+  .qc-details-record-table td:nth-child(11) {
+    padding-inline: 0.65rem;
+  }
+
+  .qc-inspection-actions {
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: stretch;
+  }
+
+  .qc-inspection-action-btn {
+    width: 100%;
+    padding-inline: 0.65rem;
+    font-size: 0.78rem;
+  }
+}
+
+@media (max-width: 991.98px) {
+  .qc-details-record-table {
+    min-width: 0 !important;
+  }
+
+  .qc-details-record-table td:last-child {
+    grid-template-columns: minmax(7rem, 38%) minmax(0, 1fr);
+  }
+
+  .qc-inspection-actions {
+    width: 100%;
+  }
+}
+
+@media (max-width: 575.98px) {
+  .qc-details-record-table td:last-child {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .qc-details-record-table td:last-child::before {
+    margin-bottom: 0.35rem;
+  }
+
+  .qc-inspection-actions {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

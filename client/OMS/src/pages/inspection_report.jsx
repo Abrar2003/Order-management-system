@@ -748,6 +748,13 @@ const InspectionReport = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const reportRef = useRef(null);
+  const searchParams = useMemo(
+    () => new URLSearchParams(location.search || ""),
+    [location.search],
+  );
+  const selectedInspectionRecordId = String(
+    searchParams.get("inspection_record_id") || "",
+  ).trim();
 
   const [qc, setQc] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -766,6 +773,35 @@ const InspectionReport = () => {
   const [remarkSortBy, setRemarkSortBy] = useState("inspectionDate");
   const [remarkSortOrder, setRemarkSortOrder] = useState("desc");
   const [previewFile, setPreviewFile] = useState(null);
+
+  const selectedInspectionRecord = useMemo(() => {
+    if (!selectedInspectionRecordId) return null;
+    const sourceRows = Array.isArray(qc?.inspection_record) ? qc.inspection_record : [];
+    return sourceRows.find(
+      (record) => String(record?._id || "").trim() === selectedInspectionRecordId,
+    ) || null;
+  }, [qc?.inspection_record, selectedInspectionRecordId]);
+  const selectedInspectionRecordMissing = Boolean(
+    selectedInspectionRecordId && qc && !selectedInspectionRecord,
+  );
+  const isSingleInspectionReport = Boolean(selectedInspectionRecord);
+  const reportInspectionRecords = useMemo(() => {
+    if (selectedInspectionRecord) return [selectedInspectionRecord];
+    return Array.isArray(qc?.inspection_record) ? qc.inspection_record : [];
+  }, [qc?.inspection_record, selectedInspectionRecord]);
+  const reportContextLabel = isSingleInspectionReport
+    ? "Inspection Record Report"
+    : "Inspection Report";
+  const reportContextDetails = selectedInspectionRecord
+    ? [
+        formatDateDDMMYYYY(
+          selectedInspectionRecord?.inspection_date || selectedInspectionRecord?.createdAt,
+        ),
+        toDisplayValue(selectedInspectionRecord?.inspector?.name, ""),
+      ]
+        .filter((value) => value && value !== "N/A")
+        .join(" | ")
+    : "";
 
   const backTarget = useMemo(() => {
     const fromPreviousPage = String(location.state?.fromPreviousPage || "").trim();
@@ -833,7 +869,7 @@ const InspectionReport = () => {
   }, []);
 
   const inspectionRows = useMemo(() => {
-    const sourceRows = Array.isArray(qc?.inspection_record) ? qc.inspection_record : [];
+    const sourceRows = reportInspectionRecords;
 
     return sourceRows
       .map((record, index) => ({
@@ -850,10 +886,10 @@ const InspectionReport = () => {
         sortTime: getInspectionRecordSortTime(record),
       }))
       .sort((a, b) => (b.sortTime || 0) - (a.sortTime || 0));
-  }, [qc?.inspection_record, qc?.request_date]);
+  }, [qc?.request_date, reportInspectionRecords]);
 
   const latestInspectionRecord = useMemo(() => {
-    const sourceRows = Array.isArray(qc?.inspection_record) ? qc.inspection_record : [];
+    const sourceRows = reportInspectionRecords;
 
     return sourceRows.reduce((latest, record) => {
       if (!latest) return record;
@@ -868,7 +904,7 @@ const InspectionReport = () => {
       const recordCreatedTime = toTimestamp(record?.createdAt);
       return recordCreatedTime > latestCreatedTime ? record : latest;
     }, null);
-  }, [qc?.inspection_record]);
+  }, [reportInspectionRecords]);
 
   const inspectionRemarkRows = useMemo(
     () =>
@@ -1057,7 +1093,7 @@ const InspectionReport = () => {
   const labelRanges = useMemo(() => {
     const ranges = [];
     const seen = new Set();
-    const inspectionRecords = Array.isArray(qc?.inspection_record) ? qc.inspection_record : [];
+    const inspectionRecords = reportInspectionRecords;
 
     inspectionRecords.forEach((record) => {
       const recordRanges = Array.isArray(record?.label_ranges) ? record.label_ranges : [];
@@ -1078,7 +1114,7 @@ const InspectionReport = () => {
       if (a.start !== b.start) return a.start - b.start;
       return a.end - b.end;
     });
-  }, [qc?.inspection_record]);
+  }, [reportInspectionRecords]);
 
   const itemMasterSummary = useMemo(() => {
     const itemMaster = qc?.item_master || {};
@@ -1751,14 +1787,25 @@ const InspectionReport = () => {
 
       const safePo = toFilenameSegment(qc?.order?.order_id, id || "po");
       const safeItemCode = toFilenameSegment(qc?.item?.item_code, "item");
-      pdf.save(`inspection_report_${safePo}_${safeItemCode}.pdf`);
+      const safeInspectionRecord = selectedInspectionRecordId
+        ? `_${toFilenameSegment(selectedInspectionRecordId, "inspection")}`
+        : "";
+      pdf.save(`inspection_report_${safePo}_${safeItemCode}${safeInspectionRecord}.pdf`);
     } catch (error) {
       console.error("Inspection report export failed:", error);
       alert("Failed to export inspection report PDF.");
     } finally {
       setExportingPdf(false);
     }
-  }, [brandLogoLoading, exportingPdf, finishImageLoading, id, productImageLoading, qc]);
+  }, [
+    brandLogoLoading,
+    exportingPdf,
+    finishImageLoading,
+    id,
+    productImageLoading,
+    qc,
+    selectedInspectionRecordId,
+  ]);
 
   useEffect(() => {
     fetchQcDetails();
@@ -1794,7 +1841,12 @@ const InspectionReport = () => {
           >
             Back
           </button>
-          <h2 className="h4 mb-0">Inspection Report</h2>
+          <div className="text-center">
+            <h2 className="h4 mb-0">{reportContextLabel}</h2>
+            {reportContextDetails && (
+              <div className="small text-secondary">{reportContextDetails}</div>
+            )}
+          </div>
           <button
             type="button"
             className="btn btn-primary btn-sm"
@@ -1814,11 +1866,17 @@ const InspectionReport = () => {
           </button>
         </div>
 
+        {selectedInspectionRecordMissing && (
+          <div className="alert alert-warning py-2 mb-3">
+            Selected inspection record was not found. Showing the full inspection report.
+          </div>
+        )}
+
         <div className="card om-card inspection-report-card" ref={reportRef}>
           <div className="card-body d-grid gap-4">
             <section>
                 <div className="d-flex justify-center align-center text-center mb-4">
-                     <h3 className="h3 m-auto">QC Report</h3>
+                     <h3 className="h3 m-auto">{isSingleInspectionReport ? "QC Inspection Record Report" : "QC Report"}</h3>
                 </div>
              
               <div className="inspection-report-summary-block">
