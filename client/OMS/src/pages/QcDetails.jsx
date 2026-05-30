@@ -9,6 +9,7 @@ import EditInspectionRecordsModal from "../components/EditInspectionRecordsModal
 import GoodsNotReadyModal from "../components/GoodsNotReadyModal";
 import RejectAllModal from "../components/RejectAllModal";
 import FilePreviewModal from "../components/FilePreviewModal";
+import QcItemComplaintsSection from "../components/complaints/QcItemComplaintsSection";
 import SortHeaderButton from "../components/SortHeaderButton";
 import TransferQcRequestModal from "../components/TransferQcRequestModal";
 import TransferInspectionModal from "../components/TransferInspectionModal";
@@ -2001,6 +2002,11 @@ const QcDetails = () => {
                 </div>
               )}
             </section>
+
+            <QcItemComplaintsSection
+              enabled={!isViewOnly && (isAdmin || isQcUser)}
+              itemCode={qc?.item?.item_code}
+            />
 
             <section>
               <div className="d-flex justify-content-between align-items-center mb-3">

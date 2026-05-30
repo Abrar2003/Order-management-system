@@ -3,24 +3,19 @@ import { Navigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import AddComplaintModal from "../components/complaints/AddComplaintModal";
 import AddCommentModal from "../components/complaints/AddCommentModal";
-import ChangeStatusModal from "../components/complaints/ChangeStatusModal";
 import ComplaintAccordionDetails from "../components/complaints/ComplaintAccordionDetails";
 import UploadComplaintFilesModal from "../components/complaints/UploadComplaintFilesModal";
-import {
-  COMPLAINT_STATUS_OPTIONS,
-  formatComplaintDateTime,
-  getComplaintStatusBadgeClass,
-  getComplaintStatusLabel,
-} from "../components/complaints/complaintConstants";
+import { formatComplaintDateTime } from "../components/complaints/complaintConstants";
 import { usePermissions } from "../auth/PermissionContext";
 import { isManagerLikeRole, isStrictAdminRole } from "../auth/permissions";
 import {
   addComplaintComment,
   archiveComplaint,
   createComplaint,
+  createComplaintCategory,
+  getComplaintCategories,
   getComplaints,
   unarchiveComplaint,
-  updateComplaintStatus,
   uploadComplaintFiles,
 } from "../services/complaints.service";
 import api from "../api/axios";
@@ -30,7 +25,7 @@ const DEFAULT_FILTERS = {
   search: "",
   brand: "",
   vendor: "",
-  status: "all",
+  category: "",
   archived: "false",
   date_from: "",
   date_to: "",
@@ -68,11 +63,13 @@ const Complaints = () => {
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0, totalPages: 1 });
   const [expandedId, setExpandedId] = useState("");
-  const [actionMenuId, setActionMenuId] = useState("");
+  const [actionMenu, setActionMenu] = useState({ id: "", top: 0, left: 0 });
   const [modal, setModal] = useState({ type: "", complaint: null });
   const [brandOptions, setBrandOptions] = useState([]);
   const [vendorOptions, setVendorOptions] = useState([]);
+  const [categoryOptions, setCategoryOptions] = useState([]);
   const [loadingOptions, setLoadingOptions] = useState(false);
+  const [creatingCategory, setCreatingCategory] = useState(false);
 
   const showToast = useCallback((message, tone = "success") => {
     setToast({ message, tone });
@@ -110,14 +107,22 @@ const Complaints = () => {
     const loadOptions = async () => {
       try {
         setLoadingOptions(true);
-        const response = await api.get("/orders/brands-and-vendors");
+        const [brandVendorResponse, categoryResponse] = await Promise.all([
+          api.get("/orders/brands-and-vendors"),
+          getComplaintCategories(),
+        ]);
         if (cancelled) return;
-        setBrandOptions(normalizeTextOptions(response?.data?.brands));
-        setVendorOptions(normalizeTextOptions(response?.data?.vendors));
+        setBrandOptions(normalizeTextOptions(brandVendorResponse?.data?.brands));
+        setVendorOptions(normalizeTextOptions(brandVendorResponse?.data?.vendors));
+        setCategoryOptions(normalizeTextOptions(
+          (Array.isArray(categoryResponse?.data?.data) ? categoryResponse.data.data : [])
+            .map((category) => category?.name),
+        ));
       } catch {
         if (!cancelled) {
           setBrandOptions([]);
           setVendorOptions([]);
+          setCategoryOptions([]);
         }
       } finally {
         if (!cancelled) setLoadingOptions(false);
@@ -148,6 +153,7 @@ const Complaints = () => {
   };
 
   const closeModal = () => setModal({ type: "", complaint: null });
+  const closeActionMenu = () => setActionMenu({ id: "", top: 0, left: 0 });
 
   const replaceRow = (updatedComplaint) => {
     setRows((prev) =>
@@ -170,6 +176,21 @@ const Complaints = () => {
     }
   };
 
+  const handleCreateCategory = async (categoryName) => {
+    try {
+      setCreatingCategory(true);
+      const response = await createComplaintCategory({ name: categoryName });
+      const savedName = String(response?.data?.data?.name || categoryName || "").trim();
+      if (savedName) {
+        setCategoryOptions((prev) => normalizeTextOptions([...prev, savedName]));
+        showToast("Complaint category saved.");
+      }
+      return savedName;
+    } finally {
+      setCreatingCategory(false);
+    }
+  };
+
   const handleAddComment = async (payload) => {
     try {
       setSaving(true);
@@ -179,20 +200,6 @@ const Complaints = () => {
       showToast("Comment added successfully.");
     } catch (commentError) {
       showToast(commentError?.response?.data?.message || "Failed to add comment.", "danger");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleChangeStatus = async (payload) => {
-    try {
-      setSaving(true);
-      const response = await updateComplaintStatus(modal.complaint._id, payload);
-      replaceRow(response?.data?.data);
-      closeModal();
-      showToast("Complaint status updated.");
-    } catch (statusError) {
-      showToast(statusError?.response?.data?.message || "Failed to update status.", "danger");
     } finally {
       setSaving(false);
     }
@@ -227,11 +234,49 @@ const Complaints = () => {
       showToast(complaint.archived ? "Complaint restored." : "Complaint archived.");
       await loadComplaints();
     } catch (archiveError) {
-      showToast(archiveError?.response?.data?.message || "Failed to update archive status.", "danger");
+      showToast(archiveError?.response?.data?.message || "Failed to update archive state.", "danger");
     }
   };
 
   const tableRows = useMemo(() => rows, [rows]);
+  const activeActionComplaint = useMemo(
+    () => tableRows.find((complaint) => complaint._id === actionMenu.id) || null,
+    [actionMenu.id, tableRows],
+  );
+
+  useEffect(() => {
+    if (!actionMenu.id) return undefined;
+
+    const handleViewportChange = () => closeActionMenu();
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("scroll", handleViewportChange, true);
+    return () => {
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("scroll", handleViewportChange, true);
+    };
+  }, [actionMenu.id]);
+
+  const handleActionButtonClick = (event, complaintId) => {
+    if (actionMenu.id === complaintId) {
+      closeActionMenu();
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const menuWidth = 224;
+    const menuHeight = 252;
+    const viewportPadding = 12;
+    const left = Math.min(
+      Math.max(viewportPadding, rect.right - menuWidth),
+      Math.max(viewportPadding, window.innerWidth - menuWidth - viewportPadding),
+    );
+    const opensDown = rect.bottom + menuHeight + viewportPadding <= window.innerHeight;
+    const top = opensDown
+      ? rect.bottom + 8
+      : Math.max(viewportPadding, rect.top - menuHeight - 8);
+
+    setActionMenu({ id: complaintId, top, left });
+  };
 
   if (!canRead) {
     return <Navigate to="/" replace />;
@@ -266,8 +311,8 @@ const Complaints = () => {
         </div>
 
         <div className="card om-card mb-3">
-          <form className="card-body row g-3 align-items-end" onSubmit={applyFilters}>
-            <div className="col-lg-3 col-md-6">
+          <form className="card-body complaints-filter-form" onSubmit={applyFilters}>
+            <div className="complaints-filter-field complaints-filter-field--wide">
               <label className="form-label">Search</label>
               <input
                 name="search"
@@ -277,42 +322,48 @@ const Complaints = () => {
                 placeholder="Complaint no, item, brand, vendor, PO"
               />
             </div>
-            <div className="col-lg-2 col-md-6">
+            <div className="complaints-filter-field">
               <label className="form-label">Brand</label>
               <input name="brand" className="form-control" value={draftFilters.brand} onChange={handleDraftChange} />
             </div>
-            <div className="col-lg-2 col-md-6">
+            <div className="complaints-filter-field">
               <label className="form-label">Vendor</label>
               <input name="vendor" className="form-control" value={draftFilters.vendor} onChange={handleDraftChange} />
             </div>
-            <div className="col-lg-2 col-md-6">
-              <label className="form-label">Status</label>
-              <select name="status" className="form-select" value={draftFilters.status} onChange={handleDraftChange}>
-                <option value="all">All</option>
-                {COMPLAINT_STATUS_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
+            <div className="complaints-filter-field">
+              <label className="form-label">Category</label>
+              <input
+                name="category"
+                className="form-control"
+                list="complaint-filter-category-options"
+                value={draftFilters.category}
+                onChange={handleDraftChange}
+              />
+              <datalist id="complaint-filter-category-options">
+                {categoryOptions.map((category) => (
+                  <option key={category} value={category} />
                 ))}
-              </select>
+              </datalist>
             </div>
-            <div className="col-lg-1 col-md-4">
+            <div className="complaints-filter-field complaints-filter-field--compact">
               <label className="form-label">Archived</label>
               <select name="archived" className="form-select" value={draftFilters.archived} onChange={handleDraftChange}>
                 <option value="false">Active</option>
                 <option value="true">Archived</option>
               </select>
             </div>
-            <div className="col-lg-2 col-md-4">
+            <div className="complaints-filter-field">
               <label className="form-label">From</label>
               <input type="date" name="date_from" className="form-control" value={draftFilters.date_from} onChange={handleDraftChange} />
             </div>
-            <div className="col-lg-2 col-md-4">
+            <div className="complaints-filter-field">
               <label className="form-label">To</label>
               <input type="date" name="date_to" className="form-control" value={draftFilters.date_to} onChange={handleDraftChange} />
             </div>
-            <div className="col-md-auto d-grid">
+            <div className="complaints-filter-action">
               <button type="submit" className="btn btn-primary">Apply</button>
             </div>
-            <div className="col-md-auto d-grid">
+            <div className="complaints-filter-action">
               <button type="button" className="btn btn-outline-secondary" onClick={resetFilters}>
                 Reset
               </button>
@@ -329,16 +380,16 @@ const Complaints = () => {
             ) : tableRows.length === 0 ? (
               <div className="text-center text-secondary py-4">No complaints found.</div>
             ) : (
-              <div className="table-responsive">
+              <div className="table-responsive complaint-table-scroll">
                 <table className="table table-striped table-hover align-middle om-table mb-0 complaints-table">
                   <thead className="table-primary">
                     <tr>
                       <th>Item Code</th>
                       <th>Brand</th>
                       <th>Vendor</th>
+                      <th>Category</th>
                       <th>Creator</th>
                       <th>First Comment</th>
-                      <th>Status</th>
                       <th>Action</th>
                     </tr>
                   </thead>
@@ -351,6 +402,7 @@ const Complaints = () => {
                           <td className="fw-semibold">{complaint.item_code || "N/A"}</td>
                           <td>{complaint.brand || "N/A"}</td>
                           <td>{complaint.vendor || "N/A"}</td>
+                          <td>{complaint.category || "N/A"}</td>
                           <td>
                             <div>{complaint.created_by?.name || "N/A"}</div>
                             <div className="small text-secondary">{formatComplaintDateTime(complaint.created_at)}</div>
@@ -359,65 +411,15 @@ const Complaints = () => {
                             {truncate(complaint.first_comment)}
                           </td>
                           <td>
-                            <span className={`badge ${getComplaintStatusBadgeClass(complaint.status)}`}>
-                              {getComplaintStatusLabel(complaint.status)}
-                            </span>
-                          </td>
-                          <td>
-                            <div className="position-relative d-inline-block">
+                            <div className="complaint-action-cell">
                               <button
                                 type="button"
-                                className="btn btn-outline-primary btn-sm"
-                                onClick={() =>
-                                  setActionMenuId((current) =>
-                                    current === complaint._id ? "" : complaint._id
-                                  )
-                                }
+                                className="btn btn-outline-primary btn-sm complaint-action-trigger"
+                                aria-expanded={actionMenu.id === complaint._id}
+                                onClick={(event) => handleActionButtonClick(event, complaint._id)}
                               >
                                 Action
                               </button>
-                              {actionMenuId === complaint._id && (
-                                <div className="complaint-action-menu shadow-sm">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setExpandedId((current) => current === complaint._id ? "" : complaint._id);
-                                      setActionMenuId("");
-                                    }}
-                                  >
-                                    View / Expand details
-                                  </button>
-                                  {canManage && (
-                                    <button type="button" onClick={() => { setModal({ type: "comment", complaint }); setActionMenuId(""); }}>
-                                      Add comment
-                                    </button>
-                                  )}
-                                  {canManage && (
-                                    <button type="button" onClick={() => { setModal({ type: "status", complaint }); setActionMenuId(""); }}>
-                                      Change status
-                                    </button>
-                                  )}
-                                  {canUpload && (
-                                    <button type="button" onClick={() => { setModal({ type: "files", complaint }); setActionMenuId(""); }}>
-                                      Upload files
-                                    </button>
-                                  )}
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setExpandedId(complaint._id);
-                                      setActionMenuId("");
-                                    }}
-                                  >
-                                    View files
-                                  </button>
-                                  {canArchive && (
-                                    <button type="button" className="text-danger" onClick={() => { handleArchive(complaint); setActionMenuId(""); }}>
-                                      {complaint.archived ? "Unarchive" : "Archive"}
-                                    </button>
-                                  )}
-                                </div>
-                              )}
                             </div>
                           </td>
                         </tr>
@@ -460,11 +462,87 @@ const Complaints = () => {
         </div>
       </div>
 
+      {activeActionComplaint && (
+        <>
+          <button
+            type="button"
+            className="complaint-action-backdrop"
+            aria-label="Close complaint actions"
+            onClick={closeActionMenu}
+          />
+          <div
+            className="complaint-action-menu shadow"
+            style={{ top: `${actionMenu.top}px`, left: `${actionMenu.left}px` }}
+          >
+            <div className="complaint-action-menu-title">
+              {activeActionComplaint.complaint_no || activeActionComplaint.item_code || "Complaint"}
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setExpandedId((current) =>
+                  current === activeActionComplaint._id ? "" : activeActionComplaint._id,
+                );
+                closeActionMenu();
+              }}
+            >
+              View details
+            </button>
+            {canManage && (
+              <button
+                type="button"
+                onClick={() => {
+                  setModal({ type: "comment", complaint: activeActionComplaint });
+                  closeActionMenu();
+                }}
+              >
+                Add comment
+              </button>
+            )}
+            {canUpload && (
+              <button
+                type="button"
+                onClick={() => {
+                  setModal({ type: "files", complaint: activeActionComplaint });
+                  closeActionMenu();
+                }}
+              >
+                Upload files
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setExpandedId(activeActionComplaint._id);
+                closeActionMenu();
+              }}
+            >
+              View files
+            </button>
+            {canArchive && (
+              <button
+                type="button"
+                className="text-danger"
+                onClick={() => {
+                  handleArchive(activeActionComplaint);
+                  closeActionMenu();
+                }}
+              >
+                {activeActionComplaint.archived ? "Unarchive" : "Archive"}
+              </button>
+            )}
+          </div>
+        </>
+      )}
+
       {modal.type === "add" && (
         <AddComplaintModal
           brandOptions={brandOptions}
+          categoryOptions={categoryOptions}
+          creatingCategory={creatingCategory}
           loadingOptions={loadingOptions}
           onClose={closeModal}
+          onCreateCategory={handleCreateCategory}
           onSubmit={handleCreateComplaint}
           saving={saving}
           vendorOptions={vendorOptions}
@@ -472,9 +550,6 @@ const Complaints = () => {
       )}
       {modal.type === "comment" && (
         <AddCommentModal complaint={modal.complaint} onClose={closeModal} onSubmit={handleAddComment} saving={saving} />
-      )}
-      {modal.type === "status" && (
-        <ChangeStatusModal complaint={modal.complaint} onClose={closeModal} onSubmit={handleChangeStatus} saving={saving} />
       )}
       {modal.type === "files" && (
         <UploadComplaintFilesModal complaint={modal.complaint} onClose={closeModal} onSubmit={handleUploadFiles} saving={saving} />

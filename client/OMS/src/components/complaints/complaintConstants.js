@@ -1,9 +1,3 @@
-export const COMPLAINT_STATUS_OPTIONS = [
-  { value: "open", label: "Open" },
-  { value: "under_process", label: "Under Process" },
-  { value: "resolved", label: "Resolved" },
-];
-
 export const COMPLAINT_FILE_ACCEPT = [
   ".pdf",
   ".xls",
@@ -20,15 +14,6 @@ export const COMPLAINT_FILE_ACCEPT = [
   ".docx",
   ".txt",
 ].join(",");
-
-export const getComplaintStatusLabel = (value) =>
-  COMPLAINT_STATUS_OPTIONS.find((option) => option.value === value)?.label || "Open";
-
-export const getComplaintStatusBadgeClass = (value) => {
-  if (value === "resolved") return "text-bg-success";
-  if (value === "under_process") return "text-bg-warning";
-  return "text-bg-primary";
-};
 
 export const formatComplaintDateTime = (value) => {
   if (!value) return "N/A";
@@ -47,4 +32,14 @@ export const getFileTypeLabel = (file = {}) => {
   const name = String(file.original_name || file.file_name || "").trim();
   const extension = name.includes(".") ? name.split(".").pop().toUpperCase() : "";
   return extension || String(file.mime_type || "File").split("/").pop().toUpperCase();
+};
+
+export const isComplaintImageFile = (file = {}) => {
+  const mimeType = String(file.mime_type || "").toLowerCase();
+  if (mimeType.startsWith("image/")) return true;
+
+  const name = String(file.original_name || file.file_name || "").toLowerCase();
+  return [".png", ".jpg", ".jpeg", ".webp", ".gif"].some((extension) =>
+    name.endsWith(extension),
+  );
 };

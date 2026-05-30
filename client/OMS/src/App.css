@@ -6874,6 +6874,37 @@ button.om-item-order-presence-label {
   vertical-align: middle;
 }
 
+.complaints-filter-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: 1rem;
+  align-items: end;
+}
+
+.complaints-filter-field {
+  min-width: 0;
+}
+
+.complaints-filter-field--wide {
+  grid-column: span 2;
+}
+
+.complaints-filter-field--compact {
+  min-width: 116px;
+}
+
+.complaints-filter-action {
+  display: grid;
+}
+
+.complaint-table-scroll {
+  overflow-x: auto;
+}
+
+.complaints-table {
+  min-width: 1040px;
+}
+
 .complaint-comment-cell {
   max-width: 360px;
   white-space: nowrap;
@@ -6885,16 +6916,43 @@ button.om-item-order-presence-label {
   opacity: 0.62;
 }
 
+.complaint-action-cell {
+  display: flex;
+  justify-content: center;
+  min-width: 86px;
+}
+
+.complaint-action-trigger {
+  min-width: 76px;
+}
+
+.complaint-action-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2110;
+  border: 0;
+  background: transparent;
+}
+
 .complaint-action-menu {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 0.35rem);
-  z-index: 50;
-  min-width: 180px;
-  padding: 0.35rem;
+  position: fixed;
+  z-index: 2120;
+  width: 224px;
+  padding: 0.45rem;
   border: 1px solid rgba(25, 32, 48, 0.12);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--bs-body-bg, #fff);
+}
+
+.complaint-action-menu-title {
+  padding: 0.45rem 0.6rem 0.35rem;
+  color: #6c757d;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .complaint-action-menu button {
@@ -6912,6 +6970,16 @@ button.om-item-order-presence-label {
 .complaint-action-menu button:hover,
 .complaint-action-menu button:focus-visible {
   background: rgba(13, 110, 253, 0.08);
+}
+
+@media (max-width: 767.98px) {
+  .complaints-filter-form {
+    grid-template-columns: 1fr;
+  }
+
+  .complaints-filter-field--wide {
+    grid-column: auto;
+  }
 }
 
 .complaint-details-panel {
@@ -6961,6 +7029,29 @@ button.om-item-order-presence-label {
   background: var(--bs-body-bg, #fff);
 }
 
+.complaint-file-link--image {
+  align-items: flex-start;
+}
+
+.complaint-file-thumbnail {
+  width: 128px;
+  height: 128px;
+  flex: 0 0 128px;
+  border-radius: 8px;
+  border: 1px solid rgba(25, 32, 48, 0.12);
+  background: #f8f9fa;
+  object-fit: cover;
+}
+
+.complaint-file-meta {
+  display: flex;
+  flex: 1 1 220px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
 .complaint-file-link:hover,
 .complaint-file-link:focus-visible {
   border-color: rgba(13, 110, 253, 0.45);
@@ -6981,6 +7072,106 @@ button.om-item-order-presence-label {
 
 .complaint-toast--success {
   background: #198754;
+}
+
+.qc-complaints-section {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.qc-complaints-unread-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.55rem;
+  height: 1.55rem;
+  padding: 0 0.45rem;
+  border-radius: 999px;
+  background: #dc3545;
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.qc-complaints-unread-badge--small {
+  min-width: 1.35rem;
+  height: 1.35rem;
+  padding: 0 0.35rem;
+  font-size: 0.72rem;
+}
+
+.qc-complaints-accordion {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.qc-complaint-item {
+  border: 1px solid rgba(25, 32, 48, 0.12);
+  border-radius: 8px;
+  background: var(--bs-body-bg, #fff);
+  overflow: hidden;
+}
+
+.qc-complaint-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 0.95rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.qc-complaint-toggle:hover,
+.qc-complaint-toggle:focus-visible {
+  background: rgba(13, 110, 253, 0.06);
+}
+
+.qc-complaint-toggle-main,
+.qc-complaint-toggle-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.qc-complaint-toggle-main {
+  flex: 1 1 auto;
+}
+
+.qc-complaint-toggle-meta {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+
+.qc-complaint-panel {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  border-top: 1px solid rgba(25, 32, 48, 0.1);
+  background: rgba(248, 249, 250, 0.62);
+}
+
+.qc-complaint-comment-form {
+  padding-top: 0.25rem;
+}
+
+@media (max-width: 767.98px) {
+  .qc-complaint-toggle,
+  .qc-complaint-toggle-main,
+  .qc-complaint-toggle-meta {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .qc-complaint-toggle-meta {
+    justify-content: flex-start;
+  }
 }
 
 .complaint-toast--danger {
