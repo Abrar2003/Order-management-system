@@ -50,6 +50,9 @@ const {
   uploadItemFile,
   uploadItemPisFile,
   deleteItemFile,
+  getItemFormDraft,
+  saveItemFormDraft,
+  deleteItemFormDraft,
 } = require("../controllers/item.controller");
 const { getProductAnalytics } = require("../controllers/product.controller");
 
@@ -290,6 +293,30 @@ router.get(
 );
 
 router.get("/product-analytics", auth, requirePermission("reports", "view"), cacheRoute("analytics", MEDIUM_CACHE_TTL), getProductAnalytics);
+
+router.get(
+  "/:id/form-draft",
+  auth,
+  requireAdminOnlyPisEdit,
+  requirePermission("pis", "edit"),
+  getItemFormDraft,
+);
+
+router.put(
+  "/:id/form-draft",
+  auth,
+  requireAdminOnlyPisEdit,
+  requirePermission("pis", "edit"),
+  saveItemFormDraft,
+);
+
+router.delete(
+  "/:id/form-draft",
+  auth,
+  requireAdminOnlyPisEdit,
+  requirePermission("pis", "edit"),
+  deleteItemFormDraft,
+);
 
 router.patch(
   "/:id",

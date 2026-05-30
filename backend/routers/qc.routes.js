@@ -46,6 +46,27 @@ router.post(
   qcController.scanBarcodeUpload,
 );
 
+router.get(
+  "/:id/form-draft",
+  auth,
+  requirePermission("qc", "edit"),
+  qcController.getQcFormDraft,
+);
+
+router.put(
+  "/:id/form-draft",
+  auth,
+  requirePermission("qc", "edit"),
+  qcController.saveQcFormDraft,
+);
+
+router.delete(
+  "/:id/form-draft",
+  auth,
+  requirePermission("qc", "edit"),
+  qcController.deleteQcFormDraft,
+);
+
 // Update QC (Inspector or Admin)
 router.patch(
   "/update-qc/:id",

@@ -28,6 +28,7 @@ import {
 } from "../utils/measuredSizeForm";
 import { getQcUserUpdateRequestAvailability } from "../utils/qcRequests";
 import { formatNumberInputValue } from "../utils/measurementDisplay";
+import useFormDraft from "../hooks/useFormDraft";
 import {
   buildUpdateQcPastDaysMessage,
   getUpdateQcPastDaysLimit,
@@ -933,6 +934,7 @@ const UpdateQcModal = ({
   const barcodeUploadTargetRef = useRef("barcode");
   const barcodeFocusPointRef = useRef(null);
   const barcodeFocusResetTimerRef = useRef(null);
+  const skipNextBarcodeValidationResetRef = useRef(false);
 
   const getBarcodeVideoTrack = () =>
     barcodeStreamRef.current?.getVideoTracks?.()[0] || null;
@@ -1082,6 +1084,74 @@ const UpdateQcModal = ({
   const summaryPendingQuantity = isInspectionRecordUpdate
     ? getInspectionRecordPendingAfter({ qc, inspectionRecord })
     : toQuantitySummaryValue(qc?.quantities?.pending);
+  const draftMode = isInspectionRecordUpdate
+    ? "inspection_record_update"
+    : canRewriteLatestInspectionRecord
+      ? "qc_latest_rewrite"
+      : "qc_update";
+  const draftRecordId = isInspectionRecordUpdate
+    ? String(inspectionRecord?._id || "")
+    : canRewriteLatestInspectionRecord
+      ? String(latestInspectionRecord?._id || "")
+      : "";
+  const draftValue = useMemo(
+    () => ({
+      form,
+      barcodeValidation: {
+        barcodeScannedInSession,
+        innerBarcodeScannedInSession,
+        barcodeValidationType,
+        barcodeValidated,
+        barcodeValidationError,
+        barcodeValidationStatus,
+      },
+    }),
+    [
+      form,
+      barcodeScannedInSession,
+      innerBarcodeScannedInSession,
+      barcodeValidationType,
+      barcodeValidated,
+      barcodeValidationError,
+      barcodeValidationStatus,
+    ],
+  );
+  const restoreDraftPayload = (payload = {}) => {
+    const nextForm =
+      payload?.form && typeof payload.form === "object" && !Array.isArray(payload.form)
+        ? payload.form
+        : payload;
+    const validation =
+      payload?.barcodeValidation && typeof payload.barcodeValidation === "object"
+        ? payload.barcodeValidation
+        : {};
+
+    skipNextBarcodeValidationResetRef.current = true;
+    setForm(nextForm);
+    setBarcodeScannedInSession(Boolean(validation.barcodeScannedInSession));
+    setInnerBarcodeScannedInSession(Boolean(validation.innerBarcodeScannedInSession));
+    setBarcodeValidationType(
+      getQcBarcodeValidationOption(validation.barcodeValidationType).value,
+    );
+    setBarcodeValidated(Boolean(validation.barcodeValidated));
+    setBarcodeValidationError(String(validation.barcodeValidationError || ""));
+    setBarcodeValidationStatus(String(validation.barcodeValidationStatus || ""));
+  };
+  const {
+    clearDraft,
+    draftMessage,
+    draftStatus,
+    hasDraftStatus,
+  } = useFormDraft({
+    enabled: Boolean(qc?._id),
+    basePath: qc?._id ? `/qc/${qc._id}/form-draft` : "",
+    mode: draftMode,
+    recordId: draftRecordId,
+    form,
+    setForm,
+    draftValue,
+    onDraftRestore: restoreDraftPayload,
+  });
 
   useEffect(() => {
     if (isQcUser) {
@@ -1308,6 +1378,11 @@ const UpdateQcModal = ({
   ]);
 
   useEffect(() => {
+    if (skipNextBarcodeValidationResetRef.current) {
+      skipNextBarcodeValidationResetRef.current = false;
+      return;
+    }
+
     if (!requiresBarcodeValidation) {
       setBarcodeValidated(true);
       setBarcodeValidationError("");
@@ -2705,6 +2780,7 @@ const UpdateQcModal = ({
             },
           ],
         });
+        await clearDraft({ resetStatus: false });
         alert("Inspection record updated successfully.");
         onUpdated?.();
         onClose();
@@ -2877,6 +2953,7 @@ const UpdateQcModal = ({
             },
           ],
         });
+        await clearDraft({ resetStatus: false });
         alert("QC updated successfully.");
         onUpdated?.();
         onClose();
@@ -2970,6 +3047,7 @@ const UpdateQcModal = ({
     try {
       setSaving(true);
       await api.patch(`/qc/update-qc/${qc._id}`, payload);
+      await clearDraft({ resetStatus: false });
       alert("QC updated successfully.");
       onUpdated?.();
       onClose();
@@ -3318,6 +3396,15 @@ const UpdateQcModal = ({
             <h5 className="modal-title">
               {isInspectionRecordUpdate ? "Update Inspection Record" : "Update QC Record"}
             </h5>
+            {hasDraftStatus && (
+              <span
+                className={`badge ms-auto me-2 ${
+                  draftStatus === "error" ? "text-bg-warning" : "text-bg-light"
+                }`}
+              >
+                {draftMessage}
+              </span>
+            )}
             <button
               type="button"
               className="btn-close"
@@ -4055,6 +4142,14 @@ const UpdateQcModal = ({
           </div>
 
           <div className="modal-footer">
+            <button
+              type="button"
+              className="btn btn-outline-danger"
+              onClick={() => clearDraft()}
+              disabled={saving}
+            >
+              Discard Draft
+            </button>
             <button
               type="button"
               className="btn btn-outline-secondary"

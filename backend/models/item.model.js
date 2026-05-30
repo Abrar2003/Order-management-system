@@ -3,6 +3,7 @@ const {
   BOX_PACKAGING_MODES,
   BOX_ENTRY_TYPES,
 } = require("../helpers/boxMeasurement");
+const { formDraftSchema } = require("../helpers/formDrafts");
 
 const SIZE_ENTRY_LIMIT = 4;
 
@@ -463,6 +464,10 @@ const itemSchema = new mongoose.Schema(
     barcode_exempted: { type: Boolean, default: false },
     finish: {
       type: [finishAssignmentSchema],
+      default: [],
+    },
+    form_drafts: {
+      type: [formDraftSchema],
       default: [],
     },
   },

@@ -83,6 +83,14 @@ const {
 const {
   cleanupLegacyItemSizeFields,
 } = require("../helpers/itemLegacySizeCleanup");
+const {
+  cleanupExpiredFormDrafts,
+  deleteFormDraft,
+  findFormDraft,
+  getDraftUserId,
+  serializeFormDraft,
+  upsertFormDraft,
+} = require("../helpers/formDrafts");
 
 const escapeRegex = (value = "") =>
   String(value)
@@ -5039,6 +5047,130 @@ exports.updateItem = async (req, res) => {
     return res.status(400).json({
       success: false,
       message: error.message || "Failed to update item",
+    });
+  }
+};
+
+exports.getItemFormDraft = async (req, res) => {
+  try {
+    const itemId = String(req.params.id || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(itemId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid item id",
+      });
+    }
+
+    const item = await Item.findById(itemId);
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: "Item not found",
+      });
+    }
+
+    const now = new Date();
+    const hadExpiredDrafts = cleanupExpiredFormDrafts(item, now);
+    const draft = findFormDraft(item, {
+      userId: getDraftUserId(req.user),
+      mode: req.query?.mode,
+      recordId: req.query?.record_id,
+    }, now);
+
+    if (hadExpiredDrafts) {
+      item.markModified("form_drafts");
+      await item.save();
+    }
+
+    return res.json({
+      success: true,
+      data: serializeFormDraft(draft),
+    });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: error.message || "Failed to load item draft",
+    });
+  }
+};
+
+exports.saveItemFormDraft = async (req, res) => {
+  try {
+    const itemId = String(req.params.id || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(itemId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid item id",
+      });
+    }
+
+    const item = await Item.findById(itemId);
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: "Item not found",
+      });
+    }
+
+    const draft = upsertFormDraft(item, {
+      userId: getDraftUserId(req.user),
+      mode: req.body?.mode,
+      recordId: req.body?.record_id,
+      payload: req.body?.payload,
+    });
+
+    item.markModified("form_drafts");
+    await item.save();
+
+    return res.json({
+      success: true,
+      data: serializeFormDraft(draft),
+    });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: error.message || "Failed to save item draft",
+    });
+  }
+};
+
+exports.deleteItemFormDraft = async (req, res) => {
+  try {
+    const itemId = String(req.params.id || "").trim();
+    if (!mongoose.Types.ObjectId.isValid(itemId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid item id",
+      });
+    }
+
+    const item = await Item.findById(itemId);
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: "Item not found",
+      });
+    }
+
+    const changed = deleteFormDraft(item, {
+      userId: getDraftUserId(req.user),
+      mode: req.query?.mode || req.body?.mode,
+      recordId: req.query?.record_id || req.body?.record_id,
+    });
+
+    if (changed) {
+      item.markModified("form_drafts");
+      await item.save();
+    }
+
+    return res.json({
+      success: true,
+      data: null,
+    });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: error.message || "Failed to delete item draft",
     });
   }
 };

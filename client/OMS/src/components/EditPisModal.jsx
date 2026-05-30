@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import api from "../api/axios";
+import useFormDraft from "../hooks/useFormDraft";
 import MeasuredSizeSection from "./MeasuredSizeSection";
 import ProductImageThumbnail from "./ProductImageThumbnail";
 import { getCountryOfOriginOptions } from "../constants/countryOfOrigin";
@@ -334,6 +335,19 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
   const [latestInspectionContextLoading, setLatestInspectionContextLoading] = useState(false);
   const isPisDiffUpdate = updateSource === "pis_diffs";
   const editScopeLabel = isPisDiffUpdate ? "Master" : "PIS";
+  const {
+    clearDraft,
+    draftMessage,
+    draftStatus,
+    hasDraftStatus,
+  } = useFormDraft({
+    enabled: Boolean(item?._id),
+    basePath: item?._id ? `/items/${item._id}/form-draft` : "",
+    mode: isPisDiffUpdate ? "pis_master_update" : "pis_update",
+    recordId: "",
+    form,
+    setForm,
+  });
 
   const itemCode = useMemo(() => toText(item?.code, "N/A"), [item?.code]);
   const itemDescription = useMemo(
@@ -595,6 +609,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
       }
 
       const response = await api.patch(`/items/${item?._id}/pis`, payload);
+      await clearDraft({ resetStatus: false });
       const fallbackItem = isPisDiffUpdate
         ? {
             ...item,
@@ -629,6 +644,15 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
         <div className="modal-content">
           <div className="modal-header">
             <h5 className="modal-title">Update {editScopeLabel}: {itemCode}</h5>
+            {hasDraftStatus && (
+              <span
+                className={`badge ms-auto me-2 ${
+                  draftStatus === "error" ? "text-bg-warning" : "text-bg-light"
+                }`}
+              >
+                {draftMessage}
+              </span>
+            )}
             <button
               type="button"
               className="btn-close"
@@ -921,6 +945,14 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
           </div>
 
           <div className="modal-footer">
+            <button
+              type="button"
+              className="btn btn-outline-danger"
+              onClick={() => clearDraft()}
+              disabled={saving}
+            >
+              Discard Draft
+            </button>
             <button
               type="button"
               className="btn btn-outline-secondary"

@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { formDraftSchema } = require("../helpers/formDrafts");
 
 const AuditActorSchema = new mongoose.Schema(
   {
@@ -200,6 +201,10 @@ const qcSchema = new mongoose.Schema(
       required: true,
     },
     updated_by: { type: AuditActorSchema, default: () => ({}) },
+    form_drafts: {
+      type: [formDraftSchema],
+      default: [],
+    },
   },
   {
     timestamps: true,

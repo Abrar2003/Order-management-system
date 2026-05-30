@@ -78,6 +78,14 @@ const {
   buildQcImagesArchive,
 } = require("../services/qcImageDownload.service");
 const { formatEan13BarcodeDisplay } = require("../helpers/barcodeFormat");
+const {
+  cleanupExpiredFormDrafts,
+  deleteFormDraft,
+  findFormDraft,
+  getDraftUserId,
+  serializeFormDraft,
+  upsertFormDraft,
+} = require("../helpers/formDrafts");
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
 
@@ -4369,6 +4377,89 @@ exports.alignQC = async (req, res) => {
     });
   } catch (err) {
     res.status(400).json({ message: err.message });
+  }
+};
+
+exports.getQcFormDraft = async (req, res) => {
+  try {
+    const qc = await QC.findById(req.params.id);
+    if (!qc) {
+      return res.status(404).json({ message: "QC record not found" });
+    }
+
+    const now = new Date();
+    const hadExpiredDrafts = cleanupExpiredFormDrafts(qc, now);
+    const draft = findFormDraft(qc, {
+      userId: getDraftUserId(req.user),
+      mode: req.query?.mode,
+      recordId: req.query?.record_id,
+    }, now);
+
+    if (hadExpiredDrafts) {
+      qc.markModified("form_drafts");
+      await qc.save();
+    }
+
+    return res.json({
+      success: true,
+      data: serializeFormDraft(draft),
+    });
+  } catch (err) {
+    return res.status(400).json({ message: err.message || "Failed to load QC draft" });
+  }
+};
+
+exports.saveQcFormDraft = async (req, res) => {
+  try {
+    const qc = await QC.findById(req.params.id);
+    if (!qc) {
+      return res.status(404).json({ message: "QC record not found" });
+    }
+
+    const now = new Date();
+    const draft = upsertFormDraft(qc, {
+      userId: getDraftUserId(req.user),
+      mode: req.body?.mode,
+      recordId: req.body?.record_id,
+      payload: req.body?.payload,
+    }, now);
+
+    qc.markModified("form_drafts");
+    await qc.save();
+
+    return res.json({
+      success: true,
+      data: serializeFormDraft(draft),
+    });
+  } catch (err) {
+    return res.status(400).json({ message: err.message || "Failed to save QC draft" });
+  }
+};
+
+exports.deleteQcFormDraft = async (req, res) => {
+  try {
+    const qc = await QC.findById(req.params.id);
+    if (!qc) {
+      return res.status(404).json({ message: "QC record not found" });
+    }
+
+    const changed = deleteFormDraft(qc, {
+      userId: getDraftUserId(req.user),
+      mode: req.query?.mode || req.body?.mode,
+      recordId: req.query?.record_id || req.body?.record_id,
+    });
+
+    if (changed) {
+      qc.markModified("form_drafts");
+      await qc.save();
+    }
+
+    return res.json({
+      success: true,
+      data: null,
+    });
+  } catch (err) {
+    return res.status(400).json({ message: err.message || "Failed to delete QC draft" });
   }
 };
 
