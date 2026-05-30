@@ -1053,6 +1053,7 @@ const UpdateQcModal = ({
     isCurrentUserLabelExempt;
   const canEditLockedQcSizeFields =
     isInspectionRecordUpdate || canRewriteLatestInspectionRecord || isQcUser || isManager;
+  const canViewStoredBarcodes = isActualAdmin || isManager || Boolean(isAdmin);
   const lockBarcodeField =
     (qc?.master_barcode || qc?.barcode) > 0 && !canEditLockedQcFields;
   const lockInnerBarcodeField = qc?.inner_barcode > 0 && !canEditLockedQcFields;
@@ -1258,6 +1259,12 @@ const UpdateQcModal = ({
         : hasStoredInspectedBoxSizes
           ? normalizeSizeCount(inspectedBoxSizeEntries.length, 1)
           : 1;
+    const storedMasterBarcode = isInspectionRecordUpdate
+      ? itemMaster?.master_barcode || itemMaster?.barcode
+      : itemMaster?.master_barcode || itemMaster?.barcode || qc?.master_barcode || qc?.barcode;
+    const storedInnerBarcode = isInspectionRecordUpdate
+      ? itemMaster?.inner_barcode
+      : itemMaster?.inner_barcode || qc?.inner_barcode;
 
     setForm({
       inspector: defaultInspectorId,
@@ -1266,18 +1273,14 @@ const UpdateQcModal = ({
       offeredQuantity: adminRecord
         ? toQuantityInputValue(adminRecord?.vendor_offered)
         : "",
-      barcode: isInspectionRecordUpdate
-        ? ((itemMaster?.master_barcode || itemMaster?.barcode) > 0
-            ? String(itemMaster?.master_barcode || itemMaster?.barcode)
-            : "")
-        : ((itemMaster?.master_barcode || itemMaster?.barcode || qc?.master_barcode || qc?.barcode) > 0
-            ? String(itemMaster?.master_barcode || itemMaster?.barcode || qc?.master_barcode || qc?.barcode)
-            : ""),
-      inner_barcode: isInspectionRecordUpdate
-        ? (itemMaster?.inner_barcode > 0 ? String(itemMaster.inner_barcode) : "")
-        : ((itemMaster?.inner_barcode || qc?.inner_barcode) > 0
-            ? String(itemMaster?.inner_barcode || qc.inner_barcode)
-            : ""),
+      barcode:
+        canViewStoredBarcodes && Number(storedMasterBarcode || 0) > 0
+          ? String(storedMasterBarcode)
+          : "",
+      inner_barcode:
+        canViewStoredBarcodes && Number(storedInnerBarcode || 0) > 0
+          ? String(storedInnerBarcode)
+          : "",
       packed_size: isInspectionRecordUpdate
         ? Boolean(itemMaster?.packed_size)
         : Boolean(itemMaster?.packed_size ?? qc?.packed_size),
@@ -1371,6 +1374,7 @@ const UpdateQcModal = ({
   }, [
     qc,
     canRewriteLatestInspectionRecord,
+    canViewStoredBarcodes,
     isInspectionRecordUpdate,
     inspectionRecord,
     latestInspectionRecord,

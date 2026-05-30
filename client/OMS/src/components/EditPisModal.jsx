@@ -512,9 +512,22 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
   const handleFetchDetails = () => {
     const hasItemEntries = inspectedMeasurementDetails.itemEntries.length > 0;
     const hasBoxEntries = inspectedMeasurementDetails.boxEntries.length > 0;
+    const inspectedMasterBarcode = toText(
+      item?.qc?.master_barcode || item?.qc?.barcode,
+    );
+    const inspectedInnerBarcode = toText(item?.qc?.inner_barcode);
+    const hasInspectedMasterBarcode =
+      inspectedMasterBarcode && inspectedMasterBarcode !== "0";
+    const hasInspectedInnerBarcode =
+      inspectedInnerBarcode && inspectedInnerBarcode !== "0";
 
-    if (!hasItemEntries && !hasBoxEntries) {
-      setError("No inspected size details found to fetch.");
+    if (
+      !hasItemEntries &&
+      !hasBoxEntries &&
+      !hasInspectedMasterBarcode &&
+      !hasInspectedInnerBarcode
+    ) {
+      setError("No inspected details found to fetch.");
       return;
     }
 
@@ -548,6 +561,14 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
           boxCount,
           { mode: boxMode, singleRemark: "box" },
         );
+      }
+
+      if (hasInspectedMasterBarcode) {
+        next.master_barcode = inspectedMasterBarcode;
+      }
+
+      if (hasInspectedInnerBarcode) {
+        next.inner_barcode = inspectedInnerBarcode;
       }
 
       return next;
