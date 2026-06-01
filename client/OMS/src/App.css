@@ -7676,3 +7676,102 @@ button.om-item-order-presence-label {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Tablet QC details tables should scroll horizontally instead of collapsing into
+   mobile cards; the card layout is only comfortable on phone widths. */
+@media (min-width: 768px) and (max-width: 1199.98px) {
+  .qc-details-table-wrap {
+    overflow-x: auto !important;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .qc-details-record-table,
+  .qc-details-record-table thead,
+  .qc-details-record-table tbody,
+  .qc-details-record-table tr,
+  .qc-details-record-table th,
+  .qc-details-record-table td {
+    display: revert !important;
+    width: auto !important;
+  }
+
+  .qc-details-record-table {
+    min-width: 1120px !important;
+    table-layout: fixed;
+    border-collapse: collapse;
+    border-spacing: 0;
+  }
+
+  .qc-details-record-table thead {
+    display: table-header-group !important;
+  }
+
+  .qc-details-record-table tbody {
+    display: table-row-group !important;
+  }
+
+  .qc-details-record-table tr {
+    display: table-row !important;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .qc-details-record-table th,
+  .qc-details-record-table td {
+    display: table-cell !important;
+    padding: 0.65rem 0.7rem !important;
+    vertical-align: middle;
+    overflow-wrap: normal;
+    white-space: nowrap;
+  }
+
+  .qc-details-record-table td::before {
+    content: none !important;
+  }
+
+  .qc-details-record-table th:nth-child(1),
+  .qc-details-record-table td:nth-child(1),
+  .qc-details-record-table th:nth-child(2),
+  .qc-details-record-table td:nth-child(2) {
+    width: 7.5rem !important;
+  }
+
+  .qc-details-record-table th:nth-child(3),
+  .qc-details-record-table td:nth-child(3) {
+    width: 10rem !important;
+    white-space: normal;
+  }
+
+  .qc-details-record-table th:nth-child(10),
+  .qc-details-record-table td:nth-child(10) {
+    width: 9rem !important;
+    white-space: normal;
+  }
+
+  .qc-details-record-table th:nth-child(11),
+  .qc-details-record-table td:nth-child(11) {
+    width: 11rem !important;
+    min-width: 11rem !important;
+  }
+
+  .qc-details-record-table td:last-child {
+    display: table-cell !important;
+  }
+
+  .qc-inspection-actions {
+    grid-template-columns: minmax(0, 1fr);
+    min-width: 0;
+    width: 100%;
+  }
+
+  .qc-inspection-action-btn {
+    width: 100%;
+    min-height: 2.2rem;
+    padding-inline: 0.65rem;
+    white-space: normal;
+    overflow-wrap: normal;
+  }
+}
