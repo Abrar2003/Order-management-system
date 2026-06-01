@@ -16,7 +16,6 @@ import TransferInspectionModal from "../components/TransferInspectionModal";
 import { getUserFromToken } from "../auth/auth.utils";
 import {
   hasShipmentPrivilegeRole,
-  isAdminLikeRole,
   isManagerLikeRole,
   isViewOnlyUser,
   normalizeUserRole,
@@ -393,7 +392,6 @@ const QcDetails = () => {
   const currentUserId = String(user?.id || user?._id || "").trim();
   const isQcUser = normalizedRole === "qc";
   const isAdmin = isManagerLikeRole(normalizedRole);
-  const isOnlyAdmin = isAdminLikeRole(normalizedRole);
   const isCurrentUserLabelExempt = isLabelExemptUser(currentUserId);
   const canTransferInspectionRecords = isAdmin;
   const canDeleteInspectionRecords = isAdmin;
@@ -2420,7 +2418,7 @@ const QcDetails = () => {
 	      {showUpdateModal && !isViewOnly && canUpdateQc && (
 	        <UpdateQcModal
 	          qc={qc}
-	          isAdmin={isOnlyAdmin}
+	          isAdmin={isAdmin}
           onClose={() => setShowUpdateModal(false)}
           onUpdated={() => {
             setShowUpdateModal(false);
@@ -2434,7 +2432,7 @@ const QcDetails = () => {
           canUpdateInspectionRecord(inspectionRecordToUpdate) && (
 	        <UpdateQcModal
 	          qc={qc}
-	          isAdmin={isOnlyAdmin}
+	          isAdmin={isAdmin}
 	          inspectionRecord={inspectionRecordToUpdate}
 	          onClose={() => setInspectionRecordToUpdate(null)}
 	          onUpdated={() => {

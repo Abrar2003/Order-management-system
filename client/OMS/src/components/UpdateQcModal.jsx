@@ -777,6 +777,21 @@ const PREFERRED_BARCODE_FORMATS = [
 const hasMeasuredSizeEntries = (entries = []) =>
   Array.isArray(entries) && entries.length > 0;
 
+const hasPositiveModelNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0;
+};
+
+const hasAnyModelLbhValue = (value = {}) =>
+  ["L", "B", "H"].some((key) => hasPositiveModelNumber(value?.[key]));
+
+const hasAnyInspectedWeightValue = (weight = {}) =>
+  INSPECTED_WEIGHT_FIELDS.some((field) =>
+    hasPositiveModelNumber(weight?.[field.payloadKey]),
+  ) ||
+  hasPositiveModelNumber(weight?.net) ||
+  hasPositiveModelNumber(weight?.gross);
+
 const buildInspectionRecordMeasurementSource = (
   inspectionRecord = {},
   itemMaster = {},
@@ -784,6 +799,19 @@ const buildInspectionRecordMeasurementSource = (
 ) => {
   const hasInspectionItemSizes = hasMeasuredSizeEntries(inspectionRecord?.inspected_item_sizes);
   const hasInspectionBoxSizes = hasMeasuredSizeEntries(inspectionRecord?.inspected_box_sizes);
+  const hasInspectionItemLbh =
+    hasInspectionItemSizes ||
+    hasAnyModelLbhValue(inspectionRecord?.inspected_item_LBH) ||
+    hasAnyModelLbhValue(inspectionRecord?.inspected_item_top_LBH) ||
+    hasAnyModelLbhValue(inspectionRecord?.inspected_item_bottom_LBH);
+  const hasInspectionBoxLbh =
+    hasInspectionBoxSizes ||
+    hasAnyModelLbhValue(inspectionRecord?.inspected_box_LBH) ||
+    hasAnyModelLbhValue(inspectionRecord?.inspected_box_top_LBH) ||
+    hasAnyModelLbhValue(inspectionRecord?.inspected_box_bottom_LBH) ||
+    hasAnyModelLbhValue(inspectionRecord?.inspected_top_LBH) ||
+    hasAnyModelLbhValue(inspectionRecord?.inspected_bottom_LBH);
+  const hasInspectionWeight = hasAnyInspectedWeightValue(inspectionRecord?.inspected_weight);
   const fallbackSource = allowFallback ? itemMaster : {};
 
   return {
@@ -795,34 +823,34 @@ const buildInspectionRecordMeasurementSource = (
     inspected_box_sizes: hasInspectionBoxSizes
       ? inspectionRecord.inspected_box_sizes
       : fallbackSource?.inspected_box_sizes,
-    inspected_box_mode: hasInspectionBoxSizes
+    inspected_box_mode: hasInspectionBoxSizes || inspectionRecord?.inspected_box_mode
       ? inspectionRecord?.inspected_box_mode
       : fallbackSource?.inspected_box_mode,
-    inspected_item_LBH: hasInspectionItemSizes
+    inspected_item_LBH: hasInspectionItemLbh
       ? inspectionRecord?.inspected_item_LBH
       : fallbackSource?.inspected_item_LBH,
-    inspected_item_top_LBH: hasInspectionItemSizes
+    inspected_item_top_LBH: hasInspectionItemLbh
       ? inspectionRecord?.inspected_item_top_LBH
       : fallbackSource?.inspected_item_top_LBH,
-    inspected_item_bottom_LBH: hasInspectionItemSizes
+    inspected_item_bottom_LBH: hasInspectionItemLbh
       ? inspectionRecord?.inspected_item_bottom_LBH
       : fallbackSource?.inspected_item_bottom_LBH,
-    inspected_box_LBH: hasInspectionBoxSizes
+    inspected_box_LBH: hasInspectionBoxLbh
       ? inspectionRecord?.inspected_box_LBH
       : fallbackSource?.inspected_box_LBH,
-    inspected_box_top_LBH: hasInspectionBoxSizes
+    inspected_box_top_LBH: hasInspectionBoxLbh
       ? inspectionRecord?.inspected_box_top_LBH
       : fallbackSource?.inspected_box_top_LBH,
-    inspected_box_bottom_LBH: hasInspectionBoxSizes
+    inspected_box_bottom_LBH: hasInspectionBoxLbh
       ? inspectionRecord?.inspected_box_bottom_LBH
       : fallbackSource?.inspected_box_bottom_LBH,
-    inspected_top_LBH: hasInspectionBoxSizes
+    inspected_top_LBH: hasInspectionBoxLbh
       ? inspectionRecord?.inspected_top_LBH
       : fallbackSource?.inspected_top_LBH,
-    inspected_bottom_LBH: hasInspectionBoxSizes
+    inspected_bottom_LBH: hasInspectionBoxLbh
       ? inspectionRecord?.inspected_bottom_LBH
       : fallbackSource?.inspected_bottom_LBH,
-    inspected_weight: hasInspectionItemSizes || hasInspectionBoxSizes
+    inspected_weight: hasInspectionWeight || hasInspectionItemSizes || hasInspectionBoxSizes
       ? inspectionRecord?.inspected_weight
       : fallbackSource?.inspected_weight,
   };
@@ -1195,7 +1223,11 @@ const UpdateQcModal = ({
       : String(qc?.remarks || "");
     const itemMaster = isInspectionRecordUpdate
       ? buildInspectionRecordMeasurementSource(inspectionRecord)
-      : qc?.item_master || {};
+      : canRewriteLatestInspectionRecord && adminRecord
+        ? buildInspectionRecordMeasurementSource(adminRecord, qc?.item_master || {}, {
+          allowFallback: true,
+        })
+        : qc?.item_master || {};
     const inspectedItemLbh = itemMaster?.inspected_item_LBH || itemMaster?.item_LBH || {};
     const inspectedBoxLbh = itemMaster?.inspected_box_LBH || itemMaster?.box_LBH || {};
     const inspectedTopLbh =
@@ -1259,10 +1291,10 @@ const UpdateQcModal = ({
         : hasStoredInspectedBoxSizes
           ? normalizeSizeCount(inspectedBoxSizeEntries.length, 1)
           : 1;
-    const storedMasterBarcode = isInspectionRecordUpdate
+    const storedMasterBarcode = isInspectionRecordUpdate || canRewriteLatestInspectionRecord
       ? itemMaster?.master_barcode || itemMaster?.barcode
       : itemMaster?.master_barcode || itemMaster?.barcode || qc?.master_barcode || qc?.barcode;
-    const storedInnerBarcode = isInspectionRecordUpdate
+    const storedInnerBarcode = isInspectionRecordUpdate || canRewriteLatestInspectionRecord
       ? itemMaster?.inner_barcode
       : itemMaster?.inner_barcode || qc?.inner_barcode;
 
@@ -2246,7 +2278,11 @@ const UpdateQcModal = ({
 
     const existingItemMaster = isInspectionRecordUpdate
       ? buildInspectionRecordMeasurementSource(inspectionRecord)
-      : qc?.item_master || {};
+      : isAdminRewriteMode && currentRequestInspectionRecord
+        ? buildInspectionRecordMeasurementSource(currentRequestInspectionRecord, qc?.item_master || {}, {
+          allowFallback: true,
+        })
+        : qc?.item_master || {};
     const isBarcodeExemptedItem = existingItemMaster?.barcode_exempted === true;
     const existingInspectedWeight = existingItemMaster?.inspected_weight || {};
     const existingInspectedBoxMode = detectBoxPackagingMode(
@@ -3079,6 +3115,10 @@ const UpdateQcModal = ({
     (!hasElevatedAccess && (qc?.quantities?.qc_checked || 0) > 0);
   const existingItemMaster = isInspectionRecordUpdate
     ? buildInspectionRecordMeasurementSource(inspectionRecord)
+    : canRewriteLatestInspectionRecord && latestInspectionRecord
+      ? buildInspectionRecordMeasurementSource(latestInspectionRecord, qc?.item_master || {}, {
+        allowFallback: true,
+      })
     : qc?.item_master || {};
   const existingInspectedWeight = existingItemMaster?.inspected_weight || {};
   const existingInspectedBoxMode = detectBoxPackagingMode(

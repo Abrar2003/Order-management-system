@@ -116,42 +116,42 @@ const InspectionSchema = new mongoose.Schema(
     // store the "pending after visit" for easy history display
     pending_after: { type: Number, required: true, min: 0 },
 
-	    cbm: {
-	      box1: { type: String, default: "0" },
-	      box2: { type: String, default: "0" },
-	      box3: { type: String, default: "0" },
-	      total: { type: String, default: "0" },
-	    },
-	    barcode: {
-	      type: Number,
-	      default: 0,
-	      min: 0,
-	    },
-	    master_barcode: {
-	      type: Number,
-	      default: 0,
-	      min: 0,
-	    },
-	    inner_barcode: {
-	      type: Number,
-	      default: 0,
-	      min: 0,
-	    },
-	    packed_size: {
-	      type: Boolean,
-	      default: false,
-	    },
-	    finishing: {
-	      type: Boolean,
-	      default: false,
-	    },
-	    branding: {
-	      type: Boolean,
-	      default: false,
-	    },
-	    inspected_item_sizes: {
-	      type: [itemSizeEntrySchema],
-	      default: [],
+    cbm: {
+      box1: { type: String, default: "0" },
+      box2: { type: String, default: "0" },
+      box3: { type: String, default: "0" },
+      total: { type: String, default: "0" },
+    },
+    barcode: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    master_barcode: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    inner_barcode: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    packed_size: {
+      type: Boolean,
+      default: false,
+    },
+    finishing: {
+      type: Boolean,
+      default: false,
+    },
+    branding: {
+      type: Boolean,
+      default: false,
+    },
+    inspected_item_sizes: {
+      type: [itemSizeEntrySchema],
+      default: [],
       validate: {
         validator: (entries) =>
           !Array.isArray(entries) || entries.length <= SIZE_ENTRY_LIMIT,

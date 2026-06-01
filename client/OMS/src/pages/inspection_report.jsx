@@ -12,7 +12,7 @@ import {
   hasStoredItemFile,
   ITEM_FILE_OPTIONS as ITEM_MASTER_FILE_OPTIONS,
 } from "../constants/itemFiles";
-import { formatEan13BarcodeDisplay, toEan13BarcodeValue } from "../utils/barcode";
+import { toEan13BarcodeValue } from "../utils/barcode";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { getDerivedOrderStatus } from "../utils/orderStatus";
 import { formatPositiveCbm } from "../utils/cbm";
@@ -26,6 +26,25 @@ import "../App.css";
 const SIZE_UNIT = "cm";
 const WEIGHT_UNIT = "kg";
 const MEASUREMENT_ENTRY_DISPLAY_LIMIT = 4;
+const normalizeBarcodeDigits = (value) => String(value ?? "").replace(/\D/g, "");
+const isDefaultBarcodeDigits = (value) => {
+  const digits = normalizeBarcodeDigits(value);
+  return digits.length > 0 && /^0+$/.test(digits);
+};
+const formatStoredBarcodeDisplay = (value, fallback = "Not Set") => {
+  const normalized = String(value ?? "").trim();
+  if (!normalized || isDefaultBarcodeDigits(normalized)) return fallback;
+  return normalized;
+};
+const getBarcodeRenderProps = (value) => {
+  const displayValue = formatStoredBarcodeDisplay(value, "");
+  if (!displayValue) return null;
+  const eanValue = toEan13BarcodeValue(displayValue);
+  if (eanValue && eanValue === normalizeBarcodeDigits(displayValue)) {
+    return { value: eanValue, format: "EAN13" };
+  }
+  return { value: displayValue, format: "CODE128" };
+};
 
 const toTimestamp = (value) => {
   if (!value) return 0;
@@ -1446,17 +1465,19 @@ const InspectionReport = () => {
       || "",
     ).trim();
     const pisInnerBarcodeRaw = String(itemMaster?.pis_inner_barcode || "").trim();
-    const pisBarcodeValue = formatEan13BarcodeDisplay(pisBarcodeRaw);
-    const inspectedBarcodeValue = formatEan13BarcodeDisplay(inspectedBarcodeRaw);
+    const pisBarcodeValue = formatStoredBarcodeDisplay(pisBarcodeRaw);
+    const inspectedBarcodeValue = formatStoredBarcodeDisplay(inspectedBarcodeRaw);
     const barcodeMismatch =
       toComparableValue(pisBarcodeRaw || "Not Set") !==
       toComparableValue(inspectedBarcodeRaw || "Not Set");
     const unifiedBarcodeValue =
       pisBarcodeValue !== "Not Set" ? pisBarcodeValue : inspectedBarcodeValue;
-    const pisBarcodeRenderValue = toEan13BarcodeValue(pisBarcodeRaw);
-    const inspectedBarcodeRenderValue = toEan13BarcodeValue(inspectedBarcodeRaw);
+    const pisBarcodeRenderProps = getBarcodeRenderProps(pisBarcodeRaw);
+    const inspectedBarcodeRenderProps = getBarcodeRenderProps(inspectedBarcodeRaw);
     const unifiedBarcodeRenderValue =
-      pisBarcodeRenderValue || inspectedBarcodeRenderValue;
+      pisBarcodeRenderProps?.value || inspectedBarcodeRenderProps?.value || "";
+    const unifiedBarcodeRenderFormat =
+      pisBarcodeRenderProps?.format || inspectedBarcodeRenderProps?.format || "EAN13";
 
     const rows = [
       ...buildMeasurementComparisonRows({
@@ -1500,13 +1521,16 @@ const InspectionReport = () => {
     return {
       pisBarcodeValue,
       inspectedBarcodeValue,
-      pisBarcodeRenderValue,
-      inspectedBarcodeRenderValue,
+      pisBarcodeRenderValue: pisBarcodeRenderProps?.value || "",
+      inspectedBarcodeRenderValue: inspectedBarcodeRenderProps?.value || "",
+      pisBarcodeRenderFormat: pisBarcodeRenderProps?.format || "EAN13",
+      inspectedBarcodeRenderFormat: inspectedBarcodeRenderProps?.format || "EAN13",
       barcodeMismatch,
       unifiedBarcodeValue,
       unifiedBarcodeRenderValue,
-      pisInnerBarcodeValue: formatEan13BarcodeDisplay(pisInnerBarcodeRaw),
-      inspectedInnerBarcodeValue: formatEan13BarcodeDisplay(inspectedInnerBarcodeRaw),
+      unifiedBarcodeRenderFormat,
+      pisInnerBarcodeValue: formatStoredBarcodeDisplay(pisInnerBarcodeRaw),
+      inspectedInnerBarcodeValue: formatStoredBarcodeDisplay(inspectedInnerBarcodeRaw),
       rows,
     };
   }, [isSingleInspectionReport, latestInspectionRecord, qc]);
@@ -2260,7 +2284,7 @@ const InspectionReport = () => {
                       <div className="qc-barcode-wrapper inspection-report-barcode-wrapper">
                         <Barcode
                           value={itemMasterSummary.pisBarcodeRenderValue}
-                          format="EAN13"
+                          format={itemMasterSummary.pisBarcodeRenderFormat}
                         />
                       </div>
                     ) : (
@@ -2275,7 +2299,7 @@ const InspectionReport = () => {
                       <div className="qc-barcode-wrapper inspection-report-barcode-wrapper">
                         <Barcode
                           value={itemMasterSummary.inspectedBarcodeRenderValue}
-                          format="EAN13"
+                          format={itemMasterSummary.inspectedBarcodeRenderFormat}
                         />
                       </div>
                     ) : (
@@ -2292,7 +2316,7 @@ const InspectionReport = () => {
                     <div className="qc-barcode-wrapper inspection-report-barcode-wrapper">
                       <Barcode
                         value={itemMasterSummary.unifiedBarcodeRenderValue}
-                        format="EAN13"
+                        format={itemMasterSummary.unifiedBarcodeRenderFormat}
                       />
                     </div>
                   ) : (
