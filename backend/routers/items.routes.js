@@ -35,6 +35,7 @@ const {
   updateProductDatabaseItem,
   checkProductDatabaseItem,
   approveProductDatabaseItem,
+  getItemDetails,
   getItemOrderPresence,
   getItemOrdersHistory,
   getPisInspectionMasterComparison,
@@ -268,6 +269,14 @@ router.get(
   requirePermission("items", "view"),
   cacheRoute("items", SHORT_CACHE_TTL),
   getItemOrderPresence,
+);
+
+router.get(
+  "/:itemCode/details",
+  auth,
+  requirePermission("items", "view"),
+  cacheRoute("items", SHORT_CACHE_TTL),
+  getItemDetails,
 );
 
 router.get(

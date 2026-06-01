@@ -1421,6 +1421,61 @@ const PRODUCT_DATABASE_ITEM_SELECT = [
   "pd_history",
   "updatedAt",
 ].join(" ");
+const ITEM_DETAILS_SELECT = [
+  "code",
+  "name",
+  "description",
+  "brand",
+  "brand_name",
+  "brands",
+  "vendors",
+  "country_of_origin",
+  "image",
+  "cad_file",
+  "pis_file",
+  "assembly_file",
+  "mounting_file",
+  "packeging_ppt",
+  "mounting_file_needed",
+  "finish",
+  "pis_item_sizes",
+  "pis_box_sizes",
+  "pis_box_mode",
+  "pis_weight",
+  "pis_barcode",
+  "pis_master_barcode",
+  "pis_inner_barcode",
+  "inspected_item_sizes",
+  "inspected_box_sizes",
+  "inspected_box_mode",
+  "inspected_weight",
+  "qc",
+  "cbm",
+  "master_item_sizes",
+  "master_box_sizes",
+  "master_box_mode",
+  "master_barcode",
+  "master_master_barcode",
+  "master_inner_barcode",
+  "master_country_of_origin",
+  "pd_barcode",
+  "pd_master_barcode",
+  "pd_inner_barcode",
+  "pd_item_sizes",
+  "pd_box_sizes",
+  "pd_box_mode",
+  "pd_checked",
+  "pd_created_by",
+  "pd_checked_by",
+  "pd_approved_by",
+  "pd_last_changed_by",
+  "pd_history",
+  "product_type",
+  "product_specs",
+  "kd",
+  "barcode_exempted",
+  "updatedAt",
+].join(" ");
 
 const buildProductDatabaseStatusMatch = (status) => {
   const normalizedStatus = String(status ?? "").trim().toLowerCase().replace(/\s+/g, "_");
@@ -4135,6 +4190,145 @@ exports.getItemOrdersHistory = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch item order history",
+      error: error.message,
+    });
+  }
+};
+
+const buildItemDetailFilePayloads = async (item = {}) => {
+  const fileEntries = [
+    { type: "product_image", field: "image", fallbackBaseName: "product-image", extension: ".jpg" },
+    { type: "cad_file", field: "cad_file", fallbackBaseName: "item-cad", extension: ".pdf" },
+    { type: "pis_file", field: "pis_file", fallbackBaseName: "item-pis", extension: ".pdf" },
+    { type: "assembly_file", field: "assembly_file", fallbackBaseName: "item-assembly", extension: ".pdf" },
+    { type: "mounting_file", field: "mounting_file", fallbackBaseName: "item-mounting", extension: ".pdf" },
+    { type: "packeging_ppt", field: "packeging_ppt", fallbackBaseName: "item-packaging-ppt", extension: ".pptx" },
+  ];
+
+  const pairs = await Promise.all(
+    fileEntries.map(async (entry) => {
+      try {
+        const file = await buildItemFileResponse(item?.[entry.field], {
+          itemCode: normalizeTextField(item?.code || item?._id),
+          fallbackBaseName: entry.fallbackBaseName,
+          extension: entry.extension,
+        });
+        return [entry.field, file || normalizeStoredItemFile(item?.[entry.field] || {})];
+      } catch (error) {
+        console.error("Build item detail file URL failed:", {
+          itemId: item?._id,
+          itemCode: item?.code,
+          field: entry.field,
+          error: error?.message || String(error),
+        });
+        return [entry.field, normalizeStoredItemFile(item?.[entry.field] || {})];
+      }
+    }),
+  );
+
+  return pairs.reduce((accumulator, [field, file]) => {
+    accumulator[field] = file;
+    return accumulator;
+  }, {});
+};
+
+exports.getItemDetails = async (req, res) => {
+  try {
+    const itemCodeInput = String(req.params.itemCode || "").trim();
+    if (!itemCodeInput) {
+      return res.status(400).json({
+        success: false,
+        message: "Item code is required",
+      });
+    }
+
+    const itemCodeMatch = new RegExp(`^\\s*${escapeRegex(itemCodeInput)}\\s*$`, "i");
+    const item = await Item.findOne({ code: itemCodeMatch })
+      .select(ITEM_DETAILS_SELECT)
+      .lean();
+
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: "Item not found",
+      });
+    }
+
+    const orders = await Order.find({ "item.item_code": itemCodeMatch })
+      .select("order_id item brand vendor status quantity archived qc_record updatedAt order_date ETD revised_ETD")
+      .populate({
+        path: "qc_record",
+        select: "last_inspected_date request_date quantities inspection_record updatedAt",
+        populate: {
+          path: "inspection_record",
+          select: "inspection_date requested_date checked passed createdAt updatedAt",
+        },
+      })
+      .sort({ order_date: -1, ETD: -1, updatedAt: -1, order_id: 1 })
+      .lean();
+
+    const orderRows = (Array.isArray(orders) ? orders : []).map((order) => {
+      const qcRecord =
+        order?.qc_record && typeof order.qc_record === "object"
+          ? order.qc_record
+          : null;
+      const inspectionRecords = Array.isArray(qcRecord?.inspection_record)
+        ? qcRecord.inspection_record
+        : [];
+      const latestInspection = inspectionRecords
+        .map((record) => ({
+          record,
+          sortTime: Math.max(
+            toTimestamp(record?.inspection_date),
+            toTimestamp(record?.updatedAt),
+            toTimestamp(record?.createdAt),
+          ),
+        }))
+        .sort((left, right) => right.sortTime - left.sortTime)[0]?.record || null;
+
+      return {
+        id: String(order?._id || ""),
+        po: String(order?.order_id || "").trim(),
+        qc_id: String(qcRecord?._id || ""),
+        order_date: order?.order_date || "",
+        etd: order?.ETD || "",
+        last_inspected_date: String(
+          latestInspection?.inspection_date ||
+            qcRecord?.last_inspected_date ||
+            "",
+        ).trim(),
+        order_quantity: Math.max(0, toSafeNumber(order?.quantity, 0)),
+        current_status: deriveOrderStatus({ orderEntry: order }),
+        inspection_count: inspectionRecords.length,
+      };
+    });
+
+    const files = await buildItemDetailFilePayloads(item);
+    const productDatabaseRow = buildProductDatabaseRow(item, req.user);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        item: {
+          ...item,
+          ...files,
+        },
+        product_database: productDatabaseRow,
+        orders: orderRows,
+        summary: {
+          total_orders: orderRows.length,
+          total_inspection_records: orderRows.reduce(
+            (sum, row) => sum + Number(row?.inspection_count || 0),
+            0,
+          ),
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Get Item Details Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch item details",
       error: error.message,
     });
   }

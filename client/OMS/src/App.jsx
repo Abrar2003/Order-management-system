@@ -32,6 +32,7 @@ import ShippedSamples from "./pages/ShippedSamples";
 import Items from "./pages/Items";
 import ItemMasters from "./pages/ItemMasters";
 import ItemFilesPage from "./pages/ItemFilesPage";
+import ItemDetails from "./pages/ItemDetails";
 import ItemOrdersHistory from "./pages/ItemOrdersHistory";
 import UploadLogs from "./pages/UploadLogs";
 import OrderEditLogs from "./pages/OrderEditLogs";
@@ -482,6 +483,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <ItemFilesPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/items/:itemCode/details"
+            element={
+              <ProtectedRoute>
+                <ItemDetails />
               </ProtectedRoute>
             }
           />

@@ -373,6 +373,19 @@ const ItemFilesPage = () => {
     [location.pathname, location.search, navigate],
   );
 
+  const navigateToItemDetails = useCallback(
+    (item) => {
+      const itemCode = String(item?.code || "").trim();
+      if (!itemCode) return;
+      navigate(`/items/${encodeURIComponent(itemCode)}/details`, {
+        state: {
+          fromItems: `${location.pathname}${location.search}`,
+        },
+      });
+    },
+    [location.pathname, location.search, navigate],
+  );
+
   const navigateToLatestInspectionReport = useCallback(
     (item) => {
       const qcId = String(item?.latest_inspection_report_qc_id || "").trim();
@@ -770,6 +783,15 @@ const ItemFilesPage = () => {
                               <button
                                 type="button"
                                 className="btn btn-outline-secondary btn-sm"
+                                onClick={() => navigateToItemDetails(item)}
+                                disabled={!item?.code}
+                                title="Open item details"
+                              >
+                                View Item
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-outline-info btn-sm"
                                 onClick={() => navigateToLatestInspectionReport(item)}
                                 disabled={!item?.latest_inspection_report_qc_id}
                                 title={
@@ -778,7 +800,7 @@ const ItemFilesPage = () => {
                                     : "No inspection report available yet"
                                 }
                               >
-                                View Item
+                                Inspection Report
                               </button>
                               <button
                                 type="button"
