@@ -12,6 +12,7 @@ const {
 const {
   cleanupLegacyItemSizeFields,
 } = require("../helpers/itemLegacySizeCleanup");
+const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
 
 const normalizeText = (value) => String(value ?? "").trim();
 
@@ -174,6 +175,9 @@ const syncItemInspectedDataFromInspection = async ({
   itemDoc = null,
   save = true,
   requireModernInspectionData = false,
+  user = null,
+  route = "",
+  source = "qc_inspection_sync",
 } = {}) => {
   if (!inspectionRecord) {
     return { matched: false, updated: false, skipped_reason: "missing_inspection" };
@@ -197,6 +201,7 @@ const syncItemInspectedDataFromInspection = async ({
     return { matched: false, updated: false, skipped_reason: "missing_item" };
   }
 
+  const beforeItemSnapshot = resolvedItem.toObject();
   const changed = applyLatestInspectionToItem({
     itemDoc: resolvedItem,
     inspectionRecord,
@@ -204,6 +209,18 @@ const syncItemInspectedDataFromInspection = async ({
   });
 
   if (changed && save) {
+    appendItemUpdateHistory(resolvedItem, {
+      before: beforeItemSnapshot,
+      after: resolvedItem.toObject(),
+      reqUser: user,
+      action: "inspection_sync",
+      source,
+      route,
+      metadata: {
+        qc_id: String(qcDoc?._id || ""),
+        inspection_record_id: String(inspectionRecord?._id || ""),
+      },
+    });
     await resolvedItem.save();
   }
 

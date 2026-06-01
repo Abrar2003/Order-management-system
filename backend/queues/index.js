@@ -219,6 +219,7 @@ const enqueuePisFileProcessing = ({
   originalName,
   previousStorageKey = "",
   checksum = "",
+  user = null,
 } = {}) =>
   addJob(
     QUEUE_NAMES.fileProcessingQueue,
@@ -229,6 +230,7 @@ const enqueuePisFileProcessing = ({
       tempFilePath,
       originalName,
       previousStorageKey,
+      user,
     },
     {
       jobId: [

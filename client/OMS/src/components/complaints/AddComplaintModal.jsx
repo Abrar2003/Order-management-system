@@ -17,6 +17,7 @@ const AddComplaintModal = ({
   categoryOptions = [],
   creatingCategory = false,
   initialValues = EMPTY_INITIAL_VALUES,
+  itemCodeOptions = [],
   loadingOptions = false,
   onClose,
   onCreateCategory,
@@ -61,6 +62,17 @@ const AddComplaintModal = ({
         ),
       ].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" })),
     [categoryOptions, form.category],
+  );
+  const resolvedItemCodeOptions = useMemo(
+    () =>
+      [
+        ...new Set(
+          [...itemCodeOptions, form.item_code]
+            .map((value) => String(value || "").trim())
+            .filter(Boolean),
+        ),
+      ].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" })),
+    [form.item_code, itemCodeOptions],
   );
 
   useEffect(() => {
@@ -160,7 +172,20 @@ const AddComplaintModal = ({
                 </div>
                 <div className="col-md-4">
                   <label className="form-label">Item Code *</label>
-                  <input name="item_code" className="form-control" value={form.item_code} onChange={handleChange} required />
+                  <input
+                    name="item_code"
+                    className="form-control"
+                    list="complaint-item-code-options"
+                    value={form.item_code}
+                    onChange={handleChange}
+                    required
+                    disabled={saving || loadingOptions}
+                  />
+                  <datalist id="complaint-item-code-options">
+                    {resolvedItemCodeOptions.map((itemCode) => (
+                      <option key={itemCode} value={itemCode} />
+                    ))}
+                  </datalist>
                 </div>
                 <div className="col-md-4">
                   <label className="form-label">PO</label>

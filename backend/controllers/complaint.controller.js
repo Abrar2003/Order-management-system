@@ -2,6 +2,7 @@ const path = require("path");
 const mongoose = require("mongoose");
 
 const { Complaint } = require("../models/complaint.model");
+const Item = require("../models/item.model");
 const {
   ComplaintCategory,
   normalizeCategoryName,
@@ -106,6 +107,17 @@ const ensureQcComplaintAccess = (req, res) => {
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value || ""));
 const normalizeItemCodeKey = (value) => normalizeText(value).toLowerCase();
 const getUserIdString = (value) => String(value?._id || value?.id || value || "").trim();
+
+const findExistingItemByCode = async (itemCode = "") => {
+  const normalizedItemCode = normalizeText(itemCode);
+  if (!normalizedItemCode) return null;
+
+  return Item.findOne({
+    code: { $regex: `^${escapeRegex(normalizedItemCode)}$`, $options: "i" },
+  })
+    .select("_id code brand brand_name brands vendors")
+    .lean();
+};
 
 const createComplaintNo = () => {
   const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, "");
@@ -481,6 +493,14 @@ exports.createComplaint = async (req, res) => {
       });
     }
 
+    const existingItem = await findExistingItemByCode(itemCode);
+    if (!existingItem) {
+      return res.status(404).json({
+        success: false,
+        message: `Item code ${itemCode} does not exist. Please select an existing item before creating a complaint.`,
+      });
+    }
+
     const actor = buildActor(req.user);
     const now = new Date();
     const uploadedFiles = await uploadComplaintFiles(req.files, actor);
@@ -490,7 +510,7 @@ exports.createComplaint = async (req, res) => {
     const basePayload = {
       brand,
       vendor,
-      item_code: itemCode,
+      item_code: normalizeText(existingItem.code || itemCode),
       po,
       category,
       first_comment: firstComment,
@@ -507,6 +527,7 @@ exports.createComplaint = async (req, res) => {
       update_history: [
         createUpdateHistory("create", actor, {
           file_count: uploadedFiles.length,
+          item_id: String(existingItem._id || ""),
         }),
       ],
     };

@@ -29,6 +29,7 @@ const {
   invalidateOrderCaches,
   invalidateItemCaches,
 } = require("../services/cacheInvalidation.service");
+const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
 
 const ACTIVE_ORDER_MATCH = {
   $and: [{ archived: { $ne: true } }, { status: { $ne: "Cancelled" } }],
@@ -272,6 +273,7 @@ const processPisFile = async (job) => {
   const tempFilePath = normalizeText(job.data?.tempFilePath);
   const originalName = normalizeText(job.data?.originalName) || "item-pis.xlsx";
   const previousStorageKey = normalizeText(job.data?.previousStorageKey);
+  const user = job.data?.user || null;
 
   if (!itemId || !tempFilePath) {
     throw new Error("itemId and tempFilePath are required");
@@ -315,10 +317,26 @@ const processPisFile = async (job) => {
       return { skipped: true, reason: "item_not_found", itemId };
     }
 
+    const beforeItemSnapshot = item.toObject();
     item.pis_file = buildStoredWasabiFile({
       ...uploadResult,
       originalName: pdfOriginalName,
       contentType: "application/pdf",
+    });
+    appendItemUpdateHistory(item, {
+      before: beforeItemSnapshot,
+      after: item.toObject(),
+      reqUser: user,
+      action: "pis_file_upload",
+      source: "item_pis_upload_worker",
+      route: "POST /items/:itemId/pis-upload",
+      metadata: {
+        file_type: "pis_file",
+        label: "PIS file",
+        original_name: originalName,
+        previous_storage_key: previousStorageKey,
+        job_id: job.id,
+      },
     });
     await item.save();
 

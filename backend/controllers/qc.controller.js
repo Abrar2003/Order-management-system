@@ -86,6 +86,7 @@ const {
   serializeFormDraft,
   upsertFormDraft,
 } = require("../helpers/formDrafts");
+const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
 
@@ -5950,6 +5951,9 @@ exports.updateQC = async (req, res) => {
             qcDoc: qc,
             inspectionRecord,
             itemDoc: itemDocForInspectedSizeUpdate,
+            user: req.user,
+            route: "PATCH /qc/update-qc/:id",
+            source: "qc_update_modal",
           });
           if (itemInspectionSyncResult?.updated && itemInspectionSyncResult?.item_doc) {
             await syncTotalPoCbmForItem(itemInspectionSyncResult.item_doc.toObject());
@@ -5966,6 +5970,7 @@ exports.updateQC = async (req, res) => {
 
     if (hasItemMasterUpdate) {
       const itemDoc = itemDocForInspectedSizeUpdate;
+      const itemDocSnapshot = itemDoc?.toObject ? itemDoc.toObject() : {};
       let hasItemDocChanges = false;
       const hasPoCbmRelevantItemChanges = Boolean(
         parsedInspectedBoxSizeEntries.hasInput ||
@@ -6192,6 +6197,17 @@ exports.updateQC = async (req, res) => {
       }
 
       if (hasItemDocChanges) {
+        appendItemUpdateHistory(itemDoc, {
+          before: itemDocSnapshot,
+          after: itemDoc.toObject(),
+          reqUser: req.user,
+          action: "qc_item_update",
+          source: "qc_update_modal",
+          route: "PATCH /qc/update-qc/:id",
+          metadata: {
+            qc_id: String(qc?._id || ""),
+          },
+        });
         await itemDoc.save();
         if (hasPoCbmRelevantItemChanges) {
           try {
@@ -11092,6 +11108,9 @@ exports.editInspectionRecords = async (req, res) => {
         const itemInspectionSyncResult = await syncItemInspectedDataFromInspection({
           qcDoc: qc,
           inspectionRecord: latestRecord,
+          user: req.user,
+          route: "PATCH /qc/:id/inspection-records/:recordId",
+          source: "qc_inspection_record_update",
         });
         if (itemInspectionSyncResult?.updated && itemInspectionSyncResult?.item_doc) {
           await syncTotalPoCbmForItem(itemInspectionSyncResult.item_doc.toObject());

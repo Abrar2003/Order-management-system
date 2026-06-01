@@ -67,6 +67,7 @@ const Complaints = () => {
   const [modal, setModal] = useState({ type: "", complaint: null });
   const [brandOptions, setBrandOptions] = useState([]);
   const [vendorOptions, setVendorOptions] = useState([]);
+  const [itemCodeOptions, setItemCodeOptions] = useState([]);
   const [categoryOptions, setCategoryOptions] = useState([]);
   const [loadingOptions, setLoadingOptions] = useState(false);
   const [creatingCategory, setCreatingCategory] = useState(false);
@@ -107,13 +108,15 @@ const Complaints = () => {
     const loadOptions = async () => {
       try {
         setLoadingOptions(true);
-        const [brandVendorResponse, categoryResponse] = await Promise.all([
+        const [brandVendorResponse, categoryResponse, itemOptionsResponse] = await Promise.all([
           api.get("/orders/brands-and-vendors"),
           getComplaintCategories(),
+          api.get("/items", { params: { page: 1, limit: 1 } }),
         ]);
         if (cancelled) return;
         setBrandOptions(normalizeTextOptions(brandVendorResponse?.data?.brands));
         setVendorOptions(normalizeTextOptions(brandVendorResponse?.data?.vendors));
+        setItemCodeOptions(normalizeTextOptions(itemOptionsResponse?.data?.filters?.item_codes));
         setCategoryOptions(normalizeTextOptions(
           (Array.isArray(categoryResponse?.data?.data) ? categoryResponse.data.data : [])
             .map((category) => category?.name),
@@ -122,6 +125,7 @@ const Complaints = () => {
         if (!cancelled) {
           setBrandOptions([]);
           setVendorOptions([]);
+          setItemCodeOptions([]);
           setCategoryOptions([]);
         }
       } finally {
@@ -540,6 +544,7 @@ const Complaints = () => {
           brandOptions={brandOptions}
           categoryOptions={categoryOptions}
           creatingCategory={creatingCategory}
+          itemCodeOptions={itemCodeOptions}
           loadingOptions={loadingOptions}
           onClose={closeModal}
           onCreateCategory={handleCreateCategory}

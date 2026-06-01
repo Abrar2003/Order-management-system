@@ -75,6 +75,7 @@ const {
   buildItemUpdateAuditSnapshot,
   buildItemUpdateLogPayload,
 } = require("../helpers/itemUpdateAudit");
+const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
 const { formatEan13BarcodeDisplay } = require("../helpers/barcodeFormat");
 const { normalizeUserRoleKey } = require("../helpers/userRole");
 const {
@@ -3021,12 +3022,25 @@ exports.updateProductDatabaseItem = async (req, res) => {
         message: "Item not found",
       });
     }
-    const beforeAuditSnapshot = buildItemUpdateAuditSnapshot(item.toObject());
+    const beforeItemSnapshot = item.toObject();
+    const beforeAuditSnapshot = buildItemUpdateAuditSnapshot(beforeItemSnapshot);
 
     const result = applyProductDatabaseSave({
       item,
       payload: req.body || {},
       user: req.user,
+    });
+    appendItemUpdateHistory(item, {
+      before: beforeItemSnapshot,
+      after: item.toObject(),
+      reqUser: req.user,
+      action: "product_database_update",
+      source: "product_database_modal",
+      route: "PATCH /items/:id/product-database",
+      metadata: {
+        product_database_status: result?.status || item?.pd_checked || "",
+        changed: Boolean(result?.changed),
+      },
     });
     await item.save();
     const afterAuditSnapshot = buildItemUpdateAuditSnapshot(item.toObject());
@@ -3075,12 +3089,26 @@ exports.checkProductDatabaseItem = async (req, res) => {
         message: "Item not found",
       });
     }
-    const beforeAuditSnapshot = buildItemUpdateAuditSnapshot(item.toObject());
+    const beforeItemSnapshot = item.toObject();
+    const beforeAuditSnapshot = buildItemUpdateAuditSnapshot(beforeItemSnapshot);
 
     const result = applyProductDatabaseCheck({
       item,
       payload: req.body || {},
       user: req.user,
+    });
+    appendItemUpdateHistory(item, {
+      before: beforeItemSnapshot,
+      after: item.toObject(),
+      reqUser: req.user,
+      action: "product_database_check",
+      source: "product_database_modal",
+      route: "POST /items/:id/product-database/check",
+      metadata: {
+        product_database_status: result?.status || item?.pd_checked || "",
+        changed: Boolean(result?.changed),
+        checked: Boolean(result?.checked),
+      },
     });
     await item.save();
     const afterAuditSnapshot = buildItemUpdateAuditSnapshot(item.toObject());
@@ -3130,12 +3158,26 @@ exports.approveProductDatabaseItem = async (req, res) => {
         message: "Item not found",
       });
     }
-    const beforeAuditSnapshot = buildItemUpdateAuditSnapshot(item.toObject());
+    const beforeItemSnapshot = item.toObject();
+    const beforeAuditSnapshot = buildItemUpdateAuditSnapshot(beforeItemSnapshot);
 
     const result = applyProductDatabaseApprove({
       item,
       payload: req.body || {},
       user: req.user,
+    });
+    appendItemUpdateHistory(item, {
+      before: beforeItemSnapshot,
+      after: item.toObject(),
+      reqUser: req.user,
+      action: "product_database_approve",
+      source: "product_database_modal",
+      route: "POST /items/:id/product-database/approve",
+      metadata: {
+        product_database_status: result?.status || item?.pd_checked || "",
+        changed: Boolean(result?.changed),
+        approved: Boolean(result?.approved),
+      },
     });
     await item.save();
     const afterAuditSnapshot = buildItemUpdateAuditSnapshot(item.toObject());
@@ -4700,6 +4742,17 @@ exports.createItem = async (req, res) => {
       file: req.file,
     });
     item.pis_file = storedPisFile;
+    appendItemUpdateHistory(item, {
+      before: {},
+      after: item.toObject(),
+      reqUser: req.user,
+      action: "create",
+      source: "item_create",
+      route: "POST /items",
+      metadata: {
+        pis_file_uploaded: Boolean(storedPisFile?.key || storedPisFile?.link),
+      },
+    });
 
     try {
       await item.save();
@@ -4735,7 +4788,7 @@ exports.createItem = async (req, res) => {
 
 exports.syncItemsFromOrders = async (req, res) => {
   try {
-    const summary = await syncAllItemsFromOrdersAndQc();
+    const summary = await syncAllItemsFromOrdersAndQc({ user: req.user });
 
     return res.status(200).json({
       success: true,
@@ -4803,6 +4856,7 @@ exports.updateItem = async (req, res) => {
         message: "Item not found",
       });
     }
+    const beforeItemSnapshot = item.toObject();
 
     const productTypeContext = await resolveItemProductTypeContext(payload);
 
@@ -5021,6 +5075,17 @@ exports.updateItem = async (req, res) => {
       });
     }
 
+    appendItemUpdateHistory(item, {
+      before: beforeItemSnapshot,
+      after: item.toObject(),
+      reqUser: req.user,
+      action: "update",
+      source: "item_update",
+      route: "PATCH /items/:id",
+      metadata: {
+        inspected_box_touched: Boolean(inspectedBoxTouched),
+      },
+    });
     await item.save();
 
     let poCbmSync = null;
@@ -5224,7 +5289,8 @@ exports.updateItemPis = async (req, res) => {
         message: "Item not found",
       });
     }
-    const beforeAuditSnapshot = buildItemUpdateAuditSnapshot(item.toObject());
+    const beforeItemSnapshot = item.toObject();
+    const beforeAuditSnapshot = buildItemUpdateAuditSnapshot(beforeItemSnapshot);
 
     const setPath = (path, value) => {
       item.set(path, value);
@@ -5405,6 +5471,19 @@ exports.updateItemPis = async (req, res) => {
     }
 
     applyCalculatedCbmTotals(item, setPath);
+    appendItemUpdateHistory(item, {
+      before: beforeItemSnapshot,
+      after: item.toObject(),
+      reqUser: req.user,
+      action: requestedPisDiffCheck ? "pis_diff_update" : "pis_update",
+      source: requestedPisDiffCheck ? "pis_diffs_modal" : "pis_update_modal",
+      route: "PATCH /items/:id/pis",
+      metadata: {
+        pis_update_source: normalizeTextField(payload?.pis_update_source),
+        sync_master_data: Boolean(payload?.sync_master_data),
+        pis_checked_flag_requested: Boolean(payload?.pis_checked_flag),
+      },
+    });
     await item.save();
     const afterAuditSnapshot = buildItemUpdateAuditSnapshot(item.toObject());
     await createPisUpdateLog({
@@ -5443,7 +5522,11 @@ exports.updateItemPis = async (req, res) => {
   }
 };
 
-const syncProductDatabaseValuesIntoPisItem = async ({ item, user } = {}) => {
+const syncProductDatabaseValuesIntoPisItem = async ({
+  item,
+  user,
+  route = "POST /items/:id/pis/sync-product-database",
+} = {}) => {
   if (!item) {
     return { status: "missing", changedFields: [], syncMessages: [] };
   }
@@ -5456,7 +5539,8 @@ const syncProductDatabaseValuesIntoPisItem = async ({ item, user } = {}) => {
     return { status: "no_data", changedFields: [], syncMessages: [] };
   }
 
-  const beforeAuditSnapshot = buildItemUpdateAuditSnapshot(item.toObject());
+  const beforeItemSnapshot = item.toObject();
+  const beforeAuditSnapshot = buildItemUpdateAuditSnapshot(beforeItemSnapshot);
   const changedFields = [];
   const syncMessages = [];
   let touched = false;
@@ -5563,6 +5647,20 @@ const syncProductDatabaseValuesIntoPisItem = async ({ item, user } = {}) => {
     });
   }
 
+  appendItemUpdateHistory(item, {
+    before: beforeItemSnapshot,
+    after: item.toObject(),
+    reqUser: user,
+    action: "pis_database_sync",
+    source: "pis_sync_database_button",
+    route,
+    metadata: {
+      source: "product_database",
+      changed_fields: changedFields,
+      synced_sections: syncMessages,
+      touched: Boolean(touched),
+    },
+  });
   await item.save();
 
   if (touched) {
@@ -5615,6 +5713,7 @@ exports.syncProductDatabaseToPis = async (req, res) => {
     const result = await syncProductDatabaseValuesIntoPisItem({
       item,
       user: req.user,
+      route: "POST /items/:id/pis/sync-product-database",
     });
 
     if (result.status === "already_synced") {
@@ -5688,6 +5787,7 @@ exports.syncAllProductDatabaseToPis = async (req, res) => {
         const result = await syncProductDatabaseValuesIntoPisItem({
           item,
           user: req.user,
+          route: "POST /items/pis/sync-product-database",
         });
 
         if (result.status === "updated") summary.updated += 1;
@@ -5862,6 +5962,7 @@ exports.uploadItemFile = async (req, res) => {
         message: `${fileConfig.label} can only be uploaded when mounting file is needed for this item`,
       });
     }
+    const beforeItemSnapshot = item.toObject();
 
     const previousFile = normalizeStoredItemFile(item?.[fileConfig.field]);
     const previousStorageKey = previousFile.key;
@@ -5883,6 +5984,20 @@ exports.uploadItemFile = async (req, res) => {
       });
 
       item[fileConfig.field] = buildStoredWasabiItemFile(uploadResult);
+      appendItemUpdateHistory(item, {
+        before: beforeItemSnapshot,
+        after: item.toObject(),
+        reqUser: req.user,
+        action: "file_upload",
+        source: "item_file_upload",
+        route: "POST /items/:id/files",
+        metadata: {
+          file_type: fileType,
+          label: fileConfig.label,
+          original_name: fallbackOriginalName,
+          previous_storage_key: previousStorageKey,
+        },
+      });
       await item.save();
     } catch (saveError) {
       if (uploadResult?.key) {
@@ -6016,6 +6131,7 @@ exports.uploadItemPisFile = async (req, res) => {
         message: `${fileConfig.label} can only be deleted when mounting file is needed for this item`,
       });
     }
+    const beforeItemSnapshot = item.toObject();
 
     const previousPisFile = normalizeStoredItemFile(item?.pis_file);
     const previousStorageKey = previousPisFile.key;
@@ -6031,6 +6147,16 @@ exports.uploadItemPisFile = async (req, res) => {
         originalName: stagedFile.originalName,
         previousStorageKey,
         checksum: stagedFile.checksum,
+        user: req.user
+          ? {
+              _id: req.user._id || req.user.id || null,
+              id: req.user.id || req.user._id || null,
+              name: req.user.name || req.user.email || req.user.username || "",
+              email: req.user.email || "",
+              username: req.user.username || "",
+              role: req.user.role || "",
+            }
+          : null,
       });
 
       if (job) {
@@ -6051,6 +6177,20 @@ exports.uploadItemPisFile = async (req, res) => {
       itemCode: normalizeTextField(item?.code),
       itemId,
       file: req.file,
+    });
+    appendItemUpdateHistory(item, {
+      before: beforeItemSnapshot,
+      after: item.toObject(),
+      reqUser: req.user,
+      action: "pis_file_upload",
+      source: "item_pis_upload",
+      route: "POST /items/:itemId/pis-upload",
+      metadata: {
+        file_type: "pis_file",
+        label: fileConfig.label,
+        original_name: req.file?.originalname || "",
+        previous_storage_key: previousStorageKey,
+      },
     });
 
     try {
@@ -6190,7 +6330,22 @@ exports.deleteItemFile = async (req, res) => {
       });
     }
 
+    const beforeItemSnapshot = item.toObject();
     item[fileConfig.field] = {};
+    appendItemUpdateHistory(item, {
+      before: beforeItemSnapshot,
+      after: item.toObject(),
+      reqUser: req.user,
+      action: "file_delete",
+      source: "item_file_delete",
+      route: "DELETE /items/:id/files/:fileType",
+      metadata: {
+        file_type: fileType,
+        label: fileConfig.label,
+        previous_storage_key: existingFile.key,
+        previous_original_name: existingFile.originalName,
+      },
+    });
     await item.save();
 
     let storageDeleteWarning = "";

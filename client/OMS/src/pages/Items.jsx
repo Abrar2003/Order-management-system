@@ -1087,6 +1087,7 @@ const Items = () => {
         <AddComplaintModal
           brandOptions={complaintBrandOptions}
           initialValues={complaintInitialValues}
+          itemCodeOptions={itemCodeOptions}
           loadingOptions={loadingComplaintOptions}
           onClose={() => setComplaintItem(null)}
           onSubmit={handleCreateComplaint}

@@ -140,6 +140,32 @@ const productDatabaseHistorySchema = new mongoose.Schema(
   },
   { _id: false },
 );
+const itemUpdateHistoryActorSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "users",
+      default: null,
+    },
+    name: { type: String, default: "", trim: true },
+    role: { type: String, default: "", trim: true },
+  },
+  { _id: false },
+);
+const itemUpdateHistorySchema = new mongoose.Schema(
+  {
+    action: { type: String, default: "update", trim: true },
+    source: { type: String, default: "", trim: true },
+    route: { type: String, default: "", trim: true },
+    actor: { type: itemUpdateHistoryActorSchema, default: () => ({}) },
+    timestamp: { type: Date, default: Date.now },
+    changed_fields: { type: [String], default: [] },
+    before: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
+    after: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
+    metadata: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
+  },
+  { _id: false },
+);
 const productTypeSnapshotSchema = new mongoose.Schema(
   {
     template: {
@@ -386,6 +412,7 @@ const itemSchema = new mongoose.Schema(
     pd_master_barcode: { type: String, default: "", trim: true },
     pd_inner_barcode: { type: String, default: "", trim: true },
     pd_history: { type: [productDatabaseHistorySchema], default: [] },
+    update_history: { type: [itemUpdateHistorySchema], default: [] },
     pis_box_top_LBH: legacyLbhSchema,
     pis_box_bottom_LBH: legacyLbhSchema,
     pis_barcode: { type: String, default: "", trim: true },

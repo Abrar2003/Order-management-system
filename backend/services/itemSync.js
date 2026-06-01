@@ -7,6 +7,7 @@ const {
   buildBoxMeasurementCbmSummary,
   detectBoxPackagingMode,
 } = require("../helpers/boxMeasurement");
+const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
 
 const normalizeText = (value) => String(value ?? "").trim();
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
@@ -410,7 +411,7 @@ const applyQcSnapshot = (item, qcLike) => {
   return changed;
 };
 
-const upsertItemByCode = async (code, applyFn) => {
+const upsertItemByCode = async (code, applyFn, historyContext = {}) => {
   const normalizedCode = normalizeText(code);
   if (!normalizedCode) {
     return { created: 0, updated: 0, skipped: 1 };
@@ -421,9 +422,22 @@ const upsertItemByCode = async (code, applyFn) => {
   if (!item) {
     item = new Item({ code: normalizedCode });
   }
+  const beforeItemSnapshot = isNew ? {} : item.toObject();
 
   const changed = applyFn(item);
   if (isNew || changed) {
+    appendItemUpdateHistory(item, {
+      before: beforeItemSnapshot,
+      after: item.toObject(),
+      reqUser: historyContext.user,
+      action: isNew ? "create" : "sync_update",
+      source: historyContext.source || "items_sync",
+      route: historyContext.route || "POST /items/sync",
+      metadata: {
+        sync_source: historyContext.syncSource || "",
+        item_code: normalizedCode,
+      },
+    });
     await item.save();
     return {
       created: isNew ? 1 : 0,
@@ -435,18 +449,22 @@ const upsertItemByCode = async (code, applyFn) => {
   return { created: 0, updated: 0, skipped: 1 };
 };
 
-const upsertItemFromOrder = async (orderLike) => {
+const upsertItemFromOrder = async (orderLike, historyContext = {}) => {
   const code = normalizeText(orderLike?.item?.item_code ?? orderLike?.item_code ?? "");
-  return upsertItemByCode(code, (item) => applyOrderSnapshot(item, orderLike));
+  return upsertItemByCode(
+    code,
+    (item) => applyOrderSnapshot(item, orderLike),
+    { ...historyContext, syncSource: "order" },
+  );
 };
 
-const upsertItemsFromOrders = async (orders = []) => {
+const upsertItemsFromOrders = async (orders = [], historyContext = {}) => {
   let created = 0;
   let updated = 0;
   let skipped = 0;
 
   for (const order of Array.isArray(orders) ? orders : []) {
-    const result = await upsertItemFromOrder(order);
+    const result = await upsertItemFromOrder(order, historyContext);
     created += result.created;
     updated += result.updated;
     skipped += result.skipped;
@@ -460,12 +478,16 @@ const upsertItemsFromOrders = async (orders = []) => {
   };
 };
 
-const upsertItemFromQc = async (qcLike) => {
+const upsertItemFromQc = async (qcLike, historyContext = {}) => {
   const code = normalizeText(qcLike?.item?.item_code ?? "");
-  return upsertItemByCode(code, (item) => applyQcSnapshot(item, qcLike));
+  return upsertItemByCode(
+    code,
+    (item) => applyQcSnapshot(item, qcLike),
+    { ...historyContext, syncSource: "qc" },
+  );
 };
 
-const upsertItemsFromQcs = async (qcs = []) => {
+const upsertItemsFromQcs = async (qcs = [], historyContext = {}) => {
   const latestQcByCode = new Map();
 
   for (const qc of Array.isArray(qcs) ? qcs : []) {
@@ -488,7 +510,7 @@ const upsertItemsFromQcs = async (qcs = []) => {
   let skipped = 0;
 
   for (const qc of latestQcs) {
-    const result = await upsertItemFromQc(qc);
+    const result = await upsertItemFromQc(qc, historyContext);
     created += result.created;
     updated += result.updated;
     skipped += result.skipped;
@@ -573,7 +595,7 @@ const syncCbmSnapshotsForModel = async (Model) => {
 const syncQCCbmTotalsFromTopBottom = async () => syncCbmSnapshotsForModel(QC);
 const syncInspectionCbmSnapshots = async () => syncCbmSnapshotsForModel(Inspection);
 
-const syncDerivedFieldsForExistingItems = async () => {
+const syncDerivedFieldsForExistingItems = async (historyContext = {}) => {
   let processed = 0;
   let updated = 0;
   let skipped = 0;
@@ -582,8 +604,20 @@ const syncDerivedFieldsForExistingItems = async () => {
 
   for await (const item of cursor) {
     processed += 1;
+    const beforeItemSnapshot = item.toObject();
     const changed = applyDerivedItemFields(item);
     if (changed) {
+      appendItemUpdateHistory(item, {
+        before: beforeItemSnapshot,
+        after: item.toObject(),
+        reqUser: historyContext.user,
+        action: "sync_update",
+        source: historyContext.source || "items_sync",
+        route: historyContext.route || "POST /items/sync",
+        metadata: {
+          sync_source: "derived_fields",
+        },
+      });
       await item.save();
       updated += 1;
     } else {
@@ -598,7 +632,12 @@ const syncDerivedFieldsForExistingItems = async () => {
   };
 };
 
-const syncAllItemsFromOrdersAndQc = async () => {
+const syncAllItemsFromOrdersAndQc = async ({ user } = {}) => {
+  const historyContext = {
+    user,
+    source: "items_sync",
+    route: "POST /items/sync",
+  };
   const [qcCbmSync, inspectionCbmSync] = await Promise.all([
     syncQCCbmTotalsFromTopBottom(),
     syncInspectionCbmSnapshots(),
@@ -614,9 +653,9 @@ const syncAllItemsFromOrdersAndQc = async () => {
       .lean(),
   ]);
 
-  const orderSync = await upsertItemsFromOrders(orders);
-  const qcSync = await upsertItemsFromQcs(qcs);
-  const derivedSync = await syncDerivedFieldsForExistingItems();
+  const orderSync = await upsertItemsFromOrders(orders, historyContext);
+  const qcSync = await upsertItemsFromQcs(qcs, historyContext);
+  const derivedSync = await syncDerivedFieldsForExistingItems(historyContext);
 
   const totalItems = await Item.countDocuments();
 
