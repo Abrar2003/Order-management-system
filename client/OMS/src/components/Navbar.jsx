@@ -98,6 +98,7 @@ const Navbar = () => {
   const canUploadFinish = hasPermission("finishes", "upload");
   const canViewPis = hasPermission("pis", "view");
   const canViewWorkflow = hasPermission("workflow", "view");
+  const canViewSamples = hasPermission("samples", "view");
   const canManageWorkflow = isManagerLikeRole(permissionRole)
     && hasPermission("workflow", "manage");
 
@@ -310,6 +311,10 @@ const Navbar = () => {
 
     const items = [];
 
+    if (canViewSamples) {
+      items.push(routeMenuItem("samples", "Samples", "/samples"));
+    }
+
     if (hasPermission("containers", "edit") || hasPermission("containers", "manage")) {
       items.push(routeMenuItem("bulk-shipping", "Bulk Shipping", "/container"));
     }
@@ -319,7 +324,7 @@ const Navbar = () => {
     }
 
     return items;
-  }, [canManageLabels, hasPermission, isQcOnlyRole]);
+  }, [canManageLabels, canViewSamples, hasPermission, isQcOnlyRole]);
 
   const uploadOrdersMenuItems = useMemo(() => {
     if (!canManageOrders || isQcOnlyRole) return [];
@@ -493,6 +498,7 @@ const Navbar = () => {
         { key: "items", label: "Items", items: itemMenuItems },
         { key: "orders", label: "Orders", items: orderMenuItems },
         { key: "reports", label: "Reports", items: reportMenuItems },
+        { key: "process", label: "Process", items: processMenuItems },
         { key: "workflow", label: "Production Workflow", items: workflowMenuItems },
         { key: "update-orders", label: "Update", items: updateOrdersMenuItems },
         { key: "upload-add", label: "Upload", items: uploadAddMenuItems },

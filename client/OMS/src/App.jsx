@@ -27,6 +27,8 @@ import PackedGoods from "./pages/PackedGoods";
 import DailyReport from "./pages/DailyReport";
 import Shipments from "./pages/Shipments";
 import Container from "./pages/Container";
+import Samples from "./pages/Samples";
+import SampleDetails from "./pages/SampleDetails";
 import Containers from "./pages/Containers";
 import ShippedSamples from "./pages/ShippedSamples";
 import Items from "./pages/Items";
@@ -438,6 +440,24 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <Containers />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/samples"
+            element={
+              <ProtectedRoute>
+                <Samples />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/samples/:id"
+            element={
+              <ProtectedRoute>
+                <SampleDetails />
               </ProtectedRoute>
             }
           />

@@ -64,6 +64,17 @@ const COMPLAINT_UPLOAD_MAX_FILE_COUNT = Math.max(
   1,
   Number.parseInt(String(process.env.COMPLAINT_UPLOAD_MAX_FILE_COUNT || 10), 10) || 10,
 );
+const SAMPLE_UPLOAD_MAX_FILE_SIZE = Math.max(
+  1,
+  Number.parseInt(
+    String(process.env.SAMPLE_UPLOAD_MAX_FILE_SIZE || DEFAULT_GENERIC_UPLOAD_MAX_FILE_SIZE),
+    10,
+  ) || DEFAULT_GENERIC_UPLOAD_MAX_FILE_SIZE,
+);
+const SAMPLE_UPLOAD_MAX_FILE_COUNT = Math.max(
+  1,
+  Number.parseInt(String(process.env.SAMPLE_UPLOAD_MAX_FILE_COUNT || 20), 10) || 20,
+);
 const COMPLAINT_UPLOAD_MIME_TYPES = new Set([
   "application/octet-stream",
   "application/pdf",
@@ -101,6 +112,19 @@ const COMPLAINT_UPLOAD_EXTENSIONS = new Set([
   ".doc",
   ".docx",
   ".txt",
+]);
+
+const SAMPLE_UPLOAD_MIME_TYPES = new Set([
+  ...COMPLAINT_UPLOAD_MIME_TYPES,
+  "application/acad",
+  "application/dwg",
+  "application/x-dwg",
+  "image/vnd.dwg",
+]);
+const SAMPLE_UPLOAD_EXTENSIONS = new Set([
+  ...COMPLAINT_UPLOAD_EXTENSIONS,
+  ".dwg",
+  ".dxf",
 ]);
 
 // Legacy non-QC uploads still use the generic middleware; QC image routes must
@@ -145,6 +169,27 @@ const complaintUpload = multer({
     fileSize: COMPLAINT_UPLOAD_MAX_FILE_SIZE,
   },
   fileFilter: complaintFileFilter,
+});
+
+const sampleFileFilter = (_req, file, cb) => {
+  const mimeType = String(file?.mimetype || "").trim().toLowerCase();
+  const extension = path.extname(String(file?.originalname || "")).toLowerCase();
+
+  if (SAMPLE_UPLOAD_MIME_TYPES.has(mimeType) && SAMPLE_UPLOAD_EXTENSIONS.has(extension)) {
+    cb(null, true);
+    return;
+  }
+
+  cb(new Error("Unsupported sample file type"), false);
+};
+
+const sampleUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    files: SAMPLE_UPLOAD_MAX_FILE_COUNT,
+    fileSize: SAMPLE_UPLOAD_MAX_FILE_SIZE,
+  },
+  fileFilter: sampleFileFilter,
 });
 ensureQcImageTempDirectories();
 
@@ -200,6 +245,9 @@ const applyGenericMulterMiddleware = (middleware) => (req, res, next) =>
 
 const applyComplaintMulterMiddleware = (middleware) => (req, res, next) =>
   middleware(req, res, (err) => handleComplaintUploadErrors(err, req, res, next));
+
+const applySampleMulterMiddleware = (middleware) => (req, res, next) =>
+  middleware(req, res, (err) => handleSampleUploadErrors(err, req, res, next));
 
 const handleGenericUploadErrors = (err, _req, res, next) => {
   if (!err) {
@@ -307,6 +355,39 @@ const handleComplaintUploadErrors = (err, _req, res, next) => {
   });
 };
 
+const handleSampleUploadErrors = (err, _req, res, next) => {
+  if (!err) {
+    next();
+    return;
+  }
+
+  if (err instanceof multer.MulterError) {
+    if (err.code === "LIMIT_FILE_SIZE") {
+      return res.status(400).json({
+        success: false,
+        message: `Sample file exceeds the maximum allowed size of ${SAMPLE_UPLOAD_MAX_FILE_SIZE} bytes`,
+      });
+    }
+
+    if (err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE") {
+      return res.status(400).json({
+        success: false,
+        message: `You can upload up to ${SAMPLE_UPLOAD_MAX_FILE_COUNT} sample files`,
+      });
+    }
+
+    return res.status(400).json({
+      success: false,
+      message: err.message || "Invalid sample upload request",
+    });
+  }
+
+  return res.status(400).json({
+    success: false,
+    message: err?.message || "Invalid sample upload request",
+  });
+};
+
 module.exports = upload;
 module.exports.safeSingle = (fieldName) =>
   applyGenericMulterMiddleware(upload.single(fieldName));
@@ -317,11 +398,16 @@ module.exports.qcImageSingleUpload = (fieldName = "image") =>
 module.exports.handleGenericUploadErrors = handleGenericUploadErrors;
 module.exports.handleQcImageUploadErrors = handleQcImageUploadErrors;
 module.exports.handleComplaintUploadErrors = handleComplaintUploadErrors;
+module.exports.handleSampleUploadErrors = handleSampleUploadErrors;
 module.exports.complaintFilesUpload = (fieldName = "files") =>
   applyComplaintMulterMiddleware(complaintUpload.array(fieldName, COMPLAINT_UPLOAD_MAX_FILE_COUNT));
+module.exports.sampleFilesUpload = (fieldName = "files") =>
+  applySampleMulterMiddleware(sampleUpload.array(fieldName, SAMPLE_UPLOAD_MAX_FILE_COUNT));
 module.exports.QC_IMAGE_TEMP_DIR = QC_IMAGE_TEMP_DIR;
 module.exports.MAX_QC_IMAGE_UPLOAD_COUNT = MAX_QC_IMAGE_UPLOAD_COUNT;
 module.exports.QC_IMAGE_MAX_FILE_SIZE = QC_IMAGE_MAX_FILE_SIZE;
 module.exports.GENERIC_UPLOAD_MAX_FILE_SIZE = GENERIC_UPLOAD_MAX_FILE_SIZE;
 module.exports.COMPLAINT_UPLOAD_MAX_FILE_SIZE = COMPLAINT_UPLOAD_MAX_FILE_SIZE;
 module.exports.COMPLAINT_UPLOAD_MAX_FILE_COUNT = COMPLAINT_UPLOAD_MAX_FILE_COUNT;
+module.exports.SAMPLE_UPLOAD_MAX_FILE_SIZE = SAMPLE_UPLOAD_MAX_FILE_SIZE;
+module.exports.SAMPLE_UPLOAD_MAX_FILE_COUNT = SAMPLE_UPLOAD_MAX_FILE_COUNT;

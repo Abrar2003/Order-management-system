@@ -78,6 +78,23 @@ const normalizeComparableBarcode = (value) => {
   return withoutLeadingZeroes || "0";
 };
 
+const getPositiveBarcodeValue = (record = {}, fields = []) => {
+  for (const field of fields) {
+    const value = record?.[field];
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return String(value);
+    }
+  }
+  return "";
+};
+
+const getRecordMasterBarcodeValue = (record = {}) =>
+  getPositiveBarcodeValue(record, ["master_barcode", "barcode"]);
+
+const getRecordInnerBarcodeValue = (record = {}) =>
+  getPositiveBarcodeValue(record, ["inner_barcode"]);
+
 const QC_BARCODE_VALIDATION_TYPES = Object.freeze([
   { value: "individual", label: "Individual" },
   { value: "inner_master", label: "Inner + Master" },
@@ -1081,7 +1098,16 @@ const UpdateQcModal = ({
     isCurrentUserLabelExempt;
   const canEditLockedQcSizeFields =
     isInspectionRecordUpdate || canRewriteLatestInspectionRecord || isQcUser || isManager;
-  const canViewStoredBarcodes = isActualAdmin || isManager || Boolean(isAdmin);
+  const canViewStoredBarcodes =
+    !isQcUser &&
+    (
+      isInspectionRecordUpdate ||
+      canRewriteLatestInspectionRecord ||
+      isActualAdmin ||
+      isManager ||
+      Boolean(isAdmin) ||
+      isCurrentUserLabelExempt
+    );
   const lockBarcodeField =
     (qc?.master_barcode || qc?.barcode) > 0 && !canEditLockedQcFields;
   const lockInnerBarcodeField = qc?.inner_barcode > 0 && !canEditLockedQcFields;
@@ -1094,6 +1120,11 @@ const UpdateQcModal = ({
     requiresBarcodeValidation && !barcodeValidated;
   const latestInspectionRecord = getLatestInspectionRecord(qc);
   const latestRequestEntry = getLatestRequestEntry(qc);
+  const barcodePrefillRecord = isInspectionRecordUpdate
+    ? inspectionRecord
+    : canRewriteLatestInspectionRecord
+      ? latestInspectionRecord
+      : null;
   const qcUserRequestAvailability = useMemo(
     () => getQcUserUpdateRequestAvailability(qc, { currentUserId }),
     [qc, currentUserId],
@@ -1291,12 +1322,8 @@ const UpdateQcModal = ({
         : hasStoredInspectedBoxSizes
           ? normalizeSizeCount(inspectedBoxSizeEntries.length, 1)
           : 1;
-    const storedMasterBarcode = isInspectionRecordUpdate || canRewriteLatestInspectionRecord
-      ? itemMaster?.master_barcode || itemMaster?.barcode
-      : itemMaster?.master_barcode || itemMaster?.barcode || qc?.master_barcode || qc?.barcode;
-    const storedInnerBarcode = isInspectionRecordUpdate || canRewriteLatestInspectionRecord
-      ? itemMaster?.inner_barcode
-      : itemMaster?.inner_barcode || qc?.inner_barcode;
+    const storedMasterBarcode = getRecordMasterBarcodeValue(barcodePrefillRecord);
+    const storedInnerBarcode = getRecordInnerBarcodeValue(barcodePrefillRecord);
 
     setForm({
       inspector: defaultInspectorId,
@@ -1407,6 +1434,7 @@ const UpdateQcModal = ({
     qc,
     canRewriteLatestInspectionRecord,
     canViewStoredBarcodes,
+    barcodePrefillRecord,
     isInspectionRecordUpdate,
     inspectionRecord,
     latestInspectionRecord,
