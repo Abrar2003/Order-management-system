@@ -587,6 +587,105 @@ exports.getComplaintById = async (req, res) => {
   }
 };
 
+exports.updateComplaint = async (req, res) => {
+  try {
+    if (!ensureAdminAccess(req, res)) return undefined;
+    if (!isValidObjectId(req.params.id)) {
+      return res.status(400).json({ success: false, message: "Invalid complaint id." });
+    }
+
+    const complaint = await Complaint.findById(req.params.id);
+    if (!complaint) {
+      return res.status(404).json({ success: false, message: "Complaint not found." });
+    }
+
+    const brand = normalizeText(req.body?.brand);
+    const vendor = normalizeText(req.body?.vendor);
+    const itemCode = normalizeText(req.body?.item_code || req.body?.itemCode);
+    const po = normalizeText(req.body?.po);
+    const category = normalizeCategoryName(req.body?.category);
+    const firstComment = normalizeText(req.body?.first_comment || req.body?.firstComment);
+
+    if (!brand || !vendor || !itemCode || !firstComment) {
+      return res.status(400).json({
+        success: false,
+        message: "Brand, vendor, item code, and first comment are required.",
+      });
+    }
+
+    const existingItem = await findExistingItemByCode(itemCode);
+    if (!existingItem) {
+      return res.status(404).json({
+        success: false,
+        message: `Item code ${itemCode} does not exist. Please select an existing item before updating the complaint.`,
+      });
+    }
+
+    const actor = buildActor(req.user);
+    const previous = {
+      brand: complaint.brand,
+      vendor: complaint.vendor,
+      item_code: complaint.item_code,
+      po: complaint.po,
+      category: complaint.category,
+      first_comment: complaint.first_comment,
+    };
+    const uploadedFiles = await uploadComplaintFiles(req.files, actor);
+    if (category) {
+      await ensureComplaintCategory(category, actor);
+    }
+
+    complaint.brand = brand;
+    complaint.vendor = vendor;
+    complaint.item_code = normalizeText(existingItem.code || itemCode);
+    complaint.po = po;
+    complaint.category = category;
+    complaint.first_comment = firstComment;
+    if (!Array.isArray(complaint.comments)) {
+      complaint.comments = [];
+    }
+    if (complaint.comments.length === 0) {
+      complaint.comments.push({
+        comment: firstComment,
+        created_by: actor,
+        created_at: complaint.created_at || new Date(),
+      });
+    } else {
+      complaint.comments[0].comment = firstComment;
+    }
+    if (uploadedFiles.length > 0) {
+      complaint.files.push(...uploadedFiles);
+    }
+    complaint.updated_by = actor;
+    complaint.update_history.push(createUpdateHistory("admin_edit", actor, {
+      previous,
+      next: {
+        brand: complaint.brand,
+        vendor: complaint.vendor,
+        item_code: complaint.item_code,
+        po: complaint.po,
+        category: complaint.category,
+        first_comment: complaint.first_comment,
+      },
+      file_count: uploadedFiles.length,
+      files: uploadedFiles.map((file) => file.original_name),
+    }));
+
+    await complaint.save();
+    return res.status(200).json({
+      success: true,
+      message: "Complaint updated successfully.",
+      data: await serializeComplaint(complaint.toObject(), { user: req.user }),
+    });
+  } catch (error) {
+    console.error("Update Complaint Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to update complaint.",
+    });
+  }
+};
+
 exports.addQcComplaintComment = async (req, res) => {
   try {
     if (!ensureQcComplaintAccess(req, res)) return undefined;

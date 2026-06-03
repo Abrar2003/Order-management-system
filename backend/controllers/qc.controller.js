@@ -9499,6 +9499,8 @@ exports.getDailyReport = async (req, res) => {
             alignedRequestInspectionsByQcId.get(qcId) || [],
             requestEntry,
           );
+          if (!latestInspection) return null;
+
           const hasInspectionActivity = hasInspectionRecordActivity({
             checked: latestInspection?.checked,
             passed: latestInspection?.passed,

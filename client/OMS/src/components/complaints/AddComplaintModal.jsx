@@ -19,6 +19,7 @@ const AddComplaintModal = ({
   initialValues = EMPTY_INITIAL_VALUES,
   itemCodeOptions = [],
   loadingOptions = false,
+  mode = "create",
   onClose,
   onCreateCategory,
   onSubmit,
@@ -30,6 +31,7 @@ const AddComplaintModal = ({
   const [error, setError] = useState("");
 
   const fileNames = useMemo(() => files.map((file) => file.name), [files]);
+  const isEditMode = mode === "edit";
   const resolvedBrandOptions = useMemo(
     () =>
       [
@@ -128,7 +130,7 @@ const AddComplaintModal = ({
         <div className="modal-content">
           <form onSubmit={handleSubmit}>
             <div className="modal-header">
-              <h5 className="modal-title">Add Complaint</h5>
+              <h5 className="modal-title">{isEditMode ? "Edit Complaint" : "Add Complaint"}</h5>
               <button type="button" className="btn-close" onClick={onClose} disabled={saving} />
             </div>
             <div className="modal-body">
@@ -251,7 +253,9 @@ const AddComplaintModal = ({
                 Cancel
               </button>
               <button type="submit" className="btn btn-primary" disabled={saving}>
-                {saving ? "Creating..." : "Create Complaint"}
+                {saving
+                  ? isEditMode ? "Saving..." : "Creating..."
+                  : isEditMode ? "Save Changes" : "Create Complaint"}
               </button>
             </div>
           </form>

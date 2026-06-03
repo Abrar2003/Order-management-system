@@ -2693,6 +2693,10 @@ const UpdateQcModal = ({
         if (shouldReadInnerBarcode) {
           payload.inner_barcode = innerBarcodeParsed ?? "";
         }
+      } else if (isQcUser && barcodeParsed !== null) {
+        payload.barcode = barcodeParsed;
+        payload.master_barcode = barcodeParsed;
+        payload.barcode_scanned = barcodeScannedInSession;
       } else if (
         barcodeParsed !== null &&
         normalizeComparableBarcode(barcodeParsed) !==
@@ -2706,6 +2710,13 @@ const UpdateQcModal = ({
       }
 
       if (
+        shouldReadInnerBarcode &&
+        isQcUser &&
+        innerBarcodeParsed !== null
+      ) {
+        payload.inner_barcode = innerBarcodeParsed;
+        payload.inner_barcode_scanned = innerBarcodeScannedInSession;
+      } else if (
         shouldReadInnerBarcode &&
         innerBarcodeParsed !== null &&
         normalizeComparableBarcode(innerBarcodeParsed) !==

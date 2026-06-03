@@ -19,6 +19,11 @@ export const createComplaint = (formData) =>
     headers: { "Content-Type": "multipart/form-data" },
   });
 
+export const updateComplaint = (id, formData) =>
+  api.patch(`/complaints/${encodeURIComponent(id)}`, formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+
 export const getComplaint = (id) =>
   api.get(`/complaints/${encodeURIComponent(id)}`);
 

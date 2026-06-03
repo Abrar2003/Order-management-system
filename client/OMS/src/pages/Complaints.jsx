@@ -16,6 +16,7 @@ import {
   getComplaintCategories,
   getComplaints,
   unarchiveComplaint,
+  updateComplaint,
   uploadComplaintFiles,
 } from "../services/complaints.service";
 import api from "../api/axios";
@@ -52,6 +53,7 @@ const Complaints = () => {
   const canManage = hasPermission("complaints", "edit") && isManagerLikeRole(role);
   const canUpload = hasPermission("complaints", "upload") && isManagerLikeRole(role);
   const canArchive = hasPermission("complaints", "delete") && isStrictAdminRole(role);
+  const canEditComplaint = hasPermission("complaints", "edit") && isStrictAdminRole(role);
 
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [draftFilters, setDraftFilters] = useState(DEFAULT_FILTERS);
@@ -175,6 +177,20 @@ const Complaints = () => {
       await loadComplaints();
     } catch (createError) {
       showToast(createError?.response?.data?.message || "Failed to create complaint.", "danger");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleEditComplaint = async (formData) => {
+    try {
+      setSaving(true);
+      const response = await updateComplaint(modal.complaint._id, formData);
+      replaceRow(response?.data?.data);
+      closeModal();
+      showToast("Complaint updated successfully.");
+    } catch (editError) {
+      showToast(editError?.response?.data?.message || "Failed to update complaint.", "danger");
     } finally {
       setSaving(false);
     }
@@ -503,6 +519,17 @@ const Complaints = () => {
                 Add comment
               </button>
             )}
+            {canEditComplaint && (
+              <button
+                type="button"
+                onClick={() => {
+                  setModal({ type: "edit", complaint: activeActionComplaint });
+                  closeActionMenu();
+                }}
+              >
+                Edit complaint
+              </button>
+            )}
             {canUpload && (
               <button
                 type="button"
@@ -549,6 +576,29 @@ const Complaints = () => {
           onClose={closeModal}
           onCreateCategory={handleCreateCategory}
           onSubmit={handleCreateComplaint}
+          saving={saving}
+          vendorOptions={vendorOptions}
+        />
+      )}
+      {modal.type === "edit" && (
+        <AddComplaintModal
+          brandOptions={brandOptions}
+          categoryOptions={categoryOptions}
+          creatingCategory={creatingCategory}
+          initialValues={{
+            brand: modal.complaint?.brand || "",
+            vendor: modal.complaint?.vendor || "",
+            category: modal.complaint?.category || "",
+            item_code: modal.complaint?.item_code || "",
+            po: modal.complaint?.po || "",
+            first_comment: modal.complaint?.first_comment || "",
+          }}
+          itemCodeOptions={itemCodeOptions}
+          loadingOptions={loadingOptions}
+          mode="edit"
+          onClose={closeModal}
+          onCreateCategory={handleCreateCategory}
+          onSubmit={handleEditComplaint}
           saving={saving}
           vendorOptions={vendorOptions}
         />

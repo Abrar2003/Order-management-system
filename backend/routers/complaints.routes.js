@@ -66,6 +66,14 @@ router.get(
   complaintController.getComplaintById,
 );
 
+router.patch(
+  "/:id",
+  auth,
+  requirePermission("complaints", "edit"),
+  complaintFilesUpload("files"),
+  complaintController.updateComplaint,
+);
+
 router.post(
   "/:id/qc-comments",
   auth,
