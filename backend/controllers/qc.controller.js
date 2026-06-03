@@ -10591,6 +10591,18 @@ exports.editInspectionRecords = async (req, res) => {
 	      return { hasInput: true, value: parsed };
 	    };
 
+      const parseOptionalBarcodeField = (value, fieldName) => {
+        if (value === undefined) return { hasInput: false, value: null };
+        const normalized = String(value ?? "").trim();
+        if (!normalized || /^0+$/.test(normalized)) {
+          return { hasInput: true, value: "" };
+        }
+        if (!/^\d+$/.test(normalized)) {
+          throw new Error(`${fieldName} must contain digits only`);
+        }
+        return { hasInput: true, value: normalized };
+      };
+
 	    const parseInspectionSizeEntries = (
 	      value,
 	      fieldName,
@@ -10846,15 +10858,15 @@ exports.editInspectionRecords = async (req, res) => {
 	        throw new Error("Passed quantity cannot exceed offered quantity");
 	      }
 
-	      const parsedBarcode = parseOptionalNonNegativeField(
+	      const parsedBarcode = parseOptionalBarcodeField(
 	        row?.barcode,
 	        "Barcode",
 	      );
-	      const parsedMasterBarcode = parseOptionalNonNegativeField(
+	      const parsedMasterBarcode = parseOptionalBarcodeField(
 	        row?.master_barcode,
 	        "Master barcode",
 	      );
-	      const parsedInnerBarcode = parseOptionalNonNegativeField(
+	      const parsedInnerBarcode = parseOptionalBarcodeField(
 	        row?.inner_barcode,
 	        "Inner barcode",
 	      );

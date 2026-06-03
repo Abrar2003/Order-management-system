@@ -124,18 +124,15 @@ const InspectionSchema = new mongoose.Schema(
     },
     barcode: {
       type: String,
-      default: 0,
-      min: 0,
+      default: "",
     },
     master_barcode: {
       type: String,
-      default: 0,
-      min: 0,
+      default: "",
     },
     inner_barcode: {
       type: String,
-      default: 0,
-      min: 0,
+      default: "",
     },
     packed_size: {
       type: Boolean,
@@ -218,4 +215,3 @@ InspectionSchema.index({ inspection_date: -1 });
 InspectionSchema.index({ inspector: 1, inspection_date: -1 });
 
 module.exports = mongoose.model("inspections", InspectionSchema);
-

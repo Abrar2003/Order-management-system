@@ -78,12 +78,18 @@ const normalizeComparableBarcode = (value) => {
   return withoutLeadingZeroes || "0";
 };
 
+const normalizeBarcodeText = (value) => String(value ?? "").trim();
+
+const isPositiveBarcodeText = (value) => {
+  const normalized = normalizeBarcodeText(value);
+  return /^\d+$/.test(normalized) && !/^0+$/.test(normalized);
+};
+
 const getPositiveBarcodeValue = (record = {}, fields = []) => {
   for (const field of fields) {
-    const value = record?.[field];
-    const parsed = Number(value);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return String(value);
+    const value = normalizeBarcodeText(record?.[field]);
+    if (isPositiveBarcodeText(value)) {
+      return value;
     }
   }
   return "";
@@ -1332,11 +1338,11 @@ const UpdateQcModal = ({
         ? toQuantityInputValue(adminRecord?.vendor_offered)
         : "",
       barcode:
-        canViewStoredBarcodes && Number(storedMasterBarcode || 0) > 0
+        canViewStoredBarcodes && isPositiveBarcodeText(storedMasterBarcode)
           ? String(storedMasterBarcode)
           : "",
       inner_barcode:
-        canViewStoredBarcodes && Number(storedInnerBarcode || 0) > 0
+        canViewStoredBarcodes && isPositiveBarcodeText(storedInnerBarcode)
           ? String(storedInnerBarcode)
           : "",
       packed_size: isInspectionRecordUpdate
@@ -2559,24 +2565,27 @@ const UpdateQcModal = ({
     const innerBarcodeValue = shouldReadInnerBarcode
       ? form.inner_barcode.trim()
       : "";
-    const currentMasterBarcodeValue = Number(
-      existingItemMaster?.master_barcode ||
-      existingItemMaster?.barcode ||
-      qc?.master_barcode ||
-      qc?.barcode ||
-      0,
-    );
-    const currentInnerBarcodeValue = Number(
-      existingItemMaster?.inner_barcode || qc?.inner_barcode || 0,
-    );
-    const barcodeParsed = barcodeValue === "" ? null : Number(barcodeValue);
+    const currentMasterBarcodeValue =
+      [
+        existingItemMaster?.master_barcode,
+        existingItemMaster?.barcode,
+        qc?.master_barcode,
+        qc?.barcode,
+      ]
+        .map(normalizeBarcodeText)
+        .find(isPositiveBarcodeText) || "";
+    const currentInnerBarcodeValue =
+      [existingItemMaster?.inner_barcode, qc?.inner_barcode]
+        .map(normalizeBarcodeText)
+        .find(isPositiveBarcodeText) || "";
+    const barcodeParsed = barcodeValue === "" ? null : barcodeValue;
     const innerBarcodeParsed =
-      innerBarcodeValue === "" ? null : Number(innerBarcodeValue);
+      innerBarcodeValue === "" ? null : innerBarcodeValue;
     const effectiveMasterBarcodeValue =
       barcodeParsed !== null ? barcodeParsed : currentMasterBarcodeValue;
     if (
       barcodeParsed !== null &&
-      (!Number.isInteger(barcodeParsed) || barcodeParsed <= 0)
+      !isPositiveBarcodeText(barcodeParsed)
     ) {
       setError("Master barcode must be a positive integer.");
       return;
@@ -2584,7 +2593,7 @@ const UpdateQcModal = ({
 
     if (
       innerBarcodeParsed !== null &&
-      (!Number.isInteger(innerBarcodeParsed) || innerBarcodeParsed <= 0)
+      !isPositiveBarcodeText(innerBarcodeParsed)
     ) {
       setError("Inner carton barcode must be a positive integer.");
       return;
@@ -2593,7 +2602,7 @@ const UpdateQcModal = ({
     if (isQcUser) {
       const typeLabel = selectedBarcodeValidationOption.label.toLowerCase();
 
-      if (!effectiveMasterBarcodeValue || effectiveMasterBarcodeValue <= 0) {
+      if (!isPositiveBarcodeText(effectiveMasterBarcodeValue)) {
         setError("Scan and validate the master barcode before updating this QC record.");
         return;
       }
@@ -2679,12 +2688,16 @@ const UpdateQcModal = ({
 
 
       if (isAdminRewriteMode) {
-        payload.barcode = barcodeParsed ?? 0;
-        payload.master_barcode = barcodeParsed ?? 0;
+        payload.barcode = barcodeParsed ?? "";
+        payload.master_barcode = barcodeParsed ?? "";
         if (shouldReadInnerBarcode) {
-          payload.inner_barcode = innerBarcodeParsed ?? 0;
+          payload.inner_barcode = innerBarcodeParsed ?? "";
         }
-      } else if (barcodeParsed !== null && barcodeParsed !== currentMasterBarcodeValue) {
+      } else if (
+        barcodeParsed !== null &&
+        normalizeComparableBarcode(barcodeParsed) !==
+          normalizeComparableBarcode(currentMasterBarcodeValue)
+      ) {
         payload.barcode = barcodeParsed;
         payload.master_barcode = barcodeParsed;
         if (isQcUser) {
@@ -2695,7 +2708,8 @@ const UpdateQcModal = ({
       if (
         shouldReadInnerBarcode &&
         innerBarcodeParsed !== null &&
-        innerBarcodeParsed !== currentInnerBarcodeValue
+        normalizeComparableBarcode(innerBarcodeParsed) !==
+          normalizeComparableBarcode(currentInnerBarcodeValue)
       ) {
         payload.inner_barcode = innerBarcodeParsed;
         if (isQcUser) {
@@ -2703,7 +2717,7 @@ const UpdateQcModal = ({
         }
       }
 
-      if (isQcUser && !isBarcodeExemptedItem) {
+      if (isQcUser) {
         payload.barcode_validation_type = selectedBarcodeValidationOption.value;
         payload.barcode_validated = true;
         payload.barcode_scanned = barcodeScannedInSession;
@@ -2837,9 +2851,9 @@ const UpdateQcModal = ({
               label_ranges: normalizedLabelRanges,
               labels_added: labelsForUpdate,
               remarks: normalizedRemarks,
-              barcode: barcodeParsed ?? 0,
-              master_barcode: barcodeParsed ?? 0,
-              inner_barcode: isCartonPackagingMode ? innerBarcodeParsed ?? 0 : 0,
+              barcode: barcodeParsed ?? "",
+              master_barcode: barcodeParsed ?? "",
+              inner_barcode: isCartonPackagingMode ? innerBarcodeParsed ?? "" : "",
               packed_size: Boolean(form.packed_size),
               finishing: Boolean(form.finishing),
               branding: Boolean(form.branding),
@@ -3010,9 +3024,9 @@ const UpdateQcModal = ({
               label_ranges: normalizedLabelRanges,
               labels_added: labelsForUpdate,
               remarks: normalizedRemarks,
-              barcode: barcodeParsed ?? 0,
-              master_barcode: barcodeParsed ?? 0,
-              inner_barcode: isCartonPackagingMode ? innerBarcodeParsed ?? 0 : 0,
+              barcode: barcodeParsed ?? "",
+              master_barcode: barcodeParsed ?? "",
+              inner_barcode: isCartonPackagingMode ? innerBarcodeParsed ?? "" : "",
               packed_size: Boolean(form.packed_size),
               finishing: Boolean(form.finishing),
               branding: Boolean(form.branding),
