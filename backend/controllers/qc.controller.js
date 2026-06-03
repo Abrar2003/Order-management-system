@@ -8304,6 +8304,7 @@ exports.transferQcRequest = async (req, res) => {
       qc.toObject(),
       beforeInspectionRecords,
     );
+    const beforeOrderSnapshot = buildOrderAuditSnapshotForQc(qc?.order);
     const targetInspector = await User.findById(targetInspectorId).select(
       "name email role",
     );
@@ -8471,7 +8472,45 @@ exports.transferQcRequest = async (req, res) => {
       updated_by: buildAuditActor(req.user),
     });
 
+    const targetRequestEntry = qc.request_history[qc.request_history.length - 1];
+    const targetInspectionRecord = await Inspection.create({
+      qc: qc._id,
+      inspector: targetInspectorId,
+      inspection_date: transferDate,
+      status: INSPECTION_RECORD_STATUS.PENDING,
+      request_history_id: targetRequestEntry?._id || null,
+      requested_date: transferDate,
+      vendor_requested: pendingQuantity,
+      vendor_offered: 0,
+      checked: 0,
+      passed: 0,
+      pending_after: pendingQuantity,
+      cbm: buildNormalizedCbmSnapshot(qc?.cbm),
+      label_ranges: [],
+      labels_added: [],
+      remarks: newRequestRemarks,
+      createdBy: req.user._id,
+      updated_by: buildAuditActor(req.user),
+    });
+
+    qc.inspection_record = Array.isArray(qc.inspection_record)
+      ? qc.inspection_record
+      : [];
+    if (
+      !qc.inspection_record.some(
+        (entry) => String(entry) === String(targetInspectionRecord._id),
+      )
+    ) {
+      qc.inspection_record.push(targetInspectionRecord._id);
+    }
+
     const refreshedInspectionRecords = await Inspection.find({ qc: qc._id }).lean();
+    recalculateQcAggregateQuantities(qc, refreshedInspectionRecords);
+    qc.labels = normalizeLabels(
+      refreshedInspectionRecords.flatMap((record) =>
+        Array.isArray(record?.labels_added) ? record.labels_added : [],
+      ),
+    );
     syncQcCurrentRequestFieldsFromHistory(qc, refreshedInspectionRecords);
     syncQcRequestHistoryStatuses(qc, refreshedInspectionRecords, {
       user: req.user,
@@ -8492,6 +8531,13 @@ exports.transferQcRequest = async (req, res) => {
 
     await qc.save();
 
+    if (qc?.order && !CLOSED_ORDER_STATUSES.includes(qc.order.status)) {
+      applyQcOrderStatus(qc, qc.order);
+      qc.order.updated_by = buildAuditActor(req.user);
+      await applyQcOrderPoCbm(qc.order);
+      await qc.order.save();
+    }
+
     await createQcEditLog({
       reqUser: req.user,
       qcDoc: qc,
@@ -8500,6 +8546,15 @@ exports.transferQcRequest = async (req, res) => {
       operationType: "qc_request_transfer",
       extraRemarks: [transferNote],
     });
+    if (qc?.order) {
+      await createOrderEditLogFromQc({
+        reqUser: req.user,
+        orderDoc: qc.order,
+        beforeSnapshot: beforeOrderSnapshot,
+        afterSnapshot: buildOrderAuditSnapshotForQc(qc.order),
+        extraRemarks: ["Order status recalculated from QC request transfer."],
+      });
+    }
 
     return res.status(200).json({
       message: `Request transferred to ${targetInspectorName}`,
@@ -8513,6 +8568,9 @@ exports.transferQcRequest = async (req, res) => {
         source_inspection_status: latestInspection
           ? INSPECTION_RECORD_STATUS.TRANSFERRED
           : INSPECTION_RECORD_STATUS.PENDING,
+        target_request_status: REQUEST_HISTORY_STATUS.OPEN,
+        target_inspection_status: INSPECTION_RECORD_STATUS.PENDING,
+        target_inspection_id: targetInspectionRecord._id,
         transfer_quantity: pendingQuantity,
         pending_quantity: pendingQuantity,
       },
@@ -9497,6 +9555,9 @@ exports.getDailyReport = async (req, res) => {
           const isInspectionDone =
             normalizedInspectionStatus ===
             normalizeInspectionStatus(INSPECTION_RECORD_STATUS.DONE);
+          const requestRemarks = normalizeText(requestEntry?.remarks || "");
+          const isTransferRequestRemark =
+            /^transferred\s+(from|to)\b/i.test(requestRemarks);
 
           return {
             request_row_id: requestLookupKey || `${qcId}:${requestDateKey}`,
@@ -9528,8 +9589,9 @@ exports.getDailyReport = async (req, res) => {
             goods_not_ready: goodsNotReady,
             is_transferred: isTransferred,
             is_rejected: isRejected,
-            transfer_note: isTransferred
-              ? normalizeText(latestInspection?.remarks || requestEntry?.remarks || "")
+            request_remarks: requestRemarks,
+            transfer_note: isTransferred || isTransferRequestRemark
+              ? normalizeText(latestInspection?.remarks || requestRemarks || "")
               : "",
             rejection_reason: isRejected
               ? normalizeText(latestInspection?.remarks || requestEntry?.remarks || "")
@@ -11405,6 +11467,348 @@ exports.deleteInspectionRecord = async (req, res) => {
 
 exports.syncInspectionStatuses = async (req, res) => {
   try {
+    const syncScope = normalizeText(req.body?.scope || req.query?.scope);
+    if (syncScope === "daily_report") {
+      const reportDate = resolveReportDate(req.body?.date || req.query?.date);
+      if (!reportDate) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid date format",
+        });
+      }
+
+      const selectedBrand = normalizeOptionalReportFilter(
+        req.body?.brand ?? req.query?.brand,
+      );
+      const selectedVendor = normalizeOptionalReportFilter(
+        req.body?.vendor ?? req.query?.vendor,
+      );
+      const [reportYear, reportMonth, reportDay] = String(reportDate).split("-");
+      const reportDateVariants = [
+        reportDate,
+        `${reportDay}/${reportMonth}/${reportYear}`,
+        `${reportDay}-${reportMonth}-${reportYear}`,
+      ];
+      const reportDateStart = parseIsoDateToUtcDate(reportDate);
+      const reportDateEnd = reportDateStart
+        ? new Date(reportDateStart.getTime() + (24 * 60 * 60 * 1000))
+        : null;
+
+      const scopedInspectionsRaw = await Inspection.find({
+        $or: [
+          { inspection_date: { $in: reportDateVariants } },
+          { requested_date: { $in: reportDateVariants } },
+          {
+            status: INSPECTION_RECORD_STATUS.TRANSFERRED,
+            ...(reportDateStart && reportDateEnd
+              ? {
+                  updatedAt: {
+                    $gte: reportDateStart,
+                    $lt: reportDateEnd,
+                  },
+                }
+              : {}),
+          },
+        ],
+      })
+        .select(
+          "qc status inspector checked passed vendor_offered vendor_requested labels_added label_ranges goods_not_ready requested_date inspection_date request_history_id remarks createdAt updatedAt",
+        )
+        .populate({
+          path: "qc",
+          select: "request_type request_history order order_meta item quantities labels cbm",
+          populate: {
+            path: "order",
+            select: "order_id status quantity shipment brand vendor archived item qc_record",
+            match: ACTIVE_ORDER_MATCH,
+          },
+        })
+        .lean();
+
+      const scopedInspections = scopedInspectionsRaw.filter((inspection) => {
+        const qcDoc = inspection?.qc;
+        if (!qcDoc?.order) return false;
+        const brand = qcDoc?.order_meta?.brand || qcDoc?.order?.brand || "";
+        const vendor = qcDoc?.order_meta?.vendor || qcDoc?.order?.vendor || "";
+        if (selectedBrand && String(brand || "") !== selectedBrand) return false;
+        if (selectedVendor && String(vendor || "") !== selectedVendor) return false;
+        return true;
+      });
+
+      const bulkOps = [];
+      const scopedInspectionsByQcId = new Map();
+      for (const inspection of scopedInspections) {
+        const nextStatus = resolveInspectionRecordStatus({
+          checked: inspection?.checked,
+          goodsNotReady: inspection?.goods_not_ready,
+          explicitStatus: inspection?.status,
+        });
+
+        if (String(inspection?.status || "") !== nextStatus) {
+          bulkOps.push({
+            updateOne: {
+              filter: { _id: inspection._id },
+              update: {
+                $set: {
+                  status: nextStatus,
+                  updated_by: buildAuditActor(req.user, "Daily Report Sync"),
+                },
+              },
+            },
+          });
+        }
+
+        const qcId = String(inspection?.qc?._id || inspection?.qc || "").trim();
+        if (!qcId) continue;
+        if (!scopedInspectionsByQcId.has(qcId)) {
+          scopedInspectionsByQcId.set(qcId, []);
+        }
+        scopedInspectionsByQcId.get(qcId).push({
+          ...inspection,
+          qc: inspection?.qc?._id || inspection?.qc || null,
+          status: nextStatus,
+        });
+      }
+
+      if (bulkOps.length > 0) {
+        await Inspection.bulkWrite(bulkOps, { ordered: false });
+      }
+
+      const qcIds = [...scopedInspectionsByQcId.keys()].filter((value) =>
+        mongoose.Types.ObjectId.isValid(value),
+      );
+      const qcDocs = qcIds.length > 0
+        ? await QC.find({ _id: { $in: qcIds } })
+          .populate("order", "status quantity shipment order_id brand vendor item qc_record")
+        : [];
+
+      const syncTimestamp = new Date();
+      const getLatestRecord = (records = []) =>
+        [...records].sort((left, right) => {
+          const leftTime = Math.max(
+            toSortableTimestamp(left?.updatedAt),
+            toSortableTimestamp(left?.createdAt),
+            toSortableTimestamp(left?.inspection_date),
+          );
+          const rightTime = Math.max(
+            toSortableTimestamp(right?.updatedAt),
+            toSortableTimestamp(right?.createdAt),
+            toSortableTimestamp(right?.inspection_date),
+          );
+          return rightTime - leftTime;
+        })[0] || null;
+      const resolveRequestStatusFromInspection = (inspection = {}) => {
+        const inspectionStatus = resolveInspectionRecordStatus({
+          checked: inspection?.checked,
+          goodsNotReady: inspection?.goods_not_ready,
+          explicitStatus: inspection?.status,
+        });
+        if (
+          normalizeInspectionStatus(inspectionStatus) ===
+          normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED)
+        ) {
+          return REQUEST_HISTORY_STATUS.TRANSFERRED;
+        }
+        if (
+          normalizeInspectionStatus(inspectionStatus) ===
+          normalizeInspectionStatus(INSPECTION_RECORD_STATUS.REJECTED)
+        ) {
+          return REQUEST_HISTORY_STATUS.REJECTED;
+        }
+        const hasActivity = hasInspectionRecordActivity({
+          checked: inspection?.checked,
+          passed: inspection?.passed,
+          vendorOffered: inspection?.vendor_offered,
+          labelsAdded: inspection?.labels_added,
+          labelRanges: inspection?.label_ranges,
+          goodsNotReady: inspection?.goods_not_ready,
+          status: inspectionStatus,
+        });
+        return hasActivity ? REQUEST_HISTORY_STATUS.INSPECTED : REQUEST_HISTORY_STATUS.OPEN;
+      };
+
+      let updatedQcCount = 0;
+      let updatedRequestHistoryCount = 0;
+      let updatedOrderCount = 0;
+      for (const qcDoc of qcDocs) {
+        const qcId = String(qcDoc?._id || "").trim();
+        const scopedRecords = scopedInspectionsByQcId.get(qcId) || [];
+        const allInspectionRecords = await Inspection.find({ qc: qcDoc._id })
+          .select(
+            "inspection_date requested_date request_history_id inspector checked passed vendor_requested vendor_offered labels_added label_ranges goods_not_ready status remarks createdAt updatedAt",
+          )
+          .lean();
+        const beforeSnapshot = buildQcEditLogSnapshot(
+          qcDoc.toObject(),
+          allInspectionRecords,
+        );
+        const beforeOrderSnapshot = buildOrderAuditSnapshotForQc(qcDoc?.order);
+
+        const recordsByRequestHistoryId = new Map();
+        for (const record of scopedRecords) {
+          const requestHistoryId = String(record?.request_history_id || "").trim();
+          if (!requestHistoryId) continue;
+          const groupedRecords = recordsByRequestHistoryId.get(requestHistoryId) || [];
+          groupedRecords.push(record);
+          recordsByRequestHistoryId.set(requestHistoryId, groupedRecords);
+        }
+
+        let qcChanged = false;
+        for (const [requestHistoryId, linkedRecords] of recordsByRequestHistoryId) {
+          const requestEntry = Array.isArray(qcDoc.request_history)
+            ? qcDoc.request_history.find(
+                (entry) => String(entry?._id || "").trim() === requestHistoryId,
+              )
+            : null;
+          const sourceInspection = getLatestRecord(linkedRecords);
+          if (!requestEntry || !sourceInspection) continue;
+
+          let requestChanged = false;
+          const nextInspectorId = String(
+            sourceInspection?.inspector?._id || sourceInspection?.inspector || "",
+          ).trim();
+          const currentInspectorId = String(
+            requestEntry?.inspector?._id || requestEntry?.inspector || "",
+          ).trim();
+          if (nextInspectorId && nextInspectorId !== currentInspectorId) {
+            requestEntry.inspector = nextInspectorId;
+            requestChanged = true;
+          }
+
+          const nextRequestDate = toISODateString(
+            sourceInspection?.requested_date ||
+              sourceInspection?.inspection_date ||
+              requestEntry?.request_date,
+          );
+          if (nextRequestDate && String(requestEntry?.request_date || "") !== nextRequestDate) {
+            requestEntry.request_date = nextRequestDate;
+            requestChanged = true;
+          }
+
+          const nextQuantityRequested = toNonNegativeNumber(
+            sourceInspection?.vendor_requested,
+            toNonNegativeNumber(requestEntry?.quantity_requested, 0),
+          );
+          if (
+            toNonNegativeNumber(requestEntry?.quantity_requested, 0) !==
+            nextQuantityRequested
+          ) {
+            requestEntry.quantity_requested = nextQuantityRequested;
+            requestChanged = true;
+          }
+
+          const nextStatus = resolveRequestStatusFromInspection(sourceInspection);
+          if (
+            normalizeRequestHistoryStatus(requestEntry?.status || "") !==
+            normalizeRequestHistoryStatus(nextStatus)
+          ) {
+            requestEntry.status = nextStatus;
+            requestChanged = true;
+          }
+
+          const nextRemarks = normalizeText(sourceInspection?.remarks || "");
+          if (nextRemarks && normalizeText(requestEntry?.remarks || "") !== nextRemarks) {
+            requestEntry.remarks = nextRemarks;
+            requestChanged = true;
+          }
+
+          if (requestChanged) {
+            stampRequestHistoryEntry(requestEntry, {
+              user: req.user,
+              updatedAt: syncTimestamp,
+              fallbackName: "Daily Report Sync",
+            });
+            updatedRequestHistoryCount += 1;
+            qcChanged = true;
+          }
+        }
+
+        const requestStatusChanged = syncQcRequestHistoryStatuses(
+          qcDoc,
+          allInspectionRecords,
+          {
+            user: req.user,
+            updatedAt: syncTimestamp,
+            fallbackName: "Daily Report Sync",
+          },
+        );
+        const currentFieldsChanged = syncQcCurrentRequestFieldsFromHistory(
+          qcDoc,
+          allInspectionRecords,
+        );
+        const beforeQuantitySnapshot = JSON.stringify(qcDoc.quantities || {});
+        const beforeLabelsSnapshot = JSON.stringify(qcDoc.labels || []);
+        recalculateQcAggregateQuantities(qcDoc, allInspectionRecords);
+        qcDoc.labels = normalizeLabels(
+          allInspectionRecords.flatMap((record) =>
+            Array.isArray(record?.labels_added) ? record.labels_added : [],
+          ),
+        );
+        const aggregateChanged =
+          beforeQuantitySnapshot !== JSON.stringify(qcDoc.quantities || {}) ||
+          beforeLabelsSnapshot !== JSON.stringify(qcDoc.labels || []);
+
+        qcChanged =
+          qcChanged || requestStatusChanged || currentFieldsChanged || aggregateChanged;
+
+        if (qcChanged) {
+          qcDoc.updated_by = buildAuditActor(req.user, "Daily Report Sync");
+          await qcDoc.save();
+          updatedQcCount += 1;
+
+          let orderChanged = false;
+          if (qcDoc?.order && !CLOSED_ORDER_STATUSES.includes(qcDoc.order.status)) {
+            const beforeOrderStatus = normalizeText(qcDoc.order.status);
+            applyQcOrderStatus(qcDoc, qcDoc.order);
+            qcDoc.order.updated_by = buildAuditActor(req.user, "Daily Report Sync");
+            await applyQcOrderPoCbm(qcDoc.order);
+            await qcDoc.order.save();
+            orderChanged = beforeOrderStatus !== normalizeText(qcDoc.order.status);
+            if (orderChanged) updatedOrderCount += 1;
+          }
+
+          const afterInspectionRecords = await Inspection.find({ qc: qcDoc._id })
+            .select(
+              "inspection_date requested_date request_history_id inspector checked passed vendor_requested vendor_offered labels_added label_ranges goods_not_ready status remarks createdAt updatedAt",
+            )
+            .lean();
+          await createQcEditLog({
+            reqUser: req.user,
+            qcDoc,
+            beforeSnapshot,
+            afterSnapshot: buildQcEditLogSnapshot(qcDoc.toObject(), afterInspectionRecords),
+            operationType: "qc_inspection_status_sync",
+            extraRemarks: ["Daily report request/inspection sync."],
+          });
+          if (qcDoc?.order) {
+            await createOrderEditLogFromQc({
+              reqUser: req.user,
+              orderDoc: qcDoc.order,
+              beforeSnapshot: beforeOrderSnapshot,
+              afterSnapshot: buildOrderAuditSnapshotForQc(qcDoc.order),
+              extraRemarks: ["Order recalculated from daily report sync."],
+            });
+          }
+        }
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Daily report request and inspection data synced successfully",
+        summary: {
+          scope: "daily_report",
+          date: reportDate,
+          brand: selectedBrand,
+          vendor: selectedVendor,
+          processed: scopedInspections.length,
+          updated_inspections: bulkOps.length,
+          updated_qcs: updatedQcCount,
+          updated_request_history: updatedRequestHistoryCount,
+          updated_orders: updatedOrderCount,
+        },
+      });
+    }
+
     const inspections = await Inspection.find({})
       .select(
         "qc status checked passed vendor_offered labels_added label_ranges goods_not_ready",

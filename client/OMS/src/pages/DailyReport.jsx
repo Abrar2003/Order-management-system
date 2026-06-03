@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 import api from "../api/axios";
+import { usePermissions } from "../auth/PermissionContext";
 import Navbar from "../components/Navbar";
 import SortHeaderButton from "../components/SortHeaderButton";
 import {
@@ -98,6 +99,7 @@ const renderResolvedCbmTotal = (value) => {
 
 const DailyReport = () => {
   const navigate = useNavigate();
+  const { hasPermission } = usePermissions();
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "daily-report");
   const initialSelectedDate = toDDMMYYYYInputValue(
@@ -126,7 +128,9 @@ const DailyReport = () => {
   const [vendorFilter, setVendorFilter] = useState(initialVendorFilter);
   const [loading, setLoading] = useState(true);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
+  const [syncMessage, setSyncMessage] = useState("");
   const [alignedSortBy, setAlignedSortBy] = useState(initialAlignedSortBy);
   const [alignedSortOrder, setAlignedSortOrder] = useState(initialAlignedSortOrder);
   const [inspectionSortBy, setInspectionSortBy] = useState(initialInspectionSortBy);
@@ -169,11 +173,13 @@ const DailyReport = () => {
     setInspectionSortBy(column);
     setInspectionSortOrder(defaultDirection);
   };
+  const canSyncDailyReport = hasPermission("inspections", "sync");
 
   const fetchDailyReport = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
+      setSyncMessage("");
       const reportDateIso = toISODateString(selectedDate);
       if (!reportDateIso || !isValidDDMMYYYY(selectedDate)) {
         setError("Report date must be in DD/MM/YYYY format.");
@@ -243,6 +249,44 @@ const DailyReport = () => {
   useEffect(() => {
     fetchDailyReport();
   }, [fetchDailyReport]);
+
+  const handleSyncDailyReport = useCallback(async () => {
+    const reportDateIso = toISODateString(selectedDate);
+    if (!reportDateIso || !isValidDDMMYYYY(selectedDate)) {
+      setError("Report date must be in DD/MM/YYYY format before syncing.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Sync request and inspection data for the currently selected daily report filters?",
+    );
+    if (!confirmed) return;
+
+    try {
+      setSyncing(true);
+      setError("");
+      setSyncMessage("");
+      const response = await api.post("/qc/sync-inspections", {
+        scope: "daily_report",
+        date: reportDateIso,
+        brand: brandFilter,
+        vendor: vendorFilter,
+      });
+      const summary = response?.data?.summary || {};
+      await fetchDailyReport();
+      setSyncMessage(
+        `Sync complete. Processed ${summary.processed ?? 0} inspection row(s), updated ${summary.updated_qcs ?? 0} QC record(s), ${summary.updated_request_history ?? 0} request history row(s).`,
+      );
+    } catch (syncError) {
+      setError(
+        syncError?.response?.data?.message ||
+          syncError?.response?.data?.error ||
+          "Failed to sync daily report data.",
+      );
+    } finally {
+      setSyncing(false);
+    }
+  }, [brandFilter, fetchDailyReport, selectedDate, vendorFilter]);
 
   useEffect(() => {
     const currentQuery = searchParams.toString();
@@ -451,6 +495,7 @@ const DailyReport = () => {
             disabled={
               loading
               || exportingPdf
+              || syncing
               || (
                 report.aligned_requests.length === 0
                 && report.inspector_compiled.length === 0
@@ -514,10 +559,20 @@ const DailyReport = () => {
                 type="button"
                 className="btn btn-primary btn-sm"
                 onClick={fetchDailyReport}
-                disabled={loading}
+                disabled={loading || syncing}
               >
                 {loading ? "Loading..." : "Refresh"}
               </button>
+              {canSyncDailyReport && (
+                <button
+                  type="button"
+                  className="btn btn-outline-primary btn-sm"
+                  onClick={handleSyncDailyReport}
+                  disabled={loading || syncing}
+                >
+                  {syncing ? "Syncing..." : "Sync"}
+                </button>
+              )}
               <span className="om-summary-chip">Date: {formatDateDDMMYYYY(report?.date)}</span>
               <span className="om-summary-chip">
                 Brand: {brandFilter || "all"}
@@ -546,6 +601,11 @@ const DailyReport = () => {
           {error && (
             <div className="alert alert-danger mb-3" role="alert">
               {error}
+            </div>
+          )}
+          {syncMessage && (
+            <div className="alert alert-success mb-3" role="status">
+              {syncMessage}
             </div>
           )}
 
