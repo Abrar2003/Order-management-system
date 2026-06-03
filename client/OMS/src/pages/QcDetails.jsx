@@ -17,6 +17,7 @@ import { getUserFromToken } from "../auth/auth.utils";
 import {
   hasShipmentPrivilegeRole,
   isManagerLikeRole,
+  isStrictAdminRole,
   isViewOnlyUser,
   normalizeUserRole,
 } from "../auth/permissions";
@@ -392,9 +393,10 @@ const QcDetails = () => {
   const currentUserId = String(user?.id || user?._id || "").trim();
   const isQcUser = normalizedRole === "qc";
   const isAdmin = isManagerLikeRole(normalizedRole);
+  const isStrictAdmin = isStrictAdminRole(normalizedRole);
   const isCurrentUserLabelExempt = isLabelExemptUser(currentUserId);
   const canTransferInspectionRecords = isAdmin;
-  const canDeleteInspectionRecords = isAdmin;
+  const canDeleteInspectionRecords = isStrictAdmin;
   const canFinalizeShipping = hasShipmentPrivilegeRole(normalizedRole);
   const derivedOrderStatus = useMemo(
     () => getDerivedOrderStatus({ order: qc?.order || {}, qc }),
@@ -436,8 +438,15 @@ const QcDetails = () => {
     Boolean(currentUserId) &&
     Boolean(alignedInspectorId) &&
     alignedInspectorId === currentUserId;
+  const isTransferredInspectionRecord = useCallback((record = {}) => {
+    const normalizedStatus = String(record?.status || "")
+      .trim()
+      .toLowerCase();
+    return normalizedStatus === "transfered" || normalizedStatus === "transferred";
+  }, []);
   const canUpdateInspectionRecord = useCallback(
     (record = {}) => {
+      if (isTransferredInspectionRecord(record)) return false;
       if (isAdmin) return true;
       if (!isCurrentUserLabelExempt || !currentUserId) return false;
       if (isLabelExemptAlignedInspectionEditor) return true;
@@ -452,6 +461,7 @@ const QcDetails = () => {
       isAdmin,
       isCurrentUserLabelExempt,
       isLabelExemptAlignedInspectionEditor,
+      isTransferredInspectionRecord,
     ],
   );
   const showInspectionActions = true;
@@ -2154,9 +2164,14 @@ const QcDetails = () => {
 	                                    <button
                                       type="button"
                                       className="btn btn-sm qc-inspection-action-btn qc-inspection-action-btn--transfer"
-                                      disabled={Number(row?.passedQty || 0) <= 0}
+                                      disabled={
+                                        Number(row?.passedQty || 0) <= 0 ||
+                                        isTransferredInspectionRecord(row.inspectionRecord)
+                                      }
                                       title={
-                                        Number(row?.passedQty || 0) <= 0
+                                        isTransferredInspectionRecord(row.inspectionRecord)
+                                          ? "Transferred inspection rows cannot be transferred again."
+                                          : Number(row?.passedQty || 0) <= 0
                                           ? "Only inspection rows with passed quantity can be transferred."
                                           : "Transfer this inspection record"
                                       }
@@ -2467,6 +2482,7 @@ const QcDetails = () => {
       {showEditInspectionModal && isAdmin && !isViewOnly && (
         <EditInspectionRecordsModal
           qc={qc}
+          canChangeInspector={isStrictAdmin}
           onClose={() => setShowEditInspectionModal(false)}
           onSuccess={() => {
             setShowEditInspectionModal(false);

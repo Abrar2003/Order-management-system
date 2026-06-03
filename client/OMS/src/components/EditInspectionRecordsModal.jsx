@@ -100,7 +100,12 @@ const parseNonNegativeNumber = (value, fieldName, rowIndex) => {
   return parsed;
 };
 
-const EditInspectionRecordsModal = ({ qc, onClose, onSuccess }) => {
+const EditInspectionRecordsModal = ({
+  qc,
+  onClose,
+  onSuccess,
+  canChangeInspector = false,
+}) => {
   const [rows, setRows] = useState(() => buildInitialRows(qc));
   const [inspectors, setInspectors] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -362,6 +367,7 @@ const EditInspectionRecordsModal = ({ qc, onClose, onSuccess }) => {
                         className="form-select form-select-sm"
                         value={row.inspector}
                         onChange={(e) => updateRow(index, "inspector", e.target.value)}
+                        disabled={!canChangeInspector}
                       >
                         <option value="">Select inspector</option>
                         {inspectors.map((inspector) => (

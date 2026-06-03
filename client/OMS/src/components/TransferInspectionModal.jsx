@@ -304,14 +304,7 @@ const TransferInspectionModal = ({
       const nextLookupResult = response?.data?.data || null;
       setLookupResult(nextLookupResult);
 
-      const suggestedQuantity = Math.min(
-        Number(nextLookupResult?.source?.passed_quantity || sourcePassedQuantity) || 0,
-        Number(nextLookupResult?.target?.open_quantity || 0) || 0,
-      );
-      const currentQuantity = toPositiveInteger(quantity);
-      if (!currentQuantity || currentQuantity > suggestedQuantity) {
-        setQuantity(suggestedQuantity > 0 ? String(suggestedQuantity) : "");
-      }
+      setQuantity(sourcePassedQuantity > 0 ? String(sourcePassedQuantity) : "");
     } catch (lookupRequestError) {
       setLookupResult(null);
       setLookupError(
@@ -349,6 +342,11 @@ const TransferInspectionModal = ({
 
     if (transferQuantity > sourcePassedQuantity) {
       setError("Quantity cannot be greater than the passed quantity of this inspection record.");
+      return;
+    }
+
+    if (transferQuantity !== sourcePassedQuantity) {
+      setError("Inspection transfer must move the full passed quantity of this inspection record.");
       return;
     }
 
@@ -526,7 +524,7 @@ const TransferInspectionModal = ({
                   disabled={!lookupResult || saving}
                 />
                 <div className="form-text">
-                  Max allowed: {maxTransferQuantity}
+                  Required: full passed quantity ({sourcePassedQuantity})
                 </div>
               </div>
               <div className="col-md-6">

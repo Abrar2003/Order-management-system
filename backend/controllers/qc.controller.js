@@ -281,6 +281,9 @@ const QC_INSPECTION_STATUS_LABEL = Object.freeze({
 const CLOSED_ORDER_STATUSES = ["Shipped", "Cancelled"];
 const MANAGER_ALLOWED_PAST_DAYS = 2;
 const QC_ALLOWED_PAST_DAYS = 1;
+const STRICT_ADMIN_ROLE_KEYS = new Set(["admin", "super_admin"]);
+const isStrictAdminRoleKey = (role = "") =>
+  STRICT_ADMIN_ROLE_KEYS.has(normalizeUserRoleKey(role));
 const UPDATE_QC_PAST_DAYS_OVERRIDE_BY_USER = Object.freeze({
   "6993ff47473290fa1cf76b65": 3,
 });
@@ -398,7 +401,11 @@ const resolveInspectionRequestGroupKey = (record = {}, fallbackKey = "") => {
 
 const calculateQcAggregateMetrics = (qcDoc, inspectionRecords = []) => {
   const safeInspectionRecords = Array.isArray(inspectionRecords)
-    ? inspectionRecords
+    ? inspectionRecords.filter(
+        (record) =>
+          normalizeInspectionStatus(record?.status) !==
+          normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED),
+      )
     : [];
   const requestHistoryQuantityById = new Map(
     (Array.isArray(qcDoc?.request_history) ? qcDoc.request_history : [])
@@ -860,16 +867,38 @@ const formatInspectionRecordsForAudit = (entries = []) => {
 
   return rows
     .map((entry, index) => {
+      const inspectorName =
+        normalizeText(entry?.inspector?.name || entry?.inspector?.email || "") ||
+        normalizeText(entry?.inspector) ||
+        "Unassigned";
+      const requestedDate = formatDateDDMMYYYY(
+        entry?.requested_date || entry?.request_date,
+        "Not Set",
+      );
       const inspectionDate = formatDateDDMMYYYY(
         entry?.inspection_date || entry?.createdAt,
         "Not Set",
       );
       const status = normalizeText(entry?.status) || "pending";
+      const requested = toNonNegativeNumber(entry?.vendor_requested, 0);
       const checked = toNonNegativeNumber(entry?.checked, 0);
       const passed = toNonNegativeNumber(entry?.passed, 0);
       const offered = toNonNegativeNumber(entry?.vendor_offered, 0);
+      const pendingAfter = toNonNegativeNumber(entry?.pending_after, 0);
+      const cbmSnapshot = buildNormalizedCbmSnapshot(entry?.cbm);
+      const labels = formatAuditList(entry?.labels_added);
+      const barcode = [
+        `master ${formatEan13BarcodeDisplay(entry?.master_barcode ?? entry?.barcode)}`,
+        `inner ${formatEan13BarcodeDisplay(entry?.inner_barcode)}`,
+      ].join(" | ");
+      const flags = [
+        `K/D ${formatAuditBoolean(entry?.kd)}`,
+        `packed ${formatAuditBoolean(entry?.packed_size)}`,
+        `finishing ${formatAuditBoolean(entry?.finishing)}`,
+        `branding ${formatAuditBoolean(entry?.branding)}`,
+      ].join(" | ");
       const remarks = normalizeText(entry?.remarks) || "None";
-      return `${index + 1}) ${inspectionDate} | offered ${offered} | checked ${checked} | passed ${passed} | ${status} | remarks: ${remarks}`;
+      return `${index + 1}) inspector ${inspectorName} | requested date ${requestedDate} | inspection date ${inspectionDate} | requested ${requested} | offered ${offered} | checked ${checked} | passed ${passed} | pending ${pendingAfter} | ${status} | labels ${labels} | cbm ${normalizeText(cbmSnapshot?.total) || "0"} | ${barcode} | ${flags} | remarks: ${remarks}`;
     })
     .join(" || ");
 };
@@ -1039,6 +1068,7 @@ const recalculateInspectorUsedLabels = async (inspectorIds = []) => {
 
     const labelUsageRecords = await Inspection.find({
       inspector: inspectorUserId,
+      status: { $ne: INSPECTION_RECORD_STATUS.TRANSFERRED },
     })
       .select("qc request_history_id inspection_date labels_added createdAt updatedAt")
       .populate("qc", "order_meta item request_date last_inspected_date")
@@ -8650,6 +8680,11 @@ exports.transferInspectionRecord = async (req, res) => {
         message: "Transfer quantity cannot be greater than the passed quantity of this inspection record",
       });
     }
+    if (transferQuantityRaw !== sourcePassed) {
+      return res.status(400).json({
+        message: "Inspection record transfer must move the full passed quantity of the source inspection record",
+      });
+    }
 
     const sourceLabels = normalizeLabels(sourceInspection?.labels_added);
     const sourceHasLabels = sourceLabels.length > 0;
@@ -8675,10 +8710,12 @@ exports.transferInspectionRecord = async (req, res) => {
       normalizeInspectionStatus(sourceStatus) ===
         normalizeInspectionStatus(INSPECTION_RECORD_STATUS.REJECTED) ||
       normalizeInspectionStatus(sourceStatus) ===
-        normalizeInspectionStatus(INSPECTION_RECORD_STATUS.GOODS_NOT_READY)
+        normalizeInspectionStatus(INSPECTION_RECORD_STATUS.GOODS_NOT_READY) ||
+      normalizeInspectionStatus(sourceStatus) ===
+        normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED)
     ) {
       return res.status(400).json({
-        message: "Rejected or goods-not-ready inspection records cannot be transferred",
+        message: "Rejected, goods-not-ready, or already transferred inspection records cannot be transferred",
       });
     }
 
@@ -8858,52 +8895,13 @@ exports.transferInspectionRecord = async (req, res) => {
     }
 
     const sourceCheckedBefore = toNonNegativeNumber(sourceInspection?.checked, 0);
-    const sourceRequestedBefore = toNonNegativeNumber(sourceInspection?.vendor_requested, 0);
-    const sourceOfferedBefore = toNonNegativeNumber(sourceInspection?.vendor_offered, 0);
-    const sourcePassedBefore = toNonNegativeNumber(sourceInspection?.passed, 0);
-    const sourcePendingBefore = toNonNegativeNumber(sourceInspection?.pending_after, 0);
     const sourceCbmBefore = getNormalizedCbmTotalNumber(sourceInspection?.cbm);
     const transferCbmTotal =
       sourceCheckedBefore > 0
         ? (sourceCbmBefore / sourceCheckedBefore) * transferQuantityRaw
         : 0;
 
-    sourceInspection.vendor_requested = Math.max(
-      0,
-      sourceRequestedBefore - transferQuantityRaw,
-    );
-    sourceInspection.vendor_offered = Math.max(
-      0,
-      sourceOfferedBefore - transferQuantityRaw,
-    );
-    sourceInspection.checked = Math.max(0, sourceCheckedBefore - transferQuantityRaw);
-    sourceInspection.passed = Math.max(0, sourcePassedBefore - transferQuantityRaw);
-    sourceInspection.pending_after = sourcePendingBefore + transferQuantityRaw;
-    sourceInspection.labels_added = normalizeLabels(
-      sourceLabels.filter((label) => !transferLabels.includes(label)),
-    );
-    sourceInspection.label_ranges = buildLabelRangesFromLabels(
-      sourceInspection.labels_added,
-    );
-    sourceInspection.cbm = buildSingleBoxCbmSnapshot(
-      Math.max(0, sourceCbmBefore - transferCbmTotal),
-    );
-    sourceInspection.status = resolveInspectionRecordStatus({
-      checked: sourceInspection.checked,
-      passed: sourceInspection.passed,
-      vendorOffered: sourceInspection.vendor_offered,
-      labelsAdded: sourceInspection.labels_added,
-      labelRanges: sourceInspection.label_ranges,
-      goodsNotReady: sourceInspection.goods_not_ready,
-      explicitStatus:
-        sourceInspection.checked <= 0 &&
-        sourceInspection.passed <= 0 &&
-        sourceInspection.vendor_offered <= 0 &&
-        sourceInspection.labels_added.length === 0
-          ? INSPECTION_RECORD_STATUS.TRANSFERRED
-          : "",
-      requestType: sourceQc?.request_type,
-    });
+    sourceInspection.status = INSPECTION_RECORD_STATUS.TRANSFERRED;
     sourceInspection.remarks = normalizeText(
       [sourceInspection.remarks, transferNoteSource].filter(Boolean).join(" | "),
     );
@@ -8937,7 +8935,7 @@ exports.transferInspectionRecord = async (req, res) => {
       replaceCbmSnapshot: false,
       allowRequestedDateFallback: false,
       explicitStatus: INSPECTION_RECORD_STATUS.DONE,
-      currentSizeSource: matchedItem || null,
+      currentSizeSource: sourceInspection || matchedItem || null,
     });
     if (targetInspection) {
       targetInspection.cbm = buildSingleBoxCbmSnapshot(transferCbmTotal);
@@ -8970,7 +8968,7 @@ exports.transferInspectionRecord = async (req, res) => {
       qcDoc: sourceQc,
       beforeSnapshot: sourceBeforeSnapshot,
       afterSnapshot: buildQcEditLogSnapshot(sourceQc.toObject(), sourceAfterInspections),
-      operationType: "qc_update",
+      operationType: "qc_inspection_record_transfer",
       extraRemarks: [transferNoteSource],
     });
     await createOrderEditLogFromQc({
@@ -8986,7 +8984,7 @@ exports.transferInspectionRecord = async (req, res) => {
       qcDoc: targetQc,
       beforeSnapshot: targetBeforeSnapshot,
       afterSnapshot: buildQcEditLogSnapshot(targetQc.toObject(), targetAfterInspections),
-      operationType: "qc_update",
+      operationType: "qc_inspection_record_transfer",
       extraRemarks: [transferNoteTarget],
     });
     await createOrderEditLogFromQc({
@@ -10524,6 +10522,7 @@ exports.editInspectionRecords = async (req, res) => {
     const qcRequestedQuantityCap = resolveRequestedQuantityFromQc(qc);
     const normalizedRole = normalizeUserRoleKey(req.user?.role);
     const canEditAllInspectionRecords = isManagerLikeRole(normalizedRole);
+    const canChangeInspectionInspector = isStrictAdminRoleKey(normalizedRole);
     const currentUserId = String(req.user?._id || req.user?.id || "").trim();
     const isCurrentUserLabelExempt = isLabelExemptUser(currentUserId);
     const latestRequestEntryForPermission = resolveLatestRequestEntry(
@@ -10787,10 +10786,18 @@ exports.editInspectionRecords = async (req, res) => {
       const inspectorId = parseRequiredInspector(
         row?.inspector ?? row?.inspector_id ?? record.inspector,
       );
+      const existingInspectorId = String(
+        record?.inspector?._id || record?.inspector || "",
+      ).trim();
+      if (inspectorId !== existingInspectorId && !canChangeInspectionInspector) {
+        return res.status(403).json({
+          message: "Only admins can change inspection record inspectors",
+        });
+      }
       if (
         !canEditAllInspectionRecords &&
         isCurrentUserLabelExempt &&
-        inspectorId !== String(record?.inspector || "").trim()
+        inspectorId !== existingInspectorId
       ) {
         return res.status(403).json({
           message: "Label-exempt users cannot reassign inspection records",
@@ -11181,11 +11188,11 @@ exports.editInspectionRecords = async (req, res) => {
 exports.deleteInspectionRecord = async (req, res) => {
   try {
     const normalizedRole = normalizeUserRoleKey(req.user?.role);
-    const canDeleteInspectionRecord = isManagerLikeRole(normalizedRole);
+    const canDeleteInspectionRecord = isStrictAdminRoleKey(normalizedRole);
 
     if (!canDeleteInspectionRecord) {
       return res.status(403).json({
-        message: "Only admin or manager can delete inspection records",
+        message: "Only admins can delete inspection records",
       });
     }
 
@@ -11350,7 +11357,7 @@ exports.deleteInspectionRecord = async (req, res) => {
       beforeSnapshot: beforeQcSnapshot,
       afterSnapshot: buildQcEditLogSnapshot(qc.toObject(), remainingInspections),
       operationType: "qc_inspection_record_delete",
-      extraRemarks: ["Inspection record deleted through admin or manager route."],
+      extraRemarks: ["Inspection record deleted through admin route."],
     });
     if (orderRecord) {
       await createOrderEditLogFromQc({
