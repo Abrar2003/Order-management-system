@@ -16,7 +16,6 @@ import {
   updateSampleVendor,
   uploadSampleFiles,
 } from "../services/samples.service";
-import { useShippingInspectors } from "../hooks/useShippingInspectors";
 import { formatDateDDMMYYYY } from "../utils/date";
 import "../App.css";
 
@@ -42,12 +41,22 @@ const blankAction = () => ({
 
 const text = (value, fallback = "-") => String(value || "").trim() || fallback;
 const isImageFile = (file = {}) => String(file?.contentType || "").toLowerCase().startsWith("image/");
+const toDateInputValue = (value) => (value ? String(value).slice(0, 10) : "");
 const statusClass = (status = "") => {
   if (["completed", "shipped", "client_approved", "inspected"].includes(status)) return "text-bg-success";
   if (status === "cancelled") return "text-bg-danger";
   if (["on_hold", "client_revision_requested"].includes(status)) return "text-bg-warning";
   return "text-bg-primary";
 };
+const makeVendorShipmentRows = (vendors = []) =>
+  (Array.isArray(vendors) ? vendors : []).map((vendor) => ({
+    vendor_entry_id: String(vendor?._id || "").trim(),
+    vendor_name: String(vendor?.vendor_name || "").trim(),
+    container: String(vendor?.container || "").trim(),
+    shipped_at: toDateInputValue(vendor?.shipped_at),
+    invoice_number: String(vendor?.invoice_number || "").trim(),
+    quantity: vendor?.quantity ? String(vendor.quantity) : "",
+  }));
 
 const FileList = ({ title, files = [] }) => (
   <section className="sample-detail-section">
@@ -126,13 +135,8 @@ const WorkflowStepper = ({ currentStatus }) => {
   );
 };
 
-const ActionModal = ({ action, onClose, onSubmit, saving }) => {
-  const {
-    inspectors,
-    inspectorById,
-    loadingInspectors,
-    inspectorError,
-  } = useShippingInspectors();
+const ActionModal = ({ action, sample, onClose, onSubmit, saving }) => {
+  const [modalError, setModalError] = useState("");
   const [form, setForm] = useState({
     current_status: action.status || "",
     comment: "",
@@ -150,23 +154,71 @@ const ActionModal = ({ action, onClose, onSubmit, saving }) => {
     shipped_at: action.vendor?.shipped_at ? String(action.vendor.shipped_at).slice(0, 10) : "",
     tracking: action.vendor?.tracking || "",
     container: action.vendor?.container || "",
+    invoice_number: action.vendor?.invoice_number || "",
+    quantity: action.vendor?.quantity ? String(action.vendor.quantity) : "",
     shipment_remarks: action.vendor?.shipment_remarks || "",
-    quantity: "",
-    stuffing_date: "",
-    invoice_number: "",
-    stuffed_by_id: "shipped_by_vendor",
+    vendor_shipments: makeVendorShipmentRows(sample?.vendor_entries),
   });
   const setField = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
+  const setVendorShipmentField = (index, field, value) => {
+    setForm((prev) => ({
+      ...prev,
+      vendor_shipments: prev.vendor_shipments.map((row, rowIndex) =>
+        rowIndex === index ? { ...row, [field]: value } : row,
+      ),
+    }));
+  };
+  const validateVendorShipments = () => {
+    if (!form.vendor_shipments.length) {
+      return "Assign at least one vendor before marking this sample as shipped.";
+    }
+
+    for (let index = 0; index < form.vendor_shipments.length; index += 1) {
+      const row = form.vendor_shipments[index] || {};
+      const label = row.vendor_name || `Vendor ${index + 1}`;
+      const quantity = Number(row.quantity);
+      if (!String(row.container || "").trim()) return `${label}: container is required.`;
+      if (!String(row.shipped_at || "").trim()) return `${label}: shipped date is required.`;
+      if (!String(row.invoice_number || "").trim()) return `${label}: invoice number is required.`;
+      if (!Number.isFinite(quantity) || quantity <= 0) return `${label}: quantity must be a positive number.`;
+    }
+
+    return "";
+  };
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    setModalError("");
+    const nextForm = { ...form };
+
+    if (action.type === "status" && form.current_status === "shipped") {
+      const validationError = validateVendorShipments();
+      if (validationError) {
+        setModalError(validationError);
+        return;
+      }
+
+      nextForm.vendor_shipments = form.vendor_shipments.map((row) => ({
+        vendor_entry_id: row.vendor_entry_id,
+        container: String(row.container || "").trim(),
+        shipped_at: row.shipped_at,
+        invoice_number: String(row.invoice_number || "").trim(),
+        quantity: Number(row.quantity),
+      }));
+    }
+
+    onSubmit(nextForm);
+  };
 
   return (
     <div className="modal d-block om-modal-backdrop" tabIndex="-1" role="dialog">
       <div className="modal-dialog modal-dialog-centered modal-lg" role="document">
-        <form className="modal-content" onSubmit={(event) => { event.preventDefault(); onSubmit(form); }}>
+        <form className="modal-content" onSubmit={handleSubmit}>
           <div className="modal-header">
             <h5 className="modal-title">{action.title}</h5>
             <button type="button" className="btn-close" onClick={onClose} aria-label="Close" />
           </div>
           <div className="modal-body">
+            {modalError && <div className="alert alert-danger">{modalError}</div>}
             {action.type === "status" && (
               <div className="row g-3">
                 <div className="col-md-6">
@@ -176,29 +228,34 @@ const ActionModal = ({ action, onClose, onSubmit, saving }) => {
                   </select>
                 </div>
                 {form.current_status === "shipped" && (
-                  <>
-                    <div className="col-md-4"><label className="form-label">Container</label><input className="form-control" value={form.container} onChange={(e) => setField("container", e.target.value)} /></div>
-                    <div className="col-md-4"><label className="form-label">Quantity</label><input type="number" min="0" className="form-control" value={form.quantity} onChange={(e) => setField("quantity", e.target.value)} /></div>
-                    <div className="col-md-4"><label className="form-label">Stuffing Date</label><input type="date" className="form-control" value={form.stuffing_date} onChange={(e) => setField("stuffing_date", e.target.value)} /></div>
-                    <div className="col-md-6"><label className="form-label">Invoice Number</label><input className="form-control" value={form.invoice_number} onChange={(e) => setField("invoice_number", e.target.value)} /></div>
-                    <div className="col-md-6">
-                      <label className="form-label">Stuffed By</label>
-                      <select
-                        className="form-select"
-                        value={form.stuffed_by_id}
-                        onChange={(e) => setField("stuffed_by_id", e.target.value)}
-                        disabled={loadingInspectors}
-                      >
-                        {inspectors.map((inspector) => (
-                          <option key={inspector.id} value={inspector.id}>
-                            {inspector.name}
-                          </option>
-                        ))}
-                      </select>
-                      {loadingInspectors && <div className="form-text">Loading inspectors...</div>}
-                      {inspectorError && <div className="form-text text-danger">{inspectorError}</div>}
+                  <div className="col-12">
+                    <div className="table-responsive">
+                      <table className="table table-sm align-middle mb-0">
+                        <thead>
+                          <tr>
+                            <th>Vendor</th>
+                            <th>Container</th>
+                            <th>Shipped Date</th>
+                            <th>Invoice Number</th>
+                            <th>Quantity</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {form.vendor_shipments.length === 0 ? (
+                            <tr><td colSpan="5" className="text-secondary">No vendors assigned.</td></tr>
+                          ) : form.vendor_shipments.map((row, index) => (
+                            <tr key={row.vendor_entry_id || index}>
+                              <td>{text(row.vendor_name)}</td>
+                              <td><input className="form-control form-control-sm" value={row.container} onChange={(e) => setVendorShipmentField(index, "container", e.target.value)} /></td>
+                              <td><input type="date" className="form-control form-control-sm" value={row.shipped_at} onChange={(e) => setVendorShipmentField(index, "shipped_at", e.target.value)} /></td>
+                              <td><input className="form-control form-control-sm" value={row.invoice_number} onChange={(e) => setVendorShipmentField(index, "invoice_number", e.target.value)} /></td>
+                              <td><input type="number" min="0" className="form-control form-control-sm" value={row.quantity} onChange={(e) => setVendorShipmentField(index, "quantity", e.target.value)} /></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
-                  </>
+                  </div>
                 )}
               </div>
             )}
@@ -237,7 +294,10 @@ const ActionModal = ({ action, onClose, onSubmit, saving }) => {
                 <div className="col-md-4"><label className="form-label">Inspected Date</label><input type="date" className="form-control" value={form.inspected_at} onChange={(e) => setField("inspected_at", e.target.value)} /></div>
                 <div className="col-md-4"><label className="form-label">Estimated Shipping</label><input type="date" className="form-control" value={form.estimated_shipping_date} onChange={(e) => setField("estimated_shipping_date", e.target.value)} /></div>
                 <div className="col-md-4"><label className="form-label">Shipped Date</label><input type="date" className="form-control" value={form.shipped_at} onChange={(e) => setField("shipped_at", e.target.value)} /></div>
-                <div className="col-md-4"><label className="form-label">Tracking / Container</label><input className="form-control" value={form.tracking || form.container} onChange={(e) => setField("tracking", e.target.value)} /></div>
+                <div className="col-md-4"><label className="form-label">Tracking</label><input className="form-control" value={form.tracking} onChange={(e) => setField("tracking", e.target.value)} /></div>
+                <div className="col-md-4"><label className="form-label">Container</label><input className="form-control" value={form.container} onChange={(e) => setField("container", e.target.value)} /></div>
+                <div className="col-md-4"><label className="form-label">Invoice Number</label><input className="form-control" value={form.invoice_number} onChange={(e) => setField("invoice_number", e.target.value)} /></div>
+                <div className="col-md-4"><label className="form-label">Quantity</label><input type="number" min="0" className="form-control" value={form.quantity} onChange={(e) => setField("quantity", e.target.value)} /></div>
                 <div className="col-md-8"><label className="form-label">Vendor Files</label><input type="file" className="form-control" multiple onChange={(e) => setField("files", Array.from(e.target.files || []))} /></div>
               </div>
             )}
@@ -299,15 +359,7 @@ const SampleDetails = () => {
           comment: form.comment,
         };
         if (form.current_status === "shipped") {
-          const stuffedBy = inspectorById.get(String(form.stuffed_by_id || "").trim());
-          payload.container = form.container;
-          payload.quantity = form.quantity;
-          payload.stuffing_date = form.stuffing_date;
-          payload.invoice_number = form.invoice_number;
-          payload.stuffed_by = {
-            id: stuffedBy?.id || form.stuffed_by_id,
-            name: stuffedBy?.name || "Shipped By Vendor",
-          };
+          payload.vendor_shipments = form.vendor_shipments;
         }
         await updateSampleStatus(id, payload);
       } else if (action.type === "files") {
@@ -330,6 +382,8 @@ const SampleDetails = () => {
           "shipped_at",
           "tracking",
           "container",
+          "invoice_number",
+          "quantity",
           "shipment_remarks",
           "comment",
         ].forEach((field) => formData.append(field, form[field] || ""));
@@ -345,7 +399,11 @@ const SampleDetails = () => {
       setAction(blankAction());
       await fetchSample();
     } catch (submitError) {
-      setError(submitError?.response?.data?.message || "Failed to update sample.");
+      setError(
+        submitError?.response?.data?.message
+          || submitError?.message
+          || "Failed to update sample.",
+      );
     } finally {
       setSaving(false);
     }
@@ -437,12 +495,15 @@ const SampleDetails = () => {
                         <th>Inspected Date</th>
                         <th>Estimated Shipping</th>
                         <th>Shipped Date</th>
+                        <th>Container</th>
+                        <th>Invoice</th>
+                        <th>Quantity</th>
                         <th>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {(sample.vendor_entries || []).length === 0 ? (
-                        <tr><td colSpan="9" className="text-secondary">No vendors added.</td></tr>
+                        <tr><td colSpan="12" className="text-secondary">No vendors added.</td></tr>
                       ) : sample.vendor_entries.map((vendor) => (
                         <tr key={vendor._id}>
                           <td>{text(vendor.vendor_name)}</td>
@@ -453,6 +514,9 @@ const SampleDetails = () => {
                           <td>{formatDateDDMMYYYY(vendor.inspected_at, "-")}</td>
                           <td>{formatDateDDMMYYYY(vendor.estimated_shipping_date, "-")}</td>
                           <td>{formatDateDDMMYYYY(vendor.shipped_at, "-")}</td>
+                          <td>{text(vendor.container)}</td>
+                          <td>{text(vendor.invoice_number)}</td>
+                          <td>{vendor.quantity ? Number(vendor.quantity) : "-"}</td>
                           <td>
                             {canMutate ? (
                               <button type="button" className="btn btn-sm btn-outline-primary" onClick={() => setAction({ type: "vendor", title: `Update ${vendor.vendor_name}`, vendor })}>
@@ -534,6 +598,7 @@ const SampleDetails = () => {
       {action.type && (
         <ActionModal
           action={action}
+          sample={sample}
           saving={saving}
           onClose={() => setAction(blankAction())}
           onSubmit={handleActionSubmit}

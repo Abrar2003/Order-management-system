@@ -449,6 +449,8 @@ const normalizeVendorEntries = (value, legacyVendor = []) => {
       shipped_at: parseDate(entry?.shipped_at, "shipped_at"),
       tracking: normalizeText(entry?.tracking),
       container: normalizeText(entry?.container),
+      invoice_number: normalizeShipmentInvoiceNumber(entry?.invoice_number, ""),
+      quantity: Math.max(0, toSafeNumber(entry?.quantity, 0)),
       shipment_remarks: normalizeText(entry?.shipment_remarks),
       files: Array.isArray(entry?.files) ? entry.files.map((file) => buildStoredSampleFile(file)) : [],
       comments: Array.isArray(entry?.comments) ? entry.comments : [],
@@ -663,6 +665,9 @@ exports.createSample = async (req, res) => {
     if (!normalizeText(payload.brand)) {
       return res.status(400).json({ success: false, message: "brand is required" });
     }
+    if (normalizeLower(payload.current_status) === "shipped") {
+      return res.status(400).json({ success: false, message: "Use Update Status to mark a sample as shipped" });
+    }
     const existingSample = await Sample.findOne({ code: { $regex: `^${escapeRegex(code)}$`, $options: "i" } }).select("_id code");
     if (existingSample) {
       return res.status(400).json({ success: false, message: `Sample code ${existingSample.code || code} already exists` });
@@ -815,6 +820,56 @@ const normalizeShipmentEntries = (entries = [], actor = {}) => {
   });
 };
 
+const normalizeVendorShipmentEntries = (sample, entries = [], actor = {}) => {
+  if (!Array.isArray(entries)) throw new Error("vendor_shipments must be an array");
+
+  const vendorEntries = Array.isArray(sample?.vendor_entries) ? sample.vendor_entries : [];
+  if (vendorEntries.length === 0) {
+    throw new Error("Cannot mark sample as shipped because no vendors are assigned");
+  }
+
+  const payloadByVendorId = new Map(
+    entries
+      .map((entry) => [normalizeText(entry?.vendor_entry_id || entry?._id), entry])
+      .filter(([vendorEntryId]) => vendorEntryId),
+  );
+
+  return vendorEntries.map((vendorEntry, index) => {
+    const vendorEntryId = String(vendorEntry?._id || "");
+    const payload = payloadByVendorId.get(vendorEntryId) || {};
+    const vendorName = normalizeText(vendorEntry?.vendor_name) || `vendor ${index + 1}`;
+    const container = normalizeText(payload.container ?? vendorEntry.container);
+    const shippedAt = parseDate(payload.shipped_at ?? vendorEntry.shipped_at, `${vendorName} shipped date`);
+    const invoiceNumber = normalizeShipmentInvoiceNumber(payload.invoice_number ?? vendorEntry.invoice_number, "");
+    const quantity = Number(payload.quantity ?? vendorEntry.quantity);
+
+    if (!container) throw new Error(`${vendorName}: container is required before marking sample as shipped`);
+    if (!shippedAt) throw new Error(`${vendorName}: shipped date is required before marking sample as shipped`);
+    if (!invoiceNumber) throw new Error(`${vendorName}: invoice number is required before marking sample as shipped`);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      throw new Error(`${vendorName}: quantity must be a positive number before marking sample as shipped`);
+    }
+
+    vendorEntry.container = container;
+    vendorEntry.shipped_at = shippedAt;
+    vendorEntry.invoice_number = invoiceNumber;
+    vendorEntry.quantity = quantity;
+
+    return {
+      container,
+      invoice_number: invoiceNumber,
+      stuffing_date: shippedAt,
+      quantity,
+      pending: 0,
+      remaining_remarks: normalizeText(payload.remaining_remarks ?? vendorEntry.shipment_remarks),
+      stuffed_by: { id: null, name: SHIPPED_BY_VENDOR_NAME },
+      cases: [],
+      updated_at: new Date(),
+      updated_by: actor,
+    };
+  });
+};
+
 exports.updateSampleStatus = async (req, res) => {
   try {
     if (!ensureSampleMutationAccess(req, res)) return;
@@ -825,18 +880,22 @@ exports.updateSampleStatus = async (req, res) => {
     const statusFrom = sample.current_status;
     const statusTo = validateEnum(payload.current_status || payload.status, Sample.SAMPLE_STATUSES, "current_status", statusFrom);
     const before = sample.toObject();
+    if (statusTo === "shipped") {
+      sample.shipment = normalizeVendorShipmentEntries(sample, payload.vendor_shipments, actor);
+      sample.shipped_at = sample.shipment.reduce((latestDate, entry) => {
+        const entryDate = entry?.stuffing_date ? new Date(entry.stuffing_date) : null;
+        if (!entryDate || Number.isNaN(entryDate.getTime())) return latestDate;
+        if (!latestDate || entryDate > latestDate) return entryDate;
+        return latestDate;
+      }, null) || new Date();
+    }
+
     sample.current_status = statusTo;
-    if (STATUS_DATE_FIELD[statusTo]) {
+    if (STATUS_DATE_FIELD[statusTo] && statusTo !== "shipped") {
       sample[STATUS_DATE_FIELD[statusTo]] = parseDate(payload.date, "date") || new Date();
     }
     if (statusTo === "cad_ready") sample.cad_completed_at = parseDate(payload.cad_completed_at, "cad_completed_at") || sample.cad_completed_at || new Date();
     if (statusTo === "shipping_planned") sample.estimated_shipping_date = parseDate(payload.estimated_shipping_date || payload.date, "estimated_shipping_date") || sample.estimated_shipping_date;
-    if (statusTo === "shipped") {
-      sample.shipped_at = parseDate(payload.shipped_at || payload.date, "shipped_at") || sample.shipped_at || new Date();
-      if (payload.container && payload.quantity && payload.stuffing_date) {
-        sample.shipment.push(normalizeShipmentEntries([payload], actor)[0]);
-      }
-    }
     sample.updated_by = actor;
     addTimeline(sample, {
       stage: statusTo,
@@ -855,6 +914,7 @@ exports.updateSampleStatus = async (req, res) => {
         "inspected_at",
         "estimated_shipping_date",
         "shipped_at",
+        "vendor_entries",
         "shipment",
       ]),
       actor,
@@ -973,6 +1033,8 @@ exports.updateSampleVendor = async (req, res) => {
     if (payload.shipped_at !== undefined) vendorEntry.shipped_at = parseDate(payload.shipped_at, "shipped_at");
     if (payload.tracking !== undefined) vendorEntry.tracking = normalizeText(payload.tracking);
     if (payload.container !== undefined) vendorEntry.container = normalizeText(payload.container);
+    if (payload.invoice_number !== undefined) vendorEntry.invoice_number = normalizeShipmentInvoiceNumber(payload.invoice_number, "");
+    if (payload.quantity !== undefined) vendorEntry.quantity = Math.max(0, toSafeNumber(payload.quantity, 0));
     if (payload.shipment_remarks !== undefined) vendorEntry.shipment_remarks = normalizeText(payload.shipment_remarks);
     if (normalizeText(payload.comment)) {
       vendorEntry.comments.push({ comment: normalizeText(payload.comment), created_by: actor, created_at: new Date() });
@@ -981,9 +1043,8 @@ exports.updateSampleVendor = async (req, res) => {
     files.forEach((file) => vendorEntry.files.push(file));
     syncLegacyVendors(sample);
     const statusBefore = sample.current_status;
-    if (vendorEntry.shipped_at) {
-      sample.current_status = "shipped";
-      sample.shipped_at = vendorEntry.shipped_at;
+    if (sample.current_status === "shipped") {
+      sample.shipped_at = sample.shipped_at || vendorEntry.shipped_at || null;
     } else if (vendorEntry.estimated_shipping_date) {
       sample.current_status = "shipping_planned";
       sample.estimated_shipping_date = vendorEntry.estimated_shipping_date;
@@ -1018,6 +1079,8 @@ exports.updateSampleVendor = async (req, res) => {
         "shipped_at",
         "tracking",
         "container",
+        "invoice_number",
+        "quantity",
         "shipment_remarks",
       ]),
       actor,
@@ -1089,16 +1152,14 @@ exports.finalizeSampleShipment = async (req, res) => {
     const before = sample.toObject();
     sample.shipment = Array.isArray(sample.shipment) ? sample.shipment : [];
     sample.shipment.push(shipmentEntry);
-    sample.current_status = "shipped";
-    sample.shipped_at = shipmentEntry.stuffing_date || new Date();
     sample.updated_by = actor;
     addTimeline(sample, {
-      stage: "shipped",
+      stage: sample.current_status || "shipment",
       action: "finalize_shipment",
       statusFrom: before.current_status,
       statusTo: sample.current_status,
       comment: normalizeText(req.body?.remarks || req.body?.remaining_remarks),
-      changedFields: buildChangedFields(before, sample.toObject(), ["shipment", "current_status", "shipped_at"]),
+      changedFields: buildChangedFields(before, sample.toObject(), ["shipment"]),
       actor,
     });
     await sample.save();

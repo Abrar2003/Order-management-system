@@ -123,17 +123,17 @@ const InspectionSchema = new mongoose.Schema(
       total: { type: String, default: "0" },
     },
     barcode: {
-      type: Number,
+      type: String,
       default: 0,
       min: 0,
     },
     master_barcode: {
-      type: Number,
+      type: String,
       default: 0,
       min: 0,
     },
     inner_barcode: {
-      type: Number,
+      type: String,
       default: 0,
       min: 0,
     },

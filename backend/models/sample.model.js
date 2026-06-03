@@ -164,6 +164,8 @@ const VendorEntrySchema = new mongoose.Schema(
     shipped_at: { type: Date, default: null },
     tracking: { type: String, default: "", trim: true },
     container: { type: String, default: "", trim: true },
+    invoice_number: { type: String, default: "", trim: true },
+    quantity: { type: Number, default: 0, min: 0 },
     shipment_remarks: { type: String, default: "", trim: true },
     files: { type: [SampleFileSchema], default: [] },
     comments: { type: [VendorCommentSchema], default: [] },
