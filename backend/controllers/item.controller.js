@@ -5446,7 +5446,8 @@ exports.updateItemPis = async (req, res) => {
 
     const payload = req.body && typeof req.body === "object" ? req.body : {};
     const roleKey = normalizeUserRoleKey(req.user?.role);
-    const canCreatePisDiffMasterData = ["admin", "super_admin"].includes(roleKey);
+    const isStrictAdmin = ["admin", "super_admin"].includes(roleKey);
+    const canCreatePisDiffMasterData = isStrictAdmin;
     const requestedPisDiffCheck =
       normalizeTextField(payload?.pis_update_source).toLowerCase() === "pis_diffs" ||
       payload?.sync_master_data === true ||
@@ -5569,6 +5570,12 @@ exports.updateItemPis = async (req, res) => {
     }
 
     if (hasOwn(payload, "barcode_exempted")) {
+      if (!isStrictAdmin) {
+        return res.status(403).json({
+          success: false,
+          message: "Only Admin or Super Admin can enable or disable barcode exempt items.",
+        });
+      }
       setPisPath(
         "barcode_exempted",
         toBooleanValue(payload.barcode_exempted, "barcode_exempted"),

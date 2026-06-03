@@ -1114,8 +1114,7 @@ const UpdateQcModal = ({
   const barcodeValidationItemMaster = isInspectionRecordUpdate
     ? buildInspectionRecordMeasurementSource(inspectionRecord)
     : qc?.item_master || {};
-  const requiresBarcodeValidation =
-    isQcUser && barcodeValidationItemMaster?.barcode_exempted !== true;
+  const requiresBarcodeValidation = isQcUser;
   const qcBarcodeValidationLocked =
     requiresBarcodeValidation && !barcodeValidated;
   const latestInspectionRecord = getLatestInspectionRecord(qc);
@@ -2311,7 +2310,6 @@ const UpdateQcModal = ({
           allowFallback: true,
         })
         : qc?.item_master || {};
-    const isBarcodeExemptedItem = existingItemMaster?.barcode_exempted === true;
     const existingInspectedWeight = existingItemMaster?.inspected_weight || {};
     const existingInspectedBoxMode = detectBoxPackagingMode(
       existingItemMaster?.inspected_box_mode,
@@ -2592,8 +2590,13 @@ const UpdateQcModal = ({
       return;
     }
 
-    if (isQcUser && !isBarcodeExemptedItem) {
+    if (isQcUser) {
       const typeLabel = selectedBarcodeValidationOption.label.toLowerCase();
+
+      if (!effectiveMasterBarcodeValue || effectiveMasterBarcodeValue <= 0) {
+        setError("Scan and validate the master barcode before updating this QC record.");
+        return;
+      }
 
       if (!barcodeValidated) {
         setError(`Validate the ${typeLabel} barcode before updating this QC record.`);

@@ -22,6 +22,8 @@ import {
   resolvePreferredMeasuredSizeCbm,
 } from "../utils/measuredSizeForm";
 import { formatEan13BarcodeDisplay } from "../utils/barcode";
+import { getUserFromToken } from "../auth/auth.utils";
+import { isStrictAdminRole, normalizeUserRole } from "../auth/permissions";
 import "../App.css";
 
 const toText = (value, fallback = "") => String(value ?? fallback).trim();
@@ -333,6 +335,10 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
   const [error, setError] = useState("");
   const [latestInspectionContext, setLatestInspectionContext] = useState(null);
   const [latestInspectionContextLoading, setLatestInspectionContextLoading] = useState(false);
+  const user = getUserFromToken();
+  const canToggleBarcodeExemption = isStrictAdminRole(
+    normalizeUserRole(user?.role),
+  );
   const isPisDiffUpdate = updateSource === "pis_diffs";
   const editScopeLabel = isPisDiffUpdate ? "Master" : "PIS";
   const {
@@ -620,7 +626,9 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
       payload.pis_inner_barcode = isPisCartonMode ? toText(form.inner_barcode) : "";
       payload.kd = Boolean(form.kd);
       payload.mounting_file_needed = Boolean(form.mounting_file_needed);
-      payload.barcode_exempted = Boolean(form.barcode_exempted);
+      if (canToggleBarcodeExemption) {
+        payload.barcode_exempted = Boolean(form.barcode_exempted);
+      }
       if (updateSource) {
         payload.pis_update_source = updateSource;
       }
@@ -640,7 +648,9 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
             pis_inner_barcode: payload.pis_inner_barcode,
             kd: payload.kd,
             mounting_file_needed: payload.mounting_file_needed,
-            barcode_exempted: payload.barcode_exempted,
+            barcode_exempted: canToggleBarcodeExemption
+              ? payload.barcode_exempted
+              : item?.barcode_exempted,
             master_country_of_origin: payload.country_of_origin,
             master_barcode: payload.pis_master_barcode,
             master_master_barcode: payload.pis_master_barcode,
@@ -759,27 +769,29 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
                   </button>
                 </div>
               </div>
-              <div className="col-md-4">
-                <label className="form-label">Barcode Exempted Item</label>
-                <div className="btn-group w-100" role="group" aria-label="Barcode Exempted Item">
-                  <button
-                    type="button"
-                    className={`btn ${form.barcode_exempted ? "btn-primary" : "btn-outline-secondary"}`}
-                    onClick={() => updateField("barcode_exempted", true)}
-                    disabled={saving}
-                  >
-                    Yes
-                  </button>
-                  <button
-                    type="button"
-                    className={`btn ${!form.barcode_exempted ? "btn-primary" : "btn-outline-secondary"}`}
-                    onClick={() => updateField("barcode_exempted", false)}
-                    disabled={saving}
-                  >
-                    No
-                  </button>
+              {canToggleBarcodeExemption && (
+                <div className="col-md-4">
+                  <label className="form-label">Barcode Exempted Item</label>
+                  <div className="btn-group w-100" role="group" aria-label="Barcode Exempted Item">
+                    <button
+                      type="button"
+                      className={`btn ${form.barcode_exempted ? "btn-primary" : "btn-outline-secondary"}`}
+                      onClick={() => updateField("barcode_exempted", true)}
+                      disabled={saving}
+                    >
+                      Yes
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn ${!form.barcode_exempted ? "btn-primary" : "btn-outline-secondary"}`}
+                      onClick={() => updateField("barcode_exempted", false)}
+                      disabled={saving}
+                    >
+                      No
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             <div className="row g-2">
