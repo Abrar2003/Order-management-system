@@ -1814,9 +1814,12 @@ const resolveLatestRequestEntry = (requestHistory = []) => {
 const resolveLatestInspectionRecordForRequestEntry = (
   inspectionRecords = [],
   requestEntry = null,
+  options = {},
 ) => {
   if (!requestEntry) return null;
 
+  const allowDateFallbackWithLinkedRecords =
+    options?.allowDateFallbackWithLinkedRecords !== false;
   const requestHistoryId = String(
     requestEntry?._id ||
       requestEntry?.request_history_id ||
@@ -1834,6 +1837,9 @@ const resolveLatestInspectionRecordForRequestEntry = (
   ).trim();
   const canUseDateFallbackRecord = (record = {}) => {
     const linkedRequestHistoryId = String(record?.request_history_id || "").trim();
+    if (!allowDateFallbackWithLinkedRecords && linkedRequestHistoryId) {
+      return false;
+    }
     if (!requestHistoryId || !linkedRequestHistoryId) return true;
     if (linkedRequestHistoryId === requestHistoryId) return true;
     if (
@@ -9302,12 +9308,19 @@ exports.getDailyReport = async (req, res) => {
       );
     const isInspectionVisibleForReportDate = (inspection = {}) => {
       const resolvedInspectionStatus = resolveInspectionStatusForReport(inspection);
+      const inspectionDateKey = toReportDateKey(
+        inspection?.requested_date || inspection?.inspection_date,
+      );
+      if (inspectionDateKey) {
+        return inspectionDateKey <= reportDate;
+      }
+
       const shouldUseMutationTimestamp =
         isTransferredStatusValue(resolvedInspectionStatus) ||
         isRejectedStatusValue(resolvedInspectionStatus);
       const effectiveDate = shouldUseMutationTimestamp
-        ? inspection?.updatedAt || inspection?.createdAt || inspection?.inspection_date
-        : inspection?.inspection_date || inspection?.createdAt;
+        ? inspection?.updatedAt || inspection?.createdAt
+        : inspection?.createdAt;
       return isOnOrBeforeReportDate(effectiveDate);
     };
     const buildDailyRequestLookupKey = ({
@@ -9508,6 +9521,7 @@ exports.getDailyReport = async (req, res) => {
           const latestInspection = resolveLatestInspectionRecordForRequestEntry(
             alignedRequestInspectionsByQcId.get(qcId) || [],
             requestEntry,
+            { allowDateFallbackWithLinkedRecords: false },
           );
           if (!latestInspection) return null;
           const isLatestInspectionRejectedOnReportDate =
