@@ -2316,6 +2316,19 @@ const syncQcCurrentRequestFieldsFromHistory = (
   return hasChanges;
 };
 
+const buildInspectionBarcodeSnapshotFromQc = (qcDoc = {}) => {
+  const masterBarcode = normalizeText(
+    qcDoc?.master_barcode || qcDoc?.barcode || "0",
+  );
+  const innerBarcode = normalizeText(qcDoc?.inner_barcode || "0");
+
+  return {
+    barcode: masterBarcode,
+    master_barcode: masterBarcode,
+    inner_barcode: innerBarcode,
+  };
+};
+
 const upsertInspectionRecordForRequest = async ({
   qcDoc,
   inspectorId,
@@ -2402,6 +2415,7 @@ const upsertInspectionRecordForRequest = async ({
           currentSizeSource?.inspected_k_d ??
           currentSizeSource?.pis_k_d,
       );
+  const inspectionBarcodeSnapshot = buildInspectionBarcodeSnapshotFromQc(qcDoc);
 
   if (!inspectionRecord) {
     inspectionRecord = await Inspection.create({
@@ -2426,6 +2440,7 @@ const upsertInspectionRecordForRequest = async ({
       vendor_offered: toNonNegativeNumber(addProvision, 0),
       pending_after: pendingAfter,
       cbm: qcCbmSnapshot,
+      ...inspectionBarcodeSnapshot,
       inspected_item_sizes: inspectionSizeSnapshot.inspected_item_sizes,
       inspected_box_sizes: inspectionSizeSnapshot.inspected_box_sizes,
       inspected_box_mode: inspectionSizeSnapshot.inspected_box_mode,
@@ -2477,6 +2492,9 @@ const upsertInspectionRecordForRequest = async ({
   inspectionRecord.passed = nextPassed;
   inspectionRecord.vendor_offered = nextOffered;
   inspectionRecord.pending_after = pendingAfter;
+  inspectionRecord.barcode = inspectionBarcodeSnapshot.barcode;
+  inspectionRecord.master_barcode = inspectionBarcodeSnapshot.master_barcode;
+  inspectionRecord.inner_barcode = inspectionBarcodeSnapshot.inner_barcode;
   inspectionRecord.inspected_item_sizes =
     inspectionSizeSnapshot.inspected_item_sizes;
   inspectionRecord.inspected_box_sizes =
@@ -8080,6 +8098,7 @@ exports.rejectAllQc = async (req, res) => {
       qcDoc: qc,
       currentSource: inspectionSizeSource,
     });
+    const inspectionBarcodeSnapshot = buildInspectionBarcodeSnapshotFromQc(qc);
 
     const requestHistoryId = latestRequestEntry?._id || null;
     let inspectionRecord = null;
@@ -8111,6 +8130,7 @@ exports.rejectAllQc = async (req, res) => {
         passed: 0,
         pending_after: 0,
         cbm: buildNormalizedCbmSnapshot(qc?.cbm),
+        ...inspectionBarcodeSnapshot,
         inspected_item_sizes: inspectionSizeSnapshot.inspected_item_sizes,
         inspected_box_sizes: inspectionSizeSnapshot.inspected_box_sizes,
         inspected_box_mode: inspectionSizeSnapshot.inspected_box_mode,
@@ -8140,6 +8160,9 @@ exports.rejectAllQc = async (req, res) => {
       inspectionRecord.checked = requestedQuantityForRecord;
       inspectionRecord.passed = 0;
       inspectionRecord.status = INSPECTION_RECORD_STATUS.REJECTED;
+      inspectionRecord.barcode = inspectionBarcodeSnapshot.barcode;
+      inspectionRecord.master_barcode = inspectionBarcodeSnapshot.master_barcode;
+      inspectionRecord.inner_barcode = inspectionBarcodeSnapshot.inner_barcode;
       inspectionRecord.inspected_item_sizes =
         inspectionSizeSnapshot.inspected_item_sizes;
       inspectionRecord.inspected_box_sizes =
@@ -8452,6 +8475,10 @@ exports.transferQcRequest = async (req, res) => {
       latestInspection.status = INSPECTION_RECORD_STATUS.TRANSFERRED;
       latestInspection.inspection_date = transferDate;
       latestInspection.remarks = transferNote;
+      const inspectionBarcodeSnapshot = buildInspectionBarcodeSnapshotFromQc(qc);
+      latestInspection.barcode = inspectionBarcodeSnapshot.barcode;
+      latestInspection.master_barcode = inspectionBarcodeSnapshot.master_barcode;
+      latestInspection.inner_barcode = inspectionBarcodeSnapshot.inner_barcode;
       latestInspection.updated_by = buildAuditActor(req.user);
       await latestInspection.save();
     }
@@ -8492,6 +8519,7 @@ exports.transferQcRequest = async (req, res) => {
       passed: 0,
       pending_after: pendingQuantity,
       cbm: buildNormalizedCbmSnapshot(qc?.cbm),
+      ...buildInspectionBarcodeSnapshotFromQc(qc),
       label_ranges: [],
       labels_added: [],
       remarks: newRequestRemarks,
