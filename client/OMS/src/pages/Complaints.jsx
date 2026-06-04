@@ -4,6 +4,7 @@ import Navbar from "../components/Navbar";
 import AddComplaintModal from "../components/complaints/AddComplaintModal";
 import AddCommentModal from "../components/complaints/AddCommentModal";
 import ComplaintAccordionDetails from "../components/complaints/ComplaintAccordionDetails";
+import EditComplaintModal from "../components/complaints/EditComplaintModal";
 import UploadComplaintFilesModal from "../components/complaints/UploadComplaintFilesModal";
 import { formatComplaintDateTime } from "../components/complaints/complaintConstants";
 import { usePermissions } from "../auth/PermissionContext";
@@ -581,21 +582,13 @@ const Complaints = () => {
         />
       )}
       {modal.type === "edit" && (
-        <AddComplaintModal
+        <EditComplaintModal
           brandOptions={brandOptions}
           categoryOptions={categoryOptions}
+          complaint={modal.complaint}
           creatingCategory={creatingCategory}
-          initialValues={{
-            brand: modal.complaint?.brand || "",
-            vendor: modal.complaint?.vendor || "",
-            category: modal.complaint?.category || "",
-            item_code: modal.complaint?.item_code || "",
-            po: modal.complaint?.po || "",
-            first_comment: modal.complaint?.first_comment || "",
-          }}
           itemCodeOptions={itemCodeOptions}
           loadingOptions={loadingOptions}
-          mode="edit"
           onClose={closeModal}
           onCreateCategory={handleCreateCategory}
           onSubmit={handleEditComplaint}

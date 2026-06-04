@@ -9295,6 +9295,11 @@ exports.getDailyReport = async (req, res) => {
       && isSameReportDateFromTimestamp(
         inspection?.updatedAt || inspection?.createdAt,
       );
+    const isRejectedInspectionOnReportDate = (inspection = {}) =>
+      isRejectedStatusValue(resolveInspectionStatusForReport(inspection))
+      && isSameReportDateFromTimestamp(
+        inspection?.updatedAt || inspection?.createdAt,
+      );
     const isInspectionVisibleForReportDate = (inspection = {}) => {
       const resolvedInspectionStatus = resolveInspectionStatusForReport(inspection);
       const shouldUseMutationTimestamp =
@@ -9344,7 +9349,12 @@ exports.getDailyReport = async (req, res) => {
         $or: [
           { inspection_date: { $in: inspectionDateVariants } },
           {
-            status: INSPECTION_RECORD_STATUS.TRANSFERRED,
+            status: {
+              $in: [
+                INSPECTION_RECORD_STATUS.TRANSFERRED,
+                INSPECTION_RECORD_STATUS.REJECTED,
+              ],
+            },
             ...(reportDateStart && reportDateEnd
               ? {
                   updatedAt: {
@@ -9500,6 +9510,8 @@ exports.getDailyReport = async (req, res) => {
             requestEntry,
           );
           if (!latestInspection) return null;
+          const isLatestInspectionRejectedOnReportDate =
+            isRejectedInspectionOnReportDate(latestInspection);
 
           const hasInspectionActivity = hasInspectionRecordActivity({
             checked: latestInspection?.checked,
@@ -9513,7 +9525,8 @@ exports.getDailyReport = async (req, res) => {
           const shouldIncludeRequest =
             requestDateKey === reportDate ||
             isTransferredRequestOnReportDate ||
-            isRejectedRequestOnReportDate;
+            isRejectedRequestOnReportDate ||
+            isLatestInspectionRejectedOnReportDate;
 
           if (!shouldIncludeRequest) return null;
 
@@ -9565,7 +9578,9 @@ exports.getDailyReport = async (req, res) => {
             request_row_id: requestLookupKey || `${qcId}:${requestDateKey}`,
             qc_id: qc._id,
             request_history_id: requestEntry?.request_history_id || null,
-            request_date: isTransferredRequestOnReportDate || isRejectedRequestOnReportDate
+            request_date: isTransferredRequestOnReportDate ||
+              isRejectedRequestOnReportDate ||
+              isLatestInspectionRejectedOnReportDate
               ? reportDate
               : requestDateKey,
             order_id: qc?.order_meta?.order_id || qc?.order?.order_id || "N/A",
@@ -9636,7 +9651,8 @@ exports.getDailyReport = async (req, res) => {
       return {
         inspection_id: inspection._id,
         inspection_date:
-          isTransferredInspectionOnReportDate(inspection)
+          isTransferredInspectionOnReportDate(inspection) ||
+          isRejectedInspectionOnReportDate(inspection)
           ? reportDate
           : inspection.inspection_date || null,
         order_id:

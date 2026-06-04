@@ -9,6 +9,7 @@ const {
 } = require("../models/complaintCategory.model");
 const {
   createStorageKey,
+  deleteObject,
   getObjectUrl,
   getSignedObjectUrl,
   uploadBuffer,
@@ -51,6 +52,21 @@ const normalizeBooleanFilter = (value, fallback = false) => {
   if (["false", "0", "no", "active"].includes(normalized)) return false;
   return fallback;
 };
+const normalizeBooleanValue = (value) => {
+  const normalized = normalizeText(value).toLowerCase();
+  return ["true", "1", "yes", "on"].includes(normalized);
+};
+const parseJsonArrayField = (value, fallback = []) => {
+  if (Array.isArray(value)) return value;
+  const normalized = normalizeText(value);
+  if (!normalized) return fallback;
+  try {
+    const parsed = JSON.parse(normalized);
+    return Array.isArray(parsed) ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+};
 const parseDateBoundary = (value, endOfDay = false) => {
   const normalized = normalizeText(value);
   if (!normalized) return null;
@@ -85,11 +101,11 @@ const ensureManagerAccess = (req, res) => {
   return false;
 };
 
-const ensureAdminAccess = (req, res) => {
+const ensureAdminAccess = (req, res, message = "Complaint archive actions are admin-only.") => {
   if (isAdminOnlyRole(req.user)) return true;
   res.status(403).json({
     success: false,
-    message: "Complaint archive actions are admin-only.",
+    message,
   });
   return false;
 };
@@ -105,6 +121,7 @@ const ensureQcComplaintAccess = (req, res) => {
 };
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value || ""));
+const getObjectIdString = (value) => String(value?._id || value || "").trim();
 const normalizeItemCodeKey = (value) => normalizeText(value).toLowerCase();
 const getUserIdString = (value) => String(value?._id || value?.id || value || "").trim();
 
@@ -589,7 +606,7 @@ exports.getComplaintById = async (req, res) => {
 
 exports.updateComplaint = async (req, res) => {
   try {
-    if (!ensureAdminAccess(req, res)) return undefined;
+    if (!ensureAdminAccess(req, res, "Only admins can fully edit complaints.")) return undefined;
     if (!isValidObjectId(req.params.id)) {
       return res.status(400).json({ success: false, message: "Invalid complaint id." });
     }
@@ -605,11 +622,36 @@ exports.updateComplaint = async (req, res) => {
     const po = normalizeText(req.body?.po);
     const category = normalizeCategoryName(req.body?.category);
     const firstComment = normalizeText(req.body?.first_comment || req.body?.firstComment);
+    const hasCommentsPayload = Object.prototype.hasOwnProperty.call(req.body || {}, "comments_json");
+    const incomingComments = hasCommentsPayload
+      ? parseJsonArrayField(req.body?.comments_json, [])
+      : [];
 
     if (!brand || !vendor || !itemCode || !firstComment) {
       return res.status(400).json({
         success: false,
         message: "Brand, vendor, item code, and first comment are required.",
+      });
+    }
+
+    const finalComments = hasCommentsPayload
+      ? incomingComments
+        .map((entry) => ({
+          _id: normalizeText(entry?._id),
+          comment: normalizeText(entry?.comment),
+        }))
+        .filter((entry) => entry.comment)
+      : [];
+    if (hasCommentsPayload && finalComments.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "At least one complaint comment is required.",
+      });
+    }
+    if (hasCommentsPayload && finalComments[0].comment !== firstComment) {
+      return res.status(400).json({
+        success: false,
+        message: "First comment must match the first complaint comment.",
       });
     }
 
@@ -630,6 +672,11 @@ exports.updateComplaint = async (req, res) => {
       category: complaint.category,
       first_comment: complaint.first_comment,
     };
+    const previousCommentIds = new Set(
+      (Array.isArray(complaint.comments) ? complaint.comments : [])
+        .map((comment) => getObjectIdString(comment))
+        .filter(Boolean),
+    );
     const uploadedFiles = await uploadComplaintFiles(req.files, actor);
     if (category) {
       await ensureComplaintCategory(category, actor);
@@ -644,20 +691,75 @@ exports.updateComplaint = async (req, res) => {
     if (!Array.isArray(complaint.comments)) {
       complaint.comments = [];
     }
-    if (complaint.comments.length === 0) {
-      complaint.comments.push({
-        comment: firstComment,
-        created_by: actor,
-        created_at: complaint.created_at || new Date(),
+
+    const existingCommentsById = new Map(
+      complaint.comments
+        .map((comment) => [getObjectIdString(comment), comment])
+        .filter(([id]) => id),
+    );
+    if (hasCommentsPayload) {
+      const nextComments = finalComments.map((entry) => {
+        const existingComment = entry._id ? existingCommentsById.get(entry._id) : null;
+        if (existingComment) {
+          existingComment.comment = entry.comment;
+          return existingComment;
+        }
+        return {
+          comment: entry.comment,
+          created_by: actor,
+          created_at: new Date(),
+        };
       });
+      complaint.comments = nextComments;
     } else {
-      complaint.comments[0].comment = firstComment;
+      if (complaint.comments.length === 0) {
+        complaint.comments.push({
+          comment: firstComment,
+          created_by: actor,
+          created_at: complaint.created_at || new Date(),
+        });
+      } else {
+        complaint.comments[0].comment = firstComment;
+      }
     }
+
+    const replaceFiles = normalizeBooleanValue(req.body?.replace_files || req.body?.replaceFiles);
+    const requestedRemoveFileIds = new Set(
+      parseJsonArrayField(req.body?.remove_file_ids || req.body?.removeFileIds, [])
+        .map((value) => normalizeText(value))
+        .filter(Boolean),
+    );
+    const existingFiles = Array.isArray(complaint.files) ? complaint.files : [];
+    const removedFiles = existingFiles.filter((file) =>
+      replaceFiles || requestedRemoveFileIds.has(getObjectIdString(file)),
+    );
+    complaint.files = existingFiles.filter((file) =>
+      !replaceFiles && !requestedRemoveFileIds.has(getObjectIdString(file)),
+    );
     if (uploadedFiles.length > 0) {
       complaint.files.push(...uploadedFiles);
     }
     complaint.updated_by = actor;
-    complaint.update_history.push(createUpdateHistory("admin_edit", actor, {
+    const nextCommentIds = new Set(
+      (Array.isArray(complaint.comments) ? complaint.comments : [])
+        .map((comment) => getObjectIdString(comment))
+        .filter(Boolean),
+    );
+    let updatedCommentCount = 0;
+    let addedCommentCount = 0;
+    for (const comment of complaint.comments || []) {
+      const id = getObjectIdString(comment);
+      if (id && previousCommentIds.has(id)) {
+        updatedCommentCount += 1;
+      } else {
+        addedCommentCount += 1;
+      }
+    }
+    let deletedCommentCount = 0;
+    for (const id of previousCommentIds) {
+      if (!nextCommentIds.has(id)) deletedCommentCount += 1;
+    }
+    complaint.update_history.push(createUpdateHistory("admin_full_edit", actor, {
       previous,
       next: {
         brand: complaint.brand,
@@ -667,11 +769,36 @@ exports.updateComplaint = async (req, res) => {
         category: complaint.category,
         first_comment: complaint.first_comment,
       },
-      file_count: uploadedFiles.length,
-      files: uploadedFiles.map((file) => file.original_name),
+      comments: {
+        added: hasCommentsPayload ? addedCommentCount : 0,
+        updated: hasCommentsPayload ? updatedCommentCount : 1,
+        deleted: hasCommentsPayload ? deletedCommentCount : 0,
+        total: Array.isArray(complaint.comments) ? complaint.comments.length : 0,
+      },
+      files: {
+        replace_all: replaceFiles,
+        uploaded_count: uploadedFiles.length,
+        uploaded: uploadedFiles.map((file) => file.original_name),
+        removed_count: removedFiles.length,
+        removed: removedFiles.map((file) => ({
+          id: getObjectIdString(file),
+          name: file.original_name || file.file_name || "",
+          key: file.key || "",
+        })),
+      },
     }));
 
     await complaint.save();
+    for (const file of removedFiles) {
+      if (!file?.key) continue;
+      deleteObject(file.key).catch((deleteError) => {
+        console.error("Complaint file delete failed:", {
+          complaint_id: getObjectIdString(complaint),
+          key: file.key,
+          error: deleteError?.message || deleteError,
+        });
+      });
+    }
     return res.status(200).json({
       success: true,
       message: "Complaint updated successfully.",
