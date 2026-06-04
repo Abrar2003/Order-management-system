@@ -11082,6 +11082,11 @@ exports.editInspectionRecords = async (req, res) => {
         labelsAdded: nextLabelsAdded,
         labelRanges: nextLabelRanges,
         goodsNotReady: record?.goods_not_ready,
+        explicitStatus:
+          passed <= 0 &&
+          isInspectionStatusMatching(record?.status, INSPECTION_RECORD_STATUS.REJECTED)
+            ? INSPECTION_RECORD_STATUS.REJECTED
+            : "",
         requestType: qc?.request_type,
       });
 	      record.label_ranges = nextLabelRanges;

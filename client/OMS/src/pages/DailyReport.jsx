@@ -691,6 +691,9 @@ const DailyReport = () => {
                           {request?.transfer_note ? (
                             <div className="small">{request.transfer_note}</div>
                           ) : null}
+                          {request?.rejection_reason ? (
+                            <div className="small text-danger">{request.rejection_reason}</div>
+                          ) : null}
                           {request?.goods_not_ready_reason ? (
                             <div className="small">{request.goods_not_ready_reason}</div>
                           ) : null}
