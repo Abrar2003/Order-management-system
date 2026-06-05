@@ -11416,15 +11416,7 @@ exports.deleteInspectionRecord = async (req, res) => {
       )
       .lean();
 
-    if (
-      deletedRequestHistoryId &&
-      Array.isArray(qc.request_history) &&
-      !remainingInspections.some(
-        (entry) =>
-          String(entry?.request_history_id || "").trim() ===
-          deletedRequestHistoryId,
-      )
-    ) {
+    if (deletedRequestHistoryId && Array.isArray(qc.request_history)) {
       qc.request_history = qc.request_history.filter(
         (entry) => String(entry?._id || "").trim() !== deletedRequestHistoryId,
       );
