@@ -40,6 +40,14 @@ export const updateWorkflowBatch = async (id, payload = {}) => {
   return res.data;
 };
 
+export const bulkUpdateWorkflowBatchTasks = async (id, payload = {}) => {
+  const res = await api.patch(
+    `/workflow/batches/${encodeURIComponent(requireId(id, "Batch id"))}/tasks/bulk`,
+    payload,
+  );
+  return res.data;
+};
+
 export const cancelWorkflowBatch = async (id, payload = {}) => {
   const res = await api.patch(
     `/workflow/batches/${encodeURIComponent(requireId(id, "Batch id"))}/cancel`,

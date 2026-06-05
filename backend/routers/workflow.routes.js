@@ -3,6 +3,7 @@ const auth = require("../middlewares/auth.middleware");
 const authorize = require("../middlewares/authorize.middleware");
 const { requirePermission } = require("../middlewares/permission.middleware");
 const {
+  bulkPatchWorkflowBatchTasks,
   cancelBatch,
   createBatchFromFolderManifest,
   getWorkflowBatch,
@@ -89,6 +90,14 @@ router.patch(
   authorize(...WORKFLOW_MANAGER_ROLES),
   requirePermission("workflow", "edit"),
   patchWorkflowBatch,
+);
+
+router.patch(
+  "/batches/:id/tasks/bulk",
+  auth,
+  authorize(...WORKFLOW_MANAGER_ROLES),
+  requirePermission("workflow", "edit"),
+  bulkPatchWorkflowBatchTasks,
 );
 
 router.patch(

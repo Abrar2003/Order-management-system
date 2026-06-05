@@ -2,15 +2,18 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { isManagerLikeRole, isStrictAdminRole } from "../auth/permissions";
 import Navbar from "../components/Navbar";
+import WorkflowBatchBulkActionsModal from "../components/workflow/WorkflowBatchBulkActionsModal";
 import WorkflowTaskDetailModal from "../components/workflow/WorkflowTaskDetailModal";
 import { usePermissions } from "../auth/PermissionContext";
 import useBrandOptions from "../hooks/useBrandOptions";
 import {
   cancelWorkflowBatch,
+  bulkUpdateWorkflowBatchTasks,
   deleteWorkflowBatch,
   deleteWorkflowTask,
   getWorkflowBatchById,
   getWorkflowTasks,
+  getWorkflowTaskTypes,
   getWorkflowUsers,
 } from "../api/workflowApi";
 import useWorkflowRealtime from "../hooks/useWorkflowRealtime";
@@ -54,6 +57,10 @@ const WorkflowBatchDetail = () => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tasksLoading, setTasksLoading] = useState(true);
+  const [bulkActionOpen, setBulkActionOpen] = useState(false);
+  const [bulkActionLoading, setBulkActionLoading] = useState(false);
+  const [bulkActionResult, setBulkActionResult] = useState(null);
+  const [bulkActionError, setBulkActionError] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [selectedTaskId, setSelectedTaskId] = useState("");
@@ -65,6 +72,7 @@ const WorkflowBatchDetail = () => {
     totalRecords: 0,
   });
   const [refreshTick, setRefreshTick] = useState(0);
+  const [taskTypes, setTaskTypes] = useState([]);
   const { brandOptions } = useBrandOptions([
     batch?.brand,
     ...tasks.map((task) => task?.brand),
@@ -105,6 +113,13 @@ const WorkflowBatchDetail = () => {
       setLoading(false);
     }
   }, [batchId, canAssignWorkflow, canViewWorkflow]);
+
+  useEffect(() => {
+    if (!canViewWorkflow) return;
+    getWorkflowTaskTypes()
+      .then((result) => setTaskTypes(Array.isArray(result?.data) ? result.data : []))
+      .catch(() => setTaskTypes([]));
+  }, [canViewWorkflow]);
 
   const loadBatchTasks = useCallback(async () => {
     if (!canViewWorkflow || !batchId) {
@@ -260,6 +275,32 @@ const WorkflowBatchDetail = () => {
     }
   };
 
+  const handleBulkSubmit = async (payload = {}) => {
+    setBulkActionLoading(true);
+    setBulkActionError("");
+    setBulkActionResult(null);
+    setError("");
+    setSuccess("");
+    try {
+      const result = await bulkUpdateWorkflowBatchTasks(batchId, payload);
+      const data = result?.data || {};
+      setBulkActionResult(data);
+      setBatch(data?.batch || batch);
+      setSuccess(
+        `Batch bulk update applied to ${Number(data?.affected_task_count || 0)} task(s).`,
+      );
+      setRefreshTick((prev) => prev + 1);
+    } catch (bulkError) {
+      setBulkActionError(
+        bulkError?.response?.data?.message
+          || bulkError?.message
+          || "Failed to update batch tasks.",
+      );
+    } finally {
+      setBulkActionLoading(false);
+    }
+  };
+
   if (!canViewWorkflow) {
     return (
       <>
@@ -305,6 +346,19 @@ const WorkflowBatchDetail = () => {
                 onClick={() => navigate(`/workflow/tasks?batch=${batch._id}`)}
               >
                 Open Task Board
+              </button>
+            )}
+            {canEditWorkflow && batch?._id && batch?.status !== "cancelled" && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  setBulkActionError("");
+                  setBulkActionResult(null);
+                  setBulkActionOpen(true);
+                }}
+              >
+                Edit / Bulk Actions
               </button>
             )}
             {canEditWorkflow && batch?.status !== "cancelled" && (
@@ -582,6 +636,17 @@ const WorkflowBatchDetail = () => {
           }}
         />
       )}
+      <WorkflowBatchBulkActionsModal
+        show={bulkActionOpen}
+        batch={batch}
+        users={users}
+        taskTypes={taskTypes}
+        loading={bulkActionLoading}
+        result={bulkActionResult}
+        error={bulkActionError}
+        onClose={() => setBulkActionOpen(false)}
+        onSubmit={handleBulkSubmit}
+      />
     </>
   );
 };

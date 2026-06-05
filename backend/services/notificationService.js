@@ -46,13 +46,18 @@ const escapeRegex = (value = "") =>
   String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const getEffectiveTaskDueDate = (task = {}) => {
-  const reworkDueDates = Array.isArray(task.rework_due_dates) ? task.rework_due_dates : [];
-  const latestReworkDueDate = reworkDueDates.length > 0
-    ? reworkDueDates[reworkDueDates.length - 1]?.date
-    : null;
-  const candidate = latestReworkDueDate || task.due_date;
-  const parsed = candidate ? new Date(candidate) : null;
-  return parsed && !Number.isNaN(parsed.getTime()) ? parsed : null;
+  const candidates = [
+    task?.due_date,
+    ...(Array.isArray(task?.rework_due_dates)
+      ? task.rework_due_dates.map((entry) => entry?.date)
+      : []),
+  ]
+    .map((value) => (value ? new Date(value) : null))
+    .filter((value) => value && !Number.isNaN(value.getTime()));
+  if (candidates.length === 0) return null;
+  return candidates.reduce((latest, value) =>
+    value.getTime() > latest.getTime() ? value : latest,
+  );
 };
 
 const resolveIo = (reqOrIo) => {

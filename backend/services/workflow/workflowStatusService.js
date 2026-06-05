@@ -294,12 +294,27 @@ const getTaskHoldPayload = (doc = {}) => {
 const isTaskHoldApprover = (actor = {}, task = {}) =>
   isAdmin(actor) || isTaskCreatedByUser(task, actor?._id || actor?.id);
 
+const getLatestWorkflowDueDateEntry = (doc = {}) => {
+  const candidates = [
+    {
+      date: getDateOrNull(doc?.due_date),
+      source: "due_date",
+    },
+    ...getTaskReworkDueDatePayload(doc).map((entry) => ({
+      ...entry,
+      date: getDateOrNull(entry?.date),
+      source: entry?.source || "rework",
+    })),
+  ].filter((entry) => entry.date);
+
+  if (candidates.length === 0) return null;
+  return candidates.reduce((latest, entry) =>
+    entry.date.getTime() > latest.date.getTime() ? entry : latest,
+  );
+};
+
 const getActiveWorkflowDueDate = (doc = {}) => {
-  const reworkDueDates = getTaskReworkDueDatePayload(doc);
-  const latestReworkDueDate = reworkDueDates.length > 0
-    ? getDateOrNull(reworkDueDates[reworkDueDates.length - 1]?.date)
-    : null;
-  return latestReworkDueDate || getDateOrNull(doc?.due_date);
+  return getLatestWorkflowDueDateEntry(doc)?.date || null;
 };
 
 const getWorkflowDeadlineSummary = (doc = {}) => {
@@ -307,9 +322,7 @@ const getWorkflowDeadlineSummary = (doc = {}) => {
     fallback: "assigned",
   }) || "assigned";
   const reworkDueDates = getTaskReworkDueDatePayload(doc);
-  const latestDueDateEntry = reworkDueDates.length > 0
-    ? reworkDueDates[reworkDueDates.length - 1]
-    : null;
+  const latestDueDateEntry = getLatestWorkflowDueDateEntry(doc);
   const activeDueDate = getActiveWorkflowDueDate(doc);
   const completedAt = getDateOrNull(doc?.completed_at);
   const statusCanHaveApproval = ["approved", "uploaded"].includes(normalizedStatus);
@@ -964,12 +977,35 @@ const buildLatestReworkDueDateExpression = () => ({
         },
       },
     },
-    in: { $arrayElemAt: ["$$dates", -1] },
+    in: {
+      $cond: [
+        { $gt: [{ $size: "$$dates" }, 0] },
+        { $max: "$$dates" },
+        null,
+      ],
+    },
   },
 });
 
 const buildActiveDueDateExpression = () => ({
-  $ifNull: [buildLatestReworkDueDateExpression(), "$due_date"],
+  $let: {
+    vars: {
+      dates: {
+        $filter: {
+          input: ["$due_date", buildLatestReworkDueDateExpression()],
+          as: "dueDateCandidate",
+          cond: { $ne: ["$$dueDateCandidate", null] },
+        },
+      },
+    },
+    in: {
+      $cond: [
+        { $gt: [{ $size: "$$dates" }, 0] },
+        { $max: "$$dates" },
+        null,
+      ],
+    },
+  },
 });
 
 // Workflow due dates are date-only, so the whole IST due date remains on time.

@@ -7,6 +7,7 @@ import { usePermissions } from "../../auth/PermissionContext";
 import {
   approveWorkflowTask,
   approveWorkflowTaskHold,
+  bulkUpdateWorkflowBatchTasks,
   completeWorkflowTask,
   deleteWorkflowBatch,
   deleteWorkflowTask,
@@ -26,6 +27,7 @@ import useWorkflowRealtime from "../../hooks/useWorkflowRealtime";
 import { formatDateOnlyIST, formatDateTimeIST } from "../../utils/date";
 import { areSearchParamsEquivalent } from "../../utils/searchParams";
 import HoverPortal from "../HoverPortal";
+import WorkflowBatchBulkActionsModal from "./WorkflowBatchBulkActionsModal";
 import WorkflowBatchCreateModal from "./WorkflowBatchCreateModal";
 import WorkflowTaskCreateModal from "./WorkflowTaskCreateModal";
 import WorkflowTaskDetailModal from "./WorkflowTaskDetailModal";
@@ -79,6 +81,15 @@ const formatOrdinal = (value) => {
   if (mod10 === 2) return `${number}nd Due Date`;
   if (mod10 === 3) return `${number}rd Due Date`;
   return `${number}th Due Date`;
+};
+
+const compareDateValues = (left, right) => {
+  const leftTime = left ? new Date(left).getTime() : 0;
+  const rightTime = right ? new Date(right).getTime() : 0;
+  if (Number.isNaN(leftTime) && Number.isNaN(rightTime)) return 0;
+  if (Number.isNaN(leftTime)) return 1;
+  if (Number.isNaN(rightTime)) return -1;
+  return leftTime - rightTime;
 };
 
 const getTaskUserId = (entry = {}) =>
@@ -311,7 +322,11 @@ const HoldPill = ({ hold = {} }) => {
 };
 
 const ReworkDueDateHover = ({ taskId = "", dueDate = "", entries = [] }) => {
-  const history = Array.isArray(entries) ? entries.filter((entry) => entry?.date) : [];
+  const history = Array.isArray(entries)
+    ? entries
+        .filter((entry) => entry?.date)
+        .sort((left, right) => compareDateValues(left?.date, right?.date))
+    : [];
   const trigger = (
     <span
       className={`workflow-due-date-value ${history.length > 0 ? "has-history" : ""}`}
@@ -350,7 +365,7 @@ const ReworkDueDateHover = ({ taskId = "", dueDate = "", entries = [] }) => {
             className="workflow-rework-hovercard-item"
           >
             <span className="workflow-rework-hovercard-comment">
-              {formatOrdinal(history.length - index)}
+              {formatOrdinal(index + 1)}
             </span>
             <span className="workflow-rework-hovercard-meta">
               {formatDateOnly(entry?.date)}
@@ -406,6 +421,10 @@ const WorkflowTasksPanel = ({
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showFolderCreateModal, setShowFolderCreateModal] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState("");
+  const [bulkBatchRow, setBulkBatchRow] = useState(null);
+  const [bulkActionLoading, setBulkActionLoading] = useState(false);
+  const [bulkActionResult, setBulkActionResult] = useState(null);
+  const [bulkActionError, setBulkActionError] = useState("");
   const [search, setSearch] = useState(() => normalizeText(searchParams.get("search")));
   const [statusFilter, setStatusFilter] = useState(() =>
     normalizeText(fixedStatusFilter) || normalizeText(searchParams.get("status")),
@@ -804,6 +823,43 @@ const WorkflowTasksPanel = ({
       "Workflow batch and all tasks inside it deleted successfully.",
       { taskId: batchRow?._id },
     );
+  };
+
+  const handleOpenBatchBulkActions = (batchRow) => {
+    setBulkActionError("");
+    setBulkActionResult(null);
+    setBulkBatchRow(batchRow);
+  };
+
+  const handleSubmitBatchBulkActions = async (payload = {}) => {
+    const batchId = String(
+      bulkBatchRow?.batch?._id || bulkBatchRow?.batch?.id || bulkBatchRow?._id || "",
+    ).replace(/^batch:/, "");
+    if (!batchId) {
+      setBulkActionError("Batch id is missing for this row.");
+      return;
+    }
+    setBulkActionLoading(true);
+    setBulkActionError("");
+    setBulkActionResult(null);
+    try {
+      const result = await bulkUpdateWorkflowBatchTasks(batchId, payload);
+      const data = result?.data || {};
+      setBulkActionResult(data);
+      setSuccess(
+        `Batch bulk update applied to ${Number(data?.affected_task_count || 0)} task(s).`,
+      );
+      setPendingRealtimeUpdates((count) => count + 1);
+      setRefreshTick((prev) => prev + 1);
+    } catch (bulkError) {
+      setBulkActionError(
+        bulkError?.response?.data?.message
+          || bulkError?.message
+          || "Failed to update batch tasks.",
+      );
+    } finally {
+      setBulkActionLoading(false);
+    }
   };
 
   const handleStageClick = async (task, stepKey) => {
@@ -1602,6 +1658,17 @@ const WorkflowTasksPanel = ({
                                   Resume
                                 </button>
                               )}
+                              {isBatchGroup && canManageWorkflow && (
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-primary btn-sm"
+                                  disabled={isBusy}
+                                  onClick={() => handleOpenBatchBulkActions(task)}
+                                  title="Edit batch shared fields and bulk task actions"
+                                >
+                                  Edit / Bulk
+                                </button>
+                              )}
                               {isBatchGroup && canDeleteWorkflow && (
                                 <button
                                   type="button"
@@ -1867,6 +1934,17 @@ const WorkflowTasksPanel = ({
           </div>
         </div>
       )}
+      <WorkflowBatchBulkActionsModal
+        show={Boolean(bulkBatchRow)}
+        batch={bulkBatchRow}
+        users={users}
+        taskTypes={taskTypes}
+        loading={bulkActionLoading}
+        result={bulkActionResult}
+        error={bulkActionError}
+        onClose={() => setBulkBatchRow(null)}
+        onSubmit={handleSubmitBatchBulkActions}
+      />
     </>
   );
 };

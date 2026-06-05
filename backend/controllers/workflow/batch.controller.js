@@ -1,4 +1,5 @@
 const {
+  bulkUpdateWorkflowBatchTasks,
   cancelWorkflowBatch,
   createWorkflowBatchFromFolderManifest,
   deleteWorkflowBatch,
@@ -90,6 +91,28 @@ const patchWorkflowBatch = async (req, res) => {
   }
 };
 
+const bulkPatchWorkflowBatchTasks = async (req, res) => {
+  try {
+    const data = await bulkUpdateWorkflowBatchTasks(
+      req.params.id,
+      req.body || {},
+      req.user,
+      req,
+    );
+    return res.status(200).json({
+      success: true,
+      message: "Workflow batch tasks updated successfully",
+      data,
+    });
+  } catch (error) {
+    console.error("Bulk Update Workflow Batch Tasks Error:", error);
+    return res.status(getErrorStatusCode(error)).json({
+      success: false,
+      message: error.message || "Failed to bulk update workflow batch tasks",
+    });
+  }
+};
+
 const cancelBatch = async (req, res) => {
   try {
     const data = await cancelWorkflowBatch(
@@ -137,6 +160,7 @@ const removeBatch = async (req, res) => {
 };
 
 module.exports = {
+  bulkPatchWorkflowBatchTasks,
   cancelBatch,
   createBatchFromFolderManifest,
   getWorkflowBatch,

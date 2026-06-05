@@ -51,6 +51,26 @@ const toDateOrNull = (value) => {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
+const getIndianDayStart = (value = new Date()) => {
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const shifted = new Date(parsed.getTime() + INDIA_TIMEZONE_OFFSET_MS);
+  return new Date(
+    Date.UTC(
+      shifted.getUTCFullYear(),
+      shifted.getUTCMonth(),
+      shifted.getUTCDate(),
+    ) - INDIA_TIMEZONE_OFFSET_MS,
+  );
+};
+
+const isSameIndianDay = (left, right) => {
+  const leftDay = left ? getIndianDayStart(left) : null;
+  const rightDay = right ? getIndianDayStart(right) : null;
+  if (!leftDay || !rightDay) return false;
+  return leftDay.getTime() === rightDay.getTime();
+};
+
 const parseDueDate = (value) => {
   const normalized = normalizeText(value);
   if (!normalized) return null;
@@ -83,6 +103,42 @@ const escapeRegex = (value = "") =>
   String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const normalizeId = (value) => String(value || "").trim();
+
+const uniqueIds = (values = []) =>
+  [...new Set((Array.isArray(values) ? values : []).map(normalizeId).filter(Boolean))];
+
+const getTaskUserId = (entry = {}) =>
+  normalizeId(entry?.user?._id || entry?.user?.id || entry?.user || entry?._id || entry?.id || entry);
+
+const getActiveTaskDueDate = (task = {}) => {
+  const candidates = [
+    task?.due_date,
+    ...(Array.isArray(task?.rework_due_dates)
+      ? task.rework_due_dates.map((entry) => entry?.date)
+      : []),
+  ]
+    .map((value) => (value ? new Date(value) : null))
+    .filter((value) => value && !Number.isNaN(value.getTime()));
+  if (candidates.length === 0) return null;
+  return candidates.reduce((latest, value) =>
+    value.getTime() > latest.getTime() ? value : latest,
+  );
+};
+
+const buildUploadStatusEntries = (assignees = []) =>
+  (Array.isArray(assignees) ? assignees : [])
+    .map((entry) => {
+      const userId = getTaskUserId(entry);
+      return userId
+        ? {
+            user: userId,
+            status: "pending",
+            uploaded_by: {},
+            uploaded_at: null,
+          }
+        : null;
+    })
+    .filter(Boolean);
 
 const collectTaskAssigneeIds = (tasks = []) =>
   [
@@ -454,6 +510,532 @@ const updateWorkflowBatch = async (
   return populateBatchQuery(Batch.findById(batch._id));
 };
 
+const buildBulkSkip = (task = {}, reason = "") => ({
+  task_id: task?._id || null,
+  task_no: task?.task_no || "",
+  reason,
+});
+
+const applyBulkAssignment = async ({ task, assignees, auditActor, note }) => {
+  const nextAssigneeIds = assignees.map((user) => normalizeId(user._id));
+  const currentAssigneeIds = (Array.isArray(task.assigned_to) ? task.assigned_to : [])
+    .map(getTaskUserId)
+    .filter(Boolean);
+  const idsToRemove = currentAssigneeIds.filter((id) => !nextAssigneeIds.includes(id));
+  const idsToAdd = nextAssigneeIds.filter((id) => !currentAssigneeIds.includes(id));
+  const normalizedNote = normalizeText(note);
+
+  if (idsToRemove.length > 0) {
+    await TaskAssignment.updateMany(
+      {
+        task: task._id,
+        assignee: { $in: idsToRemove },
+        status: "active",
+      },
+      {
+        $set: {
+          status: "removed",
+          removed_at: new Date(),
+          removed_by: auditActor,
+          note: normalizedNote || "Assignee removed by batch bulk update",
+        },
+      },
+    );
+  }
+
+  if (idsToAdd.length > 0) {
+    await TaskAssignment.insertMany(
+      idsToAdd.map((id) => ({
+        task: task._id,
+        batch: task.batch || null,
+        assignee: id,
+        department: task.department || null,
+        status: "active",
+        assigned_at: new Date(),
+        assigned_by: auditActor,
+        note: normalizedNote || "Assignee added by batch bulk update",
+      })),
+      { ordered: false },
+    );
+  }
+
+  if (idsToRemove.length === 0 && idsToAdd.length === 0) return false;
+
+  const fromStatus = normalizeText(task.status).toLowerCase() || "assigned";
+  const toStatus = fromStatus !== "assigned" && idsToAdd.length > 0 ? "assigned" : fromStatus;
+  task.assigned_to = assignees.map((user) => ({ user: user._id }));
+  task.assigned_by = auditActor;
+  task.assigned_at = new Date();
+  task.status = toStatus;
+  task.upload_statuses = buildUploadStatusEntries(task.upload_assignees);
+
+  if (toStatus === "assigned" && fromStatus !== "assigned") {
+    task.started_at = null;
+    task.completed_at = null;
+    task.approved_at = null;
+    task.approved_by = {};
+    task.uploaded_at = null;
+    task.uploaded_by = {};
+    await TaskStatusHistory.create({
+      task: task._id,
+      batch: task.batch || null,
+      from_status: fromStatus,
+      to_status: toStatus,
+      changed_by: auditActor,
+      changed_at: new Date(),
+      note: normalizedNote || "Task assignment updated by batch bulk update",
+      metadata: {
+        batch_bulk_update: true,
+        assignment_change: true,
+      },
+    });
+  }
+  return true;
+};
+
+const applyBulkAction = async ({ task, action, auditActor, note, resumeDueDate }) => {
+  const currentStatus = normalizeText(task.status).toLowerCase() || "assigned";
+  const hold = task.hold && typeof task.hold === "object" ? task.hold : {};
+  const normalizedNote = normalizeText(note);
+  const now = new Date();
+
+  if (action === "hold") {
+    if (currentStatus === "uploaded") return "Uploaded tasks cannot be put on hold";
+    if (currentStatus === "hold" || hold.status === "hold") return "Task is already on hold";
+    if (hold.status === "pending") return "Task already has a pending hold request";
+    if (!normalizedNote) return "Hold comment is required";
+
+    task.hold = {
+      ...hold,
+      status: "hold",
+      previous_status: currentStatus,
+      requested_comment: normalizedNote,
+      requested_by: auditActor,
+      requested_at: now,
+      approved_comment: normalizedNote,
+      approved_by: auditActor,
+      approved_at: now,
+      resumed_comment: "",
+      resumed_by: {},
+      resumed_at: null,
+      rejected_comment: "",
+      rejected_by: {},
+      rejected_at: null,
+      total_paused_ms: Math.max(0, Number(hold?.total_paused_ms || 0)),
+    };
+    task.status = "hold";
+    await TaskStatusHistory.create({
+      task: task._id,
+      batch: task.batch || null,
+      from_status: currentStatus,
+      to_status: "hold",
+      changed_by: auditActor,
+      changed_at: now,
+      note: normalizedNote,
+      metadata: {
+        batch_bulk_update: true,
+        hold_approved: true,
+        hold_previous_status: currentStatus,
+      },
+    });
+    return "";
+  }
+
+  if (action === "approve_hold") {
+    if (currentStatus === "hold" || hold.status !== "pending") {
+      return "Task does not have a pending hold request";
+    }
+    const fromStatus = normalizeText(hold.previous_status || currentStatus).toLowerCase() || "assigned";
+    task.status = "hold";
+    task.hold = {
+      ...hold,
+      status: "hold",
+      previous_status: fromStatus,
+      approved_comment: normalizedNote || hold.requested_comment || "Hold approved by batch bulk update",
+      approved_by: auditActor,
+      approved_at: now,
+      resumed_comment: "",
+      resumed_by: {},
+      resumed_at: null,
+      rejected_comment: "",
+      rejected_by: {},
+      rejected_at: null,
+    };
+    await TaskStatusHistory.create({
+      task: task._id,
+      batch: task.batch || null,
+      from_status: currentStatus,
+      to_status: "hold",
+      changed_by: auditActor,
+      changed_at: now,
+      note: task.hold.approved_comment,
+      metadata: {
+        batch_bulk_update: true,
+        hold_approved: true,
+        hold_previous_status: fromStatus,
+      },
+    });
+    return "";
+  }
+
+  if (action === "reject_hold") {
+    if (hold.status !== "pending") return "Task does not have a pending hold request";
+    task.hold = {
+      ...hold,
+      status: "none",
+      rejected_comment: normalizedNote,
+      rejected_by: auditActor,
+      rejected_at: now,
+    };
+    await TaskStatusHistory.create({
+      task: task._id,
+      batch: task.batch || null,
+      from_status: currentStatus,
+      to_status: currentStatus,
+      changed_by: auditActor,
+      changed_at: now,
+      note: normalizedNote || "Hold request rejected by batch bulk update",
+      metadata: {
+        batch_bulk_update: true,
+        hold_rejected: true,
+        hold_previous_status: hold.previous_status || currentStatus,
+      },
+    });
+    return "";
+  }
+
+  if (action === "resume") {
+    if (currentStatus !== "hold" || hold.status !== "hold") return "Only held tasks can be resumed";
+    if (!resumeDueDate) return "A new due date is required to resume this task";
+    const toStatus = normalizeText(hold.previous_status).toLowerCase() || "assigned";
+    if (toStatus === "hold" || toStatus === "uploaded") {
+      return "This held task does not have a resumable previous status";
+    }
+    const pausedFrom = toDateOrNull(hold.approved_at);
+    const pausedMs = pausedFrom ? Math.max(0, now.getTime() - pausedFrom.getTime()) : 0;
+    task.status = toStatus;
+    task.due_date = resumeDueDate;
+    task.rework_due_dates = [
+      ...(Array.isArray(task.rework_due_dates) ? task.rework_due_dates : []),
+      {
+        date: resumeDueDate,
+        comment: normalizedNote || "Task resumed with new due date",
+        source: "due_date",
+        created_at: now,
+        created_by: auditActor,
+      },
+    ];
+    task.hold = {
+      ...hold,
+      status: "none",
+      resumed_comment: normalizedNote,
+      resumed_by: auditActor,
+      resumed_at: now,
+      total_paused_ms: Math.max(0, Number(hold?.total_paused_ms || 0)) + pausedMs,
+    };
+    await TaskStatusHistory.create({
+      task: task._id,
+      batch: task.batch || null,
+      from_status: "hold",
+      to_status: toStatus,
+      changed_by: auditActor,
+      changed_at: now,
+      note: normalizedNote || "Task resumed by batch bulk update",
+      metadata: {
+        batch_bulk_update: true,
+        hold_resumed: true,
+        due_date_updated: true,
+        due_date: resumeDueDate,
+        total_paused_ms: task.hold.total_paused_ms,
+      },
+    });
+    return "";
+  }
+
+  return "";
+};
+
+const getBulkActionSkipReason = ({ task, action, note, resumeDueDate }) => {
+  if (!action) return "";
+  const currentStatus = normalizeText(task.status).toLowerCase() || "assigned";
+  const hold = task.hold && typeof task.hold === "object" ? task.hold : {};
+  const normalizedNote = normalizeText(note);
+
+  if (action === "hold") {
+    if (currentStatus === "uploaded") return "Uploaded tasks cannot be put on hold";
+    if (currentStatus === "hold" || hold.status === "hold") return "Task is already on hold";
+    if (hold.status === "pending") return "Task already has a pending hold request";
+    if (!normalizedNote) return "Hold comment is required";
+  }
+
+  if (action === "approve_hold") {
+    if (currentStatus === "hold" || hold.status !== "pending") {
+      return "Task does not have a pending hold request";
+    }
+  }
+
+  if (action === "reject_hold" && hold.status !== "pending") {
+    return "Task does not have a pending hold request";
+  }
+
+  if (action === "resume") {
+    if (currentStatus !== "hold" || hold.status !== "hold") return "Only held tasks can be resumed";
+    if (!resumeDueDate) return "A new due date is required to resume this task";
+    const toStatus = normalizeText(hold.previous_status).toLowerCase() || "assigned";
+    if (toStatus === "hold" || toStatus === "uploaded") {
+      return "This held task does not have a resumable previous status";
+    }
+  }
+
+  return "";
+};
+
+const bulkUpdateWorkflowBatchTasks = async (
+  id,
+  payload = {},
+  actor = {},
+  realtimeSource = null,
+) => {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new Error("Invalid batch id");
+  }
+
+  const batch = await Batch.findById(id);
+  if (!batch || batch.is_deleted) {
+    throw new Error("Workflow batch not found");
+  }
+  if (batch.status === "cancelled") {
+    throw new Error("Cancelled batches cannot be updated");
+  }
+
+  const auditActor = buildAuditActor(actor);
+  const note = normalizeText(payload?.note);
+  const changedBatchFields = [];
+  const taskPatch = {};
+  const hasTaskPatch = {};
+  const action = normalizeText(payload?.action).toLowerCase();
+  const allowedActions = ["", "hold", "approve_hold", "reject_hold", "resume"];
+  if (!allowedActions.includes(action)) {
+    throw new Error("Unsupported bulk action");
+  }
+
+  if (payload?.batch_name !== undefined) {
+    const nextName = normalizeText(payload.batch_name);
+    if (!nextName) throw new Error("batch_name is required");
+    if (batch.name !== nextName) {
+      batch.name = nextName;
+      batch.name_key = normalizeNameKey(nextName);
+      changedBatchFields.push("name");
+    }
+  }
+
+  if (payload?.due_date !== undefined) {
+    const dueDate = parseDueDate(payload.due_date);
+    const dueDateNote = normalizeText(payload?.due_date_note || payload?.note);
+    if (!dueDateNote) {
+      throw new Error("due_date_note is required when updating task due dates");
+    }
+    taskPatch.dueDate = dueDate;
+    taskPatch.dueDateNote = dueDateNote;
+    hasTaskPatch.dueDate = true;
+  }
+
+  if (payload?.task_type_key !== undefined) {
+    taskPatch.taskType = await findActiveTaskTypeByKey(payload.task_type_key);
+    hasTaskPatch.taskType = true;
+  }
+
+  if (payload?.assigned_user_ids !== undefined) {
+    const assigneeIds = uniqueIds(payload.assigned_user_ids);
+    taskPatch.assignees = await validateAssigneeUsers(assigneeIds);
+    if (taskPatch.assignees.length === 0) {
+      throw new Error("At least one assignee is required");
+    }
+    hasTaskPatch.assignees = true;
+  }
+
+  if (payload?.upload_required !== undefined) {
+    taskPatch.uploadRequired = Boolean(payload.upload_required);
+    hasTaskPatch.uploadRequired = true;
+  }
+
+  if (payload?.upload_assignee_ids !== undefined) {
+    const uploadAssigneeIds = uniqueIds(payload.upload_assignee_ids);
+    taskPatch.uploadAssignees = await validateAssigneeUsers(uploadAssigneeIds);
+    if (payload?.upload_required !== false && taskPatch.uploadAssignees.length === 0) {
+      throw new Error("At least one upload user is required when upload is required");
+    }
+    hasTaskPatch.uploadAssignees = true;
+  }
+
+  const resumeDueDate = action === "resume" ? parseDueDate(payload?.resume_due_date) : null;
+  if (action === "resume" && !resumeDueDate) {
+    throw new Error("resume_due_date is required for resume");
+  }
+
+  const tasks = await Task.find({
+    batch: batch._id,
+    is_deleted: false,
+  });
+  const skipped = [];
+  const affectedTasks = [];
+  const hasMutableTaskPatch = Object.values(hasTaskPatch).some(Boolean);
+
+  for (const task of tasks) {
+    const currentStatus = normalizeText(task.status).toLowerCase();
+    let changed = false;
+    if ((hasMutableTaskPatch || action === "hold") && currentStatus === "uploaded") {
+      skipped.push(buildBulkSkip(task, "Uploaded tasks cannot be bulk edited or held"));
+      continue;
+    }
+    const actionSkipReason = getBulkActionSkipReason({
+      task,
+      action,
+      note,
+      resumeDueDate,
+    });
+    if (actionSkipReason) {
+      skipped.push(buildBulkSkip(task, actionSkipReason));
+      continue;
+    }
+
+    if (hasTaskPatch.dueDate) {
+      const activeDueDate = getActiveTaskDueDate(task) || task.due_date || null;
+      if (!isSameIndianDay(activeDueDate, taskPatch.dueDate)) {
+        task.due_date = taskPatch.dueDate;
+        task.rework_due_dates = [
+          ...(Array.isArray(task.rework_due_dates) ? task.rework_due_dates : []),
+          {
+            date: taskPatch.dueDate,
+            comment: taskPatch.dueDateNote,
+            source: "due_date",
+            created_at: new Date(),
+            created_by: auditActor,
+          },
+        ];
+        await TaskStatusHistory.create({
+          task: task._id,
+          batch: task.batch || null,
+          from_status: currentStatus || "assigned",
+          to_status: currentStatus || "assigned",
+          changed_by: auditActor,
+          changed_at: new Date(),
+          note: taskPatch.dueDateNote,
+          metadata: {
+            batch_bulk_update: true,
+            due_date_updated: true,
+            previous_due_date: activeDueDate,
+            due_date: taskPatch.dueDate,
+          },
+        });
+        changed = true;
+      }
+    }
+
+    if (hasTaskPatch.taskType) {
+      if (normalizeText(task.task_type_key) !== taskPatch.taskType.key) {
+        task.task_type = taskPatch.taskType._id;
+        task.task_type_key = taskPatch.taskType.key;
+        task.task_type_name = taskPatch.taskType.name;
+        task.review_required = taskPatch.taskType.requires_review !== false;
+        task.priority = task.priority || taskPatch.taskType.default_priority || "normal";
+        task.tags = uniqueIds([...(Array.isArray(task.tags) ? task.tags : []), taskPatch.taskType.key]);
+        changed = true;
+      }
+    }
+
+    if (hasTaskPatch.assignees) {
+      changed = (await applyBulkAssignment({
+        task,
+        assignees: taskPatch.assignees,
+        auditActor,
+        note,
+      })) || changed;
+    }
+
+    if (hasTaskPatch.uploadRequired) {
+      if ((task.upload_required !== false) !== taskPatch.uploadRequired) {
+        task.upload_required = taskPatch.uploadRequired;
+        if (!taskPatch.uploadRequired) {
+          task.upload_assignees = [];
+          task.upload_statuses = [];
+        } else {
+          task.upload_statuses = buildUploadStatusEntries(task.upload_assignees);
+        }
+        changed = true;
+      }
+    }
+
+    if (hasTaskPatch.uploadAssignees) {
+      const uploadRequired = hasTaskPatch.uploadRequired
+        ? taskPatch.uploadRequired
+        : task.upload_required !== false;
+      if (uploadRequired && taskPatch.uploadAssignees.length === 0) {
+        skipped.push(buildBulkSkip(task, "At least one upload user is required"));
+        continue;
+      }
+      const nextIds = uploadRequired ? taskPatch.uploadAssignees.map((user) => normalizeId(user._id)) : [];
+      const currentIds = (Array.isArray(task.upload_assignees) ? task.upload_assignees : [])
+        .map(getTaskUserId)
+        .filter(Boolean);
+      const hasChange =
+        currentIds.length !== nextIds.length ||
+        currentIds.some((currentId) => !nextIds.includes(currentId)) ||
+        nextIds.some((nextId) => !currentIds.includes(nextId));
+      if (hasChange) {
+        task.upload_required = uploadRequired;
+        task.upload_assignees = uploadRequired
+          ? taskPatch.uploadAssignees.map((user) => ({ user: user._id }))
+          : [];
+        task.upload_statuses = buildUploadStatusEntries(task.upload_assignees);
+        changed = true;
+      }
+    }
+
+    if (action) {
+      const skipReason = await applyBulkAction({
+        task,
+        action,
+        auditActor,
+        note,
+        resumeDueDate,
+      });
+      if (skipReason) {
+        skipped.push(buildBulkSkip(task, skipReason));
+        continue;
+      }
+      changed = true;
+    }
+
+    if (changed) {
+      task.updated_by = auditActor;
+      await task.save();
+      affectedTasks.push(task);
+    }
+  }
+
+  if (changedBatchFields.length > 0) {
+    batch.updated_by = auditActor;
+    await batch.save();
+  }
+
+  const recalculatedBatch = await recalculateWorkflowBatchFromTasks(batch._id);
+  emitWorkflowBatchMutation({
+    realtimeSource,
+    batch: recalculatedBatch || batch,
+    message: "Workflow batch tasks bulk updated",
+    affectedAssigneeIds: collectTaskAssigneeIds(affectedTasks),
+    actor,
+  });
+
+  return {
+    batch: await populateBatchQuery(Batch.findById(batch._id)),
+    affected_task_count: affectedTasks.length,
+    skipped_task_count: skipped.length,
+    skipped,
+  };
+};
+
 const deleteWorkflowBatch = async (
   id,
   actor = {},
@@ -662,6 +1244,7 @@ const cancelWorkflowBatch = async (
 };
 
 module.exports = {
+  bulkUpdateWorkflowBatchTasks,
   cancelWorkflowBatch,
   createWorkflowBatchFromFolderManifest,
   deleteWorkflowBatch,

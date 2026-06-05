@@ -47,6 +47,15 @@ const formatOrdinal = (value) => {
   return `${number}th Due Date`;
 };
 
+const compareDateValues = (left, right) => {
+  const leftTime = left ? new Date(left).getTime() : 0;
+  const rightTime = right ? new Date(right).getTime() : 0;
+  if (Number.isNaN(leftTime) && Number.isNaN(rightTime)) return 0;
+  if (Number.isNaN(leftTime)) return 1;
+  if (Number.isNaN(rightTime)) return -1;
+  return leftTime - rightTime;
+};
+
 const getAuditActorName = (actor = {}) =>
   actor?.name || actor?.user?.name || actor?.user?.email || "N/A";
 
@@ -224,7 +233,9 @@ const WorkflowTaskDetailModal = ({
   const reworkDueDateHistory = useMemo(
     () =>
       Array.isArray(task?.rework_due_dates)
-        ? task.rework_due_dates.filter((entry) => entry?.date)
+        ? task.rework_due_dates
+            .filter((entry) => entry?.date)
+            .sort((left, right) => compareDateValues(left?.date, right?.date))
         : [],
     [task?.rework_due_dates],
   );
@@ -236,7 +247,8 @@ const WorkflowTaskDetailModal = ({
           ...entry,
           date: entry?.metadata?.due_date || entry?.metadata?.next_due_date || null,
           previousDate: entry?.metadata?.previous_due_date || null,
-        })),
+        }))
+        .sort((left, right) => compareDateValues(left?.date, right?.date)),
     [task?.status_history],
   );
 
@@ -766,7 +778,7 @@ const WorkflowTaskDetailModal = ({
                               className="workflow-rework-date-history-item"
                             >
                               <div className="fw-semibold">
-                                {formatOrdinal(reworkDueDateHistory.length - index)}
+                                {formatOrdinal(index + 1)}
                               </div>
                               <div className="small text-secondary">
                                 {formatDateOnly(entry?.date)}
