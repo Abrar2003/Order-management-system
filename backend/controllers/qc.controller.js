@@ -9324,21 +9324,29 @@ exports.getDailyReport = async (req, res) => {
     const isRejectedStatusValue = (value) =>
       normalizeInspectionStatus(value) ===
       normalizeInspectionStatus(INSPECTION_RECORD_STATUS.REJECTED);
+    const getInspectionReportDateKey = (inspection = {}) =>
+      toReportDateKey(inspection?.requested_date || inspection?.inspection_date);
+    const isStatusInspectionOnReportDate = (inspection = {}, statusMatcher) => {
+      if (!statusMatcher(resolveInspectionStatusForReport(inspection))) {
+        return false;
+      }
+
+      const inspectionDateKey = getInspectionReportDateKey(inspection);
+      if (inspectionDateKey) {
+        return inspectionDateKey === reportDate;
+      }
+
+      return isSameReportDateFromTimestamp(
+        inspection?.updatedAt || inspection?.createdAt,
+      );
+    };
     const isTransferredInspectionOnReportDate = (inspection = {}) =>
-      isTransferredStatusValue(resolveInspectionStatusForReport(inspection))
-      && isSameReportDateFromTimestamp(
-        inspection?.updatedAt || inspection?.createdAt,
-      );
+      isStatusInspectionOnReportDate(inspection, isTransferredStatusValue);
     const isRejectedInspectionOnReportDate = (inspection = {}) =>
-      isRejectedStatusValue(resolveInspectionStatusForReport(inspection))
-      && isSameReportDateFromTimestamp(
-        inspection?.updatedAt || inspection?.createdAt,
-      );
+      isStatusInspectionOnReportDate(inspection, isRejectedStatusValue);
     const isInspectionVisibleForReportDate = (inspection = {}) => {
       const resolvedInspectionStatus = resolveInspectionStatusForReport(inspection);
-      const inspectionDateKey = toReportDateKey(
-        inspection?.requested_date || inspection?.inspection_date,
-      );
+      const inspectionDateKey = getInspectionReportDateKey(inspection);
       if (inspectionDateKey) {
         return inspectionDateKey <= reportDate;
       }
@@ -9350,6 +9358,24 @@ exports.getDailyReport = async (req, res) => {
         ? inspection?.updatedAt || inspection?.createdAt
         : inspection?.createdAt;
       return isOnOrBeforeReportDate(effectiveDate);
+    };
+    const isInspectionActivityForReportDate = (inspection = {}) => {
+      const inspectionDateKey = getInspectionReportDateKey(inspection);
+      if (inspectionDateKey) {
+        return inspectionDateKey === reportDate;
+      }
+
+      const resolvedInspectionStatus = resolveInspectionStatusForReport(inspection);
+      if (
+        !isTransferredStatusValue(resolvedInspectionStatus) &&
+        !isRejectedStatusValue(resolvedInspectionStatus)
+      ) {
+        return false;
+      }
+
+      return isSameReportDateFromTimestamp(
+        inspection?.updatedAt || inspection?.createdAt,
+      );
     };
     const buildDailyRequestLookupKey = ({
       qcId = "",
@@ -9426,7 +9452,8 @@ exports.getDailyReport = async (req, res) => {
 
     const alignedRequestQcs = alignedRequestsRaw.filter((qc) => qc?.order);
     const inspections = inspectionsRaw.filter(
-      (inspection) => inspection?.qc?.order,
+      (inspection) =>
+        inspection?.qc?.order && isInspectionActivityForReportDate(inspection),
     );
     const uniqueItemCodes = [
       ...new Set(
@@ -9552,6 +9579,8 @@ exports.getDailyReport = async (req, res) => {
             { allowDateFallbackWithLinkedRecords: false },
           );
           if (!latestInspection) return null;
+          const latestInspectionDateKey =
+            getInspectionReportDateKey(latestInspection);
           const isLatestInspectionRejectedOnReportDate =
             isRejectedInspectionOnReportDate(latestInspection);
 
@@ -9564,11 +9593,12 @@ exports.getDailyReport = async (req, res) => {
             goodsNotReady: latestInspection?.goods_not_ready,
             status: latestInspection?.status || requestEntry?.status,
           });
-          const shouldIncludeRequest =
-            requestDateKey === reportDate ||
-            isTransferredRequestOnReportDate ||
-            isRejectedRequestOnReportDate ||
-            isLatestInspectionRejectedOnReportDate;
+          const shouldIncludeRequest = latestInspectionDateKey
+            ? latestInspectionDateKey === reportDate
+            : requestDateKey === reportDate ||
+              isTransferredRequestOnReportDate ||
+              isRejectedRequestOnReportDate ||
+              isLatestInspectionRejectedOnReportDate;
 
           if (!shouldIncludeRequest) return null;
 
