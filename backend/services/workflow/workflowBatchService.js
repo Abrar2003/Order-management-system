@@ -296,7 +296,7 @@ const createWorkflowBatchFromFolderManifest = async (
     );
   }
 
-  previewTaskDefinitionsForBatch({
+  const previewDefinitions = previewTaskDefinitionsForBatch({
     batch: {
       name,
       start_code: startCode,
@@ -308,6 +308,17 @@ const createWorkflowBatchFromFolderManifest = async (
     manifestEntries,
     directSubfolders,
   });
+  const selectedPreviewIds = uniqueIds(payload?.selected_preview_ids || []);
+  if (Array.isArray(payload?.selected_preview_ids) && selectedPreviewIds.length === 0) {
+    throw new Error("Select at least one task to create from this folder");
+  }
+  if (selectedPreviewIds.length > 0) {
+    const validPreviewIds = new Set(previewDefinitions.map((entry) => normalizeText(entry?.preview_id)));
+    const invalidPreviewId = selectedPreviewIds.find((id) => !validPreviewIds.has(id));
+    if (invalidPreviewId) {
+      throw new Error("One or more selected preview tasks are no longer valid");
+    }
+  }
 
   const batchId = new mongoose.Types.ObjectId();
   const batchNo = buildWorkflowBatchNo(batchId, new Date());
@@ -350,6 +361,7 @@ const createWorkflowBatchFromFolderManifest = async (
       taskType,
       manifestEntries,
       directSubfolders,
+      selectedPreviewIds,
       assignees,
       uploadRequired,
       uploadAssignees: uploadAssignees.map((user) => ({ user: user._id })),
@@ -873,10 +885,19 @@ const bulkUpdateWorkflowBatchTasks = async (
     throw new Error("resume_due_date is required for resume");
   }
 
+  const selectedTaskIds = uniqueIds(payload?.selected_task_ids || []);
+  if (selectedTaskIds.some((taskId) => !mongoose.Types.ObjectId.isValid(taskId))) {
+    throw new Error("One or more selected_task_ids are invalid");
+  }
+
   const tasks = await Task.find({
     batch: batch._id,
     is_deleted: false,
+    ...(selectedTaskIds.length > 0 ? { _id: { $in: selectedTaskIds } } : {}),
   });
+  if (selectedTaskIds.length > 0 && tasks.length === 0) {
+    throw new Error("No selected tasks were found in this batch");
+  }
   const skipped = [];
   const affectedTasks = [];
   const hasMutableTaskPatch = Object.values(hasTaskPatch).some(Boolean);

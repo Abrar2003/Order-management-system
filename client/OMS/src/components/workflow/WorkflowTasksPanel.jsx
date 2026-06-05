@@ -832,6 +832,10 @@ const WorkflowTasksPanel = ({
   };
 
   const handleSubmitBatchBulkActions = async (payload = {}) => {
+    if (payload?.__client_error) {
+      setBulkActionError(payload.__client_error);
+      return;
+    }
     const batchId = String(
       bulkBatchRow?.batch?._id || bulkBatchRow?.batch?.id || bulkBatchRow?._id || "",
     ).replace(/^batch:/, "");
@@ -1937,6 +1941,7 @@ const WorkflowTasksPanel = ({
       <WorkflowBatchBulkActionsModal
         show={Boolean(bulkBatchRow)}
         batch={bulkBatchRow}
+        tasks={bulkBatchRow?.child_tasks || []}
         users={users}
         taskTypes={taskTypes}
         loading={bulkActionLoading}

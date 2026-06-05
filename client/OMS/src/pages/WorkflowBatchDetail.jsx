@@ -276,6 +276,10 @@ const WorkflowBatchDetail = () => {
   };
 
   const handleBulkSubmit = async (payload = {}) => {
+    if (payload?.__client_error) {
+      setBulkActionError(payload.__client_error);
+      return;
+    }
     setBulkActionLoading(true);
     setBulkActionError("");
     setBulkActionResult(null);
@@ -639,6 +643,7 @@ const WorkflowBatchDetail = () => {
       <WorkflowBatchBulkActionsModal
         show={bulkActionOpen}
         batch={batch}
+        tasks={tasks}
         users={users}
         taskTypes={taskTypes}
         loading={bulkActionLoading}

@@ -52,6 +52,7 @@ const WorkflowBatchCreateModal = ({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [duplicateError, setDuplicateError] = useState("");
+  const [selectedPreviewIds, setSelectedPreviewIds] = useState([]);
 
   const selectedTaskType = useMemo(
     () =>
@@ -112,6 +113,21 @@ const WorkflowBatchCreateModal = ({
     if (previewTasks.length > 0) return "";
     return `No matching files were found for ${selectedTaskType?.name || selectedTaskType?.key}.`;
   }, [manifest.length, previewTasks.length, selectedTaskType]);
+
+  const previewTaskIds = useMemo(
+    () => previewTasks.map((task) => task.id).filter(Boolean),
+    [previewTasks],
+  );
+  const selectedPreviewIdSet = useMemo(
+    () => new Set(selectedPreviewIds.map(String)),
+    [selectedPreviewIds],
+  );
+  const allPreviewTasksSelected =
+    previewTaskIds.length > 0 && selectedPreviewIds.length === previewTaskIds.length;
+
+  useEffect(() => {
+    setSelectedPreviewIds(previewTaskIds);
+  }, [previewTaskIds]);
 
   useEffect(() => {
     if (!form.task_type_key && taskTypes.length > 0) {
@@ -194,6 +210,18 @@ const WorkflowBatchCreateModal = ({
     }));
   };
 
+  const togglePreviewTask = (taskId) => {
+    setSelectedPreviewIds((currentIds) =>
+      currentIds.includes(taskId)
+        ? currentIds.filter((entry) => entry !== taskId)
+        : [...currentIds, taskId],
+    );
+  };
+
+  const handleToggleAllPreviewTasks = () => {
+    setSelectedPreviewIds(allPreviewTasksSelected ? [] : previewTaskIds);
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     setError("");
@@ -223,6 +251,10 @@ const WorkflowBatchCreateModal = ({
       setError(previewError || "No matching tasks can be created from this folder.");
       return;
     }
+    if (selectedPreviewIds.length === 0) {
+      setError("Select at least one preview task to create.");
+      return;
+    }
     if (!normalizeText(form.due_date)) {
       setError("Due date is required.");
       return;
@@ -250,6 +282,7 @@ const WorkflowBatchCreateModal = ({
         upload_assignee_ids: form.upload_required ? form.upload_assignee_ids : [],
         due_date: normalizeText(form.due_date),
         direct_subfolders: directSubfolderNames,
+        selected_preview_ids: selectedPreviewIds,
       };
       if (normalizeWorkflowAutoCreateMode(selectedTaskType?.auto_create_mode) !== "per_direct_subfolder") {
         payload.file_manifest = manifest.map((entry) => ({
@@ -649,9 +682,20 @@ const WorkflowBatchCreateModal = ({
                             remains the final source of truth.
                           </div>
                         </div>
-                        <span className="om-summary-chip">
-                          Expected Tasks: {previewTasks.length}
-                        </span>
+                        <div className="d-flex flex-wrap gap-2 align-items-center">
+                          <span className="om-summary-chip">
+                            Selected: {selectedPreviewIds.length}/{previewTasks.length}
+                          </span>
+                          {previewTasks.length > 0 && (
+                            <button
+                              type="button"
+                              className="btn btn-outline-primary btn-sm"
+                              onClick={handleToggleAllPreviewTasks}
+                            >
+                              {allPreviewTasksSelected ? "Deselect All" : "Select All"}
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       {previewError && (
@@ -665,9 +709,22 @@ const WorkflowBatchCreateModal = ({
                       ) : (
                         <div className="d-grid gap-3">
                           {previewTasks.map((task) => (
-                            <div key={task.id} className="workflow-preview-card">
+                            <div
+                              key={task.id}
+                              className={`workflow-preview-card ${
+                                selectedPreviewIdSet.has(task.id) ? "is-selected" : ""
+                              }`}
+                            >
                               <div className="d-flex flex-wrap justify-content-between gap-2 mb-2">
-                                <div className="fw-semibold">{task.title}</div>
+                                <label className="form-check d-flex align-items-center gap-2 mb-0">
+                                  <input
+                                    type="checkbox"
+                                    className="form-check-input mt-0"
+                                    checked={selectedPreviewIdSet.has(task.id)}
+                                    onChange={() => togglePreviewTask(task.id)}
+                                  />
+                                  <span className="fw-semibold">{task.title}</span>
+                                </label>
                                 <span className="om-summary-chip">
                                   Source Files: {task.source_file_count}
                                 </span>

@@ -153,7 +153,8 @@ const createPerFileTaskDefinitions = ({ batch, taskType, manifestEntries = [] })
     throw new Error(`No matching files found for ${taskType.name || taskType.key}`);
   }
 
-  return supportedEntries.map((entry) => ({
+  return supportedEntries.map((entry, index) => ({
+    preview_id: `per-file-${index + 1}`,
     titleSuffix: entry.name,
     source_folder_path: entry.folder_path,
     source_files: [entry],
@@ -177,7 +178,8 @@ const createPerDirectSubfolderDefinitions = ({
       );
 
   const definitions = resolvedSubfolderNames
-    .map((subfolderName) => ({
+    .map((subfolderName, index) => ({
+      preview_id: `per-subfolder-${index + 1}`,
       titleSuffix: subfolderName,
       source_folder_path: `${batch?.source_folder_name || ""}/${subfolderName}`.replace(/^\/+|\/+$/g, ""),
       source_files: [],
@@ -200,6 +202,7 @@ const createOncePerBatchDefinition = ({ batch, taskType, manifestEntries = [] })
 
   return [
     {
+      preview_id: "once-per-batch-1",
       titleSuffix: batch?.name || batch?.source_folder_name || "Batch",
       source_folder_path: batch?.source_folder_name || "",
       source_files: filteredEntries,
@@ -291,6 +294,7 @@ const generateTasksForBatch = async ({
   taskType,
   manifestEntries = [],
   directSubfolders = [],
+  selectedPreviewIds = [],
   assignees = [],
   uploadRequired = true,
   uploadAssignees = [],
@@ -306,12 +310,21 @@ const generateTasksForBatch = async ({
 
   await ensureBatchHasNoGeneratedTasks(batch._id);
 
-  const taskDefinitions = buildTaskDefinitions({
+  const allTaskDefinitions = buildTaskDefinitions({
     batch,
     taskType,
     manifestEntries,
     directSubfolders,
   });
+  const normalizedSelectedPreviewIds = uniqueIds(selectedPreviewIds);
+  const taskDefinitions = normalizedSelectedPreviewIds.length > 0
+    ? allTaskDefinitions.filter((definition) =>
+        normalizedSelectedPreviewIds.includes(normalizeText(definition?.preview_id)),
+      )
+    : allTaskDefinitions;
+  if (taskDefinitions.length === 0) {
+    throw new Error("Select at least one task to create from this folder");
+  }
   const auditActor = buildAuditActor(actor);
   const initialStatus = "assigned";
   const assignedUsers = assignees.map((user) => ({ user: user._id }));
