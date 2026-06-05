@@ -187,3 +187,17 @@ export const getFilePreviewSource = ({
 
   return normalizedUrl;
 };
+
+export const shouldOpenFilePreviewExternally = (previewMode = "pdf") => {
+  const normalizedMode = String(previewMode || "").trim().toLowerCase();
+  if (normalizedMode === "image") return false;
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return false;
+  }
+
+  return (
+    window.matchMedia("(pointer: coarse)").matches ||
+    window.matchMedia("(hover: none)").matches ||
+    window.matchMedia("(max-width: 1024px)").matches
+  );
+};

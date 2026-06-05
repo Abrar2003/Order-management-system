@@ -10,6 +10,7 @@ import {
   getStoredItemFileUrl,
   hasStoredItemFile,
   ITEM_FILE_OPTIONS,
+  shouldOpenFilePreviewExternally,
 } from "../constants/itemFiles";
 import { formatEan13BarcodeDisplay } from "../utils/barcode";
 import { formatDateDDMMYYYY } from "../utils/date";
@@ -794,6 +795,10 @@ const ItemDetails = () => {
   const handlePreviewFile = (entry) => {
     const fileUrl = getStoredItemFileUrl(entry.file);
     if (!getFilePreviewSource({ fileUrl, previewMode: entry.previewMode })) return;
+    if (shouldOpenFilePreviewExternally(entry.previewMode)) {
+      window.open(fileUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
     setPreviewFile({
       title: entry.label,
       originalUrl: fileUrl,

@@ -25,6 +25,7 @@ import {
   buildItemFileUploadRequest,
   ITEM_FILE_OPTIONS,
   isItemFileOptionAvailableForItem,
+  shouldOpenFilePreviewExternally,
 } from "../constants/itemFiles";
 import {
   getNextClientSortState,
@@ -980,6 +981,11 @@ const QcDetails = () => {
       }
 
       if (fileConfig.previewMode === "pdf" || fileConfig.previewMode === "image" || fileConfig.previewMode === "office") {
+        if (shouldOpenFilePreviewExternally(fileConfig.previewMode)) {
+          window.open(fileUrl, "_blank", "noopener,noreferrer");
+          return;
+        }
+
         setPreviewFile({
           title: fileConfig.label,
           url: fileUrl,

@@ -15,6 +15,7 @@ import {
   hasStoredItemFile,
   isItemFileOptionAvailableForItem,
   isPisSpreadsheetUploadType,
+  shouldOpenFilePreviewExternally,
 } from "../constants/itemFiles";
 import {
   getNextClientSortState,
@@ -490,6 +491,11 @@ const ItemFilesPage = () => {
       const fileUrl = String(response?.data?.data?.url || "").trim();
       if (!fileUrl) {
         throw new Error(`${activeFileOption.label} URL is not available.`);
+      }
+
+      if (shouldOpenFilePreviewExternally(activeFileOption.previewMode)) {
+        window.open(fileUrl, "_blank", "noopener,noreferrer");
+        return;
       }
 
       setPreviewFile({

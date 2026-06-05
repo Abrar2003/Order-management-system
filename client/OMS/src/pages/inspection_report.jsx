@@ -11,6 +11,7 @@ import {
   getStoredItemFileUrl,
   hasStoredItemFile,
   ITEM_FILE_OPTIONS as ITEM_MASTER_FILE_OPTIONS,
+  shouldOpenFilePreviewExternally,
 } from "../constants/itemFiles";
 import { toEan13BarcodeValue } from "../utils/barcode";
 import { formatDateDDMMYYYY } from "../utils/date";
@@ -878,6 +879,11 @@ const InspectionReport = () => {
   const handlePreviewItemMasterFile = useCallback((entry = {}) => {
     const fileUrl = getStoredItemFileUrl(entry.file);
     if (!fileUrl) return;
+
+    if (shouldOpenFilePreviewExternally(entry.previewMode || "pdf")) {
+      window.open(fileUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
 
     setPreviewFile({
       title: entry.label || "Item File",
