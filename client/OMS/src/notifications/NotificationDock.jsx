@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { NOTIFICATION_TABS, getPriorityLabel } from "./useNotifications";
+import { getNotificationCard, hasWorkflowCardDetails } from "./notificationCard";
 
 const CATEGORY_MARKS = Object.freeze({
   approval: "A",
@@ -41,9 +42,10 @@ const NotificationDock = ({
   const navigate = useNavigate();
 
   const openNotification = async (notification) => {
+    const card = getNotificationCard(notification);
     await markRead(notification);
-    if (notification.deep_link) {
-      navigate(notification.deep_link);
+    if (card.deepLink) {
+      navigate(card.deepLink);
       onClose?.();
     }
   };
@@ -100,39 +102,62 @@ const NotificationDock = ({
             <span>You are caught up for this view.</span>
           </div>
         )}
-        {list.map((notification) => (
-          <article
-            key={notification._id}
-            className={`om-notification-item ${notification.read ? "" : "unread"}`}
-          >
-            <button
-              type="button"
-              className="om-notification-item-main"
-              onClick={() => openNotification(notification)}
+        {list.map((notification) => {
+          const card = getNotificationCard(notification);
+          const showDetails = hasWorkflowCardDetails(card);
+          return (
+            <article
+              key={notification._id}
+              className={[
+                "om-notification-item",
+                notification.read ? "" : "unread",
+                `om-notification-item--${card.category}`,
+                `om-notification-item--priority-${card.priority}`,
+              ].filter(Boolean).join(" ")}
             >
-              <span className={`om-notification-category om-notification-category--${notification.category}`}>
-                {CATEGORY_MARKS[notification.category] || "N"}
-              </span>
-              <span className="om-notification-copy">
-                <span className="om-notification-title-line">
-                  <strong>{notification.title}</strong>
-                  <span className={`om-notification-priority om-notification-priority--${notification.priority}`}>
-                    {getPriorityLabel(notification.priority)}
-                  </span>
+              <button
+                type="button"
+                className="om-notification-item-main"
+                onClick={() => openNotification(notification)}
+              >
+                <span className={`om-notification-category om-notification-category--${card.category}`}>
+                  {CATEGORY_MARKS[card.category] || "N"}
                 </span>
-                <span>{notification.message}</span>
-                <small>{formatRelativeTime(notification.created_at)}</small>
-              </span>
-            </button>
-            <button
-              type="button"
-              className="btn btn-sm btn-link text-secondary"
-              onClick={() => archive(notification)}
-            >
-              Archive
-            </button>
-          </article>
-        ))}
+                <span className="om-notification-copy">
+                  <span className="om-notification-title-line">
+                    <strong>{card.heading}</strong>
+                    <span className={`om-notification-priority om-notification-priority--${card.priority}`}>
+                      {getPriorityLabel(card.priority)}
+                    </span>
+                  </span>
+                  {card.taskTitle && (
+                    <span className="om-notification-card-task">{card.taskTitle}</span>
+                  )}
+                  {showDetails && (
+                    <span className="om-notification-card-meta">
+                      {card.assigneeNames && <span>Assignee: {card.assigneeNames}</span>}
+                      {card.assignedByName && <span>Assigned by: {card.assignedByName}</span>}
+                      {card.status && <span className="om-notification-status">{card.status}</span>}
+                      {card.taskType && <span>{card.taskType}</span>}
+                      {card.dueDateText && <span>Due: {card.dueDateText}</span>}
+                    </span>
+                  )}
+                  {card.comment && <span className="om-notification-comment">{card.comment}</span>}
+                  <small>{formatRelativeTime(notification.created_at)}</small>
+                </span>
+              </button>
+              {!notification.is_live_task && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-link text-secondary"
+                  onClick={() => archive(notification)}
+                >
+                  Archive
+                </button>
+              )}
+            </article>
+          );
+        })}
       </div>
 
       {hasMore && (

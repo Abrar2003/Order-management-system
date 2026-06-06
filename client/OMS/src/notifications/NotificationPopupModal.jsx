@@ -1,17 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { getPopupEntryCard } from "./notificationCard";
 
 const SECTIONS = Object.freeze([
   { key: "overdueTasks", label: "Overdue Tasks" },
   { key: "todayDueTasks", label: "Today Due Tasks" },
   { key: "approvalPending", label: "Approval Pending" },
-  { key: "holdPending", label: "Hold Pending" },
+  { key: "holdPending", label: "Hold Approval Pending" },
   { key: "uploadPending", label: "Upload Pending" },
-  { key: "criticalNotifications", label: "Critical Notifications" },
+  { key: "criticalNotifications", label: "Critical Overdue Tasks" },
 ]);
-
-const taskLink = (entry = {}) =>
-  entry.deep_link || (entry._id ? `/workflow/tasks?task=${entry._id}` : "/workflow/tasks");
 
 const NotificationPopupModal = ({ summary, onAcknowledge }) => {
   const navigate = useNavigate();
@@ -63,22 +61,33 @@ const NotificationPopupModal = ({ summary, onAcknowledge }) => {
                 <strong>{section.label}</strong>
                 <span>{section.rows.length}</span>
               </div>
-              {section.rows.slice(0, 5).map((entry) => (
-                <div key={`${section.key}-${entry._id}`} className="om-notification-popup-row">
-                  <div>
-                    <strong>{entry.title || entry.message || "Workflow task"}</strong>
-                    {entry.message && entry.message !== entry.title && <span>{entry.message}</span>}
+              {section.rows.slice(0, 5).map((entry) => {
+                const card = getPopupEntryCard(entry, section.label);
+                return (
+                  <div key={`${section.key}-${entry._id}`} className="om-notification-popup-row">
+                    <div>
+                      <small>{card.heading || section.label}</small>
+                      <strong>{card.taskTitle}</strong>
+                      <span className="om-notification-popup-card-meta">
+                        {card.assigneeNames && <span>Assignee: {card.assigneeNames}</span>}
+                        {card.assignedByName && <span>Assigned by: {card.assignedByName}</span>}
+                        {card.status && <span className="om-notification-status">{card.status}</span>}
+                        {card.taskType && <span>{card.taskType}</span>}
+                        {card.dueDateText && <span>Due: {card.dueDateText}</span>}
+                      </span>
+                      {card.comment && <span className="om-notification-comment">{card.comment}</span>}
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-primary"
+                      disabled={blocked}
+                      onClick={() => navigate(card.deepLink)}
+                    >
+                      Open
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-outline-primary"
-                    disabled={blocked}
-                    onClick={() => navigate(taskLink(entry))}
-                  >
-                    Open
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </section>
           ))}
         </div>

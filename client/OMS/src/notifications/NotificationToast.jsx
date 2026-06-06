@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { getNotificationCard } from "./notificationCard";
 
 const getToastClassName = (priority = "") =>
   [
@@ -10,20 +11,21 @@ const getToastClassName = (priority = "") =>
 const NotificationToast = ({ notification, onClose }) => {
   const navigate = useNavigate();
   if (!notification) return null;
+  const card = getNotificationCard(notification);
 
   return (
     <button
       type="button"
-      className={getToastClassName(notification.priority)}
+      className={getToastClassName(card.priority)}
       onClick={() => {
         onClose?.();
-        if (notification.deep_link) navigate(notification.deep_link);
+        if (card.deepLink) navigate(card.deepLink);
       }}
     >
       <span className="om-notification-toast-dot" />
       <span className="om-notification-toast-copy">
-        <strong>{notification.title}</strong>
-        <span>{notification.message}</span>
+        <strong>{card.heading}</strong>
+        <span>{card.taskTitle || notification.message}</span>
       </span>
     </button>
   );

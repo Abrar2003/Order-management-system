@@ -17,12 +17,12 @@ const POPUP_ACK_PREFIX = "oms_notification_popup_ack";
 export const NOTIFICATION_TABS = Object.freeze([
   { key: "all", label: "All" },
   { key: "unread", label: "Unread" },
-  { key: "task", label: "Tasks", category: "task" },
-  { key: "approval", label: "Approvals", category: "approval" },
-  { key: "upload", label: "Uploads", category: "upload" },
-  { key: "hold", label: "Holds", category: "hold" },
+  { key: "task", label: "Tasks", view: "tasks_due_today" },
+  { key: "approval", label: "Approval", view: "approval_pending" },
+  { key: "holdApproval", label: "Hold Approval", view: "hold_approval_pending" },
+  { key: "upload", label: "Uploads", view: "upload_pending" },
   { key: "comment", label: "Comments", category: "comment" },
-  { key: "critical", label: "Critical", priority: "critical" },
+  { key: "critical", label: "Critical", view: "critical_overdue" },
 ]);
 
 const normalizeText = (value) => String(value || "").trim();
@@ -39,6 +39,7 @@ const getTabParams = (tabKey) => {
     unreadOnly: tab.key === "unread" ? "true" : undefined,
     category: tab.category,
     priority: tab.priority,
+    view: tab.view,
   };
 };
 
@@ -134,11 +135,14 @@ export const useNotifications = ({ enabled = true } = {}) => {
 
     const handleNewNotification = (payload) => {
       if (!payload?._id) return;
-      setNotifications((current) =>
-        current.some((entry) => entry._id === payload._id)
-          ? current
-          : [payload, ...current],
-      );
+      const activeTabConfig = NOTIFICATION_TABS.find((entry) => entry.key === activeTab);
+      if (!activeTabConfig?.view) {
+        setNotifications((current) =>
+          current.some((entry) => entry._id === payload._id)
+            ? current
+            : [payload, ...current],
+        );
+      }
       if (payload.priority !== "silent") {
         setToast(payload);
         if (toastTimerRef.current) globalThis.clearTimeout(toastTimerRef.current);
@@ -155,6 +159,9 @@ export const useNotifications = ({ enabled = true } = {}) => {
 
     const handleSummaryUpdated = () => {
       loadSummary();
+      if (dockOpen) {
+        loadNotifications({ page: 1 });
+      }
     };
 
     socket.on("notification:new", handleNewNotification);
@@ -168,10 +175,10 @@ export const useNotifications = ({ enabled = true } = {}) => {
       socket.off("notification:summary_updated", handleSummaryUpdated);
       if (toastTimerRef.current) globalThis.clearTimeout(toastTimerRef.current);
     };
-  }, [enabled, loadSummary]);
+  }, [activeTab, dockOpen, enabled, loadNotifications, loadSummary]);
 
   const markRead = useCallback(async (notification) => {
-    if (!notification?._id || notification.read) return notification;
+    if (!notification?._id || notification.is_live_task || notification.read) return notification;
     const response = await markNotificationRead(notification._id);
     const updated = response?.data || { ...notification, read: true };
     setNotifications((current) =>
@@ -191,7 +198,7 @@ export const useNotifications = ({ enabled = true } = {}) => {
   }, []);
 
   const archive = useCallback(async (notification) => {
-    if (!notification?._id) return;
+    if (!notification?._id || notification.is_live_task) return;
     await archiveNotification(notification._id);
     setNotifications((current) => current.filter((entry) => entry._id !== notification._id));
     if (!notification.read) {
