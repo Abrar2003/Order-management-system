@@ -15,6 +15,14 @@ const {
 const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
 
 const normalizeText = (value) => String(value ?? "").trim();
+const normalizeStatus = (value) => normalizeText(value).toLowerCase();
+
+const NON_MEASUREMENT_INSPECTION_STATUSES = new Set([
+  "goods not ready",
+  "rejected",
+  "transfered",
+  "transferred",
+]);
 
 const escapeRegex = (value = "") =>
   normalizeText(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -88,12 +96,16 @@ const hasModernInspectionData = (inspection = {}) =>
   (Array.isArray(inspection?.inspected_box_sizes) &&
     inspection.inspected_box_sizes.length > 0);
 
+const isNonMeasurementInspectionStatus = (status = "") =>
+  NON_MEASUREMENT_INSPECTION_STATUSES.has(normalizeStatus(status));
+
 const applyLatestInspectionToItem = ({
   itemDoc,
   inspectionRecord,
   qcDoc = null,
 } = {}) => {
   if (!itemDoc || !inspectionRecord) return false;
+  if (isNonMeasurementInspectionStatus(inspectionRecord?.status)) return false;
 
   const itemSizes = normalizeItemSizes(inspectionRecord?.inspected_item_sizes);
   const rawBoxMode = detectBoxPackagingMode(
@@ -182,6 +194,14 @@ const syncItemInspectedDataFromInspection = async ({
   if (!inspectionRecord) {
     return { matched: false, updated: false, skipped_reason: "missing_inspection" };
   }
+  if (isNonMeasurementInspectionStatus(inspectionRecord?.status)) {
+    return {
+      matched: true,
+      updated: false,
+      skipped_reason: "non_measurement_inspection_status",
+      inspection_status: normalizeText(inspectionRecord?.status),
+    };
+  }
   if (requireModernInspectionData && !hasModernInspectionData(inspectionRecord)) {
     return { matched: false, updated: false, skipped_reason: "missing_inspection_data" };
   }
@@ -238,6 +258,7 @@ module.exports = {
   getInspectionSortTime,
   getQcItemCode,
   hasModernInspectionData,
+  isNonMeasurementInspectionStatus,
   pickLatestInspectionRecord,
   syncItemInspectedDataFromInspection,
 };
