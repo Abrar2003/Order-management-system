@@ -68,6 +68,11 @@ const formatEntries = (entries = [], weightLabel = "Weight") => {
     .join(" | ");
 };
 
+const hasMeaningfulEntryList = (entries = []) =>
+  (Array.isArray(entries) ? entries : []).some((entry) =>
+    hasMeaningfulMeasuredSize(entry),
+  );
+
 const getBrandLabel = (item = {}) =>
   toText(
     item?.brand
@@ -218,61 +223,115 @@ const buildInspectedMeasurementDetails = (item = {}) => {
   };
 };
 
-const buildInitialForm = (item = {}) => {
-  const pisWeight = item?.pis_weight || {};
-  const pisBoxMode = detectBoxPackagingMode(item?.pis_box_mode, item?.pis_box_sizes);
-  const pisItemEntries = buildMeasuredSizeEntriesFromLegacy({
-    primaryEntries: item?.pis_item_sizes,
-    singleLbh: item?.pis_item_LBH,
-    topLbh: item?.pis_item_top_LBH,
-    bottomLbh: item?.pis_item_bottom_LBH,
-    totalWeight: getWeightValueFromModel(pisWeight, "total_net"),
-    topWeight: getWeightValueFromModel(pisWeight, "top_net"),
-    bottomWeight: getWeightValueFromModel(pisWeight, "bottom_net"),
-    weightKey: "net_weight",
+const buildMeasurementEntriesForFormSource = (item = {}, source = "pis", group = "item") => {
+  const isMaster = source === "master";
+  const isItemGroup = group === "item";
+  const weight = isMaster ? {} : item?.pis_weight || {};
+  const boxMode = isMaster
+    ? detectBoxPackagingMode(item?.master_box_mode, item?.master_box_sizes)
+    : detectBoxPackagingMode(item?.pis_box_mode, item?.pis_box_sizes);
+
+  return buildMeasuredSizeEntriesFromLegacy({
+    primaryEntries: isMaster
+      ? (isItemGroup ? item?.master_item_sizes : item?.master_box_sizes)
+      : (isItemGroup ? item?.pis_item_sizes : item?.pis_box_sizes),
+    mode: isItemGroup ? undefined : boxMode,
+    singleLbh: isMaster
+      ? undefined
+      : (isItemGroup ? item?.pis_item_LBH : item?.pis_box_LBH),
+    topLbh: isMaster
+      ? undefined
+      : (isItemGroup ? item?.pis_item_top_LBH : item?.pis_box_top_LBH),
+    bottomLbh: isMaster
+      ? undefined
+      : (isItemGroup ? item?.pis_item_bottom_LBH : item?.pis_box_bottom_LBH),
+    totalWeight: isMaster
+      ? undefined
+      : getWeightValueFromModel(
+          weight,
+          isItemGroup ? "total_net" : "total_gross",
+        ),
+    topWeight: isMaster
+      ? undefined
+      : getWeightValueFromModel(weight, isItemGroup ? "top_net" : "top_gross"),
+    bottomWeight: isMaster
+      ? undefined
+      : getWeightValueFromModel(weight, isItemGroup ? "bottom_net" : "bottom_gross"),
+    weightKey: isItemGroup ? "net_weight" : "gross_weight",
     topRemark: "top",
     bottomRemark: "base",
   }).filter((entry) => hasMeaningfulMeasuredSize(entry));
-  const pisBoxEntries = buildMeasuredSizeEntriesFromLegacy({
-    primaryEntries: item?.pis_box_sizes,
-    mode: pisBoxMode,
-    singleLbh: item?.pis_box_LBH,
-    topLbh: item?.pis_box_top_LBH,
-    bottomLbh: item?.pis_box_bottom_LBH,
-    totalWeight: getWeightValueFromModel(pisWeight, "total_gross"),
-    topWeight: getWeightValueFromModel(pisWeight, "top_gross"),
-    bottomWeight: getWeightValueFromModel(pisWeight, "bottom_gross"),
-    weightKey: "gross_weight",
-    topRemark: "top",
-    bottomRemark: "base",
-  }).filter((entry) => hasMeaningfulMeasuredSize(entry));
+};
+
+const resolveInitialFormSource = (item = {}, preferMaster = false, group = "item") => {
+  const masterEntries = preferMaster
+    ? buildMeasurementEntriesForFormSource(item, "master", group)
+    : [];
+
+  if (hasMeaningfulEntryList(masterEntries)) {
+    return {
+      source: "master",
+      entries: masterEntries,
+      boxMode: detectBoxPackagingMode(item?.master_box_mode, item?.master_box_sizes),
+    };
+  }
+
+  const pisEntries = buildMeasurementEntriesForFormSource(item, "pis", group);
+
+  return {
+    source: "pis",
+    entries: pisEntries,
+    boxMode: detectBoxPackagingMode(item?.pis_box_mode, item?.pis_box_sizes),
+  };
+};
+
+const buildInitialForm = (item = {}, options = {}) => {
+  const preferMaster = options?.preferMaster === true;
+  const itemSource = resolveInitialFormSource(item, preferMaster, "item");
+  const boxSource = resolveInitialFormSource(item, preferMaster, "box");
+  const resolvedBoxMode = boxSource.source === "master"
+    ? detectBoxPackagingMode(item?.master_box_mode, item?.master_box_sizes)
+    : boxSource.boxMode;
+  const resolvedMasterBarcode = preferMaster
+    ? toText(item?.master_master_barcode || item?.master_barcode)
+      || toText(item?.pis_master_barcode || item?.pis_barcode)
+    : toText(item?.pis_master_barcode || item?.pis_barcode);
+  const resolvedInnerBarcode = preferMaster
+    ? toText(item?.master_inner_barcode) || toText(item?.pis_inner_barcode)
+    : toText(item?.pis_inner_barcode);
+  const resolvedCountryOfOrigin = preferMaster
+    ? toText(item?.master_country_of_origin) || toText(item?.country_of_origin)
+    : toText(item?.country_of_origin);
+
+  const pisItemEntries = itemSource.entries;
+  const pisBoxEntries = boxSource.entries;
 
   const pisItemCount =
     pisItemEntries.length > 0
       ? normalizeSizeCount(pisItemEntries.length, 1)
       : 1;
   const pisBoxCount =
-    pisBoxMode === BOX_PACKAGING_MODES.CARTON
+    resolvedBoxMode === BOX_PACKAGING_MODES.CARTON
       ? 2
       : pisBoxEntries.length > 0
       ? normalizeSizeCount(pisBoxEntries.length, 1)
       : 1;
 
   return {
-    country_of_origin: toText(item?.country_of_origin),
+    country_of_origin: resolvedCountryOfOrigin,
     barcode_exempted: item?.barcode_exempted === true,
     kd: Boolean(item?.kd),
     mounting_file_needed: Boolean(item?.mounting_file_needed),
-    master_barcode: toText(item?.pis_master_barcode || item?.pis_barcode),
-    inner_barcode: toText(item?.pis_inner_barcode),
+    master_barcode: resolvedMasterBarcode,
+    inner_barcode: resolvedInnerBarcode,
     pis_item_count: String(pisItemCount),
-    pis_box_mode: pisBoxMode,
+    pis_box_mode: resolvedBoxMode,
     pis_box_count: String(pisBoxCount),
     pis_item_sizes: ensureMeasuredSizeEntryCount(pisItemEntries, pisItemCount, {
       singleRemark: "item",
     }),
     pis_box_sizes: ensureMeasuredSizeEntryCount(pisBoxEntries, pisBoxCount, {
-      mode: pisBoxMode,
+      mode: resolvedBoxMode,
       singleRemark: "box",
     }),
   };
@@ -330,7 +389,10 @@ const buildInspectedReference = (item = {}) => {
 };
 
 const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
-  const [form, setForm] = useState(() => buildInitialForm(item));
+  const isPisDiffUpdate = updateSource === "pis_diffs";
+  const [form, setForm] = useState(() =>
+    buildInitialForm(item, { preferMaster: isPisDiffUpdate }),
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [latestInspectionContext, setLatestInspectionContext] = useState(null);
@@ -339,7 +401,6 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
   const canToggleBarcodeExemption = isStrictAdminRole(
     normalizeUserRole(user?.role),
   );
-  const isPisDiffUpdate = updateSource === "pis_diffs";
   const editScopeLabel = isPisDiffUpdate ? "Master" : "PIS";
   const {
     clearDraft,
@@ -646,6 +707,9 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
             pis_barcode: payload.pis_barcode,
             pis_master_barcode: payload.pis_master_barcode,
             pis_inner_barcode: payload.pis_inner_barcode,
+            pis_box_mode: payload.pis_box_mode,
+            pis_item_sizes: payload.pis_item_sizes,
+            pis_box_sizes: payload.pis_box_sizes,
             kd: payload.kd,
             mounting_file_needed: payload.mounting_file_needed,
             barcode_exempted: canToggleBarcodeExemption
@@ -655,6 +719,9 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
             master_barcode: payload.pis_master_barcode,
             master_master_barcode: payload.pis_master_barcode,
             master_inner_barcode: payload.pis_inner_barcode,
+            master_box_mode: payload.pis_box_mode,
+            master_item_sizes: payload.pis_item_sizes,
+            master_box_sizes: payload.pis_box_sizes,
             pis_checked_flag: true,
           }
         : item;
