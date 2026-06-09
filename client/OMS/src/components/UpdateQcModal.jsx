@@ -2163,7 +2163,7 @@ const UpdateQcModal = ({
       if (!normalizedExpected) {
         setBarcodeValidated(false);
         setBarcodeValidationError(
-          `PIS ${typeLabel} barcode is required before QC can update this record.`,
+          `PIS ${typeLabel} barcode is not available.`,
         );
         return false;
       }
@@ -2635,7 +2635,7 @@ const UpdateQcModal = ({
         }
 
         if (!expectedPisBarcode) {
-          setError(`PIS ${requirementLabel} barcode is required before QC can update this record.`);
+          setError(`PIS ${requirementLabel} barcode is not available.`);
           return;
         }
 
@@ -3734,7 +3734,7 @@ const UpdateQcModal = ({
 	                          <span className="badge bg-success me-2">{barcodeValidationStatus}</span>
 	                        )}
 	                        {barcodeValidationError && (
-	                          <span className="text-danger small">{barcodeValidationError}</span>
+	                          <span className="badge bg-danger me-2">{barcodeValidationError}</span>
 	                        )}
 	                        {barcodeUploadStatus && (
 	                          <span className="text-success small me-2">{barcodeUploadStatus}</span>
