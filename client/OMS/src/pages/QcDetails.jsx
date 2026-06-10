@@ -1943,6 +1943,8 @@ const QcDetails = () => {
                                 src={finish.imageUrl}
                                 alt={`${finish.uniqueCode} finish`}
                                 className="img-fluid rounded border"
+                                loading="lazy"
+                                decoding="async"
                                 style={{
                                   width: "100%",
                                   maxHeight: "220px",
@@ -2642,6 +2644,9 @@ const QcDetails = () => {
                     src={activeQcImage.url}
                     alt={activeQcImage?.originalName || "QC image"}
                     className="qc-image-gallery-preview-image"
+                    loading="eager"
+                    decoding="async"
+                    fetchPriority="high"
                   />
                 ) : (
                   <div className="qc-image-gallery-preview-empty">
@@ -2693,6 +2698,9 @@ const QcDetails = () => {
                             src={imageUrl}
                             alt={image?.originalName || `QC image ${index + 1}`}
                             className="qc-image-gallery-thumb-image"
+                            loading={Math.abs(index - activeQcImageIndex) <= 4 ? "eager" : "lazy"}
+                            decoding="async"
+                            fetchPriority={index === activeQcImageIndex ? "high" : "low"}
                           />
                         ) : (
                           <span className="qc-image-gallery-thumb-empty">

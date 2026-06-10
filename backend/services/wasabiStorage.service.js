@@ -106,6 +106,7 @@ const createStorageKey = ({
 
 let cachedClient = null;
 let cachedClientKey = "";
+const signedUrlCache = new Map();
 const DEFAULT_UPLOAD_QUEUE_SIZE = Math.max(
   1,
   Number(pickFirstDefinedEnvValue("WASABI_UPLOAD_QUEUE_SIZE") || 1),
@@ -181,6 +182,26 @@ const getSignedObjectUrl = async (
   const responseContentDisposition = safeFilename
     ? `${download ? "attachment" : "inline"}; filename="${safeFilename.replace(/"/g, "")}"`
     : undefined;
+  const cacheKey = JSON.stringify({
+    key,
+    expiresIn: safeExpiresIn,
+    download: Boolean(download),
+    filename: safeFilename,
+  });
+  const now = Date.now();
+  const cachedSignedUrl = signedUrlCache.get(cacheKey);
+
+  if (cachedSignedUrl && cachedSignedUrl.expiresAt > now) {
+    return cachedSignedUrl.url;
+  }
+
+  if (signedUrlCache.size > 5000) {
+    for (const [entryKey, entry] of signedUrlCache.entries()) {
+      if (!entry || entry.expiresAt <= now) {
+        signedUrlCache.delete(entryKey);
+      }
+    }
+  }
 
   try {
     const signedUrl = await getSignedUrl(
@@ -194,6 +215,14 @@ const getSignedObjectUrl = async (
       }),
       { expiresIn: safeExpiresIn },
     );
+    const cacheTtlMs = Math.max(0, (safeExpiresIn - 60) * 1000);
+
+    if (cacheTtlMs > 0) {
+      signedUrlCache.set(cacheKey, {
+        url: signedUrl,
+        expiresAt: now + cacheTtlMs,
+      });
+    }
 
     return signedUrl;
   } catch (error) {

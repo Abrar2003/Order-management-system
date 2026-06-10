@@ -1263,6 +1263,36 @@ const normalizeStoredSizeEntries = (entries = [], { weightKey = "" } = {}) =>
     .filter((entry) => hasCompletePositiveLbh(entry))
     .slice(0, SIZE_ENTRY_LIMIT);
 
+const hasCompletePositiveWeightedSizeEntry = (entries = [], weightKey = "") =>
+  (Array.isArray(entries) ? entries : []).some(
+    (entry) =>
+      hasCompletePositiveLbh(entry) &&
+      (!weightKey || toNonNegativeNumber(entry?.[weightKey], 0) > 0),
+  );
+
+const getQcInspectionMeasurementRequirementMessage = () =>
+  "QC users cannot update an inspection record with 0 checked quantity or without inspected item sizes, inspected box sizes, net weight, and gross weight.";
+
+const validateQcInspectionUpdateRequirements = ({
+  checked = 0,
+  itemSizes = [],
+  boxSizes = [],
+} = {}) => {
+  if (toNonNegativeNumber(checked, 0) <= 0) {
+    return getQcInspectionMeasurementRequirementMessage();
+  }
+
+  if (!hasCompletePositiveWeightedSizeEntry(itemSizes, "net_weight")) {
+    return getQcInspectionMeasurementRequirementMessage();
+  }
+
+  if (!hasCompletePositiveWeightedSizeEntry(boxSizes, "gross_weight")) {
+    return getQcInspectionMeasurementRequirementMessage();
+  }
+
+  return "";
+};
+
 const buildSizeEntriesFromLegacy = ({
   sizes = [],
   singleLbh = null,
@@ -5070,7 +5100,7 @@ exports.updateQC = async (req, res) => {
       hasKdUpdate ||
       hasMountingFileNeededUpdate;
     const itemCodeForInspectedSizeUpdate =
-      hasItemMasterUpdate || hasCbmUpdate
+      hasItemMasterUpdate || hasCbmUpdate || (isQcUser && !allowAdminRewrite)
         ? normalizeText(qc?.item?.item_code || "")
         : "";
     if (
@@ -5889,6 +5919,18 @@ exports.updateQC = async (req, res) => {
       addPassed > 0 ||
       addProvision > 0 ||
       (labelsAddedThisVisit && labelsAddedThisVisit.length > 0);
+
+    if (isQcUser && !allowAdminRewrite) {
+      const measurementValidationMessage = validateQcInspectionUpdateRequirements({
+        checked: addChecked,
+        itemSizes: effectiveInspectedItemSizeEntries,
+        boxSizes: effectiveInspectedBoxSizeEntries,
+      });
+
+      if (measurementValidationMessage) {
+        return res.status(400).json({ message: measurementValidationMessage });
+      }
+    }
 
     const shouldUpdateInspectionRecord =
       !allowAdminRewrite &&
@@ -10528,26 +10570,36 @@ exports.getQCById = async (req, res) => {
         };
       }),
     );
+    const signedItemFiles = itemMaster
+      ? await Promise.all([
+          buildSignedItemImage(itemMaster?.image),
+          buildSignedItemFile(itemMaster?.cad_file, {
+            logLabel: "CAD file",
+          }),
+          buildSignedItemFile(itemMaster?.pis_file, {
+            logLabel: "PIS file",
+          }),
+          buildSignedItemFile(itemMaster?.assembly_file, {
+            logLabel: "Assembly file",
+          }),
+          buildSignedItemFile(itemMaster?.mounting_file, {
+            logLabel: "Mounting file",
+          }),
+          buildSignedItemFile(itemMaster?.packeging_ppt, {
+            logLabel: "Packaging PPT",
+          }),
+        ])
+      : [];
     const itemMasterWithSignedUrls = itemMaster
       ? {
           ...itemMaster,
           finish: signedFinishEntries,
-          image: await buildSignedItemImage(itemMaster?.image),
-          cad_file: await buildSignedItemFile(itemMaster?.cad_file, {
-            logLabel: "CAD file",
-          }),
-          pis_file: await buildSignedItemFile(itemMaster?.pis_file, {
-            logLabel: "PIS file",
-          }),
-          assembly_file: await buildSignedItemFile(itemMaster?.assembly_file, {
-            logLabel: "Assembly file",
-          }),
-          mounting_file: await buildSignedItemFile(itemMaster?.mounting_file, {
-            logLabel: "Mounting file",
-          }),
-          packeging_ppt: await buildSignedItemFile(itemMaster?.packeging_ppt, {
-            logLabel: "Packaging PPT",
-          }),
+          image: signedItemFiles[0],
+          cad_file: signedItemFiles[1],
+          pis_file: signedItemFiles[2],
+          assembly_file: signedItemFiles[3],
+          mounting_file: signedItemFiles[4],
+          packeging_ppt: signedItemFiles[5],
         }
       : null;
     const qcImagesWithSignedUrls = await Promise.all(
@@ -10676,6 +10728,7 @@ exports.editInspectionRecords = async (req, res) => {
     const requestHistoryDateUpdates = new Map();
     const qcRequestedQuantityCap = resolveRequestedQuantityFromQc(qc);
     const normalizedRole = normalizeUserRoleKey(req.user?.role);
+    const isQcUser = normalizedRole === "qc";
     const canEditAllInspectionRecords = isManagerLikeRole(normalizedRole);
     const canChangeInspectionInspector = isStrictAdminRoleKey(normalizedRole);
     const currentUserId = String(req.user?._id || req.user?.id || "").trim();
@@ -11039,6 +11092,24 @@ exports.editInspectionRecords = async (req, res) => {
 	          mode: parsedInspectedBoxMode,
 	        },
 	      );
+      const effectiveInspectedItemSizes = parsedInspectedItemSizes.hasInput
+        ? parsedInspectedItemSizes.value
+        : record?.inspected_item_sizes || [];
+      const effectiveInspectedBoxSizes = parsedInspectedBoxSizes.hasInput
+        ? parsedInspectedBoxSizes.value
+        : record?.inspected_box_sizes || [];
+
+      if (isQcUser) {
+        const measurementValidationMessage = validateQcInspectionUpdateRequirements({
+          checked,
+          itemSizes: effectiveInspectedItemSizes,
+          boxSizes: effectiveInspectedBoxSizes,
+        });
+
+        if (measurementValidationMessage) {
+          throw new Error(measurementValidationMessage);
+        }
+      }
 
 	      const cbmInput = row?.cbm && typeof row.cbm === "object" ? row.cbm : null;
       const existingCbmSnapshot = buildNormalizedCbmSnapshot(record?.cbm);

@@ -316,6 +316,26 @@ const hasMeaningfulMeasuredSize = (entry = {}) =>
   String(entry?.remark || "").trim() !== "" ||
   String(entry?.item_count_in_inner || "").trim() !== "" ||
   String(entry?.box_count_in_master || "").trim() !== "";
+const hasCompletePositiveWeightedSizeEntry = (entries = [], weightKey = "") =>
+  (Array.isArray(entries) ? entries : []).some((entry) => {
+    const L = Number(entry?.L || 0);
+    const B = Number(entry?.B || 0);
+    const H = Number(entry?.H || 0);
+    const weight = Number(entry?.[weightKey] ?? entry?.weight ?? 0);
+
+    return (
+      Number.isFinite(L) &&
+      Number.isFinite(B) &&
+      Number.isFinite(H) &&
+      Number.isFinite(weight) &&
+      L > 0 &&
+      B > 0 &&
+      H > 0 &&
+      weight > 0
+    );
+  });
+const QC_MEASUREMENT_REQUIREMENT_MESSAGE =
+  "QC users cannot update an inspection record with 0 checked quantity or without inspected item sizes, inspected box sizes, net weight, and gross weight.";
 const buildMeasuredSizeEntriesFromLegacy = ({
   primaryEntries = [],
   mode = BOX_PACKAGING_MODES.INDIVIDUAL,
@@ -2381,6 +2401,30 @@ const UpdateQcModal = ({
     if (inspectedBoxSizePayload.error) {
       setError(inspectedBoxSizePayload.error);
       return;
+    }
+
+    if (isQcUser) {
+      const effectiveItemSizeEntries = inspectedItemSizePayload.hasAnyInput
+        ? inspectedItemSizePayload.value
+        : existingItemSizeEntries;
+      const effectiveBoxSizeEntries = inspectedBoxSizePayload.hasAnyInput
+        ? inspectedBoxSizePayload.value
+        : existingBoxSizeEntries;
+
+      if (
+        qcChecked <= 0 ||
+        !hasCompletePositiveWeightedSizeEntry(
+          effectiveItemSizeEntries,
+          "net_weight",
+        ) ||
+        !hasCompletePositiveWeightedSizeEntry(
+          effectiveBoxSizeEntries,
+          "gross_weight",
+        )
+      ) {
+        setError(QC_MEASUREMENT_REQUIREMENT_MESSAGE);
+        return;
+      }
     }
 
     const itemLegacyValues = deriveLegacyFromMeasuredSizeEntries(
