@@ -164,6 +164,11 @@ const toPositiveInteger = (value) => {
   return parsed;
 };
 
+const toNonNegativeNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
 const TransferInspectionModal = ({
   qc,
   inspectionRecord,
@@ -242,13 +247,25 @@ const TransferInspectionModal = ({
   const requiresBoxSizeCountForLabels =
     labelRequirement.boxMode !== BOX_PACKAGING_MODES.CARTON;
 
+  const sourceShippedQuantity = toNonNegativeNumber(
+    lookupResult?.source?.shipped_quantity,
+  );
+  const sourceNonShippedPassedQuantity = toNonNegativeNumber(
+    lookupResult?.source?.non_shipped_passed_quantity,
+  );
+  const sourceTransferableQuantity = toNonNegativeNumber(
+    lookupResult?.source?.transferable_quantity,
+  );
   const maxTransferQuantity = useMemo(() => {
-    const targetOpenQuantity = Number(lookupResult?.target?.open_quantity || 0) || 0;
+    const targetOpenQuantity = toNonNegativeNumber(lookupResult?.target?.open_quantity);
+    const sourceCap = sourceTransferableQuantity || sourcePassedQuantity;
+
     if (targetOpenQuantity > 0) {
-      return Math.min(sourcePassedQuantity, targetOpenQuantity);
+      return Math.min(sourceCap, targetOpenQuantity);
     }
-    return sourcePassedQuantity;
-  }, [lookupResult?.target?.open_quantity, sourcePassedQuantity]);
+
+    return sourceCap;
+  }, [lookupResult?.target?.open_quantity, sourcePassedQuantity, sourceTransferableQuantity]);
 
   const requiredLabelsCount = labelRequirement.requiredCount;
   const requiredLabelsText = !hasSourceLabels
@@ -304,7 +321,16 @@ const TransferInspectionModal = ({
       const nextLookupResult = response?.data?.data || null;
       setLookupResult(nextLookupResult);
 
-      setQuantity(sourcePassedQuantity > 0 ? String(sourcePassedQuantity) : "");
+      const sourceCap = toNonNegativeNumber(
+        nextLookupResult?.source?.transferable_quantity,
+      );
+      const targetCap = toNonNegativeNumber(nextLookupResult?.target?.open_quantity);
+      const nextMaxQuantity =
+        sourceCap > 0 && targetCap > 0
+          ? Math.min(sourceCap, targetCap)
+          : sourceCap || targetCap || sourcePassedQuantity;
+
+      setQuantity(nextMaxQuantity > 0 ? String(nextMaxQuantity) : "");
     } catch (lookupRequestError) {
       setLookupResult(null);
       setLookupError(
@@ -345,13 +371,13 @@ const TransferInspectionModal = ({
       return;
     }
 
-    if (transferQuantity !== sourcePassedQuantity) {
-      setError("Inspection transfer must move the full passed quantity of this inspection record.");
+    if (transferQuantity > maxTransferQuantity) {
+      setError("Quantity cannot exceed the passed quantity that has not already shipped or the selected PO open quantity.");
       return;
     }
 
-    if (lookupResult?.target?.open_quantity && transferQuantity > maxTransferQuantity) {
-      setError("Quantity cannot exceed the open quantity on the selected PO.");
+    if (sourceTransferableQuantity > 0 && transferQuantity > sourceTransferableQuantity) {
+      setError("Quantity cannot exceed the passed quantity that has not already shipped.");
       return;
     }
 
@@ -433,7 +459,7 @@ const TransferInspectionModal = ({
 
           <div className="modal-body d-grid gap-3">
             <div className="row g-3">
-              <div className="col-md-4">
+              <div className="col-md-3">
                 <div className="small text-secondary">Inspection Date</div>
                 <div className="fw-semibold">
                   {formatDateDDMMYYYY(
@@ -441,11 +467,17 @@ const TransferInspectionModal = ({
                   ) || "N/A"}
                 </div>
               </div>
-              <div className="col-md-4">
+              <div className="col-md-3">
                 <div className="small text-secondary">Passed Quantity</div>
                 <div className="fw-semibold">{sourcePassedQuantity}</div>
               </div>
-              <div className="col-md-4">
+              <div className="col-md-3">
+                <div className="small text-secondary">Shipped Quantity</div>
+                <div className="fw-semibold">
+                  {lookupResult ? sourceShippedQuantity : "Check PO"}
+                </div>
+              </div>
+              <div className="col-md-3">
                 <div className="small text-secondary">Available Labels</div>
                 <div className="fw-semibold">{sourceLabels.length}</div>
               </div>
@@ -503,6 +535,20 @@ const TransferInspectionModal = ({
                     <div className="fw-semibold">{lookupResult?.target?.item_code || "N/A"}</div>
                   </div>
                 </div>
+                <div className="row g-3 mt-1">
+                  <div className="col-md-4">
+                    <div className="small text-secondary">Passed Not Shipped</div>
+                    <div className="fw-semibold">{sourceNonShippedPassedQuantity}</div>
+                  </div>
+                  <div className="col-md-4">
+                    <div className="small text-secondary">Source Transferable</div>
+                    <div className="fw-semibold">{sourceTransferableQuantity}</div>
+                  </div>
+                  <div className="col-md-4">
+                    <div className="small text-secondary">Max Transfer</div>
+                    <div className="fw-semibold">{maxTransferQuantity}</div>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -514,6 +560,7 @@ const TransferInspectionModal = ({
                 <input
                   type="number"
                   min="1"
+                  max={maxTransferQuantity || undefined}
                   step="1"
                   className="form-control"
                   value={quantity}
@@ -524,7 +571,7 @@ const TransferInspectionModal = ({
                   disabled={!lookupResult || saving}
                 />
                 <div className="form-text">
-                  Required: full passed quantity ({sourcePassedQuantity})
+                  Max transferable: {maxTransferQuantity || 0} (passed and not shipped, capped by target PO open quantity)
                 </div>
               </div>
               <div className="col-md-6">

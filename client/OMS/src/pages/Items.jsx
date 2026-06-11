@@ -25,7 +25,7 @@ import {
   sortClientRows,
 } from "../utils/clientSort";
 import { formatCbm } from "../utils/cbm";
-import { formatFixedNumber, formatLbhValue } from "../utils/measurementDisplay";
+import { formatFixedNumber } from "../utils/measurementDisplay";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
 
@@ -58,6 +58,7 @@ const normalizeMeasurementEntries = (entries = [], weightKey = "") =>
       const H = Number(entry?.H || 0);
       const weight = Number(weightKey ? entry?.[weightKey] : 0);
       return {
+        remark: String(entry?.remark || entry?.type || "").trim(),
         L: Number.isFinite(L) ? L : 0,
         B: Number.isFinite(B) ? B : 0,
         H: Number.isFinite(H) ? H : 0,
@@ -73,6 +74,22 @@ const sumMeasurementWeights = (entries = [], weightKey = "") =>
     (sum, entry) => sum + (Number(entry?.weight || 0) || 0),
     0,
   );
+
+const formatMeasurementPartLabel = (remark = "", fallback = "Item") => {
+  const normalized = String(remark || "").trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (normalized === "top") return "Top";
+  if (normalized === "base" || normalized === "bottom") return "Base";
+  return normalized.replace(/([a-z]+)(\d+)/i, (_, prefix, number) =>
+    `${prefix.charAt(0).toUpperCase()}${prefix.slice(1)} ${number}`,
+  );
+};
+
+const formatSizeTableNumber = (value, decimals = 2) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return "-";
+  return parsed.toFixed(decimals).replace(/\.?0+$/, "");
+};
 
 const getWeightValue = (weight = {}, key = "") => {
   const normalizedKey = String(key || "").trim();
@@ -128,6 +145,97 @@ const getCalculatedInspectedCbm = (item) =>
   ?? item?.cbm?.qc_total
   ?? item?.cbm?.total
   ?? "0";
+
+const buildInspectedSizeRows = (item = {}) => {
+  const itemEntries = normalizeMeasurementEntries(
+    item?.inspected_item_sizes,
+    "net_weight",
+  );
+  const boxEntries = normalizeMeasurementEntries(
+    item?.inspected_box_sizes,
+    "gross_weight",
+  );
+  const fallbackItemLbh = getInspectedItemLbh(item);
+  const fallbackBoxLbh = getInspectedBoxLbh(item);
+  const normalizedItemEntries =
+    itemEntries.length > 0
+      ? itemEntries
+      : fallbackItemLbh?.L && fallbackItemLbh?.B && fallbackItemLbh?.H
+        ? [
+            {
+              ...fallbackItemLbh,
+              remark: "item",
+              weight: getInspectedWeight(item, "net"),
+            },
+          ]
+        : [];
+  const normalizedBoxEntries =
+    boxEntries.length > 0
+      ? boxEntries
+      : fallbackBoxLbh?.L && fallbackBoxLbh?.B && fallbackBoxLbh?.H
+        ? [
+            {
+              ...fallbackBoxLbh,
+              remark: "box",
+              weight: getInspectedWeight(item, "gross"),
+            },
+          ]
+        : [];
+
+  return [
+    ...normalizedItemEntries.map((entry, index) => ({
+      ...entry,
+      groupLabel: "Item",
+      partLabel: formatMeasurementPartLabel(entry?.remark, index === 0 ? "Item" : `Entry ${index + 1}`),
+      weightLabel: "Net",
+    })),
+    ...normalizedBoxEntries.map((entry, index) => ({
+      ...entry,
+      groupLabel: "Box",
+      partLabel: formatMeasurementPartLabel(entry?.remark, index === 0 ? "Box" : `Entry ${index + 1}`),
+      weightLabel: "Gross",
+    })),
+  ];
+};
+
+const InspectedSizeCell = ({ item }) => {
+  const entries = buildInspectedSizeRows(item);
+
+  if (entries.length === 0) {
+    return <span className="text-secondary">No size data</span>;
+  }
+
+  return (
+    <div className="table-responsive">
+      <table className="table table-sm align-middle mb-0 om-size-data-table items-size-data-table">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Part</th>
+            <th>L x B x H</th>
+            <th>Weight</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map((entry, index) => (
+            <tr key={`${entry.groupLabel}-${entry?.remark || "entry"}-${index}`}>
+              <td>{entry.groupLabel}</td>
+              <td>{entry.partLabel}</td>
+              <td>
+                {formatSizeTableNumber(entry?.L)} x {formatSizeTableNumber(entry?.B)} x{" "}
+                {formatSizeTableNumber(entry?.H)}
+              </td>
+              <td>
+                {formatSizeTableNumber(entry?.weight, 3)}
+                <span className="items-size-weight-label"> {entry.weightLabel}</span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
 
 const hasItemQcRecord = (item = {}) =>
   Boolean(
@@ -429,16 +537,15 @@ const Items = () => {
           if (column === "name") return item?.name;
           if (column === "brand") return item?.brand_name || item?.brand;
           if (column === "vendor") return getVendorNames(item);
-          if (column === "netWeight") return getInspectedWeight(item, "net");
-          if (column === "grossWeight") return getInspectedWeight(item, "gross");
           if (column === "cbm") return Number(getCalculatedInspectedCbm(item) || 0);
-          if (column === "itemLbh") {
-            const value = getInspectedItemLbh(item);
-            return [value?.L || 0, value?.B || 0, value?.H || 0];
-          }
-          if (column === "boxLbh") {
-            const value = getInspectedBoxLbh(item);
-            return [value?.L || 0, value?.B || 0, value?.H || 0];
+          if (column === "inspectedSize") {
+            const firstSizeRow = buildInspectedSizeRows(item)[0] || {};
+            return [
+              firstSizeRow?.L || 0,
+              firstSizeRow?.B || 0,
+              firstSizeRow?.H || 0,
+              firstSizeRow?.weight || 0,
+            ];
           }
           return "";
         },
@@ -802,7 +909,7 @@ const Items = () => {
               <div className="text-center py-4">Loading...</div>
             ) : (
               <div className="table-responsive">
-                <table className="table table-striped table-hover align-middle om-table mb-0">
+                <table className="table table-striped table-hover align-middle om-table items-table mb-0">
                   <thead className="table-primary">
                     <tr>
                       <th>
@@ -840,42 +947,18 @@ const Items = () => {
                       </th>
                       <th>
                         <SortHeaderButton
-                          label="Net Weight"
-                          isActive={sortBy === "netWeight"}
-                          direction={sortOrder}
-                          onClick={() => handleSortColumn("netWeight", "desc")}
-                        />
-                      </th>
-                      <th>
-                        <SortHeaderButton
-                          label="Gross Weight"
-                          isActive={sortBy === "grossWeight"}
-                          direction={sortOrder}
-                          onClick={() => handleSortColumn("grossWeight", "desc")}
-                        />
-                      </th>
-                      <th>
-                        <SortHeaderButton
                           label="CBM"
                           isActive={sortBy === "cbm"}
                           direction={sortOrder}
                           onClick={() => handleSortColumn("cbm", "desc")}
                         />
                       </th>
-                      <th>
+                      <th className="items-size-column">
                         <SortHeaderButton
-                          label="Item LBH"
-                          isActive={sortBy === "itemLbh"}
+                          label="Inspected Size"
+                          isActive={sortBy === "inspectedSize"}
                           direction={sortOrder}
-                          onClick={() => handleSortColumn("itemLbh", "asc")}
-                        />
-                      </th>
-                      <th>
-                        <SortHeaderButton
-                          label="Box LBH"
-                          isActive={sortBy === "boxLbh"}
-                          direction={sortOrder}
-                          onClick={() => handleSortColumn("boxLbh", "asc")}
+                          onClick={() => handleSortColumn("inspectedSize", "asc")}
                         />
                       </th>
                       <th className="items-action-column">Actions</th>
@@ -886,7 +969,7 @@ const Items = () => {
                   <tbody>
                     {sortedRows.length === 0 && (
                       <tr>
-                        <td colSpan="11" className="text-center py-4">
+                        <td colSpan="8" className="text-center py-4">
                           No items found
                         </td>
                       </tr>
@@ -935,11 +1018,10 @@ const Items = () => {
                                 : "N/A")}
                           </td>
                           <td>{getVendorNames(item)}</td>
-                          <td>{formatFixedNumber(getInspectedWeight(item, "net"))}</td>
-                          <td>{formatFixedNumber(getInspectedWeight(item, "gross"))}</td>
                           <td>{formatCbm(getCalculatedInspectedCbm(item))}</td>
-                          <td>{formatLbhValue(getInspectedItemLbh(item), { fallback: "0.00 x 0.00 x 0.00" })}</td>
-                          <td>{formatLbhValue(getInspectedBoxLbh(item), { fallback: "0.00 x 0.00 x 0.00" })}</td>
+                          <td className="items-size-column">
+                            <InspectedSizeCell item={item} />
+                          </td>
                           <td className="items-action-column">
                             <div className="items-row-actions" aria-label={`Actions for ${item?.code || "item"}`}>
                               <button

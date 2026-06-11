@@ -2662,6 +2662,34 @@ const findTransferTargetOrderAndQc = async ({
   };
 };
 
+const resolveInspectionTransferAvailability = ({
+  sourceOrder = null,
+  sourceQc = null,
+  sourceInspection = null,
+} = {}) => {
+  const passedQuantity = toNonNegativeNumber(sourceInspection?.passed, 0);
+  const sourceProgress = deriveOrderProgress({
+    orderEntry: sourceOrder,
+    qcRecord: sourceQc,
+  });
+  const shippedQuantity = toNonNegativeNumber(sourceProgress?.shipped_quantity, 0);
+  const nonShippedPassedQuantity = toNonNegativeNumber(
+    sourceProgress?.inspected_unshipped_quantity,
+    0,
+  );
+  const transferableQuantity = Math.max(
+    0,
+    Math.min(passedQuantity, nonShippedPassedQuantity),
+  );
+
+  return {
+    passedQuantity,
+    shippedQuantity,
+    nonShippedPassedQuantity,
+    transferableQuantity,
+  };
+};
+
 /**
  * GET /qclist
  * Fetch all QC records (pagination optional)
@@ -8676,7 +8704,7 @@ exports.lookupInspectionTransferTarget = async (req, res) => {
     }
 
     const qc = await QC.findById(qcId)
-      .select("order item order_meta")
+      .select("order item order_meta quantities request_history request_type")
       .populate("order", "order_id brand vendor item quantity status shipment qc_record");
     if (!qc || !qc.order) {
       return res.status(404).json({ message: "QC record not found" });
@@ -8719,6 +8747,17 @@ exports.lookupInspectionTransferTarget = async (req, res) => {
       });
     }
 
+    const sourceAvailability = resolveInspectionTransferAvailability({
+      sourceOrder: qc.order,
+      sourceQc: qc,
+      sourceInspection,
+    });
+    if (sourceAvailability.transferableQuantity <= 0) {
+      return res.status(400).json({
+        message: "This inspection record has no passed quantity left that has not already shipped",
+      });
+    }
+
     const sourceLabels = normalizeLabels(sourceInspection?.labels_added);
     const {
       targetOrder,
@@ -8750,6 +8789,9 @@ exports.lookupInspectionTransferTarget = async (req, res) => {
           order_id: qc?.order?.order_id || qc?.order_meta?.order_id || "",
           item_code: qc?.item?.item_code || "",
           passed_quantity: sourcePassed,
+          shipped_quantity: sourceAvailability.shippedQuantity,
+          non_shipped_passed_quantity: sourceAvailability.nonShippedPassedQuantity,
+          transferable_quantity: sourceAvailability.transferableQuantity,
           available_labels: sourceLabels,
           available_labels_count: sourceLabels.length,
         },
@@ -8812,14 +8854,31 @@ exports.transferInspectionRecord = async (req, res) => {
     }
 
     const sourcePassed = toNonNegativeNumber(sourceInspection?.passed, 0);
+    if (sourcePassed <= 0) {
+      return res.status(400).json({
+        message: "This inspection record has no passed quantity available to transfer",
+      });
+    }
+
+    const sourceAvailability = resolveInspectionTransferAvailability({
+      sourceOrder: sourceQc.order,
+      sourceQc,
+      sourceInspection,
+    });
+    if (sourceAvailability.transferableQuantity <= 0) {
+      return res.status(400).json({
+        message: "This inspection record has no passed quantity left that has not already shipped",
+      });
+    }
+
     if (transferQuantityRaw > sourcePassed) {
       return res.status(400).json({
         message: "Transfer quantity cannot be greater than the passed quantity of this inspection record",
       });
     }
-    if (transferQuantityRaw !== sourcePassed) {
+    if (transferQuantityRaw > sourceAvailability.transferableQuantity) {
       return res.status(400).json({
-        message: "Inspection record transfer must move the full passed quantity of the source inspection record",
+        message: "Transfer quantity cannot exceed the passed quantity that has not already shipped",
       });
     }
 
