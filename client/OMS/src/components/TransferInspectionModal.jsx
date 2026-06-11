@@ -172,11 +172,23 @@ const toNonNegativeNumber = (value) => {
 const TransferInspectionModal = ({
   qc,
   inspectionRecord,
+  sourceRemainingQuantity = null,
   onClose,
   onTransferred,
 }) => {
   const inspectionRecordId = String(inspectionRecord?._id || "").trim();
   const sourcePassedQuantity = Number(inspectionRecord?.passed || 0) || 0;
+  const hasSourceRemainingLimit =
+    sourceRemainingQuantity !== null &&
+    sourceRemainingQuantity !== undefined &&
+    Number.isFinite(Number(sourceRemainingQuantity));
+  const localSourceRemainingQuantity = hasSourceRemainingLimit
+    ? toNonNegativeNumber(sourceRemainingQuantity)
+    : null;
+  const localSourceTransferableQuantity =
+    localSourceRemainingQuantity === null
+      ? sourcePassedQuantity
+      : Math.min(sourcePassedQuantity, localSourceRemainingQuantity);
   const sourceLabels = useMemo(
     () => normalizeLabels(inspectionRecord?.labels_added),
     [inspectionRecord?.labels_added],
@@ -185,7 +197,7 @@ const TransferInspectionModal = ({
 
   const [po, setPo] = useState("");
   const [quantity, setQuantity] = useState(
-    sourcePassedQuantity > 0 ? String(sourcePassedQuantity) : "",
+    localSourceTransferableQuantity > 0 ? String(localSourceTransferableQuantity) : "",
   );
   const [labelRanges, setLabelRanges] = useState([createEmptyLabelRange()]);
   const [lookupResult, setLookupResult] = useState(null);
@@ -196,14 +208,16 @@ const TransferInspectionModal = ({
 
   useEffect(() => {
     setPo("");
-    setQuantity(sourcePassedQuantity > 0 ? String(sourcePassedQuantity) : "");
+    setQuantity(
+      localSourceTransferableQuantity > 0 ? String(localSourceTransferableQuantity) : "",
+    );
     setLabelRanges([createEmptyLabelRange()]);
     setLookupResult(null);
     setLookupLoading(false);
     setLookupError("");
     setSaving(false);
     setError("");
-  }, [inspectionRecordId, sourcePassedQuantity]);
+  }, [inspectionRecordId, localSourceTransferableQuantity]);
 
   const parsedLabelRangeData = useMemo(
     () => parseLabelRanges(labelRanges),
@@ -250,22 +264,22 @@ const TransferInspectionModal = ({
   const sourceShippedQuantity = toNonNegativeNumber(
     lookupResult?.source?.shipped_quantity,
   );
-  const sourceNonShippedPassedQuantity = toNonNegativeNumber(
-    lookupResult?.source?.non_shipped_passed_quantity,
-  );
+  const sourceRemainingLimitQuantity = lookupResult
+    ? toNonNegativeNumber(lookupResult?.source?.remaining_quantity)
+    : localSourceRemainingQuantity;
   const sourceTransferableQuantity = toNonNegativeNumber(
     lookupResult?.source?.transferable_quantity,
   );
   const maxTransferQuantity = useMemo(() => {
     const targetOpenQuantity = toNonNegativeNumber(lookupResult?.target?.open_quantity);
-    const sourceCap = sourceTransferableQuantity || sourcePassedQuantity;
+    const sourceCap = sourceTransferableQuantity || localSourceTransferableQuantity;
 
     if (targetOpenQuantity > 0) {
       return Math.min(sourceCap, targetOpenQuantity);
     }
 
     return sourceCap;
-  }, [lookupResult?.target?.open_quantity, sourcePassedQuantity, sourceTransferableQuantity]);
+  }, [localSourceTransferableQuantity, lookupResult?.target?.open_quantity, sourceTransferableQuantity]);
 
   const requiredLabelsCount = labelRequirement.requiredCount;
   const requiredLabelsText = !hasSourceLabels
@@ -328,7 +342,7 @@ const TransferInspectionModal = ({
       const nextMaxQuantity =
         sourceCap > 0 && targetCap > 0
           ? Math.min(sourceCap, targetCap)
-          : sourceCap || targetCap || sourcePassedQuantity;
+          : sourceCap || targetCap || localSourceTransferableQuantity;
 
       setQuantity(nextMaxQuantity > 0 ? String(nextMaxQuantity) : "");
     } catch (lookupRequestError) {
@@ -537,15 +551,15 @@ const TransferInspectionModal = ({
                 </div>
                 <div className="row g-3 mt-1">
                   <div className="col-md-4">
-                    <div className="small text-secondary">Passed Not Shipped</div>
-                    <div className="fw-semibold">{sourceNonShippedPassedQuantity}</div>
+                    <div className="small text-secondary">Remaining</div>
+                    <div className="fw-semibold">{sourceRemainingLimitQuantity ?? "N/A"}</div>
                   </div>
                   <div className="col-md-4">
                     <div className="small text-secondary">Source Transferable</div>
                     <div className="fw-semibold">{sourceTransferableQuantity}</div>
                   </div>
                   <div className="col-md-4">
-                    <div className="small text-secondary">Max Transfer</div>
+                    <div className="small text-secondary">Effective Max</div>
                     <div className="fw-semibold">{maxTransferQuantity}</div>
                   </div>
                 </div>
@@ -571,7 +585,7 @@ const TransferInspectionModal = ({
                   disabled={!lookupResult || saving}
                 />
                 <div className="form-text">
-                  Max transferable: {maxTransferQuantity || 0} (passed and not shipped, capped by target PO open quantity)
+                  Max transferable: {maxTransferQuantity || 0} (remaining quantity, passed quantity, and target PO open quantity)
                 </div>
               </div>
               <div className="col-md-6">

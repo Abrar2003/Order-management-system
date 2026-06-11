@@ -63,6 +63,20 @@ const normalizeLabels = (labels) => {
   return [...new Set(numericLabels)].sort((a, b) => a - b);
 };
 
+const getLatestShipmentRemainingQuantity = (shipmentEntries = []) => {
+  const entries = Array.isArray(shipmentEntries) ? shipmentEntries : [];
+  let latestRemaining = null;
+
+  entries.forEach((entry) => {
+    if (entry?.pending === null || entry?.pending === undefined) return;
+    const parsedPending = Number(entry.pending);
+    if (!Number.isFinite(parsedPending)) return;
+    latestRemaining = Math.max(0, parsedPending);
+  });
+
+  return latestRemaining;
+};
+
 const toTimestamp = (value) => {
   if (!value) return 0;
   const asString = String(value).trim();
@@ -930,6 +944,10 @@ const QcDetails = () => {
         },
       }),
     [qc?.order?.shipment, shippingSortBy, shippingSortOrder],
+  );
+  const sourceShippingRemainingQuantity = useMemo(
+    () => getLatestShipmentRemainingQuantity(qc?.order?.shipment),
+    [qc?.order?.shipment],
   );
 
   const fetchQcDetails = useCallback(async () => {
@@ -2519,6 +2537,7 @@ const QcDetails = () => {
         <TransferInspectionModal
           qc={qc}
           inspectionRecord={transferInspectionRecord}
+          sourceRemainingQuantity={sourceShippingRemainingQuantity}
           onClose={() => setTransferInspectionRecord(null)}
           onTransferred={() => {
             setTransferInspectionRecord(null);

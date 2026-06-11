@@ -2662,6 +2662,20 @@ const findTransferTargetOrderAndQc = async ({
   };
 };
 
+const resolveLatestShipmentRemainingQuantity = (shipmentEntries = []) => {
+  const entries = Array.isArray(shipmentEntries) ? shipmentEntries : [];
+  let latestRemaining = null;
+
+  entries.forEach((entry) => {
+    if (entry?.pending === null || entry?.pending === undefined) return;
+    const pending = Number(entry.pending);
+    if (!Number.isFinite(pending)) return;
+    latestRemaining = Math.max(0, pending);
+  });
+
+  return latestRemaining;
+};
+
 const resolveInspectionTransferAvailability = ({
   sourceOrder = null,
   sourceQc = null,
@@ -2677,15 +2691,24 @@ const resolveInspectionTransferAvailability = ({
     sourceProgress?.inspected_unshipped_quantity,
     0,
   );
+  const shippingRemainingQuantity = resolveLatestShipmentRemainingQuantity(
+    sourceOrder?.shipment,
+  );
+  const sourceRemainingQuantity =
+    shippingRemainingQuantity === null
+      ? nonShippedPassedQuantity
+      : Math.min(nonShippedPassedQuantity, shippingRemainingQuantity);
   const transferableQuantity = Math.max(
     0,
-    Math.min(passedQuantity, nonShippedPassedQuantity),
+    Math.min(passedQuantity, sourceRemainingQuantity),
   );
 
   return {
     passedQuantity,
     shippedQuantity,
     nonShippedPassedQuantity,
+    shippingRemainingQuantity,
+    sourceRemainingQuantity,
     transferableQuantity,
   };
 };
@@ -8791,6 +8814,8 @@ exports.lookupInspectionTransferTarget = async (req, res) => {
           passed_quantity: sourcePassed,
           shipped_quantity: sourceAvailability.shippedQuantity,
           non_shipped_passed_quantity: sourceAvailability.nonShippedPassedQuantity,
+          remaining_quantity: sourceAvailability.sourceRemainingQuantity,
+          shipping_remaining_quantity: sourceAvailability.shippingRemainingQuantity,
           transferable_quantity: sourceAvailability.transferableQuantity,
           available_labels: sourceLabels,
           available_labels_count: sourceLabels.length,
