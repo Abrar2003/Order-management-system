@@ -28,6 +28,24 @@ const CHECKED_STATUS_SORT_ORDER = {
   "Checking Pending": 2,
 };
 
+const CHECKED_STATUS_SUMMARY_FILTERS = [
+  {
+    label: "Checked",
+    value: "checked",
+    summaryKey: "checked",
+  },
+  {
+    label: "Partially Checked",
+    value: "partially checked",
+    summaryKey: "partially_checked",
+  },
+  {
+    label: "Checking Pending",
+    value: "checking pending",
+    summaryKey: "checking_pending",
+  },
+];
+
 const getCheckedStatusClassName = (status) => {
   if (status === "Checked") return "text-success fw-semibold";
   if (status === "Partially Checked") return "text-warning fw-semibold";
@@ -268,6 +286,13 @@ const Containers = () => {
     setToDateFilter("");
   };
 
+  const handleSummaryStatusFilter = useCallback((statusValue) => {
+    const nextStatus = normalizeFilterParam(statusValue, "all");
+
+    setDraftCheckedStatusFilter(nextStatus);
+    setCheckedStatusFilter(nextStatus);
+  }, []);
+
   const sortedRows = useMemo(
     () =>
       sortClientRows(rows, {
@@ -423,13 +448,20 @@ const Containers = () => {
             <span className="om-summary-chip">
               To: {toDateFilter ? formatDateDDMMYYYY(toDateFilter, toDateFilter) : "all"}
             </span>
-            <span className="om-summary-chip">Checked: {summary?.checked ?? 0}</span>
-            <span className="om-summary-chip">
-              Partially Checked: {summary?.partially_checked ?? 0}
-            </span>
-            <span className="om-summary-chip">
-              Checking Pending: {summary?.checking_pending ?? 0}
-            </span>
+            {CHECKED_STATUS_SUMMARY_FILTERS.map((statusFilter) => (
+              <button
+                key={statusFilter.value}
+                type="button"
+                className={`om-summary-chip om-summary-chip-button${
+                  checkedStatusFilter === statusFilter.value ? " is-active" : ""
+                }`}
+                onClick={() => handleSummaryStatusFilter(statusFilter.value)}
+                aria-pressed={checkedStatusFilter === statusFilter.value}
+                title={`Filter containers by ${statusFilter.label}`}
+              >
+                {statusFilter.label}: {summary?.[statusFilter.summaryKey] ?? 0}
+              </button>
+            ))}
             <span className="om-summary-chip">Total CBM: {summary?.total_cbm ?? 0}</span>
             <span className="om-summary-chip">
               Showing: {rows.length} {rows.length === 1 ? "container" : "containers"}

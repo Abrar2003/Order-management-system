@@ -333,6 +333,38 @@ small,
   letter-spacing: 0.03em;
 }
 
+.om-summary-chip-button {
+  cursor: pointer;
+  appearance: none;
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.om-summary-chip-button:hover,
+.om-summary-chip-button:focus-visible {
+  border-color: var(--om-color-accent);
+  background-color: var(--om-color-accent-soft);
+  color: var(--om-color-text);
+}
+
+.om-summary-chip-button:focus-visible {
+  outline: 3px solid rgba(124, 109, 89, 0.22);
+  outline-offset: 2px;
+}
+
+.om-summary-chip-button:active {
+  transform: translateY(1px);
+}
+
+.om-summary-chip-button.is-active {
+  border-color: var(--om-color-accent-strong);
+  background-color: var(--om-color-accent-soft);
+  color: var(--om-color-text);
+}
+
 .product-database-box-toolbar .form-select-sm,
 .product-database-box-toolbar .btn-sm {
   min-height: auto;
