@@ -878,7 +878,7 @@ const Items = () => {
                           onClick={() => handleSortColumn("boxLbh", "asc")}
                         />
                       </th>
-                      <th>Action</th>
+                      <th className="items-action-column">Actions</th>
                       {/* <th>Source</th> */}
                       {/* <th>Updated At</th> */}
                     </tr>
@@ -940,20 +940,20 @@ const Items = () => {
                           <td>{formatCbm(getCalculatedInspectedCbm(item))}</td>
                           <td>{formatLbhValue(getInspectedItemLbh(item), { fallback: "0.00 x 0.00 x 0.00" })}</td>
                           <td>{formatLbhValue(getInspectedBoxLbh(item), { fallback: "0.00 x 0.00 x 0.00" })}</td>
-                          <td>
-                            <div className="d-flex flex-wrap gap-2">
+                          <td className="items-action-column">
+                            <div className="items-row-actions" aria-label={`Actions for ${item?.code || "item"}`}>
                               <button
                                 type="button"
-                                className="btn btn-outline-secondary btn-sm"
+                                className="items-action-btn"
                                 onClick={() => navigateToItemDetails(item)}
                                 disabled={!item?.code}
                                 title="Open item details"
                               >
-                                View Item
+                                View
                               </button>
                               <button
                                 type="button"
-                                className="btn btn-outline-info btn-sm"
+                                className="items-action-btn"
                                 onClick={() => navigateToLatestInspectionReport(item)}
                                 disabled={!item?.latest_inspection_report_qc_id}
                                 title={
@@ -962,13 +962,14 @@ const Items = () => {
                                     : "No inspection report available yet"
                                 }
                               >
-                                Inspection Report
+                                Report
                               </button>
                               {canEditItems && (
                                 <button
                                   type="button"
-                                  className="btn btn-outline-primary btn-sm"
+                                  className="items-action-btn"
                                   onClick={() => setSelectedItem(item)}
+                                  title="Edit item"
                                 >
                                   Edit
                                 </button>
@@ -976,18 +977,18 @@ const Items = () => {
                               {canCreateComplaints && (
                                 <button
                                   type="button"
-                                  className="btn btn-outline-danger btn-sm"
+                                  className="items-action-btn items-action-btn-danger"
                                   onClick={() => handleOpenComplaintModal(item)}
                                   disabled={savingComplaint}
+                                  title="Create complaint"
                                 >
-                                  Create Complaint
+                                  Complaint
                                 </button>
                               )}
                               {canUploadItemFiles && itemId && (
-                                <>
+                                <div className="items-upload-action">
                                   <select
-                                    className="form-select form-select-sm"
-                                    style={{ width: "170px" }}
+                                    className="form-select form-select-sm items-upload-select"
                                     value={selectedFileType}
                                     disabled={Boolean(uploadingItemId)}
                                     onChange={(e) =>
@@ -1002,7 +1003,7 @@ const Items = () => {
                                   </select>
                                   <button
                                     type="button"
-                                    className="btn btn-outline-primary btn-sm"
+                                    className="items-action-btn items-upload-btn"
                                     onClick={() => handleOpenItemFilePicker(item)}
                                     disabled={Boolean(uploadingItemId) || isQcImageLocked}
                                     title={
@@ -1011,9 +1012,9 @@ const Items = () => {
                                         : ""
                                     }
                                   >
-                                    {isUploadingThisItem ? "Uploading..." : "Upload Files"}
+                                    {isUploadingThisItem ? "Uploading..." : "Upload"}
                                   </button>
-                                </>
+                                </div>
                               )}
                             </div>
                           </td>
