@@ -585,6 +585,28 @@ const ItemDetails = () => {
     setPoSortOrder(next.sortOrder);
   };
 
+  const getPoRowTarget = useCallback((row = {}) => {
+    const inspectionCount = Number(row?.inspection_count || 0);
+    const qcId = normalizeText(row?.qc_id);
+    if (inspectionCount > 0 && qcId) {
+      return `/qc/${encodeURIComponent(qcId)}`;
+    }
+
+    const po = normalizeText(row?.po);
+    return po ? `/orders?order_id=${encodeURIComponent(po)}` : "";
+  }, []);
+
+  const handlePoRowClick = useCallback(
+    (row = {}) => {
+      const target = getPoRowTarget(row);
+      if (!target) return;
+      navigate(target, {
+        state: { fromPreviousPage: `${location.pathname}${location.search}` },
+      });
+    },
+    [getPoRowTarget, location.pathname, location.search, navigate],
+  );
+
   const sortedOrders = useMemo(
     () =>
       sortClientRows(orders, {
@@ -948,14 +970,8 @@ const ItemDetails = () => {
                         ) : sortedOrders.map((row) => (
                           <tr
                             key={row.id || row.po}
-                            style={{ cursor: row.qc_id ? "pointer" : "default" }}
-                            onClick={() => {
-                              if (row.qc_id) {
-                                navigate(`/qc/${encodeURIComponent(row.qc_id)}`, {
-                                  state: { fromPreviousPage: `${location.pathname}${location.search}` },
-                                });
-                              }
-                            }}
+                            style={{ cursor: getPoRowTarget(row) ? "pointer" : "default" }}
+                            onClick={() => handlePoRowClick(row)}
                           >
                             <td>{toDisplay(row.po, "N/A")}</td>
                             <td>{row.order_date ? formatDateDDMMYYYY(row.order_date) : "Not Set"}</td>

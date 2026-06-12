@@ -25,7 +25,7 @@ const ComplaintFilesDropdown = ({ files = [] }) => {
             <img
               className="complaint-file-thumbnail"
               src={file.url}
-              alt={file.original_name || file.file_name || "Complaint file"}
+              alt={file.original_name || file.file_name || "Complain file"}
               loading="lazy"
             />
           )}

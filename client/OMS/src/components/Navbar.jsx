@@ -294,7 +294,7 @@ const Navbar = () => {
       routeMenuItem("samples", "Shipped Samples", "/shipped-samples"),
       routeMenuItem("qc-report-mismatch", "QC Mismatch Report", "/reports/qc-report-mismatch"),
       ...(hasPermission("complaints", "view") && isManagerLikeRole(permissionRole)
-        ? [routeMenuItem("complaints", "Complaints", "/complaints")]
+        ? [routeMenuItem("complaints", "Complains", "/complaints")]
         : []),
     ];
 

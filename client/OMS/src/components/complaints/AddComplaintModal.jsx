@@ -130,7 +130,7 @@ const AddComplaintModal = ({
         <div className="modal-content">
           <form onSubmit={handleSubmit}>
             <div className="modal-header">
-              <h5 className="modal-title">{isEditMode ? "Edit Complaint" : "Add Complaint"}</h5>
+              <h5 className="modal-title">{isEditMode ? "Edit Complain" : "Add Complain"}</h5>
               <button type="button" className="btn-close" onClick={onClose} disabled={saving} />
             </div>
             <div className="modal-body">
@@ -255,7 +255,7 @@ const AddComplaintModal = ({
               <button type="submit" className="btn btn-primary" disabled={saving}>
                 {saving
                   ? isEditMode ? "Saving..." : "Creating..."
-                  : isEditMode ? "Save Changes" : "Create Complaint"}
+                  : isEditMode ? "Save Changes" : "Create Complain"}
               </button>
             </div>
           </form>

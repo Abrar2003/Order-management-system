@@ -620,9 +620,9 @@ const Items = () => {
       setSuccess("");
       await createComplaint(formData);
       setComplaintItem(null);
-      setSuccess("Complaint created successfully.");
+      setSuccess("Complain created successfully.");
     } catch (createError) {
-      setError(createError?.response?.data?.message || "Failed to create complaint.");
+      setError(createError?.response?.data?.message || "Failed to create complain.");
     } finally {
       setSavingComplaint(false);
     }
@@ -1062,9 +1062,9 @@ const Items = () => {
                                   className="items-action-btn items-action-btn-danger"
                                   onClick={() => handleOpenComplaintModal(item)}
                                   disabled={savingComplaint}
-                                  title="Create complaint"
+                                  title="Create complain"
                                 >
-                                  Complaint
+                                  Complain
                                 </button>
                               )}
                               {canUploadItemFiles && itemId && (

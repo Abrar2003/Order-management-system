@@ -25,7 +25,7 @@ const AddCommentModal = ({ complaint, onClose, onSubmit, saving = false }) => {
             </div>
             <div className="modal-body">
               <div className="small text-secondary mb-2">
-                {complaint?.complaint_no || complaint?.item_code || "Complaint"}
+                {complaint?.complaint_no || complaint?.item_code || "Complain"}
               </div>
               {error && <div className="alert alert-danger py-2">{error}</div>}
               <textarea

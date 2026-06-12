@@ -54,7 +54,7 @@ const QcItemComplaintsSection = ({ enabled = true, itemCode = "" }) => {
       setComplaints(Array.isArray(response?.data?.data) ? response.data.data : []);
     } catch (loadError) {
       setComplaints([]);
-      setError(loadError?.response?.data?.message || "Failed to load item complaints.");
+      setError(loadError?.response?.data?.message || "Failed to load item complains.");
     } finally {
       setLoading(false);
     }
@@ -112,7 +112,7 @@ const QcItemComplaintsSection = ({ enabled = true, itemCode = "" }) => {
       replaceComplaint(response?.data?.data);
       setCommentDrafts((prev) => ({ ...prev, [complaintId]: "" }));
     } catch (commentError) {
-      setError(commentError?.response?.data?.message || "Failed to add complaint comment.");
+      setError(commentError?.response?.data?.message || "Failed to add complain comment.");
     } finally {
       setSavingId("");
     }
@@ -124,26 +124,26 @@ const QcItemComplaintsSection = ({ enabled = true, itemCode = "" }) => {
     <section className="qc-complaints-section">
       <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
         <div className="d-flex align-items-center gap-2">
-          <h3 className="h6 mb-0">Complaints</h3>
+          <h3 className="h6 mb-0">Complains</h3>
           {unreadTotal > 0 && (
-            <span className="qc-complaints-unread-badge" title={`${unreadTotal} unread complaint update${unreadTotal === 1 ? "" : "s"}`}>
+            <span className="qc-complaints-unread-badge" title={`${unreadTotal} unread complain update${unreadTotal === 1 ? "" : "s"}`}>
               {unreadTotal}
             </span>
           )}
         </div>
         <span className="small text-secondary">
-          {complaints.length} related complaint{complaints.length === 1 ? "" : "s"}
+          {complaints.length} related complain{complaints.length === 1 ? "" : "s"}
         </span>
       </div>
 
       {!normalizedItemCode ? (
-        <div className="small text-muted">No item code available for complaint lookup.</div>
+        <div className="small text-muted">No item code available for complain lookup.</div>
       ) : loading ? (
-        <div className="small text-muted">Loading complaints...</div>
+        <div className="small text-muted">Loading complains...</div>
       ) : error && complaints.length === 0 ? (
         <div className="alert alert-danger py-2 mb-0">{error}</div>
       ) : complaints.length === 0 ? (
-        <div className="small text-muted">No active complaints found for this item.</div>
+        <div className="small text-muted">No active complains found for this item.</div>
       ) : (
         <div className="qc-complaints-accordion">
           {error && <div className="alert alert-danger py-2 mb-2">{error}</div>}
@@ -163,7 +163,7 @@ const QcItemComplaintsSection = ({ enabled = true, itemCode = "" }) => {
                 >
                   <span className="qc-complaint-toggle-main">
                     <span className="fw-semibold">
-                      {complaint.complaint_no || "Complaint"}
+                      {complaint.complaint_no || "Complain"}
                     </span>
                     <span className="small text-secondary">
                       {complaint.category || "Uncategorized"} | {getCommentCount(complaint)} comment{getCommentCount(complaint) === 1 ? "" : "s"} | {getFileCount(complaint)} file{getFileCount(complaint) === 1 ? "" : "s"}
@@ -235,7 +235,7 @@ const QcItemComplaintsSection = ({ enabled = true, itemCode = "" }) => {
                         rows="3"
                         value={commentDrafts[complaint._id] || ""}
                         onChange={(event) => handleDraftChange(complaint._id, event.target.value)}
-                        placeholder="Write a complaint comment"
+                        placeholder="Write a complain comment"
                         disabled={isSaving}
                       />
                       <div className="d-flex justify-content-end mt-2">

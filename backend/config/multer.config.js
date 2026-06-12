@@ -159,7 +159,7 @@ const complaintFileFilter = (_req, file, cb) => {
     return;
   }
 
-  cb(new Error("Unsupported complaint file type"), false);
+  cb(new Error("Unsupported complain file type"), false);
 };
 
 const complaintUpload = multer({
@@ -332,26 +332,26 @@ const handleComplaintUploadErrors = (err, _req, res, next) => {
     if (err.code === "LIMIT_FILE_SIZE") {
       return res.status(400).json({
         success: false,
-        message: `Complaint file exceeds the maximum allowed size of ${COMPLAINT_UPLOAD_MAX_FILE_SIZE} bytes`,
+        message: `Complain file exceeds the maximum allowed size of ${COMPLAINT_UPLOAD_MAX_FILE_SIZE} bytes`,
       });
     }
 
     if (err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE") {
       return res.status(400).json({
         success: false,
-        message: `You can upload up to ${COMPLAINT_UPLOAD_MAX_FILE_COUNT} complaint files`,
+        message: `You can upload up to ${COMPLAINT_UPLOAD_MAX_FILE_COUNT} complain files`,
       });
     }
 
     return res.status(400).json({
       success: false,
-      message: err.message || "Invalid complaint upload request",
+      message: err.message || "Invalid complain upload request",
     });
   }
 
   return res.status(400).json({
     success: false,
-    message: err?.message || "Invalid complaint upload request",
+    message: err?.message || "Invalid complain upload request",
   });
 };
 

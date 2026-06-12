@@ -8,7 +8,7 @@ const ComplaintAccordionDetails = ({ complaint }) => {
     <div className="complaint-details-panel">
       <div className="complaint-details-grid">
         <div>
-          <div className="small text-secondary">Complaint No</div>
+          <div className="small text-secondary">Complain No</div>
           <div className="fw-semibold">{complaint?.complaint_no || "N/A"}</div>
         </div>
         <div>

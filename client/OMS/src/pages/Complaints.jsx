@@ -94,7 +94,7 @@ const Complaints = () => {
       setPagination(response?.data?.pagination || { page, limit: 20, total: 0, totalPages: 1 });
     } catch (loadError) {
       setRows([]);
-      setError(loadError?.response?.data?.message || "Failed to load complaints.");
+      setError(loadError?.response?.data?.message || "Failed to load complains.");
     } finally {
       setLoading(false);
     }
@@ -173,11 +173,11 @@ const Complaints = () => {
       setSaving(true);
       await createComplaint(formData);
       closeModal();
-      showToast("Complaint created successfully.");
+      showToast("Complain created successfully.");
       setPage(1);
       await loadComplaints();
     } catch (createError) {
-      showToast(createError?.response?.data?.message || "Failed to create complaint.", "danger");
+      showToast(createError?.response?.data?.message || "Failed to create complain.", "danger");
     } finally {
       setSaving(false);
     }
@@ -189,9 +189,9 @@ const Complaints = () => {
       const response = await updateComplaint(modal.complaint._id, formData);
       replaceRow(response?.data?.data);
       closeModal();
-      showToast("Complaint updated successfully.");
+      showToast("Complain updated successfully.");
     } catch (editError) {
-      showToast(editError?.response?.data?.message || "Failed to update complaint.", "danger");
+      showToast(editError?.response?.data?.message || "Failed to update complain.", "danger");
     } finally {
       setSaving(false);
     }
@@ -204,7 +204,7 @@ const Complaints = () => {
       const savedName = String(response?.data?.data?.name || categoryName || "").trim();
       if (savedName) {
         setCategoryOptions((prev) => normalizeTextOptions([...prev, savedName]));
-        showToast("Complaint category saved.");
+        showToast("Complain category saved.");
       }
       return savedName;
     } finally {
@@ -245,14 +245,14 @@ const Complaints = () => {
       ? ""
       : window.prompt("Archive reason");
     if (!complaint.archived && reason === null) return;
-    if (complaint.archived && !window.confirm("Restore this complaint?")) return;
+    if (complaint.archived && !window.confirm("Restore this complain?")) return;
     try {
       if (complaint.archived) {
         await unarchiveComplaint(complaint._id);
       } else {
         await archiveComplaint(complaint._id, reason);
       }
-      showToast(complaint.archived ? "Complaint restored." : "Complaint archived.");
+      showToast(complaint.archived ? "Complain restored." : "Complain archived.");
       await loadComplaints();
     } catch (archiveError) {
       showToast(archiveError?.response?.data?.message || "Failed to update archive state.", "danger");
@@ -315,9 +315,9 @@ const Complaints = () => {
 
         <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
           <div>
-            <h2 className="h4 mb-1">Complaints</h2>
+            <h2 className="h4 mb-1">Complains</h2>
             <div className="text-secondary small">
-              {pagination.total} complaint{pagination.total === 1 ? "" : "s"} found
+              {pagination.total} complain{pagination.total === 1 ? "" : "s"} found
             </div>
           </div>
           {canCreate && (
@@ -326,7 +326,7 @@ const Complaints = () => {
               className="btn btn-primary"
               onClick={() => setModal({ type: "add", complaint: null })}
             >
-              Add Complaint
+              Add Complain
             </button>
           )}
         </div>
@@ -340,7 +340,7 @@ const Complaints = () => {
                 className="form-control"
                 value={draftFilters.search}
                 onChange={handleDraftChange}
-                placeholder="Complaint no, item, brand, vendor, PO"
+                placeholder="Complain no, item, brand, vendor, PO"
               />
             </div>
             <div className="complaints-filter-field">
@@ -397,9 +397,9 @@ const Complaints = () => {
         <div className="card om-card">
           <div className="card-body p-0">
             {loading ? (
-              <div className="text-center py-4">Loading complaints...</div>
+              <div className="text-center py-4">Loading complains...</div>
             ) : tableRows.length === 0 ? (
-              <div className="text-center text-secondary py-4">No complaints found.</div>
+              <div className="text-center text-secondary py-4">No complains found.</div>
             ) : (
               <div className="table-responsive complaint-table-scroll">
                 <table className="table table-striped table-hover align-middle om-table mb-0 complaints-table">
@@ -488,7 +488,7 @@ const Complaints = () => {
           <button
             type="button"
             className="complaint-action-backdrop"
-            aria-label="Close complaint actions"
+            aria-label="Close complain actions"
             onClick={closeActionMenu}
           />
           <div
@@ -496,7 +496,7 @@ const Complaints = () => {
             style={{ top: `${actionMenu.top}px`, left: `${actionMenu.left}px` }}
           >
             <div className="complaint-action-menu-title">
-              {activeActionComplaint.complaint_no || activeActionComplaint.item_code || "Complaint"}
+              {activeActionComplaint.complaint_no || activeActionComplaint.item_code || "Complain"}
             </div>
             <button
               type="button"
@@ -528,7 +528,7 @@ const Complaints = () => {
                   closeActionMenu();
                 }}
               >
-                Edit complaint
+                Edit complain
               </button>
             )}
             {canUpload && (

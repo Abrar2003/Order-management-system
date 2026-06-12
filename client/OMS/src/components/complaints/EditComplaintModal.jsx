@@ -182,12 +182,12 @@ const EditComplaintModal = ({
         <div className="modal-content">
           <form onSubmit={handleSubmit}>
             <div className="modal-header">
-              <h5 className="modal-title">Edit Complaint</h5>
+              <h5 className="modal-title">Edit Complain</h5>
               <button type="button" className="btn-close" onClick={onClose} disabled={saving} />
             </div>
             <div className="modal-body">
               <div className="small text-secondary mb-3">
-                {complaint?.complaint_no || complaint?.item_code || "Complaint"}
+                {complaint?.complaint_no || complaint?.item_code || "Complain"}
               </div>
               {error && <div className="alert alert-danger py-2">{error}</div>}
 

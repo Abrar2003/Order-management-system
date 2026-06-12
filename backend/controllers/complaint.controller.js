@@ -96,12 +96,12 @@ const ensureManagerAccess = (req, res) => {
   if (isManagerLikeRole(req.user?.role)) return true;
   res.status(403).json({
     success: false,
-    message: "Complaint action is restricted to admin and manager users.",
+    message: "Complain action is restricted to admin and manager users.",
   });
   return false;
 };
 
-const ensureAdminAccess = (req, res, message = "Complaint archive actions are admin-only.") => {
+const ensureAdminAccess = (req, res, message = "Complain archive actions are admin-only.") => {
   if (isAdminOnlyRole(req.user)) return true;
   res.status(403).json({
     success: false,
@@ -115,7 +115,7 @@ const ensureQcComplaintAccess = (req, res) => {
   if (QC_COMPLAINT_ROLE_KEYS.has(roleKey)) return true;
   res.status(403).json({
     success: false,
-    message: "Complaint viewing is restricted to QC, admin, and manager users.",
+    message: "Complain viewing is restricted to QC, admin, and manager users.",
   });
   return false;
 };
@@ -230,7 +230,7 @@ const serializeComplaintFile = async (file = {}) => {
         filename: originalName,
       });
     } catch (error) {
-      console.error("Complaint file signed URL generation failed:", {
+      console.error("Complain file signed URL generation failed:", {
         key,
         error: error?.message || String(error),
       });
@@ -406,10 +406,10 @@ exports.getComplaints = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Get Complaints Error:", error);
+    console.error("Get Complains Error:", error);
     return res.status(500).json({
       success: false,
-      message: error?.message || "Failed to fetch complaints.",
+      message: error?.message || "Failed to fetch complains.",
     });
   }
 };
@@ -425,10 +425,10 @@ exports.getComplaintCategories = async (_req, res) => {
       data: categories.map(serializeCategory),
     });
   } catch (error) {
-    console.error("Get Complaint Categories Error:", error);
+    console.error("Get Complain Categories Error:", error);
     return res.status(500).json({
       success: false,
-      message: error?.message || "Failed to fetch complaint categories.",
+      message: error?.message || "Failed to fetch complain categories.",
     });
   }
 };
@@ -448,14 +448,14 @@ exports.createComplaintCategory = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: "Complaint category saved successfully.",
+      message: "Complain category saved successfully.",
       data: serializeCategory(category.toObject ? category.toObject() : category),
     });
   } catch (error) {
-    console.error("Create Complaint Category Error:", error);
+    console.error("Create Complain Category Error:", error);
     return res.status(500).json({
       success: false,
-      message: error?.message || "Failed to save complaint category.",
+      message: error?.message || "Failed to save complain category.",
     });
   }
 };
@@ -486,10 +486,10 @@ exports.getItemRelatedComplaints = async (req, res) => {
       ),
     });
   } catch (error) {
-    console.error("Get Item Related Complaints Error:", error);
+    console.error("Get Item Related Complains Error:", error);
     return res.status(500).json({
       success: false,
-      message: error?.message || "Failed to fetch item complaints.",
+      message: error?.message || "Failed to fetch item complains.",
     });
   }
 };
@@ -514,7 +514,7 @@ exports.createComplaint = async (req, res) => {
     if (!existingItem) {
       return res.status(404).json({
         success: false,
-        message: `Item code ${itemCode} does not exist. Please select an existing item before creating a complaint.`,
+        message: `Item code ${itemCode} does not exist. Please select an existing item before creating a complain.`,
       });
     }
 
@@ -565,19 +565,19 @@ exports.createComplaint = async (req, res) => {
     }
 
     if (!complaint) {
-      throw lastError || new Error("Failed to generate complaint number");
+      throw lastError || new Error("Failed to generate complain number");
     }
 
     return res.status(201).json({
       success: true,
-      message: "Complaint created successfully.",
+      message: "Complain created successfully.",
       data: await serializeComplaint(complaint.toObject(), { user: req.user }),
     });
   } catch (error) {
-    console.error("Create Complaint Error:", error);
+    console.error("Create Complain Error:", error);
     return res.status(500).json({
       success: false,
-      message: error?.message || "Failed to create complaint.",
+      message: error?.message || "Failed to create complain.",
     });
   }
 };
@@ -585,35 +585,35 @@ exports.createComplaint = async (req, res) => {
 exports.getComplaintById = async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ success: false, message: "Invalid complaint id." });
+      return res.status(400).json({ success: false, message: "Invalid complain id." });
     }
     const complaint = await Complaint.findById(req.params.id).lean();
     if (!complaint) {
-      return res.status(404).json({ success: false, message: "Complaint not found." });
+      return res.status(404).json({ success: false, message: "Complain not found." });
     }
     return res.status(200).json({
       success: true,
       data: await serializeComplaint(complaint, { user: req.user }),
     });
   } catch (error) {
-    console.error("Get Complaint Error:", error);
+    console.error("Get Complain Error:", error);
     return res.status(500).json({
       success: false,
-      message: error?.message || "Failed to fetch complaint.",
+      message: error?.message || "Failed to fetch complain.",
     });
   }
 };
 
 exports.updateComplaint = async (req, res) => {
   try {
-    if (!ensureAdminAccess(req, res, "Only admins can fully edit complaints.")) return undefined;
+    if (!ensureAdminAccess(req, res, "Only admins can fully edit complains.")) return undefined;
     if (!isValidObjectId(req.params.id)) {
-      return res.status(400).json({ success: false, message: "Invalid complaint id." });
+      return res.status(400).json({ success: false, message: "Invalid complain id." });
     }
 
     const complaint = await Complaint.findById(req.params.id);
     if (!complaint) {
-      return res.status(404).json({ success: false, message: "Complaint not found." });
+      return res.status(404).json({ success: false, message: "Complain not found." });
     }
 
     const brand = normalizeText(req.body?.brand);
@@ -645,13 +645,13 @@ exports.updateComplaint = async (req, res) => {
     if (hasCommentsPayload && finalComments.length === 0) {
       return res.status(400).json({
         success: false,
-        message: "At least one complaint comment is required.",
+        message: "At least one complain comment is required.",
       });
     }
     if (hasCommentsPayload && finalComments[0].comment !== firstComment) {
       return res.status(400).json({
         success: false,
-        message: "First comment must match the first complaint comment.",
+        message: "First comment must match the first complain comment.",
       });
     }
 
@@ -659,7 +659,7 @@ exports.updateComplaint = async (req, res) => {
     if (!existingItem) {
       return res.status(404).json({
         success: false,
-        message: `Item code ${itemCode} does not exist. Please select an existing item before updating the complaint.`,
+        message: `Item code ${itemCode} does not exist. Please select an existing item before updating the complain.`,
       });
     }
 
@@ -792,7 +792,7 @@ exports.updateComplaint = async (req, res) => {
     for (const file of removedFiles) {
       if (!file?.key) continue;
       deleteObject(file.key).catch((deleteError) => {
-        console.error("Complaint file delete failed:", {
+        console.error("Complain file delete failed:", {
           complaint_id: getObjectIdString(complaint),
           key: file.key,
           error: deleteError?.message || deleteError,
@@ -801,14 +801,14 @@ exports.updateComplaint = async (req, res) => {
     }
     return res.status(200).json({
       success: true,
-      message: "Complaint updated successfully.",
+      message: "Complain updated successfully.",
       data: await serializeComplaint(complaint.toObject(), { user: req.user }),
     });
   } catch (error) {
-    console.error("Update Complaint Error:", error);
+    console.error("Update Complain Error:", error);
     return res.status(500).json({
       success: false,
-      message: error?.message || "Failed to update complaint.",
+      message: error?.message || "Failed to update complain.",
     });
   }
 };
@@ -832,7 +832,7 @@ exports.addQcComplaintComment = async (req, res) => {
       itemCode,
     });
     if (!complaint) {
-      return res.status(404).json({ success: false, message: "Complaint not found for this item." });
+      return res.status(404).json({ success: false, message: "Complain not found for this item." });
     }
 
     const actor = buildActor(req.user);
@@ -855,10 +855,10 @@ exports.addQcComplaintComment = async (req, res) => {
       data: await serializeComplaint(complaint.toObject(), { user: req.user }),
     });
   } catch (error) {
-    console.error("Add QC Complaint Comment Error:", error);
+    console.error("Add QC Complain Comment Error:", error);
     return res.status(500).json({
       success: false,
-      message: error?.message || "Failed to add complaint comment.",
+      message: error?.message || "Failed to add complain comment.",
     });
   }
 };
@@ -877,7 +877,7 @@ exports.markComplaintRead = async (req, res) => {
       itemCode,
     });
     if (!complaint) {
-      return res.status(404).json({ success: false, message: "Complaint not found for this item." });
+      return res.status(404).json({ success: false, message: "Complain not found for this item." });
     }
 
     markComplaintReadForUser(complaint, req.user);
@@ -885,14 +885,14 @@ exports.markComplaintRead = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Complaint marked as read.",
+      message: "Complain marked as read.",
       data: await serializeComplaint(complaint.toObject(), { user: req.user }),
     });
   } catch (error) {
-    console.error("Mark Complaint Read Error:", error);
+    console.error("Mark Complain Read Error:", error);
     return res.status(500).json({
       success: false,
-      message: error?.message || "Failed to mark complaint as read.",
+      message: error?.message || "Failed to mark complain as read.",
     });
   }
 };
@@ -901,7 +901,7 @@ exports.addComplaintComment = async (req, res) => {
   try {
     if (!ensureManagerAccess(req, res)) return undefined;
     if (!isValidObjectId(req.params.id)) {
-      return res.status(400).json({ success: false, message: "Invalid complaint id." });
+      return res.status(400).json({ success: false, message: "Invalid complain id." });
     }
     const comment = normalizeText(req.body?.comment);
     if (!comment) {
@@ -909,7 +909,7 @@ exports.addComplaintComment = async (req, res) => {
     }
     const complaint = await Complaint.findById(req.params.id);
     if (!complaint) {
-      return res.status(404).json({ success: false, message: "Complaint not found." });
+      return res.status(404).json({ success: false, message: "Complain not found." });
     }
     const actor = buildActor(req.user);
     complaint.comments.push({
@@ -926,10 +926,10 @@ exports.addComplaintComment = async (req, res) => {
       data: await serializeComplaint(complaint.toObject(), { user: req.user }),
     });
   } catch (error) {
-    console.error("Add Complaint Comment Error:", error);
+    console.error("Add Complain Comment Error:", error);
     return res.status(500).json({
       success: false,
-      message: error?.message || "Failed to add complaint comment.",
+      message: error?.message || "Failed to add complain comment.",
     });
   }
 };
@@ -937,11 +937,11 @@ exports.addComplaintComment = async (req, res) => {
 exports.addComplaintFiles = async (req, res) => {
   try {
     if (!isValidObjectId(req.params.id)) {
-      return res.status(400).json({ success: false, message: "Invalid complaint id." });
+      return res.status(400).json({ success: false, message: "Invalid complain id." });
     }
     const complaint = await Complaint.findById(req.params.id);
     if (!complaint) {
-      return res.status(404).json({ success: false, message: "Complaint not found." });
+      return res.status(404).json({ success: false, message: "Complain not found." });
     }
     const actor = buildActor(req.user);
     const uploadedFiles = await uploadComplaintFiles(req.files, actor);
@@ -957,14 +957,14 @@ exports.addComplaintFiles = async (req, res) => {
     await complaint.save();
     return res.status(200).json({
       success: true,
-      message: "Complaint files uploaded successfully.",
+      message: "Complain files uploaded successfully.",
       data: await serializeComplaint(complaint.toObject(), { user: req.user }),
     });
   } catch (error) {
-    console.error("Upload Complaint Files Error:", error);
+    console.error("Upload Complain Files Error:", error);
     return res.status(500).json({
       success: false,
-      message: error?.message || "Failed to upload complaint files.",
+      message: error?.message || "Failed to upload complain files.",
     });
   }
 };
@@ -973,11 +973,11 @@ exports.archiveComplaint = async (req, res) => {
   try {
     if (!ensureAdminAccess(req, res)) return undefined;
     if (!isValidObjectId(req.params.id)) {
-      return res.status(400).json({ success: false, message: "Invalid complaint id." });
+      return res.status(400).json({ success: false, message: "Invalid complain id." });
     }
     const complaint = await Complaint.findById(req.params.id);
     if (!complaint) {
-      return res.status(404).json({ success: false, message: "Complaint not found." });
+      return res.status(404).json({ success: false, message: "Complain not found." });
     }
     const actor = buildActor(req.user);
     const reason = normalizeText(req.body?.archived_reason || req.body?.reason);
@@ -990,14 +990,14 @@ exports.archiveComplaint = async (req, res) => {
     await complaint.save();
     return res.status(200).json({
       success: true,
-      message: "Complaint archived successfully.",
+      message: "Complain archived successfully.",
       data: await serializeComplaint(complaint.toObject(), { user: req.user }),
     });
   } catch (error) {
-    console.error("Archive Complaint Error:", error);
+    console.error("Archive Complain Error:", error);
     return res.status(500).json({
       success: false,
-      message: error?.message || "Failed to archive complaint.",
+      message: error?.message || "Failed to archive complain.",
     });
   }
 };
@@ -1006,11 +1006,11 @@ exports.unarchiveComplaint = async (req, res) => {
   try {
     if (!ensureAdminAccess(req, res)) return undefined;
     if (!isValidObjectId(req.params.id)) {
-      return res.status(400).json({ success: false, message: "Invalid complaint id." });
+      return res.status(400).json({ success: false, message: "Invalid complain id." });
     }
     const complaint = await Complaint.findById(req.params.id);
     if (!complaint) {
-      return res.status(404).json({ success: false, message: "Complaint not found." });
+      return res.status(404).json({ success: false, message: "Complain not found." });
     }
     const actor = buildActor(req.user);
     complaint.archived = false;
@@ -1024,14 +1024,14 @@ exports.unarchiveComplaint = async (req, res) => {
     await complaint.save();
     return res.status(200).json({
       success: true,
-      message: "Complaint restored successfully.",
+      message: "Complain restored successfully.",
       data: await serializeComplaint(complaint.toObject(), { user: req.user }),
     });
   } catch (error) {
-    console.error("Unarchive Complaint Error:", error);
+    console.error("Unarchive Complain Error:", error);
     return res.status(500).json({
       success: false,
-      message: error?.message || "Failed to restore complaint.",
+      message: error?.message || "Failed to restore complain.",
     });
   }
 };

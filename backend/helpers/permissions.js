@@ -40,7 +40,7 @@ const PERMISSION_MODULES = Object.freeze([
   { key: "settings", label: "Settings" },
   { key: "brands", label: "Brands" },
   { key: "vendors", label: "Vendors" },
-  { key: "complaints", label: "Complaints" },
+  { key: "complaints", label: "Complains" },
   { key: "finishes", label: "Finishes" },
   { key: "images_documents", label: "Images / Documents" },
   { key: "labels", label: "Labels" },
