@@ -3,7 +3,10 @@ const axios = require("axios");
 const AdmZip = require("adm-zip");
 const { getObjectBuffer } = require("./wasabiStorage.service");
 
-const DOWNLOAD_CONCURRENCY = 6;
+const DOWNLOAD_CONCURRENCY = Math.max(
+  1,
+  Number(process.env.QC_IMAGE_DOWNLOAD_CONCURRENCY || 24) || 24,
+);
 
 const normalizeText = (value) => String(value ?? "").trim();
 
