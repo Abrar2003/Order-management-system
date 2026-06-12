@@ -15,6 +15,7 @@ import { getUserFromToken } from "./auth/auth.service";
 import { normalizeUserRole } from "./auth/permissions";
 
 import SignIn from "./pages/Signin";
+import BrandScopeChoice from "./pages/BrandScopeChoice";
 import Home from "./pages/Home";
 import Orders from "./pages/Orders";
 import QCPage from "./pages/QcPage";
@@ -157,7 +158,9 @@ const RouteUiCleanup = () => {
 
   useLayoutEffect(() => {
     const shouldClearCustomModalRoots =
-      location.pathname === "/signin" || location.pathname === "/";
+      location.pathname === "/signin" ||
+      location.pathname === "/choose-brand-scope" ||
+      location.pathname === "/";
     const runCleanup = () =>
       clearStaleUiOverlays({ removeCustomModalRoots: shouldClearCustomModalRoots });
 
@@ -208,6 +211,15 @@ const App = () => {
           <Routes>
           {/* Public */}
           <Route path="/signin" element={<SignIn />} />
+
+          <Route
+            path="/choose-brand-scope"
+            element={
+              <ProtectedRoute>
+                <BrandScopeChoice />
+              </ProtectedRoute>
+            }
+          />
 
           {/* Home Page */}
           <Route

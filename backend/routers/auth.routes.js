@@ -5,6 +5,7 @@ const {
   refresh,
   logout,
   me,
+  updateBrandScope,
   getUsers,
   changePassword,
   forceChangeUserPassword,
@@ -26,6 +27,7 @@ router.post("/signin", authRateLimit, signin);
 router.post("/refresh", authRateLimit, refresh);
 router.post("/logout", logout);
 router.get("/me", auth, me);
+router.post("/brand-scope", auth, updateBrandScope);
 router.patch("/change-password", auth, changePassword);
 router.patch(
   "/force-change-password",

@@ -20,7 +20,10 @@ const clearSigninOverlays = () => {
 };
 
 const SignIn = () => {
-  const [form, setForm] = useState({ username: "", password: "" });
+  const [form, setForm] = useState({
+    username: "",
+    password: "",
+  });
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
@@ -55,7 +58,9 @@ const SignIn = () => {
         window.setTimeout(clearSigninOverlays, delay),
       );
 
-      navigate("/", { replace: true });
+      navigate(res.user.requires_brand_scope_choice ? "/choose-brand-scope" : "/", {
+        replace: true,
+      });
       window.setTimeout(() => {
         cleanupTimers.forEach((timerId) => window.clearTimeout(timerId));
       }, 2000);
@@ -66,7 +71,7 @@ const SignIn = () => {
   };
 
   return (
-    <div className="page-shell d-flex justify-content-center py-5">
+    <div className="page-shell d-flex justify-content-center py-5 signin-page-shell">
       <div className="card om-card shadow-sm w-100 auth-card">
         <div className="card-body p-4 p-md-5">
           <div className="d-flex justify-content-between align-items-center mb-4">
@@ -89,6 +94,7 @@ const SignIn = () => {
                 name="username"
                 className="form-control"
                 placeholder="Username"
+                value={form.username}
                 onChange={handleChange}
                 required
               />
@@ -102,6 +108,7 @@ const SignIn = () => {
                   type={showPassword ? "text" : "password"}
                   className="form-control"
                   placeholder="Password"
+                  value={form.password}
                   onChange={handleChange}
                   required
                 />

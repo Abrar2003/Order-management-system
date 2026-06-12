@@ -20,11 +20,22 @@ const {
 const {
   logSecurityActivity,
 } = require("../services/securityMonitoringService");
+const {
+  hasDataAccessFilter,
+  isQcUser,
+} = require("../services/userDataAccess.service");
 
 const isTruthy = (value) =>
   ["1", "true", "yes", "y", "on"].includes(
     String(value ?? "").trim().toLowerCase(),
   );
+
+const normalizeBrandScope = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "giga") return "giga";
+  if (normalized === "dutch" || normalized === "dutch_interior") return "dutch";
+  return "all";
+};
 
 const getStringField = (source = {}, key) => {
   const value = source?.[key];
@@ -39,6 +50,15 @@ const buildSafeUser = (user = {}) => ({
   role: normalizeUserRole(user.role, String(user.role || "").trim()),
   name: user.name,
   email: user.email,
+  brand_scope: isQcUser(user) || hasDataAccessFilter(user)
+    ? "all"
+    : normalizeBrandScope(user.brand_scope),
+  is_qc_user: isQcUser(user),
+  has_data_access_filter: hasDataAccessFilter(user),
+  requires_brand_scope_choice:
+    !isQcUser(user) &&
+    !hasDataAccessFilter(user) &&
+    !Boolean(user.brand_scope_choice_completed),
 });
 
 const logAuthSecurityActivity = (req, payload) => {
@@ -50,13 +70,20 @@ const logAuthSecurityActivity = (req, payload) => {
   });
 };
 
-const createAuthSession = async ({ user, req }) => {
+const createAuthSession = async ({
+  user,
+  req,
+  brandScope = "all",
+  brandScopeChoiceCompleted = false,
+}) => {
   const session = await AuthSession.create({
     user: user._id,
     token_hash: "pending",
     expires_at: new Date(Date.now() + REFRESH_COOKIE_MAX_AGE_MS),
     user_agent: getStringField(req.headers, "user-agent"),
     ip: getStringField(req.headers, "x-forwarded-for") || req.ip || "",
+    brand_scope: normalizeBrandScope(brandScope),
+    brand_scope_choice_completed: Boolean(brandScopeChoiceCompleted),
   });
   const refreshToken = signRefreshToken({ user, sessionId: session._id });
   session.token_hash = hashToken(refreshToken);
@@ -64,8 +91,28 @@ const createAuthSession = async ({ user, req }) => {
   return { session, refreshToken };
 };
 
-const issueAuthCookies = async ({ res, req, user, session = null }) => {
-  const accessToken = signAccessToken(user);
+const issueAuthCookies = async ({
+  res,
+  req,
+  user,
+  session = null,
+  brandScope = null,
+  brandScopeChoiceCompleted = null,
+}) => {
+  const normalizedBrandScope = normalizeBrandScope(
+    brandScope ?? session?.brand_scope ?? user?.brand_scope,
+  );
+  const normalizedBrandScopeChoiceCompleted = Boolean(
+    brandScopeChoiceCompleted ??
+      session?.brand_scope_choice_completed ??
+      user?.brand_scope_choice_completed,
+  );
+  const tokenUser = {
+    ...user,
+    brand_scope: normalizedBrandScope,
+    brand_scope_choice_completed: normalizedBrandScopeChoiceCompleted,
+  };
+  const accessToken = signAccessToken(tokenUser);
   let refreshToken = "";
   let activeSession = session;
 
@@ -75,9 +122,16 @@ const issueAuthCookies = async ({ res, req, user, session = null }) => {
     activeSession.expires_at = new Date(Date.now() + REFRESH_COOKIE_MAX_AGE_MS);
     activeSession.rotated_at = new Date();
     activeSession.last_used_at = new Date();
+    activeSession.brand_scope = normalizedBrandScope;
+    activeSession.brand_scope_choice_completed = normalizedBrandScopeChoiceCompleted;
     await activeSession.save();
   } else {
-    const created = await createAuthSession({ user, req });
+    const created = await createAuthSession({
+      user,
+      req,
+      brandScope: normalizedBrandScope,
+      brandScopeChoiceCompleted: normalizedBrandScopeChoiceCompleted,
+    });
     activeSession = created.session;
     refreshToken = created.refreshToken;
   }
@@ -148,6 +202,7 @@ const signin = async (req, res) => {
   try {
     const username = getStringField(req.body, "username");
     const password = getStringField(req.body, "password");
+    const brandScope = "all";
 
     if (!username || !password) {
       logAuthSecurityActivity(req, {
@@ -195,7 +250,11 @@ const signin = async (req, res) => {
       user: {
         ...user.toObject(),
         role: normalizedRole,
+        brand_scope: brandScope,
+        brand_scope_choice_completed: false,
       },
+      brandScope,
+      brandScopeChoiceCompleted: false,
     });
 
     logAuthSecurityActivity(
@@ -208,12 +267,19 @@ const signin = async (req, res) => {
           user_id: user._id,
           username,
           role: normalizedRole,
+          brand_scope: brandScope,
+          brand_scope_choice_completed: false,
         },
       },
     );
 
     return res.json({
-      user: buildSafeUser({ ...user.toObject(), role: normalizedRole }),
+      user: buildSafeUser({
+        ...user.toObject(),
+        role: normalizedRole,
+        brand_scope: brandScope,
+        brand_scope_choice_completed: false,
+      }),
     });
   } catch (err) {
     console.error("Signin Error:", err);
@@ -269,10 +335,23 @@ const refresh = async (req, res) => {
       return res.status(401).json({ message: "User not found" });
     }
 
-    await issueAuthCookies({ res, req, user, session });
+    await issueAuthCookies({
+      res,
+      req,
+      user: {
+        ...user.toObject(),
+        brand_scope: session.brand_scope,
+        brand_scope_choice_completed: session.brand_scope_choice_completed,
+      },
+      session,
+    });
 
     return res.json({
-      user: buildSafeUser(user),
+      user: buildSafeUser({
+        ...user.toObject(),
+        brand_scope: session.brand_scope,
+        brand_scope_choice_completed: session.brand_scope_choice_completed,
+      }),
     });
   } catch (err) {
     clearAuthCookies(res);
@@ -320,6 +399,82 @@ const me = async (req, res) =>
   res.json({
     user: buildSafeUser(req.user),
   });
+
+const updateBrandScope = async (req, res) => {
+  try {
+    const refreshToken = getCookie(req, REFRESH_COOKIE_NAME);
+    if (!refreshToken) {
+      clearAuthCookies(res);
+      return res.status(401).json({ message: "Refresh token is required" });
+    }
+
+    const decoded = verifyRefreshToken(refreshToken);
+    const sessionId = getStringField(decoded, "sid");
+    const userId = getStringField(decoded, "sub");
+    const requestUserId = getStringField(req.user, "_id") || getStringField(req.user, "id");
+
+    if (
+      decoded?.typ !== "refresh" ||
+      !mongoose.Types.ObjectId.isValid(sessionId) ||
+      !mongoose.Types.ObjectId.isValid(userId) ||
+      String(userId) !== String(requestUserId)
+    ) {
+      clearAuthCookies(res);
+      return res.status(401).json({ message: "Invalid refresh token" });
+    }
+
+    const session = await AuthSession.findById(sessionId);
+    if (!session || String(session.user) !== userId) {
+      clearAuthCookies(res);
+      return res.status(401).json({ message: "Invalid refresh session" });
+    }
+
+    if (session.revoked_at || session.expires_at <= new Date()) {
+      clearAuthCookies(res);
+      return res.status(401).json({ message: "Refresh session expired" });
+    }
+
+    if (session.token_hash !== hashToken(refreshToken)) {
+      await AuthSession.updateMany(
+        { user: session.user, revoked_at: null },
+        { $set: { revoked_at: new Date() } },
+      );
+      clearAuthCookies(res);
+      return res.status(401).json({ message: "Refresh token was reused" });
+    }
+
+    const requestedScope = normalizeBrandScope(
+      req.body?.brand_scope ?? req.body?.brandScope,
+    );
+    const nextBrandScope = isQcUser(req.user) || hasDataAccessFilter(req.user)
+      ? "all"
+      : requestedScope;
+
+    await issueAuthCookies({
+      res,
+      req,
+      user: {
+        ...req.user,
+        brand_scope: nextBrandScope,
+        brand_scope_choice_completed: true,
+      },
+      session,
+      brandScope: nextBrandScope,
+      brandScopeChoiceCompleted: true,
+    });
+
+    return res.json({
+      user: buildSafeUser({
+        ...req.user,
+        brand_scope: nextBrandScope,
+        brand_scope_choice_completed: true,
+      }),
+    });
+  } catch (err) {
+    clearAuthCookies(res);
+    return res.status(401).json({ message: "Invalid refresh token" });
+  }
+};
 
 // GET /users?role=QC
 const getUsers = async (req, res) => {
@@ -513,6 +668,7 @@ module.exports = {
   refresh,
   logout,
   me,
+  updateBrandScope,
   getUsers,
   changePassword,
   forceChangeUserPassword,

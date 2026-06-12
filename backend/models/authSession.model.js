@@ -41,6 +41,16 @@ const authSessionSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    brand_scope: {
+      type: String,
+      enum: ["all", "dutch", "giga"],
+      default: "all",
+      trim: true,
+    },
+    brand_scope_choice_completed: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: true },
 );

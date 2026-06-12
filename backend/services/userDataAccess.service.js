@@ -2,8 +2,16 @@ const mongoose = require("mongoose");
 const Brand = require("../models/brand.model");
 
 const ALL_VENDOR_TOKEN = "all";
+const BRAND_SCOPE_ALL = "all";
+const BRAND_SCOPE_DUTCH = "dutch";
+const BRAND_SCOPE_GIGA = "giga";
+const GIGA_BRAND_NAME = "Giga";
+const GIGA_BRAND_REGEX = new RegExp(`^${GIGA_BRAND_NAME}$`, "i");
 
 const normalizeText = (value = "") => String(value || "").trim();
+
+const normalizeRoleKey = (value = "") =>
+  normalizeText(value).toLowerCase().replace(/[\s-]+/g, "_");
 
 const toArray = (value) => {
   if (Array.isArray(value)) return value;
@@ -55,6 +63,15 @@ const parseBoolean = (value) => {
   return ["1", "true", "yes", "y", "on"].includes(
     normalizeText(value).toLowerCase(),
   );
+};
+
+const normalizeBrandScope = (value) => {
+  const normalized = normalizeText(value).toLowerCase();
+  if (normalized === BRAND_SCOPE_GIGA) return BRAND_SCOPE_GIGA;
+  if (normalized === BRAND_SCOPE_DUTCH || normalized === "dutch_interior") {
+    return BRAND_SCOPE_DUTCH;
+  }
+  return BRAND_SCOPE_ALL;
 };
 
 const getBrandIdsFromPayload = (payload = {}) =>
@@ -183,6 +200,19 @@ const getAllowedVendorNames = (user = {}) => {
   return vendors;
 };
 
+const isQcUser = (user = {}) =>
+  normalizeRoleKey(user?.role) === "qc" || user?.isQC === true;
+
+const hasDataAccessFilter = (user = {}) =>
+  toArray(user?.allowed_brands).length > 0 || Boolean(getAllowedVendorNames(user));
+
+const getUserBrandScope = (user = {}) => {
+  if (isQcUser(user) || hasDataAccessFilter(user)) {
+    return BRAND_SCOPE_ALL;
+  }
+  return normalizeBrandScope(user?.brand_scope ?? user?.brandScope);
+};
+
 const combineMongoMatches = (...matches) => {
   const cleaned = matches.filter((match) => (
     match &&
@@ -213,6 +243,31 @@ const buildFieldAccessCondition = (fields = [], values = []) => {
   };
 };
 
+const buildBrandScopeCondition = (fields = [], brandScope = BRAND_SCOPE_ALL) => {
+  const normalizedFields = toArray(fields).map(normalizeText).filter(Boolean);
+  const normalizedScope = normalizeBrandScope(brandScope);
+  if (normalizedFields.length === 0 || normalizedScope === BRAND_SCOPE_ALL) {
+    return {};
+  }
+
+  if (normalizedScope === BRAND_SCOPE_GIGA) {
+    if (normalizedFields.length === 1) {
+      return { [normalizedFields[0]]: GIGA_BRAND_REGEX };
+    }
+    return {
+      $or: normalizedFields.map((field) => ({
+        [field]: GIGA_BRAND_REGEX,
+      })),
+    };
+  }
+
+  return {
+    $and: normalizedFields.map((field) => ({
+      [field]: { $not: GIGA_BRAND_REGEX },
+    })),
+  };
+};
+
 const buildDataAccessMatch = (
   user = {},
   {
@@ -222,10 +277,14 @@ const buildDataAccessMatch = (
 ) => {
   const allowedBrands = getAllowedBrandNames(user);
   const allowedVendors = getAllowedVendorNames(user);
+  const brandScope = getUserBrandScope(user);
   const conditions = [];
 
   if (allowedBrands) {
     conditions.push(buildFieldAccessCondition(brandFields, allowedBrands));
+  }
+  if (brandScope !== BRAND_SCOPE_ALL) {
+    conditions.push(buildBrandScopeCondition(brandFields, brandScope));
   }
   if (allowedVendors) {
     conditions.push(buildFieldAccessCondition(vendorFields, allowedVendors));
@@ -237,16 +296,44 @@ const buildDataAccessMatch = (
 const applyDataAccessMatch = (match = {}, user = {}, options = {}) =>
   combineMongoMatches(match, buildDataAccessMatch(user, options));
 
+const buildBrandDocumentAccessMatch = (user = {}) => {
+  const allowedBrandIds = normalizeObjectIdList(user?.allowed_brands);
+  const brandScope = getUserBrandScope(user);
+  const conditions = [];
+
+  if (allowedBrandIds.length > 0) {
+    conditions.push({ _id: { $in: allowedBrandIds } });
+  }
+  if (brandScope !== BRAND_SCOPE_ALL) {
+    conditions.push(buildBrandScopeCondition(["name"], brandScope));
+  }
+
+  return combineMongoMatches(...conditions);
+};
+
+const applyBrandDocumentAccessMatch = (match = {}, user = {}) =>
+  combineMongoMatches(match, buildBrandDocumentAccessMatch(user));
+
 module.exports = {
   ALL_VENDOR_TOKEN,
+  BRAND_SCOPE_ALL,
+  BRAND_SCOPE_DUTCH,
+  BRAND_SCOPE_GIGA,
   applyDataAccessMatch,
+  applyBrandDocumentAccessMatch,
   assertBrandIdsExist,
+  buildBrandDocumentAccessMatch,
   buildDataAccessMatch,
+  buildBrandScopeCondition,
   buildUserAccessUpdate,
   combineMongoMatches,
   getBrandIdsFromPayload,
   getAllowedBrandNames,
   getAllowedVendorNames,
+  getUserBrandScope,
+  hasDataAccessFilter,
+  isQcUser,
+  normalizeBrandScope,
   getVendorNamesFromPayload,
   normalizeObjectIdList,
   normalizeVendorList,

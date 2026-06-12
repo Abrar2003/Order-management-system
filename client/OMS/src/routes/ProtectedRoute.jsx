@@ -3,6 +3,8 @@ import { Navigate, useLocation } from "react-router-dom";
 import { getSessionUser } from "../auth/auth.service";
 import { isQcAllowedPagePath, normalizeUserRole } from "../auth/permissions";
 
+const BRAND_SCOPE_CHOICE_PATH = "/choose-brand-scope";
+
 const ProtectedRoute = ({ children }) => {
   const location = useLocation();
   const [state, setState] = useState({
@@ -40,11 +42,21 @@ const ProtectedRoute = ({ children }) => {
     return <Navigate to="/signin" replace />;
   }
 
+  const isBrandScopeChoicePath = location.pathname === BRAND_SCOPE_CHOICE_PATH;
+
   if (
     normalizeUserRole(state.user?.role) === "qc" &&
     !isQcAllowedPagePath(location.pathname)
   ) {
     return <Navigate to="/qc" replace />;
+  }
+
+  if (state.user?.requires_brand_scope_choice && !isBrandScopeChoicePath) {
+    return <Navigate to={BRAND_SCOPE_CHOICE_PATH} replace />;
+  }
+
+  if (!state.user?.requires_brand_scope_choice && isBrandScopeChoicePath) {
+    return <Navigate to="/" replace />;
   }
 
   return children;

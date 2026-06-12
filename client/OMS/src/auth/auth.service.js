@@ -20,6 +20,14 @@ export const signin = async (credentials) => {
   return res.data;
 };
 
+export const updateBrandScope = async (brandScope) => {
+  const res = await api.post("/auth/brand-scope", {
+    brand_scope: brandScope,
+  });
+  currentUser = normalizeUser(res.data?.user || null);
+  return currentUser;
+};
+
 export const refreshSession = async () => {
   const res = await api.post("/auth/refresh", null, {
     skipAuthRefresh: true,

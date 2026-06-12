@@ -259,7 +259,7 @@ async function main() {
 
     else if (row.innerBarcode) {
       updateData.pis_inner_barcode = row.innerBarcode;
-    }
+    }.
 
     return {
       updateOne: {

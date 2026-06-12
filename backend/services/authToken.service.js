@@ -67,6 +67,8 @@ const buildUserPayload = (user = {}) => ({
   role: user?.role,
   email: user?.email,
   name: user?.name,
+  brand_scope: user?.brand_scope || "all",
+  brand_scope_choice_completed: Boolean(user?.brand_scope_choice_completed),
 });
 
 const signAccessToken = (user = {}) =>

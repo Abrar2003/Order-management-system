@@ -4,6 +4,9 @@ const {
   getCookie,
   verifyAccessToken,
 } = require("../services/authToken.service");
+const {
+  getUserBrandScope,
+} = require("../services/userDataAccess.service");
 
 const normalizeText = (value) => String(value || "").trim();
 
@@ -40,13 +43,22 @@ module.exports = async (req, res, next) => {
 
     const user = await User.findById(decodedUserId)
       .select("-password")
-      .populate("allowed_brands", "name");
+      .populate("allowed_brands", "name")
+      .lean();
 
     if (!user) {
       return res.status(401).json({ message: "User not found" });
     }
 
-    req.user = user; // 🔥 THIS IS THE KEY
+    req.user = {
+      ...user,
+      id: String(user._id || decodedUserId),
+      brand_scope: getUserBrandScope({
+        ...user,
+        brand_scope: decoded?.brand_scope,
+      }),
+      brand_scope_choice_completed: Boolean(decoded?.brand_scope_choice_completed),
+    };
     next();
   } catch (err) {
     return res.status(401).json({ message: "Invalid token" });

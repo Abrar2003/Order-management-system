@@ -8752,9 +8752,10 @@ exports.getOrdersByFilters = async (req, res) => {
 
 exports.getOrderSummary = async (req, res) => {
   try {
+    const scopedActiveMatch = applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user);
     const [vendors, brands] = await Promise.all([
-      Order.distinct("vendor", ACTIVE_ORDER_MATCH),
-      Order.distinct("brand", ACTIVE_ORDER_MATCH),
+      Order.distinct("vendor", scopedActiveMatch),
+      Order.distinct("brand", scopedActiveMatch),
     ]);
 
     const normalizeList = (values) =>
