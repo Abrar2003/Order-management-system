@@ -31,9 +31,14 @@ const productTypeTemplatesRouter = require("./routers/productTypeTemplates.route
 const workflowRouter = require("./routers/workflow.routes");
 const notificationsRouter = require("./routers/notifications.routes");
 const complaintsRouter = require("./routers/complaints.routes");
+const securityRouter = require("./routers/security.routes");
 const { closeRedisClients } = require("./config/redis");
 const { closeQueues } = require("./queues");
 const { createWorkflowSocketServer } = require("./realtime/workflowSocket");
+const {
+  startSecurityBaselineCron,
+  stopSecurityBaselineCron,
+} = require("./services/securityBaselineCron");
 
 const app = express();
 const PORT = Number.parseInt(String(process.env.PORT || "8008"), 10) || 8008;
@@ -123,6 +128,8 @@ app.use("/notifications", notificationsRouter);
 app.use("/api/notifications", notificationsRouter);
 app.use("/complaints", complaintsRouter);
 app.use("/api/complaints", complaintsRouter);
+app.use("/security", securityRouter);
+app.use("/api/security", securityRouter);
 
 app.get("/", (req, res) => {
   res.send({ message: "Server OK v2" });
@@ -178,6 +185,7 @@ const startServer = async () => {
       allowCredentials: corsOptions.credentials,
     });
     app.set("io", io);
+    startSecurityBaselineCron();
 
     server.listen(PORT, () => {
       console.log(`Server started on port ${PORT}`);
@@ -188,6 +196,7 @@ const startServer = async () => {
 
       server.close(async () => {
         try {
+          stopSecurityBaselineCron();
           await io.close();
           await closeQueues();
           await closeRedisClients();

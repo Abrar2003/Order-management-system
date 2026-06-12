@@ -4,6 +4,9 @@ const auth = require("../middlewares/auth.middleware");
 const { requirePermission } = require("../middlewares/permission.middleware");
 const { cacheRoute } = require("../middlewares/cache.middleware");
 const { MEDIUM_CACHE_TTL } = require("../services/cache.service");
+const {
+  securityLog,
+} = require("../middlewares/securityActivityLogger");
 const reportsController = require("../controllers/reports.controller");
 
 const router = express.Router();
@@ -35,6 +38,9 @@ router.get(
   "/inspected-items/export",
   auth,
   requirePermission("reports", "view"),
+  securityLog("export_excel", "inspected_items_report", {
+    metadata: (req) => ({ filters: req.query || {} }),
+  }),
   reportsController.exportInspectedItemsReport,
 );
 

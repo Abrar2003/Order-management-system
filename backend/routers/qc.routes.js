@@ -17,6 +17,9 @@ const {
 const {
   invalidateQcCaches,
 } = require("../services/cacheInvalidation.service");
+const {
+  securityLog,
+} = require("../middlewares/securityActivityLogger");
 const qcController = require("../controllers/qc.controller");
 const invalidateQcOnSuccess = invalidateCacheOnSuccess(invalidateQcCaches);
 
@@ -80,6 +83,7 @@ router.patch(
   "/goods-not-ready/:id",
   auth,
   requirePermission("qc", "edit"),
+  securityLog("reject", "qc"),
   invalidateQcOnSuccess,
   qcController.markGoodsNotReady
 );
@@ -89,6 +93,7 @@ router.patch(
   auth,
   requirePermission("qc", "edit"),
   qcImageSingleUpload("image"),
+  securityLog("reject", "qc"),
   invalidateQcOnSuccess,
   qcController.rejectAllQc,
 );
@@ -114,6 +119,12 @@ router.get(
   "/:id/images/file",
   auth,
   requirePermission("qc", "view"),
+  securityLog("download_file", "qc_image", {
+    resourceId: (req) => req.params.id,
+    metadata: (req) => ({
+      image_id: req.query?.image_id || req.query?.imageId || req.query?.key || "",
+    }),
+  }),
   qcController.downloadQcImageFile,
 );
 
@@ -121,6 +132,12 @@ router.post(
   "/:id/images/download",
   auth,
   requirePermission("qc", "view"),
+  securityLog("download_file", "qc_images", {
+    resourceId: (req) => req.params.id,
+    metadata: (req) => ({
+      requested_images: Array.isArray(req.body?.images) ? req.body.images.length : undefined,
+    }),
+  }),
   qcController.downloadQcImages,
 );
 
@@ -192,6 +209,9 @@ router.get(
   "/export",
   auth,
   requirePermission("qc", "export"),
+  securityLog("export_excel", "qc", {
+    metadata: (req) => ({ filters: req.query || {} }),
+  }),
   qcController.exportQCList,
 );
 
@@ -207,6 +227,10 @@ router.get(
   "/:id/inspection-record/:recordId/transfer-target",
   auth,
   requirePermission("inspections", "assign"),
+  securityLog("view", "inspection_transfer_target", {
+    resourceId: (req) => req.params.recordId,
+    metadata: (req) => ({ qc_id: req.params.id, records: 1 }),
+  }),
   cacheRoute("qc", SHORT_CACHE_TTL),
   qcController.lookupInspectionTransferTarget,
 );
@@ -215,6 +239,14 @@ router.post(
   "/:id/inspection-record/:recordId/transfer",
   auth,
   requirePermission("inspections", "assign"),
+  securityLog("transfer", "inspection_record", {
+    resourceId: (req) => req.params.recordId,
+    metadata: (req) => ({
+      qc_id: req.params.id,
+      quantity: req.body?.quantity,
+      target: req.body?.target_po || req.body?.targetOrder || req.body?.target_order_id,
+    }),
+  }),
   invalidateQcOnSuccess,
   qcController.transferInspectionRecord,
 );
@@ -223,6 +255,10 @@ router.delete(
   "/:id/inspection-record/:recordId",
   auth,
   requirePermission("inspections", "delete"),
+  securityLog("delete", "inspection_record", {
+    resourceId: (req) => req.params.recordId,
+    metadata: (req) => ({ qc_id: req.params.id }),
+  }),
   invalidateQcOnSuccess,
   qcController.deleteInspectionRecord,
 );
@@ -231,6 +267,10 @@ router.get(
   "/:id",
   auth,
   requirePermission("qc", "view"),
+  securityLog("view", "qc", {
+    resourceId: (req) => req.params.id,
+    metadata: () => ({ records: 1 }),
+  }),
   cacheRoute("qc", SHORT_CACHE_TTL),
   qcController.getQCById
 );

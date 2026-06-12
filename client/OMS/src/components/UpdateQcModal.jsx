@@ -142,6 +142,11 @@ const getQcBarcodeValidationRequirements = (type = "") =>
       },
     ];
 
+const getBoxModeForQcBarcodeValidationType = (type = "") =>
+  getQcBarcodeValidationOption(type).value === "inner_master"
+    ? BOX_PACKAGING_MODES_UTIL.CARTON
+    : BOX_PACKAGING_MODES_UTIL.INDIVIDUAL;
+
 const INSPECTED_WEIGHT_FIELDS = Object.freeze([
   {
     formKey: "inspected_weight_top_net",
@@ -1211,12 +1216,42 @@ const UpdateQcModal = ({
         ? payload.barcodeValidation
         : {};
 
+    const restoredBarcodeValidationType = getQcBarcodeValidationOption(
+      validation.barcodeValidationType,
+    ).value;
+    const restoredForm = isQcUser
+      ? (() => {
+        const requiredMode = getBoxModeForQcBarcodeValidationType(
+          restoredBarcodeValidationType,
+        );
+        return {
+          ...nextForm,
+          inspected_box_mode: requiredMode,
+          inner_barcode:
+            requiredMode === BOX_PACKAGING_MODES.CARTON
+              ? nextForm.inner_barcode
+              : "",
+          inspected_box_count:
+            requiredMode === BOX_PACKAGING_MODES.CARTON
+              ? "2"
+              : String(normalizeSizeCount(nextForm.inspected_box_count, 1)),
+          inspected_box_sizes: ensureMeasuredSizeEntryCount(
+            convertMeasuredBoxEntriesMode(nextForm.inspected_box_sizes, requiredMode),
+            requiredMode === BOX_PACKAGING_MODES.CARTON
+              ? 2
+              : nextForm.inspected_box_count,
+            { mode: requiredMode, singleRemark: "box" },
+          ),
+        };
+      })()
+      : nextForm;
+
     skipNextBarcodeValidationResetRef.current = true;
-    setForm(nextForm);
+    setForm(restoredForm);
     setBarcodeScannedInSession(Boolean(validation.barcodeScannedInSession));
     setInnerBarcodeScannedInSession(Boolean(validation.innerBarcodeScannedInSession));
     setBarcodeValidationType(
-      getQcBarcodeValidationOption(validation.barcodeValidationType).value,
+      restoredBarcodeValidationType,
     );
     setBarcodeValidated(Boolean(validation.barcodeValidated));
     setBarcodeValidationError(String(validation.barcodeValidationError || ""));
@@ -1237,6 +1272,30 @@ const UpdateQcModal = ({
     draftValue,
     onDraftRestore: restoreDraftPayload,
   });
+
+  const applyInspectedBoxMode = (nextModeValue) => {
+    setForm((prev) => {
+      const nextMode = detectBoxPackagingMode(nextModeValue, prev.inspected_box_sizes);
+      if (nextMode !== BOX_PACKAGING_MODES.CARTON) {
+        setInnerBarcodeScannedInSession(false);
+      }
+      return {
+        ...prev,
+        inspected_box_mode: nextMode,
+        inner_barcode:
+          nextMode === BOX_PACKAGING_MODES.CARTON ? prev.inner_barcode : "",
+        inspected_box_count:
+          nextMode === BOX_PACKAGING_MODES.CARTON
+            ? "2"
+            : String(normalizeSizeCount(prev.inspected_box_count, 1)),
+        inspected_box_sizes: ensureMeasuredSizeEntryCount(
+          convertMeasuredBoxEntriesMode(prev.inspected_box_sizes, nextMode),
+          nextMode === BOX_PACKAGING_MODES.CARTON ? 2 : prev.inspected_box_count,
+          { mode: nextMode, singleRemark: "box" },
+        ),
+      };
+    });
+  };
 
   useEffect(() => {
     if (isQcUser) {
@@ -1341,11 +1400,18 @@ const UpdateQcModal = ({
     const initialInspectedItemCount = hasStoredInspectedItemSizes
       ? normalizeSizeCount(inspectedItemSizeEntries.length, 1)
       : 1;
+    const enforcedInspectedBoxMode = isQcUser
+      ? getBoxModeForQcBarcodeValidationType("individual")
+      : inspectedBoxMode;
+    const enforcedInspectedBoxSizeEntries =
+      enforcedInspectedBoxMode === inspectedBoxMode
+        ? inspectedBoxSizeEntries
+        : convertMeasuredBoxEntriesMode(inspectedBoxSizeEntries, enforcedInspectedBoxMode);
     const initialInspectedBoxCount =
-      inspectedBoxMode === BOX_PACKAGING_MODES.CARTON
+      enforcedInspectedBoxMode === BOX_PACKAGING_MODES.CARTON
         ? 2
         : hasStoredInspectedBoxSizes
-          ? normalizeSizeCount(inspectedBoxSizeEntries.length, 1)
+          ? normalizeSizeCount(enforcedInspectedBoxSizeEntries.length, 1)
           : 1;
     const storedMasterBarcode = getRecordMasterBarcodeValue(barcodePrefillRecord);
     const storedInnerBarcode = getRecordInnerBarcodeValue(barcodePrefillRecord);
@@ -1417,7 +1483,7 @@ const UpdateQcModal = ({
       inspected_item_bottom_B: strictInspectedItemBottomLbh.B,
       inspected_item_bottom_H: strictInspectedItemBottomLbh.H,
       inspected_item_count: String(initialInspectedItemCount),
-      inspected_box_mode: inspectedBoxMode,
+      inspected_box_mode: enforcedInspectedBoxMode,
       inspected_box_count: String(initialInspectedBoxCount),
       inspected_item_sizes: ensureMeasuredSizeEntryCount(
         inspectedItemSizeEntries,
@@ -1425,9 +1491,9 @@ const UpdateQcModal = ({
         { singleRemark: "item" },
       ),
       inspected_box_sizes: ensureMeasuredSizeEntryCount(
-        inspectedBoxSizeEntries,
+        enforcedInspectedBoxSizeEntries,
         initialInspectedBoxCount,
-        { mode: inspectedBoxMode, singleRemark: "box" },
+        { mode: enforcedInspectedBoxMode, singleRemark: "box" },
       ),
       last_inspected_date: toDDMMYYYYInputValue(
         isInspectionRecordUpdate
@@ -1462,6 +1528,7 @@ const UpdateQcModal = ({
     barcodePrefillRecord,
     isInspectionRecordUpdate,
     inspectionRecord,
+      isQcUser,
     latestInspectionRecord,
     latestRequestEntry,
   ]);
@@ -1782,30 +1849,13 @@ const UpdateQcModal = ({
       setBarcodeUploadStatus("");
     }
 
+    if (name === "inspected_box_mode") {
+      applyInspectedBoxMode(value);
+      return;
+    }
+
     setForm((prev) => {
       const nextValue = type === "checkbox" ? checked : value;
-
-      if (name === "inspected_box_mode") {
-        const nextMode = detectBoxPackagingMode(nextValue, prev.inspected_box_sizes);
-        if (nextMode !== BOX_PACKAGING_MODES.CARTON) {
-          setInnerBarcodeScannedInSession(false);
-        }
-        return {
-          ...prev,
-          inspected_box_mode: nextMode,
-          inner_barcode:
-            nextMode === BOX_PACKAGING_MODES.CARTON ? prev.inner_barcode : "",
-          inspected_box_count:
-            nextMode === BOX_PACKAGING_MODES.CARTON
-              ? "2"
-              : String(normalizeSizeCount(prev.inspected_box_count, 1)),
-          inspected_box_sizes: ensureMeasuredSizeEntryCount(
-            convertMeasuredBoxEntriesMode(prev.inspected_box_sizes, nextMode),
-            nextMode === BOX_PACKAGING_MODES.CARTON ? 2 : prev.inspected_box_count,
-            { mode: nextMode, singleRemark: "box" },
-          ),
-        };
-      }
 
       if (name === "inspected_item_count" || name === "inspected_box_count") {
         const safeCount = String(normalizeSizeCount(nextValue, 1));
@@ -2603,6 +2653,19 @@ const UpdateQcModal = ({
       form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON;
     const selectedBarcodeValidationOption =
       getQcBarcodeValidationOption(barcodeValidationType);
+    const requiredBoxModeForBarcodeValidation =
+      getBoxModeForQcBarcodeValidationType(selectedBarcodeValidationOption.value);
+    if (
+      requiresBarcodeValidation &&
+      form.inspected_box_mode !== requiredBoxModeForBarcodeValidation
+    ) {
+      setError(
+        selectedBarcodeValidationOption.value === "inner_master"
+          ? "Inner + Master barcode validation requires Inner + Master Carton box mode."
+          : "Individual barcode validation requires Individual Boxes mode.",
+      );
+      return;
+    }
     const shouldReadInnerBarcode =
       isCartonPackagingMode || selectedBarcodeValidationOption.value === "inner_master";
     const barcodeValue = form.barcode.trim();
@@ -3281,10 +3344,25 @@ const UpdateQcModal = ({
     mode = BOX_PACKAGING_MODES.INDIVIDUAL,
     modeName = "",
     showModeSelector = false,
-	  }) => {
-	    const isCartonMode = mode === BOX_PACKAGING_MODES.CARTON;
-	    const sectionLocked = locked || qcBarcodeValidationLocked || saving;
-	    const safeCount = isCartonMode ? 2 : normalizeSizeCount(countValue, 1);
+  }) => {
+    const isCartonMode = mode === BOX_PACKAGING_MODES.CARTON;
+    const sectionLocked = locked || qcBarcodeValidationLocked || saving;
+    const safeCount = isCartonMode ? 2 : normalizeSizeCount(countValue, 1);
+    const allowedPackagingModeOptions = requiresBarcodeValidation
+      ? [
+        {
+          value: getBoxModeForQcBarcodeValidationType(barcodeValidationType),
+          label:
+            getBoxModeForQcBarcodeValidationType(barcodeValidationType) ===
+            BOX_PACKAGING_MODES.CARTON
+              ? "Inner + Master Carton"
+              : "Individual Boxes",
+        },
+      ]
+      : [
+        { value: BOX_PACKAGING_MODES.INDIVIDUAL, label: "Individual Boxes" },
+        { value: BOX_PACKAGING_MODES.CARTON, label: "Inner + Master Carton" },
+      ];
     const entryColumnClass = safeCount > 1 ? "col-6 col-md-2" : "col-6 col-md-3";
     const singleEntryLabel = String(countLabel || "").toLowerCase().includes("box")
       ? "Box"
@@ -3303,10 +3381,13 @@ const UpdateQcModal = ({
                 name={modeName}
                 value={mode}
                 onChange={handleChange}
-	                disabled={sectionLocked}
+                disabled={sectionLocked}
               >
-                <option value={BOX_PACKAGING_MODES.INDIVIDUAL}>Individual Boxes</option>
-                <option value={BOX_PACKAGING_MODES.CARTON}>Inner + Master Carton</option>
+                {allowedPackagingModeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </>
           ) : (
@@ -3660,13 +3741,16 @@ const UpdateQcModal = ({
 	                            }`}
 	                            onClick={() => {
 	                              setBarcodeValidationType(option.value);
+                              applyInspectedBoxMode(
+                                getBoxModeForQcBarcodeValidationType(option.value),
+                              );
 	                              setBarcodeScannerTarget(
 	                                getQcBarcodeValidationRequirements(option.value)[0].inputKey,
 	                              );
-	                              setBarcodeValidationError("");
-	                              setBarcodeValidationStatus("");
-	                            }}
-	                            disabled={saving}
+                              setBarcodeValidationError("");
+                              setBarcodeValidationStatus("");
+                            }}
+                            disabled={saving}
 	                          >
 	                            {option.label}
 	                          </button>

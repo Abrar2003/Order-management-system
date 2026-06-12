@@ -17,6 +17,9 @@ const {
   invalidateOrderCaches,
 } = require("../services/cacheInvalidation.service");
 const {
+  securityLog,
+} = require("../middlewares/securityActivityLogger");
+const {
   uploadOrders,
   createOrdersManually,
   rectifyPdfOrders,
@@ -125,6 +128,9 @@ router.get(
   "/packed-goods/export",
   authenticate,
   requirePermission("orders", "export"),
+  securityLog("export_excel", "packed_goods", {
+    metadata: (req) => ({ filters: req.query || {} }),
+  }),
   exportPackedGoods,
 );
 
@@ -139,7 +145,15 @@ router.get(
 
 // get orders with optional filters via query params
 router.get("/filters", authenticate, requirePermission("orders", "view"), cacheRoute("orders", SHORT_CACHE_TTL), getOrdersByFiltersDb);
-router.get("/export", authenticate, requirePermission("orders", "export"), exportOrdersDb);
+router.get(
+  "/export",
+  authenticate,
+  requirePermission("orders", "export"),
+  securityLog("export_excel", "orders", {
+    metadata: (req) => ({ filters: req.query || {} }),
+  }),
+  exportOrdersDb,
+);
 router.get(
   "/po-status-report",
   authenticate,
@@ -172,18 +186,27 @@ router.get(
   "/delayed-po-report/export",
   authenticate,
   requirePermission("reports", "export"),
+  securityLog("export_excel", "delayed_po_report", {
+    metadata: (req) => ({ filters: req.query || {} }),
+  }),
   exportDelayedPoReport,
 );
 router.get(
   "/pending-po-report/export",
   authenticate,
   requirePermission("reports", "export"),
+  securityLog("export_excel", "pending_po_report", {
+    metadata: (req) => ({ filters: req.query || {} }),
+  }),
   exportPendingPoReport,
 );
 router.get(
   "/upcoming-etd-report/export",
   authenticate,
   requirePermission("reports", "export"),
+  securityLog("export_excel", "upcoming_etd_report", {
+    metadata: (req) => ({ filters: req.query || {} }),
+  }),
   exportUpcomingEtdReport,
 );
 router.get("/revised-etd-history", authenticate, requirePermission("orders", "view"), cacheRoute("orders", SHORT_CACHE_TTL), getRevisedEtdHistory);
@@ -201,6 +224,9 @@ router.get(
   "/shipments/export",
   authenticate,
   requirePermission("shipments", "export"),
+  securityLog("export_excel", "shipments", {
+    metadata: (req) => ({ filters: req.query || {} }),
+  }),
   exportShipmentsDb,
 );
 
@@ -249,6 +275,7 @@ router.patch(
   "/archive-order/:id",
   authenticate,
   requirePermission("orders", "delete"),
+  securityLog("archive", "order"),
   invalidateOrdersOnSuccess,
   archiveOrder,
 );
@@ -257,6 +284,7 @@ router.patch(
   "/unarchive-order/:id",
   authenticate,
   requirePermission("orders", "edit"),
+  securityLog("unarchive", "order"),
   invalidateOrdersOnSuccess,
   unarchiveOrder,
 );

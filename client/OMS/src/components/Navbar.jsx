@@ -481,6 +481,10 @@ const Navbar = () => {
         );
       }
 
+      if (isStrictAdminRole(permissionRole || role)) {
+        items.push(routeMenuItem("security-monitoring", "Security Monitoring", "/security"));
+      }
+
       items.push(
         actionMenuItem("theme", themeLabel, "toggle-theme"),
         actionMenuItem("change-password", "Change Password", "change-password"),
@@ -489,7 +493,7 @@ const Navbar = () => {
 
       return items;
     },
-    [canCreateUsers, canCreateVendors, hasPermission, isAdmin, permissionRole, themeLabel],
+    [canCreateUsers, canCreateVendors, hasPermission, isAdmin, permissionRole, role, themeLabel],
   );
 
   const menuSections = useMemo(

@@ -234,6 +234,10 @@ const resolveQcBarcodeValidationType = (value) => {
   const normalized = normalizeText(value).toLowerCase();
   return QC_BARCODE_VALIDATION_TYPES[normalized] ? normalized : "";
 };
+const getBoxModeForQcBarcodeValidationType = (value) =>
+  resolveQcBarcodeValidationType(value) === "inner_master"
+    ? BOX_PACKAGING_MODES.CARTON
+    : BOX_PACKAGING_MODES.INDIVIDUAL;
 const getQcInspectionRecordCount = (qc = {}) =>
   Array.isArray(qc?.inspection_record) ? qc.inspection_record.length : 0;
 const getQcImageUploadTotalLimit = (qc = {}) =>
@@ -5410,6 +5414,16 @@ exports.updateQC = async (req, res) => {
         });
       }
 
+      const requiredBoxModeForBarcodeValidation =
+        getBoxModeForQcBarcodeValidationType(selectedBarcodeValidationType);
+      if (parsedInspectedBoxMode !== requiredBoxModeForBarcodeValidation) {
+        return res.status(400).json({
+          message:
+            selectedBarcodeValidationType === "inner_master"
+              ? "Inner + Master barcode validation requires Inner + Master Carton box mode."
+              : "Individual barcode validation requires Individual Boxes mode.",
+        });
+      }
       const barcodeValidationConfig =
         QC_BARCODE_VALIDATION_TYPES[selectedBarcodeValidationType];
       const typeLabel = barcodeValidationConfig.label;

@@ -2695,8 +2695,11 @@ const assertTransitionPermission = ({ task, actor, toStatus }) => {
   }
 
   if (toStatus === "__rework__") {
-    if (!isManagerOrAdmin(actor)) {
-      throw new Error("Only admin or manager can send this task to rework");
+    if (
+      !isManagerOrAdmin(actor) &&
+      !isTaskCreatedByUser(task, actor?._id || actor?.id)
+    ) {
+      throw new Error("Only admin, manager, or the task creator can send this task to rework");
     }
   }
 
@@ -3125,9 +3128,9 @@ const requestWorkflowTaskHold = async ({
   }
 
   const task = await getMutableTaskById(taskId);
-  const adminHold = isAdmin(actor);
-  if (!adminHold && !canCompleteWorkflowTask(actor, task)) {
-    throw new Error("Only admins or assigned users can put workflow tasks on hold");
+  const privilegedHold = isAdmin(actor) || isTaskCreatedByUser(task, actor?._id || actor?.id);
+  if (!privilegedHold && !canCompleteWorkflowTask(actor, task)) {
+    throw new Error("Only admins, task creators, or assigned users can put workflow tasks on hold");
   }
 
   const fromStatus = normalizeWorkflowTaskStatus(task.status, {
@@ -3146,14 +3149,14 @@ const requestWorkflowTaskHold = async ({
 
   task.hold = {
     ...currentHold,
-    status: adminHold ? "hold" : "pending",
+    status: privilegedHold ? "hold" : "pending",
     previous_status: fromStatus,
     requested_comment: normalizedNote,
     requested_by: auditActor,
     requested_at: requestedAt,
-    approved_comment: adminHold ? normalizedNote : "",
-    approved_by: adminHold ? auditActor : {},
-    approved_at: adminHold ? requestedAt : null,
+    approved_comment: privilegedHold ? normalizedNote : "",
+    approved_by: privilegedHold ? auditActor : {},
+    approved_at: privilegedHold ? requestedAt : null,
     resumed_comment: "",
     resumed_by: {},
     resumed_at: null,
@@ -3163,7 +3166,7 @@ const requestWorkflowTaskHold = async ({
     total_paused_ms: currentHold.total_paused_ms,
   };
   task.updated_by = auditActor;
-  if (adminHold) {
+  if (privilegedHold) {
     task.status = "hold";
   }
   await task.save();
@@ -3172,13 +3175,13 @@ const requestWorkflowTaskHold = async ({
     task: task._id,
     batch: task.batch || null,
     from_status: fromStatus,
-    to_status: adminHold ? "hold" : fromStatus,
+    to_status: privilegedHold ? "hold" : fromStatus,
     changed_by: auditActor,
     changed_at: requestedAt,
     note: normalizedNote,
     metadata: {
       hold_requested: true,
-      hold_approved: adminHold,
+      hold_approved: privilegedHold,
       hold_previous_status: fromStatus,
     },
   });
@@ -3197,7 +3200,7 @@ const requestWorkflowTaskHold = async ({
     task: taskDetail,
     batch,
     actor,
-    message: adminHold ? "Workflow task put on hold" : "Workflow task hold requested",
+    message: privilegedHold ? "Workflow task put on hold" : "Workflow task hold requested",
     changedFields: ["hold", "status"],
     shouldRefetch: true,
   });

@@ -232,13 +232,15 @@ const getTaskActionState = ({
 	        hasUploadAssignees(task)
 	          ? uploadAssignedToCurrentUser
           : (assignedToCurrentUser || createdByCurrentUser)
-      ),
-    canRework: canManageWorkflow && ["complete", "approved", "uploaded"].includes(task?.status),
+    ),
+    canRework:
+      (canManageWorkflow || canAdminWorkflow || createdByCurrentUser) &&
+      ["complete", "approved", "uploaded"].includes(task?.status),
     canApprove: assignedByCurrentUser && task?.status === "complete",
     canRequestHold:
       task?.status !== "hold" &&
       task?.status !== "uploaded" &&
-      (assignedToCurrentUser || canAdminWorkflow) &&
+      (assignedToCurrentUser || createdByCurrentUser || canAdminWorkflow) &&
       task?.hold?.status !== "pending",
     canApproveHold:
       task?.status !== "hold" &&
@@ -250,7 +252,7 @@ const getTaskActionState = ({
       (createdByCurrentUser || canAdminWorkflow),
     canResume:
       task?.status === "hold" &&
-      canAdminWorkflow,
+      (createdByCurrentUser || canAdminWorkflow),
   };
 };
 
@@ -969,9 +971,11 @@ const WorkflowTasksPanel = ({
     }
 
     if (notePrompt.type === "hold") {
+      const creatorHold =
+        String(getTaskUserId(task?.created_by)) === String(currentUserId);
       await handleQuickAction(
         () => requestWorkflowTaskHold(task._id, { note }),
-        isAdmin ? "Task put on hold." : "Task hold request submitted.",
+        isAdmin || creatorHold ? "Task put on hold." : "Task hold request submitted.",
         {
           taskId: task._id,
           closeNotePrompt: true,
@@ -1643,7 +1647,7 @@ const WorkflowTasksPanel = ({
                                   title={
                                     task?.hold?.status === "pending"
                                       ? "Hold request is pending"
-                                      : isAdmin
+                                      : isAdmin || actions.createdByCurrentUser
                                       ? "Put task on hold"
                                       : "Request hold"
                                   }

@@ -17,6 +17,9 @@ const {
 const {
   invalidateItemCaches,
 } = require("../services/cacheInvalidation.service");
+const {
+  securityLog,
+} = require("../middlewares/securityActivityLogger");
 const { userHasPermission } = require("../services/permission.service");
 const {
   getItems,
@@ -137,6 +140,9 @@ router.get(
   "/pis-diffs/export",
   auth,
   requirePermission("pis", "export"),
+  securityLog("export_excel", "pis_diff_report", {
+    metadata: (req) => ({ filters: req.query || {} }),
+  }),
   exportPisDiffCheckedReport,
 );
 
@@ -168,6 +174,9 @@ router.get(
   "/final-pis-check/export",
   auth,
   requirePermission("pis", "export"),
+  securityLog("export_excel", "final_pis_check_report", {
+    metadata: (req) => ({ filters: req.query || {} }),
+  }),
   exportFinalPisCheckReport,
 );
 
@@ -275,6 +284,10 @@ router.get(
   "/:itemCode/details",
   auth,
   requirePermission("items", "view"),
+  securityLog("view", "item", {
+    resourceId: (req) => req.params.itemCode,
+    metadata: () => ({ records: 1 }),
+  }),
   cacheRoute("items", SHORT_CACHE_TTL),
   getItemDetails,
 );
@@ -283,6 +296,10 @@ router.get(
   "/:itemCode/orders-history",
   auth,
   requirePermission("items", "view"),
+  securityLog("view", "item_orders_history", {
+    resourceId: (req) => req.params.itemCode,
+    metadata: () => ({ records: 1 }),
+  }),
   cacheRoute("items", SHORT_CACHE_TTL),
   getItemOrdersHistory,
 );
@@ -291,6 +308,10 @@ router.get(
   "/:id/files/:fileType/url",
   auth,
   requirePermission("images_documents", "view"),
+  securityLog("download_file", "item_file", {
+    resourceId: (req) => req.params.id,
+    metadata: (req) => ({ file_type: req.params.fileType }),
+  }),
   getItemFileUrl,
 );
 
@@ -298,6 +319,9 @@ router.get(
   "/:itemId/pis-file-url",
   auth,
   requirePermission("pis", "view"),
+  securityLog("download_file", "pis_file", {
+    resourceId: (req) => req.params.itemId,
+  }),
   getItemPisFileUrl,
 );
 

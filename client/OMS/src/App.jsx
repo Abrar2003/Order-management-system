@@ -69,6 +69,7 @@ import PisUpdateLogs from "./pages/PisUpdateLogs";
 import WeeklySummary from "./pages/WeeklySummary";
 import DailySummary from "./pages/DailySummary";
 import Complaints from "./pages/Complaints";
+import SecurityDashboard from "./pages/SecurityDashboard";
 
 // import Users from "./pages/Users"; // later
 const clearStaleUiOverlays = ({ removeCustomModalRoots = false } = {}) => {
@@ -656,6 +657,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <PermissionManagement />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/security"
+            element={
+              <ProtectedRoute>
+                <SecurityDashboard />
               </ProtectedRoute>
             }
           />

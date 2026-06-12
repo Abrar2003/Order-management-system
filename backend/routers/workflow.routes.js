@@ -3,6 +3,9 @@ const auth = require("../middlewares/auth.middleware");
 const authorize = require("../middlewares/authorize.middleware");
 const { requirePermission } = require("../middlewares/permission.middleware");
 const {
+  securityLog,
+} = require("../middlewares/securityActivityLogger");
+const {
   bulkPatchWorkflowBatchTasks,
   cancelBatch,
   createBatchFromFolderManifest,
@@ -147,6 +150,7 @@ router.patch(
   "/tasks/:id",
   auth,
   requirePermission("workflow", "view"),
+  securityLog("update", "workflow_task"),
   patchTask,
 );
 
@@ -154,6 +158,7 @@ router.patch(
   "/tasks/:id/assign",
   auth,
   requirePermission("workflow", "view"),
+  securityLog("assign", "workflow_task"),
   assignTask,
 );
 
@@ -161,6 +166,7 @@ router.patch(
   "/tasks/:id/start",
   auth,
   requirePermission("workflow", "view"),
+  securityLog("start", "workflow_task"),
   startTask,
 );
 
@@ -168,6 +174,7 @@ router.patch(
   "/tasks/:id/submit",
   auth,
   requirePermission("workflow", "view"),
+  securityLog("submit", "workflow_task"),
   submitTask,
 );
 
@@ -175,6 +182,7 @@ router.patch(
   "/tasks/:id/complete",
   auth,
   requirePermission("workflow", "view"),
+  securityLog("complete", "workflow_task"),
   completeTask,
 );
 
@@ -183,6 +191,7 @@ router.patch(
   auth,
   authorize(...WORKFLOW_MANAGER_ROLES),
   requirePermission("workflow", "edit"),
+  securityLog("review", "workflow_task"),
   reviewTask,
 );
 
@@ -190,6 +199,7 @@ router.patch(
   "/tasks/:id/approve",
   auth,
   requirePermission("workflow", "view"),
+  securityLog("approve", "workflow_task"),
   approveTask,
 );
 
@@ -197,14 +207,15 @@ router.patch(
   "/tasks/:id/upload",
   auth,
   requirePermission("workflow", "view"),
+  securityLog("upload", "workflow_task"),
   uploadTask,
 );
 
 router.patch(
   "/tasks/:id/rework",
   auth,
-  authorize(...WORKFLOW_MANAGER_ROLES),
-  requirePermission("workflow", "edit"),
+  requirePermission("workflow", "view"),
+  securityLog("rework", "workflow_task"),
   reworkTask,
 );
 
@@ -212,6 +223,7 @@ router.patch(
   "/tasks/:id/hold",
   auth,
   requirePermission("workflow", "view"),
+  securityLog("hold", "workflow_task"),
   requestHoldTask,
 );
 
@@ -219,6 +231,7 @@ router.patch(
   "/tasks/:id/hold/approve",
   auth,
   requirePermission("workflow", "view"),
+  securityLog("approve_hold", "workflow_task"),
   approveHoldTask,
 );
 
@@ -226,6 +239,7 @@ router.patch(
   "/tasks/:id/hold/reject",
   auth,
   requirePermission("workflow", "view"),
+  securityLog("reject_hold", "workflow_task"),
   rejectHoldTask,
 );
 
@@ -233,6 +247,7 @@ router.patch(
   "/tasks/:id/resume",
   auth,
   requirePermission("workflow", "view"),
+  securityLog("resume", "workflow_task"),
   resumeTask,
 );
 
@@ -240,6 +255,7 @@ router.patch(
   "/tasks/:id/status",
   auth,
   requirePermission("workflow", "view"),
+  securityLog("update_status", "workflow_task"),
   patchTaskStatus,
 );
 
@@ -254,6 +270,7 @@ router.delete(
   "/tasks/:id",
   auth,
   requirePermission("workflow", "view"),
+  securityLog("delete", "workflow_task"),
   removeTask,
 );
 

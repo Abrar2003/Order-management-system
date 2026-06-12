@@ -17,6 +17,9 @@ const {
   isAdminLikeRole,
   normalizeUserRole,
 } = require("../helpers/userRole");
+const {
+  logSecurityActivity,
+} = require("../services/securityMonitoringService");
 
 const isTruthy = (value) =>
   ["1", "true", "yes", "y", "on"].includes(
@@ -37,6 +40,15 @@ const buildSafeUser = (user = {}) => ({
   name: user.name,
   email: user.email,
 });
+
+const logAuthSecurityActivity = (req, payload) => {
+  logSecurityActivity(req, payload).catch((error) => {
+    console.warn("[security] auth activity log failed", {
+      action: payload?.action,
+      message: error?.message || String(error),
+    });
+  });
+};
 
 const createAuthSession = async ({ user, req }) => {
   const session = await AuthSession.create({
@@ -138,16 +150,40 @@ const signin = async (req, res) => {
     const password = getStringField(req.body, "password");
 
     if (!username || !password) {
+      logAuthSecurityActivity(req, {
+        action: "login_failed",
+        resource_type: "auth",
+        metadata: { username, reason: "missing_credentials" },
+      });
       return res.status(400).json({ message: "Missing credentials" });
     }
 
     const user = await User.findOne({ username });
     if (!user) {
+      logAuthSecurityActivity(req, {
+        action: "login_failed",
+        resource_type: "auth",
+        metadata: { username, reason: "invalid_username" },
+      });
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
+      logAuthSecurityActivity(
+        { ...req, user },
+        {
+          action: "login_failed",
+          resource_type: "auth",
+          resource_id: user._id,
+          metadata: {
+            user_id: user._id,
+            username,
+            role: user.role,
+            reason: "invalid_password",
+          },
+        },
+      );
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
@@ -161,6 +197,20 @@ const signin = async (req, res) => {
         role: normalizedRole,
       },
     });
+
+    logAuthSecurityActivity(
+      { ...req, user: { ...user.toObject(), role: normalizedRole } },
+      {
+        action: "login_success",
+        resource_type: "auth",
+        resource_id: user._id,
+        metadata: {
+          user_id: user._id,
+          username,
+          role: normalizedRole,
+        },
+      },
+    );
 
     return res.json({
       user: buildSafeUser({ ...user.toObject(), role: normalizedRole }),
@@ -233,10 +283,12 @@ const refresh = async (req, res) => {
 const logout = async (req, res) => {
   try {
     const refreshToken = getCookie(req, REFRESH_COOKIE_NAME);
+    let decodedUserId = "";
     if (refreshToken) {
       try {
         const decoded = verifyRefreshToken(refreshToken);
         const sessionId = getStringField(decoded, "sid");
+        decodedUserId = getStringField(decoded, "sub");
         if (mongoose.Types.ObjectId.isValid(sessionId)) {
           await AuthSession.findByIdAndUpdate(sessionId, {
             $set: { revoked_at: new Date() },
@@ -246,6 +298,15 @@ const logout = async (req, res) => {
         // Always clear cookies even if the refresh token is already invalid.
       }
     }
+
+    logAuthSecurityActivity(req, {
+      action: "logout",
+      resource_type: "auth",
+      resource_id: decodedUserId,
+      metadata: {
+        user_id: decodedUserId,
+      },
+    });
 
     clearAuthCookies(res);
     return res.json({ message: "Logged out successfully" });
