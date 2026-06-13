@@ -3780,45 +3780,45 @@ const UpdateQcModal = ({
 	                                <span className="badge bg-success ms-2">Scanned</span>
 	                              )}
 	                            </label>
-	                            <div className="input-group">
-	                              <input
-	                                type="number"
-	                                className="form-control"
-	                                name={requirement.inputKey}
-	                                value={targetValue}
-	                                onChange={handleChange}
-	                                min="1"
-	                                step="1"
-	                                disabled={targetLocked}
-	                                readOnly={isQcUser}
-	                                placeholder={`Scan ${requirement.label.toLowerCase()} barcode`}
-	                              />
-	                              <button
-	                                type="button"
-	                                className="btn btn-outline-secondary"
-	                                onClick={() => toggleBarcodeScanner(requirement.inputKey)}
-	                                disabled={targetLocked}
-	                              >
-	                                {barcodeScannerOpen && barcodeScannerTarget === requirement.inputKey
-	                                  ? "Stop"
-	                                  : "Scan"}
-	                              </button>
+	                            <div className="d-flex flex-wrap gap-2 align-items-stretch qc-barcode-input-row">
+	                              <div className="input-group flex-grow-1">
+	                                <input
+	                                  type="number"
+	                                  className="form-control"
+	                                  name={requirement.inputKey}
+	                                  value={targetValue}
+	                                  onChange={handleChange}
+	                                  min="1"
+	                                  step="1"
+	                                  disabled={targetLocked}
+	                                  readOnly={isQcUser}
+	                                  placeholder={`Scan ${requirement.label.toLowerCase()} barcode`}
+	                                />
+	                                <button
+	                                  type="button"
+	                                  className="btn btn-outline-secondary"
+	                                  onClick={() => toggleBarcodeScanner(requirement.inputKey)}
+	                                  disabled={targetLocked}
+	                                >
+	                                  {barcodeScannerOpen && barcodeScannerTarget === requirement.inputKey
+	                                    ? "Stop"
+	                                    : "Scan"}
+	                                </button>
+	                              </div>
+	                              {isCurrentUserLabelExempt && (
+	                                <button
+	                                  type="button"
+	                                  className="btn btn-outline-secondary flex-shrink-0"
+	                                  onClick={() => openBarcodeUploadDialog(requirement.inputKey)}
+	                                  disabled={barcodeUploadLoading || saving}
+	                                >
+	                                  {barcodeUploadLoading ? "Uploading..." : "Upload Barcode"}
+	                                </button>
+	                              )}
 	                            </div>
 	                          </div>
 	                        );
 	                      })}
-	                      {isCurrentUserLabelExempt && (
-	                        <div className="col-auto">
-	                          <button
-	                            type="button"
-	                            className="btn btn-outline-secondary"
-	                            onClick={() => openBarcodeUploadDialog(barcodeScannerTarget)}
-	                            disabled={barcodeUploadLoading || saving}
-	                          >
-	                            {barcodeUploadLoading ? "Uploading..." : "Upload Barcode"}
-	                          </button>
-	                        </div>
-	                      )}
 	                      <div className="col-auto">
 	                        <button
 	                          type="button"
