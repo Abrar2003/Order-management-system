@@ -298,6 +298,7 @@ const getQcImageUploaderName = (image = {}) =>
 
 const getQcImageUploadedDateLabel = (image = {}) => {
   const value =
+    image?.uploadedAt ||
     image?.uploaded_at ||
     image?.created_at ||
     image?.createdAt ||
@@ -2789,11 +2790,10 @@ const QcDetails = () => {
                 </div>
               ) : (
                 <div className="qc-image-gallery-accordion-list">
-                  {qcImageGroups.map((group, groupIndex) => (
+                  {qcImageGroups.map((group) => (
                     <details
                       className="qc-image-gallery-accordion"
                       key={group.key}
-                      open={groupIndex === 0}
                     >
                       <summary className="qc-image-gallery-accordion-summary">
                         <span>

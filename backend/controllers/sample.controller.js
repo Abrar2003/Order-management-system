@@ -1,68 +1,39 @@
 const mongoose = require("mongoose");
+
 const Sample = require("../models/sample.model");
-const User = require("../models/user.model");
-const WorkflowDepartment = require("../models/workflow/Department.model");
-const WorkflowTaskType = require("../models/workflow/TaskType.model");
 const { BOX_PACKAGING_MODES, BOX_ENTRY_TYPES } = require("../helpers/boxMeasurement");
+const { normalizeUserRoleKey } = require("../helpers/userRole");
 const { calculateTotalPoCbm } = require("../services/orderCbm.service");
 const { applyDataAccessMatch } = require("../services/userDataAccess.service");
-const { createWorkflowTask } = require("../services/workflow/workflowStatusService");
-const {
-  createStorageKey,
-  getObjectUrl,
-  getSignedObjectUrl,
-  isConfigured: isWasabiConfigured,
-  uploadBuffer,
-} = require("../services/wasabiStorage.service");
-const { normalizeUserRoleKey } = require("../helpers/userRole");
 
 const SHIPPED_BY_VENDOR_ID = "shipped_by_vendor";
 const SHIPPED_BY_VENDOR_NAME = "Shipped By Vendor";
 const SIZE_ENTRY_LIMIT = 4;
-const ITEM_SIZE_REMARK_OPTIONS = Object.freeze(["item", "top", "base", "item1", "item2", "item3"]);
+const ITEM_SIZE_REMARK_OPTIONS = Object.freeze(["item", "top", "base", "item1", "item2", "item3", "item4"]);
 const BOX_SIZE_REMARK_OPTIONS = Object.freeze(["top", "base", "box", "box1", "box2", "box3"]);
-const BOX_CARTON_REMARK_OPTIONS = Object.freeze(["inner", "master"]);
-const SAMPLE_FILE_TYPES = Object.freeze([
-  "initial_sketch",
-  "cad",
-  "sample_image",
-  "inspection",
-  "vendor",
-  "other",
-]);
 const SAMPLE_MUTATION_ROLES = new Set([
   "admin",
   "super_admin",
   "inspection_manager",
   "product_manager",
 ]);
-const STATUS_DATE_FIELD = Object.freeze({
-  cad_ready: "cad_completed_at",
-  sent_to_client: "sent_to_client_at",
-  client_approved: "client_approved_at",
-  sent_to_vendor: "sent_to_vendor_at",
-  manufacturing: "expected_manufacturing_date",
-  inspection_requested: "inspection_requested_at",
-  inspected: "inspected_at",
-  shipping_planned: "estimated_shipping_date",
-  shipped: "shipped_at",
-});
-const SAMPLE_CAD_TASK_TYPE_KEY = "cad_files";
-const SAMPLE_CAD_TASK_DEPARTMENT_NAME = "AutoCAD";
 
 const escapeRegex = (value = "") =>
   String(value).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 const normalizeText = (value) => String(value ?? "").trim();
 const normalizeLower = (value) => normalizeText(value).toLowerCase();
-const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(String(value || ""));
+
 const parsePositiveInt = (value, fallback = 1) => {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
+
 const toSafeNumber = (value, fallback = 0) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 };
+
 const toNonNegativeNumber = (value, fieldLabel) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) {
@@ -70,12 +41,14 @@ const toNonNegativeNumber = (value, fieldLabel) => {
   }
   return parsed;
 };
+
 const isPositiveNumericInput = (value) => {
   const normalized = normalizeText(value);
   if (!normalized) return false;
   const parsed = Number(normalized);
   return Number.isFinite(parsed) && parsed > 0;
 };
+
 const normalizeFilterValue = (value) => {
   const normalized = normalizeText(value);
   if (!normalized) return null;
@@ -83,6 +56,7 @@ const normalizeFilterValue = (value) => {
   if (["all", "null", "undefined"].includes(lowered)) return null;
   return normalized;
 };
+
 const parseDate = (value, label = "date") => {
   const normalized = normalizeText(value);
   if (!normalized) return null;
@@ -90,14 +64,21 @@ const parseDate = (value, label = "date") => {
   if (Number.isNaN(parsed.getTime())) throw new Error(`${label} is invalid`);
   return parsed;
 };
+
 const parseDateBoundary = (value, endOfDay = false) => {
   const parsed = parseDate(value, "date");
   if (!parsed) return null;
   if (/^\d{4}-\d{2}-\d{2}$/.test(normalizeText(value))) {
-    parsed.setUTCHours(endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0, endOfDay ? 999 : 0);
+    parsed.setUTCHours(
+      endOfDay ? 23 : 0,
+      endOfDay ? 59 : 0,
+      endOfDay ? 59 : 0,
+      endOfDay ? 999 : 0,
+    );
   }
   return parsed;
 };
+
 const parseJsonBodyField = (value, label, fallback = []) => {
   if (value === undefined || value === null || value === "") return fallback;
   if (Array.isArray(value)) return value;
@@ -108,6 +89,7 @@ const parseJsonBodyField = (value, label, fallback = []) => {
     throw new Error(`${label} must be valid JSON`);
   }
 };
+
 const normalizeDistinctValues = (values = []) =>
   [...new Set(
     (Array.isArray(values) ? values : [])
@@ -121,120 +103,6 @@ const buildAuditActor = (user = {}) => ({
   name: normalizeText(user?.name || user?.email || user?.role || ""),
 });
 
-const getTomorrowDueDate = () => {
-  const dueDate = new Date();
-  dueDate.setDate(dueDate.getDate() + 1);
-  dueDate.setHours(0, 0, 0, 0);
-  return dueDate;
-};
-
-const ensureSampleCadWorkflowDepartment = async (actor = {}) => {
-  const key = "autocad";
-  let department = await WorkflowDepartment.findOne({
-    $or: [
-      { key },
-      { name: { $regex: `^${escapeRegex(SAMPLE_CAD_TASK_DEPARTMENT_NAME)}$`, $options: "i" } },
-    ],
-  });
-
-  if (!department) {
-    department = await WorkflowDepartment.create({
-      name: SAMPLE_CAD_TASK_DEPARTMENT_NAME,
-      key,
-      description: "Auto-created department for sample CAD file workflow tasks.",
-      created_by: actor,
-      updated_by: actor,
-    });
-  }
-
-  return department;
-};
-
-const ensureSampleCadWorkflowTaskType = async (departmentId, actor = {}) => {
-  let taskType = await WorkflowTaskType.findOne({ key: SAMPLE_CAD_TASK_TYPE_KEY });
-
-  if (!taskType) {
-    taskType = await WorkflowTaskType.create({
-      key: SAMPLE_CAD_TASK_TYPE_KEY,
-      name: "CAD Files",
-      description: "Auto-created workflow task for sample CAD files.",
-      category: "cad",
-      auto_create_mode: "manual",
-      default_department: departmentId,
-      default_priority: "normal",
-      requires_review: true,
-      is_active: true,
-      created_by: actor,
-      updated_by: actor,
-    });
-  } else {
-    let changed = false;
-    if (taskType.is_active !== true) {
-      taskType.is_active = true;
-      changed = true;
-    }
-    if (!taskType.default_department && departmentId) {
-      taskType.default_department = departmentId;
-      changed = true;
-    }
-    if (changed) {
-      taskType.updated_by = actor;
-      await taskType.save();
-    }
-  }
-
-  return taskType;
-};
-
-const resolveSampleCadArtist = async (payload = {}) => {
-  const requestedUserId = normalizeText(
-    payload.assigned_cad_artist_user_id ||
-      payload.assigned_cad_artist_user ||
-      payload.cad_artist_user_id,
-  );
-  if (!requestedUserId) {
-    throw new Error("assigned_cad_artist_user_id is required");
-  }
-  if (!isValidObjectId(requestedUserId)) {
-    throw new Error("assigned_cad_artist_user_id is invalid");
-  }
-
-  const user = await User.findById(requestedUserId)
-    .select("_id name username email role")
-    .lean();
-  if (!user) {
-    throw new Error("Assigned CAD artist was not found");
-  }
-
-  return user;
-};
-
-const createSampleCadWorkflowTask = async ({ sample, cadArtist, actorUser } = {}) => {
-  if (!sample?._id || !cadArtist?._id) return null;
-
-  const actor = buildAuditActor(actorUser);
-  const department = await ensureSampleCadWorkflowDepartment(actor);
-  await ensureSampleCadWorkflowTaskType(department._id, actor);
-
-  return createWorkflowTask({
-    payload: {
-      title: sample.code,
-      description: `CAD files task for sample ${sample.code}`,
-      task_type_key: SAMPLE_CAD_TASK_TYPE_KEY,
-      assignee_ids: [String(cadArtist._id)],
-      upload_assignee_ids: [String(cadArtist._id)],
-      department: String(department._id),
-      due_date: getTomorrowDueDate(),
-      brand: sample.brand,
-      priority: "normal",
-      upload_required: true,
-      review_required: true,
-      creation_note: `Created automatically when sample ${sample.code} was created.`,
-    },
-    actor: actorUser,
-  });
-};
-
 const canMutateSamples = (user = {}) =>
   SAMPLE_MUTATION_ROLES.has(normalizeUserRoleKey(user?.role));
 
@@ -242,18 +110,16 @@ const ensureSampleMutationAccess = (req, res) => {
   if (canMutateSamples(req.user)) return true;
   res.status(403).json({
     success: false,
-    message: "Sample workflow updates are restricted to admin, super admin, inspection manager, and product manager users.",
+    message: "Sample updates are restricted to admin, super admin, inspection manager, and product manager users.",
   });
   return false;
 };
 
-const validateEnum = (value, allowed = [], label = "value", fallback = "") => {
-  const normalized = normalizeLower(value || fallback);
-  if (!normalized) return fallback;
-  if (!allowed.includes(normalized)) {
-    throw new Error(`${label} must be one of: ${allowed.join(", ")}`);
-  }
-  return normalized;
+const isBadRequestError = (error) => {
+  const normalized = normalizeLower(error?.message);
+  return ["required", "must be", "invalid", "already exists", "not found", "unsupported"].some((part) =>
+    normalized.includes(part),
+  );
 };
 
 const validateRemarkOption = (remark = "", options = [], fieldLabel = "Remark") => {
@@ -284,7 +150,7 @@ const normalizeShipmentStuffedBy = (input = {}) => {
     return { id: null, name: SHIPPED_BY_VENDOR_NAME };
   }
   if (!id && !name) throw new Error("stuffed_by is required");
-  return { id: id || null, name: name || id };
+  return { id: id && mongoose.Types.ObjectId.isValid(id) ? id : null, name: name || id };
 };
 
 const isBlankItemSizeEntry = (entry = {}) =>
@@ -293,6 +159,7 @@ const isBlankItemSizeEntry = (entry = {}) =>
   !isPositiveNumericInput(entry?.H) &&
   !isPositiveNumericInput(entry?.net_weight) &&
   !isPositiveNumericInput(entry?.gross_weight) &&
+  !isPositiveNumericInput(entry?.weight) &&
   !normalizeText(entry?.remark);
 
 const isBlankBoxSizeEntry = (entry = {}, boxMode = BOX_PACKAGING_MODES.INDIVIDUAL) =>
@@ -301,6 +168,7 @@ const isBlankBoxSizeEntry = (entry = {}, boxMode = BOX_PACKAGING_MODES.INDIVIDUA
   !isPositiveNumericInput(entry?.H) &&
   !isPositiveNumericInput(entry?.net_weight) &&
   !isPositiveNumericInput(entry?.gross_weight) &&
+  !isPositiveNumericInput(entry?.weight) &&
   (boxMode === BOX_PACKAGING_MODES.CARTON ? true : !normalizeText(entry?.remark)) &&
   !isPositiveNumericInput(entry?.item_count_in_inner) &&
   !isPositiveNumericInput(entry?.box_count_in_master);
@@ -323,14 +191,12 @@ const normalizeItemSizeEntries = (entries = []) => {
     if ((L > 0 || B > 0 || H > 0) && (!L || !B || !H)) {
       throw new Error(`${label} must include positive L, B, and H values`);
     }
-    if (normalizedEntries.length > 1) {
-      if (!remark) throw new Error(`${label}.remark is required`);
-      validateRemarkOption(remark, ITEM_SIZE_REMARK_OPTIONS, `${label}.remark`);
-      if (seenRemarks.has(remark)) throw new Error("item_sizes remarks must be unique");
-      seenRemarks.add(remark);
-    } else {
-      validateRemarkOption(remark, ITEM_SIZE_REMARK_OPTIONS, `${label}.remark`);
+    if (normalizedEntries.length > 1 && !remark) {
+      throw new Error(`${label}.remark is required`);
     }
+    validateRemarkOption(remark, ITEM_SIZE_REMARK_OPTIONS, `${label}.remark`);
+    if (remark && seenRemarks.has(remark)) throw new Error("item_sizes remarks must be unique");
+    if (remark) seenRemarks.add(remark);
     return { L, B, H, remark, net_weight: netWeight, gross_weight: grossWeight };
   });
 };
@@ -352,6 +218,7 @@ const normalizeBoxSizeEntries = (entries = [], boxMode = BOX_PACKAGING_MODES.IND
     if ((L > 0 || B > 0 || H > 0) && (!L || !B || !H)) {
       throw new Error(`${label} must include positive L, B, and H values`);
     }
+
     if (boxMode === BOX_PACKAGING_MODES.CARTON) {
       const isInner = index === 0;
       return {
@@ -370,15 +237,14 @@ const normalizeBoxSizeEntries = (entries = [], boxMode = BOX_PACKAGING_MODES.IND
           : toNonNegativeNumber(entry?.box_count_in_master ?? 0, `${label}.box_count_in_master`),
       };
     }
+
     const remark = normalizeLower(entry?.remark) || (normalizedEntries.length === 1 ? "box" : "");
-    if (normalizedEntries.length > 1) {
-      if (!remark) throw new Error(`${label}.remark is required`);
-      validateRemarkOption(remark, BOX_SIZE_REMARK_OPTIONS, `${label}.remark`);
-      if (seenRemarks.has(remark)) throw new Error("box_sizes remarks must be unique");
-      seenRemarks.add(remark);
-    } else {
-      validateRemarkOption(remark, BOX_SIZE_REMARK_OPTIONS, `${label}.remark`);
+    if (normalizedEntries.length > 1 && !remark) {
+      throw new Error(`${label}.remark is required`);
     }
+    validateRemarkOption(remark, BOX_SIZE_REMARK_OPTIONS, `${label}.remark`);
+    if (remark && seenRemarks.has(remark)) throw new Error("box_sizes remarks must be unique");
+    if (remark) seenRemarks.add(remark);
     return {
       L,
       B,
@@ -389,6 +255,31 @@ const normalizeBoxSizeEntries = (entries = [], boxMode = BOX_PACKAGING_MODES.IND
       box_type: BOX_ENTRY_TYPES.INDIVIDUAL,
       item_count_in_inner: 0,
       box_count_in_master: 0,
+    };
+  });
+};
+
+const normalizeShipmentEntries = (entries = [], actor = {}) => {
+  if (!Array.isArray(entries)) throw new Error("shipment must be an array");
+  return entries.map((entry, index) => {
+    const container = normalizeText(entry?.container);
+    const stuffingDate = parseDate(entry?.stuffing_date, `shipment[${index + 1}].stuffing_date`);
+    const quantity = Number(entry?.quantity);
+    if (!container) throw new Error(`shipment[${index + 1}] container is required`);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      throw new Error(`shipment[${index + 1}] quantity must be a positive number`);
+    }
+    return {
+      container,
+      invoice_number: normalizeShipmentInvoiceNumber(entry?.invoice_number, ""),
+      stuffing_date: stuffingDate,
+      quantity,
+      pending: Math.max(0, toSafeNumber(entry?.pending, 0)),
+      remaining_remarks: normalizeText(entry?.remaining_remarks),
+      stuffed_by: normalizeShipmentStuffedBy(entry?.stuffed_by),
+      cases: Array.isArray(entry?.cases) ? entry.cases : [],
+      updated_at: new Date(),
+      updated_by: actor,
     };
   });
 };
@@ -414,219 +305,16 @@ const calculateShipmentCbm = (sample = {}, quantity = 0) => {
 
 const calculateSamplePerItemCbm = (sample = {}) => calculateShipmentCbm(sample, 1);
 
-const buildStoredSampleFile = (file = {}, actor = {}) => ({
-  key: normalizeText(file.key),
-  originalName: normalizeText(file.originalName || file.originalname),
-  contentType: normalizeText(file.contentType || file.mimetype),
-  size: Math.max(0, Number(file.size || 0)),
-  link: normalizeText(file.link) || (file.key && isWasabiConfigured() ? getObjectUrl(file.key) : ""),
-  public_id: normalizeText(file.public_id || file.key),
-  uploadedAt: file.uploadedAt || new Date(),
-  uploaded_by: file.uploaded_by || actor,
-});
-
-const serializeSampleFile = async (file = {}) => {
-  const key = normalizeText(file?.key);
-  const originalName = normalizeText(file?.originalName || file?.originalname || "sample-file");
-  let link = normalizeText(file?.link);
-  if (key && isWasabiConfigured()) {
-    try {
-      link = await getSignedObjectUrl(key, {
-        expiresIn: 24 * 60 * 60,
-        filename: originalName,
-      });
-    } catch (error) {
-      console.error("Sample file signed URL generation failed:", {
-        key,
-        error: error?.message || String(error),
-      });
-    }
-  }
-  return {
-    _id: String(file?._id || ""),
-    key,
-    originalName,
-    contentType: normalizeText(file?.contentType),
-    size: Math.max(0, Number(file?.size || 0)),
-    link,
-    public_id: normalizeText(file?.public_id || key),
-    uploadedAt: file?.uploadedAt || null,
-    uploaded_by: file?.uploaded_by || null,
-  };
-};
-
-const uploadSampleFiles = async (files = [], fileType = "other", actor = {}) => {
-  const normalizedType = SAMPLE_FILE_TYPES.includes(fileType) ? fileType : "other";
-  if (!Array.isArray(files) || files.length === 0) return [];
-  if (!isWasabiConfigured()) throw new Error("Wasabi storage is not configured");
-  const folder = `samples/${normalizedType}`;
-  return Promise.all(files.map(async (file) => {
-    const uploadResult = await uploadBuffer({
-      buffer: file.buffer,
-      key: createStorageKey({
-        folder,
-        originalName: file.originalname,
-      }),
-      originalName: file.originalname,
-      contentType: file.mimetype,
-    });
-    return buildStoredSampleFile({
-      ...uploadResult,
-      originalName: file.originalname,
-      contentType: file.mimetype,
-      size: file.size,
-    }, actor);
-  }));
-};
-
-const compactValue = (value) => {
-  if (value instanceof Date) return value.toISOString();
-  if (value === undefined) return null;
-  if (Array.isArray(value)) return value.map(compactValue);
-  if (value && typeof value === "object") {
-    if (value._id) return String(value._id);
-    return Object.entries(value).reduce((acc, [key, entryValue]) => {
-      if (["updatedAt", "createdAt", "__v"].includes(key)) return acc;
-      acc[key] = compactValue(entryValue);
-      return acc;
-    }, {});
-  }
-  return value;
-};
-
-const buildChangedFields = (before = {}, after = {}, fields = []) =>
-  fields.reduce((changes, field) => {
-    const beforeValue = compactValue(before?.[field]);
-    const afterValue = compactValue(after?.[field]);
-    if (JSON.stringify(beforeValue) !== JSON.stringify(afterValue)) {
-      changes.push({ field, before: beforeValue, after: afterValue });
-    }
-    return changes;
-  }, []);
-
-const addTimeline = (sample, {
-  stage = "",
-  action = "",
-  statusFrom = "",
-  statusTo = "",
-  comment = "",
-  files = [],
-  vendorName = "",
-  changedFields = [],
-  actor = {},
-} = {}) => {
-  sample.timeline = Array.isArray(sample.timeline) ? sample.timeline : [];
-  sample.timeline.push({
-    stage,
-    action,
-    status_from: statusFrom,
-    status_to: statusTo,
-    comment,
-    files,
-    vendor_name: vendorName,
-    changed_fields: changedFields,
-    created_by: actor,
-    created_at: new Date(),
-  });
-};
-
-const syncLegacyVendors = (sample) => {
-  const vendorNames = normalizeDistinctValues([
-    ...(Array.isArray(sample.vendor) ? sample.vendor : []),
-    ...(Array.isArray(sample.vendor_entries) ? sample.vendor_entries.map((entry) => entry.vendor_name) : []),
-  ]);
-  sample.vendor = vendorNames;
-  const existing = new Set(
-    (Array.isArray(sample.vendor_entries) ? sample.vendor_entries : [])
-      .map((entry) => normalizeLower(entry.vendor_name))
-      .filter(Boolean),
-  );
-  vendorNames.forEach((vendorName) => {
-    if (existing.has(vendorName.toLowerCase())) return;
-    sample.vendor_entries.push({ vendor_name: vendorName });
-    existing.add(vendorName.toLowerCase());
-  });
-};
-
-const normalizeVendorEntries = (value, legacyVendor = []) => {
-  const entries = parseJsonBodyField(value, "vendor_entries", []);
-  const normalized = [];
-  const seen = new Set();
-  const pushVendor = (entry = {}) => {
-    const vendorName = normalizeText(entry?.vendor_name || entry?.name || entry);
-    if (!vendorName || seen.has(vendorName.toLowerCase())) return;
-    seen.add(vendorName.toLowerCase());
-    normalized.push({
-      vendor_name: vendorName,
-      vendor_id: isValidObjectId(entry?.vendor_id) ? entry.vendor_id : null,
-      contact_name: normalizeText(entry?.contact_name),
-      expected_manufacturing_date: parseDate(entry?.expected_manufacturing_date, "expected_manufacturing_date"),
-      manufacturing_status: validateEnum(entry?.manufacturing_status, Sample.MANUFACTURING_STATUSES, "manufacturing_status", "not_started"),
-      inspection_requested_at: parseDate(entry?.inspection_requested_at, "inspection_requested_at"),
-      inspection_status: validateEnum(entry?.inspection_status, Sample.INSPECTION_STATUSES, "inspection_status", "not_requested"),
-      inspected_at: parseDate(entry?.inspected_at, "inspected_at"),
-      estimated_shipping_date: parseDate(entry?.estimated_shipping_date, "estimated_shipping_date"),
-      shipped_at: parseDate(entry?.shipped_at, "shipped_at"),
-      tracking: normalizeText(entry?.tracking),
-      container: normalizeText(entry?.container),
-      invoice_number: normalizeShipmentInvoiceNumber(entry?.invoice_number, ""),
-      quantity: Math.max(0, toSafeNumber(entry?.quantity, 0)),
-      shipment_remarks: normalizeText(entry?.shipment_remarks),
-      files: Array.isArray(entry?.files) ? entry.files.map((file) => buildStoredSampleFile(file)) : [],
-      comments: Array.isArray(entry?.comments) ? entry.comments : [],
-    });
-  };
-  entries.forEach(pushVendor);
-  normalizeVendorList(legacyVendor).forEach((vendorName) => pushVendor(vendorName));
-  return normalized;
-};
-
-const getVendorSummary = (sample = {}) => {
-  const entries = Array.isArray(sample?.vendor_entries) ? sample.vendor_entries : [];
-  const manufacturingDates = entries.map((entry) => entry?.expected_manufacturing_date).filter(Boolean);
-  const inspectionStatuses = entries.map((entry) => normalizeText(entry?.inspection_status)).filter(Boolean);
-  const shippingDates = entries.map((entry) => entry?.estimated_shipping_date).filter(Boolean);
-  return {
-    vendors: normalizeDistinctValues([
-      ...(Array.isArray(sample?.vendor) ? sample.vendor : []),
-      ...entries.map((entry) => entry?.vendor_name),
-    ]),
-    expected_manufacturing_date: manufacturingDates.sort((a, b) => new Date(a) - new Date(b))[0] || sample?.expected_manufacturing_date || null,
-    inspection_status: inspectionStatuses.includes("requested")
-      ? "requested"
-      : inspectionStatuses.includes("inspected")
-        ? "inspected"
-        : inspectionStatuses[0] || "not_requested",
-    estimated_shipping_date: shippingDates.sort((a, b) => new Date(a) - new Date(b))[0] || sample?.estimated_shipping_date || null,
-  };
-};
-
-const serializeSample = async (sample = {}, { detail = false } = {}) => {
+const serializeSample = (sample = {}) => {
   const plain = typeof sample.toObject === "function" ? sample.toObject() : sample;
-  const vendorSummary = getVendorSummary(plain);
-  const fileFields = ["initial_sketch_files", "cad_files", "sample_images", "other_files", "qc_images"];
-  const serialized = {
+  return {
     ...plain,
     _id: String(plain?._id || ""),
-    vendors: vendorSummary.vendors,
-    vendor_summary: vendorSummary,
+    vendors: normalizeDistinctValues(plain?.vendor),
+    vendor_summary: {
+      vendors: normalizeDistinctValues(plain?.vendor),
+    },
   };
-  if (detail) {
-    await Promise.all(fileFields.map(async (field) => {
-      serialized[field] = await Promise.all((Array.isArray(plain?.[field]) ? plain[field] : []).map(serializeSampleFile));
-    }));
-    serialized.vendor_entries = await Promise.all((Array.isArray(plain?.vendor_entries) ? plain.vendor_entries : []).map(async (entry) => ({
-      ...entry,
-      _id: String(entry?._id || ""),
-      files: await Promise.all((Array.isArray(entry?.files) ? entry.files : []).map(serializeSampleFile)),
-    })));
-    serialized.timeline = await Promise.all((Array.isArray(plain?.timeline) ? plain.timeline : []).map(async (entry) => ({
-      ...entry,
-      _id: String(entry?._id || ""),
-      files: await Promise.all((Array.isArray(entry?.files) ? entry.files : []).map(serializeSampleFile)),
-    })));
-  }
-  return serialized;
 };
 
 const buildSampleMatch = (query = {}) => {
@@ -634,21 +322,13 @@ const buildSampleMatch = (query = {}) => {
   const search = normalizeFilterValue(query.search);
   const brand = normalizeFilterValue(query.brand);
   const vendor = normalizeFilterValue(query.vendor);
-  const status = normalizeFilterValue(query.status);
-  const archived = normalizeText(query.archived).toLowerCase();
   const dateFrom = parseDateBoundary(query.date_from || query.dateFrom);
   const dateTo = parseDateBoundary(query.date_to || query.dateTo, true);
 
-  match.archived = ["1", "true", "yes", "archived"].includes(archived);
-  if (archived === "all") delete match.archived;
   if (brand) match.brand = { $regex: `^${escapeRegex(brand)}$`, $options: "i" };
   if (vendor) {
-    match.$or = [
-      { vendor: { $elemMatch: { $regex: escapeRegex(vendor), $options: "i" } } },
-      { "vendor_entries.vendor_name": { $regex: escapeRegex(vendor), $options: "i" } },
-    ];
+    match.vendor = { $elemMatch: { $regex: escapeRegex(vendor), $options: "i" } };
   }
-  if (status) match.current_status = status;
   if (dateFrom || dateTo) {
     match.updatedAt = {};
     if (dateFrom) match.updatedAt.$gte = dateFrom;
@@ -662,7 +342,6 @@ const buildSampleMatch = (query = {}) => {
       { description: { $regex: escaped, $options: "i" } },
       { brand: { $regex: escaped, $options: "i" } },
       { vendor: { $elemMatch: { $regex: escaped, $options: "i" } } },
-      { "vendor_entries.vendor_name": { $regex: escaped, $options: "i" } },
     ];
     if (match.$or) {
       match.$and = [{ $or: match.$or }, { $or: searchOr }];
@@ -672,11 +351,6 @@ const buildSampleMatch = (query = {}) => {
     }
   }
   return match;
-};
-
-const isBadRequestError = (error) => {
-  const normalized = normalizeLower(error?.message);
-  return ["required", "must be", "invalid", "already exists", "not found", "unsupported"].some((part) => normalized.includes(part));
 };
 
 const flattenSampleShipmentRows = (samples = []) =>
@@ -721,20 +395,18 @@ exports.getSamples = async (req, res) => {
     const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
     const skip = (page - 1) * limit;
     const baseMatch = buildSampleMatch(req.query);
-    const match = applyDataAccessMatch(baseMatch, req.user, {
-      vendorFields: ["vendor", "vendor_entries.vendor_name"],
-    });
-    const [samples, totalRecords, brandsRaw, legacyVendorsRaw, entryVendorsRaw] = await Promise.all([
+    const accessOptions = { vendorFields: ["vendor"] };
+    const match = applyDataAccessMatch(baseMatch, req.user, accessOptions);
+    const [samples, totalRecords, brandsRaw, vendorsRaw] = await Promise.all([
       Sample.find(match).sort({ updatedAt: -1, code: 1 }).skip(skip).limit(limit).lean(),
       Sample.countDocuments(match),
-      Sample.distinct("brand", applyDataAccessMatch(buildSampleMatch({ ...req.query, brand: "" }), req.user, { vendorFields: ["vendor", "vendor_entries.vendor_name"] })),
-      Sample.distinct("vendor", applyDataAccessMatch(buildSampleMatch({ ...req.query, vendor: "" }), req.user, { vendorFields: ["vendor", "vendor_entries.vendor_name"] })),
-      Sample.distinct("vendor_entries.vendor_name", applyDataAccessMatch(buildSampleMatch({ ...req.query, vendor: "" }), req.user, { vendorFields: ["vendor", "vendor_entries.vendor_name"] })),
+      Sample.distinct("brand", applyDataAccessMatch(buildSampleMatch({ ...req.query, brand: "" }), req.user, accessOptions)),
+      Sample.distinct("vendor", applyDataAccessMatch(buildSampleMatch({ ...req.query, vendor: "" }), req.user, accessOptions)),
     ]);
-    const data = await Promise.all(samples.map((sample) => serializeSample(sample)));
+
     return res.status(200).json({
       success: true,
-      data,
+      data: samples.map(serializeSample),
       pagination: {
         page,
         limit,
@@ -743,58 +415,14 @@ exports.getSamples = async (req, res) => {
       },
       filters: {
         brands: normalizeDistinctValues(brandsRaw),
-        vendors: normalizeDistinctValues([
-          ...legacyVendorsRaw,
-          ...entryVendorsRaw,
-          ...samples.flatMap((sample) => (Array.isArray(sample.vendor_entries) ? sample.vendor_entries.map((entry) => entry.vendor_name) : [])),
-        ]),
-        statuses: Sample.SAMPLE_STATUSES,
+        vendors: normalizeDistinctValues(vendorsRaw),
       },
     });
   } catch (error) {
     console.error("Get Samples Error:", error);
-    return res.status(500).json({ success: false, message: "Failed to fetch samples", error: error.message });
-  }
-};
-
-exports.getSampleById = async (req, res) => {
-  try {
-    const match = applyDataAccessMatch(
-      { _id: req.params.id },
-      req.user,
-      { vendorFields: ["vendor", "vendor_entries.vendor_name"] },
-    );
-    const sample = await Sample.findOne(match).lean();
-    if (!sample) return res.status(404).json({ success: false, message: "Sample not found" });
-    return res.status(200).json({ success: true, data: await serializeSample(sample, { detail: true }) });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: "Failed to fetch sample", error: error.message });
-  }
-};
-
-exports.getSampleCadArtists = async (_req, res) => {
-  try {
-    const users = await User.find({})
-      .select("_id name username email role")
-      .sort({ name: 1, username: 1 })
-      .lean();
-
-    return res.status(200).json({
-      success: true,
-      data: users.map((user) => ({
-        _id: String(user?._id || ""),
-        id: String(user?._id || ""),
-        name: normalizeText(user?.name),
-        username: normalizeText(user?.username),
-        email: normalizeText(user?.email),
-        role: normalizeText(user?.role),
-      })),
-    });
-  } catch (error) {
-    console.error("Get Sample CAD Artists Error:", error);
     return res.status(500).json({
       success: false,
-      message: "Failed to fetch CAD artists",
+      message: "Failed to fetch samples",
       error: error.message,
     });
   }
@@ -813,68 +441,41 @@ exports.createSample = async (req, res) => {
     if (!normalizeText(payload.brand)) {
       return res.status(400).json({ success: false, message: "brand is required" });
     }
-    if (normalizeLower(payload.current_status) === "shipped") {
-      return res.status(400).json({ success: false, message: "Use Update Status to mark a sample as shipped" });
-    }
-    const existingSample = await Sample.findOne({ code: { $regex: `^${escapeRegex(code)}$`, $options: "i" } }).select("_id code");
+
+    const existingSample = await Sample.findOne({
+      code: { $regex: `^${escapeRegex(code)}$`, $options: "i" },
+    }).select("_id code");
     if (existingSample) {
-      return res.status(400).json({ success: false, message: `Sample code ${existingSample.code || code} already exists` });
+      return res.status(400).json({
+        success: false,
+        message: `Sample code ${existingSample.code || code} already exists`,
+      });
     }
-    const cadArtist = await resolveSampleCadArtist(payload);
+
     const boxMode = Object.values(BOX_PACKAGING_MODES).includes(payload.box_mode)
       ? payload.box_mode
       : BOX_PACKAGING_MODES.INDIVIDUAL;
-    const uploadedFiles = await uploadSampleFiles(req.files, "initial_sketch", actor);
-    const vendorEntries = payload.vendor_entries !== undefined
-      ? normalizeVendorEntries(payload.vendor_entries, payload.vendor)
-      : normalizeVendorEntries([], payload.vendor);
     const sample = new Sample({
       code,
       name: normalizeText(payload.name),
       description: normalizeText(payload.description),
       brand: normalizeText(payload.brand),
       vendor: normalizeVendorList(payload.vendor),
-      vendor_entries: vendorEntries,
       item_sizes: normalizeItemSizeEntries(parseJsonBodyField(payload.item_sizes, "item_sizes")),
       box_sizes: normalizeBoxSizeEntries(parseJsonBodyField(payload.box_sizes, "box_sizes"), boxMode),
       box_mode: boxMode,
       cbm: Math.max(0, toSafeNumber(payload.cbm, 0)),
-      current_status: validateEnum(payload.current_status, Sample.SAMPLE_STATUSES, "current_status", "created"),
-      assigned_cad_artist: normalizeText(cadArtist.name || cadArtist.username || payload.assigned_cad_artist),
-      assigned_cad_artist_user: cadArtist._id,
-      initial_sketch_files: uploadedFiles,
-      requested_by: actor,
-      created_by: actor,
+      shipment: payload.shipment !== undefined
+        ? normalizeShipmentEntries(parseJsonBodyField(payload.shipment, "shipment"), actor)
+        : [],
       updated_by: actor,
     });
-    syncLegacyVendors(sample);
-    addTimeline(sample, {
-      stage: "created",
-      action: "create",
-      statusTo: sample.current_status,
-      comment: normalizeText(payload.first_comment || payload.comment),
-      files: uploadedFiles,
-      changedFields: buildChangedFields({}, sample.toObject(), [
-        "code",
-        "name",
-        "description",
-        "brand",
-        "current_status",
-        "assigned_cad_artist",
-      ]),
-      actor,
-    });
+
     await sample.save();
-    const workflowTask = await createSampleCadWorkflowTask({
-      sample,
-      cadArtist,
-      actorUser: req.user,
-    });
     return res.status(201).json({
       success: true,
       message: "Sample created successfully",
-      data: await serializeSample(sample, { detail: true }),
-      workflow_task: workflowTask,
+      data: serializeSample(sample),
     });
   } catch (error) {
     return res.status(isBadRequestError(error) ? 400 : 500).json({
@@ -892,7 +493,6 @@ exports.updateSample = async (req, res) => {
     if (!sample) return res.status(404).json({ success: false, message: "Sample not found" });
     const payload = req.body && typeof req.body === "object" ? req.body : {};
     const actor = buildAuditActor(req.user);
-    const before = sample.toObject();
     const nextCode = normalizeText(payload.code || sample.code).toUpperCase();
     if (!nextCode) return res.status(400).json({ success: false, message: "code is required" });
     if (nextCode.toLowerCase() !== normalizeLower(sample.code)) {
@@ -901,415 +501,46 @@ exports.updateSample = async (req, res) => {
         code: { $regex: `^${escapeRegex(nextCode)}$`, $options: "i" },
       }).select("_id code");
       if (existingSample) {
-        return res.status(400).json({ success: false, message: `Sample code ${existingSample.code || nextCode} already exists` });
+        return res.status(400).json({
+          success: false,
+          message: `Sample code ${existingSample.code || nextCode} already exists`,
+        });
       }
     }
+
     sample.code = nextCode;
     sample.name = normalizeText(payload.name ?? sample.name);
     sample.description = normalizeText(payload.description ?? sample.description);
     sample.brand = normalizeText(payload.brand ?? sample.brand);
-    if (
-      payload.assigned_cad_artist_user_id !== undefined ||
-      payload.assigned_cad_artist_user !== undefined ||
-      payload.cad_artist_user_id !== undefined
-    ) {
-      const cadArtist = await resolveSampleCadArtist(payload);
-      sample.assigned_cad_artist = normalizeText(cadArtist.name || cadArtist.username || payload.assigned_cad_artist);
-      sample.assigned_cad_artist_user = cadArtist._id;
-    } else {
-      sample.assigned_cad_artist = normalizeText(payload.assigned_cad_artist ?? sample.assigned_cad_artist);
-    }
     if (payload.vendor !== undefined) sample.vendor = normalizeVendorList(payload.vendor);
-    if (payload.vendor_entries !== undefined) {
-      sample.vendor_entries = normalizeVendorEntries(payload.vendor_entries, sample.vendor);
+    if (payload.item_sizes !== undefined) {
+      sample.item_sizes = normalizeItemSizeEntries(parseJsonBodyField(payload.item_sizes, "item_sizes"));
     }
-    if (payload.item_sizes !== undefined) sample.item_sizes = normalizeItemSizeEntries(parseJsonBodyField(payload.item_sizes, "item_sizes"));
     if (payload.box_mode !== undefined) {
       sample.box_mode = Object.values(BOX_PACKAGING_MODES).includes(payload.box_mode)
         ? payload.box_mode
         : BOX_PACKAGING_MODES.INDIVIDUAL;
     }
-    if (payload.box_sizes !== undefined) sample.box_sizes = normalizeBoxSizeEntries(parseJsonBodyField(payload.box_sizes, "box_sizes"), sample.box_mode);
-    if (payload.cbm !== undefined) sample.cbm = Math.max(0, toSafeNumber(payload.cbm, 0));
-    if (payload.shipment !== undefined) sample.shipment = normalizeShipmentEntries(payload.shipment, actor);
-    syncLegacyVendors(sample);
-    sample.updated_by = actor;
-    const changedFields = buildChangedFields(before, sample.toObject(), [
-      "code",
-      "name",
-      "description",
-      "brand",
-      "vendor",
-      "vendor_entries",
-      "item_sizes",
-      "box_sizes",
-      "box_mode",
-      "cbm",
-      "assigned_cad_artist",
-      "assigned_cad_artist_user",
-    ]);
-    if (changedFields.length > 0 || normalizeText(payload.comment)) {
-      addTimeline(sample, {
-        stage: "details",
-        action: "update",
-        comment: normalizeText(payload.comment),
-        changedFields,
-        actor,
-      });
+    if (payload.box_sizes !== undefined) {
+      sample.box_sizes = normalizeBoxSizeEntries(parseJsonBodyField(payload.box_sizes, "box_sizes"), sample.box_mode);
     }
+    if (payload.cbm !== undefined) sample.cbm = Math.max(0, toSafeNumber(payload.cbm, 0));
+    if (payload.shipment !== undefined) {
+      sample.shipment = normalizeShipmentEntries(parseJsonBodyField(payload.shipment, "shipment"), actor);
+    }
+    sample.updated_by = actor;
     await sample.save();
-    return res.status(200).json({ success: true, message: "Sample updated successfully", data: await serializeSample(sample, { detail: true }) });
+    return res.status(200).json({
+      success: true,
+      message: "Sample updated successfully",
+      data: serializeSample(sample),
+    });
   } catch (error) {
     return res.status(isBadRequestError(error) ? 400 : 500).json({
       success: false,
       message: error?.message || "Failed to update sample",
       error: error.message,
     });
-  }
-};
-
-const normalizeShipmentEntries = (entries = [], actor = {}) => {
-  if (!Array.isArray(entries)) throw new Error("shipment must be an array");
-  return entries.map((entry, index) => {
-    const container = normalizeText(entry?.container);
-    const stuffingDate = parseDate(entry?.stuffing_date, `shipment[${index + 1}].stuffing_date`);
-    const quantity = Number(entry?.quantity);
-    if (!container) throw new Error(`shipment[${index + 1}] container is required`);
-    if (!Number.isFinite(quantity) || quantity <= 0) throw new Error(`shipment[${index + 1}] quantity must be a positive number`);
-    return {
-      container,
-      invoice_number: normalizeShipmentInvoiceNumber(entry?.invoice_number, ""),
-      stuffing_date: stuffingDate,
-      quantity,
-      pending: Math.max(0, toSafeNumber(entry?.pending, 0)),
-      remaining_remarks: normalizeText(entry?.remaining_remarks),
-      stuffed_by: normalizeShipmentStuffedBy(entry?.stuffed_by),
-      cases: Array.isArray(entry?.cases) ? entry.cases : [],
-      updated_at: new Date(),
-      updated_by: actor,
-    };
-  });
-};
-
-const normalizeVendorShipmentEntries = (sample, entries = [], actor = {}) => {
-  if (!Array.isArray(entries)) throw new Error("vendor_shipments must be an array");
-
-  const vendorEntries = Array.isArray(sample?.vendor_entries) ? sample.vendor_entries : [];
-  if (vendorEntries.length === 0) {
-    throw new Error("Cannot mark sample as shipped because no vendors are assigned");
-  }
-
-  const payloadByVendorId = new Map(
-    entries
-      .map((entry) => [normalizeText(entry?.vendor_entry_id || entry?._id), entry])
-      .filter(([vendorEntryId]) => vendorEntryId),
-  );
-
-  return vendorEntries.map((vendorEntry, index) => {
-    const vendorEntryId = String(vendorEntry?._id || "");
-    const payload = payloadByVendorId.get(vendorEntryId) || {};
-    const vendorName = normalizeText(vendorEntry?.vendor_name) || `vendor ${index + 1}`;
-    const container = normalizeText(payload.container ?? vendorEntry.container);
-    const shippedAt = parseDate(payload.shipped_at ?? vendorEntry.shipped_at, `${vendorName} shipped date`);
-    const invoiceNumber = normalizeShipmentInvoiceNumber(payload.invoice_number ?? vendorEntry.invoice_number, "");
-    const quantity = Number(payload.quantity ?? vendorEntry.quantity);
-
-    if (!container) throw new Error(`${vendorName}: container is required before marking sample as shipped`);
-    if (!shippedAt) throw new Error(`${vendorName}: shipped date is required before marking sample as shipped`);
-    if (!invoiceNumber) throw new Error(`${vendorName}: invoice number is required before marking sample as shipped`);
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      throw new Error(`${vendorName}: quantity must be a positive number before marking sample as shipped`);
-    }
-
-    vendorEntry.container = container;
-    vendorEntry.shipped_at = shippedAt;
-    vendorEntry.invoice_number = invoiceNumber;
-    vendorEntry.quantity = quantity;
-
-    return {
-      container,
-      invoice_number: invoiceNumber,
-      stuffing_date: shippedAt,
-      quantity,
-      pending: 0,
-      remaining_remarks: normalizeText(payload.remaining_remarks ?? vendorEntry.shipment_remarks),
-      stuffed_by: { id: null, name: SHIPPED_BY_VENDOR_NAME },
-      cases: [],
-      updated_at: new Date(),
-      updated_by: actor,
-    };
-  });
-};
-
-exports.updateSampleStatus = async (req, res) => {
-  try {
-    if (!ensureSampleMutationAccess(req, res)) return;
-    const sample = await Sample.findById(req.params.id);
-    if (!sample) return res.status(404).json({ success: false, message: "Sample not found" });
-    const payload = req.body && typeof req.body === "object" ? req.body : {};
-    const actor = buildAuditActor(req.user);
-    const statusFrom = sample.current_status;
-    const statusTo = validateEnum(payload.current_status || payload.status, Sample.SAMPLE_STATUSES, "current_status", statusFrom);
-    const before = sample.toObject();
-    if (statusTo === "shipped") {
-      sample.shipment = normalizeVendorShipmentEntries(sample, payload.vendor_shipments, actor);
-      sample.shipped_at = sample.shipment.reduce((latestDate, entry) => {
-        const entryDate = entry?.stuffing_date ? new Date(entry.stuffing_date) : null;
-        if (!entryDate || Number.isNaN(entryDate.getTime())) return latestDate;
-        if (!latestDate || entryDate > latestDate) return entryDate;
-        return latestDate;
-      }, null) || new Date();
-    }
-
-    sample.current_status = statusTo;
-    if (STATUS_DATE_FIELD[statusTo] && statusTo !== "shipped") {
-      sample[STATUS_DATE_FIELD[statusTo]] = parseDate(payload.date, "date") || new Date();
-    }
-    if (statusTo === "cad_ready") sample.cad_completed_at = parseDate(payload.cad_completed_at, "cad_completed_at") || sample.cad_completed_at || new Date();
-    if (statusTo === "shipping_planned") sample.estimated_shipping_date = parseDate(payload.estimated_shipping_date || payload.date, "estimated_shipping_date") || sample.estimated_shipping_date;
-    sample.updated_by = actor;
-    addTimeline(sample, {
-      stage: statusTo,
-      action: "status_change",
-      statusFrom,
-      statusTo,
-      comment: normalizeText(payload.comment),
-      changedFields: buildChangedFields(before, sample.toObject(), [
-        "current_status",
-        "cad_completed_at",
-        "sent_to_client_at",
-        "client_approved_at",
-        "sent_to_vendor_at",
-        "expected_manufacturing_date",
-        "inspection_requested_at",
-        "inspected_at",
-        "estimated_shipping_date",
-        "shipped_at",
-        "vendor_entries",
-        "shipment",
-      ]),
-      actor,
-    });
-    await sample.save();
-    return res.status(200).json({ success: true, message: "Sample status updated successfully", data: await serializeSample(sample, { detail: true }) });
-  } catch (error) {
-    return res.status(isBadRequestError(error) ? 400 : 500).json({ success: false, message: error.message || "Failed to update sample status", error: error.message });
-  }
-};
-
-exports.addSampleTimeline = async (req, res) => {
-  try {
-    if (!ensureSampleMutationAccess(req, res)) return;
-    const sample = await Sample.findById(req.params.id);
-    if (!sample) return res.status(404).json({ success: false, message: "Sample not found" });
-    const actor = buildAuditActor(req.user);
-    addTimeline(sample, {
-      stage: normalizeText(req.body?.stage || sample.current_status || "comment"),
-      action: normalizeText(req.body?.action || "comment"),
-      comment: normalizeText(req.body?.comment),
-      vendorName: normalizeText(req.body?.vendor_name),
-      actor,
-    });
-    sample.updated_by = actor;
-    await sample.save();
-    return res.status(200).json({ success: true, message: "Timeline entry added", data: await serializeSample(sample, { detail: true }) });
-  } catch (error) {
-    return res.status(isBadRequestError(error) ? 400 : 500).json({ success: false, message: error.message || "Failed to add timeline entry", error: error.message });
-  }
-};
-
-const getFileBucket = (type = "") => {
-  const normalized = SAMPLE_FILE_TYPES.includes(type) ? type : "other";
-  if (normalized === "initial_sketch") return "initial_sketch_files";
-  if (normalized === "cad") return "cad_files";
-  if (normalized === "sample_image") return "sample_images";
-  if (normalized === "inspection") return "qc_images";
-  return "other_files";
-};
-
-exports.addSampleFiles = async (req, res) => {
-  try {
-    if (!ensureSampleMutationAccess(req, res)) return;
-    const sample = await Sample.findById(req.params.id);
-    if (!sample) return res.status(404).json({ success: false, message: "Sample not found" });
-    const actor = buildAuditActor(req.user);
-    const fileType = normalizeText(req.body?.file_type || req.body?.type || "other");
-    const files = await uploadSampleFiles(req.files, fileType, actor);
-    const bucket = getFileBucket(fileType);
-    sample[bucket] = Array.isArray(sample[bucket]) ? sample[bucket] : [];
-    files.forEach((file) => sample[bucket].push(file));
-    if (fileType === "cad" && files[0]) {
-      sample.cad_file = {
-        key: files[0].key,
-        originalName: files[0].originalName,
-        contentType: files[0].contentType,
-        size: files[0].size,
-        link: files[0].link,
-        public_id: files[0].public_id,
-      };
-      sample.current_status = sample.current_status === "cad_pending" ? "cad_ready" : sample.current_status;
-      sample.cad_completed_at = sample.cad_completed_at || new Date();
-    }
-    if (fileType === "sample_image" && files[0]) {
-      sample.image = {
-        key: files[0].key,
-        originalName: files[0].originalName,
-        contentType: files[0].contentType,
-        size: files[0].size,
-        link: files[0].link,
-        public_id: files[0].public_id,
-      };
-    }
-    addTimeline(sample, {
-      stage: fileType,
-      action: "file_upload",
-      comment: normalizeText(req.body?.comment),
-      files,
-      actor,
-    });
-    sample.updated_by = actor;
-    await sample.save();
-    return res.status(200).json({ success: true, message: "Files uploaded successfully", data: await serializeSample(sample, { detail: true }) });
-  } catch (error) {
-    return res.status(isBadRequestError(error) ? 400 : 500).json({ success: false, message: error.message || "Failed to upload sample files", error: error.message });
-  }
-};
-
-exports.updateSampleVendor = async (req, res) => {
-  try {
-    if (!ensureSampleMutationAccess(req, res)) return;
-    const sample = await Sample.findById(req.params.id);
-    if (!sample) return res.status(404).json({ success: false, message: "Sample not found" });
-    const actor = buildAuditActor(req.user);
-    const payload = req.body && typeof req.body === "object" ? req.body : {};
-    let vendorEntry = String(req.params.vendorEntryId || "").trim() === "new"
-      ? null
-      : sample.vendor_entries.id(req.params.vendorEntryId);
-    if (!vendorEntry) {
-      const vendorName = normalizeText(payload.vendor_name);
-      if (!vendorName) return res.status(400).json({ success: false, message: "vendor_name is required" });
-      sample.vendor_entries.push({ vendor_name: vendorName });
-      vendorEntry = sample.vendor_entries[sample.vendor_entries.length - 1];
-    }
-    const before = vendorEntry.toObject ? vendorEntry.toObject() : { ...vendorEntry };
-    if (payload.vendor_name !== undefined) vendorEntry.vendor_name = normalizeText(payload.vendor_name);
-    if (payload.vendor_id !== undefined) vendorEntry.vendor_id = isValidObjectId(payload.vendor_id) ? payload.vendor_id : null;
-    if (payload.contact_name !== undefined) vendorEntry.contact_name = normalizeText(payload.contact_name);
-    if (payload.expected_manufacturing_date !== undefined) vendorEntry.expected_manufacturing_date = parseDate(payload.expected_manufacturing_date, "expected_manufacturing_date");
-    if (payload.manufacturing_status !== undefined) vendorEntry.manufacturing_status = validateEnum(payload.manufacturing_status, Sample.MANUFACTURING_STATUSES, "manufacturing_status", vendorEntry.manufacturing_status);
-    if (payload.inspection_requested_at !== undefined) vendorEntry.inspection_requested_at = parseDate(payload.inspection_requested_at, "inspection_requested_at");
-    if (payload.inspection_status !== undefined) vendorEntry.inspection_status = validateEnum(payload.inspection_status, Sample.INSPECTION_STATUSES, "inspection_status", vendorEntry.inspection_status);
-    if (payload.inspected_at !== undefined) vendorEntry.inspected_at = parseDate(payload.inspected_at, "inspected_at");
-    if (payload.estimated_shipping_date !== undefined) vendorEntry.estimated_shipping_date = parseDate(payload.estimated_shipping_date, "estimated_shipping_date");
-    if (payload.shipped_at !== undefined) vendorEntry.shipped_at = parseDate(payload.shipped_at, "shipped_at");
-    if (payload.tracking !== undefined) vendorEntry.tracking = normalizeText(payload.tracking);
-    if (payload.container !== undefined) vendorEntry.container = normalizeText(payload.container);
-    if (payload.invoice_number !== undefined) vendorEntry.invoice_number = normalizeShipmentInvoiceNumber(payload.invoice_number, "");
-    if (payload.quantity !== undefined) vendorEntry.quantity = Math.max(0, toSafeNumber(payload.quantity, 0));
-    if (payload.shipment_remarks !== undefined) vendorEntry.shipment_remarks = normalizeText(payload.shipment_remarks);
-    if (normalizeText(payload.comment)) {
-      vendorEntry.comments.push({ comment: normalizeText(payload.comment), created_by: actor, created_at: new Date() });
-    }
-    const files = await uploadSampleFiles(req.files, "vendor", actor);
-    files.forEach((file) => vendorEntry.files.push(file));
-    syncLegacyVendors(sample);
-    const statusBefore = sample.current_status;
-    if (sample.current_status === "shipped") {
-      sample.shipped_at = sample.shipped_at || vendorEntry.shipped_at || null;
-    } else if (vendorEntry.estimated_shipping_date) {
-      sample.current_status = "shipping_planned";
-      sample.estimated_shipping_date = vendorEntry.estimated_shipping_date;
-    } else if (vendorEntry.inspected_at || vendorEntry.inspection_status === "inspected") {
-      sample.current_status = "inspected";
-      sample.inspected_at = vendorEntry.inspected_at || sample.inspected_at || new Date();
-    } else if (vendorEntry.inspection_requested_at || vendorEntry.inspection_status === "requested") {
-      sample.current_status = "inspection_requested";
-      sample.inspection_requested_at = vendorEntry.inspection_requested_at || sample.inspection_requested_at || new Date();
-    } else if (vendorEntry.expected_manufacturing_date || vendorEntry.manufacturing_status === "manufacturing") {
-      sample.current_status = "manufacturing";
-      sample.expected_manufacturing_date = vendorEntry.expected_manufacturing_date || sample.expected_manufacturing_date;
-    }
-    sample.updated_by = actor;
-    addTimeline(sample, {
-      stage: "vendor",
-      action: "vendor_update",
-      statusFrom: statusBefore,
-      statusTo: sample.current_status,
-      comment: normalizeText(payload.comment),
-      files,
-      vendorName: vendorEntry.vendor_name,
-      changedFields: buildChangedFields(before, vendorEntry.toObject ? vendorEntry.toObject() : vendorEntry, [
-        "vendor_name",
-        "contact_name",
-        "expected_manufacturing_date",
-        "manufacturing_status",
-        "inspection_requested_at",
-        "inspection_status",
-        "inspected_at",
-        "estimated_shipping_date",
-        "shipped_at",
-        "tracking",
-        "container",
-        "invoice_number",
-        "quantity",
-        "shipment_remarks",
-      ]),
-      actor,
-    });
-    await sample.save();
-    return res.status(200).json({ success: true, message: "Vendor updated successfully", data: await serializeSample(sample, { detail: true }) });
-  } catch (error) {
-    return res.status(isBadRequestError(error) ? 400 : 500).json({ success: false, message: error.message || "Failed to update sample vendor", error: error.message });
-  }
-};
-
-exports.archiveSample = async (req, res) => {
-  try {
-    if (!ensureSampleMutationAccess(req, res)) return;
-    const sample = await Sample.findById(req.params.id);
-    if (!sample) return res.status(404).json({ success: false, message: "Sample not found" });
-    const actor = buildAuditActor(req.user);
-    const before = sample.toObject();
-    sample.archived = true;
-    sample.archived_at = new Date();
-    sample.archived_by = actor;
-    sample.updated_by = actor;
-    addTimeline(sample, {
-      stage: "archive",
-      action: "archive",
-      comment: normalizeText(req.body?.comment),
-      changedFields: buildChangedFields(before, sample.toObject(), ["archived", "archived_at"]),
-      actor,
-    });
-    await sample.save();
-    return res.status(200).json({ success: true, message: "Sample archived", data: await serializeSample(sample, { detail: true }) });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: "Failed to archive sample", error: error.message });
-  }
-};
-
-exports.unarchiveSample = async (req, res) => {
-  try {
-    if (!ensureSampleMutationAccess(req, res)) return;
-    const sample = await Sample.findById(req.params.id);
-    if (!sample) return res.status(404).json({ success: false, message: "Sample not found" });
-    const actor = buildAuditActor(req.user);
-    const before = sample.toObject();
-    sample.archived = false;
-    sample.archived_at = null;
-    sample.archived_by = {};
-    sample.updated_by = actor;
-    addTimeline(sample, {
-      stage: "archive",
-      action: "unarchive",
-      comment: normalizeText(req.body?.comment),
-      changedFields: buildChangedFields(before, sample.toObject(), ["archived", "archived_at"]),
-      actor,
-    });
-    await sample.save();
-    return res.status(200).json({ success: true, message: "Sample unarchived", data: await serializeSample(sample, { detail: true }) });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: "Failed to unarchive sample", error: error.message });
   }
 };
 
@@ -1320,21 +551,15 @@ exports.finalizeSampleShipment = async (req, res) => {
     if (!sample) return res.status(404).json({ success: false, message: "Sample not found" });
     const actor = buildAuditActor(req.user);
     const shipmentEntry = normalizeShipmentEntries([req.body], actor)[0];
-    const before = sample.toObject();
     sample.shipment = Array.isArray(sample.shipment) ? sample.shipment : [];
     sample.shipment.push(shipmentEntry);
     sample.updated_by = actor;
-    addTimeline(sample, {
-      stage: sample.current_status || "shipment",
-      action: "finalize_shipment",
-      statusFrom: before.current_status,
-      statusTo: sample.current_status,
-      comment: normalizeText(req.body?.remarks || req.body?.remaining_remarks),
-      changedFields: buildChangedFields(before, sample.toObject(), ["shipment"]),
-      actor,
-    });
     await sample.save();
-    return res.status(200).json({ success: true, message: "Sample shipment updated successfully", data: sample });
+    return res.status(200).json({
+      success: true,
+      message: "Sample shipment updated successfully",
+      data: serializeSample(sample),
+    });
   } catch (error) {
     return res.status(isBadRequestError(error) ? 400 : 500).json({
       success: false,
@@ -1354,9 +579,9 @@ exports.getShippedSamples = async (req, res) => {
     const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
     const samples = await Sample.find(
       applyDataAccessMatch(
-        { ...buildSampleMatch({ search, brand, vendor, archived: "all" }), "shipment.0": { $exists: true } },
+        { ...buildSampleMatch({ search, brand, vendor }), "shipment.0": { $exists: true } },
         req.user,
-        { vendorFields: ["vendor", "vendor_entries.vendor_name"] },
+        { vendorFields: ["vendor"] },
       ),
     ).sort({ updatedAt: -1, code: 1 }).lean();
     const rows = flattenSampleShipmentRows(samples).filter((row) => {
@@ -1384,7 +609,11 @@ exports.getShippedSamples = async (req, res) => {
       },
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: "Failed to fetch shipped samples", error: error.message });
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch shipped samples",
+      error: error.message,
+    });
   }
 };
 
