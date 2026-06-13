@@ -475,7 +475,7 @@ const SampleDetails = () => {
 
             <section className="card om-card">
               <div className="card-body">
-                <h5>Workflow</h5>
+                <h5 className="sample-section-title">Workflow</h5>
                 <WorkflowStepper currentStatus={sample.current_status} />
               </div>
             </section>

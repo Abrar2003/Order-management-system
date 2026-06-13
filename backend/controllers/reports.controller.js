@@ -1828,9 +1828,15 @@ exports.getQcReportMismatch = async (req, res) => {
 
     const groupedRowsMap = new Map();
     inspectionRows.forEach((row) => {
-      const groupKey =
+      const normalizedItemKey = normalizeLookupKey(row?.item_code);
+      const itemKey = normalizedItemKey && normalizedItemKey !== "n/a"
+        ? normalizedItemKey
+        : "";
+      const fallbackGroupKey =
+        normalizeText(row?.inspection_id) ||
         normalizeText(row?.qc_id) ||
-        `${normalizeLookupKey(row?.order_id)}::${normalizeLookupKey(row?.item_code)}`;
+        normalizeLookupKey(row?.order_id);
+      const groupKey = itemKey || `inspection:${fallbackGroupKey}`;
       const currentEntry = groupedRowsMap.get(groupKey);
 
       if (!currentEntry) {
@@ -1851,9 +1857,13 @@ exports.getQcReportMismatch = async (req, res) => {
         };
 
         groupedRowsMap.set(groupKey, {
-          id: normalizeText(row?.qc_id) || normalizeText(row?.inspection_id) || groupKey,
+          id: itemKey
+            ? `item:${itemKey}`
+            : normalizeText(row?.inspection_id) || groupKey,
           qc_id: normalizeText(row?.qc_id),
           order_id: row?.order_id || "N/A",
+          order_ids: [],
+          latest_order_id: row?.order_id || "",
           brand: row?.brand || "N/A",
           vendor: row?.vendor || "N/A",
           item_code: row?.item_code || "N/A",
@@ -1889,6 +1899,15 @@ exports.getQcReportMismatch = async (req, res) => {
       group.passed += Number(row?.passed || 0);
       group.pending_after = row?.pending_after ?? group.pending_after;
 
+      const normalizedOrderId = normalizeText(row?.order_id);
+      if (
+        normalizedOrderId &&
+        normalizedOrderId !== "N/A" &&
+        !group.order_ids.includes(normalizedOrderId)
+      ) {
+        group.order_ids.push(normalizedOrderId);
+      }
+
       if (
         row?.inspection_date_value &&
         (!group.inspection_date_value ||
@@ -1899,6 +1918,8 @@ exports.getQcReportMismatch = async (req, res) => {
         group.inspection_date = row?.inspection_date || group.inspection_date;
         group.requested_date = row?.requested_date || group.requested_date;
         group.status = row?.status || group.status;
+        group.latest_order_id = normalizedOrderId || group.latest_order_id;
+        group.order_id = normalizedOrderId || group.order_id;
       }
 
       if (row?.inspector_name && !group.inspector_names.includes(row.inspector_name)) {
@@ -1907,6 +1928,10 @@ exports.getQcReportMismatch = async (req, res) => {
 
       const inspectionRecord = {
         inspection_id: row?.inspection_id || row?.id,
+        qc_id: row?.qc_id || "",
+        order_id: row?.order_id || "N/A",
+        brand: row?.brand || "N/A",
+        vendor: row?.vendor || "N/A",
         requested_date: row?.requested_date || "",
         inspection_date: row?.inspection_date || "",
         inspection_date_value: row?.inspection_date_value || null,
@@ -1973,14 +1998,33 @@ exports.getQcReportMismatch = async (req, res) => {
           const rightTime = right?.inspection_date_value
             ? new Date(right.inspection_date_value).getTime()
             : 0;
-          return leftTime - rightTime;
+          return rightTime - leftTime;
         }).map((inspectionRecord, index) => ({
           ...inspectionRecord,
           sheet_label: `Inspection ${index + 1}`,
         }));
+        const orderIds = Array.isArray(group.order_ids)
+          ? group.order_ids.filter(Boolean)
+          : [];
+        const orderIdsDisplay = orderIds.length > 3
+          ? `${orderIds.slice(0, 3).join(", ")} +${orderIds.length - 3}`
+          : orderIds.join(", ");
 
         return {
           ...group,
+          order_ids: orderIds,
+          po_count: orderIds.length,
+          order_id:
+            group.latest_order_id ||
+            orderIdsDisplay ||
+            group.order_id ||
+            "N/A",
+          order_ids_display:
+            orderIdsDisplay ||
+            group.latest_order_id ||
+            group.order_id ||
+            "N/A",
+          latest_order_id: undefined,
           inspector_name: group.inspector_names.join(", ") || "Unassigned",
           inspection_records: sortedInspectionRecords,
         };

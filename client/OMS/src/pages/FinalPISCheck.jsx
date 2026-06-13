@@ -6,6 +6,7 @@ import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import EditPisModal from "../components/EditPisModal";
 import { usePermissions } from "../auth/PermissionContext";
+import { isStrictAdminRole, normalizeUserRole } from "../auth/permissions";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import { formatEan13BarcodeDisplay } from "../utils/barcode";
@@ -122,6 +123,9 @@ const FinalPisCheckReport = ({
   canEditPis = false,
   onEditPis = null,
   activeEditCode = "",
+  canAddComment = false,
+  onAddComment = null,
+  activeCommentCode = "",
 }) => {
   const rows = Array.isArray(report?.rows) ? report.rows : [];
   const summary = report?.summary || {};
@@ -202,6 +206,7 @@ const FinalPisCheckReport = ({
             const measurements = row?.measurements || {};
             const differences = Array.isArray(row?.differences) ? row.differences : [];
             const references = row?.references || {};
+            const comments = Array.isArray(row?.comments) ? row.comments : [];
             const itemReferenceLabel = references.item_label || "Master";
             const boxReferenceLabel = references.box_label || "Master";
             const measurementCards = [
@@ -274,6 +279,16 @@ const FinalPisCheckReport = ({
                         {activeEditCode === row?.code ? "Loading..." : "Update PIS"}
                       </button>
                     )}
+                    {canAddComment && typeof onAddComment === "function" && (
+                      <button
+                        type="button"
+                        className="btn btn-outline-secondary btn-sm"
+                        onClick={() => onAddComment(row)}
+                        disabled={activeCommentCode === row?.code}
+                      >
+                        Add Comment
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -332,6 +347,32 @@ const FinalPisCheckReport = ({
                     </tbody>
                   </table>
                 </div>
+
+                {(Number(row?.comment_count || 0) > 0 || comments.length > 0) && (
+                  <div className="pis-diff-comment-list">
+                    <div className="pis-diff-comment-list-title">
+                      Comments ({Number(row?.comment_count || comments.length)})
+                    </div>
+                    {comments.length > 0 ? (
+                      comments.map((comment, index) => (
+                        <div
+                          className="pis-diff-comment-item"
+                          key={comment?.id || `${row?.code}-comment-${index}`}
+                        >
+                          <div>{comment?.comment || ""}</div>
+                          <small>
+                            {comment?.created_by_name || "User"}
+                            {comment?.created_at
+                              ? ` - ${formatPreviewDateTime(comment.created_at)}`
+                              : ""}
+                          </small>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="small text-secondary">Comments available.</div>
+                    )}
+                  </div>
+                )}
               </section>
             );
           })
@@ -345,7 +386,7 @@ const FinalPISCheck = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "final-pis-check");
   const pdfReportRef = useRef(null);
-  const { canEditPis } = usePermissions();
+  const { canEditPis, role } = usePermissions();
 
   const [reportData, setReportData] = useState(() => buildEmptyReportData());
   const [options, setOptions] = useState({
@@ -355,6 +396,10 @@ const FinalPISCheck = () => {
   });
   const [selectedItem, setSelectedItem] = useState(null);
   const [activeEditCode, setActiveEditCode] = useState("");
+  const [commentTarget, setCommentTarget] = useState(null);
+  const [commentText, setCommentText] = useState("");
+  const [commentSaving, setCommentSaving] = useState(false);
+  const [commentError, setCommentError] = useState("");
   const [loading, setLoading] = useState(true);
   const [optionsLoading, setOptionsLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
@@ -405,6 +450,10 @@ const FinalPISCheck = () => {
     normalizeSortOrder(searchParams.get("sortOrder")),
   );
   const [syncedQuery, setSyncedQuery] = useState(null);
+  const normalizedRole = normalizeUserRole(role);
+  const canAddFinalPisComment =
+    ["manager", "product_manager", "inspection_manager"].includes(normalizedRole) &&
+    !isStrictAdminRole(normalizedRole);
 
   const fetchOptions = useCallback(async () => {
     try {
@@ -639,6 +688,52 @@ const FinalPISCheck = () => {
       setActiveEditCode("");
     }
   }, []);
+
+  const handleOpenComment = useCallback((row = {}) => {
+    setCommentTarget(row);
+    setCommentText("");
+    setCommentError("");
+  }, []);
+
+  const handleCloseComment = useCallback(() => {
+    if (commentSaving) return;
+    setCommentTarget(null);
+    setCommentText("");
+    setCommentError("");
+  }, [commentSaving]);
+
+  const handleSubmitComment = useCallback(async (event) => {
+    event?.preventDefault();
+    const targetCode = String(commentTarget?.code || "").trim();
+    const nextComment = String(commentText || "").trim();
+
+    if (!targetCode) {
+      setCommentError("Unable to add comment for this item.");
+      return;
+    }
+    if (!nextComment) {
+      setCommentError("Comment is required.");
+      return;
+    }
+
+    try {
+      setCommentSaving(true);
+      setCommentError("");
+      await api.post(
+        `/items/final-pis-check/${encodeURIComponent(targetCode)}/comments`,
+        { comment: nextComment },
+      );
+      setCommentTarget(null);
+      setCommentText("");
+      fetchFinalPisCheckRows();
+    } catch (submitError) {
+      setCommentError(
+        submitError?.response?.data?.message || "Failed to add comment.",
+      );
+    } finally {
+      setCommentSaving(false);
+    }
+  }, [commentTarget?.code, commentText, fetchFinalPisCheckRows]);
 
   const handleExportReport = useCallback(async () => {
     try {
@@ -993,6 +1088,8 @@ const FinalPISCheck = () => {
               canEditPis={canEditPis}
               onEditPis={handleOpenEditPis}
               activeEditCode={activeEditCode}
+              canAddComment={canAddFinalPisComment}
+              onAddComment={handleOpenComment}
             />
           </>
         )}
@@ -1126,6 +1223,77 @@ const FinalPISCheck = () => {
           onClose={() => setSelectedItem(null)}
           onUpdated={handlePisUpdated}
         />
+      )}
+
+      {commentTarget && (
+        <div
+          className="modal d-block om-modal-backdrop"
+          tabIndex="-1"
+          role="dialog"
+          aria-modal="true"
+          onClick={handleCloseComment}
+        >
+          <div
+            className="modal-dialog modal-dialog-centered"
+            role="document"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <form className="modal-content" onSubmit={handleSubmitComment}>
+              <div className="modal-header">
+                <div>
+                  <h5 className="modal-title">Add Comment</h5>
+                  <div className="small text-muted">
+                    Item {commentTarget?.code || "N/A"}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn-close"
+                  aria-label="Close"
+                  onClick={handleCloseComment}
+                  disabled={commentSaving}
+                />
+              </div>
+              <div className="modal-body">
+                {commentError && (
+                  <div className="alert alert-danger" role="alert">
+                    {commentError}
+                  </div>
+                )}
+                <label className="form-label">Comment</label>
+                <textarea
+                  className="form-control"
+                  rows={4}
+                  value={commentText}
+                  maxLength={1000}
+                  onChange={(event) => setCommentText(event.target.value)}
+                  placeholder="Add update details for admins"
+                  disabled={commentSaving}
+                />
+                <div className="small text-secondary mt-1">
+                  {commentText.trim().length}/1000
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary"
+                  onClick={handleCloseComment}
+                  disabled={commentSaving}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={commentSaving || !commentText.trim()}
+                >
+                  {commentSaving ? "Adding..." : "Add Comment"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </>
   );

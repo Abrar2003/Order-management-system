@@ -140,6 +140,24 @@ const formatBoxModeLabel = (value) => {
     .join(" ");
 };
 
+const formatPoList = (row) => {
+  const display = normalizeTextValue(row?.order_ids_display);
+  if (display) return display;
+  const orderIds = Array.isArray(row?.order_ids)
+    ? row.order_ids.map(normalizeTextValue).filter(Boolean)
+    : [];
+  if (orderIds.length > 0) return orderIds.join(", ");
+  return normalizeTextValue(row?.order_id) || "N/A";
+};
+
+const getPoCount = (row) => {
+  const count = Number(row?.po_count);
+  if (Number.isFinite(count) && count > 0) return count;
+  return Array.isArray(row?.order_ids)
+    ? row.order_ids.map(normalizeTextValue).filter(Boolean).length
+    : 0;
+};
+
 const formatComparisonValue = (value, type = "text", fieldKey = "") => {
   if (fieldKey === "box_mode") {
     return formatBoxModeLabel(value);
@@ -963,6 +981,7 @@ const QcReportMismatch = () => {
                       <th>Vendor</th>
                       <th>Item Code</th>
                       <th>Item Description</th>
+                      <th>POs</th>
                       <th>Requested Date</th>
                       <th>Inspection Date</th>
                       <th>Status</th>
@@ -973,12 +992,19 @@ const QcReportMismatch = () => {
                   <tbody>
                     {rows.map((row) => {
                       const hasMismatch = Boolean(row?.mismatch_summary?.has_mismatch);
+                      const poCount = getPoCount(row);
                       return (
-                        <tr key={row?.inspection_id || row?.id}>
+                        <tr key={row?.id || row?.item_code || row?.inspection_id}>
                           <td>{row?.brand || "N/A"}</td>
                           <td>{row?.vendor || "N/A"}</td>
                           <td>{row?.item_code || "N/A"}</td>
                           <td>{row?.item_description || "N/A"}</td>
+                          <td>
+                            <div>{formatPoList(row)}</div>
+                            <div className="small text-secondary">
+                              {poCount || 0} {poCount === 1 ? "PO" : "POs"}
+                            </div>
+                          </td>
                           <td>{formatDateDDMMYYYY(row?.requested_date)}</td>
                           <td>{formatDateDDMMYYYY(row?.inspection_date)}</td>
                           <td>{row?.status || "N/A"}</td>
@@ -1075,7 +1101,7 @@ const QcReportMismatch = () => {
                 <div>
                   <h5 className="modal-title">QC Report Mismatch Details</h5>
                   <div className="small text-muted">
-                    {selectedRow?.item_code || "N/A"} | {selectedRow?.inspection_count || 0} inspections
+                    {selectedRow?.item_code || "N/A"} | {selectedRow?.inspection_count || 0} inspections | {getPoCount(selectedRow)} POs
                   </div>
                 </div>
                 <button
@@ -1089,7 +1115,7 @@ const QcReportMismatch = () => {
               <div className="modal-body">
                 <div className="d-flex flex-wrap gap-2 mb-3">
                   <span className="om-summary-chip">
-                    PO / Order ID: {selectedRow?.order_id || "N/A"}
+                    POs: {formatPoList(selectedRow)}
                   </span>
                   <span className="om-summary-chip">
                     Latest Requested: {formatDateDDMMYYYY(selectedRow?.requested_date)}
@@ -1126,10 +1152,12 @@ const QcReportMismatch = () => {
                           <thead>
                             <tr>
                               <th>Field</th>
-                              <th>Current QC Value</th>
                               {selectedInspectionRecords.map((inspection) => (
                                 <th key={inspection?.inspection_id || inspection?.sheet_label}>
                                   <div>{inspection?.sheet_label || "Inspection"}</div>
+                                  <div className="small text-secondary fw-normal">
+                                    PO: {inspection?.order_id || "N/A"}
+                                  </div>
                                   <div className="small text-secondary fw-normal">
                                     {formatDateDDMMYYYY(inspection?.inspection_date)}
                                   </div>
@@ -1147,7 +1175,6 @@ const QcReportMismatch = () => {
                                 className={entry.is_mismatch ? "table-warning" : ""}
                               >
                                 <td>{entry.field}</td>
-                                <td>{entry.current_value}</td>
                                 {entry.inspection_cells.map((cell) => (
                                   <td
                                     key={cell.key}

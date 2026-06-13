@@ -2,6 +2,7 @@ const Item = require("../models/item.model");
 const Order = require("../models/order.model");
 const QC = require("../models/qc.model");
 const Inspection = require("../models/inspection.model");
+const User = require("../models/user.model");
 const ProductTypeTemplate = require("../models/productTypeTemplate.model");
 const PisUpdateLog = require("../models/pisUpdateLog.model");
 const mongoose = require("mongoose");
@@ -25,6 +26,7 @@ const {
 } = require("../services/wasabiStorage.service");
 const { convertExcelToPdf } = require("../services/convertXlsxToPDF.service");
 const { applyDataAccessMatch } = require("../services/userDataAccess.service");
+const { notifyUsers } = require("../services/notificationService");
 const {
   deriveOrderProgress,
   deriveOrderStatus,
@@ -77,7 +79,7 @@ const {
 } = require("../helpers/itemUpdateAudit");
 const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
 const { formatEan13BarcodeDisplay } = require("../helpers/barcodeFormat");
-const { normalizeUserRoleKey } = require("../helpers/userRole");
+const { isSuperAdminLikeRole, normalizeUserRoleKey } = require("../helpers/userRole");
 const {
   buildComparisonRows,
 } = require("../helpers/pisInspectionMasterComparison");
@@ -1346,6 +1348,12 @@ const toTimestamp = (value) => {
   return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
 };
 
+const toDisplayDateString = (value = "") => {
+  const timestamp = toTimestamp(value);
+  if (!timestamp) return "";
+  return new Date(timestamp).toISOString().slice(0, 10);
+};
+
 const resolveInspectorName = (inspectorValue) => {
   if (!inspectorValue) return "";
   if (typeof inspectorValue === "string") return inspectorValue.trim();
@@ -2480,6 +2488,140 @@ const buildFinalPisCheckMatch = ({ search, brand, vendor } = {}) => {
   return { $and: conditions };
 };
 
+const buildInspectedWeightFromInspection = (inspection = {}) => {
+  const sumEntries = (entries = [], key = "") =>
+    (Array.isArray(entries) ? entries : []).reduce(
+      (sum, entry) => sum + Math.max(0, toSafeNumber(entry?.[key], 0)),
+      0,
+    );
+
+  return {
+    top_net: 0,
+    top_gross: 0,
+    bottom_net: 0,
+    bottom_gross: 0,
+    total_net: sumEntries(inspection?.inspected_item_sizes, "net_weight"),
+    total_gross: sumEntries(inspection?.inspected_box_sizes, "gross_weight"),
+  };
+};
+
+const buildCbmSnapshotFromInspection = (inspection = {}, existingCbm = {}) => {
+  const total = normalizeTextField(inspection?.cbm?.total);
+  return {
+    ...(existingCbm || {}),
+    inspected_top: normalizeTextField(inspection?.cbm?.box1) || existingCbm?.inspected_top || "0",
+    inspected_bottom:
+      normalizeTextField(inspection?.cbm?.box2) || existingCbm?.inspected_bottom || "0",
+    inspected_total: total || existingCbm?.inspected_total || "0",
+    calculated_inspected_total: total || existingCbm?.calculated_inspected_total || "0",
+  };
+};
+
+const buildLatestFinalPisInspectionLookup = async (items = []) => {
+  const itemCodes = [...new Set(
+    (Array.isArray(items) ? items : [])
+      .map((item) => normalizeTextField(item?.code))
+      .filter(Boolean),
+  )];
+
+  if (itemCodes.length === 0) return new Map();
+
+  const itemCodeMatchers = itemCodes.map((code) => ({
+    "item.item_code": new RegExp(`^\\s*${escapeRegex(code)}\\s*$`, "i"),
+  }));
+  const qcRows = await QC.find({ $or: itemCodeMatchers })
+    .select("_id item.item_code")
+    .lean();
+  const qcIdToItemCode = new Map(
+    (Array.isArray(qcRows) ? qcRows : []).map((qcDoc) => [
+      String(qcDoc?._id || ""),
+      normalizeLookupKey(qcDoc?.item?.item_code),
+    ]),
+  );
+  const qcIds = [...qcIdToItemCode.keys()].filter((value) =>
+    mongoose.Types.ObjectId.isValid(value),
+  );
+
+  if (qcIds.length === 0) return new Map();
+
+  const inspections = await Inspection.find({
+    qc: { $in: qcIds.map((value) => new mongoose.Types.ObjectId(value)) },
+    $or: [
+      { "inspected_item_sizes.0": { $exists: true } },
+      { "inspected_box_sizes.0": { $exists: true } },
+      { master_barcode: { $exists: true, $ne: "" } },
+      { inner_barcode: { $exists: true, $ne: "" } },
+      { barcode: { $exists: true, $ne: "" } },
+    ],
+  })
+    .select(
+      "qc createdAt updatedAt inspection_date status checked passed cbm barcode master_barcode inner_barcode inspected_item_sizes inspected_box_sizes inspected_box_mode",
+    )
+    .lean();
+
+  const latestByItemCode = new Map();
+  (Array.isArray(inspections) ? inspections : []).forEach((inspection) => {
+    if (!isCompletedInspectionForComparison(inspection)) return;
+    const itemCodeKey = qcIdToItemCode.get(String(inspection?.qc || ""));
+    if (!itemCodeKey) return;
+    const inspectionDateTimestamp = toTimestamp(inspection?.inspection_date);
+    const sortTimestamp = Math.max(
+      inspectionDateTimestamp,
+      toTimestamp(inspection?.updatedAt),
+      toTimestamp(inspection?.createdAt),
+    );
+    if (!sortTimestamp) return;
+
+    const previous = latestByItemCode.get(itemCodeKey);
+    if (previous && previous.sortTimestamp >= sortTimestamp) return;
+
+    latestByItemCode.set(itemCodeKey, {
+      inspection,
+      sortTimestamp,
+      inspection_date:
+        toDisplayDateString(inspection?.inspection_date) ||
+        toDisplayDateString(inspection?.createdAt),
+    });
+  });
+
+  return latestByItemCode;
+};
+
+const applyLatestFinalPisInspectionSnapshots = async (items = []) => {
+  const latestInspectionLookup = await buildLatestFinalPisInspectionLookup(items);
+  return (Array.isArray(items) ? items : []).map((item) => {
+    const latestEntry = latestInspectionLookup.get(normalizeLookupKey(item?.code));
+    const inspection = latestEntry?.inspection;
+    if (!inspection) return item;
+
+    return {
+      ...item,
+      inspected_item_sizes: Array.isArray(inspection?.inspected_item_sizes)
+        ? inspection.inspected_item_sizes
+        : [],
+      inspected_box_sizes: Array.isArray(inspection?.inspected_box_sizes)
+        ? inspection.inspected_box_sizes
+        : [],
+      inspected_box_mode: inspection?.inspected_box_mode || item?.inspected_box_mode,
+      inspected_weight: buildInspectedWeightFromInspection(inspection),
+      qc: {
+        ...(item?.qc || {}),
+        barcode: inspection?.barcode || "",
+        master_barcode: inspection?.master_barcode || inspection?.barcode || "",
+        inner_barcode: inspection?.inner_barcode || "",
+        last_inspected_date: latestEntry?.inspection_date || "",
+      },
+      cbm: buildCbmSnapshotFromInspection(inspection, item?.cbm || {}),
+      updatedAt: latestEntry?.inspection_date || item?.updatedAt,
+      final_pis_latest_inspection: {
+        inspection_id: String(inspection?._id || ""),
+        qc_id: String(inspection?.qc || ""),
+        inspection_date: latestEntry?.inspection_date || "",
+      },
+    };
+  });
+};
+
 const getFinalPisCheckRowsForQuery = async ({
   search,
   brand,
@@ -2493,9 +2635,10 @@ const getFinalPisCheckRowsForQuery = async ({
     .select(FINAL_PIS_CHECK_ITEM_SELECT)
     .sort({ updatedAt: -1, code: 1 })
     .lean();
-  const mismatchLookup = await buildInspectionReportMismatchLookup(items);
+  const latestInspectionItems = await applyLatestFinalPisInspectionSnapshots(items);
+  const mismatchLookup = await buildInspectionReportMismatchLookup(latestInspectionItems);
 
-  const rows = buildFinalPisCheckRows(items).map((row) => {
+  const rows = buildFinalPisCheckRows(latestInspectionItems).map((row) => {
     const mismatchEntry = mismatchLookup.get(normalizeLookupKey(row?.code)) || {};
     return {
       ...row,
@@ -2511,6 +2654,59 @@ const getFinalPisCheckRowsForQuery = async ({
     sortBy: normalizeFinalPisCheckSortBy(sortBy),
     sortOrder: normalizeSortOrder(sortOrder),
   });
+};
+
+const FINAL_PIS_COMMENT_ROLE_KEYS = new Set([
+  "manager",
+  "product_manager",
+  "inspection_manager",
+]);
+
+const canCreateFinalPisComment = (user = {}) =>
+  FINAL_PIS_COMMENT_ROLE_KEYS.has(normalizeUserRoleKey(user?.role));
+
+const getActorDisplayName = (user = {}) =>
+  normalizeTextField(user?.name || user?.username || user?.email || user?.role) || "User";
+
+const notifyAdminsForFinalPisComment = async ({ item = {}, comment = {}, actor = {}, req }) => {
+  const adminUsers = await User.find({
+    role: { $in: ["admin", "super admin"] },
+  })
+    .select("_id role")
+    .lean();
+  const adminUserIds = (Array.isArray(adminUsers) ? adminUsers : [])
+    .filter((user) =>
+      normalizeUserRoleKey(user?.role) === "admin" || isSuperAdminLikeRole(user?.role))
+    .map((user) => user?._id)
+    .filter(Boolean);
+
+  if (adminUserIds.length === 0) return [];
+
+  const itemCode = normalizeTextField(item?.code);
+  const actorName = getActorDisplayName(actor);
+  return notifyUsers(
+    adminUserIds,
+    {
+      type: "pis_update_comment",
+      title: "PIS update Comment",
+      message: `${actorName} commented on item ${itemCode}: ${comment?.comment || ""}`,
+      priority: "critical",
+      category: "comment",
+      entity_type: "item",
+      entity_id: item?._id,
+      deep_link: `/final-pis-check?search=${encodeURIComponent(itemCode)}`,
+      metadata: {
+        item_code: itemCode,
+        comment_id: String(comment?._id || ""),
+        comment: comment?.comment || "",
+        actor_name: actorName,
+        actor_role: normalizeTextField(actor?.role),
+        source: "final_pis_check",
+      },
+      created_by: actor?._id || actor?.id || null,
+    },
+    { realtimeSource: req, dedupe: false },
+  );
 };
 
 const buildLatestInspectionReportLookup = async (itemCodes = []) => {
@@ -3821,6 +4017,90 @@ exports.getFinalPisCheckOptions = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch Final PIS Check options",
+      error: error.message,
+    });
+  }
+};
+
+exports.createFinalPisCheckComment = async (req, res) => {
+  try {
+    if (!canCreateFinalPisComment(req.user)) {
+      return res.status(403).json({
+        success: false,
+        message: "Only manager roles can add Final PIS Check comments.",
+      });
+    }
+
+    const itemCodeInput = normalizeTextField(req.params.code || req.params.itemCode);
+    const commentText = normalizeTextField(req.body?.comment);
+
+    if (!itemCodeInput) {
+      return res.status(400).json({
+        success: false,
+        message: "Item code is required.",
+      });
+    }
+    if (!commentText) {
+      return res.status(400).json({
+        success: false,
+        message: "Comment is required.",
+      });
+    }
+    if (commentText.length > 1000) {
+      return res.status(400).json({
+        success: false,
+        message: "Comment cannot exceed 1000 characters.",
+      });
+    }
+
+    const itemCodeMatch = new RegExp(`^\\s*${escapeRegex(itemCodeInput)}\\s*$`, "i");
+    const item = await Item.findOne({ code: itemCodeMatch }).select(
+      "_id code pis_update_comments",
+    );
+
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: "Item not found.",
+      });
+    }
+
+    const comment = {
+      comment: commentText,
+      item_code: item.code || itemCodeInput,
+      created_by: req.user?._id || req.user?.id || null,
+      created_by_name: getActorDisplayName(req.user),
+      created_by_role: normalizeTextField(req.user?.role),
+      created_at: new Date(),
+    };
+
+    item.pis_update_comments.push(comment);
+    await item.save();
+    const savedComment = item.pis_update_comments[item.pis_update_comments.length - 1];
+
+    await notifyAdminsForFinalPisComment({
+      item,
+      comment: savedComment,
+      actor: req.user,
+      req,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Comment added.",
+      data: {
+        id: String(savedComment?._id || ""),
+        comment: savedComment?.comment || commentText,
+        created_by_name: savedComment?.created_by_name || getActorDisplayName(req.user),
+        created_by_role: savedComment?.created_by_role || normalizeTextField(req.user?.role),
+        created_at: savedComment?.created_at || comment.created_at,
+      },
+    });
+  } catch (error) {
+    console.error("Create Final PIS Check Comment Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to add Final PIS Check comment",
       error: error.message,
     });
   }

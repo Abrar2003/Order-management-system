@@ -1,10 +1,17 @@
 const mongoose = require("mongoose");
 const Item = require("../models/item.model");
+const QC = require("../models/qc.model");
+const Inspection = require("../models/inspection.model");
 const {
   BOX_PACKAGING_MODES,
   buildBoxMeasurementCbmSummary,
   detectBoxPackagingMode,
 } = require("../helpers/boxMeasurement");
+const {
+  parseDateOnly,
+  parseDateTime,
+  toDateOnlyIso,
+} = require("../helpers/dateOnly");
 const {
   normalizeBoxSizes,
   normalizeItemSizes,
@@ -13,6 +20,10 @@ const {
   cleanupLegacyItemSizeFields,
 } = require("../helpers/itemLegacySizeCleanup");
 const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
+const {
+  formatSizeArrayToReference,
+  pickReferenceSizeArray,
+} = require("../helpers/sizeDimensionFormatter");
 
 const normalizeText = (value) => String(value ?? "").trim();
 const normalizeStatus = (value) => normalizeText(value).toLowerCase();
@@ -49,16 +60,47 @@ const getQcItemCode = (qcDoc = {}) =>
       "",
   );
 
-const getInspectionSortTime = (inspection = {}) =>
-  Math.max(
-    inspection?.inspection_date ? new Date(inspection.inspection_date).getTime() : 0,
-    inspection?.createdAt ? new Date(inspection.createdAt).getTime() : 0,
-    inspection?.updatedAt ? new Date(inspection.updatedAt).getTime() : 0,
-  ) || 0;
+const toObjectId = (value) => {
+  const normalized = normalizeText(value?._id || value?.id || value);
+  return mongoose.Types.ObjectId.isValid(normalized)
+    ? new mongoose.Types.ObjectId(normalized)
+    : null;
+};
+
+const getDocValue = (doc = {}, path = "") =>
+  doc && typeof doc.get === "function" ? doc.get(path) : doc?.[path];
+
+const setDocValue = (doc = {}, path = "", value) => {
+  if (doc && typeof doc.set === "function") {
+    doc.set(path, value);
+    if (typeof doc.markModified === "function") doc.markModified(path);
+    return;
+  }
+  doc[path] = value;
+};
+
+const getInspectionDateSortTime = (inspection = {}) => {
+  const parsed = parseDateOnly(inspection?.inspection_date);
+  return parsed ? parsed.getTime() : 0;
+};
+
+const getInspectionCreatedSortTime = (inspection = {}) => {
+  const parsed = parseDateTime(inspection?.createdAt);
+  return parsed ? parsed.getTime() : 0;
+};
+
+// Latest item sync intentionally follows the inspection visit date, not edit time.
+const getInspectionSortTime = (inspection = {}) => getInspectionDateSortTime(inspection);
+
+const compareInspectionsByLatestDate = (left = {}, right = {}) => {
+  const dateDelta = getInspectionDateSortTime(right) - getInspectionDateSortTime(left);
+  if (dateDelta !== 0) return dateDelta;
+  return getInspectionCreatedSortTime(right) - getInspectionCreatedSortTime(left);
+};
 
 const pickLatestInspectionRecord = (records = []) =>
   [...(Array.isArray(records) ? records : [])].sort(
-    (left, right) => getInspectionSortTime(right) - getInspectionSortTime(left),
+    compareInspectionsByLatestDate,
   )[0] || null;
 
 const buildInspectedCbmSnapshot = ({
@@ -99,6 +141,176 @@ const hasModernInspectionData = (inspection = {}) =>
 const isNonMeasurementInspectionStatus = (status = "") =>
   NON_MEASUREMENT_INSPECTION_STATUSES.has(normalizeStatus(status));
 
+const isEligibleInspectionForItemSync = (inspection = {}) => {
+  const status = normalizeStatus(inspection?.status);
+  if (!status || status === "pending" || isNonMeasurementInspectionStatus(status)) {
+    return false;
+  }
+  return (
+    status === "inspection done" ||
+    toNumber(inspection?.checked, 0) > 0 ||
+    toNumber(inspection?.passed, 0) > 0 ||
+    hasModernInspectionData(inspection)
+  );
+};
+
+const formatItemInspectedSizes = (itemDocOrPlainObject = {}) => {
+  if (!itemDocOrPlainObject) return false;
+
+  let changed = false;
+  [
+    {
+      path: "inspected_item_sizes",
+      type: "item",
+    },
+    {
+      path: "inspected_box_sizes",
+      type: "box",
+    },
+  ].forEach(({ path, type }) => {
+    const incoming = getDocValue(itemDocOrPlainObject, path);
+    if (!Array.isArray(incoming)) return;
+    const reference = pickReferenceSizeArray(itemDocOrPlainObject, type);
+    if (!Array.isArray(reference) || reference.length === 0) return;
+
+    const formatted = formatSizeArrayToReference(incoming, reference, { type });
+    if (valuesEqual(incoming, formatted)) return;
+    setDocValue(itemDocOrPlainObject, path, formatted);
+    changed = true;
+  });
+
+  return changed;
+};
+
+const formatInspectionInspectedSizes = (inspectionDocOrPlainObject = {}, itemDoc = {}) => {
+  if (!inspectionDocOrPlainObject || !itemDoc) return false;
+
+  let changed = false;
+  [
+    {
+      path: "inspected_item_sizes",
+      type: "item",
+    },
+    {
+      path: "inspected_box_sizes",
+      type: "box",
+    },
+  ].forEach(({ path, type }) => {
+    const incoming = getDocValue(inspectionDocOrPlainObject, path);
+    if (!Array.isArray(incoming)) return;
+    const reference = pickReferenceSizeArray(itemDoc, type);
+    if (!Array.isArray(reference) || reference.length === 0) return;
+
+    const formatted = formatSizeArrayToReference(incoming, reference, { type });
+    if (valuesEqual(incoming, formatted)) return;
+    setDocValue(inspectionDocOrPlainObject, path, formatted);
+    changed = true;
+  });
+
+  return changed;
+};
+
+const saveFormattedInspectionIfNeeded = async ({
+  inspectionRecord,
+  itemDoc,
+  save = true,
+} = {}) => {
+  const formatted = formatInspectionInspectedSizes(inspectionRecord, itemDoc);
+  if (!formatted || !save) return formatted;
+
+  if (inspectionRecord && typeof inspectionRecord.save === "function") {
+    await inspectionRecord.save();
+    return formatted;
+  }
+
+  const inspectionId = normalizeText(inspectionRecord?._id);
+  if (mongoose.Types.ObjectId.isValid(inspectionId)) {
+    await Inspection.findByIdAndUpdate(inspectionId, {
+      $set: {
+        inspected_item_sizes: inspectionRecord?.inspected_item_sizes || [],
+        inspected_box_sizes: inspectionRecord?.inspected_box_sizes || [],
+      },
+    });
+  }
+
+  return formatted;
+};
+
+const buildItemCodeRegex = (itemCode = "") => ({
+  $regex: `^${escapeRegex(itemCode)}$`,
+  $options: "i",
+});
+
+const findItemByCode = (itemCode = "") =>
+  Item.findOne({ code: buildItemCodeRegex(itemCode) });
+
+const getItemCodeFromItem = (itemDoc = {}) =>
+  normalizeText(getDocValue(itemDoc, "code"));
+
+const loadItemForQc = async (qcDoc = {}, itemDoc = null) => {
+  if (itemDoc) return itemDoc;
+  const itemCode = getQcItemCode(qcDoc);
+  if (!itemCode) return null;
+  return findItemByCode(itemCode);
+};
+
+const findQcRecordsForItemCode = async (itemCode = "") => {
+  if (!itemCode) return [];
+  return QC.find({
+    "item.item_code": buildItemCodeRegex(itemCode),
+  })
+    .select("_id item.item_code order.item_code order_meta.item_code quantities last_inspected_date")
+    .lean();
+};
+
+const findLatestEligibleInspectionForItemCode = async (itemCode = "") => {
+  const qcRows = await findQcRecordsForItemCode(itemCode);
+  const qcIds = qcRows
+    .map((qcDoc) => toObjectId(qcDoc?._id))
+    .filter(Boolean);
+  if (qcIds.length === 0) {
+    return { inspection: null, qcDoc: null, qcRows };
+  }
+
+  const inspections = await Inspection.find({ qc: { $in: qcIds } })
+    .select(
+      [
+        "_id",
+        "qc",
+        "inspection_date",
+        "createdAt",
+        "status",
+        "checked",
+        "passed",
+        "barcode",
+        "master_barcode",
+        "inner_barcode",
+        "packed_size",
+        "finishing",
+        "branding",
+        "kd",
+        "cbm",
+        "inspected_item_sizes",
+        "inspected_box_sizes",
+        "inspected_box_mode",
+      ].join(" "),
+    )
+    .lean();
+
+  const latestInspection = pickLatestInspectionRecord(
+    inspections.filter(isEligibleInspectionForItemSync),
+  );
+  const latestQcDoc = latestInspection
+    ? qcRows.find((qcDoc) => String(qcDoc?._id || "") === String(latestInspection.qc || ""))
+    : null;
+
+  return {
+    inspection: latestInspection,
+    qcDoc: latestQcDoc,
+    qcRows,
+  };
+};
+
 const applyLatestInspectionToItem = ({
   itemDoc,
   inspectionRecord,
@@ -106,6 +318,7 @@ const applyLatestInspectionToItem = ({
 } = {}) => {
   if (!itemDoc || !inspectionRecord) return false;
   if (isNonMeasurementInspectionStatus(inspectionRecord?.status)) return false;
+  formatInspectionInspectedSizes(inspectionRecord, itemDoc);
 
   const itemSizes = normalizeItemSizes(inspectionRecord?.inspected_item_sizes);
   const rawBoxMode = detectBoxPackagingMode(
@@ -164,11 +377,12 @@ const applyLatestInspectionToItem = ({
     barcode: normalizeText(inspectionRecord?.master_barcode || inspectionRecord?.barcode),
     master_barcode: normalizeText(inspectionRecord?.master_barcode || inspectionRecord?.barcode),
     inner_barcode: normalizeText(inspectionRecord?.inner_barcode),
-    last_inspected_date: normalizeText(
-      inspectionRecord?.inspection_date ||
+    last_inspected_date: toDateOnlyIso(inspectionRecord?.inspection_date) ||
+      normalizeText(
+        inspectionRecord?.inspection_date ||
         qcDoc?.last_inspected_date ||
         "",
-    ),
+      ),
     quantities: {
       ...(currentQcSnapshot?.quantities || {}),
       checked: toNumber(qcDoc?.quantities?.qc_checked, currentQcSnapshot?.quantities?.checked || 0),
@@ -177,6 +391,7 @@ const applyLatestInspectionToItem = ({
     },
   };
   setIfChanged("qc", nextQcSnapshot);
+  formatItemInspectedSizes(itemDoc);
 
   return changed;
 };
@@ -193,14 +408,6 @@ const syncItemInspectedDataFromInspection = async ({
 } = {}) => {
   if (!inspectionRecord) {
     return { matched: false, updated: false, skipped_reason: "missing_inspection" };
-  }
-  if (isNonMeasurementInspectionStatus(inspectionRecord?.status)) {
-    return {
-      matched: true,
-      updated: false,
-      skipped_reason: "non_measurement_inspection_status",
-      inspection_status: normalizeText(inspectionRecord?.status),
-    };
   }
   if (requireModernInspectionData && !hasModernInspectionData(inspectionRecord)) {
     return { matched: false, updated: false, skipped_reason: "missing_inspection_data" };
@@ -221,11 +428,73 @@ const syncItemInspectedDataFromInspection = async ({
     return { matched: false, updated: false, skipped_reason: "missing_item" };
   }
 
+  const formattedInspection = await saveFormattedInspectionIfNeeded({
+    inspectionRecord,
+    itemDoc: resolvedItem,
+    save,
+  });
+  if (isNonMeasurementInspectionStatus(inspectionRecord?.status)) {
+    return {
+      matched: true,
+      updated: false,
+      formatted_inspection: formattedInspection,
+      skipped_reason: "non_measurement_inspection_status",
+      inspection_status: normalizeText(inspectionRecord?.status),
+      item_id: String(resolvedItem?._id || ""),
+      item_code: normalizeText(resolvedItem?.code || itemCode),
+      item_doc: resolvedItem,
+    };
+  }
+  if (!isEligibleInspectionForItemSync(inspectionRecord)) {
+    return {
+      matched: true,
+      updated: false,
+      formatted_inspection: formattedInspection,
+      skipped_reason: "inspection_not_eligible_for_item_sync",
+      inspection_status: normalizeText(inspectionRecord?.status),
+      item_id: String(resolvedItem?._id || ""),
+      item_code: normalizeText(resolvedItem?.code || itemCode),
+      item_doc: resolvedItem,
+    };
+  }
+  const latestEntry = await findLatestEligibleInspectionForItemCode(
+    normalizeText(resolvedItem?.code || itemCode),
+  );
+  const latestInspectionId = normalizeText(latestEntry?.inspection?._id);
+  const currentInspectionId = normalizeText(inspectionRecord?._id);
+  if (!latestInspectionId) {
+    return {
+      matched: true,
+      updated: false,
+      formatted_inspection: formattedInspection,
+      skipped_reason: "missing_latest_inspection",
+      item_id: String(resolvedItem?._id || ""),
+      item_code: normalizeText(resolvedItem?.code || itemCode),
+      item_doc: resolvedItem,
+    };
+  }
+  if (
+    latestInspectionId &&
+    currentInspectionId &&
+    latestInspectionId !== currentInspectionId
+  ) {
+    return {
+      matched: true,
+      updated: false,
+      formatted_inspection: formattedInspection,
+      skipped_reason: "not_latest_inspection",
+      latest_inspection_id: latestInspectionId,
+      item_id: String(resolvedItem?._id || ""),
+      item_code: normalizeText(resolvedItem?.code || itemCode),
+      item_doc: resolvedItem,
+    };
+  }
+
   const beforeItemSnapshot = resolvedItem.toObject();
   const changed = applyLatestInspectionToItem({
     itemDoc: resolvedItem,
     inspectionRecord,
-    qcDoc,
+    qcDoc: latestEntry?.qcDoc || qcDoc,
   });
 
   if (changed && save) {
@@ -237,7 +506,7 @@ const syncItemInspectedDataFromInspection = async ({
       source,
       route,
       metadata: {
-        qc_id: String(qcDoc?._id || ""),
+        qc_id: String((latestEntry?.qcDoc || qcDoc)?._id || ""),
         inspection_record_id: String(inspectionRecord?._id || ""),
       },
     });
@@ -247,18 +516,118 @@ const syncItemInspectedDataFromInspection = async ({
   return {
     matched: true,
     updated: changed,
+    formatted_inspection: formattedInspection,
     item_id: String(resolvedItem?._id || ""),
     item_code: normalizeText(resolvedItem?.code || itemCode),
     item_doc: resolvedItem,
   };
 };
 
+const syncLatestInspectionToItem = async (
+  inspectionId,
+  {
+    save = true,
+    user = null,
+    route = "",
+    source = "inspection_latest_sync",
+  } = {},
+) => {
+  const objectId = toObjectId(inspectionId);
+  if (!objectId) {
+    return { matched: false, updated: false, skipped_reason: "invalid_inspection_id" };
+  }
+
+  const inspectionRecord = await Inspection.findById(objectId);
+  if (!inspectionRecord) {
+    return { matched: false, updated: false, skipped_reason: "missing_inspection" };
+  }
+
+  const qcDoc = await QC.findById(inspectionRecord.qc)
+    .select("_id item.item_code order.item_code order_meta.item_code quantities last_inspected_date");
+  if (!qcDoc) {
+    return { matched: false, updated: false, skipped_reason: "missing_qc" };
+  }
+
+  return syncItemInspectedDataFromInspection({
+    qcDoc,
+    inspectionRecord,
+    save,
+    user,
+    route,
+    source,
+  });
+};
+
+const recomputeLatestInspectionForItem = async (
+  itemIdOrCode,
+  {
+    save = true,
+    user = null,
+    route = "",
+    source = "inspection_latest_recompute",
+  } = {},
+) => {
+  const normalizedInput = normalizeText(itemIdOrCode);
+  if (!normalizedInput) {
+    return { matched: false, updated: false, skipped_reason: "missing_item" };
+  }
+
+  const itemDoc = mongoose.Types.ObjectId.isValid(normalizedInput)
+    ? await Item.findById(normalizedInput)
+    : await findItemByCode(normalizedInput);
+  if (!itemDoc) {
+    return { matched: false, updated: false, skipped_reason: "missing_item" };
+  }
+
+  const itemCode = getItemCodeFromItem(itemDoc);
+  const latestEntry = await findLatestEligibleInspectionForItemCode(itemCode);
+  if (!latestEntry?.inspection) {
+    return {
+      matched: true,
+      updated: false,
+      skipped_reason: "missing_latest_inspection",
+      item_id: String(itemDoc?._id || ""),
+      item_code: itemCode,
+      item_doc: itemDoc,
+    };
+  }
+
+  const inspectionRecord = await Inspection.findById(latestEntry.inspection._id);
+  if (!inspectionRecord) {
+    return {
+      matched: true,
+      updated: false,
+      skipped_reason: "missing_latest_inspection",
+      item_id: String(itemDoc?._id || ""),
+      item_code: itemCode,
+      item_doc: itemDoc,
+    };
+  }
+
+  return syncItemInspectedDataFromInspection({
+    qcDoc: latestEntry.qcDoc,
+    inspectionRecord,
+    itemDoc,
+    save,
+    user,
+    route,
+    source,
+  });
+};
+
 module.exports = {
   applyLatestInspectionToItem,
+  compareInspectionsByLatestDate,
+  findLatestEligibleInspectionForItemCode,
+  formatInspectionInspectedSizes,
+  formatItemInspectedSizes,
   getInspectionSortTime,
   getQcItemCode,
   hasModernInspectionData,
+  isEligibleInspectionForItemSync,
   isNonMeasurementInspectionStatus,
   pickLatestInspectionRecord,
+  recomputeLatestInspectionForItem,
+  syncLatestInspectionToItem,
   syncItemInspectedDataFromInspection,
 };

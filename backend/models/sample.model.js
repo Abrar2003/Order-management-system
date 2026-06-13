@@ -256,6 +256,11 @@ const sampleSchema = new mongoose.Schema(
       trim: true,
     },
     assigned_cad_artist: { type: String, default: "", trim: true },
+    assigned_cad_artist_user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "users",
+      default: null,
+    },
     requested_by: { type: AuditActorSchema, default: () => ({}) },
     created_by: { type: AuditActorSchema, default: () => ({}) },
     updated_by: { type: AuditActorSchema, default: () => ({}) },

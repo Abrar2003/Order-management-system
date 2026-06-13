@@ -1,8 +1,12 @@
 const mongoose = require("mongoose");
 const Sample = require("../models/sample.model");
+const User = require("../models/user.model");
+const WorkflowDepartment = require("../models/workflow/Department.model");
+const WorkflowTaskType = require("../models/workflow/TaskType.model");
 const { BOX_PACKAGING_MODES, BOX_ENTRY_TYPES } = require("../helpers/boxMeasurement");
 const { calculateTotalPoCbm } = require("../services/orderCbm.service");
 const { applyDataAccessMatch } = require("../services/userDataAccess.service");
+const { createWorkflowTask } = require("../services/workflow/workflowStatusService");
 const {
   createStorageKey,
   getObjectUrl,
@@ -43,6 +47,8 @@ const STATUS_DATE_FIELD = Object.freeze({
   shipping_planned: "estimated_shipping_date",
   shipped: "shipped_at",
 });
+const SAMPLE_CAD_TASK_TYPE_KEY = "cad_files";
+const SAMPLE_CAD_TASK_DEPARTMENT_NAME = "AutoCAD";
 
 const escapeRegex = (value = "") =>
   String(value).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -114,6 +120,120 @@ const buildAuditActor = (user = {}) => ({
   user: user?._id || user?.id || null,
   name: normalizeText(user?.name || user?.email || user?.role || ""),
 });
+
+const getTomorrowDueDate = () => {
+  const dueDate = new Date();
+  dueDate.setDate(dueDate.getDate() + 1);
+  dueDate.setHours(0, 0, 0, 0);
+  return dueDate;
+};
+
+const ensureSampleCadWorkflowDepartment = async (actor = {}) => {
+  const key = "autocad";
+  let department = await WorkflowDepartment.findOne({
+    $or: [
+      { key },
+      { name: { $regex: `^${escapeRegex(SAMPLE_CAD_TASK_DEPARTMENT_NAME)}$`, $options: "i" } },
+    ],
+  });
+
+  if (!department) {
+    department = await WorkflowDepartment.create({
+      name: SAMPLE_CAD_TASK_DEPARTMENT_NAME,
+      key,
+      description: "Auto-created department for sample CAD file workflow tasks.",
+      created_by: actor,
+      updated_by: actor,
+    });
+  }
+
+  return department;
+};
+
+const ensureSampleCadWorkflowTaskType = async (departmentId, actor = {}) => {
+  let taskType = await WorkflowTaskType.findOne({ key: SAMPLE_CAD_TASK_TYPE_KEY });
+
+  if (!taskType) {
+    taskType = await WorkflowTaskType.create({
+      key: SAMPLE_CAD_TASK_TYPE_KEY,
+      name: "CAD Files",
+      description: "Auto-created workflow task for sample CAD files.",
+      category: "cad",
+      auto_create_mode: "manual",
+      default_department: departmentId,
+      default_priority: "normal",
+      requires_review: true,
+      is_active: true,
+      created_by: actor,
+      updated_by: actor,
+    });
+  } else {
+    let changed = false;
+    if (taskType.is_active !== true) {
+      taskType.is_active = true;
+      changed = true;
+    }
+    if (!taskType.default_department && departmentId) {
+      taskType.default_department = departmentId;
+      changed = true;
+    }
+    if (changed) {
+      taskType.updated_by = actor;
+      await taskType.save();
+    }
+  }
+
+  return taskType;
+};
+
+const resolveSampleCadArtist = async (payload = {}) => {
+  const requestedUserId = normalizeText(
+    payload.assigned_cad_artist_user_id ||
+      payload.assigned_cad_artist_user ||
+      payload.cad_artist_user_id,
+  );
+  if (!requestedUserId) {
+    throw new Error("assigned_cad_artist_user_id is required");
+  }
+  if (!isValidObjectId(requestedUserId)) {
+    throw new Error("assigned_cad_artist_user_id is invalid");
+  }
+
+  const user = await User.findById(requestedUserId)
+    .select("_id name username email role")
+    .lean();
+  if (!user) {
+    throw new Error("Assigned CAD artist was not found");
+  }
+
+  return user;
+};
+
+const createSampleCadWorkflowTask = async ({ sample, cadArtist, actorUser } = {}) => {
+  if (!sample?._id || !cadArtist?._id) return null;
+
+  const actor = buildAuditActor(actorUser);
+  const department = await ensureSampleCadWorkflowDepartment(actor);
+  await ensureSampleCadWorkflowTaskType(department._id, actor);
+
+  return createWorkflowTask({
+    payload: {
+      title: sample.code,
+      description: `CAD files task for sample ${sample.code}`,
+      task_type_key: SAMPLE_CAD_TASK_TYPE_KEY,
+      assignee_ids: [String(cadArtist._id)],
+      upload_assignee_ids: [String(cadArtist._id)],
+      department: String(department._id),
+      due_date: getTomorrowDueDate(),
+      brand: sample.brand,
+      priority: "normal",
+      upload_required: true,
+      review_required: true,
+      creation_note: `Created automatically when sample ${sample.code} was created.`,
+    },
+    actor: actorUser,
+  });
+};
 
 const canMutateSamples = (user = {}) =>
   SAMPLE_MUTATION_ROLES.has(normalizeUserRoleKey(user?.role));
@@ -652,6 +772,34 @@ exports.getSampleById = async (req, res) => {
   }
 };
 
+exports.getSampleCadArtists = async (_req, res) => {
+  try {
+    const users = await User.find({})
+      .select("_id name username email role")
+      .sort({ name: 1, username: 1 })
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      data: users.map((user) => ({
+        _id: String(user?._id || ""),
+        id: String(user?._id || ""),
+        name: normalizeText(user?.name),
+        username: normalizeText(user?.username),
+        email: normalizeText(user?.email),
+        role: normalizeText(user?.role),
+      })),
+    });
+  } catch (error) {
+    console.error("Get Sample CAD Artists Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch CAD artists",
+      error: error.message,
+    });
+  }
+};
+
 exports.createSample = async (req, res) => {
   try {
     if (!ensureSampleMutationAccess(req, res)) return;
@@ -672,6 +820,7 @@ exports.createSample = async (req, res) => {
     if (existingSample) {
       return res.status(400).json({ success: false, message: `Sample code ${existingSample.code || code} already exists` });
     }
+    const cadArtist = await resolveSampleCadArtist(payload);
     const boxMode = Object.values(BOX_PACKAGING_MODES).includes(payload.box_mode)
       ? payload.box_mode
       : BOX_PACKAGING_MODES.INDIVIDUAL;
@@ -691,7 +840,8 @@ exports.createSample = async (req, res) => {
       box_mode: boxMode,
       cbm: Math.max(0, toSafeNumber(payload.cbm, 0)),
       current_status: validateEnum(payload.current_status, Sample.SAMPLE_STATUSES, "current_status", "created"),
-      assigned_cad_artist: normalizeText(payload.assigned_cad_artist),
+      assigned_cad_artist: normalizeText(cadArtist.name || cadArtist.username || payload.assigned_cad_artist),
+      assigned_cad_artist_user: cadArtist._id,
       initial_sketch_files: uploadedFiles,
       requested_by: actor,
       created_by: actor,
@@ -715,7 +865,17 @@ exports.createSample = async (req, res) => {
       actor,
     });
     await sample.save();
-    return res.status(201).json({ success: true, message: "Sample created successfully", data: await serializeSample(sample, { detail: true }) });
+    const workflowTask = await createSampleCadWorkflowTask({
+      sample,
+      cadArtist,
+      actorUser: req.user,
+    });
+    return res.status(201).json({
+      success: true,
+      message: "Sample created successfully",
+      data: await serializeSample(sample, { detail: true }),
+      workflow_task: workflowTask,
+    });
   } catch (error) {
     return res.status(isBadRequestError(error) ? 400 : 500).json({
       success: false,
@@ -748,7 +908,17 @@ exports.updateSample = async (req, res) => {
     sample.name = normalizeText(payload.name ?? sample.name);
     sample.description = normalizeText(payload.description ?? sample.description);
     sample.brand = normalizeText(payload.brand ?? sample.brand);
-    sample.assigned_cad_artist = normalizeText(payload.assigned_cad_artist ?? sample.assigned_cad_artist);
+    if (
+      payload.assigned_cad_artist_user_id !== undefined ||
+      payload.assigned_cad_artist_user !== undefined ||
+      payload.cad_artist_user_id !== undefined
+    ) {
+      const cadArtist = await resolveSampleCadArtist(payload);
+      sample.assigned_cad_artist = normalizeText(cadArtist.name || cadArtist.username || payload.assigned_cad_artist);
+      sample.assigned_cad_artist_user = cadArtist._id;
+    } else {
+      sample.assigned_cad_artist = normalizeText(payload.assigned_cad_artist ?? sample.assigned_cad_artist);
+    }
     if (payload.vendor !== undefined) sample.vendor = normalizeVendorList(payload.vendor);
     if (payload.vendor_entries !== undefined) {
       sample.vendor_entries = normalizeVendorEntries(payload.vendor_entries, sample.vendor);
@@ -776,6 +946,7 @@ exports.updateSample = async (req, res) => {
       "box_mode",
       "cbm",
       "assigned_cad_artist",
+      "assigned_cad_artist_user",
     ]);
     if (changedFields.length > 0 || normalizeText(payload.comment)) {
       addTimeline(sample, {

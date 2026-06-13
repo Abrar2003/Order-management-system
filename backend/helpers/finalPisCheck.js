@@ -41,6 +41,7 @@ const FINAL_PIS_CHECK_ITEM_SELECT = [
   "inspected_bottom_LBH",
   "cbm",
   "pis_checked_flag",
+  "pis_update_comments",
   "qc.barcode",
   "qc.master_barcode",
   "qc.inner_barcode",
@@ -1099,6 +1100,21 @@ const buildFinalPisCheckRow = (item = {}) => {
       has_master_item_sizes: hasMasterItemEntries,
       has_master_box_sizes: hasMasterBoxEntries,
     },
+    comments: Array.isArray(item?.pis_update_comments)
+      ? item.pis_update_comments
+          .slice(-5)
+          .reverse()
+          .map((comment) => ({
+            id: String(comment?._id || ""),
+            comment: normalizeText(comment?.comment),
+            created_by_name: normalizeText(comment?.created_by_name),
+            created_by_role: normalizeText(comment?.created_by_role),
+            created_at: comment?.created_at || null,
+          }))
+      : [],
+    comment_count: Array.isArray(item?.pis_update_comments)
+      ? item.pis_update_comments.length
+      : 0,
     differences,
   };
 };

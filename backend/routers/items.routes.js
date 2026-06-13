@@ -31,6 +31,7 @@ const {
   getFinalPisCheckOptions,
   getFinalPisCheckReportPreview,
   exportFinalPisCheckReport,
+  createFinalPisCheckComment,
   getPisUpdateLogs,
   getProductDatabaseItems,
   getItemDatabaseItems,
@@ -178,6 +179,14 @@ router.get(
     metadata: (req) => ({ filters: req.query || {} }),
   }),
   exportFinalPisCheckReport,
+);
+
+router.post(
+  "/final-pis-check/:code/comments",
+  auth,
+  requirePermission("pis", "view"),
+  invalidateItemsOnSuccess,
+  createFinalPisCheckComment,
 );
 
 router.get(

@@ -391,7 +391,7 @@ const buildInspectedReference = (item = {}) => {
 const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
   const isPisDiffUpdate = updateSource === "pis_diffs";
   const [form, setForm] = useState(() =>
-    buildInitialForm(item, { preferMaster: isPisDiffUpdate }),
+    buildInitialForm(item, { preferMaster: false }),
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");

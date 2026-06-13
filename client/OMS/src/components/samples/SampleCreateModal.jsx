@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import MeasuredSizeSection from "../MeasuredSizeSection";
 import useBrandOptions from "../../hooks/useBrandOptions";
-import { createSample, updateSample } from "../../services/samples.service";
+import { createSample, getSampleCadArtists, updateSample } from "../../services/samples.service";
 import {
   BOX_PACKAGING_MODES,
   BOX_SIZE_REMARK_OPTIONS,
@@ -21,6 +21,7 @@ const initialForm = (sample = null) => ({
   description: String(sample?.description || ""),
   brand: String(sample?.brand || ""),
   assigned_cad_artist: String(sample?.assigned_cad_artist || ""),
+  assigned_cad_artist_user_id: String(sample?.assigned_cad_artist_user || sample?.assigned_cad_artist_user_id || ""),
   first_comment: "",
   box_mode: sample?.box_mode || BOX_PACKAGING_MODES.INDIVIDUAL,
   item_count: String(Math.max(1, sample?.item_sizes?.length || 1)),
@@ -54,8 +55,9 @@ const initialForm = (sample = null) => ({
 
 const hasSizeInput = (entries = []) =>
   entries.some((entry) =>
-    ["L", "B", "H", "weight", "item_count_in_inner", "box_count_in_master"]
-      .some((field) => String(entry?.[field] ?? "").trim() !== ""),
+    ["L", "B", "H", "weight"].some((field) => String(entry?.[field] ?? "").trim() !== "") ||
+      Number(entry?.item_count_in_inner || 0) > 0 ||
+      Number(entry?.box_count_in_master || 0) > 0,
   );
 
 const buildSizePayload = ({ entries, count, mode, groupLabel, remarkOptions, payloadWeightKey, singleRemark }) => {
@@ -86,9 +88,64 @@ const SampleCreateModal = ({ sample = null, onClose, onSaved }) => {
   const isEdit = Boolean(sample?._id);
   const [form, setForm] = useState(() => initialForm(sample));
   const [files, setFiles] = useState([]);
+  const [cadArtists, setCadArtists] = useState([]);
+  const [loadingCadArtists, setLoadingCadArtists] = useState(false);
+  const [cadArtistError, setCadArtistError] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const { brandOptions, loadingBrands } = useBrandOptions([sample?.brand]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadCadArtists = async () => {
+      try {
+        setLoadingCadArtists(true);
+        setCadArtistError("");
+        const response = await getSampleCadArtists();
+        const users = Array.isArray(response?.data?.data) ? response.data.data : [];
+        if (cancelled) return;
+
+        setCadArtists(users);
+        setForm((prev) => {
+          if (prev.assigned_cad_artist_user_id) return prev;
+          const existingArtist = String(prev.assigned_cad_artist || "").trim().toLowerCase();
+          const matchedExisting = existingArtist
+            ? users.find((user) =>
+                [user?.name, user?.username, user?.email]
+                  .map((value) => String(value || "").trim().toLowerCase())
+                  .includes(existingArtist),
+              )
+            : null;
+          const defaultArtist = matchedExisting ||
+            users.find((user) => String(user?.username || "").trim().toLowerCase() === "anzar") ||
+            null;
+          if (!defaultArtist?._id) return prev;
+
+          return {
+            ...prev,
+            assigned_cad_artist_user_id: String(defaultArtist._id),
+            assigned_cad_artist: String(
+              defaultArtist.name || defaultArtist.username || defaultArtist.email || "",
+            ),
+          };
+        });
+      } catch (loadError) {
+        if (!cancelled) {
+          setCadArtists([]);
+          setCadArtistError(loadError?.response?.data?.message || "Failed to load CAD artists.");
+        }
+      } finally {
+        if (!cancelled) setLoadingCadArtists(false);
+      }
+    };
+
+    loadCadArtists();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const itemEntries = useMemo(
     () => ensureMeasuredSizeEntryCount(form.item_sizes, form.item_count, { singleRemark: "item" }),
@@ -166,6 +223,7 @@ const SampleCreateModal = ({ sample = null, onClose, onSaved }) => {
       description: form.description.trim(),
       brand: form.brand.trim(),
       assigned_cad_artist: form.assigned_cad_artist.trim(),
+      assigned_cad_artist_user_id: form.assigned_cad_artist_user_id.trim(),
       first_comment: form.first_comment.trim(),
       comment: form.first_comment.trim(),
       item_sizes: itemPayload.value,
@@ -183,8 +241,8 @@ const SampleCreateModal = ({ sample = null, onClose, onSaved }) => {
       setError(payload.error);
       return;
     }
-    if (!payload.code || !payload.brand || (!payload.name && !payload.description)) {
-      setError("Code, brand, and either name or description are required.");
+    if (!payload.code || !payload.brand || !payload.assigned_cad_artist_user_id || (!payload.name && !payload.description)) {
+      setError("Code, brand, assigned CAD artist, and either name or description are required.");
       return;
     }
 
@@ -253,7 +311,36 @@ const SampleCreateModal = ({ sample = null, onClose, onSaved }) => {
               </div>
               <div className="col-md-3">
                 <label className="form-label">Assigned CAD Artist</label>
-                <input className="form-control" value={form.assigned_cad_artist} onChange={(e) => setField("assigned_cad_artist", e.target.value)} />
+                <select
+                  className="form-select"
+                  value={form.assigned_cad_artist_user_id}
+                  onChange={(event) => {
+                    const selectedUserId = event.target.value;
+                    const selectedArtist = cadArtists.find((artist) => String(artist?._id || "") === selectedUserId);
+                    setForm((prev) => ({
+                      ...prev,
+                      assigned_cad_artist_user_id: selectedUserId,
+                      assigned_cad_artist: String(
+                        selectedArtist?.name ||
+                          selectedArtist?.username ||
+                          selectedArtist?.email ||
+                          "",
+                      ),
+                    }));
+                  }}
+                  disabled={loadingCadArtists}
+                  required
+                >
+                  <option value="">
+                    {loadingCadArtists ? "Loading users..." : "Select CAD artist"}
+                  </option>
+                  {cadArtists.map((artist) => (
+                    <option key={artist._id} value={artist._id}>
+                      {artist.name || artist.username || artist.email}
+                    </option>
+                  ))}
+                </select>
+                {cadArtistError && <div className="form-text text-danger">{cadArtistError}</div>}
               </div>
               <div className="col-md-3">
                 <label className="form-label">CBM</label>

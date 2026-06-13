@@ -8,6 +8,7 @@ const { sampleFilesUpload } = require("../config/multer.config");
 const {
   getSamples,
   getSampleById,
+  getSampleCadArtists,
   createSample,
   updateSample,
   updateSampleStatus,
@@ -40,6 +41,13 @@ router.get(
   auth,
   requirePermission("samples", "view"),
   getShippedSamples,
+);
+
+router.get(
+  "/cad-artists",
+  auth,
+  requirePermissionOrRoles("samples", "create", SAMPLE_WORKFLOW_ROLE_KEYS),
+  getSampleCadArtists,
 );
 
 router.post(

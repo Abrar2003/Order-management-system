@@ -41,6 +41,8 @@ export const sampleStatusLabel = (value = "") =>
 
 export const listSamples = (params = {}) => api.get("/samples", { params });
 
+export const getSampleCadArtists = () => api.get("/samples/cad-artists");
+
 export const createSample = (formData) =>
   api.post("/samples", formData, {
     headers: { "Content-Type": "multipart/form-data" },

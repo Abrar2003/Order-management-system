@@ -4,6 +4,10 @@ const {
   BOX_ENTRY_TYPES,
 } = require("../helpers/boxMeasurement");
 const { formDraftSchema } = require("../helpers/formDrafts");
+const {
+  formatSizeArrayToReference,
+  pickReferenceSizeArray,
+} = require("../helpers/sizeDimensionFormatter");
 
 const SIZE_ENTRY_LIMIT = 4;
 
@@ -165,6 +169,17 @@ const itemUpdateHistorySchema = new mongoose.Schema(
     metadata: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
   },
   { _id: false },
+);
+const pisUpdateCommentSchema = new mongoose.Schema(
+  {
+    comment: { type: String, required: true, trim: true },
+    item_code: { type: String, default: "", trim: true },
+    created_by: { type: mongoose.Schema.Types.ObjectId, ref: "users", default: null },
+    created_by_name: { type: String, default: "", trim: true },
+    created_by_role: { type: String, default: "", trim: true },
+    created_at: { type: Date, default: Date.now },
+  },
+  { _id: true },
 );
 const productTypeSnapshotSchema = new mongoose.Schema(
   {
@@ -413,6 +428,7 @@ const itemSchema = new mongoose.Schema(
     pd_inner_barcode: { type: String, default: "", trim: true },
     pd_history: { type: [productDatabaseHistorySchema], default: [] },
     update_history: { type: [itemUpdateHistorySchema], default: [] },
+    pis_update_comments: { type: [pisUpdateCommentSchema], default: [] },
     pis_box_top_LBH: legacyLbhSchema,
     pis_box_bottom_LBH: legacyLbhSchema,
     pis_barcode: { type: String, default: "", trim: true },
@@ -573,6 +589,27 @@ itemSchema.pre("validate", function syncBarcodeAliases() {
         source_header: String(entry?.source_header || "").trim(),
       }));
     }
+  }
+});
+
+itemSchema.pre("validate", function formatInspectedSizesToReference() {
+  const itemReference = pickReferenceSizeArray(this, "item");
+  const boxReference = pickReferenceSizeArray(this, "box");
+
+  if (itemReference.length > 0 && Array.isArray(this.inspected_item_sizes)) {
+    this.inspected_item_sizes = formatSizeArrayToReference(
+      this.inspected_item_sizes,
+      itemReference,
+      { type: "item" },
+    );
+  }
+
+  if (boxReference.length > 0 && Array.isArray(this.inspected_box_sizes)) {
+    this.inspected_box_sizes = formatSizeArrayToReference(
+      this.inspected_box_sizes,
+      boxReference,
+      { type: "box" },
+    );
   }
 });
 

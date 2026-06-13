@@ -4111,6 +4111,39 @@ small,
   width: 38%;
 }
 
+.pis-diff-comment-list {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid #ded6cc;
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.pis-diff-comment-list-title {
+  margin-bottom: 0.5rem;
+  color: var(--om-color-text-muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pis-diff-comment-item + .pis-diff-comment-item {
+  margin-top: 0.65rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid rgba(120, 95, 68, 0.18);
+}
+
+.pis-diff-comment-item div {
+  color: var(--om-color-text);
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.pis-diff-comment-item small {
+  color: var(--om-color-text-muted);
+}
+
 .finish-code-preview {
   min-height: 2.9rem;
   display: flex;
@@ -8661,26 +8694,33 @@ button.om-item-order-presence-label {
   word-break: break-word;
 }
 
+.sample-section-title {
+  margin: 0 0 0.85rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
 .sample-workflow-stepper {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(142px, 1fr));
+  gap: 0.65rem;
+  align-items: stretch;
 }
 
 .sample-workflow-step {
   border: 1px solid #d8c8b4;
-  border-radius: 6px;
-  padding: 10px;
+  border-radius: 7px;
+  padding: 0.78rem 0.82rem;
   background: #fffaf3;
   display: flex;
-  gap: 8px;
+  gap: 0.62rem;
   align-items: center;
-  min-height: 58px;
+  min-height: 3.7rem;
 }
 
 .sample-workflow-step span {
-  width: 26px;
-  height: 26px;
+  width: 1.72rem;
+  height: 1.72rem;
   border-radius: 50%;
   border: 1px solid #cbb9a3;
   display: inline-flex;
@@ -8689,11 +8729,13 @@ button.om-item-order-presence-label {
   flex: 0 0 auto;
   font-size: 0.8rem;
   font-weight: 700;
+  line-height: 1;
 }
 
 .sample-workflow-step strong {
-  font-size: 0.86rem;
-  line-height: 1.15;
+  font-size: 0.88rem;
+  line-height: 1.12;
+  overflow-wrap: anywhere;
 }
 
 .sample-workflow-step.is-complete {
