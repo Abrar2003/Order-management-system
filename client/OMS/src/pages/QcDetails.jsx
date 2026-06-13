@@ -284,6 +284,31 @@ const getQcImageSelectionValue = (image) =>
 
 const isMongoObjectIdLike = (value) => /^[a-f0-9]{24}$/i.test(String(value || "").trim());
 
+const hasQcImageComment = (image = {}) =>
+  String(image?.comment || "").trim().length > 0;
+
+const getQcImageUploaderName = (image = {}) =>
+  String(
+    image?.uploaded_by?.name ||
+      image?.uploaded_by_name ||
+      image?.inspector?.name ||
+      image?.created_by?.name ||
+      "",
+  ).trim() || "Unknown Inspector";
+
+const getQcImageUploadedDateLabel = (image = {}) => {
+  const value =
+    image?.uploaded_at ||
+    image?.created_at ||
+    image?.createdAt ||
+    image?.updatedAt ||
+    "";
+  return value ? formatDateDDMMYYYY(value) : "Date Not Set";
+};
+
+const getQcImageGroupKey = (image = {}) =>
+  `${getQcImageUploadedDateLabel(image)}__${getQcImageUploaderName(image)}`;
+
 const getDownloadFileName = (response, fallbackName) => {
   const disposition = String(response?.headers?.["content-disposition"] || "");
   const match = disposition.match(/filename\*?=(?:UTF-8''|\"?)([^\";]+)/i);
@@ -364,6 +389,8 @@ const QcDetails = () => {
   const [transferInspectionRecord, setTransferInspectionRecord] = useState(null);
   const [inspectionRecordToUpdate, setInspectionRecordToUpdate] = useState(null);
   const [showQcImageGallery, setShowQcImageGallery] = useState(false);
+  const [showQcImageCarousel, setShowQcImageCarousel] = useState(false);
+  const [showOnlyCommentedQcImages, setShowOnlyCommentedQcImages] = useState(false);
   const [activeQcImageIndex, setActiveQcImageIndex] = useState(0);
   const [selectedQcImageIds, setSelectedQcImageIds] = useState([]);
   const [downloadingQcImages, setDownloadingQcImages] = useState(false);
@@ -729,6 +756,37 @@ const QcDetails = () => {
     () => (Array.isArray(qc?.qc_images) ? qc.qc_images : []),
     [qc?.qc_images],
   );
+  const visibleQcImages = useMemo(
+    () =>
+      qcImages
+        .map((image, index) => ({ image, index }))
+        .filter((entry) =>
+          showOnlyCommentedQcImages ? hasQcImageComment(entry.image) : true,
+        ),
+    [qcImages, showOnlyCommentedQcImages],
+  );
+  const qcImageGroups = useMemo(() => {
+    const groups = new Map();
+
+    visibleQcImages.forEach((entry) => {
+      const groupKey = getQcImageGroupKey(entry.image);
+      const group = groups.get(groupKey) || {
+        key: groupKey,
+        dateLabel: getQcImageUploadedDateLabel(entry.image),
+        inspectorName: getQcImageUploaderName(entry.image),
+        images: [],
+      };
+
+      group.images.push(entry);
+      groups.set(groupKey, group);
+    });
+
+    return [...groups.values()];
+  }, [visibleQcImages]);
+  const commentedQcImageCount = useMemo(
+    () => qcImages.filter(hasQcImageComment).length,
+    [qcImages],
+  );
   const activeRelatedStoredFile = useMemo(
     () => (
       activeRelatedFileConfig?.scope === "item_master" && activeRelatedFileConfig?.field
@@ -767,8 +825,8 @@ const QcDetails = () => {
   ]);
   const activeQcImage = qcImages[activeQcImageIndex] || null;
   const selectableQcImageIds = useMemo(
-    () => qcImages.map((image) => getQcImageSelectionValue(image)).filter(Boolean),
-    [qcImages],
+    () => visibleQcImages.map(({ image }) => getQcImageSelectionValue(image)).filter(Boolean),
+    [visibleQcImages],
   );
   const selectedQcImages = useMemo(
     () => qcImages.filter((image) => selectedQcImageIds.includes(getQcImageSelectionValue(image))),
@@ -1308,12 +1366,40 @@ const QcDetails = () => {
       qcImages.length - 1,
     );
     setActiveQcImageIndex(nextIndex);
+    setShowQcImageCarousel(false);
     setShowQcImageGallery(true);
   }, [qcImages.length]);
 
   const handleCloseQcImageGallery = useCallback(() => {
+    setShowQcImageCarousel(false);
     setShowQcImageGallery(false);
   }, []);
+
+  const handleOpenQcImageCarousel = useCallback((index = 0) => {
+    if (qcImages.length === 0) return;
+    const nextIndex = Math.min(
+      Math.max(Number(index) || 0, 0),
+      qcImages.length - 1,
+    );
+    setActiveQcImageIndex(nextIndex);
+    setShowQcImageCarousel(true);
+  }, [qcImages.length]);
+
+  const handleMoveQcImageCarousel = useCallback((direction) => {
+    if (visibleQcImages.length === 0) return;
+
+    setActiveQcImageIndex((currentIndex) => {
+      const currentVisibleIndex = visibleQcImages.findIndex(
+        (entry) => entry.index === currentIndex,
+      );
+      const safeCurrentVisibleIndex = currentVisibleIndex >= 0 ? currentVisibleIndex : 0;
+      const nextVisibleIndex =
+        (safeCurrentVisibleIndex + direction + visibleQcImages.length) %
+        visibleQcImages.length;
+
+      return visibleQcImages[nextVisibleIndex]?.index ?? currentIndex;
+    });
+  }, [visibleQcImages]);
 
   const handleToggleQcImageSelection = useCallback((image) => {
     const selectionValue = getQcImageSelectionValue(image);
@@ -1424,6 +1510,7 @@ const QcDetails = () => {
   useEffect(() => {
     if (qcImages.length === 0) {
       setShowQcImageGallery(false);
+      setShowQcImageCarousel(false);
       setActiveQcImageIndex(0);
       setSelectedQcImageIds([]);
       return;
@@ -1433,6 +1520,21 @@ const QcDetails = () => {
       setActiveQcImageIndex(0);
     }
   }, [activeQcImageIndex, qcImages.length]);
+
+  useEffect(() => {
+    if (!showQcImageGallery) return;
+    if (visibleQcImages.length === 0) {
+      setShowQcImageCarousel(false);
+      return;
+    }
+
+    const activeIsVisible = visibleQcImages.some(
+      (entry) => entry.index === activeQcImageIndex,
+    );
+    if (!activeIsVisible) {
+      setActiveQcImageIndex(visibleQcImages[0].index);
+    }
+  }, [activeQcImageIndex, showQcImageGallery, visibleQcImages]);
 
   useEffect(() => {
     setSelectedQcImageIds((previous) =>
@@ -1445,6 +1547,8 @@ const QcDetails = () => {
   useEffect(() => {
     if (showQcImageGallery) return;
     setSelectedQcImageIds([]);
+    setShowOnlyCommentedQcImages(false);
+    setShowQcImageCarousel(false);
   }, [showQcImageGallery]);
 
   useEffect(() => {
@@ -1453,7 +1557,17 @@ const QcDetails = () => {
     const previousOverflow = document.body.style.overflow;
     const handleKeyDown = (event) => {
       if (event.key === "Escape") {
+        if (showQcImageCarousel) {
+          setShowQcImageCarousel(false);
+          return;
+        }
         setShowQcImageGallery(false);
+      }
+      if (showQcImageCarousel && event.key === "ArrowLeft") {
+        handleMoveQcImageCarousel(-1);
+      }
+      if (showQcImageCarousel && event.key === "ArrowRight") {
+        handleMoveQcImageCarousel(1);
       }
     };
 
@@ -1464,7 +1578,7 @@ const QcDetails = () => {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [showQcImageGallery]);
+  }, [handleMoveQcImageCarousel, showQcImageCarousel, showQcImageGallery]);
 
   useEffect(() => {
     fetchQcDetails();
@@ -2594,7 +2708,9 @@ const QcDetails = () => {
               <div>
                 <h3 className="h5 mb-1">QC Image Gallery</h3>
                 <div className="small text-muted">
-                  {`${qcImages.length} image${qcImages.length === 1 ? "" : "s"} available`}
+                  {showOnlyCommentedQcImages
+                    ? `${visibleQcImages.length} of ${qcImages.length} image${qcImages.length === 1 ? "" : "s"} with comments`
+                    : `${qcImages.length} image${qcImages.length === 1 ? "" : "s"} available`}
                 </div>
                 {selectedQcImages.length > 0 && (
                   <div className="small text-muted">
@@ -2614,6 +2730,14 @@ const QcDetails = () => {
                   }
                 >
                   {allSelectableQcImagesSelected ? "Clear Selection" : "Select All"}
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${showOnlyCommentedQcImages ? "btn-primary" : "btn-outline-primary"}`}
+                  onClick={() => setShowOnlyCommentedQcImages((current) => !current)}
+                  disabled={deletingQcImages || downloadingQcImages}
+                >
+                  With Comments{commentedQcImageCount > 0 ? ` (${commentedQcImageCount})` : ""}
                 </button>
                 <button
                   type="button"
@@ -2657,96 +2781,165 @@ const QcDetails = () => {
             </div>
 
             <div className="qc-image-gallery-body">
-              <div className="qc-image-gallery-preview mb-3">
-                {String(activeQcImage?.url || "").trim() ? (
-                  <img
-                    src={activeQcImage.url}
-                    alt={activeQcImage?.originalName || "QC image"}
-                    className="qc-image-gallery-preview-image"
-                    loading="eager"
-                    decoding="async"
-                    fetchPriority="high"
-                  />
-                ) : (
-                  <div className="qc-image-gallery-preview-empty">
-                    Preview unavailable
+              {qcImageGroups.length === 0 ? (
+                <div className="qc-image-gallery-empty-state">
+                  {showOnlyCommentedQcImages
+                    ? "No QC images with comments found."
+                    : "No QC images found."}
+                </div>
+              ) : (
+                <div className="qc-image-gallery-accordion-list">
+                  {qcImageGroups.map((group, groupIndex) => (
+                    <details
+                      className="qc-image-gallery-accordion"
+                      key={group.key}
+                      open={groupIndex === 0}
+                    >
+                      <summary className="qc-image-gallery-accordion-summary">
+                        <span>
+                          <span className="fw-semibold">{group.dateLabel}</span>
+                          <span className="text-muted"> | {group.inspectorName}</span>
+                        </span>
+                        <span className="qc-image-gallery-count-pill">
+                          {group.images.length}
+                        </span>
+                      </summary>
+
+                      <div className="qc-image-gallery-grid">
+                        {group.images.map(({ image, index }) => {
+                          const imageUrl = String(image?.url || "").trim();
+                          const isSelected = index === activeQcImageIndex;
+                          const selectionValue = getQcImageSelectionValue(image);
+                          const isChecked =
+                            selectionValue && selectedQcImageIds.includes(selectionValue);
+                          const comment = String(image?.comment || "").trim();
+
+                          return (
+                            <div
+                              className="qc-image-gallery-thumb-wrap"
+                              key={String(
+                                image?._id ||
+                                image?.key ||
+                                `${image?.originalName || "qc-image"}-${index}`,
+                              )}
+                            >
+                              <button
+                                type="button"
+                                className={`qc-image-gallery-thumb${isSelected ? " is-active" : ""}${isChecked ? " is-marked" : ""}`}
+                                onClick={() => handleOpenQcImageCarousel(index)}
+                                title={image?.originalName || `QC image ${index + 1}`}
+                              >
+                                {imageUrl ? (
+                                  <img
+                                    src={imageUrl}
+                                    alt={image?.originalName || `QC image ${index + 1}`}
+                                    className="qc-image-gallery-thumb-image"
+                                    loading="lazy"
+                                    decoding="async"
+                                  />
+                                ) : (
+                                  <span className="qc-image-gallery-thumb-empty">
+                                    Preview unavailable
+                                  </span>
+                                )}
+                                {comment && (
+                                  <span className="qc-image-gallery-comment-indicator">
+                                    Comment
+                                  </span>
+                                )}
+                              </button>
+
+                              {selectionValue && (
+                                <label
+                                  className="qc-image-gallery-thumb-check"
+                                  onClick={(event) => event.stopPropagation()}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    className="form-check-input m-0"
+                                    checked={Boolean(isChecked)}
+                                    onChange={() => handleToggleQcImageSelection(image)}
+                                    disabled={deletingQcImages || downloadingQcImages}
+                                  />
+                                </label>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </details>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {showQcImageCarousel && activeQcImage && (
+              <div
+                className="qc-image-carousel-backdrop"
+                role="dialog"
+                aria-modal="true"
+                aria-label="QC image carousel"
+                onClick={() => setShowQcImageCarousel(false)}
+              >
+                <div
+                  className="qc-image-carousel-panel"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    className="btn btn-outline-secondary btn-sm qc-image-carousel-close"
+                    onClick={() => setShowQcImageCarousel(false)}
+                  >
+                    Close
+                  </button>
+                  <button
+                    type="button"
+                    className="qc-image-carousel-nav qc-image-carousel-nav--prev"
+                    onClick={() => handleMoveQcImageCarousel(-1)}
+                    aria-label="Previous image"
+                  >
+                    {"<"}
+                  </button>
+                  <div className="qc-image-carousel-stage">
+                    {String(activeQcImage?.url || "").trim() ? (
+                      <img
+                        src={activeQcImage.url}
+                        alt={activeQcImage?.originalName || "QC image"}
+                        className="qc-image-carousel-image"
+                        loading="eager"
+                        decoding="async"
+                        fetchPriority="high"
+                      />
+                    ) : (
+                      <div className="qc-image-carousel-empty">
+                        Preview unavailable
+                      </div>
+                    )}
                   </div>
-                )}
-                <div className="qc-image-gallery-preview-meta">
-                  <div className="fw-semibold">
-                    {activeQcImage?.originalName || "QC image"}
-                  </div>
-                  <div className="small text-muted mt-1">
-                    {String(activeQcImage?.uploaded_by?.name || "").trim()
-                      ? `Uploaded by ${activeQcImage.uploaded_by.name}`
-                      : "Uploaded image"}
-                  </div>
-                  {String(activeQcImage?.comment || "").trim() && (
-                    <div className="small mt-3">
-                      <strong>Comment:</strong> {String(activeQcImage.comment || "").trim()}
+                  <button
+                    type="button"
+                    className="qc-image-carousel-nav qc-image-carousel-nav--next"
+                    onClick={() => handleMoveQcImageCarousel(1)}
+                    aria-label="Next image"
+                  >
+                    {">"}
+                  </button>
+                  <div className="qc-image-carousel-meta">
+                    <div className="fw-semibold">
+                      {activeQcImage?.originalName || "QC image"}
                     </div>
-                  )}
+                    <div className="small text-muted">
+                      {getQcImageUploadedDateLabel(activeQcImage)} | {getQcImageUploaderName(activeQcImage)}
+                    </div>
+                    {String(activeQcImage?.comment || "").trim() && (
+                      <div className="small mt-2">
+                        <strong>Comment:</strong> {String(activeQcImage.comment || "").trim()}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-
-              <div className="qc-image-gallery-grid">
-                {qcImages.map((image, index) => {
-                  const imageUrl = String(image?.url || "").trim();
-                  const isSelected = index === activeQcImageIndex;
-                  const selectionValue = getQcImageSelectionValue(image);
-                  const isChecked =
-                    selectionValue && selectedQcImageIds.includes(selectionValue);
-
-                  return (
-                    <div
-                      className="qc-image-gallery-thumb-wrap"
-                      key={String(
-                        image?._id ||
-                        image?.key ||
-                        `${image?.originalName || "qc-image"}-${index}`,
-                      )}
-                    >
-                      <button
-                        type="button"
-                        className={`qc-image-gallery-thumb${isSelected ? " is-active" : ""}${isChecked ? " is-marked" : ""}`}
-                        onClick={() => setActiveQcImageIndex(index)}
-                        title={image?.originalName || `QC image ${index + 1}`}
-                      >
-                        {imageUrl ? (
-                          <img
-                            src={imageUrl}
-                            alt={image?.originalName || `QC image ${index + 1}`}
-                            className="qc-image-gallery-thumb-image"
-                            loading={Math.abs(index - activeQcImageIndex) <= 4 ? "eager" : "lazy"}
-                            decoding="async"
-                            fetchPriority={index === activeQcImageIndex ? "high" : "low"}
-                          />
-                        ) : (
-                          <span className="qc-image-gallery-thumb-empty">
-                            Preview unavailable
-                          </span>
-                        )}
-                      </button>
-
-                      {selectionValue && (
-                        <label
-                          className="qc-image-gallery-thumb-check"
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          <input
-                            type="checkbox"
-                            className="form-check-input m-0"
-                            checked={Boolean(isChecked)}
-                            onChange={() => handleToggleQcImageSelection(image)}
-                            disabled={deletingQcImages || downloadingQcImages}
-                          />
-                        </label>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            )}
           </div>
         </div>
       )}

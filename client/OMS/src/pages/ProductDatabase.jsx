@@ -1120,6 +1120,11 @@ const buildTemplateOptionValue = (key = "", version = "") =>
     ? `${normalizeTemplateKey(key)}::${Number(version)}`
     : "";
 
+const formatProductTypeDisplayLabel = (value = "") =>
+  String(value || "")
+    .trim()
+    .replace(/\s+v\d+\s*$/i, "");
+
 const parseTemplateOptionValue = (value = "") => {
   const [keyPart = "", versionPart = ""] = String(value || "").split("::");
   const version = Number.parseInt(versionPart, 10);
@@ -1931,7 +1936,7 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
                               templateOption.version,
                             )}
                           >
-                            {templateOption.label} v{templateOption.version}
+                            {formatProductTypeDisplayLabel(templateOption.label || templateOption.key)}
                             {templateOption.status && templateOption.status !== "active"
                               ? ` (${templateOption.status})`
                               : ""}
@@ -1956,10 +1961,10 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
                         {selectedProductTypeTemplate && (
                           <>
                             <span className="om-summary-chip">
-                              {selectedProductTypeTemplate.label}
-                            </span>
-                            <span className="om-summary-chip">
-                              Version: {selectedProductTypeTemplate.version}
+                              {formatProductTypeDisplayLabel(
+                                selectedProductTypeTemplate.label ||
+                                  selectedProductTypeTemplate.key,
+                              )}
                             </span>
                             <span className="om-summary-chip">
                               Status: {selectedProductTypeTemplate.status}

@@ -5412,6 +5412,68 @@ small,
   padding-right: 0.25rem;
 }
 
+.qc-image-gallery-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 12rem;
+  border: 1px solid rgba(203, 189, 170, 0.55);
+  border-radius: 1rem;
+  color: var(--om-color-text-muted);
+  background: var(--om-color-surface-muted);
+}
+
+.qc-image-gallery-accordion-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.qc-image-gallery-accordion {
+  border: 1px solid rgba(203, 189, 170, 0.55);
+  border-radius: 1rem;
+  background: var(--om-color-surface-muted);
+  overflow: hidden;
+}
+
+.qc-image-gallery-accordion-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.qc-image-gallery-accordion-summary::-webkit-details-marker {
+  display: none;
+}
+
+.qc-image-gallery-accordion-summary::before {
+  content: ">";
+  flex: 0 0 auto;
+  color: var(--om-color-text-muted);
+  transition: transform 0.18s ease;
+}
+
+.qc-image-gallery-accordion[open] .qc-image-gallery-accordion-summary::before {
+  transform: rotate(90deg);
+}
+
+.qc-image-gallery-count-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  height: 1.6rem;
+  padding: 0 0.55rem;
+  border-radius: 999px;
+  background: var(--om-color-surface);
+  color: var(--om-color-text-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
 .qc-image-gallery-preview {
   display: grid;
   gap: 0.75rem;
@@ -5458,6 +5520,7 @@ small,
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.75rem;
+  padding: 0 1rem 1rem;
 }
 
 .qc-image-gallery-thumb-wrap {
@@ -5465,6 +5528,7 @@ small,
 }
 
 .qc-image-gallery-thumb {
+  position: relative;
   width: 100%;
   aspect-ratio: 1 / 1;
   padding: 0;
@@ -5535,6 +5599,110 @@ small,
   font-size: 0.8rem;
   text-align: center;
   background: var(--om-color-surface-muted);
+}
+
+.qc-image-gallery-comment-indicator {
+  position: absolute;
+  left: 0.45rem;
+  bottom: 0.45rem;
+  max-width: calc(100% - 0.9rem);
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(49, 40, 34, 0.78);
+  color: #fffdfa;
+  font-size: 0.72rem;
+  line-height: 1.1;
+}
+
+.qc-image-carousel-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  background: rgba(35, 28, 22, 0.82);
+}
+
+.qc-image-carousel-panel {
+  position: relative;
+  width: min(1040px, 100%);
+  max-height: calc(100vh - 2.5rem);
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+}
+
+.qc-image-carousel-stage {
+  min-height: min(70vh, 720px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.qc-image-carousel-image,
+.qc-image-carousel-empty {
+  max-width: 100%;
+  max-height: 72vh;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 253, 250, 0.18);
+  background: var(--om-color-surface-muted);
+  box-shadow: var(--om-shadow-lg);
+}
+
+.qc-image-carousel-image {
+  display: block;
+  object-fit: contain;
+}
+
+.qc-image-carousel-empty {
+  width: min(720px, 100%);
+  min-height: 320px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--om-color-text-muted);
+}
+
+.qc-image-carousel-meta {
+  width: min(720px, 100%);
+  justify-self: center;
+  padding: 0.85rem 1rem;
+  border-radius: 1rem;
+  background: var(--om-color-surface);
+  box-shadow: var(--om-shadow-sm);
+}
+
+.qc-image-carousel-close {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 2;
+  background: var(--om-color-surface);
+}
+
+.qc-image-carousel-nav {
+  position: absolute;
+  top: 45%;
+  z-index: 2;
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 1px solid rgba(255, 253, 250, 0.45);
+  border-radius: 999px;
+  background: rgba(255, 253, 250, 0.92);
+  color: var(--om-color-text);
+  font-size: 1.5rem;
+  line-height: 1;
+  box-shadow: var(--om-shadow-sm);
+}
+
+.qc-image-carousel-nav--prev {
+  left: 0;
+}
+
+.qc-image-carousel-nav--next {
+  right: 0;
 }
 
 @media (max-width: 991.98px) {

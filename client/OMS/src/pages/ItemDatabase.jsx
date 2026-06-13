@@ -159,7 +159,7 @@ const ItemDatabase = () => {
   return (
     <>
       <Navbar />
-      <div className="container-fluid py-4 om-page item-database-page">
+      <div className="page-shell py-3 item-database-page">
         <div className="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
           <div>
             <h2 className="h4 mb-1">Item Database</h2>

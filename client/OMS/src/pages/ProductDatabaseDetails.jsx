@@ -30,6 +30,8 @@ const formatLabel = (value) =>
     .replace(/_/g, " ")
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/\b\w/g, (character) => character.toUpperCase());
+const formatProductTypeDisplayLabel = (value = "") =>
+  normalizeText(value).replace(/\s+v\d+\s*$/i, "");
 const formatNumber = (value) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return "Not Set";
@@ -329,8 +331,12 @@ const ProductDatabaseDetails = () => {
                   rows={[
                     { label: "Description", value: productDatabase.description },
                     { label: "Country Of Origin", value: productDatabase.country_of_origin },
-                    { label: "Product Type", value: productDatabase.product_type?.label || productDatabase.product_type?.key },
-                    { label: "Template Version", value: productDatabase.product_type?.version ? `v${productDatabase.product_type.version}` : "Not Set" },
+                    {
+                      label: "Product Type",
+                      value: formatProductTypeDisplayLabel(
+                        productDatabase.product_type?.label || productDatabase.product_type?.key,
+                      ),
+                    },
                     { label: "Last Updated", value: productDatabase.updated_at ? formatDateDDMMYYYY(productDatabase.updated_at) : "Not Set" },
                   ]}
                 />
