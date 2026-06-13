@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
-import { formatDateDDMMYYYY } from "../utils/date";
+import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
 
@@ -108,6 +108,10 @@ const InspectedItemsReport = () => {
   const [draftCriterionFilter, setDraftCriterionFilter] = useState(() => normalizeFilter(searchParams.get("criterion")));
   const [statusFilter, setStatusFilter] = useState(() => normalizeFilter(searchParams.get("status")));
   const [draftStatusFilter, setDraftStatusFilter] = useState(() => normalizeFilter(searchParams.get("status")));
+  const [fromDate, setFromDate] = useState(() => toISODateString(searchParams.get("from_date")));
+  const [draftFromDate, setDraftFromDate] = useState(() => toISODateString(searchParams.get("from_date")));
+  const [toDate, setToDate] = useState(() => toISODateString(searchParams.get("to_date")));
+  const [draftToDate, setDraftToDate] = useState(() => toISODateString(searchParams.get("to_date")));
   const [page, setPage] = useState(() => parsePositiveInt(searchParams.get("page"), 1));
   const [limit, setLimit] = useState(() => parseLimit(searchParams.get("limit")));
   const [totalRecords, setTotalRecords] = useState(0);
@@ -129,6 +133,8 @@ const InspectedItemsReport = () => {
           vendor: vendorFilter,
           criterion: criterionFilter,
           status: statusFilter,
+          from_date: fromDate,
+          to_date: toDate,
           page,
           limit,
         },
@@ -145,7 +151,7 @@ const InspectedItemsReport = () => {
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, criterionFilter, limit, page, searchInput, statusFilter, vendorFilter]);
+  }, [brandFilter, criterionFilter, fromDate, limit, page, searchInput, statusFilter, toDate, vendorFilter]);
 
   useEffect(() => {
     fetchReport();
@@ -158,6 +164,8 @@ const InspectedItemsReport = () => {
     if (vendorFilter !== DEFAULT_FILTER) nextParams.set("vendor", vendorFilter);
     if (criterionFilter !== DEFAULT_FILTER) nextParams.set("criterion", criterionFilter);
     if (statusFilter !== DEFAULT_FILTER) nextParams.set("status", statusFilter);
+    if (fromDate) nextParams.set("from_date", fromDate);
+    if (toDate) nextParams.set("to_date", toDate);
     if (page > 1) nextParams.set("page", String(page));
     if (limit !== DEFAULT_LIMIT) nextParams.set("limit", String(limit));
 
@@ -167,12 +175,14 @@ const InspectedItemsReport = () => {
   }, [
     brandFilter,
     criterionFilter,
+    fromDate,
     limit,
     page,
     searchInput,
     searchParams,
     setSearchParams,
     statusFilter,
+    toDate,
     vendorFilter,
   ]);
 
@@ -183,6 +193,8 @@ const InspectedItemsReport = () => {
     setVendorFilter(draftVendorFilter);
     setCriterionFilter(draftCriterionFilter);
     setStatusFilter(draftStatusFilter);
+    setFromDate(toISODateString(draftFromDate));
+    setToDate(toISODateString(draftToDate));
     setPage(1);
   };
 
@@ -192,11 +204,15 @@ const InspectedItemsReport = () => {
     setDraftVendorFilter(DEFAULT_FILTER);
     setDraftCriterionFilter(DEFAULT_FILTER);
     setDraftStatusFilter(DEFAULT_FILTER);
+    setDraftFromDate("");
+    setDraftToDate("");
     setSearchInput("");
     setBrandFilter(DEFAULT_FILTER);
     setVendorFilter(DEFAULT_FILTER);
     setCriterionFilter(DEFAULT_FILTER);
     setStatusFilter(DEFAULT_FILTER);
+    setFromDate("");
+    setToDate("");
     setPage(1);
   };
 
@@ -211,6 +227,8 @@ const InspectedItemsReport = () => {
           vendor: vendorFilter,
           criterion: criterionFilter,
           status: statusFilter,
+          from_date: fromDate,
+          to_date: toDate,
         },
       });
       downloadBlobResponse(
@@ -224,7 +242,7 @@ const InspectedItemsReport = () => {
     } finally {
       setExporting(false);
     }
-  }, [brandFilter, criterionFilter, searchInput, statusFilter, vendorFilter]);
+  }, [brandFilter, criterionFilter, fromDate, searchInput, statusFilter, toDate, vendorFilter]);
 
   return (
     <>
@@ -256,7 +274,7 @@ const InspectedItemsReport = () => {
         <div className="card om-card mb-4">
           <div className="card-body">
             <form className="row g-3 align-items-end" onSubmit={applyFilters}>
-              <div className="col-lg-3 col-md-6">
+              <div className="col-lg-2 col-md-6">
                 <label className="form-label">Search</label>
                 <input
                   className="form-control"
@@ -314,6 +332,26 @@ const InspectedItemsReport = () => {
                     <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
                 </select>
+              </div>
+              <div className="col-lg-2 col-md-4">
+                <label className="form-label">Last Inspected From</label>
+                <input
+                  type="date"
+                  className="form-control"
+                  value={draftFromDate}
+                  max={draftToDate || undefined}
+                  onChange={(event) => setDraftFromDate(toISODateString(event.target.value))}
+                />
+              </div>
+              <div className="col-lg-2 col-md-4">
+                <label className="form-label">Last Inspected To</label>
+                <input
+                  type="date"
+                  className="form-control"
+                  value={draftToDate}
+                  min={draftFromDate || undefined}
+                  onChange={(event) => setDraftToDate(toISODateString(event.target.value))}
+                />
               </div>
               <div className="col-lg-1 col-md-4">
                 <label className="form-label">Rows</label>
@@ -405,7 +443,7 @@ const InspectedItemsReport = () => {
                     ))}
                     {rows.length === 0 && (
                       <tr>
-                        <td colSpan={11} className="text-center py-4">
+                        <td colSpan={13} className="text-center py-4">
                           No items found
                         </td>
                       </tr>

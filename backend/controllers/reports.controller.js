@@ -193,6 +193,63 @@ const matchesInspectedItemsCriterion = (row = {}, criterion = "all", status = "a
   return true;
 };
 
+const getDateOnlyTimestamp = (value) => {
+  const isoDate = toISODateString(value);
+  if (!isoDate) return 0;
+  const parsed = new Date(`${isoDate}T00:00:00.000Z`).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const normalizeInspectedItemsDateRange = ({ fromDate = "", toDate = "" } = {}) => {
+  const hasFrom = Boolean(normalizeText(fromDate));
+  const hasTo = Boolean(normalizeText(toDate));
+  const fromIso = hasFrom ? toISODateString(fromDate) : "";
+  const toIso = hasTo ? toISODateString(toDate) : "";
+
+  if (hasFrom && !fromIso) {
+    throw new Error("Invalid from date filter");
+  }
+  if (hasTo && !toIso) {
+    throw new Error("Invalid to date filter");
+  }
+
+  const fromTime = fromIso ? getDateOnlyTimestamp(fromIso) : 0;
+  const toTime = toIso ? getDateOnlyTimestamp(toIso) : 0;
+  if (fromTime && toTime && fromTime > toTime) {
+    throw new Error("From date cannot be after to date");
+  }
+
+  return {
+    from_date: fromIso,
+    to_date: toIso,
+    from_time: fromTime,
+    to_time: toTime,
+  };
+};
+
+const matchesInspectedItemsDateRange = (row = {}, dateRange = {}) => {
+  const hasDateFilter = Boolean(dateRange?.from_time || dateRange?.to_time);
+  if (!hasDateFilter) return true;
+
+  const inspectedTime = getDateOnlyTimestamp(row?.last_inspected_date);
+  if (!inspectedTime) return false;
+  if (dateRange.from_time && inspectedTime < dateRange.from_time) return false;
+  if (dateRange.to_time && inspectedTime > dateRange.to_time) return false;
+  return true;
+};
+
+const sortInspectedItemsRows = (left = {}, right = {}) => {
+  const dateDelta =
+    getDateOnlyTimestamp(right?.last_inspected_date) -
+    getDateOnlyTimestamp(left?.last_inspected_date);
+  if (dateDelta !== 0) return dateDelta;
+  return normalizeText(left?.code).localeCompare(
+    normalizeText(right?.code),
+    undefined,
+    { sensitivity: "base" },
+  );
+};
+
 const buildInspectedItemsReportRow = (item = {}) => {
   const flags = buildInspectedItemsReportFlags(item);
   return {
@@ -252,8 +309,11 @@ const getInspectedItemsReportDataset = async ({
   vendor,
   criterion = "all",
   status = "all",
+  fromDate = "",
+  toDate = "",
   user,
 } = {}) => {
+  const dateRange = normalizeInspectedItemsDateRange({ fromDate, toDate });
   const accessOptions = {
     brandFields: ["brand", "brand_name", "brands"],
     vendorFields: ["vendors"],
@@ -267,7 +327,7 @@ const getInspectedItemsReportDataset = async ({
   const [items, brandsRaw, brandNamesRaw, brandsPrimaryRaw, vendorsRaw] = await Promise.all([
     Item.find(baseMatch)
       .select(INSPECTED_ITEMS_REPORT_SELECT)
-      .sort({ updatedAt: -1, code: 1 })
+      .sort({ "qc.last_inspected_date": -1, code: 1 })
       .lean(),
     Item.distinct(
       "brands",
@@ -288,21 +348,26 @@ const getInspectedItemsReportDataset = async ({
   ]);
 
   const baseRows = (Array.isArray(items) ? items : []).map(buildInspectedItemsReportRow);
+  const dateFilteredRows = baseRows
+    .filter((row) => matchesInspectedItemsDateRange(row, dateRange))
+    .sort(sortInspectedItemsRows);
   const normalizedCriterion = normalizeText(criterion).toLowerCase() || "all";
   const normalizedStatus = normalizeText(status).toLowerCase() || "all";
-  const filteredRows = baseRows.filter((row) =>
+  const filteredRows = dateFilteredRows.filter((row) =>
     matchesInspectedItemsCriterion(row, normalizedCriterion, normalizedStatus),
   );
 
   return {
     rows: filteredRows,
-    summary: buildInspectedItemsSummary(baseRows),
+    summary: buildInspectedItemsSummary(dateFilteredRows),
     filters: {
       search: normalizeText(search),
       brand: normalizeText(brand) || "all",
       vendor: normalizeText(vendor) || "all",
       criterion: normalizedCriterion,
       status: normalizedStatus,
+      from_date: dateRange.from_date,
+      to_date: dateRange.to_date,
       brand_options: [
         ...new Set([
           ...(brandsPrimaryRaw || []),
@@ -1543,6 +1608,8 @@ exports.getInspectedItemsReport = async (req, res) => {
     const vendor = req.query.vendor;
     const criterion = normalizeText(req.query.criterion).toLowerCase() || "all";
     const status = normalizeText(req.query.status).toLowerCase() || "all";
+    const fromDate = req.query.from_date ?? req.query.fromDate ?? req.query.from;
+    const toDate = req.query.to_date ?? req.query.toDate ?? req.query.to;
     const page = parsePositiveInt(req.query.page, 1);
     const limit = Math.min(
       INSPECTED_ITEMS_REPORT_LIMIT,
@@ -1556,6 +1623,8 @@ exports.getInspectedItemsReport = async (req, res) => {
       vendor,
       criterion,
       status,
+      fromDate,
+      toDate,
       user: req.user,
     });
 
@@ -1573,6 +1642,12 @@ exports.getInspectedItemsReport = async (req, res) => {
     });
   } catch (error) {
     console.error("Get Inspected Items Report Error:", error);
+    if (/date/i.test(error?.message || "")) {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
     return res.status(500).json({
       success: false,
       message: error?.message || "Failed to fetch inspected items report.",
@@ -1588,6 +1663,8 @@ exports.exportInspectedItemsReport = async (req, res) => {
       vendor: req.query.vendor,
       criterion: normalizeText(req.query.criterion).toLowerCase() || "all",
       status: normalizeText(req.query.status).toLowerCase() || "all",
+      fromDate: req.query.from_date ?? req.query.fromDate ?? req.query.from,
+      toDate: req.query.to_date ?? req.query.toDate ?? req.query.to,
       user: req.user,
     });
 
@@ -1639,6 +1716,12 @@ exports.exportInspectedItemsReport = async (req, res) => {
     return res.status(200).send(fileBuffer);
   } catch (error) {
     console.error("Export Inspected Items Report Error:", error);
+    if (/date/i.test(error?.message || "")) {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
     return res.status(500).json({
       success: false,
       message: error?.message || "Failed to export inspected items report.",
