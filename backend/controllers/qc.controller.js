@@ -485,6 +485,81 @@ const calculateQcAggregateMetrics = (qcDoc, inspectionRecords = []) => {
   };
 };
 
+const applyInspectionRecordPendingAfter = (qcDoc, inspectionRecords = []) => {
+  const records = Array.isArray(inspectionRecords)
+    ? inspectionRecords.filter(
+        (record) =>
+          normalizeInspectionStatus(record?.status) !==
+          normalizeInspectionStatus(INSPECTION_RECORD_STATUS.TRANSFERRED),
+      )
+    : [];
+  if (records.length === 0) return;
+
+  const requestHistoryQuantityById = new Map(
+    (Array.isArray(qcDoc?.request_history) ? qcDoc.request_history : [])
+      .map((entry) => [
+        String(entry?._id || "").trim(),
+        toNonNegativeNumber(entry?.quantity_requested, 0),
+      ])
+      .filter(([requestHistoryId]) => requestHistoryId),
+  );
+  const requestType = normalizeQcRequestType(qcDoc?.request_type);
+  const fallbackRequestedQuantity = resolveRequestedQuantityFromQc(qcDoc);
+  const clientDemandQty = toNonNegativeNumber(qcDoc?.quantities?.client_demand, 0);
+  const requestGroupMetrics = new Map();
+
+  const sortedRecords = [...records].sort((left, right) => {
+    const leftTime = Math.max(
+      toSortableTimestamp(left?.inspection_date),
+      toSortableTimestamp(left?.createdAt),
+    );
+    const rightTime = Math.max(
+      toSortableTimestamp(right?.inspection_date),
+      toSortableTimestamp(right?.createdAt),
+    );
+    if (leftTime !== rightTime) return leftTime - rightTime;
+    return String(left?._id || "").localeCompare(String(right?._id || ""));
+  });
+
+  sortedRecords.forEach((record, index) => {
+    const requestGroupKey = resolveInspectionRequestGroupKey(
+      record,
+      `fallback:${index}`,
+    );
+    const requestHistoryId = String(record?.request_history_id || "").trim();
+    const recordRequestedQuantity = toNonNegativeNumber(record?.vendor_requested, 0);
+    const historyRequestedQuantity = requestHistoryId
+      ? toNonNegativeNumber(requestHistoryQuantityById.get(requestHistoryId), 0)
+      : 0;
+    const requestMetrics = requestGroupMetrics.get(requestGroupKey) || {
+      requestedQuantity: 0,
+      samplePassed: 0,
+    };
+
+    requestMetrics.requestedQuantity = Math.max(
+      requestMetrics.requestedQuantity,
+      recordRequestedQuantity,
+      historyRequestedQuantity,
+    );
+    requestMetrics.samplePassed += toNonNegativeNumber(record?.passed, 0);
+    requestGroupMetrics.set(requestGroupKey, requestMetrics);
+
+    const effectivePassedThroughRecord = Array.from(requestGroupMetrics.values()).reduce(
+      (sum, metrics) =>
+        sum +
+        getEffectiveRequestPassedQuantity({
+          requestType,
+          samplePassed: metrics.samplePassed,
+          requestedQuantity:
+            metrics.requestedQuantity > 0 ? metrics.requestedQuantity : fallbackRequestedQuantity,
+        }),
+      0,
+    );
+
+    record.pending_after = Math.max(0, clientDemandQty - effectivePassedThroughRecord);
+  });
+};
+
 const getQcLabelRequirement = ({
   totalPassed = 0,
   boxSizesCount = 0,
@@ -533,11 +608,15 @@ const normalizeInspectionStatus = (value) =>
 const isInspectionStatusMatching = (value, expectedStatus) =>
   normalizeInspectionStatus(value) === normalizeInspectionStatus(expectedStatus);
 
+const isGoodsNotReadyText = (value = "") =>
+  normalizeInspectionStatus(value) ===
+  normalizeInspectionStatus(INSPECTION_RECORD_STATUS.GOODS_NOT_READY);
+
 const isGoodsNotReadyMarked = (
   goodsNotReady = null,
   explicitStatus = "",
 ) => {
-  if (isInspectionStatusMatching(explicitStatus, INSPECTION_RECORD_STATUS.GOODS_NOT_READY)) {
+  if (isGoodsNotReadyText(explicitStatus)) {
     return true;
   }
 
@@ -546,7 +625,7 @@ const isGoodsNotReadyMarked = (
   }
 
   if (typeof goodsNotReady === "string") {
-    return normalizeActionBoolean(goodsNotReady, false);
+    return isGoodsNotReadyText(goodsNotReady) || normalizeActionBoolean(goodsNotReady, false);
   }
 
   if (!goodsNotReady || typeof goodsNotReady !== "object") {
@@ -554,11 +633,18 @@ const isGoodsNotReadyMarked = (
   }
 
   if (goodsNotReady.ready !== undefined) {
-    return normalizeActionBoolean(goodsNotReady.ready, false);
+    return (
+      normalizeActionBoolean(goodsNotReady.ready, false) ||
+      isGoodsNotReadyText(goodsNotReady.reason)
+    );
   }
 
   return Boolean(normalizeText(goodsNotReady.reason || ""));
 };
+
+const isGoodsNotReadyInspectionRecord = (record = {}) =>
+  isGoodsNotReadyMarked(record?.goods_not_ready, record?.status) ||
+  isGoodsNotReadyText(record?.remarks);
 
 const getGoodsNotReadyReason = (goodsNotReady = null, fallback = "") => {
   if (goodsNotReady && typeof goodsNotReady === "object") {
@@ -11142,14 +11228,14 @@ exports.editInspectionRecords = async (req, res) => {
         row?.checked ?? record.checked,
         "Checked quantity",
       );
-      const passed = parseNonNegativeField(
+      const submittedPassed = parseNonNegativeField(
         row?.passed ?? record.passed,
         "Passed quantity",
       );
-      const pendingAfter = parseNonNegativeField(
-        row?.pending_after ?? record.pending_after,
-        "Pending after",
-      );
+      const recordIsGoodsNotReady = isGoodsNotReadyInspectionRecord(record);
+      const passed = recordIsGoodsNotReady
+        ? toNonNegativeNumber(record?.passed, 0)
+        : submittedPassed;
 
       if (passed > checked) {
         throw new Error("Passed quantity cannot exceed checked quantity");
@@ -11295,10 +11381,11 @@ exports.editInspectionRecords = async (req, res) => {
         if (["false", "0", "no", "n", ""].includes(normalized)) return false;
         throw new Error("K/D fields must be boolean");
       };
-      const remarks =
-        row?.remarks !== undefined
-          ? String(row.remarks || "")
-          : String(record?.remarks || "");
+      const remarks = recordIsGoodsNotReady
+        ? String(record?.remarks || "")
+        : (row?.remarks !== undefined
+            ? String(row.remarks || "")
+            : String(record?.remarks || ""));
       const linkedRequestHistoryEntry = resolveLinkedRequestHistoryEntry(record);
       const linkedRequestHistoryId = String(
         linkedRequestHistoryEntry?._id || record?.request_history_id || "",
@@ -11330,9 +11417,10 @@ exports.editInspectionRecords = async (req, res) => {
       record.vendor_offered = vendorOffered;
       record.checked = checked;
       record.passed = passed;
-      record.pending_after = pendingAfter;
       record.cbm = nextCbmSnapshot;
-	      record.status = resolveInspectionRecordStatus({
+	      record.status = recordIsGoodsNotReady
+        ? INSPECTION_RECORD_STATUS.GOODS_NOT_READY
+        : resolveInspectionRecordStatus({
         checked,
         passed,
         vendorOffered,
@@ -11399,11 +11487,13 @@ exports.editInspectionRecords = async (req, res) => {
       }
     }
 
+    applyInspectionRecordPendingAfter(qc, inspectionDocs);
+
     await Promise.all(inspectionDocs.map((doc) => doc.save()));
 
 	    const refreshedInspections = await Inspection.find({ qc: qc._id })
 	      .select(
-	        "inspection_date requested_date request_history_id inspector checked passed vendor_requested vendor_offered labels_added label_ranges goods_not_ready status createdAt barcode master_barcode inner_barcode packed_size finishing branding kd inspected_item_sizes inspected_box_sizes inspected_box_mode",
+	        "inspection_date requested_date request_history_id inspector checked passed vendor_requested vendor_offered pending_after labels_added label_ranges goods_not_ready status createdAt barcode master_barcode inner_barcode packed_size finishing branding kd inspected_item_sizes inspected_box_sizes inspected_box_mode",
 	      )
 	      .lean();
 

@@ -62,6 +62,75 @@ const toTimestamp = (value) => {
   return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
 };
 
+const getEffectiveRequestPassedQuantity = ({
+  requestType = "",
+  samplePassed = 0,
+  requestedQuantity = 0,
+}) => {
+  const safeSamplePassed = Math.max(0, Number(samplePassed) || 0);
+  if (String(requestType || "").trim().toUpperCase() !== "AQL") {
+    return safeSamplePassed;
+  }
+
+  return safeSamplePassed > 0 ? Math.max(0, Number(requestedQuantity) || 0) : 0;
+};
+
+const getPreviewEffectivePassed = (qc = {}, rows = []) => {
+  const requestHistoryQuantityById = new Map(
+    (Array.isArray(qc?.request_history) ? qc.request_history : [])
+      .map((entry) => [
+        String(entry?._id || "").trim(),
+        Number(entry?.quantity_requested),
+      ])
+      .filter(([requestHistoryId, quantity]) =>
+        requestHistoryId && Number.isFinite(quantity),
+      ),
+  );
+  const requestType = String(qc?.request_type || "").trim();
+  const fallbackRequestedQuantity = Number(qc?.quantities?.quantity_requested || 0) || 0;
+  const requestGroups = new Map();
+
+  rows.forEach((row, index) => {
+    const requestHistoryId = String(row?.request_history_id || "").trim();
+    const requestedDate = toISODateString(row?.requested_date) || "";
+    const inspectorId = String(row?.inspector || "").trim();
+    const groupKey =
+      requestHistoryId ||
+      (requestedDate && inspectorId
+        ? `date:${requestedDate}:inspector:${inspectorId}`
+        : requestedDate || `row:${index}`);
+    const group = requestGroups.get(groupKey) || {
+      requestedQuantity: 0,
+      samplePassed: 0,
+    };
+    const rowRequestedQuantity = Number(row?.vendor_requested || 0) || 0;
+    const historyRequestedQuantity = requestHistoryId
+      ? Number(requestHistoryQuantityById.get(requestHistoryId) || 0) || 0
+      : 0;
+
+    group.requestedQuantity = Math.max(
+      group.requestedQuantity,
+      rowRequestedQuantity,
+      historyRequestedQuantity,
+    );
+    group.samplePassed += Number(row?.passed || 0) || 0;
+    requestGroups.set(groupKey, group);
+  });
+
+  return Array.from(requestGroups.values()).reduce(
+    (sum, group) =>
+      sum +
+      getEffectiveRequestPassedQuantity({
+        requestType,
+        samplePassed: group.samplePassed,
+        requestedQuantity: group.requestedQuantity > 0
+          ? group.requestedQuantity
+          : fallbackRequestedQuantity,
+      }),
+    0,
+  );
+};
+
 const buildInitialRows = (qc) =>
   (Array.isArray(qc?.inspection_record) ? [...qc.inspection_record] : [])
     .sort((a, b) => {
@@ -77,6 +146,7 @@ const buildInitialRows = (qc) =>
         "",
       ),
       inspector: String(record?.inspector?._id || record?.inspector || ""),
+      request_history_id: String(record?.request_history_id || ""),
       vendor_requested: toSafeNumberString(record?.vendor_requested),
       vendor_offered: toSafeNumberString(record?.vendor_offered),
       checked: toSafeNumberString(record?.checked),
@@ -128,14 +198,13 @@ const EditInspectionRecordsModal = ({
   }, []);
 
   const totals = useMemo(
-    () =>
-      rows.reduce(
+    () => {
+      const nextTotals = rows.reduce(
         (acc, row) => {
           acc.vendor_requested += Number(row.vendor_requested || 0) || 0;
           acc.vendor_offered += Number(row.vendor_offered || 0) || 0;
           acc.checked += Number(row.checked || 0) || 0;
           acc.passed += Number(row.passed || 0) || 0;
-          acc.pending_after += Number(row.pending_after || 0) || 0;
           return acc;
         },
         {
@@ -145,8 +214,15 @@ const EditInspectionRecordsModal = ({
           passed: 0,
           pending_after: 0,
         },
-      ),
-    [rows],
+      );
+      const clientDemand = Number(qc?.quantities?.client_demand || 0) || 0;
+      nextTotals.pending_after = Math.max(
+        0,
+        clientDemand - getPreviewEffectivePassed(qc, rows),
+      );
+      return nextTotals;
+    },
+    [qc, rows],
   );
 
   const updateRow = (index, field, value) => {
@@ -223,11 +299,6 @@ const EditInspectionRecordsModal = ({
         );
         const checked = parseNonNegativeNumber(row.checked, "checked quantity", rowIndex);
         const passed = parseNonNegativeNumber(row.passed, "passed quantity", rowIndex);
-        const pendingAfter = parseNonNegativeNumber(
-          row.pending_after,
-          "pending quantity",
-          rowIndex,
-        );
         const cbmTotal = parseNonNegativeNumber(row.cbm_total, "cbm", rowIndex);
 
         if (passed > checked) {
@@ -243,7 +314,6 @@ const EditInspectionRecordsModal = ({
           vendor_offered: vendorOffered,
           checked,
           passed,
-          pending_after: pendingAfter,
           cbm: {
             total: cbmTotal,
           },
@@ -429,7 +499,8 @@ const EditInspectionRecordsModal = ({
                         min="0"
                         className="form-control form-control-sm"
                         value={row.pending_after}
-                        onChange={(e) => updateRow(index, "pending_after", e.target.value)}
+                        disabled
+                        readOnly
                       />
                     </label>
 

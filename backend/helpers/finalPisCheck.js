@@ -32,13 +32,6 @@ const FINAL_PIS_CHECK_ITEM_SELECT = [
   "master_item_sizes",
   "master_box_sizes",
   "master_box_mode",
-  "pis_item_sizes",
-  "pis_box_sizes",
-  "pis_box_mode",
-  "pis_barcode",
-  "pis_master_barcode",
-  "pis_inner_barcode",
-  "country_of_origin",
   "pis_checked_flag",
   "pis_update_comments",
   "updatedAt",
@@ -50,7 +43,6 @@ const FINAL_PIS_CHECK_DIFF_FIELDS = Object.freeze([
   "Weight",
   "CBM",
   "Barcode",
-  "Country",
 ]);
 
 const FINAL_PIS_CHECK_SORT_FIELDS = Object.freeze([
@@ -1004,36 +996,36 @@ const createMissingMasterDifference = ({
   delta: "Master data missing",
   note:
     note ||
-    `Master ${`${segment || ""} ${attribute || ""}`.trim()} is missing; PIS cannot be approved against Master.`,
+    `Master ${`${segment || ""} ${attribute || ""}`.trim()} is missing; inspected data cannot be approved against Master.`,
 });
 
 const buildMasterPresenceDifferences = ({
-  hasPisItemEntries = false,
+  hasInspectedItemEntries = false,
   hasMasterItemEntries = false,
-  hasPisBoxEntries = false,
+  hasInspectedBoxEntries = false,
   hasMasterBoxEntries = false,
-  pisItemEntries = [],
-  pisBoxEntries = [],
+  inspectedItemEntries = [],
+  inspectedBoxEntries = [],
 } = {}) => {
   const differences = [];
-  if (hasPisItemEntries && !hasMasterItemEntries) {
+  if (hasInspectedItemEntries && !hasMasterItemEntries) {
     differences.push(createMissingMasterDifference({
       key: "master-missing-item-size",
       section: "Item Size",
       segment: "Master Data",
       attribute: "Item Size",
-      sourceDisplay: buildMeasurementDisplay(pisItemEntries, "net_weight").sizeDisplay,
-      note: "Master item sizes are missing; PIS item sizes cannot be approved against Master.",
+      sourceDisplay: buildMeasurementDisplay(inspectedItemEntries, "net_weight").sizeDisplay,
+      note: "Master item sizes are missing; inspected item sizes cannot be approved against Master.",
     }));
   }
-  if (hasPisBoxEntries && !hasMasterBoxEntries) {
+  if (hasInspectedBoxEntries && !hasMasterBoxEntries) {
     differences.push(createMissingMasterDifference({
       key: "master-missing-box-size",
       section: "Box Size",
       segment: "Master Data",
       attribute: "Box Size",
-      sourceDisplay: buildMeasurementDisplay(pisBoxEntries, "gross_weight").sizeDisplay,
-      note: "Master box sizes are missing; PIS box sizes cannot be approved against Master.",
+      sourceDisplay: buildMeasurementDisplay(inspectedBoxEntries, "gross_weight").sizeDisplay,
+      note: "Master box sizes are missing; inspected box sizes cannot be approved against Master.",
     }));
   }
   return differences;
@@ -1044,18 +1036,21 @@ const buildBarcodeDifferences = (item = {}) => {
 
   const differences = [];
   const masterBarcode = item?.master_master_barcode || item?.master_barcode;
-  const pisBarcode = item?.pis_master_barcode || item?.pis_barcode;
+  const inspectedBarcode = item?.qc?.master_barcode || item?.qc?.barcode;
   const masterDifference = createTextDifference({
     key: "barcode-master",
     section: "Barcode",
     segment: "Master",
     attribute: "Barcode",
-    inspectedValue: pisBarcode,
+    inspectedValue: inspectedBarcode,
     pisValue: masterBarcode,
-    sourceLabel: "PIS",
+    sourceLabel: "Inspected",
     referenceLabel: "Master",
   });
-  if ((normalizeBarcodeValue(masterBarcode) || normalizeBarcodeValue(pisBarcode)) && masterDifference) {
+  if (
+    (normalizeBarcodeValue(masterBarcode) || normalizeBarcodeValue(inspectedBarcode)) &&
+    masterDifference
+  ) {
     differences.push(masterDifference);
   }
 
@@ -1065,38 +1060,19 @@ const buildBarcodeDifferences = (item = {}) => {
     section: "Barcode",
     segment: "Inner",
     attribute: "Barcode",
-    inspectedValue: item?.pis_inner_barcode,
+    inspectedValue: item?.qc?.inner_barcode,
     pisValue: masterInnerBarcode,
-    sourceLabel: "PIS",
+    sourceLabel: "Inspected",
     referenceLabel: "Master",
   });
   if (
-    (normalizeBarcodeValue(masterInnerBarcode) || normalizeBarcodeValue(item?.pis_inner_barcode)) &&
+    (normalizeBarcodeValue(masterInnerBarcode) || normalizeBarcodeValue(item?.qc?.inner_barcode)) &&
     innerDifference
   ) {
     differences.push(innerDifference);
   }
 
   return differences;
-};
-
-const buildCountryDifferences = (item = {}) => {
-  const pisCountry = normalizeText(item?.country_of_origin);
-  const masterCountry = normalizeText(item?.master_country_of_origin);
-  if (!pisCountry && !masterCountry) return [];
-
-  const difference = createTextDifference({
-    key: "country-of-origin",
-    section: "Country",
-    segment: "Origin",
-    attribute: "Country of Origin",
-    inspectedValue: pisCountry,
-    pisValue: masterCountry,
-    sourceLabel: "PIS",
-    referenceLabel: "Master",
-  });
-
-  return difference ? [difference] : [];
 };
 
 const formatBoxModeLabel = (mode = "") => {
@@ -1111,36 +1087,44 @@ const buildFinalPisCheckRow = (item = {}) => {
   const masterItemEntries = buildItemMeasurementEntries({
     sizes: item?.master_item_sizes,
   });
-  const pisItemEntries = buildItemMeasurementEntries({
-    sizes: item?.pis_item_sizes,
+  const inspectedItemEntries = buildItemMeasurementEntries({
+    sizes: item?.inspected_item_sizes,
+    singleLbh: item?.inspected_item_LBH,
+    topLbh: item?.inspected_item_top_LBH,
+    bottomLbh: item?.inspected_item_bottom_LBH,
+    weight: item?.inspected_weight,
   });
   const masterBoxEntries = buildBoxMeasurementEntries({
     sizes: item?.master_box_sizes,
     mode: item?.master_box_mode,
   });
-  const pisBoxEntries = buildBoxMeasurementEntries({
-    sizes: item?.pis_box_sizes,
-    mode: item?.pis_box_mode,
+  const inspectedBoxEntries = buildBoxMeasurementEntries({
+    sizes: item?.inspected_box_sizes,
+    mode: item?.inspected_box_mode,
+    singleLbh: item?.inspected_box_LBH,
+    topLbh: item?.inspected_box_top_LBH || item?.inspected_top_LBH,
+    bottomLbh: item?.inspected_box_bottom_LBH || item?.inspected_bottom_LBH,
+    weight: item?.inspected_weight,
   });
   const hasMasterItemEntries = masterItemEntries.length > 0;
   const hasMasterBoxEntries = masterBoxEntries.length > 0;
-  const hasPisItemEntries = pisItemEntries.length > 0;
-  const hasPisBoxEntries = pisBoxEntries.length > 0;
+  const hasInspectedItemEntries = inspectedItemEntries.length > 0;
+  const hasInspectedBoxEntries = inspectedBoxEntries.length > 0;
   const itemReferenceLabel = "Master";
   const boxReferenceLabel = "Master";
-  const normalizedPisItemEntries = hasReferenceSizeArray(masterItemEntries)
-    ? formatSizeArrayToReference(pisItemEntries, masterItemEntries, {
+  const normalizedInspectedItemEntries = hasReferenceSizeArray(masterItemEntries)
+    ? formatSizeArrayToReference(inspectedItemEntries, masterItemEntries, {
         type: "item",
       })
-    : pisItemEntries;
-  const normalizedPisBoxEntries = hasReferenceSizeArray(masterBoxEntries)
-    ? formatSizeArrayToReference(pisBoxEntries, masterBoxEntries, {
+    : inspectedItemEntries;
+  const normalizedInspectedBoxEntries = hasReferenceSizeArray(masterBoxEntries)
+    ? formatSizeArrayToReference(inspectedBoxEntries, masterBoxEntries, {
         type: "box",
       })
-    : pisBoxEntries;
+    : inspectedBoxEntries;
 
-  const resolvedPisBoxMode = formatBoxModeLabel(
-    detectBoxPackagingMode(item?.pis_box_mode, item?.pis_box_sizes),
+  const resolvedInspectedBoxMode = formatBoxModeLabel(
+    detectBoxPackagingMode(item?.inspected_box_mode, item?.inspected_box_sizes),
   );
   const resolvedMasterBoxMode = formatBoxModeLabel(
     detectBoxPackagingMode(item?.master_box_mode, item?.master_box_sizes),
@@ -1148,31 +1132,36 @@ const buildFinalPisCheckRow = (item = {}) => {
 
   const differences = [
     ...buildMasterPresenceDifferences({
-      hasPisItemEntries,
+      hasInspectedItemEntries,
       hasMasterItemEntries,
-      hasPisBoxEntries,
+      hasInspectedBoxEntries,
       hasMasterBoxEntries,
-      pisItemEntries,
-      pisBoxEntries,
+      inspectedItemEntries,
+      inspectedBoxEntries,
     }),
     ...(hasMasterItemEntries
-      ? buildItemSizeDifferences(normalizedPisItemEntries, masterItemEntries, {
-          sourceLabel: "PIS",
+      ? buildItemSizeDifferences(normalizedInspectedItemEntries, masterItemEntries, {
+          sourceLabel: "Inspected",
           referenceLabel: itemReferenceLabel,
         })
       : []),
     ...(hasMasterBoxEntries
       ? buildBoxSizeDifferences({
-          inspectedEntries: normalizedPisBoxEntries,
+          inspectedEntries: normalizedInspectedBoxEntries,
           pisEntries: masterBoxEntries,
-          inspectedMode: resolvedPisBoxMode,
+          inspectedMode: resolvedInspectedBoxMode,
           pisMode: resolvedMasterBoxMode,
-          sourceLabel: "PIS",
+          sourceLabel: "Inspected",
           referenceLabel: boxReferenceLabel,
         })
       : []),
+    ...buildCbmDifferences({
+      inspectedCbm: item?.cbm?.calculated_inspected_total || item?.cbm?.inspected_total,
+      masterBoxEntries,
+      masterBoxMode: item?.master_box_mode,
+      referenceLabel: boxReferenceLabel,
+    }),
     ...buildBarcodeDifferences(item),
-    ...buildCountryDifferences(item),
   ];
 
   if (differences.length === 0) {
@@ -1197,19 +1186,21 @@ const buildFinalPisCheckRow = (item = {}) => {
     updated_at: formatUpdatedDate(item?.updatedAt),
     diff_fields: diffFields,
     measurements: {
-      inspected_item: buildMeasurementDisplay(normalizedPisItemEntries, "net_weight"),
+      inspected_item: buildMeasurementDisplay(normalizedInspectedItemEntries, "net_weight"),
       pis_item: buildMeasurementDisplay(masterItemEntries, "net_weight"),
-      inspected_box: buildMeasurementDisplay(normalizedPisBoxEntries, "gross_weight"),
+      inspected_box: buildMeasurementDisplay(normalizedInspectedBoxEntries, "gross_weight"),
       pis_box: buildMeasurementDisplay(masterBoxEntries, "gross_weight"),
     },
     references: {
-      source_label: "PIS",
+      source_label: "Inspected",
       item_label: itemReferenceLabel,
       box_label: boxReferenceLabel,
       has_master_item_sizes: hasMasterItemEntries,
       has_master_box_sizes: hasMasterBoxEntries,
-      has_pis_item_sizes: hasPisItemEntries,
-      has_pis_box_sizes: hasPisBoxEntries,
+      has_pis_item_sizes: hasInspectedItemEntries,
+      has_pis_box_sizes: hasInspectedBoxEntries,
+      has_inspected_item_sizes: hasInspectedItemEntries,
+      has_inspected_box_sizes: hasInspectedBoxEntries,
     },
     comments: Array.isArray(item?.pis_update_comments)
       ? item.pis_update_comments

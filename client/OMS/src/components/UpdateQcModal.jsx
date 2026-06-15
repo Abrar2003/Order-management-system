@@ -85,6 +85,32 @@ const isPositiveBarcodeText = (value) => {
   return /^\d+$/.test(normalized) && !/^0+$/.test(normalized);
 };
 
+const normalizeStatusText = (value) => String(value ?? "").trim().toLowerCase();
+
+const isGoodsNotReadyText = (value) => normalizeStatusText(value) === "goods not ready";
+
+const isGoodsNotReadyRecord = (record = {}) => {
+  if (isGoodsNotReadyText(record?.status) || isGoodsNotReadyText(record?.remarks)) return true;
+  const goodsNotReady = record?.goods_not_ready;
+  if (typeof goodsNotReady === "boolean") return goodsNotReady;
+  if (typeof goodsNotReady === "string") {
+    const normalized = normalizeStatusText(goodsNotReady);
+    return isGoodsNotReadyText(goodsNotReady) || ["true", "1", "yes", "y"].includes(normalized);
+  }
+  if (goodsNotReady && typeof goodsNotReady === "object") {
+    if (goodsNotReady.ready !== undefined) {
+      const normalized = normalizeStatusText(goodsNotReady.ready);
+      return (
+        goodsNotReady.ready === true ||
+        ["true", "1", "yes", "y"].includes(normalized) ||
+        isGoodsNotReadyText(goodsNotReady.reason)
+      );
+    }
+    return Boolean(String(goodsNotReady.reason || "").trim());
+  }
+  return false;
+};
+
 const getPositiveBarcodeValue = (record = {}, fields = []) => {
   for (const field of fields) {
     const value = normalizeBarcodeText(record?.[field]);
@@ -1150,6 +1176,12 @@ const UpdateQcModal = ({
     requiresBarcodeValidation && !barcodeValidated;
   const latestInspectionRecord = getLatestInspectionRecord(qc);
   const latestRequestEntry = getLatestRequestEntry(qc);
+  const selectedInspectionRecord = isInspectionRecordUpdate
+    ? inspectionRecord
+    : canRewriteLatestInspectionRecord
+      ? latestInspectionRecord
+      : null;
+  const selectedRecordIsGoodsNotReady = isGoodsNotReadyRecord(selectedInspectionRecord);
   const barcodePrefillRecord = isInspectionRecordUpdate
     ? inspectionRecord
     : canRewriteLatestInspectionRecord
@@ -2270,12 +2302,15 @@ const UpdateQcModal = ({
     }
 
     const qcChecked = form.qc_checked === "" ? 0 : Number(form.qc_checked);
-    const qcPassed = form.qc_passed === "" ? 0 : Number(form.qc_passed);
+    const submittedQcPassed = form.qc_passed === "" ? 0 : Number(form.qc_passed);
+    const qcPassed = selectedRecordIsGoodsNotReady
+      ? Number(selectedInspectionRecord?.passed || 0) || 0
+      : submittedQcPassed;
     const offeredQuantity =
       form.offeredQuantity === "" ? 0 : Number(form.offeredQuantity);
 
     if (
-      [qcChecked, qcPassed, offeredQuantity].some((value) =>
+      [qcChecked, submittedQcPassed, offeredQuantity].some((value) =>
         Number.isNaN(value),
       )
     ) {
@@ -2284,7 +2319,7 @@ const UpdateQcModal = ({
     }
 
     if (
-      [qcChecked, qcPassed, offeredQuantity].some(
+      [qcChecked, submittedQcPassed, offeredQuantity].some(
         (value) => value < 0,
       )
     ) {
@@ -2927,6 +2962,9 @@ const UpdateQcModal = ({
         0,
         clientDemandQuantity - totalEffectivePassedAfterUpdate,
       );
+      const effectivePendingAfterUpdate = selectedRecordIsGoodsNotReady
+        ? Number(inspectionRecord?.pending_after || 0) || 0
+        : pendingAfterUpdate;
       const requestedDateIso = toISODateString(
         inspectionRecord?.requested_date ||
         inspectionRecord?.request_date ||
@@ -2964,7 +3002,7 @@ const UpdateQcModal = ({
               vendor_offered: offeredQuantity,
               checked: qcChecked,
               passed: qcPassed,
-              pending_after: pendingAfterUpdate,
+              pending_after: effectivePendingAfterUpdate,
               cbm: inspectionRecord?.cbm || { total: 0 },
               label_ranges: normalizedLabelRanges,
               labels_added: labelsForUpdate,
@@ -3059,6 +3097,9 @@ const UpdateQcModal = ({
         0,
         clientDemandQuantity - totalEffectivePassedAfterRewrite,
       );
+      const effectivePendingAfterRewrite = selectedRecordIsGoodsNotReady
+        ? Number(rewriteTargetRecord?.pending_after || 0) || 0
+        : pendingAfterRewrite;
       const requestedDateIso = toISODateString(
         rewriteTargetRecord?.requested_date ||
         rewriteTargetRecord?.request_date ||
@@ -3132,7 +3173,7 @@ const UpdateQcModal = ({
               vendor_offered: offeredQuantity,
               checked: qcChecked,
               passed: qcPassed,
-              pending_after: pendingAfterRewrite,
+              pending_after: effectivePendingAfterRewrite,
               cbm: {
                 box1: Number(updatedQc?.cbm?.box1 ?? updatedQc?.cbm?.top ?? 0) || 0,
                 box2: Number(updatedQc?.cbm?.box2 ?? updatedQc?.cbm?.bottom ?? 0) || 0,
@@ -4145,8 +4186,13 @@ const UpdateQcModal = ({
 	                  value={form.qc_passed}
 	                  onChange={handleChange}
 	                  min="0"
-	                  disabled={qcBarcodeValidationLocked || saving}
+	                  disabled={qcBarcodeValidationLocked || saving || selectedRecordIsGoodsNotReady}
 	                />
+                {selectedRecordIsGoodsNotReady && (
+                  <div className="form-text">
+                    Goods-not-ready records keep their existing passed quantity.
+                  </div>
+                )}
               </div>
 
               <div className="col-md-2">

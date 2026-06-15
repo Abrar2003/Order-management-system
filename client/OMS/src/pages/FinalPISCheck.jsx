@@ -139,7 +139,7 @@ const FinalPisCheckReport = ({
             <div className="pis-diff-report-eyebrow">{eyebrow}</div>
             <h2 className="pis-diff-report-title">{title}</h2>
             <div className="pis-diff-report-subtitle">
-              Checked items with PIS vs master differences
+              Checked items with inspected vs Master differences
             </div>
             <div className="pis-diff-report-subtitle">
               Generated {formatPreviewDateTime(report?.generated_at)}
@@ -198,7 +198,7 @@ const FinalPisCheckReport = ({
         {rows.length === 0 ? (
           <section className="pis-diff-report-item">
             <div className="p-4 text-center text-secondary">
-              No checked items with PIS vs master differences were found for the current filters.
+              No checked items with inspected vs Master differences were found for the current filters.
             </div>
           </section>
         ) : (
@@ -310,7 +310,7 @@ const FinalPisCheckReport = ({
                         <th>Area</th>
                         <th>Measurement</th>
                         <th>{sourceLabel}</th>
-                        <th>Reference</th>
+                        <th>Master</th>
                         <th>Difference</th>
                         <th>Remark</th>
                       </tr>
