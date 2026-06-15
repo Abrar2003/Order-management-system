@@ -616,8 +616,18 @@ const applyCalculatedCbmTotals = (item, setPath) => {
           remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
         });
 
+  const masterBoxMode = detectBoxPackagingMode(
+    item?.master_box_mode,
+    item?.master_box_sizes,
+  );
+  const masterBoxSummary = buildBoxMeasurementCbmSummary({
+    sizes: item?.master_box_sizes,
+    mode: masterBoxMode,
+  });
+
   const hasDerivedInspectedCbm = toPositiveCbmNumber(inspectedSummary.total) > 0;
   const hasDerivedPisCbm = toPositiveCbmNumber(pisSummary.total) > 0;
+  const hasDerivedMasterCbm = toPositiveCbmNumber(masterBoxSummary.total) > 0;
 
   setPath(
     "cbm.inspected_top",
@@ -671,6 +681,15 @@ const applyCalculatedCbmTotals = (item, setPath) => {
       : toNormalizedDecimalText(
           item?.cbm?.calculated_pis_total ?? item?.cbm?.total ?? 0,
           "cbm.calculated_pis_total",
+        ),
+  );
+  setPath(
+    "cbm.calculated_master_total",
+    hasDerivedMasterCbm
+      ? masterBoxSummary.total
+      : toNormalizedDecimalText(
+          item?.cbm?.calculated_master_total ?? 0,
+          "cbm.calculated_master_total",
         ),
   );
   setPath(
@@ -2504,140 +2523,6 @@ const buildFinalPisCheckMatch = ({ search, brand, vendor } = {}) => {
   return { $and: conditions };
 };
 
-const buildInspectedWeightFromInspection = (inspection = {}) => {
-  const sumEntries = (entries = [], key = "") =>
-    (Array.isArray(entries) ? entries : []).reduce(
-      (sum, entry) => sum + Math.max(0, toSafeNumber(entry?.[key], 0)),
-      0,
-    );
-
-  return {
-    top_net: 0,
-    top_gross: 0,
-    bottom_net: 0,
-    bottom_gross: 0,
-    total_net: sumEntries(inspection?.inspected_item_sizes, "net_weight"),
-    total_gross: sumEntries(inspection?.inspected_box_sizes, "gross_weight"),
-  };
-};
-
-const buildCbmSnapshotFromInspection = (inspection = {}, existingCbm = {}) => {
-  const total = normalizeTextField(inspection?.cbm?.total);
-  return {
-    ...(existingCbm || {}),
-    inspected_top: normalizeTextField(inspection?.cbm?.box1) || existingCbm?.inspected_top || "0",
-    inspected_bottom:
-      normalizeTextField(inspection?.cbm?.box2) || existingCbm?.inspected_bottom || "0",
-    inspected_total: total || existingCbm?.inspected_total || "0",
-    calculated_inspected_total: total || existingCbm?.calculated_inspected_total || "0",
-  };
-};
-
-const buildLatestFinalPisInspectionLookup = async (items = []) => {
-  const itemCodes = [...new Set(
-    (Array.isArray(items) ? items : [])
-      .map((item) => normalizeTextField(item?.code))
-      .filter(Boolean),
-  )];
-
-  if (itemCodes.length === 0) return new Map();
-
-  const itemCodeMatchers = itemCodes.map((code) => ({
-    "item.item_code": new RegExp(`^\\s*${escapeRegex(code)}\\s*$`, "i"),
-  }));
-  const qcRows = await QC.find({ $or: itemCodeMatchers })
-    .select("_id item.item_code")
-    .lean();
-  const qcIdToItemCode = new Map(
-    (Array.isArray(qcRows) ? qcRows : []).map((qcDoc) => [
-      String(qcDoc?._id || ""),
-      normalizeLookupKey(qcDoc?.item?.item_code),
-    ]),
-  );
-  const qcIds = [...qcIdToItemCode.keys()].filter((value) =>
-    mongoose.Types.ObjectId.isValid(value),
-  );
-
-  if (qcIds.length === 0) return new Map();
-
-  const inspections = await Inspection.find({
-    qc: { $in: qcIds.map((value) => new mongoose.Types.ObjectId(value)) },
-    $or: [
-      { "inspected_item_sizes.0": { $exists: true } },
-      { "inspected_box_sizes.0": { $exists: true } },
-      { master_barcode: { $exists: true, $ne: "" } },
-      { inner_barcode: { $exists: true, $ne: "" } },
-      { barcode: { $exists: true, $ne: "" } },
-    ],
-  })
-    .select(
-      "qc createdAt updatedAt inspection_date status checked passed cbm barcode master_barcode inner_barcode inspected_item_sizes inspected_box_sizes inspected_box_mode",
-    )
-    .lean();
-
-  const latestByItemCode = new Map();
-  (Array.isArray(inspections) ? inspections : []).forEach((inspection) => {
-    if (!isCompletedInspectionForComparison(inspection)) return;
-    const itemCodeKey = qcIdToItemCode.get(String(inspection?.qc || ""));
-    if (!itemCodeKey) return;
-    const inspectionDateTimestamp = toTimestamp(inspection?.inspection_date);
-    const sortTimestamp = Math.max(
-      inspectionDateTimestamp,
-      toTimestamp(inspection?.updatedAt),
-      toTimestamp(inspection?.createdAt),
-    );
-    if (!sortTimestamp) return;
-
-    const previous = latestByItemCode.get(itemCodeKey);
-    if (previous && previous.sortTimestamp >= sortTimestamp) return;
-
-    latestByItemCode.set(itemCodeKey, {
-      inspection,
-      sortTimestamp,
-      inspection_date:
-        toDisplayDateString(inspection?.inspection_date) ||
-        toDisplayDateString(inspection?.createdAt),
-    });
-  });
-
-  return latestByItemCode;
-};
-
-const applyLatestFinalPisInspectionSnapshots = async (items = []) => {
-  const latestInspectionLookup = await buildLatestFinalPisInspectionLookup(items);
-  return (Array.isArray(items) ? items : []).map((item) => {
-    const latestEntry = latestInspectionLookup.get(normalizeLookupKey(item?.code));
-    const inspection = latestEntry?.inspection;
-    if (!inspection) return item;
-
-    return {
-      ...item,
-      inspected_item_sizes: Array.isArray(inspection?.inspected_item_sizes)
-        ? inspection.inspected_item_sizes
-        : [],
-      inspected_box_sizes: Array.isArray(inspection?.inspected_box_sizes)
-        ? inspection.inspected_box_sizes
-        : [],
-      inspected_box_mode: inspection?.inspected_box_mode || item?.inspected_box_mode,
-      inspected_weight: buildInspectedWeightFromInspection(inspection),
-      qc: {
-        ...(item?.qc || {}),
-        barcode: inspection?.barcode || "",
-        master_barcode: inspection?.master_barcode || inspection?.barcode || "",
-        inner_barcode: inspection?.inner_barcode || "",
-        last_inspected_date: latestEntry?.inspection_date || "",
-      },
-      cbm: buildCbmSnapshotFromInspection(inspection, item?.cbm || {}),
-      updatedAt: latestEntry?.inspection_date || item?.updatedAt,
-      final_pis_latest_inspection: {
-        inspection_id: String(inspection?._id || ""),
-        qc_id: String(inspection?.qc || ""),
-        inspection_date: latestEntry?.inspection_date || "",
-      },
-    };
-  });
-};
-
 const getFinalPisCheckRowsForQuery = async ({
   search,
   brand,
@@ -2651,10 +2536,9 @@ const getFinalPisCheckRowsForQuery = async ({
     .select(FINAL_PIS_CHECK_ITEM_SELECT)
     .sort({ updatedAt: -1, code: 1 })
     .lean();
-  const latestInspectionItems = await applyLatestFinalPisInspectionSnapshots(items);
-  const mismatchLookup = await buildInspectionReportMismatchLookup(latestInspectionItems);
+  const mismatchLookup = await buildInspectionReportMismatchLookup(items);
 
-  const rows = buildFinalPisCheckRows(latestInspectionItems).map((row) => {
+  const rows = buildFinalPisCheckRows(items).map((row) => {
     const mismatchEntry = mismatchLookup.get(normalizeLookupKey(row?.code)) || {};
     return {
       ...row,

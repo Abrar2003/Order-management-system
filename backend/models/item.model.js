@@ -298,6 +298,7 @@ const itemSchema = new mongoose.Schema(
       inspected_total: { type: String, default: "0", trim: true },
       calculated_inspected_total: { type: String, default: "0", trim: true },
       calculated_pis_total: { type: String, default: "0", trim: true },
+      calculated_master_total: { type: String, default: "0", trim: true },
       calculated_total: { type: String, default: "0", trim: true },
     },
     inspected_item_LBH: legacyLbhSchema,

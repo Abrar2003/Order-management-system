@@ -31,6 +31,22 @@ const FINAL_PIS_CHECK_ITEM_SELECT = [
   "master_item_sizes",
   "master_box_sizes",
   "master_box_mode",
+  "inspected_weight",
+  "inspected_item_LBH",
+  "inspected_item_sizes",
+  "inspected_item_top_LBH",
+  "inspected_item_bottom_LBH",
+  "inspected_box_LBH",
+  "inspected_box_sizes",
+  "inspected_box_mode",
+  "inspected_box_top_LBH",
+  "inspected_box_bottom_LBH",
+  "inspected_top_LBH",
+  "inspected_bottom_LBH",
+  "cbm",
+  "qc.barcode",
+  "qc.master_barcode",
+  "qc.inner_barcode",
   "pis_checked_flag",
   "pis_update_comments",
   "updatedAt",
@@ -944,11 +960,15 @@ const buildOverallWeightDifferences = ({
 
 const buildCbmDifferences = ({
   inspectedCbm,
+  masterCbm: storedMasterCbm,
   masterBoxEntries = [],
   masterBoxMode = "",
   referenceLabel = "Master",
 } = {}) => {
-  const masterCbm = calculateEffectiveBoxEntriesCbmTotal(masterBoxEntries, masterBoxMode);
+  const storedMasterCbmNumber = toFiniteNumber(storedMasterCbm);
+  const masterCbm = hasMeaningfulComparableNumber(storedMasterCbmNumber)
+    ? storedMasterCbmNumber
+    : calculateEffectiveBoxEntriesCbmTotal(masterBoxEntries, masterBoxMode);
   if (masterCbm <= COMPARE_TOLERANCE) {
     return [];
   }
@@ -1106,6 +1126,7 @@ const buildFinalPisCheckRow = (item = {}) => {
       : []),
     ...buildCbmDifferences({
       inspectedCbm: item?.cbm?.calculated_inspected_total || item?.cbm?.inspected_total,
+      masterCbm: item?.cbm?.calculated_master_total,
       masterBoxEntries,
       masterBoxMode: item?.master_box_mode,
       referenceLabel: boxReferenceLabel,

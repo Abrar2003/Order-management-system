@@ -10,7 +10,7 @@ Important field groups:
 
 | Data group | Item fields |
 | --- | --- |
-| PIS | `country_of_origin`, `pis_barcode`, `pis_master_barcode`, `pis_inner_barcode`, `pis_item_sizes`, `pis_box_sizes`, `pis_box_mode`, `pis_weight`, `cbm.calculated_pis_total`, `pis_checked_flag` |
+| PIS | `country_of_origin`, `pis_barcode`, `pis_master_barcode`, `pis_inner_barcode`, `pis_item_sizes`, `pis_box_sizes`, `pis_box_mode`, `pis_weight`, `cbm.calculated_pis_total`, `cbm.calculated_master_total`, `pis_checked_flag` |
 | Product Database | `pd_barcode`, `pd_master_barcode`, `pd_inner_barcode`, `pd_item_sizes`, `pd_box_sizes`, `pd_box_mode`, `pd_checked`, `pd_created_by`, `pd_checked_by`, `pd_approved_by`, `pd_last_changed_by`, `pd_history`, `product_type`, `product_specs` |
 | Master | `master_item_sizes`, `master_box_sizes`, `master_box_mode`, `pis_checked_flag` |
 
@@ -21,7 +21,7 @@ Size arrays are capped at 4 entries by the item schema. Inner + master carton mo
 | Data | Operation | Route | Controller | Business behavior |
 | --- | --- | --- | --- | --- |
 | PIS list | Read | `GET /items` | `backend/controllers/item.controller.js#getItems` | Used by the PIS and Items pages to read item rows, PIS measurements, barcodes, files, QC flags, and metadata. |
-| PIS update | Update | `PATCH /items/:id/pis` | `backend/controllers/item.controller.js#updateItemPis` | Updates PIS country, barcodes, `pis_item_sizes`, `pis_box_sizes`, box mode, derived weights, and calculated CBM. Legacy PIS LBH fields are read-only. In PIS Diff mode it only writes master sizes, master box mode, and `pis_checked_flag`; PIS fields are left unchanged. |
+| PIS update | Update | `PATCH /items/:id/pis` | `backend/controllers/item.controller.js#updateItemPis` | Updates PIS country, barcodes, `pis_item_sizes`, `pis_box_sizes`, box mode, derived weights, and calculated CBM. Legacy PIS LBH fields are read-only. In PIS Diff mode it writes master sizes, master box mode, `cbm.calculated_master_total`, and `pis_checked_flag`; PIS fields are left unchanged. |
 | PIS diffs | Read | `GET /items/pis-diffs` | `backend/controllers/item.controller.js#getPisDiffItems` | Reads unchecked rows where inspected data exists and differs from PIS data. Checked rows are excluded by `pis_checked_flag: { $ne: true }`, and rows with no inspected data are excluded because there is nothing to compare. |
 | Product Database | Read | `GET /items/product-database` | `backend/controllers/item.controller.js#getProductDatabaseItems` | Reads Product Database rows, status counts, filters, and row-level permissions. |
 | Product Database | Update | `PATCH /items/:id/product-database` | `backend/controllers/item.controller.js#updateProductDatabaseItem` | Saves PD fields through `backend/helpers/productDatabase.js#applyProductDatabaseSave`, moves the record to Created, and appends `pd_history`. |
