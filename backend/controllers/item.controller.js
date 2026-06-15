@@ -1840,16 +1840,14 @@ const ITEM_MASTER_SELECT = [
   "brand_name",
   "brands",
   "vendors",
-  "country_of_origin",
   "product_type",
-  "pis_checked_flag",
-  "pis_item_sizes",
-  "pis_box_sizes",
-  "pis_box_mode",
   "master_item_sizes",
   "master_box_sizes",
   "master_box_mode",
-  "updatedAt",
+  "master_barcode",
+  "master_master_barcode",
+  "master_inner_barcode",
+  "master_country_of_origin",
 ].join(" ");
 
 const PIS_INSPECTION_MASTER_ITEM_SELECT = [
@@ -1899,7 +1897,10 @@ const ITEM_MASTER_ELIGIBLE_MATCH = Object.freeze({
   $or: [
     { "master_item_sizes.0": { $exists: true } },
     { "master_box_sizes.0": { $exists: true } },
-    { pis_checked_flag: true },
+    { master_barcode: { $exists: true, $ne: "" } },
+    { master_master_barcode: { $exists: true, $ne: "" } },
+    { master_inner_barcode: { $exists: true, $ne: "" } },
+    { master_country_of_origin: { $exists: true, $ne: "" } },
   ],
 });
 
@@ -4205,14 +4206,14 @@ exports.exportFinalPisCheckReport = async (req, res) => {
       { key: "vendors", header: "Vendors" },
       { key: "diff_fields", header: "Diff Fields" },
       { key: "inspection_report", header: "Inspection Report" },
-      { key: "inspected_item_size", header: "Inspected Item Size" },
-      { key: "inspected_item_weight", header: "Inspected Item Net Weight" },
-      { key: "pis_item_size", header: "PIS Item Size" },
-      { key: "pis_item_weight", header: "PIS Item Net Weight" },
-      { key: "inspected_box_size", header: "Inspected Box Size" },
-      { key: "inspected_box_weight", header: "Inspected Box Gross Weight" },
-      { key: "pis_box_size", header: "PIS Box Size" },
-      { key: "pis_box_weight", header: "PIS Box Gross Weight" },
+      { key: "inspected_item_size", header: "PIS Item Size" },
+      { key: "inspected_item_weight", header: "PIS Item Net Weight" },
+      { key: "pis_item_size", header: "Master Item Size" },
+      { key: "pis_item_weight", header: "Master Item Net Weight" },
+      { key: "inspected_box_size", header: "PIS Box Size" },
+      { key: "inspected_box_weight", header: "PIS Box Gross Weight" },
+      { key: "pis_box_size", header: "Master Box Size" },
+      { key: "pis_box_weight", header: "Master Box Gross Weight" },
       { key: "updated_at", header: "Last Updated" },
     ];
     const detailRows = rows.map((row) => ({
@@ -4240,8 +4241,8 @@ exports.exportFinalPisCheckReport = async (req, res) => {
       { key: "section", header: "Area" },
       { key: "segment", header: "Measurement Segment" },
       { key: "attribute", header: "Attribute" },
-      { key: "inspected", header: "Inspected" },
-      { key: "pis", header: "PIS" },
+      { key: "inspected", header: "PIS" },
+      { key: "pis", header: "Master" },
       { key: "delta", header: "Difference" },
       { key: "note", header: "Remark" },
     ];

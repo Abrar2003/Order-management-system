@@ -156,12 +156,12 @@ test("normalizes PIS diff comparison sources before size mismatch checks", () =>
   assert.equal(hasMismatch, false);
 });
 
-test("final PIS check does not return a row when inspected dimensions only differ by LBH order", () => {
+test("final PIS check does not return a row when PIS dimensions only differ from Master by LBH order", () => {
   const rows = buildFinalPisCheckRows([
     {
       code: "ITEM-1",
       description: "Normalized item",
-      inspected_item_sizes: [{ L: 99, B: 101, H: 49, net_weight: 10 }],
+      pis_item_sizes: [{ L: 99, B: 101, H: 49, net_weight: 10 }],
       master_item_sizes: [{ L: 100, B: 50, H: 100, net_weight: 10 }],
     },
   ]);
@@ -169,17 +169,39 @@ test("final PIS check does not return a row when inspected dimensions only diffe
   assert.deepEqual(rows, []);
 });
 
-test("final PIS check falls back to PIS reference when master sizes are missing", () => {
+test("final PIS check reports missing Master data instead of falling back to PIS", () => {
   const rows = buildFinalPisCheckRows([
     {
       code: "ITEM-2",
-      description: "PIS fallback item",
-      inspected_item_sizes: [{ L: 99, B: 101, H: 49, net_weight: 10 }],
+      description: "Missing master item",
       pis_item_sizes: [{ L: 100, B: 50, H: 100, net_weight: 10 }],
     },
   ]);
 
-  assert.deepEqual(rows, []);
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].diff_fields, ["Item Size"]);
+  assert.equal(rows[0].references.source_label, "PIS");
+  assert.equal(rows[0].references.item_label, "Master");
+  assert.equal(rows[0].differences[0].delta, "Master data missing");
+});
+
+test("final PIS check compares PIS barcode with Master barcode and ignores QC barcode", () => {
+  const rows = buildFinalPisCheckRows([
+    {
+      code: "ITEM-3",
+      description: "Barcode source item",
+      pis_master_barcode: "4006381333931",
+      master_master_barcode: "1234567890128",
+      qc: {
+        master_barcode: "1234567890128",
+      },
+    },
+  ]);
+
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].diff_fields, ["Barcode"]);
+  assert.equal(rows[0].differences[0].inspected, "4006381333931");
+  assert.equal(rows[0].differences[0].pis, "1234567890128");
 });
 
 test("QC mismatch comparison ignores inspected LBH storage order when Master/PIS reference exists", () => {

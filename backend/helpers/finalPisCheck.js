@@ -27,31 +27,20 @@ const FINAL_PIS_CHECK_ITEM_SELECT = [
   "master_barcode",
   "master_master_barcode",
   "master_inner_barcode",
+  "master_country_of_origin",
   "kd",
-  "inspected_weight",
   "master_item_sizes",
   "master_box_sizes",
   "master_box_mode",
   "pis_item_sizes",
   "pis_box_sizes",
   "pis_box_mode",
-  "inspected_item_LBH",
-  "inspected_item_sizes",
-  "inspected_item_top_LBH",
-  "inspected_item_bottom_LBH",
-  "inspected_box_LBH",
-  "inspected_box_sizes",
-  "inspected_box_mode",
-  "inspected_box_top_LBH",
-  "inspected_box_bottom_LBH",
-  "inspected_top_LBH",
-  "inspected_bottom_LBH",
-  "cbm",
+  "pis_barcode",
+  "pis_master_barcode",
+  "pis_inner_barcode",
+  "country_of_origin",
   "pis_checked_flag",
   "pis_update_comments",
-  "qc.barcode",
-  "qc.master_barcode",
-  "qc.inner_barcode",
   "updatedAt",
 ].join(" ");
 
@@ -61,6 +50,7 @@ const FINAL_PIS_CHECK_DIFF_FIELDS = Object.freeze([
   "Weight",
   "CBM",
   "Barcode",
+  "Country",
 ]);
 
 const FINAL_PIS_CHECK_SORT_FIELDS = Object.freeze([
@@ -589,14 +579,15 @@ const buildNumericDifferenceNote = ({
   pisDisplay = EMPTY_LABEL,
   hasInspected = false,
   hasPis = false,
+  sourceLabel = "Inspected",
   referenceLabel = "PIS",
 } = {}) => {
   const subject = `${segment} ${attribute}`.trim();
   if (hasInspected && !hasPis) {
-    return `Inspected ${subject} is ${inspectedDisplay}, while ${referenceLabel} is not set.`;
+    return `${sourceLabel} ${subject} is ${inspectedDisplay}, while ${referenceLabel} is not set.`;
   }
   if (!hasInspected && hasPis) {
-    return `${referenceLabel} ${subject} is ${pisDisplay}, while inspected value is not set.`;
+    return `${referenceLabel} ${subject} is ${pisDisplay}, while ${sourceLabel} is not set.`;
   }
   return `${subject} differs (${inspectedDisplay} vs ${pisDisplay}).`;
 };
@@ -608,14 +599,15 @@ const buildTextDifferenceNote = ({
   pisDisplay = EMPTY_LABEL,
   hasInspected = false,
   hasPis = false,
+  sourceLabel = "Inspected",
   referenceLabel = "PIS",
 } = {}) => {
   const subject = `${segment} ${attribute}`.trim();
   if (hasInspected && !hasPis) {
-    return `Inspected ${subject} is ${inspectedDisplay}, while ${referenceLabel} is not set.`;
+    return `${sourceLabel} ${subject} is ${inspectedDisplay}, while ${referenceLabel} is not set.`;
   }
   if (!hasInspected && hasPis) {
-    return `${referenceLabel} ${subject} is ${pisDisplay}, while inspected value is not set.`;
+    return `${referenceLabel} ${subject} is ${pisDisplay}, while ${sourceLabel} is not set.`;
   }
   return `${subject} differs (${inspectedDisplay} vs ${pisDisplay}).`;
 };
@@ -632,6 +624,7 @@ const createNumericDifference = ({
   compareTolerance = COMPARE_TOLERANCE,
   compareDecimals = null,
   fixedDecimals = false,
+  sourceLabel = "Inspected",
   referenceLabel = "PIS",
   comparator = null,
 } = {}) => {
@@ -682,7 +675,7 @@ const createNumericDifference = ({
             tolerance: compareTolerance,
             fixedDecimals,
           })
-        : (comparison.hasInspected ? `${referenceLabel} not set` : "Inspected not set"),
+        : (comparison.hasInspected ? `${referenceLabel} not set` : `${sourceLabel} not set`),
     note: buildNumericDifferenceNote({
       segment,
       attribute,
@@ -690,6 +683,7 @@ const createNumericDifference = ({
       pisDisplay,
       hasInspected: comparison.hasInspected,
       hasPis: comparison.hasPis,
+      sourceLabel,
       referenceLabel,
     }),
   };
@@ -702,6 +696,7 @@ const createTextDifference = ({
   attribute,
   inspectedValue,
   pisValue,
+  sourceLabel = "Inspected",
   referenceLabel = "PIS",
 } = {}) => {
   const comparison = compareTextValues(inspectedValue, pisValue);
@@ -723,7 +718,10 @@ const createTextDifference = ({
     inspected: inspectedDisplay,
     pis: pisDisplay,
     reference_label: referenceLabel,
-    delta: "Mismatch",
+    delta:
+      comparison.hasInspected && !comparison.hasPis
+        ? `${referenceLabel} not set`
+        : (!comparison.hasInspected && comparison.hasPis ? `${sourceLabel} not set` : "Mismatch"),
     note: buildTextDifferenceNote({
       segment,
       attribute,
@@ -731,6 +729,7 @@ const createTextDifference = ({
       pisDisplay,
       hasInspected: comparison.hasInspected,
       hasPis: comparison.hasPis,
+      sourceLabel,
       referenceLabel,
     }),
   };
@@ -756,7 +755,7 @@ const getEntryLabel = (entry = {}, key = "", fallback = "Value") => {
 const buildItemSizeDifferences = (
   inspectedEntries = [],
   pisEntries = [],
-  { referenceLabel = "PIS" } = {},
+  { sourceLabel = "Inspected", referenceLabel = "PIS" } = {},
 ) => {
   const differences = [];
   const orderedKeys = buildUnionKeys(inspectedEntries, pisEntries, buildItemEntryKey);
@@ -782,6 +781,7 @@ const buildItemSizeDifferences = (
         pisValue: pisEntry?.[axis],
         unit: "cm",
         comparator: compareItemSizeDimensionVariance,
+        sourceLabel,
         referenceLabel,
       });
       if (difference) differences.push(difference);
@@ -796,6 +796,7 @@ const buildItemSizeDifferences = (
       pisValue: pisEntry?.net_weight,
       unit: "kg",
       comparator: compareWeightVariance,
+      sourceLabel,
       referenceLabel,
     });
     if (weightDifference) differences.push(weightDifference);
@@ -809,6 +810,7 @@ const buildBoxSizeDifferences = ({
   pisEntries = [],
   inspectedMode = "",
   pisMode = "",
+  sourceLabel = "Inspected",
   referenceLabel = "PIS",
 } = {}) => {
   const differences = [];
@@ -819,6 +821,7 @@ const buildBoxSizeDifferences = ({
     attribute: "Box Mode",
     inspectedValue: inspectedMode,
     pisValue: pisMode,
+    sourceLabel,
     referenceLabel,
   });
   if (modeDifference) differences.push(modeDifference);
@@ -847,6 +850,7 @@ const buildBoxSizeDifferences = ({
         pisValue: pisEntry?.[axis],
         unit: "cm",
         comparator: compareBoxSizeDimensionVariance,
+        sourceLabel,
         referenceLabel,
       });
       if (difference) differences.push(difference);
@@ -887,6 +891,7 @@ const buildBoxSizeDifferences = ({
           entryConfig.keySuffix === "gross-weight"
             ? compareWeightVariance
             : null,
+        sourceLabel,
         referenceLabel,
       });
       if (difference) differences.push(difference);
@@ -981,21 +986,78 @@ const buildCbmDifferences = ({
   return difference ? [difference] : [];
 };
 
+const createMissingMasterDifference = ({
+  key,
+  section,
+  segment,
+  attribute,
+  sourceDisplay = EMPTY_LABEL,
+  note = "",
+} = {}) => ({
+  key,
+  section,
+  segment,
+  attribute,
+  inspected: sourceDisplay || EMPTY_LABEL,
+  pis: EMPTY_LABEL,
+  reference_label: "Master",
+  delta: "Master data missing",
+  note:
+    note ||
+    `Master ${`${segment || ""} ${attribute || ""}`.trim()} is missing; PIS cannot be approved against Master.`,
+});
+
+const buildMasterPresenceDifferences = ({
+  hasPisItemEntries = false,
+  hasMasterItemEntries = false,
+  hasPisBoxEntries = false,
+  hasMasterBoxEntries = false,
+  pisItemEntries = [],
+  pisBoxEntries = [],
+} = {}) => {
+  const differences = [];
+  if (hasPisItemEntries && !hasMasterItemEntries) {
+    differences.push(createMissingMasterDifference({
+      key: "master-missing-item-size",
+      section: "Item Size",
+      segment: "Master Data",
+      attribute: "Item Size",
+      sourceDisplay: buildMeasurementDisplay(pisItemEntries, "net_weight").sizeDisplay,
+      note: "Master item sizes are missing; PIS item sizes cannot be approved against Master.",
+    }));
+  }
+  if (hasPisBoxEntries && !hasMasterBoxEntries) {
+    differences.push(createMissingMasterDifference({
+      key: "master-missing-box-size",
+      section: "Box Size",
+      segment: "Master Data",
+      attribute: "Box Size",
+      sourceDisplay: buildMeasurementDisplay(pisBoxEntries, "gross_weight").sizeDisplay,
+      note: "Master box sizes are missing; PIS box sizes cannot be approved against Master.",
+    }));
+  }
+  return differences;
+};
+
 const buildBarcodeDifferences = (item = {}) => {
   if (item?.barcode_exempted === true) return [];
 
   const differences = [];
   const masterBarcode = item?.master_master_barcode || item?.master_barcode;
+  const pisBarcode = item?.pis_master_barcode || item?.pis_barcode;
   const masterDifference = createTextDifference({
     key: "barcode-master",
     section: "Barcode",
     segment: "Master",
     attribute: "Barcode",
-    inspectedValue: item?.qc?.master_barcode || item?.qc?.barcode,
+    inspectedValue: pisBarcode,
     pisValue: masterBarcode,
+    sourceLabel: "PIS",
     referenceLabel: "Master",
   });
-  if (normalizeBarcodeValue(masterBarcode) && masterDifference) differences.push(masterDifference);
+  if ((normalizeBarcodeValue(masterBarcode) || normalizeBarcodeValue(pisBarcode)) && masterDifference) {
+    differences.push(masterDifference);
+  }
 
   const masterInnerBarcode = item?.master_inner_barcode;
   const innerDifference = createTextDifference({
@@ -1003,15 +1065,38 @@ const buildBarcodeDifferences = (item = {}) => {
     section: "Barcode",
     segment: "Inner",
     attribute: "Barcode",
-    inspectedValue: item?.qc?.inner_barcode,
+    inspectedValue: item?.pis_inner_barcode,
     pisValue: masterInnerBarcode,
+    sourceLabel: "PIS",
     referenceLabel: "Master",
   });
-  if (normalizeBarcodeValue(masterInnerBarcode) && innerDifference) {
+  if (
+    (normalizeBarcodeValue(masterInnerBarcode) || normalizeBarcodeValue(item?.pis_inner_barcode)) &&
+    innerDifference
+  ) {
     differences.push(innerDifference);
   }
 
   return differences;
+};
+
+const buildCountryDifferences = (item = {}) => {
+  const pisCountry = normalizeText(item?.country_of_origin);
+  const masterCountry = normalizeText(item?.master_country_of_origin);
+  if (!pisCountry && !masterCountry) return [];
+
+  const difference = createTextDifference({
+    key: "country-of-origin",
+    section: "Country",
+    segment: "Origin",
+    attribute: "Country of Origin",
+    inspectedValue: pisCountry,
+    pisValue: masterCountry,
+    sourceLabel: "PIS",
+    referenceLabel: "Master",
+  });
+
+  return difference ? [difference] : [];
 };
 
 const formatBoxModeLabel = (mode = "") => {
@@ -1023,26 +1108,11 @@ const formatBoxModeLabel = (mode = "") => {
 };
 
 const buildFinalPisCheckRow = (item = {}) => {
-  const inspectedItemEntries = buildItemMeasurementEntries({
-    sizes: item?.inspected_item_sizes,
-    singleLbh: item?.inspected_item_LBH,
-    topLbh: item?.inspected_item_top_LBH,
-    bottomLbh: item?.inspected_item_bottom_LBH,
-    weight: item?.inspected_weight,
-  });
   const masterItemEntries = buildItemMeasurementEntries({
     sizes: item?.master_item_sizes,
   });
   const pisItemEntries = buildItemMeasurementEntries({
     sizes: item?.pis_item_sizes,
-  });
-  const inspectedBoxEntries = buildBoxMeasurementEntries({
-    sizes: item?.inspected_box_sizes,
-    mode: item?.inspected_box_mode,
-    singleLbh: item?.inspected_box_LBH,
-    topLbh: item?.inspected_box_top_LBH || item?.inspected_top_LBH,
-    bottomLbh: item?.inspected_box_bottom_LBH || item?.inspected_bottom_LBH,
-    weight: item?.inspected_weight,
   });
   const masterBoxEntries = buildBoxMeasurementEntries({
     sizes: item?.master_box_sizes,
@@ -1056,64 +1126,53 @@ const buildFinalPisCheckRow = (item = {}) => {
   const hasMasterBoxEntries = masterBoxEntries.length > 0;
   const hasPisItemEntries = pisItemEntries.length > 0;
   const hasPisBoxEntries = pisBoxEntries.length > 0;
-  const referenceItemEntries = hasMasterItemEntries ? masterItemEntries : pisItemEntries;
-  const referenceBoxEntries = hasMasterBoxEntries ? masterBoxEntries : pisBoxEntries;
-  const hasReferenceItemEntries = referenceItemEntries.length > 0;
-  const hasReferenceBoxEntries = referenceBoxEntries.length > 0;
-  const itemReferenceLabel = hasMasterItemEntries ? "Master" : "PIS";
-  const boxReferenceLabel = hasMasterBoxEntries ? "Master" : "PIS";
-  const normalizedInspectedItemEntries = hasReferenceSizeArray(referenceItemEntries)
-    ? formatSizeArrayToReference(inspectedItemEntries, referenceItemEntries, {
+  const itemReferenceLabel = "Master";
+  const boxReferenceLabel = "Master";
+  const normalizedPisItemEntries = hasReferenceSizeArray(masterItemEntries)
+    ? formatSizeArrayToReference(pisItemEntries, masterItemEntries, {
         type: "item",
       })
-    : inspectedItemEntries;
-  const normalizedInspectedBoxEntries = hasReferenceSizeArray(referenceBoxEntries)
-    ? formatSizeArrayToReference(inspectedBoxEntries, referenceBoxEntries, {
+    : pisItemEntries;
+  const normalizedPisBoxEntries = hasReferenceSizeArray(masterBoxEntries)
+    ? formatSizeArrayToReference(pisBoxEntries, masterBoxEntries, {
         type: "box",
       })
-    : inspectedBoxEntries;
+    : pisBoxEntries;
 
-  const resolvedInspectedBoxMode = formatBoxModeLabel(
-    detectBoxPackagingMode(item?.inspected_box_mode, item?.inspected_box_sizes),
-  );
   const resolvedPisBoxMode = formatBoxModeLabel(
-    detectBoxPackagingMode(
-      hasMasterBoxEntries ? item?.master_box_mode : item?.pis_box_mode,
-      hasMasterBoxEntries ? item?.master_box_sizes : item?.pis_box_sizes,
-    ),
+    detectBoxPackagingMode(item?.pis_box_mode, item?.pis_box_sizes),
+  );
+  const resolvedMasterBoxMode = formatBoxModeLabel(
+    detectBoxPackagingMode(item?.master_box_mode, item?.master_box_sizes),
   );
 
   const differences = [
-    ...(hasReferenceItemEntries
-      ? buildItemSizeDifferences(normalizedInspectedItemEntries, referenceItemEntries, {
+    ...buildMasterPresenceDifferences({
+      hasPisItemEntries,
+      hasMasterItemEntries,
+      hasPisBoxEntries,
+      hasMasterBoxEntries,
+      pisItemEntries,
+      pisBoxEntries,
+    }),
+    ...(hasMasterItemEntries
+      ? buildItemSizeDifferences(normalizedPisItemEntries, masterItemEntries, {
+          sourceLabel: "PIS",
           referenceLabel: itemReferenceLabel,
         })
       : []),
-    ...(hasReferenceBoxEntries
+    ...(hasMasterBoxEntries
       ? buildBoxSizeDifferences({
-          inspectedEntries: normalizedInspectedBoxEntries,
-          pisEntries: referenceBoxEntries,
-          inspectedMode: resolvedInspectedBoxMode,
-          pisMode: resolvedPisBoxMode,
-          referenceLabel: boxReferenceLabel,
-        })
-      : []),
-    ...buildOverallWeightDifferences({
-      inspectedWeight: item?.inspected_weight,
-      masterItemEntries: referenceItemEntries,
-      masterBoxEntries: referenceBoxEntries,
-      itemReferenceLabel,
-      boxReferenceLabel,
-    }),
-    ...(hasReferenceBoxEntries
-      ? buildCbmDifferences({
-          inspectedCbm: item?.cbm?.calculated_inspected_total,
-          masterBoxEntries: referenceBoxEntries,
-          masterBoxMode: hasMasterBoxEntries ? item?.master_box_mode : item?.pis_box_mode,
+          inspectedEntries: normalizedPisBoxEntries,
+          pisEntries: masterBoxEntries,
+          inspectedMode: resolvedPisBoxMode,
+          pisMode: resolvedMasterBoxMode,
+          sourceLabel: "PIS",
           referenceLabel: boxReferenceLabel,
         })
       : []),
     ...buildBarcodeDifferences(item),
+    ...buildCountryDifferences(item),
   ];
 
   if (differences.length === 0) {
@@ -1138,12 +1197,13 @@ const buildFinalPisCheckRow = (item = {}) => {
     updated_at: formatUpdatedDate(item?.updatedAt),
     diff_fields: diffFields,
     measurements: {
-      inspected_item: buildMeasurementDisplay(normalizedInspectedItemEntries, "net_weight"),
-      pis_item: buildMeasurementDisplay(referenceItemEntries, "net_weight"),
-      inspected_box: buildMeasurementDisplay(normalizedInspectedBoxEntries, "gross_weight"),
-      pis_box: buildMeasurementDisplay(referenceBoxEntries, "gross_weight"),
+      inspected_item: buildMeasurementDisplay(normalizedPisItemEntries, "net_weight"),
+      pis_item: buildMeasurementDisplay(masterItemEntries, "net_weight"),
+      inspected_box: buildMeasurementDisplay(normalizedPisBoxEntries, "gross_weight"),
+      pis_box: buildMeasurementDisplay(masterBoxEntries, "gross_weight"),
     },
     references: {
+      source_label: "PIS",
       item_label: itemReferenceLabel,
       box_label: boxReferenceLabel,
       has_master_item_sizes: hasMasterItemEntries,

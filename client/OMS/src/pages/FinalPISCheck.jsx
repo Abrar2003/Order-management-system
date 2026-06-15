@@ -139,7 +139,7 @@ const FinalPisCheckReport = ({
             <div className="pis-diff-report-eyebrow">{eyebrow}</div>
             <h2 className="pis-diff-report-title">{title}</h2>
             <div className="pis-diff-report-subtitle">
-              Checked items with master vs inspected differences
+              Checked items with PIS vs master differences
             </div>
             <div className="pis-diff-report-subtitle">
               Generated {formatPreviewDateTime(report?.generated_at)}
@@ -198,7 +198,7 @@ const FinalPisCheckReport = ({
         {rows.length === 0 ? (
           <section className="pis-diff-report-item">
             <div className="p-4 text-center text-secondary">
-              No checked items with master vs inspected differences were found for the current filters.
+              No checked items with PIS vs master differences were found for the current filters.
             </div>
           </section>
         ) : (
@@ -207,11 +207,12 @@ const FinalPisCheckReport = ({
             const differences = Array.isArray(row?.differences) ? row.differences : [];
             const references = row?.references || {};
             const comments = Array.isArray(row?.comments) ? row.comments : [];
+            const sourceLabel = references.source_label || "PIS";
             const itemReferenceLabel = references.item_label || "Master";
             const boxReferenceLabel = references.box_label || "Master";
             const measurementCards = [
               {
-                label: "Inspected Item",
+                label: `${sourceLabel} Item`,
                 size: measurements?.inspected_item?.sizeDisplay,
                 weightLabel: "Net",
                 weight: measurements?.inspected_item?.weightDisplay,
@@ -223,7 +224,7 @@ const FinalPisCheckReport = ({
                 weight: measurements?.pis_item?.weightDisplay,
               },
               {
-                label: "Inspected Box",
+                label: `${sourceLabel} Box`,
                 size: measurements?.inspected_box?.sizeDisplay,
                 weightLabel: "Gross",
                 weight: measurements?.inspected_box?.weightDisplay,
@@ -308,7 +309,7 @@ const FinalPisCheckReport = ({
                       <tr>
                         <th>Area</th>
                         <th>Measurement</th>
-                        <th>Inspected</th>
+                        <th>{sourceLabel}</th>
                         <th>Reference</th>
                         <th>Difference</th>
                         <th>Remark</th>

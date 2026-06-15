@@ -87,7 +87,8 @@ const HEADER_FORMULAS = Object.freeze({
     title: "Inspection Time (days)",
     lines: [
       "Formula: (last inspection createdAt - first inspection createdAt) / (1000 x 60 x 60 x 24).",
-      "This value is only calculated when at least 2 inspection records exist, then rounded to 2 decimals in the API.",
+      "For a PO with one inspection, the API uses order date to inspection date.",
+      "The value is rounded to 2 decimals in the API.",
     ],
   },
   rejectionPercent: {
@@ -95,6 +96,7 @@ const HEADER_FORMULAS = Object.freeze({
     lines: [
       "Start with remaining = order quantity.",
       "For each inspection: rejected = remaining - passed, rejection % = (rejected / remaining) x 100.",
+      "For a PO fully passed in one inspection, rejection is 0%.",
       "Average Rejection (%) = average of the non-zero rejection percentages collected across inspections.",
     ],
   },

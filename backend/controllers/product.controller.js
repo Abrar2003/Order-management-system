@@ -41,6 +41,9 @@ const calculateShippingTimeDays = (orderDate, shippingDate) => {
   return diffDays >= 0 ? diffDays : null;
 };
 
+const getInspectionDateValue = (inspection = {}) =>
+  inspection?.inspection_date || inspection?.createdAt || null;
+
 const latestValidShipmentDate = (shipmentEntries = []) =>
   (Array.isArray(shipmentEntries) ? shipmentEntries : []).reduce((latest, entry) => {
     const parsed = toUtcDateOnly(entry?.stuffing_date);
@@ -75,8 +78,10 @@ const normalizeDistinctValues = (values = []) =>
 
 const processOrderAnalyticsRow = (order = {}) => {
   const inspections = (Array.isArray(order.inspections) ? order.inspections : [])
-    .filter((inspection) => inspection?.createdAt)
-    .sort((left, right) => new Date(left.createdAt) - new Date(right.createdAt));
+    .filter((inspection) => getInspectionDateValue(inspection))
+    .sort((left, right) =>
+      new Date(getInspectionDateValue(left)) - new Date(getInspectionDateValue(right)),
+    );
   const orderQuantity = Math.max(0, toFiniteNumber(order.quantity, 0));
   const passedQuantity = inspections.reduce(
     (sum, inspection) => sum + Math.max(0, toFiniteNumber(inspection?.passed, 0)),
@@ -94,9 +99,26 @@ const processOrderAnalyticsRow = (order = {}) => {
   let inspectionTimeDays = null;
   let rejectionPercent = null;
 
-  if (inspections.length >= 2) {
-    const first = new Date(inspections[0].createdAt);
-    const last = new Date(inspections[inspections.length - 1].createdAt);
+  if (inspections.length === 1) {
+    const [inspection] = inspections;
+    const inspectionDays = calculateShippingTimeDays(
+      order.order_date,
+      getInspectionDateValue(inspection),
+    );
+    inspectionTimeDays = inspectionDays === null
+      ? null
+      : toRoundedNumber(inspectionDays, 2);
+
+    const passed = Math.max(0, toFiniteNumber(inspection?.passed, 0));
+    if (orderQuantity > 0) {
+      const rejected = Math.max(0, orderQuantity - passed);
+      rejectionPercent = passed >= orderQuantity
+        ? 0
+        : toRoundedNumber((rejected / orderQuantity) * 100, 2);
+    }
+  } else if (inspections.length >= 2) {
+    const first = new Date(getInspectionDateValue(inspections[0]));
+    const last = new Date(getInspectionDateValue(inspections[inspections.length - 1]));
     const inspectionDays = (last - first) / DAY_MS;
     inspectionTimeDays = Number.isFinite(inspectionDays)
       ? toRoundedNumber(inspectionDays, 2)
@@ -290,6 +312,7 @@ exports.getProductAnalytics = async (req, res) => {
               as: "insp",
               in: {
                 passed: "$$insp.passed",
+                inspection_date: "$$insp.inspection_date",
                 createdAt: "$$insp.createdAt",
               },
             },

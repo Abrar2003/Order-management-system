@@ -100,23 +100,13 @@ const normalizeEntries = (entries = [], weightKey = "") =>
     .filter((entry) => hasEntryValue(entry, weightKey));
 
 const resolveItemSizeEntries = (item = {}) => {
-  const masterEntries = normalizeEntries(item?.master_item_sizes, "net_weight");
-  if (masterEntries.length > 0) return masterEntries;
-  return normalizeEntries(item?.pis_item_sizes, "net_weight");
+  return normalizeEntries(item?.master_item_sizes, "net_weight");
 };
 
 const resolveBoxSizeData = (item = {}) => {
-  const masterEntries = normalizeEntries(item?.master_box_sizes, "gross_weight");
-  if (masterEntries.length > 0) {
-    return {
-      entries: masterEntries,
-      mode: item?.master_box_mode,
-    };
-  }
-
   return {
-    entries: normalizeEntries(item?.pis_box_sizes, "gross_weight"),
-    mode: item?.pis_box_mode,
+    entries: normalizeEntries(item?.master_box_sizes, "gross_weight"),
+    mode: item?.master_box_mode,
   };
 };
 
@@ -193,6 +183,12 @@ const renderSizeEntries = (entries = [], { emptyLabel = "No master sizes saved" 
     </div>
   );
 };
+
+const getMasterBarcode = (item = {}) =>
+  formatText(item?.master_master_barcode || item?.master_barcode);
+
+const getMasterInnerBarcode = (item = {}) =>
+  formatText(item?.master_inner_barcode);
 
 const ItemMasters = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -415,23 +411,28 @@ const ItemMasters = () => {
                             <div className="small text-secondary">{getVendors(item)}</div>
                             <div className="small text-secondary">
                               {getProductType(item)}
-                              {item?.country_of_origin
-                                ? ` - Origin: ${item.country_of_origin}`
+                              {item?.master_country_of_origin
+                                ? ` - Master Origin: ${item.master_country_of_origin}`
                                 : ""}
                             </div>
-                            {item?.pis_checked_flag === true && (
-                              <span className="badge text-bg-success mt-1">PIS Checked</span>
-                            )}
+                            <div className="small text-secondary">
+                              Master Barcode: {getMasterBarcode(item)}
+                            </div>
+                            <div className="small text-secondary">
+                              Master Inner Barcode: {getMasterInnerBarcode(item)}
+                            </div>
                           </td>
                           <td>
                             <div className="small text-secondary mb-1">
                               Box mode: {formatBoxMode(combinedSizeData.boxMode)}
                             </div>
                             {renderSizeEntries(combinedSizeData.rows, {
-                              emptyLabel: "No sizes saved",
+                              emptyLabel: "No master sizes saved",
                             })}
                           </td>
-                          <td>{formatDate(item?.updatedAt)}</td>
+                          <td>
+                            {formatDate(item?.updatedAt)}
+                          </td>
                         </tr>
                       );
                     })
