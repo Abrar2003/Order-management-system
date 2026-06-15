@@ -5192,6 +5192,62 @@ small,
   min-height: 2.75rem;
 }
 
+.product-analytics-parent-row {
+  cursor: pointer;
+}
+
+.product-analytics-parent-row > td {
+  vertical-align: middle;
+}
+
+.product-analytics-toggle {
+  width: 1.75rem;
+  height: 1.75rem;
+  margin-right: 0.5rem;
+  border: 1px solid var(--om-border, #d8cbb8);
+  border-radius: 999px;
+  background: #fff;
+  color: #3a2f29;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.product-analytics-toggle:hover,
+.product-analytics-toggle:focus-visible {
+  background: #f5efe6;
+  outline: none;
+}
+
+.product-analytics-item-name {
+  max-width: 24rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.product-analytics-detail-row > td {
+  background: #fbf8f3;
+  padding: 0.75rem 1rem;
+}
+
+.product-analytics-detail-wrap {
+  border: 1px solid var(--om-border, #d8cbb8);
+  border-radius: 8px;
+  overflow-x: auto;
+  background: #fff;
+}
+
+.product-analytics-detail-table th {
+  white-space: nowrap;
+  color: #5f5248;
+  background: #f3eadf;
+}
+
+.product-analytics-detail-table td,
+.product-analytics-detail-table th {
+  padding: 0.55rem 0.75rem;
+}
+
 @media (max-width: 1400px) {
   .shipments-table {
     font-size: 0.8rem;

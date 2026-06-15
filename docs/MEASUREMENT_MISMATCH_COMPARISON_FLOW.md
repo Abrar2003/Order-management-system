@@ -9,7 +9,7 @@ The numeric measurement rules are centralized in `backend/helpers/measurementMis
 | Measurement | Compared only when | Mismatch rule | Notes |
 |---|---|---|---|
 | Weight | Both inspected/current value and reference value are present and greater than zero | `abs(inspected - reference) / reference * 100 > 10` | Exactly 10% is accepted. Missing weight on either side is not compared. |
-| Item size `L`, `B`, `H` | Both side values for that axis are present and greater than zero | Absolute variance is `> 0.5 cm` | Exactly `0.5 cm` is accepted. Missing axis data is not compared. |
+| Item size `L`, `B`, `H` | Both side values for that axis are present and greater than zero | Absolute variance is `> 1 cm` | Exactly `1 cm` is accepted. Missing axis data is not compared. |
 | Box size `L`, `B`, `H` | Both side values for that axis are present and greater than zero | Absolute variance is `> 1 cm` | Exactly `1 cm` is accepted. Missing axis data is not compared. |
 
 For these measurement rules, "reference" depends on the page:
@@ -55,8 +55,8 @@ Non-measurement checks still exist where the page already supported them:
 |---|---|---|---|
 | 1. Query base data | Query unchecked `Item` records matching search/brand/vendor. | Aggregate `Inspection` records by report filters, keep only the latest 3 inspections per item code, then fetch current `Item` documents for those item codes. | Query checked `Item` records matching search/brand/vendor. |
 | 2. Normalize measurements | Build comparable inspected and PIS entries from array-backed fields first, then legacy LBH/weight fallback fields. | Normalize both historical inspection snapshot and current item inspected data with `buildNormalizedInspectionSizeState`. | Build inspected entries, PIS entries, and master entries from array-backed fields first, then legacy fallback fields. |
-| 3. Select reference | PIS fields are the reference. | Current item inspected fields are the reference. | Master fields are the reference when present; otherwise PIS fields are the reference. |
-| 4. Apply measurement rules | Weight `> 10%`, item size `> 0.5 cm`, box size `> 1 cm`; missing one-side measurement values are skipped. | Same rules; inspections with no comparable data are removed before grouping and pagination, and missing per-field data does not create a mismatch. | Same rules; missing one-side measurement values do not create size/weight differences. |
+| 3. Select reference | Master fields are used to order PIS/inspected sizes when present; inspected falls back to PIS order when Master is unavailable. | Master fields are used first to order snapshot/current inspected sizes; PIS fields are the fallback reference. | Master fields are the reference when present; otherwise PIS fields are the reference. |
+| 4. Apply measurement rules | Weight `> 10%`, item size `> 1 cm`, box size `> 1 cm`; missing one-side measurement values are skipped. | Same rules; inspections with no comparable data are removed before grouping and pagination, and missing per-field data does not create a mismatch. | Same rules; missing one-side measurement values do not create size/weight differences. |
 | 5. Build mismatch rows | Return only items with `pis_diff` fields. | Group only comparable inspections by QC/item. Mismatch highlighting is based on backend mismatch arrays. | Return only checked items with at least one difference. |
 | 6. Render | Main table renders inspected vs PIS measurements. Preview/export renders detailed differences. | Main table renders grouped QC rows. Detail modal renders current inspected values and each comparable inspection snapshot. | Cards and reports render inspected values beside Master/PIS reference values with detailed differences. |
 

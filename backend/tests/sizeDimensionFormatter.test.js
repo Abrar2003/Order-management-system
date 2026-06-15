@@ -4,8 +4,16 @@ const test = require("node:test");
 const {
   formatSizeArrayToReference,
   formatSizeEntryToReference,
+  normalizeSizeGroupForComparison,
   pickReferenceSizeArray,
 } = require("../helpers/sizeDimensionFormatter");
+const { buildFinalPisCheckRows } = require("../helpers/finalPisCheck");
+const {
+  compareInspectionSizeSnapshot,
+} = require("../helpers/inspectionSizeSnapshot");
+const {
+  compareItemSizeDimensionVariance,
+} = require("../helpers/measurementMismatchRules");
 
 test("reorders incoming dimensions to match reference dimensions", () => {
   const result = formatSizeEntryToReference(
@@ -130,4 +138,82 @@ test("does not match dimensions greater than tolerance", () => {
   );
 
   assert.deepEqual(result, { L: 98.9, B: 20, H: 30 });
+});
+
+test("normalizes PIS diff comparison sources before size mismatch checks", () => {
+  const reference = [{ L: 100, B: 50, H: 100 }];
+  const inspected = normalizeSizeGroupForComparison({
+    sourceSizes: [{ L: 99, B: 101, H: 49 }],
+    referenceSizes: reference,
+    type: "item",
+  });
+
+  const hasMismatch = ["L", "B", "H"].some((axis) =>
+    compareItemSizeDimensionVariance(inspected[0][axis], reference[0][axis]).mismatch,
+  );
+
+  assert.deepEqual(inspected, [{ L: 99, B: 49, H: 101 }]);
+  assert.equal(hasMismatch, false);
+});
+
+test("final PIS check does not return a row when inspected dimensions only differ by LBH order", () => {
+  const rows = buildFinalPisCheckRows([
+    {
+      code: "ITEM-1",
+      description: "Normalized item",
+      inspected_item_sizes: [{ L: 99, B: 101, H: 49, net_weight: 10 }],
+      master_item_sizes: [{ L: 100, B: 50, H: 100, net_weight: 10 }],
+    },
+  ]);
+
+  assert.deepEqual(rows, []);
+});
+
+test("final PIS check falls back to PIS reference when master sizes are missing", () => {
+  const rows = buildFinalPisCheckRows([
+    {
+      code: "ITEM-2",
+      description: "PIS fallback item",
+      inspected_item_sizes: [{ L: 99, B: 101, H: 49, net_weight: 10 }],
+      pis_item_sizes: [{ L: 100, B: 50, H: 100, net_weight: 10 }],
+    },
+  ]);
+
+  assert.deepEqual(rows, []);
+});
+
+test("QC mismatch comparison ignores inspected LBH storage order when Master/PIS reference exists", () => {
+  const mismatch = compareInspectionSizeSnapshot(
+    {
+      inspected_item_sizes: [{ L: 99, B: 101, H: 49 }],
+      inspected_box_sizes: [{ L: 29, B: 61, H: 39, box_type: "master" }],
+    },
+    {
+      master_item_sizes: [{ L: 100, B: 50, H: 100 }],
+      pis_box_sizes: [{ L: 30, B: 40, H: 60, box_type: "master" }],
+      inspected_item_sizes: [{ L: 100, B: 50, H: 100 }],
+      inspected_box_sizes: [{ L: 30, B: 40, H: 60, box_type: "master" }],
+    },
+  );
+
+  assert.equal(mismatch.has_mismatch, false);
+  assert.deepEqual(mismatch.inspection_snapshot.inspected_item_sizes[0], {
+    L: 99,
+    B: 49,
+    H: 101,
+    remark: "",
+    net_weight: 0,
+    gross_weight: 0,
+  });
+  assert.deepEqual(mismatch.inspection_snapshot.inspected_box_sizes[0], {
+    L: 29,
+    B: 39,
+    H: 61,
+    net_weight: 0,
+    gross_weight: 0,
+    remark: "master",
+    box_type: "master",
+    item_count_in_inner: 0,
+    box_count_in_master: 0,
+  });
 });

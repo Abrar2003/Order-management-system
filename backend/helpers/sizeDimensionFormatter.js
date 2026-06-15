@@ -87,6 +87,8 @@ const formatSizeEntryToReference = (
   };
 };
 
+const normalizeSizeEntryToReference = formatSizeEntryToReference;
+
 const findReferenceEntryForIncoming = ({
   incomingEntry = {},
   incomingIndex = 0,
@@ -137,6 +139,16 @@ const formatSizeArrayToReference = (
   });
 };
 
+const normalizeSizeArrayToReference = formatSizeArrayToReference;
+
+const normalizeSizeGroupForComparison = ({
+  sourceSizes = [],
+  referenceSizes = [],
+  type = "item",
+  tolerance = DEFAULT_TOLERANCE,
+} = {}) =>
+  formatSizeArrayToReference(sourceSizes, referenceSizes, { type, tolerance });
+
 const pickReferenceSizeArray = (itemDoc = {}, type = "item") => {
   const masterKey = type === "box" ? "master_box_sizes" : "master_item_sizes";
   const pisKey = type === "box" ? "pis_box_sizes" : "pis_item_sizes";
@@ -156,5 +168,8 @@ module.exports = {
   formatSizeArrayToReference,
   formatSizeEntryToReference,
   hasReferenceSizeArray,
+  normalizeSizeArrayToReference,
+  normalizeSizeEntryToReference,
+  normalizeSizeGroupForComparison,
   pickReferenceSizeArray,
 };

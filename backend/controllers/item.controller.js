@@ -57,6 +57,10 @@ const {
   compareWeightVariance,
 } = require("../helpers/measurementMismatchRules");
 const {
+  formatSizeArrayToReference,
+  hasReferenceSizeArray,
+} = require("../helpers/sizeDimensionFormatter");
+const {
   NOT_SET_STATUS,
   PD_STATUSES,
   ProductDatabaseError,
@@ -1701,54 +1705,14 @@ const compareMeasurementEntryGroups = (
 };
 
 const buildPisDiffSummary = (item = {}) => {
-  const inspectedItemEntries = buildComparableMeasurementEntries({
-    sizes: item?.inspected_item_sizes,
-    singleLbh: item?.inspected_item_LBH,
-    topLbh: item?.inspected_item_top_LBH,
-    bottomLbh: item?.inspected_item_bottom_LBH,
-    weight: item?.inspected_weight,
-    totalWeightKey: "total_net",
-    topWeightKey: "top_net",
-    bottomWeightKey: "bottom_net",
-    weightKey: "net_weight",
-    remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
-  });
-  const pisItemEntries = buildComparableMeasurementEntries({
-    sizes: item?.pis_item_sizes,
-    singleLbh: item?.pis_item_LBH,
-    topLbh: item?.pis_item_top_LBH,
-    bottomLbh: item?.pis_item_bottom_LBH,
-    weight: item?.pis_weight,
-    totalWeightKey: "total_net",
-    topWeightKey: "top_net",
-    bottomWeightKey: "bottom_net",
-    weightKey: "net_weight",
-    remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
-  });
-  const inspectedBoxEntries = buildComparableMeasurementEntries({
-    sizes: item?.inspected_box_sizes,
-    singleLbh: item?.inspected_box_LBH,
-    topLbh: item?.inspected_box_top_LBH || item?.inspected_top_LBH,
-    bottomLbh: item?.inspected_box_bottom_LBH || item?.inspected_bottom_LBH,
-    weight: item?.inspected_weight,
-    totalWeightKey: "total_gross",
-    topWeightKey: "top_gross",
-    bottomWeightKey: "bottom_gross",
-    weightKey: "gross_weight",
-    remarkOptions: BOX_SIZE_REMARK_OPTIONS,
-  });
-  const pisBoxEntries = buildComparableMeasurementEntries({
-    sizes: item?.pis_box_sizes,
-    singleLbh: item?.pis_box_LBH,
-    topLbh: item?.pis_box_top_LBH,
-    bottomLbh: item?.pis_box_bottom_LBH,
-    weight: item?.pis_weight,
-    totalWeightKey: "total_gross",
-    topWeightKey: "top_gross",
-    bottomWeightKey: "bottom_gross",
-    weightKey: "gross_weight",
-    remarkOptions: BOX_SIZE_REMARK_OPTIONS,
-  });
+  const {
+    inspectedEntries: inspectedItemEntries,
+    pisEntries: pisItemEntries,
+  } = buildPisDiffComparisonEntrySets(item, "item");
+  const {
+    inspectedEntries: inspectedBoxEntries,
+    pisEntries: pisBoxEntries,
+  } = buildPisDiffComparisonEntrySets(item, "box");
 
   const itemComparison = compareMeasurementEntryGroups(
     inspectedItemEntries,
@@ -1845,6 +1809,9 @@ const PIS_DIFF_ITEM_SELECT = [
   "pis_box_mode",
   "pis_box_top_LBH",
   "pis_box_bottom_LBH",
+  "master_item_sizes",
+  "master_box_sizes",
+  "master_box_mode",
   "inspected_item_LBH",
   "inspected_item_sizes",
   "inspected_item_top_LBH",
@@ -2017,26 +1984,35 @@ const buildPisDiffMeasurementEntries = ({
   group = "item",
 } = {}) => {
   const isPis = source === "pis";
+  const isMaster = source === "master";
   const isItemGroup = group === "item";
-  const weight = isPis ? item?.pis_weight : item?.inspected_weight;
+  const weight = isPis || isMaster ? item?.pis_weight : item?.inspected_weight;
 
   return buildComparableMeasurementEntries({
-    sizes: isPis
-      ? (isItemGroup ? item?.pis_item_sizes : item?.pis_box_sizes)
-      : (isItemGroup ? item?.inspected_item_sizes : item?.inspected_box_sizes),
-    singleLbh: isPis
-      ? (isItemGroup ? item?.pis_item_LBH : item?.pis_box_LBH)
-      : (isItemGroup ? item?.inspected_item_LBH : item?.inspected_box_LBH),
-    topLbh: isPis
-      ? (isItemGroup ? item?.pis_item_top_LBH : item?.pis_box_top_LBH)
-      : (isItemGroup
-          ? item?.inspected_item_top_LBH
-          : item?.inspected_box_top_LBH || item?.inspected_top_LBH),
-    bottomLbh: isPis
-      ? (isItemGroup ? item?.pis_item_bottom_LBH : item?.pis_box_bottom_LBH)
-      : (isItemGroup
-          ? item?.inspected_item_bottom_LBH
-          : item?.inspected_box_bottom_LBH || item?.inspected_bottom_LBH),
+    sizes: isMaster
+      ? (isItemGroup ? item?.master_item_sizes : item?.master_box_sizes)
+      : isPis
+        ? (isItemGroup ? item?.pis_item_sizes : item?.pis_box_sizes)
+        : (isItemGroup ? item?.inspected_item_sizes : item?.inspected_box_sizes),
+    singleLbh: isMaster
+      ? null
+      : isPis
+        ? (isItemGroup ? item?.pis_item_LBH : item?.pis_box_LBH)
+        : (isItemGroup ? item?.inspected_item_LBH : item?.inspected_box_LBH),
+    topLbh: isMaster
+      ? null
+      : isPis
+        ? (isItemGroup ? item?.pis_item_top_LBH : item?.pis_box_top_LBH)
+        : (isItemGroup
+            ? item?.inspected_item_top_LBH
+            : item?.inspected_box_top_LBH || item?.inspected_top_LBH),
+    bottomLbh: isMaster
+      ? null
+      : isPis
+        ? (isItemGroup ? item?.pis_item_bottom_LBH : item?.pis_box_bottom_LBH)
+        : (isItemGroup
+            ? item?.inspected_item_bottom_LBH
+            : item?.inspected_box_bottom_LBH || item?.inspected_bottom_LBH),
     weight,
     totalWeightKey: isItemGroup ? "total_net" : "total_gross",
     topWeightKey: isItemGroup ? "top_net" : "top_gross",
@@ -2045,6 +2021,50 @@ const buildPisDiffMeasurementEntries = ({
     remarkOptions: isItemGroup ? ITEM_SIZE_REMARK_OPTIONS : BOX_SIZE_REMARK_OPTIONS,
   });
 };
+
+const buildPisDiffNormalizedMeasurementEntries = ({
+  item = {},
+  source = "pis",
+  group = "item",
+} = {}) => {
+  const type = group === "box" ? "box" : "item";
+  const sourceEntries = buildPisDiffMeasurementEntries({ item, source, group });
+  const masterEntries = buildPisDiffMeasurementEntries({
+    item,
+    source: "master",
+    group,
+  });
+
+  if (source === "master" || !Array.isArray(sourceEntries) || sourceEntries.length === 0) {
+    return sourceEntries;
+  }
+
+  if (hasReferenceSizeArray(masterEntries)) {
+    return formatSizeArrayToReference(sourceEntries, masterEntries, { type });
+  }
+
+  if (source === "inspected") {
+    const pisEntries = buildPisDiffMeasurementEntries({ item, source: "pis", group });
+    if (hasReferenceSizeArray(pisEntries)) {
+      return formatSizeArrayToReference(sourceEntries, pisEntries, { type });
+    }
+  }
+
+  return sourceEntries;
+};
+
+const buildPisDiffComparisonEntrySets = (item = {}, group = "item") => ({
+  inspectedEntries: buildPisDiffNormalizedMeasurementEntries({
+    item,
+    source: "inspected",
+    group,
+  }),
+  pisEntries: buildPisDiffNormalizedMeasurementEntries({
+    item,
+    source: "pis",
+    group,
+  }),
+});
 
 const buildPisDiffRows = (items = []) =>
   (Array.isArray(items) ? items : [])
@@ -2148,12 +2168,7 @@ const buildPisDiffMeasurementDetails = ({
   baseLabel = "Item",
   sizeComparator = compareItemSizeDimensionVariance,
 } = {}) => {
-  const inspectedEntries = buildPisDiffMeasurementEntries({
-    item,
-    source: "inspected",
-    group,
-  });
-  const pisEntries = buildPisDiffMeasurementEntries({ item, source: "pis", group });
+  const { inspectedEntries, pisEntries } = buildPisDiffComparisonEntrySets(item, group);
   const inspectedEntriesWithKeys = inspectedEntries.map((entry, index) => ({
     ...entry,
     __key: buildMeasurementEntryKey(entry, index),
@@ -2337,19 +2352,19 @@ const buildPisDiffDetailedComparisons = (item = {}) => {
 
 const buildPisDiffReportPreviewRow = (item = {}) => {
   const inspectedItemBlock = formatMeasurementBlockForReport(
-    buildPisDiffMeasurementEntries({ item, source: "inspected", group: "item" }),
+    buildPisDiffNormalizedMeasurementEntries({ item, source: "inspected", group: "item" }),
     { weightKey: "net_weight" },
   );
   const pisItemBlock = formatMeasurementBlockForReport(
-    buildPisDiffMeasurementEntries({ item, source: "pis", group: "item" }),
+    buildPisDiffNormalizedMeasurementEntries({ item, source: "pis", group: "item" }),
     { weightKey: "net_weight" },
   );
   const inspectedBoxBlock = formatMeasurementBlockForReport(
-    buildPisDiffMeasurementEntries({ item, source: "inspected", group: "box" }),
+    buildPisDiffNormalizedMeasurementEntries({ item, source: "inspected", group: "box" }),
     { weightKey: "gross_weight" },
   );
   const pisBoxBlock = formatMeasurementBlockForReport(
-    buildPisDiffMeasurementEntries({ item, source: "pis", group: "box" }),
+    buildPisDiffNormalizedMeasurementEntries({ item, source: "pis", group: "box" }),
     { weightKey: "gross_weight" },
   );
 
@@ -3799,19 +3814,19 @@ exports.exportPisDiffCheckedReport = async (req, res) => {
 
     const detailRows = checkedDiffRows.map((item) => {
       const inspectedItemBlock = formatMeasurementBlockForReport(
-        buildPisDiffMeasurementEntries({ item, source: "inspected", group: "item" }),
+        buildPisDiffNormalizedMeasurementEntries({ item, source: "inspected", group: "item" }),
         { weightKey: "net_weight" },
       );
       const pisItemBlock = formatMeasurementBlockForReport(
-        buildPisDiffMeasurementEntries({ item, source: "pis", group: "item" }),
+        buildPisDiffNormalizedMeasurementEntries({ item, source: "pis", group: "item" }),
         { weightKey: "net_weight" },
       );
       const inspectedBoxBlock = formatMeasurementBlockForReport(
-        buildPisDiffMeasurementEntries({ item, source: "inspected", group: "box" }),
+        buildPisDiffNormalizedMeasurementEntries({ item, source: "inspected", group: "box" }),
         { weightKey: "gross_weight" },
       );
       const pisBoxBlock = formatMeasurementBlockForReport(
-        buildPisDiffMeasurementEntries({ item, source: "pis", group: "box" }),
+        buildPisDiffNormalizedMeasurementEntries({ item, source: "pis", group: "box" }),
         { weightKey: "gross_weight" },
       );
 
@@ -4354,7 +4369,7 @@ exports.getItemOrdersHistory = async (req, res) => {
         .lean(),
       Order.find({ "item.item_code": itemCodeMatch })
         .select(
-          "order_id item brand vendor order_date ETD revised_ETD status quantity archived qc_record updatedAt",
+          "order_id item brand vendor order_date ETD revised_ETD status quantity shipment archived qc_record updatedAt",
         )
         .populate({
           path: "qc_record",
@@ -4440,7 +4455,9 @@ exports.getItemOrdersHistory = async (req, res) => {
         order_id: String(order?.order_id || "").trim(),
         brand: String(order?.brand || "").trim(),
         vendor: String(order?.vendor || "").trim(),
-        status: deriveOrderStatus({ orderEntry: order }),
+        status: Boolean(order?.archived)
+          ? "Archived"
+          : deriveOrderStatus({ orderEntry: order }),
         order_date: order?.order_date || null,
         ETD: order?.ETD || null,
         revised_ETD: order?.revised_ETD || null,

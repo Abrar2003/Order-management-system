@@ -9,6 +9,10 @@ const {
   compareWeightVariance,
   hasComparableNumber,
 } = require("./measurementMismatchRules");
+const {
+  formatSizeArrayToReference,
+  hasReferenceSizeArray,
+} = require("./sizeDimensionFormatter");
 
 const SIZE_ENTRY_LIMIT = 4;
 const NUMBER_TOLERANCE = 0.001;
@@ -337,6 +341,47 @@ const buildNormalizedInspectionSizeState = (source = {}) => {
   };
 };
 
+const pickInspectionComparisonReference = (source = {}, type = "item") => {
+  if (type === "box") {
+    const masterBoxSizes = normalizeBoxSizes(
+      source?.master_box_sizes,
+      source?.master_box_mode,
+    );
+    if (hasReferenceSizeArray(masterBoxSizes)) return masterBoxSizes;
+
+    const pisBoxSizes = normalizeBoxSizes(
+      source?.pis_box_sizes,
+      source?.pis_box_mode,
+    );
+    return hasReferenceSizeArray(pisBoxSizes) ? pisBoxSizes : [];
+  }
+
+  const masterItemSizes = normalizeItemSizes(source?.master_item_sizes);
+  if (hasReferenceSizeArray(masterItemSizes)) return masterItemSizes;
+
+  const pisItemSizes = normalizeItemSizes(source?.pis_item_sizes);
+  return hasReferenceSizeArray(pisItemSizes) ? pisItemSizes : [];
+};
+
+const normalizeInspectionStateToReference = (state = {}, referenceSource = {}) => {
+  const itemReference = pickInspectionComparisonReference(referenceSource, "item");
+  const boxReference = pickInspectionComparisonReference(referenceSource, "box");
+
+  return {
+    ...state,
+    inspected_item_sizes: hasReferenceSizeArray(itemReference)
+      ? formatSizeArrayToReference(state?.inspected_item_sizes, itemReference, {
+          type: "item",
+        })
+      : state?.inspected_item_sizes,
+    inspected_box_sizes: hasReferenceSizeArray(boxReference)
+      ? formatSizeArrayToReference(state?.inspected_box_sizes, boxReference, {
+          type: "box",
+        })
+      : state?.inspected_box_sizes,
+  };
+};
+
 const buildInspectionSizeSnapshot = ({
   qcDoc = null,
   updatePayload = {},
@@ -452,8 +497,14 @@ const compareEntryArrays = ({
 };
 
 const compareInspectionSizeSnapshot = (inspection = {}, currentSource = {}) => {
-  const inspectionState = buildNormalizedInspectionSizeState(inspection);
-  const currentState = buildNormalizedInspectionSizeState(currentSource);
+  const inspectionState = normalizeInspectionStateToReference(
+    buildNormalizedInspectionSizeState(inspection),
+    currentSource,
+  );
+  const currentState = normalizeInspectionStateToReference(
+    buildNormalizedInspectionSizeState(currentSource),
+    currentSource,
+  );
 
   const itemSizeComparison = compareEntryArrays({
     inspectionEntries: inspectionState.inspected_item_sizes,
@@ -548,4 +599,6 @@ module.exports = {
   buildNormalizedInspectionSizeState,
   buildInspectionSizeSnapshot,
   compareInspectionSizeSnapshot,
+  normalizeInspectionStateToReference,
+  pickInspectionComparisonReference,
 };

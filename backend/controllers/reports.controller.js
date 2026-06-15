@@ -518,6 +518,12 @@ const QC_REPORT_MISMATCH_ITEM_SELECT = [
   "inspected_top_LBH",
   "inspected_bottom_LBH",
   "inspected_weight",
+  "master_item_sizes",
+  "master_box_sizes",
+  "master_box_mode",
+  "pis_item_sizes",
+  "pis_box_sizes",
+  "pis_box_mode",
 ].join(" ");
 const QC_REPORT_MISMATCH_RECENT_INSPECTION_LIMIT = 3;
 const QC_REPORT_MISMATCH_STATUS = "Inspection Done";

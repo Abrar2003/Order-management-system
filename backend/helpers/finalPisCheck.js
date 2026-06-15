@@ -10,6 +10,10 @@ const {
   compareWeightVariance,
 } = require("./measurementMismatchRules");
 const { formatEan13BarcodeDisplay } = require("./barcodeFormat");
+const {
+  formatSizeArrayToReference,
+  hasReferenceSizeArray,
+} = require("./sizeDimensionFormatter");
 
 const FINAL_PIS_CHECK_ITEM_SELECT = [
   "code",
@@ -28,6 +32,9 @@ const FINAL_PIS_CHECK_ITEM_SELECT = [
   "master_item_sizes",
   "master_box_sizes",
   "master_box_mode",
+  "pis_item_sizes",
+  "pis_box_sizes",
+  "pis_box_mode",
   "inspected_item_LBH",
   "inspected_item_sizes",
   "inspected_item_top_LBH",
@@ -899,11 +906,25 @@ const buildOverallWeightDifferences = ({
   inspectedWeight = {},
   masterItemEntries = [],
   masterBoxEntries = [],
+  itemReferenceLabel = "Master",
+  boxReferenceLabel = "Master",
 } = {}) => {
   const differences = [];
   [
-    { key: "total-net", attribute: "Total Net", unit: "kg", fieldKey: "total_net" },
-    { key: "total-gross", attribute: "Total Gross", unit: "kg", fieldKey: "total_gross" },
+    {
+      key: "total-net",
+      attribute: "Total Net",
+      unit: "kg",
+      fieldKey: "total_net",
+      referenceLabel: itemReferenceLabel,
+    },
+    {
+      key: "total-gross",
+      attribute: "Total Gross",
+      unit: "kg",
+      fieldKey: "total_gross",
+      referenceLabel: boxReferenceLabel,
+    },
   ].forEach((weightField) => {
     const isNetWeight = weightField.fieldKey === "total_net";
     const masterEntries = isNetWeight ? masterItemEntries : masterBoxEntries;
@@ -924,7 +945,7 @@ const buildOverallWeightDifferences = ({
       pisValue: masterWeight,
       unit: weightField.unit,
       comparator: compareWeightVariance,
-      referenceLabel: "Master",
+      referenceLabel: weightField.referenceLabel,
     });
     if (difference) differences.push(difference);
   });
@@ -935,6 +956,7 @@ const buildCbmDifferences = ({
   inspectedCbm,
   masterBoxEntries = [],
   masterBoxMode = "",
+  referenceLabel = "Master",
 } = {}) => {
   const masterCbm = calculateEffectiveBoxEntriesCbmTotal(masterBoxEntries, masterBoxMode);
   if (masterCbm <= COMPARE_TOLERANCE) {
@@ -953,7 +975,7 @@ const buildCbmDifferences = ({
     compareTolerance: CBM_COMPARE_TOLERANCE + CBM_COMPARE_EPSILON,
     compareDecimals: CBM_COMPARE_DECIMALS,
     fixedDecimals: true,
-    referenceLabel: "Master",
+    referenceLabel,
   });
 
   return difference ? [difference] : [];
@@ -1011,6 +1033,9 @@ const buildFinalPisCheckRow = (item = {}) => {
   const masterItemEntries = buildItemMeasurementEntries({
     sizes: item?.master_item_sizes,
   });
+  const pisItemEntries = buildItemMeasurementEntries({
+    sizes: item?.pis_item_sizes,
+  });
   const inspectedBoxEntries = buildBoxMeasurementEntries({
     sizes: item?.inspected_box_sizes,
     mode: item?.inspected_box_mode,
@@ -1023,29 +1048,50 @@ const buildFinalPisCheckRow = (item = {}) => {
     sizes: item?.master_box_sizes,
     mode: item?.master_box_mode,
   });
+  const pisBoxEntries = buildBoxMeasurementEntries({
+    sizes: item?.pis_box_sizes,
+    mode: item?.pis_box_mode,
+  });
   const hasMasterItemEntries = masterItemEntries.length > 0;
   const hasMasterBoxEntries = masterBoxEntries.length > 0;
-  const referenceItemEntries = masterItemEntries;
-  const referenceBoxEntries = masterBoxEntries;
-  const itemReferenceLabel = "Master";
-  const boxReferenceLabel = "Master";
+  const hasPisItemEntries = pisItemEntries.length > 0;
+  const hasPisBoxEntries = pisBoxEntries.length > 0;
+  const referenceItemEntries = hasMasterItemEntries ? masterItemEntries : pisItemEntries;
+  const referenceBoxEntries = hasMasterBoxEntries ? masterBoxEntries : pisBoxEntries;
+  const hasReferenceItemEntries = referenceItemEntries.length > 0;
+  const hasReferenceBoxEntries = referenceBoxEntries.length > 0;
+  const itemReferenceLabel = hasMasterItemEntries ? "Master" : "PIS";
+  const boxReferenceLabel = hasMasterBoxEntries ? "Master" : "PIS";
+  const normalizedInspectedItemEntries = hasReferenceSizeArray(referenceItemEntries)
+    ? formatSizeArrayToReference(inspectedItemEntries, referenceItemEntries, {
+        type: "item",
+      })
+    : inspectedItemEntries;
+  const normalizedInspectedBoxEntries = hasReferenceSizeArray(referenceBoxEntries)
+    ? formatSizeArrayToReference(inspectedBoxEntries, referenceBoxEntries, {
+        type: "box",
+      })
+    : inspectedBoxEntries;
 
   const resolvedInspectedBoxMode = formatBoxModeLabel(
     detectBoxPackagingMode(item?.inspected_box_mode, item?.inspected_box_sizes),
   );
   const resolvedPisBoxMode = formatBoxModeLabel(
-    detectBoxPackagingMode(item?.master_box_mode, item?.master_box_sizes),
+    detectBoxPackagingMode(
+      hasMasterBoxEntries ? item?.master_box_mode : item?.pis_box_mode,
+      hasMasterBoxEntries ? item?.master_box_sizes : item?.pis_box_sizes,
+    ),
   );
 
   const differences = [
-    ...(hasMasterItemEntries
-      ? buildItemSizeDifferences(inspectedItemEntries, referenceItemEntries, {
+    ...(hasReferenceItemEntries
+      ? buildItemSizeDifferences(normalizedInspectedItemEntries, referenceItemEntries, {
           referenceLabel: itemReferenceLabel,
         })
       : []),
-    ...(hasMasterBoxEntries
+    ...(hasReferenceBoxEntries
       ? buildBoxSizeDifferences({
-          inspectedEntries: inspectedBoxEntries,
+          inspectedEntries: normalizedInspectedBoxEntries,
           pisEntries: referenceBoxEntries,
           inspectedMode: resolvedInspectedBoxMode,
           pisMode: resolvedPisBoxMode,
@@ -1054,14 +1100,17 @@ const buildFinalPisCheckRow = (item = {}) => {
       : []),
     ...buildOverallWeightDifferences({
       inspectedWeight: item?.inspected_weight,
-      masterItemEntries,
-      masterBoxEntries,
+      masterItemEntries: referenceItemEntries,
+      masterBoxEntries: referenceBoxEntries,
+      itemReferenceLabel,
+      boxReferenceLabel,
     }),
-    ...(hasMasterBoxEntries
+    ...(hasReferenceBoxEntries
       ? buildCbmDifferences({
           inspectedCbm: item?.cbm?.calculated_inspected_total,
-          masterBoxEntries,
-          masterBoxMode: item?.master_box_mode,
+          masterBoxEntries: referenceBoxEntries,
+          masterBoxMode: hasMasterBoxEntries ? item?.master_box_mode : item?.pis_box_mode,
+          referenceLabel: boxReferenceLabel,
         })
       : []),
     ...buildBarcodeDifferences(item),
@@ -1089,9 +1138,9 @@ const buildFinalPisCheckRow = (item = {}) => {
     updated_at: formatUpdatedDate(item?.updatedAt),
     diff_fields: diffFields,
     measurements: {
-      inspected_item: buildMeasurementDisplay(inspectedItemEntries, "net_weight"),
+      inspected_item: buildMeasurementDisplay(normalizedInspectedItemEntries, "net_weight"),
       pis_item: buildMeasurementDisplay(referenceItemEntries, "net_weight"),
-      inspected_box: buildMeasurementDisplay(inspectedBoxEntries, "gross_weight"),
+      inspected_box: buildMeasurementDisplay(normalizedInspectedBoxEntries, "gross_weight"),
       pis_box: buildMeasurementDisplay(referenceBoxEntries, "gross_weight"),
     },
     references: {
@@ -1099,6 +1148,8 @@ const buildFinalPisCheckRow = (item = {}) => {
       box_label: boxReferenceLabel,
       has_master_item_sizes: hasMasterItemEntries,
       has_master_box_sizes: hasMasterBoxEntries,
+      has_pis_item_sizes: hasPisItemEntries,
+      has_pis_box_sizes: hasPisBoxEntries,
     },
     comments: Array.isArray(item?.pis_update_comments)
       ? item.pis_update_comments

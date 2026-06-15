@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import SortHeaderButton from "../components/SortHeaderButton";
 import Tooltip from "../components/Tooltip";
+import { formatDateDDMMYYYY } from "../utils/date";
 import {
   getNextClientSortState,
   sortClientRows,
@@ -32,12 +33,33 @@ const normalizeFilterParam = (value, fallback = "all") => {
 
 const normalizeSearchParam = (value) => String(value || "").trim();
 
+const hasFiniteNumber = (value) => {
+  if (value === null || value === undefined || value === "") return false;
+  return Number.isFinite(Number(value));
+};
+
+const formatWholeNumber = (value) =>
+  hasFiniteNumber(value) ? Number(value).toLocaleString("en-IN") : "-";
+
+const formatDays = (value, { maximumFractionDigits = 1 } = {}) => {
+  if (!hasFiniteNumber(value)) return "-";
+  const rounded = Number(value);
+  const formatted = rounded.toLocaleString("en-IN", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits,
+  });
+  return `${formatted} ${Math.abs(rounded) === 1 ? "day" : "days"}`;
+};
+
+const formatPercent = (value) =>
+  hasFiniteNumber(value) ? Number(value).toFixed(2) : "-";
+
 const HEADER_FORMULAS = Object.freeze({
-  orderId: {
-    title: "PO",
+  poCount: {
+    title: "PO Count",
     lines: [
-      "Direct value from the order record: order.order_id.",
-      "This column is an identifier, so there is no derived formula.",
+      "Formula: PO Count = count of POs grouped under the same item code.",
+      "Expand the item row to view each PO included in this count.",
     ],
   },
   itemCode: {
@@ -74,6 +96,14 @@ const HEADER_FORMULAS = Object.freeze({
       "Start with remaining = order quantity.",
       "For each inspection: rejected = remaining - passed, rejection % = (rejected / remaining) x 100.",
       "Average Rejection (%) = average of the non-zero rejection percentages collected across inspections.",
+    ],
+  },
+  avgShippingTimeDays: {
+    title: "Avg Shipping Time (days)",
+    lines: [
+      "Formula: average of fully shipped PO shipping times for this item.",
+      "PO shipping time = latest shipment stuffing date - order date.",
+      "POs with pending shipment quantity or invalid dates are not counted.",
     ],
   },
 });
@@ -123,8 +153,9 @@ const ProductAnalytics = () => {
     brands: [],
     vendors: [],
   });
-  const [sortBy, setSortBy] = useState("orderId");
+  const [sortBy, setSortBy] = useState("itemCode");
   const [sortOrder, setSortOrder] = useState("asc");
+  const [expandedRowIds, setExpandedRowIds] = useState(() => new Set());
 
   const fetchData = useCallback(async () => {
     try {
@@ -205,13 +236,25 @@ const ProductAnalytics = () => {
     [sortBy, sortOrder],
   );
 
+  const toggleRow = useCallback((rowId) => {
+    setExpandedRowIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(rowId)) {
+        next.delete(rowId);
+      } else {
+        next.add(rowId);
+      }
+      return next;
+    });
+  }, []);
+
   const sortedRows = useMemo(
     () =>
       sortClientRows(rows, {
         sortBy,
         sortOrder,
         getSortValue: (row, column) => {
-          if (column === "orderId") return row?.orderId;
+          if (column === "poCount") return Number(row?.poCount || 0);
           if (column === "itemCode") return row?.itemCode;
           if (column === "orderQuantity") return Number(row?.orderQuantity || 0);
           if (column === "passedQuantity") {
@@ -225,6 +268,11 @@ const ProductAnalytics = () => {
           if (column === "rejectionPercent") {
             return Number.isFinite(Number(row?.rejectionPercent))
               ? Number(row.rejectionPercent)
+              : null;
+          }
+          if (column === "avgShippingTimeDays") {
+            return Number.isFinite(Number(row?.avgShippingTimeDays))
+              ? Number(row.avgShippingTimeDays)
               : null;
           }
           return "";
@@ -259,7 +307,7 @@ const ProductAnalytics = () => {
                   type="text"
                   className="form-control"
                   value={draftSearchInput}
-                  placeholder="Search items"
+                  placeholder="Search item code or PO"
                   onChange={(e) => setDraftSearchInput(e.target.value)}
                 />
               </div>
@@ -339,12 +387,12 @@ const ProductAnalytics = () => {
                   <thead className="table-primary">
                     <tr>
                       <th>
-                        <HeaderFormulaTooltip column="orderId">
+                        <HeaderFormulaTooltip column="poCount">
                           <SortHeaderButton
-                            label="PO"
-                            isActive={sortBy === "orderId"}
+                            label="PO Count"
+                            isActive={sortBy === "poCount"}
                             direction={sortOrder}
-                            onClick={() => handleSortColumn("orderId", "asc")}
+                            onClick={() => handleSortColumn("poCount", "desc")}
                             showNativeTitle={false}
                           />
                         </HeaderFormulaTooltip>
@@ -406,39 +454,123 @@ const ProductAnalytics = () => {
                           />
                         </HeaderFormulaTooltip>
                       </th>
+                      <th>
+                        <HeaderFormulaTooltip column="avgShippingTimeDays">
+                          <SortHeaderButton
+                            label="Avg Shipping Time"
+                            isActive={sortBy === "avgShippingTimeDays"}
+                            direction={sortOrder}
+                            onClick={() => handleSortColumn("avgShippingTimeDays", "desc")}
+                            showNativeTitle={false}
+                          />
+                        </HeaderFormulaTooltip>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
                     {sortedRows.length === 0 && (
                       <tr>
-                        <td colSpan="6" className="text-center py-4">
+                        <td colSpan="7" className="text-center py-4">
                           No data found
                         </td>
                       </tr>
                     )}
-                    {sortedRows.map((row, i) => (
-                      <tr key={i}>
-                        <td>{row.orderId}</td>
-                        <td>{row.itemCode}</td>
-                        <td>{row.orderQuantity}</td>
-                        <td>
-                          {row.passedQuantity !== null
-                            ? row.passedQuantity
-                            : "-"}
-                        </td>
-                        <td>
-                          {!isNaN(row.inspectionTimeDays)
-                            ? Number(row.inspectionTimeDays).toFixed(0)
-                            : "-"}
-                        </td>
+                    {sortedRows.map((row) => {
+                      const rowId = String(row?.id || row?.itemId || row?.itemCode || "");
+                      const isExpanded = expandedRowIds.has(rowId);
+                      const childRows = Array.isArray(row?.orders) ? row.orders : [];
 
-                        <td>
-                          {!isNaN(row.rejectionPercent)
-                            ? Number(row.rejectionPercent).toFixed(2)
-                            : "-"}
-                        </td>
-                      </tr>
-                    ))}
+                      return (
+                        <Fragment key={rowId}>
+                          <tr
+                            key={`${rowId}-parent`}
+                            className="product-analytics-parent-row"
+                            onClick={() => toggleRow(rowId)}
+                          >
+                            <td>
+                              <button
+                                type="button"
+                                className="product-analytics-toggle"
+                                aria-label={isExpanded ? "Collapse PO rows" : "Expand PO rows"}
+                                aria-expanded={isExpanded}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  toggleRow(rowId);
+                                }}
+                              >
+                                {isExpanded ? "-" : "+"}
+                              </button>
+                              <span className="fw-semibold">
+                                {formatWholeNumber(row?.poCount)} {Number(row?.poCount) === 1 ? "PO" : "POs"}
+                              </span>
+                            </td>
+                            <td>
+                              <div className="fw-semibold">{row?.itemCode || "-"}</div>
+                              {row?.itemName ? (
+                                <div className="text-secondary small product-analytics-item-name">
+                                  {row.itemName}
+                                </div>
+                              ) : null}
+                            </td>
+                            <td>{formatWholeNumber(row?.orderQuantity)}</td>
+                            <td>{formatWholeNumber(row?.passedQuantity)}</td>
+                            <td>{formatDays(row?.inspectionTimeDays, { maximumFractionDigits: 0 })}</td>
+                            <td>{formatPercent(row?.rejectionPercent)}</td>
+                            <td>{formatDays(row?.avgShippingTimeDays)}</td>
+                          </tr>
+                          {isExpanded && (
+                            <tr key={`${rowId}-children`} className="product-analytics-detail-row">
+                              <td colSpan="7">
+                                <div className="product-analytics-detail-wrap">
+                                  <table className="table table-sm align-middle mb-0 product-analytics-detail-table">
+                                    <thead>
+                                      <tr>
+                                        <th>PO</th>
+                                        <th>Order Date</th>
+                                        <th>Shipping Date</th>
+                                        <th>Shipping Time</th>
+                                        <th>Order Qty</th>
+                                        <th>Passed</th>
+                                        <th>Inspection Time</th>
+                                        <th>Average Rejection (%)</th>
+                                        <th>Brand</th>
+                                        <th>Vendor</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {childRows.length === 0 ? (
+                                        <tr>
+                                          <td colSpan="10" className="text-center text-secondary py-3">
+                                            No PO details found
+                                          </td>
+                                        </tr>
+                                      ) : childRows.map((poRow) => (
+                                        <tr key={`${rowId}-${poRow?.orderId}`}>
+                                          <td>{poRow?.orderId || "-"}</td>
+                                          <td>{poRow?.orderDate ? formatDateDDMMYYYY(poRow.orderDate, "-") : "-"}</td>
+                                          <td>{poRow?.shippingDate ? formatDateDDMMYYYY(poRow.shippingDate, "-") : "-"}</td>
+                                          <td>
+                                            {poRow?.isFullyShipped
+                                              ? formatDays(poRow?.shippingTimeDays)
+                                              : "-"}
+                                          </td>
+                                          <td>{formatWholeNumber(poRow?.orderQuantity)}</td>
+                                          <td>{formatWholeNumber(poRow?.passedQuantity)}</td>
+                                          <td>{formatDays(poRow?.inspectionTimeDays, { maximumFractionDigits: 0 })}</td>
+                                          <td>{formatPercent(poRow?.rejectionPercent)}</td>
+                                          <td>{poRow?.brand || "-"}</td>
+                                          <td>{poRow?.vendor || "-"}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

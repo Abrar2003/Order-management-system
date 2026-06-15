@@ -21,6 +21,18 @@ const toText = (value, fallback = "N/A") => {
   return normalized || fallback;
 };
 
+const getOrderStatusClassName = (status = "") => {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "archived") return "text-danger fw-semibold";
+  return "";
+};
+
+const getOrderRowClassName = (status = "") => {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "archived") return "table-danger";
+  return "table-light";
+};
+
 const ItemOrdersHistory = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -258,7 +270,7 @@ const ItemOrdersHistory = () => {
 
                     return (
                       <tbody key={order?.id || `${order?.order_id}-${order?.item_code}`}>
-                        <tr className="table-light">
+                        <tr className={getOrderRowClassName(order?.status)}>
                           <td>
                             <button
                               type="button"
@@ -285,7 +297,9 @@ const ItemOrdersHistory = () => {
                               revisedEtd={order?.revised_ETD}
                             />
                           </td>
-                          <td>{toText(order?.status)}</td>
+                          <td className={getOrderStatusClassName(order?.status)}>
+                            {toText(order?.status)}
+                          </td>
                           <td>{toSafeNumber(order?.quantity)}</td>
                         </tr>
 

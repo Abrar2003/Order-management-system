@@ -1,13 +1,221 @@
-const mongoose = require("mongoose");
 const Order = require("../models/order.model");
 const { applyDataAccessMatch } = require("../services/userDataAccess.service");
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const normalizeText = (value) => String(value ?? "").trim();
+
+const toFiniteNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const toRoundedNumber = (value, decimals = 2) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return Number(parsed.toFixed(decimals));
+};
+
+const toUtcDateOnly = (value) => {
+  if (!value) return null;
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) return null;
+  return new Date(Date.UTC(
+    parsed.getUTCFullYear(),
+    parsed.getUTCMonth(),
+    parsed.getUTCDate(),
+  ));
+};
+
+const toIsoDateOnly = (value) => {
+  const parsed = toUtcDateOnly(value);
+  return parsed ? parsed.toISOString().slice(0, 10) : "";
+};
+
+const calculateShippingTimeDays = (orderDate, shippingDate) => {
+  const orderDateUtc = toUtcDateOnly(orderDate);
+  const shippingDateUtc = toUtcDateOnly(shippingDate);
+  if (!orderDateUtc || !shippingDateUtc) return null;
+
+  const diffDays = (shippingDateUtc.getTime() - orderDateUtc.getTime()) / DAY_MS;
+  return diffDays >= 0 ? diffDays : null;
+};
+
+const latestValidShipmentDate = (shipmentEntries = []) =>
+  (Array.isArray(shipmentEntries) ? shipmentEntries : []).reduce((latest, entry) => {
+    const parsed = toUtcDateOnly(entry?.stuffing_date);
+    if (!parsed) return latest;
+    if (!latest || parsed.getTime() > latest.getTime()) return parsed;
+    return latest;
+  }, null);
+
+const sumShipmentQuantity = (shipmentEntries = []) =>
+  (Array.isArray(shipmentEntries) ? shipmentEntries : []).reduce(
+    (sum, entry) => sum + Math.max(0, toFiniteNumber(entry?.quantity, 0)),
+    0,
+  );
+
+const averageNumbers = (values = [], decimals = 2) => {
+  const validValues = (Array.isArray(values) ? values : []).filter((value) => {
+    if (value === null || value === undefined || value === "") return false;
+    return Number.isFinite(Number(value));
+  });
+  if (validValues.length === 0) return null;
+
+  const total = validValues.reduce((sum, value) => sum + Number(value), 0);
+  return toRoundedNumber(total / validValues.length, decimals);
+};
+
+const normalizeDistinctValues = (values = []) =>
+  [...new Set(
+    (Array.isArray(values) ? values : [])
+      .map((value) => normalizeText(value))
+      .filter(Boolean),
+  )].sort((left, right) => left.localeCompare(right));
+
+const processOrderAnalyticsRow = (order = {}) => {
+  const inspections = (Array.isArray(order.inspections) ? order.inspections : [])
+    .filter((inspection) => inspection?.createdAt)
+    .sort((left, right) => new Date(left.createdAt) - new Date(right.createdAt));
+  const orderQuantity = Math.max(0, toFiniteNumber(order.quantity, 0));
+  const passedQuantity = inspections.reduce(
+    (sum, inspection) => sum + Math.max(0, toFiniteNumber(inspection?.passed, 0)),
+    0,
+  );
+  const shippedQuantity = sumShipmentQuantity(order.shipment);
+  const isFullyShipped = orderQuantity > 0 && shippedQuantity >= orderQuantity;
+  const latestShipmentDate = isFullyShipped
+    ? latestValidShipmentDate(order.shipment)
+    : null;
+  const shippingTimeDays = isFullyShipped
+    ? calculateShippingTimeDays(order.order_date, latestShipmentDate)
+    : null;
+
+  let inspectionTimeDays = null;
+  let rejectionPercent = null;
+
+  if (inspections.length >= 2) {
+    const first = new Date(inspections[0].createdAt);
+    const last = new Date(inspections[inspections.length - 1].createdAt);
+    const inspectionDays = (last - first) / DAY_MS;
+    inspectionTimeDays = Number.isFinite(inspectionDays)
+      ? toRoundedNumber(inspectionDays, 2)
+      : null;
+
+    let remaining = orderQuantity;
+    const percentages = [];
+
+    for (const inspection of inspections) {
+      if (!remaining || remaining <= 0) break;
+
+      const passed = Math.max(0, toFiniteNumber(inspection?.passed, 0));
+      const rejected = Math.max(0, remaining - passed);
+      const percent = (rejected / remaining) * 100;
+
+      if (percent !== 0) percentages.push(percent);
+      remaining = rejected;
+    }
+
+    rejectionPercent = averageNumbers(percentages, 2);
+  }
+
+  return {
+    orderId: normalizeText(order.order_id),
+    itemId: normalizeText(order.itemId),
+    itemCode: normalizeText(order.itemCode),
+    itemName: normalizeText(order.itemName),
+    brand: normalizeText(order.brand),
+    vendor: normalizeText(order.vendor),
+    orderDate: toIsoDateOnly(order.order_date),
+    shippingDate: latestShipmentDate ? toIsoDateOnly(latestShipmentDate) : "",
+    shippingTimeDays: shippingTimeDays === null ? null : toRoundedNumber(shippingTimeDays, 1),
+    orderQuantity,
+    passedQuantity,
+    shippedQuantity: Math.min(orderQuantity || shippedQuantity, shippedQuantity),
+    isFullyShipped,
+    inspectionTimeDays,
+    rejectionPercent,
+  };
+};
+
+const groupProductAnalyticsRows = (orders = []) => {
+  const groupedRows = new Map();
+
+  (Array.isArray(orders) ? orders : []).forEach((order) => {
+    const poRow = processOrderAnalyticsRow(order);
+    const itemKey = poRow.itemId || poRow.itemCode;
+    if (!itemKey) return;
+
+    const existing = groupedRows.get(itemKey) || {
+      id: itemKey,
+      itemId: poRow.itemId,
+      itemCode: poRow.itemCode,
+      itemName: poRow.itemName,
+      brandValues: new Set(),
+      vendorValues: new Set(),
+      poCount: 0,
+      orderQuantity: 0,
+      passedQuantity: 0,
+      shippedQuantity: 0,
+      orders: [],
+    };
+
+    existing.poCount += 1;
+    existing.orderQuantity += poRow.orderQuantity;
+    existing.passedQuantity += poRow.passedQuantity;
+    existing.shippedQuantity += poRow.shippedQuantity;
+    existing.orders.push(poRow);
+
+    if (poRow.brand) existing.brandValues.add(poRow.brand);
+    if (poRow.vendor) existing.vendorValues.add(poRow.vendor);
+    if (!existing.itemName && poRow.itemName) existing.itemName = poRow.itemName;
+
+    groupedRows.set(itemKey, existing);
+  });
+
+  return [...groupedRows.values()].map((group) => {
+    const orders = [...group.orders].sort((left, right) =>
+      String(left.orderId || "").localeCompare(String(right.orderId || ""), undefined, {
+        numeric: true,
+        sensitivity: "base",
+      }),
+    );
+    const shippingValues = orders
+      .filter((order) => order.isFullyShipped)
+      .map((order) => order.shippingTimeDays);
+
+    return {
+      id: group.id,
+      itemId: group.itemId,
+      itemCode: group.itemCode,
+      itemName: group.itemName,
+      brand: normalizeDistinctValues([...group.brandValues]).join(", "),
+      vendor: normalizeDistinctValues([...group.vendorValues]).join(", "),
+      poCount: group.poCount,
+      orderQuantity: group.orderQuantity,
+      passedQuantity: group.passedQuantity,
+      shippedQuantity: group.shippedQuantity,
+      inspectionTimeDays: averageNumbers(
+        orders.map((order) => order.inspectionTimeDays),
+        2,
+      ),
+      rejectionPercent: averageNumbers(
+        orders.map((order) => order.rejectionPercent),
+        2,
+      ),
+      avgShippingTimeDays: averageNumbers(shippingValues, 1),
+      orders,
+    };
+  });
+};
+
 exports.getProductAnalytics = async (req, res) => {
-  console.log("🔥 NEW CONTROLLER v2");
   try {
     const { search = "", brand, vendor, page = 1, limit = 20 } = req.query;
 
-    const skip = (Number(page) - 1) * Number(limit);
+    const normalizedPage = Math.max(1, Number.parseInt(page, 10) || 1);
+    const normalizedLimit = Math.max(1, Number.parseInt(limit, 10) || 20);
+    const skip = (normalizedPage - 1) * normalizedLimit;
 
     // -------------------------------
     // MATCH STAGE (Filters)
@@ -17,10 +225,12 @@ exports.getProductAnalytics = async (req, res) => {
     };
 
     if (search) {
-      matchStage["item.item_code"] = {
-        $regex: search,
-        $options: "i",
-      };
+      const escapedSearch = normalizeText(search).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      matchStage.$or = [
+        { "item.item_code": { $regex: escapedSearch, $options: "i" } },
+        { "item.description": { $regex: escapedSearch, $options: "i" } },
+        { order_id: { $regex: escapedSearch, $options: "i" } },
+      ];
     }
 
     if (brand && brand !== "all") matchStage.brand = brand;
@@ -66,7 +276,13 @@ exports.getProductAnalytics = async (req, res) => {
       {
         $project: {
           order_id: 1,
+          order_date: 1,
+          brand: 1,
+          vendor: 1,
+          shipment: 1,
+          itemId: "$item._id",
           itemCode: "$item.item_code",
+          itemName: "$item.description",
           quantity: 1,
           inspections: {
             $map: {
@@ -81,83 +297,22 @@ exports.getProductAnalytics = async (req, res) => {
         },
       },
 
-      { $sort: { quantity: -1 } },
-
-      {
-        $facet: {
-          data: [{ $skip: skip }, { $limit: Number(limit) }],
-          totalCount: [{ $count: "count" }],
-        },
-      },
+      { $sort: { itemCode: 1, order_id: 1 } },
     ];
 
-    const result = await Order.aggregate(pipeline);
-    const processOrder = (order) => {
-      const inspections = (order.inspections || [])
-        .filter((i) => i?.createdAt)
-        .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-
-      // Calculate total passed quantity across all inspections
-      const totalPassed = inspections.reduce((sum, insp) => sum + (insp.passed || 0), 0);
-
-      if (inspections.length < 2) {
-        return {
-          orderId: order.order_id,
-          itemCode: order.itemCode,
-          orderQuantity: order.quantity,
-          passedQuantity: totalPassed,
-          inspectionTimeDays: null,
-          rejectionPercent: null,
-        };
-      }
-
-      // ✅ Inspection Time
-      const first = new Date(inspections[0].createdAt);
-      const last = new Date(inspections[inspections.length - 1].createdAt);
-
-      const inspectionTimeDays = (last - first) / (1000 * 60 * 60 * 24);
-
-      // ✅ Rejection Logic (your exact requirement)
-      let remaining = order.quantity;
-      const percentages = [];
-
-      for (const insp of inspections) {
-        if (!remaining || remaining <= 0) break;
-
-        const passed = insp.passed || 0;
-        const rejected = remaining - passed;
-
-        if (remaining >= 0) {
-          const percent = (rejected / remaining) * 100;
-
-          if (percent !== 0) {
-            percentages.push(percent);
-          }
-        }
-
-        remaining = rejected;
-      }
-
-      const rejectionPercent =
-        percentages.length > 0
-          ? percentages.reduce((a, b) => a + b, 0) / percentages.length
-          : null;
-
-      return {
-        orderId: order.order_id,
-        itemCode: order.itemCode,
-        orderQuantity: order.quantity,
-        passedQuantity: totalPassed,
-        inspectionTimeDays: Number(inspectionTimeDays.toFixed(2)),
-        rejectionPercent: rejectionPercent
-          ? Number(rejectionPercent.toFixed(2))
-          : null,
-      };
-    };
-    const rawData = result[0]?.data || [];
-const data = rawData.map(processOrder);
-    const total = result[0]?.totalCount[0]?.count || 0;
-    const totalPages = Math.ceil(total / Number(limit));
+    const rawOrders = await Order.aggregate(pipeline);
+    const groupedData = groupProductAnalyticsRows(rawOrders)
+      .sort((left, right) => {
+        const quantityDelta = Number(right.orderQuantity || 0) - Number(left.orderQuantity || 0);
+        if (quantityDelta !== 0) return quantityDelta;
+        return String(left.itemCode || "").localeCompare(String(right.itemCode || ""), undefined, {
+          numeric: true,
+          sensitivity: "base",
+        });
+      });
+    const total = groupedData.length;
+    const totalPages = Math.max(1, Math.ceil(total / normalizedLimit));
+    const data = groupedData.slice(skip, skip + normalizedLimit);
     
     return res.json({
       success: true,
@@ -165,8 +320,8 @@ const data = rawData.map(processOrder);
       pagination: {
         totalRecords: total,
         totalPages,
-        page: Number(page),
-        limit: Number(limit),
+        page: normalizedPage,
+        limit: normalizedLimit,
       },
       filters: {
         brands: brandOptions || [],
@@ -180,4 +335,10 @@ const data = rawData.map(processOrder);
       message: "Failed to fetch product analytics",
     });
   }
+};
+
+exports._private = {
+  calculateShippingTimeDays,
+  groupProductAnalyticsRows,
+  processOrderAnalyticsRow,
 };
