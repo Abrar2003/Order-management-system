@@ -175,12 +175,12 @@ test("normalizes PIS diff comparison sources before size mismatch checks", () =>
   assert.equal(hasMismatch, false);
 });
 
-test("final PIS check does not return a row when PIS dimensions only differ from Master by LBH order", () => {
+test("final PIS check does not return a row when inspected dimensions only differ from Master by LBH order", () => {
   const rows = buildFinalPisCheckRows([
     {
       code: "ITEM-1",
       description: "Normalized item",
-      pis_item_sizes: [{ L: 99, B: 101, H: 49, net_weight: 10 }],
+      inspected_item_sizes: [{ L: 99, B: 101, H: 49, net_weight: 10 }],
       master_item_sizes: [{ L: 100, B: 50, H: 100, net_weight: 10 }],
     },
   ]);
@@ -188,31 +188,31 @@ test("final PIS check does not return a row when PIS dimensions only differ from
   assert.deepEqual(rows, []);
 });
 
-test("final PIS check reports PIS item size differences against Master", () => {
+test("final PIS check reports inspected item size differences against Master", () => {
   const rows = buildFinalPisCheckRows([
     {
       code: "ITEM-2",
-      description: "Different PIS item",
-      pis_item_sizes: [{ L: 120, B: 50, H: 100, net_weight: 10 }],
+      description: "Different inspected item",
+      inspected_item_sizes: [{ L: 120, B: 50, H: 100, net_weight: 10 }],
       master_item_sizes: [{ L: 100, B: 50, H: 100, net_weight: 10 }],
     },
   ]);
 
   assert.equal(rows.length, 1);
   assert.deepEqual(rows[0].diff_fields, ["Item Size"]);
-  assert.equal(rows[0].references.source_label, "PIS");
+  assert.equal(rows[0].references.source_label, "Inspected");
   assert.equal(rows[0].references.item_label, "Master");
   assert.equal(rows[0].differences[0].inspected, "120 cm");
   assert.equal(rows[0].differences[0].pis, "100 cm");
 });
 
-test("final PIS check normalizes PIS box base dimensions against Master before mismatch rows", () => {
+test("final PIS check normalizes inspected box base dimensions against Master before mismatch rows", () => {
   const rows = buildFinalPisCheckRows([
     {
       code: "ITEM-BASE",
       description: "Normalized box base",
-      pis_box_mode: "individual",
-      pis_box_sizes: [
+      inspected_box_mode: "individual",
+      inspected_box_sizes: [
         { remark: "base", box_type: "individual", L: 55, B: 80, H: 105 },
       ],
       master_box_mode: "individual",
@@ -220,7 +220,7 @@ test("final PIS check normalizes PIS box base dimensions against Master before m
         { remark: "base", box_type: "individual", L: 55, B: 105, H: 79 },
       ],
       cbm: {
-        calculated_pis_total: "0.46",
+        calculated_inspected_total: "0.46",
         calculated_master_total: "0.46",
       },
     },
@@ -229,13 +229,13 @@ test("final PIS check normalizes PIS box base dimensions against Master before m
   assert.deepEqual(rows, []);
 });
 
-test("final PIS check keeps real PIS box dimension mismatches after normalization", () => {
+test("final PIS check keeps real inspected box dimension mismatches after normalization", () => {
   const rows = buildFinalPisCheckRows([
     {
       code: "ITEM-TOP",
       description: "Top height mismatch",
-      pis_box_mode: "individual",
-      pis_box_sizes: [
+      inspected_box_mode: "individual",
+      inspected_box_sizes: [
         { remark: "top", box_type: "individual", L: 246, B: 9, H: 106 },
       ],
       master_box_mode: "individual",
@@ -243,7 +243,7 @@ test("final PIS check keeps real PIS box dimension mismatches after normalizatio
         { remark: "top", box_type: "individual", L: 245, B: 8, H: 104.5 },
       ],
       cbm: {
-        calculated_pis_total: "0.2",
+        calculated_inspected_total: "0.2",
         calculated_master_total: "0.2",
       },
     },
@@ -251,7 +251,7 @@ test("final PIS check keeps real PIS box dimension mismatches after normalizatio
 
   assert.equal(rows.length, 1);
   assert.deepEqual(rows[0].diff_fields, ["Box Size"]);
-  assert.equal(rows[0].references.source_label, "PIS");
+  assert.equal(rows[0].references.source_label, "Inspected");
   assert.equal(rows[0].differences.length, 1);
   assert.equal(rows[0].differences[0].segment, "Top");
   assert.equal(rows[0].differences[0].attribute, "H");
@@ -259,13 +259,13 @@ test("final PIS check keeps real PIS box dimension mismatches after normalizatio
   assert.equal(rows[0].differences[0].pis, "104.5 cm");
 });
 
-test("final PIS check reports PIS box mode count and weight differences against Master", () => {
+test("final PIS check reports inspected box mode count and weight differences against Master", () => {
   const rows = buildFinalPisCheckRows([
     {
       code: "ITEM-3",
-      description: "Different PIS box",
-      pis_box_mode: "individual",
-      pis_box_sizes: [
+      description: "Different inspected box",
+      inspected_box_mode: "individual",
+      inspected_box_sizes: [
         {
           L: 30,
           B: 40,
@@ -293,7 +293,7 @@ test("final PIS check reports PIS box mode count and weight differences against 
 
   assert.equal(rows.length, 1);
   assert.deepEqual(rows[0].diff_fields, ["Box Size"]);
-  assert.equal(rows[0].references.source_label, "PIS");
+  assert.equal(rows[0].references.source_label, "Inspected");
   assert.ok(differenceAttributes.includes("Box Mode"));
   assert.ok(differenceAttributes.includes("Gross Weight"));
   assert.ok(differenceAttributes.includes("Box Count in Master"));
@@ -304,13 +304,13 @@ test("final PIS check reports missing Master data instead of falling back to PIS
     {
       code: "ITEM-4",
       description: "Missing master item",
-      pis_item_sizes: [{ L: 100, B: 50, H: 100, net_weight: 10 }],
+      inspected_item_sizes: [{ L: 100, B: 50, H: 100, net_weight: 10 }],
     },
   ]);
 
   assert.equal(rows.length, 1);
   assert.deepEqual(rows[0].diff_fields, ["Item Size"]);
-  assert.equal(rows[0].references.source_label, "PIS");
+  assert.equal(rows[0].references.source_label, "Inspected");
   assert.equal(rows[0].references.item_label, "Master");
   assert.equal(rows[0].differences[0].delta, "Master data missing");
 });
@@ -336,10 +336,10 @@ test("final PIS check reports inspected CBM differences against Master calculate
     {
       code: "ITEM-6",
       description: "CBM mismatch item",
-      pis_box_sizes: [{ L: 30, B: 40, H: 50, gross_weight: 10 }],
+      inspected_box_sizes: [{ L: 30, B: 40, H: 50, gross_weight: 10 }],
       master_box_sizes: [{ L: 100, B: 100, H: 100, gross_weight: 10 }],
       cbm: {
-        calculated_pis_total: "0.5",
+        calculated_inspected_total: "0.5",
       },
     },
   ]);
