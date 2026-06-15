@@ -32,6 +32,8 @@ const {
   getFinalPisCheckReportPreview,
   exportFinalPisCheckReport,
   createFinalPisCheckComment,
+  updateFinalPisCheckComment,
+  deleteFinalPisCheckComment,
   getPisUpdateLogs,
   getProductDatabaseItems,
   getItemDatabaseItems,
@@ -187,6 +189,22 @@ router.post(
   requirePermission("pis", "view"),
   invalidateItemsOnSuccess,
   createFinalPisCheckComment,
+);
+
+router.put(
+  "/final-pis-check/:code/comments/:commentId",
+  auth,
+  requirePermission("pis", "view"),
+  invalidateItemsOnSuccess,
+  updateFinalPisCheckComment,
+);
+
+router.delete(
+  "/final-pis-check/:code/comments/:commentId",
+  auth,
+  requirePermission("pis", "view"),
+  invalidateItemsOnSuccess,
+  deleteFinalPisCheckComment,
 );
 
 router.get(

@@ -3991,6 +3991,7 @@ exports.createFinalPisCheckComment = async (req, res) => {
       data: {
         id: String(savedComment?._id || ""),
         comment: savedComment?.comment || commentText,
+        created_by: String(savedComment?.created_by || ""),
         created_by_name: savedComment?.created_by_name || getActorDisplayName(req.user),
         created_by_role: savedComment?.created_by_role || normalizeTextField(req.user?.role),
         created_at: savedComment?.created_at || comment.created_at,
@@ -4001,6 +4002,142 @@ exports.createFinalPisCheckComment = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to add Final PIS Check comment",
+      error: error.message,
+    });
+  }
+};
+
+const getFinalPisCommentActorId = (user = {}) =>
+  normalizeTextField(user?._id || user?.id || "");
+
+const isFinalPisCommentCreator = (comment = {}, user = {}) => {
+  const actorId = getFinalPisCommentActorId(user);
+  const creatorId = normalizeTextField(comment?.created_by);
+  return Boolean(actorId && creatorId && actorId === creatorId);
+};
+
+const findFinalPisCheckCommentTarget = async ({ itemCodeInput = "", commentId = "" } = {}) => {
+  const normalizedItemCode = normalizeTextField(itemCodeInput);
+  const normalizedCommentId = normalizeTextField(commentId);
+
+  if (!normalizedItemCode) {
+    return { status: 400, message: "Item code is required." };
+  }
+  if (!normalizedCommentId || !mongoose.Types.ObjectId.isValid(normalizedCommentId)) {
+    return { status: 400, message: "Valid comment id is required." };
+  }
+
+  const itemCodeMatch = new RegExp(`^\\s*${escapeRegex(normalizedItemCode)}\\s*$`, "i");
+  const item = await Item.findOne({ code: itemCodeMatch }).select(
+    "_id code pis_update_comments",
+  );
+
+  if (!item) {
+    return { status: 404, message: "Item not found." };
+  }
+
+  const comment = item.pis_update_comments.id(normalizedCommentId);
+  if (!comment) {
+    return { status: 404, message: "Comment not found." };
+  }
+
+  return { item, comment };
+};
+
+exports.updateFinalPisCheckComment = async (req, res) => {
+  try {
+    const commentText = normalizeTextField(req.body?.comment);
+    if (!commentText) {
+      return res.status(400).json({
+        success: false,
+        message: "Comment is required.",
+      });
+    }
+    if (commentText.length > 1000) {
+      return res.status(400).json({
+        success: false,
+        message: "Comment cannot exceed 1000 characters.",
+      });
+    }
+
+    const target = await findFinalPisCheckCommentTarget({
+      itemCodeInput: req.params.code || req.params.itemCode,
+      commentId: req.params.commentId,
+    });
+    if (!target?.item || !target?.comment) {
+      return res.status(target.status || 404).json({
+        success: false,
+        message: target.message || "Comment not found.",
+      });
+    }
+
+    if (!isFinalPisCommentCreator(target.comment, req.user)) {
+      return res.status(403).json({
+        success: false,
+        message: "Only the comment creator can edit this comment.",
+      });
+    }
+
+    target.comment.comment = commentText;
+    await target.item.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Comment updated.",
+      data: {
+        id: String(target.comment?._id || ""),
+        comment: target.comment?.comment || commentText,
+        created_by: String(target.comment?.created_by || ""),
+        created_by_name: target.comment?.created_by_name || "",
+        created_by_role: target.comment?.created_by_role || "",
+        created_at: target.comment?.created_at || null,
+      },
+    });
+  } catch (error) {
+    console.error("Update Final PIS Check Comment Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update Final PIS Check comment",
+      error: error.message,
+    });
+  }
+};
+
+exports.deleteFinalPisCheckComment = async (req, res) => {
+  try {
+    const target = await findFinalPisCheckCommentTarget({
+      itemCodeInput: req.params.code || req.params.itemCode,
+      commentId: req.params.commentId,
+    });
+    if (!target?.item || !target?.comment) {
+      return res.status(target.status || 404).json({
+        success: false,
+        message: target.message || "Comment not found.",
+      });
+    }
+
+    if (!isFinalPisCommentCreator(target.comment, req.user)) {
+      return res.status(403).json({
+        success: false,
+        message: "Only the comment creator can delete this comment.",
+      });
+    }
+
+    target.comment.deleteOne();
+    await target.item.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Comment deleted.",
+      data: {
+        id: normalizeTextField(req.params.commentId),
+      },
+    });
+  } catch (error) {
+    console.error("Delete Final PIS Check Comment Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete Final PIS Check comment",
       error: error.message,
     });
   }

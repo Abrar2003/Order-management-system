@@ -6,6 +6,7 @@ import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import EditPisModal from "../components/EditPisModal";
 import { usePermissions } from "../auth/PermissionContext";
+import { getUserFromToken } from "../auth/auth.service";
 import { isStrictAdminRole, normalizeUserRole } from "../auth/permissions";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -126,6 +127,10 @@ const FinalPisCheckReport = ({
   canAddComment = false,
   onAddComment = null,
   activeCommentCode = "",
+  currentUserId = "",
+  onEditComment = null,
+  onDeleteComment = null,
+  activeCommentAction = "",
 }) => {
   const rows = Array.isArray(report?.rows) ? report.rows : [];
   const summary = report?.summary || {};
@@ -210,6 +215,7 @@ const FinalPisCheckReport = ({
             const sourceLabel = references.source_label || "PIS";
             const itemReferenceLabel = references.item_label || "Master";
             const boxReferenceLabel = references.box_label || "Master";
+            const normalizedCurrentUserId = String(currentUserId || "").trim();
             const measurementCards = [
               {
                 label: `${sourceLabel} Item`,
@@ -360,13 +366,44 @@ const FinalPisCheckReport = ({
                           className="pis-diff-comment-item"
                           key={comment?.id || `${row?.code}-comment-${index}`}
                         >
-                          <div>{comment?.comment || ""}</div>
-                          <small>
-                            {comment?.created_by_name || "User"}
-                            {comment?.created_at
-                              ? ` - ${formatPreviewDateTime(comment.created_at)}`
-                              : ""}
-                          </small>
+                          <div className="d-flex justify-content-between gap-2">
+                            <div className="flex-grow-1">
+                              <div>{comment?.comment || ""}</div>
+                              <small>
+                                {comment?.created_by_name || "User"}
+                                {comment?.created_at
+                                  ? ` - ${formatPreviewDateTime(comment.created_at)}`
+                                  : ""}
+                              </small>
+                            </div>
+                            {normalizedCurrentUserId &&
+                              String(comment?.created_by || "").trim() === normalizedCurrentUserId && (
+                                <div className="d-flex gap-1 align-items-start">
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-secondary btn-sm"
+                                    onClick={() => onEditComment?.(row, comment)}
+                                    disabled={
+                                      typeof onEditComment !== "function" ||
+                                      activeCommentAction === `edit:${comment?.id}`
+                                    }
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-danger btn-sm"
+                                    onClick={() => onDeleteComment?.(row, comment)}
+                                    disabled={
+                                      typeof onDeleteComment !== "function" ||
+                                      activeCommentAction === `delete:${comment?.id}`
+                                    }
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
+                              )}
+                          </div>
                         </div>
                       ))
                     ) : (
@@ -398,8 +435,11 @@ const FinalPISCheck = () => {
   const [selectedItem, setSelectedItem] = useState(null);
   const [activeEditCode, setActiveEditCode] = useState("");
   const [commentTarget, setCommentTarget] = useState(null);
+  const [commentMode, setCommentMode] = useState("add");
+  const [editingComment, setEditingComment] = useState(null);
   const [commentText, setCommentText] = useState("");
   const [commentSaving, setCommentSaving] = useState(false);
+  const [activeCommentAction, setActiveCommentAction] = useState("");
   const [commentError, setCommentError] = useState("");
   const [loading, setLoading] = useState(true);
   const [optionsLoading, setOptionsLoading] = useState(true);
@@ -451,6 +491,8 @@ const FinalPISCheck = () => {
     normalizeSortOrder(searchParams.get("sortOrder")),
   );
   const [syncedQuery, setSyncedQuery] = useState(null);
+  const currentUser = getUserFromToken();
+  const currentUserId = String(currentUser?._id || currentUser?.id || "").trim();
   const normalizedRole = normalizeUserRole(role);
   const canAddFinalPisComment =
     ["manager", "product_manager", "inspection_manager"].includes(normalizedRole) &&
@@ -692,13 +734,25 @@ const FinalPISCheck = () => {
 
   const handleOpenComment = useCallback((row = {}) => {
     setCommentTarget(row);
+    setCommentMode("add");
+    setEditingComment(null);
     setCommentText("");
+    setCommentError("");
+  }, []);
+
+  const handleOpenEditComment = useCallback((row = {}, comment = {}) => {
+    setCommentTarget(row);
+    setCommentMode("edit");
+    setEditingComment(comment);
+    setCommentText(String(comment?.comment || ""));
     setCommentError("");
   }, []);
 
   const handleCloseComment = useCallback(() => {
     if (commentSaving) return;
     setCommentTarget(null);
+    setCommentMode("add");
+    setEditingComment(null);
     setCommentText("");
     setCommentError("");
   }, [commentSaving]);
@@ -706,10 +760,15 @@ const FinalPISCheck = () => {
   const handleSubmitComment = useCallback(async (event) => {
     event?.preventDefault();
     const targetCode = String(commentTarget?.code || "").trim();
+    const commentId = String(editingComment?.id || "").trim();
     const nextComment = String(commentText || "").trim();
 
     if (!targetCode) {
-      setCommentError("Unable to add comment for this item.");
+      setCommentError("Unable to save comment for this item.");
+      return;
+    }
+    if (commentMode === "edit" && !commentId) {
+      setCommentError("Unable to edit this comment.");
       return;
     }
     if (!nextComment) {
@@ -719,22 +778,58 @@ const FinalPISCheck = () => {
 
     try {
       setCommentSaving(true);
+      setActiveCommentAction(commentMode === "edit" ? `edit:${commentId}` : "");
       setCommentError("");
-      await api.post(
-        `/items/final-pis-check/${encodeURIComponent(targetCode)}/comments`,
-        { comment: nextComment },
-      );
+      const encodedCode = encodeURIComponent(targetCode);
+      if (commentMode === "edit") {
+        await api.put(
+          `/items/final-pis-check/${encodedCode}/comments/${encodeURIComponent(commentId)}`,
+          { comment: nextComment },
+        );
+      } else {
+        await api.post(
+          `/items/final-pis-check/${encodedCode}/comments`,
+          { comment: nextComment },
+        );
+      }
       setCommentTarget(null);
+      setCommentMode("add");
+      setEditingComment(null);
       setCommentText("");
       fetchFinalPisCheckRows();
     } catch (submitError) {
       setCommentError(
-        submitError?.response?.data?.message || "Failed to add comment.",
+        submitError?.response?.data?.message || "Failed to save comment.",
       );
     } finally {
       setCommentSaving(false);
+      setActiveCommentAction("");
     }
-  }, [commentTarget?.code, commentText, fetchFinalPisCheckRows]);
+  }, [commentMode, commentTarget?.code, commentText, editingComment?.id, fetchFinalPisCheckRows]);
+
+  const handleDeleteComment = useCallback(async (row = {}, comment = {}) => {
+    const targetCode = String(row?.code || "").trim();
+    const commentId = String(comment?.id || "").trim();
+    if (!targetCode || !commentId) {
+      setError("Unable to delete this comment.");
+      return;
+    }
+    const confirmed = window.confirm("Delete this comment?");
+    if (!confirmed) return;
+
+    try {
+      setActiveCommentAction(`delete:${commentId}`);
+      setError("");
+      await api.delete(
+        `/items/final-pis-check/${encodeURIComponent(targetCode)}/comments/${encodeURIComponent(commentId)}`,
+      );
+      fetchFinalPisCheckRows();
+    } catch (deleteError) {
+      setError(deleteError?.response?.data?.message || "Failed to delete comment.");
+    } finally {
+      setActiveCommentAction("");
+    }
+  }, [fetchFinalPisCheckRows]);
 
   const handleExportReport = useCallback(async () => {
     try {
@@ -1091,6 +1186,10 @@ const FinalPISCheck = () => {
               activeEditCode={activeEditCode}
               canAddComment={canAddFinalPisComment}
               onAddComment={handleOpenComment}
+              currentUserId={currentUserId}
+              onEditComment={handleOpenEditComment}
+              onDeleteComment={handleDeleteComment}
+              activeCommentAction={activeCommentAction}
             />
           </>
         )}
@@ -1242,7 +1341,9 @@ const FinalPISCheck = () => {
             <form className="modal-content" onSubmit={handleSubmitComment}>
               <div className="modal-header">
                 <div>
-                  <h5 className="modal-title">Add Comment</h5>
+                  <h5 className="modal-title">
+                    {commentMode === "edit" ? "Edit Comment" : "Add Comment"}
+                  </h5>
                   <div className="small text-muted">
                     Item {commentTarget?.code || "N/A"}
                   </div>
@@ -1289,7 +1390,9 @@ const FinalPISCheck = () => {
                   className="btn btn-primary"
                   disabled={commentSaving || !commentText.trim()}
                 >
-                  {commentSaving ? "Adding..." : "Add Comment"}
+                  {commentSaving
+                    ? (commentMode === "edit" ? "Saving..." : "Adding...")
+                    : (commentMode === "edit" ? "Save Comment" : "Add Comment")}
                 </button>
               </div>
             </form>

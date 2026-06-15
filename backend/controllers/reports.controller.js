@@ -534,13 +534,15 @@ const getDateTimeValue = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const getInspectionRecencyTime = (inspection = {}) =>
-  getDateTimeValue(inspection?.inspection_date_value) ||
-  getDateTimeValue(inspection?.createdAt);
+const getInspectionDateRecencyTime = (inspection = {}) =>
+  getDateTimeValue(inspection?.inspection_date_recency_value);
 
 const compareInspectionRecencyDesc = (left = {}, right = {}) => {
-  const timeDelta = getInspectionRecencyTime(right) - getInspectionRecencyTime(left);
+  const timeDelta =
+    getInspectionDateRecencyTime(right) - getInspectionDateRecencyTime(left);
   if (timeDelta !== 0) return timeDelta;
+  const createdAtDelta = getDateTimeValue(right?.createdAt) - getDateTimeValue(left?.createdAt);
+  if (createdAtDelta !== 0) return createdAtDelta;
   return normalizeText(right?._id).localeCompare(normalizeText(left?._id));
 };
 
@@ -957,6 +959,7 @@ const buildDateNormalizationStages = ({ reportRange, inspectorObjectId = null } 
   },
   {
     $addFields: {
+      inspection_date_recency_value: inspectionDateToDateExpression,
       inspection_date_value: {
         $ifNull: [inspectionDateToDateExpression, "$createdAt"],
       },
@@ -1101,6 +1104,7 @@ const buildQcReportMismatchPipeline = ({
           "$inspection_date",
         ),
         inspection_date_value: 1,
+        inspection_date_recency_value: 1,
         status: 1,
         checked: {
           $round: [buildNumericExpression("$checked"), 3],
@@ -1119,6 +1123,7 @@ const buildQcReportMismatchPipeline = ({
     },
     {
       $sort: {
+        inspection_date_recency_value: -1,
         inspection_date_value: -1,
         createdAt: -1,
         _id: -1,
@@ -1857,6 +1862,7 @@ exports.getQcReportMismatch = async (req, res) => {
         requested_date: normalizeText(inspection?.requested_date),
         inspection_date: normalizeText(inspection?.inspection_date),
         inspection_date_value: inspection?.inspection_date_value || null,
+        inspection_date_recency_value: inspection?.inspection_date_recency_value || null,
         status: normalizeText(inspection?.status),
         checked: normalizeNumber(inspection?.checked),
         passed: normalizeNumber(inspection?.passed),
@@ -1961,6 +1967,7 @@ exports.getQcReportMismatch = async (req, res) => {
           requested_date: row?.requested_date || "",
           inspection_date: row?.inspection_date || "",
           inspection_date_value: row?.inspection_date_value || null,
+          inspection_date_recency_value: row?.inspection_date_recency_value || null,
           status: row?.status || "",
           checked: 0,
           passed: 0,
@@ -1998,12 +2005,13 @@ exports.getQcReportMismatch = async (req, res) => {
       }
 
       if (
-        row?.inspection_date_value &&
-        (!group.inspection_date_value ||
-          new Date(row.inspection_date_value).getTime() >=
-            new Date(group.inspection_date_value).getTime())
+        row?.inspection_date_recency_value &&
+        (!group.inspection_date_recency_value ||
+          new Date(row.inspection_date_recency_value).getTime() >
+            new Date(group.inspection_date_recency_value).getTime())
       ) {
         group.inspection_date_value = row.inspection_date_value;
+        group.inspection_date_recency_value = row.inspection_date_recency_value;
         group.inspection_date = row?.inspection_date || group.inspection_date;
         group.requested_date = row?.requested_date || group.requested_date;
         group.status = row?.status || group.status;
@@ -2024,6 +2032,7 @@ exports.getQcReportMismatch = async (req, res) => {
         requested_date: row?.requested_date || "",
         inspection_date: row?.inspection_date || "",
         inspection_date_value: row?.inspection_date_value || null,
+        inspection_date_recency_value: row?.inspection_date_recency_value || null,
         inspector_id: row?.inspector_id || "",
         inspector_name: row?.inspector_name || "Unassigned",
         status: row?.status || "",
@@ -2081,13 +2090,16 @@ exports.getQcReportMismatch = async (req, res) => {
     const groupedRows = [...groupedRowsMap.values()]
       .map((group) => {
         const sortedInspectionRecords = [...group.inspection_records].sort((left, right) => {
-          const leftTime = left?.inspection_date_value
-            ? new Date(left.inspection_date_value).getTime()
+          const leftTime = left?.inspection_date_recency_value
+            ? new Date(left.inspection_date_recency_value).getTime()
             : 0;
-          const rightTime = right?.inspection_date_value
-            ? new Date(right.inspection_date_value).getTime()
+          const rightTime = right?.inspection_date_recency_value
+            ? new Date(right.inspection_date_recency_value).getTime()
             : 0;
-          return rightTime - leftTime;
+          const timeDelta = rightTime - leftTime;
+          if (timeDelta !== 0) return timeDelta;
+          return getDateTimeValue(right?.inspection_date_value) -
+            getDateTimeValue(left?.inspection_date_value);
         }).map((inspectionRecord, index) => ({
           ...inspectionRecord,
           sheet_label: `Inspection ${index + 1}`,
@@ -2119,13 +2131,16 @@ exports.getQcReportMismatch = async (req, res) => {
         };
       })
       .sort((left, right) => {
-        const leftTime = left?.inspection_date_value
-          ? new Date(left.inspection_date_value).getTime()
+        const leftTime = left?.inspection_date_recency_value
+          ? new Date(left.inspection_date_recency_value).getTime()
           : 0;
-        const rightTime = right?.inspection_date_value
-          ? new Date(right.inspection_date_value).getTime()
+        const rightTime = right?.inspection_date_recency_value
+          ? new Date(right.inspection_date_recency_value).getTime()
           : 0;
-        return rightTime - leftTime;
+        const timeDelta = rightTime - leftTime;
+        if (timeDelta !== 0) return timeDelta;
+        return getDateTimeValue(right?.inspection_date_value) -
+          getDateTimeValue(left?.inspection_date_value);
       });
 
     const filteredRows = mismatchOnly
@@ -2178,6 +2193,7 @@ exports.getQcReportMismatch = async (req, res) => {
         item_code: itemCode,
         mismatch_only: mismatchOnly,
         comparison_inspection_limit: QC_REPORT_MISMATCH_RECENT_INSPECTION_LIMIT,
+        comparison_recency_field: "inspection_date",
         brand_options: sortedBrands,
         vendor_options: sortedVendors,
         inspector_options: inspectorOptions,

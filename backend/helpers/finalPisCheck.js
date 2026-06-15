@@ -1184,6 +1184,7 @@ const buildFinalPisCheckRow = (item = {}) => {
           .map((comment) => ({
             id: String(comment?._id || ""),
             comment: normalizeText(comment?.comment),
+            created_by: String(comment?.created_by || ""),
             created_by_name: normalizeText(comment?.created_by_name),
             created_by_role: normalizeText(comment?.created_by_role),
             created_at: comment?.created_at || null,
