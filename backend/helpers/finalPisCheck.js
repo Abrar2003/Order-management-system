@@ -9,7 +9,6 @@ const {
   compareItemSizeDimensionVariance,
   compareWeightVariance,
 } = require("./measurementMismatchRules");
-const { formatEan13BarcodeDisplay } = require("./barcodeFormat");
 const {
   formatSizeArrayToReference,
   hasReferenceSizeArray,
@@ -42,7 +41,6 @@ const FINAL_PIS_CHECK_DIFF_FIELDS = Object.freeze([
   "Box Size",
   "Weight",
   "CBM",
-  "Barcode",
 ]);
 
 const FINAL_PIS_CHECK_SORT_FIELDS = Object.freeze([
@@ -694,13 +692,8 @@ const createTextDifference = ({
   const comparison = compareTextValues(inspectedValue, pisValue);
   if (!comparison.mismatch) return null;
 
-  const shouldFormatBarcode = normalizeKey(section) === "barcode";
-  const inspectedDisplay = shouldFormatBarcode
-    ? formatEan13BarcodeDisplay(comparison.inspected)
-    : comparison.inspected || EMPTY_LABEL;
-  const pisDisplay = shouldFormatBarcode
-    ? formatEan13BarcodeDisplay(comparison.pis)
-    : comparison.pis || EMPTY_LABEL;
+  const inspectedDisplay = comparison.inspected || EMPTY_LABEL;
+  const pisDisplay = comparison.pis || EMPTY_LABEL;
 
   return {
     key,
@@ -1031,50 +1024,6 @@ const buildMasterPresenceDifferences = ({
   return differences;
 };
 
-const buildBarcodeDifferences = (item = {}) => {
-  if (item?.barcode_exempted === true) return [];
-
-  const differences = [];
-  const masterBarcode = item?.master_master_barcode || item?.master_barcode;
-  const inspectedBarcode = item?.qc?.master_barcode || item?.qc?.barcode;
-  const masterDifference = createTextDifference({
-    key: "barcode-master",
-    section: "Barcode",
-    segment: "Master",
-    attribute: "Barcode",
-    inspectedValue: inspectedBarcode,
-    pisValue: masterBarcode,
-    sourceLabel: "Inspected",
-    referenceLabel: "Master",
-  });
-  if (
-    (normalizeBarcodeValue(masterBarcode) || normalizeBarcodeValue(inspectedBarcode)) &&
-    masterDifference
-  ) {
-    differences.push(masterDifference);
-  }
-
-  const masterInnerBarcode = item?.master_inner_barcode;
-  const innerDifference = createTextDifference({
-    key: "barcode-inner",
-    section: "Barcode",
-    segment: "Inner",
-    attribute: "Barcode",
-    inspectedValue: item?.qc?.inner_barcode,
-    pisValue: masterInnerBarcode,
-    sourceLabel: "Inspected",
-    referenceLabel: "Master",
-  });
-  if (
-    (normalizeBarcodeValue(masterInnerBarcode) || normalizeBarcodeValue(item?.qc?.inner_barcode)) &&
-    innerDifference
-  ) {
-    differences.push(innerDifference);
-  }
-
-  return differences;
-};
-
 const formatBoxModeLabel = (mode = "") => {
   const normalized = normalizeKey(mode);
   if (!normalized) return "";
@@ -1161,7 +1110,6 @@ const buildFinalPisCheckRow = (item = {}) => {
       masterBoxMode: item?.master_box_mode,
       referenceLabel: boxReferenceLabel,
     }),
-    ...buildBarcodeDifferences(item),
   ];
 
   if (differences.length === 0) {

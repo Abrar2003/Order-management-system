@@ -32,6 +32,14 @@ function isNotRequired(value) {
   return normalizeBarcode(value) === "not required";
 }
 
+function hasExistingPisBarcode(item = {}) {
+  return Boolean(
+    cleanCell(item.pis_barcode) ||
+      cleanCell(item.pis_master_barcode) ||
+      cleanCell(item.pis_inner_barcode),
+  );
+}
+
 function chunkArray(arr, size) {
   const chunks = [];
 
@@ -142,32 +150,46 @@ async function main() {
         code: { $in: codes },
       },
       {
-        projection: { code: 1 },
+        projection: {
+          code: 1,
+          pis_barcode: 1,
+          pis_master_barcode: 1,
+          pis_inner_barcode: 1,
+        },
       },
     )
     .toArray();
 
-  const existingCodeSet = new Set(
-    existingItems.map((item) => item.code),
+  const existingItemByCode = new Map(
+    existingItems.map((item) => [item.code, item]),
   );
 
   const matchedRows = rows.filter((row) =>
-    existingCodeSet.has(row.code),
+    existingItemByCode.has(row.code),
   );
-  
+
+  const skippedExistingPisRows = matchedRows
+    .filter((row) => hasExistingPisBarcode(existingItemByCode.get(row.code)))
+    .map((row) => ({
+      ...row,
+      existingPisBarcode: existingItemByCode.get(row.code)?.pis_barcode || "",
+      existingPisMasterBarcode: existingItemByCode.get(row.code)?.pis_master_barcode || "",
+      existingPisInnerBarcode: existingItemByCode.get(row.code)?.pis_inner_barcode || "",
+    }));
+
+  const updatableRows = matchedRows.filter(
+    (row) => !hasExistingPisBarcode(existingItemByCode.get(row.code)),
+  );
 
   const unmatchedRows = rows.filter(
-    (row) => !existingCodeSet.has(row.code),
+    (row) => !existingItemByCode.has(row.code),
   );
-  rows.map((row) => { console.log(row.code, {
-      barcode: row.barcode,
-      masterBarcode: row.masterBarcode,
-      innerBarcode: row.innerBarcode,
-    });
-  });
+
   console.log({
     xlsxRows: rows.length,
     matchedItems: matchedRows.length,
+    skippedExistingPisBarcodeItems: skippedExistingPisRows.length,
+    updatableItems: updatableRows.length,
     unmatchedItems: unmatchedRows.length,
     mode: shouldApply ? "APPLY" : "DRY_RUN",
   });
@@ -190,8 +212,13 @@ async function main() {
     console.log("Dry run only. Re-run with --apply to update MongoDB.");
 
     console.log(
-      "Sample rows:",
-      matchedRows.slice(0, 5),
+      "Sample updatable rows:",
+      updatableRows.slice(0, 5),
+    );
+
+    console.log(
+      "Sample skipped existing PIS barcode rows:",
+      skippedExistingPisRows.slice(0, 5),
     );
 
     await mongoose.disconnect();
@@ -199,7 +226,7 @@ async function main() {
     return;
   }
 
-  const ops = matchedRows.map((row) => {
+  const ops = updatableRows.map((row) => {
     const updateData = {
       updatedAt: new Date(),
     };
@@ -259,7 +286,7 @@ async function main() {
 
     else if (row.innerBarcode) {
       updateData.pis_inner_barcode = row.innerBarcode;
-    }.
+    }
 
     return {
       updateOne: {
@@ -274,6 +301,20 @@ async function main() {
   let matchedCount = 0;
   let modifiedCount = 0;
 
+  if (!ops.length) {
+    console.log({
+      updated: true,
+      matchedCount,
+      modifiedCount,
+      skippedExistingPisBarcodeItems: skippedExistingPisRows.length,
+      message: "No items needed PIS barcode updates.",
+    });
+
+    await mongoose.disconnect();
+
+    return;
+  }
+
   for (const chunk of chunkArray(ops, 500)) {
     const result = await items.bulkWrite(chunk, {
       ordered: false,
@@ -287,6 +328,7 @@ async function main() {
     updated: true,
     matchedCount,
     modifiedCount,
+    skippedExistingPisBarcodeItems: skippedExistingPisRows.length,
   });
 
   await mongoose.disconnect();

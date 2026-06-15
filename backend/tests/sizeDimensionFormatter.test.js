@@ -244,7 +244,7 @@ test("final PIS check reports missing Master data instead of falling back to PIS
   assert.equal(rows[0].differences[0].delta, "Master data missing");
 });
 
-test("final PIS check compares inspected barcode with Master barcode and ignores PIS barcode", () => {
+test("final PIS check does not compare barcode differences", () => {
   const rows = buildFinalPisCheckRows([
     {
       code: "ITEM-5",
@@ -257,11 +257,7 @@ test("final PIS check compares inspected barcode with Master barcode and ignores
     },
   ]);
 
-  assert.equal(rows.length, 1);
-  assert.deepEqual(rows[0].diff_fields, ["Barcode"]);
-  assert.equal(rows[0].references.source_label, "Inspected");
-  assert.equal(rows[0].differences[0].inspected, "9876543210982");
-  assert.equal(rows[0].differences[0].pis, "1234567890128");
+  assert.deepEqual(rows, []);
 });
 
 test("final PIS check reports inspected CBM differences against Master calculated CBM", () => {
