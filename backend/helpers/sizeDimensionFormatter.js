@@ -18,6 +18,9 @@ const hasPositiveReferenceDimensions = (entry = {}) =>
 const getEntryBoxType = (entry = {}) =>
   String(entry?.box_type || "").trim().toLowerCase();
 
+const getEntryRemark = (entry = {}) =>
+  String(entry?.remark || entry?.type || "").trim().toLowerCase();
+
 const toPlainEntry = (entry = {}) =>
   entry && typeof entry.toObject === "function"
     ? entry.toObject({ depopulate: true })
@@ -98,6 +101,24 @@ const findReferenceEntryForIncoming = ({
   const references = Array.isArray(referenceEntries) ? referenceEntries : [];
   if (type === "box") {
     const incomingBoxType = getEntryBoxType(incomingEntry);
+    const incomingRemark = getEntryRemark(incomingEntry);
+    if (incomingBoxType && incomingRemark) {
+      const matchedByTypeAndRemark = references.find(
+        (referenceEntry) =>
+          getEntryBoxType(referenceEntry) === incomingBoxType &&
+          getEntryRemark(referenceEntry) === incomingRemark &&
+          hasPositiveReferenceDimensions(referenceEntry),
+      );
+      if (matchedByTypeAndRemark) return matchedByTypeAndRemark;
+    }
+    if (incomingRemark) {
+      const matchedByRemark = references.find(
+        (referenceEntry) =>
+          getEntryRemark(referenceEntry) === incomingRemark &&
+          hasPositiveReferenceDimensions(referenceEntry),
+      );
+      if (matchedByRemark) return matchedByRemark;
+    }
     if (incomingBoxType) {
       const matchedByType = references.find(
         (referenceEntry) =>
