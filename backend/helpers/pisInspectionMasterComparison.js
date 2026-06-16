@@ -46,7 +46,7 @@ const hasAvailableValue = (entry = {}, key = "") => {
 const readCellValue = (entry = {}, key = "") =>
   hasAvailableValue(entry, key) ? entry[key] : MISSING_VALUE;
 
-const compareAvailableValues = (left, right) => {
+const compareAvailableValues = (left, right, tolerance = NUMBER_TOLERANCE, isWeight = false) => {
   const leftNumber = Number(left);
   const rightNumber = Number(right);
   const bothNumeric =
@@ -56,21 +56,26 @@ const compareAvailableValues = (left, right) => {
     String(right).trim() !== "";
 
   if (bothNumeric) {
-    return Math.abs(leftNumber - rightNumber) <= NUMBER_TOLERANCE;
+    if (isWeight) {
+      const maxVal = Math.max(leftNumber, rightNumber);
+      if (maxVal === 0) return true;
+      return Math.abs(leftNumber - rightNumber) <= 0.1 * maxVal;
+    }
+    return Math.abs(leftNumber - rightNumber) <= tolerance;
   }
 
   return String(left ?? "").trim().toLowerCase() ===
     String(right ?? "").trim().toLowerCase();
 };
 
-const getCellStatus = (value, referenceValues = []) => {
+const getCellStatus = (value, referenceValues = [], tolerance = NUMBER_TOLERANCE, isWeight = false) => {
   if (value === MISSING_VALUE) return "missing";
   const availableReferences = referenceValues.filter(
     (referenceValue) => referenceValue !== MISSING_VALUE,
   );
   if (availableReferences.length === 0) return "match";
   return availableReferences.every((referenceValue) =>
-    compareAvailableValues(value, referenceValue)
+    compareAvailableValues(value, referenceValue, tolerance, isWeight)
   )
     ? "match"
     : "mismatch";
@@ -81,6 +86,7 @@ const buildComparisonRows = ({
   inspectionEntries = [],
   masterEntries = [],
   fields = [],
+  isBoxSize = false,
 } = {}) => {
   const pisIndex = indexSizeArrayByRemark(pisEntries);
   const masterIndex = indexSizeArrayByRemark(masterEntries);
@@ -100,6 +106,10 @@ const buildComparisonRows = ({
   );
   masterIndex.forEach((_, key) => pushRemarkKey(key));
 
+  const finalIsBoxSize = isBoxSize || fields.some((f) =>
+    ["box_type", "item_count_in_inner", "box_count_in_master"].includes(f?.key),
+  );
+
   return remarkKeys.flatMap((remarkKey) => {
     const pisEntry = pisIndex.get(remarkKey)?.entry || {};
     const masterEntry = masterIndex.get(remarkKey)?.entry || {};
@@ -114,6 +124,12 @@ const buildComparisonRows = ({
 
     return fields.map((field) => {
       const fieldKey = String(field?.key || "").trim();
+      const isDimension = ["L", "B", "H"].includes(fieldKey);
+      const isWeight = ["net_weight", "gross_weight"].includes(fieldKey);
+      const tolerance = isDimension
+        ? (finalIsBoxSize ? 1.0 : 0.5)
+        : NUMBER_TOLERANCE;
+
       const pis = readCellValue(pisEntry, fieldKey);
       const master = readCellValue(masterEntry, fieldKey);
       const inspectionValues = inspectionEntryList.map((entry) =>
@@ -122,10 +138,10 @@ const buildComparisonRows = ({
       const references = [pis, master].filter((value) => value !== MISSING_VALUE);
       const cell_status = {
         pis: pis === MISSING_VALUE ? "missing" : "match",
-        master: getCellStatus(master, [pis]),
+        master: getCellStatus(master, [pis], tolerance, isWeight),
       };
       inspectionValues.forEach((value, index) => {
-        cell_status[`inspection_${index + 1}`] = getCellStatus(value, references);
+        cell_status[`inspection_${index + 1}`] = getCellStatus(value, references, tolerance, isWeight);
       });
 
       const availableValues = [pis, ...inspectionValues, master].filter(
@@ -136,9 +152,9 @@ const buildComparisonRows = ({
         (
           references.length > 0
             ? availableValues.some((value) =>
-                references.some((reference) => !compareAvailableValues(value, reference))
+                references.some((reference) => !compareAvailableValues(value, reference, tolerance, isWeight))
               )
-            : !availableValues.every((value) => compareAvailableValues(value, availableValues[0]))
+            : !availableValues.every((value) => compareAvailableValues(value, availableValues[0], tolerance, isWeight))
         );
 
       return {

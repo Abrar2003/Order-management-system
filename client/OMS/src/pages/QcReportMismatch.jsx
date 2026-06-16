@@ -1159,10 +1159,16 @@ const QcReportMismatch = () => {
                                     PO: {inspection?.order_id || "N/A"}
                                   </div>
                                   <div className="small text-secondary fw-normal">
-                                    {formatDateDDMMYYYY(inspection?.inspection_date)}
+                                    PO Date: {formatDateDDMMYYYY(inspection?.order_date_value)}
                                   </div>
                                   <div className="small text-secondary fw-normal">
-                                    {inspection?.inspector_name || "Unassigned"}
+                                    Insp Date: {formatDateDDMMYYYY(inspection?.inspection_date)}
+                                  </div>
+                                  <div className="small text-secondary fw-normal">
+                                    Status: {inspection?.status || "N/A"}
+                                  </div>
+                                  <div className="small text-secondary fw-normal">
+                                    Inspector: {inspection?.inspector_name || "Unassigned"}
                                   </div>
                                 </th>
                               ))}

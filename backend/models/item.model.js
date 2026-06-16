@@ -240,8 +240,36 @@ const productSpecsSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const fileSubSchema = new mongoose.Schema(
+  {
+    key: { type: String, default: "", trim: true },
+    originalName: { type: String, default: "", trim: true },
+    contentType: { type: String, default: "", trim: true },
+    size: { type: Number, default: 0, min: 0 },
+    link: { type: String, default: "", trim: true },
+    public_id: { type: String, default: "", trim: true },
+  },
+  { _id: false },
+);
+
+const shippingMarksSchema = new mongoose.Schema(
+  {
+    shipping_marks_1: { type: fileSubSchema, default: () => ({}) },
+    shipping_marks_2: { type: fileSubSchema, default: () => ({}) },
+    ean: { type: fileSubSchema, default: () => ({}) },
+    flat_carton_1: { type: fileSubSchema, default: () => ({}) },
+    flat_carton_2: { type: fileSubSchema, default: () => ({}) },
+    three_d_carton: { type: fileSubSchema, default: () => ({}) },
+  },
+  { _id: false },
+);
+
 const itemSchema = new mongoose.Schema(
   {
+    shipping_marks: {
+      type: shippingMarksSchema,
+      default: () => ({}),
+    },
     code: {
       type: String,
       required: true,

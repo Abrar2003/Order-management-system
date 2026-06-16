@@ -791,6 +791,18 @@ const ITEM_PRESENTATION_MIME_TYPES = new Set([
   "application/vnd.ms-powerpoint.presentation.macroenabled.12",
 ]);
 const ITEM_PRESENTATION_EXTENSIONS = new Set([".ppt", ".pptx", ".pptm"]);
+const ITEM_PDF_AND_IMAGE_MIME_TYPES = new Set([
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+]);
+const ITEM_PDF_AND_IMAGE_EXTENSIONS = new Set([
+  ".pdf",
+  ".jpg",
+  ".jpeg",
+  ".png",
+]);
+
 const ITEM_FILE_CONFIG = Object.freeze({
   product_image: {
     field: "image",
@@ -847,6 +859,60 @@ const ITEM_FILE_CONFIG = Object.freeze({
     extensions: ITEM_PRESENTATION_EXTENSIONS,
     defaultExtension: ".pptx",
     invalidTypeMessage: "Only PPT, PPTX, or PPTM files are allowed for Packaging PPT",
+  },
+  shipping_marks_1: {
+    field: "shipping_marks.shipping_marks_1",
+    folder: "item-shipping-marks",
+    label: "Shipping marks",
+    mimeTypes: ITEM_PDF_AND_IMAGE_MIME_TYPES,
+    extensions: ITEM_PDF_AND_IMAGE_EXTENSIONS,
+    defaultExtension: ".pdf",
+    invalidTypeMessage: "Only PDF, JPG, JPEG, and PNG files are allowed for Shipping marks",
+  },
+  shipping_marks_2: {
+    field: "shipping_marks.shipping_marks_2",
+    folder: "item-shipping-marks",
+    label: "Shipping marks (Optional)",
+    mimeTypes: ITEM_PDF_AND_IMAGE_MIME_TYPES,
+    extensions: ITEM_PDF_AND_IMAGE_EXTENSIONS,
+    defaultExtension: ".pdf",
+    invalidTypeMessage: "Only PDF, JPG, JPEG, and PNG files are allowed for Shipping marks",
+  },
+  ean: {
+    field: "shipping_marks.ean",
+    folder: "item-shipping-marks",
+    label: "EAN",
+    mimeTypes: ITEM_PDF_AND_IMAGE_MIME_TYPES,
+    extensions: ITEM_PDF_AND_IMAGE_EXTENSIONS,
+    defaultExtension: ".pdf",
+    invalidTypeMessage: "Only PDF, JPG, JPEG, and PNG files are allowed for EAN",
+  },
+  flat_carton_1: {
+    field: "shipping_marks.flat_carton_1",
+    folder: "item-shipping-marks",
+    label: "Flat carton",
+    mimeTypes: ITEM_PDF_AND_IMAGE_MIME_TYPES,
+    extensions: ITEM_PDF_AND_IMAGE_EXTENSIONS,
+    defaultExtension: ".pdf",
+    invalidTypeMessage: "Only PDF, JPG, JPEG, and PNG files are allowed for Flat carton",
+  },
+  flat_carton_2: {
+    field: "shipping_marks.flat_carton_2",
+    folder: "item-shipping-marks",
+    label: "Flat carton (Optional)",
+    mimeTypes: ITEM_PDF_AND_IMAGE_MIME_TYPES,
+    extensions: ITEM_PDF_AND_IMAGE_EXTENSIONS,
+    defaultExtension: ".pdf",
+    invalidTypeMessage: "Only PDF, JPG, JPEG, and PNG files are allowed for Flat carton",
+  },
+  three_d_carton: {
+    field: "shipping_marks.three_d_carton",
+    folder: "item-shipping-marks",
+    label: "3D carton",
+    mimeTypes: ITEM_PDF_AND_IMAGE_MIME_TYPES,
+    extensions: ITEM_PDF_AND_IMAGE_EXTENSIONS,
+    defaultExtension: ".pdf",
+    invalidTypeMessage: "Only PDF, JPG, JPEG, and PNG files are allowed for 3D carton",
   },
 });
 const ALLOWED_ITEM_FILE_TYPES = new Set(Object.keys(ITEM_FILE_CONFIG));
@@ -1467,6 +1533,7 @@ const ITEM_DETAILS_SELECT = [
   "assembly_file",
   "mounting_file",
   "packeging_ppt",
+  "shipping_marks",
   "mounting_file_needed",
   "finish",
   "pis_item_sizes",
@@ -4523,6 +4590,14 @@ exports.getItemOrdersHistory = async (req, res) => {
 };
 
 const buildItemDetailFilePayloads = async (item = {}) => {
+  const getNestedValue = (obj, path) => {
+    if (!obj || !path) return undefined;
+    if (typeof obj.get === "function") {
+      return obj.get(path);
+    }
+    return path.split(".").reduce((acc, part) => acc && acc[part], obj);
+  };
+
   const fileEntries = [
     { type: "product_image", field: "image", fallbackBaseName: "product-image", extension: ".jpg" },
     { type: "cad_file", field: "cad_file", fallbackBaseName: "item-cad", extension: ".pdf" },
@@ -4532,15 +4607,25 @@ const buildItemDetailFilePayloads = async (item = {}) => {
     { type: "packeging_ppt", field: "packeging_ppt", fallbackBaseName: "item-packaging-ppt", extension: ".pptx" },
   ];
 
+  const shippingMarksEntries = [
+    { type: "shipping_marks_1", key: "shipping_marks_1", field: "shipping_marks.shipping_marks_1", fallbackBaseName: "shipping-marks-1", extension: ".pdf" },
+    { type: "shipping_marks_2", key: "shipping_marks_2", field: "shipping_marks.shipping_marks_2", fallbackBaseName: "shipping-marks-2", extension: ".pdf" },
+    { type: "ean", key: "ean", field: "shipping_marks.ean", fallbackBaseName: "ean", extension: ".pdf" },
+    { type: "flat_carton_1", key: "flat_carton_1", field: "shipping_marks.flat_carton_1", fallbackBaseName: "flat-carton-1", extension: ".pdf" },
+    { type: "flat_carton_2", key: "flat_carton_2", field: "shipping_marks.flat_carton_2", fallbackBaseName: "flat-carton-2", extension: ".pdf" },
+    { type: "three_d_carton", key: "three_d_carton", field: "shipping_marks.three_d_carton", fallbackBaseName: "three-d-carton", extension: ".pdf" },
+  ];
+
   const pairs = await Promise.all(
     fileEntries.map(async (entry) => {
       try {
-        const file = await buildItemFileResponse(item?.[entry.field], {
+        const rawFile = getNestedValue(item, entry.field);
+        const file = await buildItemFileResponse(rawFile, {
           itemCode: normalizeTextField(item?.code || item?._id),
           fallbackBaseName: entry.fallbackBaseName,
           extension: entry.extension,
         });
-        return [entry.field, file || normalizeStoredItemFile(item?.[entry.field] || {})];
+        return [entry.field, file || normalizeStoredItemFile(rawFile || {})];
       } catch (error) {
         console.error("Build item detail file URL failed:", {
           itemId: item?._id,
@@ -4548,15 +4633,44 @@ const buildItemDetailFilePayloads = async (item = {}) => {
           field: entry.field,
           error: error?.message || String(error),
         });
-        return [entry.field, normalizeStoredItemFile(item?.[entry.field] || {})];
+        return [entry.field, normalizeStoredItemFile(getNestedValue(item, entry.field) || {})];
       }
     }),
   );
 
-  return pairs.reduce((accumulator, [field, file]) => {
+  const shippingPairs = await Promise.all(
+    shippingMarksEntries.map(async (entry) => {
+      try {
+        const rawFile = getNestedValue(item, entry.field);
+        const file = await buildItemFileResponse(rawFile, {
+          itemCode: normalizeTextField(item?.code || item?._id),
+          fallbackBaseName: entry.fallbackBaseName,
+          extension: entry.extension,
+        });
+        return [entry.key, file || normalizeStoredItemFile(rawFile || {})];
+      } catch (error) {
+        console.error("Build item detail shipping marks URL failed:", {
+          itemId: item?._id,
+          itemCode: item?.code,
+          field: entry.field,
+          error: error?.message || String(error),
+        });
+        return [entry.key, normalizeStoredItemFile(getNestedValue(item, entry.field) || {})];
+      }
+    }),
+  );
+
+  const result = pairs.reduce((accumulator, [field, file]) => {
     accumulator[field] = file;
     return accumulator;
   }, {});
+
+  result.shipping_marks = shippingPairs.reduce((accumulator, [key, file]) => {
+    accumulator[key] = file;
+    return accumulator;
+  }, {});
+
+  return result;
 };
 
 exports.getItemDetails = async (req, res) => {
@@ -4842,6 +4956,7 @@ exports.getPisInspectionMasterComparison = async (req, res) => {
               ),
               masterEntries: item?.master_item_sizes,
               fields: ITEM_SIZE_COMPARISON_FIELDS,
+              isBoxSize: false,
             }),
           },
           {
@@ -4854,6 +4969,7 @@ exports.getPisInspectionMasterComparison = async (req, res) => {
               ),
               masterEntries: item?.master_box_sizes,
               fields: BOX_SIZE_COMPARISON_FIELDS,
+              isBoxSize: true,
             }),
           },
         ]
@@ -6401,7 +6517,7 @@ exports.getItemFileUrl = async (req, res) => {
       });
     }
 
-    const filePayload = await buildItemFileResponse(item?.[fileConfig.field], {
+    const filePayload = await buildItemFileResponse(item.get(fileConfig.field), {
       itemCode: normalizeTextField(item?.code || itemId),
       fallbackBaseName: fileType,
       extension: fileConfig.defaultExtension,
@@ -6504,7 +6620,7 @@ exports.uploadItemFile = async (req, res) => {
     }
     const beforeItemSnapshot = item.toObject();
 
-    const previousFile = normalizeStoredItemFile(item?.[fileConfig.field]);
+    const previousFile = normalizeStoredItemFile(item.get(fileConfig.field));
     const previousStorageKey = previousFile.key;
     const fallbackOriginalName =
       req.file.originalname ||
@@ -6523,7 +6639,7 @@ exports.uploadItemFile = async (req, res) => {
         contentType: mimeType || "application/octet-stream",
       });
 
-      item[fileConfig.field] = buildStoredWasabiItemFile(uploadResult);
+      item.set(fileConfig.field, buildStoredWasabiItemFile(uploadResult));
       appendItemUpdateHistory(item, {
         before: beforeItemSnapshot,
         after: item.toObject(),
@@ -6573,7 +6689,7 @@ exports.uploadItemFile = async (req, res) => {
       data: {
         item_id: item._id,
         file_type: fileType,
-        file: buildStoredWasabiItemFile(item?.[fileConfig.field]),
+        file: buildStoredWasabiItemFile(item.get(fileConfig.field)),
       },
     });
   } catch (error) {
@@ -6863,7 +6979,7 @@ exports.deleteItemFile = async (req, res) => {
       });
     }
 
-    const existingFile = normalizeStoredItemFile(item?.[fileConfig.field]);
+    const existingFile = normalizeStoredItemFile(item.get(fileConfig.field));
     if (!existingFile.key && !existingFile.url) {
       return res.status(404).json({
         success: false,
@@ -6872,7 +6988,7 @@ exports.deleteItemFile = async (req, res) => {
     }
 
     const beforeItemSnapshot = item.toObject();
-    item[fileConfig.field] = {};
+    item.set(fileConfig.field, {});
     appendItemUpdateHistory(item, {
       before: beforeItemSnapshot,
       after: item.toObject(),

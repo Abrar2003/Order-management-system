@@ -546,6 +546,98 @@ const compareInspectionRecencyDesc = (left = {}, right = {}) => {
   return normalizeText(right?._id).localeCompare(normalizeText(left?._id));
 };
 
+const sortInspectionsByOrderAndInspectionDate = (inspections = []) => {
+  if (!Array.isArray(inspections) || inspections.length === 0) {
+    return [];
+  }
+
+  // 1. Group by order_id (PO)
+  const poGroups = new Map();
+  inspections.forEach((insp) => {
+    const po = normalizeText(insp?.order_id) || "N/A";
+    const group = poGroups.get(po) || [];
+    group.push(insp);
+    poGroups.set(po, group);
+  });
+
+  // Helper to get safe timestamp
+  const getSafeTimeValue = (value) => {
+    if (!value) return null;
+    const time = new Date(value).getTime();
+    return Number.isFinite(time) ? time : null;
+  };
+
+  // Helper to compare order dates (latest first, nulls last)
+  const compareOrderDates = (aDate, bDate) => {
+    const aTime = getSafeTimeValue(aDate);
+    const bTime = getSafeTimeValue(bDate);
+
+    if (aTime !== null && bTime !== null) {
+      return bTime - aTime;
+    }
+    if (aTime !== null) {
+      return -1;
+    }
+    if (bTime !== null) {
+      return 1;
+    }
+    return 0;
+  };
+
+  // Helper to compare inspection dates (latest first, nulls last)
+  const compareInspectionDates = (a, b) => {
+    const aTime = getSafeTimeValue(a?.inspection_date_recency_value);
+    const bTime = getSafeTimeValue(b?.inspection_date_recency_value);
+
+    if (aTime !== null && bTime !== null) {
+      if (bTime !== aTime) return bTime - aTime;
+    } else if (aTime !== null) {
+      return -1;
+    } else if (bTime !== null) {
+      return 1;
+    }
+    // secondary fallback to ID for deterministic sort
+    const idA = normalizeText(a?.inspection_id || a?._id || a?.id);
+    const idB = normalizeText(b?.inspection_id || b?._id || b?.id);
+    return idB.localeCompare(idA);
+  };
+
+  // 2. Sort inspections within each PO group by inspection_date (recency) latest first
+  poGroups.forEach((group) => {
+    group.sort(compareInspectionDates);
+  });
+
+  // 3. For each PO group, find its order_date.
+  // We can look at the inspections in that group and find the first non-null order_date_value.
+  const poOrderDates = new Map();
+  poGroups.forEach((group, po) => {
+    let orderDate = null;
+    for (const insp of group) {
+      if (insp?.order_date_value) {
+        orderDate = insp.order_date_value;
+        break;
+      }
+    }
+    poOrderDates.set(po, orderDate);
+  });
+
+  // 4. Sort PO keys based on order_date latest first
+  const sortedPos = Array.from(poGroups.keys()).sort((poA, poB) => {
+    const dateCompare = compareOrderDates(poOrderDates.get(poA), poOrderDates.get(poB));
+    if (dateCompare !== 0) return dateCompare;
+    return poA.localeCompare(poB);
+  });
+
+  // 5. Flatten the sorted PO groups
+  const flattened = [];
+  sortedPos.forEach((po) => {
+    const group = poGroups.get(po) || [];
+    flattened.push(...group);
+  });
+
+  return flattened;
+};
+
 const limitRecentInspectionsByItem = (
   inspections = [],
   limit = QC_REPORT_MISMATCH_RECENT_INSPECTION_LIMIT,
@@ -563,11 +655,8 @@ const limitRecentInspectionsByItem = (
 
   return [...groupedByItem.values()]
     .flatMap((group) =>
-      [...group]
-        .sort(compareInspectionRecencyDesc)
-        .slice(0, Math.max(1, limit)),
-    )
-    .sort(compareInspectionRecencyDesc);
+      sortInspectionsByOrderAndInspectionDate(group).slice(0, Math.max(1, limit))
+    );
 };
 
 const buildScalarValueExpression = (fieldPath, fallbackValue = "") => ({
@@ -1000,6 +1089,7 @@ const buildQcLookupStages = ({ selectedVendor = "" } = {}) => [
           $project: {
             order_meta: 1,
             item: 1,
+            order: 1,
           },
         },
       ],
@@ -1013,11 +1103,25 @@ const buildQcLookupStages = ({ selectedVendor = "" } = {}) => [
     },
   },
   {
+    $lookup: {
+      from: "orders",
+      localField: "qc_doc.order",
+      foreignField: "_id",
+      as: "order_doc",
+    },
+  },
+  {
+    $addFields: {
+      order_doc: { $arrayElemAt: ["$order_doc", 0] },
+    },
+  },
+  {
     $addFields: {
       vendor_value: buildTrimmedStringExpression("$qc_doc.order_meta.vendor"),
       brand_value: buildTrimmedStringExpression("$qc_doc.order_meta.brand"),
       order_id_value: buildTrimmedStringExpression("$qc_doc.order_meta.order_id"),
       item_code_value: buildTrimmedStringExpression("$qc_doc.item.item_code"),
+      order_date_value: "$order_doc.order_date",
     },
   },
 ];
@@ -1113,6 +1217,7 @@ const buildQcReportMismatchPipeline = ({
         ),
         inspection_date_value: 1,
         inspection_date_recency_value: 1,
+        order_date_value: 1,
         status: 1,
         checked: {
           $round: [buildNumericExpression("$checked"), 3],
@@ -1893,6 +1998,7 @@ exports.getQcReportMismatch = async (req, res) => {
         inspection_date: normalizeText(inspection?.inspection_date),
         inspection_date_value: inspection?.inspection_date_value || null,
         inspection_date_recency_value: inspection?.inspection_date_recency_value || null,
+        order_date_value: inspection?.order_date_value || null,
         status: normalizeText(inspection?.status),
         checked: normalizeNumber(inspection?.checked),
         passed: normalizeNumber(inspection?.passed),
@@ -2063,6 +2169,7 @@ exports.getQcReportMismatch = async (req, res) => {
         inspection_date: row?.inspection_date || "",
         inspection_date_value: row?.inspection_date_value || null,
         inspection_date_recency_value: row?.inspection_date_recency_value || null,
+        order_date_value: row?.order_date_value || null,
         inspector_id: row?.inspector_id || "",
         inspector_name: row?.inspector_name || "Unassigned",
         status: row?.status || "",
@@ -2103,11 +2210,11 @@ exports.getQcReportMismatch = async (req, res) => {
       group.inspection_records.push(inspectionRecord);
       group.mismatch_summary.mismatch_count += inspectionRecord.mismatch_summary.mismatch_count;
       group.mismatch_summary.item_size_mismatch_count +=
-        inspectionRecord.mismatch_summary.item_size_mismatch_count;
+          inspectionRecord.mismatch_summary.item_size_mismatch_count;
       group.mismatch_summary.box_size_mismatch_count +=
-        inspectionRecord.mismatch_summary.box_size_mismatch_count;
+          inspectionRecord.mismatch_summary.box_size_mismatch_count;
       group.mismatch_summary.box_mode_mismatch_count +=
-        inspectionRecord.mismatch_summary.box_mode_mismatch_count;
+          inspectionRecord.mismatch_summary.box_mode_mismatch_count;
 
       if (inspectionRecord.mismatch_summary.has_mismatch) {
         group.mismatch_summary.has_mismatch = true;
@@ -2119,21 +2226,11 @@ exports.getQcReportMismatch = async (req, res) => {
 
     const groupedRows = [...groupedRowsMap.values()]
       .map((group) => {
-        const sortedInspectionRecords = [...group.inspection_records].sort((left, right) => {
-          const leftTime = left?.inspection_date_recency_value
-            ? new Date(left.inspection_date_recency_value).getTime()
-            : 0;
-          const rightTime = right?.inspection_date_recency_value
-            ? new Date(right.inspection_date_recency_value).getTime()
-            : 0;
-          const timeDelta = rightTime - leftTime;
-          if (timeDelta !== 0) return timeDelta;
-          return getDateTimeValue(right?.inspection_date_value) -
-            getDateTimeValue(left?.inspection_date_value);
-        }).map((inspectionRecord, index) => ({
-          ...inspectionRecord,
-          sheet_label: `Inspection ${index + 1}`,
-        }));
+        const sortedInspectionRecords = sortInspectionsByOrderAndInspectionDate(group.inspection_records)
+          .map((inspectionRecord, index) => ({
+            ...inspectionRecord,
+            sheet_label: `Inspection ${index + 1}`,
+          }));
         const orderIds = Array.isArray(group.order_ids)
           ? group.order_ids.filter(Boolean)
           : [];
