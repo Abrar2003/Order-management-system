@@ -1061,12 +1061,20 @@ const buildQcReportMismatchPipeline = ({
   status = "",
   orderId = "",
   itemCode = "",
+  user = null,
 } = {}) => {
   const pipeline = [
     ...buildDateNormalizationStages({ reportRange, inspectorObjectId }),
     ...buildQcLookupStages(),
     ...buildUserLookupStages(),
   ];
+  const accessMatch = applyDataAccessMatch({}, user, {
+    brandFields: ["brand_value"],
+    vendorFields: ["vendor_value"],
+  });
+  if (Object.keys(accessMatch).length > 0) {
+    pipeline.push({ $match: accessMatch });
+  }
 
   const match = {};
   if (brand) match.brand_value = brand;
@@ -1261,6 +1269,12 @@ exports.getVendorWiseQaSummary = async (req, res) => {
       ...buildDateNormalizationStages({ reportRange }),
       ...buildQcLookupStages({ selectedVendor }),
       {
+        $match: applyDataAccessMatch({}, req.user, {
+          brandFields: ["brand_value"],
+          vendorFields: ["vendor_value"],
+        }),
+      },
+      {
         $facet: {
           vendor_options: buildSortedVendorOptionsFacet(),
           inspectors: [
@@ -1396,6 +1410,12 @@ exports.getVendorWiseQaDetailed = async (req, res) => {
     const pipeline = [
       ...buildDateNormalizationStages({ reportRange }),
       ...buildQcLookupStages({ selectedVendor }),
+      {
+        $match: applyDataAccessMatch({}, req.user, {
+          brandFields: ["brand_value"],
+          vendorFields: ["vendor_value"],
+        }),
+      },
       {
         $facet: {
           vendor_options: buildSortedVendorOptionsFacet({
@@ -1808,6 +1828,7 @@ exports.getQcReportMismatch = async (req, res) => {
         status,
         orderId,
         itemCode,
+        user: req.user,
       }),
     ).allowDiskUse(true);
     const inspectionsForComparison = limitRecentInspectionsByItem(inspections);
@@ -1821,14 +1842,23 @@ exports.getQcReportMismatch = async (req, res) => {
     ];
 
     const itemDocs = uniqueItemCodes.length > 0
-      ? await Item.find({
-          $or: uniqueItemCodes.map((code) => ({
-            code: {
-              $regex: `^${escapeRegex(code)}$`,
-              $options: "i",
+      ? await Item.find(
+          applyDataAccessMatch(
+            {
+              $or: uniqueItemCodes.map((code) => ({
+                code: {
+                  $regex: `^${escapeRegex(code)}$`,
+                  $options: "i",
+                },
+              })),
             },
-          })),
-        })
+            req.user,
+            {
+              brandFields: ["brand", "brand_name", "brands"],
+              vendorFields: ["vendors"],
+            },
+          ),
+        )
           .select(QC_REPORT_MISMATCH_ITEM_SELECT)
           .lean()
       : [];

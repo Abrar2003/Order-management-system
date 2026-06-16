@@ -178,9 +178,8 @@ const EditComplaintModal = ({
 
   return (
     <div className="modal d-block om-modal-backdrop" tabIndex="-1" role="dialog">
-      <div className="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
-        <div className="modal-content">
-          <form onSubmit={handleSubmit}>
+      <div className="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable complaint-modal-dialog">
+        <form onSubmit={handleSubmit} className="modal-content">
             <div className="modal-header">
               <h5 className="modal-title">Edit Complain</h5>
               <button type="button" className="btn-close" onClick={onClose} disabled={saving} />
@@ -265,17 +264,17 @@ const EditComplaintModal = ({
                     >
                       {creatingCategory ? "Saving..." : "Create Category"}
                     </button>
-                    <datalist id="edit-complaint-category-options">
-                      {resolvedCategoryOptions.map((category) => (
-                        <option key={category} value={category} />
-                      ))}
-                    </datalist>
                   </div>
+                  <datalist id="edit-complaint-category-options">
+                    {resolvedCategoryOptions.map((category) => (
+                      <option key={category} value={category} />
+                    ))}
+                  </datalist>
                 </div>
               </div>
 
               <div className="complaint-detail-section">
-                <div className="d-flex justify-content-between align-items-center gap-2 mb-2">
+                <div className="d-flex justify-content-between align-items-center gap-2 mb-3">
                   <h4 className="h6 mb-0">Comments</h4>
                   <button type="button" className="btn btn-outline-primary btn-sm" onClick={handleAddComment} disabled={saving}>
                     Add Comment
@@ -283,16 +282,16 @@ const EditComplaintModal = ({
                 </div>
                 <div className="d-flex flex-column gap-2">
                   {comments.map((entry, index) => (
-                    <div className="border rounded p-2" key={entry.client_id}>
-                      <div className="d-flex justify-content-between align-items-center gap-2 mb-2">
-                        <div className="small text-secondary">
+                    <div className="complaint-comment-bubble" key={entry.client_id}>
+                      <div className="comment-bubble-header">
+                        <div className="fw-semibold">
                           Comment {index + 1}
                           {entry.created_by?.name ? ` by ${entry.created_by.name}` : ""}
                           {entry.created_at ? ` on ${formatComplaintDateTime(entry.created_at)}` : ""}
                         </div>
                         <button
                           type="button"
-                          className="btn btn-outline-danger btn-sm"
+                          className="btn btn-outline-danger btn-sm px-3 py-1"
                           onClick={() => handleRemoveComment(entry.client_id)}
                           disabled={saving || comments.length <= 1}
                         >
@@ -312,7 +311,7 @@ const EditComplaintModal = ({
               </div>
 
               <div className="complaint-detail-section">
-                <div className="d-flex justify-content-between align-items-center gap-2 mb-2">
+                <div className="d-flex justify-content-between align-items-center gap-2 mb-3">
                   <h4 className="h6 mb-0">Files</h4>
                   <div className="form-check">
                     <input
@@ -337,43 +336,43 @@ const EditComplaintModal = ({
                       const fileId = file._id || `${file.key || "file"}-${index}`;
                       const willRemove = replaceFiles || removedFileIdSet.has(String(fileId));
                       return (
-                        <div className={`border rounded p-2 ${willRemove ? "bg-light text-secondary" : ""}`} key={fileId}>
-                          <div className="d-flex justify-content-between align-items-center gap-2">
-                            <div>
-                              <div className="fw-semibold">{file.original_name || file.file_name || "File"}</div>
-                              <div className="small text-secondary">
-                                {getFileTypeLabel(file)} · Uploaded by {file.uploaded_by?.name || "Unknown"} on {formatComplaintDateTime(file.uploaded_at)}
-                              </div>
+                        <div className={`complaint-file-card ${willRemove ? "will-remove" : ""}`} key={fileId}>
+                          <div>
+                            <div className="fw-semibold">{file.original_name || file.file_name || "File"}</div>
+                            <div className="small text-secondary">
+                              {getFileTypeLabel(file)} · Uploaded by {file.uploaded_by?.name || "Unknown"} on {formatComplaintDateTime(file.uploaded_at)}
                             </div>
-                            <button
-                              type="button"
-                              className={`btn btn-sm ${willRemove ? "btn-outline-secondary" : "btn-outline-danger"}`}
-                              onClick={() => toggleRemoveFile(file._id)}
-                              disabled={saving || replaceFiles || !file._id}
-                            >
-                              {willRemove ? "Removing" : "Remove"}
-                            </button>
                           </div>
+                          <button
+                            type="button"
+                            className={`btn btn-sm ${willRemove ? "btn-outline-secondary" : "btn-outline-danger"}`}
+                            onClick={() => toggleRemoveFile(file._id)}
+                            disabled={saving || replaceFiles || !file._id}
+                          >
+                            {willRemove ? "Removing" : "Remove"}
+                          </button>
                         </div>
                       );
                     })}
                   </div>
                 )}
 
-                <label className="form-label">Add Files</label>
-                <input
-                  type="file"
-                  className="form-control"
-                  accept={COMPLAINT_FILE_ACCEPT}
-                  multiple
-                  onChange={(event) => setFiles(Array.from(event.target.files || []))}
-                  disabled={saving}
-                />
-                {selectedFileNames.length > 0 && (
-                  <div className="small text-secondary mt-2">
-                    Selected: {selectedFileNames.join(", ")}
-                  </div>
-                )}
+                <div className="mt-3">
+                  <label className="form-label">Add Files</label>
+                  <input
+                    type="file"
+                    className="form-control"
+                    accept={COMPLAINT_FILE_ACCEPT}
+                    multiple
+                    onChange={(event) => setFiles(Array.from(event.target.files || []))}
+                    disabled={saving}
+                  />
+                  {selectedFileNames.length > 0 && (
+                    <div className="small text-secondary mt-2">
+                      Selected: {selectedFileNames.join(", ")}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
             <div className="modal-footer">
@@ -385,7 +384,6 @@ const EditComplaintModal = ({
               </button>
             </div>
           </form>
-        </div>
       </div>
     </div>
   );

@@ -8,7 +8,7 @@ import EditComplaintModal from "../components/complaints/EditComplaintModal";
 import UploadComplaintFilesModal from "../components/complaints/UploadComplaintFilesModal";
 import { formatComplaintDateTime } from "../components/complaints/complaintConstants";
 import { usePermissions } from "../auth/PermissionContext";
-import { isManagerLikeRole, isStrictAdminRole } from "../auth/permissions";
+import { isManagerLikeRole, isStrictAdminRole, normalizeUserRole } from "../auth/permissions";
 import {
   addComplaintComment,
   archiveComplaint,
@@ -53,8 +53,8 @@ const Complaints = () => {
   const canCreate = hasPermission("complaints", "create") && isManagerLikeRole(role);
   const canManage = hasPermission("complaints", "edit") && isManagerLikeRole(role);
   const canUpload = hasPermission("complaints", "upload") && isManagerLikeRole(role);
-  const canArchive = hasPermission("complaints", "delete") && isStrictAdminRole(role);
-  const canEditComplaint = hasPermission("complaints", "edit") && isStrictAdminRole(role);
+  const canArchive = hasPermission("complaints", "delete") && (isStrictAdminRole(role) || normalizeUserRole(role) === "inspection_manager");
+  const canEditComplaint = hasPermission("complaints", "edit") && (isStrictAdminRole(role) || normalizeUserRole(role) === "inspection_manager");
 
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [draftFilters, setDraftFilters] = useState(DEFAULT_FILTERS);

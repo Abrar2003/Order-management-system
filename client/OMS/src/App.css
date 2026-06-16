@@ -8709,3 +8709,129 @@ button.om-item-order-presence-label {
 .samples-page {
   max-width: 1600px;
 }
+
+/* Complaints Custom Modal Styling */
+.complaint-modal-dialog .modal-content {
+  border-radius: var(--om-radius-xl) !important;
+  border: 1px solid var(--om-color-border-strong) !important;
+  background: var(--om-color-surface) !important;
+  box-shadow: var(--om-shadow-lg) !important;
+  overflow: hidden;
+}
+
+.complaint-modal-dialog .modal-header {
+  background: var(--om-color-surface-muted) !important;
+  border-bottom: 1px solid var(--om-color-border) !important;
+  padding: 1.25rem 1.75rem !important;
+}
+
+.complaint-modal-dialog .modal-title {
+  color: var(--om-color-text) !important;
+  font-weight: 700 !important;
+  font-size: 1.25rem !important;
+}
+
+.complaint-modal-dialog .modal-body {
+  padding: 2rem 1.75rem !important;
+}
+
+.complaint-modal-dialog .modal-footer {
+  background: var(--om-color-surface-muted) !important;
+  border-top: 1px solid var(--om-color-border) !important;
+  padding: 1.25rem 1.75rem !important;
+}
+
+/* Fix input-group border radius resets when datalist or hidden elements exist, or generally */
+.input-group > .form-control:first-child,
+.input-group > .form-select:first-child {
+  border-top-right-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+  border-top-left-radius: 0.95rem !important;
+  border-bottom-left-radius: 0.95rem !important;
+}
+
+.input-group > .btn:last-child {
+  border-top-left-radius: 0 !important;
+  border-bottom-left-radius: 0 !important;
+  border-top-right-radius: 0.95rem !important;
+  border-bottom-right-radius: 0.95rem !important;
+}
+
+/* Form section headers inside complaint modals */
+.complaint-modal-dialog .complaint-detail-section {
+  border-top: 1px solid var(--om-color-border);
+  margin-top: 1.75rem;
+  padding-top: 1.5rem;
+}
+
+.complaint-modal-dialog .complaint-detail-section h4 {
+  font-size: 0.82rem !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
+  color: var(--om-color-text-muted) !important;
+  margin-bottom: 1rem !important;
+}
+
+/* Styled comment entries inside the modal */
+.complaint-modal-dialog .complaint-comment-bubble {
+  background: var(--om-color-surface-muted) !important;
+  border: 1px solid var(--om-color-border) !important;
+  border-radius: var(--om-radius-md) !important;
+  padding: 1.25rem !important;
+  transition: all 0.2s ease !important;
+  margin-bottom: 0.75rem !important;
+}
+
+.complaint-modal-dialog .complaint-comment-bubble:hover {
+  border-color: var(--om-color-accent) !important;
+  box-shadow: var(--om-shadow-xs) !important;
+}
+
+.complaint-modal-dialog .comment-bubble-header {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  margin-bottom: 0.75rem !important;
+  font-size: 0.82rem !important;
+  color: var(--om-color-text-muted) !important;
+}
+
+/* File items in edit modal */
+.complaint-modal-dialog .complaint-file-card {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  background: var(--om-color-surface-muted) !important;
+  border: 1px solid var(--om-color-border) !important;
+  border-radius: var(--om-radius-md) !important;
+  padding: 1rem 1.25rem !important;
+  margin-bottom: 0.55rem !important;
+  transition: all 0.2s ease !important;
+}
+
+.complaint-modal-dialog .complaint-file-card:hover {
+  border-color: var(--om-color-accent) !important;
+  box-shadow: var(--om-shadow-xs) !important;
+}
+
+.complaint-modal-dialog .complaint-file-card.will-remove {
+  opacity: 0.6 !important;
+  border-style: dashed !important;
+  background: var(--om-color-surface-alt) !important;
+}
+
+.complaint-modal-dialog {
+  max-height: calc(100vh - 3.5rem) !important;
+}
+
+.complaint-modal-dialog .modal-content {
+  max-height: calc(100vh - 3.5rem) !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.complaint-modal-dialog .modal-body {
+  flex: 1 1 auto !important;
+  overflow-y: auto !important;
+}

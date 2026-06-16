@@ -3012,7 +3012,9 @@ exports.getItemDatabaseProductDetails = async (req, res) => {
       });
     }
 
-    const item = await Item.findById(id).select(PRODUCT_DATABASE_ITEM_SELECT).lean();
+    const item = await Item.findOne(applyItemDataAccess({ _id: id }, req.user))
+      .select(PRODUCT_DATABASE_ITEM_SELECT)
+      .lean();
     if (!item) {
       return res.status(404).json({
         success: false,
@@ -3166,7 +3168,7 @@ exports.updateProductDatabaseItem = async (req, res) => {
       });
     }
 
-    const item = await Item.findById(itemId);
+    const item = await Item.findOne(applyItemDataAccess({ _id: itemId }, req.user));
     if (!item) {
       return res.status(404).json({
         success: false,
@@ -3233,7 +3235,7 @@ exports.checkProductDatabaseItem = async (req, res) => {
       });
     }
 
-    const item = await Item.findById(itemId);
+    const item = await Item.findOne(applyItemDataAccess({ _id: itemId }, req.user));
     if (!item) {
       return res.status(404).json({
         success: false,
@@ -3302,7 +3304,7 @@ exports.approveProductDatabaseItem = async (req, res) => {
       });
     }
 
-    const item = await Item.findById(itemId);
+    const item = await Item.findOne(applyItemDataAccess({ _id: itemId }, req.user));
     if (!item) {
       return res.status(404).json({
         success: false,
@@ -3954,9 +3956,9 @@ exports.createFinalPisCheckComment = async (req, res) => {
     }
 
     const itemCodeMatch = new RegExp(`^\\s*${escapeRegex(itemCodeInput)}\\s*$`, "i");
-    const item = await Item.findOne({ code: itemCodeMatch }).select(
-      "_id code pis_update_comments",
-    );
+    const item = await Item.findOne(
+      applyItemDataAccess({ code: itemCodeMatch }, req.user),
+    ).select("_id code pis_update_comments");
 
     if (!item) {
       return res.status(404).json({
@@ -4016,7 +4018,11 @@ const isFinalPisCommentCreator = (comment = {}, user = {}) => {
   return Boolean(actorId && creatorId && actorId === creatorId);
 };
 
-const findFinalPisCheckCommentTarget = async ({ itemCodeInput = "", commentId = "" } = {}) => {
+const findFinalPisCheckCommentTarget = async ({
+  itemCodeInput = "",
+  commentId = "",
+  user = null,
+} = {}) => {
   const normalizedItemCode = normalizeTextField(itemCodeInput);
   const normalizedCommentId = normalizeTextField(commentId);
 
@@ -4028,9 +4034,9 @@ const findFinalPisCheckCommentTarget = async ({ itemCodeInput = "", commentId = 
   }
 
   const itemCodeMatch = new RegExp(`^\\s*${escapeRegex(normalizedItemCode)}\\s*$`, "i");
-  const item = await Item.findOne({ code: itemCodeMatch }).select(
-    "_id code pis_update_comments",
-  );
+  const item = await Item.findOne(
+    applyItemDataAccess({ code: itemCodeMatch }, user),
+  ).select("_id code pis_update_comments");
 
   if (!item) {
     return { status: 404, message: "Item not found." };
@@ -4063,6 +4069,7 @@ exports.updateFinalPisCheckComment = async (req, res) => {
     const target = await findFinalPisCheckCommentTarget({
       itemCodeInput: req.params.code || req.params.itemCode,
       commentId: req.params.commentId,
+      user: req.user,
     });
     if (!target?.item || !target?.comment) {
       return res.status(target.status || 404).json({
@@ -4108,6 +4115,7 @@ exports.deleteFinalPisCheckComment = async (req, res) => {
     const target = await findFinalPisCheckCommentTarget({
       itemCodeInput: req.params.code || req.params.itemCode,
       commentId: req.params.commentId,
+      user: req.user,
     });
     if (!target?.item || !target?.comment) {
       return res.status(target.status || 404).json({
@@ -4386,10 +4394,10 @@ exports.getItemOrdersHistory = async (req, res) => {
     const itemCodeMatch = new RegExp(`^\\s*${escapedItemCode}\\s*$`, "i");
 
     const [itemDoc, orders] = await Promise.all([
-      Item.findOne({ code: itemCodeMatch })
+      Item.findOne(applyItemDataAccess({ code: itemCodeMatch }, req.user))
         .select("code name description brand brand_name brands vendors")
         .lean(),
-      Order.find({ "item.item_code": itemCodeMatch })
+      Order.find(applyDataAccessMatch({ "item.item_code": itemCodeMatch }, req.user))
         .select(
           "order_id item brand vendor order_date ETD revised_ETD status quantity shipment archived qc_record updatedAt",
         )
@@ -4562,7 +4570,7 @@ exports.getItemDetails = async (req, res) => {
     }
 
     const itemCodeMatch = new RegExp(`^\\s*${escapeRegex(itemCodeInput)}\\s*$`, "i");
-    const item = await Item.findOne({ code: itemCodeMatch })
+    const item = await Item.findOne(applyItemDataAccess({ code: itemCodeMatch }, req.user))
       .select(ITEM_DETAILS_SELECT)
       .lean();
 
@@ -4573,7 +4581,7 @@ exports.getItemDetails = async (req, res) => {
       });
     }
 
-    const orders = await Order.find({ "item.item_code": itemCodeMatch })
+    const orders = await Order.find(applyDataAccessMatch({ "item.item_code": itemCodeMatch }, req.user))
       .select("order_id item brand vendor status quantity archived qc_record updatedAt order_date ETD revised_ETD")
       .populate({
         path: "qc_record",
@@ -4739,7 +4747,7 @@ exports.getPisInspectionMasterComparison = async (req, res) => {
 
     const escapedItemCode = escapeRegex(itemCodeInput);
     const itemCodeMatch = new RegExp(`^\\s*${escapedItemCode}\\s*$`, "i");
-    const item = await Item.findOne({ code: itemCodeMatch })
+    const item = await Item.findOne(applyItemDataAccess({ code: itemCodeMatch }, req.user))
       .select(PIS_INSPECTION_MASTER_ITEM_SELECT)
       .lean();
 
@@ -4750,10 +4758,15 @@ exports.getPisInspectionMasterComparison = async (req, res) => {
       });
     }
 
-    const orders = await Order.find({
-      "item.item_code": itemCodeMatch,
-      qc_record: { $ne: null },
-    })
+    const orders = await Order.find(
+      applyDataAccessMatch(
+        {
+          "item.item_code": itemCodeMatch,
+          qc_record: { $ne: null },
+        },
+        req.user,
+      ),
+    )
       .select("order_id item.item_code brand vendor quantity qc_record order_date updatedAt status")
       .sort({ order_date: -1, updatedAt: -1, order_id: 1 })
       .lean();
@@ -4918,10 +4931,13 @@ exports.getPisInspectionMasterComparisonRecords = async (req, res) => {
 
     const rows = await Order.aggregate([
       {
-        $match: {
-          qc_record: { $ne: null },
-          "item.item_code": { $nin: [null, ""] },
-        },
+        $match: applyDataAccessMatch(
+          {
+            qc_record: { $ne: null },
+            "item.item_code": { $nin: [null, ""] },
+          },
+          req.user,
+        ),
       },
       {
         $lookup: {
@@ -5058,10 +5074,15 @@ exports.getItemOrderPresence = async (req, res) => {
     const escapedItemCode = escapeRegex(itemCodeInput);
     const itemCodeMatch = new RegExp(`^\\s*${escapedItemCode}\\s*$`, "i");
 
-    const orders = await Order.find({
-      ...ACTIVE_ORDER_MATCH,
-      "item.item_code": itemCodeMatch,
-    })
+    const orders = await Order.find(
+      applyDataAccessMatch(
+        {
+          ...ACTIVE_ORDER_MATCH,
+          "item.item_code": itemCodeMatch,
+        },
+        req.user,
+      ),
+    )
       .select(
         "order_id status quantity shipment order_date ETD revised_ETD updatedAt qc_record item",
       )
@@ -5362,7 +5383,7 @@ exports.updateItem = async (req, res) => {
       });
     }
 
-    const item = await Item.findById(itemId);
+    const item = await Item.findOne(applyItemDataAccess({ _id: itemId }, req.user));
     if (!item) {
       return res.status(404).json({
         success: false,
@@ -5639,7 +5660,7 @@ exports.getItemFormDraft = async (req, res) => {
       });
     }
 
-    const item = await Item.findById(itemId);
+    const item = await Item.findOne(applyItemDataAccess({ _id: itemId }, req.user));
     if (!item) {
       return res.status(404).json({
         success: false,
@@ -5682,7 +5703,7 @@ exports.saveItemFormDraft = async (req, res) => {
       });
     }
 
-    const item = await Item.findById(itemId);
+    const item = await Item.findOne(applyItemDataAccess({ _id: itemId }, req.user));
     if (!item) {
       return res.status(404).json({
         success: false,
@@ -5722,7 +5743,7 @@ exports.deleteItemFormDraft = async (req, res) => {
       });
     }
 
-    const item = await Item.findById(itemId);
+    const item = await Item.findOne(applyItemDataAccess({ _id: itemId }, req.user));
     if (!item) {
       return res.status(404).json({
         success: false,
@@ -5796,7 +5817,7 @@ exports.updateItemPis = async (req, res) => {
       });
     }
 
-    const item = await Item.findById(itemId);
+    const item = await Item.findOne(applyItemDataAccess({ _id: itemId }, req.user));
     if (!item) {
       return res.status(404).json({
         success: false,
@@ -6222,7 +6243,7 @@ exports.syncProductDatabaseToPis = async (req, res) => {
       });
     }
 
-    const item = await Item.findById(itemId);
+    const item = await Item.findOne(applyItemDataAccess({ _id: itemId }, req.user));
     if (!item) {
       return res.status(404).json({
         success: false,
@@ -6291,7 +6312,7 @@ exports.syncAllProductDatabaseToPis = async (req, res) => {
       ],
     };
 
-    const items = await Item.find(candidateMatch);
+    const items = await Item.find(applyItemDataAccess(candidateMatch, req.user));
     const summary = {
       scanned: items.length,
       updated: 0,
@@ -6365,9 +6386,8 @@ exports.getItemFileUrl = async (req, res) => {
       });
     }
 
-    const item = await Item.findById(itemId).select(
-      `code mounting_file_needed ${fileConfig.field}`,
-    );
+    const item = await Item.findOne(applyItemDataAccess({ _id: itemId }, req.user))
+      .select(`code mounting_file_needed ${fileConfig.field}`);
     if (!item) {
       return res.status(404).json({
         success: false,
@@ -6469,7 +6489,7 @@ exports.uploadItemFile = async (req, res) => {
       });
     }
 
-    const item = await Item.findById(itemId);
+    const item = await Item.findOne(applyItemDataAccess({ _id: itemId }, req.user));
     if (!item) {
       return res.status(404).json({
         success: false,
@@ -6577,7 +6597,8 @@ exports.getItemPisFileUrl = async (req, res) => {
       });
     }
 
-    const item = await Item.findById(itemId).select("code pis_file");
+    const item = await Item.findOne(applyItemDataAccess({ _id: itemId }, req.user))
+      .select("code pis_file");
     if (!item) {
       return res.status(404).json({
         success: false,
@@ -6638,7 +6659,7 @@ exports.uploadItemPisFile = async (req, res) => {
       });
     }
 
-    const item = await Item.findById(itemId);
+    const item = await Item.findOne(applyItemDataAccess({ _id: itemId }, req.user));
     if (!item) {
       return res.status(404).json({
         success: false,
@@ -6834,7 +6855,7 @@ exports.deleteItemFile = async (req, res) => {
       });
     }
 
-    const item = await Item.findById(itemId);
+    const item = await Item.findOne(applyItemDataAccess({ _id: itemId }, req.user));
     if (!item) {
       return res.status(404).json({
         success: false,

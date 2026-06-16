@@ -4,7 +4,10 @@ const EmailLogs = require("../models/emailLogs.model");
 const Order = require("../models/order.model");
 const Brand = require("../models/brand.model");
 const { parseDateOnly, toDateOnlyIso } = require("../helpers/dateOnly");
-const { applyDataAccessMatch } = require("../services/userDataAccess.service");
+const {
+  applyBrandDocumentAccessMatch,
+  applyDataAccessMatch,
+} = require("../services/userDataAccess.service");
 
 const DEFAULT_PAGE_LIMIT = 30;
 const PAGE_LIMIT_OPTIONS = [7, 30, 50, 90];
@@ -95,11 +98,15 @@ const normalizeBrandInput = (payload) => {
     : { id: "", name: raw };
 };
 
-const findBrandDoc = async (brandPayload) => {
+const findBrandDoc = async (brandPayload, user = null) => {
   const brandInput = normalizeBrandInput(brandPayload);
 
   if (brandInput.id && mongoose.Types.ObjectId.isValid(brandInput.id)) {
-    const brandById = await Brand.findById(brandInput.id).select("_id name").lean();
+    const brandById = await Brand.findOne(
+      applyBrandDocumentAccessMatch({ _id: brandInput.id }, user),
+    )
+      .select("_id name")
+      .lean();
     if (brandById) {
       return brandById;
     }
@@ -107,10 +114,19 @@ const findBrandDoc = async (brandPayload) => {
 
   if (brandInput.name) {
     const exactMatch =
-      (await Brand.findOne({ name: brandInput.name }).select("_id name").lean())
-      || (await Brand.findOne({
-        name: { $regex: `^${escapeRegex(brandInput.name)}$`, $options: "i" },
-      }).select("_id name").lean());
+      (await Brand.findOne(applyBrandDocumentAccessMatch({ name: brandInput.name }, user))
+        .select("_id name")
+        .lean())
+      || (await Brand.findOne(
+        applyBrandDocumentAccessMatch(
+          {
+            name: { $regex: `^${escapeRegex(brandInput.name)}$`, $options: "i" },
+          },
+          user,
+        ),
+      )
+        .select("_id name")
+        .lean());
 
     if (exactMatch) {
       return exactMatch;
@@ -120,7 +136,7 @@ const findBrandDoc = async (brandPayload) => {
   return null;
 };
 
-const resolveEmailLogInput = async (payload = {}, currentLog = null) => {
+const resolveEmailLogInput = async (payload = {}, currentLog = null, user = null) => {
   const hasOrderIdInput = hasOwn(payload, "order_id") || hasOwn(payload, "orderId");
   const hasBrandInput = hasOwn(payload, "brand") || hasOwn(payload, "brand_id") || hasOwn(payload, "brandId");
   const hasVendorInput = hasOwn(payload, "vendor") || hasOwn(payload, "vendor_name") || hasOwn(payload, "vendorName");
@@ -145,7 +161,7 @@ const resolveEmailLogInput = async (payload = {}, currentLog = null) => {
     : (hasOwn(payload, "brand_id") || hasOwn(payload, "brandId")
       ? { id: pickFirstOwn(payload, ["brand_id", "brandId"]) }
       : currentLog?.brand);
-  const brandDoc = await findBrandDoc(rawBrandPayload);
+  const brandDoc = await findBrandDoc(rawBrandPayload, user);
 
   if (!orderId) {
     return { error: "order_id is required" };
@@ -179,22 +195,29 @@ const resolveEmailLogInput = async (payload = {}, currentLog = null) => {
   };
 };
 
-const findMatchingOrder = async ({ order_id, brand, vendor }) => {
+const findMatchingOrder = async ({ order_id, brand, vendor, user = null }) => {
   const orderId = normalizeText(order_id);
   const brandName = normalizeText(brand?.name);
   const vendorName = normalizeText(vendor?.name);
 
-  const exactOrder = await Order.findOne({
-    order_id: orderId,
-    brand: brandName,
-    vendor: vendorName,
-  }).select("_id order_id brand vendor").lean();
+  const exactOrder = await Order.findOne(
+    applyDataAccessMatch(
+      {
+        order_id: orderId,
+        brand: brandName,
+        vendor: vendorName,
+      },
+      user,
+    ),
+  )
+    .select("_id order_id brand vendor")
+    .lean();
 
   if (exactOrder) {
     return { order: exactOrder, matchType: "exact" };
   }
 
-  const orderById = await Order.findOne({ order_id: orderId })
+  const orderById = await Order.findOne(applyDataAccessMatch({ order_id: orderId }, user))
     .select("_id order_id brand vendor")
     .lean();
 
@@ -205,7 +228,7 @@ const findMatchingOrder = async ({ order_id, brand, vendor }) => {
   return { order: orderById, matchType: "order_id_only" };
 };
 
-const serializeEmailLogs = async (emailLogs) => {
+const serializeEmailLogs = async (emailLogs, { user = null } = {}) => {
   const rows = Array.isArray(emailLogs) ? emailLogs : [];
   if (rows.length === 0) {
     return [];
@@ -213,7 +236,7 @@ const serializeEmailLogs = async (emailLogs) => {
 
   const orderIds = [...new Set(rows.map((row) => normalizeText(row?.order_id)).filter(Boolean))];
   const relatedOrders = orderIds.length > 0
-    ? await Order.find({ order_id: { $in: orderIds } })
+    ? await Order.find(applyDataAccessMatch({ order_id: { $in: orderIds } }, user))
       .select("_id order_id brand vendor")
       .lean()
     : [];
@@ -367,7 +390,7 @@ exports.getAllEmailLogs = async (req, res) => {
       .populate("created_by", "name email")
       .lean()
       .exec();
-    const serializedLogs = await serializeEmailLogs(emailLogs);
+    const serializedLogs = await serializeEmailLogs(emailLogs, { user: req.user });
 
     res.status(200).json({
       success: true,
@@ -395,8 +418,8 @@ exports.getAllEmailLogs = async (req, res) => {
 exports.getCreateOptions = async (req, res) => {
   try {
     const [brandDocs, vendors] = await Promise.all([
-      Brand.find({}, "_id name").sort({ name: 1 }).lean(),
-      Order.distinct("vendor"),
+      Brand.find(applyBrandDocumentAccessMatch({}, req.user), "_id name").sort({ name: 1 }).lean(),
+      Order.distinct("vendor", applyDataAccessMatch({}, req.user)),
     ]);
 
     const brands = (Array.isArray(brandDocs) ? brandDocs : [])
@@ -437,7 +460,12 @@ exports.getEmailLogsByOrderId = async (req, res) => {
       });
     }
 
-    const emailLogs = await EmailLogs.find({ order_id: orderId })
+    const emailLogs = await EmailLogs.find(
+      applyDataAccessMatch({ order_id: orderId }, req.user, {
+        brandFields: ["brand.name"],
+        vendorFields: ["vendor.name"],
+      }),
+    )
       .sort({ creation_date: 1 })
       .populate("created_by", "name email")
       .lean()
@@ -452,7 +480,7 @@ exports.getEmailLogsByOrderId = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: await serializeEmailLogs(emailLogs),
+      data: await serializeEmailLogs(emailLogs, { user: req.user }),
     });
   } catch (err) {
     console.error("Error fetching email logs:", err);
@@ -477,7 +505,7 @@ exports.createEmailLog = async (req, res) => {
       });
     }
 
-    const resolvedInput = await resolveEmailLogInput(req.body || {});
+    const resolvedInput = await resolveEmailLogInput(req.body || {}, null, req.user);
     if (resolvedInput.error) {
       return res.status(400).json({
         success: false,
@@ -486,7 +514,7 @@ exports.createEmailLog = async (req, res) => {
     }
 
     const { data } = resolvedInput;
-    const { matchType } = await findMatchingOrder(data);
+    const { matchType } = await findMatchingOrder({ ...data, user: req.user });
 
     if (matchType === "missing") {
       return res.status(404).json({
@@ -532,7 +560,7 @@ exports.createEmailLog = async (req, res) => {
       .sort({ creation_date: 1 })
       .populate("created_by", "name email")
       .lean();
-    const serializedLogs = await serializeEmailLogs(loadedLogs);
+    const serializedLogs = await serializeEmailLogs(loadedLogs, { user: req.user });
 
     res.status(201).json({
       success: true,
@@ -562,7 +590,12 @@ exports.updateEmailLog = async (req, res) => {
       });
     }
 
-    const emailLog = await EmailLogs.findById(id);
+    const emailLog = await EmailLogs.findOne(
+      applyDataAccessMatch({ _id: id }, req.user, {
+        brandFields: ["brand.name"],
+        vendorFields: ["vendor.name"],
+      }),
+    );
     if (!emailLog) {
       return res.status(404).json({
         success: false,
@@ -570,7 +603,7 @@ exports.updateEmailLog = async (req, res) => {
       });
     }
 
-    const resolvedInput = await resolveEmailLogInput(req.body || {}, emailLog);
+    const resolvedInput = await resolveEmailLogInput(req.body || {}, emailLog, req.user);
     if (resolvedInput.error) {
       return res.status(400).json({
         success: false,
@@ -579,7 +612,7 @@ exports.updateEmailLog = async (req, res) => {
     }
 
     const { data } = resolvedInput;
-    const { matchType } = await findMatchingOrder(data);
+    const { matchType } = await findMatchingOrder({ ...data, user: req.user });
 
     if (matchType === "missing") {
       return res.status(404).json({
@@ -619,7 +652,9 @@ exports.updateEmailLog = async (req, res) => {
     await emailLog.save();
 
     const updatedLog = await loadEmailLogById(emailLog._id);
-    const [serializedLog] = await serializeEmailLogs(updatedLog ? [updatedLog] : []);
+    const [serializedLog] = await serializeEmailLogs(updatedLog ? [updatedLog] : [], {
+      user: req.user,
+    });
 
     return res.status(200).json({
       success: true,
@@ -672,7 +707,12 @@ exports.deleteEmailLog = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const emailLog = await EmailLogs.findByIdAndDelete(id);
+    const emailLog = await EmailLogs.findOneAndDelete(
+      applyDataAccessMatch({ _id: id }, req.user, {
+        brandFields: ["brand.name"],
+        vendorFields: ["vendor.name"],
+      }),
+    );
 
     if (!emailLog) {
       return res.status(404).json({

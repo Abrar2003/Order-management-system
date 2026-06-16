@@ -489,7 +489,11 @@ exports.createSample = async (req, res) => {
 exports.updateSample = async (req, res) => {
   try {
     if (!ensureSampleMutationAccess(req, res)) return;
-    const sample = await Sample.findById(req.params.id);
+    const sample = await Sample.findOne(
+      applyDataAccessMatch({ _id: req.params.id }, req.user, {
+        vendorFields: ["vendor"],
+      }),
+    );
     if (!sample) return res.status(404).json({ success: false, message: "Sample not found" });
     const payload = req.body && typeof req.body === "object" ? req.body : {};
     const actor = buildAuditActor(req.user);
@@ -547,7 +551,11 @@ exports.updateSample = async (req, res) => {
 exports.finalizeSampleShipment = async (req, res) => {
   try {
     if (!ensureSampleMutationAccess(req, res)) return;
-    const sample = await Sample.findById(req.params.id);
+    const sample = await Sample.findOne(
+      applyDataAccessMatch({ _id: req.params.id }, req.user, {
+        vendorFields: ["vendor"],
+      }),
+    );
     if (!sample) return res.status(404).json({ success: false, message: "Sample not found" });
     const actor = buildAuditActor(req.user);
     const shipmentEntry = normalizeShipmentEntries([req.body], actor)[0];

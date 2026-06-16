@@ -342,7 +342,7 @@ const isQcOrderInspectionDone = (qcDoc = null, orderDoc = null) =>
   normalizeOrderStatus(resolveQcOrderStatus(qcDoc, orderDoc)) ===
   "Inspection Done";
 
-const buildActiveOrderLookupStage = (asField = "order") => ({
+const buildActiveOrderLookupStage = (asField = "order", user = null) => ({
   $lookup: {
     from: "orders",
     let: { orderId: "$order" },
@@ -353,7 +353,7 @@ const buildActiveOrderLookupStage = (asField = "order") => ({
         },
       },
       {
-        $match: ACTIVE_ORDER_MATCH,
+        $match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, user),
       },
     ],
     as: asField,
@@ -2698,6 +2698,7 @@ const findTransferTargetOrderAndQc = async ({
   poNumber = "",
   itemCode = "",
   sourceOrderId = "",
+  user = null,
 } = {}) => {
   const normalizedPoNumber = normalizeText(poNumber);
   const normalizedItemCode = normalizeText(itemCode);
@@ -2709,20 +2710,25 @@ const findTransferTargetOrderAndQc = async ({
     };
   }
 
-  const targetOrder = await Order.findOne({
-    ...ACTIVE_ORDER_MATCH,
-    ...(sourceOrderId && mongoose.Types.ObjectId.isValid(sourceOrderId)
-      ? { _id: { $ne: new mongoose.Types.ObjectId(sourceOrderId) } }
-      : {}),
-    order_id: {
-      $regex: `^${escapeRegex(normalizedPoNumber)}$`,
-      $options: "i",
-    },
-    "item.item_code": {
-      $regex: `^${escapeRegex(normalizedItemCode)}$`,
-      $options: "i",
-    },
-  });
+  const targetOrder = await Order.findOne(
+    applyDataAccessMatch(
+      {
+        ...ACTIVE_ORDER_MATCH,
+        ...(sourceOrderId && mongoose.Types.ObjectId.isValid(sourceOrderId)
+          ? { _id: { $ne: new mongoose.Types.ObjectId(sourceOrderId) } }
+          : {}),
+        order_id: {
+          $regex: `^${escapeRegex(normalizedPoNumber)}$`,
+          $options: "i",
+        },
+        "item.item_code": {
+          $regex: `^${escapeRegex(normalizedItemCode)}$`,
+          $options: "i",
+        },
+      },
+      user,
+    ),
+  );
 
   if (!targetOrder) {
     return {
@@ -2832,7 +2838,11 @@ const INSPECTION_SIZE_SOURCE_SELECT = [
 const resolveQcInspectionSizeItemCode = (qcDoc = {}) =>
   normalizeText(qcDoc?.item?.item_code || qcDoc?.order?.item?.item_code || "");
 
-const findInspectionSizeSourceForQc = async (qcDoc = {}, existingSource = null) => {
+const findInspectionSizeSourceForQc = async (
+  qcDoc = {},
+  existingSource = null,
+  user = null,
+) => {
   if (existingSource && typeof existingSource === "object") {
     return existingSource;
   }
@@ -2840,12 +2850,21 @@ const findInspectionSizeSourceForQc = async (qcDoc = {}, existingSource = null) 
   const itemCode = resolveQcInspectionSizeItemCode(qcDoc);
   if (!itemCode) return null;
 
-  return Item.findOne({
-    code: {
-      $regex: `^${escapeRegex(itemCode)}$`,
-      $options: "i",
-    },
-  })
+  return Item.findOne(
+    applyDataAccessMatch(
+      {
+        code: {
+          $regex: `^${escapeRegex(itemCode)}$`,
+          $options: "i",
+        },
+      },
+      user,
+      {
+        brandFields: ["brand", "brand_name", "brands"],
+        vendorFields: ["vendors"],
+      },
+    ),
+  )
     .select(INSPECTION_SIZE_SOURCE_SELECT)
     .lean();
 };
@@ -3601,7 +3620,7 @@ exports.getQCList = async (req, res) => {
 
     const pipeline = [
       { $match: match },
-      buildActiveOrderLookupStage("order"),
+      buildActiveOrderLookupStage("order", req.user),
       { $unwind: { path: "$order", preserveNullAndEmptyArrays: false } },
       {
         $addFields: {
@@ -3640,7 +3659,7 @@ exports.getQCList = async (req, res) => {
       QC.aggregate(pipeline).allowDiskUse(true),
       QC.aggregate([
         { $match: applyDataAccessMatch(buildQcListMatch({ ...filterInput, includeVendor: false }), req.user, { brandFields: ["order_meta.brand"], vendorFields: ["order_meta.vendor"] }) },
-        buildActiveOrderLookupStage("order"),
+        buildActiveOrderLookupStage("order", req.user),
         { $unwind: { path: "$order", preserveNullAndEmptyArrays: false } },
         ...optionInspectionStatusStages,
         { $group: { _id: "$order_meta.vendor" } },
@@ -3648,7 +3667,7 @@ exports.getQCList = async (req, res) => {
       ]).allowDiskUse(true),
       QC.aggregate([
         { $match: applyDataAccessMatch(buildQcListMatch({ ...filterInput, includeOrder: false }), req.user, { brandFields: ["order_meta.brand"], vendorFields: ["order_meta.vendor"] }) },
-        buildActiveOrderLookupStage("order"),
+        buildActiveOrderLookupStage("order", req.user),
         { $unwind: { path: "$order", preserveNullAndEmptyArrays: false } },
         ...optionInspectionStatusStages,
         { $group: { _id: "$order_meta.order_id" } },
@@ -3656,7 +3675,7 @@ exports.getQCList = async (req, res) => {
       ]).allowDiskUse(true),
       QC.aggregate([
         { $match: applyDataAccessMatch(buildQcListMatch({ ...filterInput, includeSearch: false }), req.user, { brandFields: ["order_meta.brand"], vendorFields: ["order_meta.vendor"] }) },
-        buildActiveOrderLookupStage("order"),
+        buildActiveOrderLookupStage("order", req.user),
         { $unwind: { path: "$order", preserveNullAndEmptyArrays: false } },
         ...optionInspectionStatusStages,
         { $group: { _id: "$item.item_code" } },
@@ -3779,7 +3798,7 @@ exports.exportQCList = async (req, res) => {
         },
       },
       { $unwind: { path: "$createdByUser", preserveNullAndEmptyArrays: true } },
-      buildActiveOrderLookupStage("order"),
+      buildActiveOrderLookupStage("order", req.user),
       { $unwind: { path: "$order", preserveNullAndEmptyArrays: false } },
       {
         $project: {
@@ -4170,7 +4189,9 @@ exports.alignQC = async (req, res) => {
       order: order,
       "item.item_code": item.item_code,
     });
-    const orderRecord = await Order.findById(order);
+    const orderRecord = await Order.findOne(
+      applyDataAccessMatch({ _id: order }, req.user),
+    );
     if (!orderRecord) {
       return res.status(404).json({ message: "Order not found" });
     }
@@ -4270,12 +4291,21 @@ exports.alignQC = async (req, res) => {
 
     const normalizedItemCode = normalizeText(item?.item_code || "");
     const matchedItem = normalizedItemCode
-      ? await Item.findOne({
-          code: {
-            $regex: `^${escapeRegex(normalizedItemCode)}$`,
-            $options: "i",
+      ? await Item.findOne(
+        applyDataAccessMatch(
+          {
+            code: {
+              $regex: `^${escapeRegex(normalizedItemCode)}$`,
+              $options: "i",
+            },
           },
-        })
+          req.user,
+          {
+            brandFields: ["brand", "brand_name", "brands"],
+            vendorFields: ["vendors"],
+          },
+        ),
+      )
           .select("code name description cbm qc")
           .lean()
       : null;
@@ -4608,8 +4638,12 @@ exports.alignQC = async (req, res) => {
 
 exports.getQcFormDraft = async (req, res) => {
   try {
-    const qc = await QC.findById(req.params.id);
-    if (!qc) {
+    const qc = await QC.findById(req.params.id).populate({
+      path: "order",
+      match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
+      select: "_id",
+    });
+    if (!qc || !qc.order) {
       return res.status(404).json({ message: "QC record not found" });
     }
 
@@ -4637,8 +4671,12 @@ exports.getQcFormDraft = async (req, res) => {
 
 exports.saveQcFormDraft = async (req, res) => {
   try {
-    const qc = await QC.findById(req.params.id);
-    if (!qc) {
+    const qc = await QC.findById(req.params.id).populate({
+      path: "order",
+      match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
+      select: "_id",
+    });
+    if (!qc || !qc.order) {
       return res.status(404).json({ message: "QC record not found" });
     }
 
@@ -4664,8 +4702,12 @@ exports.saveQcFormDraft = async (req, res) => {
 
 exports.deleteQcFormDraft = async (req, res) => {
   try {
-    const qc = await QC.findById(req.params.id);
-    if (!qc) {
+    const qc = await QC.findById(req.params.id).populate({
+      path: "order",
+      match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
+      select: "_id",
+    });
+    if (!qc || !qc.order) {
       return res.status(404).json({ message: "QC record not found" });
     }
 
@@ -4738,9 +4780,13 @@ exports.updateQC = async (req, res) => {
 
     const qc = await QC.findById(req.params.id)
       .populate("inspector")
-      .populate("order", "status quantity shipment order_id brand vendor");
+      .populate({
+        path: "order",
+        match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
+        select: "status quantity shipment order_id brand vendor",
+      });
 
-    if (!qc) {
+    if (!qc || !qc.order) {
       return res.status(404).json({ message: "QC record not found" });
     }
     const beforeInspectionRecords = await Inspection.find({ qc: qc._id }).lean();
@@ -4751,7 +4797,7 @@ exports.updateQC = async (req, res) => {
     const linkedOrderId = qc?.order?._id || qc.order;
     const linkedOrderBefore =
       linkedOrderId && mongoose.Types.ObjectId.isValid(linkedOrderId)
-        ? await Order.findById(linkedOrderId)
+        ? await Order.findOne(applyDataAccessMatch({ _id: linkedOrderId }, req.user))
         : null;
     const beforeOrderSnapshot = buildOrderAuditSnapshotForQc(linkedOrderBefore);
 
@@ -5256,12 +5302,21 @@ exports.updateQC = async (req, res) => {
 
     let itemDocForInspectedSizeUpdate = null;
     if (itemCodeForInspectedSizeUpdate) {
-      itemDocForInspectedSizeUpdate = await Item.findOne({
-        code: {
-          $regex: `^${escapeRegex(itemCodeForInspectedSizeUpdate)}$`,
-          $options: "i",
-        },
-      });
+      itemDocForInspectedSizeUpdate = await Item.findOne(
+        applyDataAccessMatch(
+          {
+            code: {
+              $regex: `^${escapeRegex(itemCodeForInspectedSizeUpdate)}$`,
+              $options: "i",
+            },
+          },
+          req.user,
+          {
+            brandFields: ["brand", "brand_name", "brands"],
+            vendorFields: ["vendors"],
+          },
+        ),
+      );
     }
 
     if (hasItemMasterUpdate && !itemDocForInspectedSizeUpdate) {
@@ -5406,12 +5461,21 @@ exports.updateQC = async (req, res) => {
       !itemDocForBarcodeRequirement &&
       qcItemCodeForBarcodeRequirement
     ) {
-      itemDocForBarcodeRequirement = await Item.findOne({
-        code: {
-          $regex: `^${escapeRegex(qcItemCodeForBarcodeRequirement)}$`,
-          $options: "i",
-        },
-      });
+      itemDocForBarcodeRequirement = await Item.findOne(
+        applyDataAccessMatch(
+          {
+            code: {
+              $regex: `^${escapeRegex(qcItemCodeForBarcodeRequirement)}$`,
+              $options: "i",
+            },
+          },
+          req.user,
+          {
+            brandFields: ["brand", "brand_name", "brands"],
+            vendorFields: ["vendors"],
+          },
+        ),
+      );
     }
 
     /* ────────────────────────
@@ -5832,12 +5896,21 @@ exports.updateQC = async (req, res) => {
       qc?.item?.item_code || itemCodeForInspectedSizeUpdate || "",
     );
     if (!itemDocForLabelValidation && itemCodeForLabelValidation) {
-      itemDocForLabelValidation = await Item.findOne({
-        code: {
-          $regex: `^${escapeRegex(itemCodeForLabelValidation)}$`,
-          $options: "i",
-        },
-      })
+      itemDocForLabelValidation = await Item.findOne(
+        applyDataAccessMatch(
+          {
+            code: {
+              $regex: `^${escapeRegex(itemCodeForLabelValidation)}$`,
+              $options: "i",
+            },
+          },
+          req.user,
+          {
+            brandFields: ["brand", "brand_name", "brands"],
+            vendorFields: ["vendors"],
+          },
+        ),
+      )
         .select("inspected_box_sizes inspected_box_mode pis_box_sizes pis_box_mode")
         .lean();
     }
@@ -6101,6 +6174,7 @@ exports.updateQC = async (req, res) => {
       const inspectionSizeSource = await findInspectionSizeSourceForQc(
         qc,
         itemDocForInspectedSizeUpdate,
+        req.user,
       );
       const inspectionInspectorId = qc.inspector?._id
         ? qc.inspector._id
@@ -6477,7 +6551,9 @@ exports.updateQC = async (req, res) => {
     await qc.save();
 
     const orderId = qc?.order?._id || qc.order;
-    const orderRecord = await Order.findById(orderId);
+    const orderRecord = await Order.findOne(
+      applyDataAccessMatch({ _id: orderId }, req.user),
+    );
     if (orderRecord && !CLOSED_ORDER_STATUSES.includes(orderRecord.status)) {
       applyQcOrderStatus(qc, orderRecord);
       orderRecord.updated_by = buildAuditActor(req.user);
@@ -6721,7 +6797,7 @@ exports.getInspectorReports = async (req, res) => {
           populate: {
             path: "order",
             select: "_id",
-            match: ACTIVE_ORDER_MATCH,
+            match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
           },
         })
         .lean(),
@@ -6736,7 +6812,7 @@ exports.getInspectorReports = async (req, res) => {
           populate: {
             path: "order",
             select: "order_id brand vendor status quantity shipment archived",
-            match: ACTIVE_ORDER_MATCH,
+            match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
           },
         })
       .sort({ createdAt: -1 })
@@ -6790,13 +6866,22 @@ exports.getInspectorReports = async (req, res) => {
       ),
     ];
     const itemDocs = uniqueItemCodes.length
-      ? await Item.find({
-          code: {
-            $in: uniqueItemCodes.map(
-              (itemCode) => new RegExp(`^${escapeRegex(itemCode)}$`, "i"),
-            ),
+      ? await Item.find(
+        applyDataAccessMatch(
+          {
+            code: {
+              $in: uniqueItemCodes.map(
+                (itemCode) => new RegExp(`^${escapeRegex(itemCode)}$`, "i"),
+              ),
+            },
           },
-        })
+          req.user,
+          {
+            brandFields: ["brand", "brand_name", "brands"],
+            vendorFields: ["vendors"],
+          },
+        ),
+      )
           .select(
             "code cbm inspected_item_LBH inspected_item_sizes inspected_item_top_LBH inspected_item_bottom_LBH inspected_box_LBH inspected_box_sizes inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_item_LBH pis_item_sizes pis_item_top_LBH pis_item_bottom_LBH pis_box_LBH pis_box_sizes pis_box_top_LBH pis_box_bottom_LBH",
           )
@@ -7068,9 +7153,7 @@ exports.getVendorReports = async (req, res) => {
       return res.status(400).json({ message: "Invalid timeline filters" });
     }
 
-    const orderRows = await Order.find({
-      ...ACTIVE_ORDER_MATCH,
-    })
+    const orderRows = await Order.find(applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user))
       .select(
         "order_id brand vendor status order_date ETD revised_ETD quantity item shipment",
       )
@@ -7460,7 +7543,7 @@ exports.getWeeklyOrderSummary = async (req, res) => {
       .select("order order_meta item quantities request_history")
       .populate({
         path: "order",
-        match: ACTIVE_ORDER_MATCH,
+        match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
         select: "order_id vendor brand quantity status shipment",
       })
       .lean();
@@ -7533,7 +7616,7 @@ exports.getWeeklyOrderSummary = async (req, res) => {
       .select("order order_meta item quantities request_history cbm")
       .populate({
         path: "order",
-        match: ACTIVE_ORDER_MATCH,
+        match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
         select: "order_id vendor brand quantity status shipment",
       })
       .lean();
@@ -7557,13 +7640,22 @@ exports.getWeeklyOrderSummary = async (req, res) => {
       ),
     ];
     const itemDocs = uniqueItemCodes.length > 0
-      ? await Item.find({
-          code: {
-            $in: uniqueItemCodes.map(
-              (itemCode) => new RegExp(`^${escapeRegex(itemCode)}$`, "i"),
-            ),
+      ? await Item.find(
+        applyDataAccessMatch(
+          {
+            code: {
+              $in: uniqueItemCodes.map(
+                (itemCode) => new RegExp(`^${escapeRegex(itemCode)}$`, "i"),
+              ),
+            },
           },
-        })
+          req.user,
+          {
+            brandFields: ["brand", "brand_name", "brands"],
+            vendorFields: ["vendors"],
+          },
+        ),
+      )
           .select(
             "code cbm inspected_item_LBH inspected_item_sizes inspected_item_top_LBH inspected_item_bottom_LBH inspected_box_LBH inspected_box_sizes inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH box_LBH pis_item_LBH pis_item_sizes pis_item_top_LBH pis_item_bottom_LBH pis_box_LBH pis_box_sizes pis_box_top_LBH pis_box_bottom_LBH",
           )
@@ -7854,7 +7946,7 @@ exports.getDailyOrderSummary = async (req, res) => {
               },
             },
             {
-              $match: ACTIVE_ORDER_MATCH,
+              $match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
             },
           ],
           as: "order_doc",
@@ -8011,9 +8103,13 @@ exports.markGoodsNotReady = async (req, res) => {
 
     const qc = await QC.findById(req.params.id)
       .populate("inspector")
-      .populate("order", "status quantity shipment order_id brand vendor");
+      .populate({
+        path: "order",
+        match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
+        select: "status quantity shipment order_id brand vendor",
+      });
 
-    if (!qc) {
+    if (!qc || !qc.order) {
       return res.status(404).json({ message: "QC record not found" });
     }
     const beforeInspectionRecords = await Inspection.find({ qc: qc._id }).lean();
@@ -8084,7 +8180,7 @@ exports.markGoodsNotReady = async (req, res) => {
     }
 
     const requestedQuantityForRecord = latestRequestedQuantity;
-    const inspectionSizeSource = await findInspectionSizeSourceForQc(qc);
+    const inspectionSizeSource = await findInspectionSizeSourceForQc(qc, null, req.user);
 
     qc.last_inspected_date = inspectionDate;
     qc.remarks = reason;
@@ -8177,9 +8273,12 @@ exports.rejectAllQc = async (req, res) => {
 
     const qc = await QC.findById(req.params.id)
       .populate("inspector")
-      .populate("order");
+      .populate({
+        path: "order",
+        match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
+      });
 
-    if (!qc) {
+    if (!qc || !qc.order) {
       return res.status(404).json({ message: "QC record not found" });
     }
 
@@ -8286,7 +8385,7 @@ exports.rejectAllQc = async (req, res) => {
     const previousRejectedImageKey = normalizeText(
       qc?.rejected_image?.key || "",
     );
-    const inspectionSizeSource = await findInspectionSizeSourceForQc(qc);
+    const inspectionSizeSource = await findInspectionSizeSourceForQc(qc, null, req.user);
     const inspectionSizeSnapshot = buildInspectionSizeSnapshot({
       qcDoc: qc,
       currentSource: inspectionSizeSource,
@@ -8515,9 +8614,13 @@ exports.transferQcRequest = async (req, res) => {
     const qc = await QC.findById(qcId)
       .populate("inspector", "name email role")
       .populate("request_history.inspector", "name email role")
-      .populate("order", "status quantity shipment order_id brand vendor");
+      .populate({
+        path: "order",
+        match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
+        select: "status quantity shipment order_id brand vendor",
+      });
 
-    if (!qc) {
+    if (!qc || !qc.order) {
       return res.status(404).json({ message: "QC record not found" });
     }
 
@@ -8828,7 +8931,11 @@ exports.lookupInspectionTransferTarget = async (req, res) => {
 
     const qc = await QC.findById(qcId)
       .select("order item order_meta quantities request_history request_type")
-      .populate("order", "order_id brand vendor item quantity status shipment qc_record");
+      .populate({
+        path: "order",
+        match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
+        select: "order_id brand vendor item quantity status shipment qc_record",
+      });
     if (!qc || !qc.order) {
       return res.status(404).json({ message: "QC record not found" });
     }
@@ -8890,6 +8997,7 @@ exports.lookupInspectionTransferTarget = async (req, res) => {
       poNumber,
       itemCode: qc?.item?.item_code || qc?.order?.item?.item_code || "",
       sourceOrderId: qc?.order?._id || qc?.order || "",
+      user: req.user,
     });
 
     if (!targetOrder) {
@@ -8964,7 +9072,11 @@ exports.transferInspectionRecord = async (req, res) => {
     }
 
     const sourceQc = await QC.findById(qcId)
-      .populate("order", "order_id brand vendor item quantity status shipment qc_record")
+      .populate({
+        path: "order",
+        match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
+        select: "order_id brand vendor item quantity status shipment qc_record",
+      })
       .populate("inspector", "name email role");
     if (!sourceQc || !sourceQc.order) {
       return res.status(404).json({ message: "QC record not found" });
@@ -9048,6 +9160,7 @@ exports.transferInspectionRecord = async (req, res) => {
       poNumber,
       itemCode: sourceQc?.item?.item_code || sourceQc?.order?.item?.item_code || "",
       sourceOrderId: sourceQc?.order?._id || sourceQc?.order || "",
+      user: req.user,
     });
 
     if (!targetOrder) {
@@ -9070,12 +9183,21 @@ exports.transferInspectionRecord = async (req, res) => {
       sourceQc?.item?.item_code || targetOrder?.item?.item_code || "",
     );
     const matchedItem = itemCode
-      ? await Item.findOne({
-          code: {
-            $regex: `^${escapeRegex(itemCode)}$`,
-            $options: "i",
+      ? await Item.findOne(
+        applyDataAccessMatch(
+          {
+            code: {
+              $regex: `^${escapeRegex(itemCode)}$`,
+              $options: "i",
+            },
           },
-        })
+          req.user,
+          {
+            brandFields: ["brand", "brand_name", "brands"],
+            vendorFields: ["vendors"],
+          },
+        ),
+      )
         .select("code name description cbm qc inspected_box_sizes inspected_box_mode pis_box_sizes pis_box_mode")
         .lean()
       : null;
@@ -9634,7 +9756,7 @@ exports.getDailyReport = async (req, res) => {
         .populate({
           path: "order",
           select: "order_id status quantity shipment brand vendor archived",
-          match: ACTIVE_ORDER_MATCH,
+          match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
         })
         .sort({ createdAt: -1 })
         .lean(),
@@ -9669,7 +9791,7 @@ exports.getDailyReport = async (req, res) => {
           populate: {
             path: "order",
             select: "order_id status quantity shipment brand vendor archived",
-            match: ACTIVE_ORDER_MATCH,
+            match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
           },
         })
         .sort({ createdAt: -1 })
@@ -9689,13 +9811,22 @@ exports.getDailyReport = async (req, res) => {
       ),
     ];
     const itemDocs = uniqueItemCodes.length > 0
-      ? await Item.find({
-          code: {
-            $in: uniqueItemCodes.map(
-              (itemCode) => new RegExp(`^${escapeRegex(itemCode)}$`, "i"),
-            ),
+      ? await Item.find(
+        applyDataAccessMatch(
+          {
+            code: {
+              $in: uniqueItemCodes.map(
+                (itemCode) => new RegExp(`^${escapeRegex(itemCode)}$`, "i"),
+              ),
+            },
           },
-        })
+          req.user,
+          {
+            brandFields: ["brand", "brand_name", "brands"],
+            vendorFields: ["vendors"],
+          },
+        ),
+      )
           .select(
             "code cbm inspected_item_LBH inspected_item_sizes inspected_item_top_LBH inspected_item_bottom_LBH inspected_box_LBH inspected_box_sizes inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_item_LBH pis_item_sizes pis_item_top_LBH pis_item_bottom_LBH pis_box_LBH pis_box_sizes pis_box_top_LBH pis_box_bottom_LBH",
           )
@@ -10126,9 +10257,13 @@ exports.uploadQcImages = async (req, res) => {
 
     const qc = await QC.findById(qcId)
       .populate("inspector")
-      .populate("order", "status quantity shipment order_id brand vendor");
+      .populate({
+        path: "order",
+        match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
+        select: "status quantity shipment order_id brand vendor",
+      });
 
-    if (!qc) {
+    if (!qc || !qc.order) {
       return res.status(404).json({ success: false, message: "QC record not found" });
     }
 
@@ -10268,9 +10403,13 @@ exports.deleteQcImages = async (req, res) => {
 
     const qc = await QC.findById(qcId)
       .populate("inspector")
-      .populate("order", "status quantity shipment order_id brand vendor");
+      .populate({
+        path: "order",
+        match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
+        select: "status quantity shipment order_id brand vendor",
+      });
 
-    if (!qc) {
+    if (!qc || !qc.order) {
       return res.status(404).json({ success: false, message: "QC record not found" });
     }
 
@@ -10437,9 +10576,15 @@ exports.downloadQcImageFile = async (req, res) => {
       });
     }
 
-    const qc = await QC.findById(qcId).select("order_id inspector qc_images");
+    const qc = await QC.findById(qcId)
+      .select("order order_id inspector qc_images")
+      .populate({
+        path: "order",
+        match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
+        select: "_id",
+      });
 
-    if (!qc) {
+    if (!qc || !qc.order) {
       return res.status(404).json({
         success: false,
         message: "QC record not found",
@@ -10529,9 +10674,15 @@ exports.downloadQcImages = async (req, res) => {
       });
     }
 
-    const qc = await QC.findById(qcId).select("order_id inspector qc_images");
+    const qc = await QC.findById(qcId)
+      .select("order order_id inspector qc_images")
+      .populate({
+        path: "order",
+        match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
+        select: "_id",
+      });
 
-    if (!qc) {
+    if (!qc || !qc.order) {
       return res.status(404).json({
         success: false,
         message: "QC record not found",
@@ -10633,7 +10784,7 @@ exports.getQCById = async (req, res) => {
       .populate("updated_by.user", "name email role")
       .populate({
         path: "order",
-        match: ACTIVE_ORDER_MATCH,
+        match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
       })
       .populate({
         path: "inspection_record",
@@ -10673,12 +10824,21 @@ exports.getQCById = async (req, res) => {
       qcData?.item?.item_code || qcData?.order?.item?.item_code || "",
     );
     const itemMaster = itemCode
-      ? await Item.findOne({
-          code: {
-            $regex: `^${escapeRegex(itemCode)}$`,
-            $options: "i",
+      ? await Item.findOne(
+        applyDataAccessMatch(
+          {
+            code: {
+              $regex: `^${escapeRegex(itemCode)}$`,
+              $options: "i",
+            },
           },
-        })
+          req.user,
+          {
+            brandFields: ["brand", "brand_name", "brands"],
+            vendorFields: ["vendors"],
+          },
+        ),
+      )
           .select(
             "code name description brand_name brands vendors finish barcode_exempted inspected_weight pis_weight weight cbm kd mounting_file_needed pis_barcode pis_master_barcode pis_inner_barcode qc.barcode qc.master_barcode qc.inner_barcode inspected_item_LBH inspected_item_sizes inspected_item_top_LBH inspected_item_bottom_LBH pis_item_LBH pis_item_sizes pis_item_top_LBH pis_item_bottom_LBH item_LBH inspected_box_LBH inspected_box_sizes inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_box_LBH pis_box_sizes pis_box_top_LBH pis_box_bottom_LBH box_LBH image cad_file pis_file assembly_file mounting_file packeging_ppt",
           )
@@ -10878,8 +11038,12 @@ exports.editInspectionRecords = async (req, res) => {
         .json({ message: "At least one inspection row is required" });
     }
 
-    const qc = await QC.findById(qcId);
-    if (!qc) {
+    const qc = await QC.findById(qcId).populate({
+      path: "order",
+      match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
+      select: "_id status quantity shipment order_id brand vendor item qc_record",
+    });
+    if (!qc || !qc.order) {
       return res.status(404).json({ message: "QC record not found" });
     }
 
@@ -10895,7 +11059,7 @@ exports.editInspectionRecords = async (req, res) => {
     );
     const linkedOrderBefore =
       qc?.order && mongoose.Types.ObjectId.isValid(qc.order)
-        ? await Order.findById(qc.order)
+        ? await Order.findOne(applyDataAccessMatch({ _id: qc.order }, req.user))
         : null;
     const beforeOrderSnapshot = buildOrderAuditSnapshotForQc(linkedOrderBefore);
 
@@ -11563,7 +11727,9 @@ exports.editInspectionRecords = async (req, res) => {
     }
 
     const orderId = qc?.order?._id || qc.order;
-    const orderRecord = await Order.findById(orderId);
+    const orderRecord = await Order.findOne(
+      applyDataAccessMatch({ _id: orderId }, req.user),
+    );
     if (orderRecord && !CLOSED_ORDER_STATUSES.includes(orderRecord.status)) {
       applyQcOrderStatus(qc, orderRecord);
       orderRecord.updated_by = buildAuditActor(req.user);
@@ -11638,8 +11804,12 @@ exports.deleteInspectionRecord = async (req, res) => {
       return res.status(400).json({ message: "Invalid inspection record id" });
     }
 
-    const qc = await QC.findById(qcId);
-    if (!qc) {
+    const qc = await QC.findById(qcId).populate({
+      path: "order",
+      match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
+      select: "_id status quantity shipment order_id brand vendor item qc_record",
+    });
+    if (!qc || !qc.order) {
       return res.status(404).json({ message: "QC record not found" });
     }
 
@@ -11654,7 +11824,7 @@ exports.deleteInspectionRecord = async (req, res) => {
     const beforeQcSnapshot = buildQcEditLogSnapshot(qc.toObject(), existingInspectionDocs);
     const linkedOrderBefore =
       qc?.order && mongoose.Types.ObjectId.isValid(qc.order)
-        ? await Order.findById(qc.order)
+        ? await Order.findOne(applyDataAccessMatch({ _id: qc.order }, req.user))
         : null;
     const beforeOrderSnapshot = buildOrderAuditSnapshotForQc(linkedOrderBefore);
 
@@ -11726,7 +11896,9 @@ exports.deleteInspectionRecord = async (req, res) => {
     await recalculateInspectorUsedLabels([inspection.inspector]);
 
     const orderId = qc?.order?._id || qc.order;
-    const orderRecord = await Order.findById(orderId);
+    const orderRecord = await Order.findOne(
+      applyDataAccessMatch({ _id: orderId }, req.user),
+    );
 
     if (shouldDeleteQcRecord) {
       if (orderRecord) {
@@ -11866,7 +12038,7 @@ exports.syncInspectionStatuses = async (req, res) => {
           populate: {
             path: "order",
             select: "order_id status quantity shipment brand vendor archived item qc_record",
-            match: ACTIVE_ORDER_MATCH,
+            match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
           },
         })
         .lean();
@@ -11925,7 +12097,11 @@ exports.syncInspectionStatuses = async (req, res) => {
       );
       const qcDocs = qcIds.length > 0
         ? await QC.find({ _id: { $in: qcIds } })
-          .populate("order", "status quantity shipment order_id brand vendor item qc_record")
+          .populate({
+            path: "order",
+            match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
+            select: "status quantity shipment order_id brand vendor item qc_record",
+          })
         : [];
 
       const syncTimestamp = new Date();

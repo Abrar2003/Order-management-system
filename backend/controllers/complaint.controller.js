@@ -15,6 +15,9 @@ const {
   uploadBuffer,
 } = require("../services/wasabiStorage.service");
 const {
+  applyDataAccessMatch,
+} = require("../services/userDataAccess.service");
+const {
   isManagerLikeRole,
   isSuperAdminLikeRole,
   normalizeUserRoleKey,
@@ -89,7 +92,7 @@ const buildActor = (user = {}) => ({
 
 const isAdminOnlyRole = (user = {}) => {
   const roleKey = normalizeUserRoleKey(user?.role);
-  return roleKey === "admin" || isSuperAdminLikeRole(roleKey);
+  return roleKey === "admin" || roleKey === "inspection_manager" || isSuperAdminLikeRole(roleKey);
 };
 
 const ensureManagerAccess = (req, res) => {
@@ -101,7 +104,7 @@ const ensureManagerAccess = (req, res) => {
   return false;
 };
 
-const ensureAdminAccess = (req, res, message = "Complain archive actions are admin-only.") => {
+const ensureAdminAccess = (req, res, message = "Complain archive actions are restricted to admin and inspection manager users.") => {
   if (isAdminOnlyRole(req.user)) return true;
   res.status(403).json({
     success: false,
@@ -125,13 +128,22 @@ const getObjectIdString = (value) => String(value?._id || value || "").trim();
 const normalizeItemCodeKey = (value) => normalizeText(value).toLowerCase();
 const getUserIdString = (value) => String(value?._id || value?.id || value || "").trim();
 
-const findExistingItemByCode = async (itemCode = "") => {
+const findExistingItemByCode = async (itemCode = "", user = null) => {
   const normalizedItemCode = normalizeText(itemCode);
   if (!normalizedItemCode) return null;
 
-  return Item.findOne({
-    code: { $regex: `^${escapeRegex(normalizedItemCode)}$`, $options: "i" },
-  })
+  return Item.findOne(
+    applyDataAccessMatch(
+      {
+        code: { $regex: `^${escapeRegex(normalizedItemCode)}$`, $options: "i" },
+      },
+      user,
+      {
+        brandFields: ["brand", "brand_name", "brands"],
+        vendorFields: ["vendors"],
+      },
+    ),
+  )
     .select("_id code brand brand_name brands vendors")
     .lean();
 };
@@ -301,16 +313,21 @@ const serializeComplaint = async (complaint = {}, { user = null } = {}) => {
   };
 };
 
-const findItemScopedComplaint = async ({ complaintId, itemCode }) => {
+const findItemScopedComplaint = async ({ complaintId, itemCode, user = null }) => {
   if (!isValidObjectId(complaintId)) return null;
   const normalizedItemCode = normalizeItemCodeKey(itemCode);
   if (!normalizedItemCode) return null;
 
-  const complaint = await Complaint.findOne({
-    _id: complaintId,
-    archived: false,
-    item_code: { $regex: `^${escapeRegex(itemCode)}$`, $options: "i" },
-  });
+  const complaint = await Complaint.findOne(
+    applyDataAccessMatch(
+      {
+        _id: complaintId,
+        archived: false,
+        item_code: { $regex: `^${escapeRegex(itemCode)}$`, $options: "i" },
+      },
+      user,
+    ),
+  );
 
   if (!complaint) return null;
   if (normalizeItemCodeKey(complaint.item_code) !== normalizedItemCode) return null;
@@ -384,7 +401,7 @@ exports.getComplaints = async (req, res) => {
     const page = parsePositiveInt(req.query.page, 1);
     const limit = Math.min(100, parsePositiveInt(req.query.limit, 20));
     const skip = (page - 1) * limit;
-    const match = buildComplaintMatch(req.query || {});
+    const match = applyDataAccessMatch(buildComplaintMatch(req.query || {}), req.user);
 
     const [rows, total] = await Promise.all([
       Complaint.find(match)
@@ -472,10 +489,15 @@ exports.getItemRelatedComplaints = async (req, res) => {
       });
     }
 
-    const complaints = await Complaint.find({
-      archived: false,
-      item_code: { $regex: `^${escapeRegex(itemCode)}$`, $options: "i" },
-    })
+    const complaints = await Complaint.find(
+      applyDataAccessMatch(
+        {
+          archived: false,
+          item_code: { $regex: `^${escapeRegex(itemCode)}$`, $options: "i" },
+        },
+        req.user,
+      ),
+    )
       .sort({ updated_at: -1, created_at: -1, _id: -1 })
       .lean();
 
@@ -510,7 +532,7 @@ exports.createComplaint = async (req, res) => {
       });
     }
 
-    const existingItem = await findExistingItemByCode(itemCode);
+    const existingItem = await findExistingItemByCode(itemCode, req.user);
     if (!existingItem) {
       return res.status(404).json({
         success: false,
@@ -587,7 +609,9 @@ exports.getComplaintById = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({ success: false, message: "Invalid complain id." });
     }
-    const complaint = await Complaint.findById(req.params.id).lean();
+    const complaint = await Complaint.findOne(
+      applyDataAccessMatch({ _id: req.params.id }, req.user),
+    ).lean();
     if (!complaint) {
       return res.status(404).json({ success: false, message: "Complain not found." });
     }
@@ -606,12 +630,14 @@ exports.getComplaintById = async (req, res) => {
 
 exports.updateComplaint = async (req, res) => {
   try {
-    if (!ensureAdminAccess(req, res, "Only admins can fully edit complains.")) return undefined;
+    if (!ensureAdminAccess(req, res, "Only admins and inspection managers can fully edit complains.")) return undefined;
     if (!isValidObjectId(req.params.id)) {
       return res.status(400).json({ success: false, message: "Invalid complain id." });
     }
 
-    const complaint = await Complaint.findById(req.params.id);
+    const complaint = await Complaint.findOne(
+      applyDataAccessMatch({ _id: req.params.id }, req.user),
+    );
     if (!complaint) {
       return res.status(404).json({ success: false, message: "Complain not found." });
     }
@@ -655,7 +681,7 @@ exports.updateComplaint = async (req, res) => {
       });
     }
 
-    const existingItem = await findExistingItemByCode(itemCode);
+    const existingItem = await findExistingItemByCode(itemCode, req.user);
     if (!existingItem) {
       return res.status(404).json({
         success: false,
@@ -830,6 +856,7 @@ exports.addQcComplaintComment = async (req, res) => {
     const complaint = await findItemScopedComplaint({
       complaintId: req.params.id,
       itemCode,
+      user: req.user,
     });
     if (!complaint) {
       return res.status(404).json({ success: false, message: "Complain not found for this item." });
@@ -875,6 +902,7 @@ exports.markComplaintRead = async (req, res) => {
     const complaint = await findItemScopedComplaint({
       complaintId: req.params.id,
       itemCode,
+      user: req.user,
     });
     if (!complaint) {
       return res.status(404).json({ success: false, message: "Complain not found for this item." });
@@ -907,7 +935,9 @@ exports.addComplaintComment = async (req, res) => {
     if (!comment) {
       return res.status(400).json({ success: false, message: "Comment is required." });
     }
-    const complaint = await Complaint.findById(req.params.id);
+    const complaint = await Complaint.findOne(
+      applyDataAccessMatch({ _id: req.params.id }, req.user),
+    );
     if (!complaint) {
       return res.status(404).json({ success: false, message: "Complain not found." });
     }
@@ -939,7 +969,9 @@ exports.addComplaintFiles = async (req, res) => {
     if (!isValidObjectId(req.params.id)) {
       return res.status(400).json({ success: false, message: "Invalid complain id." });
     }
-    const complaint = await Complaint.findById(req.params.id);
+    const complaint = await Complaint.findOne(
+      applyDataAccessMatch({ _id: req.params.id }, req.user),
+    );
     if (!complaint) {
       return res.status(404).json({ success: false, message: "Complain not found." });
     }
@@ -975,7 +1007,9 @@ exports.archiveComplaint = async (req, res) => {
     if (!isValidObjectId(req.params.id)) {
       return res.status(400).json({ success: false, message: "Invalid complain id." });
     }
-    const complaint = await Complaint.findById(req.params.id);
+    const complaint = await Complaint.findOne(
+      applyDataAccessMatch({ _id: req.params.id }, req.user),
+    );
     if (!complaint) {
       return res.status(404).json({ success: false, message: "Complain not found." });
     }
@@ -1008,7 +1042,9 @@ exports.unarchiveComplaint = async (req, res) => {
     if (!isValidObjectId(req.params.id)) {
       return res.status(400).json({ success: false, message: "Invalid complain id." });
     }
-    const complaint = await Complaint.findById(req.params.id);
+    const complaint = await Complaint.findOne(
+      applyDataAccessMatch({ _id: req.params.id }, req.user),
+    );
     if (!complaint) {
       return res.status(404).json({ success: false, message: "Complain not found." });
     }

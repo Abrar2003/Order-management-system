@@ -126,9 +126,8 @@ const AddComplaintModal = ({
 
   return (
     <div className="modal d-block om-modal-backdrop" tabIndex="-1" role="dialog">
-      <div className="modal-dialog modal-lg modal-dialog-centered">
-        <div className="modal-content">
-          <form onSubmit={handleSubmit}>
+      <div className="modal-dialog modal-lg modal-dialog-centered complaint-modal-dialog">
+        <form onSubmit={handleSubmit} className="modal-content">
             <div className="modal-header">
               <h5 className="modal-title">{isEditMode ? "Edit Complain" : "Add Complain"}</h5>
               <button type="button" className="btn-close" onClick={onClose} disabled={saving} />
@@ -213,14 +212,14 @@ const AddComplaintModal = ({
                     >
                       {creatingCategory ? "Saving..." : "Create Category"}
                     </button>
-                    <datalist id="complaint-category-options">
-                      {resolvedCategoryOptions.map((category) => (
-                        <option key={category} value={category} />
-                      ))}
-                    </datalist>
                   </div>
+                  <datalist id="complaint-category-options">
+                    {resolvedCategoryOptions.map((category) => (
+                      <option key={category} value={category} />
+                    ))}
+                  </datalist>
                 </div>
-                <div className="col-12">
+                <div className="col-12 mt-3">
                   <label className="form-label">First Comment *</label>
                   <textarea
                     name="first_comment"
@@ -231,7 +230,7 @@ const AddComplaintModal = ({
                     required
                   />
                 </div>
-                <div className="col-12">
+                <div className="col-12 mt-3">
                   <label className="form-label">Files</label>
                   <input
                     type="file"
@@ -259,7 +258,6 @@ const AddComplaintModal = ({
               </button>
             </div>
           </form>
-        </div>
       </div>
     </div>
   );

@@ -184,8 +184,30 @@ const buildCacheKey = (prefix, req) => {
     .slice(0, 32);
   const userRole = normalizeText(req?.user?.role || "anonymous").toLowerCase();
   const userId = normalizeText(req?.user?._id || req?.user?.id || "anonymous");
+  const brandScope = normalizeText(req?.user?.brand_scope || "all").toLowerCase();
+  const allowedBrandKey = (Array.isArray(req?.user?.allowed_brands)
+    ? req.user.allowed_brands
+    : []
+  )
+    .map((entry) => normalizeText(entry?._id || entry?.id || entry?.name || entry))
+    .filter(Boolean)
+    .sort()
+    .join(",");
+  const allowedVendorKey = (Array.isArray(req?.user?.allowed_vendors)
+    ? req.user.allowed_vendors
+    : []
+  )
+    .map(normalizeText)
+    .filter(Boolean)
+    .sort()
+    .join(",");
+  const accessHash = crypto
+    .createHash("sha256")
+    .update(`${brandScope}|${allowedBrandKey}|${allowedVendorKey}`)
+    .digest("hex")
+    .slice(0, 16);
 
-  return `${safePrefix}:${userRole}:${userId}:${urlHash}`;
+  return `${safePrefix}:${userRole}:${userId}:${accessHash}:${urlHash}`;
 };
 
 const withCache = async (key, ttl, producerFn) => {

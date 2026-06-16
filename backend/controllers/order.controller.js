@@ -3141,7 +3141,16 @@ const buildPoBucketDataset = async ({
   ];
 
   const itemDocs = itemCodes.length > 0
-    ? await Item.find({ code: { $in: itemCodes } })
+    ? await Item.find(
+      applyDataAccessMatch(
+        { code: { $in: itemCodes } },
+        user,
+        {
+          brandFields: ["brand", "brand_name", "brands"],
+          vendorFields: ["vendors"],
+        },
+      ),
+    )
       .select(
         [
           "code",
@@ -3796,7 +3805,16 @@ const getShipmentDataset = async ({
   ];
 
   const itemDocs = itemCodes.length > 0
-    ? await Item.find({ code: { $in: itemCodes } })
+    ? await Item.find(
+      applyDataAccessMatch(
+        { code: { $in: itemCodes } },
+        user,
+        {
+          brandFields: ["brand", "brand_name", "brands"],
+          vendorFields: ["vendors"],
+        },
+      ),
+    )
       .select(
         [
           "code",
@@ -4385,11 +4403,16 @@ exports.lookupPreviousOrder = async (req, res) => {
       return res.status(400).json({ message: "item_code is required" });
     }
 
-    const orderDoc = await Order.findOne({
-      ...ACTIVE_ORDER_MATCH,
-      order_id: buildExactTextQuery(orderId),
-      "item.item_code": buildExactTextQuery(itemCode),
-    }).sort({ updatedAt: -1, createdAt: -1 });
+    const orderDoc = await Order.findOne(
+      applyDataAccessMatch(
+        {
+          ...ACTIVE_ORDER_MATCH,
+          order_id: buildExactTextQuery(orderId),
+          "item.item_code": buildExactTextQuery(itemCode),
+        },
+        req.user,
+      ),
+    ).sort({ updatedAt: -1, createdAt: -1 });
 
     if (!orderDoc) {
       return res.status(404).json({
@@ -4574,14 +4597,19 @@ exports.uploadOrders = async (req, res) => {
 
     const openOrders =
       uploadedBrandVendorPairs.length > 0
-        ? await Order.find({
-            ...ACTIVE_ORDER_MATCH,
-            status: { $nin: ["Shipped"] },
-            $or: uploadedBrandVendorPairs.map((entry) => ({
-              brand: entry.brand,
-              vendor: entry.vendor,
-            })),
-          })
+        ? await Order.find(
+          applyDataAccessMatch(
+            {
+              ...ACTIVE_ORDER_MATCH,
+              status: { $nin: ["Shipped"] },
+              $or: uploadedBrandVendorPairs.map((entry) => ({
+                brand: entry.brand,
+                vendor: entry.vendor,
+              })),
+            },
+            req.user,
+          ),
+        )
             .select("brand vendor order_id")
             .lean()
         : [];
@@ -4854,14 +4882,23 @@ exports.createOrdersManually = async (req, res) => {
 
     let itemDetailsByCodeKey = new Map();
     if (uniqueItemCodes.length > 0) {
-      const itemDocs = await Item.find({
-        $or: uniqueItemCodes.map((itemCode) => ({
-          code: {
-            $regex: `^${escapeRegex(itemCode)}$`,
-            $options: "i",
+      const itemDocs = await Item.find(
+        applyDataAccessMatch(
+          {
+            $or: uniqueItemCodes.map((itemCode) => ({
+              code: {
+                $regex: `^${escapeRegex(itemCode)}$`,
+                $options: "i",
+              },
+            })),
           },
-        })),
-      })
+          req.user,
+          {
+            brandFields: ["brand", "brand_name", "brands"],
+            vendorFields: ["vendors"],
+          },
+        ),
+      )
         .select("code description name brand brand_name brands vendors")
         .lean();
 
@@ -5910,8 +5947,9 @@ exports.getOrders = async (req, res) => {
     if (brand) {
       match.brand = brand;
     }
+    const scopedMatch = applyDataAccessMatch(match, req.user);
 
-    const orders = await Order.find(match)
+    const orders = await Order.find(scopedMatch)
       .populate({
         path: "qc_record",
         populate: {
@@ -5923,7 +5961,7 @@ exports.getOrders = async (req, res) => {
       .skip(skip)
       .limit(Number(limit));
 
-    const total = await Order.countDocuments(match);
+    const total = await Order.countDocuments(scopedMatch);
 
     res.json({
       data: orders.map((orderEntry) => {
@@ -5952,8 +5990,8 @@ exports.getPoStatusReport = async (req, res) => {
     const selectedBrand = normalizeFilterValue(req.query.brand);
     const selectedVendor = normalizeFilterValue(req.query.vendor);
     const selectedStatus = normalizePoStatusReportStatus(req.query.status);
-    const activeMatch = { ...ACTIVE_ORDER_MATCH };
-    const reportMatch = { ...activeMatch };
+    const activeMatch = applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user);
+    const reportMatch = { ...ACTIVE_ORDER_MATCH };
 
     if (selectedBrand) {
       reportMatch.brand = selectedBrand;
@@ -5961,11 +5999,12 @@ exports.getPoStatusReport = async (req, res) => {
     if (selectedVendor) {
       reportMatch.vendor = selectedVendor;
     }
+    const scopedReportMatch = applyDataAccessMatch(reportMatch, req.user);
 
     const [brandOptionsRaw, vendorOptionsRaw, reportOrdersRaw] = await Promise.all([
       Order.distinct("brand", activeMatch),
       Order.distinct("vendor", activeMatch),
-      Order.find(reportMatch)
+      Order.find(scopedReportMatch)
         .select("_id brand vendor order_id status quantity order_date ETD revised_ETD item qc_record shipment total_po_cbm")
         .populate({
           path: "qc_record",
@@ -6180,10 +6219,15 @@ exports.getPoStatusReport = async (req, res) => {
 // Get Order by ID
 exports.getOrderById = async (req, res) => {
   try {
-    const orders = await Order.find({
-      ...ACTIVE_ORDER_MATCH,
-      order_id: req.params.id,
-    })
+    const orders = await Order.find(
+      applyDataAccessMatch(
+        {
+          ...ACTIVE_ORDER_MATCH,
+          order_id: req.params.id,
+        },
+        req.user,
+      ),
+    )
       .populate({
         path: "qc_record",
         select:
@@ -6214,7 +6258,16 @@ exports.getOrderById = async (req, res) => {
       ),
     ];
     const itemDocs = itemCodes.length > 0
-      ? await Item.find({ code: { $in: itemCodes } })
+      ? await Item.find(
+        applyDataAccessMatch(
+          { code: { $in: itemCodes } },
+          req.user,
+          {
+            brandFields: ["brand", "brand_name", "brands"],
+            vendorFields: ["vendors"],
+          },
+        ),
+      )
         .select(
           [
             "code",
@@ -6300,7 +6353,7 @@ exports.getRevisedEtdHistory = async (req, res) => {
       };
     }
 
-    const orders = await Order.find(match)
+    const orders = await Order.find(applyDataAccessMatch(match, req.user))
       .select(
         "order_id item revised_ETD revised_etd_history updatedAt createdAt",
       )
@@ -6972,7 +7025,7 @@ exports.exportOrdersDb = async (req, res) => {
       ];
 
       orders = visibleSourceOrderIds.length > 0
-        ? await Order.find({ _id: { $in: visibleSourceOrderIds } })
+        ? await Order.find(applyDataAccessMatch({ _id: { $in: visibleSourceOrderIds } }, req.user))
           .select(
             "order_id brand vendor ETD order_date status quantity item shipment qc_record",
           )
@@ -7299,6 +7352,7 @@ const buildDelayedPoReportDataset = async ({
   fromDate = "",
   toDate = "",
   includeDetails = false,
+  user = null,
 } = {}) => {
   const selectedBrand = normalizeFilterValue(brand) || "";
   const selectedVendor = normalizeFilterValue(vendor) || "";
@@ -7320,7 +7374,7 @@ const buildDelayedPoReportDataset = async ({
         select: "quantities request_history last_inspected_date inspection_dates",
       };
 
-  const orders = await Order.find(ACTIVE_ORDER_MATCH)
+  const orders = await Order.find(applyDataAccessMatch(ACTIVE_ORDER_MATCH, user))
     .select(
       "order_id item brand vendor quantity status ETD revised_ETD order_date shipment qc_record",
     )
@@ -7667,6 +7721,7 @@ const buildUpcomingEtdReportDataset = async ({
   brand = "",
   vendor = "",
   toDate = "",
+  user = null,
 } = {}) => {
   const selectedBrand = normalizeFilterValue(brand) || "";
   const selectedVendor = normalizeFilterValue(vendor) || "";
@@ -7676,7 +7731,7 @@ const buildUpcomingEtdReportDataset = async ({
     : null;
   const reportEndDateUtc = toUtcDayStart(toDate) || defaultRangeEnd;
 
-  const orders = await Order.find(ACTIVE_ORDER_MATCH)
+  const orders = await Order.find(applyDataAccessMatch(ACTIVE_ORDER_MATCH, user))
     .select(
       "order_id item brand vendor quantity status ETD revised_ETD order_date shipment qc_record",
     )
@@ -7977,6 +8032,7 @@ const buildPendingPoReportDataset = async ({
   orderId = "",
   sortBy = "order_id",
   sortOrder = "asc",
+  user = null,
 } = {}) => {
   const selectedBrand = normalizeFilterValue(brand) || "";
   const selectedVendor = normalizeFilterValue(vendor) || "";
@@ -8014,7 +8070,7 @@ const buildPendingPoReportDataset = async ({
     String(sortOrder || "").trim().toLowerCase() === "desc" ? "desc" : "asc";
   const sortDirection = selectedSortOrder === "desc" ? -1 : 1;
 
-  const orders = await Order.find(ACTIVE_ORDER_MATCH)
+  const orders = await Order.find(applyDataAccessMatch(ACTIVE_ORDER_MATCH, user))
     .select(
       "_id order_id item brand vendor quantity status shipment qc_record order_date ETD revised_ETD",
     )
@@ -8169,6 +8225,7 @@ exports.getPendingPoReport = async (req, res) => {
       orderId: req.query.order_id ?? req.query.order ?? req.query.po,
       sortBy: req.query.sort_by ?? req.query.sortBy,
       sortOrder: req.query.sort_order ?? req.query.sortOrder,
+      user: req.user,
     });
     const totalRecords = dataset.rows.length;
     const page = shouldPaginate ? requestedPage : 1;
@@ -8214,6 +8271,7 @@ exports.exportPendingPoReport = async (req, res) => {
       orderId: req.query.order_id ?? req.query.order ?? req.query.po,
       sortBy: req.query.sort_by ?? req.query.sortBy,
       sortOrder: req.query.sort_order ?? req.query.sortOrder,
+      user: req.user,
     });
 
     const columns = [
@@ -8315,7 +8373,10 @@ exports.getDelayedPoReport = async (req, res) => {
       });
     }
 
-    const dataset = await buildDelayedPoReportDataset(filters);
+    const dataset = await buildDelayedPoReportDataset({
+      ...filters,
+      user: req.user,
+    });
 
     return res.status(200).json(dataset);
   } catch (error) {
@@ -8339,6 +8400,7 @@ exports.getUpcomingEtdReport = async (req, res) => {
         req.query.date ??
         req.query.end_date ??
         req.query.endDate,
+      user: req.user,
     });
 
     return res.status(200).json(dataset);
@@ -8363,6 +8425,7 @@ exports.exportUpcomingEtdReport = async (req, res) => {
         req.query.date ??
         req.query.end_date ??
         req.query.endDate,
+      user: req.user,
     });
 
     const columns = [
@@ -8454,6 +8517,7 @@ exports.exportDelayedPoReport = async (req, res) => {
     const dataset = await buildDelayedPoReportDataset({
       ...filters,
       includeDetails: true,
+      user: req.user,
     });
     const detailColumns = [
       { key: "order_id", header: "PO" },
@@ -8714,9 +8778,10 @@ exports.getOrdersByFilters = async (req, res) => {
     if (status) {
       matchStage.status = status;
     }
+    const scopedMatchStage = applyDataAccessMatch(matchStage, req.user);
 
     const [orders, totalRecords] = await Promise.all([
-      Order.find(matchStage)
+      Order.find(scopedMatchStage)
         .populate({
           path: "qc_record",
           populate: {
@@ -8727,7 +8792,7 @@ exports.getOrdersByFilters = async (req, res) => {
         .sort({ order_date: -1, order_id: -1 })
         .skip(skip)
         .limit(Number(limit)),
-      Order.countDocuments(matchStage),
+      Order.countDocuments(scopedMatchStage),
     ]);
 
     return res.status(200).json({
@@ -8782,13 +8847,14 @@ const buildPackedGoodsDataset = async ({
   brands = [],
   vendor = "",
   orderId = "",
+  user = null,
 } = {}) => {
   const selectedBrands = normalizeFilterValues(brands);
   const selectedBrandKeys = new Set(selectedBrands.map((brand) => normalizeBrandKey(brand)));
   const selectedVendor = normalizeFilterValue(vendor);
   const selectedOrderId = normalizeFilterValue(orderId);
 
-  const orders = await Order.find(ACTIVE_ORDER_MATCH)
+  const orders = await Order.find(applyDataAccessMatch(ACTIVE_ORDER_MATCH, user))
     .select(
       "order_id item brand vendor quantity shipment qc_record order_date updatedAt total_po_cbm",
     )
@@ -8808,7 +8874,16 @@ const buildPackedGoodsDataset = async ({
   ];
 
   const itemDocs = itemCodes.length > 0
-    ? await Item.find({ code: { $in: itemCodes } })
+    ? await Item.find(
+      applyDataAccessMatch(
+        { code: { $in: itemCodes } },
+        user,
+        {
+          brandFields: ["brand", "brand_name", "brands"],
+          vendorFields: ["vendors"],
+        },
+      ),
+    )
       .select(
         [
           "code",
@@ -8971,6 +9046,7 @@ exports.getPackedGoods = async (req, res) => {
       brands: req.query.brand ?? req.query.brands ?? req.query["brand[]"],
       vendor: req.query.vendor,
       orderId: req.query.order_id ?? req.query.order ?? req.query.po,
+      user: req.user,
     });
 
     return res.status(200).json({
@@ -9002,6 +9078,7 @@ exports.exportPackedGoods = async (req, res) => {
       brands: req.query.brand ?? req.query.brands ?? req.query["brand[]"],
       vendor: req.query.vendor,
       orderId: req.query.order_id ?? req.query.order ?? req.query.po,
+      user: req.user,
     });
 
     const columns = [
@@ -9175,8 +9252,16 @@ exports.checkShipmentRows = async (req, res) => {
       ),
     ];
     const [orders, samples] = await Promise.all([
-      orderIds.length > 0 ? Order.find({ _id: { $in: orderIds } }) : [],
-      sampleIds.length > 0 ? Sample.find({ _id: { $in: sampleIds } }) : [],
+      orderIds.length > 0
+        ? Order.find(applyDataAccessMatch({ _id: { $in: orderIds } }, req.user))
+        : [],
+      sampleIds.length > 0
+        ? Sample.find(
+          applyDataAccessMatch({ _id: { $in: sampleIds } }, req.user, {
+            vendorFields: ["vendor"],
+          }),
+        )
+        : [],
     ]);
     const ordersById = new Map(
       orders.map((orderDoc) => [String(orderDoc._id), orderDoc]),
@@ -9476,10 +9561,15 @@ exports.getShipments = async (req, res) => {
   try {
     const statusesToInclude = ["Inspection Done", "Partial Shipped", "Shipped"];
 
-    const orders = await Order.find({
-      ...ACTIVE_ORDER_MATCH,
-      status: { $in: statusesToInclude },
-    })
+    const orders = await Order.find(
+      applyDataAccessMatch(
+        {
+          ...ACTIVE_ORDER_MATCH,
+          status: { $in: statusesToInclude },
+        },
+        req.user,
+      ),
+    )
       .select(
         "order_id item brand vendor status quantity shipment order_date updatedAt",
       )
@@ -9567,7 +9657,9 @@ exports.editOrder = async (req, res) => {
       return res.status(400).json({ message: "Invalid order id" });
     }
 
-    const order = await Order.findOne({ _id: id, ...ACTIVE_ORDER_MATCH });
+    const order = await Order.findOne(
+      applyDataAccessMatch({ _id: id, ...ACTIVE_ORDER_MATCH }, req.user),
+    );
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
     }
@@ -9983,10 +10075,15 @@ exports.bulkUpdateRevisedEtd = async (req, res) => {
       }
     }
 
-    const orders = await Order.find({
-      _id: { $in: orderIds },
-      ...ACTIVE_ORDER_MATCH,
-    });
+    const orders = await Order.find(
+      applyDataAccessMatch(
+        {
+          _id: { $in: orderIds },
+          ...ACTIVE_ORDER_MATCH,
+        },
+        req.user,
+      ),
+    );
 
     if (orders.length !== orderIds.length) {
       return res.status(404).json({
@@ -10047,7 +10144,9 @@ exports.editCompleteOrder = async (req, res) => {
       return res.status(400).json({ message: "Invalid order id" });
     }
 
-    const anchorOrder = await Order.findOne({ _id: id, ...ACTIVE_ORDER_MATCH });
+    const anchorOrder = await Order.findOne(
+      applyDataAccessMatch({ _id: id, ...ACTIVE_ORDER_MATCH }, req.user),
+    );
     if (!anchorOrder) {
       return res.status(404).json({ message: "Order not found" });
     }
@@ -10120,10 +10219,15 @@ exports.editCompleteOrder = async (req, res) => {
       nextEtd = parsedEtd;
     }
 
-    const groupOrders = await Order.find({
-      order_id: anchorOrder.order_id,
-      ...ACTIVE_ORDER_MATCH,
-    });
+    const groupOrders = await Order.find(
+      applyDataAccessMatch(
+        {
+          order_id: anchorOrder.order_id,
+          ...ACTIVE_ORDER_MATCH,
+        },
+        req.user,
+      ),
+    );
     if (groupOrders.length === 0) {
       return res
         .status(404)
@@ -10286,7 +10390,9 @@ exports.archiveOrder = async (req, res) => {
       return res.status(400).json({ message: "archive remark is required" });
     }
 
-    const order = await Order.findOne({ _id: id, ...ACTIVE_ORDER_MATCH });
+    const order = await Order.findOne(
+      applyDataAccessMatch({ _id: id, ...ACTIVE_ORDER_MATCH }, req.user),
+    );
     if (!order) {
       return res
         .status(404)
@@ -10352,7 +10458,9 @@ exports.unarchiveOrder = async (req, res) => {
       return res.status(400).json({ message: "Invalid order id" });
     }
 
-    const order = await Order.findOne({ _id: id, archived: true });
+    const order = await Order.findOne(
+      applyDataAccessMatch({ _id: id, archived: true }, req.user),
+    );
     if (!order) {
       return res.status(404).json({ message: "Archived order not found" });
     }
@@ -10450,9 +10558,11 @@ exports.getArchivedOrders = async (req, res) => {
       const escaped = escapeRegex(orderId);
       match.order_id = { $regex: escaped, $options: "i" };
     }
+    const scopedMatch = applyDataAccessMatch(match, req.user);
+    const scopedArchivedMatch = applyDataAccessMatch({ archived: true }, req.user);
 
     const [rows, totalRecords, vendorsRaw, brandsRaw] = await Promise.all([
-      Order.find(match)
+      Order.find(scopedMatch)
         .select(
           "order_id item brand vendor quantity archived archived_remark archived_at archived_by archived_previous_status updatedAt",
         )
@@ -10460,9 +10570,9 @@ exports.getArchivedOrders = async (req, res) => {
         .skip(skip)
         .limit(limit)
         .lean(),
-      Order.countDocuments(match),
-      Order.distinct("vendor", { archived: true }),
-      Order.distinct("brand", { archived: true }),
+      Order.countDocuments(scopedMatch),
+      Order.distinct("vendor", scopedArchivedMatch),
+      Order.distinct("brand", scopedArchivedMatch),
     ]);
     const rowsWithRestoreStatus = await attachArchivedRestoreStatus(rows);
 
@@ -10638,10 +10748,15 @@ exports.finalizeOrder = async (req, res) => {
       invoice,
     } = req.body;
 
-    const order = await Order.findOne({
-      _id: req.params.id,
-      ...ACTIVE_ORDER_MATCH,
-    });
+    const order = await Order.findOne(
+      applyDataAccessMatch(
+        {
+          _id: req.params.id,
+          ...ACTIVE_ORDER_MATCH,
+        },
+        req.user,
+      ),
+    );
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
     }
@@ -10891,7 +11006,7 @@ exports.reSync = async (req, res) => {
 
     const groups = await Order.aggregate([
       {
-        $match: ACTIVE_ORDER_MATCH,
+        $match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
       },
       {
         $group: {

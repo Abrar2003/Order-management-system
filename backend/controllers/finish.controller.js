@@ -341,10 +341,19 @@ exports.upsertFinish = async (req, res) => {
     }
 
     const vendorMatch = buildVendorItemMatch({ vendor });
-    const selectedItems = await Item.find({
-      ...(vendorMatch || {}),
-      code: { $in: itemCodes },
-    })
+    const selectedItems = await Item.find(
+      applyDataAccessMatch(
+        {
+          ...(vendorMatch || {}),
+          code: { $in: itemCodes },
+        },
+        req.user,
+        {
+          brandFields: ["brand", "brand_name", "brands"],
+          vendorFields: ["vendors"],
+        },
+      ),
+    )
       .select("_id code finish vendors")
       .lean();
 
