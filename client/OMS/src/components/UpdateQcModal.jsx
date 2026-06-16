@@ -1156,15 +1156,13 @@ const UpdateQcModal = ({
   const canEditLockedQcSizeFields =
     isInspectionRecordUpdate || canRewriteLatestInspectionRecord || isQcUser || isManager;
   const canViewStoredBarcodes =
-    !isQcUser &&
-    (
-      isInspectionRecordUpdate ||
-      canRewriteLatestInspectionRecord ||
-      isActualAdmin ||
-      isManager ||
-      Boolean(isAdmin) ||
-      isCurrentUserLabelExempt
-    );
+    isInspectionRecordUpdate ||
+    canRewriteLatestInspectionRecord ||
+    isActualAdmin ||
+    isManager ||
+    Boolean(isAdmin) ||
+    isCurrentUserLabelExempt ||
+    isQcUser;
   const lockBarcodeField =
     (qc?.master_barcode || qc?.barcode) > 0 && !canEditLockedQcFields;
   const lockInnerBarcodeField = qc?.inner_barcode > 0 && !canEditLockedQcFields;
@@ -1184,9 +1182,7 @@ const UpdateQcModal = ({
   const selectedRecordIsGoodsNotReady = isGoodsNotReadyRecord(selectedInspectionRecord);
   const barcodePrefillRecord = isInspectionRecordUpdate
     ? inspectionRecord
-    : canRewriteLatestInspectionRecord
-      ? latestInspectionRecord
-      : null;
+    : latestInspectionRecord || qc;
   const qcUserRequestAvailability = useMemo(
     () => getQcUserUpdateRequestAvailability(qc, { currentUserId }),
     [qc, currentUserId],
@@ -1370,8 +1366,8 @@ const UpdateQcModal = ({
       : String(qc?.remarks || "");
     const itemMaster = isInspectionRecordUpdate
       ? buildInspectionRecordMeasurementSource(inspectionRecord)
-      : canRewriteLatestInspectionRecord && adminRecord
-        ? buildInspectionRecordMeasurementSource(adminRecord, qc?.item_master || {}, {
+      : latestInspectionRecord
+        ? buildInspectionRecordMeasurementSource(latestInspectionRecord, qc?.item_master || {}, {
           allowFallback: true,
         })
         : qc?.item_master || {};
@@ -2101,7 +2097,6 @@ const UpdateQcModal = ({
   };
 
   const handleSizeEntryChange = (groupKey, index, field, value) => {
-    if (qcBarcodeValidationLocked) return;
 
     if (field !== "remark" && value !== "") {
       const parsedValue = Number(value);
@@ -3387,7 +3382,7 @@ const UpdateQcModal = ({
     showModeSelector = false,
   }) => {
     const isCartonMode = mode === BOX_PACKAGING_MODES.CARTON;
-    const sectionLocked = locked || qcBarcodeValidationLocked || saving;
+    const sectionLocked = locked || saving;
     const safeCount = isCartonMode ? 2 : normalizeSizeCount(countValue, 1);
     const allowedPackagingModeOptions = requiresBarcodeValidation
       ? [
@@ -3984,7 +3979,6 @@ const UpdateQcModal = ({
 	                />
 	              </div>
 
-	              {!requiresBarcodeValidation && (
 	              <div className="col-md-6">
                 <label className="form-label">
                   {form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON
@@ -4076,8 +4070,7 @@ const UpdateQcModal = ({
                   <div className="small text-danger mt-1">{barcodeUploadError}</div>
                 )}
 	              </div>
-	              )}
-	              {!requiresBarcodeValidation && form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON && (
+	              {form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON && (
                 <div className="col-md-6">
                   <label className="form-label">Inner Carton Barcode</label>
                   <div className="d-flex flex-wrap gap-2 align-items-stretch qc-barcode-input-row">
