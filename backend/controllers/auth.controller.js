@@ -76,6 +76,7 @@ const createAuthSession = async ({
   brandScope = "all",
   brandScopeChoiceCompleted = false,
 }) => {
+  console.log("[LOGIN_DEBUG] createAuthSession called:", { userId: user._id, brandScope, brandScopeChoiceCompleted });
   const session = await AuthSession.create({
     user: user._id,
     token_hash: "pending",
@@ -85,9 +86,11 @@ const createAuthSession = async ({
     brand_scope: normalizeBrandScope(brandScope),
     brand_scope_choice_completed: Boolean(brandScopeChoiceCompleted),
   });
+  console.log("[LOGIN_DEBUG] AuthSession created in DB:", session._id);
   const refreshToken = signRefreshToken({ user, sessionId: session._id });
   session.token_hash = hashToken(refreshToken);
   await session.save();
+  console.log("[LOGIN_DEBUG] AuthSession token_hash saved");
   return { session, refreshToken };
 };
 
@@ -99,6 +102,7 @@ const issueAuthCookies = async ({
   brandScope = null,
   brandScopeChoiceCompleted = null,
 }) => {
+  console.log("[LOGIN_DEBUG] issueAuthCookies called for user:", user?._id || user?.id);
   const normalizedBrandScope = normalizeBrandScope(
     brandScope ?? session?.brand_scope ?? user?.brand_scope,
   );
@@ -112,11 +116,18 @@ const issueAuthCookies = async ({
     brand_scope: normalizedBrandScope,
     brand_scope_choice_completed: normalizedBrandScopeChoiceCompleted,
   };
+  console.log("[LOGIN_DEBUG] Generating access token for user properties:", {
+    id: tokenUser._id || tokenUser.id,
+    role: tokenUser.role,
+    brand_scope: tokenUser.brand_scope,
+    brand_scope_choice_completed: tokenUser.brand_scope_choice_completed
+  });
   const accessToken = signAccessToken(tokenUser);
   let refreshToken = "";
   let activeSession = session;
 
   if (activeSession) {
+    console.log("[LOGIN_DEBUG] Reusing active session:", activeSession._id);
     refreshToken = signRefreshToken({ user, sessionId: activeSession._id });
     activeSession.token_hash = hashToken(refreshToken);
     activeSession.expires_at = new Date(Date.now() + REFRESH_COOKIE_MAX_AGE_MS);
@@ -125,7 +136,9 @@ const issueAuthCookies = async ({
     activeSession.brand_scope = normalizedBrandScope;
     activeSession.brand_scope_choice_completed = normalizedBrandScopeChoiceCompleted;
     await activeSession.save();
+    console.log("[LOGIN_DEBUG] Active session updated in DB");
   } else {
+    console.log("[LOGIN_DEBUG] Creating new session...");
     const created = await createAuthSession({
       user,
       req,
@@ -136,6 +149,7 @@ const issueAuthCookies = async ({
     refreshToken = created.refreshToken;
   }
 
+  console.log("[LOGIN_DEBUG] Setting auth cookies on response");
   setAuthCookies(res, { accessToken, refreshToken });
   return activeSession;
 };
@@ -204,7 +218,15 @@ const signin = async (req, res) => {
     const password = getStringField(req.body, "password");
     const brandScope = "all";
 
+    console.log("[LOGIN_DEBUG] Signin request received:", {
+      username,
+      hasPassword: !!password,
+      passwordLength: password ? password.length : 0,
+      bodyKeys: Object.keys(req.body)
+    });
+
     if (!username || !password) {
+      console.log("[LOGIN_DEBUG] Missing credentials");
       logAuthSecurityActivity(req, {
         action: "login_failed",
         resource_type: "auth",
@@ -213,8 +235,11 @@ const signin = async (req, res) => {
       return res.status(400).json({ message: "Missing credentials" });
     }
 
+    console.log("[LOGIN_DEBUG] Querying DB for user strictly matching username (case-sensitive):", username);
     const user = await User.findOne({ username });
+    
     if (!user) {
+      console.log("[LOGIN_DEBUG] User not found in database for strict username:", username);
       logAuthSecurityActivity(req, {
         action: "login_failed",
         resource_type: "auth",
@@ -223,8 +248,20 @@ const signin = async (req, res) => {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
+    console.log("[LOGIN_DEBUG] User found in database:", {
+      _id: user._id,
+      username: user.username,
+      role: user.role,
+      email: user.email,
+      hasHashedPassword: !!user.password
+    });
+
+    console.log("[LOGIN_DEBUG] Comparing passwords using bcrypt...");
     const isMatch = await bcrypt.compare(password, user.password);
+    console.log("[LOGIN_DEBUG] Bcrypt compare result:", isMatch);
+
     if (!isMatch) {
+      console.log("[LOGIN_DEBUG] Password did not match for user:", username);
       logAuthSecurityActivity(
         { ...req, user },
         {
@@ -243,7 +280,12 @@ const signin = async (req, res) => {
     }
 
     const normalizedRole = normalizeUserRole(user.role, String(user.role || "").trim());
+    console.log("[LOGIN_DEBUG] User role normalized:", {
+      originalRole: user.role,
+      normalizedRole
+    });
 
+    console.log("[LOGIN_DEBUG] Issuing auth cookies for user session...");
     await issueAuthCookies({
       res,
       req,
@@ -256,6 +298,7 @@ const signin = async (req, res) => {
       brandScope,
       brandScopeChoiceCompleted: false,
     });
+    console.log("[LOGIN_DEBUG] Auth cookies issued successfully");
 
     logAuthSecurityActivity(
       { ...req, user: { ...user.toObject(), role: normalizedRole } },
@@ -273,6 +316,13 @@ const signin = async (req, res) => {
       },
     );
 
+    console.log("[LOGIN_DEBUG] Login flow successful, sending response user:", buildSafeUser({
+      ...user.toObject(),
+      role: normalizedRole,
+      brand_scope: brandScope,
+      brand_scope_choice_completed: false,
+    }));
+
     return res.json({
       user: buildSafeUser({
         ...user.toObject(),
@@ -282,7 +332,7 @@ const signin = async (req, res) => {
       }),
     });
   } catch (err) {
-    console.error("Signin Error:", err);
+    console.error("[LOGIN_DEBUG] Exception in signin flow:", err);
     return res.status(500).json({ message: "Failed to sign in" });
   }
 };

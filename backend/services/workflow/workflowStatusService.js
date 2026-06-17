@@ -2641,6 +2641,89 @@ const applyTaskTransition = async ({
   }
 
   await task.save();
+
+  if (toStatus === "approved" && task.task_type_key === "cad_files") {
+    try {
+      const SampleWorkflow = require("../../models/sampleWorkflow.model");
+      const isSampleWorkflowTask = await SampleWorkflow.exists({ code: task.title });
+      if (isSampleWorkflowTask) {
+        const User = require("../../models/user.model");
+        const gaurav = await User.findOne({ username: { $regex: /^Gaurav$/i } });
+        const ekta = await User.findOne({ username: { $regex: /^Ekta$/i } });
+        const ajit = await User.findOne({ username: { $regex: /^Ajit$/i } });
+
+        const taskTypeMisc = await TaskType.findOne({ key: "miscellaneous" });
+        const deptOperations = await Department.findOne({ key: "operations" });
+
+        const taskType3D = await TaskType.findOne({ key: "3d_by_cad" });
+        const dept3D = await Department.findOne({ key: "3d_files" });
+
+        if (gaurav) {
+          const actorObj = {
+            _id: gaurav._id,
+            name: gaurav.name,
+            email: gaurav.email,
+            role: gaurav.role,
+          };
+
+          const due = addWorkflowDaysSkippingSunday(new Date(), 2);
+          const year = due.getFullYear();
+          const month = String(due.getMonth() + 1).padStart(2, "0");
+          const day = String(due.getDate()).padStart(2, "0");
+          const dueDateString = `${year}-${month}-${day}`;
+
+          // Task 1: Ekta, miscellaneous, operations
+          if (ekta && taskTypeMisc && deptOperations) {
+            await createWorkflowTask({
+              payload: {
+                title: task.title,
+                task_type_key: "miscellaneous",
+                assignee_ids: [ekta._id.toString()],
+                upload_required: false,
+                department: deptOperations._id.toString(),
+                due_date: dueDateString,
+                brand: task.brand || "Sample Brand",
+                description: `Operations task for Sample Workflow ${task.title}`,
+                priority: "normal",
+                creation_note: `Automatically triggered by approval of AutoCAD task: ${task.task_no}`,
+              },
+              actor: actorObj,
+              realtimeSource,
+            });
+          } else {
+            console.warn("Could not create miscellaneous task: user, task type, or department missing");
+          }
+
+          // Task 2: Ajit, 3d_by_cad, 3d_files
+          if (ajit && taskType3D && dept3D) {
+            await createWorkflowTask({
+              payload: {
+                title: task.title,
+                task_type_key: "3d_by_cad",
+                assignee_ids: [ajit._id.toString()],
+                upload_required: false,
+                department: dept3D._id.toString(),
+                due_date: dueDateString,
+                brand: task.brand || "Sample Brand",
+                description: `3D CAD task for Sample Workflow ${task.title}`,
+                priority: "normal",
+                creation_note: `Automatically triggered by approval of AutoCAD task: ${task.task_no}`,
+              },
+              actor: actorObj,
+              realtimeSource,
+            });
+          } else {
+            console.warn("Could not create 3d_by_cad task: user, task type, or department missing");
+          }
+        } else {
+          console.warn("Auto task creation failed: User 'Gaurav' not found");
+        }
+      }
+    } catch (triggerError) {
+      console.error("Failed to trigger follow-up sample workflow tasks on approval:", triggerError);
+    }
+  }
+
   await TaskStatusHistory.create({
     task: task._id,
     batch: task.batch || null,

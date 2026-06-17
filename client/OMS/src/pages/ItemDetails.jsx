@@ -11,6 +11,7 @@ import {
   hasStoredItemFile,
   ITEM_FILE_OPTIONS,
   shouldOpenFilePreviewExternally,
+  SHIPPING_MARKS_SUB_OPTIONS,
 } from "../constants/itemFiles";
 import { formatEan13BarcodeDisplay } from "../utils/barcode";
 import { formatDateDDMMYYYY } from "../utils/date";
@@ -475,6 +476,11 @@ const KeyValueGrid = ({ rows = [] }) => (
   </div>
 );
 
+const getNestedValue = (obj, path) => {
+  if (!obj || !path) return null;
+  return path.split(".").reduce((acc, part) => acc && acc[part], obj);
+};
+
 const ItemDetails = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -550,16 +556,48 @@ const ItemDetails = () => {
     };
   }, [brandName]);
 
+  const [selectedDetailsShippingMark, setSelectedDetailsShippingMark] = useState("shipping_marks_1");
+
   const uploadedFiles = useMemo(
     () =>
       ITEM_FILE_OPTIONS
-        .map((option) => ({
-          ...option,
-          file: item?.[option.field] || null,
-        }))
+        .filter((option) => option.value !== "shipping_marks")
+        .map((option) => {
+          const file = getNestedValue(item, option.field) || null;
+          const isImage = file?.contentType?.startsWith("image/") || /\.(jpg|jpeg|png)$/i.test(file?.originalName || "");
+          return {
+            ...option,
+            file,
+            previewMode: isImage ? "image" : option.previewMode,
+          };
+        })
         .filter((entry) => hasStoredItemFile(entry.file)),
     [item],
   );
+
+  const shippingMarksFiles = useMemo(() => {
+    return SHIPPING_MARKS_SUB_OPTIONS.map((opt) => {
+      const file = getNestedValue(item, opt.field) || null;
+      const isImage = file?.contentType?.startsWith("image/") || /\.(jpg|jpeg|png)$/i.test(file?.originalName || "");
+      return {
+        ...opt,
+        file,
+        previewMode: isImage ? "image" : "pdf",
+      };
+    }).filter((entry) => hasStoredItemFile(entry.file));
+  }, [item]);
+
+  const activeDetailsShippingMarkFile = useMemo(() => {
+    return shippingMarksFiles.find(file => file.value === selectedDetailsShippingMark) || shippingMarksFiles[0] || null;
+  }, [shippingMarksFiles, selectedDetailsShippingMark]);
+
+  useEffect(() => {
+    if (shippingMarksFiles.length > 0) {
+      if (!shippingMarksFiles.some(file => file.value === selectedDetailsShippingMark)) {
+        setSelectedDetailsShippingMark(shippingMarksFiles[0].value);
+      }
+    }
+  }, [shippingMarksFiles, selectedDetailsShippingMark]);
 
   const finishRows = useMemo(
     () =>
@@ -884,9 +922,11 @@ const ItemDetails = () => {
                 <section>
                   <div className="d-flex justify-content-between align-items-center mb-3">
                     <h3 className="h6 mb-0">Related Files</h3>
-                    <span className="small text-secondary">{uploadedFiles.length} {uploadedFiles.length === 1 ? "file" : "files"}</span>
+                    <span className="small text-secondary">
+                      {uploadedFiles.length + (shippingMarksFiles.length > 0 ? 1 : 0)} file(s)
+                    </span>
                   </div>
-                  {uploadedFiles.length > 0 ? (
+                  {uploadedFiles.length > 0 || shippingMarksFiles.length > 0 ? (
                     <div className="row g-3">
                       {uploadedFiles.map((entry) => {
                         const fileUrl = getStoredItemFileUrl(entry.file);
@@ -909,6 +949,56 @@ const ItemDetails = () => {
                           </div>
                         );
                       })}
+
+                      {shippingMarksFiles.length > 0 && (
+                        <div className="col-md-6 col-xl-4">
+                          <div className="card h-100 shadow-sm border-0" style={{ borderLeft: "4px solid #0d6efd" }}>
+                            <div className="card-body d-flex flex-column gap-2">
+                              <div className="fw-semibold">Shipping Marks</div>
+                              <div className="small text-secondary">Select a shipping marks file to view or open:</div>
+                              <select
+                                className="form-select form-select-sm my-1"
+                                value={selectedDetailsShippingMark}
+                                onChange={(e) => setSelectedDetailsShippingMark(e.target.value)}
+                              >
+                                {shippingMarksFiles.map((entry) => (
+                                  <option key={entry.value} value={entry.value}>
+                                    {entry.label}
+                                  </option>
+                                ))}
+                              </select>
+                              {activeDetailsShippingMarkFile && (
+                                <div className="small text-secondary text-truncate mb-2">
+                                  {String(activeDetailsShippingMarkFile.file?.originalName || "Uploaded file").trim()}
+                                </div>
+                              )}
+                              <div className="mt-auto">
+                                <div className="d-flex flex-wrap gap-2">
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-primary btn-sm rounded-pill"
+                                    onClick={() => handlePreviewFile(activeDetailsShippingMarkFile)}
+                                    disabled={!activeDetailsShippingMarkFile?.file}
+                                  >
+                                    Preview
+                                  </button>
+                                  <a
+                                    href={activeDetailsShippingMarkFile ? getStoredItemFileUrl(activeDetailsShippingMarkFile.file) : "#"}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className={`btn btn-outline-secondary btn-sm rounded-pill ${!activeDetailsShippingMarkFile ? "disabled" : ""}`}
+                                    onClick={(event) => {
+                                      if (!activeDetailsShippingMarkFile) event.preventDefault();
+                                    }}
+                                  >
+                                    Open File
+                                  </a>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="text-secondary small">No related item files uploaded yet.</div>

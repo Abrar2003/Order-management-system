@@ -634,7 +634,7 @@ const createNumericDifference = ({
   referenceLabel = "PIS",
   comparator = null,
 } = {}) => {
-  const comparison = normalizeNumericComparisonResult(
+  const comparisonResult = normalizeNumericComparisonResult(
     typeof comparator === "function"
       ? comparator(inspectedValue, pisValue)
       : compareNumericValues(inspectedValue, pisValue, {
@@ -642,6 +642,10 @@ const createNumericDifference = ({
           decimals: compareDecimals,
         }),
   );
+  const comparison =
+    !comparisonResult.mismatch && comparisonResult.hasInspected !== comparisonResult.hasPis
+      ? { ...comparisonResult, mismatch: true }
+      : comparisonResult;
   if (!comparison.mismatch) return null;
   const displayInspectedValue = Number.isInteger(compareDecimals)
     ? comparison.inspected
@@ -736,16 +740,73 @@ const createTextDifference = ({
   };
 };
 
-const buildUnionKeys = (inspectedEntries = [], pisEntries = [], keyBuilder) => [
-  ...new Set([
-    ...(Array.isArray(inspectedEntries) ? inspectedEntries : []).map((entry, index) =>
-      keyBuilder(entry, index),
-    ),
-    ...(Array.isArray(pisEntries) ? pisEntries : []).map((entry, index) =>
-      keyBuilder(entry, index),
-    ),
-  ]),
-];
+const buildReferenceFirstEntryPairs = (
+  inspectedEntries = [],
+  pisEntries = [],
+  keyBuilder,
+) => {
+  const inspectedList = (Array.isArray(inspectedEntries) ? inspectedEntries : []).map(
+    (entry, index) => ({
+      entry,
+      index,
+      key: keyBuilder(entry, index),
+    }),
+  );
+  const referenceList = (Array.isArray(pisEntries) ? pisEntries : []).map(
+    (entry, index) => ({
+      entry,
+      index,
+      key: keyBuilder(entry, index),
+    }),
+  );
+  const usedInspectedIndexes = new Set();
+  const pairs = referenceList.map((reference) => ({
+    key: reference.key,
+    index: reference.index,
+    inspectedEntry: {},
+    pisEntry: reference.entry,
+    labelEntry: reference.entry,
+  }));
+
+  referenceList.forEach((reference, pairIndex) => {
+    const exactMatch = inspectedList.find(
+      (source) =>
+        source.key === reference.key && !usedInspectedIndexes.has(source.index),
+    );
+    if (!exactMatch) return;
+
+    usedInspectedIndexes.add(exactMatch.index);
+    pairs[pairIndex].inspectedEntry = exactMatch.entry;
+  });
+
+  referenceList.forEach((reference, pairIndex) => {
+    if (Object.keys(pairs[pairIndex].inspectedEntry || {}).length > 0) {
+      return;
+    }
+
+    const indexMatch = inspectedList.find(
+      (source) =>
+        source.index === reference.index && !usedInspectedIndexes.has(source.index),
+    );
+    if (!indexMatch) return;
+
+    usedInspectedIndexes.add(indexMatch.index);
+    pairs[pairIndex].inspectedEntry = indexMatch.entry;
+  });
+
+  inspectedList.forEach((source) => {
+    if (usedInspectedIndexes.has(source.index)) return;
+    pairs.push({
+      key: source.key,
+      index: pairs.length,
+      inspectedEntry: source.entry,
+      pisEntry: {},
+      labelEntry: source.entry,
+    });
+  });
+
+  return pairs;
+};
 
 const getEntryLabel = (entry = {}, key = "", fallback = "Value") => {
   const explicitRemark = formatRemarkLabel(entry?.remark, "");
@@ -759,18 +820,14 @@ const buildItemSizeDifferences = (
   { sourceLabel = "Inspected", referenceLabel = "PIS" } = {},
 ) => {
   const differences = [];
-  const orderedKeys = buildUnionKeys(inspectedEntries, pisEntries, buildItemEntryKey);
-  const inspectedMap = new Map(
-    inspectedEntries.map((entry, index) => [buildItemEntryKey(entry, index), entry]),
-  );
-  const pisMap = new Map(
-    pisEntries.map((entry, index) => [buildItemEntryKey(entry, index), entry]),
+  const entryPairs = buildReferenceFirstEntryPairs(
+    inspectedEntries,
+    pisEntries,
+    buildItemEntryKey,
   );
 
-  orderedKeys.forEach((key, index) => {
-    const inspectedEntry = inspectedMap.get(key) || {};
-    const pisEntry = pisMap.get(key) || {};
-    const segment = getEntryLabel(inspectedEntry?.remark ? inspectedEntry : pisEntry, key, "Item");
+  entryPairs.forEach(({ key, index, inspectedEntry = {}, pisEntry = {}, labelEntry }) => {
+    const segment = getEntryLabel(labelEntry, key, "Item");
 
     ["L", "B", "H"].forEach((axis) => {
       const difference = createNumericDifference({
@@ -827,19 +884,14 @@ const buildBoxSizeDifferences = ({
   });
   if (modeDifference) differences.push(modeDifference);
 
-  const orderedKeys = buildUnionKeys(inspectedEntries, pisEntries, buildBoxEntryKey);
-  const inspectedMap = new Map(
-    inspectedEntries.map((entry, index) => [buildBoxEntryKey(entry, index), entry]),
-  );
-  const pisMap = new Map(
-    pisEntries.map((entry, index) => [buildBoxEntryKey(entry, index), entry]),
+  const entryPairs = buildReferenceFirstEntryPairs(
+    inspectedEntries,
+    pisEntries,
+    buildBoxEntryKey,
   );
 
-  orderedKeys.forEach((key, index) => {
-    const inspectedEntry = inspectedMap.get(key) || {};
-    const pisEntry = pisMap.get(key) || {};
-    const labelSource = inspectedEntry?.remark ? inspectedEntry : pisEntry;
-    const segment = getEntryLabel(labelSource, key, "Box");
+  entryPairs.forEach(({ key, index, inspectedEntry = {}, pisEntry = {}, labelEntry }) => {
+    const segment = getEntryLabel(labelEntry, key, "Box");
 
     ["L", "B", "H"].forEach((axis) => {
       const difference = createNumericDifference({

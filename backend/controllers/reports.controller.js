@@ -88,6 +88,7 @@ const INSPECTED_ITEMS_REPORT_SELECT = [
   "finish",
   "qc",
   "source",
+  "shipping_marks",
   "inspected_item_sizes",
   "inspected_box_sizes",
   "updatedAt",
@@ -102,6 +103,7 @@ const INSPECTED_ITEM_CRITERIA = Object.freeze({
   PACKAGING_PPT: "packaging_ppt",
   PRODUCT_IMAGE: "product_image",
   FINISH: "finish",
+  SHIPPING_MARKS: "shipping_marks",
 });
 
 const buildInspectedItemsReportMatch = ({ search, brand, vendor } = {}) => {
@@ -150,6 +152,18 @@ const hasFinishUploaded = (item = {}) =>
     normalizeText(entry?.unique_code || entry?.color || entry?.finish_id || entry?.image?.key),
   );
 
+const hasShippingMarksUploaded = (item = {}) => {
+  const marks = item?.shipping_marks || {};
+  return (
+    hasStoredItemFile(marks.shipping_marks_1) ||
+    hasStoredItemFile(marks.shipping_marks_2) ||
+    hasStoredItemFile(marks.ean) ||
+    hasStoredItemFile(marks.flat_carton_1) ||
+    hasStoredItemFile(marks.flat_carton_2) ||
+    hasStoredItemFile(marks.three_d_carton)
+  );
+};
+
 const hasItemBeenInspected = (item = {}) =>
   Boolean(
     normalizeText(item?.qc?.last_inspected_date) ||
@@ -169,6 +183,7 @@ const buildInspectedItemsReportFlags = (item = {}) => ({
   packaging_ppt: hasStoredItemFile(item?.packeging_ppt),
   product_image: hasStoredItemFile(item?.image),
   finish: hasFinishUploaded(item),
+  shipping_marks: hasShippingMarksUploaded(item),
 });
 
 const isInspectedItemsCriterionApplicable = (row = {}, criterion = "all") => {
@@ -274,6 +289,7 @@ const buildInspectedItemsReportRow = (item = {}) => {
       mounting_file: item?.mounting_file || {},
       packeging_ppt: item?.packeging_ppt || {},
       finish_count: Array.isArray(item?.finish) ? item.finish.length : 0,
+      shipping_marks: item?.shipping_marks || {},
     },
     updated_at: item?.updatedAt || null,
   };
@@ -300,6 +316,7 @@ const buildInspectedItemsSummary = (rows = []) => {
     packaging_ppt: createSummaryEntry(INSPECTED_ITEM_CRITERIA.PACKAGING_PPT, "Packaging PPT Uploaded"),
     product_image: createSummaryEntry(INSPECTED_ITEM_CRITERIA.PRODUCT_IMAGE, "Product Image Uploaded"),
     finish: createSummaryEntry(INSPECTED_ITEM_CRITERIA.FINISH, "Finish Uploaded"),
+    shipping_marks: createSummaryEntry(INSPECTED_ITEM_CRITERIA.SHIPPING_MARKS, "Shipping Marks Uploaded"),
   };
 };
 
@@ -1817,6 +1834,7 @@ exports.exportInspectedItemsReport = async (req, res) => {
       { header: "Packaging PPT", value: (row) => (row.flags?.packaging_ppt ? "Yes" : "No") },
       { header: "Product Image", value: (row) => (row.flags?.product_image ? "Yes" : "No") },
       { header: "Finish", value: (row) => (row.flags?.finish ? "Yes" : "No") },
+      { header: "Shipping Marks", value: (row) => (row.flags?.shipping_marks ? "Yes" : "No") },
       {
         header: "Finish Count",
         value: (row) => Number(row.files?.finish_count || 0),

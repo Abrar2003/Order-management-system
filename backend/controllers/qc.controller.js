@@ -10840,7 +10840,7 @@ exports.getQCById = async (req, res) => {
         ),
       )
           .select(
-            "code name description brand_name brands vendors finish barcode_exempted inspected_weight pis_weight weight cbm kd mounting_file_needed pis_barcode pis_master_barcode pis_inner_barcode qc.barcode qc.master_barcode qc.inner_barcode inspected_item_LBH inspected_item_sizes inspected_item_top_LBH inspected_item_bottom_LBH pis_item_LBH pis_item_sizes pis_item_top_LBH pis_item_bottom_LBH item_LBH inspected_box_LBH inspected_box_sizes inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_box_LBH pis_box_sizes pis_box_top_LBH pis_box_bottom_LBH box_LBH image cad_file pis_file assembly_file mounting_file packeging_ppt",
+            "code name description brand_name brands vendors finish barcode_exempted inspected_weight pis_weight weight cbm kd mounting_file_needed pis_barcode pis_master_barcode pis_inner_barcode qc.barcode qc.master_barcode qc.inner_barcode inspected_item_LBH inspected_item_sizes inspected_item_top_LBH inspected_item_bottom_LBH pis_item_LBH pis_item_sizes pis_item_top_LBH pis_item_bottom_LBH item_LBH inspected_box_LBH inspected_box_sizes inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_box_LBH pis_box_sizes pis_box_top_LBH pis_box_bottom_LBH box_LBH image cad_file pis_file assembly_file mounting_file packeging_ppt shipping_marks",
           )
           .lean()
       : null;
@@ -10932,6 +10932,24 @@ exports.getQCById = async (req, res) => {
           buildSignedItemFile(itemMaster?.packeging_ppt, {
             logLabel: "Packaging PPT",
           }),
+          buildSignedItemFile(itemMaster?.shipping_marks?.shipping_marks_1, {
+            logLabel: "Shipping marks 1",
+          }),
+          buildSignedItemFile(itemMaster?.shipping_marks?.shipping_marks_2, {
+            logLabel: "Shipping marks 2",
+          }),
+          buildSignedItemFile(itemMaster?.shipping_marks?.ean, {
+            logLabel: "EAN",
+          }),
+          buildSignedItemFile(itemMaster?.shipping_marks?.flat_carton_1, {
+            logLabel: "Flat carton 1",
+          }),
+          buildSignedItemFile(itemMaster?.shipping_marks?.flat_carton_2, {
+            logLabel: "Flat carton 2",
+          }),
+          buildSignedItemFile(itemMaster?.shipping_marks?.three_d_carton, {
+            logLabel: "3D carton",
+          }),
         ])
       : [];
     const itemMasterWithSignedUrls = itemMaster
@@ -10944,6 +10962,14 @@ exports.getQCById = async (req, res) => {
           assembly_file: signedItemFiles[3],
           mounting_file: signedItemFiles[4],
           packeging_ppt: signedItemFiles[5],
+          shipping_marks: {
+            shipping_marks_1: signedItemFiles[6],
+            shipping_marks_2: signedItemFiles[7],
+            ean: signedItemFiles[8],
+            flat_carton_1: signedItemFiles[9],
+            flat_carton_2: signedItemFiles[10],
+            three_d_carton: signedItemFiles[11],
+          },
         }
       : null;
     const qcImagesWithSignedUrls = await Promise.all(

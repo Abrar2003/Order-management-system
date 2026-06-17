@@ -259,6 +259,70 @@ test("final PIS check keeps real inspected box dimension mismatches after normal
   assert.equal(rows[0].differences[0].pis, "104.5 cm");
 });
 
+test("final PIS check reports master box entries missing from inspected data", () => {
+  const rows = buildFinalPisCheckRows([
+    {
+      code: "260206",
+      description: "Nice (set of 2) - natural",
+      inspected_box_mode: "individual",
+      inspected_box_sizes: [
+        {
+          remark: "box",
+          L: 64,
+          B: 65,
+          H: 52.5,
+          gross_weight: 25.75,
+        },
+      ],
+      master_box_mode: "individual",
+      master_box_sizes: [
+        {
+          remark: "box1",
+          L: 65,
+          B: 65,
+          H: 50,
+          gross_weight: 27.6,
+        },
+        {
+          remark: "box2",
+          L: 46,
+          B: 46,
+          H: 55,
+          gross_weight: 18.6,
+        },
+      ],
+      cbm: {
+        calculated_inspected_total: "0.22",
+        calculated_master_total: "0.33",
+      },
+    },
+  ]);
+
+  const boxSizeDifferences = rows[0].differences.filter(
+    (difference) => difference.section === "Box Size",
+  );
+  const box1HeightDifference = boxSizeDifferences.find(
+    (difference) => difference.segment === "Box 1" && difference.attribute === "H",
+  );
+  const box2MissingLengthDifference = boxSizeDifferences.find(
+    (difference) => difference.segment === "Box 2" && difference.attribute === "L",
+  );
+  const box2MissingWeightDifference = boxSizeDifferences.find(
+    (difference) =>
+      difference.segment === "Box 2" && difference.attribute === "Gross Weight",
+  );
+
+  assert.equal(rows.length, 1);
+  assert.ok(rows[0].diff_fields.includes("Box Size"));
+  assert.equal(box1HeightDifference.inspected, "52.5 cm");
+  assert.equal(box1HeightDifference.pis, "50 cm");
+  assert.equal(box2MissingLengthDifference.inspected, "Not Set");
+  assert.equal(box2MissingLengthDifference.pis, "46 cm");
+  assert.equal(box2MissingLengthDifference.delta, "Inspected not set");
+  assert.equal(box2MissingWeightDifference.inspected, "Not Set");
+  assert.equal(box2MissingWeightDifference.pis, "18.6 kg");
+});
+
 test("final PIS check reports inspected box mode count and weight differences against Master", () => {
   const rows = buildFinalPisCheckRows([
     {

@@ -21,6 +21,7 @@ const CRITERIA_OPTIONS = [
   { value: "packaging_ppt", label: "Packaging PPT Uploaded" },
   { value: "product_image", label: "Product Image Uploaded" },
   { value: "finish", label: "Finish Uploaded" },
+  { value: "shipping_marks", label: "Shipping Marks Uploaded" },
 ];
 
 const STATUS_OPTIONS = [
@@ -38,6 +39,7 @@ const SUMMARY_KEYS = [
   "packaging_ppt",
   "product_image",
   "finish",
+  "shipping_marks",
 ];
 
 const normalizeText = (value) => String(value || "").trim();
@@ -403,6 +405,7 @@ const InspectedItemsReport = () => {
                       <th>Packaging PPT</th>
                       <th>Product Image</th>
                       <th>Finish</th>
+                      <th>Shipping Marks</th>
                       <th>Last Inspected</th>
                     </tr>
                   </thead>
@@ -438,12 +441,13 @@ const InspectedItemsReport = () => {
                             </div>
                           )}
                         </td>
+                        <td><FlagBadge value={row.flags?.shipping_marks} /></td>
                         <td>{row.last_inspected_date ? formatDateDDMMYYYY(row.last_inspected_date) : "N/A"}</td>
                       </tr>
                     ))}
                     {rows.length === 0 && (
                       <tr>
-                        <td colSpan={13} className="text-center py-4">
+                        <td colSpan={14} className="text-center py-4">
                           No items found
                         </td>
                       </tr>

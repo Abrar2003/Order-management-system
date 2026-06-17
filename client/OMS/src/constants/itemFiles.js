@@ -100,6 +100,86 @@ export const ITEM_FILE_OPTIONS = Object.freeze([
     mimeTypes: PPT_MIME_TYPES,
     invalidMessage: "Only PPT, PPTX, or PPTM files are allowed for Packaging PPT.",
   },
+  {
+    value: "shipping_marks",
+    label: "Shipping Marks",
+    buttonLabel: "Shipping Marks",
+    field: "shipping_marks",
+    previewMode: "pdf",
+    accept: ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png",
+    extensions: [".pdf", ".jpg", ".jpeg", ".png"],
+    mimeTypes: ["application/pdf", "image/jpeg", "image/png"],
+    invalidMessage: "Only PDF, JPG, JPEG, or PNG files are allowed for Shipping Marks.",
+  },
+]);
+
+export const SHIPPING_MARKS_SUB_OPTIONS = Object.freeze([
+  {
+    value: "shipping_marks_1",
+    label: "Shipping Marks (First)",
+    buttonLabel: "Shipping marks (First)",
+    field: "shipping_marks.shipping_marks_1",
+    previewMode: "pdf",
+    accept: ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png",
+    extensions: [".pdf", ".jpg", ".jpeg", ".png"],
+    mimeTypes: ["application/pdf", "image/jpeg", "image/png"],
+    invalidMessage: "Only PDF, JPG, JPEG, or PNG files are allowed for Shipping marks.",
+  },
+  {
+    value: "shipping_marks_2",
+    label: "Shipping Marks (Optional)",
+    buttonLabel: "Shipping marks (Optional)",
+    field: "shipping_marks.shipping_marks_2",
+    previewMode: "pdf",
+    accept: ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png",
+    extensions: [".pdf", ".jpg", ".jpeg", ".png"],
+    mimeTypes: ["application/pdf", "image/jpeg", "image/png"],
+    invalidMessage: "Only PDF, JPG, JPEG, or PNG files are allowed for Shipping marks.",
+  },
+  {
+    value: "ean",
+    label: "EAN",
+    buttonLabel: "EAN",
+    field: "shipping_marks.ean",
+    previewMode: "pdf",
+    accept: ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png",
+    extensions: [".pdf", ".jpg", ".jpeg", ".png"],
+    mimeTypes: ["application/pdf", "image/jpeg", "image/png"],
+    invalidMessage: "Only PDF, JPG, JPEG, or PNG files are allowed for EAN.",
+  },
+  {
+    value: "flat_carton_1",
+    label: "Flat Carton",
+    buttonLabel: "Flat Carton",
+    field: "shipping_marks.flat_carton_1",
+    previewMode: "pdf",
+    accept: ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png",
+    extensions: [".pdf", ".jpg", ".jpeg", ".png"],
+    mimeTypes: ["application/pdf", "image/jpeg", "image/png"],
+    invalidMessage: "Only PDF, JPG, JPEG, or PNG files are allowed for Flat carton.",
+  },
+  {
+    value: "flat_carton_2",
+    label: "Flat Carton (Optional)",
+    buttonLabel: "Flat Carton (Optional)",
+    field: "shipping_marks.flat_carton_2",
+    previewMode: "pdf",
+    accept: ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png",
+    extensions: [".pdf", ".jpg", ".jpeg", ".png"],
+    mimeTypes: ["application/pdf", "image/jpeg", "image/png"],
+    invalidMessage: "Only PDF, JPG, JPEG, or PNG files are allowed for Flat carton.",
+  },
+  {
+    value: "three_d_carton",
+    label: "3D Carton",
+    buttonLabel: "3D Carton",
+    field: "shipping_marks.three_d_carton",
+    previewMode: "pdf",
+    accept: ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png",
+    extensions: [".pdf", ".jpg", ".jpeg", ".png"],
+    mimeTypes: ["application/pdf", "image/jpeg", "image/png"],
+    invalidMessage: "Only PDF, JPG, JPEG, or PNG files are allowed for 3D carton.",
+  },
 ]);
 
 export const ITEM_FILE_OPTIONS_BY_VALUE = Object.freeze(
@@ -113,7 +193,9 @@ export const DEFAULT_ITEM_FILE_TYPE = ITEM_FILE_OPTIONS[0]?.value || "product_im
 
 export const getItemFileOption = (value) => {
   const normalizedValue = String(value || "").trim().toLowerCase();
-  return ITEM_FILE_OPTIONS_BY_VALUE[normalizedValue] || null;
+  const option = ITEM_FILE_OPTIONS_BY_VALUE[normalizedValue] || null;
+  if (option) return option;
+  return SHIPPING_MARKS_SUB_OPTIONS.find(opt => opt.value.toLowerCase() === normalizedValue) || null;
 };
 
 export const isItemFileOptionAvailableForItem = (option, item = {}) => {

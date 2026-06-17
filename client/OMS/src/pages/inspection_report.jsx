@@ -12,6 +12,7 @@ import {
   hasStoredItemFile,
   ITEM_FILE_OPTIONS as ITEM_MASTER_FILE_OPTIONS,
   shouldOpenFilePreviewExternally,
+  SHIPPING_MARKS_SUB_OPTIONS,
 } from "../constants/itemFiles";
 import { toEan13BarcodeValue } from "../utils/barcode";
 import { formatDateDDMMYYYY } from "../utils/date";
@@ -763,6 +764,11 @@ const collectWeightDifferenceLogs = ({
   return logs;
 };
 
+const getNestedValue = (obj, path) => {
+  if (!obj || !path) return null;
+  return path.split(".").reduce((acc, part) => acc && acc[part], obj);
+};
+
 const InspectionReport = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -777,6 +783,7 @@ const InspectionReport = () => {
   ).trim();
 
   const [qc, setQc] = useState(null);
+  const [selectedReportShippingMark, setSelectedReportShippingMark] = useState("shipping_marks_1");
   const [loading, setLoading] = useState(true);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [brandLogoSrc, setBrandLogoSrc] = useState("");
@@ -864,12 +871,43 @@ const InspectionReport = () => {
 
   const itemMasterFiles = useMemo(
     () =>
-      ITEM_MASTER_FILE_OPTIONS.map((option) => ({
-        ...option,
-        file: qc?.item_master?.[option.field] || null,
-      })),
+      ITEM_MASTER_FILE_OPTIONS
+        .filter((option) => option.value !== "shipping_marks")
+        .map((option) => {
+          const file = getNestedValue(qc?.item_master, option.field) || null;
+          const isImage = file?.contentType?.startsWith("image/") || /\.(jpg|jpeg|png)$/i.test(file?.originalName || "");
+          return {
+            ...option,
+            file,
+            previewMode: isImage ? "image" : option.previewMode,
+          };
+        }),
     [qc?.item_master],
   );
+
+  const shippingMarksFiles = useMemo(() => {
+    return SHIPPING_MARKS_SUB_OPTIONS.map((opt) => {
+      const file = getNestedValue(qc?.item_master, opt.field) || null;
+      const isImage = file?.contentType?.startsWith("image/") || /\.(jpg|jpeg|png)$/i.test(file?.originalName || "");
+      return {
+        ...opt,
+        file,
+        previewMode: isImage ? "image" : "pdf",
+      };
+    }).filter((entry) => hasStoredItemFile(entry.file));
+  }, [qc?.item_master]);
+
+  const activeReportShippingMarkFile = useMemo(() => {
+    return shippingMarksFiles.find(file => file.value === selectedReportShippingMark) || shippingMarksFiles[0] || null;
+  }, [shippingMarksFiles, selectedReportShippingMark]);
+
+  useEffect(() => {
+    if (shippingMarksFiles.length > 0) {
+      if (!shippingMarksFiles.some(file => file.value === selectedReportShippingMark)) {
+        setSelectedReportShippingMark(shippingMarksFiles[0].value);
+      }
+    }
+  }, [shippingMarksFiles, selectedReportShippingMark]);
 
   const uploadedItemMasterFiles = useMemo(
     () => itemMasterFiles.filter((entry) => hasStoredItemFile(entry.file)),
@@ -2044,10 +2082,10 @@ const InspectionReport = () => {
               <div className="d-flex justify-content-between align-items-center mb-3">
                 <h3 className="h6 mb-0">Related Files</h3>
                 <span className="small text-secondary">
-                  {uploadedItemMasterFiles.length} {uploadedItemMasterFiles.length === 1 ? "file" : "files"}
+                  {uploadedItemMasterFiles.length + (shippingMarksFiles.length > 0 ? 1 : 0)} file(s)
                 </span>
               </div>
-              {uploadedItemMasterFiles.length > 0 ? (
+              {uploadedItemMasterFiles.length > 0 || shippingMarksFiles.length > 0 ? (
                 <div className="row g-3">
                   {uploadedItemMasterFiles.map((entry) => {
                     const fileUrl = getStoredItemFileUrl(entry.file);
@@ -2088,6 +2126,58 @@ const InspectionReport = () => {
                       </div>
                     );
                   })}
+
+                  {shippingMarksFiles.length > 0 && (
+                    <div className="col-md-6 col-xl-4">
+                      <div className="card h-100 shadow-sm border-0" style={{ borderLeft: "4px solid #0d6efd" }}>
+                        <div className="card-body d-flex flex-column gap-2">
+                          <div className="fw-semibold">Shipping Marks</div>
+                          <div className="small text-secondary">
+                            Select a shipping marks file to view or open:
+                          </div>
+                          <select
+                            className="form-select form-select-sm my-1"
+                            value={selectedReportShippingMark}
+                            onChange={(e) => setSelectedReportShippingMark(e.target.value)}
+                          >
+                            {shippingMarksFiles.map((entry) => (
+                              <option key={entry.value} value={entry.value}>
+                                {entry.label}
+                              </option>
+                            ))}
+                          </select>
+                          {activeReportShippingMarkFile && (
+                            <div className="small text-secondary text-truncate mb-2">
+                              {String(activeReportShippingMarkFile.file?.originalName || "Uploaded file").trim()}
+                            </div>
+                          )}
+                          <div className="mt-auto">
+                            <div className="d-flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                className="btn btn-outline-primary btn-sm rounded-pill"
+                                onClick={() => handlePreviewItemMasterFile(activeReportShippingMarkFile)}
+                                disabled={!activeReportShippingMarkFile?.file}
+                              >
+                                Preview
+                              </button>
+                              <a
+                                href={activeReportShippingMarkFile ? getStoredItemFileUrl(activeReportShippingMarkFile.file) : "#"}
+                                target="_blank"
+                                rel="noreferrer"
+                                className={`btn btn-outline-secondary btn-sm rounded-pill ${!activeReportShippingMarkFile ? "disabled" : ""}`}
+                                onClick={(event) => {
+                                  if (!activeReportShippingMarkFile) event.preventDefault();
+                                }}
+                              >
+                                Open File
+                              </a>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="text-secondary small">

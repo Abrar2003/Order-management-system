@@ -26,6 +26,7 @@ import {
   ITEM_FILE_OPTIONS,
   isItemFileOptionAvailableForItem,
   shouldOpenFilePreviewExternally,
+  SHIPPING_MARKS_SUB_OPTIONS,
 } from "../constants/itemFiles";
 import {
   getNextClientSortState,
@@ -365,6 +366,11 @@ const buildSelectedFileBatchKey = ({
     ),
   ].join("::");
 
+const getNestedValue = (obj, path) => {
+  if (!obj || !path) return null;
+  return path.split(".").reduce((acc, part) => acc && acc[part], obj);
+};
+
 const QcDetails = () => {
   const { id } = useParams();
   const [qc, setQc] = useState(null);
@@ -373,6 +379,7 @@ const QcDetails = () => {
     const initialRole = String(getUserFromToken()?.role || "").trim().toLowerCase();
     return initialRole === "qc" ? "qc_images" : "product_image";
   });
+  const [subFileType, setSubFileType] = useState("shipping_marks_1");
   const [qcImageUploadMode, setQcImageUploadMode] = useState("single");
   const [qcSingleImageComment, setQcSingleImageComment] = useState("");
   const [uploadingRelatedFile, setUploadingRelatedFile] = useState(false);
@@ -538,11 +545,33 @@ const QcDetails = () => {
     [isQcUser, qc?.item_master],
   );
   const activeRelatedFileConfig = useMemo(
-    () =>
-      availableRelatedFileOptions.find((option) => option.value === relatedFileType)
-      || availableRelatedFileOptions[0]
-      || RELATED_FILE_OPTIONS[0],
-    [availableRelatedFileOptions, relatedFileType],
+    () => {
+      let baseConfig;
+      if (relatedFileType === "shipping_marks") {
+        const subOpt = SHIPPING_MARKS_SUB_OPTIONS.find(opt => opt.value === subFileType) || SHIPPING_MARKS_SUB_OPTIONS[0];
+        baseConfig = {
+          ...subOpt,
+          scope: "item_master",
+        };
+      } else {
+        baseConfig =
+          availableRelatedFileOptions.find((option) => option.value === relatedFileType)
+          || availableRelatedFileOptions[0]
+          || RELATED_FILE_OPTIONS[0];
+      }
+      if (baseConfig?.scope === "item_master" && baseConfig?.field) {
+        const fileObj = getNestedValue(qc?.item_master, baseConfig.field);
+        const isImage = fileObj?.contentType?.startsWith("image/") || /\.(jpg|jpeg|png)$/i.test(fileObj?.originalName || "");
+        if (isImage) {
+          return {
+            ...baseConfig,
+            previewMode: "image",
+          };
+        }
+      }
+      return baseConfig;
+    },
+    [availableRelatedFileOptions, relatedFileType, subFileType, qc?.item_master],
   );
   const canUploadQcImages = isAdmin || isQcUser;
   const canUploadItemMasterFiles = isAdmin && canUpdateQc;
@@ -791,7 +820,7 @@ const QcDetails = () => {
   const activeRelatedStoredFile = useMemo(
     () => (
       activeRelatedFileConfig?.scope === "item_master" && activeRelatedFileConfig?.field
-        ? qc?.item_master?.[activeRelatedFileConfig.field] || null
+        ? getNestedValue(qc?.item_master, activeRelatedFileConfig.field) || null
         : null
     ),
     [activeRelatedFileConfig, qc?.item_master],
@@ -1664,6 +1693,21 @@ const QcDetails = () => {
                       </option>
                     ))}
                   </select>
+
+                  {relatedFileType === "shipping_marks" && (
+                    <select
+                      className="form-select form-select-sm qc-details-toolbar-select"
+                      value={subFileType}
+                      onChange={(e) => setSubFileType(String(e.target.value || "shipping_marks_1"))}
+                      disabled={isRelatedUploadBusy || deletingRelatedFile}
+                    >
+                      {SHIPPING_MARKS_SUB_OPTIONS.map((subOpt) => (
+                        <option key={subOpt.value} value={subOpt.value}>
+                          {subOpt.label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
 
                   {activeRelatedFileConfig?.value === "qc_images" && (
                     <>
