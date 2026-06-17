@@ -162,7 +162,7 @@ test("does not match dimensions greater than tolerance", () => {
 test("normalizes PIS diff comparison sources before size mismatch checks", () => {
   const reference = [{ L: 100, B: 50, H: 100 }];
   const inspected = normalizeSizeGroupForComparison({
-    sourceSizes: [{ L: 99, B: 101, H: 49 }],
+    sourceSizes: [{ L: 99.5, B: 100.5, H: 49.5 }],
     referenceSizes: reference,
     type: "item",
   });
@@ -171,7 +171,7 @@ test("normalizes PIS diff comparison sources before size mismatch checks", () =>
     compareItemSizeDimensionVariance(inspected[0][axis], reference[0][axis]).mismatch,
   );
 
-  assert.deepEqual(inspected, [{ L: 99, B: 49, H: 101 }]);
+  assert.deepEqual(inspected, [{ L: 99.5, B: 49.5, H: 100.5 }]);
   assert.equal(hasMismatch, false);
 });
 
@@ -180,7 +180,7 @@ test("final PIS check does not return a row when inspected dimensions only diffe
     {
       code: "ITEM-1",
       description: "Normalized item",
-      inspected_item_sizes: [{ L: 99, B: 101, H: 49, net_weight: 10 }],
+      inspected_item_sizes: [{ L: 99.5, B: 100.5, H: 49.5, net_weight: 10 }],
       master_item_sizes: [{ L: 100, B: 50, H: 100, net_weight: 10 }],
     },
   ]);
@@ -429,7 +429,7 @@ test("final PIS check does not emit country differences without inspected countr
 test("QC mismatch comparison ignores inspected LBH storage order when Master/PIS reference exists", () => {
   const mismatch = compareInspectionSizeSnapshot(
     {
-      inspected_item_sizes: [{ L: 99, B: 101, H: 49 }],
+      inspected_item_sizes: [{ L: 99.5, B: 100.5, H: 49.5 }],
       inspected_box_sizes: [{ L: 29, B: 61, H: 39, box_type: "master" }],
     },
     {
@@ -442,9 +442,9 @@ test("QC mismatch comparison ignores inspected LBH storage order when Master/PIS
 
   assert.equal(mismatch.has_mismatch, false);
   assert.deepEqual(mismatch.inspection_snapshot.inspected_item_sizes[0], {
-    L: 99,
-    B: 49,
-    H: 101,
+    L: 99.5,
+    B: 49.5,
+    H: 100.5,
     remark: "",
     net_weight: 0,
     gross_weight: 0,
@@ -460,4 +460,42 @@ test("QC mismatch comparison ignores inspected LBH storage order when Master/PIS
     item_count_in_inner: 0,
     box_count_in_master: 0,
   });
+});
+
+test("QC mismatch comparison ignores configured size and weight tolerances", () => {
+  const withinTolerance = compareInspectionSizeSnapshot(
+    {
+      inspected_item_sizes: [{ L: 100.5, B: 50, H: 100, net_weight: 110 }],
+      inspected_box_sizes: [{ L: 101, B: 50, H: 100, gross_weight: 90 }],
+    },
+    {
+      inspected_item_sizes: [{ L: 100, B: 50, H: 100, net_weight: 100 }],
+      inspected_box_sizes: [{ L: 100, B: 50, H: 100, gross_weight: 100 }],
+    },
+  );
+
+  assert.equal(withinTolerance.has_mismatch, false);
+  assert.deepEqual(withinTolerance.item_size_mismatches, []);
+  assert.deepEqual(withinTolerance.box_size_mismatches, []);
+
+  const outsideTolerance = compareInspectionSizeSnapshot(
+    {
+      inspected_item_sizes: [{ L: 100.51, B: 50, H: 100, net_weight: 111 }],
+      inspected_box_sizes: [{ L: 101.01, B: 50, H: 100, gross_weight: 89.9 }],
+    },
+    {
+      inspected_item_sizes: [{ L: 100, B: 50, H: 100, net_weight: 100 }],
+      inspected_box_sizes: [{ L: 100, B: 50, H: 100, gross_weight: 100 }],
+    },
+  );
+
+  assert.equal(outsideTolerance.has_mismatch, true);
+  assert.deepEqual(
+    outsideTolerance.item_size_mismatches.map((entry) => entry.field),
+    ["L", "net_weight"],
+  );
+  assert.deepEqual(
+    outsideTolerance.box_size_mismatches.map((entry) => entry.field),
+    ["L", "gross_weight"],
+  );
 });

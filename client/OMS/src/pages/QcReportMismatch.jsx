@@ -175,19 +175,28 @@ const hasComparableNumberValue = (value) => {
 
 const hasComparableTextValue = (value) => Boolean(normalizeTextValue(value));
 
+const hasFieldData = (value, field = {}) =>
+  field.type === "number"
+    ? hasComparableNumberValue(value)
+    : hasComparableTextValue(value);
+
 const hasComparableFieldData = (inspectionValue, currentValue, field = {}) => {
-  if (field.type === "number") {
-    return hasComparableNumberValue(inspectionValue) &&
-      hasComparableNumberValue(currentValue);
-  }
-  return hasComparableTextValue(inspectionValue) &&
-    hasComparableTextValue(currentValue);
+  return hasFieldData(inspectionValue, field) && hasFieldData(currentValue, field);
 };
 
 const buildMismatchKeySet = (mismatches = []) =>
   new Set(
     (Array.isArray(mismatches) ? mismatches : []).map((entry) =>
       `${Number(entry?.index || 0)}:${String(entry?.field || "").trim()}`,
+    ),
+  );
+
+const getMismatchMaxLength = (inspections = [], mismatchKey = "") =>
+  Math.max(
+    0,
+    ...(Array.isArray(inspections) ? inspections : []).flatMap((inspection) =>
+      (Array.isArray(inspection?.[mismatchKey]) ? inspection[mismatchKey] : [])
+        .map((entry) => Number(entry?.index || 0) + 1),
     ),
   );
 
@@ -207,6 +216,7 @@ const buildSheetRows = ({
         ? inspection.inspection_snapshot[snapshotKey].length
         : 0,
     ),
+    getMismatchMaxLength(safeInspections, mismatchKey),
   );
 
   if (maxLength === 0) {
@@ -228,6 +238,8 @@ const buildSheetRows = ({
         const inspectionValue = inspectionEntry?.[field.key];
         const currentValue = currentEntry?.[field.key];
         const isComparable = hasComparableFieldData(inspectionValue, currentValue, field);
+        const isMismatch = mismatchKeySet.has(mismatchEntryKey);
+        const hasInspectionValue = hasFieldData(inspectionValue, field);
 
         return {
           key: `${inspection?.inspection_id || inspectionIndex}-${index}-${field.key}`,
@@ -235,15 +247,15 @@ const buildSheetRows = ({
           label: inspection?.sheet_label || `Inspection ${inspectionIndex + 1}`,
           inspection_date: inspection?.inspection_date || "",
           inspector_name: inspection?.inspector_name || "Unassigned",
-          value: isComparable
+          value: hasInspectionValue
             ? formatComparisonValue(inspectionValue, field.type, field.key)
             : "No Data",
           is_comparable: isComparable,
-          is_mismatch: isComparable && mismatchKeySet.has(mismatchEntryKey),
+          is_mismatch: isMismatch,
         };
       });
 
-      if (!inspectionCells.some((cell) => cell.is_comparable)) {
+      if (!inspectionCells.some((cell) => cell.is_comparable || cell.is_mismatch)) {
         return;
       }
 
@@ -257,7 +269,7 @@ const buildSheetRows = ({
     });
   }
 
-  return rows;
+  return rows.sort((left, right) => Number(right.is_mismatch) - Number(left.is_mismatch));
 };
 
 const buildBoxModeSheetRows = ({
@@ -282,11 +294,11 @@ const buildBoxModeSheetRows = ({
       inspector_name: inspection?.inspector_name || "Unassigned",
       value: isComparable ? formatBoxModeLabel(inspectionMode) : "No Data",
       is_comparable: isComparable,
-      is_mismatch: isComparable && Boolean(inspection?.box_mode_mismatch),
+      is_mismatch: Boolean(inspection?.box_mode_mismatch),
     };
   });
 
-  if (!inspectionCells.some((cell) => cell.is_comparable)) {
+  if (!inspectionCells.some((cell) => cell.is_comparable || cell.is_mismatch)) {
     return [];
   }
 
@@ -1175,27 +1187,29 @@ const QcReportMismatch = () => {
                             </tr>
                           </thead>
                           <tbody>
-                            {section.rows.map((entry) => (
-                              <tr
-                                key={entry.key}
-                                className={entry.is_mismatch ? "table-danger" : ""}
-                              >
-                                <td>{entry.field}</td>
-                                {entry.inspection_cells.map((cell) => (
-                                  <td
-                                    key={cell.key}
-                                    className={cell.is_mismatch ? "table-danger" : ""}
-                                  >
-                                    <div>{cell.value}</div>
-                                    <div className="small text-secondary">
-                                      {cell.is_comparable
-                                        ? (cell.is_mismatch ? "Mismatch" : "Matched")
-                                        : "No comparable data"}
-                                    </div>
-                                  </td>
-                                ))}
-                              </tr>
-                            ))}
+                            {section.rows.map((entry) => {
+                              const mismatchClassName = entry.is_mismatch ? "om-report-danger-row" : "";
+                              return (
+                                <tr
+                                  key={entry.key}
+                                  className={mismatchClassName}
+                                >
+                                  <td>{entry.field}</td>
+                                  {entry.inspection_cells.map((cell) => (
+                                    <td
+                                      key={cell.key}
+                                    >
+                                      <div>{cell.value}</div>
+                                      <div className="small text-secondary">
+                                        {cell.is_mismatch
+                                          ? "Mismatch"
+                                          : (cell.is_comparable ? "Matched" : "No comparable data")}
+                                      </div>
+                                    </td>
+                                  ))}
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
