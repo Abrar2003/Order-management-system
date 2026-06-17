@@ -3157,6 +3157,105 @@ const reworkWorkflowTask = async ({
   task.rework_count = task.reworked.count;
   await task.save();
 
+  if (task.task_type_key === "cad_files") {
+    try {
+      const SampleWorkflow = require("../../models/sampleWorkflow.model");
+      const isSampleWorkflowTask = await SampleWorkflow.exists({ code: task.title });
+      if (isSampleWorkflowTask) {
+        const otherTasks = await Task.find({
+          title: task.title,
+          _id: { $ne: task._id },
+          is_deleted: false,
+        });
+
+        for (const otherTask of otherTasks) {
+          const otherStatus = normalizeWorkflowTaskStatus(otherTask.status, {
+            fallback: "assigned",
+          }) || "assigned";
+
+          if (["complete", "approved", "uploaded"].includes(otherStatus)) {
+            try {
+              await reworkWorkflowTask({
+                taskId: otherTask._id,
+                actor,
+                note: `Automatically sent to rework because AutoCAD task ${task.task_no} was sent to rework: ${note}`,
+                dueDate: "",
+                realtimeSource,
+              });
+            } catch (reworkErr) {
+              console.error(`Failed to auto-rework task ${otherTask.task_no}:`, reworkErr);
+            }
+          } else if (otherStatus !== "hold") {
+            try {
+              const currentHold = getTaskHoldPayload(otherTask);
+              otherTask.hold = {
+                ...currentHold,
+                status: "hold",
+                previous_status: otherStatus,
+                requested_comment: `Automatically put on hold because AutoCAD task ${task.task_no} was sent to rework`,
+                requested_by: auditActor,
+                requested_at: reworkedAt,
+                approved_comment: `Automatically put on hold because AutoCAD task ${task.task_no} was sent to rework`,
+                approved_by: auditActor,
+                approved_at: reworkedAt,
+                resumed_comment: "",
+                resumed_by: {},
+                resumed_at: null,
+                rejected_comment: "",
+                rejected_by: {},
+                rejected_at: null,
+                total_paused_ms: currentHold.total_paused_ms,
+              };
+              otherTask.status = "hold";
+              otherTask.updated_by = auditActor;
+              await otherTask.save();
+
+              await TaskStatusHistory.create({
+                task: otherTask._id,
+                batch: otherTask.batch || null,
+                from_status: otherStatus,
+                to_status: "hold",
+                changed_by: auditActor,
+                changed_at: reworkedAt,
+                note: `Automatically put on hold because AutoCAD task ${task.task_no} was sent to rework`,
+                metadata: {
+                  hold_requested: true,
+                  hold_approved: true,
+                  hold_previous_status: otherStatus,
+                  auto_hold_due_to_cad_rework: true,
+                },
+              });
+
+              await createTransitionCommentIfNeeded({
+                task: otherTask,
+                actor,
+                note: `Automatically put on hold because AutoCAD task ${task.task_no} was sent to rework`,
+                commentType: "hold",
+              });
+
+              const otherBatch = await recalculateWorkflowBatchIfPresent(otherTask.batch);
+              const otherTaskDetail = await buildTaskDetail(otherTask._id, actor);
+
+              emitWorkflowTaskMutation({
+                realtimeSource,
+                task: otherTaskDetail,
+                batch: otherBatch,
+                actor,
+                message: "Workflow task put on hold automatically due to AutoCAD rework",
+                changedFields: ["hold", "status"],
+                shouldRefetch: true,
+              });
+            } catch (holdErr) {
+              console.error(`Failed to auto-hold task ${otherTask.task_no}:`, holdErr);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Failed to automatically update follow-up tasks on AutoCAD rework:", err);
+    }
+  }
+
   await TaskStatusHistory.create({
     task: task._id,
     batch: task.batch || null,

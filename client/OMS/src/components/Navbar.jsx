@@ -312,7 +312,10 @@ const Navbar = () => {
     const items = [];
 
     if (canViewSamples) {
-      items.push(routeMenuItem("samples", "Samples", "/samples"));
+      items.push(
+        routeMenuItem("samples", "Samples", "/samples"),
+        routeMenuItem("samples-workflow", "Sample Workflow", "/samples/workflow")
+      );
     }
 
     if (hasPermission("containers", "edit") || hasPermission("containers", "manage")) {

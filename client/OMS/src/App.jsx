@@ -29,6 +29,7 @@ import DailyReport from "./pages/DailyReport";
 import Shipments from "./pages/Shipments";
 import Container from "./pages/Container";
 import Samples from "./pages/Samples";
+import SampleWorkflow from "./pages/SampleWorkflow";
 import Containers from "./pages/Containers";
 import ShippedSamples from "./pages/ShippedSamples";
 import Items from "./pages/Items";
@@ -461,6 +462,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <Samples />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/samples/workflow"
+            element={
+              <ProtectedRoute>
+                <SampleWorkflow />
               </ProtectedRoute>
             }
           />
