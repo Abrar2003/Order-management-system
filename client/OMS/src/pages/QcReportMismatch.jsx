@@ -1178,7 +1178,7 @@ const QcReportMismatch = () => {
                             {section.rows.map((entry) => (
                               <tr
                                 key={entry.key}
-                                className={entry.is_mismatch ? "table-warning" : ""}
+                                className={entry.is_mismatch ? "table-danger" : ""}
                               >
                                 <td>{entry.field}</td>
                                 {entry.inspection_cells.map((cell) => (
