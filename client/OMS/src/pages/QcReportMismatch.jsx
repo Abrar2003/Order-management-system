@@ -959,7 +959,7 @@ const QcReportMismatch = () => {
               Mismatch Only: {filters.mismatch_only ? "Yes" : "No"}
             </span>
             <span className="om-summary-chip">
-              Per Item: Latest {filters.comparison_inspection_limit ?? 3} inspections
+              Per Item: Latest {filters.comparison_inspection_limit ?? 3} POs, latest inspection per PO
             </span>
             <span className="om-summary-chip">
               Page: {pagination.page ?? 1}

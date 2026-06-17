@@ -551,16 +551,54 @@ const getDateTimeValue = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const getInspectionDateRecencyTime = (inspection = {}) =>
-  getDateTimeValue(inspection?.inspection_date_recency_value);
+const getNullableDateTimeValue = (value) => {
+  if (!value) return null;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const compareDateDescNullLast = (leftValue, rightValue) => {
+  const leftTime = getNullableDateTimeValue(leftValue);
+  const rightTime = getNullableDateTimeValue(rightValue);
+
+  if (leftTime !== null && rightTime !== null) {
+    if (rightTime !== leftTime) return rightTime - leftTime;
+    return 0;
+  }
+  if (leftTime !== null) return -1;
+  if (rightTime !== null) return 1;
+  return 0;
+};
 
 const compareInspectionRecencyDesc = (left = {}, right = {}) => {
-  const timeDelta =
-    getInspectionDateRecencyTime(right) - getInspectionDateRecencyTime(left);
-  if (timeDelta !== 0) return timeDelta;
-  const createdAtDelta = getDateTimeValue(right?.createdAt) - getDateTimeValue(left?.createdAt);
+  const recencyDelta = compareDateDescNullLast(
+    left?.inspection_date_recency_value,
+    right?.inspection_date_recency_value,
+  );
+  if (recencyDelta !== 0) return recencyDelta;
+  const inspectionDateDelta = compareDateDescNullLast(
+    left?.inspection_date_value,
+    right?.inspection_date_value,
+  );
+  if (inspectionDateDelta !== 0) return inspectionDateDelta;
+  const createdAtDelta = compareDateDescNullLast(left?.createdAt, right?.createdAt);
   if (createdAtDelta !== 0) return createdAtDelta;
   return normalizeText(right?._id).localeCompare(normalizeText(left?._id));
+};
+
+const getLatestOrderDateValue = (inspections = []) => {
+  let latestEntry = null;
+  (Array.isArray(inspections) ? inspections : []).forEach((inspection) => {
+    if (
+      compareDateDescNullLast(
+        inspection?.order_date_value,
+        latestEntry?.order_date_value,
+      ) < 0
+    ) {
+      latestEntry = inspection;
+    }
+  });
+  return latestEntry?.order_date_value || null;
 };
 
 const sortInspectionsByOrderAndInspectionDate = (inspections = []) => {
@@ -577,70 +615,20 @@ const sortInspectionsByOrderAndInspectionDate = (inspections = []) => {
     poGroups.set(po, group);
   });
 
-  // Helper to get safe timestamp
-  const getSafeTimeValue = (value) => {
-    if (!value) return null;
-    const time = new Date(value).getTime();
-    return Number.isFinite(time) ? time : null;
-  };
-
-  // Helper to compare order dates (latest first, nulls last)
-  const compareOrderDates = (aDate, bDate) => {
-    const aTime = getSafeTimeValue(aDate);
-    const bTime = getSafeTimeValue(bDate);
-
-    if (aTime !== null && bTime !== null) {
-      return bTime - aTime;
-    }
-    if (aTime !== null) {
-      return -1;
-    }
-    if (bTime !== null) {
-      return 1;
-    }
-    return 0;
-  };
-
-  // Helper to compare inspection dates (latest first, nulls last)
-  const compareInspectionDates = (a, b) => {
-    const aTime = getSafeTimeValue(a?.inspection_date_recency_value);
-    const bTime = getSafeTimeValue(b?.inspection_date_recency_value);
-
-    if (aTime !== null && bTime !== null) {
-      if (bTime !== aTime) return bTime - aTime;
-    } else if (aTime !== null) {
-      return -1;
-    } else if (bTime !== null) {
-      return 1;
-    }
-    // secondary fallback to ID for deterministic sort
-    const idA = normalizeText(a?.inspection_id || a?._id || a?.id);
-    const idB = normalizeText(b?.inspection_id || b?._id || b?.id);
-    return idB.localeCompare(idA);
-  };
-
   // 2. Sort inspections within each PO group by inspection_date (recency) latest first
   poGroups.forEach((group) => {
-    group.sort(compareInspectionDates);
+    group.sort(compareInspectionRecencyDesc);
   });
 
-  // 3. For each PO group, find its order_date.
-  // We can look at the inspections in that group and find the first non-null order_date_value.
+  // 3. For each PO group, find its latest order_date.
   const poOrderDates = new Map();
   poGroups.forEach((group, po) => {
-    let orderDate = null;
-    for (const insp of group) {
-      if (insp?.order_date_value) {
-        orderDate = insp.order_date_value;
-        break;
-      }
-    }
-    poOrderDates.set(po, orderDate);
+    poOrderDates.set(po, getLatestOrderDateValue(group));
   });
 
   // 4. Sort PO keys based on order_date latest first
   const sortedPos = Array.from(poGroups.keys()).sort((poA, poB) => {
-    const dateCompare = compareOrderDates(poOrderDates.get(poA), poOrderDates.get(poB));
+    const dateCompare = compareDateDescNullLast(poOrderDates.get(poA), poOrderDates.get(poB));
     if (dateCompare !== 0) return dateCompare;
     return poA.localeCompare(poB);
   });
@@ -653,6 +641,43 @@ const sortInspectionsByOrderAndInspectionDate = (inspections = []) => {
   });
 
   return flattened;
+};
+
+const selectLatestInspectionPerLatestPo = (
+  inspections = [],
+  limit = QC_REPORT_MISMATCH_RECENT_INSPECTION_LIMIT,
+) => {
+  if (!Array.isArray(inspections) || inspections.length === 0) return [];
+
+  const poGroups = new Map();
+  inspections.forEach((inspection) => {
+    const normalizedPo = normalizeText(inspection?.order_id) || "N/A";
+    const poKey = normalizedPo;
+    const group = poGroups.get(poKey) || {
+      order_id: normalizedPo,
+      inspections: [],
+    };
+    group.inspections.push(inspection);
+    poGroups.set(poKey, group);
+  });
+
+  return [...poGroups.values()]
+    .map((group) => {
+      const sortedInspections = [...group.inspections].sort(compareInspectionRecencyDesc);
+      return {
+        ...group,
+        order_date_value: getLatestOrderDateValue(group.inspections),
+        latest_inspection: sortedInspections[0] || null,
+      };
+    })
+    .sort((left, right) => {
+      const dateCompare = compareDateDescNullLast(left.order_date_value, right.order_date_value);
+      if (dateCompare !== 0) return dateCompare;
+      return normalizeText(left.order_id).localeCompare(normalizeText(right.order_id));
+    })
+    .slice(0, Math.max(1, limit))
+    .map((group) => group.latest_inspection)
+    .filter(Boolean);
 };
 
 const limitRecentInspectionsByItem = (
@@ -672,7 +697,7 @@ const limitRecentInspectionsByItem = (
 
   return [...groupedByItem.values()]
     .flatMap((group) =>
-      sortInspectionsByOrderAndInspectionDate(group).slice(0, Math.max(1, limit))
+      selectLatestInspectionPerLatestPo(group, Math.max(1, limit))
     );
 };
 
@@ -2338,7 +2363,8 @@ exports.getQcReportMismatch = async (req, res) => {
         item_code: itemCode,
         mismatch_only: mismatchOnly,
         comparison_inspection_limit: QC_REPORT_MISMATCH_RECENT_INSPECTION_LIMIT,
-        comparison_recency_field: "inspection_date",
+        comparison_recency_field: "order_date_then_inspection_date",
+        comparison_strategy: "latest_po_latest_inspection",
         brand_options: sortedBrands,
         vendor_options: sortedVendors,
         inspector_options: inspectorOptions,
@@ -2357,4 +2383,10 @@ exports.getQcReportMismatch = async (req, res) => {
       message: error?.message || "Failed to fetch QC report mismatch data",
     });
   }
+};
+
+exports.__test__ = {
+  limitRecentInspectionsByItem,
+  selectLatestInspectionPerLatestPo,
+  sortInspectionsByOrderAndInspectionDate,
 };
