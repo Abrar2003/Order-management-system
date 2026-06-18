@@ -756,10 +756,38 @@ const PackedGoods = () => {
                 </span>
               </div>
 
+              <div className="d-flex flex-wrap align-items-center gap-3 mb-3 px-1">
+                <span className="small text-secondary fw-semibold">Status Legend:</span>
+                <div className="d-flex align-items-center gap-2">
+                  <span
+                    className="d-inline-block rounded-circle"
+                    style={{
+                      width: "12px",
+                      height: "12px",
+                      backgroundColor: "var(--om-color-packed-success-even)",
+                      border: "1.5px solid var(--om-color-success)",
+                    }}
+                  />
+                  <span className="small text-secondary fw-medium">Completely Packed PO</span>
+                </div>
+                <div className="d-flex align-items-center gap-2">
+                  <span
+                    className="d-inline-block rounded-circle"
+                    style={{
+                      width: "12px",
+                      height: "12px",
+                      backgroundColor: "var(--om-color-packed-warning-even)",
+                      border: "1.5px solid var(--om-color-warning)",
+                    }}
+                  />
+                  <span className="small text-secondary fw-medium">Not Completely Packed PO</span>
+                </div>
+              </div>
+
               <div className="card om-card">
                 <div className="card-body p-0">
                   <div className="table-responsive">
-                    <table className="table table-striped align-middle om-table mb-0">
+                    <table className="table align-middle om-table mb-0">
                       <thead className="table-primary">
                         <tr>
                           <th>PO</th>
@@ -775,7 +803,7 @@ const PackedGoods = () => {
                         {sortedRows.map((row) => (
                           <tr
                             key={`pdf-${row?.id || `${row?.order_id}-${row?.item_code}`}`}
-                            className={row?.po_has_no_pending_quantity ? "om-report-success-row" : ""}
+                            className={row?.po_has_no_pending_quantity ? "om-report-success-row" : "om-report-warning-row"}
                           >
                             <td>{row?.order_id || "N/A"}</td>
                             <td>{row?.brand || "N/A"}</td>
@@ -803,13 +831,43 @@ const PackedGoods = () => {
           </div>
         )}
 
+        {!loading && sortedRows.length > 0 && (
+          <div className="d-flex flex-wrap align-items-center gap-3 mb-3 px-1">
+            <span className="small text-secondary fw-semibold">Status Legend:</span>
+            <div className="d-flex align-items-center gap-2">
+              <span
+                className="d-inline-block rounded-circle shadow-sm"
+                style={{
+                  width: "12px",
+                  height: "12px",
+                  backgroundColor: "var(--om-color-packed-success-even)",
+                  border: "1.5px solid var(--om-color-success)",
+                }}
+              />
+              <span className="small text-secondary fw-medium">Completely Packed PO</span>
+            </div>
+            <div className="d-flex align-items-center gap-2">
+              <span
+                className="d-inline-block rounded-circle shadow-sm"
+                style={{
+                  width: "12px",
+                  height: "12px",
+                  backgroundColor: "var(--om-color-packed-warning-even)",
+                  border: "1.5px solid var(--om-color-warning)",
+                }}
+              />
+              <span className="small text-secondary fw-medium">Not Completely Packed PO</span>
+            </div>
+          </div>
+        )}
+
         <div className="card om-card">
           <div className="card-body p-0">
             {loading ? (
               <div className="text-center py-4">Loading...</div>
             ) : (
               <div className="table-responsive">
-                <table className="table table-striped table-hover align-middle om-table mb-0">
+                <table className="table table-hover align-middle om-table mb-0">
                   <thead className="table-primary">
                     <tr>
                       <th>
@@ -881,7 +939,7 @@ const PackedGoods = () => {
                       paginatedRows.map((row) => (
                         <tr
                           key={row?.id || `${row?.order_id}-${row?.item_code}`}
-                          className={row?.po_has_no_pending_quantity ? "om-report-success-row" : ""}
+                          className={row?.po_has_no_pending_quantity ? "om-report-success-row" : "om-report-warning-row"}
                         >
                           <td>{row?.order_id || "N/A"}</td>
                           <td>{row?.brand || "N/A"}</td>

@@ -15,8 +15,12 @@
   --om-color-accent-soft: #e9dfd2;
   --om-color-success: #5d7354;
   --om-color-success-soft: #e7efe3;
+  --om-color-packed-success-odd: #d2e5c4;
+  --om-color-packed-success-even: #b8d7a3;
   --om-color-warning: #8a6e4a;
   --om-color-warning-soft: #f3eadc;
+  --om-color-packed-warning-odd: #fbe9ba;
+  --om-color-packed-warning-even: #f9da8f;
   --om-color-danger: #8f6251;
   --om-color-danger-soft: #f4e6e0;
   --om-chart-line: #615342;
@@ -97,8 +101,12 @@
   --om-color-accent-soft: #3b3129;
   --om-color-success: #a9c39f;
   --om-color-success-soft: #223023;
+  --om-color-packed-success-odd: #1e3520;
+  --om-color-packed-success-even: #2a4b2d;
   --om-color-warning: #d0b288;
   --om-color-warning-soft: #32271a;
+  --om-color-packed-warning-odd: #382e1b;
+  --om-color-packed-warning-even: #4f4025;
   --om-color-danger: #d0a191;
   --om-color-danger-soft: #34231d;
   --om-chart-line: #ddcfbc;
@@ -4883,9 +4891,30 @@ small,
   vertical-align: top;
 }
 
-.om-report-success-row > *{
-  background: var(--om-color-success-soft) !important;
+.om-report-success-row:nth-child(odd) > * {
+  background: var(--om-color-packed-success-odd) !important;
   color: var(--om-color-success);
+  font-weight: 600;
+  vertical-align: top;
+}
+
+.om-report-success-row:nth-child(even) > * {
+  background: var(--om-color-packed-success-even) !important;
+  color: var(--om-color-success);
+  font-weight: 600;
+  vertical-align: top;
+}
+
+.om-report-warning-row:nth-child(odd) > * {
+  background: var(--om-color-packed-warning-odd) !important;
+  color: var(--om-color-warning);
+  font-weight: 600;
+  vertical-align: top;
+}
+
+.om-report-warning-row:nth-child(even) > * {
+  background: var(--om-color-packed-warning-even) !important;
+  color: var(--om-color-warning);
   font-weight: 600;
   vertical-align: top;
 }
@@ -4898,6 +4927,7 @@ small,
 }
 
 .om-report-success-row .btn-link,
+.om-report-warning-row .btn-link,
 .om-report-danger-row .btn-link {
   color: inherit !important;
 }
