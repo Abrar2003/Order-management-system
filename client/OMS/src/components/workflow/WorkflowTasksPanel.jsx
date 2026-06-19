@@ -1366,6 +1366,12 @@ const WorkflowTasksPanel = ({
                         Array.isArray(task.assigned_to) && task.assigned_to.length > 0
                           ? task.assigned_to.map((entry) => getTaskUserName(entry)).join(", ")
                           : "Unassigned";
+                      const assignedByText =
+                        task?.assigned_by?.name
+                        || task?.assigned_by?.user?.name
+                        || task?.assigned_by?.user?.email
+                        || task?.assigned_by?.email
+                        || "—";
                       const uploadPendingUserNames = getPendingUploadUserNames(task);
                       const reworkCount = Number(task?.reworked?.count || task?.rework_count || 0);
                       const reworkComments = Array.isArray(task?.reworked?.comments)
@@ -1402,6 +1408,9 @@ const WorkflowTasksPanel = ({
                                   <span className="workflow-batch-child-marker" aria-hidden="true" />
                                 )}
                                 <div>
+                                  <div className="small text-secondary">
+                                    Assigned by: {assignedByText}
+                                  </div>
                                   <div className="fw-semibold">
                                     {task.title}
                                   </div>
