@@ -50,13 +50,13 @@ test("QC mismatch selection keeps only latest inspection inside each PO", () => 
   assert.deepEqual(ids(selected), ["po-3-new", "po-2", "po-1"]);
 });
 
-test("QC mismatch selection returns available PO groups when fewer than 3 exist", () => {
+test("QC mismatch selection excludes an item when fewer than 3 distinct POs exist", () => {
   const selected = limitRecentInspectionsByItem([
     makeInspection({ id: "po-2", po: "PO-2", orderDate: "2026-02-01", inspectionDate: "2026-02-10" }),
     makeInspection({ id: "po-1", po: "PO-1", orderDate: "2026-01-01", inspectionDate: "2026-01-10" }),
   ]);
 
-  assert.deepEqual(ids(selected), ["po-2", "po-1"]);
+  assert.deepEqual(ids(selected), []);
 });
 
 test("QC mismatch selection places missing order dates after dated POs", () => {
@@ -69,12 +69,23 @@ test("QC mismatch selection places missing order dates after dated POs", () => {
   assert.deepEqual(ids(selected), ["po-2", "po-1", "no-date-latest"]);
 });
 
-test("QC mismatch selection groups missing PO values into one N/A group", () => {
+test("QC mismatch selection does not count missing PO values toward eligibility", () => {
   const selected = limitRecentInspectionsByItem([
+    makeInspection({ id: "po-3", po: "PO-3", orderDate: "2026-03-01", inspectionDate: "2026-03-10" }),
     makeInspection({ id: "po-2", po: "PO-2", orderDate: "2026-02-01", inspectionDate: "2026-02-10" }),
     makeInspection({ id: "missing-old", inspectionDate: "2026-01-01" }),
     makeInspection({ id: "missing-new", inspectionDate: "2026-01-15" }),
   ]);
 
-  assert.deepEqual(ids(selected), ["po-2", "missing-new"]);
+  assert.deepEqual(ids(selected), []);
+});
+
+test("QC mismatch selection includes one latest inspection from exactly 3 distinct POs", () => {
+  const selected = limitRecentInspectionsByItem([
+    makeInspection({ id: "po-3", po: "PO-3", orderDate: "2026-03-01", inspectionDate: "2026-03-10" }),
+    makeInspection({ id: "po-2", po: "PO-2", orderDate: "2026-02-01", inspectionDate: "2026-02-10" }),
+    makeInspection({ id: "po-1", po: "PO-1", orderDate: "2026-01-01", inspectionDate: "2026-01-10" }),
+  ]);
+
+  assert.deepEqual(ids(selected), ["po-3", "po-2", "po-1"]);
 });

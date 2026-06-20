@@ -651,7 +651,8 @@ const selectLatestInspectionPerLatestPo = (
 
   const poGroups = new Map();
   inspections.forEach((inspection) => {
-    const normalizedPo = normalizeText(inspection?.order_id) || "N/A";
+    const normalizedPo = normalizeText(inspection?.order_id);
+    if (!normalizedPo || normalizedPo.toLowerCase() === "n/a") return;
     const poKey = normalizedPo;
     const group = poGroups.get(poKey) || {
       order_id: normalizedPo,
@@ -660,6 +661,9 @@ const selectLatestInspectionPerLatestPo = (
     group.inspections.push(inspection);
     poGroups.set(poKey, group);
   });
+
+  const requiredPoCount = Math.max(1, limit);
+  if (poGroups.size < requiredPoCount) return [];
 
   return [...poGroups.values()]
     .map((group) => {
@@ -675,7 +679,7 @@ const selectLatestInspectionPerLatestPo = (
       if (dateCompare !== 0) return dateCompare;
       return normalizeText(left.order_id).localeCompare(normalizeText(right.order_id));
     })
-    .slice(0, Math.max(1, limit))
+    .slice(0, requiredPoCount)
     .map((group) => group.latest_inspection)
     .filter(Boolean);
 };

@@ -5,7 +5,7 @@ const upload = require("../config/multer.config");
 const qcImageAnyUpload = upload.qcImageAnyUpload;
 const qcImageSingleUpload = upload.qcImageSingleUpload;
 const auth = require("../middlewares/auth.middleware");
-const { requirePermission } = require("../middlewares/permission.middleware");
+const { requirePermission, requireCheckedEditAccess } = require("../middlewares/permission.middleware");
 const {
   cacheRoute,
   invalidateCacheOnSuccess,
@@ -82,7 +82,7 @@ router.patch(
 router.patch(
   "/:id/checked",
   auth,
-  requirePermission("qc", "edit"),
+  requireCheckedEditAccess,
   invalidateQcOnSuccess,
   qcController.updateQcCheckedStatus,
 );

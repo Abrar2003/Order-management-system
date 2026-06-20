@@ -81,10 +81,35 @@ const requireAdminOnlyPermissionManagement = (req, res, next) => {
   return next();
 };
 
+const CheckedEditRoleKeys = new Set([
+  "admin",
+  "super_admin",
+  "inspection_manager",
+]);
+
+const requireCheckedEditAccess = (req, res, next) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const roleKey = normalizeUserRoleKey(req.user?.role);
+    if (!CheckedEditRoleKeys.has(roleKey)) {
+      return res.status(403).json({
+        message: "Checked status update is restricted to inspection managers and admins.",
+      });
+    }
+    return next();
+  } catch (error) {
+    console.error("Checked permission check error:", error);
+    return res.status(500).json({ message: "Failed to verify permissions" });
+  }
+};
+
 module.exports = {
   requireAdminOnlyPermissionManagement,
   requireAdminOnlyPisEdit,
   requirePermission,
   requirePermissionOrRoles,
   requireShipmentEditAccess,
+  requireCheckedEditAccess,
 };

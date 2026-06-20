@@ -255,7 +255,8 @@ const QCPage = () => {
   const canAlignQc = hasPermission("qc", "assign");
   const canTransferRequest = hasPermission("qc", "assign");
   const showActionColumn = !isViewOnly;
-  const tableColumnCount = showActionColumn ? TABLE_COLUMN_COUNT : TABLE_COLUMN_COUNT - 1;
+  const showCheckedColumn = canManageCheckedStatus;
+  const tableColumnCount = TABLE_COLUMN_COUNT - (showActionColumn ? 0 : 1) - (showCheckedColumn ? 0 : 1);
   const canUseInspectorFilter = !isQcUser;
   const canExportQcList = hasPermission("qc", "export");
   const initialFilters = buildQcFilterStateFromSearchParams(
@@ -315,7 +316,7 @@ const QCPage = () => {
           inspector: canUseInspectorFilter ? appliedFilters.inspector : "",
           vendor: appliedFilters.vendor,
           inspection_status: appliedFilters.inspectionStatus,
-          checked_status: appliedFilters.checkedStatus,
+          checked_status: canManageCheckedStatus ? appliedFilters.checkedStatus : "",
           from: fromIso || "",
           to: toIso || "",
           sort_by: sortBy,
@@ -432,7 +433,7 @@ const QCPage = () => {
         normalizeQueryText(appliedFilters.inspectionStatus),
       );
     }
-    if (normalizeQueryText(appliedFilters.checkedStatus)) {
+    if (canManageCheckedStatus && normalizeQueryText(appliedFilters.checkedStatus)) {
       next.set(
         "checked_status",
         normalizeQueryText(appliedFilters.checkedStatus),
@@ -571,7 +572,7 @@ const QCPage = () => {
           inspector: canUseInspectorFilter ? appliedFilters.inspector : "",
           vendor: appliedFilters.vendor,
           inspection_status: appliedFilters.inspectionStatus,
-          checked_status: appliedFilters.checkedStatus,
+          checked_status: canManageCheckedStatus ? appliedFilters.checkedStatus : "",
           from: fromIso || "",
           to: toIso || "",
           sort_by: sortBy,
@@ -852,18 +853,20 @@ const QCPage = () => {
                   />
                 )}
               </div>
-              <div className="qc-list-filter-field">
-                <label>Checked</label>
-                <select
-                  className="form-select form-select-sm"
-                  value={checkedStatus}
-                  onChange={(e) => setCheckedStatus(e.target.value)}
-                >
-                  <option value="">All</option>
-                  <option value="checked">Checked</option>
-                  <option value="unchecked">Unchecked</option>
-                </select>
-              </div>
+              {canManageCheckedStatus && (
+                <div className="qc-list-filter-field">
+                  <label>Checked</label>
+                  <select
+                    className="form-select form-select-sm"
+                    value={checkedStatus}
+                    onChange={(e) => setCheckedStatus(e.target.value)}
+                  >
+                    <option value="">All</option>
+                    <option value="checked">Checked</option>
+                    <option value="unchecked">Unchecked</option>
+                  </select>
+                </div>
+              )}
             </div>
             <div className="qc-list-mobile-filters border-bottom bg-body-tertiary p-3">
               <div className="qc-list-mobile-filter-grid">
@@ -936,18 +939,20 @@ const QCPage = () => {
                     </select>
                   </div>
                 )}
-                <div>
-                  <label className="form-label small text-secondary">Checked</label>
-                  <select
-                    className="form-select form-select-sm"
-                    value={checkedStatus}
-                    onChange={(e) => setCheckedStatus(e.target.value)}
-                  >
-                    <option value="">All</option>
-                    <option value="checked">Checked</option>
-                    <option value="unchecked">Unchecked</option>
-                  </select>
-                </div>
+                {canManageCheckedStatus && (
+                  <div>
+                    <label className="form-label small text-secondary">Checked</label>
+                    <select
+                      className="form-select form-select-sm"
+                      value={checkedStatus}
+                      onChange={(e) => setCheckedStatus(e.target.value)}
+                    >
+                      <option value="">All</option>
+                      <option value="checked">Checked</option>
+                      <option value="unchecked">Unchecked</option>
+                    </select>
+                  </div>
+                )}
                 <div>
                   <label className="form-label small text-secondary">From</label>
                   <input
@@ -1006,7 +1011,7 @@ const QCPage = () => {
                     <th>QC Passed</th>
                     <th>Pending</th>
                     <th>Inspector</th>
-                    <th className="text-center">Checked</th>
+                    {canManageCheckedStatus && <th className="text-center">Checked</th>}
                     {showActionColumn && <th className="qc-list-action-col">Actions</th>}
                   </tr>
 
@@ -1086,26 +1091,21 @@ const QCPage = () => {
                             </span>
                           </td>
                           <td>{qc?.inspector?.name || "N/A"}</td>
-                          <td className="text-center">
-                            <input
-                              type="checkbox"
-                              className="form-check-input"
-                              checked={Boolean(qc?.checked?.checked_status)}
-                              disabled={
-                                !canManageCheckedStatus
-                                || updatingCheckedIds.includes(String(qc?._id || ""))
-                              }
-                              aria-label={`Mark QC ${qc?.order_meta?.order_id || ""} as checked`}
-                              title={
-                                canManageCheckedStatus
-                                  ? "Update checked status"
-                                  : "Only inspection managers and admins can update this status"
-                              }
-                              onChange={(event) =>
-                                handleCheckedStatusChange(qc, event.target.checked)
-                              }
-                            />
-                          </td>
+                          {canManageCheckedStatus && (
+                            <td className="text-center">
+                              <input
+                                type="checkbox"
+                                className="form-check-input"
+                                checked={Boolean(qc?.checked?.checked_status)}
+                                disabled={updatingCheckedIds.includes(String(qc?._id || ""))}
+                                aria-label={`Mark QC ${qc?.order_meta?.order_id || ""} as checked`}
+                                title="Update checked status"
+                                onChange={(event) =>
+                                  handleCheckedStatusChange(qc, event.target.checked)
+                                }
+                              />
+                            </td>
+                          )}
                           {showActionColumn && (
                             <td className="qc-list-action-col">
                               <div className="d-flex flex-column gap-2 qc-list-row-actions">

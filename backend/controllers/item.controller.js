@@ -2895,6 +2895,169 @@ exports.getProductDatabaseItems = async (req, res) => {
   }
 };
 
+exports.exportProductDatabaseItems = async (req, res) => {
+  try {
+    const search = req.query.search;
+    const brand = req.query.brand;
+    const vendor = req.query.vendor;
+    const status = req.query.status;
+    const baseMatch = applyItemDataAccess(
+      buildItemMatch({ search, brand, vendor }),
+      req.user,
+    );
+    const match = combineMongoMatches(
+      baseMatch,
+      buildProductDatabaseStatusMatch(status),
+    );
+    const items = await Item.find(match)
+      .select(PRODUCT_DATABASE_ITEM_SELECT)
+      .sort({ updatedAt: -1, code: 1 })
+      .lean();
+    const rows = (Array.isArray(items) ? items : []).map((item) => ({
+      ...buildProductDatabaseRow(item, req.user),
+      kd: item?.kd === true,
+      mounting_file_needed: item?.mounting_file_needed === true,
+    }));
+
+    const formatActorForExport = (actor = null, dateKey = "") => {
+      if (!actor) return "";
+      const name = normalizeTextField(
+        actor?.name || actor?.user?.name || actor?.user?.email,
+      );
+      const date = toDisplayDateString(
+        actor?.[dateKey] || actor?.updated_at || actor?.created_at,
+      );
+      return [name, date].filter(Boolean).join(" - ");
+    };
+    const formatSizesForExport = (entries = []) =>
+      (Array.isArray(entries) ? entries : [])
+        .map((entry) => {
+          const dimensions = [entry?.L, entry?.B, entry?.H]
+            .map((value) => Number(value || 0))
+            .join(" x ");
+          const details = [
+            entry?.remark || entry?.type || "",
+            dimensions,
+            entry?.net_weight ? `Net ${entry.net_weight}` : "",
+            entry?.gross_weight ? `Gross ${entry.gross_weight}` : "",
+            entry?.item_count_in_inner
+              ? `Items/Inner ${entry.item_count_in_inner}`
+              : "",
+            entry?.box_count_in_master
+              ? `Inner/Master ${entry.box_count_in_master}`
+              : "",
+          ].filter(Boolean);
+          return details.join(" | ");
+        })
+        .join("; ");
+    const stringifyForExport = (value) => {
+      if (!value || (typeof value === "object" && Object.keys(value).length === 0)) {
+        return "";
+      }
+      try {
+        return JSON.stringify(value).slice(0, 32700);
+      } catch {
+        return String(value || "").slice(0, 32700);
+      }
+    };
+    const columns = [
+      { key: "code", header: "Item Code" },
+      { key: "name", header: "Name" },
+      { key: "description", header: "Description" },
+      { key: "brand", header: "Brand" },
+      { key: "vendors", header: "Vendors" },
+      { key: "country_of_origin", header: "Country of Origin" },
+      { key: "master_barcode", header: "Master Barcode" },
+      { key: "inner_barcode", header: "Inner Barcode" },
+      { key: "kd", header: "K/D" },
+      { key: "mounting_file_needed", header: "Mounting File Needed" },
+      { key: "product_type", header: "Product Type" },
+      { key: "item_sizes", header: "Product Sizes" },
+      { key: "box_mode", header: "Box Mode" },
+      { key: "box_sizes", header: "Box Sizes" },
+      { key: "product_specs", header: "Product Specifications" },
+      { key: "status", header: "Approval Status" },
+      { key: "created_by", header: "Created By" },
+      { key: "checked_by", header: "Checked By" },
+      { key: "approved_by", header: "Approved By" },
+      { key: "last_changed_by", header: "Last Changed By" },
+      { key: "updated_at", header: "Updated Date" },
+    ];
+    const exportRows = rows.map((row) => ({
+      code: normalizeTextField(row?.code),
+      name: normalizeTextField(row?.name),
+      description: normalizeTextField(row?.description),
+      brand:
+        normalizeTextField(row?.brand_name || row?.brand) ||
+        (Array.isArray(row?.brands) ? row.brands.join(", ") : ""),
+      vendors: Array.isArray(row?.vendors) ? row.vendors.join(", ") : "",
+      country_of_origin: normalizeTextField(row?.country_of_origin),
+      master_barcode: normalizeTextField(
+        row?.pd_master_barcode || row?.pd_barcode,
+      ),
+      inner_barcode: normalizeTextField(row?.pd_inner_barcode),
+      kd: row?.kd === true ? "Yes" : "No",
+      mounting_file_needed: row?.mounting_file_needed === true ? "Yes" : "No",
+      product_type: normalizeTextField(
+        row?.product_type?.label || row?.product_type?.key,
+      ),
+      item_sizes: formatSizesForExport(row?.pd_item_sizes),
+      box_mode: normalizeTextField(row?.pd_box_mode),
+      box_sizes: formatSizesForExport(row?.pd_box_sizes),
+      product_specs: stringifyForExport(row?.product_specs),
+      status: normalizeTextField(row?.pd_checked || NOT_SET_STATUS).replace(
+        /_/g,
+        " ",
+      ),
+      created_by: formatActorForExport(row?.pd_created_by, "created_at"),
+      checked_by: formatActorForExport(row?.pd_checked_by, "checked_at"),
+      approved_by: formatActorForExport(row?.pd_approved_by, "approved_at"),
+      last_changed_by: formatActorForExport(
+        row?.pd_last_changed_by,
+        "changed_at",
+      ),
+      updated_at: toDisplayDateString(row?.updated_at),
+    }));
+    const headerRow = columns.map((column) => column.header);
+    const dataRows = exportRows.map((row) =>
+      columns.map((column) => row[column.key] ?? ""),
+    );
+    const worksheet = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
+    worksheet["!cols"] = columns.map((column, columnIndex) => ({
+      wch: Math.min(
+        60,
+        Math.max(
+          12,
+          column.header.length + 2,
+          ...dataRows.map(
+            (row) => Math.min(60, String(row[columnIndex] ?? "").length + 2),
+          ),
+        ),
+      ),
+    }));
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Product Database");
+    const fileBuffer = XLSX.write(workbook, {
+      type: "buffer",
+      bookType: "xls",
+    });
+    const fileDate = new Date().toISOString().slice(0, 10);
+
+    res.setHeader("Content-Type", "application/vnd.ms-excel");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="product-database-${fileDate}.xls"`,
+    );
+    return res.status(200).send(fileBuffer);
+  } catch (error) {
+    console.error("Export Product Database Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to export Product Database.",
+    });
+  }
+};
+
 const RUNNING_ORDER_STATUSES = ["Pending", "Under Inspection", "Inspection Done", "Partial Shipped"];
 
 const buildRunningPoLookup = async (itemCodes = []) => {

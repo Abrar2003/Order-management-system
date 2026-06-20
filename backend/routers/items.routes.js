@@ -36,6 +36,7 @@ const {
   deleteFinalPisCheckComment,
   getPisUpdateLogs,
   getProductDatabaseItems,
+  exportProductDatabaseItems,
   getItemDatabaseItems,
   exportItemDatabaseItems,
   getItemDatabaseProductDetails,
@@ -214,6 +215,16 @@ router.get(
   requirePermission("product_database", "view"),
   cacheRoute("items", MEDIUM_CACHE_TTL),
   getProductDatabaseItems,
+);
+
+router.get(
+  "/product-database/export",
+  auth,
+  requirePermission("product_database", "view"),
+  securityLog("export_excel", "product_database", {
+    metadata: (req) => ({ filters: req.query || {} }),
+  }),
+  exportProductDatabaseItems,
 );
 
 router.get(

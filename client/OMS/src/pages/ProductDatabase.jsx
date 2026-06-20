@@ -119,6 +119,25 @@ const parseLimit = (value) => {
   return LIMIT_OPTIONS.includes(parsed) ? parsed : DEFAULT_LIMIT;
 };
 
+const downloadProductDatabaseExport = (response) => {
+  const disposition = String(response?.headers?.["content-disposition"] || "");
+  const match = disposition.match(/filename\*?=(?:UTF-8''|"?)([^";]+)/i);
+  const fileName = match?.[1]
+    ? decodeURIComponent(match[1].trim())
+    : `product-database-${new Date().toISOString().slice(0, 10)}.xls`;
+  const blob = new Blob([response.data], {
+    type: response?.headers?.["content-type"] || "application/vnd.ms-excel",
+  });
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(url);
+};
+
 const normalizeStatus = (value) => {
   const normalized = String(value || "").trim().toLowerCase().replace(/\s+/g, "_");
   if (["created", "checked", "approved", "not_set"].includes(normalized)) {
@@ -2172,6 +2191,7 @@ const ProductDatabase = () => {
     totalPages: 1,
   });
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [selectedItem, setSelectedItem] = useState(null);
@@ -2281,6 +2301,40 @@ const ProductDatabase = () => {
     setLimit(DEFAULT_LIMIT);
   };
 
+  const handleExportXls = useCallback(async () => {
+    try {
+      setExporting(true);
+      const params = {};
+      if (search) params.search = search;
+      if (brandFilter !== DEFAULT_FILTER) params.brand = brandFilter;
+      if (vendorFilter !== DEFAULT_FILTER) params.vendor = vendorFilter;
+      if (statusFilter !== DEFAULT_FILTER) params.status = statusFilter;
+
+      const response = await api.get("/items/product-database/export", {
+        params,
+        responseType: "blob",
+      });
+      downloadProductDatabaseExport(response);
+    } catch (exportError) {
+      console.error(exportError);
+      let message = "Failed to export Product Database as XLS.";
+      const responseData = exportError?.response?.data;
+      if (responseData instanceof Blob) {
+        try {
+          const payload = JSON.parse(await responseData.text());
+          message = payload?.message || message;
+        } catch {
+          // Keep the fallback when the response body is not JSON.
+        }
+      } else if (responseData?.message) {
+        message = responseData.message;
+      }
+      alert(message);
+    } finally {
+      setExporting(false);
+    }
+  }, [brandFilter, search, statusFilter, vendorFilter]);
+
   const handleDraftSaved = useCallback(({ itemId, draft: nextDraft }) => {
     const draftKey = normalizeTextValue(itemId);
     if (!draftKey) return;
@@ -2319,9 +2373,19 @@ const ProductDatabase = () => {
       <Navbar />
 
       <div className="page-shell om-report-page py-3">
-        <div className="d-flex justify-content-between align-items-center mb-3">
+        <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
           <h2 className="h4 mb-0">Product Database</h2>
-          <span className="small text-secondary">PD size data approval workflow</span>
+          <div className="d-flex flex-wrap align-items-center justify-content-end gap-2">
+            <span className="small text-secondary">PD size data approval workflow</span>
+            <button
+              type="button"
+              className="btn btn-outline-primary btn-sm"
+              onClick={handleExportXls}
+              disabled={loading || exporting || Number(pagination.total || 0) === 0}
+            >
+              {exporting ? "Exporting..." : "Export XLS"}
+            </button>
+          </div>
         </div>
 
         <div className="card om-card mb-3">
