@@ -845,32 +845,32 @@ small,
 
 .workflow-task-table > thead > tr > th:nth-child(1),
 .workflow-task-table > tbody > tr > td:nth-child(1) {
-  width: 18%;
+  width: 17%;
 }
 
 .workflow-task-table > thead > tr > th:nth-child(2),
 .workflow-task-table > tbody > tr > td:nth-child(2) {
-  width: 9%;
+  width: 8%;
 }
 
 .workflow-task-table > thead > tr > th:nth-child(3),
 .workflow-task-table > tbody > tr > td:nth-child(3) {
-  width: 12%;
+  width: 11%;
 }
 
 .workflow-task-table > thead > tr > th:nth-child(4),
 .workflow-task-table > tbody > tr > td:nth-child(4) {
-  width: 17%;
+  width: 15%;
 }
 
 .workflow-task-table > thead > tr > th:nth-child(5),
 .workflow-task-table > tbody > tr > td:nth-child(5) {
-  width: 26%;
+  width: 37%;
 }
 
 .workflow-task-table > thead > tr > th:nth-child(6),
 .workflow-task-table > tbody > tr > td:nth-child(6) {
-  width: 18%;
+  width: 12%;
 }
 
 .workflow-task-name-cell,
@@ -1291,40 +1291,44 @@ small,
   border: 0;
 }
 
-.workflow-task-actions.is-hold-decision {
+.workflow-task-actions.is-hold-decision,
+.workflow-task-actions.is-hold-request {
   display: flex;
   flex-direction: column;
   width: 100%;
   min-width: 0;
-  gap: 0.35rem;
+  gap: 0.3rem;
 }
 
-.workflow-task-actions.is-hold-decision .workflow-task-primary-actions {
+.workflow-task-actions.is-hold-decision .workflow-task-primary-actions,
+.workflow-task-actions.is-hold-request .workflow-task-primary-actions {
   display: block;
   width: 100%;
 }
 
 .workflow-task-actions.is-hold-decision .workflow-task-decision-group {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.35rem;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 0.3rem;
   width: 100%;
 }
 
-.workflow-task-actions.is-hold-decision .workflow-task-utility-actions {
+.workflow-task-actions.is-hold-decision .workflow-task-utility-actions,
+.workflow-task-actions.is-hold-request .workflow-task-utility-actions {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.35rem;
+  gap: 0.3rem;
   width: 100%;
 }
 
-.workflow-task-actions.is-hold-decision .workflow-task-action-button {
+.workflow-task-actions.is-hold-decision .workflow-task-action-button,
+.workflow-task-actions.is-hold-request .workflow-task-action-button {
   width: 100%;
   min-width: 0;
-  min-height: 2rem;
-  padding: 0.22rem 0.15rem;
-  border-radius: 0.55rem;
-  font-size: 0.68rem;
+  min-height: 1.85rem;
+  padding: 0.2rem 0.15rem;
+  border-radius: 0.5rem;
+  font-size: 0.65rem;
   line-height: 1.15;
   display: flex;
   align-items: center;
@@ -1333,32 +1337,37 @@ small,
   white-space: nowrap !important;
 }
 
-.workflow-task-actions.is-hold-decision .workflow-icon-button {
+.workflow-task-actions.is-hold-decision .workflow-icon-button,
+.workflow-task-actions.is-hold-request .workflow-icon-button {
   width: 100%;
-  height: 2rem;
-  border-radius: 0.55rem;
+  height: 1.85rem;
+  border-radius: 0.5rem;
 }
 
-.workflow-task-actions.is-hold-request {
-  display: inline-grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0.4rem;
+.workflow-task-actions .workflow-task-action-button {
+  min-height: 1.85rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.5rem;
+  font-size: 0.65rem;
+  line-height: 1.15;
 }
 
-.workflow-task-actions.is-hold-request .workflow-task-primary-actions,
-.workflow-task-actions.is-hold-request .workflow-task-utility-actions {
-  width: 100%;
+.workflow-task-actions .workflow-icon-button {
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: 0.5rem;
 }
 
-.workflow-task-actions.is-hold-request .workflow-task-action-button {
-  width: 100%;
+.workflow-task-actions .workflow-icon-button svg {
+  width: 0.85rem;
+  height: 0.85rem;
 }
 
-.workflow-task-actions.is-hold-request .workflow-task-utility-actions {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 2.2rem;
-  justify-content: start;
+.workflow-task-actions,
+.workflow-task-actions .workflow-task-primary-actions,
+.workflow-task-actions .workflow-task-utility-actions,
+.workflow-task-actions .workflow-task-decision-group {
+  gap: 0.3rem;
 }
 
 .workflow-icon-button {
@@ -1448,9 +1457,9 @@ small,
 .workflow-status-line-steps {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(var(--workflow-step-count, 5), minmax(4.6rem, 1fr));
+  grid-template-columns: repeat(var(--workflow-step-count, 5), minmax(3.2rem, 1fr));
   gap: 0.2rem;
-  overflow-x: auto;
+  overflow-x: visible;
   overflow-y: visible;
   padding-bottom: 0.2rem;
 }
@@ -1499,10 +1508,10 @@ small,
 }
 
 .workflow-status-line-label {
-  max-width: 4.4rem;
-  font-size: 0.66rem;
+  max-width: 3.6rem;
+  font-size: 0.63rem;
   font-weight: 600;
-  line-height: 1.1;
+  line-height: 1.15;
   white-space: normal;
   overflow-wrap: anywhere;
 }
@@ -7552,6 +7561,184 @@ button.om-item-order-presence-label {
 .packed-goods-pdf-report {
   width: 100%;
   background: #fff;
+}
+
+.delayed-po-table th:nth-child(1) {
+  min-width: 170px;
+}
+
+.delayed-po-table th:nth-child(2) {
+  min-width: 130px;
+}
+
+.delayed-po-table th:nth-child(3) {
+  min-width: 170px;
+}
+
+.delayed-po-table th:nth-child(4) {
+  min-width: 110px;
+}
+
+.delayed-po-table th:nth-child(5) {
+  min-width: 280px;
+}
+
+.delayed-po-quantity-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.delayed-po-quantity-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.75rem;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.delayed-po-quantity-tag.is-shipped {
+  color: #2f5d38;
+  border-color: #9dc5a5;
+  background: #e5f3e8;
+}
+
+.delayed-po-quantity-tag.is-passed {
+  color: #765414;
+  border-color: #dfc06e;
+  background: #fff3cd;
+}
+
+.delayed-po-quantity-tag.is-pending {
+  color: #8b3030;
+  border-color: #dda1a1;
+  background: #fbe2e2;
+}
+
+.delayed-po-summary-table th,
+.delayed-po-summary-table td {
+  white-space: nowrap;
+}
+
+.delayed-po-summary-table th:last-child {
+  min-width: 280px;
+}
+
+.delayed-po-summary-table th:nth-child(5) {
+  min-width: 290px;
+}
+
+.delayed-po-summary-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.85rem;
+}
+
+.delayed-po-legend-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--om-color-text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.delayed-po-legend-swatch {
+  display: inline-block;
+  width: 0.85rem;
+  height: 0.85rem;
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  border-radius: 0.25rem;
+}
+
+.delayed-po-legend-swatch.is-completely-pending {
+  border-color: #dda1a1;
+  background: #fbe2e2;
+}
+
+.delayed-po-legend-swatch.has-shipped-quantity {
+  border-color: #9ec3df;
+  background: #e2effb;
+}
+
+.delayed-po-legend-swatch.is-shipped-tag {
+  border-color: #9dc5a5;
+  background: #e5f3e8;
+}
+
+.delayed-po-legend-swatch.is-inspected-tag {
+  border-color: #dfc06e;
+  background: #fff3cd;
+}
+
+.delayed-po-legend-swatch.is-pending-tag {
+  border-color: #dda1a1;
+  background: #fbe2e2;
+}
+
+.delayed-po-summary-row.is-completely-pending > * {
+  background: #fbe2e2 !important;
+}
+
+.delayed-po-summary-row.has-shipped-quantity > * {
+  background: #e2effb !important;
+}
+
+:root[data-theme="dark"] .delayed-po-summary-row.is-completely-pending > * {
+  background: #472929 !important;
+}
+
+:root[data-theme="dark"] .delayed-po-summary-row.has-shipped-quantity > * {
+  background: #24394b !important;
+}
+
+:root[data-theme="dark"] .delayed-po-legend-swatch.is-completely-pending,
+:root[data-theme="dark"] .delayed-po-legend-swatch.is-pending-tag {
+  border-color: #825050;
+  background: #472929;
+}
+
+:root[data-theme="dark"] .delayed-po-legend-swatch.has-shipped-quantity {
+  border-color: #4e708b;
+  background: #24394b;
+}
+
+:root[data-theme="dark"] .delayed-po-legend-swatch.is-shipped-tag {
+  border-color: #52785a;
+  background: #233d29;
+}
+
+:root[data-theme="dark"] .delayed-po-legend-swatch.is-inspected-tag {
+  border-color: #806a35;
+  background: #453a20;
+}
+
+:root[data-theme="dark"] .delayed-po-quantity-tag.is-shipped {
+  color: #b9dfc0;
+  border-color: #52785a;
+  background: #233d29;
+}
+
+:root[data-theme="dark"] .delayed-po-quantity-tag.is-passed {
+  color: #f0d58b;
+  border-color: #806a35;
+  background: #453a20;
+}
+
+:root[data-theme="dark"] .delayed-po-quantity-tag.is-pending {
+  color: #efb4b4;
+  border-color: #825050;
+  background: #472929;
 }
 
 @media (max-width: 1199.98px) {

@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import html2canvas from "html2canvas";
+import { jsPDF } from "jspdf";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import SortHeaderButton from "../components/SortHeaderButton";
@@ -10,43 +12,117 @@ import {
   getNextClientSortState,
   sortClientRows,
 } from "../utils/clientSort";
-import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
+import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
 
-const DEFAULT_ENTITY_FILTER = "all";
+const DEFAULT_LIMIT = 20;
+const LIMIT_OPTIONS = [10, 20, 50, 100];
+const DEFAULT_BRANDS = ["all"];
 
-const normalizeEntityFilter = (value) => {
+const normalizeValues = (values = []) =>
+  [
+    ...new Set(
+      (Array.isArray(values) ? values : [values])
+        .flatMap((value) => String(value || "").split(","))
+        .map((value) => value.trim())
+        .filter((value) => value && !["all", "undefined", "null"].includes(value.toLowerCase())),
+    ),
+  ].sort((left, right) => left.localeCompare(right));
+
+const normalizeBrands = (values) => {
+  const normalized = normalizeValues(values);
+  return normalized.length > 0 ? normalized : DEFAULT_BRANDS;
+};
+const isAllBrands = (values) => !Array.isArray(values) || values.includes("all");
+const normalizeFilter = (value) => {
   const normalized = String(value || "").trim();
-  if (!normalized) return DEFAULT_ENTITY_FILTER;
-  const lowered = normalized.toLowerCase();
-  if (lowered === "all" || lowered === "undefined" || lowered === "null") {
-    return DEFAULT_ENTITY_FILTER;
-  }
-  return normalized;
+  return normalized && !["undefined", "null"].includes(normalized.toLowerCase())
+    ? normalized
+    : "all";
+};
+const parsePositiveInt = (value, fallback) => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+const parseLimit = (value) => {
+  const parsed = parsePositiveInt(value, DEFAULT_LIMIT);
+  return LIMIT_OPTIONS.includes(parsed) ? parsed : DEFAULT_LIMIT;
+};
+const sameBrands = (left, right) =>
+  JSON.stringify(normalizeBrands(left)) === JSON.stringify(normalizeBrands(right));
+const distinct = (values) =>
+  [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+
+const readFilters = (params) => ({
+  brand: normalizeBrands(params.getAll("brand").length ? params.getAll("brand") : params.get("brand")),
+  vendor: normalizeFilter(params.get("vendor")),
+  po: normalizeFilter(params.get("po")),
+});
+
+const buildSearchParams = ({ filters, sortBy, sortOrder, page, limit }) => {
+  const params = new URLSearchParams();
+  if (!isAllBrands(filters.brand)) params.set("brand", filters.brand.join(","));
+  if (filters.vendor !== "all") params.set("vendor", filters.vendor);
+  if (filters.po !== "all") params.set("po", filters.po);
+  if (sortBy !== "po") params.set("sort_by", sortBy);
+  if (sortOrder !== "asc") params.set("sort_order", sortOrder);
+  if (page > 1) params.set("page", String(page));
+  if (limit !== DEFAULT_LIMIT) params.set("limit", String(limit));
+  return params;
 };
 
-const defaultReport = {
-  filters: {
-    brand: "",
-    vendor: "",
-    brand_options: [],
-    vendor_options: [],
-    from_date: "",
-    to_date: "",
-    report_date: "",
-  },
-  summary: {
-    delayed_po_count: 0,
-    vendors_count: 0,
-    pending_count: 0,
-    inspection_done_count: 0,
-    shipped_count: 0,
-    total_delay_days: 0,
-    average_delay_days: 0,
-  },
-  vendors: [],
+const buildApiParams = (filters) => {
+  const params = {};
+  if (!isAllBrands(filters.brand)) params.brand = filters.brand.join(",");
+  if (filters.vendor !== "all") params.vendor = filters.vendor;
+  if (filters.po !== "all") params.order_id = filters.po;
+  return params;
+};
+
+const downloadBlob = (response) => {
+  const disposition = String(response?.headers?.["content-disposition"] || "");
+  const match = disposition.match(/filename\*?=(?:UTF-8''|"?)([^";]+)/i);
+  const fileName = match?.[1]
+    ? decodeURIComponent(match[1].trim())
+    : `delayed-po-report-${new Date().toISOString().slice(0, 10)}.xls`;
+  const blob = new Blob([response.data], {
+    type: response?.headers?.["content-type"] || "application/vnd.ms-excel",
+  });
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(url);
+};
+
+const QuantityTag = ({ type, label, value, hideWhenZero = false }) => {
+  const quantity = Number(value || 0);
+  if (hideWhenZero && quantity <= 0) return null;
+  return (
+    <span className={`delayed-po-quantity-tag is-${type}`}>
+      {label}: {quantity}
+    </span>
+  );
+};
+
+const getDelayedPoPdfRowClass = (row = {}) => {
+  const orderQuantity = Number(row?.order_quantity || 0);
+  const shippedQuantity = Number(row?.shipped_quantity || 0);
+  const passedQuantity = Number(row?.passed_quantity || 0);
+
+  if (orderQuantity > 0 && shippedQuantity >= orderQuantity) {
+    return "om-report-success-row";
+  }
+  if (shippedQuantity > 0 || passedQuantity > 0) {
+    return "om-report-warning-row";
+  }
+  return "om-report-danger-row";
 };
 
 const DelayedPoReports = () => {
@@ -54,622 +130,639 @@ const DelayedPoReports = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "delayed-po-reports");
 
-  const [brandFilter, setBrandFilter] = useState(() =>
-    normalizeEntityFilter(searchParams.get("brand")),
+  const initialFilters = readFilters(searchParams);
+  const [allRows, setAllRows] = useState([]);
+  const [draftBrand, setDraftBrand] = useState(initialFilters.brand);
+  const [draftVendor, setDraftVendor] = useState(initialFilters.vendor);
+  const [draftPo, setDraftPo] = useState(initialFilters.po);
+  const [appliedFilters, setAppliedFilters] = useState(initialFilters);
+  const [sortBy, setSortBy] = useState(searchParams.get("sort_by") || "po");
+  const [sortOrder, setSortOrder] = useState(
+    searchParams.get("sort_order") === "desc" ? "desc" : "asc",
   );
-  const [draftBrandFilter, setDraftBrandFilter] = useState(() =>
-    normalizeEntityFilter(searchParams.get("brand")),
-  );
-  const [vendorFilter, setVendorFilter] = useState(() =>
-    normalizeEntityFilter(searchParams.get("vendor")),
-  );
-  const [draftVendorFilter, setDraftVendorFilter] = useState(() =>
-    normalizeEntityFilter(searchParams.get("vendor")),
-  );
-  const [fromDateFilter, setFromDateFilter] = useState(() =>
-    String(
-      searchParams.get("from_date")
-      || searchParams.get("fromDate")
-      || "",
-    ).trim(),
-  );
-  const [draftFromDateFilter, setDraftFromDateFilter] = useState(() =>
-    String(
-      searchParams.get("from_date")
-      || searchParams.get("fromDate")
-      || "",
-    ).trim(),
-  );
-  const [toDateFilter, setToDateFilter] = useState(() =>
-    String(
-      searchParams.get("to_date")
-      || searchParams.get("toDate")
-      || "",
-    ).trim(),
-  );
-  const [draftToDateFilter, setDraftToDateFilter] = useState(() =>
-    String(
-      searchParams.get("to_date")
-      || searchParams.get("toDate")
-      || "",
-    ).trim(),
-  );
+  const [page, setPage] = useState(() => parsePositiveInt(searchParams.get("page"), 1));
+  const [summaryPage, setSummaryPage] = useState(1);
+  const [limit, setLimit] = useState(() => parseLimit(searchParams.get("limit")));
   const [loading, setLoading] = useState(true);
-  const [exporting, setExporting] = useState(false);
+  const [exportingFormat, setExportingFormat] = useState("");
   const [error, setError] = useState("");
-  const [report, setReport] = useState(defaultReport);
+  const [reportDate, setReportDate] = useState("");
   const [syncedQuery, setSyncedQuery] = useState(null);
-  const [sortBy, setSortBy] = useState("delayDays");
-  const [sortOrder, setSortOrder] = useState("desc");
+  const pdfReportRef = useRef(null);
 
-  const fetchReport = useCallback(async () => {
+  const fetchRows = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
-      const normalizedFromDate = String(fromDateFilter || "").trim();
-      const normalizedToDate = String(toDateFilter || "").trim();
-
-      if (normalizedFromDate && normalizedToDate && normalizedFromDate > normalizedToDate) {
-        setReport(defaultReport);
-        setError("From date must be before or equal to To date.");
-        return;
-      }
-
-      const params = {};
-      if (brandFilter !== DEFAULT_ENTITY_FILTER) {
-        params.brand = brandFilter;
-      }
-      if (vendorFilter !== DEFAULT_ENTITY_FILTER) {
-        params.vendor = vendorFilter;
-      }
-      if (normalizedFromDate) {
-        params.from_date = normalizedFromDate;
-      }
-      if (normalizedToDate) {
-        params.to_date = normalizedToDate;
-      }
-
-      const response = await getDelayedPoReport(params);
-      setReport({
-        filters: {
-          ...defaultReport.filters,
-          ...(response?.filters || {}),
-        },
-        summary: response?.summary || defaultReport.summary,
-        vendors: Array.isArray(response?.vendors) ? response.vendors : [],
-      });
-    } catch (err) {
-      setReport(defaultReport);
-      setError(err?.response?.data?.message || "Failed to load delayed PO report.");
+      const response = await getDelayedPoReport();
+      setAllRows(Array.isArray(response?.rows) ? response.rows : []);
+      setReportDate(response?.filters?.report_date || "");
+    } catch (fetchError) {
+      setAllRows([]);
+      setError(fetchError?.response?.data?.message || "Failed to load delayed PO report.");
     } finally {
       setLoading(false);
     }
-  }, [brandFilter, fromDateFilter, toDateFilter, vendorFilter]);
+  }, []);
 
   useEffect(() => {
-    fetchReport();
-  }, [fetchReport]);
-
-  useEffect(() => {
-    const currentQuery = searchParams.toString();
-    if (syncedQuery === currentQuery) return;
-
-    const nextBrandFilter = normalizeEntityFilter(searchParams.get("brand"));
-    const nextVendorFilter = normalizeEntityFilter(searchParams.get("vendor"));
-    const nextFromDate = String(
-      searchParams.get("from_date")
-      || searchParams.get("fromDate")
-      || "",
-    ).trim();
-    const nextToDate = String(
-      searchParams.get("to_date")
-      || searchParams.get("toDate")
-      || "",
-    ).trim();
-
-    setBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
-    setDraftBrandFilter((prev) => (prev === nextBrandFilter ? prev : nextBrandFilter));
-    setVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
-    setDraftVendorFilter((prev) => (prev === nextVendorFilter ? prev : nextVendorFilter));
-    setFromDateFilter((prev) => (prev === nextFromDate ? prev : nextFromDate));
-    setDraftFromDateFilter((prev) => (prev === nextFromDate ? prev : nextFromDate));
-    setToDateFilter((prev) => (prev === nextToDate ? prev : nextToDate));
-    setDraftToDateFilter((prev) => (prev === nextToDate ? prev : nextToDate));
-    setSyncedQuery((prev) => (prev === currentQuery ? prev : currentQuery));
-  }, [searchParams, syncedQuery]);
+    fetchRows();
+  }, [fetchRows]);
 
   useEffect(() => {
     const currentQuery = searchParams.toString();
-    if (syncedQuery !== currentQuery) return;
+    const nextFilters = readFilters(searchParams);
+    setDraftBrand((previous) => sameBrands(previous, nextFilters.brand) ? previous : nextFilters.brand);
+    setDraftVendor(nextFilters.vendor);
+    setDraftPo(nextFilters.po);
+    setAppliedFilters((previous) =>
+      sameBrands(previous.brand, nextFilters.brand)
+      && previous.vendor === nextFilters.vendor
+      && previous.po === nextFilters.po
+        ? previous
+        : nextFilters
+    );
+    setSortBy(searchParams.get("sort_by") || "po");
+    setSortOrder(searchParams.get("sort_order") === "desc" ? "desc" : "asc");
+    setPage(parsePositiveInt(searchParams.get("page"), 1));
+    setLimit(parseLimit(searchParams.get("limit")));
+    setSyncedQuery(currentQuery);
+  }, [searchParams]);
 
-    const next = new URLSearchParams();
-    if (brandFilter !== DEFAULT_ENTITY_FILTER) {
-      next.set("brand", brandFilter);
-    }
-    if (vendorFilter !== DEFAULT_ENTITY_FILTER) {
-      next.set("vendor", vendorFilter);
-    }
-    if (fromDateFilter) {
-      next.set("from_date", fromDateFilter);
-    }
-    if (toDateFilter) {
-      next.set("to_date", toDateFilter);
-    }
-
+  useEffect(() => {
+    if (syncedQuery !== searchParams.toString()) return;
+    const next = buildSearchParams({ filters: appliedFilters, sortBy, sortOrder, page, limit });
     if (!areSearchParamsEquivalent(next, searchParams)) {
       setSearchParams(next, { replace: true });
     }
-  }, [
-    brandFilter,
-    fromDateFilter,
-    searchParams,
-    setSearchParams,
-    syncedQuery,
-    toDateFilter,
-    vendorFilter,
-  ]);
+  }, [appliedFilters, limit, page, searchParams, setSearchParams, sortBy, sortOrder, syncedQuery]);
 
-  const filters = useMemo(
-    () => report?.filters || defaultReport.filters,
-    [report?.filters],
+  const brandOptions = useMemo(() => distinct(allRows.map((row) => row?.brand)), [allRows]);
+  const vendorOptions = useMemo(
+    () => distinct(
+      allRows
+        .filter((row) => isAllBrands(draftBrand) || draftBrand.includes(row?.brand))
+        .map((row) => row?.vendor),
+    ),
+    [allRows, draftBrand],
   );
-  const summary = useMemo(
-    () => report?.summary || defaultReport.summary,
-    [report?.summary],
+  const poOptions = useMemo(
+    () => distinct(
+      allRows
+        .filter((row) => isAllBrands(draftBrand) || draftBrand.includes(row?.brand))
+        .filter((row) => draftVendor === "all" || row?.vendor === draftVendor)
+        .map((row) => row?.order_id),
+    ),
+    [allRows, draftBrand, draftVendor],
   );
 
-  const handleOpenOrder = useCallback((orderId) => {
-    const normalizedOrderId = String(orderId || "").trim();
-    if (!normalizedOrderId) return;
-    navigate(`/orders?order_id=${encodeURIComponent(normalizedOrderId)}`);
-  }, [navigate]);
+  const filteredRows = useMemo(
+    () => allRows.filter((row) => (
+      (isAllBrands(appliedFilters.brand) || appliedFilters.brand.includes(row?.brand))
+      && (appliedFilters.vendor === "all" || row?.vendor === appliedFilters.vendor)
+      && (appliedFilters.po === "all" || row?.order_id === appliedFilters.po)
+    )),
+    [allRows, appliedFilters],
+  );
 
-  const handleApplyFilters = useCallback((event) => {
-    event?.preventDefault();
-    setBrandFilter(normalizeEntityFilter(draftBrandFilter));
-    setVendorFilter(normalizeEntityFilter(draftVendorFilter));
-    setFromDateFilter(String(draftFromDateFilter || "").trim());
-    setToDateFilter(String(draftToDateFilter || "").trim());
-  }, [
-    draftBrandFilter,
-    draftFromDateFilter,
-    draftToDateFilter,
-    draftVendorFilter,
-  ]);
+  const sortedRows = useMemo(
+    () => sortClientRows(filteredRows, {
+      sortBy,
+      sortOrder,
+      getSortValue: (row, column) => {
+        if (column === "po") return row?.order_id;
+        if (column === "itemCode") return row?.item_code;
+        if (column === "dates") return new Date(row?.etd || row?.po_etd || 0).getTime();
+        if (column === "orderQuantity") return Number(row?.order_quantity || 0);
+        if (column === "quantities") return Number(row?.pending_quantity || 0);
+        return "";
+      },
+    }),
+    [filteredRows, sortBy, sortOrder],
+  );
+  const poCount = useMemo(
+    () => new Set(filteredRows.map((row) => `${row?.order_id}__${row?.brand}__${row?.vendor}`)).size,
+    [filteredRows],
+  );
+  const poSummaryRows = useMemo(() => {
+    const summaryMap = new Map();
 
-  const handleClearFilters = useCallback(() => {
-    setDraftBrandFilter(DEFAULT_ENTITY_FILTER);
-    setDraftVendorFilter(DEFAULT_ENTITY_FILTER);
-    setDraftFromDateFilter("");
-    setDraftToDateFilter("");
-    setBrandFilter(DEFAULT_ENTITY_FILTER);
-    setVendorFilter(DEFAULT_ENTITY_FILTER);
-    setFromDateFilter("");
-    setToDateFilter("");
-  }, []);
-
-  const handleExport = useCallback(async () => {
-    try {
-      setExporting(true);
-      const normalizedFromDate = String(fromDateFilter || "").trim();
-      const normalizedToDate = String(toDateFilter || "").trim();
-
-      if (normalizedFromDate && normalizedToDate && normalizedFromDate > normalizedToDate) {
-        alert("From date must be before or equal to To date.");
-        return;
+    filteredRows.forEach((row) => {
+      const key = `${row?.order_id}__${row?.brand}__${row?.vendor}`;
+      if (!summaryMap.has(key)) {
+        summaryMap.set(key, {
+          order_id: row?.order_id || "N/A",
+          brand: row?.brand || "N/A",
+          vendor: row?.vendor || "N/A",
+          order_date: row?.order_date || "",
+          etd: row?.po_etd || row?.etd || "",
+          item_count: 0,
+          shipped_item_count: 0,
+          inspected_item_count: 0,
+          pending_item_count: 0,
+          order_quantity: 0,
+          shipped_quantity: 0,
+          passed_quantity: 0,
+          pending_quantity: 0,
+        });
       }
 
-      const params = {};
-      if (brandFilter !== DEFAULT_ENTITY_FILTER) {
-        params.brand = brandFilter;
+      const summary = summaryMap.get(key);
+      const currentOrderDate = new Date(summary.order_date || 0).getTime();
+      const rowOrderDate = new Date(row?.order_date || 0).getTime();
+      if (
+        Number.isFinite(rowOrderDate)
+        && (!Number.isFinite(currentOrderDate) || rowOrderDate < currentOrderDate)
+      ) {
+        summary.order_date = row.order_date;
       }
-      if (vendorFilter !== DEFAULT_ENTITY_FILTER) {
-        params.vendor = vendorFilter;
+      summary.item_count += 1;
+      if (
+        Number(row?.order_quantity || 0) > 0
+        && Number(row?.shipped_quantity || 0) >= Number(row?.order_quantity || 0)
+      ) {
+        summary.shipped_item_count += 1;
+      } else if (Number(row?.passed_quantity || 0) > 0) {
+        summary.inspected_item_count += 1;
+      } else {
+        summary.pending_item_count += 1;
       }
-      if (normalizedFromDate) {
-        params.from_date = normalizedFromDate;
-      }
-      if (normalizedToDate) {
-        params.to_date = normalizedToDate;
-      }
+      summary.order_quantity += Number(row?.order_quantity || 0);
+      summary.shipped_quantity += Number(row?.shipped_quantity || 0);
+      summary.passed_quantity += Number(row?.passed_quantity || 0);
+      summary.pending_quantity += Number(row?.pending_quantity || 0);
+    });
 
-      const response = await exportDelayedPoReport(params);
-      const disposition = String(response?.headers?.["content-disposition"] || "");
-      const match = disposition.match(/filename\*?=(?:UTF-8''|\"?)([^\";]+)/i);
-      const fallbackName = `delayed-po-item-report-${new Date().toISOString().slice(0, 10)}.xlsx`;
-      const fileName = match?.[1]
-        ? decodeURIComponent(match[1].trim())
-        : fallbackName;
-
-      const blob = new Blob(
-        [response.data],
-        {
-          type:
-            response?.headers?.["content-type"]
-            || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        },
+    return Array.from(summaryMap.values()).sort((left, right) => {
+      const etdCompare = String(left?.etd || "").localeCompare(String(right?.etd || ""));
+      if (etdCompare !== 0) return etdCompare;
+      return String(left?.order_id || "").localeCompare(
+        String(right?.order_id || ""),
+        undefined,
+        { numeric: true, sensitivity: "base" },
       );
-      const url = window.URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = fileName;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      window.URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error(err);
+    });
+  }, [filteredRows]);
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / limit));
+  const safePage = Math.min(page, totalPages);
+  const paginatedRows = sortedRows.slice((safePage - 1) * limit, safePage * limit);
+  const summaryTotalPages = Math.max(1, Math.ceil(poSummaryRows.length / limit));
+  const safeSummaryPage = Math.min(summaryPage, summaryTotalPages);
+  const paginatedPoSummaryRows = poSummaryRows.slice(
+    (safeSummaryPage - 1) * limit,
+    safeSummaryPage * limit,
+  );
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  useEffect(() => {
+    if (summaryPage > summaryTotalPages) setSummaryPage(summaryTotalPages);
+  }, [summaryPage, summaryTotalPages]);
+
+  const handleBrandChange = (event) => {
+    const { value, checked } = event.target;
+    setDraftBrand((previous) => {
+      if (value === "all") return DEFAULT_BRANDS;
+      let next = normalizeBrands(previous).filter((entry) => entry !== "all");
+      next = checked ? [...next, value] : next.filter((entry) => entry !== value);
+      return normalizeBrands(next);
+    });
+    setDraftVendor("all");
+    setDraftPo("all");
+  };
+
+  const applyFilters = () => {
+    setPage(1);
+    setSummaryPage(1);
+    setAppliedFilters({
+      brand: normalizeBrands(draftBrand),
+      vendor: vendorOptions.includes(draftVendor) ? draftVendor : "all",
+      po: poOptions.includes(draftPo) ? draftPo : "all",
+    });
+  };
+  const clearFilters = () => {
+    const cleared = { brand: DEFAULT_BRANDS, vendor: "all", po: "all" };
+    setDraftBrand(cleared.brand);
+    setDraftVendor(cleared.vendor);
+    setDraftPo(cleared.po);
+    setAppliedFilters(cleared);
+    setPage(1);
+    setSummaryPage(1);
+  };
+  const handleSort = (column, direction = "asc") => {
+    const next = getNextClientSortState(sortBy, sortOrder, column, direction);
+    setSortBy(next.sortBy);
+    setSortOrder(next.sortOrder);
+    setPage(1);
+  };
+  const handleExport = async () => {
+    try {
+      setExportingFormat("xls");
+      const response = await exportDelayedPoReport(buildApiParams(appliedFilters));
+      downloadBlob(response);
+    } catch (exportError) {
+      console.error(exportError);
       alert("Failed to export delayed PO report.");
     } finally {
-      setExporting(false);
+      setExportingFormat("");
     }
-  }, [brandFilter, fromDateFilter, toDateFilter, vendorFilter]);
+  };
 
-  const displayedFromDate = useMemo(
-    () => toISODateString(filters.from_date) || "",
-    [filters.from_date],
-  );
-  const displayedToDate = useMemo(
-    () => toISODateString(filters.to_date) || "",
-    [filters.to_date],
-  );
-  const etdWindowLabel = useMemo(() => {
-    if (displayedFromDate && displayedToDate) {
-      return `${formatDateDDMMYYYY(displayedFromDate)} - ${formatDateDDMMYYYY(displayedToDate)}`;
-    }
-    if (displayedFromDate) {
-      return `From ${formatDateDDMMYYYY(displayedFromDate)}`;
-    }
-    if (displayedToDate) {
-      return `Until ${formatDateDDMMYYYY(displayedToDate)}`;
-    }
-    return "All ETD Dates";
-  }, [displayedFromDate, displayedToDate]);
+  const handleExportPdf = async () => {
+    if (!pdfReportRef.current || loading || sortedRows.length === 0) return;
 
-  const handleSortColumn = useCallback(
-    (column, defaultDirection = "asc") => {
-      const nextSortState = getNextClientSortState(
-        sortBy,
-        sortOrder,
-        column,
-        defaultDirection,
-      );
-      setSortBy(nextSortState.sortBy);
-      setSortOrder(nextSortState.sortOrder);
-    },
-    [sortBy, sortOrder],
-  );
+    try {
+      setExportingFormat("pdf");
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+      const target = pdfReportRef.current;
+      const canvas = await html2canvas(target, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        windowWidth: Math.max(target.scrollWidth, target.clientWidth),
+        windowHeight: Math.max(target.scrollHeight, target.clientHeight),
+        scrollX: 0,
+        scrollY: 0,
+      });
+      const imageData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF({
+        orientation: "landscape",
+        unit: "pt",
+        format: "a4",
+      });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 18;
+      const printableWidth = pageWidth - margin * 2;
+      const printableHeight = pageHeight - margin * 2;
+      const imageHeight = (canvas.height * printableWidth) / canvas.width;
+      let remainingHeight = imageHeight;
+      let yPosition = margin;
+
+      pdf.addImage(imageData, "PNG", margin, yPosition, printableWidth, imageHeight);
+      remainingHeight -= printableHeight;
+
+      while (remainingHeight > 0) {
+        pdf.addPage();
+        yPosition = margin - (imageHeight - remainingHeight);
+        pdf.addImage(imageData, "PNG", margin, yPosition, printableWidth, imageHeight);
+        remainingHeight -= printableHeight;
+      }
+
+      pdf.save(`delayed-po-report-${new Date().toISOString().slice(0, 10)}.pdf`);
+    } catch (pdfError) {
+      console.error(pdfError);
+      alert("Failed to export delayed PO report as PDF.");
+    } finally {
+      setExportingFormat("");
+    }
+  };
 
   return (
     <>
       <Navbar />
-
-      <div className="page-shell om-report-page py-3">
-        <div className="d-flex justify-content-between align-items-center mb-3">
-          <button
-            type="button"
-            className="btn btn-outline-secondary btn-sm"
-            onClick={() => navigate(-1)}
-          >
-            Back
-          </button>
-          <h2 className="h4 mb-0">Delayed PO Reports</h2>
-          <button
-            type="button"
-            className="btn btn-outline-primary btn-sm"
-            onClick={handleExport}
-            disabled={exporting}
-          >
-            {exporting ? "Exporting..." : "Export XLSX"}
-          </button>
-        </div>
-
-        <div className="card om-card mb-3">
-          <form className="card-body d-flex flex-wrap gap-2 align-items-end" onSubmit={handleApplyFilters}>
-            <div>
-              <label className="form-label mb-1">From Date</label>
-              <input
-                type="date"
-                className="form-control"
-                value={draftFromDateFilter}
-                max={draftToDateFilter || undefined}
-                onChange={(event) =>
-                  setDraftFromDateFilter(String(event.target.value || "").trim())
-                }
-              />
-            </div>
-
-            <div>
-              <label className="form-label mb-1">To Date</label>
-              <input
-                type="date"
-                className="form-control"
-                value={draftToDateFilter}
-                min={draftFromDateFilter || undefined}
-                onChange={(event) =>
-                  setDraftToDateFilter(String(event.target.value || "").trim())
-                }
-              />
-            </div>
-
-            <div>
-              <label className="form-label mb-1">Brand</label>
-              <select
-                className="form-select"
-                value={draftBrandFilter}
-                onChange={(event) =>
-                  setDraftBrandFilter(normalizeEntityFilter(event.target.value))
-                }
-              >
-                <option value={DEFAULT_ENTITY_FILTER}>All Brands</option>
-                {(Array.isArray(filters.brand_options) ? filters.brand_options : []).map((brand) => (
-                  <option key={brand} value={brand}>
-                    {brand}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="form-label mb-1">Vendor</label>
-              <select
-                className="form-select"
-                value={draftVendorFilter}
-                onChange={(event) =>
-                  setDraftVendorFilter(normalizeEntityFilter(event.target.value))
-                }
-              >
-                <option value={DEFAULT_ENTITY_FILTER}>All Vendors</option>
-                {(Array.isArray(filters.vendor_options) ? filters.vendor_options : []).map((vendor) => (
-                  <option key={vendor} value={vendor}>
-                    {vendor}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <button
-              type="submit"
-              className="btn btn-primary btn-sm"
-              disabled={loading}
-            >
-              {loading ? "Loading..." : "Apply"}
+      <div className="page-shell py-3">
+        <div className="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+          <div>
+            <button type="button" className="btn btn-link p-0 mb-2 text-decoration-none" onClick={() => navigate(-1)}>
+              Back
             </button>
-            <button
-              type="button"
-              className="btn btn-outline-secondary btn-sm"
-              onClick={handleClearFilters}
-              disabled={loading}
-            >
-              Clear
-            </button>
-          </form>
-        </div>
-
-        <div className="card om-card mb-3">
-          <div className="card-body d-flex flex-wrap gap-2">
-            <span className="om-summary-chip">
-              ETD Window: {etdWindowLabel}
-            </span>
-            <span className="om-summary-chip">
-              Report Date: {formatDateDDMMYYYY(filters.report_date)}
-            </span>
-            <span className="om-summary-chip">
-              Brand: {brandFilter === DEFAULT_ENTITY_FILTER ? "all" : brandFilter}
-            </span>
-            <span className="om-summary-chip">
-              Vendor: {vendorFilter === DEFAULT_ENTITY_FILTER ? "all" : vendorFilter}
-            </span>
-            <span className="om-summary-chip">
-              Delayed POs: {summary.delayed_po_count ?? 0}
-            </span>
-            <span className="om-summary-chip">
-              Vendors: {summary.vendors_count ?? 0}
-            </span>
-            <span className="om-summary-chip">
-              Pending: {summary.pending_count ?? 0}
-            </span>
-            <span className="om-summary-chip">
-              Inspection Done: {summary.inspection_done_count ?? 0}
-            </span>
-            <span className="om-summary-chip">
-              Shipped: {summary.shipped_count ?? 0}
-            </span>
-            <span className="om-summary-chip">
-              Avg Delay: {summary.average_delay_days ?? 0} days
-            </span>
+            <h2 className="h4 mb-1">Delayed PO Report</h2>
+            <p className="text-secondary mb-0">
+              POs past ETD with pending item quantities. Completely shipped POs are excluded.
+            </p>
+          </div>
+          <div className="d-flex flex-column align-items-end gap-2">
+            <div className="d-flex flex-wrap justify-content-end gap-2">
+              <button
+                type="button"
+                className="btn btn-outline-primary btn-sm"
+                onClick={handleExportPdf}
+                disabled={loading || exportingFormat !== "" || sortedRows.length === 0}
+              >
+                {exportingFormat === "pdf" ? "Exporting..." : "Export PDF"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline-primary btn-sm"
+                onClick={handleExport}
+                disabled={loading || exportingFormat !== "" || sortedRows.length === 0}
+              >
+                {exportingFormat === "xls" ? "Exporting..." : "Export XLS"}
+              </button>
+            </div>
+            <div className="d-flex flex-wrap justify-content-end gap-2">
+              <span className="om-summary-chip">POs: {poCount}</span>
+              <span className="om-summary-chip">Rows: {filteredRows.length}</span>
+              <span className="om-summary-chip">Report Date: {formatDateDDMMYYYY(reportDate)}</span>
+            </div>
           </div>
         </div>
 
-        {error && (
-          <div className="alert alert-danger mb-3" role="alert">
-            {error}
+        <div className="card om-card mb-3">
+          <div className="card-body">
+            <div className="packed-goods-filter-bar">
+              <div className="packed-goods-filter-field packed-goods-filter-field--brand dropdown">
+                <label className="form-label small mb-1">Brand</label>
+                <button
+                  type="button"
+                  className="form-select form-select-sm packed-goods-filter-trigger"
+                  data-bs-toggle="dropdown"
+                  data-bs-auto-close="outside"
+                >
+                  <div className="text-truncate">
+                    {isAllBrands(draftBrand) ? "All Brands" : draftBrand.join(", ")}
+                  </div>
+                </button>
+                <ul className="dropdown-menu packed-goods-filter-menu shadow">
+                  <li>
+                    <label className="packed-goods-filter-option">
+                      <input type="checkbox" className="form-check-input" value="all" checked={isAllBrands(draftBrand)} onChange={handleBrandChange} />
+                      <span className="packed-goods-filter-option-label">All Brands</span>
+                    </label>
+                  </li>
+                  {brandOptions.map((brand) => (
+                    <li key={brand}>
+                      <label className="packed-goods-filter-option">
+                        <input type="checkbox" className="form-check-input" value={brand} checked={draftBrand.includes(brand)} onChange={handleBrandChange} />
+                        <span className="packed-goods-filter-option-label">{brand}</span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="packed-goods-filter-field">
+                <label className="form-label small mb-1">Vendor</label>
+                <select className="form-select form-select-sm" value={draftVendor} onChange={(event) => { setDraftVendor(event.target.value); setDraftPo("all"); }}>
+                  <option value="all">All Vendors</option>
+                  {vendorOptions.map((vendor) => <option key={vendor} value={vendor}>{vendor}</option>)}
+                </select>
+              </div>
+              <div className="packed-goods-filter-field packed-goods-filter-field--po">
+                <label className="form-label small mb-1">PO</label>
+                <select className="form-select form-select-sm" value={draftPo} onChange={(event) => setDraftPo(event.target.value)}>
+                  <option value="all">All POs</option>
+                  {poOptions.map((po) => <option key={po} value={po}>{po}</option>)}
+                </select>
+              </div>
+              <div className="packed-goods-filter-field packed-goods-filter-field--limit">
+                <label className="form-label small mb-1">Rows</label>
+                <select className="form-select form-select-sm" value={limit} onChange={(event) => { setLimit(parseLimit(event.target.value)); setPage(1); setSummaryPage(1); }}>
+                  {LIMIT_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
+              </div>
+              <button type="button" className="btn btn-primary btn-sm packed-goods-filter-button" onClick={applyFilters}>Apply Filters</button>
+              <button type="button" className="btn btn-outline-secondary btn-sm packed-goods-filter-button" onClick={clearFilters}>Clear Filters</button>
+            </div>
+          </div>
+        </div>
+
+        {error && <div className="alert alert-danger">{error}</div>}
+
+        {!loading && poSummaryRows.length > 0 && (
+          <div className="card om-card mb-3">
+            <div className="card-header bg-transparent">
+              <h3 className="h6 mb-1">PO-wise Summary</h3>
+              <div className="small text-secondary">
+                Aggregated totals for the currently selected filters.
+              </div>
+              <div className="delayed-po-summary-legend mt-3">
+                <span className="small text-secondary fw-semibold">Legend:</span>
+                <span className="delayed-po-legend-entry">
+                  <span className="delayed-po-legend-swatch is-completely-pending" />
+                  Completely pending PO
+                </span>
+                <span className="delayed-po-legend-entry">
+                  <span className="delayed-po-legend-swatch has-shipped-quantity" />
+                  Has shipped quantity
+                </span>
+                <span className="delayed-po-legend-entry">
+                  <span className="delayed-po-legend-swatch is-shipped-tag" />
+                  Shipped items
+                </span>
+                <span className="delayed-po-legend-entry">
+                  <span className="delayed-po-legend-swatch is-inspected-tag" />
+                  Inspected items
+                </span>
+                <span className="delayed-po-legend-entry">
+                  <span className="delayed-po-legend-swatch is-pending-tag" />
+                  Pending items
+                </span>
+              </div>
+            </div>
+            <div className="card-body p-0">
+              <div className="table-responsive">
+                <table className="table table-hover align-middle om-table mb-0 delayed-po-summary-table">
+                  <thead className="table-primary">
+                    <tr>
+                      <th>PO</th>
+                      <th>Brand</th>
+                      <th>Vendor</th>
+                      <th>Dates</th>
+                      <th>Items</th>
+                      <th>Order Qty</th>
+                      <th>Quantities</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginatedPoSummaryRows.map((row) => (
+                      <tr
+                        key={`summary-${row.order_id}-${row.brand}-${row.vendor}`}
+                        className={
+                          row.pending_item_count === row.item_count
+                            ? "delayed-po-summary-row is-completely-pending"
+                            : row.shipped_quantity > 0
+                              ? "delayed-po-summary-row has-shipped-quantity"
+                              : ""
+                        }
+                      >
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btn-link p-0 text-decoration-none fw-semibold"
+                            onClick={() => navigate(`/orders?order_id=${encodeURIComponent(row.order_id || "")}`)}
+                          >
+                            {row.order_id}
+                          </button>
+                        </td>
+                        <td>{row.brand}</td>
+                        <td>{row.vendor}</td>
+                        <td>
+                          <div><span className="text-secondary small">Order:</span> {formatDateDDMMYYYY(row.order_date)}</div>
+                          <div><span className="text-secondary small">ETD:</span> {formatDateDDMMYYYY(row.etd)}</div>
+                        </td>
+                        <td>
+                          <div className="delayed-po-quantity-tags">
+                            <QuantityTag type="shipped" label="Shipped" value={row.shipped_item_count} />
+                            <QuantityTag type="passed" label="Inspected" value={row.inspected_item_count} />
+                            <QuantityTag type="pending" label="Pending" value={row.pending_item_count} />
+                          </div>
+                        </td>
+                        <td>{row.order_quantity}</td>
+                        <td>
+                          <div className="delayed-po-quantity-tags">
+                            <QuantityTag type="shipped" label="Shipped" value={row.shipped_quantity} hideWhenZero />
+                            <QuantityTag type="passed" label="Passed" value={row.passed_quantity} />
+                            <QuantityTag type="pending" label="Pending" value={row.pending_quantity} />
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="card-footer bg-transparent d-flex flex-wrap justify-content-between align-items-center gap-2">
+              <span className="small text-secondary">
+                Showing {(safeSummaryPage - 1) * limit + 1} - {Math.min(safeSummaryPage * limit, poSummaryRows.length)} of {poSummaryRows.length} POs
+              </span>
+              <div className="d-flex align-items-center gap-2">
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary btn-sm"
+                  disabled={safeSummaryPage <= 1}
+                  onClick={() => setSummaryPage((current) => Math.max(1, current - 1))}
+                >
+                  Previous
+                </button>
+                <span className="small text-secondary">
+                  Page {safeSummaryPage} of {summaryTotalPages}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary btn-sm"
+                  disabled={safeSummaryPage >= summaryTotalPages}
+                  onClick={() => setSummaryPage((current) => Math.min(summaryTotalPages, current + 1))}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
-        <div className="d-grid gap-3">
-          {loading ? (
-            <div className="card om-card">
-              <div className="card-body text-center py-4">Loading...</div>
+        {!loading && sortedRows.length > 0 && (
+          <div className="packed-goods-pdf-surface" aria-hidden="true">
+            <div ref={pdfReportRef} className="packed-goods-pdf-report delayed-po-pdf-report">
+              <div className="d-flex justify-content-between align-items-start gap-3 mb-3">
+                <div>
+                  <h2 className="h4 mb-1">Delayed PO Report</h2>
+                  <p className="text-secondary mb-0">
+                    Report date: {formatDateDDMMYYYY(reportDate)}
+                  </p>
+                </div>
+                <div className="d-flex flex-wrap justify-content-end gap-2">
+                  <span className="om-summary-chip">POs: {poCount}</span>
+                  <span className="om-summary-chip">Rows: {sortedRows.length}</span>
+                  <span className="om-summary-chip">
+                    Brands: {isAllBrands(appliedFilters.brand) ? "All Brands" : appliedFilters.brand.join(", ")}
+                  </span>
+                  <span className="om-summary-chip">
+                    Vendor: {appliedFilters.vendor === "all" ? "All Vendors" : appliedFilters.vendor}
+                  </span>
+                  <span className="om-summary-chip">
+                    PO: {appliedFilters.po === "all" ? "All POs" : appliedFilters.po}
+                  </span>
+                </div>
+              </div>
+              <table className="table table-sm align-middle om-table mb-0 delayed-po-table">
+                <thead className="table-primary">
+                  <tr>
+                    <th>PO</th>
+                    <th>Item Code</th>
+                    <th>Order Date</th>
+                    <th>ETD</th>
+                    <th>Order Qty</th>
+                    <th>Shipped</th>
+                    <th>Passed</th>
+                    <th>Pending</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedRows.map((row) => (
+                    <tr
+                      key={`pdf-${row?.id || `${row?.order_id}-${row?.item_code}`}`}
+                      className={getDelayedPoPdfRowClass(row)}
+                    >
+                      <td>{row?.order_id || "N/A"}</td>
+                      <td>{row?.item_code || "N/A"}</td>
+                      <td>{formatDateDDMMYYYY(row?.order_date)}</td>
+                      <td>{formatDateDDMMYYYY(row?.etd || row?.po_etd)}</td>
+                      <td>{Number(row?.order_quantity || 0)}</td>
+                      <td>{Number(row?.shipped_quantity || 0)}</td>
+                      <td>{Number(row?.passed_quantity || 0)}</td>
+                      <td>{Number(row?.pending_quantity || 0)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          ) : report.vendors.length === 0 ? (
-            <div className="card om-card">
-              <div className="card-body text-secondary">
-                No delayed POs found for the selected filters.
+          </div>
+        )}
+
+        <div className="card om-card">
+          <div className="card-body p-0">
+            {loading ? (
+              <div className="text-center py-4">Loading...</div>
+            ) : (
+              <div className="table-responsive">
+                <table className="table table-hover align-middle om-table mb-0 delayed-po-table">
+                  <thead className="table-primary">
+                    <tr>
+                      <th><SortHeaderButton label="PO" isActive={sortBy === "po"} direction={sortOrder} onClick={() => handleSort("po")} /></th>
+                      <th><SortHeaderButton label="Item Code" isActive={sortBy === "itemCode"} direction={sortOrder} onClick={() => handleSort("itemCode")} /></th>
+                      <th><SortHeaderButton label="Dates" isActive={sortBy === "dates"} direction={sortOrder} onClick={() => handleSort("dates", "desc")} /></th>
+                      <th><SortHeaderButton label="Order Qty" isActive={sortBy === "orderQuantity"} direction={sortOrder} onClick={() => handleSort("orderQuantity", "desc")} /></th>
+                      <th><SortHeaderButton label="Quantities" isActive={sortBy === "quantities"} direction={sortOrder} onClick={() => handleSort("quantities", "desc")} /></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginatedRows.length === 0 ? (
+                      <tr><td colSpan={5} className="text-center py-4">No delayed POs found.</td></tr>
+                    ) : paginatedRows.map((row) => (
+                      <tr key={row?.id || `${row?.order_id}-${row?.item_code}`}>
+                        <td>
+                          <button type="button" className="btn btn-link p-0 text-decoration-none fw-semibold" onClick={() => navigate(`/orders?order_id=${encodeURIComponent(row?.order_id || "")}`)}>
+                            {row?.order_id || "N/A"}
+                          </button>
+                          <div className="small text-secondary">{row?.brand || "N/A"} · {row?.vendor || "N/A"}</div>
+                        </td>
+                        <td>{row?.item_code || "N/A"}</td>
+                        <td>
+                          <div><span className="text-secondary small">Order:</span> {formatDateDDMMYYYY(row?.order_date)}</div>
+                          <div><span className="text-secondary small">ETD:</span> {formatDateDDMMYYYY(row?.etd || row?.po_etd)}</div>
+                        </td>
+                        <td>{Number(row?.order_quantity || 0)}</td>
+                        <td>
+                          <div className="delayed-po-quantity-tags">
+                            <QuantityTag type="shipped" label="Shipped" value={row?.shipped_quantity} hideWhenZero />
+                            <QuantityTag type="passed" label="Passed" value={row?.passed_quantity} />
+                            <QuantityTag type="pending" label="Pending" value={row?.pending_quantity} />
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+          {!loading && sortedRows.length > 0 && (
+            <div className="card-footer bg-transparent d-flex justify-content-between align-items-center gap-2">
+              <span className="small text-secondary">
+                Showing {(safePage - 1) * limit + 1} - {Math.min(safePage * limit, sortedRows.length)} of {sortedRows.length}
+              </span>
+              <div className="d-flex align-items-center gap-2">
+                <button type="button" className="btn btn-outline-secondary btn-sm" disabled={safePage <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>Previous</button>
+                <span className="small text-secondary">Page {safePage} of {totalPages}</span>
+                <button type="button" className="btn btn-outline-secondary btn-sm" disabled={safePage >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>Next</button>
               </div>
             </div>
-          ) : (
-            report.vendors.map((vendorEntry, index) => {
-              const rows = Array.isArray(vendorEntry?.rows) ? vendorEntry.rows : [];
-              const sortedRows = sortClientRows(rows, {
-                sortBy,
-                sortOrder,
-                getSortValue: (row, column) => {
-                  if (column === "orderId") return row?.order_id;
-                  if (column === "brand") return row?.brand;
-                  if (column === "orderDate") return new Date(row?.order_date || 0).getTime();
-                  if (column === "etd") return new Date(row?.etd || 0).getTime();
-                  if (column === "delayDays") return Number(row?.delay_days || 0);
-                  if (column === "pending") return Number(row?.pending_count || 0);
-                  if (column === "inspectionDone") {
-                    return Number(row?.inspection_done_count || 0);
-                  }
-                  if (column === "shipped") return Number(row?.shipped_count || 0);
-                  if (column === "lastProgress") return row?.last_progress;
-                  return "";
-                },
-              });
-              const vendorKey = String(vendorEntry?.vendor || "").trim() || `vendor-${index}`;
-
-              return (
-                <div key={vendorKey} className="card om-card">
-                  <div className="card-body p-0">
-                    <div className="px-3 py-2 border-bottom d-flex flex-wrap gap-2">
-                      <span className="fw-semibold">Vendor: {vendorEntry.vendor}</span>
-                      <span className="om-summary-chip">
-                        Brands: {(Array.isArray(vendorEntry?.brands) ? vendorEntry.brands : []).join(", ") || "N/A"}
-                      </span>
-                      <span className="om-summary-chip">
-                        Delayed POs: {vendorEntry.delayed_po_count ?? 0}
-                      </span>
-                      <span className="om-summary-chip">
-                        Pending: {vendorEntry.pending_count ?? 0}
-                      </span>
-                      <span className="om-summary-chip">
-                        Inspection Done: {vendorEntry.inspection_done_count ?? 0}
-                      </span>
-                      <span className="om-summary-chip">
-                        Shipped: {vendorEntry.shipped_count ?? 0}
-                      </span>
-                      <span className="om-summary-chip">
-                        Avg Delay: {vendorEntry.average_delay_days ?? 0} days
-                      </span>
-                    </div>
-
-                    <div className="table-responsive">
-                      <table className="table table-sm table-striped align-middle mb-0">
-                        <thead>
-                          <tr>
-                            <th>
-                              <SortHeaderButton
-                                label="PO"
-                                isActive={sortBy === "orderId"}
-                                direction={sortOrder}
-                                onClick={() => handleSortColumn("orderId", "asc")}
-                              />
-                            </th>
-                            <th>
-                              <SortHeaderButton
-                                label="Brand"
-                                isActive={sortBy === "brand"}
-                                direction={sortOrder}
-                                onClick={() => handleSortColumn("brand", "asc")}
-                              />
-                            </th>
-                            <th>
-                              <SortHeaderButton
-                                label="Order Date"
-                                isActive={sortBy === "orderDate"}
-                                direction={sortOrder}
-                                onClick={() => handleSortColumn("orderDate", "desc")}
-                              />
-                            </th>
-                            <th>
-                              <SortHeaderButton
-                                label="ETD"
-                                isActive={sortBy === "etd"}
-                                direction={sortOrder}
-                                onClick={() => handleSortColumn("etd", "desc")}
-                              />
-                            </th>
-                            <th>
-                              <SortHeaderButton
-                                label="Delay Days"
-                                isActive={sortBy === "delayDays"}
-                                direction={sortOrder}
-                                onClick={() => handleSortColumn("delayDays", "desc")}
-                              />
-                            </th>
-                            <th>
-                              <SortHeaderButton
-                                label="Pending"
-                                isActive={sortBy === "pending"}
-                                direction={sortOrder}
-                                onClick={() => handleSortColumn("pending", "desc")}
-                              />
-                            </th>
-                            <th>
-                              <SortHeaderButton
-                                label="Inspection Done"
-                                isActive={sortBy === "inspectionDone"}
-                                direction={sortOrder}
-                                onClick={() => handleSortColumn("inspectionDone", "desc")}
-                              />
-                            </th>
-                            <th>
-                              <SortHeaderButton
-                                label="Shipped"
-                                isActive={sortBy === "shipped"}
-                                direction={sortOrder}
-                                onClick={() => handleSortColumn("shipped", "desc")}
-                              />
-                            </th>
-                            <th>
-                              <SortHeaderButton
-                                label="Last Progress"
-                                isActive={sortBy === "lastProgress"}
-                                direction={sortOrder}
-                                onClick={() => handleSortColumn("lastProgress", "asc")}
-                              />
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {sortedRows.length === 0 && (
-                            <tr>
-                              <td colSpan="9" className="text-center py-3">
-                                No delayed POs for this vendor.
-                              </td>
-                            </tr>
-                          )}
-
-                          {sortedRows.map((row) => (
-                            <tr
-                              key={`${vendorKey}-${row.order_id}`}
-                              className="table-clickable"
-                              onClick={() => handleOpenOrder(row.order_id)}
-                            >
-                              <td>
-                                <button
-                                  type="button"
-                                  className="btn btn-link p-0 align-baseline text-decoration-none"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    handleOpenOrder(row.order_id);
-                                  }}
-                                >
-                                  {row.order_id}
-                                </button>
-                              </td>
-                              <td>{row.brand}</td>
-                              <td>{formatDateDDMMYYYY(row.order_date)}</td>
-                              <td>{formatDateDDMMYYYY(row.etd)}</td>
-                              <td>{row.delay_days ?? 0}</td>
-                              <td>{row.pending_count ?? 0}</td>
-                              <td>{row.inspection_done_count ?? 0}</td>
-                              <td>{row.shipped_count ?? 0}</td>
-                              <td>{row.last_progress || "-"}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
-              );
-            })
           )}
         </div>
+
       </div>
     </>
   );

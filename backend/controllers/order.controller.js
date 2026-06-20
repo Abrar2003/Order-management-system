@@ -7717,6 +7717,264 @@ const resolveDelayedPoReportFilterParams = (req = {}) => {
   };
 };
 
+const buildReformedDelayedPoReportDataset = async ({
+  brands = [],
+  vendor = "",
+  orderId = "",
+  user = null,
+} = {}) => {
+  const selectedBrands = normalizeFilterValues(brands);
+  const selectedBrandKeys = new Set(
+    selectedBrands.map((brandValue) => normalizeBrandKey(brandValue)),
+  );
+  const selectedVendor = normalizeFilterValue(vendor);
+  const selectedOrderId = normalizeFilterValue(orderId);
+  const todayUtc = toUtcDayStart(new Date());
+
+  const orders = await Order.find(applyDataAccessMatch(ACTIVE_ORDER_MATCH, user))
+    .select(
+      "order_id item brand vendor quantity shipment qc_record order_date ETD revised_ETD",
+    )
+    .populate({
+      path: "qc_record",
+      select: "quantities request_history last_inspected_date inspection_dates",
+    })
+    .sort({ order_date: -1, order_id: 1, "item.item_code": 1 })
+    .lean();
+
+  const poGroups = new Map();
+
+  (Array.isArray(orders) ? orders : []).forEach((orderEntry) => {
+    const orderIdValue = normalizeOrderKey(orderEntry?.order_id) || "N/A";
+    const brandValue = normalizeLooseString(orderEntry?.brand) || "N/A";
+    const vendorValue = normalizeLooseString(orderEntry?.vendor) || "N/A";
+    const poKey = [
+      orderIdValue,
+      normalizeBrandKey(brandValue),
+      normalizeVendorKey(vendorValue),
+    ].join("__");
+    const progress = deriveOrderProgress({ orderEntry });
+    const originalEtd = parseDateLike(orderEntry?.ETD);
+
+    if (!poGroups.has(poKey)) {
+      poGroups.set(poKey, {
+        order_id: orderIdValue,
+        brand: brandValue,
+        vendor: vendorValue,
+        etd: originalEtd,
+        has_pending_quantity: false,
+        total_order_quantity: 0,
+        total_shipped_quantity: 0,
+        total_passed_quantity: 0,
+        total_pending_quantity: 0,
+        rows: [],
+      });
+    }
+
+    const group = poGroups.get(poKey);
+    group.etd = resolveEarlierDate(group.etd, originalEtd);
+    group.has_pending_quantity =
+      group.has_pending_quantity ||
+      Math.max(
+        0,
+        Number(progress?.order_quantity || 0) -
+          Number(progress?.shipped_quantity || 0),
+      ) > 0;
+    group.total_order_quantity += Number(progress?.order_quantity || 0);
+    group.total_shipped_quantity += Number(progress?.shipped_quantity || 0);
+    group.total_passed_quantity += Number(
+      progress?.inspected_unshipped_quantity || 0,
+    );
+    group.total_pending_quantity += Number(
+      progress?.pending_inspection_quantity || 0,
+    );
+    group.rows.push({
+      id: String(orderEntry?._id || ""),
+      order_id: orderIdValue,
+      item_code:
+        normalizeLooseString(orderEntry?.item?.item_code) || "N/A",
+      brand: brandValue,
+      vendor: vendorValue,
+      order_date: toISODateString(orderEntry?.order_date),
+      etd: toISODateString(originalEtd),
+      order_quantity: Number(progress?.order_quantity || 0),
+      shipped_quantity: Number(progress?.shipped_quantity || 0),
+      passed_quantity: Number(progress?.inspected_unshipped_quantity || 0),
+      pending_quantity: Number(progress?.pending_inspection_quantity || 0),
+    });
+  });
+
+  const delayedGroups = Array.from(poGroups.values()).filter((group) => {
+    if (!group?.etd || !todayUtc) return false;
+    const etdCrossed = group.etd.getTime() < todayUtc.getTime();
+    const completelyShipped =
+      Number(group.total_order_quantity || 0) > 0 &&
+      Number(group.total_shipped_quantity || 0) >=
+        Number(group.total_order_quantity || 0);
+    return etdCrossed && group.has_pending_quantity && !completelyShipped;
+  });
+
+  const allRows = delayedGroups
+    .flatMap((group) =>
+      group.rows.map((row) => ({
+        ...row,
+        po_etd: toISODateString(group.etd),
+      })),
+    )
+    .sort((left, right) => {
+      const etdCompare = String(left?.po_etd || "").localeCompare(
+        String(right?.po_etd || ""),
+      );
+      if (etdCompare !== 0) return etdCompare;
+      const poCompare = String(left?.order_id || "").localeCompare(
+        String(right?.order_id || ""),
+        undefined,
+        { numeric: true, sensitivity: "base" },
+      );
+      if (poCompare !== 0) return poCompare;
+      return String(left?.item_code || "").localeCompare(
+        String(right?.item_code || ""),
+        undefined,
+        { numeric: true, sensitivity: "base" },
+      );
+    });
+
+  const brandFilteredRows = allRows.filter(
+    (row) =>
+      selectedBrandKeys.size === 0 ||
+      selectedBrandKeys.has(normalizeBrandKey(row?.brand)),
+  );
+  const vendorFilteredRows = brandFilteredRows.filter(
+    (row) =>
+      !selectedVendor ||
+      normalizeVendorKey(row?.vendor) === normalizeVendorKey(selectedVendor),
+  );
+  const rows = selectedOrderId
+    ? vendorFilteredRows.filter(
+        (row) =>
+          normalizeOrderKey(row?.order_id) ===
+          normalizeOrderKey(selectedOrderId),
+      )
+    : vendorFilteredRows;
+
+  const poKeys = new Set(
+    rows.map((row) =>
+      [
+        normalizeOrderKey(row?.order_id),
+        normalizeBrandKey(row?.brand),
+        normalizeVendorKey(row?.vendor),
+      ].join("__"),
+    ),
+  );
+  const brandFilterSource = selectedVendor
+    ? allRows.filter(
+        (row) =>
+          normalizeVendorKey(row?.vendor) === normalizeVendorKey(selectedVendor),
+      )
+    : allRows;
+  const poSummaryMap = new Map();
+
+  rows.forEach((row) => {
+    const poKey = [
+      normalizeOrderKey(row?.order_id),
+      normalizeBrandKey(row?.brand),
+      normalizeVendorKey(row?.vendor),
+    ].join("__");
+
+    if (!poSummaryMap.has(poKey)) {
+      poSummaryMap.set(poKey, {
+        order_id: row?.order_id || "N/A",
+        brand: row?.brand || "N/A",
+        vendor: row?.vendor || "N/A",
+        order_date: row?.order_date || "",
+        etd: row?.po_etd || row?.etd || "",
+        item_count: 0,
+        shipped_item_count: 0,
+        inspected_item_count: 0,
+        pending_item_count: 0,
+        total_order_quantity: 0,
+        total_shipped_quantity: 0,
+        total_passed_quantity: 0,
+        total_pending_quantity: 0,
+      });
+    }
+
+    const summaryRow = poSummaryMap.get(poKey);
+    const currentOrderDate = parseDateLike(summaryRow.order_date);
+    const rowOrderDate = parseDateLike(row?.order_date);
+    if (
+      rowOrderDate &&
+      (!currentOrderDate || rowOrderDate.getTime() < currentOrderDate.getTime())
+    ) {
+      summaryRow.order_date = toISODateString(rowOrderDate);
+    }
+    summaryRow.item_count += 1;
+    if (
+      Number(row?.order_quantity || 0) > 0 &&
+      Number(row?.shipped_quantity || 0) >= Number(row?.order_quantity || 0)
+    ) {
+      summaryRow.shipped_item_count += 1;
+    } else if (Number(row?.passed_quantity || 0) > 0) {
+      summaryRow.inspected_item_count += 1;
+    } else {
+      summaryRow.pending_item_count += 1;
+    }
+    summaryRow.total_order_quantity += Number(row?.order_quantity || 0);
+    summaryRow.total_shipped_quantity += Number(row?.shipped_quantity || 0);
+    summaryRow.total_passed_quantity += Number(row?.passed_quantity || 0);
+    summaryRow.total_pending_quantity += Number(row?.pending_quantity || 0);
+  });
+  const poSummary = Array.from(poSummaryMap.values()).sort((left, right) => {
+    const etdCompare = String(left?.etd || "").localeCompare(
+      String(right?.etd || ""),
+    );
+    if (etdCompare !== 0) return etdCompare;
+    return String(left?.order_id || "").localeCompare(
+      String(right?.order_id || ""),
+      undefined,
+      { numeric: true, sensitivity: "base" },
+    );
+  });
+
+  return {
+    success: true,
+    rows,
+    po_summary: poSummary,
+    filters: {
+      brands: normalizeDistinctValues(
+        brandFilterSource.map((row) => row?.brand),
+      ),
+      vendors: normalizeDistinctValues(
+        brandFilteredRows.map((row) => row?.vendor),
+      ),
+      order_ids: normalizeDistinctValues(
+        vendorFilteredRows.map((row) => row?.order_id),
+      ),
+      report_date: toISODateString(todayUtc),
+    },
+    summary: {
+      row_count: rows.length,
+      po_count: poKeys.size,
+      total_order_quantity: rows.reduce(
+        (sum, row) => sum + Number(row?.order_quantity || 0),
+        0,
+      ),
+      total_shipped_quantity: rows.reduce(
+        (sum, row) => sum + Number(row?.shipped_quantity || 0),
+        0,
+      ),
+      total_passed_quantity: rows.reduce(
+        (sum, row) => sum + Number(row?.passed_quantity || 0),
+        0,
+      ),
+      total_pending_quantity: rows.reduce(
+        (sum, row) => sum + Number(row?.pending_quantity || 0),
+        0,
+      ),
+    },
+  };
+};
+
 const buildUpcomingEtdReportDataset = async ({
   brand = "",
   vendor = "",
@@ -8365,16 +8623,10 @@ exports.exportPendingPoReport = async (req, res) => {
 
 exports.getDelayedPoReport = async (req, res) => {
   try {
-    const filters = resolveDelayedPoReportFilterParams(req);
-    if (filters.error) {
-      return res.status(400).json({
-        success: false,
-        message: filters.error,
-      });
-    }
-
-    const dataset = await buildDelayedPoReportDataset({
-      ...filters,
+    const dataset = await buildReformedDelayedPoReportDataset({
+      brands: req.query.brand ?? req.query.brands ?? req.query["brand[]"],
+      vendor: req.query.vendor,
+      orderId: req.query.order_id ?? req.query.order ?? req.query.po,
       user: req.user,
     });
 
@@ -8725,6 +8977,118 @@ exports.exportDelayedPoReport = async (req, res) => {
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    return res.status(200).send(fileBuffer);
+  } catch (error) {
+    console.error("Export Delayed PO Report Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to export delayed PO report",
+      error: error.message,
+    });
+  }
+};
+
+exports.exportDelayedPoReport = async (req, res) => {
+  try {
+    const dataset = await buildReformedDelayedPoReportDataset({
+      brands: req.query.brand ?? req.query.brands ?? req.query["brand[]"],
+      vendor: req.query.vendor,
+      orderId: req.query.order_id ?? req.query.order ?? req.query.po,
+      user: req.user,
+    });
+    const columns = [
+      { key: "order_id", header: "PO" },
+      { key: "item_code", header: "Item Code" },
+      { key: "brand", header: "Brand" },
+      { key: "vendor", header: "Vendor" },
+      { key: "order_date", header: "Order Date" },
+      { key: "etd", header: "ETD" },
+      { key: "order_quantity", header: "Order Quantity" },
+      { key: "shipped_quantity", header: "Shipped Quantity" },
+      { key: "passed_quantity", header: "Passed Quantity" },
+      { key: "pending_quantity", header: "Pending Quantity" },
+    ];
+    const summaryColumns = [
+      { key: "order_id", header: "PO" },
+      { key: "brand", header: "Brand" },
+      { key: "vendor", header: "Vendor" },
+      { key: "order_date", header: "Order Date" },
+      { key: "etd", header: "ETD" },
+      { key: "item_count", header: "Item Count" },
+      { key: "shipped_item_count", header: "Shipped Items" },
+      { key: "inspected_item_count", header: "Inspected Items" },
+      { key: "pending_item_count", header: "Pending Items" },
+      { key: "total_order_quantity", header: "Order Quantity" },
+      { key: "total_shipped_quantity", header: "Shipped Quantity" },
+      { key: "total_passed_quantity", header: "Passed Quantity" },
+      { key: "total_pending_quantity", header: "Pending Quantity" },
+    ];
+    const exportRows = dataset.rows.map((row) => ({
+      order_id: String(row?.order_id || "").trim(),
+      item_code: String(row?.item_code || "").trim(),
+      brand: String(row?.brand || "").trim(),
+      vendor: String(row?.vendor || "").trim(),
+      order_date: formatDateDDMMYYYY(row?.order_date, ""),
+      etd: formatDateDDMMYYYY(row?.etd || row?.po_etd, ""),
+      order_quantity: Number(row?.order_quantity || 0),
+      shipped_quantity: Number(row?.shipped_quantity || 0),
+      passed_quantity: Number(row?.passed_quantity || 0),
+      pending_quantity: Number(row?.pending_quantity || 0),
+    }));
+    const summaryRows = (Array.isArray(dataset?.po_summary)
+      ? dataset.po_summary
+      : []
+    ).map((row) => ({
+      order_id: String(row?.order_id || "").trim(),
+      brand: String(row?.brand || "").trim(),
+      vendor: String(row?.vendor || "").trim(),
+      order_date: formatDateDDMMYYYY(row?.order_date, ""),
+      etd: formatDateDDMMYYYY(row?.etd, ""),
+      item_count: Number(row?.item_count || 0),
+      shipped_item_count: Number(row?.shipped_item_count || 0),
+      inspected_item_count: Number(row?.inspected_item_count || 0),
+      pending_item_count: Number(row?.pending_item_count || 0),
+      total_order_quantity: Number(row?.total_order_quantity || 0),
+      total_shipped_quantity: Number(row?.total_shipped_quantity || 0),
+      total_passed_quantity: Number(row?.total_passed_quantity || 0),
+      total_pending_quantity: Number(row?.total_pending_quantity || 0),
+    }));
+    const buildWorksheet = (sheetColumns, sheetRows) => {
+      const headerRow = sheetColumns.map((column) => column.header);
+      const dataRows = sheetRows.map((row) =>
+        sheetColumns.map((column) => row[column.key] ?? ""),
+      );
+      const worksheet = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
+      worksheet["!cols"] = sheetColumns.map((column, columnIndex) => ({
+        wch: Math.min(
+          32,
+          Math.max(
+            12,
+            column.header.length + 2,
+            ...dataRows.map(
+              (row) => String(row[columnIndex] ?? "").length + 2,
+            ),
+          ),
+        ),
+      }));
+      return worksheet;
+    };
+    const itemWorksheet = buildWorksheet(columns, exportRows);
+    const summaryWorksheet = buildWorksheet(summaryColumns, summaryRows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, itemWorksheet, "Item Details");
+    XLSX.utils.book_append_sheet(workbook, summaryWorksheet, "PO Summary");
+    const fileBuffer = XLSX.write(workbook, {
+      type: "buffer",
+      bookType: "xls",
+    });
+    const fileDate = new Date().toISOString().slice(0, 10);
+
+    res.setHeader("Content-Type", "application/vnd.ms-excel");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="delayed-po-report-${fileDate}.xls"`,
+    );
     return res.status(200).send(fileBuffer);
   } catch (error) {
     console.error("Export Delayed PO Report Error:", error);
