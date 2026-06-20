@@ -1599,117 +1599,128 @@ const WorkflowTasksPanel = ({
                             </div>
                           </td>
                           <td>
-                            <div className="workflow-task-actions">
-                              {!isBatchGroup && (
-                                <button
-                                  type="button"
-                                  className="workflow-icon-button"
-                                  onClick={() => setSelectedTaskId(task._id)}
-                                  title="View task details"
-                                  aria-label="View task details"
-                                >
-                                  <img src={WORKFLOW_ACTION_ICONS.info} alt="" />
-                                </button>
-                              )}
-                              {actions.canRework && (
-                                <button
-                                  type="button"
-                                  className="workflow-icon-button is-accent"
-                                  disabled={isBusy}
-                                  onClick={() => handleReworkAction(task)}
-                                  title={`Send to rework (${reworkCount})`}
-                                  aria-label="Send to rework"
-                                >
-                                  <img src={WORKFLOW_ACTION_ICONS.rework} alt="" />
-                                </button>
-                              )}
-                              {actions.canApproveHold && (
-                                <>
+                            <div
+                              className={`workflow-task-actions ${
+                                actions.canApproveHold ? "is-hold-decision" : ""
+                              } ${
+                                actions.canRequestHold ? "is-hold-request" : ""
+                              }`}
+                            >
+                              <div className="workflow-task-primary-actions">
+                                {actions.canApproveHold && (
+                                  <div className="workflow-task-decision-group">
+                                    <button
+                                      type="button"
+                                      className="btn btn-warning btn-sm workflow-task-action-button"
+                                      disabled={isBusy}
+                                      onClick={() => handleHoldAction(task, "approve_hold")}
+                                      title="Approve hold request"
+                                    >
+                                      Approve Hold
+                                    </button>
+                                    {actions.canRejectHold && (
+                                      <button
+                                        type="button"
+                                        className="btn btn-outline-danger btn-sm workflow-task-action-button"
+                                        disabled={isBusy}
+                                        onClick={() => handleHoldAction(task, "reject_hold")}
+                                        title="Reject hold request"
+                                      >
+                                        Reject
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                                {!actions.canApproveHold && actions.canRequestHold && (
                                   <button
                                     type="button"
-                                    className="btn btn-outline-warning btn-sm"
-                                    disabled={isBusy}
-                                    onClick={() => handleHoldAction(task, "approve_hold")}
-                                    title="Approve hold request"
+                                    className="btn btn-outline-warning btn-sm workflow-task-action-button"
+                                    disabled={isBusy || task?.hold?.status === "pending"}
+                                    onClick={() => handleHoldAction(task, "hold")}
+                                    title={
+                                      task?.hold?.status === "pending"
+                                        ? "Hold request is pending"
+                                        : isAdmin || actions.createdByCurrentUser
+                                        ? "Put task on hold"
+                                        : "Request hold"
+                                    }
                                   >
                                     Hold
                                   </button>
-                                  {actions.canRejectHold && (
-                                    <button
-                                      type="button"
-                                      className="btn btn-outline-secondary btn-sm"
-                                      disabled={isBusy}
-                                      onClick={() => handleHoldAction(task, "reject_hold")}
-                                      title="Reject hold request"
-                                    >
-                                      Reject
-                                    </button>
-                                  )}
-                                </>
-                              )}
-                              {!actions.canApproveHold && actions.canRequestHold && (
-                                <button
-                                  type="button"
-                                  className="btn btn-outline-warning btn-sm"
-                                  disabled={isBusy || task?.hold?.status === "pending"}
-                                  onClick={() => handleHoldAction(task, "hold")}
-                                  title={
-                                    task?.hold?.status === "pending"
-                                      ? "Hold request is pending"
-                                      : isAdmin || actions.createdByCurrentUser
-                                      ? "Put task on hold"
-                                      : "Request hold"
-                                  }
-                                >
-                                  Hold
-                                </button>
-                              )}
-                              {actions.canResume && (
-                                <button
-                                  type="button"
-                                  className="btn btn-outline-success btn-sm"
-                                  disabled={isBusy}
-                                  onClick={() => handleHoldAction(task, "resume")}
-                                  title="Resume held task"
-                                >
-                                  Resume
-                                </button>
-                              )}
-                              {isBatchGroup && canManageWorkflow && (
-                                <button
-                                  type="button"
-                                  className="btn btn-outline-primary btn-sm"
-                                  disabled={isBusy}
-                                  onClick={() => handleOpenBatchBulkActions(task)}
-                                  title="Edit batch shared fields and bulk task actions"
-                                >
-                                  Edit / Bulk
-                                </button>
-                              )}
-                              {isBatchGroup && canDeleteWorkflow && (
-                                <button
-                                  type="button"
-                                  className="workflow-icon-button is-danger"
-                                  disabled={isBusy}
-                                  onClick={() => handleDeleteBatchGroup(task)}
-                                  title="Delete batch and all tasks"
-                                  aria-label="Delete batch and all tasks"
-                                >
-                                  <img src={WORKFLOW_ACTION_ICONS.delete} alt="" />
-                                </button>
-                              )}
-                              {!isBatchGroup && (canDeleteWorkflow || actions.createdByCurrentUser) && (
-                                <button
-                                  type="button"
-                                  className="workflow-icon-button is-danger"
-                                  disabled={isBusy}
-                                  onClick={() => handleDeleteTask(task)}
-                                  title="Delete task"
-                                  aria-label="Delete task"
-                                >
-                                  <img src={WORKFLOW_ACTION_ICONS.delete} alt="" />
-                                </button>
-                              )}
+                                )}
+                                {actions.canResume && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-success btn-sm workflow-task-action-button"
+                                    disabled={isBusy}
+                                    onClick={() => handleHoldAction(task, "resume")}
+                                    title="Resume held task"
+                                  >
+                                    Resume
+                                  </button>
+                                )}
+                                {isBatchGroup && canManageWorkflow && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-primary btn-sm workflow-task-action-button"
+                                    disabled={isBusy}
+                                    onClick={() => handleOpenBatchBulkActions(task)}
+                                    title="Edit batch shared fields and bulk task actions"
+                                  >
+                                    Edit / Bulk
+                                  </button>
+                                )}
+                              </div>
+
+                              <div className="workflow-task-utility-actions">
+                                {!isBatchGroup && (
+                                  <button
+                                    type="button"
+                                    className="workflow-icon-button"
+                                    onClick={() => setSelectedTaskId(task._id)}
+                                    title="View task details"
+                                    aria-label="View task details"
+                                  >
+                                    <img src={WORKFLOW_ACTION_ICONS.info} alt="" />
+                                  </button>
+                                )}
+                                {actions.canRework && (
+                                  <button
+                                    type="button"
+                                    className="workflow-icon-button is-accent"
+                                    disabled={isBusy}
+                                    onClick={() => handleReworkAction(task)}
+                                    title={`Send to rework (${reworkCount})`}
+                                    aria-label="Send to rework"
+                                  >
+                                    <img src={WORKFLOW_ACTION_ICONS.rework} alt="" />
+                                  </button>
+                                )}
+                                {isBatchGroup && canDeleteWorkflow && (
+                                  <button
+                                    type="button"
+                                    className="workflow-icon-button is-danger"
+                                    disabled={isBusy}
+                                    onClick={() => handleDeleteBatchGroup(task)}
+                                    title="Delete batch and all tasks"
+                                    aria-label="Delete batch and all tasks"
+                                  >
+                                    <img src={WORKFLOW_ACTION_ICONS.delete} alt="" />
+                                  </button>
+                                )}
+                                {!isBatchGroup && (canDeleteWorkflow || actions.createdByCurrentUser) && (
+                                  <button
+                                    type="button"
+                                    className="workflow-icon-button is-danger"
+                                    disabled={isBusy}
+                                    onClick={() => handleDeleteTask(task)}
+                                    title="Delete task"
+                                    aria-label="Delete task"
+                                  >
+                                    <img src={WORKFLOW_ACTION_ICONS.delete} alt="" />
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           </td>
                         </tr>

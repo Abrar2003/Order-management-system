@@ -865,12 +865,12 @@ small,
 
 .workflow-task-table > thead > tr > th:nth-child(5),
 .workflow-task-table > tbody > tr > td:nth-child(5) {
-  width: 32%;
+  width: 30%;
 }
 
 .workflow-task-table > thead > tr > th:nth-child(6),
 .workflow-task-table > tbody > tr > td:nth-child(6) {
-  width: 10%;
+  width: 12%;
 }
 
 .workflow-task-name-cell,
@@ -1154,8 +1154,88 @@ small,
 .workflow-task-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
   align-items: center;
+  gap: 0.4rem;
+}
+
+.workflow-task-primary-actions,
+.workflow-task-utility-actions,
+.workflow-task-decision-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.workflow-task-decision-group {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.workflow-task-action-button {
+  min-height: 2.2rem;
+  padding-inline: 0.8rem;
+  border-radius: 0.65rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.workflow-task-utility-actions {
+  padding: 0;
+  border: 0;
+}
+
+.workflow-task-actions.is-hold-decision {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.workflow-task-actions.is-hold-decision .workflow-task-primary-actions,
+.workflow-task-actions.is-hold-decision .workflow-task-utility-actions,
+.workflow-task-actions.is-hold-decision .workflow-task-decision-group {
+  display: contents;
+}
+
+.workflow-task-actions.is-hold-decision .workflow-task-action-button {
+  width: 100%;
+  min-width: 0;
+  min-height: 1.8rem;
+  padding: 0.18rem 0.25rem;
+  border-radius: 0.5rem;
+  font-size: 0.66rem;
+}
+
+.workflow-task-actions.is-hold-decision .workflow-icon-button {
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 0.6rem;
+}
+
+.workflow-task-actions.is-hold-request {
+  display: inline-grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.4rem;
+}
+
+.workflow-task-actions.is-hold-request .workflow-task-primary-actions,
+.workflow-task-actions.is-hold-request .workflow-task-utility-actions {
+  width: 100%;
+}
+
+.workflow-task-actions.is-hold-request .workflow-task-action-button {
+  width: 100%;
+}
+
+.workflow-task-actions.is-hold-request .workflow-task-utility-actions {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 2.2rem;
+  justify-content: start;
 }
 
 .workflow-icon-button {
