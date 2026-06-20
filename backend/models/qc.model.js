@@ -190,7 +190,19 @@ const qcSchema = new mongoose.Schema(
       },
       qc_rejected: { type: Number, default: 0 },
     },
-
+    checked: {
+      checked_by: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "users",
+      },
+      checked_at: {
+        type: Date,
+      },
+      checked_status: {
+        type: Boolean,
+        default: false,
+      },
+    },
     remarks: {
       type: String,
     },
@@ -232,6 +244,7 @@ qcSchema.index({
 
 // Optional (only if you do a LOT of date range queries without other filters)
 qcSchema.index({ request_date: -1 });
+qcSchema.index({ "checked.checked_status": 1, request_date: -1 });
 
 qcSchema.index({ "order_meta.order_id": 1, request_date: -1 });
 qcSchema.index({

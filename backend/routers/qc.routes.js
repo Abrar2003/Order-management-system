@@ -80,6 +80,14 @@ router.patch(
 );
 
 router.patch(
+  "/:id/checked",
+  auth,
+  requirePermission("qc", "edit"),
+  invalidateQcOnSuccess,
+  qcController.updateQcCheckedStatus,
+);
+
+router.patch(
   "/goods-not-ready/:id",
   auth,
   requirePermission("qc", "edit"),

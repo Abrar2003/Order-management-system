@@ -4525,7 +4525,8 @@ small,
     minmax(9rem, 1fr)
     minmax(17rem, 1.6fr)
     minmax(10rem, 1.1fr)
-    minmax(10rem, 1.1fr);
+    minmax(10rem, 1.1fr)
+    minmax(8rem, 0.8fr);
   gap: 0.85rem;
   align-items: end;
   padding: 1rem 1.25rem 1.15rem;

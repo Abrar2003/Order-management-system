@@ -3210,6 +3210,7 @@ const buildQcListMatch = ({
   search = "",
   from = "",
   to = "",
+  checkedStatus = "",
   includeVendor = true,
   includeOrder = true,
   includeSearch = true,
@@ -3221,6 +3222,7 @@ const buildQcListMatch = ({
   const brandValue = String(brand || "").trim();
   const orderValue = String(order || "").trim();
   const searchValue = String(search || "").trim();
+  const checkedStatusValue = String(checkedStatus || "").trim().toLowerCase();
   const fromDate = toISODateString(from);
   const toDate = toISODateString(to);
 
@@ -3250,6 +3252,15 @@ const buildQcListMatch = ({
     match.request_date = {};
     if (fromDate) match.request_date.$gte = fromDate;
     if (toDate) match.request_date.$lte = toDate;
+  }
+
+  if (checkedStatusValue === "checked" || checkedStatusValue === "true") {
+    match["checked.checked_status"] = true;
+  } else if (
+    checkedStatusValue === "unchecked"
+    || checkedStatusValue === "false"
+  ) {
+    match["checked.checked_status"] = { $ne: true };
   }
 
   return match;
@@ -3566,6 +3577,7 @@ exports.getQCList = async (req, res) => {
       order = "",
       from = "",
       to = "",
+      checked_status = "",
       sort = "-request_date",
     } = req.query;
     const selectedInspectionStatus = normalizeQcInspectionStatusFilter(
@@ -3603,6 +3615,7 @@ exports.getQCList = async (req, res) => {
       search,
       from,
       to,
+      checkedStatus: checked_status,
     };
     const match = applyDataAccessMatch(
       buildQcListMatch(filterInput),
@@ -3733,6 +3746,7 @@ exports.exportQCList = async (req, res) => {
       order = "",
       from = "",
       to = "",
+      checked_status = "",
       sort = "-request_date",
       format = "xlsx",
     } = req.query;
@@ -3759,6 +3773,7 @@ exports.exportQCList = async (req, res) => {
       search,
       from,
       to,
+      checkedStatus: checked_status,
     };
     const match = buildQcListMatch(filterInput);
     const inspectionStatusStages =
@@ -4728,6 +4743,73 @@ exports.deleteQcFormDraft = async (req, res) => {
     });
   } catch (err) {
     return res.status(400).json({ message: err.message || "Failed to delete QC draft" });
+  }
+};
+
+exports.updateQcCheckedStatus = async (req, res) => {
+  try {
+    const normalizedRole = normalizeUserRoleKey(req.user?.role);
+    const canUpdateCheckedStatus =
+      isStrictAdminRoleKey(normalizedRole)
+      || normalizedRole === "inspection_manager";
+
+    if (!canUpdateCheckedStatus) {
+      return res.status(403).json({
+        message:
+          "Only inspection managers and admins can update QC checked status",
+      });
+    }
+
+    if (!hasOwn(req.body, "checked_status")) {
+      return res.status(400).json({ message: "checked_status is required" });
+    }
+
+    const rawCheckedStatus = req.body.checked_status;
+    const normalizedCheckedStatus = String(rawCheckedStatus ?? "")
+      .trim()
+      .toLowerCase();
+    const isValidCheckedStatus =
+      typeof rawCheckedStatus === "boolean"
+      || ["true", "false", "1", "0"].includes(normalizedCheckedStatus);
+
+    if (!isValidCheckedStatus) {
+      return res.status(400).json({
+        message: "checked_status must be true or false",
+      });
+    }
+
+    const checkedStatus =
+      rawCheckedStatus === true
+      || normalizedCheckedStatus === "true"
+      || normalizedCheckedStatus === "1";
+    const checkedAt = new Date();
+    const qc = await QC.findOneAndUpdate(
+      applyDataAccessMatch({ _id: req.params.id }, req.user),
+      {
+        $set: {
+          "checked.checked_status": checkedStatus,
+          "checked.checked_by": req.user?._id || req.user?.id || null,
+          "checked.checked_at": checkedAt,
+          updated_by: buildAuditActor(req.user),
+        },
+      },
+      { new: true, runValidators: true },
+    )
+      .populate("checked.checked_by", "name email role")
+      .lean();
+
+    if (!qc) {
+      return res.status(404).json({ message: "QC record not found" });
+    }
+
+    return res.json({
+      message: `QC marked as ${checkedStatus ? "checked" : "unchecked"}`,
+      checked: qc.checked,
+    });
+  } catch (err) {
+    return res.status(400).json({
+      message: err.message || "Failed to update QC checked status",
+    });
   }
 };
 

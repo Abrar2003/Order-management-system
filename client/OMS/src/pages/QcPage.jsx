@@ -6,7 +6,11 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import TransferQcRequestModal from "../components/TransferQcRequestModal";
 import AlignQCModal from "../components/AlignQcModal";
 import { getUserFromToken } from "../auth/auth.utils";
-import { isViewOnlyUser } from "../auth/permissions";
+import {
+  isStrictAdminRole,
+  isViewOnlyUser,
+  normalizeUserRole,
+} from "../auth/permissions";
 import { usePermissions } from "../auth/PermissionContext";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -213,6 +217,7 @@ const buildQcFilterStateFromSearchParams = (
     to: toDDMMYYYYInputValue(nextToRaw, nextToRaw),
     order: normalizeQueryText(searchParams.get("order")),
     inspectionStatus: normalizeQueryText(searchParams.get("inspection_status")),
+    checkedStatus: normalizeQueryText(searchParams.get("checked_status")),
   };
 };
 
@@ -223,7 +228,8 @@ const areQcFilterStatesEqual = (left = {}, right = {}) =>
   && normalizeQueryText(left.from) === normalizeQueryText(right.from)
   && normalizeQueryText(left.to) === normalizeQueryText(right.to)
   && normalizeQueryText(left.order) === normalizeQueryText(right.order)
-  && normalizeQueryText(left.inspectionStatus) === normalizeQueryText(right.inspectionStatus);
+  && normalizeQueryText(left.inspectionStatus) === normalizeQueryText(right.inspectionStatus)
+  && normalizeQueryText(left.checkedStatus) === normalizeQueryText(right.checkedStatus);
 
 const QCPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -241,8 +247,11 @@ const QCPage = () => {
   const currentUser = getUserFromToken();
   const { hasPermission } = usePermissions();
   const isViewOnly = isViewOnlyUser(currentUser);
-  const normalizedRole = String(currentUser?.role || "").trim().toLowerCase();
+  const normalizedRole = normalizeUserRole(currentUser?.role);
   const isQcUser = normalizedRole === "qc";
+  const canManageCheckedStatus =
+    isStrictAdminRole(normalizedRole)
+    || normalizedRole === "inspection_manager";
   const canAlignQc = hasPermission("qc", "assign");
   const canTransferRequest = hasPermission("qc", "assign");
   const showActionColumn = !isViewOnly;
@@ -270,6 +279,9 @@ const QCPage = () => {
   const [inspectionStatus, setInspectionStatus] = useState(
     initialFilters.inspectionStatus,
   );
+  const [checkedStatus, setCheckedStatus] = useState(
+    initialFilters.checkedStatus,
+  );
 
   // applied filters used for API + URL sync
   const [appliedFilters, setAppliedFilters] = useState(initialFilters);
@@ -284,6 +296,7 @@ const QCPage = () => {
   const [transferRequestQc, setTransferRequestQc] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [updatingCheckedIds, setUpdatingCheckedIds] = useState([]);
   const [syncedQuery, setSyncedQuery] = useState(null);
 
   const fetchQC = useCallback(async () => {
@@ -302,6 +315,7 @@ const QCPage = () => {
           inspector: canUseInspectorFilter ? appliedFilters.inspector : "",
           vendor: appliedFilters.vendor,
           inspection_status: appliedFilters.inspectionStatus,
+          checked_status: appliedFilters.checkedStatus,
           from: fromIso || "",
           to: toIso || "",
           sort_by: sortBy,
@@ -383,6 +397,9 @@ const QCPage = () => {
     setInspectionStatus((prev) => (
       prev === nextFilters.inspectionStatus ? prev : nextFilters.inspectionStatus
     ));
+    setCheckedStatus((prev) => (
+      prev === nextFilters.checkedStatus ? prev : nextFilters.checkedStatus
+    ));
     setAppliedFilters((prev) => (
       areQcFilterStatesEqual(prev, nextFilters) ? prev : nextFilters
     ));
@@ -413,6 +430,12 @@ const QCPage = () => {
       next.set(
         "inspection_status",
         normalizeQueryText(appliedFilters.inspectionStatus),
+      );
+    }
+    if (normalizeQueryText(appliedFilters.checkedStatus)) {
+      next.set(
+        "checked_status",
+        normalizeQueryText(appliedFilters.checkedStatus),
       );
     }
     if (normalizeQueryText(appliedFilters.from)) {
@@ -487,6 +510,7 @@ const QCPage = () => {
     to: normalizeQueryText(to),
     order: normalizeQueryText(order),
     inspectionStatus: normalizeQueryText(inspectionStatus),
+    checkedStatus: normalizeQueryText(checkedStatus),
   };
   const hasPendingFilterChanges = !areQcFilterStatesEqual(
     appliedFilters,
@@ -509,6 +533,7 @@ const QCPage = () => {
       to: "",
       order: "",
       inspectionStatus: "",
+      checkedStatus: "",
     };
 
     setSearch("");
@@ -518,6 +543,7 @@ const QCPage = () => {
     setTo("");
     setOrder("");
     setInspectionStatus("");
+    setCheckedStatus("");
     setAppliedFilters(emptyFilters);
     setPage(1);
   }, []);
@@ -545,6 +571,7 @@ const QCPage = () => {
           inspector: canUseInspectorFilter ? appliedFilters.inspector : "",
           vendor: appliedFilters.vendor,
           inspection_status: appliedFilters.inspectionStatus,
+          checked_status: appliedFilters.checkedStatus,
           from: fromIso || "",
           to: toIso || "",
           sort_by: sortBy,
@@ -590,6 +617,61 @@ const QCPage = () => {
     sortBy,
     sortOrder,
   ]);
+
+  const handleCheckedStatusChange = useCallback(async (qc, checked) => {
+    const qcId = String(qc?._id || "").trim();
+    if (!qcId || !canManageCheckedStatus) return;
+
+    setUpdatingCheckedIds((previous) => [...previous, qcId]);
+    setQcList((previous) =>
+      previous.map((entry) =>
+        String(entry?._id || "") === qcId
+          ? {
+              ...entry,
+              checked: {
+                ...(entry.checked || {}),
+                checked_status: checked,
+              },
+            }
+          : entry,
+      ),
+    );
+
+    try {
+      const response = await axios.patch(`/qc/${qcId}/checked`, {
+        checked_status: checked,
+      });
+      setQcList((previous) =>
+        previous.map((entry) =>
+          String(entry?._id || "") === qcId
+            ? { ...entry, checked: response?.data?.checked || entry.checked }
+            : entry,
+        ),
+      );
+    } catch (err) {
+      setQcList((previous) =>
+        previous.map((entry) =>
+          String(entry?._id || "") === qcId
+            ? {
+                ...entry,
+                checked: {
+                  ...(entry.checked || {}),
+                  checked_status: !checked,
+                },
+              }
+            : entry,
+        ),
+      );
+      alert(
+        err?.response?.data?.message
+        || "Failed to update QC checked status.",
+      );
+    } finally {
+      setUpdatingCheckedIds((previous) =>
+        previous.filter((id) => id !== qcId),
+      );
+    }
+  }, [canManageCheckedStatus]);
 
   return (
     <>
@@ -770,6 +852,18 @@ const QCPage = () => {
                   />
                 )}
               </div>
+              <div className="qc-list-filter-field">
+                <label>Checked</label>
+                <select
+                  className="form-select form-select-sm"
+                  value={checkedStatus}
+                  onChange={(e) => setCheckedStatus(e.target.value)}
+                >
+                  <option value="">All</option>
+                  <option value="checked">Checked</option>
+                  <option value="unchecked">Unchecked</option>
+                </select>
+              </div>
             </div>
             <div className="qc-list-mobile-filters border-bottom bg-body-tertiary p-3">
               <div className="qc-list-mobile-filter-grid">
@@ -843,6 +937,18 @@ const QCPage = () => {
                   </div>
                 )}
                 <div>
+                  <label className="form-label small text-secondary">Checked</label>
+                  <select
+                    className="form-select form-select-sm"
+                    value={checkedStatus}
+                    onChange={(e) => setCheckedStatus(e.target.value)}
+                  >
+                    <option value="">All</option>
+                    <option value="checked">Checked</option>
+                    <option value="unchecked">Unchecked</option>
+                  </select>
+                </div>
+                <div>
                   <label className="form-label small text-secondary">From</label>
                   <input
                     type="date"
@@ -900,6 +1006,7 @@ const QCPage = () => {
                     <th>QC Passed</th>
                     <th>Pending</th>
                     <th>Inspector</th>
+                    <th className="text-center">Checked</th>
                     {showActionColumn && <th className="qc-list-action-col">Actions</th>}
                   </tr>
 
@@ -979,6 +1086,26 @@ const QCPage = () => {
                             </span>
                           </td>
                           <td>{qc?.inspector?.name || "N/A"}</td>
+                          <td className="text-center">
+                            <input
+                              type="checkbox"
+                              className="form-check-input"
+                              checked={Boolean(qc?.checked?.checked_status)}
+                              disabled={
+                                !canManageCheckedStatus
+                                || updatingCheckedIds.includes(String(qc?._id || ""))
+                              }
+                              aria-label={`Mark QC ${qc?.order_meta?.order_id || ""} as checked`}
+                              title={
+                                canManageCheckedStatus
+                                  ? "Update checked status"
+                                  : "Only inspection managers and admins can update this status"
+                              }
+                              onChange={(event) =>
+                                handleCheckedStatusChange(qc, event.target.checked)
+                              }
+                            />
+                          </td>
                           {showActionColumn && (
                             <td className="qc-list-action-col">
                               <div className="d-flex flex-column gap-2 qc-list-row-actions">
