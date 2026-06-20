@@ -5762,12 +5762,12 @@ exports.updateQC = async (req, res) => {
       currentAggregateMetrics.totalEffectivePassed;
     const currentVendorOfferedTotal =
       currentAggregateMetrics.totalVendorOffered;
-    const currentRequestInspectionRecord =
-      resolveLatestInspectionRecordFromList(beforeInspectionRecords) ||
-      resolveLatestInspectionRecordForRequestEntry(
-        beforeInspectionRecords,
-        latestRequestEntry,
-      );
+    const currentRequestInspectionRecord = allowAdminRewrite
+      ? resolveLatestInspectionRecordFromList(beforeInspectionRecords)
+      : resolveLatestInspectionRecordForRequestEntry(
+          beforeInspectionRecords,
+          latestRequestEntry,
+        );
     const currentRequestHistoryId = String(
       currentRequestInspectionRecord?.request_history_id || "",
     ).trim();
@@ -6324,8 +6324,8 @@ exports.updateQC = async (req, res) => {
         inspectorId: inspectionInspectorId,
         requestDate: requestedDateForRecord,
         requestHistoryId:
-          currentRequestInspectionRecord?.request_history_id ||
           targetRequestEntry?._id ||
+          currentRequestInspectionRecord?.request_history_id ||
           null,
         requestedQuantity: requestedQuantityForRecord,
         inspectionDate: inspectionDateForRecord,
@@ -6371,6 +6371,12 @@ exports.updateQC = async (req, res) => {
             error: itemInspectionSyncError?.message || String(itemInspectionSyncError),
           });
         }
+
+        const persistedInspectionRecords = await Inspection.find({
+          qc: qc._id,
+        }).lean();
+        recalculateQcAggregateQuantities(qc, persistedInspectionRecords);
+        qc.markModified("quantities");
       }
     }
 
