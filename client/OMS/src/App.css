@@ -850,12 +850,12 @@ small,
 
 .workflow-task-table > thead > tr > th:nth-child(2),
 .workflow-task-table > tbody > tr > td:nth-child(2) {
-  width: 10%;
+  width: 9%;
 }
 
 .workflow-task-table > thead > tr > th:nth-child(3),
 .workflow-task-table > tbody > tr > td:nth-child(3) {
-  width: 13%;
+  width: 12%;
 }
 
 .workflow-task-table > thead > tr > th:nth-child(4),
@@ -865,12 +865,12 @@ small,
 
 .workflow-task-table > thead > tr > th:nth-child(5),
 .workflow-task-table > tbody > tr > td:nth-child(5) {
-  width: 30%;
+  width: 28%;
 }
 
 .workflow-task-table > thead > tr > th:nth-child(6),
 .workflow-task-table > tbody > tr > td:nth-child(6) {
-  width: 12%;
+  width: 16%;
 }
 
 .workflow-task-name-cell,
@@ -1177,8 +1177,113 @@ small,
   min-height: 2.2rem;
   padding-inline: 0.8rem;
   border-radius: 0.65rem;
-  font-weight: 600;
+  font-weight: 700;
   white-space: nowrap;
+  letter-spacing: 0.01em;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+}
+
+.workflow-task-action-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* Custom Warning button theme (Approve Hold, Hold) */
+.workflow-task-action-button.btn-warning,
+.workflow-task-action-button.btn-outline-warning {
+  background: var(--om-color-warning-soft) !important;
+  border-color: rgba(138, 110, 74, 0.3) !important;
+  color: var(--om-color-warning) !important;
+}
+
+.workflow-task-action-button.btn-warning:hover:not(:disabled),
+.workflow-task-action-button.btn-outline-warning:hover:not(:disabled) {
+  background: rgba(138, 110, 74, 0.16) !important;
+  border-color: rgba(138, 110, 74, 0.5) !important;
+  color: var(--om-color-warning) !important;
+  transform: translateY(-1px);
+  box-shadow: var(--om-shadow-xs);
+}
+
+.workflow-task-action-button.btn-warning:active:not(:disabled),
+.workflow-task-action-button.btn-outline-warning:active:not(:disabled) {
+  background: rgba(138, 110, 74, 0.24) !important;
+  transform: scale(0.97);
+}
+
+/* Custom Danger button theme (Reject) */
+.workflow-task-action-button.btn-danger,
+.workflow-task-action-button.btn-outline-danger {
+  background: var(--om-color-danger-soft) !important;
+  border-color: rgba(143, 98, 81, 0.3) !important;
+  color: var(--om-color-danger) !important;
+}
+
+.workflow-task-action-button.btn-danger:hover:not(:disabled),
+.workflow-task-action-button.btn-outline-danger:hover:not(:disabled) {
+  background: rgba(143, 98, 81, 0.14) !important;
+  border-color: rgba(143, 98, 81, 0.5) !important;
+  color: var(--om-color-danger) !important;
+  transform: translateY(-1px);
+  box-shadow: var(--om-shadow-xs);
+}
+
+.workflow-task-action-button.btn-danger:active:not(:disabled),
+.workflow-task-action-button.btn-outline-danger:active:not(:disabled) {
+  background: rgba(143, 98, 81, 0.22) !important;
+  transform: scale(0.97);
+}
+
+/* Custom Success button theme (Resume) */
+.workflow-task-action-button.btn-success,
+.workflow-task-action-button.btn-outline-success {
+  background: var(--om-color-success-soft) !important;
+  border-color: rgba(93, 115, 84, 0.3) !important;
+  color: var(--om-color-success) !important;
+}
+
+.workflow-task-action-button.btn-success:hover:not(:disabled),
+.workflow-task-action-button.btn-outline-success:hover:not(:disabled) {
+  background: rgba(93, 115, 84, 0.14) !important;
+  border-color: rgba(93, 115, 84, 0.5) !important;
+  color: var(--om-color-success) !important;
+  transform: translateY(-1px);
+  box-shadow: var(--om-shadow-xs);
+}
+
+.workflow-task-action-button.btn-success:active:not(:disabled),
+.workflow-task-action-button.btn-outline-success:active:not(:disabled) {
+  background: rgba(93, 115, 84, 0.22) !important;
+  transform: scale(0.97);
+}
+
+/* Custom Primary button theme (Edit / Bulk) */
+.workflow-task-action-button.btn-primary,
+.workflow-task-action-button.btn-outline-primary {
+  background: var(--om-color-accent-soft) !important;
+  border-color: rgba(124, 109, 89, 0.3) !important;
+  color: var(--om-color-accent-strong) !important;
+}
+
+.workflow-task-action-button.btn-primary:hover:not(:disabled),
+.workflow-task-action-button.btn-outline-primary:hover:not(:disabled) {
+  background: rgba(124, 109, 89, 0.15) !important;
+  border-color: rgba(124, 109, 89, 0.5) !important;
+  color: var(--om-color-accent-strong) !important;
+  transform: translateY(-1px);
+  box-shadow: var(--om-shadow-xs);
+}
+
+.workflow-task-action-button.btn-primary:active:not(:disabled),
+.workflow-task-action-button.btn-outline-primary:active:not(:disabled) {
+  background: rgba(124, 109, 89, 0.25) !important;
+  transform: scale(0.97);
 }
 
 .workflow-task-utility-actions {
@@ -1187,33 +1292,46 @@ small,
 }
 
 .workflow-task-actions.is-hold-decision {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   min-width: 0;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.35rem;
-  align-items: center;
 }
 
 .workflow-task-actions.is-hold-decision .workflow-task-primary-actions,
-.workflow-task-actions.is-hold-decision .workflow-task-utility-actions,
 .workflow-task-actions.is-hold-decision .workflow-task-decision-group {
-  display: contents;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem;
+  width: 100%;
+}
+
+.workflow-task-actions.is-hold-decision .workflow-task-utility-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.35rem;
+  width: 100%;
 }
 
 .workflow-task-actions.is-hold-decision .workflow-task-action-button {
   width: 100%;
   min-width: 0;
-  min-height: 1.8rem;
-  padding: 0.18rem 0.25rem;
-  border-radius: 0.5rem;
-  font-size: 0.66rem;
+  min-height: 2rem;
+  padding: 0.22rem 0.35rem;
+  border-radius: 0.55rem;
+  font-size: 0.72rem;
+  line-height: 1.15;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
 }
 
 .workflow-task-actions.is-hold-decision .workflow-icon-button {
-  width: 1.9rem;
-  height: 1.9rem;
-  border-radius: 0.6rem;
+  width: 100%;
+  height: 2rem;
+  border-radius: 0.55rem;
 }
 
 .workflow-task-actions.is-hold-request {
@@ -1244,20 +1362,31 @@ small,
   justify-content: center;
   width: 2.2rem;
   height: 2.2rem;
-  border: 1px solid rgba(203, 189, 170, 0.55);
+  border: 1px solid var(--om-color-border);
   border-radius: 0.75rem;
-  background: rgba(255, 255, 255, 0.82);
-  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  background: transparent;
+  color: var(--om-color-text-muted);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
 }
 
 .workflow-icon-button:hover:not(:disabled) {
+  background: var(--om-color-surface-alt);
+  border-color: var(--om-color-border-strong);
+  color: var(--om-color-text);
   transform: translateY(-1px);
-  box-shadow: var(--om-shadow-sm);
-  border-color: rgba(112, 106, 95, 0.55);
+  box-shadow: var(--om-shadow-xs);
+}
+
+.workflow-icon-button:active:not(:disabled) {
+  transform: scale(0.95);
 }
 
 .workflow-icon-button:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
 }
 
 .workflow-icon-button img {
@@ -1273,12 +1402,25 @@ small,
 }
 
 .workflow-icon-button.is-danger {
-  border-color: rgba(210, 71, 71, 0.4);
+  color: var(--om-color-danger);
+  border-color: rgba(143, 98, 81, 0.3);
+}
+
+.workflow-icon-button.is-danger:hover:not(:disabled) {
+  background: var(--om-color-danger-soft);
+  border-color: var(--om-color-danger);
+  color: var(--om-color-danger);
 }
 
 .workflow-icon-button.is-accent {
-  color: #8c4c1d;
-  border-color: rgba(182, 110, 54, 0.42);
+  color: var(--om-color-warning);
+  border-color: rgba(138, 110, 74, 0.3);
+}
+
+.workflow-icon-button.is-accent:hover:not(:disabled) {
+  background: var(--om-color-warning-soft);
+  border-color: var(--om-color-warning);
+  color: var(--om-color-warning);
 }
 
 .workflow-status-line {

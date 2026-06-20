@@ -1681,7 +1681,11 @@ const WorkflowTasksPanel = ({
                                     title="View task details"
                                     aria-label="View task details"
                                   >
-                                    <img src={WORKFLOW_ACTION_ICONS.info} alt="" />
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                      <circle cx="12" cy="12" r="10"></circle>
+                                      <line x1="12" y1="16" x2="12" y2="12"></line>
+                                      <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                                    </svg>
                                   </button>
                                 )}
                                 {actions.canRework && (
@@ -1693,7 +1697,9 @@ const WorkflowTasksPanel = ({
                                     title={`Send to rework (${reworkCount})`}
                                     aria-label="Send to rework"
                                   >
-                                    <img src={WORKFLOW_ACTION_ICONS.rework} alt="" />
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
+                                    </svg>
                                   </button>
                                 )}
                                 {isBatchGroup && canDeleteWorkflow && (
@@ -1705,7 +1711,12 @@ const WorkflowTasksPanel = ({
                                     title="Delete batch and all tasks"
                                     aria-label="Delete batch and all tasks"
                                   >
-                                    <img src={WORKFLOW_ACTION_ICONS.delete} alt="" />
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                      <polyline points="3 6 5 6 21 6"></polyline>
+                                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                      <line x1="10" y1="11" x2="10" y2="17"></line>
+                                      <line x1="14" y1="11" x2="14" y2="17"></line>
+                                    </svg>
                                   </button>
                                 )}
                                 {!isBatchGroup && (canDeleteWorkflow || actions.createdByCurrentUser) && (
@@ -1717,7 +1728,12 @@ const WorkflowTasksPanel = ({
                                     title="Delete task"
                                     aria-label="Delete task"
                                   >
-                                    <img src={WORKFLOW_ACTION_ICONS.delete} alt="" />
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                      <polyline points="3 6 5 6 21 6"></polyline>
+                                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                      <line x1="10" y1="11" x2="10" y2="17"></line>
+                                      <line x1="14" y1="11" x2="14" y2="17"></line>
+                                    </svg>
                                   </button>
                                 )}
                               </div>

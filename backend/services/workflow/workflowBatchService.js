@@ -855,6 +855,18 @@ const bulkUpdateWorkflowBatchTasks = async (
   if (payload?.task_type_key !== undefined) {
     taskPatch.taskType = await findActiveTaskTypeByKey(payload.task_type_key);
     hasTaskPatch.taskType = true;
+    if (normalizeKey(batch.task_type_key) !== taskPatch.taskType.key) {
+      batch.task_type = taskPatch.taskType._id;
+      batch.task_type_key = taskPatch.taskType.key;
+      batch.selected_task_type = {
+        key: taskPatch.taskType.key,
+        name: taskPatch.taskType.name,
+        category: taskPatch.taskType.category,
+        auto_create_mode: taskPatch.taskType.auto_create_mode,
+        requires_review: taskPatch.taskType.requires_review !== false,
+      };
+      changedBatchFields.push("task_type");
+    }
   }
 
   if (payload?.assigned_user_ids !== undefined) {
