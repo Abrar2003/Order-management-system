@@ -1156,13 +1156,15 @@ const UpdateQcModal = ({
   const canEditLockedQcSizeFields =
     isInspectionRecordUpdate || canRewriteLatestInspectionRecord || isQcUser || isManager;
   const canViewStoredBarcodes =
-    isInspectionRecordUpdate ||
-    canRewriteLatestInspectionRecord ||
-    isActualAdmin ||
-    isManager ||
-    Boolean(isAdmin) ||
-    isCurrentUserLabelExempt ||
-    isQcUser;
+    !isQcUser &&
+    (
+      isInspectionRecordUpdate ||
+      canRewriteLatestInspectionRecord ||
+      isActualAdmin ||
+      isManager ||
+      Boolean(isAdmin) ||
+      isCurrentUserLabelExempt
+    );
   const lockBarcodeField =
     (qc?.master_barcode || qc?.barcode) > 0 && !canEditLockedQcFields;
   const lockInnerBarcodeField = qc?.inner_barcode > 0 && !canEditLockedQcFields;
@@ -1254,11 +1256,9 @@ const UpdateQcModal = ({
         );
         return {
           ...nextForm,
+          barcode: "",
+          inner_barcode: "",
           inspected_box_mode: requiredMode,
-          inner_barcode:
-            requiredMode === BOX_PACKAGING_MODES.CARTON
-              ? nextForm.inner_barcode
-              : "",
           inspected_box_count:
             requiredMode === BOX_PACKAGING_MODES.CARTON
               ? "2"
@@ -1276,14 +1276,22 @@ const UpdateQcModal = ({
 
     skipNextBarcodeValidationResetRef.current = true;
     setForm(restoredForm);
-    setBarcodeScannedInSession(Boolean(validation.barcodeScannedInSession));
-    setInnerBarcodeScannedInSession(Boolean(validation.innerBarcodeScannedInSession));
+    setBarcodeScannedInSession(
+      isQcUser ? false : Boolean(validation.barcodeScannedInSession),
+    );
+    setInnerBarcodeScannedInSession(
+      isQcUser ? false : Boolean(validation.innerBarcodeScannedInSession),
+    );
     setBarcodeValidationType(
       restoredBarcodeValidationType,
     );
-    setBarcodeValidated(Boolean(validation.barcodeValidated));
-    setBarcodeValidationError(String(validation.barcodeValidationError || ""));
-    setBarcodeValidationStatus(String(validation.barcodeValidationStatus || ""));
+    setBarcodeValidated(isQcUser ? false : Boolean(validation.barcodeValidated));
+    setBarcodeValidationError(
+      isQcUser ? "" : String(validation.barcodeValidationError || ""),
+    );
+    setBarcodeValidationStatus(
+      isQcUser ? "" : String(validation.barcodeValidationStatus || ""),
+    );
   };
   const {
     clearDraft,
@@ -2097,6 +2105,7 @@ const UpdateQcModal = ({
   };
 
   const handleSizeEntryChange = (groupKey, index, field, value) => {
+    if (qcBarcodeValidationLocked) return;
 
     if (field !== "remark" && value !== "") {
       const parsedValue = Number(value);
@@ -2355,8 +2364,9 @@ const UpdateQcModal = ({
     const latestRequestEntry = getLatestRequestEntry(qc);
     const currentRequestInspectionRecord = isInspectionRecordUpdate
       ? inspectionRecord
-      : latestInspectionRecord ||
-        resolveLatestInspectionRecordForRequestEntry(
+      : isAdminRewriteMode
+        ? latestInspectionRecord
+        : resolveLatestInspectionRecordForRequestEntry(
           inspectionRecords,
           latestRequestEntry,
         );
@@ -3382,7 +3392,7 @@ const UpdateQcModal = ({
     showModeSelector = false,
   }) => {
     const isCartonMode = mode === BOX_PACKAGING_MODES.CARTON;
-    const sectionLocked = locked || saving;
+    const sectionLocked = locked || saving || qcBarcodeValidationLocked;
     const safeCount = isCartonMode ? 2 : normalizeSizeCount(countValue, 1);
     const allowedPackagingModeOptions = requiresBarcodeValidation
       ? [
@@ -3979,98 +3989,93 @@ const UpdateQcModal = ({
 	                />
 	              </div>
 
-	              <div className="col-md-6">
-                <label className="form-label">
-                  {form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON
-                    ? "Master Carton Barcode"
-                    : "Barcode"}
-                </label>
-                <div className="d-flex flex-wrap gap-2 align-items-stretch qc-barcode-input-row">
-                  <div className="input-group flex-grow-1">
-                    <input
-                      type="number"
-                      className="form-control"
-                      name="barcode"
-                      value={form.barcode}
-                      onChange={handleChange}
-                      min="1"
-                      step="1"
-                      disabled={lockBarcodeField}
-                      readOnly={isQcUser}
-                      placeholder={
-                        lockBarcodeField
-                          ? "Already set"
-                          : isQcUser
-                            ? "Scan master barcode"
-                            : "Enter master barcode"
-                      }
-                    />
-                    <button
-                      type="button"
-                      className="btn btn-outline-secondary"
-                      onClick={() => toggleBarcodeScanner("barcode")}
-                      disabled={lockBarcodeField}
-                    >
-                      {barcodeScannerOpen && barcodeScannerTarget === "barcode"
-                        ? "Stop Scan"
-                        : "Scan"}
-                    </button>
-                  </div>
-                  {isCurrentUserLabelExempt && (
-                    <button
-                      type="button"
-                      className="btn btn-outline-secondary flex-shrink-0"
-                      onClick={() => openBarcodeUploadDialog("barcode")}
-                      disabled={barcodeUploadLoading}
-                    >
-                      {barcodeUploadLoading ? "Uploading..." : "Upload Barcode"}
-                    </button>
-                  )}
-                </div>
-                <input
-                  ref={barcodeUploadInputRef}
-                  type="file"
-                  className="d-none"
-                  accept=".jpg,.jpeg,.png,.webp,.pdf,image/*,application/pdf"
-                  onChange={handleBarcodeUploadChange}
-                />
-                {barcodeScannerOpen && barcodeScannerTarget === "barcode" && (
-                  <div className="border rounded p-2 mt-2">
-                    <video
-                      ref={barcodeVideoRef}
-                      autoPlay
-                      muted
-                      playsInline
-                      onClick={handleBarcodeVideoClick}
-                      className="w-100 rounded"
-                      style={{ maxHeight: "240px", objectFit: "cover", background: "#111827" }}
-                    />
-                    {barcodeScannerStatus && (
-                      <div className="small text-muted mt-2">{barcodeScannerStatus}</div>
-                    )}
-                    {barcodeScannerError && (
-                      <div className="small text-danger mt-1">{barcodeScannerError}</div>
-                    )}
-                  </div>
-                )}
-                {isQcUser && !lockBarcodeField && (
-                  <div className="small text-secondary mt-2">
-                    QC users must scan the master barcode before saving.
-                  </div>
-                )}
-                {isCurrentUserLabelExempt && (
-                  <div className="small text-secondary mt-1">
-                    Upload a barcode photo or PDF to auto-fill the master barcode.
-                  </div>
-                )}
-                {barcodeUploadStatus && (
-                  <div className="small text-success mt-1">{barcodeUploadStatus}</div>
-                )}
-                {barcodeUploadError && (
-                  <div className="small text-danger mt-1">{barcodeUploadError}</div>
-                )}
-	              </div>
-	              {form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON && (
+	              {!requiresBarcodeValidation && (
+	                <div className="col-md-6">
+	                  <label className="form-label">
+	                    {form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON
+	                      ? "Master Carton Barcode"
+	                      : "Barcode"}
+	                  </label>
+	                  <div className="d-flex flex-wrap gap-2 align-items-stretch qc-barcode-input-row">
+	                    <div className="input-group flex-grow-1">
+	                      <input
+	                        type="number"
+	                        className="form-control"
+	                        name="barcode"
+	                        value={form.barcode}
+	                        onChange={handleChange}
+	                        min="1"
+	                        step="1"
+	                        disabled={lockBarcodeField}
+	                        placeholder={
+	                          lockBarcodeField
+	                            ? "Already set"
+	                            : "Enter master barcode"
+	                        }
+	                      />
+	                      <button
+	                        type="button"
+	                        className="btn btn-outline-secondary"
+	                        onClick={() => toggleBarcodeScanner("barcode")}
+	                        disabled={lockBarcodeField}
+	                      >
+	                        {barcodeScannerOpen && barcodeScannerTarget === "barcode"
+	                          ? "Stop Scan"
+	                          : "Scan"}
+	                      </button>
+	                    </div>
+	                    {isCurrentUserLabelExempt && (
+	                      <button
+	                        type="button"
+	                        className="btn btn-outline-secondary flex-shrink-0"
+	                        onClick={() => openBarcodeUploadDialog("barcode")}
+	                        disabled={barcodeUploadLoading}
+	                      >
+	                        {barcodeUploadLoading ? "Uploading..." : "Upload Barcode"}
+	                      </button>
+	                    )}
+	                  </div>
+	                  <input
+	                    ref={barcodeUploadInputRef}
+	                    type="file"
+	                    className="d-none"
+	                    accept=".jpg,.jpeg,.png,.webp,.pdf,image/*,application/pdf"
+	                    onChange={handleBarcodeUploadChange}
+	                  />
+	                  {barcodeScannerOpen && barcodeScannerTarget === "barcode" && (
+	                    <div className="border rounded p-2 mt-2">
+	                      <video
+	                        ref={barcodeVideoRef}
+	                        autoPlay
+	                        muted
+	                        playsInline
+	                        onClick={handleBarcodeVideoClick}
+	                        className="w-100 rounded"
+	                        style={{ maxHeight: "240px", objectFit: "cover", background: "#111827" }}
+	                      />
+	                      {barcodeScannerStatus && (
+	                        <div className="small text-muted mt-2">{barcodeScannerStatus}</div>
+	                      )}
+	                      {barcodeScannerError && (
+	                        <div className="small text-danger mt-1">{barcodeScannerError}</div>
+	                      )}
+	                    </div>
+	                  )}
+	                  {isCurrentUserLabelExempt && (
+	                    <div className="small text-secondary mt-1">
+	                      Upload a barcode photo or PDF to auto-fill the master barcode.
+	                    </div>
+	                  )}
+	                  {barcodeUploadStatus && (
+	                    <div className="small text-success mt-1">{barcodeUploadStatus}</div>
+	                  )}
+	                  {barcodeUploadError && (
+	                    <div className="small text-danger mt-1">{barcodeUploadError}</div>
+	                  )}
+	                </div>
+	              )}
+	              {!requiresBarcodeValidation &&
+	                form.inspected_box_mode === BOX_PACKAGING_MODES.CARTON && (
                 <div className="col-md-6">
                   <label className="form-label">Inner Carton Barcode</label>
                   <div className="d-flex flex-wrap gap-2 align-items-stretch qc-barcode-input-row">
@@ -4113,7 +4118,7 @@ const UpdateQcModal = ({
                       >
                         {barcodeUploadLoading ? "Uploading..." : "Upload Barcode"}
                       </button>
-                    )}
+	              )}
                   </div>
                   {barcodeScannerOpen && barcodeScannerTarget === "inner_barcode" && (
                     <div className="border rounded p-2 mt-2">
