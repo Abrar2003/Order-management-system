@@ -865,12 +865,12 @@ small,
 
 .workflow-task-table > thead > tr > th:nth-child(5),
 .workflow-task-table > tbody > tr > td:nth-child(5) {
-  width: 28%;
+  width: 26%;
 }
 
 .workflow-task-table > thead > tr > th:nth-child(6),
 .workflow-task-table > tbody > tr > td:nth-child(6) {
-  width: 16%;
+  width: 18%;
 }
 
 .workflow-task-name-cell,
@@ -1299,7 +1299,11 @@ small,
   gap: 0.35rem;
 }
 
-.workflow-task-actions.is-hold-decision .workflow-task-primary-actions,
+.workflow-task-actions.is-hold-decision .workflow-task-primary-actions {
+  display: block;
+  width: 100%;
+}
+
 .workflow-task-actions.is-hold-decision .workflow-task-decision-group {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1318,14 +1322,15 @@ small,
   width: 100%;
   min-width: 0;
   min-height: 2rem;
-  padding: 0.22rem 0.35rem;
+  padding: 0.22rem 0.15rem;
   border-radius: 0.55rem;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   line-height: 1.15;
   display: flex;
   align-items: center;
   justify-content: center;
   text-align: center;
+  white-space: nowrap !important;
 }
 
 .workflow-task-actions.is-hold-decision .workflow-icon-button {
