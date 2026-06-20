@@ -2949,6 +2949,12 @@ const buildItemDatabaseRow = ({
 } = {}) => ({
   id: String(item?._id || productDatabaseRow?.id || ""),
   item_code: item?.code || productDatabaseRow?.code || "",
+  description:
+    item?.description ||
+    item?.name ||
+    productDatabaseRow?.description ||
+    productDatabaseRow?.name ||
+    "",
   brand: item?.brand || item?.brand_name || productDatabaseRow?.brand || productDatabaseRow?.brand_name || "",
   brands: Array.isArray(item?.brands) ? item.brands : [],
   vendor:
@@ -2964,6 +2970,85 @@ const buildItemDatabaseRow = ({
   product_database: productDatabaseRow,
 });
 
+const getItemDatabaseDataset = async ({
+  search,
+  brand,
+  vendor,
+  status,
+  runningPo = "all",
+  user = null,
+} = {}) => {
+  const normalizedRunningPo = String(runningPo || "all").trim().toLowerCase();
+  const baseMatch = applyItemDataAccess(
+    buildItemMatch({ search, brand, vendor }),
+    user,
+  );
+  const statusMatch = buildProductDatabaseStatusMatch(status);
+  const match = combineMongoMatches(baseMatch, statusMatch);
+
+  const [
+    allMatchedItems,
+    brandsRaw,
+    brandNamesRaw,
+    brandsPrimaryRaw,
+    vendorsRaw,
+  ] = await Promise.all([
+    Item.find(match)
+      .select(PRODUCT_DATABASE_ITEM_SELECT)
+      .sort({ updatedAt: -1, code: 1 })
+      .lean(),
+    Item.distinct("brands", applyItemDataAccess(buildItemMatch({ search, vendor }), user)),
+    Item.distinct("brand_name", applyItemDataAccess(buildItemMatch({ search, vendor }), user)),
+    Item.distinct("brand", applyItemDataAccess(buildItemMatch({ search, vendor }), user)),
+    Item.distinct("vendors", applyItemDataAccess(buildItemMatch({ search, brand }), user)),
+  ]);
+
+  const itemCodes = (Array.isArray(allMatchedItems) ? allMatchedItems : [])
+    .map((item) => item?.code);
+  const [runningPoLookup, latestInspectionReportLookup] = await Promise.all([
+    buildRunningPoLookup(itemCodes),
+    buildLatestInspectionReportLookup(itemCodes),
+  ]);
+
+  const rows = (Array.isArray(allMatchedItems) ? allMatchedItems : [])
+    .map((item) => {
+      const itemCodeKey = normalizeLookupKey(item?.code);
+      return buildItemDatabaseRow({
+        item,
+        productDatabaseRow: buildProductDatabaseRow(item, user),
+        runningPo: runningPoLookup.get(itemCodeKey) || {},
+        latestInspectionReport: latestInspectionReportLookup.get(itemCodeKey) || {},
+      });
+    })
+    .filter((row) => {
+      if (normalizedRunningPo === "yes" || normalizedRunningPo === "running") {
+        return Number(row?.current_running_pos || 0) > 0;
+      }
+      if (normalizedRunningPo === "no" || normalizedRunningPo === "none") {
+        return Number(row?.current_running_pos || 0) === 0;
+      }
+      return true;
+    });
+
+  return {
+    rows,
+    allMatchedItems,
+    filters: {
+      search: normalizeFilterValue(search) || "",
+      brand: normalizeFilterValue(brand) || "",
+      vendor: normalizeFilterValue(vendor) || "",
+      status: String(status || "").trim() || "all",
+      running_po: normalizedRunningPo || "all",
+      brand_options: normalizeDistinctValues([
+        ...(brandsPrimaryRaw || []),
+        ...(brandsRaw || []),
+        ...(brandNamesRaw || []),
+      ]),
+      vendor_options: normalizeDistinctValues(vendorsRaw),
+    },
+  };
+};
+
 exports.getItemDatabaseItems = async (req, res) => {
   try {
     const search = req.query.search;
@@ -2974,56 +3059,16 @@ exports.getItemDatabaseItems = async (req, res) => {
     const page = parsePositiveInt(req.query.page, 1);
     const limit = Math.min(200, parsePositiveInt(req.query.limit, 20));
     const skip = (page - 1) * limit;
-
-    const baseMatch = applyItemDataAccess(
-      buildItemMatch({ search, brand, vendor }),
-      req.user,
-    );
-    const statusMatch = buildProductDatabaseStatusMatch(status);
-    const match = combineMongoMatches(baseMatch, statusMatch);
-
-    const [
-      allMatchedItems,
-      brandsRaw,
-      brandNamesRaw,
-      brandsPrimaryRaw,
-      vendorsRaw,
-    ] = await Promise.all([
-      Item.find(match)
-        .select(PRODUCT_DATABASE_ITEM_SELECT)
-        .sort({ updatedAt: -1, code: 1 })
-        .lean(),
-      Item.distinct("brands", applyItemDataAccess(buildItemMatch({ search, vendor }), req.user)),
-      Item.distinct("brand_name", applyItemDataAccess(buildItemMatch({ search, vendor }), req.user)),
-      Item.distinct("brand", applyItemDataAccess(buildItemMatch({ search, vendor }), req.user)),
-      Item.distinct("vendors", applyItemDataAccess(buildItemMatch({ search, brand }), req.user)),
-    ]);
-
-    const itemCodes = (Array.isArray(allMatchedItems) ? allMatchedItems : []).map((item) => item?.code);
-    const [runningPoLookup, latestInspectionReportLookup] = await Promise.all([
-      buildRunningPoLookup(itemCodes),
-      buildLatestInspectionReportLookup(itemCodes),
-    ]);
-
-    const allRows = (Array.isArray(allMatchedItems) ? allMatchedItems : [])
-      .map((item) => {
-        const itemCodeKey = normalizeLookupKey(item?.code);
-        return buildItemDatabaseRow({
-          item,
-          productDatabaseRow: buildProductDatabaseRow(item, req.user),
-          runningPo: runningPoLookup.get(itemCodeKey) || {},
-          latestInspectionReport: latestInspectionReportLookup.get(itemCodeKey) || {},
-        });
-      })
-      .filter((row) => {
-        if (runningPo === "yes" || runningPo === "running") {
-          return Number(row?.current_running_pos || 0) > 0;
-        }
-        if (runningPo === "no" || runningPo === "none") {
-          return Number(row?.current_running_pos || 0) === 0;
-        }
-        return true;
-      });
+    const dataset = await getItemDatabaseDataset({
+      search,
+      brand,
+      vendor,
+      status,
+      runningPo,
+      user: req.user,
+    });
+    const allRows = dataset.rows;
+    const allMatchedItems = dataset.allMatchedItems;
 
     const totalRecords = allRows.length;
     const rows = allRows.slice(skip, skip + limit);
@@ -3040,19 +3085,7 @@ exports.getItemDatabaseItems = async (req, res) => {
     return res.status(200).json({
       success: true,
       rows: rowsWithThumbnails,
-      filters: {
-        search: normalizeFilterValue(search) || "",
-        brand: normalizeFilterValue(brand) || "",
-        vendor: normalizeFilterValue(vendor) || "",
-        status: String(status || "").trim() || "all",
-        running_po: runningPo || "all",
-        brand_options: normalizeDistinctValues([
-          ...(brandsPrimaryRaw || []),
-          ...(brandsRaw || []),
-          ...(brandNamesRaw || []),
-        ]),
-        vendor_options: normalizeDistinctValues(vendorsRaw),
-      },
+      filters: dataset.filters,
       pagination: {
         page,
         limit,
@@ -3065,6 +3098,81 @@ exports.getItemDatabaseItems = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error?.message || "Failed to fetch Item Database items",
+    });
+  }
+};
+
+exports.exportItemDatabaseItems = async (req, res) => {
+  try {
+    const dataset = await getItemDatabaseDataset({
+      search: req.query.search,
+      brand: req.query.brand,
+      vendor: req.query.vendor,
+      status: req.query.status,
+      runningPo: req.query.running_po,
+      user: req.user,
+    });
+    const columns = [
+      { key: "item_code", header: "Item Code" },
+      { key: "description", header: "Description" },
+      { key: "brand", header: "Brand" },
+      { key: "vendor", header: "Vendor" },
+      { key: "current_running_pos", header: "Current Running POs" },
+      { key: "current_running_po_ids", header: "Running PO IDs" },
+      { key: "last_inspected_date", header: "Last Inspected Date" },
+      { key: "product_database_status", header: "PD Status" },
+    ];
+    const exportRows = dataset.rows.map((row) => ({
+      item_code: String(row?.item_code || "").trim(),
+      description: String(row?.description || "").trim(),
+      brand:
+        String(row?.brand || "").trim() ||
+        (Array.isArray(row?.brands) ? row.brands.join(", ") : ""),
+      vendor:
+        String(row?.vendor || "").trim() ||
+        (Array.isArray(row?.vendors) ? row.vendors.join(", ") : ""),
+      current_running_pos: Number(row?.current_running_pos || 0),
+      current_running_po_ids: Array.isArray(row?.current_running_po_ids)
+        ? row.current_running_po_ids.join(", ")
+        : "",
+      last_inspected_date: toDisplayDateString(row?.last_inspected_date),
+      product_database_status:
+        String(row?.product_database_status || NOT_SET_STATUS)
+          .trim()
+          .replace(/_/g, " "),
+    }));
+    const headerRow = columns.map((column) => column.header);
+    const dataRows = exportRows.map((row) =>
+      columns.map((column) => row[column.key] ?? ""),
+    );
+    const worksheet = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
+    worksheet["!cols"] = columns.map((column, columnIndex) => ({
+      wch: Math.min(
+        50,
+        Math.max(
+          12,
+          column.header.length + 2,
+          ...dataRows.map((row) => String(row[columnIndex] ?? "").length + 2),
+        ),
+      ),
+    }));
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Item Database");
+    const fileBuffer = XLSX.write(workbook, { type: "buffer", bookType: "xls" });
+    const fileDate = new Date().toISOString().slice(0, 10);
+
+    res.setHeader("Content-Type", "application/vnd.ms-excel");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="item-database-${fileDate}.xls"`,
+    );
+    return res.status(200).send(fileBuffer);
+  } catch (error) {
+    console.error("Export Item Database Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to export Item Database.",
     });
   }
 };

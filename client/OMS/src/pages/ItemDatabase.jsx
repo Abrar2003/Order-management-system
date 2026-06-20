@@ -50,6 +50,25 @@ const getStatusBadgeClass = (value) => {
   return "text-bg-secondary";
 };
 
+const downloadBlobResponse = (response, fallbackName) => {
+  const disposition = String(response?.headers?.["content-disposition"] || "");
+  const match = disposition.match(/filename\*?=(?:UTF-8''|"?)([^";]+)/i);
+  const fileName = match?.[1]
+    ? decodeURIComponent(match[1].trim())
+    : fallbackName;
+  const blob = new Blob([response.data], {
+    type: response?.headers?.["content-type"] || "application/vnd.ms-excel",
+  });
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(url);
+};
+
 const ItemDatabase = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -58,6 +77,7 @@ const ItemDatabase = () => {
   const [rows, setRows] = useState([]);
   const [filters, setFilters] = useState({ brand_options: [], vendor_options: [] });
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
   const [searchInput, setSearchInput] = useState(() => normalizeText(searchParams.get("search")));
   const [draftSearchInput, setDraftSearchInput] = useState(() => normalizeText(searchParams.get("search")));
@@ -156,6 +176,43 @@ const ItemDatabase = () => {
     setPage(1);
   };
 
+  const handleExportXls = useCallback(async () => {
+    try {
+      setExporting(true);
+      const response = await api.get("/items/item-database/export", {
+        responseType: "blob",
+        params: {
+          search: searchInput,
+          brand: brandFilter,
+          vendor: vendorFilter,
+          status: statusFilter,
+          running_po: runningPoFilter,
+        },
+      });
+      downloadBlobResponse(
+        response,
+        `item-database-${new Date().toISOString().slice(0, 10)}.xls`,
+      );
+    } catch (exportError) {
+      console.error(exportError);
+      let message = "Failed to export Item Database as XLS.";
+      const responseData = exportError?.response?.data;
+      if (responseData instanceof Blob) {
+        try {
+          const payload = JSON.parse(await responseData.text());
+          message = payload?.message || message;
+        } catch {
+          // Keep the fallback message when the error body is not JSON.
+        }
+      } else if (responseData?.message) {
+        message = responseData.message;
+      }
+      alert(message);
+    } finally {
+      setExporting(false);
+    }
+  }, [brandFilter, runningPoFilter, searchInput, statusFilter, vendorFilter]);
+
   return (
     <>
       <Navbar />
@@ -167,6 +224,14 @@ const ItemDatabase = () => {
               {totalRecords} item{totalRecords === 1 ? "" : "s"}
             </div>
           </div>
+          <button
+            type="button"
+            className="btn btn-outline-primary btn-sm"
+            onClick={handleExportXls}
+            disabled={exporting || loading || totalRecords === 0}
+          >
+            {exporting ? "Exporting..." : "Export XLS"}
+          </button>
         </div>
 
         <div className="card om-card mb-4">

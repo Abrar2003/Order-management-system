@@ -37,6 +37,7 @@ const {
   getPisUpdateLogs,
   getProductDatabaseItems,
   getItemDatabaseItems,
+  exportItemDatabaseItems,
   getItemDatabaseProductDetails,
   updateProductDatabaseItem,
   checkProductDatabaseItem,
@@ -221,6 +222,16 @@ router.get(
   requirePermission("product_database", "view"),
   cacheRoute("items", MEDIUM_CACHE_TTL),
   getItemDatabaseItems,
+);
+
+router.get(
+  "/item-database/export",
+  auth,
+  requirePermission("product_database", "view"),
+  securityLog("export_excel", "item_database", {
+    metadata: (req) => ({ filters: req.query || {} }),
+  }),
+  exportItemDatabaseItems,
 );
 
 router.get(
