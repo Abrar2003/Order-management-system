@@ -29,7 +29,7 @@ const getDefaultUpcomingEtdToDate = () => {
   const todayIso = toISODateString(new Date());
   const todayUtc = todayIso ? new Date(`${todayIso}T00:00:00Z`) : new Date();
   const nextDate = new Date(todayUtc);
-  nextDate.setUTCDate(nextDate.getUTCDate() + 15);
+  nextDate.setUTCDate(nextDate.getUTCDate() + 10);
   return toISODateString(nextDate);
 };
 
