@@ -8183,6 +8183,8 @@ exports.getDailyOrderSummary = async (req, res) => {
 };
 
 exports.markGoodsNotReady = async (req, res) => {
+  const uploadedImageKeys = [];
+  const preparedUploads = [];
   try {
     const reason = String(req.body?.reason || "").trim();
     if (!reason) {
@@ -8269,10 +8271,58 @@ exports.markGoodsNotReady = async (req, res) => {
 
     const requestedQuantityForRecord = latestRequestedQuantity;
     const inspectionSizeSource = await findInspectionSizeSourceForQc(qc, null, req.user);
+    const imageFiles = flattenUploadedFiles(req.files);
+    const existingGoodsNotReadyImages = Array.isArray(qc?.goods_not_ready_images)
+      ? qc.goods_not_ready_images
+      : [];
+    if (existingGoodsNotReadyImages.length + imageFiles.length > 10) {
+      return res.status(400).json({
+        message: `Goods-not-ready images are limited to 10. This QC already has ${existingGoodsNotReadyImages.length}.`,
+      });
+    }
+    if (imageFiles.length > 0 && !isWasabiConfigured()) {
+      return res.status(503).json({
+        message: "Wasabi storage is not configured for goods-not-ready images",
+      });
+    }
+
+    const uploadedAt = new Date();
+    const uploadedBy = buildAuditActor(req.user);
+    const goodsNotReadyImages = [];
+    for (const [index, imageFile] of imageFiles.entries()) {
+      const fallbackOriginalName = `${normalizeText(
+        qc?.order_meta?.order_id || qc?._id || "qc",
+      )}-goods-not-ready-${index + 1}${
+        path.extname(String(imageFile?.originalname || "")).toLowerCase() || ".jpg"
+      }`;
+      const preparedUpload = await prepareSingleQcImageUpload({
+        file: imageFile,
+        fallbackOriginalName,
+      });
+      preparedUploads.push(preparedUpload);
+      const uploadResult = await uploadPreparedQcImage({
+        preparedUpload,
+        folder: "qc-goods-not-ready-images",
+      });
+      if (uploadResult?.key) uploadedImageKeys.push(uploadResult.key);
+      goodsNotReadyImages.push(buildStoredQcImageEntry({
+        uploadResult,
+        hash: preparedUpload.hash,
+        comment: reason,
+        uploadedAt,
+        uploadedBy,
+      }));
+    }
 
     qc.last_inspected_date = inspectionDate;
     qc.remarks = reason;
     qc.updated_by = buildAuditActor(req.user);
+    if (goodsNotReadyImages.length > 0) {
+      qc.goods_not_ready_images = [
+        ...existingGoodsNotReadyImages,
+        ...goodsNotReadyImages,
+      ];
+    }
 
     const inspectionRecord = await upsertInspectionRecordForRequest({
       qcDoc: qc,
@@ -8330,10 +8380,18 @@ exports.markGoodsNotReady = async (req, res) => {
       data: qc,
     });
   } catch (err) {
+    await Promise.allSettled(
+      uploadedImageKeys.map((key) => deleteObject(key)),
+    );
     console.error("Goods Not Ready Error:", err);
     return res
       .status(400)
       .json({ message: err.message || "Failed to mark goods not ready" });
+  } finally {
+    await cleanupLocalQcImageFiles([
+      ...flattenUploadedFiles(req.files).map((file) => file?.path),
+      ...preparedUploads.flatMap((upload) => upload?.cleanupPaths || []),
+    ]);
   }
 };
 
@@ -11078,6 +11136,24 @@ exports.getQCById = async (req, res) => {
         },
       ),
     );
+    const goodsNotReadyImagesWithSignedUrls = await Promise.all(
+      (Array.isArray(qcData?.goods_not_ready_images)
+        ? [...qcData.goods_not_ready_images]
+        : [])
+        .sort(
+          (a, b) =>
+            toSortableTimestamp(b?.uploadedAt || b?.createdAt) -
+            toSortableTimestamp(a?.uploadedAt || a?.createdAt),
+        )
+        .map(async (image) => {
+          const signedImage = await buildSignedQcImage(image);
+          return {
+            ...image,
+            ...(signedImage || {}),
+            comment: normalizeText(image?.comment || ""),
+          };
+        }),
+    );
     const rejectedImageWithSignedUrl = qcData?.rejected_image
       ? await buildSignedQcImage(qcData.rejected_image)
       : null;
@@ -11119,6 +11195,7 @@ exports.getQCById = async (req, res) => {
         ...qcData,
         item_master: itemMasterWithSignedUrls,
         qc_images: qcImagesWithSignedUrls,
+        goods_not_ready_images: goodsNotReadyImagesWithSignedUrls,
         rejected_image: rejectedImageWithSignedUrl
           ? {
               ...qcData.rejected_image,

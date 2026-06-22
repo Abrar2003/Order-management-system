@@ -290,7 +290,9 @@ const getSelectedFileSignature = (file) =>
   ].join("__");
 
 const getQcImageSelectionValue = (image) =>
-  String(image?._id || image?.key || "").trim();
+  image?.gallery_source === "goods_not_ready"
+    ? ""
+    : String(image?._id || image?.key || "").trim();
 
 const isMongoObjectIdLike = (value) => /^[a-f0-9]{24}$/i.test(String(value || "").trim());
 
@@ -839,8 +841,27 @@ const QcDetails = () => {
     [itemMasterFiles],
   );
   const qcImages = useMemo(
-    () => (Array.isArray(qc?.qc_images) ? qc.qc_images : []),
-    [qc?.qc_images],
+    () => [
+      ...(Array.isArray(qc?.qc_images)
+        ? qc.qc_images.map((image) => ({
+            ...image,
+            gallery_source: "qc",
+            gallery_source_label: "QC Image",
+          }))
+        : []),
+      ...(Array.isArray(qc?.goods_not_ready_images)
+        ? qc.goods_not_ready_images.map((image) => ({
+            ...image,
+            gallery_source: "goods_not_ready",
+            gallery_source_label: "Goods Not Ready",
+          }))
+        : []),
+    ].sort(
+      (left, right) =>
+        toTimestamp(right?.uploadedAt || right?.createdAt) -
+        toTimestamp(left?.uploadedAt || left?.createdAt),
+    ),
+    [qc?.goods_not_ready_images, qc?.qc_images],
   );
   const visibleQcImages = useMemo(
     () =>
@@ -2951,6 +2972,11 @@ const QcDetails = () => {
                                     Comment
                                   </span>
                                 )}
+                                {image?.gallery_source === "goods_not_ready" && (
+                                  <span className="qc-image-gallery-source-indicator">
+                                    Goods Not Ready
+                                  </span>
+                                )}
                               </button>
 
                               {selectionValue && (
@@ -3034,6 +3060,9 @@ const QcDetails = () => {
                     </div>
                     <div className="small text-muted">
                       {getQcImageUploadedDateLabel(activeQcImage)} | {getQcImageUploaderName(activeQcImage)}
+                      {activeQcImage?.gallery_source_label
+                        ? ` | ${activeQcImage.gallery_source_label}`
+                        : ""}
                     </div>
                     {String(activeQcImage?.comment || "").trim() && (
                       <div className="small mt-2">

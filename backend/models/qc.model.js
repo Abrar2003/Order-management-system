@@ -146,6 +146,25 @@ const qcSchema = new mongoose.Schema(
         uploaded_by: { type: AuditActorSchema, default: () => ({}) },
       },
     ],
+    goods_not_ready_images: {
+      type: [
+        {
+          key: { type: String, default: "", trim: true },
+          hash: { type: String, default: "", trim: true, lowercase: true },
+          originalName: { type: String, default: "", trim: true },
+          contentType: { type: String, default: "", trim: true },
+          size: { type: Number, default: 0, min: 0 },
+          comment: { type: String, default: "", trim: true },
+          uploadedAt: { type: Date, default: Date.now },
+          uploaded_by: { type: AuditActorSchema, default: () => ({}) },
+        },
+      ],
+      default: [],
+      validate: {
+        validator: (images) => !Array.isArray(images) || images.length <= 10,
+        message: "goods_not_ready_images cannot exceed 10 images",
+      },
+    },
     rejected_image: {
       key: { type: String, default: "", trim: true },
       hash: { type: String, default: "", trim: true, lowercase: true },

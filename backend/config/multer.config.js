@@ -395,6 +395,20 @@ module.exports.qcImageUpload = qcImageUpload;
 module.exports.qcImageAnyUpload = applyMulterMiddleware(qcImageUpload.any());
 module.exports.qcImageSingleUpload = (fieldName = "image") =>
   applyMulterMiddleware(qcImageUpload.single(fieldName));
+module.exports.goodsNotReadyImagesUpload = (fieldName = "goods_not_ready_images") =>
+  (req, res, next) =>
+    qcImageUpload.array(fieldName, 10)(req, res, (err) => {
+      if (
+        err instanceof multer.MulterError
+        && (err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE")
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "You can upload up to 10 goods-not-ready images",
+        });
+      }
+      return handleQcImageUploadErrors(err, req, res, next);
+    });
 module.exports.handleGenericUploadErrors = handleGenericUploadErrors;
 module.exports.handleQcImageUploadErrors = handleQcImageUploadErrors;
 module.exports.handleComplaintUploadErrors = handleComplaintUploadErrors;

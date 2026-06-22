@@ -4,6 +4,7 @@ const router = express.Router();
 const upload = require("../config/multer.config");
 const qcImageAnyUpload = upload.qcImageAnyUpload;
 const qcImageSingleUpload = upload.qcImageSingleUpload;
+const goodsNotReadyImagesUpload = upload.goodsNotReadyImagesUpload;
 const auth = require("../middlewares/auth.middleware");
 const { requirePermission, requireCheckedEditAccess } = require("../middlewares/permission.middleware");
 const {
@@ -102,6 +103,7 @@ router.patch(
   "/goods-not-ready/:id",
   auth,
   requirePermission("qc", "edit"),
+  goodsNotReadyImagesUpload("goods_not_ready_images"),
   securityLog("reject", "qc"),
   invalidateQcOnSuccess,
   qcController.markGoodsNotReady
