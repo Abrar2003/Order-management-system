@@ -22,7 +22,6 @@ module.exports = {
       env: {
         NODE_ENV: "production",
         PORT: 8008,
-        APP_COMMIT_SHA: process.env.APP_COMMIT_SHA || "unknown",
       },
     },
     {

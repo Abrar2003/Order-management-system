@@ -159,6 +159,9 @@ log "Restarting backend via PM2 cluster mode"
 cd "$APP_DIR"
 
 DEPLOYED_COMMIT_SHA="$(git rev-parse HEAD)"
+DEPLOY_COMMIT_FILE="$BACKEND_DIR/.deploy-commit-sha"
+printf '%s\n' "$DEPLOYED_COMMIT_SHA" > "${DEPLOY_COMMIT_FILE}.tmp"
+mv -f "${DEPLOY_COMMIT_FILE}.tmp" "$DEPLOY_COMMIT_FILE"
 export APP_COMMIT_SHA="$DEPLOYED_COMMIT_SHA"
 
 if pm2 describe oms-backend >/dev/null 2>&1; then
