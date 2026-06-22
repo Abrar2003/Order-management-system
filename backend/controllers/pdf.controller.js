@@ -78,7 +78,15 @@ const renderHtmlPdf = async (req, res) => {
   }
 };
 
+const getPdfRendererStatus = (_req, res) =>
+  res.status(200).json({
+    ok: true,
+    renderer: "chromium",
+    reports: [...PDF_REPORT_KEYS].sort(),
+  });
+
 module.exports = {
   PDF_REPORT_KEYS,
+  getPdfRendererStatus,
   renderHtmlPdf,
 };

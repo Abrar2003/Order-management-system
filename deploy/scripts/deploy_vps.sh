@@ -158,7 +158,26 @@ sync_frontend_build
 log "Restarting backend via PM2 cluster mode"
 cd "$APP_DIR"
 
-pm2 startOrReload "$PM2_CONFIG" --update-env
+DEPLOYED_COMMIT_SHA="$(git rev-parse HEAD)"
+export APP_COMMIT_SHA="$DEPLOYED_COMMIT_SHA"
+
+if pm2 describe oms-backend >/dev/null 2>&1; then
+  pm2 reload "$PM2_CONFIG" --only oms-backend --update-env
+else
+  pm2 start "$PM2_CONFIG" --only oms-backend --update-env
+fi
+
+REDIS_JOBS_ENABLED_EFFECTIVE="$(get_env_value REDIS_JOBS_ENABLED)"
+if is_truthy "$REDIS_JOBS_ENABLED_EFFECTIVE"; then
+  if pm2 describe oms-worker >/dev/null 2>&1; then
+    pm2 restart "$PM2_CONFIG" --only oms-worker --update-env
+  else
+    pm2 start "$PM2_CONFIG" --only oms-worker --update-env
+  fi
+else
+  pm2 delete oms-worker >/dev/null 2>&1 || true
+fi
+
 pm2 save
 
 log "Verifying PM2 processes"
@@ -175,7 +194,6 @@ fi
 
 echo "oms-backend is running with $RUNNING_PM2_WEB_INSTANCES instance(s)"
 
-REDIS_JOBS_ENABLED_EFFECTIVE="$(get_env_value REDIS_JOBS_ENABLED)"
 if is_truthy "$REDIS_JOBS_ENABLED_EFFECTIVE"; then
   EXPECTED_PM2_WORKER_INSTANCES="${EXPECTED_PM2_WORKER_INSTANCES:-$(get_env_value PM2_WORKER_INSTANCES)}"
   EXPECTED_PM2_WORKER_INSTANCES="${EXPECTED_PM2_WORKER_INSTANCES:-1}"
@@ -207,19 +225,41 @@ fi
 if command -v curl >/dev/null 2>&1; then
   log "Checking backend health"
   for i in {1..10}; do
-    if curl --fail --silent --show-error "$BACKEND_HEALTHCHECK_URL" >/dev/null; then
-      echo "Backend health check passed"
+    HEALTH_RESPONSE="$(curl --fail --silent --show-error "$BACKEND_HEALTHCHECK_URL" || true)"
+    HEALTH_COMMIT="$(
+      printf '%s' "$HEALTH_RESPONSE" |
+        node -e '
+          let input = "";
+          process.stdin.on("data", chunk => input += chunk);
+          process.stdin.on("end", () => {
+            try {
+              console.log(JSON.parse(input || "{}").commit || "");
+            } catch {
+              console.log("");
+            }
+          });
+        '
+    )"
+
+    if [[ "$HEALTH_COMMIT" == "$DEPLOYED_COMMIT_SHA" ]]; then
+      echo "Backend health check passed for commit $DEPLOYED_COMMIT_SHA"
       break
     fi
 
     if [[ "$i" -eq 10 ]]; then
-      echo "Backend health check failed after multiple attempts"
+      echo "Backend health check did not reach deployed commit $DEPLOYED_COMMIT_SHA"
+      echo "Health response: $HEALTH_RESPONSE"
       exit 1
     fi
 
-    echo "Backend not ready yet, retrying in 3 seconds..."
+    echo "Backend still reports commit '${HEALTH_COMMIT:-unknown}', retrying in 3 seconds..."
     sleep 3
   done
+
+  PDF_STATUS_URL="${PDF_STATUS_URL:-http://127.0.0.1:8008/reports/pdf/status}"
+  log "Checking PDF renderer route"
+  curl --fail --silent --show-error "$PDF_STATUS_URL" >/dev/null
+  echo "PDF renderer route check passed"
 
   if [[ -n "$FRONTEND_HEALTHCHECK_URL" ]]; then
     log "Checking frontend health"

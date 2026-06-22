@@ -46,6 +46,11 @@ const app = express();
 const PORT = Number.parseInt(String(process.env.PORT || "8008"), 10) || 8008;
 const isProduction =
   String(process.env.NODE_ENV || "").trim().toLowerCase() === "production";
+const APP_COMMIT_SHA = String(
+  process.env.APP_COMMIT_SHA
+    || process.env.GIT_COMMIT_SHA
+    || "unknown",
+).trim();
 
 const isTruthy = (value) =>
   String(value || "")
@@ -155,6 +160,7 @@ app.get("/healthz", (req, res) => {
     timestamp: new Date().toISOString(),
     database: readyStateMap[dbReadyState] || "unknown",
     environment: process.env.NODE_ENV || "development",
+    commit: APP_COMMIT_SHA,
   });
 });
 

@@ -8,9 +8,14 @@ const {
   securityLog,
 } = require("../middlewares/securityActivityLogger");
 const reportsController = require("../controllers/reports.controller");
-const { renderHtmlPdf } = require("../controllers/pdf.controller");
+const {
+  getPdfRendererStatus,
+  renderHtmlPdf,
+} = require("../controllers/pdf.controller");
 
 const router = express.Router();
+
+router.get("/pdf/status", getPdfRendererStatus);
 
 router.post(
   "/pdf/render",
