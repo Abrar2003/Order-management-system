@@ -10928,7 +10928,7 @@ exports.getQCById = async (req, res) => {
         ),
       )
           .select(
-            "code name description brand_name brands vendors finish barcode_exempted inspected_weight pis_weight weight cbm kd mounting_file_needed pis_barcode pis_master_barcode pis_inner_barcode qc.barcode qc.master_barcode qc.inner_barcode inspected_item_LBH inspected_item_sizes inspected_item_top_LBH inspected_item_bottom_LBH pis_item_LBH pis_item_sizes pis_item_top_LBH pis_item_bottom_LBH item_LBH inspected_box_LBH inspected_box_sizes inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_box_LBH pis_box_sizes pis_box_top_LBH pis_box_bottom_LBH box_LBH image cad_file pis_file assembly_file mounting_file packeging_ppt shipping_marks",
+            "code name description brand_name brands vendors finish claim_percentage barcode_exempted inspected_weight pis_weight weight cbm kd mounting_file_needed pis_barcode pis_master_barcode pis_inner_barcode qc.barcode qc.master_barcode qc.inner_barcode inspected_item_LBH inspected_item_sizes inspected_item_top_LBH inspected_item_bottom_LBH pis_item_LBH pis_item_sizes pis_item_top_LBH pis_item_bottom_LBH item_LBH inspected_box_LBH inspected_box_sizes inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH pis_box_LBH pis_box_sizes pis_box_top_LBH pis_box_bottom_LBH box_LBH image cad_file pis_file assembly_file mounting_file packeging_ppt shipping_marks",
           )
           .lean()
       : null;

@@ -234,6 +234,15 @@ const InfoBox = ({ label, value, compact = false }) => (
   </div>
 );
 
+const CLAIM_WARNING_THRESHOLD = 3;
+const CLAIM_WARNING_DELAY_SECONDS = 3;
+
+const formatClaimPercentage = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return "0";
+  return parsed.toFixed(2).replace(/\.?0+$/, "");
+};
+
 const RELATED_FILE_OPTIONS = Object.freeze([
   ...ITEM_FILE_OPTIONS.map((option) => ({
     ...option,
@@ -374,6 +383,10 @@ const getNestedValue = (obj, path) => {
 const QcDetails = () => {
   const { id } = useParams();
   const [qc, setQc] = useState(null);
+  const [claimWarningOpen, setClaimWarningOpen] = useState(false);
+  const [claimWarningSeconds, setClaimWarningSeconds] = useState(
+    CLAIM_WARNING_DELAY_SECONDS,
+  );
   const [loading, setLoading] = useState(true);
   const [relatedFileType, setRelatedFileType] = useState(() => {
     const initialRole = String(getUserFromToken()?.role || "").trim().toLowerCase();
@@ -750,8 +763,50 @@ const QcDetails = () => {
           : formatLbhValue(boxLbhSource),
       pisCbm: formatPositiveCbm(pisCbm, "Not Set"),
       calculatedPisCbm: formatPositiveCbm(calculatedPisCbm, "Not Set"),
+      claimPercentage: Math.max(
+        0,
+        Number(itemMaster?.claim_percentage || 0) || 0,
+      ),
     };
   }, [qc]);
+  const claimPercentage = itemMasterDetails.claimPercentage;
+
+  useEffect(() => {
+    if (claimPercentage <= CLAIM_WARNING_THRESHOLD || !qc?._id) {
+      setClaimWarningOpen(false);
+      return undefined;
+    }
+
+    const acknowledgementKey =
+      `qc-claim-warning:${String(qc._id)}:${formatClaimPercentage(claimPercentage)}`;
+    if (globalThis.sessionStorage?.getItem(acknowledgementKey) === "true") {
+      setClaimWarningOpen(false);
+      return undefined;
+    }
+
+    setClaimWarningSeconds(CLAIM_WARNING_DELAY_SECONDS);
+    setClaimWarningOpen(true);
+    const timerId = globalThis.setInterval(() => {
+      setClaimWarningSeconds((current) => {
+        if (current <= 1) {
+          globalThis.clearInterval(timerId);
+          return 0;
+        }
+        return current - 1;
+      });
+    }, 1000);
+
+    return () => globalThis.clearInterval(timerId);
+  }, [claimPercentage, qc?._id]);
+
+  const acknowledgeClaimWarning = useCallback(() => {
+    if (claimWarningSeconds > 0 || !qc?._id) return;
+    const acknowledgementKey =
+      `qc-claim-warning:${String(qc._id)}:${formatClaimPercentage(claimPercentage)}`;
+    globalThis.sessionStorage?.setItem(acknowledgementKey, "true");
+    setClaimWarningOpen(false);
+  }, [claimPercentage, claimWarningSeconds, qc?._id]);
+
   const finishRows = useMemo(() => {
     const finishEntries = Array.isArray(qc?.item_master?.finish)
       ? qc.item_master.finish
@@ -1996,7 +2051,11 @@ const QcDetails = () => {
           </div>
         )}
 
-        <div className="card om-card">
+        <div className="card om-card qc-details-main-card">
+          <div className="qc-claim-percentage-corner-tag">
+            <span>Claim percentage</span>
+            <strong>{formatClaimPercentage(claimPercentage)}%</strong>
+          </div>
           <div className="card-body d-grid gap-4">
             <section>
               <h3 className="h6 mb-3 qc-details-section-title">{`Order Information | ${qc.order.order_id} | ${qc.order.brand} | ${qc.order.vendor} |  Request Date: ${formatDateDDMMYYYY(qc.request_date)}`}</h3>
@@ -2985,6 +3044,53 @@ const QcDetails = () => {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {claimWarningOpen && (
+        <div
+          className="om-notification-popup-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="claim-warning-title"
+        >
+          <div className="om-notification-popup qc-claim-warning-modal">
+            <div className="om-notification-popup-header">
+              <div>
+                <h5 id="claim-warning-title" className="mb-1">
+                  High Claim Percentage
+                </h5>
+                <div className="text-secondary small">
+                  Review this item before continuing with QC.
+                </div>
+              </div>
+            </div>
+            <div className="om-notification-popup-body">
+              <div className="qc-claim-warning-value">
+                {formatClaimPercentage(claimPercentage)}%
+              </div>
+              <p className="mb-0 text-center">
+                Item <strong>{itemMasterDetails.code}</strong> has a claim percentage
+                greater than {CLAIM_WARNING_THRESHOLD}%.
+              </p>
+            </div>
+            <div className="om-notification-popup-footer">
+              {claimWarningSeconds > 0 && (
+                <span className="small text-secondary">
+                  You can acknowledge in {claimWarningSeconds} second
+                  {claimWarningSeconds === 1 ? "" : "s"}...
+                </span>
+              )}
+              <button
+                type="button"
+                className="btn btn-danger"
+                disabled={claimWarningSeconds > 0}
+                onClick={acknowledgeClaimWarning}
+              >
+                Acknowledge
+              </button>
+            </div>
           </div>
         </div>
       )}

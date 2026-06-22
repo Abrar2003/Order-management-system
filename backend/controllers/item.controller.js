@@ -1504,6 +1504,7 @@ const PRODUCT_DATABASE_ITEM_SELECT = [
   "pd_inner_barcode",
   "kd",
   "mounting_file_needed",
+  "claim_percentage",
   "mounting_file",
   "product_type",
   "product_specs",
@@ -5809,6 +5810,21 @@ exports.updateItem = async (req, res) => {
         "mounting_file_needed",
         toBooleanValue(payload.mounting_file_needed, "mounting_file_needed"),
       );
+    }
+
+    if (hasOwn(payload, "claim_percentage")) {
+      const claimPercentage = Number(payload.claim_percentage);
+      if (
+        !Number.isFinite(claimPercentage)
+        || claimPercentage < 0
+        || claimPercentage > 100
+      ) {
+        throw createHttpError(
+          400,
+          "claim_percentage must be a number between 0 and 100",
+        );
+      }
+      setPath("claim_percentage", claimPercentage);
     }
 
     if (productTypeContext.productTypeSnapshot) {

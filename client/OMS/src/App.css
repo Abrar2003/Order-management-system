@@ -441,6 +441,105 @@ small,
   font-size: 0.6rem;
 }
 
+.item-files-table .items-size-column {
+  width: 20rem;
+  min-width: 20rem;
+}
+
+.item-files-table .om-size-data-table th,
+.item-files-table .om-size-data-table td {
+  padding-block: 0.25rem;
+}
+
+.item-files-table .om-size-data-table td {
+  font-size: 0.68rem;
+}
+
+.item-files-table .om-size-data-table th:nth-child(3),
+.item-files-table .om-size-data-table td:nth-child(3) {
+  width: 40%;
+}
+
+.item-files-table .om-size-data-table th:nth-child(4),
+.item-files-table .om-size-data-table td:nth-child(4) {
+  width: 20%;
+}
+
+.qc-details-main-card {
+  position: relative;
+}
+
+.qc-claim-percentage-corner-tag {
+  position: absolute;
+  z-index: 2;
+  top: 1rem;
+  right: 1rem;
+  display: grid;
+  min-width: 9.5rem;
+  padding: 0.65rem 1rem;
+  border: 1px solid rgba(185, 28, 28, 0.32);
+  border-radius: 0.85rem;
+  background: linear-gradient(145deg, #fff1f1, #fee2e2);
+  color: #b91c1c;
+  box-shadow: 0 0.45rem 1.1rem rgba(185, 28, 28, 0.12);
+  text-align: center;
+}
+
+.qc-claim-percentage-corner-tag span {
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.qc-claim-percentage-corner-tag strong {
+  margin-top: 0.12rem;
+  font-size: 1.55rem;
+  line-height: 1;
+}
+
+.qc-details-main-card > .card-body {
+  padding-top: 1.35rem;
+}
+
+.qc-details-main-card .qc-details-section-title {
+  padding-right: 11rem;
+}
+
+@media (max-width: 767.98px) {
+  .qc-claim-percentage-corner-tag {
+    position: static;
+    width: fit-content;
+    margin: 1rem 1rem 0 auto;
+  }
+
+  .qc-details-main-card .qc-details-section-title {
+    padding-right: 0;
+  }
+}
+
+.qc-claim-warning-modal {
+  width: min(28rem, calc(100vw - 2rem));
+  border-color: rgba(185, 28, 28, 0.3);
+}
+
+.qc-claim-warning-modal .om-notification-popup-header {
+  background: linear-gradient(180deg, #fff7f7, #fff);
+}
+
+.qc-claim-warning-value {
+  width: fit-content;
+  margin: 0 auto 0.8rem;
+  padding: 0.45rem 1rem;
+  border: 1px solid rgba(185, 28, 28, 0.3);
+  border-radius: 999px;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 1.65rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
 .security-summary-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

@@ -542,6 +542,7 @@ const itemSchema = new mongoose.Schema(
       type: [formDraftSchema],
       default: [],
     },
+    claim_percentage: { type: Number, default: 0, min: 0, max: 100 },
   },
   { timestamps: true },
 );

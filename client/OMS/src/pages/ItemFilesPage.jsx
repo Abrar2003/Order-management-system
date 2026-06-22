@@ -22,7 +22,6 @@ import {
   sortClientRows,
 } from "../utils/clientSort";
 import { formatCbm } from "../utils/cbm";
-import { formatFixedNumber, formatLbhValue } from "../utils/measurementDisplay";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
 
@@ -56,6 +55,7 @@ const normalizeMeasurementEntries = (entries = [], weightKey = "") =>
       const H = Number(entry?.H || 0);
       const weight = Number(weightKey ? entry?.[weightKey] : 0);
       return {
+        remark: String(entry?.remark || entry?.type || "").trim(),
         L: Number.isFinite(L) ? L : 0,
         B: Number.isFinite(B) ? B : 0,
         H: Number.isFinite(H) ? H : 0,
@@ -110,6 +110,160 @@ const getInspectedItemLbh = (item) =>
 const getInspectedBoxLbh = (item) =>
   getPrimaryMeasurementLbh(item?.inspected_box_sizes, item?.inspected_box_LBH || item?.box_LBH || {});
 
+const getPisItemLbh = (item) =>
+  getPrimaryMeasurementLbh(item?.pis_item_sizes, item?.pis_item_LBH || {});
+
+const getPisBoxLbh = (item) =>
+  getPrimaryMeasurementLbh(item?.pis_box_sizes, item?.pis_box_LBH || {});
+
+const hasCompleteLbh = (value = {}) =>
+  Number(value?.L || 0) > 0
+  && Number(value?.B || 0) > 0
+  && Number(value?.H || 0) > 0;
+
+const getPreferredItemLbh = (item, preferPis = false) => {
+  const pisValue = getPisItemLbh(item);
+  return preferPis && hasCompleteLbh(pisValue)
+    ? pisValue
+    : getInspectedItemLbh(item);
+};
+
+const getPreferredBoxLbh = (item, preferPis = false) => {
+  const pisValue = getPisBoxLbh(item);
+  return preferPis && hasCompleteLbh(pisValue)
+    ? pisValue
+    : getInspectedBoxLbh(item);
+};
+
+const getPisWeight = (item, key) => {
+  const weightKey = key === "net" ? "net_weight" : "gross_weight";
+  const sizeEntryWeight =
+    key === "net"
+      ? sumMeasurementWeights(item?.pis_item_sizes, weightKey)
+      : sumMeasurementWeights(item?.pis_box_sizes, weightKey);
+  return sizeEntryWeight || getWeightValue(item?.pis_weight, key);
+};
+
+const getPreferredWeight = (item, key, preferPis = false) => {
+  const pisWeight = getPisWeight(item, key);
+  return preferPis && pisWeight > 0
+    ? pisWeight
+    : getInspectedWeight(item, key);
+};
+
+const formatMeasurementPartLabel = (remark = "", fallback = "Item") => {
+  const normalized = String(remark || "").trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (normalized === "top") return "Top";
+  if (normalized === "base" || normalized === "bottom") return "Base";
+  if (normalized === "inner") return "Inner";
+  if (normalized === "master" || normalized === "outer") return "Master";
+  return normalized.replace(/([a-z]+)(\d+)/i, (_, prefix, number) =>
+    `${prefix.charAt(0).toUpperCase()}${prefix.slice(1)} ${number}`,
+  );
+};
+
+const formatSizeTableNumber = (value, decimals = 2) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return "-";
+  return parsed.toFixed(decimals).replace(/\.?0+$/, "");
+};
+
+const buildPreferredSizeRows = (item = {}, preferPis = false) => {
+  const sourceItemEntries = preferPis && normalizeMeasurementEntries(
+    item?.pis_item_sizes,
+    "net_weight",
+  ).length > 0
+    ? normalizeMeasurementEntries(item?.pis_item_sizes, "net_weight")
+    : normalizeMeasurementEntries(item?.inspected_item_sizes, "net_weight");
+  const sourceBoxEntries = preferPis && normalizeMeasurementEntries(
+    item?.pis_box_sizes,
+    "gross_weight",
+  ).length > 0
+    ? normalizeMeasurementEntries(item?.pis_box_sizes, "gross_weight")
+    : normalizeMeasurementEntries(item?.inspected_box_sizes, "gross_weight");
+  const fallbackItemLbh = getPreferredItemLbh(item, preferPis);
+  const fallbackBoxLbh = getPreferredBoxLbh(item, preferPis);
+  const itemEntries = sourceItemEntries.length > 0
+    ? sourceItemEntries
+    : hasCompleteLbh(fallbackItemLbh)
+      ? [{
+          ...fallbackItemLbh,
+          remark: "item",
+          weight: getPreferredWeight(item, "net", preferPis),
+        }]
+      : [];
+  const boxEntries = sourceBoxEntries.length > 0
+    ? sourceBoxEntries
+    : hasCompleteLbh(fallbackBoxLbh)
+      ? [{
+          ...fallbackBoxLbh,
+          remark: "box",
+          weight: getPreferredWeight(item, "gross", preferPis),
+        }]
+      : [];
+
+  return [
+    ...itemEntries.map((entry, index) => ({
+      ...entry,
+      groupLabel: "Item",
+      partLabel: formatMeasurementPartLabel(
+        entry?.remark,
+        index === 0 ? "Item" : `Entry ${index + 1}`,
+      ),
+      weightLabel: "Net",
+    })),
+    ...boxEntries.map((entry, index) => ({
+      ...entry,
+      groupLabel: "Box",
+      partLabel: formatMeasurementPartLabel(
+        entry?.remark,
+        index === 0 ? "Box" : `Entry ${index + 1}`,
+      ),
+      weightLabel: "Gross",
+    })),
+  ];
+};
+
+const SizeDataCell = ({ item, preferPis = false }) => {
+  const entries = buildPreferredSizeRows(item, preferPis);
+
+  if (entries.length === 0) {
+    return <span className="text-secondary">No size data</span>;
+  }
+
+  return (
+    <div className="table-responsive">
+      <table className="table table-sm align-middle mb-0 om-size-data-table items-size-data-table">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Part</th>
+            <th>L x B x H</th>
+            <th>Weight</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map((entry, index) => (
+            <tr key={`${entry.groupLabel}-${entry?.remark || "entry"}-${index}`}>
+              <td>{entry.groupLabel}</td>
+              <td>{entry.partLabel}</td>
+              <td>
+                {formatSizeTableNumber(entry?.L)} x {formatSizeTableNumber(entry?.B)} x{" "}
+                {formatSizeTableNumber(entry?.H)}
+              </td>
+              <td>
+                {formatSizeTableNumber(entry?.weight, 3)}
+                <span className="items-size-weight-label"> {entry.weightLabel}</span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
 const getCalculatedInspectedCbm = (item) =>
   item?.cbm?.calculated_inspected_total
   ?? item?.cbm?.inspected_total
@@ -117,6 +271,17 @@ const getCalculatedInspectedCbm = (item) =>
   ?? item?.cbm?.qc_total
   ?? item?.cbm?.total
   ?? "0";
+
+const getPreferredCbm = (item, preferPis = false) => {
+  const pisCbm = Number(
+    item?.cbm?.calculated_pis_total
+    ?? item?.cbm?.total
+    ?? 0,
+  );
+  return preferPis && Number.isFinite(pisCbm) && pisCbm > 0
+    ? pisCbm
+    : getCalculatedInspectedCbm(item);
+};
 
 const isProductImageFileType = (fileType = "") =>
   String(fileType || "").trim().toLowerCase() === "product_image";
@@ -137,6 +302,7 @@ const ItemFilesPage = () => {
   const activeFileOption =
     getItemFileOption(requestedFileType) || getItemFileOption(DEFAULT_ITEM_FILE_TYPE);
   const activeFileType = activeFileOption?.value || DEFAULT_ITEM_FILE_TYPE;
+  const preferPisMeasurements = isPisSpreadsheetUploadType(activeFileType);
   const canUploadActiveFile =
     canUploadItemFiles &&
     (!isPisSpreadsheetUploadType(activeFileType) || canEditPis);
@@ -330,16 +496,18 @@ const ItemFilesPage = () => {
           if (column === "code") return item?.code;
           if (column === "name") return item?.name;
           if (column === "brand") return item?.brand_name || item?.brand;
-          if (column === "netWeight") return getInspectedWeight(item, "net");
-          if (column === "grossWeight") return getInspectedWeight(item, "gross");
-          if (column === "cbm") return Number(getCalculatedInspectedCbm(item) || 0);
-          if (column === "itemLbh") {
-            const value = getInspectedItemLbh(item);
-            return [value?.L || 0, value?.B || 0, value?.H || 0];
+          if (column === "cbm") {
+            return Number(getPreferredCbm(item, preferPisMeasurements) || 0);
           }
-          if (column === "boxLbh") {
-            const value = getInspectedBoxLbh(item);
-            return [value?.L || 0, value?.B || 0, value?.H || 0];
+          if (column === "sizeData") {
+            const firstEntry = buildPreferredSizeRows(item, preferPisMeasurements)[0] || {};
+            return [
+              firstEntry?.groupLabel || "",
+              firstEntry?.partLabel || "",
+              firstEntry?.L || 0,
+              firstEntry?.B || 0,
+              firstEntry?.H || 0,
+            ];
           }
           if (column === "file") {
             const storedFile = item?.[activeFileOption.field];
@@ -350,7 +518,14 @@ const ItemFilesPage = () => {
           return "";
         },
       }),
-    [activeFileOption.field, activeFileOption.label, rows, sortBy, sortOrder],
+    [
+      activeFileOption.field,
+      activeFileOption.label,
+      preferPisMeasurements,
+      rows,
+      sortBy,
+      sortOrder,
+    ],
   );
 
   const uploadedVisibleCount = useMemo(
@@ -641,7 +816,7 @@ const ItemFilesPage = () => {
               <div className="text-center py-4">Loading...</div>
             ) : (
               <div className="table-responsive">
-                <table className="table table-striped table-hover align-middle om-table mb-0">
+                <table className="table table-striped table-hover align-middle om-table items-table item-files-table mb-0">
                   <thead className="table-primary">
                     <tr>
                       <th>
@@ -670,42 +845,18 @@ const ItemFilesPage = () => {
                       </th>
                       <th>
                         <SortHeaderButton
-                          label="Net Weight"
-                          isActive={sortBy === "netWeight"}
-                          direction={sortOrder}
-                          onClick={() => handleSortColumn("netWeight", "desc")}
-                        />
-                      </th>
-                      <th>
-                        <SortHeaderButton
-                          label="Gross Weight"
-                          isActive={sortBy === "grossWeight"}
-                          direction={sortOrder}
-                          onClick={() => handleSortColumn("grossWeight", "desc")}
-                        />
-                      </th>
-                      <th>
-                        <SortHeaderButton
                           label="CBM"
                           isActive={sortBy === "cbm"}
                           direction={sortOrder}
                           onClick={() => handleSortColumn("cbm", "desc")}
                         />
                       </th>
-                      <th>
+                      <th className="items-size-column">
                         <SortHeaderButton
-                          label="Item LBH"
-                          isActive={sortBy === "itemLbh"}
+                          label={preferPisMeasurements ? "PIS Size" : "Inspected Size"}
+                          isActive={sortBy === "sizeData"}
                           direction={sortOrder}
-                          onClick={() => handleSortColumn("itemLbh", "asc")}
-                        />
-                      </th>
-                      <th>
-                        <SortHeaderButton
-                          label="Box LBH"
-                          isActive={sortBy === "boxLbh"}
-                          direction={sortOrder}
-                          onClick={() => handleSortColumn("boxLbh", "asc")}
+                          onClick={() => handleSortColumn("sizeData", "asc")}
                         />
                       </th>
                       <th>
@@ -722,7 +873,7 @@ const ItemFilesPage = () => {
                   <tbody>
                     {sortedRows.length === 0 && (
                       <tr>
-                        <td colSpan="10" className="text-center py-4">
+                        <td colSpan="7" className="text-center py-4">
                           No items found
                         </td>
                       </tr>
@@ -754,11 +905,13 @@ const ItemFilesPage = () => {
                                 ? item.brands[0]
                                 : "N/A")}
                           </td>
-                          <td>{formatFixedNumber(getInspectedWeight(item, "net"))}</td>
-                          <td>{formatFixedNumber(getInspectedWeight(item, "gross"))}</td>
-                          <td>{formatCbm(getCalculatedInspectedCbm(item))}</td>
-                          <td>{formatLbhValue(getInspectedItemLbh(item), { fallback: "0.00 x 0.00 x 0.00" })}</td>
-                          <td>{formatLbhValue(getInspectedBoxLbh(item), { fallback: "0.00 x 0.00 x 0.00" })}</td>
+                          <td>{formatCbm(getPreferredCbm(item, preferPisMeasurements))}</td>
+                          <td className="items-size-column">
+                            <SizeDataCell
+                              item={item}
+                              preferPis={preferPisMeasurements}
+                            />
+                          </td>
                           <td>
                             {hasFile ? (
                               <div className="item-file-product-image-cell">

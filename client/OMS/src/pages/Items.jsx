@@ -272,6 +272,108 @@ const getPrimaryBrand = (item = {}) =>
 const getPrimaryVendor = (item = {}) =>
   String(Array.isArray(item?.vendors) && item.vendors.length > 0 ? item.vendors[0] : "").trim();
 
+const formatClaimPercentage = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return "0";
+  return parsed.toFixed(2).replace(/\.?0+$/, "");
+};
+
+const ClaimPercentageModal = ({
+  item,
+  onClose,
+  onSaved,
+}) => {
+  const [value, setValue] = useState(() => String(Number(item?.claim_percentage || 0)));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    const parsedValue = Number(value);
+    if (!Number.isFinite(parsedValue) || parsedValue < 0 || parsedValue > 100) {
+      setError("Enter a percentage between 0 and 100.");
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setError("");
+      const response = await api.patch(`/items/${encodeURIComponent(item._id)}`, {
+        claim_percentage: parsedValue,
+      });
+      onSaved(response?.data?.data || {
+        ...item,
+        claim_percentage: parsedValue,
+      });
+    } catch (saveError) {
+      setError(
+        saveError?.response?.data?.message
+        || saveError?.message
+        || "Failed to save claim percentage.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="modal d-block om-modal-backdrop" tabIndex="-1" role="dialog">
+      <div className="modal-dialog modal-dialog-centered" role="document">
+        <form className="modal-content" onSubmit={handleSubmit}>
+          <div className="modal-header">
+            <div>
+              <h5 className="modal-title">Claim Percentage</h5>
+              <div className="small text-secondary">
+                Item {item?.code || "N/A"}
+              </div>
+            </div>
+            <button
+              type="button"
+              className="btn-close"
+              aria-label="Close"
+              disabled={saving}
+              onClick={onClose}
+            />
+          </div>
+          <div className="modal-body">
+            <label className="form-label" htmlFor="item-claim-percentage">
+              Claim percentage
+            </label>
+            <div className="input-group">
+              <input
+                id="item-claim-percentage"
+                type="number"
+                className="form-control"
+                min="0"
+                max="100"
+                step="0.01"
+                value={value}
+                autoFocus
+                onChange={(event) => setValue(event.target.value)}
+              />
+              <span className="input-group-text">%</span>
+            </div>
+            {error && <div className="alert alert-danger mt-3 mb-0">{error}</div>}
+          </div>
+          <div className="modal-footer">
+            <button
+              type="button"
+              className="btn btn-outline-secondary"
+              disabled={saving}
+              onClick={onClose}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={saving}>
+              {saving ? "Saving..." : "Save percentage"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
 const Items = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -287,6 +389,7 @@ const Items = () => {
 
   const [rows, setRows] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
+  const [claimPercentageItem, setClaimPercentageItem] = useState(null);
   const [complaintItem, setComplaintItem] = useState(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showCreateSampleModal, setShowCreateSampleModal] = useState(false);
@@ -1049,6 +1152,20 @@ const Items = () => {
                               {canEditItems && (
                                 <button
                                   type="button"
+                                  className={
+                                    Number(item?.claim_percentage || 0) > 3
+                                      ? "items-action-btn items-action-btn-danger"
+                                      : "items-action-btn"
+                                  }
+                                  onClick={() => setClaimPercentageItem(item)}
+                                  title="Set item claim percentage"
+                                >
+                                  Claim {formatClaimPercentage(item?.claim_percentage)}%
+                                </button>
+                              )}
+                              {canEditItems && (
+                                <button
+                                  type="button"
                                   className="items-action-btn"
                                   onClick={() => setSelectedItem(item)}
                                   title="Edit item"
@@ -1166,6 +1283,26 @@ const Items = () => {
           onUpdated={() => {
             setSelectedItem(null);
             fetchItems();
+          }}
+        />
+      )}
+
+      {claimPercentageItem && canEditItems && (
+        <ClaimPercentageModal
+          item={claimPercentageItem}
+          onClose={() => setClaimPercentageItem(null)}
+          onSaved={(updatedItem) => {
+            setRows((currentRows) =>
+              currentRows.map((row) =>
+                String(row?._id) === String(updatedItem?._id)
+                  ? { ...row, ...updatedItem }
+                  : row,
+              ),
+            );
+            setClaimPercentageItem(null);
+            setSuccess(
+              `Claim percentage for item ${updatedItem?.code || ""} saved successfully.`,
+            );
           }}
         />
       )}
