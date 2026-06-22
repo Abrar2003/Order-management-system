@@ -4,6 +4,7 @@ const http = require("http");
 const mongoose = require("mongoose");
 const dns = require("dns");
 const path = require("path");
+const { execFileSync } = require("child_process");
 const { loadEnvFiles } = require("./config/loadEnv");
 
 loadEnvFiles({
