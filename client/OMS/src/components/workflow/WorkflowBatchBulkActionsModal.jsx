@@ -12,7 +12,10 @@ const getUserLabel = (entry = {}) =>
 const getTaskTypeKey = (entry = {}) => normalizeText(entry?.key || entry?.task_type_key);
 
 const getTaskTitle = (task = {}) =>
-  task?.task_no || task?.title || task?.source_folder_path || getTaskId(task) || "Task";
+  normalizeText(task?.title || task?.source_folder_path) || "Untitled Task";
+
+const getTaskNumber = (task = {}) =>
+  normalizeText(task?.task_no) || getTaskId(task) || "No task number";
 
 const getTaskStatus = (task = {}) => normalizeText(task?.status).toLowerCase();
 
@@ -241,7 +244,9 @@ const WorkflowBatchBulkActionsModal = ({
                 />
                 <span className="workflow-bulk-task-row-copy">
                   <span className="fw-semibold">{getTaskTitle(task)}</span>
-                  <span className="small text-secondary">{getTaskStatus(task)}</span>
+                  <span className="small text-secondary">
+                    {getTaskNumber(task)} • {getTaskStatus(task)}
+                  </span>
                 </span>
               </label>
             );
