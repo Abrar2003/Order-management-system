@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "check:env": "node scripts/check-env.js",
+    "verify:build-info": "node scripts/verifyBuildInfo.js",
     "prestart": "npm run check:env",
     "start": "node index.js",
     "dev": "nodemon index.js",
