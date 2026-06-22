@@ -3,6 +3,7 @@ const cors = require("cors");
 const http = require("http");
 const mongoose = require("mongoose");
 const dns = require("dns");
+const fs = require("fs");
 const path = require("path");
 const { execFileSync } = require("child_process");
 const { loadEnvFiles } = require("./config/loadEnv");
@@ -47,22 +48,66 @@ const app = express();
 const PORT = Number.parseInt(String(process.env.PORT || "8008"), 10) || 8008;
 const isProduction =
   String(process.env.NODE_ENV || "").trim().toLowerCase() === "production";
-const getAppCommitSha = () => {
-  const envCommit = String(
-    process.env.APP_COMMIT_SHA || process.env.GIT_COMMIT_SHA || "",
-  ).trim();
+const DEPLOY_COMMIT_FILE = path.resolve(__dirname, ".deploy-commit-sha");
+const GIT_DIR = path.resolve(__dirname, "..", ".git");
 
-  if (envCommit && envCommit !== "unknown") {
-    return envCommit;
+const normalizeCommitSha = (value) => {
+  const normalized = String(value || "").trim();
+  return /^[0-9a-f]{7,64}$/i.test(normalized) ? normalized : "";
+};
+
+const readDeploymentCommit = () => {
+  try {
+    return normalizeCommitSha(fs.readFileSync(DEPLOY_COMMIT_FILE, "utf8"));
+  } catch {
+    return "";
   }
+};
+
+const readGitHeadCommit = () => {
+  try {
+    const head = fs.readFileSync(path.join(GIT_DIR, "HEAD"), "utf8").trim();
+    const directCommit = normalizeCommitSha(head);
+    if (directCommit) return directCommit;
+
+    const reference = head.match(/^ref:\s+(.+)$/)?.[1];
+    if (!reference) return "";
+
+    try {
+      return normalizeCommitSha(fs.readFileSync(path.join(GIT_DIR, reference), "utf8"));
+    } catch {
+      const packedRefs = fs.readFileSync(path.join(GIT_DIR, "packed-refs"), "utf8");
+      const refLine = packedRefs
+        .split("\n")
+        .find((line) => line && !line.startsWith("#") && !line.startsWith("^") && line.endsWith(` ${reference}`));
+      return normalizeCommitSha(refLine?.split(" ")[0]);
+    }
+  } catch {
+    return "";
+  }
+};
+
+const getAppCommitSha = () => {
+  const envCommit = normalizeCommitSha(
+    process.env.APP_COMMIT_SHA || process.env.GIT_COMMIT_SHA,
+  );
+  if (envCommit) return envCommit;
+
+  const deploymentCommit = readDeploymentCommit();
+  if (deploymentCommit) return deploymentCommit;
+
+  const gitHeadCommit = readGitHeadCommit();
+  if (gitHeadCommit) return gitHeadCommit;
 
   try {
     return (
-      execFileSync("git", ["rev-parse", "HEAD"], {
-        cwd: path.resolve(__dirname, ".."),
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-      }).trim() || "unknown"
+      normalizeCommitSha(
+        execFileSync("git", ["rev-parse", "HEAD"], {
+          cwd: path.resolve(__dirname, ".."),
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+        }),
+      ) || "unknown"
     );
   } catch {
     return "unknown";
