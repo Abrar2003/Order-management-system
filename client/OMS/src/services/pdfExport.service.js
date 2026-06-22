@@ -137,6 +137,13 @@ export const exportElementToPdf = async ({
   const clone = element.cloneNode(true);
   clone.removeAttribute("aria-hidden");
   clone.classList.add("pdf-report");
+  
+  if (clone.style.position === "fixed" || clone.style.position === "absolute") {
+    clone.style.removeProperty("position");
+    clone.style.removeProperty("left");
+    clone.style.removeProperty("top");
+  }
+
   clone.querySelectorAll("[aria-hidden='true']").forEach((node) => {
     node.removeAttribute("aria-hidden");
   });
