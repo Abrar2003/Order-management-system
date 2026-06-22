@@ -93,6 +93,40 @@ const readHtmlOutput = async (outputDir, expectedHtmlName) => {
   };
 };
 
+const readPdfOutput = async (outputDir, expectedPdfName) => {
+  const expectedPdfPath = path.join(outputDir, expectedPdfName);
+  const expectedStats = await fs.stat(expectedPdfPath).catch(() => null);
+  if (expectedStats?.isFile() && expectedStats.size > 0) {
+    return {
+      pdfPath: expectedPdfPath,
+      pdfFileName: expectedPdfName,
+      pdfStats: expectedStats,
+    };
+  }
+
+  const outputEntries = await fs.readdir(outputDir).catch(() => []);
+  const pdfEntries = outputEntries.filter(
+    (entry) => path.extname(entry).toLowerCase() === ".pdf",
+  );
+  if (pdfEntries.length === 0) {
+    throw createConversionError("Spreadsheet PDF was not created", {
+      code: "PDF_OUTPUT_MISSING",
+    });
+  }
+
+  for (const pdfFileName of pdfEntries) {
+    const pdfPath = path.join(outputDir, pdfFileName);
+    const pdfStats = await fs.stat(pdfPath).catch(() => null);
+    if (pdfStats?.isFile() && pdfStats.size > 0) {
+      return { pdfPath, pdfFileName, pdfStats };
+    }
+  }
+
+  throw createConversionError("Generated spreadsheet PDF is empty", {
+    code: "EMPTY_GENERATED_PDF",
+  });
+};
+
 const cleanupConversionArtifacts = async ({
   inputFilePath = "",
   workDir = "",
@@ -253,12 +287,15 @@ async function convertExcelToPdf(inputOrOptions = {}) {
       });
     }
 
-    const args = [
+    const commonArgs = [
       "--headless",
       "--nologo",
       "--nodefault",
       "--nofirststartwizard",
       `-env:UserInstallation=${pathToFileURL(profileDir).href}`,
+    ];
+    const htmlArgs = [
+      ...commonArgs,
       "--convert-to",
       "html:HTML",
       "--outdir",
@@ -266,29 +303,57 @@ async function convertExcelToPdf(inputOrOptions = {}) {
       stagedInputPath,
     ];
 
-    const libreOfficeCommand = await runLibreOfficeConversion(args, { timeoutMs });
+    let libreOfficeCommand = await runLibreOfficeConversion(htmlArgs, { timeoutMs });
+    let pdfBuffer;
+    let pdfPath = "";
+    let conversionMode = "html_chromium";
 
-    const htmlOutput = await readHtmlOutput(
-      outputDir,
-      `${path.parse(path.basename(stagedInputPath)).name}.html`,
-    );
-    const spreadsheetHtml = await fs.readFile(htmlOutput.htmlPath, "utf8");
-    const pdfBuffer = await renderPdf({
-      html: spreadsheetHtml,
-      format: "A4",
-      landscape: true,
-      margin: {
-        top: "8mm",
-        right: "8mm",
-        bottom: "8mm",
-        left: "8mm",
-      },
-      basePath: outputDir,
-      extraCss: `
-        table { break-inside: auto !important; }
-        tr { break-inside: avoid !important; page-break-inside: avoid !important; }
-      `,
-    });
+    try {
+      const htmlOutput = await readHtmlOutput(
+        outputDir,
+        `${path.parse(path.basename(stagedInputPath)).name}.html`,
+      );
+      const spreadsheetHtml = await fs.readFile(htmlOutput.htmlPath, "utf8");
+      pdfBuffer = await renderPdf({
+        html: spreadsheetHtml,
+        format: "A4",
+        landscape: true,
+        margin: {
+          top: "8mm",
+          right: "8mm",
+          bottom: "8mm",
+          left: "8mm",
+        },
+        basePath: outputDir,
+        extraCss: `
+          table { break-inside: auto !important; }
+          tr { break-inside: avoid !important; page-break-inside: avoid !important; }
+        `,
+      });
+    } catch (error) {
+      if (error?.code !== "HTML_OUTPUT_MISSING") throw error;
+
+      console.warn(
+        "Spreadsheet HTML preview was not created; falling back to direct PDF conversion",
+      );
+      const pdfArgs = [
+        ...commonArgs,
+        "--convert-to",
+        "pdf",
+        "--outdir",
+        outputDir,
+        stagedInputPath,
+      ];
+      libreOfficeCommand = await runLibreOfficeConversion(pdfArgs, { timeoutMs });
+      const pdfOutput = await readPdfOutput(
+        outputDir,
+        `${path.parse(path.basename(stagedInputPath)).name}.pdf`,
+      );
+      pdfPath = pdfOutput.pdfPath;
+      pdfBuffer = await fs.readFile(pdfOutput.pdfPath);
+      conversionMode = "libreoffice_pdf";
+    }
+
     if (pdfBuffer.length <= 0) {
       throw createConversionError("Generated PDF is empty", {
         code: "EMPTY_GENERATED_PDF",
@@ -301,9 +366,10 @@ async function convertExcelToPdf(inputOrOptions = {}) {
       outputDir,
       profileDir,
       inputFilePath: stagedInputPath,
-      pdfPath: "",
+      pdfPath,
       pdfFileName: `${path.parse(inputFileName).name}.pdf`,
       libreOfficeCommand,
+      conversionMode,
       pdfBuffer,
       size: pdfBuffer.length,
       cleanup: async () =>
