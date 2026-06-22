@@ -260,6 +260,7 @@ const DelayedPoReports = () => {
           vendor: row?.vendor || "N/A",
           order_date: row?.order_date || "",
           etd: row?.po_etd || row?.etd || "",
+          delay_days: row?.delay_days || 0,
           item_count: 0,
           shipped_item_count: 0,
           inspected_item_count: 0,
@@ -279,6 +280,9 @@ const DelayedPoReports = () => {
         && (!Number.isFinite(currentOrderDate) || rowOrderDate < currentOrderDate)
       ) {
         summary.order_date = row.order_date;
+      }
+      if (Number(row?.delay_days || 0) > Number(summary.delay_days || 0)) {
+        summary.delay_days = Number(row.delay_days);
       }
       summary.item_count += 1;
       if (
