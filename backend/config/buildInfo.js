@@ -1,10 +1,7 @@
 const fs = require("fs");
 const path = require("path");
-const { execFileSync } = require("child_process");
 
-const REPOSITORY_ROOT = path.resolve(__dirname, "..", "..");
 const DEPLOY_COMMIT_FILE = path.resolve(__dirname, "..", ".deploy-commit-sha");
-const SAFE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
 const normalizeCommitSha = (value) => {
   const normalized = String(value || "").trim();
@@ -31,26 +28,7 @@ const resolveCommitInfo = () => {
       return { sha: markerCommit, source: "deployment marker" };
     }
   } catch {
-    // Continue to the Git CLI fallback.
-  }
-
-  try {
-    const gitCommit = normalizeCommitSha(
-      execFileSync("/usr/bin/git", ["rev-parse", "HEAD"], {
-        cwd: REPOSITORY_ROOT,
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          PATH: SAFE_PATH,
-        },
-        stdio: ["ignore", "pipe", "ignore"],
-      }),
-    );
-    if (gitCommit) {
-      return { sha: gitCommit, source: "git CLI" };
-    }
-  } catch {
-    // All supported commit sources have failed.
+    // Ignore error if file does not exist.
   }
 
   return { sha: "unknown", source: "unavailable" };
@@ -65,3 +43,4 @@ module.exports = {
   getBuildInfo,
   getCommitSource,
 };
+
