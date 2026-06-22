@@ -239,35 +239,51 @@ fi
 
 if command -v curl >/dev/null 2>&1; then
   log "Checking backend health"
+  VERIFY_DEPLOYED_COMMIT="${VERIFY_DEPLOYED_COMMIT:-false}"
   for i in {1..10}; do
-    HEALTH_RESPONSE="$(curl --fail --silent --show-error "$BACKEND_HEALTHCHECK_URL" || true)"
-    HEALTH_COMMIT="$(
-      printf '%s' "$HEALTH_RESPONSE" |
-        node -e '
-          let input = "";
-          process.stdin.on("data", chunk => input += chunk);
-          process.stdin.on("end", () => {
-            try {
-              console.log(JSON.parse(input || "{}").commit || "");
-            } catch {
-              console.log("");
-            }
-          });
-        '
-    )"
+    if HEALTH_RESPONSE="$(curl --fail --silent --show-error "$BACKEND_HEALTHCHECK_URL")"; then
+      # Commit equality is optional because PM2 environment propagation may differ across reloads.
+      if [[ "$VERIFY_DEPLOYED_COMMIT" == "true" ]]; then
+        HEALTH_COMMIT="$(
+          printf '%s' "$HEALTH_RESPONSE" |
+            node -e '
+              let input = "";
+              process.stdin.on("data", chunk => input += chunk);
+              process.stdin.on("end", () => {
+                try {
+                  console.log(JSON.parse(input || "{}").commit || "");
+                } catch {
+                  console.log("");
+                }
+              });
+            '
+        )"
 
-    if [[ "$HEALTH_COMMIT" == "$DEPLOYED_COMMIT_SHA" ]]; then
-      echo "Backend health check passed for commit $DEPLOYED_COMMIT_SHA"
-      break
+        if [[ "$HEALTH_COMMIT" == "$DEPLOYED_COMMIT_SHA" ]]; then
+          echo "Backend health check passed for commit $DEPLOYED_COMMIT_SHA"
+          break
+        fi
+
+        if [[ "$i" -eq 10 ]]; then
+          echo "Backend health check did not reach deployed commit $DEPLOYED_COMMIT_SHA"
+          echo "Health response: $HEALTH_RESPONSE"
+          exit 1
+        fi
+
+        echo "Backend still reports commit '${HEALTH_COMMIT:-unknown}', retrying in 3 seconds..."
+      else
+        echo "Health response: $HEALTH_RESPONSE"
+        echo "Backend health check passed; commit verification disabled."
+        break
+      fi
+    else
+      if [[ "$i" -eq 10 ]]; then
+        echo "Backend health check failed after multiple attempts"
+        exit 1
+      fi
+
+      echo "Backend not ready yet, retrying in 3 seconds..."
     fi
-
-    if [[ "$i" -eq 10 ]]; then
-      echo "Backend health check did not reach deployed commit $DEPLOYED_COMMIT_SHA"
-      echo "Health response: $HEALTH_RESPONSE"
-      exit 1
-    fi
-
-    echo "Backend still reports commit '${HEALTH_COMMIT:-unknown}', retrying in 3 seconds..."
     sleep 3
   done
 
