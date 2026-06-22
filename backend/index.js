@@ -3,6 +3,7 @@ const cors = require("cors");
 const http = require("http");
 const mongoose = require("mongoose");
 const dns = require("dns");
+const fs = require("fs");
 const path = require("path");
 const { execFileSync } = require("child_process");
 const { loadEnvFiles } = require("./config/loadEnv");
@@ -47,22 +48,39 @@ const app = express();
 const PORT = Number.parseInt(String(process.env.PORT || "8008"), 10) || 8008;
 const isProduction =
   String(process.env.NODE_ENV || "").trim().toLowerCase() === "production";
-const getAppCommitSha = () => {
-  const envCommit = String(
-    process.env.APP_COMMIT_SHA || process.env.GIT_COMMIT_SHA || "",
-  ).trim();
+const DEPLOY_COMMIT_FILE = path.resolve(__dirname, ".deploy-commit-sha");
 
-  if (envCommit && envCommit !== "unknown") {
-    return envCommit;
+const normalizeCommitSha = (value) => {
+  const normalized = String(value || "").trim();
+  return /^[0-9a-f]{7,64}$/i.test(normalized) ? normalized : "";
+};
+
+const readDeploymentCommit = () => {
+  try {
+    return normalizeCommitSha(fs.readFileSync(DEPLOY_COMMIT_FILE, "utf8"));
+  } catch {
+    return "";
   }
+};
+
+const getAppCommitSha = () => {
+  const envCommit = normalizeCommitSha(
+    process.env.APP_COMMIT_SHA || process.env.GIT_COMMIT_SHA,
+  );
+  if (envCommit) return envCommit;
+
+  const deploymentCommit = readDeploymentCommit();
+  if (deploymentCommit) return deploymentCommit;
 
   try {
     return (
-      execFileSync("git", ["rev-parse", "HEAD"], {
-        cwd: path.resolve(__dirname, ".."),
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-      }).trim() || "unknown"
+      normalizeCommitSha(
+        execFileSync("git", ["rev-parse", "HEAD"], {
+          cwd: path.resolve(__dirname, ".."),
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+        }),
+      ) || "unknown"
     );
   } catch {
     return "unknown";
