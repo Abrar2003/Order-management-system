@@ -46,11 +46,29 @@ const app = express();
 const PORT = Number.parseInt(String(process.env.PORT || "8008"), 10) || 8008;
 const isProduction =
   String(process.env.NODE_ENV || "").trim().toLowerCase() === "production";
-const APP_COMMIT_SHA = String(
-  process.env.APP_COMMIT_SHA
-    || process.env.GIT_COMMIT_SHA
-    || "unknown",
-).trim();
+const getAppCommitSha = () => {
+  const envCommit = String(
+    process.env.APP_COMMIT_SHA || process.env.GIT_COMMIT_SHA || "",
+  ).trim();
+
+  if (envCommit && envCommit !== "unknown") {
+    return envCommit;
+  }
+
+  try {
+    return (
+      execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: path.resolve(__dirname, ".."),
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim() || "unknown"
+    );
+  } catch {
+    return "unknown";
+  }
+};
+
+const APP_COMMIT_SHA = getAppCommitSha();
 
 const isTruthy = (value) =>
   String(value || "")
