@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import html2canvas from "html2canvas";
-import { jsPDF } from "jspdf";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import ReportInfoBanner from "../components/ReportInfoBanner";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { formatCbm } from "../utils/cbm";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
+import { exportElementToPdf } from "../services/pdfExport.service";
 
 const DEFAULT_ENTITY_FILTER = "all";
 const DEFAULT_SORT_BY = "last_inspection_date";
@@ -676,64 +676,18 @@ const WeeklySummary = () => {
       setExportingPdf(true);
       const target = reportRef.current;
       await waitForImagesToLoad(target);
-      const canvas = await html2canvas(target, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: "#ffffff",
-        windowWidth: Math.max(target.scrollWidth, target.clientWidth),
-        windowHeight: Math.max(target.scrollHeight, target.clientHeight),
-        scrollX: 0,
-        scrollY: -window.scrollY,
-      });
-
-      const imageData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF({
-        orientation: "portrait",
-        unit: "pt",
-        format: "a4",
-      });
-
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const margin = 18;
-      const printableWidth = pageWidth - margin * 2;
-      const printableHeight = pageHeight - margin * 2;
-      const imageHeight = (canvas.height * printableWidth) / canvas.width;
-
-      let remainingHeight = imageHeight;
-      let yPosition = margin;
-
-      pdf.addImage(
-        imageData,
-        "PNG",
-        margin,
-        yPosition,
-        printableWidth,
-        imageHeight,
-        undefined,
-        "FAST",
-      );
-
-      remainingHeight -= printableHeight;
-      while (remainingHeight > 0) {
-        pdf.addPage();
-        yPosition = margin - (imageHeight - remainingHeight);
-        pdf.addImage(
-          imageData,
-          "PNG",
-          margin,
-          yPosition,
-          printableWidth,
-          imageHeight,
-          undefined,
-          "FAST",
-        );
-        remainingHeight -= printableHeight;
-      }
-
       const safeFromDate = String(filters.from_date || "from").replace(/[^a-zA-Z0-9_-]/g, "_");
       const safeToDate = String(filters.to_date || "to").replace(/[^a-zA-Z0-9_-]/g, "_");
-      pdf.save(`weekly-order-summary-${safeFromDate}-to-${safeToDate}.pdf`);
+      await exportElementToPdf({
+        element: target,
+        reportKey: "weekly-order-summary",
+        filename: `weekly-order-summary-${safeFromDate}-to-${safeToDate}.pdf`,
+        landscape: false,
+        repeatHeader: {
+          title: "Weekly Order Summary",
+          subtitle: `${formatDateDDMMYYYY(filters.from_date)} - ${formatDateDDMMYYYY(filters.to_date)}`,
+        },
+      });
     } catch (err) {
       console.error("Weekly order summary export failed:", err);
       alert("Failed to export weekly order summary PDF.");
@@ -776,6 +730,12 @@ const WeeklySummary = () => {
               : "Confirm & Export PDF"}
           </button>
         </div>
+
+        <ReportInfoBanner
+          description="Aggregates order inspections and status updates within a weekly date range."
+          dataShown="Brand logo, vendor names, total order/passed quantities, inspected CBM volume, pending counts, goods-not-ready notes, and last inspectors."
+          howItWorks="Groups inspection records by vendor and order ID. Filterable by brand and customizable date range."
+        />
 
         <div className="card om-card mb-3">
           <form className="card-body d-flex flex-wrap gap-2 align-items-end" onSubmit={handleApplyFilters}>

@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import html2canvas from "html2canvas";
-import { jsPDF } from "jspdf";
 import api from "../api/axios";
 import { usePermissions } from "../auth/PermissionContext";
 import Navbar from "../components/Navbar";
+import ReportInfoBanner from "../components/ReportInfoBanner";
 import SortHeaderButton from "../components/SortHeaderButton";
 import {
   formatDateDDMMYYYY,
@@ -16,6 +15,7 @@ import {
 import { formatCbm, formatPositiveCbm } from "../utils/cbm";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
+import { exportElementToPdf } from "../services/pdfExport.service";
 import "../App.css";
 
 const DEFAULT_ALIGNED_SORT_BY = "request_date";
@@ -401,65 +401,18 @@ const DailyReport = () => {
     try {
       setExportingPdf(true);
       await new Promise((resolve) => window.setTimeout(resolve, 0));
-      const target = reportRef.current;
-      const canvas = await html2canvas(target, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: "#ffffff",
-        windowWidth: Math.max(target.scrollWidth, target.clientWidth),
-        windowHeight: Math.max(target.scrollHeight, target.clientHeight),
-        scrollX: 0,
-        scrollY: -window.scrollY,
-      });
-
-      const imageData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF({
-        orientation: "portrait",
-        unit: "pt",
-        format: "a4",
-      });
-
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const margin = 18;
-      const printableWidth = pageWidth - margin * 2;
-      const printableHeight = pageHeight - margin * 2;
-      const imageHeight = (canvas.height * printableWidth) / canvas.width;
-
-      let remainingHeight = imageHeight;
-      let yPosition = margin;
-
-      pdf.addImage(
-        imageData,
-        "PNG",
-        margin,
-        yPosition,
-        printableWidth,
-        imageHeight,
-        undefined,
-        "FAST",
-      );
-
-      remainingHeight -= printableHeight;
-      while (remainingHeight > 0) {
-        pdf.addPage();
-        yPosition = margin - (imageHeight - remainingHeight);
-        pdf.addImage(
-          imageData,
-          "PNG",
-          margin,
-          yPosition,
-          printableWidth,
-          imageHeight,
-          undefined,
-          "FAST",
-        );
-        remainingHeight -= printableHeight;
-      }
-
       const safeDate = String(toISODateString(report?.date) || "daily-inspection-report")
         .replace(/[^a-zA-Z0-9_-]/g, "_");
-      pdf.save(`daily-inspection-report-${safeDate}.pdf`);
+      await exportElementToPdf({
+        element: reportRef.current,
+        reportKey: "daily-inspection-report",
+        filename: `daily-inspection-report-${safeDate}.pdf`,
+        landscape: false,
+        repeatHeader: {
+          title: "Daily Inspection Report",
+          subtitle: `Report date: ${formatDateDDMMYYYY(report?.date)}`,
+        },
+      });
     } catch (err) {
       console.error("Daily inspection report export failed:", err);
       alert("Failed to export daily inspection report PDF.");
@@ -505,6 +458,12 @@ const DailyReport = () => {
             {exportingPdf ? "Exporting..." : "Export PDF"}
           </button>
         </div>
+
+        <ReportInfoBanner
+          description="Views daily inspection schedules, assignments, and results for a selected date."
+          dataShown="Aligned request listings, inspector names, requested vs passed quantities, inspected CBM volume, status, and remarks."
+          howItWorks="Compiles inspection requests and inspector activities for the selected date. Filterable by brand and vendor, and sortable by date, PO, or inspector."
+        />
 
         <div ref={reportRef}>
           <div className="card om-card mb-3">

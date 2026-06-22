@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import ReportInfoBanner from "../components/ReportInfoBanner";
 import InspectorCard from "../components/reports/InspectorCard";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { formatCbm } from "../utils/cbm";
@@ -437,6 +438,12 @@ const InspectorReports = () => {
           <h2 className="h4 mb-0">Inspector Performance Reports</h2>
           <span className="d-none d-md-inline" />
         </div>
+
+        <ReportInfoBanner
+          description="Evaluates the output, efficiency, and metrics of individual inspectors over a selected timeline."
+          dataShown="Inspectors list, counts of inspections, items checked/passed, total inspected volume (CBM), and activity charts over time."
+          howItWorks="Analyzes inspector metrics across a timeline. Filterable by timeline, date range, specific inspector, and chart grouping (daily/weekly/monthly)."
+        />
 
         <div className="card om-card mb-3">
           <form className="card-body d-flex flex-wrap gap-2 align-items-end" onSubmit={handleApplyFilters}>

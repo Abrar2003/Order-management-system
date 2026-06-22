@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import Navbar from "../components/Navbar";
+import ReportInfoBanner from "../components/ReportInfoBanner";
 import { formatDateDDMMYYYY } from "../utils/date";
 import {
   fetchPisInspectionMasterComparison,
@@ -252,6 +253,12 @@ const PisInspectionMasterComparison = () => {
             </div>
           </div>
         </div>
+
+        <ReportInfoBanner
+          description="Compares dimension and specification data between the Product Information Sheet (PIS), the latest 3 inspected POs, and the Master item database."
+          dataShown="Item metadata, latest 3 inspected PO cards, and detailed comparison tables highlighting mismatched or missing fields."
+          howItWorks="Searchable by item code, comparing sizes/remarks across all three sources to find discrepancies. Displays a list of default eligible items with at least 3 inspected POs."
+        />
 
         <div className="card om-card mb-3">
           <div className="card-body">

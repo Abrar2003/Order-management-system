@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import Barcode from "react-barcode";
-import html2canvas from "html2canvas";
-import { jsPDF } from "jspdf";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import FilePreviewModal from "../components/FilePreviewModal";
@@ -24,6 +22,7 @@ import {
   sortClientRows,
 } from "../utils/clientSort";
 import "../App.css";
+import { exportElementToPdf } from "../services/pdfExport.service";
 
 const SIZE_UNIT = "cm";
 const WEIGHT_UNIT = "kg";
@@ -1856,67 +1855,22 @@ const InspectionReport = () => {
       setExportingPdf(true);
       const target = reportRef.current;
       await waitForImagesToLoad(target);
-      const canvas = await html2canvas(target, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: "#ffffff",
-        windowWidth: Math.max(target.scrollWidth, target.clientWidth),
-        windowHeight: Math.max(target.scrollHeight, target.clientHeight),
-        scrollX: 0,
-        scrollY: -window.scrollY,
-      });
-
-      const imageData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF({
-        orientation: "portrait",
-        unit: "pt",
-        format: "a4",
-      });
-
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const margin = 18;
-      const printableWidth = pageWidth - margin * 2;
-      const printableHeight = pageHeight - margin * 2;
-      const imageHeight = (canvas.height * printableWidth) / canvas.width;
-
-      let remainingHeight = imageHeight;
-      let yPosition = margin;
-
-      pdf.addImage(
-        imageData,
-        "PNG",
-        margin,
-        yPosition,
-        printableWidth,
-        imageHeight,
-        undefined,
-        "FAST",
-      );
-
-      remainingHeight -= printableHeight;
-      while (remainingHeight > 0) {
-        pdf.addPage();
-        yPosition = margin - (imageHeight - remainingHeight);
-        pdf.addImage(
-          imageData,
-          "PNG",
-          margin,
-          yPosition,
-          printableWidth,
-          imageHeight,
-          undefined,
-          "FAST",
-        );
-        remainingHeight -= printableHeight;
-      }
-
       const safePo = toFilenameSegment(qc?.order?.order_id, id || "po");
       const safeItemCode = toFilenameSegment(qc?.item?.item_code, "item");
       const safeInspectionRecord = selectedInspectionRecordId
         ? `_${toFilenameSegment(selectedInspectionRecordId, "inspection")}`
         : "";
-      pdf.save(`inspection_report_${safePo}_${safeItemCode}${safeInspectionRecord}.pdf`);
+      await exportElementToPdf({
+        element: target,
+        endpoint: "/qc/pdf/render",
+        reportKey: "inspection-report",
+        filename: `inspection_report_${safePo}_${safeItemCode}${safeInspectionRecord}.pdf`,
+        landscape: false,
+        repeatHeader: {
+          title: "Inspection Report",
+          subtitle: `PO: ${qc?.order?.order_id || "N/A"} · Item: ${qc?.item?.item_code || "N/A"}`,
+        },
+      });
     } catch (error) {
       console.error("Inspection report export failed:", error);
       alert("Failed to export inspection report PDF.");

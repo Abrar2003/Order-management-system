@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import html2canvas from "html2canvas";
-import { jsPDF } from "jspdf";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Navbar from "../components/Navbar";
+import ReportInfoBanner from "../components/ReportInfoBanner";
 import SortHeaderButton from "../components/SortHeaderButton";
 import {
   exportDelayedPoReport,
@@ -15,6 +14,7 @@ import {
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
+import { exportElementToPdf } from "../services/pdfExport.service";
 import "../App.css";
 
 const DEFAULT_LIMIT = 20;
@@ -145,6 +145,9 @@ const DelayedPoReports = () => {
   const [limit, setLimit] = useState(() => parseLimit(searchParams.get("limit")));
   const [loading, setLoading] = useState(true);
   const [exportingFormat, setExportingFormat] = useState("");
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportFormat, setExportFormat] = useState("xls");
+  const [exportReportType, setExportReportType] = useState("summary");
   const [error, setError] = useState("");
   const [reportDate, setReportDate] = useState("");
   const [syncedQuery, setSyncedQuery] = useState(null);
@@ -357,11 +360,15 @@ const DelayedPoReports = () => {
     setSortOrder(next.sortOrder);
     setPage(1);
   };
-  const handleExport = async () => {
+  const handleExportSpreadsheet = async (reportType) => {
     try {
       setExportingFormat("xls");
-      const response = await exportDelayedPoReport(buildApiParams(appliedFilters));
+      const response = await exportDelayedPoReport({
+        ...buildApiParams(appliedFilters),
+        report_type: reportType,
+      });
       downloadBlob(response);
+      setShowExportModal(false);
     } catch (exportError) {
       console.error(exportError);
       alert("Failed to export delayed PO report.");
@@ -370,54 +377,59 @@ const DelayedPoReports = () => {
     }
   };
 
-  const handleExportPdf = async () => {
-    if (!pdfReportRef.current || loading || sortedRows.length === 0) return;
+  const handleExportPdf = async (reportType) => {
+    if (loading || sortedRows.length === 0) return;
 
     try {
       setExportingFormat("pdf");
+      setExportReportType(reportType);
       await new Promise((resolve) => window.setTimeout(resolve, 0));
       const target = pdfReportRef.current;
-      const canvas = await html2canvas(target, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: "#ffffff",
-        windowWidth: Math.max(target.scrollWidth, target.clientWidth),
-        windowHeight: Math.max(target.scrollHeight, target.clientHeight),
-        scrollX: 0,
-        scrollY: 0,
-      });
-      const imageData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF({
-        orientation: "landscape",
-        unit: "pt",
-        format: "a4",
-      });
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const margin = 18;
-      const printableWidth = pageWidth - margin * 2;
-      const printableHeight = pageHeight - margin * 2;
-      const imageHeight = (canvas.height * printableWidth) / canvas.width;
-      let remainingHeight = imageHeight;
-      let yPosition = margin;
-
-      pdf.addImage(imageData, "PNG", margin, yPosition, printableWidth, imageHeight);
-      remainingHeight -= printableHeight;
-
-      while (remainingHeight > 0) {
-        pdf.addPage();
-        yPosition = margin - (imageHeight - remainingHeight);
-        pdf.addImage(imageData, "PNG", margin, yPosition, printableWidth, imageHeight);
-        remainingHeight -= printableHeight;
+      if (!target) {
+        throw new Error("Delayed PO PDF report is not available.");
       }
-
-      pdf.save(`delayed-po-report-${new Date().toISOString().slice(0, 10)}.pdf`);
+      const filename = `delayed-po-${reportType}-report-${new Date().toISOString().slice(0, 10)}.pdf`;
+      await exportElementToPdf({
+        element: target,
+        reportKey: "delayed-po-report",
+        filename,
+        landscape: true,
+        repeatHeader: {
+          inTable: true,
+          title: reportType === "summary"
+            ? "PO-wise Summary"
+            : "Delayed PO Detailed Report",
+          subtitle: `Report date: ${formatDateDDMMYYYY(reportDate)} · Brand: ${
+            isAllBrands(appliedFilters.brand)
+              ? "All Brands"
+              : appliedFilters.brand.join(", ")
+          } · Vendor: ${
+            appliedFilters.vendor === "all"
+              ? "All Vendors"
+              : appliedFilters.vendor
+          }`,
+        },
+        extraCss: `
+          .packed-goods-pdf-report { width: 100% !important; }
+          .delayed-po-pdf-summary-header { display: none !important; }
+          .delayed-po-pdf-summary-table td { height: auto !important; }
+        `,
+      });
+      setShowExportModal(false);
     } catch (pdfError) {
       console.error(pdfError);
       alert("Failed to export delayed PO report as PDF.");
     } finally {
       setExportingFormat("");
     }
+  };
+
+  const handleConfirmExport = () => {
+    if (exportFormat === "pdf") {
+      handleExportPdf(exportReportType);
+      return;
+    }
+    handleExportSpreadsheet(exportReportType);
   };
 
   return (
@@ -435,24 +447,14 @@ const DelayedPoReports = () => {
             </p>
           </div>
           <div className="d-flex flex-column align-items-end gap-2">
-            <div className="d-flex flex-wrap justify-content-end gap-2">
-              <button
-                type="button"
-                className="btn btn-outline-primary btn-sm"
-                onClick={handleExportPdf}
-                disabled={loading || exportingFormat !== "" || sortedRows.length === 0}
-              >
-                {exportingFormat === "pdf" ? "Exporting..." : "Export PDF"}
-              </button>
-              <button
-                type="button"
-                className="btn btn-outline-primary btn-sm"
-                onClick={handleExport}
-                disabled={loading || exportingFormat !== "" || sortedRows.length === 0}
-              >
-                {exportingFormat === "xls" ? "Exporting..." : "Export XLS"}
-              </button>
-            </div>
+            <button
+              type="button"
+              className="btn btn-outline-primary btn-sm"
+              onClick={() => setShowExportModal(true)}
+              disabled={loading || exportingFormat !== "" || sortedRows.length === 0}
+            >
+              {exportingFormat ? "Exporting..." : "Export Report"}
+            </button>
             <div className="d-flex flex-wrap justify-content-end gap-2">
               <span className="om-summary-chip">POs: {poCount}</span>
               <span className="om-summary-chip">Rows: {filteredRows.length}</span>
@@ -460,6 +462,12 @@ const DelayedPoReports = () => {
             </div>
           </div>
         </div>
+
+        <ReportInfoBanner
+          description="Tracks Purchase Orders that are past their Estimated Time of Delivery (ETD) with outstanding items."
+          dataShown="PO numbers, item codes, order dates, original ETD, order quantities, shipped vs pending quantities, and status badges."
+          howItWorks="Excludes fully shipped POs. Summarizes and filters delayed orders by brand, vendor, and PO ID, sortable by dates and quantities."
+        />
 
         <div className="card om-card mb-3">
           <div className="card-body">
@@ -600,7 +608,12 @@ const DelayedPoReports = () => {
                             <QuantityTag type="pending" label="Pending" value={row.pending_item_count} />
                           </div>
                         </td>
-                        <td>{row.order_quantity}</td>
+                        <td>
+                          <div className="fw-semibold">{row.order_quantity}</div>
+                          <div className="small text-secondary">
+                            {row.item_count} {row.item_count === 1 ? "item" : "items"}
+                          </div>
+                        </td>
                         <td>
                           <div className="delayed-po-quantity-tags">
                             <QuantityTag type="shipped" label="Shipped" value={row.shipped_quantity} hideWhenZero />
@@ -646,58 +659,161 @@ const DelayedPoReports = () => {
         {!loading && sortedRows.length > 0 && (
           <div className="packed-goods-pdf-surface" aria-hidden="true">
             <div ref={pdfReportRef} className="packed-goods-pdf-report delayed-po-pdf-report">
-              <div className="d-flex justify-content-between align-items-start gap-3 mb-3">
-                <div>
-                  <h2 className="h4 mb-1">Delayed PO Report</h2>
-                  <p className="text-secondary mb-0">
-                    Report date: {formatDateDDMMYYYY(reportDate)}
-                  </p>
-                </div>
-                <div className="d-flex flex-wrap justify-content-end gap-2">
-                  <span className="om-summary-chip">POs: {poCount}</span>
-                  <span className="om-summary-chip">Rows: {sortedRows.length}</span>
-                  <span className="om-summary-chip">
-                    Brands: {isAllBrands(appliedFilters.brand) ? "All Brands" : appliedFilters.brand.join(", ")}
-                  </span>
-                  <span className="om-summary-chip">
-                    Vendor: {appliedFilters.vendor === "all" ? "All Vendors" : appliedFilters.vendor}
-                  </span>
-                  <span className="om-summary-chip">
-                    PO: {appliedFilters.po === "all" ? "All POs" : appliedFilters.po}
-                  </span>
-                </div>
-              </div>
-              <table className="table table-sm align-middle om-table mb-0 delayed-po-table">
-                <thead className="table-primary">
-                  <tr>
-                    <th>PO</th>
-                    <th>Item Code</th>
-                    <th>Order Date</th>
-                    <th>ETD</th>
-                    <th>Order Qty</th>
-                    <th>Shipped</th>
-                    <th>Passed</th>
-                    <th>Pending</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedRows.map((row) => (
-                    <tr
-                      key={`pdf-${row?.id || `${row?.order_id}-${row?.item_code}`}`}
-                      className={getDelayedPoPdfRowClass(row)}
-                    >
-                      <td>{row?.order_id || "N/A"}</td>
-                      <td>{row?.item_code || "N/A"}</td>
-                      <td>{formatDateDDMMYYYY(row?.order_date)}</td>
-                      <td>{formatDateDDMMYYYY(row?.etd || row?.po_etd)}</td>
-                      <td>{Number(row?.order_quantity || 0)}</td>
-                      <td>{Number(row?.shipped_quantity || 0)}</td>
-                      <td>{Number(row?.passed_quantity || 0)}</td>
-                      <td>{Number(row?.pending_quantity || 0)}</td>
+              {exportReportType === "summary" ? (
+                <section className="delayed-po-pdf-summary-card">
+                  <header className="delayed-po-pdf-summary-header">
+                    <h2>PO-wise Summary</h2>
+                    <p>Aggregated totals for the currently selected filters.</p>
+                    <div className="delayed-po-pdf-summary-meta">
+                      <span>Report date: {formatDateDDMMYYYY(reportDate)}</span>
+                      <span>POs: {poCount}</span>
+                      <span>
+                        Brand: {isAllBrands(appliedFilters.brand)
+                          ? "All Brands"
+                          : appliedFilters.brand.join(", ")}
+                      </span>
+                      <span>
+                        Vendor: {appliedFilters.vendor === "all"
+                          ? "All Vendors"
+                          : appliedFilters.vendor}
+                      </span>
+                    </div>
+                    <div className="delayed-po-summary-legend delayed-po-pdf-summary-legend">
+                      <span>Legend:</span>
+                      <span className="delayed-po-legend-entry">
+                        <span className="delayed-po-legend-swatch is-completely-pending" />
+                        Completely pending PO
+                      </span>
+                      <span className="delayed-po-legend-entry">
+                        <span className="delayed-po-legend-swatch has-shipped-quantity" />
+                        Has shipped quantity
+                      </span>
+                      <span className="delayed-po-legend-entry">
+                        <span className="delayed-po-legend-swatch is-shipped-tag" />
+                        Shipped items
+                      </span>
+                      <span className="delayed-po-legend-entry">
+                        <span className="delayed-po-legend-swatch is-inspected-tag" />
+                        Inspected items
+                      </span>
+                      <span className="delayed-po-legend-entry">
+                        <span className="delayed-po-legend-swatch is-pending-tag" />
+                        Pending items
+                      </span>
+                    </div>
+                  </header>
+
+                  <div className="delayed-po-pdf-summary-table-wrap">
+                    <table className="delayed-po-pdf-summary-table">
+                      <thead>
+                        <tr>
+                          <th>PO</th>
+                          <th>Brand</th>
+                          <th>Vendor</th>
+                          <th>Dates</th>
+                          <th>Items</th>
+                          <th>Order Qty</th>
+                          <th>Quantities</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {poSummaryRows.map((row) => (
+                          <tr
+                            key={`pdf-summary-${row.order_id}-${row.brand}-${row.vendor}`}
+                            className={
+                              row.pending_item_count === row.item_count
+                                ? "is-completely-pending"
+                                : row.shipped_quantity > 0
+                                  ? "has-shipped-quantity"
+                                  : ""
+                            }
+                          >
+                            <td className="delayed-po-pdf-po">{row.order_id}</td>
+                            <td>{row.brand}</td>
+                            <td>{row.vendor}</td>
+                            <td>
+                              <div className="delayed-po-pdf-dates">
+                                <span><small>Order:</small> {formatDateDDMMYYYY(row.order_date)}</span>
+                                <span><small>ETD:</small> {formatDateDDMMYYYY(row.etd)}</span>
+                              </div>
+                            </td>
+                            <td>
+                              <div className="delayed-po-pdf-tags">
+                                <QuantityTag type="shipped" label="Shipped" value={row.shipped_item_count} />
+                                <QuantityTag type="passed" label="Inspected" value={row.inspected_item_count} />
+                                <QuantityTag type="pending" label="Pending" value={row.pending_item_count} />
+                              </div>
+                            </td>
+                            <td>
+                              <strong>{row.order_quantity}</strong>
+                              <small className="delayed-po-pdf-item-count">
+                                {row.item_count} {row.item_count === 1 ? "item" : "items"}
+                              </small>
+                            </td>
+                            <td>
+                              <div className="delayed-po-pdf-tags">
+                                <QuantityTag type="shipped" label="Shipped" value={row.shipped_quantity} />
+                                <QuantityTag type="passed" label="Passed" value={row.passed_quantity} />
+                                <QuantityTag type="pending" label="Pending" value={row.pending_quantity} />
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              ) : (
+                <>
+                  <div className="d-flex justify-content-between align-items-start gap-3 mb-3">
+                    <div>
+                      <h2 className="h4 mb-1">Delayed PO Detailed Report</h2>
+                      <p className="text-secondary mb-0">
+                        Report date: {formatDateDDMMYYYY(reportDate)}
+                      </p>
+                    </div>
+                    <div className="d-flex flex-wrap justify-content-end gap-2">
+                      <span className="om-summary-chip">POs: {poCount}</span>
+                      <span className="om-summary-chip">Rows: {sortedRows.length}</span>
+                    </div>
+                  </div>
+                  <table className="table table-sm align-middle om-table mb-0 delayed-po-table">
+                  <thead className="table-primary">
+                    <tr>
+                      <th>PO</th>
+                      <th>Item Code</th>
+                      <th>Brand</th>
+                      <th>Vendor</th>
+                      <th>Order Date</th>
+                      <th>ETD</th>
+                      <th>Order Qty</th>
+                      <th>Shipped</th>
+                      <th>Passed</th>
+                      <th>Pending</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {sortedRows.map((row) => (
+                      <tr
+                        key={`pdf-${row?.id || `${row?.order_id}-${row?.item_code}`}`}
+                        className={getDelayedPoPdfRowClass(row)}
+                      >
+                        <td>{row?.order_id || "N/A"}</td>
+                        <td>{row?.item_code || "N/A"}</td>
+                        <td>{row?.brand || "N/A"}</td>
+                        <td>{row?.vendor || "N/A"}</td>
+                        <td>{formatDateDDMMYYYY(row?.order_date)}</td>
+                        <td>{formatDateDDMMYYYY(row?.etd || row?.po_etd)}</td>
+                        <td>{Number(row?.order_quantity || 0)}</td>
+                        <td>{Number(row?.shipped_quantity || 0)}</td>
+                        <td>{Number(row?.passed_quantity || 0)}</td>
+                        <td>{Number(row?.pending_quantity || 0)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  </table>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -764,6 +880,114 @@ const DelayedPoReports = () => {
         </div>
 
       </div>
+
+      {showExportModal && (
+        <div className="modal d-block om-modal-backdrop" tabIndex="-1" role="dialog">
+          <div className="modal-dialog modal-dialog-centered modal-lg" role="document">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">Export Delayed PO Report</h5>
+                <button
+                  type="button"
+                  className="btn-close"
+                  aria-label="Close"
+                  disabled={Boolean(exportingFormat)}
+                  onClick={() => setShowExportModal(false)}
+                />
+              </div>
+              <div className="modal-body d-grid gap-4">
+                <fieldset>
+                  <legend className="form-label">Report type</legend>
+                  <div className="upcoming-etd-export-format-grid">
+                    <label className={`upcoming-etd-export-format${exportReportType === "summary" ? " is-selected" : ""}`}>
+                      <input
+                        type="radio"
+                        name="delayed-po-report-type"
+                        value="summary"
+                        checked={exportReportType === "summary"}
+                        disabled={Boolean(exportingFormat)}
+                        onChange={(event) => setExportReportType(event.target.value)}
+                      />
+                      <span>
+                        <strong>Summary</strong>
+                        <small>One aggregated row per PO with item and quantity totals.</small>
+                      </span>
+                    </label>
+                    <label className={`upcoming-etd-export-format${exportReportType === "detailed" ? " is-selected" : ""}`}>
+                      <input
+                        type="radio"
+                        name="delayed-po-report-type"
+                        value="detailed"
+                        checked={exportReportType === "detailed"}
+                        disabled={Boolean(exportingFormat)}
+                        onChange={(event) => setExportReportType(event.target.value)}
+                      />
+                      <span>
+                        <strong>Detailed</strong>
+                        <small>One row per item with its order and progress quantities.</small>
+                      </span>
+                    </label>
+                  </div>
+                </fieldset>
+
+                <fieldset>
+                  <legend className="form-label">Export format</legend>
+                  <div className="upcoming-etd-export-format-grid">
+                    <label className={`upcoming-etd-export-format${exportFormat === "xls" ? " is-selected" : ""}`}>
+                      <input
+                        type="radio"
+                        name="delayed-po-export-format"
+                        value="xls"
+                        checked={exportFormat === "xls"}
+                        disabled={Boolean(exportingFormat)}
+                        onChange={(event) => setExportFormat(event.target.value)}
+                      />
+                      <span>
+                        <strong>Excel (.xls)</strong>
+                        <small>Editable spreadsheet containing the selected report type.</small>
+                      </span>
+                    </label>
+                    <label className={`upcoming-etd-export-format${exportFormat === "pdf" ? " is-selected" : ""}`}>
+                      <input
+                        type="radio"
+                        name="delayed-po-export-format"
+                        value="pdf"
+                        checked={exportFormat === "pdf"}
+                        disabled={Boolean(exportingFormat)}
+                        onChange={(event) => setExportFormat(event.target.value)}
+                      />
+                      <span>
+                        <strong>PDF (.pdf)</strong>
+                        <small>Print-ready landscape report with the selected rows.</small>
+                      </span>
+                    </label>
+                  </div>
+                </fieldset>
+              </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary"
+                  disabled={Boolean(exportingFormat)}
+                  onClick={() => setShowExportModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={Boolean(exportingFormat)}
+                  onClick={handleConfirmExport}
+                >
+                  {exportingFormat
+                    ? "Exporting..."
+                    : `Export ${exportReportType === "summary" ? "Summary" : "Detailed"} ${exportFormat.toUpperCase()}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };

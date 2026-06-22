@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import html2canvas from "html2canvas";
-import { jsPDF } from "jspdf";
 import { useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import { usePermissions } from "../auth/PermissionContext";
 import Navbar from "../components/Navbar";
+import ReportInfoBanner from "../components/ReportInfoBanner";
 import SortHeaderButton from "../components/SortHeaderButton";
 import {
   getNextClientSortState,
@@ -14,6 +13,7 @@ import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import { formatCbm, resolvePreferredCbm } from "../utils/cbm";
 import "../App.css";
+import { exportElementToPdf } from "../services/pdfExport.service";
 
 const DEFAULT_SORT_BY = "po";
 const DEFAULT_SORT_ORDER = "asc";
@@ -494,38 +494,16 @@ const PackedGoods = () => {
     try {
       setExportingFormat("pdf");
       await new Promise((resolve) => window.setTimeout(resolve, 0));
-      const target = reportRef.current;
-      const canvas = await html2canvas(target, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: "#ffffff",
-        windowWidth: Math.max(target.scrollWidth, target.clientWidth),
-        windowHeight: Math.max(target.scrollHeight, target.clientHeight),
-        scrollX: 0,
-        scrollY: 0,
+      await exportElementToPdf({
+        element: reportRef.current,
+        reportKey: "packed-goods",
+        filename: `packed-goods-${new Date().toISOString().slice(0, 10)}.pdf`,
+        landscape: false,
+        repeatHeader: {
+          title: "Packed Goods",
+          subtitle: "Items inspected and packed, but not yet shipped.",
+        },
       });
-      const imageData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const margin = 18;
-      const printableWidth = pageWidth - margin * 2;
-      const printableHeight = pageHeight - margin * 2;
-      const imageHeight = (canvas.height * printableWidth) / canvas.width;
-
-      let remainingHeight = imageHeight;
-      let yPosition = margin;
-      pdf.addImage(imageData, "PNG", margin, yPosition, printableWidth, imageHeight);
-      remainingHeight -= printableHeight;
-
-      while (remainingHeight > 0) {
-        pdf.addPage();
-        yPosition = margin - (imageHeight - remainingHeight);
-        pdf.addImage(imageData, "PNG", margin, yPosition, printableWidth, imageHeight);
-        remainingHeight -= printableHeight;
-      }
-
-      pdf.save(`packed-goods-${new Date().toISOString().slice(0, 10)}.pdf`);
     } catch (pdfError) {
       console.error(pdfError);
       alert("Failed to export packed goods PDF.");
@@ -581,6 +559,12 @@ const PackedGoods = () => {
             </div>
           </div>
         </div>
+
+        <ReportInfoBanner
+          description="Tracks items that have been inspected and packed but are not yet shipped out of the warehouse."
+          dataShown="PO number, brand, vendor, item code, order quantity, packed quantity, and total volume (CBM)."
+          howItWorks="Lists items with packed quantities not yet shipped, filterable by brand list, vendor, and PO, and pageable."
+        />
 
         <div className="card om-card mb-3">
           <div className="card-body">

@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import html2canvas from "html2canvas";
-import { jsPDF } from "jspdf";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import ReportInfoBanner from "../components/ReportInfoBanner";
 import EditPisModal from "../components/EditPisModal";
 import { usePermissions } from "../auth/PermissionContext";
 import { getUserFromToken } from "../auth/auth.service";
@@ -12,6 +11,7 @@ import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import { formatEan13BarcodeDisplay } from "../utils/barcode";
 import "../App.css";
+import { exportElementToPdf } from "../services/pdfExport.service";
 
 const DEFAULT_LIMIT = 20;
 const LIMIT_OPTIONS = [10, 20, 50, 100];
@@ -926,79 +926,9 @@ const FinalPISCheck = () => {
   const handleExportPdfReport = useCallback(async () => {
     if (!pdfReportRef.current || !pdfPreviewData || exportingPdf) return;
 
-    const target = pdfReportRef.current;
-    const scrollContainer = target.closest(".pis-diff-pdf-preview-scroll");
-    const previousScrollStyles = scrollContainer
-      ? {
-          maxHeight: scrollContainer.style.maxHeight,
-          overflow: scrollContainer.style.overflow,
-        }
-      : null;
-
     try {
       setExportingPdf(true);
       await waitForFontsReady();
-
-      if (scrollContainer) {
-        scrollContainer.style.maxHeight = "none";
-        scrollContainer.style.overflow = "visible";
-      }
-
-      const canvas = await html2canvas(target, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: "#ffffff",
-        windowWidth: Math.max(target.scrollWidth, target.clientWidth),
-        windowHeight: Math.max(target.scrollHeight, target.clientHeight),
-        scrollX: 0,
-        scrollY: -window.scrollY,
-      });
-
-      const imageData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF({
-        orientation: "portrait",
-        unit: "pt",
-        format: "a4",
-      });
-
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const margin = 18;
-      const printableWidth = pageWidth - margin * 2;
-      const printableHeight = pageHeight - margin * 2;
-      const imageHeight = (canvas.height * printableWidth) / canvas.width;
-
-      let remainingHeight = imageHeight;
-      let yPosition = margin;
-
-      pdf.addImage(
-        imageData,
-        "PNG",
-        margin,
-        yPosition,
-        printableWidth,
-        imageHeight,
-        undefined,
-        "FAST",
-      );
-
-      remainingHeight -= printableHeight;
-      while (remainingHeight > 0) {
-        pdf.addPage();
-        yPosition = margin - (imageHeight - remainingHeight);
-        pdf.addImage(
-          imageData,
-          "PNG",
-          margin,
-          yPosition,
-          printableWidth,
-          imageHeight,
-          undefined,
-          "FAST",
-        );
-        remainingHeight -= printableHeight;
-      }
-
       const fileDate = new Date().toISOString().slice(0, 10);
       const filterName = toFilenameSegment(
         [brandFilter, vendorFilter, diffFieldFilter, searchInput]
@@ -1006,15 +936,21 @@ const FinalPISCheck = () => {
           .join("_"),
         "final-pis-check",
       );
-      pdf.save(`final-pis-check-${filterName}-${fileDate}.pdf`);
+      await exportElementToPdf({
+        element: pdfReportRef.current,
+        endpoint: "/items/pdf/render",
+        reportKey: "final-pis-check",
+        filename: `final-pis-check-${filterName}-${fileDate}.pdf`,
+        landscape: false,
+        repeatHeader: {
+          title: "Final PIS Check",
+          subtitle: `Brand: ${brandFilter} · Vendor: ${vendorFilter} · Difference: ${diffFieldFilter}`,
+        },
+      });
     } catch (pdfError) {
       console.error("Final PIS Check PDF export failed:", pdfError);
       setPdfPreviewError("Failed to export Final PIS Check PDF.");
     } finally {
-      if (scrollContainer && previousScrollStyles) {
-        scrollContainer.style.maxHeight = previousScrollStyles.maxHeight;
-        scrollContainer.style.overflow = previousScrollStyles.overflow;
-      }
       setExportingPdf(false);
     }
   }, [brandFilter, diffFieldFilter, exportingPdf, pdfPreviewData, searchInput, vendorFilter]);
@@ -1028,6 +964,16 @@ const FinalPISCheck = () => {
       <Navbar />
 
       <div className="page-shell py-3">
+        <div className="d-flex justify-content-between align-items-center mb-3">
+          <h2 className="h4 mb-0">Final PIS Check</h2>
+        </div>
+
+        <ReportInfoBanner
+          description="Audits and verifies discrepancies between inspected item/box dimensions/weights and the Master Product Information Sheet (PIS) values."
+          dataShown="Item code, brand, vendor, barcode, inspected size/weight details, Master PIS size/weight details, difference delta, and comments."
+          howItWorks="Displays detailed mismatch comparisons. Allows adding comments and editing/updating Master PIS details directly. Filterable by search, brand, vendor, and difference field."
+        />
+
         <div className="card om-card mb-3">
           <div className="card-body">
             <form className="row g-2 align-items-end" onSubmit={handleApplyFilters}>

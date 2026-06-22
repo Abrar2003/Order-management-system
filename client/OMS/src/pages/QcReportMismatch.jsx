@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import ReportInfoBanner from "../components/ReportInfoBanner";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -765,6 +766,12 @@ const QcReportMismatch = () => {
             Latest inspection snapshots vs current inspected sizes
           </span>
         </div>
+
+        <ReportInfoBanner
+          description="Highlights discrepancies between historical inspection reports submitted by QCs and current records of item/box dimensions in the database."
+          dataShown="Brand, vendor, item code, description, POs list, request/inspection dates, match status, and detailed mismatched fields."
+          howItWorks="Compiles historical QC sheet snapshots vs current sizes, filterable by date, brand, vendor, inspector, status, PO, item code, and a mismatch-only checkbox."
+        />
 
         <div className="card om-card mb-3">
           <form className="card-body row g-2 align-items-end" onSubmit={handleApplyFilters}>

@@ -8990,6 +8990,14 @@ exports.exportDelayedPoReport = async (req, res) => {
 
 exports.exportDelayedPoReport = async (req, res) => {
   try {
+    const requestedReportType = String(
+      req.query.report_type ?? req.query.reportType ?? "detailed",
+    )
+      .trim()
+      .toLowerCase();
+    const reportType = requestedReportType === "summary"
+      ? "summary"
+      : "detailed";
     const dataset = await buildReformedDelayedPoReportDataset({
       brands: req.query.brand ?? req.query.brands ?? req.query["brand[]"],
       vendor: req.query.vendor,
@@ -9073,11 +9081,15 @@ exports.exportDelayedPoReport = async (req, res) => {
       }));
       return worksheet;
     };
-    const itemWorksheet = buildWorksheet(columns, exportRows);
-    const summaryWorksheet = buildWorksheet(summaryColumns, summaryRows);
+    const selectedColumns = reportType === "summary" ? summaryColumns : columns;
+    const selectedRows = reportType === "summary" ? summaryRows : exportRows;
+    const worksheet = buildWorksheet(selectedColumns, selectedRows);
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, itemWorksheet, "Item Details");
-    XLSX.utils.book_append_sheet(workbook, summaryWorksheet, "PO Summary");
+    XLSX.utils.book_append_sheet(
+      workbook,
+      worksheet,
+      reportType === "summary" ? "PO Summary" : "Item Details",
+    );
     const fileBuffer = XLSX.write(workbook, {
       type: "buffer",
       bookType: "xls",
@@ -9087,7 +9099,7 @@ exports.exportDelayedPoReport = async (req, res) => {
     res.setHeader("Content-Type", "application/vnd.ms-excel");
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="delayed-po-report-${fileDate}.xls"`,
+      `attachment; filename="delayed-po-${reportType}-report-${fileDate}.xls"`,
     );
     return res.status(200).send(fileBuffer);
   } catch (error) {

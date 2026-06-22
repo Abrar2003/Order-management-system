@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import ReportInfoBanner from "../components/ReportInfoBanner";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -75,14 +76,17 @@ const downloadBlobResponse = (response, fallbackName, fallbackType) => {
   window.URL.revokeObjectURL(url);
 };
 
-const SummaryPill = ({ entry }) => (
-  <div className="inspected-items-report-pill">
-    <div className="small text-secondary">{entry?.label || "Metric"}</div>
-    <div className="fw-semibold">
-      {Number(entry?.count || 0)} / {Number(entry?.total || 0)}
+const SummaryPill = ({ entry, brandFilter }) => {
+  const isGigaPis = entry?.key === "pis" && String(brandFilter || "").trim().toLowerCase() === "giga";
+  return (
+    <div className="inspected-items-report-pill">
+      <div className="small text-secondary">{entry?.label || "Metric"}</div>
+      <div className="fw-semibold">
+        {isGigaPis ? "-" : `${Number(entry?.count || 0)} / ${Number(entry?.total || 0)}`}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 const FlagBadge = ({ value, applicable = true }) => (
   <span className={`badge ${applicable ? getFlagBadgeClass(value) : "text-bg-light text-secondary"}`}>
@@ -267,9 +271,15 @@ const InspectedItemsReport = () => {
           </button>
         </div>
 
+        <ReportInfoBanner
+          description="Audits items to check if essential documents (CAD, PIS, Assembly instructions, packaging PPT, product image, finishes, shipping marks) are uploaded."
+          dataShown="Item code, description, brand, vendors list, status flags indicating presence of required files, and last inspected date."
+          howItWorks="Compiles document flag checklists for inspected items, filterable by brand, vendor, specific criterion status, date, and keyword."
+        />
+
         <div className="inspected-items-report-pill-row mb-4">
           {summaryEntries.map((entry) => (
-            <SummaryPill key={entry.key} entry={entry} />
+            <SummaryPill key={entry.key} entry={entry} brandFilter={brandFilter} />
           ))}
         </div>
 
@@ -418,7 +428,7 @@ const InspectedItemsReport = () => {
                         <td>{(row.vendors || []).join(", ") || "N/A"}</td>
                         <td><FlagBadge value={row.flags?.inspected} /></td>
                         <td><FlagBadge value={row.flags?.cad} /></td>
-                        <td><FlagBadge value={row.flags?.pis} /></td>
+                        <td><FlagBadge value={row.flags?.pis} applicable={normalizeText(row.brand).toLowerCase() !== "giga"} /></td>
                         <td>
                           <FlagBadge
                             value={row.flags?.assembly}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import ReportInfoBanner from "../components/ReportInfoBanner";
 import SortHeaderButton from "../components/SortHeaderButton";
 import {
   getNextClientSortState,
@@ -310,6 +311,12 @@ const DailySummary = () => {
           <h2 className="h4 mb-0">Daily Summary</h2>
           <span className="d-none d-md-inline" />
         </div>
+
+        <ReportInfoBanner
+          description="Summarizes inspection activity for a specific day."
+          dataShown="Total vendors and items inspected, inspection date, PO, item code, requested/passed quantities, open quantity, inspector name, and remarks."
+          howItWorks="Shows a daily snapshot of inspections grouped by vendor. Filterable by date and brand, and sortable by table columns."
+        />
 
         <div className="card om-card mb-3">
           <form className="card-body d-flex flex-wrap gap-2 align-items-end" onSubmit={handleApplyFilters}>

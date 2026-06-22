@@ -8,8 +8,19 @@ const {
   securityLog,
 } = require("../middlewares/securityActivityLogger");
 const reportsController = require("../controllers/reports.controller");
+const { renderHtmlPdf } = require("../controllers/pdf.controller");
 
 const router = express.Router();
+
+router.post(
+  "/pdf/render",
+  auth,
+  requirePermission("reports", "view"),
+  securityLog("export_pdf", "report", {
+    metadata: (req) => ({ report_key: req.body?.reportKey || "" }),
+  }),
+  renderHtmlPdf,
+);
 
 router.get(
   "/vendor-wise-qa/summary",
@@ -48,7 +59,7 @@ router.get(
   "/inspected-items",
   auth,
   requirePermission("reports", "view"),
-  cacheRoute("reports", MEDIUM_CACHE_TTL),
+  cacheRoute("reports_inspected_v2", MEDIUM_CACHE_TTL),
   reportsController.getInspectedItemsReport,
 );
 

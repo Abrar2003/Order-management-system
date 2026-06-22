@@ -3,7 +3,6 @@ const path = require("path");
 const mongoose = require("mongoose");
 const XLSX = require("xlsx");
 const AdmZip = require("adm-zip");
-const PDFDocument = require("pdfkit");
 const dns = require("dns");
 
 dns.setServers(["1.1.1.1", "8.8.8.8"]);
@@ -21,6 +20,7 @@ const {
 const {
   cleanupLegacyItemSizeFields,
 } = require("../helpers/itemLegacySizeCleanup");
+const { renderPdf } = require("../services/pdfRenderer");
 
 const SIZE_ENTRY_LIMIT = 4;
 const ITEM_REMARKS = ["item", "item1", "item2", "item3"];
@@ -612,172 +612,78 @@ const drawImageGallery = (doc, images = []) => {
   }
 };
 
-const createPdfBuffer = async (parsedWorkbook) =>
-  new Promise((resolve, reject) => {
-    const doc = new PDFDocument({
-      size: "A4",
-      margin: 36,
-      bufferPages: true,
-      compress: true,
-      info: {
-        Title: `${parsedWorkbook?.code || "Unknown"} PIS Snapshot`,
-        Author: "Order Management System",
-      },
-    });
-    const chunks = [];
+const escapePdfHtml = (value) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 
-    doc.on("data", (chunk) => chunks.push(chunk));
-    doc.on("end", () => resolve(Buffer.concat(chunks)));
-    doc.on("error", reject);
+const flattenPdfValues = (value, prefix = "", rows = []) => {
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) =>
+      flattenPdfValues(entry, `${prefix}${prefix ? " " : ""}${index + 1}`, rows));
+    return rows;
+  }
+  if (value && typeof value === "object") {
+    Object.entries(value).forEach(([key, entry]) =>
+      flattenPdfValues(entry, `${prefix}${prefix ? " · " : ""}${key}`, rows));
+    return rows;
+  }
+  rows.push({ label: prefix || "Value", value: toDisplayValue(value) });
+  return rows;
+};
 
-    doc.font("Helvetica-Bold").fontSize(16).fillColor("#111827");
-    doc.text(`PIS Sheet - ${parsedWorkbook?.code || "Unknown Item"}`);
-    doc.moveDown(0.35);
+const createPdfBuffer = async (parsedWorkbook) => {
+  const summaryRows = [
+    ["Article Number", parsedWorkbook?.code || "N/A"],
+    ["Sheet Name", parsedWorkbook?.sheet_name || "N/A"],
+    ["Source File", parsedWorkbook?.file_name || "N/A"],
+    ["Dimension Unit", parsedWorkbook?.dimension_unit || "N/A"],
+    ["PIS Barcode", parsedWorkbook?.payload?.pis_barcode || "N/A"],
+    ["Calculated PIS CBM", parsedWorkbook?.payload?.cbm?.calculated_pis_total || "0"],
+  ];
+  const detailRows = flattenPdfValues(parsedWorkbook?.details || {});
+  const imageHtml = (parsedWorkbook?.sheet_images || []).map((image) => {
+    const mimeType = String(image?.mime_type || image?.contentType || "image/png");
+    const source = Buffer.isBuffer(image?.buffer)
+      ? `data:${mimeType};base64,${image.buffer.toString("base64")}`
+      : "";
+    return source
+      ? `<figure class="pdf-keep-together"><img src="${source}" alt="${escapePdfHtml(image?.name || "Sheet image")}" /><figcaption>${escapePdfHtml(image?.name || "Sheet image")}</figcaption></figure>`
+      : "";
+  }).join("");
+  const tableRows = (rows) => rows.map((row) => `
+    <tr><th>${escapePdfHtml(row.label ?? row[0])}</th><td>${escapePdfHtml(row.value ?? row[1])}</td></tr>
+  `).join("");
 
-    drawSectionTitle(doc, "Summary");
-    drawKeyValueGrid(doc, [
-      { label: "Article Number", value: parsedWorkbook?.code || "N/A" },
-      { label: "Sheet Name", value: parsedWorkbook?.sheet_name || "N/A" },
-      { label: "Source File", value: parsedWorkbook?.file_name || "N/A" },
-      { label: "Workbook Path", value: parsedWorkbook?.file_path || "N/A" },
-      { label: "Dimension Unit", value: parsedWorkbook?.dimension_unit || "N/A" },
-      { label: "PIS Barcode", value: parsedWorkbook?.payload?.pis_barcode || "N/A" },
-      { label: "Calculated PIS CBM", value: parsedWorkbook?.payload?.cbm?.calculated_pis_total || "0" },
-    ]);
-
-    drawSectionTitle(doc, "Sheet Images");
-    drawImageGallery(doc, parsedWorkbook?.sheet_images || []);
-
-    drawSectionTitle(doc, "Product Info");
-    drawKeyValueGrid(doc, [
-      { label: "Brand", value: parsedWorkbook?.details?.product_info?.brand },
-      { label: "Supplier", value: parsedWorkbook?.details?.product_info?.supplier },
-      { label: "Supplier Ref", value: parsedWorkbook?.details?.product_info?.supplier_ref },
-      { label: "Product Type", value: parsedWorkbook?.details?.product_info?.product_type },
-      { label: "Article Name", value: parsedWorkbook?.details?.product_info?.article_name },
-      { label: "Collection", value: parsedWorkbook?.details?.product_info?.collection },
-      { label: "Sales Unit", value: parsedWorkbook?.details?.product_info?.sales_unit },
-    ]);
-
-    drawSectionTitle(doc, "Trade Packaging");
-    drawKeyValueGrid(doc, [
-      { label: "Barcode Master Box", value: parsedWorkbook?.details?.trade_packaging?.barcode_master_box },
-      { label: "Barcode PCS", value: parsedWorkbook?.details?.trade_packaging?.barcode_pcs },
-      { label: "HS Code", value: parsedWorkbook?.details?.trade_packaging?.hs_code },
-      { label: "Import Duties", value: parsedWorkbook?.details?.trade_packaging?.import_duties },
-      { label: "MOQ First Order", value: parsedWorkbook?.details?.trade_packaging?.moq_first_order },
-      { label: "MOQ Re-order", value: parsedWorkbook?.details?.trade_packaging?.moq_reorder },
-      { label: "Max Carrying Capacity", value: parsedWorkbook?.details?.trade_packaging?.maximum_carrying_capacity },
-      { label: "Master Box CBM", value: parsedWorkbook?.details?.trade_packaging?.master_box_cbm },
-      { label: "PCS In Box", value: parsedWorkbook?.details?.trade_packaging?.pcs_in_box },
-      { label: "CBM Per Unit", value: parsedWorkbook?.details?.trade_packaging?.cbm_per_unit },
-      { label: "Paper/Carton Total KG", value: parsedWorkbook?.details?.trade_packaging?.packing_weight?.paper_carton_total_kg },
-      { label: "Paper/Carton Per Piece KG", value: parsedWorkbook?.details?.trade_packaging?.packing_weight?.paper_carton_per_piece_kg },
-      { label: "Plastic/Styrofoam Total KG", value: parsedWorkbook?.details?.trade_packaging?.packing_weight?.plastics_styrofoam_total_kg },
-      { label: "Plastic/Styrofoam Per Piece KG", value: parsedWorkbook?.details?.trade_packaging?.packing_weight?.plastics_styrofoam_per_piece_kg },
-    ]);
-
-    drawSectionTitle(doc, "Pricing Headers");
-    drawTable(doc, {
-      columns: [{ label: "Header", key: "header", width: 1 }],
-      rows: (parsedWorkbook?.details?.pricing_headers_present || []).map((header) => ({ header })),
-    });
-
-    drawSectionTitle(doc, "Materials");
-    drawTable(doc, {
-      columns: [
-        { label: "Type", key: "material_type", width: 1.1 },
-        { label: "Name", key: "material_name", width: 1.3 },
-        { label: "Composition %", key: "composition_percent", width: 1 },
-        { label: "Color", key: "color", width: 1.1 },
-        { label: "Finishing", key: "finishing", width: 1.2 },
-      ],
-      rows: parsedWorkbook?.details?.materials || [],
-    });
-
-    drawSectionTitle(doc, "Item Sizes");
-    drawTable(doc, {
-      columns: [
-        { label: "Remark", key: "remark", width: 1.2 },
-        { label: "L", key: "L", width: 0.8, align: "right" },
-        { label: "B", key: "B", width: 0.8, align: "right" },
-        { label: "H", key: "H", width: 0.8, align: "right" },
-        { label: "Net Weight", key: "net_weight", width: 1.2, align: "right" },
-      ],
-      rows: (parsedWorkbook?.payload?.pis_item_sizes || []).map((entry) => ({
-        remark: toDisplayValue(entry?.remark || "single"),
-        L: roundNumber(Number(entry?.L || 0), 3),
-        B: roundNumber(Number(entry?.B || 0), 3),
-        H: roundNumber(Number(entry?.H || 0), 3),
-        net_weight: roundNumber(Number(entry?.net_weight || 0), 3),
-      })),
-    });
-
-    drawSectionTitle(doc, "Box Sizes");
-    drawTable(doc, {
-      columns: [
-        { label: "Remark", key: "remark", width: 1.2 },
-        { label: "L", key: "L", width: 0.8, align: "right" },
-        { label: "B", key: "B", width: 0.8, align: "right" },
-        { label: "H", key: "H", width: 0.8, align: "right" },
-        { label: "Gross Weight", key: "gross_weight", width: 1.2, align: "right" },
-      ],
-      rows: (parsedWorkbook?.payload?.pis_box_sizes || []).map((entry) => ({
-        remark: toDisplayValue(entry?.remark || "single"),
-        L: roundNumber(Number(entry?.L || 0), 3),
-        B: roundNumber(Number(entry?.B || 0), 3),
-        H: roundNumber(Number(entry?.H || 0), 3),
-        gross_weight: roundNumber(Number(entry?.gross_weight || 0), 3),
-      })),
-    });
-
-    drawSectionTitle(doc, "Hardware");
-    drawKeyValueGrid(doc, [
-      { label: "Table Top", value: parsedWorkbook?.details?.hardware?.table_top },
-      { label: "Legs", value: parsedWorkbook?.details?.hardware?.legs },
-      { label: "Extendable", value: parsedWorkbook?.details?.hardware?.extendable },
-      { label: "Butterfly", value: parsedWorkbook?.details?.hardware?.butterfly },
-      { label: "Bolt & Washers", value: parsedWorkbook?.details?.hardware?.bold_and_washers },
-      { label: "Sleeding Guide", value: parsedWorkbook?.details?.hardware?.sleeding_guide },
-      { label: "Handles", value: parsedWorkbook?.details?.hardware?.handles },
-      { label: "Stoppers", value: parsedWorkbook?.details?.hardware?.stoppers },
-      { label: "Locks", value: parsedWorkbook?.details?.hardware?.locks },
-      { label: "Wheels", value: parsedWorkbook?.details?.hardware?.wheels },
-      { label: "Protection Caps", value: parsedWorkbook?.details?.hardware?.protection_caps },
-      { label: "KD", value: parsedWorkbook?.details?.hardware?.kd },
-      { label: "Allen Key", value: parsedWorkbook?.details?.hardware?.allen_key },
-    ]);
-
-    drawSectionTitle(doc, "Features");
-    drawTable(doc, {
-      columns: [
-        { label: "Feature", key: "feature", width: 1.6 },
-        { label: "Value", key: "value", width: 0.8 },
-      ],
-      rows: Object.entries(parsedWorkbook?.details?.features || {}).map(([feature, value]) => ({
-        feature,
-        value: toBooleanDisplay(value),
-      })),
-    });
-
-    drawSectionTitle(doc, "Branding");
-    drawKeyValueGrid(doc, [
-      { label: "Brand Name", value: parsedWorkbook?.details?.branding?.brand_name },
-      { label: "Barcode Sticker", value: toBooleanDisplay(parsedWorkbook?.details?.branding?.barcode_sticker) },
-      { label: "Transparent Sticker", value: toBooleanDisplay(parsedWorkbook?.details?.branding?.transparent_sticker) },
-      { label: "Hangtag", value: toBooleanDisplay(parsedWorkbook?.details?.branding?.hangtag) },
-    ]);
-
-    if (Array.isArray(parsedWorkbook?.warnings) && parsedWorkbook.warnings.length > 0) {
-      drawSectionTitle(doc, "Warnings");
-      drawTable(doc, {
-        columns: [{ label: "Message", key: "message", width: 1 }],
-        rows: parsedWorkbook.warnings.map((message) => ({ message })),
-      });
-    }
-
-    doc.end();
+  return renderPdf({
+    html: `
+      <section class="pis-snapshot">
+        <h1>PIS Sheet - ${escapePdfHtml(parsedWorkbook?.code || "Unknown Item")}</h1>
+        <section class="pdf-report-section"><h2>Summary</h2><table><tbody>${tableRows(summaryRows)}</tbody></table></section>
+        ${imageHtml ? `<section class="pdf-report-section"><h2>Sheet Images</h2><div class="images">${imageHtml}</div></section>` : ""}
+        <section><h2>Workbook Details</h2><table><tbody>${tableRows(detailRows)}</tbody></table></section>
+      </section>
+    `,
+    format: "A4",
+    landscape: false,
+    margin: { top: "10mm", right: "10mm", bottom: "10mm", left: "10mm" },
+    extraCss: `
+      body { font-family: Arial, sans-serif; font-size: 10px; }
+      h1 { margin: 0 0 8mm; font-size: 18px; }
+      h2 { margin: 5mm 0 2mm; font-size: 13px; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { padding: 5px 7px; border: 1px solid #d1d5db; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+      th { width: 35%; background: #f3f4f6; }
+      .images { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5mm; }
+      figure { margin: 0; }
+      img { display: block; max-width: 100%; max-height: 80mm; margin: 0 auto; object-fit: contain; }
+      figcaption { margin-top: 2mm; color: #6b7280; text-align: center; }
+    `,
   });
+};
 
 const extractWorkbookData = (filePath) => {
   const workbook = XLSX.readFile(filePath, { cellDates: true });

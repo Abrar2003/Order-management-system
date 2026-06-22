@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import ReportInfoBanner from "../components/ReportInfoBanner";
 import OrderEtdWithHistory from "../components/OrderEtdWithHistory";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { formatDateDDMMYYYY, toISODateString } from "../utils/date";
@@ -435,6 +436,12 @@ const VendorReports = () => {
           <h2 className="h4 mb-0">Vendor Performance Reports</h2>
           <span className="d-none d-md-inline" />
         </div>
+
+        <ReportInfoBanner
+          description="Measures order completion, lead times, and delay metrics for manufacturing vendors."
+          dataShown="Vendor lists, order counts, delayed orders, average delay days, lead times, and detailed order lists with ETD comparison dates."
+          howItWorks="Computes average lead time and delay statistics. Filterable by timeline/date range, brand, vendor, and sortable by order dates or ETD."
+        />
 
         <div className="card om-card mb-3">
           <form className="card-body d-flex flex-wrap gap-2 align-items-end" onSubmit={handleApplyFilters}>

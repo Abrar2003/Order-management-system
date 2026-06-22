@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import ReportInfoBanner from "../components/ReportInfoBanner";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { formatDateDDMMYYYY } from "../utils/date";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
@@ -239,6 +240,12 @@ const ShippedSamples = () => {
             {loading ? "Loading..." : "Refresh"}
           </button>
         </div>
+
+        <ReportInfoBanner
+          description="Tracks product sample shipments sent out to clients or testing facilities."
+          dataShown="Sample code, vendor, brand, description, quantity, container number, stuffing date, status, stuffed CBM, and update time."
+          howItWorks="Lists shipped samples containerized for transit, filterable by search term, vendor, or container number, and pageable."
+        />
 
         <div className="card om-card mb-3">
           <div className="card-body">

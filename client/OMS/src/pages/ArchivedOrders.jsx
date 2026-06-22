@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import Navbar from "../components/Navbar";
+import ReportInfoBanner from "../components/ReportInfoBanner";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { usePermissions } from "../auth/PermissionContext";
 import {
@@ -296,6 +297,12 @@ const ArchivedOrders = () => {
             <span className="om-summary-chip">Total: {pagination.totalRecords}</span>
           </div>
         </div>
+
+        <ReportInfoBanner
+          description="Lists archived orders (typically inactive or zero-quantity orders) and allows unarchiving."
+          dataShown="PO number, item code, description, brand, vendor, quantity, original status, archive date, user, and remark."
+          howItWorks="Displays a paginated log of archived orders, filterable by order ID, vendor, and brand, with a tool to sync/archive zero-quantity orders."
+        />
 
         <div className="card om-card mb-3">
           <div className="card-body">

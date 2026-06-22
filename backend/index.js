@@ -40,6 +40,7 @@ const {
   startSecurityBaselineCron,
   stopSecurityBaselineCron,
 } = require("./services/securityBaselineCron");
+const { closePdfRenderer } = require("./services/pdfRenderer");
 
 const app = express();
 const PORT = Number.parseInt(String(process.env.PORT || "8008"), 10) || 8008;
@@ -200,6 +201,7 @@ const startServer = async () => {
         try {
           stopSecurityBaselineCron();
           await io.close();
+          await closePdfRenderer();
           await closeQueues();
           await closeRedisClients();
           await mongoose.connection.close(false);

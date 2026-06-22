@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Navbar from "../components/Navbar";
+import ReportInfoBanner from "../components/ReportInfoBanner";
 import UpcomingEtdExportModal from "../components/UpcomingEtdExportModal";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { getUpcomingEtdReport } from "../services/orders.service";
@@ -14,6 +15,22 @@ import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
 
 const DEFAULT_ENTITY_FILTER = "all";
+
+const getEtdUrgency = (daysUntilEtd) => {
+  const days = Number(daysUntilEtd || 0);
+  if (days <= 0) return { className: "is-today", label: "Today" };
+  if (days <= 3) return { className: "is-urgent", label: `${days}d` };
+  if (days <= 7) return { className: "is-soon", label: `${days}d` };
+  return { className: "is-upcoming", label: `${days}d` };
+};
+
+const getProgressTone = (lastProgress) => {
+  const normalized = String(lastProgress || "").trim().toLowerCase();
+  if (!normalized || normalized === "pending") return "is-pending";
+  if (normalized.includes("ship")) return "is-shipped";
+  if (normalized.includes("inspect")) return "is-inspection";
+  return "is-progress";
+};
 
 const normalizeEntityFilter = (value) => {
   const normalized = String(value || "").trim();
@@ -93,6 +110,7 @@ const UpcomingEtdReports = () => {
   const [showExportModal, setShowExportModal] = useState(false);
   const [sortBy, setSortBy] = useState("daysUntilEtd");
   const [sortOrder, setSortOrder] = useState("asc");
+  const [collapsedVendors, setCollapsedVendors] = useState(() => new Set());
 
   const fetchReport = useCallback(async () => {
     try {
@@ -216,34 +234,68 @@ const UpcomingEtdReports = () => {
     [sortBy, sortOrder],
   );
 
+  const toggleVendor = useCallback((vendorKey) => {
+    setCollapsedVendors((current) => {
+      const next = new Set(current);
+      if (next.has(vendorKey)) {
+        next.delete(vendorKey);
+      } else {
+        next.add(vendorKey);
+      }
+      return next;
+    });
+  }, []);
+
   return (
     <>
       <Navbar />
 
-      <div className="page-shell om-report-page py-3">
-        <div className="d-flex justify-content-between align-items-center mb-3">
+      <div className="page-shell om-report-page upcoming-etd-page py-3">
+        <header className="upcoming-etd-page-header">
           <button
             type="button"
-            className="btn btn-outline-secondary btn-sm"
+            className="btn btn-outline-secondary btn-sm upcoming-etd-back-button"
             onClick={() => navigate(-1)}
+            aria-label="Go back"
           >
-            Back
+            <span aria-hidden="true">←</span>
+            <span>Back</span>
           </button>
-          <h2 className="h4 mb-0">Upcoming ETD Reports</h2>
+          <div className="upcoming-etd-heading">
+            <span className="upcoming-etd-eyebrow">Planning overview</span>
+            <h1>Upcoming ETD Report</h1>
+            <p>Track purchase orders approaching their effective departure date.</p>
+          </div>
           <button
             type="button"
-            className="btn btn-outline-primary btn-sm"
+            className="btn btn-primary btn-sm upcoming-etd-export-button"
             onClick={() => setShowExportModal(true)}
           >
-            Export Report
+            <span aria-hidden="true">⇩</span>
+            <span>Export</span>
           </button>
+        </header>
+
+        <div className="upcoming-etd-info-banner">
+          <ReportInfoBanner
+            description="Monitors Purchase Orders with delivery dates approaching within a specified future window."
+            dataShown="PO numbers, brand, order date, effective ETD, days remaining, pending/inspected/shipped item counts, and last recorded progress."
+            howItWorks="Shows upcoming orders grouped by vendor and sorted by days remaining. Filterable by limit date, brand, and vendor."
+          />
         </div>
 
-        <div className="card om-card mb-3">
-          <form className="card-body d-flex flex-wrap gap-2 align-items-end" onSubmit={handleApplyFilters}>
+        <section className="card om-card upcoming-etd-filter-card mb-3" aria-labelledby="upcoming-etd-filter-title">
+          <div className="upcoming-etd-section-heading">
             <div>
-              <label className="form-label mb-1">Until Date</label>
+              <h2 id="upcoming-etd-filter-title">Report controls</h2>
+              <p>Adjust the ETD window or narrow the report by brand and vendor.</p>
+            </div>
+          </div>
+          <form className="upcoming-etd-filter-grid" onSubmit={handleApplyFilters}>
+            <div className="upcoming-etd-filter-field">
+              <label className="form-label" htmlFor="upcoming-etd-until-date">Until date</label>
               <input
+                id="upcoming-etd-until-date"
                 type="date"
                 className="form-control"
                 value={draftToDateFilter}
@@ -251,9 +303,10 @@ const UpcomingEtdReports = () => {
               />
             </div>
 
-            <div>
-              <label className="form-label mb-1">Brand</label>
+            <div className="upcoming-etd-filter-field">
+              <label className="form-label" htmlFor="upcoming-etd-brand">Brand</label>
               <select
+                id="upcoming-etd-brand"
                 className="form-select"
                 value={draftBrandFilter}
                 onChange={(event) =>
@@ -269,9 +322,10 @@ const UpcomingEtdReports = () => {
               </select>
             </div>
 
-            <div>
-              <label className="form-label mb-1">Vendor</label>
+            <div className="upcoming-etd-filter-field">
+              <label className="form-label" htmlFor="upcoming-etd-vendor">Vendor</label>
               <select
+                id="upcoming-etd-vendor"
                 className="form-select"
                 value={draftVendorFilter}
                 onChange={(event) =>
@@ -287,55 +341,72 @@ const UpcomingEtdReports = () => {
               </select>
             </div>
 
-            <button
-              type="submit"
-              className="btn btn-primary btn-sm"
-              disabled={loading}
-            >
-              Apply
-            </button>
-            <button
-              type="button"
-              className="btn btn-outline-secondary btn-sm"
-              onClick={handleClearFilters}
-              disabled={loading}
-            >
-              Clear
-            </button>
+            <div className="upcoming-etd-filter-actions">
+              <button
+                type="button"
+                className="btn btn-outline-secondary"
+                onClick={handleClearFilters}
+                disabled={loading}
+              >
+                Reset
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={loading}
+              >
+                {loading ? "Loading..." : "Apply filters"}
+              </button>
+            </div>
           </form>
-        </div>
+        </section>
 
-        <div className="card om-card mb-3">
-          <div className="card-body d-flex flex-wrap gap-2">
-            <span className="om-summary-chip">
-              Window: {formatDateDDMMYYYY(filters.report_start_date)} - {formatDateDDMMYYYY(filters.report_end_date)}
-            </span>
-            <span className="om-summary-chip">
-              Brand: {brandFilter === DEFAULT_ENTITY_FILTER ? "all" : brandFilter}
-            </span>
-            <span className="om-summary-chip">
-              Vendor: {vendorFilter === DEFAULT_ENTITY_FILTER ? "all" : vendorFilter}
-            </span>
-            <span className="om-summary-chip">
-              Upcoming POs: {summary.upcoming_po_count ?? 0}
-            </span>
-            <span className="om-summary-chip">
-              Vendors: {summary.vendors_count ?? 0}
-            </span>
-            <span className="om-summary-chip">
-              Pending: {summary.pending_count ?? 0}
-            </span>
-            <span className="om-summary-chip">
-              Inspection Done: {summary.inspection_done_count ?? 0}
-            </span>
-            <span className="om-summary-chip">
-              Shipped: {summary.shipped_count ?? 0}
-            </span>
-            <span className="om-summary-chip">
-              Avg Days Until ETD: {summary.average_days_until_etd ?? 0}
-            </span>
+        <section className="upcoming-etd-overview mb-3" aria-label="Report summary">
+          <div className="upcoming-etd-window-card">
+            <div className="upcoming-etd-window-icon" aria-hidden="true">↗</div>
+            <div>
+              <span className="upcoming-etd-card-label">ETD window</span>
+              <strong>
+                {formatDateDDMMYYYY(filters.report_start_date)} —{" "}
+                {formatDateDDMMYYYY(filters.report_end_date)}
+              </strong>
+              <div className="upcoming-etd-active-filters">
+                <span>
+                  Brand: {brandFilter === DEFAULT_ENTITY_FILTER ? "All" : brandFilter}
+                </span>
+                <span>
+                  Vendor: {vendorFilter === DEFAULT_ENTITY_FILTER ? "All" : vendorFilter}
+                </span>
+              </div>
+            </div>
           </div>
-        </div>
+
+          <div className="upcoming-etd-kpi-grid">
+            <div className="upcoming-etd-kpi is-primary">
+              <span className="upcoming-etd-card-label">Upcoming POs</span>
+              <strong>{summary.upcoming_po_count ?? 0}</strong>
+              <small>Across {summary.vendors_count ?? 0} vendors</small>
+            </div>
+            <div className="upcoming-etd-kpi is-warning">
+              <span className="upcoming-etd-card-label">Pending items</span>
+              <strong>{summary.pending_count ?? 0}</strong>
+              <small>Awaiting inspection</small>
+            </div>
+            <div className="upcoming-etd-kpi is-success">
+              <span className="upcoming-etd-card-label">Inspection done</span>
+              <strong>{summary.inspection_done_count ?? 0}</strong>
+              <small>Ready for next step</small>
+            </div>
+            <div className="upcoming-etd-kpi is-neutral">
+              <span className="upcoming-etd-card-label">Avg. time to ETD</span>
+              <strong>
+                {summary.average_days_until_etd ?? 0}
+                <span> days</span>
+              </strong>
+              <small>{summary.shipped_count ?? 0} items shipped</small>
+            </div>
+          </div>
+        </section>
 
         {error && (
           <div className="alert alert-danger mb-3" role="alert">
@@ -345,13 +416,19 @@ const UpcomingEtdReports = () => {
 
         <div className="d-grid gap-3">
           {loading ? (
-            <div className="card om-card">
-              <div className="card-body text-center py-4">Loading...</div>
+            <div className="card om-card upcoming-etd-state-card">
+              <div className="spinner-border spinner-border-sm" role="status" aria-hidden="true" />
+              <div>
+                <strong>Loading upcoming ETDs</strong>
+                <span>Building the latest vendor view…</span>
+              </div>
             </div>
           ) : report.vendors.length === 0 ? (
-            <div className="card om-card">
-              <div className="card-body text-secondary">
-                No upcoming ETD POs found for the selected filters.
+            <div className="card om-card upcoming-etd-state-card">
+              <div className="upcoming-etd-empty-icon" aria-hidden="true">✓</div>
+              <div>
+                <strong>No upcoming ETDs found</strong>
+                <span>Try extending the until date or clearing the selected filters.</span>
               </div>
             </div>
           ) : (
@@ -380,34 +457,61 @@ const UpcomingEtdReports = () => {
                 },
               });
               const vendorKey = String(vendorEntry?.vendor || "").trim() || `vendor-${index}`;
+              const isCollapsed = collapsedVendors.has(vendorKey);
+              const vendorInitial = String(vendorEntry?.vendor || "?")
+                .trim()
+                .charAt(0)
+                .toUpperCase();
 
               return (
-                <div key={vendorKey} className="card om-card">
-                  <div className="card-body p-0">
-                    <div className="px-3 py-2 border-bottom d-flex flex-wrap gap-2">
-                      <span className="fw-semibold">Vendor: {vendorEntry.vendor}</span>
-                      <span className="om-summary-chip">
-                        Brands: {(Array.isArray(vendorEntry?.brands) ? vendorEntry.brands : []).join(", ") || "N/A"}
+                <section key={vendorKey} className="card om-card upcoming-etd-vendor-card">
+                  <div className="upcoming-etd-vendor-header">
+                    <div className="upcoming-etd-vendor-identity">
+                      <span className="upcoming-etd-vendor-avatar" aria-hidden="true">
+                        {vendorInitial}
                       </span>
-                      <span className="om-summary-chip">
-                        Upcoming POs: {vendorEntry.upcoming_po_count ?? 0}
-                      </span>
-                      <span className="om-summary-chip">
-                        Pending: {vendorEntry.pending_count ?? 0}
-                      </span>
-                      <span className="om-summary-chip">
-                        Inspection Done: {vendorEntry.inspection_done_count ?? 0}
-                      </span>
-                      <span className="om-summary-chip">
-                        Shipped: {vendorEntry.shipped_count ?? 0}
-                      </span>
-                      <span className="om-summary-chip">
-                        Avg Days Until ETD: {vendorEntry.average_days_until_etd ?? 0}
-                      </span>
+                      <div>
+                        <span className="upcoming-etd-card-label">Vendor</span>
+                        <h2>{vendorEntry.vendor}</h2>
+                        <p>
+                          {(Array.isArray(vendorEntry?.brands) ? vendorEntry.brands : []).join(", ") || "No brand listed"}
+                        </p>
+                      </div>
                     </div>
 
-                    <div className="table-responsive">
-                      <table className="table table-sm table-striped align-middle mb-0">
+                    <div className="upcoming-etd-vendor-summary">
+                      <div>
+                        <span>POs</span>
+                        <strong>{vendorEntry.upcoming_po_count ?? 0}</strong>
+                      </div>
+                      <div className="is-warning">
+                        <span>Pending</span>
+                        <strong>{vendorEntry.pending_count ?? 0}</strong>
+                      </div>
+                      <div className="is-success">
+                        <span>Inspected</span>
+                        <strong>{vendorEntry.inspection_done_count ?? 0}</strong>
+                      </div>
+                      <div>
+                        <span>Avg. ETD</span>
+                        <strong>{vendorEntry.average_days_until_etd ?? 0}d</strong>
+                      </div>
+                      <button
+                        type="button"
+                        className="upcoming-etd-collapse-button"
+                        onClick={() => toggleVendor(vendorKey)}
+                        aria-expanded={!isCollapsed}
+                        aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${vendorEntry.vendor}`}
+                      >
+                        <span aria-hidden="true">{isCollapsed ? "+" : "−"}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {!isCollapsed && (
+                    <div className="card-body p-0">
+                      <div className="table-responsive">
+                      <table className="table table-sm table-hover align-middle mb-0 upcoming-etd-table">
                         <thead>
                           <tr>
                             <th>
@@ -493,39 +597,64 @@ const UpcomingEtdReports = () => {
                             </tr>
                           )}
 
-                          {sortedRows.map((row) => (
-                            <tr
-                              key={`${vendorKey}-${row.order_id}`}
-                              className="table-clickable"
-                              onClick={() => handleOpenOrder(row.order_id)}
-                            >
-                              <td>
-                                <button
-                                  type="button"
-                                  className="btn btn-link p-0 align-baseline text-decoration-none"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    handleOpenOrder(row.order_id);
-                                  }}
-                                >
-                                  {row.order_id}
-                                </button>
-                              </td>
-                              <td>{row.brand}</td>
-                              <td>{formatDateDDMMYYYY(row.order_date)}</td>
-                              <td>{formatDateDDMMYYYY(row.effective_etd)}</td>
-                              <td>{row.days_until_etd ?? 0}</td>
-                              <td>{row.pending_count ?? 0}</td>
-                              <td>{row.inspection_done_count ?? 0}</td>
-                              <td>{row.shipped_count ?? 0}</td>
-                              <td>{row.last_progress || "-"}</td>
-                            </tr>
-                          ))}
+                          {sortedRows.map((row) => {
+                            const urgency = getEtdUrgency(row.days_until_etd);
+                            return (
+                              <tr
+                                key={`${vendorKey}-${row.order_id}`}
+                                className="table-clickable"
+                                onClick={() => handleOpenOrder(row.order_id)}
+                              >
+                                <td>
+                                  <button
+                                    type="button"
+                                    className="btn btn-link p-0 align-baseline text-decoration-none upcoming-etd-po-link"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      handleOpenOrder(row.order_id);
+                                    }}
+                                  >
+                                    {row.order_id}
+                                  </button>
+                                </td>
+                                <td>{row.brand}</td>
+                                <td>{formatDateDDMMYYYY(row.order_date)}</td>
+                                <td>{formatDateDDMMYYYY(row.effective_etd)}</td>
+                                <td>
+                                  <span className={`upcoming-etd-days-badge ${urgency.className}`}>
+                                    {urgency.label}
+                                  </span>
+                                </td>
+                                <td>
+                                  <span className={`upcoming-etd-count${Number(row.pending_count || 0) > 0 ? " is-pending" : ""}`}>
+                                    {row.pending_count ?? 0}
+                                  </span>
+                                </td>
+                                <td>
+                                  <span className={`upcoming-etd-count${Number(row.inspection_done_count || 0) > 0 ? " is-inspected" : ""}`}>
+                                    {row.inspection_done_count ?? 0}
+                                  </span>
+                                </td>
+                                <td>
+                                  <span className="upcoming-etd-count">
+                                    {row.shipped_count ?? 0}
+                                  </span>
+                                </td>
+                                <td>
+                                  <span className={`upcoming-etd-progress ${getProgressTone(row.last_progress)}`}>
+                                    <span aria-hidden="true" />
+                                    {row.last_progress || "Pending"}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
+                      </div>
                     </div>
-                  </div>
-                </div>
+                  )}
+                </section>
               );
             })
           )}

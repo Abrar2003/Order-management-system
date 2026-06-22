@@ -21,7 +21,18 @@ const {
   securityLog,
 } = require("../middlewares/securityActivityLogger");
 const qcController = require("../controllers/qc.controller");
+const { renderHtmlPdf } = require("../controllers/pdf.controller");
 const invalidateQcOnSuccess = invalidateCacheOnSuccess(invalidateQcCaches);
+
+router.post(
+  "/pdf/render",
+  auth,
+  requirePermission("qc", "view"),
+  securityLog("export_pdf", "inspection_report", {
+    metadata: (req) => ({ report_key: req.body?.reportKey || "" }),
+  }),
+  renderHtmlPdf,
+);
 
 // GET all QC
 router.get(

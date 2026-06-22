@@ -64,9 +64,20 @@ const {
   deleteItemFormDraft,
 } = require("../controllers/item.controller");
 const { getProductAnalytics } = require("../controllers/product.controller");
+const { renderHtmlPdf } = require("../controllers/pdf.controller");
 
 const router = express.Router();
 const invalidateItemsOnSuccess = invalidateCacheOnSuccess(invalidateItemCaches);
+
+router.post(
+  "/pdf/render",
+  auth,
+  requirePermission("pis", "export"),
+  securityLog("export_pdf", "pis_report", {
+    metadata: (req) => ({ report_key: req.body?.reportKey || "" }),
+  }),
+  renderHtmlPdf,
+);
 
 const requirePisUpdateLogsView = async (req, res, next) => {
   try {

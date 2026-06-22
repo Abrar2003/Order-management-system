@@ -609,10 +609,6 @@ const QcDetails = () => {
       ? "Item master not found for this QC."
       : activeRelatedFileConfig?.scope === "item_master" && !isAdmin
       ? "Only admin or manager can upload item related files."
-      : activeRelatedFileConfig?.scope === "qc" && qcInspectionRecordCount <= 0
-      ? "QC image uploads are available after at least one inspection record exists."
-      : activeRelatedFileConfig?.scope === "qc" && !canUploadMoreQcImages
-      ? `QC image upload limit reached (${qcImageCurrentTotalCount}/${qcImageUploadTotalLimit}).`
       : activeRelatedFileConfig?.scope === "qc"
       ? "Only admin, manager, or QC can upload QC images."
       : "Only admin or manager can upload item related files."

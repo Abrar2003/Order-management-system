@@ -297,12 +297,20 @@ const buildInspectedItemsReportRow = (item = {}) => {
 
 const buildInspectedItemsSummary = (rows = []) => {
   const total = rows.length;
-  const createSummaryEntry = (key, label, totalRows = rows) => ({
-    key,
-    label,
-    count: totalRows.filter((row) => Boolean(row?.flags?.[key])).length,
-    total: totalRows.length,
-  });
+  const createSummaryEntry = (key, label, totalRows = rows) => {
+    let filteredRowsForPill = totalRows;
+    if (key === "pis") {
+      filteredRowsForPill = totalRows.filter(
+        (row) => normalizeText(row?.brand).toLowerCase() !== "giga"
+      );
+    }
+    return {
+      key,
+      label,
+      count: filteredRowsForPill.filter((row) => Boolean(row?.flags?.[key])).length,
+      total: filteredRowsForPill.length,
+    };
+  };
   const assemblyRows = rows.filter((row) => row?.requirements?.assembly === true);
   const mountingFileRows = rows.filter((row) => row?.requirements?.mounting_file === true);
 
@@ -1857,7 +1865,7 @@ exports.exportInspectedItemsReport = async (req, res) => {
       { header: "Vendors", value: (row) => (row.vendors || []).join(", ") || "N/A" },
       { header: "Inspected", value: (row) => (row.flags?.inspected ? "Yes" : "No") },
       { header: "CAD", value: (row) => (row.flags?.cad ? "Yes" : "No") },
-      { header: "PIS", value: (row) => (row.flags?.pis ? "Yes" : "No") },
+      { header: "PIS", value: (row) => normalizeText(row.brand).toLowerCase() === "giga" ? "N/A" : (row.flags?.pis ? "Yes" : "No") },
       { header: "Assembly", value: (row) => row.requirements?.assembly ? (row.flags?.assembly ? "Yes" : "No") : "N/A" },
       { header: "Mounting File", value: (row) => row.requirements?.mounting_file ? (row.flags?.mounting_file ? "Yes" : "No") : "N/A" },
       { header: "Packaging PPT", value: (row) => (row.flags?.packaging_ppt ? "Yes" : "No") },

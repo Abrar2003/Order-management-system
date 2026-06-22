@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import ReportInfoBanner from "../components/ReportInfoBanner";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
@@ -537,6 +538,12 @@ const VendorWiseQAReport = () => {
           <h2 className="h4 mb-0">Vendor Wise QA Performance Report</h2>
           <span className="d-none d-md-inline" />
         </div>
+
+        <ReportInfoBanner
+          description="Analyzes inspector metrics and order details per vendor."
+          dataShown="Summary of inspections/quantities/CBM by inspector, or detailed lists showing dates, POs, items, and inspect quantities."
+          howItWorks="Toggleable between Summary (inspector metrics for a vendor) and Detailed (line items for all vendors/inspectors). Filterable by timeline, date range, vendor, and inspector."
+        />
 
         <div className="card om-card mb-3">
           <div className="card-body d-flex flex-column gap-3">

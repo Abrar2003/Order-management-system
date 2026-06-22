@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
+import ReportInfoBanner from "../components/ReportInfoBanner";
 import AddComplaintModal from "../components/complaints/AddComplaintModal";
 import AddCommentModal from "../components/complaints/AddCommentModal";
 import ComplaintAccordionDetails from "../components/complaints/ComplaintAccordionDetails";
@@ -330,6 +331,12 @@ const Complaints = () => {
             </button>
           )}
         </div>
+
+        <ReportInfoBanner
+          description="Tracks client quality complaints, issues, and resolution communications."
+          dataShown="Complaint category, item code, brand, vendor, creator details, dates, accordion comments log, attached proof files, and status."
+          howItWorks="Displays a paginated log of complaints, filterable by search text, brand, vendor, category, archived/active status, and date range."
+        />
 
         <div className="card om-card mb-3">
           <form className="card-body complaints-filter-form" onSubmit={applyFilters}>

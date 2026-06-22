@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import html2canvas from "html2canvas";
-import { jsPDF } from "jspdf";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Navbar from "../components/Navbar";
+import ReportInfoBanner from "../components/ReportInfoBanner";
 import SortHeaderButton from "../components/SortHeaderButton";
 import {
   exportPendingPoReport,
@@ -15,6 +14,7 @@ import {
   sortClientRows,
 } from "../utils/clientSort";
 import "../App.css";
+import { exportElementToPdf } from "../services/pdfExport.service";
 
 const DEFAULT_ENTITY_FILTER = "all";
 const DEFAULT_LIMIT = 50;
@@ -350,38 +350,16 @@ const PendingPoReport = () => {
     try {
       setExportingFormat("pdf");
       await new Promise((resolve) => window.setTimeout(resolve, 0));
-      const target = reportRef.current;
-      const canvas = await html2canvas(target, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: "#ffffff",
-        windowWidth: Math.max(target.scrollWidth, target.clientWidth),
-        windowHeight: Math.max(target.scrollHeight, target.clientHeight),
-        scrollX: 0,
-        scrollY: -window.scrollY,
+      await exportElementToPdf({
+        element: reportRef.current,
+        reportKey: "pending-po-report",
+        filename: `pending-po-report-${new Date().toISOString().slice(0, 10)}.pdf`,
+        landscape: false,
+        repeatHeader: {
+          title: "Pending PO Report",
+          subtitle: `Generated ${formatDateDDMMYYYY(new Date())}`,
+        },
       });
-      const imageData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const margin = 18;
-      const printableWidth = pageWidth - margin * 2;
-      const printableHeight = pageHeight - margin * 2;
-      const imageHeight = (canvas.height * printableWidth) / canvas.width;
-
-      let remainingHeight = imageHeight;
-      let yPosition = margin;
-      pdf.addImage(imageData, "PNG", margin, yPosition, printableWidth, imageHeight);
-      remainingHeight -= printableHeight;
-
-      while (remainingHeight > 0) {
-        pdf.addPage();
-        yPosition = margin - (imageHeight - remainingHeight);
-        pdf.addImage(imageData, "PNG", margin, yPosition, printableWidth, imageHeight);
-        remainingHeight -= printableHeight;
-      }
-
-      pdf.save(`pending-po-report-${new Date().toISOString().slice(0, 10)}.pdf`);
     } catch (err) {
       console.error(err);
       alert("Failed to export pending PO report PDF.");
@@ -431,6 +409,12 @@ const PendingPoReport = () => {
             </button>
           </div>
         </div>
+
+        <ReportInfoBanner
+          description="Identifies purchase orders that have outstanding quantities awaiting inspection or shipping."
+          dataShown="PO number, vendor, item code, item description, order quantity, inspection pending quantity, and shipping pending quantity."
+          howItWorks="Lists active items with remaining quantities, filterable by brand, vendor, and PO search, and pageable."
+        />
 
         <div className="card om-card mb-3">
           <form className="card-body d-flex flex-wrap gap-2 align-items-end" onSubmit={handleApplyFilters}>

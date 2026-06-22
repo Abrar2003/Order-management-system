@@ -17,7 +17,8 @@
     "backfill:item-kd": "node scripts/backfillItemKdFromLegacyFields.js",
     "sync:items-inspected-from-latest-inspections": "node scripts/syncItemsInspectedDataFromLatestInspections.js",
     "upload:pis:folder": "node scripts/uploadPisFolderViaApi.js",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test tests/*.test.js",
+    "test:pdf": "node --test tests/pdfArchitecture.test.js tests/pdfRenderer.test.js",
     "serve": "npm run dev"
   },
   "keywords": [],
@@ -43,9 +44,12 @@
     "multer": "^2.1.1",
     "node-cron": "^4.2.1",
     "nodemon": "^3.1.11",
-    "pdfkit": "^0.18.0",
+    "puppeteer": "^24.43.1",
     "sharp": "^0.34.5",
     "socket.io": "^4.8.3",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "pdf-parse": "^2.4.5"
   }
 }

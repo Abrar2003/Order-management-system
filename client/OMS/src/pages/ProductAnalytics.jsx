@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import ReportInfoBanner from "../components/ReportInfoBanner";
 import SortHeaderButton from "../components/SortHeaderButton";
 import Tooltip from "../components/Tooltip";
 import { formatDateDDMMYYYY } from "../utils/date";
@@ -299,6 +300,12 @@ const ProductAnalytics = () => {
           <h2 className="h4 mb-0">Product Analytics</h2>
           <span className="d-none d-md-inline" />
         </div>
+
+        <ReportInfoBanner
+          description="Evaluates historical item performance based on order quantities, inspection times, rejection rates, and shipping times."
+          dataShown="Item codes, PO counts, order/passed quantities, average inspection duration, average rejection rate, and average shipping lead times."
+          howItWorks="Compiles analytical metrics grouped by item code. Filterable by search text, brand, and vendor. Rows expand to show PO-level details."
+        />
 
         <div className="card om-card mb-3">
           <div className="card-body">

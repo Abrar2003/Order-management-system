@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import html2canvas from "html2canvas";
-import { jsPDF } from "jspdf";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
+import ReportInfoBanner from "../components/ReportInfoBanner";
 import EditPisModal from "../components/EditPisModal";
 import SortHeaderButton from "../components/SortHeaderButton";
 import { usePermissions } from "../auth/PermissionContext";
@@ -22,6 +21,7 @@ import { formatFixedNumber, formatLbhValue } from "../utils/measurementDisplay";
 import { formatEan13BarcodeDisplay } from "../utils/barcode";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
 import "../App.css";
+import { exportElementToPdf } from "../services/pdfExport.service";
 
 const DEFAULT_LIMIT = 20;
 const LIMIT_OPTIONS = [10, 20, 50, 100];
@@ -803,93 +803,29 @@ const PISDiffs = () => {
   const handleExportPdfReport = useCallback(async () => {
     if (!pdfReportRef.current || !pdfPreviewData || exportingPdf) return;
 
-    const target = pdfReportRef.current;
-    const scrollContainer = target.closest(".pis-diff-pdf-preview-scroll");
-    const previousScrollStyles = scrollContainer
-      ? {
-          maxHeight: scrollContainer.style.maxHeight,
-          overflow: scrollContainer.style.overflow,
-        }
-      : null;
-
     try {
       setExportingPdf(true);
       await waitForFontsReady();
-
-      if (scrollContainer) {
-        scrollContainer.style.maxHeight = "none";
-        scrollContainer.style.overflow = "visible";
-      }
-
-      const canvas = await html2canvas(target, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: "#ffffff",
-        windowWidth: Math.max(target.scrollWidth, target.clientWidth),
-        windowHeight: Math.max(target.scrollHeight, target.clientHeight),
-        scrollX: 0,
-        scrollY: -window.scrollY,
-      });
-
-      const imageData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF({
-        orientation: "portrait",
-        unit: "pt",
-        format: "a4",
-      });
-
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const margin = 18;
-      const printableWidth = pageWidth - margin * 2;
-      const printableHeight = pageHeight - margin * 2;
-      const imageHeight = (canvas.height * printableWidth) / canvas.width;
-
-      let remainingHeight = imageHeight;
-      let yPosition = margin;
-
-      pdf.addImage(
-        imageData,
-        "PNG",
-        margin,
-        yPosition,
-        printableWidth,
-        imageHeight,
-        undefined,
-        "FAST",
-      );
-
-      remainingHeight -= printableHeight;
-      while (remainingHeight > 0) {
-        pdf.addPage();
-        yPosition = margin - (imageHeight - remainingHeight);
-        pdf.addImage(
-          imageData,
-          "PNG",
-          margin,
-          yPosition,
-          printableWidth,
-          imageHeight,
-          undefined,
-          "FAST",
-        );
-        remainingHeight -= printableHeight;
-      }
-
       const fileDate = new Date().toISOString().slice(0, 10);
       const filterName = toFilenameSegment(
         [brandFilter, vendorFilter, searchInput].filter(Boolean).join("_"),
         "checked",
       );
-      pdf.save(`pis-diffs-${filterName}-${fileDate}.pdf`);
+      await exportElementToPdf({
+        element: pdfReportRef.current,
+        endpoint: "/items/pdf/render",
+        reportKey: "pis-diffs",
+        filename: `pis-diffs-${filterName}-${fileDate}.pdf`,
+        landscape: false,
+        repeatHeader: {
+          title: "PIS vs Inspected Difference Report",
+          subtitle: `Brand: ${brandFilter} · Vendor: ${vendorFilter} · Search: ${searchInput || "All"}`,
+        },
+      });
     } catch (pdfError) {
       console.error("PIS diff PDF export failed:", pdfError);
       setPdfPreviewError("Failed to export checked PIS diff PDF.");
     } finally {
-      if (scrollContainer && previousScrollStyles) {
-        scrollContainer.style.maxHeight = previousScrollStyles.maxHeight;
-        scrollContainer.style.overflow = previousScrollStyles.overflow;
-      }
       setExportingPdf(false);
     }
   }, [brandFilter, exportingPdf, pdfPreviewData, searchInput, vendorFilter]);
@@ -925,6 +861,12 @@ const PISDiffs = () => {
             </button>
           </div>
         </div>
+
+        <ReportInfoBanner
+          description="Identifies products where measurements recorded during QC inspections differ from Master Product Information Sheet (PIS) values, and need verification."
+          dataShown="Item code, description, brand, vendor, difference details (barcode, weight, dimensions, inner/master count), and current inspection records."
+          howItWorks="Compares active/recent inspected sizes against Master PIS sizes, filterable by search query, brand, and vendor, with custom XLSX/PDF export actions."
+        />
 
         <div className="card om-card mb-3">
           <div className="card-body">
