@@ -49,6 +49,7 @@ const PORT = Number.parseInt(String(process.env.PORT || "8008"), 10) || 8008;
 const isProduction =
   String(process.env.NODE_ENV || "").trim().toLowerCase() === "production";
 const DEPLOY_COMMIT_FILE = path.resolve(__dirname, ".deploy-commit-sha");
+const GIT_DIR = path.resolve(__dirname, "..", ".git");
 
 const normalizeCommitSha = (value) => {
   const normalized = String(value || "").trim();
@@ -63,6 +64,29 @@ const readDeploymentCommit = () => {
   }
 };
 
+const readGitHeadCommit = () => {
+  try {
+    const head = fs.readFileSync(path.join(GIT_DIR, "HEAD"), "utf8").trim();
+    const directCommit = normalizeCommitSha(head);
+    if (directCommit) return directCommit;
+
+    const reference = head.match(/^ref:\s+(.+)$/)?.[1];
+    if (!reference) return "";
+
+    try {
+      return normalizeCommitSha(fs.readFileSync(path.join(GIT_DIR, reference), "utf8"));
+    } catch {
+      const packedRefs = fs.readFileSync(path.join(GIT_DIR, "packed-refs"), "utf8");
+      const refLine = packedRefs
+        .split("\n")
+        .find((line) => line && !line.startsWith("#") && !line.startsWith("^") && line.endsWith(` ${reference}`));
+      return normalizeCommitSha(refLine?.split(" ")[0]);
+    }
+  } catch {
+    return "";
+  }
+};
+
 const getAppCommitSha = () => {
   const envCommit = normalizeCommitSha(
     process.env.APP_COMMIT_SHA || process.env.GIT_COMMIT_SHA,
@@ -71,6 +95,9 @@ const getAppCommitSha = () => {
 
   const deploymentCommit = readDeploymentCommit();
   if (deploymentCommit) return deploymentCommit;
+
+  const gitHeadCommit = readGitHeadCommit();
+  if (gitHeadCommit) return gitHeadCommit;
 
   try {
     return (
