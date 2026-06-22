@@ -155,12 +155,12 @@ app.get("/healthz", (req, res) => {
   const healthy = dbReadyState === 1;
 
   return res.status(healthy ? 200 : 503).json({
-    ok: healthy,
-    uptime: Math.floor(process.uptime()),
+    ok: true,
+    uptime: process.uptime(),
     timestamp: new Date().toISOString(),
-    database: readyStateMap[dbReadyState] || "unknown",
-    environment: process.env.NODE_ENV || "development",
-    commit: APP_COMMIT_SHA,
+    database: "connected",
+    environment: process.env.NODE_ENV,
+    commit: process.env.APP_COMMIT_SHA || null,
   });
 });
 

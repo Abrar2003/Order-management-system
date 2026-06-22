@@ -7816,10 +7816,16 @@ const buildReformedDelayedPoReportDataset = async ({
 
   const allRows = delayedGroups
     .flatMap((group) =>
-      group.rows.map((row) => ({
-        ...row,
-        po_etd: toISODateString(group.etd),
-      })),
+      group.rows.map((row) => {
+        const rowEtdDate = parseDateLike(row.etd);
+        const delayMs = rowEtdDate ? (todayUtc.getTime() - rowEtdDate.getTime()) : 0;
+        const delayDays = Math.max(0, Math.floor(delayMs / (1000 * 60 * 60 * 24)));
+        return {
+          ...row,
+          po_etd: toISODateString(group.etd),
+          delay_days: delayDays,
+        };
+      }),
     )
     .sort((left, right) => {
       const etdCompare = String(left?.po_etd || "").localeCompare(
@@ -7882,12 +7888,18 @@ const buildReformedDelayedPoReportDataset = async ({
     ].join("__");
 
     if (!poSummaryMap.has(poKey)) {
+      const summaryEtd = row?.po_etd || row?.etd || "";
+      const summaryEtdDate = parseDateLike(summaryEtd);
+      const delayMs = summaryEtdDate ? (todayUtc.getTime() - summaryEtdDate.getTime()) : 0;
+      const delayDays = Math.max(0, Math.floor(delayMs / (1000 * 60 * 60 * 24)));
+
       poSummaryMap.set(poKey, {
         order_id: row?.order_id || "N/A",
         brand: row?.brand || "N/A",
         vendor: row?.vendor || "N/A",
         order_date: row?.order_date || "",
-        etd: row?.po_etd || row?.etd || "",
+        etd: summaryEtd,
+        delay_days: delayDays,
         item_count: 0,
         shipped_item_count: 0,
         inspected_item_count: 0,
@@ -9011,6 +9023,7 @@ exports.exportDelayedPoReport = async (req, res) => {
       { key: "vendor", header: "Vendor" },
       { key: "order_date", header: "Order Date" },
       { key: "etd", header: "ETD" },
+      { key: "delay_days", header: "Delay (Days)" },
       { key: "order_quantity", header: "Order Quantity" },
       { key: "shipped_quantity", header: "Shipped Quantity" },
       { key: "passed_quantity", header: "Passed Quantity" },
@@ -9022,6 +9035,7 @@ exports.exportDelayedPoReport = async (req, res) => {
       { key: "vendor", header: "Vendor" },
       { key: "order_date", header: "Order Date" },
       { key: "etd", header: "ETD" },
+      { key: "delay_days", header: "Delay (Days)" },
       { key: "item_count", header: "Item Count" },
       { key: "shipped_item_count", header: "Shipped Items" },
       { key: "inspected_item_count", header: "Inspected Items" },
@@ -9038,6 +9052,7 @@ exports.exportDelayedPoReport = async (req, res) => {
       vendor: String(row?.vendor || "").trim(),
       order_date: formatDateDDMMYYYY(row?.order_date, ""),
       etd: formatDateDDMMYYYY(row?.etd || row?.po_etd, ""),
+      delay_days: Number(row?.delay_days || 0),
       order_quantity: Number(row?.order_quantity || 0),
       shipped_quantity: Number(row?.shipped_quantity || 0),
       passed_quantity: Number(row?.passed_quantity || 0),
@@ -9052,6 +9067,7 @@ exports.exportDelayedPoReport = async (req, res) => {
       vendor: String(row?.vendor || "").trim(),
       order_date: formatDateDDMMYYYY(row?.order_date, ""),
       etd: formatDateDDMMYYYY(row?.etd, ""),
+      delay_days: Number(row?.delay_days || 0),
       item_count: Number(row?.item_count || 0),
       shipped_item_count: Number(row?.shipped_item_count || 0),
       inspected_item_count: Number(row?.inspected_item_count || 0),

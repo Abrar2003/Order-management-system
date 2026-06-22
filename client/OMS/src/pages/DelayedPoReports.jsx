@@ -236,6 +236,7 @@ const DelayedPoReports = () => {
         if (column === "po") return row?.order_id;
         if (column === "itemCode") return row?.item_code;
         if (column === "dates") return new Date(row?.etd || row?.po_etd || 0).getTime();
+        if (column === "delayDays") return Number(row?.delay_days || 0);
         if (column === "orderQuantity") return Number(row?.order_quantity || 0);
         if (column === "quantities") return Number(row?.pending_quantity || 0);
         return "";
@@ -569,6 +570,7 @@ const DelayedPoReports = () => {
                       <th>Brand</th>
                       <th>Vendor</th>
                       <th>Dates</th>
+                      <th>Delay</th>
                       <th>Items</th>
                       <th>Order Qty</th>
                       <th>Quantities</th>
@@ -600,6 +602,11 @@ const DelayedPoReports = () => {
                         <td>
                           <div><span className="text-secondary small">Order:</span> {formatDateDDMMYYYY(row.order_date)}</div>
                           <div><span className="text-secondary small">ETD:</span> {formatDateDDMMYYYY(row.etd)}</div>
+                        </td>
+                        <td>
+                          <span className="text-danger fw-semibold">
+                            {row.delay_days} {row.delay_days === 1 ? "day" : "days"}
+                          </span>
                         </td>
                         <td>
                           <div className="delayed-po-quantity-tags">
@@ -711,6 +718,7 @@ const DelayedPoReports = () => {
                           <th>Brand</th>
                           <th>Vendor</th>
                           <th>Dates</th>
+                          <th>Delay</th>
                           <th>Items</th>
                           <th>Order Qty</th>
                           <th>Quantities</th>
@@ -736,6 +744,11 @@ const DelayedPoReports = () => {
                                 <span><small>Order:</small> {formatDateDDMMYYYY(row.order_date)}</span>
                                 <span><small>ETD:</small> {formatDateDDMMYYYY(row.etd)}</span>
                               </div>
+                            </td>
+                            <td>
+                              <strong className="text-danger">
+                                {row.delay_days} {row.delay_days === 1 ? "day" : "days"}
+                              </strong>
                             </td>
                             <td>
                               <div className="delayed-po-pdf-tags">
@@ -786,6 +799,7 @@ const DelayedPoReports = () => {
                       <th>Vendor</th>
                       <th>Order Date</th>
                       <th>ETD</th>
+                      <th>Delay</th>
                       <th>Order Qty</th>
                       <th>Shipped</th>
                       <th>Passed</th>
@@ -804,6 +818,7 @@ const DelayedPoReports = () => {
                         <td>{row?.vendor || "N/A"}</td>
                         <td>{formatDateDDMMYYYY(row?.order_date)}</td>
                         <td>{formatDateDDMMYYYY(row?.etd || row?.po_etd)}</td>
+                        <td>{row?.delay_days} {row?.delay_days === 1 ? "day" : "days"}</td>
                         <td>{Number(row?.order_quantity || 0)}</td>
                         <td>{Number(row?.shipped_quantity || 0)}</td>
                         <td>{Number(row?.passed_quantity || 0)}</td>
@@ -830,13 +845,14 @@ const DelayedPoReports = () => {
                       <th><SortHeaderButton label="PO" isActive={sortBy === "po"} direction={sortOrder} onClick={() => handleSort("po")} /></th>
                       <th><SortHeaderButton label="Item Code" isActive={sortBy === "itemCode"} direction={sortOrder} onClick={() => handleSort("itemCode")} /></th>
                       <th><SortHeaderButton label="Dates" isActive={sortBy === "dates"} direction={sortOrder} onClick={() => handleSort("dates", "desc")} /></th>
+                      <th><SortHeaderButton label="Delay" isActive={sortBy === "delayDays"} direction={sortOrder} onClick={() => handleSort("delayDays", "desc")} /></th>
                       <th><SortHeaderButton label="Order Qty" isActive={sortBy === "orderQuantity"} direction={sortOrder} onClick={() => handleSort("orderQuantity", "desc")} /></th>
                       <th><SortHeaderButton label="Quantities" isActive={sortBy === "quantities"} direction={sortOrder} onClick={() => handleSort("quantities", "desc")} /></th>
                     </tr>
                   </thead>
                   <tbody>
                     {paginatedRows.length === 0 ? (
-                      <tr><td colSpan={5} className="text-center py-4">No delayed POs found.</td></tr>
+                      <tr><td colSpan={6} className="text-center py-4">No delayed POs found.</td></tr>
                     ) : paginatedRows.map((row) => (
                       <tr key={row?.id || `${row?.order_id}-${row?.item_code}`}>
                         <td>
@@ -849,6 +865,11 @@ const DelayedPoReports = () => {
                         <td>
                           <div><span className="text-secondary small">Order:</span> {formatDateDDMMYYYY(row?.order_date)}</div>
                           <div><span className="text-secondary small">ETD:</span> {formatDateDDMMYYYY(row?.etd || row?.po_etd)}</div>
+                        </td>
+                        <td>
+                          <span className="text-danger fw-semibold">
+                            {row?.delay_days} {row?.delay_days === 1 ? "day" : "days"}
+                          </span>
                         </td>
                         <td>{Number(row?.order_quantity || 0)}</td>
                         <td>
