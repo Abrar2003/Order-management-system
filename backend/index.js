@@ -160,7 +160,7 @@ app.get("/healthz", (req, res) => {
     timestamp: new Date().toISOString(),
     database: "connected",
     environment: process.env.NODE_ENV,
-    commit: process.env.APP_COMMIT_SHA || null,
+    commit: APP_COMMIT_SHA,
   });
 });
 
