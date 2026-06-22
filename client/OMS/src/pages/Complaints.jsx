@@ -352,11 +352,37 @@ const Complaints = () => {
             </div>
             <div className="complaints-filter-field">
               <label className="form-label">Brand</label>
-              <input name="brand" className="form-control" value={draftFilters.brand} onChange={handleDraftChange} />
+              <select
+                name="brand"
+                className="form-select"
+                value={draftFilters.brand}
+                onChange={handleDraftChange}
+                disabled={loadingOptions}
+              >
+                <option value="">All Brands</option>
+                {brandOptions.map((brand) => (
+                  <option key={brand} value={brand}>
+                    {brand}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="complaints-filter-field">
               <label className="form-label">Vendor</label>
-              <input name="vendor" className="form-control" value={draftFilters.vendor} onChange={handleDraftChange} />
+              <select
+                name="vendor"
+                className="form-select"
+                value={draftFilters.vendor}
+                onChange={handleDraftChange}
+                disabled={loadingOptions}
+              >
+                <option value="">All Vendors</option>
+                {vendorOptions.map((vendor) => (
+                  <option key={vendor} value={vendor}>
+                    {vendor}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="complaints-filter-field">
               <label className="form-label">Category</label>
