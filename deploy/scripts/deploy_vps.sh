@@ -242,7 +242,7 @@ if command -v curl >/dev/null 2>&1; then
   VERIFY_DEPLOYED_COMMIT="${VERIFY_DEPLOYED_COMMIT:-false}"
   for i in {1..10}; do
     if HEALTH_RESPONSE="$(curl --fail --silent --show-error "$BACKEND_HEALTHCHECK_URL")"; then
-      # Commit equality is optional because PM2 environment propagation is not guaranteed across reloads.
+      # Commit equality is optional because PM2 environment propagation may differ across reloads.
       if [[ "$VERIFY_DEPLOYED_COMMIT" == "true" ]]; then
         HEALTH_COMMIT="$(
           printf '%s' "$HEALTH_RESPONSE" |
