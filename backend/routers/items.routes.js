@@ -65,6 +65,9 @@ const {
 } = require("../controllers/item.controller");
 const { getProductAnalytics } = require("../controllers/product.controller");
 const { renderHtmlPdf } = require("../controllers/pdf.controller");
+const {
+  parseAndSyncPisUpload,
+} = require("../middlewares/parseAndSyncPisUpload.middleware");
 
 const router = express.Router();
 const invalidateItemsOnSuccess = invalidateCacheOnSuccess(invalidateItemCaches);
@@ -452,6 +455,7 @@ router.post(
   requireAdminOnlyPisEdit,
   requirePermission("pis", "upload"),
   upload.safeSingle("file"),
+  parseAndSyncPisUpload,
   invalidateItemsOnSuccess,
   uploadItemPisFile,
 );

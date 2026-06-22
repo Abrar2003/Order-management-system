@@ -37,6 +37,7 @@
     "bullmq": "^5.76.2",
     "cors": "^2.8.6",
     "dotenv": "^17.2.3",
+    "exceljs": "^4.4.0",
     "express": "^5.2.1",
     "googleapis": "^171.4.0",
     "ioredis": "^5.10.1",

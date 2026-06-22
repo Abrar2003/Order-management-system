@@ -7091,6 +7091,7 @@ exports.uploadItemPisFile = async (req, res) => {
         return res.status(202).json({
           success: true,
           message: "PIS spreadsheet processing queued",
+          pis_import: req.pisImportResult,
           queue: QUEUE_NAMES.fileProcessingQueue,
           job_id: job.id,
           status_url: `/jobs/${QUEUE_NAMES.fileProcessingQueue}/${job.id}`,
@@ -7196,6 +7197,7 @@ exports.uploadItemPisFile = async (req, res) => {
         item_id: item._id,
         pis_file: responsePisFile,
       },
+      pis_import: req.pisImportResult,
     });
   } catch (error) {
     await safeDeleteLocalFile(stagedPisFilePath);
