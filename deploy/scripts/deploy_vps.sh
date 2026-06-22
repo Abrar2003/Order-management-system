@@ -184,10 +184,22 @@ log "Verifying PM2 processes"
 
 EXPECTED_PM2_WEB_INSTANCES="${EXPECTED_PM2_WEB_INSTANCES:-$(get_env_value PM2_WEB_INSTANCES)}"
 EXPECTED_PM2_WEB_INSTANCES="${EXPECTED_PM2_WEB_INSTANCES:-2}"
-RUNNING_PM2_WEB_INSTANCES="$(count_online_pm2_app oms-backend)"
+PM2_VERIFY_TIMEOUT_SECONDS="${PM2_VERIFY_TIMEOUT_SECONDS:-30}"
+RUNNING_PM2_WEB_INSTANCES=0
+
+for ((attempt=1; attempt<=PM2_VERIFY_TIMEOUT_SECONDS; attempt++)); do
+  RUNNING_PM2_WEB_INSTANCES="$(count_online_pm2_app oms-backend)"
+
+  if [[ "$RUNNING_PM2_WEB_INSTANCES" -eq "$EXPECTED_PM2_WEB_INSTANCES" ]]; then
+    break
+  fi
+
+  echo "Waiting for oms-backend: $RUNNING_PM2_WEB_INSTANCES/$EXPECTED_PM2_WEB_INSTANCES online (attempt $attempt/$PM2_VERIFY_TIMEOUT_SECONDS)"
+  sleep 1
+done
 
 if [[ "$RUNNING_PM2_WEB_INSTANCES" -ne "$EXPECTED_PM2_WEB_INSTANCES" ]]; then
-  echo "Expected $EXPECTED_PM2_WEB_INSTANCES oms-backend PM2 instances, but found $RUNNING_PM2_WEB_INSTANCES"
+  echo "Expected $EXPECTED_PM2_WEB_INSTANCES oms-backend PM2 instances, but found $RUNNING_PM2_WEB_INSTANCES after ${PM2_VERIFY_TIMEOUT_SECONDS}s"
   pm2 list
   exit 1
 fi
