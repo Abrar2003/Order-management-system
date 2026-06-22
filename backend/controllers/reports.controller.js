@@ -4,6 +4,7 @@ const XLSX = require("xlsx");
 const Inspection = require("../models/inspection.model");
 const QC = require("../models/qc.model");
 const Item = require("../models/item.model");
+const Order = require("../models/order.model");
 const { applyDataAccessMatch } = require("../services/userDataAccess.service");
 const {
   buildNormalizedInspectionSizeState,
@@ -93,6 +94,14 @@ const INSPECTED_ITEMS_REPORT_SELECT = [
   "inspected_box_sizes",
   "updatedAt",
 ].join(" ");
+const INSPECTED_ITEMS_ORDER_SELECT = [
+  "item",
+  "brand",
+  "vendor",
+  "status",
+  "qc_record",
+  "updatedAt",
+].join(" ");
 
 const INSPECTED_ITEM_CRITERIA = Object.freeze({
   INSPECTED: "inspected",
@@ -106,42 +115,204 @@ const INSPECTED_ITEM_CRITERIA = Object.freeze({
   SHIPPING_MARKS: "shipping_marks",
 });
 
-const buildInspectedItemsReportMatch = ({ search, brand, vendor } = {}) => {
-  const conditions = [];
-  const normalizedSearch = normalizeText(search);
-  const normalizedBrand = normalizeText(brand);
-  const normalizedVendor = normalizeText(vendor);
+const normalizeInspectedItemsCodeKey = (value) =>
+  normalizeText(value).toLocaleLowerCase();
 
-  if (normalizedSearch && normalizedSearch.toLowerCase() !== "all") {
-    const escaped = escapeRegex(normalizedSearch);
-    conditions.push({
-      $or: [
-        { code: { $regex: escaped, $options: "i" } },
-        { name: { $regex: escaped, $options: "i" } },
-        { description: { $regex: escaped, $options: "i" } },
-        { brand: { $regex: escaped, $options: "i" } },
-        { brand_name: { $regex: escaped, $options: "i" } },
-      ],
-    });
+const normalizeDistinctTextValues = (values = []) => [
+  ...new Map(
+    (Array.isArray(values) ? values : [])
+      .map(normalizeText)
+      .filter(Boolean)
+      .map((value) => [value.toLocaleLowerCase(), value]),
+  ).values(),
+];
+
+const getLatestInspectedItemsDate = (...values) =>
+  values
+    .map((value) => ({
+      value: normalizeText(value),
+      timestamp: getDateOnlyTimestamp(value),
+    }))
+    .filter((entry) => entry.value)
+    .sort((left, right) => right.timestamp - left.timestamp)[0]?.value || "";
+
+const buildOrderItemReportGroups = (orders = []) => {
+  const groups = new Map();
+
+  for (const order of Array.isArray(orders) ? orders : []) {
+    if (normalizeText(order?.status).toLocaleLowerCase() === "cancelled") {
+      continue;
+    }
+    const code = normalizeText(order?.item?.item_code);
+    const key = normalizeInspectedItemsCodeKey(code);
+    if (!key) continue;
+
+    const existing = groups.get(key) || {
+      key,
+      code,
+      description: "",
+      brands: [],
+      vendors: [],
+      last_inspected_date: "",
+      inspected: false,
+      updated_at: null,
+    };
+    const qc = order?.qc_record || {};
+    const qcInspected = Boolean(
+      normalizeText(qc?.last_inspected_date) ||
+        Number(qc?.quantities?.checked || 0) > 0 ||
+        Number(qc?.quantities?.passed || 0) > 0,
+    );
+
+    if (!existing.description) {
+      existing.description = normalizeText(order?.item?.description);
+    }
+    existing.brands = normalizeDistinctTextValues([
+      ...existing.brands,
+      order?.brand,
+    ]);
+    existing.vendors = normalizeDistinctTextValues([
+      ...existing.vendors,
+      order?.vendor,
+    ]);
+    existing.last_inspected_date = getLatestInspectedItemsDate(
+      existing.last_inspected_date,
+      qc?.last_inspected_date,
+    );
+    existing.inspected = existing.inspected || qcInspected;
+    existing.updated_at = existing.updated_at || order?.updatedAt || null;
+    groups.set(key, existing);
   }
 
-  if (normalizedBrand && normalizedBrand.toLowerCase() !== "all") {
-    conditions.push({
-      $or: [
-        { brand: normalizedBrand },
-        { brand_name: normalizedBrand },
-        { brands: normalizedBrand },
-      ],
-    });
+  return groups;
+};
+
+const buildOrderOnlyInspectedItemsSource = (group = {}) => ({
+  _id: `order:${encodeURIComponent(normalizeText(group?.key))}`,
+  code: normalizeText(group?.code),
+  name: "",
+  description: normalizeText(group?.description),
+  brand: normalizeText(group?.brands?.[0]),
+  brands: normalizeDistinctTextValues(group?.brands),
+  vendors: normalizeDistinctTextValues(group?.vendors),
+  qc: {
+    last_inspected_date: normalizeText(group?.last_inspected_date),
+    quantities: {
+      checked: group?.inspected ? 1 : 0,
+      passed: 0,
+    },
+  },
+  updatedAt: group?.updated_at || null,
+});
+
+const mergeInspectedItemsSources = (items = [], orders = []) => {
+  const orderGroups = buildOrderItemReportGroups(orders);
+  const mergedSources = new Map();
+
+  for (const item of Array.isArray(items) ? items : []) {
+    const code = normalizeText(item?.code);
+    const key = normalizeInspectedItemsCodeKey(code);
+    if (!key) continue;
+
+    const orderGroup = orderGroups.get(key);
+    if (!mergedSources.has(key)) {
+      const masterBrands = normalizeDistinctTextValues([
+        item?.brand,
+        item?.brand_name,
+        ...(Array.isArray(item?.brands) ? item.brands : []),
+      ]);
+      const masterVendors = normalizeDistinctTextValues(item?.vendors);
+      const masterLastInspectedDate = normalizeText(item?.qc?.last_inspected_date);
+      const orderLastInspectedDate = normalizeText(orderGroup?.last_inspected_date);
+      const orderInspected = orderGroup?.inspected === true;
+
+      mergedSources.set(key, {
+        ...item,
+        code,
+        description:
+          normalizeText(item?.description) ||
+          normalizeText(orderGroup?.description),
+        brand:
+          normalizeText(item?.brand || item?.brand_name) ||
+          normalizeText(orderGroup?.brands?.[0]),
+        brands:
+          masterBrands.length > 0
+            ? masterBrands
+            : normalizeDistinctTextValues(orderGroup?.brands),
+        vendors:
+          masterVendors.length > 0
+            ? masterVendors
+            : normalizeDistinctTextValues(orderGroup?.vendors),
+        qc: {
+          ...(item?.qc || {}),
+          last_inspected_date: getLatestInspectedItemsDate(
+            masterLastInspectedDate,
+            orderLastInspectedDate,
+          ),
+          quantities: {
+            ...(item?.qc?.quantities || {}),
+            checked:
+              Number(item?.qc?.quantities?.checked || 0) > 0 || orderInspected
+                ? Math.max(1, Number(item?.qc?.quantities?.checked || 0))
+                : 0,
+          },
+        },
+      });
+    }
+
+    orderGroups.delete(key);
   }
 
-  if (normalizedVendor && normalizedVendor.toLowerCase() !== "all") {
-    conditions.push({ vendors: normalizedVendor });
+  for (const group of orderGroups.values()) {
+    mergedSources.set(group.key, buildOrderOnlyInspectedItemsSource(group));
   }
 
-  if (conditions.length === 0) return {};
-  if (conditions.length === 1) return conditions[0];
-  return { $and: conditions };
+  return [...mergedSources.values()];
+};
+
+const matchesInspectedItemsReportFilters = (
+  row = {},
+  { search, brand, vendor } = {},
+) => {
+  const normalizedSearch = normalizeText(search).toLocaleLowerCase();
+  const normalizedBrand = normalizeText(brand).toLocaleLowerCase();
+  const normalizedVendor = normalizeText(vendor).toLocaleLowerCase();
+  const rowBrands = normalizeDistinctTextValues([
+    row?.brand,
+    ...(Array.isArray(row?.brands) ? row.brands : []),
+  ]).map((value) => value.toLocaleLowerCase());
+  const rowVendors = normalizeDistinctTextValues(row?.vendors)
+    .map((value) => value.toLocaleLowerCase());
+
+  if (normalizedSearch && normalizedSearch !== "all") {
+    const searchableValues = [
+      row?.code,
+      row?.name,
+      row?.description,
+      ...rowBrands,
+    ].map((value) => normalizeText(value).toLocaleLowerCase());
+    if (!searchableValues.some((value) => value.includes(normalizedSearch))) {
+      return false;
+    }
+  }
+
+  if (
+    normalizedBrand &&
+    normalizedBrand !== "all" &&
+    !rowBrands.includes(normalizedBrand)
+  ) {
+    return false;
+  }
+
+  if (
+    normalizedVendor &&
+    normalizedVendor !== "all" &&
+    !rowVendors.includes(normalizedVendor)
+  ) {
+    return false;
+  }
+
+  return true;
 };
 
 const hasStoredItemFile = (file = {}) =>
@@ -343,36 +514,32 @@ const getInspectedItemsReportDataset = async ({
     brandFields: ["brand", "brand_name", "brands"],
     vendorFields: ["vendors"],
   };
-  const baseMatch = applyDataAccessMatch(
-    buildInspectedItemsReportMatch({ search, brand, vendor }),
+  const itemAccessMatch = applyDataAccessMatch({}, user, accessOptions);
+  const orderAccessMatch = applyDataAccessMatch(
+    { status: { $ne: "Cancelled" } },
     user,
-    accessOptions,
   );
 
-  const [items, brandsRaw, brandNamesRaw, brandsPrimaryRaw, vendorsRaw] = await Promise.all([
-    Item.find(baseMatch)
+  const [items, orders] = await Promise.all([
+    Item.find(itemAccessMatch)
       .select(INSPECTED_ITEMS_REPORT_SELECT)
       .sort({ "qc.last_inspected_date": -1, code: 1 })
       .lean(),
-    Item.distinct(
-      "brands",
-      applyDataAccessMatch(buildInspectedItemsReportMatch({ search, vendor }), user, accessOptions),
-    ),
-    Item.distinct(
-      "brand_name",
-      applyDataAccessMatch(buildInspectedItemsReportMatch({ search, vendor }), user, accessOptions),
-    ),
-    Item.distinct(
-      "brand",
-      applyDataAccessMatch(buildInspectedItemsReportMatch({ search, vendor }), user, accessOptions),
-    ),
-    Item.distinct(
-      "vendors",
-      applyDataAccessMatch(buildInspectedItemsReportMatch({ search, brand }), user, accessOptions),
-    ),
+    Order.find(orderAccessMatch)
+      .select(INSPECTED_ITEMS_ORDER_SELECT)
+      .populate({
+        path: "qc_record",
+        select: "last_inspected_date quantities",
+      })
+      .sort({ updatedAt: -1 })
+      .lean(),
   ]);
 
-  const baseRows = (Array.isArray(items) ? items : []).map(buildInspectedItemsReportRow);
+  const allRows = mergeInspectedItemsSources(items, orders)
+    .map(buildInspectedItemsReportRow);
+  const baseRows = allRows.filter((row) =>
+    matchesInspectedItemsReportFilters(row, { search, brand, vendor }),
+  );
   const dateFilteredRows = baseRows
     .filter((row) => matchesInspectedItemsDateRange(row, dateRange))
     .sort(sortInspectedItemsRows);
@@ -393,16 +560,24 @@ const getInspectedItemsReportDataset = async ({
       status: normalizedStatus,
       from_date: dateRange.from_date,
       to_date: dateRange.to_date,
-      brand_options: [
-        ...new Set([
-          ...(brandsPrimaryRaw || []),
-          ...(brandsRaw || []),
-          ...(brandNamesRaw || []),
-        ].map(normalizeText).filter(Boolean)),
-      ].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" })),
-      vendor_options: [
-        ...new Set((vendorsRaw || []).map(normalizeText).filter(Boolean)),
-      ].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" })),
+      brand_options: normalizeDistinctTextValues(
+        allRows
+          .filter((row) =>
+            matchesInspectedItemsReportFilters(row, { search, vendor }),
+          )
+          .flatMap((row) => [row?.brand, ...(row?.brands || [])]),
+      ).sort((left, right) =>
+        left.localeCompare(right, undefined, { sensitivity: "base" }),
+      ),
+      vendor_options: normalizeDistinctTextValues(
+        allRows
+          .filter((row) =>
+            matchesInspectedItemsReportFilters(row, { search, brand }),
+          )
+          .flatMap((row) => row?.vendors || []),
+      ).sort((left, right) =>
+        left.localeCompare(right, undefined, { sensitivity: "base" }),
+      ),
     },
   };
 };
@@ -2398,6 +2573,11 @@ exports.getQcReportMismatch = async (req, res) => {
 };
 
 exports.__test__ = {
+  buildInspectedItemsReportRow,
+  buildOrderItemReportGroups,
+  matchesInspectedItemsReportFilters,
+  matchesInspectedItemsDateRange,
+  mergeInspectedItemsSources,
   limitRecentInspectionsByItem,
   selectLatestInspectionPerLatestPo,
   sortInspectionsByOrderAndInspectionDate,

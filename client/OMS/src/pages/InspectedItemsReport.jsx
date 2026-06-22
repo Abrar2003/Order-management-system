@@ -272,9 +272,9 @@ const InspectedItemsReport = () => {
         </div>
 
         <ReportInfoBanner
-          description="Audits items to check if essential documents (CAD, PIS, Assembly instructions, packaging PPT, product image, finishes, shipping marks) are uploaded."
+          description="Audits all item-master and non-cancelled ordered items, whether they have been inspected or not, to check if essential documents are uploaded."
           dataShown="Item code, description, brand, vendors list, status flags indicating presence of required files, and last inspected date."
-          howItWorks="Compiles document flag checklists for inspected items, filterable by brand, vendor, specific criterion status, date, and keyword."
+          howItWorks="Combines item-master records with distinct items from non-cancelled order history, then applies brand, vendor, inspection, document, date, and keyword filters."
         />
 
         <div className="inspected-items-report-pill-row mb-4">

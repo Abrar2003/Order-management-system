@@ -64,7 +64,7 @@ router.get(
   "/inspected-items",
   auth,
   requirePermission("reports", "view"),
-  cacheRoute("reports_inspected_v2", MEDIUM_CACHE_TTL),
+  cacheRoute("reports", MEDIUM_CACHE_TTL),
   reportsController.getInspectedItemsReport,
 );
 
