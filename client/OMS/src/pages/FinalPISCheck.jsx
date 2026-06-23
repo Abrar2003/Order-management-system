@@ -969,9 +969,9 @@ const FinalPISCheck = () => {
         </div>
 
         <ReportInfoBanner
-          description="Audits and verifies discrepancies between inspected item/box dimensions/weights and the Master Product Information Sheet (PIS) values."
-          dataShown="Item code, brand, vendor, barcode, inspected size/weight details, Master PIS size/weight details, difference delta, and comments."
-          howItWorks="Displays detailed mismatch comparisons. Allows adding comments and editing/updating Master PIS details directly. Filterable by search, brand, vendor, and difference field."
+          description="Shows inspected-versus-Master discrepancies only for items that have Master data and valid inspection records across at least 3 distinct POs."
+          dataShown="Eligible item code, brand, vendor, inspected size/weight details, Master PIS size/weight details, difference delta, and comments."
+          howItWorks="Includes only items with created Master data and inspections in at least 3 distinct POs, then displays detailed mismatch comparisons. Allows comments and Master PIS updates, with search, brand, vendor, and difference-field filters."
         />
 
         <div className="card om-card mb-3">
