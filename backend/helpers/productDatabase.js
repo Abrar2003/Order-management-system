@@ -18,6 +18,8 @@ const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
   "item",
   "top",
   "base",
+  "base2",
+  "pedestal",
   "item1",
   "item2",
   "item3",

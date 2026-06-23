@@ -51,6 +51,23 @@ router.get(
 );
 
 router.get(
+  "/common-errors/export",
+  auth,
+  requirePermission("reports", "view"),
+  securityLog("export_excel", "common_errors_report", {
+    metadata: (req) => ({ filters: req.query || {} }),
+  }),
+  reportsController.exportCommonErrorsReport,
+);
+
+router.get(
+  "/common-errors",
+  auth,
+  requirePermission("reports", "view"),
+  reportsController.getCommonErrorsReport,
+);
+
+router.get(
   "/inspected-items/export",
   auth,
   requirePermission("reports", "view"),

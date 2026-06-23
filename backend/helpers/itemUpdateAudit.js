@@ -52,6 +52,8 @@ const formatRemark = (entry = {}, fallback = "Entry") => {
   if (raw === BOX_ENTRY_TYPES.INNER) return "Inner Carton";
   if (raw === BOX_ENTRY_TYPES.MASTER) return "Master Carton";
   if (raw === "base") return "Base";
+  if (raw === "base2") return "Base 2";
+  if (raw === "pedestal") return "Pedestal";
   if (raw === "top") return "Top";
   return raw.replace(/([a-z]+)(\d+)/i, (_, prefix, number) =>
     `${prefix.charAt(0).toUpperCase()}${prefix.slice(1)} ${number}`,

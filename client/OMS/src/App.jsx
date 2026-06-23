@@ -46,6 +46,7 @@ import VendorReports from "./pages/VendorReports";
 import VendorWiseQAReport from "./pages/VendorWiseQAReport";
 import DelayedPoReports from "./pages/DelayedPoReports";
 import UpcomingEtdReports from "./pages/UpcomingEtdReports";
+import CommonErrorsReport from "./pages/CommonErrorsReport";
 import PoStatusReport from "./pages/PoStatusReport";
 import PendingPoReport from "./pages/PendingPoReport";
 import ProductAnalytics from "./pages/ProductAnalytics";
@@ -336,6 +337,15 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <UpcomingEtdReports />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/reports/common-errors"
+            element={
+              <ProtectedRoute>
+                <CommonErrorsReport />
               </ProtectedRoute>
             }
           />

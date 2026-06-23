@@ -42,6 +42,8 @@ const formatRemarkLabel = (remark = "", fallback = "Entry") => {
   if (!normalized) return fallback;
   if (normalized === "top") return "Top";
   if (normalized === "base") return "Base";
+  if (normalized === "base2") return "Base 2";
+  if (normalized === "pedestal") return "Pedestal";
   if (normalized === "inner") return "Inner Carton";
   if (normalized === "master") return "Master Carton";
   return normalized.replace(/([a-z]+)(\d+)/i, (_, prefix, number) =>
@@ -215,7 +217,10 @@ const buildInspectedMeasurementDetails = (item = {}) => {
     bottomRemark: "base",
   }).filter((entry) => hasFetchableMeasuredValue(entry));
 
-  const sortedItemEntries = sortMeasuredEntriesByRemark(itemEntries, ["item", "top", "base"]);
+  const sortedItemEntries = sortMeasuredEntriesByRemark(
+    itemEntries,
+    ["item", "top", "base", "base2", "pedestal"],
+  );
   const sortedBoxEntries =
     inspectedBoxMode === BOX_PACKAGING_MODES.CARTON
       ? (boxEntries.length > 0 ? arrangeCartonEntriesForFetch(boxEntries) : [])

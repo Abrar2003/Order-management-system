@@ -4,6 +4,7 @@ const { renderPdf } = require("../services/pdfRenderer");
 
 const PDF_REPORT_KEYS = new Set([
   "daily-inspection-report",
+  "common-errors-report",
   "delayed-po-report",
   "final-pis-check",
   "inspection-report",

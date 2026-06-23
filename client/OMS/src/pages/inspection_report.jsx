@@ -76,7 +76,17 @@ const getInspectionRecordSortTime = (record = {}) =>
 const formatDisplayLbhValue = (value) =>
   formatLbhValue(value, { fallback: "Not Set", suffix: SIZE_UNIT });
 
-const ITEM_INDEXED_REMARKS = ["top", "base", "item", "item1", "item2", "item3", "item4"];
+const ITEM_INDEXED_REMARKS = [
+  "top",
+  "base",
+  "base2",
+  "pedestal",
+  "item",
+  "item1",
+  "item2",
+  "item3",
+  "item4",
+];
 const BOX_INDEXED_REMARKS = ["top", "base", "box", "inner", "master", "box1", "box2", "box3", "box4"];
 
 const formatMeasurementRemark = (remark = "") => {
@@ -84,6 +94,8 @@ const formatMeasurementRemark = (remark = "") => {
   if (!normalized) return "";
   if (normalized === "top") return "Top";
   if (normalized === "base") return "Base";
+  if (normalized === "base2") return "Base 2";
+  if (normalized === "pedestal") return "Pedestal";
   return normalized.replace(/([a-z]+)(\d+)/i, (_, prefix, number) =>
     `${prefix.charAt(0).toUpperCase()}${prefix.slice(1)} ${number}`,
   );

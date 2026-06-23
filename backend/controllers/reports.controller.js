@@ -11,6 +11,9 @@ const {
   compareInspectionSizeSnapshot,
   normalizeNumber,
 } = require("../helpers/inspectionSizeSnapshot");
+const {
+  evaluateCommonInspectionErrors,
+} = require("../helpers/commonInspectionErrors");
 
 const normalizeText = (value) => String(value ?? "").trim();
 const escapeRegex = (value = "") =>
@@ -2091,6 +2094,240 @@ exports.exportInspectedItemsReport = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error?.message || "Failed to export inspected items report.",
+    });
+  }
+};
+
+const buildCommonErrorsReportDataset = async ({
+  user,
+  search = "",
+  brand = "",
+  vendor = "",
+  errorType = "",
+  fromDate = "",
+  toDate = "",
+} = {}) => {
+  const normalizedBrand = normalizeOptionalFilter(brand);
+  const normalizedVendor = normalizeOptionalFilter(vendor);
+  const normalizedSearch = normalizeOptionalFilter(search).toLowerCase();
+  const normalizedErrorType = normalizeOptionalFilter(errorType).toLowerCase();
+  const fromIso = toISODateString(fromDate);
+  const toIso = toISODateString(toDate);
+  const qcMatch = applyDataAccessMatch({}, user, {
+    brandFields: ["order_meta.brand"],
+    vendorFields: ["order_meta.vendor"],
+  });
+
+  if (normalizedBrand) qcMatch["order_meta.brand"] = normalizedBrand;
+  if (normalizedVendor) qcMatch["order_meta.vendor"] = normalizedVendor;
+
+  const qcRows = await QC.find(qcMatch)
+    .select("_id order order_meta item")
+    .populate("order", "order_id brand vendor item")
+    .lean();
+  const qcContextById = new Map(
+    qcRows.map((qc) => [
+      String(qc?._id || ""),
+      {
+        order_id: normalizeText(qc?.order?.order_id || qc?.order_meta?.order_id),
+        brand: normalizeText(qc?.order?.brand || qc?.order_meta?.brand),
+        vendor: normalizeText(qc?.order?.vendor || qc?.order_meta?.vendor),
+        item_code: normalizeText(qc?.item?.item_code || qc?.order?.item?.item_code),
+        item_description: normalizeText(
+          qc?.item?.description || qc?.order?.item?.description,
+        ),
+      },
+    ]),
+  );
+  const qcIds = qcRows.map((qc) => qc?._id).filter(Boolean);
+
+  if (qcIds.length === 0) {
+    return {
+      rows: [],
+      filters: { brand_options: [], vendor_options: [] },
+      summary: { inspection_count: 0, error_count: 0, weight_errors: 0, height_errors: 0 },
+    };
+  }
+
+  const inspections = await Inspection.find({ qc: { $in: qcIds } })
+    .select(
+      "qc inspector inspection_date requested_date status inspected_item_sizes inspected_box_sizes inspected_box_mode createdAt",
+    )
+    .populate("inspector", "name email")
+    .sort({ inspection_date: -1, createdAt: -1 })
+    .lean();
+
+  const allRows = [];
+  for (const inspection of inspections) {
+    const context = qcContextById.get(String(inspection?.qc || "")) || {};
+    const inspectionDate = toISODateString(inspection?.inspection_date);
+    if (fromIso && (!inspectionDate || inspectionDate < fromIso)) continue;
+    if (toIso && (!inspectionDate || inspectionDate > toIso)) continue;
+
+    const evaluation = evaluateCommonInspectionErrors(inspection);
+    if (!evaluation.has_error) continue;
+
+    const inspectorName = normalizeText(
+      inspection?.inspector?.name || inspection?.inspector?.email,
+    );
+    const searchText = [
+      context.order_id,
+      context.item_code,
+      context.item_description,
+      context.brand,
+      context.vendor,
+      inspectorName,
+    ].join(" ").toLowerCase();
+    if (normalizedSearch && !searchText.includes(normalizedSearch)) continue;
+
+    const errors = normalizedErrorType
+      ? evaluation.errors.filter((error) => error.type === normalizedErrorType)
+      : evaluation.errors;
+    if (errors.length === 0) continue;
+
+    allRows.push({
+      id: String(inspection?._id || ""),
+      qc_id: String(inspection?.qc || ""),
+      order_id: context.order_id,
+      item_code: context.item_code,
+      item_description: context.item_description,
+      brand: context.brand,
+      vendor: context.vendor,
+      inspector_name: inspectorName || "N/A",
+      inspection_date: inspectionDate,
+      status: normalizeText(inspection?.status),
+      error_types: errors.map((error) => error.type),
+      errors,
+      item_sizes: evaluation.item_sizes,
+      box_sizes: evaluation.box_sizes,
+    });
+  }
+
+  const brandOptions = [...new Set(
+    [...qcContextById.values()].map((entry) => entry.brand).filter(Boolean),
+  )].sort((a, b) => a.localeCompare(b));
+  const vendorOptions = [...new Set(
+    [...qcContextById.values()].map((entry) => entry.vendor).filter(Boolean),
+  )].sort((a, b) => a.localeCompare(b));
+
+  return {
+    rows: allRows,
+    filters: {
+      brand_options: brandOptions,
+      vendor_options: vendorOptions,
+    },
+    summary: {
+      inspection_count: allRows.length,
+      error_count: allRows.reduce((sum, row) => sum + row.errors.length, 0),
+      weight_errors: allRows.reduce(
+        (sum, row) => sum + row.errors.filter((error) => error.type === "weight").length,
+        0,
+      ),
+      height_errors: allRows.reduce(
+        (sum, row) => sum + row.errors.filter((error) => error.type === "height").length,
+        0,
+      ),
+    },
+  };
+};
+
+exports.getCommonErrorsReport = async (req, res) => {
+  try {
+    const page = parsePositiveInt(req.query.page, 1);
+    const limit = Math.min(5000, parsePositiveInt(req.query.limit, 20));
+    const dataset = await buildCommonErrorsReportDataset({
+      user: req.user,
+      search: req.query.search,
+      brand: req.query.brand,
+      vendor: req.query.vendor,
+      errorType: req.query.error_type,
+      fromDate: req.query.from_date,
+      toDate: req.query.to_date,
+    });
+    const total = dataset.rows.length;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const safePage = Math.min(page, totalPages);
+
+    return res.status(200).json({
+      success: true,
+      rows: dataset.rows.slice((safePage - 1) * limit, safePage * limit),
+      summary: dataset.summary,
+      filters: {
+        ...dataset.filters,
+        search: normalizeOptionalFilter(req.query.search),
+        brand: normalizeOptionalFilter(req.query.brand),
+        vendor: normalizeOptionalFilter(req.query.vendor),
+        error_type: normalizeOptionalFilter(req.query.error_type),
+        from_date: toISODateString(req.query.from_date),
+        to_date: toISODateString(req.query.to_date),
+      },
+      pagination: { page: safePage, limit, total, totalPages },
+    });
+  } catch (error) {
+    console.error("Common Errors Report Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to fetch Common Errors report",
+    });
+  }
+};
+
+const formatCommonErrorSizeEntries = (entries = [], weightKey = "") =>
+  (Array.isArray(entries) ? entries : [])
+    .map((entry) => {
+      const remark = normalizeText(entry?.remark) || "entry";
+      const size = `${Number(entry?.L || 0)} x ${Number(entry?.B || 0)} x ${Number(entry?.H || 0)}`;
+      const weight = Number(entry?.[weightKey] || 0);
+      return `${remark}: ${size}${weight > 0 ? ` | ${weightKey}: ${weight}` : ""}`;
+    })
+    .join("; ");
+
+exports.exportCommonErrorsReport = async (req, res) => {
+  try {
+    const dataset = await buildCommonErrorsReportDataset({
+      user: req.user,
+      search: req.query.search,
+      brand: req.query.brand,
+      vendor: req.query.vendor,
+      errorType: req.query.error_type,
+      fromDate: req.query.from_date,
+      toDate: req.query.to_date,
+    });
+    const rows = dataset.rows.flatMap((row) =>
+      row.errors.map((error) => ({
+        PO: row.order_id,
+        "Item Code": row.item_code,
+        Description: row.item_description,
+        Brand: row.brand,
+        Vendor: row.vendor,
+        Inspector: row.inspector_name,
+        "Inspection Date": row.inspection_date,
+        "Error Type": error.label,
+        Formula: error.formula,
+        Calculated: error.actual,
+        Recorded: error.expected,
+        Difference: error.difference,
+        "Item Sizes": formatCommonErrorSizeEntries(row.item_sizes, "net_weight"),
+        "Box Sizes": formatCommonErrorSizeEntries(row.box_sizes, "gross_weight"),
+      })),
+    );
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    worksheet["!cols"] = [
+      14, 14, 34, 18, 22, 22, 16, 38, 24, 14, 14, 14, 70, 70,
+    ].map((wch) => ({ wch }));
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Common Errors");
+    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xls" });
+    const fileName = `common-errors-${new Date().toISOString().slice(0, 10)}.xls`;
+
+    res.setHeader("Content-Type", "application/vnd.ms-excel");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    return res.status(200).send(buffer);
+  } catch (error) {
+    console.error("Export Common Errors Report Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Failed to export Common Errors report",
     });
   }
 };

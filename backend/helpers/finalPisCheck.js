@@ -81,6 +81,8 @@ const ITEM_REMARK_ORDER = Object.freeze([
   "item",
   "top",
   "base",
+  "base2",
+  "pedestal",
   "item1",
   "item2",
   "item3",
@@ -278,6 +280,8 @@ const formatRemarkLabel = (remark = "", fallback = "Value") => {
   if (normalized === "item") return "Item";
   if (normalized === "top") return "Top";
   if (normalized === "base") return "Base";
+  if (normalized === "base2") return "Base 2";
+  if (normalized === "pedestal") return "Pedestal";
   if (normalized === "inner") return "Inner Carton";
   if (normalized === "master") return "Master Carton";
   if (normalized === "individual") return "Individual";

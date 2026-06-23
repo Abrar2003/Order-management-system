@@ -16,6 +16,8 @@ export const ITEM_SIZE_REMARK_OPTIONS = Object.freeze([
   { value: "item", label: "Item" },
   { value: "top", label: "Top" },
   { value: "base", label: "Base" },
+  { value: "base2", label: "Base 2" },
+  { value: "pedestal", label: "Pedestal" },
   { value: "item1", label: "Item 1" },
   { value: "item2", label: "Item 2" },
   { value: "item3", label: "Item 3" },

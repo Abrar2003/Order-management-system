@@ -25,6 +25,8 @@ const ITEM_SIZE_REMARK_ORDER = Object.freeze([
   "item",
   "top",
   "base",
+  "base2",
+  "pedestal",
   "item1",
   "item2",
   "item3",
