@@ -644,24 +644,34 @@ const QcDetails = () => {
     ) {
       return fromQcList;
     }
+
+    const orderId = String(
+      qc?.order?.order_id || qc?.order_meta?.order_id || "",
+    ).trim();
+    if (orderId) {
+      const params = new URLSearchParams();
+      params.set("order", orderId);
+      return `/qc?${params.toString()}`;
+    }
+
+    const itemCode = String(qc?.item?.item_code || "").trim();
+    if (itemCode) {
+      const params = new URLSearchParams();
+      params.set("search", itemCode);
+      return `/qc?${params.toString()}`;
+    }
+
     return "/qc";
-  }, [location.state]);
-  const hasQcListBackState = useMemo(() => {
-    const fromQcList = String(location.state?.fromQcList || "").trim();
-    return (
-      Boolean(fromQcList) &&
-      fromQcList.startsWith("/qc") &&
-      !fromQcList.startsWith("/qc/")
-    );
-  }, [location.state]);
+  }, [
+    location.state,
+    qc?.item?.item_code,
+    qc?.order?.order_id,
+    qc?.order_meta?.order_id,
+  ]);
 
   const handleBackNavigation = useCallback(() => {
-    if (hasQcListBackState) {
-      navigate(-1);
-      return;
-    }
     navigate(backTarget, { replace: true });
-  }, [backTarget, hasQcListBackState, navigate]);
+  }, [backTarget, navigate]);
 
   const labelRange = sortedLabels.length
     ? `${sortedLabels[0]} - ${sortedLabels[sortedLabels.length - 1]}`

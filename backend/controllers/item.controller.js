@@ -52,6 +52,10 @@ const {
   compareInspectionSizeSnapshot,
 } = require("../helpers/inspectionSizeSnapshot");
 const {
+  getValidInspectionPoLookup,
+  isValidInspectionHistoryRecord,
+} = require("../services/validInspectionHistory.service");
+const {
   compareBoxSizeDimensionVariance,
   compareItemSizeDimensionVariance,
   compareWeightVariance,
@@ -2604,9 +2608,15 @@ const getFinalPisCheckRowsForQuery = async ({
     .select(FINAL_PIS_CHECK_ITEM_SELECT)
     .sort({ updatedAt: -1, code: 1 })
     .lean();
-  const mismatchLookup = await buildInspectionReportMismatchLookup(items);
+  const validInspectionPoLookup = await getValidInspectionPoLookup(
+    items.map((item) => item?.code),
+  );
+  const eligibleItems = items.filter((item) =>
+    validInspectionPoLookup.get(normalizeLookupKey(item?.code))?.eligible === true,
+  );
+  const mismatchLookup = await buildInspectionReportMismatchLookup(eligibleItems);
 
-  const rows = buildFinalPisCheckRows(items).map((row) => {
+  const rows = buildFinalPisCheckRows(eligibleItems).map((row) => {
     const mismatchEntry = mismatchLookup.get(normalizeLookupKey(row?.code)) || {};
     return {
       ...row,
@@ -4773,10 +4783,19 @@ exports.getItemOrdersHistory = async (req, res) => {
         : [];
 
       const mappedInspections = inspectionRecords
+        .filter((record) =>
+          isValidInspectionHistoryRecord({
+            itemCode: order?.item?.item_code,
+            orderId: order?.order_id,
+            inspectionDate: record?.inspection_date,
+            inspector: record?.inspector,
+            source: "inspection_record",
+          }),
+        )
         .map((record) => ({
           qc_id: String(qcRecord?._id || ""),
           id: String(record?._id || ""),
-          inspector_name: resolveInspectorName(record?.inspector) || "N/A",
+          inspector_name: resolveInspectorName(record?.inspector),
           inspection_date: String(record?.inspection_date || "").trim(),
           requested_date: String(record?.requested_date || "").trim(),
           vendor_requested: Math.max(0, toSafeNumber(record?.vendor_requested, 0)),
@@ -4793,31 +4812,6 @@ exports.getItemOrdersHistory = async (req, res) => {
         }))
         .sort((a, b) => (b.__sortTime || 0) - (a.__sortTime || 0))
         .map(({ __sortTime, ...rest }) => rest);
-
-      if (mappedInspections.length === 0 && qcRecord) {
-        mappedInspections.push({
-          id: `qc-snapshot-${order?._id || ""}`,
-          inspector_name: resolveInspectorName(qcRecord?.inspector) || "N/A",
-          inspection_date: String(qcRecord?.last_inspected_date || "").trim(),
-          requested_date: "",
-          vendor_requested: Math.max(
-            0,
-            toSafeNumber(qcRecord?.quantities?.quantity_requested, 0),
-          ),
-          vendor_offered: Math.max(
-            0,
-            toSafeNumber(qcRecord?.quantities?.vendor_provision, 0),
-          ),
-          checked: Math.max(0, toSafeNumber(qcRecord?.quantities?.qc_checked, 0)),
-          passed: Math.max(0, toSafeNumber(qcRecord?.quantities?.qc_passed, 0)),
-          pending_after: Math.max(
-            0,
-            toSafeNumber(qcRecord?.quantities?.pending, 0),
-          ),
-          remarks: "",
-          source: "qc_snapshot",
-        });
-      }
 
       return {
         id: String(order?._id || ""),

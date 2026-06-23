@@ -94,19 +94,27 @@ const toTimestamp = (value) => {
 const buildLatestInspectionContext = (orders = []) =>
   (Array.isArray(orders) ? orders : [])
     .flatMap((order) =>
-      (Array.isArray(order?.inspections) ? order.inspections : []).map((inspection) => ({
-        order_id: toText(order?.order_id, "N/A"),
-        brand: toText(order?.brand, "N/A"),
-        vendor: toText(order?.vendor, "N/A"),
-        inspector_name: toText(inspection?.inspector_name, "N/A"),
-        inspection_date: toText(inspection?.inspection_date),
-        requested_date: toText(inspection?.requested_date),
-        sort_time: Math.max(
-          toTimestamp(inspection?.inspection_date),
-          toTimestamp(inspection?.requested_date),
-          toTimestamp(order?.order_date),
-        ),
-      })),
+      (Array.isArray(order?.inspections) ? order.inspections : [])
+        .filter(
+          (inspection) =>
+            toText(order?.order_id) &&
+            toText(inspection?.inspection_date) &&
+            toText(inspection?.inspector_name) &&
+            toText(inspection?.inspector_name).toLowerCase() !== "n/a",
+        )
+        .map((inspection) => ({
+          order_id: toText(order?.order_id),
+          brand: toText(order?.brand),
+          vendor: toText(order?.vendor),
+          inspector_name: toText(inspection?.inspector_name),
+          inspection_date: toText(inspection?.inspection_date),
+          requested_date: toText(inspection?.requested_date),
+          sort_time: Math.max(
+            toTimestamp(inspection?.inspection_date),
+            toTimestamp(inspection?.requested_date),
+            toTimestamp(order?.order_date),
+          ),
+        })),
     )
     .sort((left, right) => (right.sort_time || 0) - (left.sort_time || 0))[0] || null;
 
@@ -397,6 +405,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
   const [error, setError] = useState("");
   const [latestInspectionContext, setLatestInspectionContext] = useState(null);
   const [latestInspectionContextLoading, setLatestInspectionContextLoading] = useState(false);
+  const [latestInspectionContextLoaded, setLatestInspectionContextLoaded] = useState(false);
   const user = getUserFromToken();
   const canToggleBarcodeExemption = isStrictAdminRole(
     normalizeUserRole(user?.role),
@@ -471,6 +480,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
     if (!showInspectedReference || !itemCode || itemCode === "N/A") {
       setLatestInspectionContext(null);
       setLatestInspectionContextLoading(false);
+      setLatestInspectionContextLoaded(false);
       return undefined;
     }
 
@@ -479,6 +489,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
     const fetchLatestInspectionContext = async () => {
       try {
         setLatestInspectionContextLoading(true);
+        setLatestInspectionContextLoaded(false);
         const response = await api.get(
           `/items/${encodeURIComponent(itemCode)}/orders-history`,
         );
@@ -493,6 +504,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
       } finally {
         if (!ignore) {
           setLatestInspectionContextLoading(false);
+          setLatestInspectionContextLoaded(true);
         }
       }
     };
@@ -577,6 +589,11 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
   };
 
   const handleFetchDetails = () => {
+    if (!latestInspectionContext) {
+      setError("No valid inspected record available.");
+      return;
+    }
+
     const hasItemEntries = inspectedMeasurementDetails.itemEntries.length > 0;
     const hasBoxEntries = inspectedMeasurementDetails.boxEntries.length > 0;
     const inspectedMasterBarcode = toText(
@@ -897,55 +914,62 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
                       type="button"
                       className="btn btn-outline-primary btn-sm"
                       onClick={handleFetchDetails}
-                      disabled={saving}
+                      disabled={
+                        saving ||
+                        latestInspectionContextLoading ||
+                        !latestInspectionContext
+                      }
                     >
                       Fetch details
                     </button>
                     <span className="badge text-bg-warning">Needs PIS Check</span>
                   </div>
                 </div>
-                <div className="row g-3 small">
-                  <div className="col-md-3">
-                    <div className="text-secondary">PO Number</div>
-                    <div className="fw-semibold">
-                      {latestInspectionContextLoading
-                        ? "Loading..."
-                        : latestInspectionContext?.order_id || "N/A"}
-                    </div>
+                {latestInspectionContextLoading && (
+                  <div className="text-secondary small">
+                    Loading inspected record...
                   </div>
+                )}
+                {!latestInspectionContextLoading &&
+                  latestInspectionContextLoaded &&
+                  !latestInspectionContext && (
+                    <div className="alert alert-secondary mb-0">
+                      No valid inspected record available.
+                    </div>
+                  )}
+                {!latestInspectionContextLoading && latestInspectionContext && (
+                  <div className="row g-3 small">
+                    <div className="col-md-3">
+                      <div className="text-secondary">PO Number</div>
+                      <div className="fw-semibold">
+                        {latestInspectionContext.order_id}
+                      </div>
+                    </div>
                   <div className="col-md-3">
                     <div className="text-secondary">Brand</div>
                     <div className="fw-semibold">
-                      {latestInspectionContextLoading
-                        ? "Loading..."
-                        : latestInspectionContext?.brand || brandLabel}
+                      {latestInspectionContext.brand || brandLabel}
                     </div>
                   </div>
                   <div className="col-md-3">
                     <div className="text-secondary">Vendor</div>
                     <div className="fw-semibold">
-                      {latestInspectionContextLoading
-                        ? "Loading..."
-                        : latestInspectionContext?.vendor || vendorsLabel}
+                      {latestInspectionContext.vendor || vendorsLabel}
                     </div>
                   </div>
                   <div className="col-md-3">
                     <div className="text-secondary">Inspector</div>
                     <div className="fw-semibold">
-                      {latestInspectionContextLoading
-                        ? "Loading..."
-                        : latestInspectionContext?.inspector_name || "N/A"}
+                      {latestInspectionContext.inspector_name}
                     </div>
                   </div>
                   <div className="col-md-3">
                     <div className="text-secondary">Inspection Date</div>
                     <div className="fw-semibold">
-                      {latestInspectionContextLoading
-                        ? "Loading..."
-                        : formatDateDDMMYYYY(
-                            latestInspectionContext?.inspection_date,
-                            "N/A",
-                          )}
+                      {formatDateDDMMYYYY(
+                        latestInspectionContext.inspection_date,
+                        "N/A",
+                      )}
                     </div>
                   </div>
                   <div className="col-md-6">
@@ -983,7 +1007,8 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
                     <div className="text-secondary">Inspected CBM</div>
                     <div>{inspectedReference.cbm}</div>
                   </div>
-                </div>
+                  </div>
+                )}
               </div>
             )}
 
