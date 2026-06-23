@@ -20,6 +20,23 @@ const connectDB = async () => {
       : 10000,
   });
 
+  try {
+    const hello = await conn.connection.db.admin().command({ hello: 1 });
+    const supportsTransactions = Boolean(
+      hello?.logicalSessionTimeoutMinutes != null &&
+        (hello?.setName || hello?.msg === "isdbgrid"),
+    );
+    conn.connection.$supportsTransactions = supportsTransactions;
+    console.log(
+      `MongoDB transactions: ${supportsTransactions ? "supported" : "unsupported"}`,
+    );
+  } catch (error) {
+    conn.connection.$supportsTransactions = null;
+    console.warn("Could not determine MongoDB transaction support:", {
+      error: error?.message || String(error),
+    });
+  }
+
   console.log(`Connected to MongoDB: ${conn.connection.host}`);
   return conn;
 };

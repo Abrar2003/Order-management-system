@@ -17,6 +17,7 @@ const {
 const Order = require("../models/order.model");
 const mongoose = require("mongoose");
 const {
+  isTransactionUnsupportedError,
   runTransactionalController,
 } = require("../helpers/transactionalController");
 const { upsertItemFromQc } = require("../services/itemSync");
@@ -6792,6 +6793,9 @@ const updateQC = async (req, res) => {
       throw err;
     }
     if (err?.name === "VersionError") {
+      throw err;
+    }
+    if (isTransactionUnsupportedError(err)) {
       throw err;
     }
     res.status(400).json({ message: err.message });

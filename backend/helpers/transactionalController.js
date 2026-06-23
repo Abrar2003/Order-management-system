@@ -31,12 +31,70 @@ const createDeferredResponse = (res) => {
   };
 };
 
+const isTransactionUnsupportedError = (error) => {
+  const candidates = [
+    error,
+    error?.cause,
+    error?.originalError,
+    error?.errorResponse,
+  ].filter(Boolean);
+
+  return candidates.some((candidate) => {
+    const message = String(candidate?.message || candidate?.errmsg || "")
+      .trim()
+      .toLowerCase();
+    return (
+      Number(candidate?.code) === 20 ||
+      message.includes(
+        "transaction numbers are only allowed on a replica set member or mongos",
+      ) ||
+      message.includes("transactions are not supported")
+    );
+  });
+};
+
+const sendDeferredResult = (res, result) => {
+  if (!result?.sent) {
+    return res.status(204).end();
+  }
+  return res.status(result.statusCode).json(result.body);
+};
+
+const runWithoutTransaction = async ({ handler, req, res }) => {
+  const maxAttempts = 2;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const { response, getResult } = createDeferredResponse(res);
+    try {
+      await handler(req, response);
+      return sendDeferredResult(res, getResult());
+    } catch (error) {
+      if (error?.name === "VersionError" && attempt < maxAttempts) {
+        continue;
+      }
+
+      console.error("Non-transactional controller failed:", {
+        method: req.method,
+        path: req.originalUrl || req.url,
+        error: error?.message || String(error),
+      });
+      return res.status(500).json({
+        message: "The QC update could not be completed.",
+      });
+    }
+  }
+};
+
 const runTransactionalController = async ({
   connection,
   handler,
   req,
   res,
 }) => {
+  if (connection?.$supportsTransactions === false) {
+    return runWithoutTransaction({ handler, req, res });
+  }
+
   const maxAttempts = 2;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -56,6 +114,14 @@ const runTransactionalController = async ({
         return res.status(error.statusCode).json(error.body);
       }
 
+      if (isTransactionUnsupportedError(error)) {
+        connection.$supportsTransactions = false;
+        console.warn(
+          "MongoDB transactions are unavailable; retrying QC update without a transaction.",
+        );
+        return runWithoutTransaction({ handler, req, res });
+      }
+
       if (error?.name === "VersionError" && attempt < maxAttempts) {
         continue;
       }
@@ -71,17 +137,14 @@ const runTransactionalController = async ({
       });
     }
 
-    const result = getResult();
-    if (!result.sent) {
-      return res.status(204).end();
-    }
-
-    return res.status(result.statusCode).json(result.body);
+    return sendDeferredResult(res, getResult());
   }
 };
 
 module.exports = {
   DeferredHttpResponseError,
   createDeferredResponse,
+  isTransactionUnsupportedError,
+  runWithoutTransaction,
   runTransactionalController,
 };

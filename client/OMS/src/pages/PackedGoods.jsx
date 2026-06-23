@@ -740,28 +740,38 @@ const PackedGoods = () => {
                 </span>
               </div>
 
-              <div className="d-flex flex-wrap align-items-center gap-3 mb-3 px-1">
+              <div className="d-flex flex-wrap align-items-center gap-3 mb-3 px-1" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "16px" }}>
                 <span className="small text-secondary fw-semibold">Status Legend:</span>
-                <div className="d-flex align-items-center gap-2">
+                <div className="d-flex align-items-center gap-2 text-nowrap" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                   <span
                     className="d-inline-block rounded-circle"
                     style={{
+                      display: "inline-block",
                       width: "12px",
                       height: "12px",
-                      backgroundColor: "var(--om-color-packed-success-even)",
-                      border: "1.5px solid var(--om-color-success)",
+                      minWidth: "12px",
+                      minHeight: "12px",
+                      flexShrink: 0,
+                      borderRadius: "50%",
+                      backgroundColor: "var(--om-color-packed-success-even, #b8d7a3)",
+                      border: "1.5px solid var(--om-color-success, #5d7354)",
                     }}
                   />
                   <span className="small text-secondary fw-medium">Completely Packed PO</span>
                 </div>
-                <div className="d-flex align-items-center gap-2">
+                <div className="d-flex align-items-center gap-2 text-nowrap" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                   <span
                     className="d-inline-block rounded-circle"
                     style={{
+                      display: "inline-block",
                       width: "12px",
                       height: "12px",
-                      backgroundColor: "var(--om-color-packed-warning-even)",
-                      border: "1.5px solid var(--om-color-warning)",
+                      minWidth: "12px",
+                      minHeight: "12px",
+                      flexShrink: 0,
+                      borderRadius: "50%",
+                      backgroundColor: "var(--om-color-packed-warning-even, #f9da8f)",
+                      border: "1.5px solid var(--om-color-warning, #8a6e4a)",
                     }}
                   />
                   <span className="small text-secondary fw-medium">Not Completely Packed PO</span>
@@ -816,28 +826,38 @@ const PackedGoods = () => {
         )}
 
         {!loading && sortedRows.length > 0 && (
-          <div className="d-flex flex-wrap align-items-center gap-3 mb-3 px-1">
+          <div className="d-flex flex-wrap align-items-center gap-3 mb-3 px-1" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "16px" }}>
             <span className="small text-secondary fw-semibold">Status Legend:</span>
-            <div className="d-flex align-items-center gap-2">
+            <div className="d-flex align-items-center gap-2 text-nowrap" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <span
                 className="d-inline-block rounded-circle shadow-sm"
                 style={{
+                  display: "inline-block",
                   width: "12px",
                   height: "12px",
-                  backgroundColor: "var(--om-color-packed-success-even)",
-                  border: "1.5px solid var(--om-color-success)",
+                  minWidth: "12px",
+                  minHeight: "12px",
+                  flexShrink: 0,
+                  borderRadius: "50%",
+                  backgroundColor: "var(--om-color-packed-success-even, #b8d7a3)",
+                  border: "1.5px solid var(--om-color-success, #5d7354)",
                 }}
               />
               <span className="small text-secondary fw-medium">Completely Packed PO</span>
             </div>
-            <div className="d-flex align-items-center gap-2">
+            <div className="d-flex align-items-center gap-2 text-nowrap" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <span
                 className="d-inline-block rounded-circle shadow-sm"
                 style={{
+                  display: "inline-block",
                   width: "12px",
                   height: "12px",
-                  backgroundColor: "var(--om-color-packed-warning-even)",
-                  border: "1.5px solid var(--om-color-warning)",
+                  minWidth: "12px",
+                  minHeight: "12px",
+                  flexShrink: 0,
+                  borderRadius: "50%",
+                  backgroundColor: "var(--om-color-packed-warning-even, #f9da8f)",
+                  border: "1.5px solid var(--om-color-warning, #8a6e4a)",
                 }}
               />
               <span className="small text-secondary fw-medium">Not Completely Packed PO</span>

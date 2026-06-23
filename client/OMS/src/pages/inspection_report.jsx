@@ -1728,33 +1728,27 @@ const InspectionReport = () => {
 
     let isMounted = true;
 
-    const fetchBrandDetails = async () => {
+    const fetchBrandLogoDirect = async () => {
       try {
         setBrandLogoLoading(true);
-        const response = await api.get("/brands/");
+        const logoUrl = `/brands/${encodeURIComponent(brandName)}/logo`;
+        const response = await api.get(logoUrl, { responseType: "blob" });
         if (!isMounted) return;
 
-        const brands = Array.isArray(response?.data?.data) ? response.data.data : [];
-        const matchedBrand = brands.find(
-          (brand) => getBrandKey(brand?.name) === getBrandKey(brandName),
-        );
-        const resolvedLogoSrc = toBrandLogoDataUrl(matchedBrand?.logo);
-        if (!resolvedLogoSrc) {
-          setBrandLogoSrc("");
-          return;
-        }
-
-        if (resolvedLogoSrc.startsWith("data:image/")) {
-          setBrandLogoSrc(resolvedLogoSrc);
-          return;
-        }
-
-        try {
-          setBrandLogoSrc(await fetchRemoteImageAsDataUrl(resolvedLogoSrc));
-        } catch {
-          setBrandLogoSrc(resolvedLogoSrc);
-        }
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          if (isMounted) {
+            setBrandLogoSrc(reader.result);
+          }
+        };
+        reader.onerror = () => {
+          if (isMounted) {
+            setBrandLogoSrc("");
+          }
+        };
+        reader.readAsDataURL(response.data);
       } catch (error) {
+        console.error("Failed to fetch brand logo:", error);
         if (isMounted) {
           setBrandLogoSrc("");
         }
@@ -1765,7 +1759,7 @@ const InspectionReport = () => {
       }
     };
 
-    fetchBrandDetails();
+    fetchBrandLogoDirect();
 
     return () => {
       isMounted = false;

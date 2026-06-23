@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  isTransactionUnsupportedError,
   runTransactionalController,
 } = require("../helpers/transactionalController");
 
@@ -148,6 +149,65 @@ test("retries the whole transaction once after a version conflict", async () => 
   });
 
   assert.equal(attempts, 2);
+  assert.equal(state.statusCode, 200);
+  assert.deepEqual(state.body, { ok: true });
+});
+
+test("runs without a transaction when the connection is known to be standalone", async () => {
+  let transactionCalls = 0;
+  const connection = {
+    $supportsTransactions: false,
+    async transaction() {
+      transactionCalls += 1;
+    },
+  };
+  const { res, state } = createResponse();
+
+  await runTransactionalController({
+    connection,
+    req: { method: "PATCH", originalUrl: "/qc/update-qc/1" },
+    res,
+    handler: async (_req, deferredRes) => {
+      deferredRes.json({ ok: true });
+    },
+  });
+
+  assert.equal(transactionCalls, 0);
+  assert.equal(state.statusCode, 200);
+  assert.deepEqual(state.body, { ok: true });
+});
+
+test("detects standalone transaction errors and retries without a transaction", async () => {
+  let transactionCalls = 0;
+  let handlerCalls = 0;
+  const connection = {
+    $supportsTransactions: null,
+    async transaction(callback) {
+      transactionCalls += 1;
+      await callback();
+      const error = new Error(
+        "Transaction numbers are only allowed on a replica set member or mongos",
+      );
+      error.code = 20;
+      throw error;
+    },
+  };
+  const { res, state } = createResponse();
+
+  await runTransactionalController({
+    connection,
+    req: { method: "PATCH", originalUrl: "/qc/update-qc/1" },
+    res,
+    handler: async (_req, deferredRes) => {
+      handlerCalls += 1;
+      deferredRes.json({ ok: true });
+    },
+  });
+
+  assert.equal(isTransactionUnsupportedError({ code: 20 }), true);
+  assert.equal(transactionCalls, 1);
+  assert.equal(handlerCalls, 2);
+  assert.equal(connection.$supportsTransactions, false);
   assert.equal(state.statusCode, 200);
   assert.deepEqual(state.body, { ok: true });
 });

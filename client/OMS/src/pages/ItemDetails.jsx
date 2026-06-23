@@ -553,18 +553,32 @@ const ItemDetails = () => {
     }
 
     let cancelled = false;
-    const loadBrandLogo = async () => {
+    const loadBrandLogoDirect = async () => {
       try {
-        const response = await api.get("/brands/");
+        const logoUrl = `/brands/${encodeURIComponent(brandName)}/logo`;
+        const response = await api.get(logoUrl, { responseType: "blob" });
         if (cancelled) return;
-        const brands = Array.isArray(response?.data?.data) ? response.data.data : [];
-        const matchedBrand = brands.find((brand) => getBrandKey(brand?.name) === getBrandKey(brandName));
-        setBrandLogoSrc(toBrandLogoDataUrl(matchedBrand?.logo));
-      } catch {
-        if (!cancelled) setBrandLogoSrc("");
+
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          if (!cancelled) {
+            setBrandLogoSrc(reader.result);
+          }
+        };
+        reader.onerror = () => {
+          if (!cancelled) {
+            setBrandLogoSrc("");
+          }
+        };
+        reader.readAsDataURL(response.data);
+      } catch (error) {
+        console.error("Failed to fetch brand logo:", error);
+        if (!cancelled) {
+          setBrandLogoSrc("");
+        }
       }
     };
-    loadBrandLogo();
+    loadBrandLogoDirect();
     return () => {
       cancelled = true;
     };

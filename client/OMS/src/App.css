@@ -4411,36 +4411,35 @@ small,
   border-radius: var(--om-radius-md);
   background: var(--om-color-surface);
   padding: 0.75rem;
-  display: flex;
-  gap: 2rem;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
   align-items: stretch;
   min-height: 220px;
 }
 
 .inspection-report-summary-column {
   min-width: 0;
+  width: 100%;
 }
 
 .inspection-report-summary-primary {
-  flex: 1 1 0;
   display: grid;
   gap: 0.5rem;
+  align-content: start;
 }
 
 .inspection-report-summary-media {
-  flex: 1 1 0;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
 }
 
 .inspection-report-summary-media--brand {
-  flex: 1 1 0;
   max-width: none;
 }
 
 .inspection-report-summary-media--product {
-  flex: 1 1 0;
   max-width: none;
 }
 
@@ -7177,6 +7176,7 @@ small,
   }
 
   .inspection-report-summary-block {
+    grid-template-columns: minmax(0, 1fr);
     padding: 0.85rem;
     gap: 0.9rem;
   }
