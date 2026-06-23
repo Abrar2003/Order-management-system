@@ -176,8 +176,19 @@ const useFormDraft = ({
     }
   }, [draftUrl]);
 
+  const pauseDraftSaves = useCallback(() => {
+    saveGenerationRef.current += 1;
+    loadedRef.current = false;
+  }, []);
+
+  const resumeDraftSaves = useCallback(() => {
+    loadedRef.current = true;
+  }, []);
+
   return {
     clearDraft,
+    pauseDraftSaves,
+    resumeDraftSaves,
     draftMessage: message,
     draftStatus: status,
     hasDraftStatus: Boolean(message),

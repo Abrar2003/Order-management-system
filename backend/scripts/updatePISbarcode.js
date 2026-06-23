@@ -40,6 +40,25 @@ function hasExistingPisBarcode(item = {}) {
   );
 }
 
+function buildMissingPisBarcodeFilter(code) {
+  const isMissing = (field) => ({
+    $or: [
+      { [field]: { $exists: false } },
+      { [field]: null },
+      { [field]: "" },
+    ],
+  });
+
+  return {
+    code,
+    $and: [
+      isMissing("pis_barcode"),
+      isMissing("pis_master_barcode"),
+      isMissing("pis_inner_barcode"),
+    ],
+  };
+}
+
 function chunkArray(arr, size) {
   const chunks = [];
 
@@ -237,7 +256,7 @@ async function main() {
 
       return {
         updateOne: {
-          filter: { code: row.code },
+          filter: buildMissingPisBarcodeFilter(row.code),
           update: {
             $set: updateData,
           },
@@ -290,7 +309,7 @@ async function main() {
 
     return {
       updateOne: {
-        filter: { code: row.code },
+        filter: buildMissingPisBarcodeFilter(row.code),
         update: {
           $set: updateData,
         },

@@ -1,6 +1,8 @@
 const mongoose = require("mongoose");
 require("dotenv").config();
 
+mongoose.set("transactionAsyncLocalStorage", true);
+
 const connectDB = async () => {
   const mongoUri = String(process.env.MONGO_URI || "").trim();
   if (!mongoUri) {

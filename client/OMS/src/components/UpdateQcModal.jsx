@@ -1295,6 +1295,8 @@ const UpdateQcModal = ({
   };
   const {
     clearDraft,
+    pauseDraftSaves,
+    resumeDraftSaves,
     draftMessage,
     draftStatus,
     hasDraftStatus,
@@ -2991,6 +2993,7 @@ const UpdateQcModal = ({
       }
 
       try {
+        pauseDraftSaves();
         setSaving(true);
         await api.patch(`/qc/${qc._id}/inspection-records`, {
           records: [
@@ -3035,6 +3038,7 @@ const UpdateQcModal = ({
           err.response?.data?.message || "Failed to update inspection record.",
         );
       } finally {
+        resumeDraftSaves();
         setSaving(false);
       }
       return;
@@ -3160,6 +3164,7 @@ const UpdateQcModal = ({
       qcPayload.labels = allLabelsAfterRewrite;
 
       try {
+        pauseDraftSaves();
         setSaving(true);
         const qcResponse = await api.patch(`/qc/update-qc/${qc._id}`, qcPayload);
         const updatedQc = qcResponse?.data?.data || qc;
@@ -3209,6 +3214,7 @@ const UpdateQcModal = ({
       } catch (err) {
         setError(err.response?.data?.message || "Failed to update QC record.");
       } finally {
+        resumeDraftSaves();
         setSaving(false);
       }
       return;
@@ -3294,6 +3300,7 @@ const UpdateQcModal = ({
     const payload = buildQcPayload();
 
     try {
+      pauseDraftSaves();
       setSaving(true);
       await api.patch(`/qc/update-qc/${qc._id}`, payload);
       await clearDraft({ resetStatus: false });
@@ -3303,6 +3310,7 @@ const UpdateQcModal = ({
     } catch (err) {
       setError(err.response?.data?.message || "Failed to update QC record.");
     } finally {
+      resumeDraftSaves();
       setSaving(false);
     }
   };

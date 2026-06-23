@@ -16,6 +16,9 @@ const {
 
 const Order = require("../models/order.model");
 const mongoose = require("mongoose");
+const {
+  runTransactionalController,
+} = require("../helpers/transactionalController");
 const { upsertItemFromQc } = require("../services/itemSync");
 const {
   syncItemInspectedDataFromInspection,
@@ -4671,8 +4674,22 @@ exports.getQcFormDraft = async (req, res) => {
     }, now);
 
     if (hadExpiredDrafts) {
-      qc.markModified("form_drafts");
-      await qc.save();
+      await QC.updateOne(
+        { _id: qc._id },
+        [
+          {
+            $set: {
+              form_drafts: {
+                $filter: {
+                  input: { $ifNull: ["$form_drafts", []] },
+                  as: "draft",
+                  cond: { $gt: ["$$draft.expires_at", now] },
+                },
+              },
+            },
+          },
+        ],
+      );
     }
 
     return res.json({
@@ -4703,12 +4720,58 @@ exports.saveQcFormDraft = async (req, res) => {
       payload: req.body?.payload,
     }, now);
 
-    qc.markModified("form_drafts");
-    await qc.save();
+    const draftUserId = new mongoose.Types.ObjectId(String(draft.user));
+    const draftMode = String(draft.mode || "").trim().toLowerCase();
+    const draftRecordId = String(draft.record_id || "").trim();
+    const nextDraft = {
+      user: draftUserId,
+      mode: draftMode,
+      record_id: draftRecordId,
+      payload: draft.payload,
+      updated_at: draft.updated_at,
+      expires_at: draft.expires_at,
+    };
+
+    await QC.updateOne(
+      { _id: qc._id },
+      [
+        {
+          $set: {
+            form_drafts: {
+              $concatArrays: [
+                {
+                  $filter: {
+                    input: { $ifNull: ["$form_drafts", []] },
+                    as: "draft",
+                    cond: {
+                      $and: [
+                        { $gt: ["$$draft.expires_at", now] },
+                        {
+                          $not: [
+                            {
+                              $and: [
+                                { $eq: ["$$draft.user", draftUserId] },
+                                { $eq: ["$$draft.mode", draftMode] },
+                                { $eq: ["$$draft.record_id", draftRecordId] },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                  },
+                },
+                [{ $literal: nextDraft }],
+              ],
+            },
+          },
+        },
+      ],
+    );
 
     return res.json({
       success: true,
-      data: serializeFormDraft(draft),
+      data: serializeFormDraft(nextDraft),
     });
   } catch (err) {
     return res.status(400).json({ message: err.message || "Failed to save QC draft" });
@@ -4726,15 +4789,53 @@ exports.deleteQcFormDraft = async (req, res) => {
       return res.status(404).json({ message: "QC record not found" });
     }
 
+    const draftUserIdValue = getDraftUserId(req.user);
+    const draftMode = String(
+      req.query?.mode || req.body?.mode || "",
+    ).trim().toLowerCase();
+    const draftRecordId = String(
+      req.query?.record_id || req.body?.record_id || "",
+    ).trim();
     const changed = deleteFormDraft(qc, {
-      userId: getDraftUserId(req.user),
+      userId: draftUserIdValue,
       mode: req.query?.mode || req.body?.mode,
       recordId: req.query?.record_id || req.body?.record_id,
     });
 
     if (changed) {
-      qc.markModified("form_drafts");
-      await qc.save();
+      const draftUserId = new mongoose.Types.ObjectId(draftUserIdValue);
+      const now = new Date();
+      await QC.updateOne(
+        { _id: qc._id },
+        [
+          {
+            $set: {
+              form_drafts: {
+                $filter: {
+                  input: { $ifNull: ["$form_drafts", []] },
+                  as: "draft",
+                  cond: {
+                    $and: [
+                      { $gt: ["$$draft.expires_at", now] },
+                      {
+                        $not: [
+                          {
+                            $and: [
+                              { $eq: ["$$draft.user", draftUserId] },
+                              { $eq: ["$$draft.mode", draftMode] },
+                              { $eq: ["$$draft.record_id", draftRecordId] },
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        ],
+      );
     }
 
     return res.json({
@@ -4817,7 +4918,7 @@ exports.updateQcCheckedStatus = async (req, res) => {
  * PATCH /update-qc/:id
  * QC inspector updates checked / passed with allocated labels
  */
-exports.updateQC = async (req, res) => {
+const updateQC = async (req, res) => {
   try {
     const {
       qc_checked,
@@ -6682,9 +6783,26 @@ exports.updateQC = async (req, res) => {
       data: qc,
     });
   } catch (err) {
+    if (
+      typeof err?.hasErrorLabel === "function" &&
+      err.hasErrorLabel("TransientTransactionError")
+    ) {
+      throw err;
+    }
+    if (err?.name === "VersionError") {
+      throw err;
+    }
     res.status(400).json({ message: err.message });
   }
 };
+
+exports.updateQC = async (req, res) =>
+  runTransactionalController({
+    connection: mongoose.connection,
+    handler: updateQC,
+    req,
+    res,
+  });
 
 exports.scanBarcodeUpload = async (req, res) => {
   try {
