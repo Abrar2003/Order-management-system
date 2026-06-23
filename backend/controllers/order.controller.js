@@ -5,6 +5,10 @@ const QC = require("../models/qc.model");
 const Item = require("../models/item.model");
 const Sample = require("../models/sample.model");
 const UploadLog = require("../models/uploadLog.model");
+const {
+  formatManualOrderValidationMessage,
+  getMissingManualOrderFields,
+} = require("../helpers/manualOrderValidation");
 const OrderEditLog = require("../models/orderEditLog.model");
 const mongoose = require("mongoose");
 const dateParser = require("../helpers/dateparsser");
@@ -4863,7 +4867,8 @@ exports.createOrdersManually = async (req, res) => {
 
     duplicateEntries = [];
     const seenKeys = new Set();
-    const draftRows = rows.map((row) => ({
+    const draftRows = rows.map((row, index) => ({
+      rowNumber: Number(row?.row_number) > 0 ? Number(row.row_number) : index + 1,
       orderId: normalizeValue(row?.order_id ?? row?.orderId ?? row?.PO),
       itemCode: normalizeValue(row?.item_code ?? row?.itemCode),
       brand: normalizeValue(row?.brand),
@@ -4932,6 +4937,7 @@ exports.createOrdersManually = async (req, res) => {
       );
     }
 
+    const missingRequiredEntries = [];
     const orders = draftRows
       .map((draftRow) => {
         const orderId = draftRow.orderId;
@@ -4960,29 +4966,20 @@ exports.createOrdersManually = async (req, res) => {
         const resolvedVendor = vendor || existingVendor;
         const resolvedDescription = existingDescription || description;
 
-        if (!orderId || !itemCode || !resolvedBrand || !resolvedVendor) {
-          duplicateEntries.push({
+        const missingFields = getMissingManualOrderFields({
+          orderId,
+          itemCode,
+          description: resolvedDescription,
+          brand: resolvedBrand,
+          vendor: resolvedVendor,
+          quantity,
+        });
+        if (missingFields.length > 0) {
+          missingRequiredEntries.push({
+            row_number: draftRow.rowNumber,
             order_id: orderId,
             item_code: itemCode,
-            reason: "missing_required_fields",
-          });
-          return null;
-        }
-
-        if (!Number.isFinite(quantity) || quantity <= 0) {
-          duplicateEntries.push({
-            order_id: orderId,
-            item_code: itemCode,
-            reason: "invalid_quantity",
-          });
-          return null;
-        }
-
-        if (!resolvedDescription) {
-          duplicateEntries.push({
-            order_id: orderId,
-            item_code: itemCode,
-            reason: "description_required_for_new_item",
+            missing_fields: missingFields,
           });
           return null;
         }
@@ -5038,6 +5035,16 @@ exports.createOrdersManually = async (req, res) => {
         };
       })
       .filter(Boolean);
+
+    if (missingRequiredEntries.length > 0) {
+      const message = formatManualOrderValidationMessage(
+        missingRequiredEntries,
+      );
+      return res.status(400).json({
+        message,
+        missing_required_fields: missingRequiredEntries,
+      });
+    }
 
     totalRowsUnique = orders.length;
     totalDistinctOrdersUploaded = new Set(

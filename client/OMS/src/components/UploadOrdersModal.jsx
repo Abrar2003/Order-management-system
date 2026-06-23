@@ -47,6 +47,27 @@ const getItemPreferredVendor = (itemDoc = {}) => {
   return vendors.length > 0 ? vendors[0] : "";
 };
 
+const getMissingManualOrderFields = (row = {}) => {
+  const missingFields = [];
+  if (!toTrimmedString(row?.order_id)) missingFields.push("PO");
+  if (!toTrimmedString(row?.item_code)) missingFields.push("Item Code");
+  if (!toTrimmedString(row?.description)) missingFields.push("Description");
+  if (!toTrimmedString(row?.brand)) missingFields.push("Brand");
+  if (!toTrimmedString(row?.vendor)) missingFields.push("Vendor");
+  if (!Number.isFinite(Number(row?.quantity)) || Number(row.quantity) <= 0) {
+    missingFields.push("Quantity (> 0)");
+  }
+  return missingFields;
+};
+
+const formatMissingManualOrderFields = (entries = []) => [
+  "Manual order submission was blocked. Complete the required fields:",
+  ...entries.map(
+    (entry) =>
+      `Row ${entry.row_number}: ${entry.missing_fields.join(", ")}`,
+  ),
+].join("\n");
+
 const buildItemMeta = ({
   itemCode = "",
   existingDescription = "",
@@ -527,7 +548,8 @@ const UploadOrdersModal = ({
 
   const getManualPayloadRows = (rowsInput = manualRows) =>
     (Array.isArray(rowsInput) ? rowsInput : [])
-      .map((row) => ({
+      .map((row, index) => ({
+        row_number: index + 1,
         order_id: toTrimmedString(row.order_id),
         item_code: toTrimmedString(row.item_code),
         description: toTrimmedString(row.description),
@@ -538,7 +560,8 @@ const UploadOrdersModal = ({
         order_date: toTrimmedString(row.order_date),
       }))
       .filter((row) =>
-        Object.values(row).some((value) => {
+        Object.entries(row).some(([key, value]) => {
+          if (key === "row_number") return false;
           if (value === null || value === undefined) return false;
           if (typeof value === "number") return Number.isFinite(value) && value !== 0;
           return String(value).trim() !== "";
@@ -566,20 +589,14 @@ const UploadOrdersModal = ({
       return;
     }
 
-    const hasInvalidRequiredValues = payloadRows.some(
-      (row) =>
-        !row.order_id
-        || !row.item_code
-        || !row.description
-        || !row.brand
-        || !row.vendor
-        || !Number.isFinite(Number(row.quantity))
-        || Number(row.quantity) <= 0,
-    );
-    if (hasInvalidRequiredValues) {
-      setError(
-        "Each row must include PO, item code, description, brand, vendor, and quantity > 0.",
-      );
+    const missingRequiredEntries = payloadRows
+      .map((row) => ({
+        row_number: row.row_number,
+        missing_fields: getMissingManualOrderFields(row),
+      }))
+      .filter((entry) => entry.missing_fields.length > 0);
+    if (missingRequiredEntries.length > 0) {
+      setError(formatMissingManualOrderFields(missingRequiredEntries));
       return;
     }
 
@@ -590,7 +607,16 @@ const UploadOrdersModal = ({
       onSuccess?.();
       onClose?.();
     } catch (err) {
-      setError(err?.response?.data?.message || "Manual add failed");
+      const missingEntries = Array.isArray(
+        err?.response?.data?.missing_required_fields,
+      )
+        ? err.response.data.missing_required_fields
+        : [];
+      setError(
+        missingEntries.length > 0
+          ? formatMissingManualOrderFields(missingEntries)
+          : err?.response?.data?.message || "Manual add failed",
+      );
     } finally {
       setLoading(false);
     }
@@ -937,7 +963,14 @@ const UploadOrdersModal = ({
               </div>
             )}
 
-            {error && <div className="alert alert-danger py-2 mb-0">{error}</div>}
+            {error && (
+              <div
+                className="alert alert-danger py-2 mb-0"
+                style={{ whiteSpace: "pre-line" }}
+              >
+                {error}
+              </div>
+            )}
           </div>
 
           <div className="modal-footer">
