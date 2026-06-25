@@ -225,87 +225,13 @@ const sortBoxEntriesByRemark = (
 const buildBoxEntriesFromLegacy = ({
   sizes = [],
   mode = BOX_PACKAGING_MODES.INDIVIDUAL,
-  singleLbh = null,
-  topLbh = null,
-  bottomLbh = null,
-  totalWeight = 0,
-  topWeight = 0,
-  bottomWeight = 0,
   weightKey = "",
-  topRemark = "top",
-  bottomRemark = "base",
 } = {}) => {
   const resolvedMode = detectBoxPackagingMode(mode, sizes);
-  const normalizedSizes = normalizeStoredBoxEntries(sizes, {
+  return normalizeStoredBoxEntries(sizes, {
     weightKey,
     mode: resolvedMode,
   });
-  if (normalizedSizes.length > 0) {
-    return normalizedSizes;
-  }
-
-  if (resolvedMode === BOX_PACKAGING_MODES.CARTON) {
-    if (!hasCompletePositiveLbh(singleLbh)) {
-      return [];
-    }
-
-    return [
-      {
-        L: toPositiveNumber(singleLbh?.L, 0),
-        B: toPositiveNumber(singleLbh?.B, 0),
-        H: toPositiveNumber(singleLbh?.H, 0),
-        remark: BOX_ENTRY_TYPES.MASTER,
-        box_type: BOX_ENTRY_TYPES.MASTER,
-        item_count_in_inner: 0,
-        box_count_in_master: 0,
-        ...(weightKey
-          ? { [weightKey]: Math.max(0, toSafeNumber(totalWeight, 0)) }
-          : {}),
-      },
-    ];
-  }
-
-  const legacyEntries = [];
-  if (hasCompletePositiveLbh(topLbh)) {
-    legacyEntries.push({
-      ...topLbh,
-      remark: topRemark,
-      box_type: BOX_ENTRY_TYPES.INDIVIDUAL,
-      item_count_in_inner: 0,
-      box_count_in_master: 0,
-      ...(weightKey ? { [weightKey]: Math.max(0, toSafeNumber(topWeight, 0)) } : {}),
-    });
-  }
-  if (hasCompletePositiveLbh(bottomLbh)) {
-    legacyEntries.push({
-      ...bottomLbh,
-      remark: bottomRemark,
-      box_type: BOX_ENTRY_TYPES.INDIVIDUAL,
-      item_count_in_inner: 0,
-      box_count_in_master: 0,
-      ...(weightKey
-        ? { [weightKey]: Math.max(0, toSafeNumber(bottomWeight, 0)) }
-        : {}),
-    });
-  }
-  if (legacyEntries.length > 0) {
-    return legacyEntries.slice(0, SIZE_ENTRY_LIMIT);
-  }
-
-  if (!hasCompletePositiveLbh(singleLbh)) {
-    return [];
-  }
-
-  return [
-    {
-      ...singleLbh,
-      remark: "",
-      box_type: BOX_ENTRY_TYPES.INDIVIDUAL,
-      item_count_in_inner: 0,
-      box_count_in_master: 0,
-      ...(weightKey ? { [weightKey]: Math.max(0, toSafeNumber(totalWeight, 0)) } : {}),
-    },
-  ];
 };
 
 const buildBoxLegacyFieldsFromEntries = (
@@ -386,18 +312,12 @@ const buildBoxLegacyFieldsFromEntries = (
 const buildBoxMeasurementCbmSummary = ({
   sizes = [],
   mode = BOX_PACKAGING_MODES.INDIVIDUAL,
-  singleLbh = null,
-  topLbh = null,
-  bottomLbh = null,
 } = {}) => {
   const resolvedMode = detectBoxPackagingMode(mode, sizes);
   const normalizedEntries = sortBoxEntriesByRemark(
     buildBoxEntriesFromLegacy({
       sizes,
       mode: resolvedMode,
-      singleLbh,
-      topLbh,
-      bottomLbh,
     }),
     resolvedMode,
   );
@@ -445,22 +365,12 @@ const buildBoxMeasurementCbmSummary = ({
     };
   }
 
-  const first = calculateCbmFromLbh(topLbh || {});
-  const second = calculateCbmFromLbh(bottomLbh || {});
-  const splitTotal =
-    toPositiveNumber(first, 0) > 0 && toPositiveNumber(second, 0) > 0
-      ? toPositiveNumber(first, 0) + toPositiveNumber(second, 0)
-      : 0;
-
   return {
     mode: resolvedMode,
-    first,
-    second,
+    first: "0",
+    second: "0",
     third: "0",
-    total:
-      splitTotal > 0
-        ? toDecimalString(splitTotal, 6)
-        : calculateCbmFromLbh(singleLbh || {}),
+    total: "0",
   };
 };
 

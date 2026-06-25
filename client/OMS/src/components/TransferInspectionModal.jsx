@@ -233,10 +233,6 @@ const TransferInspectionModal = ({
     return buildMeasuredSizeEntriesFromLegacy({
       primaryEntries: itemMaster?.inspected_box_sizes,
       mode: boxMode,
-      singleLbh: itemMaster?.inspected_box_LBH || itemMaster?.box_LBH,
-      topLbh: itemMaster?.inspected_box_top_LBH || itemMaster?.inspected_top_LBH,
-      bottomLbh:
-        itemMaster?.inspected_box_bottom_LBH || itemMaster?.inspected_bottom_LBH,
     }).filter((entry) => hasMeaningfulMeasuredSize(entry));
   }, [qc?.item_master]);
 

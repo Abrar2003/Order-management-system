@@ -206,11 +206,6 @@ const WEIGHT_FIELD_KEYS = Object.freeze([
   "total_gross",
 ]);
 
-const LEGACY_WEIGHT_FALLBACK_BY_KEY = Object.freeze({
-  total_net: "net",
-  total_gross: "gross",
-});
-
 const hasCompletePositiveLbh = (dimensions = {}) =>
   Number(dimensions?.L || 0) > 0 &&
   Number(dimensions?.B || 0) > 0 &&
@@ -247,60 +242,14 @@ const sortSizeEntriesByRemark = (entries = [], remarkOptions = []) =>
 
 const buildSizeEntriesFromLegacy = ({
   sizes = [],
-  singleLbh = null,
-  topLbh = null,
-  bottomLbh = null,
-  totalWeight = 0,
-  topWeight = 0,
-  bottomWeight = 0,
   weightKey = "",
-  topRemark = "top",
-  bottomRemark = "base",
 } = {}) => {
-  const normalizedSizes = normalizeStoredSizeEntries(sizes, { weightKey });
-  if (normalizedSizes.length > 0) {
-    return normalizedSizes;
-  }
-
-  const legacyEntries = [];
-  if (hasCompletePositiveLbh(topLbh)) {
-    legacyEntries.push({
-      ...topLbh,
-      remark: topRemark,
-      ...(weightKey ? { [weightKey]: toSafeNumber(topWeight, 0) } : {}),
-    });
-  }
-  if (hasCompletePositiveLbh(bottomLbh)) {
-    legacyEntries.push({
-      ...bottomLbh,
-      remark: bottomRemark,
-      ...(weightKey ? { [weightKey]: toSafeNumber(bottomWeight, 0) } : {}),
-    });
-  }
-  if (legacyEntries.length > 0) {
-    return legacyEntries.slice(0, SIZE_ENTRY_LIMIT);
-  }
-
-  if (!hasCompletePositiveLbh(singleLbh)) {
-    return [];
-  }
-
-  return [
-    {
-      ...singleLbh,
-      remark: "",
-      ...(weightKey ? { [weightKey]: toSafeNumber(totalWeight, 0) } : {}),
-    },
-  ];
+  return normalizeStoredSizeEntries(sizes, { weightKey });
 };
 
 const buildWeightRecord = (weight = {}) =>
   WEIGHT_FIELD_KEYS.reduce((accumulator, fieldKey) => {
-    const legacyKey = LEGACY_WEIGHT_FALLBACK_BY_KEY[fieldKey];
-    accumulator[fieldKey] = toSafeNumber(
-      weight?.[fieldKey] ?? (legacyKey ? weight?.[legacyKey] : undefined),
-      0,
-    );
+    accumulator[fieldKey] = toSafeNumber(weight?.[fieldKey], 0);
     return accumulator;
   }, {});
 
@@ -374,30 +323,16 @@ const getPayloadWeightField = (payloadWeight = {}, fieldKey = "", fieldLabelPref
     };
   }
 
-  const legacyKey = LEGACY_WEIGHT_FALLBACK_BY_KEY[fieldKey];
-  if (legacyKey && hasOwn(payloadWeight, legacyKey)) {
-    return {
-      provided: true,
-      value: toNonNegativeNumber(payloadWeight[legacyKey], `${fieldLabelPrefix}.${legacyKey}`),
-    };
-  }
-
   return { provided: false, value: 0 };
 };
 
 const buildMeasurementCbmSummary = ({
   sizes = [],
-  singleLbh = null,
-  topLbh = null,
-  bottomLbh = null,
   remarkOptions = [],
 } = {}) => {
   const normalizedEntries = sortSizeEntriesByRemark(
     buildSizeEntriesFromLegacy({
       sizes,
-      singleLbh,
-      topLbh,
-      bottomLbh,
     }),
     remarkOptions,
   ).slice(0, SIZE_ENTRY_LIMIT);
@@ -419,21 +354,11 @@ const buildMeasurementCbmSummary = ({
     };
   }
 
-  const first = calculateCbmFromLbh(topLbh || {});
-  const second = calculateCbmFromLbh(bottomLbh || {});
-  const topAndBottomTotal =
-    toPositiveCbmNumber(first) > 0 && toPositiveCbmNumber(second) > 0
-      ? toPositiveCbmNumber(first) + toPositiveCbmNumber(second)
-      : 0;
-
   return {
-    first,
-    second,
+    first: "0",
+    second: "0",
     third: "0",
-    total:
-      topAndBottomTotal > 0
-        ? toNormalizedDecimalText(topAndBottomTotal, "cbm.total")
-        : calculateCbmFromLbh(singleLbh || {}),
+    total: "0",
   };
 };
 
@@ -578,24 +503,12 @@ const applyCalculatedCbmTotals = (item, setPath) => {
   const inspectedBoxSummary = buildBoxMeasurementCbmSummary({
     sizes: item?.inspected_box_sizes,
     mode: inspectedBoxMode,
-    singleLbh: item?.inspected_box_LBH || item?.box_LBH,
-    topLbh:
-      inspectedBoxMode === BOX_PACKAGING_MODES.CARTON
-        ? null
-        : item?.inspected_box_top_LBH || item?.inspected_top_LBH,
-    bottomLbh:
-      inspectedBoxMode === BOX_PACKAGING_MODES.CARTON
-        ? null
-        : item?.inspected_box_bottom_LBH || item?.inspected_bottom_LBH,
   });
   const inspectedSummary =
     toPositiveCbmNumber(inspectedBoxSummary.total) > 0
       ? inspectedBoxSummary
       : buildMeasurementCbmSummary({
           sizes: item?.inspected_item_sizes,
-          singleLbh: item?.inspected_item_LBH || item?.item_LBH,
-          topLbh: item?.inspected_item_top_LBH,
-          bottomLbh: item?.inspected_item_bottom_LBH,
           remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
         });
 
@@ -606,19 +519,12 @@ const applyCalculatedCbmTotals = (item, setPath) => {
   const pisBoxSummary = buildBoxMeasurementCbmSummary({
     sizes: item?.pis_box_sizes,
     mode: pisBoxMode,
-    singleLbh: item?.pis_box_LBH || item?.box_LBH,
-    topLbh: pisBoxMode === BOX_PACKAGING_MODES.CARTON ? null : item?.pis_box_top_LBH,
-    bottomLbh:
-      pisBoxMode === BOX_PACKAGING_MODES.CARTON ? null : item?.pis_box_bottom_LBH,
   });
   const pisSummary =
     toPositiveCbmNumber(pisBoxSummary.total) > 0
       ? pisBoxSummary
       : buildMeasurementCbmSummary({
           sizes: item?.pis_item_sizes,
-          singleLbh: item?.pis_item_LBH || item?.item_LBH,
-          topLbh: item?.pis_item_top_LBH,
-          bottomLbh: item?.pis_item_bottom_LBH,
           remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
         });
 
@@ -1546,14 +1452,12 @@ const ITEM_DETAILS_SELECT = [
   "pis_item_sizes",
   "pis_box_sizes",
   "pis_box_mode",
-  "pis_weight",
   "pis_barcode",
   "pis_master_barcode",
   "pis_inner_barcode",
   "inspected_item_sizes",
   "inspected_box_sizes",
   "inspected_box_mode",
-  "inspected_weight",
   "qc",
   "cbm",
   "master_item_sizes",
@@ -1687,35 +1591,15 @@ const compareRoundedCbmValues = (inspectedValue, pisValue) => {
   };
 };
 
-const getNormalizedWeightFieldValue = (weight = {}, fieldKey = "") =>
-  buildWeightRecord(weight)?.[fieldKey] ?? 0;
-
 const buildComparableMeasurementEntries = ({
   sizes = [],
-  singleLbh = null,
-  topLbh = null,
-  bottomLbh = null,
-  weight = {},
-  totalWeightKey = "",
-  topWeightKey = "",
-  bottomWeightKey = "",
   weightKey = "",
   remarkOptions = [],
-  topRemark = "top",
-  bottomRemark = "base",
 } = {}) =>
   sortSizeEntriesByRemark(
     buildSizeEntriesFromLegacy({
       sizes,
-      singleLbh,
-      topLbh,
-      bottomLbh,
-      totalWeight: getNormalizedWeightFieldValue(weight, totalWeightKey),
-      topWeight: getNormalizedWeightFieldValue(weight, topWeightKey),
-      bottomWeight: getNormalizedWeightFieldValue(weight, bottomWeightKey),
       weightKey,
-      topRemark,
-      bottomRemark,
     }).filter((entry) => {
       const hasSize = hasAnyPositiveMeasurementLbh(entry);
       const hasWeight = weightKey
@@ -1891,31 +1775,15 @@ const PIS_DIFF_ITEM_SELECT = [
   "master_inner_barcode",
   "mounting_file_needed",
   "mounting_file",
-  "pis_weight",
-  "inspected_weight",
-  "pis_item_LBH",
   "pis_item_sizes",
-  "pis_item_top_LBH",
-  "pis_item_bottom_LBH",
-  "pis_box_LBH",
   "pis_box_sizes",
   "pis_box_mode",
-  "pis_box_top_LBH",
-  "pis_box_bottom_LBH",
   "master_item_sizes",
   "master_box_sizes",
   "master_box_mode",
-  "inspected_item_LBH",
   "inspected_item_sizes",
-  "inspected_item_top_LBH",
-  "inspected_item_bottom_LBH",
-  "inspected_box_LBH",
   "inspected_box_sizes",
   "inspected_box_mode",
-  "inspected_box_top_LBH",
-  "inspected_box_bottom_LBH",
-  "inspected_top_LBH",
-  "inspected_bottom_LBH",
   "cbm",
   "pis_checked_flag",
   "qc.barcode",
@@ -1963,7 +1831,6 @@ const PIS_INSPECTION_MASTER_ITEM_SELECT = [
   "master_barcode",
   "master_master_barcode",
   "master_inner_barcode",
-  "pis_weight",
   "cbm",
 ].join(" ");
 
@@ -2080,7 +1947,6 @@ const buildPisDiffMeasurementEntries = ({
   const isPis = source === "pis";
   const isMaster = source === "master";
   const isItemGroup = group === "item";
-  const weight = isPis || isMaster ? item?.pis_weight : item?.inspected_weight;
 
   return buildComparableMeasurementEntries({
     sizes: isMaster
@@ -2088,29 +1954,6 @@ const buildPisDiffMeasurementEntries = ({
       : isPis
         ? (isItemGroup ? item?.pis_item_sizes : item?.pis_box_sizes)
         : (isItemGroup ? item?.inspected_item_sizes : item?.inspected_box_sizes),
-    singleLbh: isMaster
-      ? null
-      : isPis
-        ? (isItemGroup ? item?.pis_item_LBH : item?.pis_box_LBH)
-        : (isItemGroup ? item?.inspected_item_LBH : item?.inspected_box_LBH),
-    topLbh: isMaster
-      ? null
-      : isPis
-        ? (isItemGroup ? item?.pis_item_top_LBH : item?.pis_box_top_LBH)
-        : (isItemGroup
-            ? item?.inspected_item_top_LBH
-            : item?.inspected_box_top_LBH || item?.inspected_top_LBH),
-    bottomLbh: isMaster
-      ? null
-      : isPis
-        ? (isItemGroup ? item?.pis_item_bottom_LBH : item?.pis_box_bottom_LBH)
-        : (isItemGroup
-            ? item?.inspected_item_bottom_LBH
-            : item?.inspected_box_bottom_LBH || item?.inspected_bottom_LBH),
-    weight,
-    totalWeightKey: isItemGroup ? "total_net" : "total_gross",
-    topWeightKey: isItemGroup ? "top_net" : "top_gross",
-    bottomWeightKey: isItemGroup ? "bottom_net" : "bottom_gross",
     weightKey: isItemGroup ? "net_weight" : "gross_weight",
     remarkOptions: isItemGroup ? ITEM_SIZE_REMARK_OPTIONS : BOX_SIZE_REMARK_OPTIONS,
   });
@@ -5265,7 +5108,6 @@ exports.getPisInspectionMasterComparison = async (req, res) => {
           master_master_barcode: item?.master_master_barcode || "",
           master_inner_barcode: item?.master_inner_barcode || "",
         },
-        pis_weight: item?.pis_weight || {},
         cbm: item?.cbm || {},
       },
       inspections: comparisonInspections.map(

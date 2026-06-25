@@ -68,11 +68,6 @@ const normalizeAllowedBoxRemark = (value = "", index = 0) => {
 const getCartonRemarkForIndex = (index = 0) =>
   index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
 
-const LEGACY_WEIGHT_FALLBACK_BY_KEY = Object.freeze({
-  total_net: "net",
-  total_gross: "gross",
-});
-
 export const detectBoxPackagingMode = (mode = "", entries = []) => {
   const normalizedMode = String(mode || "").trim().toLowerCase();
   if (
@@ -260,34 +255,13 @@ const hasMeasurementInput = (entry = {}) =>
   String(entry?.item_count_in_inner || "").trim() !== "" ||
   String(entry?.box_count_in_master || "").trim() !== "";
 
-export const getWeightValueFromModel = (weightData = {}, payloadKey = "") => {
-  const normalizedPayloadKey = String(payloadKey || "").trim();
-  if (!normalizedPayloadKey) return 0;
-
-  const legacyKey = LEGACY_WEIGHT_FALLBACK_BY_KEY[normalizedPayloadKey];
-  const rawValue =
-    weightData?.[normalizedPayloadKey]
-    ?? (legacyKey ? weightData?.[legacyKey] : undefined)
-    ?? 0;
-  const parsed = Number(rawValue);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-};
-
 export const buildMeasuredSizeEntriesFromLegacy = ({
   primaryEntries = [],
   mode = BOX_PACKAGING_MODES.INDIVIDUAL,
-  singleLbh = {},
-  topLbh = {},
-  bottomLbh = {},
-  totalWeight = 0,
-  topWeight = 0,
-  bottomWeight = 0,
   weightKey = "",
-  topRemark = "top",
-  bottomRemark = "base",
 } = {}) => {
   const resolvedMode = detectBoxPackagingMode(mode, primaryEntries);
-  const normalizedPrimaryEntries = Array.isArray(primaryEntries)
+  return Array.isArray(primaryEntries)
     ? primaryEntries
         .map((entry, index) =>
           toMeasuredSizeEntryValue(entry, weightKey, { mode: resolvedMode, index }),
@@ -295,46 +269,6 @@ export const buildMeasuredSizeEntriesFromLegacy = ({
         .filter((entry) => hasMeaningfulMeasuredSize(entry))
         .slice(0, resolvedMode === BOX_PACKAGING_MODES.CARTON ? 2 : SIZE_ENTRY_LIMIT)
     : [];
-  if (normalizedPrimaryEntries.length > 0) {
-    return normalizedPrimaryEntries;
-  }
-
-  if (resolvedMode === BOX_PACKAGING_MODES.CARTON) {
-    const masterEntry = toMeasuredSizeEntryValue(
-      {
-        ...singleLbh,
-        remark: BOX_ENTRY_TYPES.MASTER,
-        box_type: BOX_ENTRY_TYPES.MASTER,
-        [weightKey]: totalWeight,
-      },
-      weightKey,
-      { mode: resolvedMode, index: 1 },
-    );
-    return hasMeaningfulMeasuredSize(masterEntry)
-      ? [masterEntry]
-      : [createEmptyMeasuredSizeEntry({ mode: resolvedMode, boxType: BOX_ENTRY_TYPES.INNER }), createEmptyMeasuredSizeEntry({ mode: resolvedMode, boxType: BOX_ENTRY_TYPES.MASTER })];
-  }
-
-  const topEntry = toMeasuredSizeEntryValue(
-    { ...topLbh, remark: topRemark, [weightKey]: topWeight },
-    weightKey,
-    { mode: resolvedMode },
-  );
-  const bottomEntry = toMeasuredSizeEntryValue(
-    { ...bottomLbh, remark: bottomRemark, [weightKey]: bottomWeight },
-    weightKey,
-    { mode: resolvedMode },
-  );
-  if (hasMeaningfulMeasuredSize(topEntry) || hasMeaningfulMeasuredSize(bottomEntry)) {
-    return [topEntry, bottomEntry].filter((entry) => hasMeaningfulMeasuredSize(entry));
-  }
-
-  const singleEntry = toMeasuredSizeEntryValue(
-    { ...singleLbh, [weightKey]: totalWeight },
-    weightKey,
-    { mode: resolvedMode },
-  );
-  return hasMeaningfulMeasuredSize(singleEntry) ? [singleEntry] : [createEmptyMeasuredSizeEntry()];
 };
 
 export const getRemarkLabel = (options = [], remark = "") =>

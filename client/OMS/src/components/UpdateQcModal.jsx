@@ -273,11 +273,6 @@ const INSPECTED_BOX_BOTTOM_LBH_FORM_KEYS = Object.freeze([
   "inspected_bottom_H",
 ]);
 
-const LEGACY_INSPECTED_WEIGHT_FALLBACK_BY_KEY = Object.freeze({
-  total_net: "net",
-  total_gross: "gross",
-});
-
 const createEmptyLabelRange = () => ({ start: "", end: "" });
 const buildClearedFormFields = (fieldKeys = []) =>
   fieldKeys.reduce((accumulator, fieldKey) => {
@@ -285,19 +280,6 @@ const buildClearedFormFields = (fieldKeys = []) =>
     return accumulator;
   }, {});
 const toDimensionInputValue = (value) => formatNumberInputValue(value);
-const getWeightValueFromModel = (weightData = {}, payloadKey = "") => {
-  const normalizedPayloadKey = String(payloadKey || "").trim();
-  if (!normalizedPayloadKey) return 0;
-
-  const legacyKey = LEGACY_INSPECTED_WEIGHT_FALLBACK_BY_KEY[normalizedPayloadKey];
-  const rawValue =
-    weightData?.[normalizedPayloadKey]
-    ?? (legacyKey ? weightData?.[legacyKey] : undefined)
-    ?? 0;
-  const parsed = Number(rawValue);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-};
-
 const hasAnyLbhInput = (values = []) =>
   values.some((value) => String(value ?? "").trim() !== "");
 const hasCompletePositiveLbh = (dimensions = {}) =>
@@ -372,12 +354,6 @@ const QC_MEASUREMENT_REQUIREMENT_MESSAGE =
 const buildMeasuredSizeEntriesFromLegacy = ({
   primaryEntries = [],
   mode = BOX_PACKAGING_MODES.INDIVIDUAL,
-  singleLbh = {},
-  topLbh = {},
-  bottomLbh = {},
-  totalWeight = 0,
-  topWeight = 0,
-  bottomWeight = 0,
   weightKey = "",
   topRemark = "top",
   bottomRemark = "base",
@@ -385,12 +361,6 @@ const buildMeasuredSizeEntriesFromLegacy = ({
   buildMeasuredSizeEntriesFromLegacyUtil({
     primaryEntries,
     mode,
-    singleLbh,
-    topLbh,
-    bottomLbh,
-    totalWeight,
-    topWeight,
-    bottomWeight,
     weightKey,
     topRemark,
     bottomRemark,
@@ -853,21 +823,6 @@ const PREFERRED_BARCODE_FORMATS = [
 const hasMeasuredSizeEntries = (entries = []) =>
   Array.isArray(entries) && entries.length > 0;
 
-const hasPositiveModelNumber = (value) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0;
-};
-
-const hasAnyModelLbhValue = (value = {}) =>
-  ["L", "B", "H"].some((key) => hasPositiveModelNumber(value?.[key]));
-
-const hasAnyInspectedWeightValue = (weight = {}) =>
-  INSPECTED_WEIGHT_FIELDS.some((field) =>
-    hasPositiveModelNumber(weight?.[field.payloadKey]),
-  ) ||
-  hasPositiveModelNumber(weight?.net) ||
-  hasPositiveModelNumber(weight?.gross);
-
 const buildInspectionRecordMeasurementSource = (
   inspectionRecord = {},
   itemMaster = {},
@@ -875,19 +830,6 @@ const buildInspectionRecordMeasurementSource = (
 ) => {
   const hasInspectionItemSizes = hasMeasuredSizeEntries(inspectionRecord?.inspected_item_sizes);
   const hasInspectionBoxSizes = hasMeasuredSizeEntries(inspectionRecord?.inspected_box_sizes);
-  const hasInspectionItemLbh =
-    hasInspectionItemSizes ||
-    hasAnyModelLbhValue(inspectionRecord?.inspected_item_LBH) ||
-    hasAnyModelLbhValue(inspectionRecord?.inspected_item_top_LBH) ||
-    hasAnyModelLbhValue(inspectionRecord?.inspected_item_bottom_LBH);
-  const hasInspectionBoxLbh =
-    hasInspectionBoxSizes ||
-    hasAnyModelLbhValue(inspectionRecord?.inspected_box_LBH) ||
-    hasAnyModelLbhValue(inspectionRecord?.inspected_box_top_LBH) ||
-    hasAnyModelLbhValue(inspectionRecord?.inspected_box_bottom_LBH) ||
-    hasAnyModelLbhValue(inspectionRecord?.inspected_top_LBH) ||
-    hasAnyModelLbhValue(inspectionRecord?.inspected_bottom_LBH);
-  const hasInspectionWeight = hasAnyInspectedWeightValue(inspectionRecord?.inspected_weight);
   const fallbackSource = allowFallback ? itemMaster : {};
 
   return {
@@ -902,33 +844,9 @@ const buildInspectionRecordMeasurementSource = (
     inspected_box_mode: hasInspectionBoxSizes || inspectionRecord?.inspected_box_mode
       ? inspectionRecord?.inspected_box_mode
       : fallbackSource?.inspected_box_mode,
-    inspected_item_LBH: hasInspectionItemLbh
-      ? inspectionRecord?.inspected_item_LBH
-      : fallbackSource?.inspected_item_LBH,
-    inspected_item_top_LBH: hasInspectionItemLbh
-      ? inspectionRecord?.inspected_item_top_LBH
-      : fallbackSource?.inspected_item_top_LBH,
-    inspected_item_bottom_LBH: hasInspectionItemLbh
-      ? inspectionRecord?.inspected_item_bottom_LBH
-      : fallbackSource?.inspected_item_bottom_LBH,
-    inspected_box_LBH: hasInspectionBoxLbh
-      ? inspectionRecord?.inspected_box_LBH
-      : fallbackSource?.inspected_box_LBH,
-    inspected_box_top_LBH: hasInspectionBoxLbh
-      ? inspectionRecord?.inspected_box_top_LBH
-      : fallbackSource?.inspected_box_top_LBH,
-    inspected_box_bottom_LBH: hasInspectionBoxLbh
-      ? inspectionRecord?.inspected_box_bottom_LBH
-      : fallbackSource?.inspected_box_bottom_LBH,
-    inspected_top_LBH: hasInspectionBoxLbh
-      ? inspectionRecord?.inspected_top_LBH
-      : fallbackSource?.inspected_top_LBH,
-    inspected_bottom_LBH: hasInspectionBoxLbh
-      ? inspectionRecord?.inspected_bottom_LBH
-      : fallbackSource?.inspected_bottom_LBH,
-    inspected_weight: hasInspectionWeight || hasInspectionItemSizes || hasInspectionBoxSizes
+    inspected_weight: hasInspectionItemSizes || hasInspectionBoxSizes
       ? inspectionRecord?.inspected_weight
-      : fallbackSource?.inspected_weight,
+      : undefined,
   };
 };
 
@@ -1383,19 +1301,12 @@ const UpdateQcModal = ({
           allowFallback: true,
         })
         : qc?.item_master || {};
-    const inspectedItemLbh = itemMaster?.inspected_item_LBH || itemMaster?.item_LBH || {};
-    const inspectedBoxLbh = itemMaster?.inspected_box_LBH || itemMaster?.box_LBH || {};
-    const inspectedTopLbh =
-      itemMaster?.inspected_box_top_LBH
-      || itemMaster?.inspected_top_LBH
-      || {};
-    const inspectedBottomLbh =
-      itemMaster?.inspected_box_bottom_LBH
-      || itemMaster?.inspected_bottom_LBH
-      || {};
-    const inspectedItemTopLbh = itemMaster?.inspected_item_top_LBH || {};
-    const inspectedItemBottomLbh = itemMaster?.inspected_item_bottom_LBH || {};
-    const inspectedWeight = itemMaster?.inspected_weight || {};
+    const inspectedItemLbh = {};
+    const inspectedBoxLbh = {};
+    const inspectedTopLbh = {};
+    const inspectedBottomLbh = {};
+    const inspectedItemTopLbh = {};
+    const inspectedItemBottomLbh = {};
     const inspectedBoxMode = detectBoxPackagingMode(
       itemMaster?.inspected_box_mode,
       itemMaster?.inspected_box_sizes,
@@ -1408,12 +1319,6 @@ const UpdateQcModal = ({
     const strictInspectedItemBottomLbh = toStrictLbhInputGroup(inspectedItemBottomLbh);
     const inspectedItemSizeEntries = buildMeasuredSizeEntriesFromLegacy({
       primaryEntries: itemMaster?.inspected_item_sizes,
-      singleLbh: inspectedItemLbh,
-      topLbh: inspectedItemTopLbh,
-      bottomLbh: inspectedItemBottomLbh,
-      totalWeight: getWeightValueFromModel(inspectedWeight, "total_net"),
-      topWeight: getWeightValueFromModel(inspectedWeight, "top_net"),
-      bottomWeight: getWeightValueFromModel(inspectedWeight, "bottom_net"),
       weightKey: "net_weight",
       topRemark: "top",
       bottomRemark: "base",
@@ -1421,12 +1326,6 @@ const UpdateQcModal = ({
     const inspectedBoxSizeEntries = buildMeasuredSizeEntriesFromLegacy({
       primaryEntries: itemMaster?.inspected_box_sizes,
       mode: inspectedBoxMode,
-      singleLbh: inspectedBoxLbh,
-      topLbh: inspectedTopLbh,
-      bottomLbh: inspectedBottomLbh,
-      totalWeight: getWeightValueFromModel(inspectedWeight, "total_gross"),
-      topWeight: getWeightValueFromModel(inspectedWeight, "top_gross"),
-      bottomWeight: getWeightValueFromModel(inspectedWeight, "bottom_gross"),
       weightKey: "gross_weight",
       topRemark: "top",
       bottomRemark: "base",
@@ -1486,24 +1385,12 @@ const UpdateQcModal = ({
       remarks: isInspectionRecordUpdate || canRewriteLatestInspectionRecord
         ? initialRemarks
         : "",
-      inspected_weight_top_net: toDimensionInputValue(
-        getWeightValueFromModel(inspectedWeight, "top_net"),
-      ),
-      inspected_weight_top_gross: toDimensionInputValue(
-        getWeightValueFromModel(inspectedWeight, "top_gross"),
-      ),
-      inspected_weight_bottom_net: toDimensionInputValue(
-        getWeightValueFromModel(inspectedWeight, "bottom_net"),
-      ),
-      inspected_weight_bottom_gross: toDimensionInputValue(
-        getWeightValueFromModel(inspectedWeight, "bottom_gross"),
-      ),
-      inspected_weight_total_net: toDimensionInputValue(
-        getWeightValueFromModel(inspectedWeight, "total_net"),
-      ),
-      inspected_weight_total_gross: toDimensionInputValue(
-        getWeightValueFromModel(inspectedWeight, "total_gross"),
-      ),
+      inspected_weight_top_net: "",
+      inspected_weight_top_gross: "",
+      inspected_weight_bottom_net: "",
+      inspected_weight_bottom_gross: "",
+      inspected_weight_total_net: "",
+      inspected_weight_total_gross: "",
       inspected_item_L: strictInspectedItemLbh.L,
       inspected_item_B: strictInspectedItemLbh.B,
       inspected_item_H: strictInspectedItemLbh.H,
@@ -2430,19 +2317,12 @@ const UpdateQcModal = ({
           allowFallback: true,
         })
         : qc?.item_master || {};
-    const existingInspectedWeight = existingItemMaster?.inspected_weight || {};
     const existingInspectedBoxMode = detectBoxPackagingMode(
       existingItemMaster?.inspected_box_mode,
       existingItemMaster?.inspected_box_sizes,
     );
     const existingItemSizeEntries = buildMeasuredSizeEntriesFromLegacy({
       primaryEntries: existingItemMaster?.inspected_item_sizes,
-      singleLbh: existingItemMaster?.inspected_item_LBH || existingItemMaster?.item_LBH,
-      topLbh: existingItemMaster?.inspected_item_top_LBH,
-      bottomLbh: existingItemMaster?.inspected_item_bottom_LBH,
-      totalWeight: getWeightValueFromModel(existingInspectedWeight, "total_net"),
-      topWeight: getWeightValueFromModel(existingInspectedWeight, "top_net"),
-      bottomWeight: getWeightValueFromModel(existingInspectedWeight, "bottom_net"),
       weightKey: "net_weight",
       topRemark: "top",
       bottomRemark: "base",
@@ -2450,14 +2330,6 @@ const UpdateQcModal = ({
     const existingBoxSizeEntries = buildMeasuredSizeEntriesFromLegacy({
       primaryEntries: existingItemMaster?.inspected_box_sizes,
       mode: existingInspectedBoxMode,
-      singleLbh: existingItemMaster?.inspected_box_LBH || existingItemMaster?.box_LBH,
-      topLbh:
-        existingItemMaster?.inspected_box_top_LBH || existingItemMaster?.inspected_top_LBH,
-      bottomLbh:
-        existingItemMaster?.inspected_box_bottom_LBH || existingItemMaster?.inspected_bottom_LBH,
-      totalWeight: getWeightValueFromModel(existingInspectedWeight, "total_gross"),
-      topWeight: getWeightValueFromModel(existingInspectedWeight, "top_gross"),
-      bottomWeight: getWeightValueFromModel(existingInspectedWeight, "bottom_gross"),
       weightKey: "gross_weight",
       topRemark: "top",
       bottomRemark: "base",
@@ -3339,19 +3211,12 @@ const UpdateQcModal = ({
         allowFallback: true,
       })
     : qc?.item_master || {};
-  const existingInspectedWeight = existingItemMaster?.inspected_weight || {};
   const existingInspectedBoxMode = detectBoxPackagingMode(
     existingItemMaster?.inspected_box_mode,
     existingItemMaster?.inspected_box_sizes,
   );
   const existingItemSizeEntries = buildMeasuredSizeEntriesFromLegacy({
     primaryEntries: existingItemMaster?.inspected_item_sizes,
-    singleLbh: existingItemMaster?.inspected_item_LBH || existingItemMaster?.item_LBH,
-    topLbh: existingItemMaster?.inspected_item_top_LBH,
-    bottomLbh: existingItemMaster?.inspected_item_bottom_LBH,
-    totalWeight: getWeightValueFromModel(existingInspectedWeight, "total_net"),
-    topWeight: getWeightValueFromModel(existingInspectedWeight, "top_net"),
-    bottomWeight: getWeightValueFromModel(existingInspectedWeight, "bottom_net"),
     weightKey: "net_weight",
     topRemark: "top",
     bottomRemark: "base",
@@ -3359,14 +3224,6 @@ const UpdateQcModal = ({
   const existingBoxSizeEntries = buildMeasuredSizeEntriesFromLegacy({
     primaryEntries: existingItemMaster?.inspected_box_sizes,
     mode: existingInspectedBoxMode,
-    singleLbh: existingItemMaster?.inspected_box_LBH || existingItemMaster?.box_LBH,
-    topLbh:
-      existingItemMaster?.inspected_box_top_LBH || existingItemMaster?.inspected_top_LBH,
-    bottomLbh:
-      existingItemMaster?.inspected_box_bottom_LBH || existingItemMaster?.inspected_bottom_LBH,
-    totalWeight: getWeightValueFromModel(existingInspectedWeight, "total_gross"),
-    topWeight: getWeightValueFromModel(existingInspectedWeight, "top_gross"),
-    bottomWeight: getWeightValueFromModel(existingInspectedWeight, "bottom_gross"),
     weightKey: "gross_weight",
     topRemark: "top",
     bottomRemark: "base",

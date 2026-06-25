@@ -426,11 +426,6 @@ const formatSizeEntries = (entries = [], weightKey = "") => {
     .join(" || ");
 };
 
-const getWeightValue = (weight = {}, key = "") => {
-  const legacyKey = key === "total_net" ? "net" : key === "total_gross" ? "gross" : "";
-  return toSafeNumber(weight?.[key] ?? (legacyKey ? weight?.[legacyKey] : undefined));
-};
-
 const formatSpecValue = (field = {}) => {
   const valueType = normalizeText(field?.value_type).toLowerCase();
   if (valueType === "number") return formatNumber(field?.value_number);
@@ -799,12 +794,12 @@ const ItemDetails = () => {
           comparisonType: "weight",
           pisMeta: toStructuredWeightFromEntries(
             pisItemEntries,
-            getWeightValue(item?.pis_weight, "total_net"),
+            null,
             { indexedRemarks: ITEM_INDEXED_REMARKS },
           ),
           checkedMeta: toStructuredWeightFromEntries(
             inspectedItemEntries,
-            getWeightValue(item?.inspected_weight, "total_net"),
+            null,
             { indexedRemarks: ITEM_INDEXED_REMARKS },
           ),
           masterMeta: toStructuredWeightFromEntries(
@@ -819,12 +814,12 @@ const ItemDetails = () => {
           comparisonType: "weight",
           pisMeta: toStructuredWeightFromEntries(
             pisBoxEntries,
-            getWeightValue(item?.pis_weight, "total_gross"),
+            null,
             { indexedRemarks: BOX_INDEXED_REMARKS },
           ),
           checkedMeta: toStructuredWeightFromEntries(
             inspectedBoxEntries,
-            getWeightValue(item?.inspected_weight, "total_gross"),
+            null,
             { indexedRemarks: BOX_INDEXED_REMARKS },
           ),
           masterMeta: toStructuredWeightFromEntries(

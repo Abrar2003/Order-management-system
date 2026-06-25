@@ -246,20 +246,6 @@ const calculateCbmFromLbh = (dimensions = {}) => {
   return (length * breadth * height) / 1000000;
 };
 
-const resolveSplitOrSingleLbhCbmTotal = ({
-  topLbh = null,
-  bottomLbh = null,
-  singleLbh = null,
-} = {}) => {
-  const topCbm = toPositiveCbmNumber(calculateCbmFromLbh(topLbh));
-  const bottomCbm = toPositiveCbmNumber(calculateCbmFromLbh(bottomLbh));
-  if (topCbm > 0 && bottomCbm > 0) {
-    return topCbm + bottomCbm;
-  }
-
-  return toPositiveCbmNumber(calculateCbmFromLbh(singleLbh));
-};
-
 const calculateSizeEntriesCbmTotal = (entries = []) =>
   (Array.isArray(entries) ? entries : []).reduce(
     (sum, entry) => sum + toPositiveCbmNumber(calculateCbmFromLbh(entry)),
@@ -279,10 +265,6 @@ const resolveOrderRowCbmSummary = (itemDoc = null, orderQuantity = 0) => {
     orderQuantity,
     inspectedBoxSizes: itemDoc?.inspected_box_sizes,
     inspectedBoxMode: itemDoc?.inspected_box_mode,
-    inspectedBoxLbh: itemDoc?.inspected_box_LBH,
-    inspectedBoxTopLbh: itemDoc?.inspected_box_top_LBH || itemDoc?.inspected_top_LBH,
-    inspectedBoxBottomLbh:
-      itemDoc?.inspected_box_bottom_LBH || itemDoc?.inspected_bottom_LBH,
   });
   if (inspectedBoxPoCbm > 0) {
     const quantity = Math.max(0, Number(orderQuantity || 0));
@@ -353,42 +335,6 @@ const resolveOrderRowCbmSummary = (itemDoc = null, orderQuantity = 0) => {
     .find((value) => value > 0);
   if (pisStoredCbm > 0) {
     const perItem = toRoundedCbmValue(pisStoredCbm);
-    return {
-      source: "pis",
-      per_item: perItem,
-      total: toRoundedCbmValue(Math.max(0, Number(orderQuantity || 0)) * perItem),
-    };
-  }
-
-  const inspectedLbhCbm = resolveSplitOrSingleLbhCbmTotal({
-    topLbh:
-      itemDoc?.inspected_box_top_LBH ||
-      itemDoc?.inspected_top_LBH ||
-      itemDoc?.inspected_item_top_LBH,
-    bottomLbh:
-      itemDoc?.inspected_box_bottom_LBH ||
-      itemDoc?.inspected_bottom_LBH ||
-      itemDoc?.inspected_item_bottom_LBH,
-    singleLbh:
-      itemDoc?.inspected_box_LBH ||
-      itemDoc?.inspected_item_LBH,
-  });
-  if (inspectedLbhCbm > 0) {
-    const perItem = toRoundedCbmValue(inspectedLbhCbm);
-    return {
-      source: "inspected",
-      per_item: perItem,
-      total: toRoundedCbmValue(Math.max(0, Number(orderQuantity || 0)) * perItem),
-    };
-  }
-
-  const pisLbhCbm = resolveSplitOrSingleLbhCbmTotal({
-    topLbh: itemDoc?.pis_box_top_LBH || itemDoc?.pis_item_top_LBH,
-    bottomLbh: itemDoc?.pis_box_bottom_LBH || itemDoc?.pis_item_bottom_LBH,
-    singleLbh: itemDoc?.pis_box_LBH || itemDoc?.pis_item_LBH,
-  });
-  if (pisLbhCbm > 0) {
-    const perItem = toRoundedCbmValue(pisLbhCbm);
     return {
       source: "pis",
       per_item: perItem,

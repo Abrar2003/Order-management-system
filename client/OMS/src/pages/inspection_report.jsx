@@ -238,14 +238,7 @@ const getWeightValue = (weight = {}, key = "") => {
   const normalizedKey = String(key || "").trim();
   if (!normalizedKey) return 0;
 
-  const legacyFallbackByKey = {
-    total_net: "net",
-    total_gross: "gross",
-  };
-  const rawValue =
-    weight?.[normalizedKey]
-    ?? (legacyFallbackByKey[normalizedKey] ? weight?.[legacyFallbackByKey[normalizedKey]] : undefined)
-    ?? 0;
+  const rawValue = weight?.[normalizedKey] ?? 0;
   const parsed = Number(rawValue);
   return Number.isFinite(parsed) ? parsed : 0;
 };
@@ -328,34 +321,6 @@ const normalizeMeasurementEntries = (
       .slice(0, MEASUREMENT_ENTRY_DISPLAY_LIMIT),
     remarkOrder,
   );
-
-const toLegacyMeasurementEntry = (remark = "", value = null) => {
-  if (!hasAnyPositiveLbh(value || {})) return null;
-  return {
-    remark,
-    L: Number(value?.L || 0),
-    B: Number(value?.B || 0),
-    H: Number(value?.H || 0),
-    weight: 0,
-  };
-};
-
-const buildLegacyLbhEntries = ({
-  top = null,
-  bottom = null,
-  single = null,
-  fallback = null,
-  singleRemark = "item",
-  remarkOrder = [],
-} = {}) =>
-  sortMeasurementEntries(
-    [
-      toLegacyMeasurementEntry("top", top),
-      toLegacyMeasurementEntry("base", bottom),
-      toLegacyMeasurementEntry(singleRemark, pickDisplayableLbh(single, fallback)),
-    ].filter(Boolean),
-    remarkOrder,
-  ).slice(0, MEASUREMENT_ENTRY_DISPLAY_LIMIT);
 
 const toMeasurementRowEntry = (entry = {}, index = 0, value, display = "") => ({
   key: buildMeasurementEntryKey(entry, index),
@@ -1233,38 +1198,8 @@ const InspectionReport = () => {
       "gross_weight",
       BOX_INDEXED_REMARKS,
     );
-    const inspectedItemLegacyEntries = useLatestItemSizes || !allowItemInspectedFallback
-      ? []
-      : buildLegacyLbhEntries({
-          top: itemMaster?.inspected_item_top_LBH,
-          bottom: itemMaster?.inspected_item_bottom_LBH,
-          single: itemMaster?.inspected_item_LBH,
-          fallback: itemMaster?.item_LBH,
-          singleRemark: "item",
-          remarkOrder: ITEM_INDEXED_REMARKS,
-        });
-    const inspectedBoxLegacyEntries = useLatestBoxSizes || !allowItemInspectedFallback
-      ? []
-      : buildLegacyLbhEntries({
-          top:
-            itemMaster?.inspected_box_top_LBH ||
-            itemMaster?.inspected_top_LBH ||
-            itemMaster?.inspected_item_top_LBH,
-          bottom:
-            itemMaster?.inspected_box_bottom_LBH ||
-            itemMaster?.inspected_bottom_LBH ||
-            itemMaster?.inspected_item_bottom_LBH,
-          single:
-            itemMaster?.inspected_box_LBH ||
-            itemMaster?.inspected_item_LBH,
-          fallback: itemMaster?.box_LBH || itemMaster?.item_LBH,
-          singleRemark: "box",
-          remarkOrder: BOX_INDEXED_REMARKS,
-        });
-    const inspectedItemLbhEntries =
-      inspectedItemEntries.length > 0 ? inspectedItemEntries : inspectedItemLegacyEntries;
-    const inspectedBoxLbhEntries =
-      inspectedBoxEntries.length > 0 ? inspectedBoxEntries : inspectedBoxLegacyEntries;
+    const inspectedItemLbhEntries = inspectedItemEntries;
+    const inspectedBoxLbhEntries = inspectedBoxEntries;
     const pisProductLbh =
       pisItemEntries.length > 0
         ? toStructuredLbhFromEntries(pisItemEntries, null, {
@@ -1275,156 +1210,56 @@ const InspectionReport = () => {
       inspectedItemLbhEntries.length > 0
         ? toStructuredLbhFromEntries(
             inspectedItemLbhEntries,
-            useLatestItemSizes
-              ? null
-              : allowItemInspectedFallback
-                ? itemMaster?.inspected_item_LBH || itemMaster?.item_LBH
-                : null,
+            null,
             { indexedRemarks: ITEM_INDEXED_REMARKS },
           )
-        : formatStructuredLbhValue({
-            top:
-              useLatestItemSizes || !allowItemInspectedFallback
-                ? null
-                : itemMaster?.inspected_item_top_LBH,
-            bottom:
-              useLatestItemSizes || !allowItemInspectedFallback
-                ? null
-                : itemMaster?.inspected_item_bottom_LBH,
-            single:
-              useLatestItemSizes || !allowItemInspectedFallback
-                ? null
-                : itemMaster?.inspected_item_LBH,
-            fallback:
-              useLatestItemSizes || !allowItemInspectedFallback
-                ? null
-                : itemMaster?.item_LBH,
-          });
+        : formatStructuredLbhValue();
     const pisPackedSize =
       pisBoxEntries.length > 0
         ? toStructuredLbhFromEntries(pisBoxEntries, null, {
             indexedRemarks: BOX_INDEXED_REMARKS,
           })
         : formatStructuredLbhValue();
-    const inspectedTopLbh =
-      useLatestBoxSizes || !allowItemInspectedFallback
-        ? {}
-        : itemMaster?.inspected_box_top_LBH
-          || itemMaster?.inspected_top_LBH
-          || itemMaster?.inspected_item_top_LBH
-          || {};
-    const inspectedBottomLbh =
-      useLatestBoxSizes || !allowItemInspectedFallback
-        ? {}
-        : itemMaster?.inspected_box_bottom_LBH
-          || itemMaster?.inspected_bottom_LBH
-          || itemMaster?.inspected_item_bottom_LBH
-          || {};
     const checkedPackedSize =
       inspectedBoxLbhEntries.length > 0
         ? toStructuredLbhFromEntries(
             inspectedBoxLbhEntries,
-            useLatestBoxSizes
-              ? null
-              : allowItemInspectedFallback
-                ? itemMaster?.inspected_box_LBH
-                  || itemMaster?.inspected_item_LBH
-                  || itemMaster?.box_LBH
-                  || itemMaster?.item_LBH
-                : null,
+            null,
             { indexedRemarks: BOX_INDEXED_REMARKS },
           )
-        : formatStructuredLbhValue({
-            top: inspectedTopLbh,
-            bottom: inspectedBottomLbh,
-            single:
-              useLatestBoxSizes || !allowItemInspectedFallback
-                ? null
-                : itemMaster?.inspected_box_LBH
-                  || itemMaster?.inspected_item_LBH
-                  || itemMaster?.box_LBH
-                  || itemMaster?.item_LBH,
-            fallback:
-              useLatestBoxSizes || !allowItemInspectedFallback
-                ? null
-                : itemMaster?.box_LBH || itemMaster?.item_LBH,
-          });
+        : formatStructuredLbhValue();
     const pisNetWeight =
       pisItemEntries.length > 0
         ? toStructuredWeightFromEntries(
             pisItemEntries,
-            itemMaster?.weight?.net,
+            null,
             { indexedRemarks: ITEM_INDEXED_REMARKS },
           )
-        : formatStructuredWeightValue({
-            top: getWeightValue(itemMaster?.pis_weight, "top_net"),
-            bottom: getWeightValue(itemMaster?.pis_weight, "bottom_net"),
-            single: getWeightValue(itemMaster?.pis_weight, "total_net"),
-            fallback: itemMaster?.weight?.net,
-          });
+        : formatStructuredWeightValue();
     const checkedNetWeight =
       inspectedItemEntries.length > 0
         ? toStructuredWeightFromEntries(
             inspectedItemEntries,
-            useLatestItemSizes || !allowItemInspectedFallback ? null : itemMaster?.weight?.net,
+            null,
             { indexedRemarks: ITEM_INDEXED_REMARKS },
           )
-        : formatStructuredWeightValue({
-            top:
-              useLatestItemSizes || !allowItemInspectedFallback
-                ? null
-                : getWeightValue(itemMaster?.inspected_weight, "top_net"),
-            bottom:
-              useLatestItemSizes || !allowItemInspectedFallback
-                ? null
-                : getWeightValue(itemMaster?.inspected_weight, "bottom_net"),
-            single:
-              useLatestItemSizes || !allowItemInspectedFallback
-                ? null
-                : getWeightValue(itemMaster?.inspected_weight, "total_net"),
-            fallback:
-              useLatestItemSizes || !allowItemInspectedFallback
-                ? null
-                : itemMaster?.weight?.net,
-          });
+        : formatStructuredWeightValue();
     const pisGrossWeight =
       pisBoxEntries.length > 0
         ? toStructuredWeightFromEntries(
             pisBoxEntries,
-            itemMaster?.weight?.gross,
+            null,
             { indexedRemarks: BOX_INDEXED_REMARKS },
           )
-        : formatStructuredWeightValue({
-            top: getWeightValue(itemMaster?.pis_weight, "top_gross"),
-            bottom: getWeightValue(itemMaster?.pis_weight, "bottom_gross"),
-            single: getWeightValue(itemMaster?.pis_weight, "total_gross"),
-            fallback: itemMaster?.weight?.gross,
-          });
+        : formatStructuredWeightValue();
     const checkedGrossWeight =
       inspectedBoxEntries.length > 0
         ? toStructuredWeightFromEntries(
             inspectedBoxEntries,
-            useLatestBoxSizes || !allowItemInspectedFallback ? null : itemMaster?.weight?.gross,
+            null,
             { indexedRemarks: BOX_INDEXED_REMARKS },
           )
-        : formatStructuredWeightValue({
-            top:
-              useLatestBoxSizes || !allowItemInspectedFallback
-                ? null
-                : getWeightValue(itemMaster?.inspected_weight, "top_gross"),
-            bottom:
-              useLatestBoxSizes || !allowItemInspectedFallback
-                ? null
-                : getWeightValue(itemMaster?.inspected_weight, "bottom_gross"),
-            single:
-              useLatestBoxSizes || !allowItemInspectedFallback
-                ? null
-                : getWeightValue(itemMaster?.inspected_weight, "total_gross"),
-            fallback:
-              useLatestBoxSizes || !allowItemInspectedFallback
-                ? null
-                : itemMaster?.weight?.gross,
-          });
+        : formatStructuredWeightValue();
     const calculatedInspectedCbmRaw =
       hasLatestInspectionRecord
         ? inspectedSource?.cbm?.total

@@ -9,7 +9,6 @@ import {
   calculateMeasuredSizeEntriesCbm,
   detectBoxPackagingMode,
   ensureMeasuredSizeEntryCount,
-  getWeightValueFromModel,
   hasMeaningfulMeasuredSize,
   normalizeSizeCount,
   parseMeasuredSizeEntries,
@@ -47,35 +46,18 @@ const getVendorsLabel = (item = {}) =>
     : "N/A";
 
 const buildInitialForm = (item = {}) => {
-  const inspectedWeight = item?.inspected_weight || {};
   const inspectedBoxMode = detectBoxPackagingMode(
     item?.inspected_box_mode,
     item?.inspected_box_sizes,
   );
   const inspectedItemEntries = buildMeasuredSizeEntriesFromLegacy({
     primaryEntries: item?.inspected_item_sizes,
-    singleLbh: item?.inspected_item_LBH ?? item?.item_LBH,
-    topLbh: item?.inspected_item_top_LBH,
-    bottomLbh: item?.inspected_item_bottom_LBH,
-    totalWeight: getWeightValueFromModel(inspectedWeight, "total_net"),
-    topWeight: getWeightValueFromModel(inspectedWeight, "top_net"),
-    bottomWeight: getWeightValueFromModel(inspectedWeight, "bottom_net"),
     weightKey: "net_weight",
-    topRemark: "top",
-    bottomRemark: "base",
   }).filter((entry) => hasMeaningfulMeasuredSize(entry));
   const inspectedBoxEntries = buildMeasuredSizeEntriesFromLegacy({
     primaryEntries: item?.inspected_box_sizes,
     mode: inspectedBoxMode,
-    singleLbh: item?.inspected_box_LBH ?? item?.box_LBH,
-    topLbh: item?.inspected_box_top_LBH ?? item?.inspected_top_LBH,
-    bottomLbh: item?.inspected_box_bottom_LBH ?? item?.inspected_bottom_LBH,
-    totalWeight: getWeightValueFromModel(inspectedWeight, "total_gross"),
-    topWeight: getWeightValueFromModel(inspectedWeight, "top_gross"),
-    bottomWeight: getWeightValueFromModel(inspectedWeight, "bottom_gross"),
     weightKey: "gross_weight",
-    topRemark: "top",
-    bottomRemark: "base",
   }).filter((entry) => hasMeaningfulMeasuredSize(entry));
 
   const inspectedItemCount =

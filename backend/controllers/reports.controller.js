@@ -712,15 +712,6 @@ const QC_REPORT_MISMATCH_ITEM_SELECT = [
   "inspected_item_sizes",
   "inspected_box_sizes",
   "inspected_box_mode",
-  "inspected_item_LBH",
-  "inspected_item_top_LBH",
-  "inspected_item_bottom_LBH",
-  "inspected_box_LBH",
-  "inspected_box_top_LBH",
-  "inspected_box_bottom_LBH",
-  "inspected_top_LBH",
-  "inspected_bottom_LBH",
-  "inspected_weight",
   "master_item_sizes",
   "master_box_sizes",
   "master_box_mode",
@@ -1059,13 +1050,6 @@ const buildLbhCbmExpression = ({
   },
 });
 
-const buildLbhCbmExpressionFromPath = (fieldPath) =>
-  buildLbhCbmExpression({
-    lengthExpression: `${fieldPath}.L`,
-    breadthExpression: `${fieldPath}.B`,
-    heightExpression: `${fieldPath}.H`,
-  });
-
 const buildSizeEntriesCbmTotalExpression = (fieldPath) => ({
   $reduce: {
     input: {
@@ -1132,114 +1116,15 @@ const buildItemCbmPerUnitExpression = () => ({
       inspectedItemSizesCbm: buildSizeEntriesCbmTotalExpression(
         "$item_doc.inspected_item_sizes",
       ),
-      inspectedBoxTopCbm: buildLbhCbmExpressionFromPath(
-        "$item_doc.inspected_box_top_LBH",
-      ),
-      inspectedTopCbm: buildLbhCbmExpressionFromPath(
-        "$item_doc.inspected_top_LBH",
-      ),
-      inspectedItemTopCbm: buildLbhCbmExpressionFromPath(
-        "$item_doc.inspected_item_top_LBH",
-      ),
-      inspectedBoxBottomCbm: buildLbhCbmExpressionFromPath(
-        "$item_doc.inspected_box_bottom_LBH",
-      ),
-      inspectedBottomCbm: buildLbhCbmExpressionFromPath(
-        "$item_doc.inspected_bottom_LBH",
-      ),
-      inspectedItemBottomCbm: buildLbhCbmExpressionFromPath(
-        "$item_doc.inspected_item_bottom_LBH",
-      ),
-      inspectedBoxSingleCbm: buildLbhCbmExpressionFromPath(
-        "$item_doc.inspected_box_LBH",
-      ),
-      inspectedItemSingleCbm: buildLbhCbmExpressionFromPath(
-        "$item_doc.inspected_item_LBH",
-      ),
-      itemCalculatedInspected: buildNumericExpression(
-        "$item_doc.cbm.calculated_inspected_total",
-      ),
-      itemInspected: buildNumericExpression("$item_doc.cbm.inspected_total"),
-      itemCalculatedPis: buildNumericExpression(
-        "$item_doc.cbm.calculated_pis_total",
-      ),
-      itemTotal: buildNumericExpression("$item_doc.cbm.total"),
     },
     in: {
-      $let: {
-        vars: {
-          inspectedSizeEntriesCbm: buildFirstPositiveExpression([
-            "$$inspectedBoxSizesCbm",
-            "$$inspectedItemSizesCbm",
-          ]),
-          resolvedInspectedTopCbm: buildFirstPositiveExpression([
-            "$$inspectedBoxTopCbm",
-            "$$inspectedTopCbm",
-            "$$inspectedItemTopCbm",
-          ]),
-          resolvedInspectedBottomCbm: buildFirstPositiveExpression([
-            "$$inspectedBoxBottomCbm",
-            "$$inspectedBottomCbm",
-            "$$inspectedItemBottomCbm",
-          ]),
-          resolvedInspectedSingleCbm: buildFirstPositiveExpression([
-            "$$inspectedBoxSingleCbm",
-            "$$inspectedItemSingleCbm",
-          ]),
-        },
-        in: {
-          $max: [
-            0,
-            {
-              $cond: [
-                { $gt: ["$$inspectedSizeEntriesCbm", 0] },
-                "$$inspectedSizeEntriesCbm",
-                {
-                  $cond: [
-                    {
-                      $and: [
-                        { $gt: ["$$resolvedInspectedTopCbm", 0] },
-                        { $gt: ["$$resolvedInspectedBottomCbm", 0] },
-                      ],
-                    },
-                    {
-                      $add: [
-                        "$$resolvedInspectedTopCbm",
-                        "$$resolvedInspectedBottomCbm",
-                      ],
-                    },
-                    {
-                      $cond: [
-                        { $gt: ["$$resolvedInspectedSingleCbm", 0] },
-                        "$$resolvedInspectedSingleCbm",
-                        {
-                          $cond: [
-                            { $gt: ["$$itemCalculatedInspected", 0] },
-                            "$$itemCalculatedInspected",
-                            {
-                              $cond: [
-                                { $gt: ["$$itemInspected", 0] },
-                                "$$itemInspected",
-                                {
-                                  $cond: [
-                                    { $gt: ["$$itemCalculatedPis", 0] },
-                                    "$$itemCalculatedPis",
-                                    "$$itemTotal",
-                                  ],
-                                },
-                              ],
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                  ],
-                },
-              ],
-            },
-          ],
-        },
-      },
+      $max: [
+        0,
+        buildFirstPositiveExpression([
+          "$$inspectedBoxSizesCbm",
+          "$$inspectedItemSizesCbm",
+        ]),
+      ],
     },
   },
 });
@@ -1499,14 +1384,6 @@ const buildItemLookupStages = () => [
             cbm: 1,
             inspected_item_sizes: 1,
             inspected_box_sizes: 1,
-            inspected_box_top_LBH: 1,
-            inspected_top_LBH: 1,
-            inspected_item_top_LBH: 1,
-            inspected_box_bottom_LBH: 1,
-            inspected_bottom_LBH: 1,
-            inspected_item_bottom_LBH: 1,
-            inspected_box_LBH: 1,
-            inspected_item_LBH: 1,
           },
         },
       ],

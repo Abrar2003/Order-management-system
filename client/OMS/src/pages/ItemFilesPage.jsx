@@ -65,8 +65,8 @@ const normalizeMeasurementEntries = (entries = [], weightKey = "") =>
     .filter((entry) => entry.L > 0 && entry.B > 0 && entry.H > 0)
     .slice(0, 3);
 
-const getPrimaryMeasurementLbh = (entries = [], fallback = {}) =>
-  normalizeMeasurementEntries(entries)[0] || fallback || {};
+const getPrimaryMeasurementLbh = (entries = []) =>
+  normalizeMeasurementEntries(entries)[0] || {};
 
 const sumMeasurementWeights = (entries = [], weightKey = "") =>
   normalizeMeasurementEntries(entries, weightKey).reduce(
@@ -83,14 +83,7 @@ const getWeightValue = (weight = {}, key = "") => {
     gross: "total_gross",
   };
   const resolvedKey = weightKeyMap[normalizedKey] || normalizedKey;
-  const legacyFallbackByKey = {
-    total_net: "net",
-    total_gross: "gross",
-  };
-  const rawValue =
-    weight?.[resolvedKey]
-    ?? (legacyFallbackByKey[resolvedKey] ? weight?.[legacyFallbackByKey[resolvedKey]] : undefined)
-    ?? 0;
+  const rawValue = weight?.[resolvedKey] ?? 0;
   const parsed = Number(rawValue);
   return Number.isFinite(parsed) ? parsed : 0;
 };
@@ -101,20 +94,20 @@ const getInspectedWeight = (item, key) => {
     key === "net"
       ? sumMeasurementWeights(item?.inspected_item_sizes, weightKey)
       : sumMeasurementWeights(item?.inspected_box_sizes, weightKey);
-  return sizeEntryWeight || getWeightValue(item?.inspected_weight, key) || getWeightValue(item?.weight, key);
+  return sizeEntryWeight;
 };
 
 const getInspectedItemLbh = (item) =>
-  getPrimaryMeasurementLbh(item?.inspected_item_sizes, item?.inspected_item_LBH || item?.item_LBH || {});
+  getPrimaryMeasurementLbh(item?.inspected_item_sizes);
 
 const getInspectedBoxLbh = (item) =>
-  getPrimaryMeasurementLbh(item?.inspected_box_sizes, item?.inspected_box_LBH || item?.box_LBH || {});
+  getPrimaryMeasurementLbh(item?.inspected_box_sizes);
 
 const getPisItemLbh = (item) =>
-  getPrimaryMeasurementLbh(item?.pis_item_sizes, item?.pis_item_LBH || {});
+  getPrimaryMeasurementLbh(item?.pis_item_sizes);
 
 const getPisBoxLbh = (item) =>
-  getPrimaryMeasurementLbh(item?.pis_box_sizes, item?.pis_box_LBH || {});
+  getPrimaryMeasurementLbh(item?.pis_box_sizes);
 
 const hasCompleteLbh = (value = {}) =>
   Number(value?.L || 0) > 0
@@ -141,7 +134,7 @@ const getPisWeight = (item, key) => {
     key === "net"
       ? sumMeasurementWeights(item?.pis_item_sizes, weightKey)
       : sumMeasurementWeights(item?.pis_box_sizes, weightKey);
-  return sizeEntryWeight || getWeightValue(item?.pis_weight, key);
+  return sizeEntryWeight;
 };
 
 const getPreferredWeight = (item, key, preferPis = false) => {

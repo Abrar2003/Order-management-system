@@ -14,7 +14,6 @@ import {
 } from "../utils/clientSort";
 import {
   buildMeasuredSizeEntriesFromLegacy,
-  getWeightValueFromModel,
   hasMeaningfulMeasuredSize,
 } from "../utils/measuredSizeForm";
 import { formatFixedNumber, formatLbhValue } from "../utils/measurementDisplay";
@@ -97,7 +96,6 @@ const buildMeasurementEntries = ({
 } = {}) => {
   const isPis = source === "pis";
   const isItemGroup = group === "item";
-  const weight = isPis ? item?.pis_weight : item?.inspected_weight;
   const primaryEntries = isPis
     ? (isItemGroup ? item?.pis_item_sizes : item?.pis_box_sizes)
     : (isItemGroup ? item?.inspected_item_sizes : item?.inspected_box_sizes);
@@ -107,36 +105,7 @@ const buildMeasurementEntries = ({
 
   return buildMeasuredSizeEntriesFromLegacy({
     primaryEntries,
-    singleLbh: isPis
-      ? (isItemGroup ? item?.pis_item_LBH : item?.pis_box_LBH)
-      : (isItemGroup
-          ? item?.inspected_item_LBH
-          : item?.inspected_box_LBH),
-    topLbh: isPis
-      ? (isItemGroup ? item?.pis_item_top_LBH : item?.pis_box_top_LBH)
-      : (isItemGroup
-          ? item?.inspected_item_top_LBH
-          : item?.inspected_box_top_LBH || item?.inspected_top_LBH),
-    bottomLbh: isPis
-      ? (isItemGroup ? item?.pis_item_bottom_LBH : item?.pis_box_bottom_LBH)
-      : (isItemGroup
-          ? item?.inspected_item_bottom_LBH
-          : item?.inspected_box_bottom_LBH || item?.inspected_bottom_LBH),
-    totalWeight: getWeightValueFromModel(
-      weight,
-      isItemGroup ? "total_net" : "total_gross",
-    ),
-    topWeight: getWeightValueFromModel(
-      weight,
-      isItemGroup ? "top_net" : "top_gross",
-    ),
-    bottomWeight: getWeightValueFromModel(
-      weight,
-      isItemGroup ? "bottom_net" : "bottom_gross",
-    ),
     weightKey,
-    topRemark: "top",
-    bottomRemark: "base",
   }).filter((entry) => hasMeaningfulMeasuredSize(entry));
 };
 

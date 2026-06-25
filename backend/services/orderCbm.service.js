@@ -83,43 +83,14 @@ const getValidNormalBoxEntries = (entries = []) =>
     return entryType === BOX_ENTRY_TYPES.INDIVIDUAL && hasCompletePositiveLbh(entry);
   });
 
-const getLegacyInspectedBoxEntries = ({
-  inspectedBoxLbh = null,
-  inspectedBoxTopLbh = null,
-  inspectedBoxBottomLbh = null,
-} = {}) => {
-  const legacyEntries = [];
-  if (hasCompletePositiveLbh(inspectedBoxTopLbh)) {
-    legacyEntries.push(inspectedBoxTopLbh);
-  }
-  if (hasCompletePositiveLbh(inspectedBoxBottomLbh)) {
-    legacyEntries.push(inspectedBoxBottomLbh);
-  }
-  if (legacyEntries.length > 0) return legacyEntries;
-  return hasCompletePositiveLbh(inspectedBoxLbh) ? [inspectedBoxLbh] : [];
-};
-
 const calculateNormalModeTotalPoCbm = ({
   orderQuantity = 0,
   inspectedBoxSizes = [],
-  inspectedBoxLbh = null,
-  inspectedBoxTopLbh = null,
-  inspectedBoxBottomLbh = null,
 } = {}) => {
   const quantity = toPositiveNumber(orderQuantity, 0);
   if (quantity <= 0) return 0;
 
-  const validSizeEntries = getValidNormalBoxEntries(inspectedBoxSizes);
-  const entries =
-    validSizeEntries.length > 0
-      ? validSizeEntries
-      : getLegacyInspectedBoxEntries({
-          inspectedBoxLbh,
-          inspectedBoxTopLbh,
-          inspectedBoxBottomLbh,
-        });
-
-  const perUnitCbm = entries.reduce(
+  const perUnitCbm = getValidNormalBoxEntries(inspectedBoxSizes).reduce(
     (sum, entry) => sum + dimensionToCbm(entry),
     0,
   );
@@ -155,9 +126,6 @@ const calculateTotalPoCbm = ({
   orderQuantity = 0,
   inspectedBoxSizes = [],
   inspectedBoxMode = BOX_PACKAGING_MODES.INDIVIDUAL,
-  inspectedBoxLbh = null,
-  inspectedBoxTopLbh = null,
-  inspectedBoxBottomLbh = null,
 } = {}) => {
   const entries = Array.isArray(inspectedBoxSizes) ? inspectedBoxSizes : [];
   const resolvedMode = detectBoxPackagingMode(inspectedBoxMode, entries);
@@ -172,9 +140,6 @@ const calculateTotalPoCbm = ({
   return calculateNormalModeTotalPoCbm({
     orderQuantity,
     inspectedBoxSizes: entries,
-    inspectedBoxLbh,
-    inspectedBoxTopLbh,
-    inspectedBoxBottomLbh,
   });
 };
 
@@ -204,10 +169,6 @@ const calculateOrderTotalPoCbm = ({ order = null, item = null } = {}) => {
     orderQuantity: order?.quantity,
     inspectedBoxSizes: item?.inspected_box_sizes,
     inspectedBoxMode: item?.inspected_box_mode,
-    inspectedBoxLbh: item?.inspected_box_LBH,
-    inspectedBoxTopLbh: item?.inspected_box_top_LBH || item?.inspected_top_LBH,
-    inspectedBoxBottomLbh:
-      item?.inspected_box_bottom_LBH || item?.inspected_bottom_LBH,
   });
 };
 
@@ -218,7 +179,7 @@ const findItemForOrder = async (order = null, { session = null } = {}) => {
   const query = Item.findOne({
     code: { $regex: `^${escapeRegex(itemCode)}$`, $options: "i" },
   }).select(
-    "code inspected_box_sizes inspected_box_mode inspected_box_LBH inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH",
+    "code inspected_box_sizes inspected_box_mode",
   );
 
   if (session) query.session(session);
@@ -359,7 +320,7 @@ const findItemsByCodes = async (codes = []) => {
 
   const items = await Item.find({ code: { $in: uniqueCodes } })
     .select(
-      "code inspected_box_sizes inspected_box_mode inspected_box_LBH inspected_box_top_LBH inspected_box_bottom_LBH inspected_top_LBH inspected_bottom_LBH",
+      "code inspected_box_sizes inspected_box_mode",
     )
     .lean();
 

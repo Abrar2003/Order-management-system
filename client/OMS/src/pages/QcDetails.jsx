@@ -155,14 +155,7 @@ const getWeightValue = (weight = {}, key = "") => {
   const normalizedKey = String(key || "").trim();
   if (!normalizedKey) return 0;
 
-  const legacyFallbackByKey = {
-    total_net: "net",
-    total_gross: "gross",
-  };
-  const rawValue =
-    weight?.[normalizedKey]
-    ?? (legacyFallbackByKey[normalizedKey] ? weight?.[legacyFallbackByKey[normalizedKey]] : undefined)
-    ?? 0;
+  const rawValue = weight?.[normalizedKey] ?? 0;
   const parsed = Number(rawValue);
   return Number.isFinite(parsed) ? parsed : 0;
 };
@@ -743,20 +736,14 @@ const QcDetails = () => {
       (pisItemSizeEntries.length > 0
         ? sumMeasurementWeights(pisItemSizeEntries)
         : 0)
-      || getWeightValue(itemMaster?.pis_weight, "total_net")
-      || itemMaster?.weight?.net
       || 0,
     );
     const grossWeight = Number(
       (pisBoxSizeEntries.length > 0
         ? sumMeasurementWeights(pisBoxSizeEntries)
         : 0)
-      || getWeightValue(itemMaster?.pis_weight, "total_gross")
-      || itemMaster?.weight?.gross
       || 0,
     );
-    const itemLbhSource = itemMaster?.pis_item_LBH || itemMaster?.item_LBH;
-    const boxLbhSource = itemMaster?.pis_box_LBH || itemMaster?.box_LBH;
 
     return {
       code: String(itemMaster?.code || qc?.item?.item_code || "N/A").trim() || "N/A",
@@ -768,11 +755,11 @@ const QcDetails = () => {
       itemLbh:
         pisItemSizeEntries.length > 0
           ? formatMeasurementEntries(pisItemSizeEntries, { weightLabel: "Net" })
-          : formatLbhValue(itemLbhSource),
+          : "Not Set",
       boxLbh:
         pisBoxSizeEntries.length > 0
           ? formatMeasurementEntries(pisBoxSizeEntries, { weightLabel: "Gross" })
-          : formatLbhValue(boxLbhSource),
+          : "Not Set",
       pisCbm: formatPositiveCbm(pisCbm, "Not Set"),
       calculatedPisCbm: formatPositiveCbm(calculatedPisCbm, "Not Set"),
       claimPercentage: Math.max(

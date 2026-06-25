@@ -78,7 +78,7 @@ const getPisWeight = (item, key) => {
     key === "net"
       ? sumMeasurementWeights(item?.pis_item_sizes, "net_weight")
       : sumMeasurementWeights(item?.pis_box_sizes, "gross_weight");
-  const value = sizeEntryWeight || (item?.pis_weight?.[key] ?? 0);
+  const value = sizeEntryWeight;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };

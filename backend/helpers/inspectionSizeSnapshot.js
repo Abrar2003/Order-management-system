@@ -16,10 +16,6 @@ const {
 
 const SIZE_ENTRY_LIMIT = 4;
 const NUMBER_TOLERANCE = 0.001;
-const LEGACY_WEIGHT_FALLBACK_BY_KEY = Object.freeze({
-  total_net: "net",
-  total_gross: "gross",
-});
 const ITEM_SIZE_REMARK_ORDER = Object.freeze([
   "",
   "item",
@@ -47,15 +43,6 @@ const SNAPSHOT_SOURCE_FIELDS = Object.freeze([
   "inspected_item_sizes",
   "inspected_box_sizes",
   "inspected_box_mode",
-  "inspected_item_LBH",
-  "inspected_item_top_LBH",
-  "inspected_item_bottom_LBH",
-  "inspected_box_LBH",
-  "inspected_box_top_LBH",
-  "inspected_box_bottom_LBH",
-  "inspected_top_LBH",
-  "inspected_bottom_LBH",
-  "inspected_weight",
 ]);
 
 const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key);
@@ -65,18 +52,6 @@ const normalizeKey = (value) => normalizeText(value).toLowerCase();
 const normalizeNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
-};
-
-const getWeightValue = (weight = {}, key = "") => {
-  const normalizedKey = normalizeText(key);
-  if (!normalizedKey) return 0;
-
-  const fallbackKey = LEGACY_WEIGHT_FALLBACK_BY_KEY[normalizedKey];
-  return normalizeNumber(
-    weight?.[normalizedKey] ??
-      (fallbackKey ? weight?.[fallbackKey] : undefined) ??
-      0,
-  );
 };
 
 const hasMeaningfulNumber = (value) =>
@@ -219,42 +194,7 @@ const normalizeBoxSizes = (
 };
 
 const buildItemSizesFromSource = (source = {}) => {
-  const normalizedEntries = normalizeItemSizes(source?.inspected_item_sizes);
-  if (normalizedEntries.length > 0) return normalizedEntries;
-
-  const legacyEntries = [];
-  const topEntry = normalizeItemSizeEntry({
-    ...(source?.inspected_item_top_LBH || {}),
-    remark: "top",
-    net_weight: getWeightValue(source?.inspected_weight, "top_net"),
-  });
-  if (hasMeaningfulItemEntry(topEntry)) {
-    legacyEntries.push(topEntry);
-  }
-
-  const bottomEntry = normalizeItemSizeEntry({
-    ...(source?.inspected_item_bottom_LBH || {}),
-    remark: "base",
-    net_weight: getWeightValue(source?.inspected_weight, "bottom_net"),
-  });
-  if (hasMeaningfulItemEntry(bottomEntry)) {
-    legacyEntries.push(bottomEntry);
-  }
-
-  if (legacyEntries.length > 0) {
-    return sortEntries(legacyEntries, {
-      order: ITEM_SIZE_REMARK_ORDER,
-      keyBuilder: buildItemEntryKey,
-    });
-  }
-
-  const singleEntry = normalizeItemSizeEntry({
-    ...(source?.inspected_item_LBH || {}),
-    remark: "",
-    net_weight: getWeightValue(source?.inspected_weight, "total_net"),
-  });
-
-  return hasMeaningfulItemEntry(singleEntry) ? [singleEntry] : [];
+  return normalizeItemSizes(source?.inspected_item_sizes);
 };
 
 const buildBoxSizesFromSource = (source = {}) => {
@@ -269,63 +209,7 @@ const buildBoxSizesFromSource = (source = {}) => {
   if (normalizedEntries.length > 0) {
     return normalizedEntries;
   }
-
-  if (resolvedMode === BOX_PACKAGING_MODES.CARTON) {
-    const masterEntry = normalizeBoxSizeEntry(
-      {
-        ...(source?.inspected_box_LBH || {}),
-        remark: BOX_ENTRY_TYPES.MASTER,
-        box_type: BOX_ENTRY_TYPES.MASTER,
-        gross_weight: getWeightValue(source?.inspected_weight, "total_gross"),
-      },
-      resolvedMode,
-    );
-    return hasMeaningfulBoxEntry(masterEntry) ? [masterEntry] : [];
-  }
-
-  const legacyEntries = [];
-  const topEntry = normalizeBoxSizeEntry(
-    {
-      ...(source?.inspected_box_top_LBH || source?.inspected_top_LBH || {}),
-      remark: "top",
-      gross_weight: getWeightValue(source?.inspected_weight, "top_gross"),
-    },
-    resolvedMode,
-  );
-  if (hasMeaningfulBoxEntry(topEntry)) {
-    legacyEntries.push(topEntry);
-  }
-
-  const bottomEntry = normalizeBoxSizeEntry(
-    {
-      ...(source?.inspected_box_bottom_LBH || source?.inspected_bottom_LBH || {}),
-      remark: "base",
-      gross_weight: getWeightValue(source?.inspected_weight, "bottom_gross"),
-    },
-    resolvedMode,
-  );
-  if (hasMeaningfulBoxEntry(bottomEntry)) {
-    legacyEntries.push(bottomEntry);
-  }
-
-  if (legacyEntries.length > 0) {
-    return sortEntries(legacyEntries, {
-      order: BOX_SIZE_REMARK_ORDER,
-      keyBuilder: buildBoxEntryKey,
-    });
-  }
-
-  const singleEntry = normalizeBoxSizeEntry(
-    {
-      ...(source?.inspected_box_LBH || {}),
-      remark: "",
-      box_type: BOX_ENTRY_TYPES.INDIVIDUAL,
-      gross_weight: getWeightValue(source?.inspected_weight, "total_gross"),
-    },
-    resolvedMode,
-  );
-
-  return hasMeaningfulBoxEntry(singleEntry) ? [singleEntry] : [];
+  return [];
 };
 
 const buildNormalizedInspectionSizeState = (source = {}) => {

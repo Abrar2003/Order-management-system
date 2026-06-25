@@ -31,18 +31,9 @@ const FINAL_PIS_CHECK_ITEM_SELECT = [
   "master_item_sizes",
   "master_box_sizes",
   "master_box_mode",
-  "inspected_weight",
-  "inspected_item_LBH",
   "inspected_item_sizes",
-  "inspected_item_top_LBH",
-  "inspected_item_bottom_LBH",
-  "inspected_box_LBH",
   "inspected_box_sizes",
   "inspected_box_mode",
-  "inspected_box_top_LBH",
-  "inspected_box_bottom_LBH",
-  "inspected_top_LBH",
-  "inspected_bottom_LBH",
   "cbm",
   "qc.barcode",
   "qc.master_barcode",
@@ -99,11 +90,6 @@ const BOX_REMARK_ORDER = Object.freeze([
   "box3",
   "box4",
 ]);
-const LEGACY_WEIGHT_FALLBACK_BY_KEY = Object.freeze({
-  total_net: "net",
-  total_gross: "gross",
-});
-
 const normalizeText = (value) => String(value ?? "").trim();
 const normalizeKey = (value) => normalizeText(value).toLowerCase();
 
@@ -375,17 +361,6 @@ const hasMeaningfulEntry = (
   || hasWeightData(entry, weightKey)
   || countKeys.some((countKey) => hasCountData(entry, countKey));
 
-const getWeightRecordValue = (weight = {}, key = "") => {
-  const normalizedKey = normalizeText(key);
-  if (!normalizedKey) return 0;
-  const fallbackKey = LEGACY_WEIGHT_FALLBACK_BY_KEY[normalizedKey];
-  const rawValue =
-    weight?.[normalizedKey]
-    ?? (fallbackKey ? weight?.[fallbackKey] : undefined)
-    ?? 0;
-  return toFiniteNumber(rawValue) ?? 0;
-};
-
 const normalizeItemMeasurementEntry = (entry = {}) => ({
   remark: normalizeKey(entry?.remark || entry?.type || ""),
   L: toFiniteNumber(entry?.L) ?? 0,
@@ -407,67 +382,22 @@ const normalizeBoxMeasurementEntry = (entry = {}) => ({
 
 const buildItemMeasurementEntries = ({
   sizes = [],
-  singleLbh = {},
-  topLbh = {},
-  bottomLbh = {},
-  weight = {},
 } = {}) => {
-  const normalizedSizes = (Array.isArray(sizes) ? sizes : [])
+  return sortEntries(
+    (Array.isArray(sizes) ? sizes : [])
     .map((entry) => normalizeItemMeasurementEntry(entry))
     .filter((entry) => hasMeaningfulEntry(entry, { weightKey: "net_weight" }))
-    .slice(0, SIZE_ENTRY_LIMIT);
-
-  if (normalizedSizes.length > 0) {
-    return sortEntries(normalizedSizes, {
+    .slice(0, SIZE_ENTRY_LIMIT),
+    {
       order: ITEM_REMARK_ORDER,
       keyBuilder: buildItemEntryKey,
-    });
-  }
-
-  const legacyEntries = [];
-  const topEntry = normalizeItemMeasurementEntry({
-    ...topLbh,
-    remark: "top",
-    net_weight: getWeightRecordValue(weight, "top_net"),
-  });
-  if (hasMeaningfulEntry(topEntry, { weightKey: "net_weight" })) {
-    legacyEntries.push(topEntry);
-  }
-
-  const baseEntry = normalizeItemMeasurementEntry({
-    ...bottomLbh,
-    remark: "base",
-    net_weight: getWeightRecordValue(weight, "bottom_net"),
-  });
-  if (hasMeaningfulEntry(baseEntry, { weightKey: "net_weight" })) {
-    legacyEntries.push(baseEntry);
-  }
-
-  if (legacyEntries.length > 0) {
-    return sortEntries(legacyEntries, {
-      order: ITEM_REMARK_ORDER,
-      keyBuilder: buildItemEntryKey,
-    });
-  }
-
-  const singleEntry = normalizeItemMeasurementEntry({
-    ...singleLbh,
-    remark: "",
-    net_weight: getWeightRecordValue(weight, "total_net"),
-  });
-
-  return hasMeaningfulEntry(singleEntry, { weightKey: "net_weight" })
-    ? [singleEntry]
-    : [];
+    },
+  );
 };
 
 const buildBoxMeasurementEntries = ({
   sizes = [],
   mode = "",
-  singleLbh = {},
-  topLbh = {},
-  bottomLbh = {},
-  weight = {},
 } = {}) => {
   const resolvedMode = detectBoxPackagingMode(mode, sizes);
   const normalizedSizes = (Array.isArray(sizes) ? sizes : [])
@@ -480,67 +410,10 @@ const buildBoxMeasurementEntries = ({
     )
     .slice(0, resolvedMode === BOX_PACKAGING_MODES.CARTON ? 2 : SIZE_ENTRY_LIMIT);
 
-  if (normalizedSizes.length > 0) {
-    return sortEntries(normalizedSizes, {
-      order: BOX_REMARK_ORDER,
-      keyBuilder: buildBoxEntryKey,
-    });
-  }
-
-  if (resolvedMode === BOX_PACKAGING_MODES.CARTON) {
-    const masterEntry = normalizeBoxMeasurementEntry({
-      ...singleLbh,
-      remark: "master",
-      box_type: BOX_ENTRY_TYPES.MASTER,
-      gross_weight: getWeightRecordValue(weight, "total_gross"),
-    });
-
-    return hasMeaningfulEntry(masterEntry, {
-      weightKey: "gross_weight",
-      countKeys: ["item_count_in_inner", "box_count_in_master"],
-    })
-      ? [masterEntry]
-      : [];
-  }
-
-  const legacyEntries = [];
-  const topEntry = normalizeBoxMeasurementEntry({
-    ...topLbh,
-    remark: "top",
-    box_type: BOX_ENTRY_TYPES.INDIVIDUAL,
-    gross_weight: getWeightRecordValue(weight, "top_gross"),
+  return sortEntries(normalizedSizes, {
+    order: BOX_REMARK_ORDER,
+    keyBuilder: buildBoxEntryKey,
   });
-  if (hasMeaningfulEntry(topEntry, { weightKey: "gross_weight" })) {
-    legacyEntries.push(topEntry);
-  }
-
-  const baseEntry = normalizeBoxMeasurementEntry({
-    ...bottomLbh,
-    remark: "base",
-    box_type: BOX_ENTRY_TYPES.INDIVIDUAL,
-    gross_weight: getWeightRecordValue(weight, "bottom_gross"),
-  });
-  if (hasMeaningfulEntry(baseEntry, { weightKey: "gross_weight" })) {
-    legacyEntries.push(baseEntry);
-  }
-
-  if (legacyEntries.length > 0) {
-    return sortEntries(legacyEntries, {
-      order: BOX_REMARK_ORDER,
-      keyBuilder: buildBoxEntryKey,
-    });
-  }
-
-  const singleEntry = normalizeBoxMeasurementEntry({
-    ...singleLbh,
-    remark: "",
-    box_type: BOX_ENTRY_TYPES.INDIVIDUAL,
-    gross_weight: getWeightRecordValue(weight, "total_gross"),
-  });
-
-  return hasMeaningfulEntry(singleEntry, { weightKey: "gross_weight" })
-    ? [singleEntry]
-    : [];
 };
 
 const buildMeasurementDisplay = (entries = [], weightKey = "") => {
@@ -1117,10 +990,6 @@ const buildFinalPisCheckRow = (item = {}) => {
   });
   const inspectedItemEntries = buildItemMeasurementEntries({
     sizes: item?.inspected_item_sizes,
-    singleLbh: item?.inspected_item_LBH,
-    topLbh: item?.inspected_item_top_LBH,
-    bottomLbh: item?.inspected_item_bottom_LBH,
-    weight: item?.inspected_weight,
   });
   const masterBoxEntries = buildBoxMeasurementEntries({
     sizes: item?.master_box_sizes,
@@ -1129,10 +998,6 @@ const buildFinalPisCheckRow = (item = {}) => {
   const inspectedBoxEntries = buildBoxMeasurementEntries({
     sizes: item?.inspected_box_sizes,
     mode: item?.inspected_box_mode,
-    singleLbh: item?.inspected_box_LBH,
-    topLbh: item?.inspected_box_top_LBH || item?.inspected_top_LBH,
-    bottomLbh: item?.inspected_box_bottom_LBH || item?.inspected_bottom_LBH,
-    weight: item?.inspected_weight,
   });
   const hasMasterItemEntries = masterItemEntries.length > 0;
   const hasMasterBoxEntries = masterBoxEntries.length > 0;
