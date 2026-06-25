@@ -154,7 +154,12 @@ const isBlankBoxSizeEntry = (entry = {}, boxMode = BOX_PACKAGING_MODES.INDIVIDUA
   !isPositiveNumericInput(entry?.net_weight) &&
   !isPositiveNumericInput(entry?.gross_weight) &&
   !isPositiveNumericInput(entry?.weight) &&
-  (boxMode === BOX_PACKAGING_MODES.CARTON ? true : !normalizeText(entry?.remark)) &&
+  (
+    boxMode === BOX_PACKAGING_MODES.CARTON ||
+    boxMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
+      ? true
+      : !normalizeText(entry?.remark)
+  ) &&
   !isPositiveNumericInput(entry?.item_count_in_inner) &&
   !isPositiveNumericInput(entry?.box_count_in_master);
 
@@ -189,8 +194,14 @@ const normalizeItemSizeEntries = (entries = []) => {
 const normalizeBoxSizeEntries = (entries = [], boxMode = BOX_PACKAGING_MODES.INDIVIDUAL) => {
   if (!Array.isArray(entries)) throw new Error("box_sizes must be an array");
   const normalizedEntries = entries.filter((entry) => !isBlankBoxSizeEntry(entry, boxMode));
-  if (normalizedEntries.length > SIZE_ENTRY_LIMIT) {
-    throw new Error(`box_sizes cannot exceed ${SIZE_ENTRY_LIMIT} entries`);
+  const entryLimit =
+    boxMode === BOX_PACKAGING_MODES.CARTON
+      ? 2
+      : boxMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
+        ? 1
+        : SIZE_ENTRY_LIMIT;
+  if (normalizedEntries.length > entryLimit) {
+    throw new Error(`box_sizes cannot exceed ${entryLimit} entries`);
   }
   const seenRemarks = new Set();
   return normalizedEntries.map((entry, index) => {
@@ -220,6 +231,27 @@ const normalizeBoxSizeEntries = (entries = [], boxMode = BOX_PACKAGING_MODES.IND
         box_count_in_master: isInner
           ? 0
           : toNonNegativeNumber(entry?.box_count_in_master ?? 0, `${label}.box_count_in_master`),
+      };
+    }
+
+    if (boxMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER) {
+      const piecesInMaster = toNonNegativeNumber(
+        entry?.box_count_in_master ?? 0,
+        `${label}.box_count_in_master`,
+      );
+      if (piecesInMaster <= 0) {
+        throw new Error(`${label}.box_count_in_master must be greater than 0`);
+      }
+      return {
+        L,
+        B,
+        H,
+        remark: BOX_ENTRY_TYPES.MASTER,
+        net_weight: netWeight,
+        gross_weight: grossWeight,
+        box_type: BOX_ENTRY_TYPES.MASTER,
+        item_count_in_inner: 0,
+        box_count_in_master: piecesInMaster,
       };
     }
 

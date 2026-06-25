@@ -11,6 +11,7 @@ import {
   convertMeasuredBoxEntriesMode,
   createEmptyMeasuredSizeEntry,
   ensureMeasuredSizeEntryCount,
+  getFixedBoxEntryCount,
   normalizeSizeCount,
   parseMeasuredSizeEntries,
   resolvePreferredMeasuredSizeCbm,
@@ -27,9 +28,8 @@ const initialForm = (sample = null) => ({
   box_mode: sample?.box_mode || BOX_PACKAGING_MODES.INDIVIDUAL,
   item_count: String(Math.max(1, sample?.item_sizes?.length || 1)),
   box_count: String(
-    sample?.box_mode === BOX_PACKAGING_MODES.CARTON
-      ? 2
-      : Math.max(1, sample?.box_sizes?.length || 1),
+    getFixedBoxEntryCount(sample?.box_mode) ??
+      Math.max(1, sample?.box_sizes?.length || 1),
   ),
   item_sizes: Array.isArray(sample?.item_sizes) && sample.item_sizes.length
     ? sample.item_sizes.map((entry) => ({
@@ -134,7 +134,7 @@ const SampleCreateModal = ({ sample = null, onClose, onSaved, isWorkflow = false
     setForm((prev) => ({
       ...prev,
       box_mode: mode,
-      box_count: mode === BOX_PACKAGING_MODES.CARTON ? "2" : prev.box_count,
+      box_count: String(getFixedBoxEntryCount(mode) ?? prev.box_count),
       box_sizes: convertMeasuredBoxEntriesMode(prev.box_sizes, mode),
     }));
   };

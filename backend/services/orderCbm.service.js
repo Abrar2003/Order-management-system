@@ -122,6 +122,24 @@ const calculateCartonModeTotalPoCbm = ({
   );
 };
 
+const calculateIndividualMasterModeTotalPoCbm = ({
+  orderQuantity = 0,
+  inspectedBoxSizes = [],
+} = {}) => {
+  const quantity = toPositiveNumber(orderQuantity, 0);
+  if (quantity <= 0) return 0;
+
+  const masterEntry = findCartonEntry(inspectedBoxSizes, BOX_ENTRY_TYPES.MASTER);
+  const piecesInMaster = toPositiveNumber(masterEntry?.box_count_in_master, 0);
+  const masterBoxCbm = dimensionToCbm(masterEntry);
+
+  if (piecesInMaster <= 0 || masterBoxCbm <= 0) {
+    return 0;
+  }
+
+  return roundCbm((quantity / piecesInMaster) * masterBoxCbm);
+};
+
 const calculateTotalPoCbm = ({
   orderQuantity = 0,
   inspectedBoxSizes = [],
@@ -132,6 +150,13 @@ const calculateTotalPoCbm = ({
 
   if (resolvedMode === BOX_PACKAGING_MODES.CARTON) {
     return calculateCartonModeTotalPoCbm({
+      orderQuantity,
+      inspectedBoxSizes: entries,
+    });
+  }
+
+  if (resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER) {
+    return calculateIndividualMasterModeTotalPoCbm({
       orderQuantity,
       inspectedBoxSizes: entries,
     });

@@ -28,6 +28,7 @@ import {
   createEmptyMeasuredSizeEntry,
   detectBoxPackagingMode,
   ensureMeasuredSizeEntryCount,
+  getFixedBoxEntryCount,
   getRemarkLabel,
   normalizeSizeCount,
   SIZE_ENTRY_LIMIT as SIZE_ENTRY_LIMIT_UTIL,
@@ -182,6 +183,9 @@ const formatRemark = (value) => {
 const formatBoxMode = (value) => {
   const mode = normalizeTextValue(value).toLowerCase();
   if (mode === BOX_PACKAGING_MODES.CARTON) return "Carton";
+  if (mode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER) {
+    return "Individual packing + master";
+  }
   return "Individual";
 };
 
@@ -571,7 +575,10 @@ const ProductDatabaseMeasuredSizeSection = ({
   onEntryChange,
 }) => {
   const isCartonMode = mode === BOX_PACKAGING_MODES.CARTON;
-  const safeCount = isCartonMode ? 2 : normalizeSizeCount(countValue, 1);
+  const isIndividualMasterMode =
+    mode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER;
+  const fixedBoxCount = getFixedBoxEntryCount(mode);
+  const safeCount = fixedBoxCount ?? normalizeSizeCount(countValue, 1);
   const entryColumnClass = safeCount > 1 ? "col-md-2" : "col-md-3";
   const singleEntryLabel = String(countLabel || "").toLowerCase().includes("box")
     ? "Box"
@@ -594,6 +601,9 @@ const ProductDatabaseMeasuredSizeSection = ({
             >
               <option value={BOX_PACKAGING_MODES.INDIVIDUAL}>Individual Boxes</option>
               <option value={BOX_PACKAGING_MODES.CARTON}>Inner + Master Carton</option>
+              <option value={BOX_PACKAGING_MODES.INDIVIDUAL_MASTER}>
+                Individual packing + master
+              </option>
             </select>
           </>
         ) : (
@@ -618,11 +628,11 @@ const ProductDatabaseMeasuredSizeSection = ({
         {showModeSelector && countName && (
           <>
             <label className="form-label mt-3">{countLabel}</label>
-            {isCartonMode ? (
+            {fixedBoxCount ? (
               <input
                 type="text"
                 className="form-control"
-                value="2"
+                value={String(fixedBoxCount)}
                 disabled
                 readOnly
               />
@@ -656,6 +666,8 @@ const ProductDatabaseMeasuredSizeSection = ({
                   : remarkOptions;
                 const displayedRemark = isCartonMode
                   ? getCartonRemark(index)
+                  : isIndividualMasterMode
+                    ? BOX_ENTRY_TYPES.MASTER
                   : entry.remark;
                 return (
                   <>
@@ -664,6 +676,8 @@ const ProductDatabaseMeasuredSizeSection = ({
                   ? index === 0
                     ? "Inner carton"
                     : "Master carton"
+                  : isIndividualMasterMode
+                    ? "Master carton"
                   : safeCount === 1
                   ? singleEntryLabel
                   : `Entry ${index + 1}${displayedRemark ? ` | ${getRemarkLabel(displayedRemarkOptions, displayedRemark)}` : ""}`}
@@ -796,6 +810,22 @@ const ProductDatabaseMeasuredSizeSection = ({
                     />
                   </div>
                 )}
+                {isIndividualMasterMode && (
+                  <div className="col-md-3">
+                    <label className="form-label small text-secondary">Pcs in Master</label>
+                    <input
+                      type="number"
+                      className="form-control"
+                      value={entry.box_count_in_master}
+                      onChange={(event) =>
+                        onEntryChange(entriesKey, index, "box_count_in_master", event.target.value)
+                      }
+                      min="0"
+                      step="1"
+                      disabled={disabled}
+                    />
+                  </div>
+                )}
               </div>
                   </>
                 );
@@ -804,14 +834,19 @@ const ProductDatabaseMeasuredSizeSection = ({
           ))}
         </div>
 
-        {safeCount === 1 && !isCartonMode && (
+        {safeCount === 1 && !isCartonMode && !isIndividualMasterMode && (
           <div className="small text-secondary mt-2">
             Single-entry measurements use {singleEntryLabel.toLowerCase()} as the remark.
           </div>
         )}
         {isCartonMode && (
           <div className="small text-secondary mt-2">
-            Master carton CBM is treated as the final effective box CBM.
+            Master carton CBM is divided by item count in inner and box count in master.
+          </div>
+        )}
+        {isIndividualMasterMode && (
+          <div className="small text-secondary mt-2">
+            Master carton CBM is divided by pcs in master.
           </div>
         )}
       </div>
@@ -928,6 +963,8 @@ const toMeasuredSizeEntryFormValue = (
         normalizedRemark === BOX_ENTRY_TYPES.MASTER
         ? BOX_ENTRY_TYPES.MASTER
         : BOX_ENTRY_TYPES.INNER
+      : resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
+        ? BOX_ENTRY_TYPES.MASTER
       : BOX_ENTRY_TYPES.INDIVIDUAL;
   const cartonRemarkIndex = resolvedBoxType === BOX_ENTRY_TYPES.MASTER ? 1 : 0;
 
@@ -937,7 +974,8 @@ const toMeasuredSizeEntryFormValue = (
       boxType: resolvedBoxType,
     }),
     remark:
-      resolvedMode === BOX_PACKAGING_MODES.CARTON
+      resolvedMode === BOX_PACKAGING_MODES.CARTON ||
+      resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
         ? getCartonRemarkForIndex(cartonRemarkIndex)
         : normalizedRemark,
     box_type: resolvedBoxType,
@@ -964,9 +1002,10 @@ const createProductDatabaseMeasuredSizeFormState = (item = {}) => {
     }),
   );
   const resolvedBoxMode = detectBoxPackagingMode(boxMode, boxEntries);
+  const fixedBoxCount = getFixedBoxEntryCount(resolvedBoxMode);
   const boxCount =
-    resolvedBoxMode === BOX_PACKAGING_MODES.CARTON
-      ? "2"
+    fixedBoxCount
+      ? String(fixedBoxCount)
       : String(normalizeSizeCount(Math.max(boxEntries.length, 1), 1));
 
   return {
@@ -990,7 +1029,11 @@ const cloneMeasuredSizeFormState = (formState = {}) => ({
   itemCount: String(normalizeSizeCount(formState?.itemCount, 1)),
   itemEntries: cloneMeasuredSizeEntries(formState?.itemEntries),
   boxMode: detectBoxPackagingMode(formState?.boxMode, formState?.boxEntries || []),
-  boxCount: String(normalizeSizeCount(formState?.boxCount, 1)),
+  boxCount: String(
+    getFixedBoxEntryCount(
+      detectBoxPackagingMode(formState?.boxMode, formState?.boxEntries || []),
+    ) ?? normalizeSizeCount(formState?.boxCount, 1),
+  ),
   boxEntries: cloneMeasuredSizeEntries(formState?.boxEntries),
 });
 
@@ -1007,10 +1050,9 @@ const buildMeasuredSizeEntriesPayload = ({
   isBox = false,
 } = {}) => {
   const resolvedMode = isBox ? detectBoxPackagingMode(mode, entries) : BOX_PACKAGING_MODES.INDIVIDUAL;
+  const fixedBoxCount = isBox ? getFixedBoxEntryCount(resolvedMode) : null;
   const safeCount =
-    isBox && resolvedMode === BOX_PACKAGING_MODES.CARTON
-      ? 2
-      : normalizeSizeCount(count, 1);
+    fixedBoxCount ?? normalizeSizeCount(count, 1);
   const scopedEntries = ensureMeasuredSizeEntryCount(entries, safeCount, {
     mode: resolvedMode,
     singleRemark: isBox ? "box" : "item",
@@ -1018,7 +1060,9 @@ const buildMeasuredSizeEntriesPayload = ({
 
   return scopedEntries.reduce((payloadEntries, entry, index) => {
     const isCartonMode = isBox && resolvedMode === BOX_PACKAGING_MODES.CARTON;
-    if (!hasMeaningfulMeasuredPayloadInput(entry, isCartonMode)) {
+    const isIndividualMasterMode =
+      isBox && resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER;
+    if (!hasMeaningfulMeasuredPayloadInput(entry, isCartonMode || isIndividualMasterMode)) {
       return payloadEntries;
     }
 
@@ -1041,6 +1085,10 @@ const buildMeasuredSizeEntriesPayload = ({
         if (boxType === BOX_ENTRY_TYPES.MASTER) {
           addPositivePayloadNumber(payload, "box_count_in_master", entry?.box_count_in_master);
         }
+      } else if (isIndividualMasterMode) {
+        payload.remark = BOX_ENTRY_TYPES.MASTER;
+        payload.box_type = BOX_ENTRY_TYPES.MASTER;
+        addPositivePayloadNumber(payload, "box_count_in_master", entry?.box_count_in_master);
       } else {
         payload.box_type = BOX_ENTRY_TYPES.INDIVIDUAL;
         const remark = normalizeMeasuredKey(entry?.remark) || (safeCount === 1 ? "box" : "");
@@ -1611,12 +1659,13 @@ export const ProductDatabaseModal = ({ item, draft = null, onClose, onSaved, onS
           ...prev,
           boxMode: nextMode,
           boxCount:
-            nextMode === BOX_PACKAGING_MODES.CARTON
-              ? "2"
-              : String(normalizeSizeCount(prev.boxCount, 1)),
+            String(
+              getFixedBoxEntryCount(nextMode) ??
+                normalizeSizeCount(prev.boxCount, 1),
+            ),
           boxEntries: ensureMeasuredSizeEntryCount(
             convertMeasuredBoxEntriesMode(prev.boxEntries, nextMode),
-            nextMode === BOX_PACKAGING_MODES.CARTON ? 2 : prev.boxCount,
+            getFixedBoxEntryCount(nextMode) ?? prev.boxCount,
             { mode: nextMode, singleRemark: "box" },
           ),
         };

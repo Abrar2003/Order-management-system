@@ -81,6 +81,7 @@ const formatRemark = (entry = {}, fallback = "Entry") => {
 const formatBoxMode = (mode = "") => {
   const normalized = String(mode || "").trim().toLowerCase();
   if (normalized === "carton") return "Inner + Master Carton";
+  if (normalized === "individual_master") return "Individual packing + master";
   return "Individual Boxes";
 };
 

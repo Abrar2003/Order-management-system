@@ -10,6 +10,7 @@ import {
   createEmptyMeasuredSizeEntry,
   detectBoxPackagingMode,
   ensureMeasuredSizeEntryCount,
+  getFixedBoxEntryCount,
   normalizeSizeCount,
   parseMeasuredSizeEntries,
   resolvePreferredMeasuredSizeCbm,
@@ -112,7 +113,7 @@ const CreateItemModal = ({
 
   const handleBoxModeChange = (value) => {
     const nextMode = detectBoxPackagingMode(value, form.pis_box_sizes);
-    const nextCount = nextMode === BOX_PACKAGING_MODES.CARTON ? "2" : form.pis_box_count;
+    const nextCount = String(getFixedBoxEntryCount(nextMode) ?? form.pis_box_count);
     setForm((prev) => ({
       ...prev,
       pis_box_mode: nextMode,

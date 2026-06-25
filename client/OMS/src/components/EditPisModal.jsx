@@ -15,6 +15,7 @@ import {
   calculateMeasuredSizeEntriesCbm,
   detectBoxPackagingMode,
   ensureMeasuredSizeEntryCount,
+  getFixedBoxEntryCount,
   hasMeaningfulMeasuredSize,
   normalizeSizeCount,
   parseMeasuredSizeEntries,
@@ -31,11 +32,14 @@ const formatFallback = (value, fallback = "Not Set") => {
   const text = toText(value);
   return text && text !== "0" ? text : fallback;
 };
-const formatBoxMode = (mode = "") => (
-  detectBoxPackagingMode(mode) === BOX_PACKAGING_MODES.CARTON
-    ? "Inner / Master Carton"
-    : "Individual Boxes"
-);
+const formatBoxMode = (mode = "") => {
+  const resolvedMode = detectBoxPackagingMode(mode);
+  if (resolvedMode === BOX_PACKAGING_MODES.CARTON) return "Inner / Master Carton";
+  if (resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER) {
+    return "Individual packing + master";
+  }
+  return "Individual Boxes";
+};
 const formatRemarkLabel = (remark = "", fallback = "Entry") => {
   const normalized = toText(remark).toLowerCase();
   if (!normalized) return fallback;
@@ -207,13 +211,14 @@ const buildInspectedMeasurementDetails = (item = {}) => {
     inspectedBoxMode === BOX_PACKAGING_MODES.CARTON
       ? (boxEntries.length > 0 ? arrangeCartonEntriesForFetch(boxEntries) : [])
       : sortMeasuredEntriesByRemark(boxEntries, ["box", "top", "base"]);
+  const fixedBoxCount = getFixedBoxEntryCount(inspectedBoxMode);
 
   return {
     inspectedBoxMode,
     itemEntries: sortedItemEntries.slice(0, SIZE_ENTRY_LIMIT),
     boxEntries: sortedBoxEntries.slice(
       0,
-      inspectedBoxMode === BOX_PACKAGING_MODES.CARTON ? 2 : SIZE_ENTRY_LIMIT,
+      fixedBoxCount ?? SIZE_ENTRY_LIMIT,
     ),
   };
 };
@@ -281,12 +286,12 @@ const buildInitialForm = (item = {}, options = {}) => {
     pisItemEntries.length > 0
       ? normalizeSizeCount(pisItemEntries.length, 1)
       : 1;
+  const pisBoxFixedCount = getFixedBoxEntryCount(resolvedBoxMode);
   const pisBoxCount =
-    resolvedBoxMode === BOX_PACKAGING_MODES.CARTON
-      ? 2
-      : pisBoxEntries.length > 0
+    pisBoxFixedCount ??
+    (pisBoxEntries.length > 0
       ? normalizeSizeCount(pisBoxEntries.length, 1)
-      : 1;
+      : 1);
 
   return {
     country_of_origin: resolvedCountryOfOrigin,
@@ -491,7 +496,7 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
 
   const handleBoxModeChange = (value) => {
     const nextMode = detectBoxPackagingMode(value, form.pis_box_sizes);
-    const nextCount = nextMode === BOX_PACKAGING_MODES.CARTON ? "2" : form.pis_box_count;
+    const nextCount = String(getFixedBoxEntryCount(nextMode) ?? form.pis_box_count);
     setForm((prev) => ({
       ...prev,
       pis_box_mode: nextMode,
@@ -583,9 +588,8 @@ const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
       if (hasBoxEntries) {
         const boxMode = inspectedMeasurementDetails.inspectedBoxMode;
         const boxCount =
-          boxMode === BOX_PACKAGING_MODES.CARTON
-            ? 2
-            : normalizeSizeCount(inspectedMeasurementDetails.boxEntries.length, 1);
+          getFixedBoxEntryCount(boxMode) ??
+          normalizeSizeCount(inspectedMeasurementDetails.boxEntries.length, 1);
         next.pis_box_mode = boxMode;
         next.pis_box_count = String(boxCount);
         next.pis_box_sizes = ensureMeasuredSizeEntryCount(

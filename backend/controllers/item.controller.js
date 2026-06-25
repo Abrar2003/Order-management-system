@@ -341,10 +341,18 @@ const buildMeasurementCbmSummary = ({
     const first = calculateCbmFromLbh(normalizedEntries[0] || {});
     const second = calculateCbmFromLbh(normalizedEntries[1] || {});
     const third = calculateCbmFromLbh(normalizedEntries[2] || {});
-    const total = normalizedEntries.reduce(
-      (sum, entry) => sum + toPositiveCbmNumber(calculateCbmFromLbh(entry)),
-      0,
+    const itemEntries = normalizedEntries.filter((entry) =>
+      String(entry?.remark || "").trim().toLowerCase().startsWith("item")
     );
+    const total = itemEntries.length > 0
+      ? itemEntries.reduce(
+          (sum, entry) => sum + toPositiveCbmNumber(calculateCbmFromLbh(entry)),
+          0,
+        )
+      : normalizedEntries.reduce(
+          (sum, entry) => sum + toPositiveCbmNumber(calculateCbmFromLbh(entry)),
+          0,
+        );
 
     return {
       first,

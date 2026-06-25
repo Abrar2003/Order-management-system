@@ -9,6 +9,7 @@ import {
   calculateMeasuredSizeEntriesCbm,
   detectBoxPackagingMode,
   ensureMeasuredSizeEntryCount,
+  getFixedBoxEntryCount,
   hasMeaningfulMeasuredSize,
   normalizeSizeCount,
   parseMeasuredSizeEntries,
@@ -64,12 +65,12 @@ const buildInitialForm = (item = {}) => {
     inspectedItemEntries.length > 0
       ? normalizeSizeCount(inspectedItemEntries.length, 1)
       : 1;
+  const inspectedBoxFixedCount = getFixedBoxEntryCount(inspectedBoxMode);
   const inspectedBoxCount =
-    inspectedBoxMode === BOX_PACKAGING_MODES.CARTON
-      ? 2
-      : inspectedBoxEntries.length > 0
+    inspectedBoxFixedCount ??
+    (inspectedBoxEntries.length > 0
       ? normalizeSizeCount(inspectedBoxEntries.length, 1)
-      : 1;
+      : 1);
 
   return {
     name: toText(item?.name),
@@ -185,7 +186,7 @@ const EditItemModal = ({ item, onClose, onUpdated }) => {
   const handleInspectedBoxModeChange = (value) => {
     const nextMode = detectBoxPackagingMode(value, form.inspected_box_sizes);
     const nextCount =
-      nextMode === BOX_PACKAGING_MODES.CARTON ? "2" : form.inspected_box_count;
+      String(getFixedBoxEntryCount(nextMode) ?? form.inspected_box_count);
     setForm((prev) => ({
       ...prev,
       inspected_box_mode: nextMode,

@@ -255,10 +255,22 @@ const parseDimensionRows = (sheet, dimensionCell) => {
     );
   }
 
+  const hasInnerBox = boxSizes.some(
+    (entry) => entry?.box_type === BOX_ENTRY_TYPES.INNER,
+  );
+  const hasMasterBox = boxSizes.some(
+    (entry) => entry?.box_type === BOX_ENTRY_TYPES.MASTER,
+  );
+
   return {
     itemSizes,
     boxSizes,
-    boxMode: boxSizes.length > 0 ? BOX_PACKAGING_MODES.CARTON : null,
+    boxMode:
+      hasInnerBox
+        ? BOX_PACKAGING_MODES.CARTON
+        : hasMasterBox
+          ? BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
+          : null,
   };
 };
 

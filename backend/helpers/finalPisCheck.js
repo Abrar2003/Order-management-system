@@ -400,6 +400,12 @@ const buildBoxMeasurementEntries = ({
   mode = "",
 } = {}) => {
   const resolvedMode = detectBoxPackagingMode(mode, sizes);
+  const entryLimit =
+    resolvedMode === BOX_PACKAGING_MODES.CARTON
+      ? 2
+      : resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
+        ? 1
+        : SIZE_ENTRY_LIMIT;
   const normalizedSizes = (Array.isArray(sizes) ? sizes : [])
     .map((entry) => normalizeBoxMeasurementEntry(entry))
     .filter((entry) =>
@@ -408,7 +414,7 @@ const buildBoxMeasurementEntries = ({
         countKeys: ["item_count_in_inner", "box_count_in_master"],
       }),
     )
-    .slice(0, resolvedMode === BOX_PACKAGING_MODES.CARTON ? 2 : SIZE_ENTRY_LIMIT);
+    .slice(0, entryLimit);
 
   return sortEntries(normalizedSizes, {
     order: BOX_REMARK_ORDER,
@@ -992,6 +998,9 @@ const formatBoxModeLabel = (mode = "") => {
   const normalized = normalizeKey(mode);
   if (!normalized) return "";
   if (normalized === BOX_PACKAGING_MODES.CARTON) return "Carton";
+  if (normalized === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER) {
+    return "Individual packing + master";
+  }
   if (normalized === BOX_PACKAGING_MODES.INDIVIDUAL) return "Individual";
   return formatRemarkLabel(normalized, normalized);
 };

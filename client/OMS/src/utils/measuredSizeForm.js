@@ -5,6 +5,7 @@ export const SIZE_ENTRY_LIMIT = 4;
 export const BOX_PACKAGING_MODES = Object.freeze({
   INDIVIDUAL: "individual",
   CARTON: "carton",
+  INDIVIDUAL_MASTER: "individual_master",
 });
 export const BOX_ENTRY_TYPES = Object.freeze({
   INDIVIDUAL: "individual",
@@ -68,29 +69,38 @@ const normalizeAllowedBoxRemark = (value = "", index = 0) => {
 const getCartonRemarkForIndex = (index = 0) =>
   index === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER;
 
+export const getFixedBoxEntryCount = (mode = BOX_PACKAGING_MODES.INDIVIDUAL) => {
+  const normalizedMode = String(mode || "").trim().toLowerCase();
+  if (normalizedMode === BOX_PACKAGING_MODES.CARTON) return 2;
+  if (normalizedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER) return 1;
+  return null;
+};
+
 export const detectBoxPackagingMode = (mode = "", entries = []) => {
   const normalizedMode = String(mode || "").trim().toLowerCase();
   if (
     normalizedMode === BOX_PACKAGING_MODES.INDIVIDUAL ||
-    normalizedMode === BOX_PACKAGING_MODES.CARTON
+    normalizedMode === BOX_PACKAGING_MODES.CARTON ||
+    normalizedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
   ) {
     return normalizedMode;
   }
 
-  const hasCartonEntry = (Array.isArray(entries) ? entries : []).some((entry) => {
+  const entryTypes = (Array.isArray(entries) ? entries : []).reduce((types, entry) => {
     const remark = String(entry?.remark || entry?.type || "").trim().toLowerCase();
     const boxType = String(entry?.box_type || "").trim().toLowerCase();
-    return (
-      remark === BOX_ENTRY_TYPES.INNER ||
-      remark === BOX_ENTRY_TYPES.MASTER ||
-      boxType === BOX_ENTRY_TYPES.INNER ||
-      boxType === BOX_ENTRY_TYPES.MASTER
-    );
-  });
+    if (remark === BOX_ENTRY_TYPES.INNER || boxType === BOX_ENTRY_TYPES.INNER) {
+      types.inner = true;
+    }
+    if (remark === BOX_ENTRY_TYPES.MASTER || boxType === BOX_ENTRY_TYPES.MASTER) {
+      types.master = true;
+    }
+    return types;
+  }, { inner: false, master: false });
 
-  return hasCartonEntry
-    ? BOX_PACKAGING_MODES.CARTON
-    : BOX_PACKAGING_MODES.INDIVIDUAL;
+  if (entryTypes.inner) return BOX_PACKAGING_MODES.CARTON;
+  if (entryTypes.master) return BOX_PACKAGING_MODES.INDIVIDUAL_MASTER;
+  return BOX_PACKAGING_MODES.INDIVIDUAL;
 };
 
 const createCartonEntry = (
@@ -107,22 +117,41 @@ const createCartonEntry = (
   box_count_in_master: boxType === BOX_ENTRY_TYPES.MASTER ? "" : "0",
 });
 
+const createIndividualMasterEntry = () => ({
+  ...createCartonEntry(BOX_ENTRY_TYPES.MASTER, 0),
+  remark: BOX_ENTRY_TYPES.MASTER,
+  box_type: BOX_ENTRY_TYPES.MASTER,
+  item_count_in_inner: "0",
+  box_count_in_master: "",
+});
+
 export const createEmptyMeasuredSizeEntry = ({
   mode = BOX_PACKAGING_MODES.INDIVIDUAL,
   boxType = BOX_ENTRY_TYPES.INDIVIDUAL,
 } = {}) =>
-  detectBoxPackagingMode(mode, [{ box_type: boxType }]) === BOX_PACKAGING_MODES.CARTON
-    ? createCartonEntry(boxType === BOX_ENTRY_TYPES.MASTER ? BOX_ENTRY_TYPES.MASTER : BOX_ENTRY_TYPES.INNER)
-    : {
-        remark: "",
-        box_type: BOX_ENTRY_TYPES.INDIVIDUAL,
-        L: "",
-        B: "",
-        H: "",
-        weight: "",
-        item_count_in_inner: "0",
-        box_count_in_master: "0",
-      };
+  (() => {
+    const resolvedMode = detectBoxPackagingMode(mode, [{ box_type: boxType }]);
+    if (resolvedMode === BOX_PACKAGING_MODES.CARTON) {
+      return createCartonEntry(
+        boxType === BOX_ENTRY_TYPES.MASTER
+          ? BOX_ENTRY_TYPES.MASTER
+          : BOX_ENTRY_TYPES.INNER,
+      );
+    }
+    if (resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER) {
+      return createIndividualMasterEntry();
+    }
+    return {
+      remark: "",
+      box_type: BOX_ENTRY_TYPES.INDIVIDUAL,
+      L: "",
+      B: "",
+      H: "",
+      weight: "",
+      item_count_in_inner: "0",
+      box_count_in_master: "0",
+    };
+  })();
 
 export const toDimensionInputValue = (value) => {
   return formatNumberInputValue(value);
@@ -149,16 +178,20 @@ const coerceMeasuredSizeEntry = (
   const normalizedRemark = String(entry?.remark || "").trim().toLowerCase();
   const normalizedBoxType = String(entry?.box_type || "").trim().toLowerCase();
   const isCartonMode = resolvedMode === BOX_PACKAGING_MODES.CARTON;
+  const isIndividualMasterMode =
+    resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER;
   const resolvedBoxType = isCartonMode
     ? normalizedBoxType === BOX_ENTRY_TYPES.MASTER ||
       normalizedRemark === BOX_ENTRY_TYPES.MASTER ||
       index === 1
       ? BOX_ENTRY_TYPES.MASTER
       : BOX_ENTRY_TYPES.INNER
+    : isIndividualMasterMode
+      ? BOX_ENTRY_TYPES.MASTER
     : BOX_ENTRY_TYPES.INDIVIDUAL;
 
   return {
-    remark: isCartonMode
+    remark: isCartonMode || isIndividualMasterMode
       ? resolvedBoxType
       : normalizedRemark,
     box_type: resolvedBoxType,
@@ -177,10 +210,9 @@ export const ensureMeasuredSizeEntryCount = (
   { mode = BOX_PACKAGING_MODES.INDIVIDUAL, singleRemark = "" } = {},
 ) => {
   const resolvedMode = detectBoxPackagingMode(mode, entries);
+  const fixedBoxCount = getFixedBoxEntryCount(resolvedMode);
   const safeCount =
-    resolvedMode === BOX_PACKAGING_MODES.CARTON
-      ? 2
-      : normalizeSizeCount(count, 1);
+    fixedBoxCount ?? normalizeSizeCount(count, 1);
   const nextEntries = Array.isArray(entries)
     ? entries
         .slice(0, safeCount)
@@ -195,6 +227,13 @@ export const ensureMeasuredSizeEntryCount = (
         createEmptyMeasuredSizeEntry({
           mode: resolvedMode,
           boxType: nextEntries.length === 0 ? BOX_ENTRY_TYPES.INNER : BOX_ENTRY_TYPES.MASTER,
+        }),
+      );
+    } else if (resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER) {
+      nextEntries.push(
+        createEmptyMeasuredSizeEntry({
+          mode: resolvedMode,
+          boxType: BOX_ENTRY_TYPES.MASTER,
         }),
       );
     } else {
@@ -212,6 +251,10 @@ export const ensureMeasuredSizeEntryCount = (
         entry.item_count_in_inner = "0";
       }
     });
+  } else if (resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER && nextEntries[0]) {
+    nextEntries[0].box_type = BOX_ENTRY_TYPES.MASTER;
+    nextEntries[0].remark = BOX_ENTRY_TYPES.MASTER;
+    nextEntries[0].item_count_in_inner = "0";
   } else if (safeCount === 1 && nextEntries[0]) {
     nextEntries[0].remark = normalizeRemarkValue(singleRemark);
     nextEntries[0].box_type = BOX_ENTRY_TYPES.INDIVIDUAL;
@@ -267,7 +310,7 @@ export const buildMeasuredSizeEntriesFromLegacy = ({
           toMeasuredSizeEntryValue(entry, weightKey, { mode: resolvedMode, index }),
         )
         .filter((entry) => hasMeaningfulMeasuredSize(entry))
-        .slice(0, resolvedMode === BOX_PACKAGING_MODES.CARTON ? 2 : SIZE_ENTRY_LIMIT)
+        .slice(0, getFixedBoxEntryCount(resolvedMode) ?? SIZE_ENTRY_LIMIT)
     : [];
 };
 
@@ -279,9 +322,10 @@ export const convertMeasuredBoxEntriesMode = (
   nextMode = BOX_PACKAGING_MODES.INDIVIDUAL,
 ) => {
   const resolvedMode = detectBoxPackagingMode(nextMode, entries);
+  const fixedBoxCount = getFixedBoxEntryCount(resolvedMode);
   const normalizedEntries = ensureMeasuredSizeEntryCount(
     entries,
-    resolvedMode === BOX_PACKAGING_MODES.CARTON ? 2 : Math.max(1, entries?.length || 1),
+    fixedBoxCount ?? Math.max(1, entries?.length || 1),
     { mode: resolvedMode },
   );
 
@@ -319,6 +363,22 @@ export const convertMeasuredBoxEntriesMode = (
     ];
   }
 
+  if (resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER) {
+    const masterEntry = normalizedEntries.find(
+      (entry) => entry?.box_type === BOX_ENTRY_TYPES.MASTER,
+    ) || normalizedEntries[0] || createIndividualMasterEntry();
+
+    return [
+      {
+        ...createIndividualMasterEntry(),
+        ...masterEntry,
+        remark: BOX_ENTRY_TYPES.MASTER,
+        box_type: BOX_ENTRY_TYPES.MASTER,
+        item_count_in_inner: "0",
+      },
+    ];
+  }
+
   return normalizedEntries.map((entry, index) => ({
     ...createEmptyMeasuredSizeEntry(),
     ...entry,
@@ -342,8 +402,9 @@ export const deriveLegacyFromMeasuredSizeEntries = (
   } = {},
 ) => {
   const resolvedMode = detectBoxPackagingMode(mode, entries);
+  const fixedBoxCount = getFixedBoxEntryCount(resolvedMode);
   const safeCount =
-    resolvedMode === BOX_PACKAGING_MODES.CARTON ? 2 : normalizeSizeCount(count, 1);
+    fixedBoxCount ?? normalizeSizeCount(count, 1);
   const safeEntries = ensureMeasuredSizeEntryCount(entries, safeCount, {
     mode: resolvedMode,
   });
@@ -399,6 +460,23 @@ export const deriveLegacyFromMeasuredSizeEntries = (
     };
   }
 
+  if (resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER) {
+    const masterEntry =
+      normalizedEntries.find((entry) => entry.box_type === BOX_ENTRY_TYPES.MASTER || entry.remark === BOX_ENTRY_TYPES.MASTER) ||
+      normalizedEntries[0] ||
+      null;
+
+    return {
+      mode: resolvedMode,
+      single: toLegacyLbh(masterEntry),
+      top: null,
+      bottom: null,
+      totalWeight: totalWeight > 0 ? totalWeight : null,
+      topWeight: null,
+      bottomWeight: Number(masterEntry?.weight || 0) > 0 ? Number(masterEntry.weight) : null,
+    };
+  }
+
   return {
     mode: resolvedMode,
     single: safeCount === 1 ? toLegacyLbh(normalizedEntries[0]) : null,
@@ -428,10 +506,9 @@ export const parseMeasuredSizeEntries = ({
   singleRemark = "",
 } = {}) => {
   const resolvedMode = detectBoxPackagingMode(mode, entries);
+  const fixedBoxCount = getFixedBoxEntryCount(resolvedMode);
   const safeCount =
-    resolvedMode === BOX_PACKAGING_MODES.CARTON
-      ? 2
-      : normalizeSizeCount(count, 1);
+    fixedBoxCount ?? normalizeSizeCount(count, 1);
   const scopedEntries = ensureMeasuredSizeEntryCount(
     entries,
     safeCount,
@@ -491,9 +568,13 @@ export const parseMeasuredSizeEntries = ({
     const B = parsedB.value;
     const H = parsedH.value;
 
-    let normalizedRemark = "";
     const isCartonMode = resolvedMode === BOX_PACKAGING_MODES.CARTON;
-    if (safeCount === 1 && !isCartonMode) {
+    const isIndividualMasterMode =
+      resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER;
+    let normalizedRemark = "";
+    if (isIndividualMasterMode) {
+      normalizedRemark = BOX_ENTRY_TYPES.MASTER;
+    } else if (safeCount === 1 && !isCartonMode) {
       normalizedRemark =
         String(entry?.remark || "").trim().toLowerCase() ||
         normalizeRemarkValue(singleRemark);
@@ -563,6 +644,16 @@ export const parseMeasuredSizeEntries = ({
         parsedEntry.box_count_in_master = boxCountInMaster.value;
         parsedEntry.item_count_in_inner = 0;
       }
+    } else if (resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER) {
+      const piecesInMaster = parseEntryNumber(
+        entry?.box_count_in_master,
+        `${entryLabel} pcs in master`,
+      );
+      if (piecesInMaster.error) return { error: piecesInMaster.error };
+      parsedEntry.remark = BOX_ENTRY_TYPES.MASTER;
+      parsedEntry.box_type = BOX_ENTRY_TYPES.MASTER;
+      parsedEntry.item_count_in_inner = 0;
+      parsedEntry.box_count_in_master = piecesInMaster.value;
     }
 
     parsedEntries.push(parsedEntry);
@@ -582,10 +673,9 @@ export const calculateMeasuredSizeEntriesCbm = (
   { mode = BOX_PACKAGING_MODES.INDIVIDUAL } = {},
 ) => {
   const resolvedMode = detectBoxPackagingMode(mode, entries);
+  const fixedBoxCount = getFixedBoxEntryCount(resolvedMode);
   const safeCount =
-    resolvedMode === BOX_PACKAGING_MODES.CARTON
-      ? 2
-      : normalizeSizeCount(count, 1);
+    fixedBoxCount ?? normalizeSizeCount(count, 1);
   const scopedEntries = ensureMeasuredSizeEntryCount(entries, safeCount, {
     mode: resolvedMode,
   }).slice(0, safeCount);
@@ -615,6 +705,26 @@ export const calculateMeasuredSizeEntriesCbm = (
     return formatCbm(
       ((L * B * H) / 1000000) / (itemCountInInner * boxCountInMaster),
     );
+  }
+  if (resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER) {
+    const masterEntry =
+      scopedEntries.find((entry) => entry?.box_type === BOX_ENTRY_TYPES.MASTER) ||
+      scopedEntries[0] ||
+      null;
+    const L = Number(masterEntry?.L || 0);
+    const B = Number(masterEntry?.B || 0);
+    const H = Number(masterEntry?.H || 0);
+    if (!Number.isFinite(L) || !Number.isFinite(B) || !Number.isFinite(H)) {
+      return formatCbm(0);
+    }
+    if (L <= 0 || B <= 0 || H <= 0) {
+      return formatCbm(0);
+    }
+    const piecesInMaster = toPositiveNumber(masterEntry?.box_count_in_master);
+    if (piecesInMaster <= 0) {
+      return formatCbm(0);
+    }
+    return formatCbm(((L * B * H) / 1000000) / piecesInMaster);
   }
   const total = scopedEntries.reduce((sum, entry) => {
     const L = Number(entry?.L || 0);

@@ -1401,11 +1401,15 @@ const sortSizeEntriesByRemark = (entries = [], remarkOptions = []) =>
     return safeLeftIndex - safeRightIndex;
   });
 
-const calculateSizeEntriesCbmTotal = (entries = []) =>
-  normalizeStoredSizeEntries(entries).reduce(
+const calculateSizeEntriesCbmTotal = (entries = []) => {
+  const itemEntries = normalizeStoredSizeEntries(entries).filter(entry => 
+    String(entry?.remark || "").trim().toLowerCase().startsWith("item")
+  );
+  return itemEntries.reduce(
     (sum, entry) => sum + toPositiveCbmNumber(calculateCbmFromLbh(entry)),
     0,
   );
+};
 
 const sumSizeEntriesWeight = (entries = [], weightKey = "") =>
   normalizeStoredSizeEntries(entries, { weightKey }).reduce(
@@ -5094,6 +5098,14 @@ const updateQC = async (req, res) => {
         throw new Error(`${fieldName} must contain exactly 2 entries in carton mode`);
       }
 
+      if (
+        fieldName === "inspected_box_sizes" &&
+        resolvedBoxMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER &&
+        nonEmptyEntries.length > 1
+      ) {
+        throw new Error(`${fieldName} must contain exactly 1 entry in individual packing + master mode`);
+      }
+
       const seenRemarks = new Set();
       const parsedEntries = nonEmptyEntries.map((entry, entryIndex) => {
         const L = toNonNegativeNumber(entry?.L, NaN);
@@ -5118,19 +5130,24 @@ const updateQC = async (req, res) => {
         const isCartonBoxEntry =
           fieldName === "inspected_box_sizes" &&
           resolvedBoxMode === BOX_PACKAGING_MODES.CARTON;
+        const isIndividualMasterBoxEntry =
+          fieldName === "inspected_box_sizes" &&
+          resolvedBoxMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER;
         const cartonRemark = isCartonBoxEntry
           ? entryIndex === 0 ? "inner" : "master"
           : "";
         const defaultSingleRemark =
           fieldName === "inspected_box_sizes" ? "box" : "item";
         const nextRemark =
-          nonEmptyEntries.length === 1
-            ? normalizedRemark || defaultSingleRemark
-            : isCartonBoxEntry
-              ? cartonRemark
+          isCartonBoxEntry || isIndividualMasterBoxEntry
+            ? isIndividualMasterBoxEntry
+              ? "master"
+              : cartonRemark
+            : nonEmptyEntries.length === 1
+              ? normalizedRemark || defaultSingleRemark
               : normalizedRemark;
 
-        if (nonEmptyEntries.length > 1 && !isCartonBoxEntry) {
+        if (nonEmptyEntries.length > 1 && !isCartonBoxEntry && !isIndividualMasterBoxEntry) {
           if (!nextRemark) {
             throw new Error(
               `${fieldName}[${entryIndex}] remark is required when multiple entries are provided`,
@@ -5183,6 +5200,19 @@ const updateQC = async (req, res) => {
               );
             }
             if (boxType === "master" && parsedEntry.box_count_in_master <= 0) {
+              throw new Error(
+                `${fieldName}[${entryIndex}].box_count_in_master must be greater than 0`,
+              );
+            }
+          } else if (resolvedBoxMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER) {
+            parsedEntry.remark = "master";
+            parsedEntry.box_type = "master";
+            parsedEntry.item_count_in_inner = 0;
+            parsedEntry.box_count_in_master = toNonNegativeNumber(
+              entry?.box_count_in_master,
+              0,
+            );
+            if (parsedEntry.box_count_in_master <= 0) {
               throw new Error(
                 `${fieldName}[${entryIndex}].box_count_in_master must be greater than 0`,
               );
@@ -5598,14 +5628,22 @@ const updateQC = async (req, res) => {
         });
       }
 
-      const requiredBoxModeForBarcodeValidation =
-        getBoxModeForQcBarcodeValidationType(selectedBarcodeValidationType);
-      if (parsedInspectedBoxMode !== requiredBoxModeForBarcodeValidation) {
+      const isCartonMode = parsedInspectedBoxMode === BOX_PACKAGING_MODES.CARTON;
+      const isIndividualOrIndividualMasterMode =
+        parsedInspectedBoxMode === BOX_PACKAGING_MODES.INDIVIDUAL ||
+        parsedInspectedBoxMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER;
+
+      const isValidBoxModeForBarcode =
+        selectedBarcodeValidationType === "inner_master"
+          ? isCartonMode
+          : isIndividualOrIndividualMasterMode;
+
+      if (!isValidBoxModeForBarcode) {
         return res.status(400).json({
           message:
             selectedBarcodeValidationType === "inner_master"
               ? "Inner + Master barcode validation requires Inner + Master Carton box mode."
-              : "Individual barcode validation requires Individual Boxes mode.",
+              : "Individual barcode validation requires Individual Boxes or Individual packing + master mode.",
         });
       }
       const barcodeValidationConfig =
@@ -11302,6 +11340,13 @@ exports.editInspectionRecords = async (req, res) => {
 	      const resolvedBoxMode = isBoxSizeField
 	        ? detectBoxPackagingMode(mode, value)
 	        : BOX_PACKAGING_MODES.INDIVIDUAL;
+	      if (
+	        isBoxSizeField &&
+	        resolvedBoxMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER &&
+	        value.length > 1
+	      ) {
+	        throw new Error(`${fieldName} must contain exactly 1 entry in individual packing + master mode`);
+	      }
 	      const seenRemarks = new Set();
 
 	      const parsedEntries = value.map((entry = {}, entryIndex) => {
@@ -11311,15 +11356,17 @@ exports.editInspectionRecords = async (req, res) => {
 	        const H = parseNonNegativeField(entry?.H, `${entryLabel}.H`);
 	        const isCartonEntry =
 	          isBoxSizeField && resolvedBoxMode === BOX_PACKAGING_MODES.CARTON;
+	        const isIndividualMasterEntry =
+	          isBoxSizeField && resolvedBoxMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER;
 	        const cartonRemark = isCartonEntry
 	          ? entryIndex === 0 ? "inner" : "master"
 	          : "";
-	        const normalizedRemark = isCartonEntry
-	          ? cartonRemark
+	        const normalizedRemark = isCartonEntry || isIndividualMasterEntry
+	          ? isIndividualMasterEntry ? "master" : cartonRemark
 	          : normalizeText(entry?.remark || entry?.type || "").toLowerCase();
 	        const defaultSingleRemark = isBoxSizeField ? "box" : "item";
 
-	        if (value.length > 1 && !isCartonEntry) {
+	        if (value.length > 1 && !isCartonEntry && !isIndividualMasterEntry) {
 	          if (!normalizedRemark) {
 	            throw new Error(`${entryLabel}.remark is required`);
 	          }
@@ -11361,6 +11408,19 @@ exports.editInspectionRecords = async (req, res) => {
 	                    `${entryLabel}.box_count_in_master`,
 	                  )
 	                : 0;
+	          } else if (resolvedBoxMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER) {
+	            parsedEntry.remark = "master";
+	            parsedEntry.box_type = "master";
+	            parsedEntry.item_count_in_inner = 0;
+	            parsedEntry.box_count_in_master = parseNonNegativeField(
+	              entry?.box_count_in_master,
+	              `${entryLabel}.box_count_in_master`,
+	            );
+	            if (parsedEntry.box_count_in_master <= 0) {
+	              throw new Error(
+	                `${entryLabel}.box_count_in_master must be greater than 0`,
+	              );
+	            }
 	          } else {
 	            parsedEntry.box_type = "individual";
 	            parsedEntry.item_count_in_inner = 0;

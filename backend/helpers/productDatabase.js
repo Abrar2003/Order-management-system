@@ -179,7 +179,12 @@ const normalizeBoxSizeEntries = (
 
   const resolvedMode = detectBoxPackagingMode(mode, entries);
   const meaningfulEntries = entries.filter((entry) => hasMeaningfulBoxEntry(entry));
-  const limit = resolvedMode === BOX_PACKAGING_MODES.CARTON ? 2 : SIZE_ENTRY_LIMIT;
+  const limit =
+    resolvedMode === BOX_PACKAGING_MODES.CARTON
+      ? 2
+      : resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
+        ? 1
+        : SIZE_ENTRY_LIMIT;
 
   if (meaningfulEntries.length > limit) {
     throw new ProductDatabaseError(`pd_box_sizes cannot exceed ${limit} entries`);
@@ -232,6 +237,15 @@ const normalizeBoxSizeEntries = (
     });
   }
 
+  if (
+    resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER &&
+    meaningfulEntries.length > 1
+  ) {
+    throw new ProductDatabaseError(
+      "pd_box_sizes must contain exactly 1 entry in individual packing + master mode",
+    );
+  }
+
   const seenRemarks = new Set();
   return meaningfulEntries.map((entry, index) => {
     const entryLabel = `PD box size ${index + 1}`;
@@ -273,6 +287,25 @@ const normalizeBoxSizeEntries = (
       }
 
       return cartonEntry;
+    }
+
+    if (resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER) {
+      const individualMasterEntry = {
+        ...baseEntry,
+        remark: BOX_ENTRY_TYPES.MASTER,
+        box_type: BOX_ENTRY_TYPES.MASTER,
+        item_count_in_inner: 0,
+      };
+      assignPositiveNumber(
+        individualMasterEntry,
+        "box_count_in_master",
+        entry?.box_count_in_master,
+        `${entryLabel} pcs in master`,
+      );
+      if (!hasMeaningfulNumber(individualMasterEntry.box_count_in_master)) {
+        throw new ProductDatabaseError(`${entryLabel} pcs in master must be greater than 0`);
+      }
+      return individualMasterEntry;
     }
 
     const normalizedRemark =

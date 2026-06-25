@@ -378,6 +378,10 @@ const buildMeasurementComparisonRows = ({
 };
 
 const isCartonBoxMode = (value) => normalizeText(value).toLowerCase() === "carton";
+const isMasterCartonBarcodeMode = (value) => {
+  const normalized = normalizeText(value).toLowerCase();
+  return normalized === "carton" || normalized === "individual_master";
+};
 const isIndividualBoxMode = (value) => {
   const normalized = normalizeText(value).toLowerCase();
   return !normalized || normalized === "individual";
@@ -385,7 +389,7 @@ const isIndividualBoxMode = (value) => {
 
 const getConditionalBarcodeValue = ({ mode, individual = "", cartonMaster = "", cartonInner = "", type = "" }) => {
   if (type === "individual") return isIndividualBoxMode(mode) ? formatEan13BarcodeDisplay(individual) : "Not Set";
-  if (type === "cartonMaster") return isCartonBoxMode(mode) ? formatEan13BarcodeDisplay(cartonMaster || individual) : "Not Set";
+  if (type === "cartonMaster") return isMasterCartonBarcodeMode(mode) ? formatEan13BarcodeDisplay(cartonMaster || individual) : "Not Set";
   if (type === "cartonInner") return isCartonBoxMode(mode) ? formatEan13BarcodeDisplay(cartonInner) : "Not Set";
   return "Not Set";
 };
@@ -702,7 +706,8 @@ const ItemDetails = () => {
         item?.master_box_mode,
       ];
       const showIndividualBarcode = sourceModes.some(isIndividualBoxMode);
-      const showCartonBarcodes = sourceModes.some(isCartonBoxMode);
+      const showMasterCartonBarcode = sourceModes.some(isMasterCartonBarcodeMode);
+      const showInnerCartonBarcode = sourceModes.some(isCartonBoxMode);
 
       if (showIndividualBarcode) {
         barcodeRows.push({
@@ -726,9 +731,8 @@ const ItemDetails = () => {
         });
       }
 
-      if (showCartonBarcodes) {
-        barcodeRows.push(
-          {
+      if (showMasterCartonBarcode) {
+        barcodeRows.push({
             key: "Master Carton Barcode",
             attribute: "Master Carton Barcode",
             pis: getConditionalBarcodeValue({
@@ -749,8 +753,11 @@ const ItemDetails = () => {
               cartonMaster: item?.master_master_barcode || item?.master_barcode,
               type: "cartonMaster",
             }),
-          },
-          {
+          });
+      }
+
+      if (showInnerCartonBarcode) {
+        barcodeRows.push({
             key: "Inner Carton Barcode",
             attribute: "Inner Carton Barcode",
             pis: getConditionalBarcodeValue({
@@ -768,8 +775,7 @@ const ItemDetails = () => {
               cartonInner: item?.master_inner_barcode,
               type: "cartonInner",
             }),
-          },
-        );
+          });
       }
 
       return [

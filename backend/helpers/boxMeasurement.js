@@ -1,6 +1,7 @@
 const BOX_PACKAGING_MODES = Object.freeze({
   INDIVIDUAL: "individual",
   CARTON: "carton",
+  INDIVIDUAL_MASTER: "individual_master",
 });
 
 const BOX_ENTRY_TYPES = Object.freeze({
@@ -77,29 +78,42 @@ const calculateCartonPerItemCbm = ({
   return masterCbm / (itemCountInInner * boxCountInMaster);
 };
 
+const calculateIndividualMasterPerItemCbm = ({ masterEntry = null } = {}) => {
+  const piecesInMaster = toPositiveNumber(masterEntry?.box_count_in_master, 0);
+  const masterCbm = toPositiveNumber(calculateCbmFromLbh(masterEntry || {}), 0);
+
+  if (piecesInMaster <= 0 || masterCbm <= 0) {
+    return 0;
+  }
+
+  return masterCbm / piecesInMaster;
+};
+
 const detectBoxPackagingMode = (value = "", entries = []) => {
   const normalizedValue = normalizeText(value);
   if (
     normalizedValue === BOX_PACKAGING_MODES.INDIVIDUAL ||
-    normalizedValue === BOX_PACKAGING_MODES.CARTON
+    normalizedValue === BOX_PACKAGING_MODES.CARTON ||
+    normalizedValue === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
   ) {
     return normalizedValue;
   }
 
-  const hasCartonEntry = (Array.isArray(entries) ? entries : []).some((entry) => {
+  const entryTypes = (Array.isArray(entries) ? entries : []).reduce((types, entry) => {
     const remark = normalizeText(entry?.remark || entry?.type || "");
     const boxType = normalizeText(entry?.box_type || "");
-    return (
-      remark === BOX_ENTRY_TYPES.INNER ||
-      remark === BOX_ENTRY_TYPES.MASTER ||
-      boxType === BOX_ENTRY_TYPES.INNER ||
-      boxType === BOX_ENTRY_TYPES.MASTER
-    );
-  });
+    if (remark === BOX_ENTRY_TYPES.INNER || boxType === BOX_ENTRY_TYPES.INNER) {
+      types.inner = true;
+    }
+    if (remark === BOX_ENTRY_TYPES.MASTER || boxType === BOX_ENTRY_TYPES.MASTER) {
+      types.master = true;
+    }
+    return types;
+  }, { inner: false, master: false });
 
-  return hasCartonEntry
-    ? BOX_PACKAGING_MODES.CARTON
-    : BOX_PACKAGING_MODES.INDIVIDUAL;
+  if (entryTypes.inner) return BOX_PACKAGING_MODES.CARTON;
+  if (entryTypes.master) return BOX_PACKAGING_MODES.INDIVIDUAL_MASTER;
+  return BOX_PACKAGING_MODES.INDIVIDUAL;
 };
 
 const normalizeIndividualRemark = (value = "") => {
@@ -130,6 +144,15 @@ const normalizeBoxEntryMetadata = (entry = {}, mode = BOX_PACKAGING_MODES.INDIVI
         resolvedType === BOX_ENTRY_TYPES.MASTER
           ? Math.max(0, toSafeNumber(entry?.box_count_in_master, 0))
           : 0,
+    };
+  }
+
+  if (normalizedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER) {
+    return {
+      remark: BOX_ENTRY_TYPES.MASTER,
+      box_type: BOX_ENTRY_TYPES.MASTER,
+      item_count_in_inner: 0,
+      box_count_in_master: Math.max(0, toSafeNumber(entry?.box_count_in_master, 0)),
     };
   }
 
@@ -169,6 +192,14 @@ const normalizeStoredBoxEntries = (
     })
     .filter((entry) => hasCompletePositiveLbh(entry));
 
+  if (resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER) {
+    const masterEntry =
+      normalizedEntries.find((entry) => entry?.box_type === BOX_ENTRY_TYPES.MASTER) ||
+      normalizedEntries[0] ||
+      null;
+    return masterEntry ? [masterEntry] : [];
+  }
+
   if (resolvedMode !== BOX_PACKAGING_MODES.CARTON) {
     return normalizedEntries.slice(0, SIZE_ENTRY_LIMIT);
   }
@@ -203,15 +234,19 @@ const sortBoxEntriesByRemark = (
   const remarkOrder =
     resolvedMode === BOX_PACKAGING_MODES.CARTON
       ? BOX_CARTON_REMARK_OPTIONS
+      : resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
+        ? [BOX_ENTRY_TYPES.MASTER]
       : BOX_INDIVIDUAL_REMARK_OPTIONS;
 
   return [...(Array.isArray(entries) ? entries : [])].sort((left, right) => {
     const leftRemark =
-      resolvedMode === BOX_PACKAGING_MODES.CARTON
+      resolvedMode === BOX_PACKAGING_MODES.CARTON ||
+      resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
         ? normalizeText(left?.box_type || left?.remark || "")
         : normalizeText(left?.remark || "");
     const rightRemark =
-      resolvedMode === BOX_PACKAGING_MODES.CARTON
+      resolvedMode === BOX_PACKAGING_MODES.CARTON ||
+      resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
         ? normalizeText(right?.box_type || right?.remark || "")
         : normalizeText(right?.remark || "");
     const leftIndex = remarkOrder.indexOf(leftRemark);
@@ -281,6 +316,23 @@ const buildBoxLegacyFieldsFromEntries = (
     };
   }
 
+  if (resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER) {
+    const masterEntry =
+      normalizedEntries.find((entry) => entry?.box_type === BOX_ENTRY_TYPES.MASTER) ||
+      normalizedEntries[0] ||
+      null;
+
+    return {
+      mode: resolvedMode,
+      single: toLbh(masterEntry),
+      top: { L: 0, B: 0, H: 0 },
+      bottom: { L: 0, B: 0, H: 0 },
+      totalWeight,
+      topWeight: 0,
+      bottomWeight: weightKey ? Math.max(0, toSafeNumber(masterEntry?.[weightKey], 0)) : 0,
+    };
+  }
+
   const firstEntry = normalizedEntries[0] || null;
   const secondEntry = normalizedEntries[1] || null;
 
@@ -340,6 +392,27 @@ const buildBoxMeasurementCbmSummary = ({
       total: toDecimalString(
         calculateCartonPerItemCbm({
           innerEntry,
+          masterEntry,
+        }),
+        6,
+      ),
+    };
+  }
+
+  if (resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER) {
+    const masterEntry =
+      normalizedEntries.find((entry) => entry?.box_type === BOX_ENTRY_TYPES.MASTER) ||
+      normalizedEntries[0] ||
+      null;
+    const masterCbm = calculateCbmFromLbh(masterEntry || {});
+
+    return {
+      mode: resolvedMode,
+      first: masterCbm,
+      second: "0",
+      third: "0",
+      total: toDecimalString(
+        calculateIndividualMasterPerItemCbm({
           masterEntry,
         }),
         6,

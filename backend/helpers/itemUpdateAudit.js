@@ -90,6 +90,8 @@ const formatSizeEntries = (
               },
               `Entry ${index + 1}`,
             )
+          : resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
+            ? "Master Carton"
           : formatRemark(entry, `Entry ${index + 1}`);
       const size = [
         formatNumber(entry?.L) || "0",
@@ -114,10 +116,14 @@ const formatSizeEntries = (
     .join(" || ");
 };
 
-const formatBoxMode = (mode = "") =>
-  detectBoxPackagingMode(mode) === BOX_PACKAGING_MODES.CARTON
-    ? "Inner + Master Carton"
-    : "Individual Boxes";
+const formatBoxMode = (mode = "") => {
+  const resolvedMode = detectBoxPackagingMode(mode);
+  if (resolvedMode === BOX_PACKAGING_MODES.CARTON) return "Inner + Master Carton";
+  if (resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER) {
+    return "Individual packing + master";
+  }
+  return "Individual Boxes";
+};
 
 const formatProductType = (productType = {}) =>
   formatText(
@@ -380,6 +386,8 @@ const collectSizeMissingFields = (
     const entryLabel =
       resolvedMode === BOX_PACKAGING_MODES.CARTON
         ? `${labelPrefix} ${index === 0 ? "Inner Carton" : "Master Carton"}`
+        : resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
+          ? `${labelPrefix} Master Carton`
         : `${labelPrefix} Entry ${entryNumber}`;
     const fieldBase = `${fieldPrefix}.${entryNumber}`;
 
@@ -403,6 +411,7 @@ const collectSizeMissingFields = (
 
     if (
       resolvedMode !== BOX_PACKAGING_MODES.CARTON &&
+      resolvedMode !== BOX_PACKAGING_MODES.INDIVIDUAL_MASTER &&
       requireRemarkWhenMultiple &&
       safeEntries.length > 1 &&
       !normalizeText(entry?.remark || entry?.type)
@@ -428,6 +437,15 @@ const collectSizeMissingFields = (
           scope,
           `${fieldBase}.box_count_in_master`,
           `${entryLabel} Box Count In Master`,
+        );
+      }
+    } else if (resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER) {
+      if (isMissingNumber(entry?.box_count_in_master)) {
+        pushMissing(
+          missingFields,
+          scope,
+          `${fieldBase}.box_count_in_master`,
+          `${entryLabel} Pcs in Master`,
         );
       }
     }

@@ -3,6 +3,7 @@ import {
   BOX_ENTRY_TYPES,
   BOX_PACKAGING_MODES,
   SIZE_ENTRY_LIMIT,
+  getFixedBoxEntryCount,
   getRemarkLabel,
   normalizeSizeCount,
 } from "../utils/measuredSizeForm";
@@ -27,7 +28,10 @@ const MeasuredSizeSection = ({
   onEntryChange,
 }) => {
   const isCartonMode = mode === BOX_PACKAGING_MODES.CARTON;
-  const safeCount = isCartonMode ? 2 : normalizeSizeCount(countValue, 1);
+  const isIndividualMasterMode =
+    mode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER;
+  const fixedBoxCount = getFixedBoxEntryCount(mode);
+  const safeCount = fixedBoxCount ?? normalizeSizeCount(countValue, 1);
   const entryColumnClass = safeCount > 1 ? "col-md-2" : "col-md-3";
   const singleEntryLabel = String(countLabel || "").toLowerCase().includes("box")
     ? "Box"
@@ -49,10 +53,19 @@ const MeasuredSizeSection = ({
             >
               <option value={BOX_PACKAGING_MODES.INDIVIDUAL}>Individual Boxes</option>
               <option value={BOX_PACKAGING_MODES.CARTON}>Inner + Master Carton</option>
+              <option value={BOX_PACKAGING_MODES.INDIVIDUAL_MASTER}>
+                Individual packing + master
+              </option>
             </select>
             <label className="form-label mt-3">{countLabel}</label>
-            {isCartonMode ? (
-              <input type="text" className="form-control" value="2" disabled readOnly />
+            {fixedBoxCount ? (
+              <input
+                type="text"
+                className="form-control"
+                value={String(fixedBoxCount)}
+                disabled
+                readOnly
+              />
             ) : (
               <select
                 className="form-select"
@@ -97,6 +110,8 @@ const MeasuredSizeSection = ({
                   : remarkOptions;
                 const displayedRemark = isCartonMode
                   ? getCartonRemark(index)
+                  : isIndividualMasterMode
+                  ? BOX_ENTRY_TYPES.MASTER
                   : entry.remark;
                 return (
                   <>
@@ -105,6 +120,8 @@ const MeasuredSizeSection = ({
                   ? index === 0
                     ? "Inner carton"
                     : "Master carton"
+                  : isIndividualMasterMode
+                  ? "Master carton"
                   : safeCount === 1
                   ? singleEntryLabel
                   : `Entry ${index + 1}${displayedRemark ? ` | ${getRemarkLabel(displayedRemarkOptions, displayedRemark)}` : ""}`}
@@ -208,6 +225,22 @@ const MeasuredSizeSection = ({
                     />
                   </div>
                 )}
+                {isIndividualMasterMode && (
+                  <div className="col-md-3">
+                    <label className="form-label small text-secondary">Pcs in Master</label>
+                    <input
+                      type="number"
+                      className="form-control"
+                      value={entry.box_count_in_master}
+                      onChange={(event) =>
+                        onEntryChange?.(index, "box_count_in_master", event.target.value)
+                      }
+                      min="0"
+                      step="1"
+                      disabled={disabled}
+                    />
+                  </div>
+                )}
               </div>
                   </>
                 );
@@ -215,14 +248,19 @@ const MeasuredSizeSection = ({
             </div>
           ))}
         </div>
-        {safeCount === 1 && !isCartonMode && (
+        {safeCount === 1 && !isCartonMode && !isIndividualMasterMode && (
           <div className="small text-secondary mt-2">
             Single-entry measurements use {singleEntryLabel.toLowerCase()} as the remark.
           </div>
         )}
         {isCartonMode && (
           <div className="small text-secondary mt-2">
-            Master carton CBM is treated as the final effective box CBM.
+            Master carton CBM is divided by item count in inner and box count in master.
+          </div>
+        )}
+        {isIndividualMasterMode && (
+          <div className="small text-secondary mt-2">
+            Master carton CBM is divided by pcs in master.
           </div>
         )}
       </div>

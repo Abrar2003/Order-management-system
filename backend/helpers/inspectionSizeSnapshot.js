@@ -142,6 +142,15 @@ const normalizeBoxEntryMetadata = (
     };
   }
 
+  if (resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER) {
+    return {
+      remark: BOX_ENTRY_TYPES.MASTER,
+      box_type: BOX_ENTRY_TYPES.MASTER,
+      item_count_in_inner: 0,
+      box_count_in_master: normalizeNumber(entry?.box_count_in_master),
+    };
+  }
+
   return {
     remark: normalizedRemark,
     box_type: BOX_ENTRY_TYPES.INDIVIDUAL,
@@ -179,7 +188,12 @@ const normalizeBoxSizes = (
   mode = BOX_PACKAGING_MODES.INDIVIDUAL,
 ) => {
   const resolvedMode = detectBoxPackagingMode(mode, entries);
-  const limit = resolvedMode === BOX_PACKAGING_MODES.CARTON ? 2 : SIZE_ENTRY_LIMIT;
+  const limit =
+    resolvedMode === BOX_PACKAGING_MODES.CARTON
+      ? 2
+      : resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
+        ? 1
+        : SIZE_ENTRY_LIMIT;
 
   return sortEntries(
     (Array.isArray(entries) ? entries : [])

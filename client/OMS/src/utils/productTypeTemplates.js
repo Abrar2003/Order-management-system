@@ -745,13 +745,20 @@ export const buildProductTypePayload = ({
     version: Number(template?.version || 1),
   };
 
-  const boxMode = boxSizes.some((entry) =>
-    [BOX_ENTRY_TYPES.INNER, BOX_ENTRY_TYPES.MASTER].includes(
-      normalizeTemplateKey(entry?.box_type),
-    ),
-  )
+  const boxModeTypes = boxSizes.reduce(
+    (types, entry) => {
+      const boxType = normalizeTemplateKey(entry?.box_type);
+      if (boxType === BOX_ENTRY_TYPES.INNER) types.inner = true;
+      if (boxType === BOX_ENTRY_TYPES.MASTER) types.master = true;
+      return types;
+    },
+    { inner: false, master: false },
+  );
+  const boxMode = boxModeTypes.inner
     ? BOX_PACKAGING_MODES.CARTON
-    : BOX_PACKAGING_MODES.INDIVIDUAL;
+    : boxModeTypes.master
+      ? BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
+      : BOX_PACKAGING_MODES.INDIVIDUAL;
 
   return {
     product_type: productType,

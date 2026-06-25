@@ -134,6 +134,7 @@ const formatBoxModeLabel = (value) => {
   if (!normalized) return "Not Set";
   if (normalized === "individual") return "Individual";
   if (normalized === "carton") return "Carton";
+  if (normalized === "individual_master") return "Individual packing + master";
   return normalized
     .split(/[_\s-]+/)
     .filter(Boolean)

@@ -10,6 +10,7 @@ import {
   createEmptyMeasuredSizeEntry,
   detectBoxPackagingMode,
   ensureMeasuredSizeEntryCount,
+  getFixedBoxEntryCount,
   normalizeSizeCount,
   parseMeasuredSizeEntries,
   resolvePreferredMeasuredSizeCbm,
@@ -70,7 +71,10 @@ const hasMeaningfulSampleSizeInput = (
     return true;
   }
 
-  if (resolvedMode === BOX_PACKAGING_MODES.CARTON) {
+  if (
+    resolvedMode === BOX_PACKAGING_MODES.CARTON ||
+    resolvedMode === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
+  ) {
     return (
       hasPositiveNumericInput(entry?.item_count_in_inner) ||
       hasPositiveNumericInput(entry?.box_count_in_master)
@@ -257,7 +261,7 @@ const SampleModal = ({
 
   const handleBoxModeChange = (value) => {
     const nextMode = detectBoxPackagingMode(value, sampleForm.box_sizes);
-    const nextCount = nextMode === BOX_PACKAGING_MODES.CARTON ? "2" : sampleForm.box_count;
+    const nextCount = String(getFixedBoxEntryCount(nextMode) ?? sampleForm.box_count);
     setSampleForm((prev) => ({
       ...prev,
       box_mode: nextMode,

@@ -13,6 +13,7 @@ const fileArgIndex = args.indexOf("--file");
 
 const filePath =
   fileArgIndex >= 0
+
     ? path.resolve(process.cwd(), args[fileArgIndex + 1])
     : path.resolve(__dirname, "../data/All EAN India.xlsx");
 
@@ -22,6 +23,7 @@ function cleanCell(value) {
   return String(value)
     .replace(/\.0$/, "")
     .trim();
+    
 }
 
 function normalizeBarcode(value) {
