@@ -98,6 +98,43 @@ const buildCushionDiaWorkbook = () => {
   return workbook;
 };
 
+const buildWideDeptHighWorkbook = () => {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Chairs");
+
+  sheet.getCell("F4").value = "article number";
+  sheet.getCell("J4").value = "550875";
+  sheet.getCell("F10").value = "Barcode pcs";
+  sheet.getCell("I10").value = "8721274911619";
+
+  const headers = [
+    ["A34", "Dimension in cm"],
+    ["D34", "length"],
+    ["F34", "wide"],
+    ["H34", "dept"],
+    ["J34", "high"],
+    ["L34", "thickness"],
+    ["N34", "weight"],
+    ["R34", "quantities in box"],
+  ];
+  headers.forEach(([address, value]) => {
+    sheet.getCell(address).value = value;
+  });
+
+  sheet.getCell(35, 1).value = "Item";
+  sheet.getCell(35, 4).value = 40;
+  sheet.getCell(35, 6).value = 40;
+  sheet.getCell(35, 10).value = 40;
+
+  sheet.getCell(39, 1).value = "Box sizes";
+  sheet.getCell(39, 4).value = 42;
+  sheet.getCell(39, 6).value = 42;
+  sheet.getCell(39, 10).value = 44;
+  sheet.getCell(39, 18).value = 1;
+
+  return workbook;
+};
+
 const createResponse = () => ({
   statusCode: 200,
   payload: null,
@@ -251,6 +288,35 @@ test("keeps partially available PIS size rows and leaves missing dimensions empt
     item_count_in_inner: 0,
     box_count_in_master: 2,
   });
+});
+
+test("parses wide dept high stool layout with single-quantity box as individual mode", () => {
+  const parsed = parsePisWorkbook(buildWideDeptHighWorkbook());
+
+  assert.equal(parsed.articleNumber, "550875");
+  assert.equal(parsed.sheetName, "Chairs");
+  assert.equal(parsed.masterBarcode, "");
+  assert.equal(parsed.pcsBarcode, "8721274911619");
+  assert.deepEqual(parsed.itemSizes, [{
+    L: 40,
+    B: 40,
+    H: 40,
+    net_weight: 0,
+    gross_weight: 0,
+    remark: "Item",
+  }]);
+  assert.deepEqual(parsed.boxSizes, [{
+    L: 42,
+    B: 42,
+    H: 44,
+    net_weight: 0,
+    gross_weight: 0,
+    remark: "box",
+    box_type: BOX_ENTRY_TYPES.INDIVIDUAL,
+    item_count_in_inner: 0,
+    box_count_in_master: 0,
+  }]);
+  assert.equal(parsed.boxMode, BOX_PACKAGING_MODES.INDIVIDUAL);
 });
 
 test("missing article number fails before item lookup or save", async () => {

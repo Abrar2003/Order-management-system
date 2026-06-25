@@ -18,9 +18,9 @@ const PCS_BARCODE_ALIASES = ["barcode pcs", "pcs barcode", "barcode pieces"];
 
 const DIMENSION_HEADER_ALIASES = Object.freeze({
   L: ["length"],
-  B: ["width"],
-  depth: ["depth"],
-  height: ["height"],
+  B: ["width", "wide"],
+  depth: ["depth", "dept", "deep"],
+  height: ["height", "high"],
   thickness: ["thickness"],
   dia: ["dia", "diameter"],
   net_weight: ["netto weight kg", "net weight kg", "netto weight", "net weight"],
@@ -31,7 +31,7 @@ const DIMENSION_HEADER_ALIASES = Object.freeze({
 const RECOGNIZED_ROW_LABELS = Object.freeze({
   item: ["item"],
   inner: ["inner carton", "inner box"],
-  master: ["outer carton", "master carton", "master box", "outer box"],
+  master: ["outer carton", "master carton", "master box", "outer box", "box sizes"],
 });
 
 class PisImportError extends Error {
@@ -132,7 +132,13 @@ const parseNumericValue = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const parseBarcodeValue = (cell) => getCellFormattedText(cell).trim();
+const parseBarcodeValue = (cell) => {
+  const text = getCellFormattedText(cell).trim();
+  if (!text) return "";
+  const compact = text.replace(/[\s-]+/g, "");
+  if (/^\d+\.0+$/.test(compact)) return compact.replace(/\.0+$/, "");
+  return /^\d+$/.test(compact) ? compact : "";
+};
 
 const findWorksheet = (workbook) =>
   workbook.worksheets.find(
@@ -304,22 +310,36 @@ const parseDimensionRows = (sheet, dimensionCell) => {
     );
   }
 
-  const hasInnerBox = boxSizes.some(
+  const normalizedBoxSizes =
+    boxSizes.length === 1 &&
+    Number(boxSizes[0]?.box_count_in_master || boxSizes[0]?.item_count_in_inner || 0) === 1
+      ? [{
+          ...boxSizes[0],
+          remark: "box",
+          box_type: BOX_ENTRY_TYPES.INDIVIDUAL,
+          item_count_in_inner: 0,
+          box_count_in_master: 0,
+        }]
+      : boxSizes;
+
+  const hasInnerBox = normalizedBoxSizes.some(
     (entry) => entry?.box_type === BOX_ENTRY_TYPES.INNER,
   );
-  const hasMasterBox = boxSizes.some(
+  const hasMasterBox = normalizedBoxSizes.some(
     (entry) => entry?.box_type === BOX_ENTRY_TYPES.MASTER,
   );
 
   return {
     itemSizes,
-    boxSizes,
+    boxSizes: normalizedBoxSizes,
     boxMode:
       hasInnerBox
         ? BOX_PACKAGING_MODES.CARTON
         : hasMasterBox
           ? BOX_PACKAGING_MODES.INDIVIDUAL_MASTER
-          : null,
+          : normalizedBoxSizes.length > 0
+            ? BOX_PACKAGING_MODES.INDIVIDUAL
+            : null,
   };
 };
 
