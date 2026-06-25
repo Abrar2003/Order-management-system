@@ -124,6 +124,7 @@ const FinalPisCheckReport = ({
   canEditPis = false,
   onEditPis = null,
   activeEditCode = "",
+  editButtonLabel = "Update PIS",
   canAddComment = false,
   onAddComment = null,
   activeCommentCode = "",
@@ -283,7 +284,7 @@ const FinalPisCheckReport = ({
                         onClick={() => onEditPis(row)}
                         disabled={activeEditCode === row?.code}
                       >
-                        {activeEditCode === row?.code ? "Loading..." : "Update PIS"}
+                        {activeEditCode === row?.code ? "Loading..." : editButtonLabel}
                       </button>
                     )}
                     {canAddComment && typeof onAddComment === "function" && (
@@ -424,7 +425,7 @@ const FinalPISCheck = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   useRememberSearchParams(searchParams, setSearchParams, "final-pis-check");
   const pdfReportRef = useRef(null);
-  const { canEditPis, role } = usePermissions();
+  const { role } = usePermissions();
 
   const [reportData, setReportData] = useState(() => buildEmptyReportData());
   const [options, setOptions] = useState({
@@ -494,6 +495,7 @@ const FinalPISCheck = () => {
   const currentUser = getUserFromToken();
   const currentUserId = String(currentUser?._id || currentUser?.id || "").trim();
   const normalizedRole = normalizeUserRole(role);
+  const canUpdateMaster = isStrictAdminRole(normalizedRole);
   const canAddFinalPisComment =
     ["manager", "product_manager", "inspection_manager"].includes(normalizedRole) &&
     !isStrictAdminRole(normalizedRole);
@@ -695,7 +697,7 @@ const FinalPISCheck = () => {
   const handleOpenEditPis = useCallback(async (row = {}) => {
     const targetCode = String(row?.code || "").trim();
     if (!targetCode) {
-      setError("Unable to open PIS editor for this item.");
+      setError("Unable to open master editor for this item.");
       return;
     }
 
@@ -717,7 +719,7 @@ const FinalPISCheck = () => {
       );
 
       if (!matchedItem) {
-        setError(`Item ${targetCode} could not be loaded for PIS update.`);
+        setError(`Item ${targetCode} could not be loaded for master update.`);
         return;
       }
 
@@ -725,7 +727,7 @@ const FinalPISCheck = () => {
     } catch (fetchError) {
       setError(
         fetchError?.response?.data?.message
-          || `Failed to load item ${targetCode} for PIS update.`,
+          || `Failed to load item ${targetCode} for master update.`,
       );
     } finally {
       setActiveEditCode("");
@@ -1127,9 +1129,10 @@ const FinalPISCheck = () => {
               showHeader={false}
               showOverviewGrids={false}
               showBrandVendorMeta={false}
-              canEditPis={canEditPis}
+              canEditPis={canUpdateMaster}
               onEditPis={handleOpenEditPis}
               activeEditCode={activeEditCode}
+              editButtonLabel="Update Master"
               canAddComment={canAddFinalPisComment}
               onAddComment={handleOpenComment}
               currentUserId={currentUserId}
@@ -1263,11 +1266,12 @@ const FinalPISCheck = () => {
         </div>
       )}
 
-      {selectedItem && canEditPis && (
+      {selectedItem && canUpdateMaster && (
         <EditPisModal
           item={selectedItem}
           onClose={() => setSelectedItem(null)}
           onUpdated={handlePisUpdated}
+          updateSource="final_pis_check"
         />
       )}
 

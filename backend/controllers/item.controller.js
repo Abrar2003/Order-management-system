@@ -6029,14 +6029,17 @@ exports.updateItemPis = async (req, res) => {
     const roleKey = normalizeUserRoleKey(req.user?.role);
     const isStrictAdmin = ["admin", "super_admin"].includes(roleKey);
     const canCreatePisDiffMasterData = isStrictAdmin;
+    const pisUpdateSource = normalizeTextField(payload?.pis_update_source).toLowerCase();
+    const requestedFinalPisMasterUpdate = pisUpdateSource === "final_pis_check";
     const requestedPisDiffCheck =
-      normalizeTextField(payload?.pis_update_source).toLowerCase() === "pis_diffs" ||
+      pisUpdateSource === "pis_diffs" ||
+      requestedFinalPisMasterUpdate ||
       payload?.sync_master_data === true ||
       payload?.pis_checked_flag === true;
     if (requestedPisDiffCheck && !canCreatePisDiffMasterData) {
       return res.status(403).json({
         success: false,
-        message: "Only Admin or Super Admin can check PIS diffs and create master data.",
+        message: "Only Admin or Super Admin can update master data.",
       });
     }
 
@@ -6258,10 +6261,12 @@ exports.updateItemPis = async (req, res) => {
       after: item.toObject(),
       reqUser: req.user,
       action: requestedPisDiffCheck ? "pis_diff_update" : "pis_update",
-      source: requestedPisDiffCheck ? "pis_diffs_modal" : "pis_update_modal",
+      source: requestedPisDiffCheck
+        ? (requestedFinalPisMasterUpdate ? "final_pis_check_modal" : "pis_diffs_modal")
+        : "pis_update_modal",
       route: "PATCH /items/:id/pis",
       metadata: {
-        pis_update_source: normalizeTextField(payload?.pis_update_source),
+        pis_update_source: pisUpdateSource,
         sync_master_data: Boolean(payload?.sync_master_data),
         pis_checked_flag_requested: Boolean(payload?.pis_checked_flag),
       },
@@ -6273,8 +6278,12 @@ exports.updateItemPis = async (req, res) => {
       beforeSnapshot: beforeAuditSnapshot,
       afterSnapshot: afterAuditSnapshot,
       operationType: requestedPisDiffCheck ? "pis_diff_update" : "pis_update",
-      pageName: requestedPisDiffCheck ? "PIS Diff Modal" : "PIS Update Modal",
-      source: requestedPisDiffCheck ? "pis_diffs_modal" : "pis_update_modal",
+      pageName: requestedPisDiffCheck
+        ? (requestedFinalPisMasterUpdate ? "Final PIS Check Modal" : "PIS Diff Modal")
+        : "PIS Update Modal",
+      source: requestedPisDiffCheck
+        ? (requestedFinalPisMasterUpdate ? "final_pis_check_modal" : "pis_diffs_modal")
+        : "pis_update_modal",
       dataScopes: requestedPisDiffCheck
         ? [AUDIT_SCOPES.MASTER, AUDIT_SCOPES.PIS]
         : [AUDIT_SCOPES.PIS],
@@ -6282,7 +6291,7 @@ exports.updateItemPis = async (req, res) => {
         ? ["PIS diff was checked and submitted values were saved to master and PIS data."]
         : [],
       metadata: {
-        pis_update_source: normalizeTextField(payload?.pis_update_source),
+        pis_update_source: pisUpdateSource,
         sync_master_data: Boolean(payload?.sync_master_data),
         pis_checked_flag_requested: Boolean(payload?.pis_checked_flag),
       },

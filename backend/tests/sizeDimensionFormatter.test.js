@@ -206,6 +206,36 @@ test("final PIS check reports inspected item size differences against Master", (
   assert.equal(rows[0].differences[0].pis, "100 cm");
 });
 
+test("final PIS check drives item detail rows from Master entries", () => {
+  const rows = buildFinalPisCheckRows([
+    {
+      code: "96412",
+      description: "Ettafel Taylor 140x120 cm",
+      inspected_item_sizes: [
+        { remark: "top", L: 140, B: 120, H: 4.5, net_weight: 31 },
+        { remark: "base", L: 17, B: 5, H: 73.5, net_weight: 6.6 },
+      ],
+      master_item_sizes: [
+        { L: 140, B: 120, H: 76, net_weight: 37.9 },
+      ],
+    },
+  ]);
+
+  assert.equal(rows.length, 1);
+  assert.deepEqual(
+    rows[0].differences.map((difference) => difference.segment),
+    ["Entry 1", "Entry 1", "Entry 1", "Entry 1"],
+  );
+  assert.ok(
+    rows[0].differences.every((difference) => difference.inspected === "Not Set"),
+  );
+  assert.ok(
+    rows[0].differences.every(
+      (difference) => !["Top", "Base"].includes(difference.segment),
+    ),
+  );
+});
+
 test("final PIS check normalizes inspected box base dimensions against Master before mismatch rows", () => {
   const rows = buildFinalPisCheckRows([
     {

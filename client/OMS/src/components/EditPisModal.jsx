@@ -343,9 +343,11 @@ const buildInspectedReference = (item = {}) => {
 };
 
 const EditPisModal = ({ item, onClose, onUpdated, updateSource = "" }) => {
-  const isPisDiffUpdate = updateSource === "pis_diffs";
+  const isMasterUpdate =
+    updateSource === "pis_diffs" || updateSource === "final_pis_check";
+  const isPisDiffUpdate = isMasterUpdate;
   const [form, setForm] = useState(() =>
-    buildInitialForm(item, { preferMaster: false }),
+    buildInitialForm(item, { preferMaster: isMasterUpdate }),
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");

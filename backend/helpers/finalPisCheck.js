@@ -621,6 +621,7 @@ const buildReferenceFirstEntryPairs = (
   inspectedEntries = [],
   pisEntries = [],
   keyBuilder,
+  { allowIndexFallback = true, includeUnmatchedInspected = true } = {},
 ) => {
   const inspectedList = (Array.isArray(inspectedEntries) ? inspectedEntries : []).map(
     (entry, index) => ({
@@ -656,31 +657,35 @@ const buildReferenceFirstEntryPairs = (
     pairs[pairIndex].inspectedEntry = exactMatch.entry;
   });
 
-  referenceList.forEach((reference, pairIndex) => {
-    if (Object.keys(pairs[pairIndex].inspectedEntry || {}).length > 0) {
-      return;
-    }
+  if (allowIndexFallback) {
+    referenceList.forEach((reference, pairIndex) => {
+      if (Object.keys(pairs[pairIndex].inspectedEntry || {}).length > 0) {
+        return;
+      }
 
-    const indexMatch = inspectedList.find(
-      (source) =>
-        source.index === reference.index && !usedInspectedIndexes.has(source.index),
-    );
-    if (!indexMatch) return;
+      const indexMatch = inspectedList.find(
+        (source) =>
+          source.index === reference.index && !usedInspectedIndexes.has(source.index),
+      );
+      if (!indexMatch) return;
 
-    usedInspectedIndexes.add(indexMatch.index);
-    pairs[pairIndex].inspectedEntry = indexMatch.entry;
-  });
-
-  inspectedList.forEach((source) => {
-    if (usedInspectedIndexes.has(source.index)) return;
-    pairs.push({
-      key: source.key,
-      index: pairs.length,
-      inspectedEntry: source.entry,
-      pisEntry: {},
-      labelEntry: source.entry,
+      usedInspectedIndexes.add(indexMatch.index);
+      pairs[pairIndex].inspectedEntry = indexMatch.entry;
     });
-  });
+  }
+
+  if (includeUnmatchedInspected) {
+    inspectedList.forEach((source) => {
+      if (usedInspectedIndexes.has(source.index)) return;
+      pairs.push({
+        key: source.key,
+        index: pairs.length,
+        inspectedEntry: source.entry,
+        pisEntry: {},
+        labelEntry: source.entry,
+      });
+    });
+  }
 
   return pairs;
 };
@@ -701,6 +706,10 @@ const buildItemSizeDifferences = (
     inspectedEntries,
     pisEntries,
     buildItemEntryKey,
+    {
+      allowIndexFallback: false,
+      includeUnmatchedInspected: false,
+    },
   );
 
   entryPairs.forEach(({ key, index, inspectedEntry = {}, pisEntry = {}, labelEntry }) => {
@@ -765,6 +774,9 @@ const buildBoxSizeDifferences = ({
     inspectedEntries,
     pisEntries,
     buildBoxEntryKey,
+    {
+      includeUnmatchedInspected: false,
+    },
   );
 
   entryPairs.forEach(({ key, index, inspectedEntry = {}, pisEntry = {}, labelEntry }) => {
