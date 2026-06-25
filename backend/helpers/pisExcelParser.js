@@ -8,7 +8,11 @@ const {
 } = require("./boxMeasurement");
 
 const ARTICLE_NUMBER_ALIASES = ["article number"];
-const DIMENSION_SECTION_ALIASES = ["dimension in cm", "dimensions in cm"];
+const DIMENSION_SECTION_ALIASES = [
+  "dimension in cm",
+  "dimensions in cm",
+  "dimension / weight",
+];
 const MASTER_BARCODE_ALIASES = ["barcode master box", "master box barcode"];
 const PCS_BARCODE_ALIASES = ["barcode pcs", "pcs barcode", "barcode pieces"];
 
@@ -18,6 +22,7 @@ const DIMENSION_HEADER_ALIASES = Object.freeze({
   depth: ["depth"],
   height: ["height"],
   thickness: ["thickness"],
+  dia: ["dia", "diameter"],
   net_weight: ["netto weight kg", "net weight kg", "netto weight", "net weight"],
   gross_weight: ["gross weight kg", "gross weight"],
   quantity: ["quantities in box", "quantity in box", "pcs in box"],
@@ -178,9 +183,21 @@ const readNumericCell = (sheet, rowNumber, columnNumber) => {
   return parseNumericValue(getCellFormattedText(sheet.getCell(rowNumber, columnNumber)));
 };
 
+const readCellText = (sheet, rowNumber, columnNumber) => {
+  if (!columnNumber) return "";
+  return getCellFormattedText(sheet.getCell(rowNumber, columnNumber));
+};
+
+const firstPositiveNumber = (values = []) =>
+  values.find((value) => Number.isFinite(value) && value > 0) ?? null;
+
 const parseDimensionRows = (sheet, dimensionCell) => {
   const columns = findHeaderColumns(sheet, dimensionCell);
-  if (!columns.L || !columns.B || (!columns.depth && !columns.height && !columns.thickness)) {
+  if (
+    !columns.L ||
+    !columns.B ||
+    (!columns.depth && !columns.height && !columns.thickness && !columns.dia)
+  ) {
     throw new PisImportError(422, "PIS dimensions section is missing required headers");
   }
 
@@ -195,11 +212,46 @@ const parseDimensionRows = (sheet, dimensionCell) => {
 
     const L = readNumericCell(sheet, rowNumber, columns.L);
     const B = readNumericCell(sheet, rowNumber, columns.B);
-    const H = [
+    const thirdDimensionValues = [
       readNumericCell(sheet, rowNumber, columns.depth),
       readNumericCell(sheet, rowNumber, columns.height),
       readNumericCell(sheet, rowNumber, columns.thickness),
-    ].find((value) => value > 0) ?? null;
+      readNumericCell(sheet, rowNumber, columns.dia),
+    ];
+    const thirdDimensionTextValues = [
+      readCellText(sheet, rowNumber, columns.depth),
+      readCellText(sheet, rowNumber, columns.height),
+      readCellText(sheet, rowNumber, columns.thickness),
+      readCellText(sheet, rowNumber, columns.dia),
+    ];
+    const rawNetWeight = readNumericCell(sheet, rowNumber, columns.net_weight);
+    const rawGrossWeight = readNumericCell(sheet, rowNumber, columns.gross_weight);
+    const rawQuantity = readNumericCell(sheet, rowNumber, columns.quantity);
+    const hasAnyRowInput = [
+      columns.L,
+      columns.B,
+      columns.depth,
+      columns.height,
+      columns.thickness,
+      columns.dia,
+      columns.net_weight,
+      columns.gross_weight,
+      columns.quantity,
+    ].some((columnNumber) =>
+      String(readCellText(sheet, rowNumber, columnNumber)).trim() !== "",
+    );
+
+    if (!hasAnyRowInput) {
+      continue;
+    }
+
+    const thirdDimension = firstPositiveNumber(thirdDimensionValues);
+    const hasThirdDimensionInput = thirdDimensionTextValues.some(
+      (value) => String(value || "").trim() !== "",
+    );
+    const H =
+      thirdDimension ??
+      (rowType === "item" && L > 0 && B > 0 && !hasThirdDimensionInput ? 1 : null);
 
     if (!(L > 0 && B > 0 && H > 0)) {
       malformedRows.push(rowNumber);
@@ -210,14 +262,8 @@ const parseDimensionRows = (sheet, dimensionCell) => {
       L,
       B,
       H,
-      net_weight: Math.max(
-        0,
-        readNumericCell(sheet, rowNumber, columns.net_weight) ?? 0,
-      ),
-      gross_weight: Math.max(
-        0,
-        readNumericCell(sheet, rowNumber, columns.gross_weight) ?? 0,
-      ),
+      net_weight: Math.max(0, rawNetWeight ?? 0),
+      gross_weight: Math.max(0, rawGrossWeight ?? 0),
     };
 
     if (rowType === "item") {
@@ -225,10 +271,7 @@ const parseDimensionRows = (sheet, dimensionCell) => {
       continue;
     }
 
-    const quantity = Math.max(
-      0,
-      readNumericCell(sheet, rowNumber, columns.quantity) ?? 0,
-    );
+    const quantity = Math.max(0, rawQuantity ?? 0);
     const isInner = rowType === "inner";
     boxSizes.push({
       ...entry,

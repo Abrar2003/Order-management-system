@@ -61,6 +61,43 @@ const buildFixtureWorkbook = ({
   return workbook;
 };
 
+const buildCushionDiaWorkbook = () => {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("cushion");
+
+  sheet.getCell("F4").value = "article number";
+  sheet.getCell("J4").value = "550868";
+
+  const headers = [
+    ["A40", "Dimension / Weight"],
+    ["D40", "Length"],
+    ["F40", "Width"],
+    ["H40", "Dia"],
+    ["N40", "Net Weight KG"],
+    ["P40", "Gross Weight KG"],
+    ["T40", "Quantities in box"],
+  ];
+  headers.forEach(([address, value]) => {
+    sheet.getCell(address).value = value;
+  });
+
+  sheet.getCell(41, 1).value = "Item";
+  sheet.getCell(41, 4).value = 60;
+  sheet.getCell(41, 6).value = 40;
+  sheet.getCell(41, 14).value = 6.2;
+  sheet.getCell(41, 16).value = 7.4;
+
+  sheet.getCell(45, 1).value = "Inner Carton";
+
+  sheet.getCell(46, 1).value = "Outer Carton";
+  sheet.getCell(46, 4).value = 62;
+  sheet.getCell(46, 6).value = 22;
+  sheet.getCell(46, 8).value = 42;
+  sheet.getCell(46, 20).value = 6;
+
+  return workbook;
+};
+
 const createResponse = () => ({
   statusCode: 200,
   payload: null,
@@ -158,6 +195,33 @@ test("parses the supplied PIS layout into item, carton, and barcode fields", () 
     },
   ]);
   assert.equal(parsed.boxMode, BOX_PACKAGING_MODES.CARTON);
+});
+
+test("parses cushion Dia layout and defaults flat item height to one", () => {
+  const parsed = parsePisWorkbook(buildCushionDiaWorkbook());
+
+  assert.equal(parsed.articleNumber, "550868");
+  assert.equal(parsed.sheetName, "cushion");
+  assert.deepEqual(parsed.itemSizes, [{
+    L: 60,
+    B: 40,
+    H: 1,
+    net_weight: 6.2,
+    gross_weight: 7.4,
+    remark: "Item",
+  }]);
+  assert.deepEqual(parsed.boxSizes, [{
+    L: 62,
+    B: 22,
+    H: 42,
+    net_weight: 0,
+    gross_weight: 0,
+    remark: BOX_ENTRY_TYPES.MASTER,
+    box_type: BOX_ENTRY_TYPES.MASTER,
+    item_count_in_inner: 0,
+    box_count_in_master: 6,
+  }]);
+  assert.equal(parsed.boxMode, BOX_PACKAGING_MODES.INDIVIDUAL_MASTER);
 });
 
 test("missing article number fails before item lookup or save", async () => {
