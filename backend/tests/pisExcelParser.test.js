@@ -224,6 +224,35 @@ test("parses cushion Dia layout and defaults flat item height to one", () => {
   assert.equal(parsed.boxMode, BOX_PACKAGING_MODES.INDIVIDUAL_MASTER);
 });
 
+test("keeps partially available PIS size rows and leaves missing dimensions empty", () => {
+  const workbook = buildFixtureWorkbook();
+  const sheet = workbook.getWorksheet("Wall_deco");
+  sheet.getCell(41, 6).value = null;
+  sheet.getCell(46, 12).value = null;
+
+  const parsed = parsePisWorkbook(workbook);
+
+  assert.deepEqual(parsed.itemSizes, [{
+    L: 60,
+    B: 0,
+    H: 4,
+    net_weight: 2.36,
+    gross_weight: 3.45,
+    remark: "Item",
+  }]);
+  assert.deepEqual(parsed.boxSizes[1], {
+    L: 65,
+    B: 24,
+    H: 0,
+    net_weight: 4.72,
+    gross_weight: 6.5,
+    remark: BOX_ENTRY_TYPES.MASTER,
+    box_type: BOX_ENTRY_TYPES.MASTER,
+    item_count_in_inner: 0,
+    box_count_in_master: 2,
+  });
+});
+
 test("missing article number fails before item lookup or save", async () => {
   let lookups = 0;
   const middleware = createParseAndSyncPisUpload({

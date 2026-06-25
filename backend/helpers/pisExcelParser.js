@@ -188,8 +188,22 @@ const readCellText = (sheet, rowNumber, columnNumber) => {
   return getCellFormattedText(sheet.getCell(rowNumber, columnNumber));
 };
 
+const readNumericField = (sheet, rowNumber, columnNumber) => {
+  const text = readCellText(sheet, rowNumber, columnNumber);
+  const hasInput = String(text).trim() !== "";
+  const value = hasInput ? parseNumericValue(text) : null;
+  return {
+    hasInput,
+    invalid: hasInput && value === null,
+    value,
+  };
+};
+
 const firstPositiveNumber = (values = []) =>
   values.find((value) => Number.isFinite(value) && value > 0) ?? null;
+
+const toNonNegativeNumber = (value) =>
+  Number.isFinite(value) && value > 0 ? value : 0;
 
 const parseDimensionRows = (sheet, dimensionCell) => {
   const columns = findHeaderColumns(sheet, dimensionCell);
@@ -210,60 +224,52 @@ const parseDimensionRows = (sheet, dimensionCell) => {
     const rowType = resolveRowType(sheet.getRow(rowNumber));
     if (!rowType) continue;
 
-    const L = readNumericCell(sheet, rowNumber, columns.L);
-    const B = readNumericCell(sheet, rowNumber, columns.B);
-    const thirdDimensionValues = [
-      readNumericCell(sheet, rowNumber, columns.depth),
-      readNumericCell(sheet, rowNumber, columns.height),
-      readNumericCell(sheet, rowNumber, columns.thickness),
-      readNumericCell(sheet, rowNumber, columns.dia),
+    const lengthField = readNumericField(sheet, rowNumber, columns.L);
+    const breadthField = readNumericField(sheet, rowNumber, columns.B);
+    const thirdDimensionFields = [
+      readNumericField(sheet, rowNumber, columns.depth),
+      readNumericField(sheet, rowNumber, columns.height),
+      readNumericField(sheet, rowNumber, columns.thickness),
+      readNumericField(sheet, rowNumber, columns.dia),
     ];
-    const thirdDimensionTextValues = [
-      readCellText(sheet, rowNumber, columns.depth),
-      readCellText(sheet, rowNumber, columns.height),
-      readCellText(sheet, rowNumber, columns.thickness),
-      readCellText(sheet, rowNumber, columns.dia),
+    const netWeightField = readNumericField(sheet, rowNumber, columns.net_weight);
+    const grossWeightField = readNumericField(sheet, rowNumber, columns.gross_weight);
+    const quantityField = readNumericField(sheet, rowNumber, columns.quantity);
+    const numericFields = [
+      lengthField,
+      breadthField,
+      ...thirdDimensionFields,
+      netWeightField,
+      grossWeightField,
+      quantityField,
     ];
-    const rawNetWeight = readNumericCell(sheet, rowNumber, columns.net_weight);
-    const rawGrossWeight = readNumericCell(sheet, rowNumber, columns.gross_weight);
-    const rawQuantity = readNumericCell(sheet, rowNumber, columns.quantity);
-    const hasAnyRowInput = [
-      columns.L,
-      columns.B,
-      columns.depth,
-      columns.height,
-      columns.thickness,
-      columns.dia,
-      columns.net_weight,
-      columns.gross_weight,
-      columns.quantity,
-    ].some((columnNumber) =>
-      String(readCellText(sheet, rowNumber, columnNumber)).trim() !== "",
-    );
+    const hasAnyRowInput = numericFields.some((field) => field.hasInput);
 
     if (!hasAnyRowInput) {
       continue;
     }
 
-    const thirdDimension = firstPositiveNumber(thirdDimensionValues);
-    const hasThirdDimensionInput = thirdDimensionTextValues.some(
-      (value) => String(value || "").trim() !== "",
-    );
-    const H =
-      thirdDimension ??
-      (rowType === "item" && L > 0 && B > 0 && !hasThirdDimensionInput ? 1 : null);
-
-    if (!(L > 0 && B > 0 && H > 0)) {
+    if (numericFields.some((field) => field.invalid)) {
       malformedRows.push(rowNumber);
       continue;
     }
 
+    const L = toNonNegativeNumber(lengthField.value);
+    const B = toNonNegativeNumber(breadthField.value);
+    const thirdDimension = firstPositiveNumber(
+      thirdDimensionFields.map((field) => field.value),
+    );
+    const hasThirdDimensionInput = thirdDimensionFields.some((field) => field.hasInput);
+    const H =
+      thirdDimension ??
+      (rowType === "item" && L > 0 && B > 0 && !hasThirdDimensionInput ? 1 : null);
+
     const entry = {
       L,
       B,
-      H,
-      net_weight: Math.max(0, rawNetWeight ?? 0),
-      gross_weight: Math.max(0, rawGrossWeight ?? 0),
+      H: toNonNegativeNumber(H),
+      net_weight: toNonNegativeNumber(netWeightField.value),
+      gross_weight: toNonNegativeNumber(grossWeightField.value),
     };
 
     if (rowType === "item") {
@@ -271,7 +277,7 @@ const parseDimensionRows = (sheet, dimensionCell) => {
       continue;
     }
 
-    const quantity = Math.max(0, rawQuantity ?? 0);
+    const quantity = toNonNegativeNumber(quantityField.value);
     const isInner = rowType === "inner";
     boxSizes.push({
       ...entry,
