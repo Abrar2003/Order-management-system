@@ -1,4 +1,5 @@
 const XLSX = require("xlsx");
+const ExcelJS = require("exceljs");
 const path = require("path");
 const Order = require("../models/order.model");
 const QC = require("../models/qc.model");
@@ -7036,200 +7037,54 @@ exports.exportOrdersDb = async (req, res) => {
 
     const normalizeText = (value) => String(value ?? "").trim();
 
-    const resolveInspectorLabel = (inspectorValue) => {
-      if (!inspectorValue) return "";
-      if (typeof inspectorValue === "string") return inspectorValue.trim();
-      return normalizeText(
-        inspectorValue?.name || inspectorValue?.email || inspectorValue?._id,
-      );
-    };
-
-    const stringifyList = (values = []) =>
-      (Array.isArray(values) ? values : [])
-        .map((value) => normalizeText(value))
-        .filter(Boolean)
-        .join(" | ");
-
-    const stringifyRequestHistory = (history = []) =>
-      (Array.isArray(history) ? history : [])
-        .map((entry) => {
-          const requestDate = normalizeText(entry?.request_date);
-          const requestType = normalizeText(entry?.request_type);
-          const quantityRequested = toSafeNumber(entry?.quantity_requested);
-          const statusText = normalizeText(entry?.status);
-          return [
-            requestDate,
-            requestType,
-            `qty ${quantityRequested}`,
-            statusText,
-          ]
-            .filter(Boolean)
-            .join(" / ");
-        })
-        .filter(Boolean)
-        .join(" | ");
-
     const columns = [
-      { key: "order_id", header: "Order ID" },
-      { key: "brand", header: "Brand" },
-      { key: "vendor", header: "Vendor" },
-      { key: "status", header: "Order Status" },
-      { key: "order_quantity", header: "Order Quantity" },
-      { key: "order_date", header: "Order Date" },
-      { key: "etd", header: "ETD" },
-      { key: "item_code", header: "Item Code" },
-      { key: "item_description", header: "Item Description" },
-      { key: "qc_item_code", header: "QC Item Code" },
-      { key: "qc_item_description", header: "QC Item Description" },
-      { key: "qc_available", header: "QC Available" },
-      { key: "qc_request_date", header: "QC Request Date" },
-      { key: "qc_request_type", header: "QC Request Type" },
-      { key: "qc_last_inspected_date", header: "QC Last Inspected Date" },
-      { key: "qc_inspector", header: "QC Inspector" },
-      { key: "qc_client_demand", header: "QC Client Demand" },
-      { key: "qc_quantity_requested", header: "QC Quantity Requested" },
-      { key: "qc_vendor_provision", header: "QC Vendor Provision" },
-      { key: "qc_checked", header: "QC Checked" },
-      { key: "qc_passed", header: "QC Passed" },
-      { key: "qc_pending", header: "QC Pending" },
-      { key: "qc_rejected", header: "QC Rejected" },
-      { key: "qc_labels", header: "QC Labels" },
-      { key: "qc_inspection_dates", header: "QC Inspection Dates" },
-      { key: "qc_request_history", header: "QC Request History" },
+      { key: "order_id", header: "Order ID", width: 9.28515625 },
+      { key: "brand", header: "Brand", width: 6.85546875 },
+      { key: "vendor", header: "Vendor", width: 9.28515625 },
+      { key: "status", header: "Order Status", width: 16.28515625 },
+      { key: "item_code", header: "Item Code", width: 10.85546875 },
+      { key: "item_description", header: "Item Description", width: 60.28515625 },
       {
-        key: "qc_inspection_records_count",
-        header: "QC Inspection Records Count",
+        key: "order_date",
+        header: "Order Date",
+        width: 11.85546875,
+        numFmt: "mm-dd-yy",
       },
-      { key: "qc_cbm_top", header: "QC CBM Top" },
-      { key: "qc_cbm_bottom", header: "QC CBM Bottom" },
-      { key: "qc_cbm_total", header: "QC CBM Total" },
-      { key: "qc_remarks", header: "QC Remarks" },
-      { key: "shipment_count", header: "Shipment Count" },
-      { key: "total_shipped_quantity", header: "Total Shipped Quantity" },
-      { key: "shipping_pending_quantity", header: "Shipping Pending Quantity" },
-      { key: "shipment_index", header: "Shipment Index" },
-      { key: "shipment_stuffing_date", header: "Shipment Stuffing Date" },
-      { key: "shipment_container", header: "Shipment Container" },
-      { key: "shipment_invoice_number", header: "Shipment Invoice Number" },
-      { key: "shipment_quantity", header: "Shipment Quantity" },
-      { key: "shipment_pending", header: "Shipment Pending" },
-      { key: "shipment_remarks", header: "Shipment Remarks" },
+      { key: "etd", header: "ETD", width: 10.7109375 },
+      { key: "order_quantity", header: "Order Quantity", width: 16.140625 },
+      { key: "inspection_done", header: "Inspection Done", width: 17 },
+      { key: "inspection_pending", header: "Inspection Pending", width: 20 },
+      { key: "shipped_quantity", header: "Shipped Quantity", width: 18.5703125 },
+      { key: "shipping_pending", header: "Shipping Pending", width: 18.42578125 },
     ];
 
-    const exportRows = orders.flatMap((orderEntry) => {
-      const orderQuantity = Math.max(0, toSafeNumber(orderEntry?.quantity));
-      const shipmentEntries = Array.isArray(orderEntry?.shipment)
-        ? orderEntry.shipment
-        : [];
-      const totalShippedQuantity = shipmentEntries.reduce(
-        (sum, shipmentEntry) =>
-          sum + Math.max(0, toSafeNumber(shipmentEntry?.quantity)),
-        0,
-      );
-      const shippingPendingQuantity = Math.max(
-        0,
-        orderQuantity - totalShippedQuantity,
-      );
+    const exportRows = orders.map((orderEntry) => {
       const qcRecord = orderEntry?.qc_record || null;
-      const hasQcRecord = Boolean(qcRecord);
-      const qcQuantities = qcRecord?.quantities || {};
-      const inspectionDates = stringifyList(qcRecord?.inspection_dates);
-      const requestHistory = stringifyRequestHistory(qcRecord?.request_history);
-      const qcLabels = (Array.isArray(qcRecord?.labels) ? qcRecord.labels : [])
-        .map((labelValue) => Number(labelValue))
-        .filter((labelValue) => Number.isFinite(labelValue))
-        .join(", ");
+      const progress = deriveOrderProgress({ orderEntry, qcRecord });
+      const orderQuantity = Math.max(0, toSafeNumber(progress.order_quantity));
+      const shippedQuantity = Math.max(
+        0,
+        toSafeNumber(progress.shipped_quantity),
+      );
 
-      const baseRow = {
+      return {
         order_id: normalizeText(orderEntry?.order_id),
         brand: normalizeText(orderEntry?.brand),
         vendor: normalizeText(orderEntry?.vendor),
-        status: deriveOrderStatus({ orderEntry, qcRecord }),
-        order_quantity: orderQuantity,
-        order_date: formatDateDDMMYYYY(orderEntry?.order_date, ""),
-        etd: formatDateDDMMYYYY(orderEntry?.ETD, ""),
+        status: normalizeText(progress.status),
         item_code: normalizeText(orderEntry?.item?.item_code),
         item_description: normalizeText(orderEntry?.item?.description),
-        qc_item_code: normalizeText(qcRecord?.item?.item_code),
-        qc_item_description: normalizeText(qcRecord?.item?.description),
-        qc_available: hasQcRecord ? "Yes" : "No",
-        qc_request_date: normalizeText(qcRecord?.request_date),
-        qc_request_type: normalizeText(qcRecord?.request_type),
-        qc_last_inspected_date: normalizeText(qcRecord?.last_inspected_date),
-        qc_inspector: resolveInspectorLabel(qcRecord?.inspector),
-        qc_client_demand: hasQcRecord
-          ? toSafeNumber(qcQuantities?.client_demand)
-          : "",
-        qc_quantity_requested: hasQcRecord
-          ? toSafeNumber(qcQuantities?.quantity_requested)
-          : "",
-        qc_vendor_provision: hasQcRecord
-          ? toSafeNumber(qcQuantities?.vendor_provision)
-          : "",
-        qc_checked: hasQcRecord ? toSafeNumber(qcQuantities?.qc_checked) : "",
-        qc_passed: hasQcRecord ? toSafeNumber(qcQuantities?.qc_passed) : "",
-        qc_pending: hasQcRecord ? toSafeNumber(qcQuantities?.pending) : "",
-        qc_rejected: hasQcRecord ? toSafeNumber(qcQuantities?.qc_rejected) : "",
-        qc_labels: qcLabels,
-        qc_inspection_dates: inspectionDates,
-        qc_request_history: requestHistory,
-        qc_inspection_records_count: hasQcRecord
-          ? Array.isArray(qcRecord?.inspection_record)
-            ? qcRecord.inspection_record.length
-            : 0
-          : "",
-        qc_cbm_top: normalizeText(qcRecord?.cbm?.top),
-        qc_cbm_bottom: normalizeText(qcRecord?.cbm?.bottom),
-        qc_cbm_total: normalizeText(qcRecord?.cbm?.total),
-        qc_remarks: normalizeText(qcRecord?.remarks),
-        shipment_count: shipmentEntries.length,
-        total_shipped_quantity: totalShippedQuantity,
-        shipping_pending_quantity: shippingPendingQuantity,
-      };
-
-      if (shipmentEntries.length === 0) {
-        return [
-          {
-            ...baseRow,
-            shipment_index: "",
-            shipment_stuffing_date: "",
-            shipment_container: "",
-            shipment_invoice_number: "N/A",
-            shipment_quantity: 0,
-            shipment_pending: shippingPendingQuantity,
-            shipment_remarks: "",
-          },
-        ];
-      }
-
-      let cumulativeShipped = 0;
-      return shipmentEntries.map((shipmentEntry, shipmentIndex) => {
-        const shipmentQuantity = Math.max(
+        order_date: formatDateDDMMYYYY(orderEntry?.order_date, ""),
+        etd: formatDateDDMMYYYY(orderEntry?.ETD, ""),
+        order_quantity: orderQuantity,
+        inspection_done: Math.max(0, toSafeNumber(progress.passed_quantity)),
+        inspection_pending: Math.max(
           0,
-          toSafeNumber(shipmentEntry?.quantity),
-        );
-        cumulativeShipped += shipmentQuantity;
-        const pendingValue = toSafeNumber(shipmentEntry?.pending);
-        const pendingFromOrder = Math.max(0, orderQuantity - cumulativeShipped);
-
-        return {
-          ...baseRow,
-          shipment_index: shipmentIndex + 1,
-          shipment_stuffing_date: formatDateDDMMYYYY(
-            shipmentEntry?.stuffing_date,
-            "",
-          ),
-          shipment_container: normalizeText(shipmentEntry?.container),
-          shipment_invoice_number: normalizeShipmentInvoiceNumber(
-            shipmentEntry?.invoice_number,
-          ),
-          shipment_quantity: shipmentQuantity,
-          shipment_pending: Number.isFinite(Number(shipmentEntry?.pending))
-            ? pendingValue
-            : pendingFromOrder,
-          shipment_remarks: normalizeText(shipmentEntry?.remaining_remarks),
-        };
-      });
+          toSafeNumber(progress.pending_inspection_quantity),
+        ),
+        shipped_quantity: shippedQuantity,
+        shipping_pending: Math.max(0, orderQuantity - shippedQuantity),
+      };
     });
 
     const headerRow = columns.map((column) => column.header);
@@ -7265,21 +7120,73 @@ exports.exportOrdersDb = async (req, res) => {
       return res.status(200).send(csvContent);
     }
 
-    const worksheet = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
-    worksheet["!cols"] = columns.map((column, columnIndex) => {
-      const maxDataLength = Math.max(
-        ...dataRows.map((row) => String(row[columnIndex] ?? "").length),
-        column.header.length,
-      );
-      return { wch: Math.min(50, Math.max(12, maxDataLength + 2)) };
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "OMS";
+    workbook.created = new Date();
+    workbook.modified = new Date();
+    const worksheet = workbook.addWorksheet("Sheet1", {
+      properties: {
+        defaultRowHeight: 15,
+      },
+      pageSetup: {
+        margins: {
+          left: 0.7,
+          right: 0.7,
+          top: 0.75,
+          bottom: 0.75,
+          header: 0.3,
+          footer: 0.3,
+        },
+      },
+      views: [
+        {
+          state: "normal",
+          showGridLines: true,
+          zoomScale: 100,
+          zoomScaleNormal: 100,
+        },
+      ],
+    });
+    worksheet.columns = columns.map((column) => ({
+      key: column.key,
+      header: column.header,
+      width: column.width,
+      style: column.numFmt ? { numFmt: column.numFmt } : {},
+    }));
+
+    const headerFont = {
+      name: "Calibri",
+      family: 2,
+      scheme: "minor",
+      size: 12,
+      bold: true,
+      color: { argb: "FF000000" },
+    };
+    const bodyFont = {
+      name: "Calibri",
+      family: 2,
+      scheme: "minor",
+      size: 11,
+      color: { argb: "FF000000" },
+    };
+    const centeredAlignment = { horizontal: "center" };
+
+    const headerWorksheetRow = worksheet.getRow(1);
+    headerWorksheetRow.height = 15.75;
+    headerWorksheetRow.eachCell((cell) => {
+      cell.font = headerFont;
+      cell.alignment = centeredAlignment;
     });
 
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Orders Details");
-    const fileBuffer = XLSX.write(workbook, {
-      type: "buffer",
-      bookType: "xlsx",
+    exportRows.forEach((row) => {
+      const worksheetRow = worksheet.addRow(row);
+      worksheetRow.eachCell((cell) => {
+        cell.font = bodyFont;
+        cell.alignment = centeredAlignment;
+      });
     });
+
+    const fileBuffer = await workbook.xlsx.writeBuffer();
     const fileName = `${baseFileName}.xlsx`;
 
     res.setHeader(
