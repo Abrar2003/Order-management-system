@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect } from "react";
 import {
   BrowserRouter as Router,
   Routes,
@@ -14,64 +14,64 @@ import { PermissionProvider } from "./auth/PermissionContext";
 import { getUserFromToken } from "./auth/auth.service";
 import { normalizeUserRole } from "./auth/permissions";
 
-import SignIn from "./pages/Signin";
-import BrandScopeChoice from "./pages/BrandScopeChoice";
-import Home from "./pages/Home";
-import Orders from "./pages/Orders";
-import QCPage from "./pages/QcPage";
-import QcDetails from "./pages/QcDetails";
-import OrdersByBrand from "./pages/OrdersByBrand";
-import Signup from "./pages/Signup";
-import CreateVendor from "./pages/CreateVendor";
-import OpenOrders from "./pages/OpenOrders";
-import PackedGoods from "./pages/PackedGoods";
-import DailyReport from "./pages/DailyReport";
-import Shipments from "./pages/Shipments";
-import Container from "./pages/Container";
-import Samples from "./pages/Samples";
-import SampleWorkflow from "./pages/SampleWorkflow";
-import Containers from "./pages/Containers";
-import ShippedSamples from "./pages/ShippedSamples";
-import Items from "./pages/Items";
-import ItemMasters from "./pages/ItemMasters";
-import ItemFilesPage from "./pages/ItemFilesPage";
-import ItemDetails from "./pages/ItemDetails";
-import ItemOrdersHistory from "./pages/ItemOrdersHistory";
-import UploadLogs from "./pages/UploadLogs";
-import OrderEditLogs from "./pages/OrderEditLogs";
-import ArchivedOrders from "./pages/ArchivedOrders";
-import InspectionReport from "./pages/inspection_report";
-import InspectorReports from "./pages/InspectorReports";
-import VendorReports from "./pages/VendorReports";
-import VendorWiseQAReport from "./pages/VendorWiseQAReport";
-import DelayedPoReports from "./pages/DelayedPoReports";
-import UpcomingEtdReports from "./pages/UpcomingEtdReports";
-import CommonErrorsReport from "./pages/CommonErrorsReport";
-import PoStatusReport from "./pages/PoStatusReport";
-import PendingPoReport from "./pages/PendingPoReport";
-import ProductAnalytics from "./pages/ProductAnalytics";
-import QcReportMismatch from "./pages/QcReportMismatch";
-import InspectedItemsReport from "./pages/InspectedItemsReport";
-import PisInspectionMasterComparison from "./pages/PisInspectionMasterComparison";
-import ProductDatabase from "./pages/ProductDatabase";
-import ItemDatabase from "./pages/ItemDatabase";
-import ProductDatabaseDetails from "./pages/ProductDatabaseDetails";
-import ProductTypeTemplates from "./pages/ProductTypeTemplates";
-import WorkflowDashboard from "./pages/WorkflowDashboard";
-import WorkflowTasks from "./pages/WorkflowTasks";
-import WorkflowMyTasks from "./pages/WorkflowMyTasks";
-import WorkflowUploadPending from "./pages/WorkflowUploadPending";
-import WorkflowTaskTypes from "./pages/WorkflowTaskTypes";
-import WorkflowDepartments from "./pages/WorkflowDepartments";
-import PermissionManagement from "./pages/PermissionManagement";
-import PIS from "./pages/PIS";
-import PISDiffs from "./pages/PISDiffs";
-import FinalPISCheck from "./pages/FinalPISCheck";
-import PisUpdateLogs from "./pages/PisUpdateLogs";
-import WeeklySummary from "./pages/WeeklySummary";
-import DailySummary from "./pages/DailySummary";
-import Complaints from "./pages/Complaints";
-import SecurityDashboard from "./pages/SecurityDashboard";
+const SignIn = lazy(() => import("./pages/Signin"));
+const BrandScopeChoice = lazy(() => import("./pages/BrandScopeChoice"));
+const Home = lazy(() => import("./pages/Home"));
+const Orders = lazy(() => import("./pages/Orders"));
+const QCPage = lazy(() => import("./pages/QcPage"));
+const QcDetails = lazy(() => import("./pages/QcDetails"));
+const OrdersByBrand = lazy(() => import("./pages/OrdersByBrand"));
+const Signup = lazy(() => import("./pages/Signup"));
+const CreateVendor = lazy(() => import("./pages/CreateVendor"));
+const OpenOrders = lazy(() => import("./pages/OpenOrders"));
+const PackedGoods = lazy(() => import("./pages/PackedGoods"));
+const DailyReport = lazy(() => import("./pages/DailyReport"));
+const Shipments = lazy(() => import("./pages/Shipments"));
+const Container = lazy(() => import("./pages/Container"));
+const Samples = lazy(() => import("./pages/Samples"));
+const SampleWorkflow = lazy(() => import("./pages/SampleWorkflow"));
+const Containers = lazy(() => import("./pages/Containers"));
+const ShippedSamples = lazy(() => import("./pages/ShippedSamples"));
+const Items = lazy(() => import("./pages/Items"));
+const ItemMasters = lazy(() => import("./pages/ItemMasters"));
+const ItemFilesPage = lazy(() => import("./pages/ItemFilesPage"));
+const ItemDetails = lazy(() => import("./pages/ItemDetails"));
+const ItemOrdersHistory = lazy(() => import("./pages/ItemOrdersHistory"));
+const UploadLogs = lazy(() => import("./pages/UploadLogs"));
+const OrderEditLogs = lazy(() => import("./pages/OrderEditLogs"));
+const ArchivedOrders = lazy(() => import("./pages/ArchivedOrders"));
+const InspectionReport = lazy(() => import("./pages/inspection_report"));
+const InspectorReports = lazy(() => import("./pages/InspectorReports"));
+const VendorReports = lazy(() => import("./pages/VendorReports"));
+const VendorWiseQAReport = lazy(() => import("./pages/VendorWiseQAReport"));
+const DelayedPoReports = lazy(() => import("./pages/DelayedPoReports"));
+const UpcomingEtdReports = lazy(() => import("./pages/UpcomingEtdReports"));
+const CommonErrorsReport = lazy(() => import("./pages/CommonErrorsReport"));
+const PoStatusReport = lazy(() => import("./pages/PoStatusReport"));
+const PendingPoReport = lazy(() => import("./pages/PendingPoReport"));
+const ProductAnalytics = lazy(() => import("./pages/ProductAnalytics"));
+const QcReportMismatch = lazy(() => import("./pages/QcReportMismatch"));
+const InspectedItemsReport = lazy(() => import("./pages/InspectedItemsReport"));
+const PisInspectionMasterComparison = lazy(() => import("./pages/PisInspectionMasterComparison"));
+const ProductDatabase = lazy(() => import("./pages/ProductDatabase"));
+const ItemDatabase = lazy(() => import("./pages/ItemDatabase"));
+const ProductDatabaseDetails = lazy(() => import("./pages/ProductDatabaseDetails"));
+const ProductTypeTemplates = lazy(() => import("./pages/ProductTypeTemplates"));
+const WorkflowDashboard = lazy(() => import("./pages/WorkflowDashboard"));
+const WorkflowTasks = lazy(() => import("./pages/WorkflowTasks"));
+const WorkflowMyTasks = lazy(() => import("./pages/WorkflowMyTasks"));
+const WorkflowUploadPending = lazy(() => import("./pages/WorkflowUploadPending"));
+const WorkflowTaskTypes = lazy(() => import("./pages/WorkflowTaskTypes"));
+const WorkflowDepartments = lazy(() => import("./pages/WorkflowDepartments"));
+const PermissionManagement = lazy(() => import("./pages/PermissionManagement"));
+const PIS = lazy(() => import("./pages/PIS"));
+const PISDiffs = lazy(() => import("./pages/PISDiffs"));
+const FinalPISCheck = lazy(() => import("./pages/FinalPISCheck"));
+const PisUpdateLogs = lazy(() => import("./pages/PisUpdateLogs"));
+const WeeklySummary = lazy(() => import("./pages/WeeklySummary"));
+const DailySummary = lazy(() => import("./pages/DailySummary"));
+const Complaints = lazy(() => import("./pages/Complaints"));
+const SecurityDashboard = lazy(() => import("./pages/SecurityDashboard"));
 
 // import Users from "./pages/Users"; // later
 const clearStaleUiOverlays = ({ removeCustomModalRoots = false } = {}) => {
@@ -202,6 +202,12 @@ const AppFallbackRoute = () => {
   return <Navigate to={role === "qc" ? "/qc" : "/orders"} replace />;
 };
 
+const PageFallback = () => (
+  <div className="d-flex align-items-center justify-content-center min-vh-100 text-secondary">
+    Loading...
+  </div>
+);
+
 const App = () => {
   return (
     <div className="app-shell">
@@ -209,6 +215,7 @@ const App = () => {
         <PermissionProvider>
           <ModalNumberInputGuard />
           <RouteUiCleanup />
+          <Suspense fallback={<PageFallback />}>
           <Routes>
           {/* Public */}
           <Route path="/signin" element={<SignIn />} />
@@ -788,6 +795,7 @@ const App = () => {
           {/* Fallback */}
             <Route path="*" element={<AppFallbackRoute />} />
           </Routes>
+          </Suspense>
         </PermissionProvider>
       </Router>
     </div>

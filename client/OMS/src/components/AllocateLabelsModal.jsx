@@ -8,27 +8,12 @@ const LABEL_ACTION_MODES = Object.freeze({
   REJECT: "reject",
 });
 
-const normalizeLabels = (labels = []) => (
-  [...new Set(
-    (Array.isArray(labels) ? labels : [])
-      .map((label) => Number(label))
-      .filter((label) => Number.isInteger(label) && label > 0),
-  )].sort((left, right) => left - right)
-);
-
 const buildRange = (start, end) => {
   const labels = [];
   for (let i = start; i <= end; i++) {
     labels.push(i);
   }
   return labels;
-};
-
-const formatLabelList = (labels, limit = 10) => {
-  if (!labels.length) return "";
-  const preview = labels.slice(0, limit).join(", ");
-  if (labels.length <= limit) return preview;
-  return `${preview} (+${labels.length - limit} more)`;
 };
 
 const parseRangeLabels = ({ labelStart = "", labelEnd = "" } = {}) => {
@@ -97,7 +82,7 @@ const UsageSummaryCard = ({
         </div>
         <div className="col-6 col-xl-3">
           <div className="small text-secondary">Unused</div>
-          <div className="fw-semibold">{loading ? "Loading..." : usage?.unused_labels?.length ?? "-"}</div>
+          <div className="fw-semibold">{loading ? "Loading..." : usage?.total_unused ?? "-"}</div>
         </div>
         <div className="col-6 col-xl-3">
           <div className="small text-secondary">Rejected</div>
@@ -185,6 +170,7 @@ const AllocateLabelsModal = ({ onClose }) => {
       try {
         setLoadingUsage(true);
         const res = await api.get(`/inspectors/${selectedInspectorId}/label-usage`, {
+          params: { detail: "summary" },
           signal: controller.signal,
         });
         setUsage(res.data.data);
@@ -215,6 +201,7 @@ const AllocateLabelsModal = ({ onClose }) => {
       try {
         setLoadingSourceUsage(true);
         const res = await api.get(`/inspectors/${sourceInspectorId}/label-usage`, {
+          params: { detail: "summary" },
           signal: controller.signal,
         });
         setSourceUsage(res.data.data);
@@ -245,6 +232,7 @@ const AllocateLabelsModal = ({ onClose }) => {
       try {
         setLoadingTargetUsage(true);
         const res = await api.get(`/inspectors/${targetInspectorId}/label-usage`, {
+          params: { detail: "summary" },
           signal: controller.signal,
         });
         setTargetUsage(res.data.data);
@@ -289,39 +277,6 @@ const AllocateLabelsModal = ({ onClose }) => {
       return;
     }
 
-    const usageAllocated = normalizeLabels(
-      usage?.allocated_labels || selectedInspector?.alloted_labels || [],
-    );
-    const usageUsed = normalizeLabels(
-      usage?.used_labels || selectedInspector?.used_labels || [],
-    );
-    const usageRejected = normalizeLabels(
-      usage?.rejected_labels || selectedInspector?.rejected_labels || [],
-    );
-    const allocatedSet = new Set(usageAllocated);
-    const usedSet = new Set(usageUsed);
-    const rejectedSet = new Set(usageRejected);
-
-    const conflictsUsed = labels.filter((label) => usedSet.has(label));
-    const conflictsAllocated = labels.filter((label) => allocatedSet.has(label));
-    const conflictsRejected = labels.filter((label) => rejectedSet.has(label));
-
-    const nextErrors = [];
-    if (conflictsRejected.length) {
-      nextErrors.push(`Rejected labels cannot be reallocated: ${formatLabelList(conflictsRejected)}`);
-    }
-    if (conflictsUsed.length) {
-      nextErrors.push(`Used labels cannot be reallocated: ${formatLabelList(conflictsUsed)}`);
-    }
-    if (conflictsAllocated.length) {
-      nextErrors.push(`Already allocated to this inspector: ${formatLabelList(conflictsAllocated)}`);
-    }
-
-    if (nextErrors.length) {
-      setErrors(nextErrors);
-      return;
-    }
-
     try {
       setSaving(true);
       await api.patch(`/inspectors/${selectedInspectorId}/allocate-labels`, { labels });
@@ -346,41 +301,6 @@ const AllocateLabelsModal = ({ onClose }) => {
     const { labels, error } = parseRangeLabels({ labelStart, labelEnd });
     if (error) {
       setErrors([error]);
-      return;
-    }
-
-    const usageAllocated = normalizeLabels(
-      usage?.allocated_labels || selectedInspector?.alloted_labels || [],
-    );
-    const usageUsed = normalizeLabels(
-      usage?.used_labels || selectedInspector?.used_labels || [],
-    );
-    const usageRejected = normalizeLabels(
-      usage?.rejected_labels || selectedInspector?.rejected_labels || [],
-    );
-    const allocatedSet = new Set(usageAllocated);
-    const usedSet = new Set(usageUsed);
-    const rejectedSet = new Set(usageRejected);
-
-    const alreadyRejected = labels.filter((label) => rejectedSet.has(label));
-    const missingFromInspector = labels.filter(
-      (label) => !allocatedSet.has(label) && !rejectedSet.has(label),
-    );
-    const usedInInspector = labels.filter((label) => usedSet.has(label));
-
-    const nextErrors = [];
-    if (alreadyRejected.length) {
-      nextErrors.push(`Already rejected for this inspector: ${formatLabelList(alreadyRejected)}`);
-    }
-    if (missingFromInspector.length) {
-      nextErrors.push(`Not allocated to selected inspector: ${formatLabelList(missingFromInspector)}`);
-    }
-    if (usedInInspector.length) {
-      nextErrors.push(`Used labels cannot be rejected: ${formatLabelList(usedInInspector)}`);
-    }
-
-    if (nextErrors.length) {
-      setErrors(nextErrors);
       return;
     }
 
@@ -416,62 +336,6 @@ const AllocateLabelsModal = ({ onClose }) => {
       return;
     }
 
-    const sourceAllocated = normalizeLabels(
-      sourceUsage?.allocated_labels || sourceInspector?.alloted_labels || [],
-    );
-    const sourceUsed = normalizeLabels(
-      sourceUsage?.used_labels || sourceInspector?.used_labels || [],
-    );
-    const sourceRejected = normalizeLabels(
-      sourceUsage?.rejected_labels || sourceInspector?.rejected_labels || [],
-    );
-    const targetAllocated = normalizeLabels(
-      targetUsage?.allocated_labels || targetInspector?.alloted_labels || [],
-    );
-    const targetUsed = normalizeLabels(
-      targetUsage?.used_labels || targetInspector?.used_labels || [],
-    );
-    const targetRejected = normalizeLabels(
-      targetUsage?.rejected_labels || targetInspector?.rejected_labels || [],
-    );
-
-    const sourceAllocatedSet = new Set(sourceAllocated);
-    const sourceUsedSet = new Set(sourceUsed);
-    const sourceRejectedSet = new Set(sourceRejected);
-    const targetAllocatedSet = new Set(targetAllocated);
-    const targetUsedSet = new Set(targetUsed);
-    const targetRejectedSet = new Set(targetRejected);
-
-    const missingFromSource = labels.filter((label) => !sourceAllocatedSet.has(label));
-    const usedInSource = labels.filter((label) => sourceUsedSet.has(label));
-    const rejectedInSource = labels.filter((label) => sourceRejectedSet.has(label));
-    const alreadyInTarget = labels.filter(
-      (label) => (
-        targetAllocatedSet.has(label)
-        || targetUsedSet.has(label)
-        || targetRejectedSet.has(label)
-      ),
-    );
-
-    const nextErrors = [];
-    if (missingFromSource.length) {
-      nextErrors.push(`Not allocated to source QC: ${formatLabelList(missingFromSource)}`);
-    }
-    if (usedInSource.length) {
-      nextErrors.push(`Used labels cannot be transferred: ${formatLabelList(usedInSource)}`);
-    }
-    if (rejectedInSource.length) {
-      nextErrors.push(`Rejected labels cannot be transferred: ${formatLabelList(rejectedInSource)}`);
-    }
-    if (alreadyInTarget.length) {
-      nextErrors.push(`Already assigned to target QC: ${formatLabelList(alreadyInTarget)}`);
-    }
-
-    if (nextErrors.length) {
-      setErrors(nextErrors);
-      return;
-    }
-
     try {
       setSaving(true);
       await api.patch("/inspectors/transfer-labels", {
@@ -500,10 +364,6 @@ const AllocateLabelsModal = ({ onClose }) => {
     }
     handleAllocate();
   };
-
-  const isUsageLoading = isTransferMode
-    ? loadingSourceUsage || loadingTargetUsage
-    : loadingUsage;
 
   return (
     <div className="modal d-block om-modal-backdrop" tabIndex="-1" role="dialog">
@@ -684,7 +544,7 @@ const AllocateLabelsModal = ({ onClose }) => {
               type="button"
               className={isRejectMode ? "btn btn-danger" : "btn btn-primary"}
               onClick={handleSubmit}
-              disabled={saving || loadingInspectors || isUsageLoading}
+              disabled={saving || loadingInspectors}
             >
               {saving
                 ? (isTransferMode ? "Transferring..." : isRejectMode ? "Rejecting..." : "Allocating...")

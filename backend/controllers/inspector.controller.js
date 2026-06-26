@@ -1,6 +1,7 @@
 const Inspector = require("../models/inspector.model");
 const User = require("../models/user.model");
 const Inspection = require("../models/inspection.model");
+const mongoose = require("mongoose");
 const parsePositiveInteger = (value, fallback) => {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed < 1) return fallback;
@@ -111,6 +112,37 @@ const buildLabelUsedHistoryFromInspectionRecords = (records = []) =>
       (left, right) =>
         new Date(right?.used_at || 0) - new Date(left?.used_at || 0),
     );
+
+const getUsedLabelSummaryForInspectorUser = async (inspectorUserId) => {
+  if (!inspectorUserId) return { totalUsed: 0 };
+
+  const [result = {}] = await Inspection.aggregate([
+    {
+      $match: {
+        inspector: inspectorUserId,
+        labels_added: { $exists: true, $ne: [] },
+      },
+    },
+    { $unwind: "$labels_added" },
+    {
+      $match: {
+        labels_added: { $type: "number", $gt: 0 },
+      },
+    },
+    {
+      $group: {
+        _id: "$labels_added",
+      },
+    },
+    {
+      $count: "totalUsed",
+    },
+  ]);
+
+  return {
+    totalUsed: Number(result.totalUsed || 0),
+  };
+};
 
 const syncInspectorUsedLabelsFromInspectionRecords = async (inspector) => {
   if (!inspector?.user) return inspector;
@@ -1024,6 +1056,59 @@ exports.removeLabels = async (req, res) => {
  */
 exports.getLabelUsageStats = async (req, res) => {
   try {
+    const detail = String(req.query.detail || "full").trim().toLowerCase();
+    const summaryOnly = ["summary", "counts", "fast"].includes(detail);
+
+    if (summaryOnly) {
+      if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+        return res.status(404).json({ message: "Inspector not found" });
+      }
+
+      const [inspectorSummary = null] = await Inspector.aggregate([
+        {
+          $match: {
+            _id: new mongoose.Types.ObjectId(req.params.id),
+          },
+        },
+        {
+          $project: {
+            user: 1,
+            total_allocated: {
+              $size: { $ifNull: ["$alloted_labels", []] },
+            },
+            total_rejected: {
+              $size: { $ifNull: ["$rejected_labels", []] },
+            },
+          },
+        },
+      ]);
+
+      if (!inspectorSummary) {
+        return res.status(404).json({ message: "Inspector not found" });
+      }
+
+      const usedLabelSummary = await getUsedLabelSummaryForInspectorUser(
+        inspectorSummary.user,
+      );
+      const totalUsed = usedLabelSummary.totalUsed;
+      const totalAllocated = Number(inspectorSummary.total_allocated || 0);
+      const totalRejected = Number(inspectorSummary.total_rejected || 0);
+      const totalUnused = Math.max(totalAllocated - totalUsed, 0);
+
+      return res.json({
+        data: {
+          inspector: inspectorSummary.user,
+          total_allocated: totalAllocated,
+          total_used: totalUsed,
+          total_unused: totalUnused,
+          total_rejected: totalRejected,
+          usage_percentage: totalAllocated > 0
+            ? ((totalUsed / totalAllocated) * 100).toFixed(2)
+            : 0,
+        },
+      });
+    }
+
     const inspector = await Inspector.findById(req.params.id)
       .populate("user", "name email role");
 
@@ -1038,11 +1123,11 @@ exports.getLabelUsageStats = async (req, res) => {
       used: usedLabels,
       rejected: rejectedLabels,
     } = getInspectorLabelState(inspector);
-    const allocatedSet = new Set(allocatedLabels);
     const usedSet = new Set(usedLabels);
     const unusedLabels = allocatedLabels.filter(
       (label) => !usedSet.has(label),
     );
+
     const labelAllocationHistory = Array.isArray(inspector.label_allocation_history)
       ? inspector.label_allocation_history
           .map((entry) => (typeof entry?.toObject === "function" ? entry.toObject() : entry))

@@ -938,6 +938,7 @@ const ItemFilesPage = () => {
                                 type="button"
                                 className="btn btn-outline-secondary btn-sm dropdown-toggle"
                                 data-bs-toggle="dropdown"
+                                data-bs-popper-config='{"strategy":"fixed"}'
                                 aria-expanded="false"
                               >
                                 Actions
