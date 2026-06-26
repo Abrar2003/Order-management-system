@@ -349,6 +349,7 @@ exports.getInspectorOptions = async (req, res) => {
 
     const inspectors = userIds.length
       ? await Inspector.find({ user: { $in: userIds } })
+          .select("_id user")
           .populate("user", "name email role")
           .sort({ createdAt: -1 })
           .lean()

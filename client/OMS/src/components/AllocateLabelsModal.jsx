@@ -54,6 +54,26 @@ const parseRangeLabels = ({ labelStart = "", labelEnd = "" } = {}) => {
   return { labels: buildRange(startNum, endNum), error: "" };
 };
 
+const normalizeInspectorOption = (inspector = {}) => {
+  const id = String(inspector?.id || inspector?._id || "").trim();
+  const name = String(
+    inspector?.name || inspector?.user?.name || inspector?.user?.email || id,
+  ).trim();
+  const email = String(inspector?.email || inspector?.user?.email || "").trim();
+
+  return {
+    _id: id,
+    user: {
+      name,
+      email,
+    },
+  };
+};
+
+const getInspectorName = (inspector = null) => (
+  inspector?.user?.name || inspector?.user?.email || "Select inspector"
+);
+
 const UsageSummaryCard = ({
   title,
   inspector = null,
@@ -64,7 +84,7 @@ const UsageSummaryCard = ({
     <div className="border rounded p-3 h-100">
       <div className="small text-secondary">{title}</div>
       <div className="fw-semibold mb-2">
-        {inspector?.user?.name || inspector?.user?.email || "Select inspector"}
+        {getInspectorName(inspector)}
       </div>
       <div className="row g-2">
         <div className="col-6 col-xl-3">
@@ -121,36 +141,32 @@ const AllocateLabelsModal = ({ onClose }) => {
     [inspectors, targetInspectorId],
   );
 
-  const globalLabelPools = useMemo(() => {
-    const allocated = new Set();
-    const used = new Set();
-    const rejected = new Set();
-
-    inspectors.forEach((inspector) => {
-      normalizeLabels(inspector?.alloted_labels).forEach((label) => allocated.add(label));
-      normalizeLabels(inspector?.used_labels).forEach((label) => used.add(label));
-      normalizeLabels(inspector?.rejected_labels).forEach((label) => rejected.add(label));
-    });
-
-    return { allocated, used, rejected };
-  }, [inspectors]);
-
   useEffect(() => {
+    const controller = new AbortController();
+
     const fetchInspectors = async () => {
       try {
         setLoadingInspectors(true);
-        const res = await api.get("/inspectors", {
-          params: { page: 1, limit: 1000 },
+        const res = await api.get("/inspectors/options", {
+          signal: controller.signal,
         });
-        setInspectors(res.data.data || []);
+        const nextInspectors = Array.isArray(res.data?.data)
+          ? res.data.data.map(normalizeInspectorOption).filter((inspector) => inspector._id)
+          : [];
+        setInspectors(nextInspectors);
       } catch (err) {
+        if (err.name === "CanceledError" || err.code === "ERR_CANCELED") return;
         setErrors([err.response?.data?.message || "Failed to load inspectors."]);
       } finally {
-        setLoadingInspectors(false);
+        if (!controller.signal.aborted) {
+          setLoadingInspectors(false);
+        }
       }
     };
 
     fetchInspectors();
+
+    return () => controller.abort();
   }, []);
 
   useEffect(() => {
@@ -163,19 +179,28 @@ const AllocateLabelsModal = ({ onClose }) => {
       return;
     }
 
+    const controller = new AbortController();
+
     const fetchUsage = async () => {
       try {
         setLoadingUsage(true);
-        const res = await api.get(`/inspectors/${selectedInspectorId}/label-usage`);
+        const res = await api.get(`/inspectors/${selectedInspectorId}/label-usage`, {
+          signal: controller.signal,
+        });
         setUsage(res.data.data);
       } catch (err) {
+        if (err.name === "CanceledError" || err.code === "ERR_CANCELED") return;
         setErrors([err.response?.data?.message || "Failed to load label usage."]);
       } finally {
-        setLoadingUsage(false);
+        if (!controller.signal.aborted) {
+          setLoadingUsage(false);
+        }
       }
     };
 
     fetchUsage();
+
+    return () => controller.abort();
   }, [selectedInspectorId]);
 
   useEffect(() => {
@@ -184,19 +209,28 @@ const AllocateLabelsModal = ({ onClose }) => {
       return;
     }
 
+    const controller = new AbortController();
+
     const fetchSourceUsage = async () => {
       try {
         setLoadingSourceUsage(true);
-        const res = await api.get(`/inspectors/${sourceInspectorId}/label-usage`);
+        const res = await api.get(`/inspectors/${sourceInspectorId}/label-usage`, {
+          signal: controller.signal,
+        });
         setSourceUsage(res.data.data);
       } catch (err) {
+        if (err.name === "CanceledError" || err.code === "ERR_CANCELED") return;
         setErrors([err.response?.data?.message || "Failed to load source inspector label usage."]);
       } finally {
-        setLoadingSourceUsage(false);
+        if (!controller.signal.aborted) {
+          setLoadingSourceUsage(false);
+        }
       }
     };
 
     fetchSourceUsage();
+
+    return () => controller.abort();
   }, [sourceInspectorId]);
 
   useEffect(() => {
@@ -205,19 +239,28 @@ const AllocateLabelsModal = ({ onClose }) => {
       return;
     }
 
+    const controller = new AbortController();
+
     const fetchTargetUsage = async () => {
       try {
         setLoadingTargetUsage(true);
-        const res = await api.get(`/inspectors/${targetInspectorId}/label-usage`);
+        const res = await api.get(`/inspectors/${targetInspectorId}/label-usage`, {
+          signal: controller.signal,
+        });
         setTargetUsage(res.data.data);
       } catch (err) {
+        if (err.name === "CanceledError" || err.code === "ERR_CANCELED") return;
         setErrors([err.response?.data?.message || "Failed to load target inspector label usage."]);
       } finally {
-        setLoadingTargetUsage(false);
+        if (!controller.signal.aborted) {
+          setLoadingTargetUsage(false);
+        }
       }
     };
 
     fetchTargetUsage();
+
+    return () => controller.abort();
   }, [targetInspectorId]);
 
   const resetForm = () => {
@@ -262,15 +305,6 @@ const AllocateLabelsModal = ({ onClose }) => {
     const conflictsUsed = labels.filter((label) => usedSet.has(label));
     const conflictsAllocated = labels.filter((label) => allocatedSet.has(label));
     const conflictsRejected = labels.filter((label) => rejectedSet.has(label));
-    const conflictsAllocatedOther = labels.filter(
-      (label) => globalLabelPools.allocated.has(label) && !allocatedSet.has(label),
-    );
-    const conflictsUsedOther = labels.filter(
-      (label) => globalLabelPools.used.has(label) && !usedSet.has(label),
-    );
-    const conflictsRejectedOther = labels.filter(
-      (label) => globalLabelPools.rejected.has(label) && !rejectedSet.has(label),
-    );
 
     const nextErrors = [];
     if (conflictsRejected.length) {
@@ -281,15 +315,6 @@ const AllocateLabelsModal = ({ onClose }) => {
     }
     if (conflictsAllocated.length) {
       nextErrors.push(`Already allocated to this inspector: ${formatLabelList(conflictsAllocated)}`);
-    }
-    if (conflictsRejectedOther.length) {
-      nextErrors.push(`Rejected labels cannot be allocated again: ${formatLabelList(conflictsRejectedOther)}`);
-    }
-    if (conflictsUsedOther.length) {
-      nextErrors.push(`Already used by another inspector: ${formatLabelList(conflictsUsedOther)}`);
-    }
-    if (conflictsAllocatedOther.length) {
-      nextErrors.push(`Allocated to another inspector: ${formatLabelList(conflictsAllocatedOther)}`);
     }
 
     if (nextErrors.length) {
@@ -427,27 +452,6 @@ const AllocateLabelsModal = ({ onClose }) => {
         || targetRejectedSet.has(label)
       ),
     );
-    const conflictsOtherAllocated = labels.filter(
-      (label) => (
-        globalLabelPools.allocated.has(label)
-        && !sourceAllocatedSet.has(label)
-        && !targetAllocatedSet.has(label)
-      ),
-    );
-    const conflictsOtherUsed = labels.filter(
-      (label) => (
-        globalLabelPools.used.has(label)
-        && !sourceUsedSet.has(label)
-        && !targetUsedSet.has(label)
-      ),
-    );
-    const conflictsOtherRejected = labels.filter(
-      (label) => (
-        globalLabelPools.rejected.has(label)
-        && !sourceRejectedSet.has(label)
-        && !targetRejectedSet.has(label)
-      ),
-    );
 
     const nextErrors = [];
     if (missingFromSource.length) {
@@ -461,15 +465,6 @@ const AllocateLabelsModal = ({ onClose }) => {
     }
     if (alreadyInTarget.length) {
       nextErrors.push(`Already assigned to target QC: ${formatLabelList(alreadyInTarget)}`);
-    }
-    if (conflictsOtherRejected.length) {
-      nextErrors.push(`Rejected labels cannot be transferred: ${formatLabelList(conflictsOtherRejected)}`);
-    }
-    if (conflictsOtherUsed.length) {
-      nextErrors.push(`Already used by another inspector: ${formatLabelList(conflictsOtherUsed)}`);
-    }
-    if (conflictsOtherAllocated.length) {
-      nextErrors.push(`Allocated to another inspector: ${formatLabelList(conflictsOtherAllocated)}`);
     }
 
     if (nextErrors.length) {
@@ -505,6 +500,10 @@ const AllocateLabelsModal = ({ onClose }) => {
     }
     handleAllocate();
   };
+
+  const isUsageLoading = isTransferMode
+    ? loadingSourceUsage || loadingTargetUsage
+    : loadingUsage;
 
   return (
     <div className="modal d-block om-modal-backdrop" tabIndex="-1" role="dialog">
@@ -581,7 +580,7 @@ const AllocateLabelsModal = ({ onClose }) => {
                       </option>
                       {inspectors.map((inspector) => (
                         <option key={inspector._id} value={inspector._id}>
-                          {inspector.user?.name || inspector.user?.email || inspector._id}
+                          {getInspectorName(inspector)}
                         </option>
                       ))}
                     </select>
@@ -600,7 +599,7 @@ const AllocateLabelsModal = ({ onClose }) => {
                       </option>
                       {inspectors.map((inspector) => (
                         <option key={inspector._id} value={inspector._id}>
-                          {inspector.user?.name || inspector.user?.email || inspector._id}
+                          {getInspectorName(inspector)}
                         </option>
                       ))}
                     </select>
@@ -642,7 +641,7 @@ const AllocateLabelsModal = ({ onClose }) => {
                       </option>
                       {inspectors.map((inspector) => (
                         <option key={inspector._id} value={inspector._id}>
-                          {inspector.user?.name || inspector.user?.email || inspector._id}
+                          {getInspectorName(inspector)}
                         </option>
                       ))}
                     </select>
@@ -685,7 +684,7 @@ const AllocateLabelsModal = ({ onClose }) => {
               type="button"
               className={isRejectMode ? "btn btn-danger" : "btn btn-primary"}
               onClick={handleSubmit}
-              disabled={saving || loadingInspectors}
+              disabled={saving || loadingInspectors || isUsageLoading}
             >
               {saving
                 ? (isTransferMode ? "Transferring..." : isRejectMode ? "Rejecting..." : "Allocating...")

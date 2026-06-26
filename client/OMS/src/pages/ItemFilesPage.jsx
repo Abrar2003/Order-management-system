@@ -933,47 +933,70 @@ const ItemFilesPage = () => {
                             )}
                           </td>
                           <td>
-                            <div className="d-flex flex-wrap gap-2">
+                            <div className="dropdown">
                               <button
                                 type="button"
-                                className="btn btn-outline-secondary btn-sm"
-                                onClick={() => navigateToItemDetails(item)}
-                                disabled={!item?.code}
-                                title="Open item details"
+                                className="btn btn-outline-secondary btn-sm dropdown-toggle"
+                                data-bs-toggle="dropdown"
+                                aria-expanded="false"
                               >
-                                View Item
+                                Actions
                               </button>
-                              <button
-                                type="button"
-                                className="btn btn-outline-info btn-sm"
-                                onClick={() => navigateToLatestInspectionReport(item)}
-                                disabled={!item?.latest_inspection_report_qc_id}
-                                title={
-                                  item?.latest_inspection_report_qc_id
-                                    ? "Open latest inspection report"
-                                    : "No inspection report available yet"
-                                }
-                              >
-                                Inspection Report
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-outline-primary btn-sm"
-                                onClick={() => handlePreviewFile(item)}
-                                disabled={!hasFile || isOpeningThisItem}
-                              >
-                                {isOpeningThisItem ? "Loading..." : "Preview"}
-                              </button>
-                              {canUploadActiveFile && (
-                                <button
-                                  type="button"
-                                  className="btn btn-primary btn-sm"
-                                  onClick={() => handleOpenItemFilePicker(item)}
-                                  disabled={Boolean(uploadingItemId)}
-                                >
-                                  {isUploadingThisItem ? "Uploading..." : `Upload ${activeFileOption.label}`}
-                                </button>
-                              )}
+                              <ul className="dropdown-menu dropdown-menu-end shadow">
+                                <li>
+                                  <button
+                                    className="dropdown-item"
+                                    type="button"
+                                    onClick={() => navigateToItemDetails(item)}
+                                    disabled={!item?.code}
+                                    title="Open item details"
+                                  >
+                                    View Item
+                                  </button>
+                                </li>
+                                <li>
+                                  <button
+                                    className="dropdown-item"
+                                    type="button"
+                                    onClick={() => navigateToLatestInspectionReport(item)}
+                                    disabled={!item?.latest_inspection_report_qc_id}
+                                    title={
+                                      item?.latest_inspection_report_qc_id
+                                        ? "Open latest inspection report"
+                                        : "No inspection report available yet"
+                                    }
+                                  >
+                                    Inspection Report
+                                  </button>
+                                </li>
+                                <li>
+                                  <button
+                                    className="dropdown-item"
+                                    type="button"
+                                    onClick={() => handlePreviewFile(item)}
+                                    disabled={!hasFile || isOpeningThisItem}
+                                  >
+                                    {isOpeningThisItem ? "Loading..." : "Preview"}
+                                  </button>
+                                </li>
+                                {canUploadActiveFile && (
+                                  <>
+                                    <li>
+                                      <hr className="dropdown-divider" />
+                                    </li>
+                                    <li>
+                                      <button
+                                        className="dropdown-item"
+                                        type="button"
+                                        onClick={() => handleOpenItemFilePicker(item)}
+                                        disabled={Boolean(uploadingItemId)}
+                                      >
+                                        {isUploadingThisItem ? "Uploading..." : `Upload ${activeFileOption.label}`}
+                                      </button>
+                                    </li>
+                                  </>
+                                )}
+                              </ul>
                             </div>
                           </td>
                         </tr>
