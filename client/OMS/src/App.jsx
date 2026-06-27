@@ -13,6 +13,7 @@ import ProtectedRoute from "./routes/ProtectedRoute";
 import { PermissionProvider } from "./auth/PermissionContext";
 import { getUserFromToken } from "./auth/auth.service";
 import { normalizeUserRole } from "./auth/permissions";
+import useMobileKeyboardHandler from "./hooks/useMobileKeyboardHandler";
 
 const SignIn = lazy(() => import("./pages/Signin"));
 const BrandScopeChoice = lazy(() => import("./pages/BrandScopeChoice"));
@@ -208,12 +209,18 @@ const PageFallback = () => (
   </div>
 );
 
+const MobileKeyboardGuard = () => {
+  useMobileKeyboardHandler();
+  return null;
+};
+
 const App = () => {
   return (
     <div className="app-shell">
       <Router>
         <PermissionProvider>
           <ModalNumberInputGuard />
+          <MobileKeyboardGuard />
           <RouteUiCleanup />
           <Suspense fallback={<PageFallback />}>
           <Routes>
