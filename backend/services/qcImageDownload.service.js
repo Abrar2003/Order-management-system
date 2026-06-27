@@ -1,8 +1,12 @@
 const path = require("path");
 const axios = require("axios");
-const AdmZip = require("adm-zip");
+const archiver = require("archiver");
 const { getObjectBuffer } = require("./wasabiStorage.service");
 
+const ZIP_COMPRESSION_LEVEL = Math.max(
+  0,
+  Math.min(9, Number(process.env.QC_IMAGE_DOWNLOAD_ZIP_LEVEL || 0) || 0),
+);
 const DOWNLOAD_CONCURRENCY = Math.max(
   1,
   Number(process.env.QC_IMAGE_DOWNLOAD_CONCURRENCY || 24) || 24,
@@ -73,6 +77,21 @@ const buildArchiveFileName = (archiveLabel = "") => {
   return `${safeLabel || "qc-images"}-${dateStamp}.zip`;
 };
 
+const getQcImageDownloadMemorySnapshot = () => {
+  const usage = process.memoryUsage();
+  return {
+    rss: Number(usage?.rss || 0),
+    heapUsed: Number(usage?.heapUsed || 0),
+  };
+};
+
+const logQcImageDownloadEvent = (event, payload = {}) => {
+  console.info(`[qc-image-download] ${event}`, {
+    ...payload,
+    memory: getQcImageDownloadMemorySnapshot(),
+  });
+};
+
 const mapWithConcurrencyLimit = async (
   items = [],
   concurrencyLimit = 1,
@@ -139,86 +158,166 @@ const fetchQcImageContent = async (image = {}) => {
   throw new Error("QC image storage reference is missing");
 };
 
-const buildQcImagesArchive = async ({
+const createArchiveWriteCompletion = (archive, outputStream) =>
+  new Promise((resolve, reject) => {
+    let settled = false;
+    let outputFinished = false;
+
+    const cleanup = () => {
+      archive.off("error", handleError);
+      outputStream.off("error", handleError);
+      outputStream.off("finish", handleFinish);
+      outputStream.off("close", handleClose);
+    };
+
+    const settle = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback(value);
+    };
+
+    function handleError(error) {
+      settle(reject, error);
+    }
+
+    function handleFinish() {
+      outputFinished = true;
+      settle(resolve);
+    }
+
+    function handleClose() {
+      if (!outputFinished) {
+        settle(
+          reject,
+          new Error("QC image download stream closed before completion"),
+        );
+      }
+    }
+
+    archive.on("error", handleError);
+    outputStream.on("error", handleError);
+    outputStream.on("finish", handleFinish);
+    outputStream.on("close", handleClose);
+  });
+
+const streamQcImagesArchive = async ({
   images = [],
   archiveLabel = "",
+  outputStream = null,
+  fetchImageContent = fetchQcImageContent,
+  concurrency = DOWNLOAD_CONCURRENCY,
 } = {}) => {
   const safeImages = Array.isArray(images) ? images.filter(Boolean) : [];
   if (safeImages.length === 0) {
     throw new Error("Select at least one QC image to download");
   }
 
-  const preparedEntries = await mapWithConcurrencyLimit(
+  if (!outputStream || typeof outputStream.write !== "function") {
+    throw new Error("A writable archive output stream is required");
+  }
+
+  const archive = archiver("zip", {
+    store: ZIP_COMPRESSION_LEVEL === 0,
+    zlib: { level: ZIP_COMPRESSION_LEVEL },
+  });
+  const usedNames = new Set();
+  const archiveEntryNames = safeImages.map((image, index) =>
+    ensureUniqueArchiveEntryName(buildArchiveEntryName(image, index), usedNames),
+  );
+  const failures = [];
+  let downloadedCount = 0;
+  const startedAt = Date.now();
+  const safeConcurrency = Math.max(1, Number(concurrency) || DOWNLOAD_CONCURRENCY);
+  const archiveWriteCompletion = createArchiveWriteCompletion(
+    archive,
+    outputStream,
+  );
+
+  archive.pipe(outputStream);
+
+  logQcImageDownloadEvent("start", {
+    requestedCount: safeImages.length,
+    archiveLabel: normalizeText(archiveLabel),
+    concurrency: safeConcurrency,
+    zipCompressionLevel: ZIP_COMPRESSION_LEVEL,
+  });
+
+  await mapWithConcurrencyLimit(
     safeImages,
-    DOWNLOAD_CONCURRENCY,
+    safeConcurrency,
     async (image, index) => {
-      const archiveEntryName = buildArchiveEntryName(image, index);
+      const uniqueArchiveEntryName = archiveEntryNames[index];
 
       try {
-        const objectData = await fetchQcImageContent(image);
-        return {
-          ok: true,
-          archiveEntryName,
-          buffer: objectData.buffer,
-        };
+        const objectData = await fetchImageContent(image);
+        archive.append(objectData.buffer, {
+          name: uniqueArchiveEntryName,
+          store: true,
+        });
+        downloadedCount += 1;
+
+        if (downloadedCount === 1 || downloadedCount % 25 === 0) {
+          logQcImageDownloadEvent("progress", {
+            requestedCount: safeImages.length,
+            downloadedCount,
+            failedCount: failures.length,
+            durationMs: Date.now() - startedAt,
+            archiveBytes: archive.pointer(),
+          });
+        }
       } catch (error) {
-        return {
-          ok: false,
-          archiveEntryName,
-          error: error?.message || "Failed to load image from storage",
-        };
+        failures.push(
+          `${uniqueArchiveEntryName}: ${error?.message || "Failed to load image from storage"}`,
+        );
       }
     },
   );
 
-  const zip = new AdmZip();
-  const usedNames = new Set();
-  const failures = [];
-  let downloadedCount = 0;
-
-  preparedEntries.forEach((entry) => {
-    const uniqueArchiveEntryName = ensureUniqueArchiveEntryName(
-      entry.archiveEntryName,
-      usedNames,
-    );
-
-    if (!entry.ok) {
-      failures.push(`${uniqueArchiveEntryName}: ${entry.error}`);
-      return;
-    }
-
-    zip.addFile(uniqueArchiveEntryName, entry.buffer);
-    downloadedCount += 1;
-  });
-
-  if (downloadedCount === 0) {
-    throw new Error(
-      failures[0] || "Failed to prepare QC image download archive",
-    );
-  }
-
   if (failures.length > 0) {
-    zip.addFile(
-      "_download-errors.txt",
+    archive.append(
       Buffer.from(
         [
-          "Some selected QC images could not be added to this archive.",
+          downloadedCount === 0
+            ? "The selected QC images could not be added to this archive."
+            : "Some selected QC images could not be added to this archive.",
           "",
           ...failures,
         ].join("\n"),
         "utf8",
       ),
+      {
+        name: "_download-errors.txt",
+        store: true,
+      },
     );
   }
 
+  await archive.finalize();
+  await archiveWriteCompletion;
+
+  logQcImageDownloadEvent("complete", {
+    requestedCount: safeImages.length,
+    downloadedCount,
+    failedCount: failures.length,
+    durationMs: Date.now() - startedAt,
+    archiveBytes: archive.pointer(),
+  });
+
   return {
-    archiveBuffer: zip.toBuffer(),
     archiveFileName: buildArchiveFileName(archiveLabel),
     downloadedCount,
     failedCount: failures.length,
+    archiveBytes: archive.pointer(),
   };
 };
 
 module.exports = {
-  buildQcImagesArchive,
+  buildArchiveFileName,
+  streamQcImagesArchive,
+  __test__: {
+    buildArchiveEntryName,
+    ensureUniqueArchiveEntryName,
+    streamQcImagesArchive,
+  },
 };

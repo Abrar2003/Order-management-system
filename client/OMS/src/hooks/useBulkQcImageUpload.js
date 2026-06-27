@@ -212,7 +212,12 @@ export const useBulkQcImageUpload = ({
     updateState(createInitialState());
   }, [updateState]);
 
-  const selectFiles = useCallback((rawFiles = [], { uploadMode = "bulk" } = {}) => {
+  const selectFiles = useCallback((rawFiles = [], { uploadMode = "bulk", imageType = "qc_images" } = {}) => {
+    const normalizedImageType = normalizeText(imageType).toLowerCase();
+    const imageTypeLabel =
+      normalizedImageType === "hardware_inspection"
+        ? "hardware inspection image"
+        : "QC image";
     const uniqueFiles = mergeUniqueFiles(rawFiles);
     const invalidFiles = uniqueFiles.filter((file) => !isSupportedQcImageFile(file));
     let validFiles = uniqueFiles.filter((file) => isSupportedQcImageFile(file));
@@ -231,7 +236,7 @@ export const useBulkQcImageUpload = ({
 
     if (maxFiles <= 0) {
       validFiles = [];
-      messages.push("QC image upload limit reached for this QC record.");
+      messages.push(`${imageTypeLabel} upload limit reached for this QC record.`);
     }
 
     if (validFiles.length > maxFiles) {
@@ -259,7 +264,7 @@ export const useBulkQcImageUpload = ({
         messages.join(" ")
         || (validFiles.length > 0
           ? `${validFiles.length} image${validFiles.length === 1 ? "" : "s"} ready to upload in ${pendingBatchStatuses.length} batch${pendingBatchStatuses.length === 1 ? "" : "es"}.`
-          : "No valid QC images selected."),
+          : `No valid ${imageTypeLabel}s selected.`),
     }));
 
     return {
@@ -287,6 +292,7 @@ export const useBulkQcImageUpload = ({
   const uploadBatchWithRetry = useCallback(async ({
     batchFiles,
     uploadMode,
+    imageType,
     comment,
     signal,
     onUploadProgress,
@@ -300,6 +306,7 @@ export const useBulkQcImageUpload = ({
           qcId,
           files: batchFiles,
           uploadMode,
+          imageType,
           comment,
           signal,
           onUploadProgress,
@@ -320,12 +327,18 @@ export const useBulkQcImageUpload = ({
 
   const startUpload = useCallback(async ({
     uploadMode = "bulk",
+    imageType = "qc_images",
     comment = "",
     files = null,
   } = {}) => {
     if (stateRef.current.isUploading || uploadInFlightRef.current) return null;
 
     const normalizedUploadMode = normalizeText(uploadMode).toLowerCase() || "bulk";
+    const normalizedImageType = normalizeText(imageType).toLowerCase() || "qc_images";
+    const imageTypeLabel =
+      normalizedImageType === "hardware_inspection"
+        ? "hardware inspection image"
+        : "QC image";
     const filesToUpload = mergeUniqueFiles(
       Array.isArray(files) ? files : stateRef.current.selectedFiles,
     );
@@ -341,7 +354,7 @@ export const useBulkQcImageUpload = ({
     if (filesToUpload.length === 0) {
       updateState((previousState) => ({
         ...previousState,
-        selectionMessage: "Select at least one QC image before uploading.",
+        selectionMessage: `Select at least one ${imageTypeLabel} before uploading.`,
       }));
       return null;
     }
@@ -412,6 +425,7 @@ export const useBulkQcImageUpload = ({
           const { response, attempts } = await uploadBatchWithRetry({
             batchFiles,
             uploadMode: normalizedUploadMode,
+            imageType: normalizedImageType,
             comment,
             signal: abortController.signal,
             onUploadProgress: (progressEvent) => {
@@ -577,7 +591,7 @@ export const useBulkQcImageUpload = ({
     };
   }, [batchSize, qcId, setBatchStatus, updateState, uploadBatchWithRetry]);
 
-  const retryFailedFiles = useCallback(async ({ uploadMode = "bulk", comment = "" } = {}) => {
+  const retryFailedFiles = useCallback(async ({ uploadMode = "bulk", imageType = "qc_images", comment = "" } = {}) => {
     const retryFiles = mergeUniqueFiles(
       stateRef.current.batchStatuses.flatMap((batchStatus) => batchStatus.retryFiles || []),
     );
@@ -592,6 +606,7 @@ export const useBulkQcImageUpload = ({
 
     return startUpload({
       uploadMode,
+      imageType,
       comment,
       files: retryFiles,
     });

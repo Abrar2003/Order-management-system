@@ -2,6 +2,7 @@ import api from "../api/axios";
 
 export const MAX_QC_IMAGE_UPLOAD_FILES_PER_REQUEST = 100;
 export const QC_IMAGE_UPLOAD_LIMIT_PER_INSPECTION_RECORD = 150;
+export const HARDWARE_INSPECTION_IMAGE_LIMIT = 6;
 export const QC_IMAGE_BATCH_SIZE = 10;
 export const SUPPORTED_QC_IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png"];
 export const SUPPORTED_QC_IMAGE_MIME_TYPES = ["image/jpeg", "image/png"];
@@ -67,12 +68,14 @@ export const uploadQcImageBatch = async ({
   qcId,
   files = [],
   uploadMode = "bulk",
+  imageType = "qc_images",
   comment = "",
   signal,
   onUploadProgress,
 } = {}) => {
   const formData = new FormData();
   formData.append("upload_mode", normalizeText(uploadMode || "bulk").toLowerCase());
+  formData.append("image_type", normalizeText(imageType || "qc_images"));
 
   if (normalizeText(uploadMode).toLowerCase() === "single" && normalizeText(comment)) {
     formData.append("comment", normalizeText(comment));

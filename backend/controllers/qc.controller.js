@@ -65,6 +65,7 @@ const {
 const {
   QC_IMAGE_UPLOAD_MODES,
   QC_IMAGE_UPLOAD_LIMIT_PER_INSPECTION_RECORD,
+  HARDWARE_INSPECTION_IMAGE_LIMIT,
   MAX_QC_IMAGE_UPLOAD_COUNT,
 } = require("../config/qcImageUpload.config");
 const {
@@ -79,7 +80,8 @@ const {
   scanBarcodeFromUpload,
 } = require("../services/qcBarcodeScan.service");
 const {
-  buildQcImagesArchive,
+  buildArchiveFileName,
+  streamQcImagesArchive,
 } = require("../services/qcImageDownload.service");
 const { formatEan13BarcodeDisplay } = require("../helpers/barcodeFormat");
 const {
@@ -1512,6 +1514,89 @@ const buildSignedItemImage = async (image = {}) =>
 
 const buildSignedQcImage = async (image = {}) =>
   buildSignedItemFile(image, { logLabel: "QC image" });
+
+const buildSignedQcImageList = async (images = []) =>
+  Promise.all(
+    (Array.isArray(images) ? [...images] : [])
+      .sort(
+        (a, b) =>
+          toSortableTimestamp(b?.uploadedAt || b?.createdAt) -
+          toSortableTimestamp(a?.uploadedAt || a?.createdAt),
+      )
+      .map(async (image) => {
+        const signedImage = await buildSignedQcImage(image);
+        return {
+          ...image,
+          ...(signedImage || {}),
+          comment: normalizeText(image?.comment || ""),
+        };
+      }),
+  );
+
+const getImageListFromQc = (qcDoc = {}, field = "qc_images") =>
+  Array.isArray(qcDoc?.[field]) ? qcDoc[field] : [];
+
+const findPreviousInspectedQcRecordsForItem = async ({
+  qcDoc = {},
+  user = null,
+} = {}) => {
+  const itemCode = normalizeText(
+    qcDoc?.item?.item_code || qcDoc?.order?.item?.item_code || "",
+  );
+  const currentInspectionTime = toSortableTimestamp(qcDoc?.last_inspected_date);
+
+  if (!itemCode || currentInspectionTime <= 0) {
+    return [];
+  }
+
+  const candidateRecords = await QC.find({
+    _id: { $ne: qcDoc?._id },
+    "item.item_code": {
+      $regex: `^${escapeRegex(itemCode)}$`,
+      $options: "i",
+    },
+  })
+    .select(
+      "_id order order_id order_meta item last_inspected_date qc_images hardware_inspection",
+    )
+    .populate({
+      path: "order",
+      match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, user),
+      select: "_id order_id brand vendor",
+    })
+    .lean();
+
+  const eligibleRecords = (Array.isArray(candidateRecords) ? candidateRecords : [])
+    .map((record) => ({
+      ...record,
+      __lastInspectedTime: toSortableTimestamp(record?.last_inspected_date),
+    }))
+    .filter(
+      (record) =>
+        record?.order &&
+        record.__lastInspectedTime > 0 &&
+        record.__lastInspectedTime < currentInspectionTime,
+    );
+
+  const previousInspectionTime = Math.max(
+    0,
+    ...eligibleRecords.map((record) => record.__lastInspectedTime),
+  );
+
+  if (previousInspectionTime <= 0) {
+    return [];
+  }
+
+  return eligibleRecords
+    .filter((record) => record.__lastInspectedTime === previousInspectionTime)
+    .sort((a, b) =>
+      normalizeText(a?.order_meta?.order_id || a?.order?.order_id || "").localeCompare(
+        normalizeText(b?.order_meta?.order_id || b?.order?.order_id || ""),
+        undefined,
+        { numeric: true, sensitivity: "base" },
+      ),
+    );
+};
 
 const buildFinishImagePublicUrl = (finishEntry = {}) => {
   const uniqueCode = String(finishEntry?.unique_code || "").trim().toUpperCase();
@@ -10427,19 +10512,54 @@ exports.uploadQcImages = async (req, res) => {
       });
     }
 
+    const imageType = String(
+      req.body?.image_type || req.body?.imageType || "qc_images",
+    )
+      .trim()
+      .toLowerCase();
+
+    if (imageType !== "qc_images" && imageType !== "hardware_inspection") {
+      return res.status(400).json({ success: false, message: "Invalid image type" });
+    }
+
     const singleImageComment =
       uploadMode === QC_IMAGE_UPLOAD_MODES.SINGLE
         ? normalizeText(req.body?.comment || "")
         : "";
     const uploadedBy = buildAuditActor(req.user);
-    const remainingUploadSlots = getRemainingQcImageUploadSlots(qc);
-    if (remainingUploadSlots <= 0) {
+
+    let maxSuccessfulUploads = 0;
+    let limitMessage = "";
+    let totalLimit = 0;
+    let currentCount = 0;
+    const imageTypeLabel =
+      imageType === "hardware_inspection" ? "hardware inspection image" : "QC image";
+    const storageFolder =
+      imageType === "hardware_inspection" ? "hardware-inspection" : "qc-images";
+
+    if (imageType === "hardware_inspection") {
+      currentCount = Array.isArray(qc.hardware_inspection)
+        ? qc.hardware_inspection.length
+        : 0;
+      totalLimit = HARDWARE_INSPECTION_IMAGE_LIMIT;
+      maxSuccessfulUploads = Math.max(0, totalLimit - currentCount);
+      limitMessage =
+        `Hardware inspection image limit reached (max ${HARDWARE_INSPECTION_IMAGE_LIMIT} images).`;
+    } else {
+      currentCount = getQcImageCurrentCount(qc);
+      totalLimit = getQcImageUploadTotalLimit(qc);
+      maxSuccessfulUploads = getRemainingQcImageUploadSlots(qc);
+      limitMessage = buildQcImageUploadLimitMessage(qc);
+    }
+
+    if (maxSuccessfulUploads <= 0) {
       return res.status(400).json({
         success: false,
-        message: buildQcImageUploadLimitMessage(qc),
+        message: limitMessage,
         data: {
-          total_limit: getQcImageUploadTotalLimit(qc),
-          current_count: getQcImageCurrentCount(qc),
+          image_type: imageType,
+          total_limit: totalLimit,
+          current_count: currentCount,
           remaining_slots: 0,
           inspection_record_count: getQcInspectionRecordCount(qc),
         },
@@ -10462,18 +10582,20 @@ exports.uploadQcImages = async (req, res) => {
       uploadMode,
       singleImageComment,
       uploadedBy,
-      maxSuccessfulUploads: remainingUploadSlots,
-      uploadLimitMessage: buildQcImageUploadLimitMessage(qc),
+      targetField: imageType,
+      storageFolder,
+      maxSuccessfulUploads,
+      uploadLimitMessage: limitMessage,
       requestStartedAt,
     });
 
-    let message = "QC image upload request processed";
+    let message = `${imageTypeLabel} upload request processed`;
     if (uploadedCount > 0) {
-      message = `${uploadedCount} QC image${uploadedCount === 1 ? "" : "s"} uploaded successfully`;
+      message = `${uploadedCount} ${imageTypeLabel}${uploadedCount === 1 ? "" : "s"} uploaded successfully`;
     } else if (skippedDuplicateCount > 0 && failedCount === 0) {
-      message = "All selected QC images were duplicates and were skipped";
+      message = `All selected ${imageTypeLabel}s were duplicates and were skipped`;
     } else if (failedCount > 0 && uploadedCount === 0 && skippedDuplicateCount === 0) {
-      message = "No QC images were uploaded";
+      message = `No ${imageTypeLabel}s were uploaded`;
     }
 
     if (skippedDuplicateCount > 0 && uploadedCount > 0) {
@@ -10497,9 +10619,10 @@ exports.uploadQcImages = async (req, res) => {
         bytes_saved: bytesSaved,
         processed_count: processedCount,
         total_requested_count: totalRequestedCount,
-        total_limit: getQcImageUploadTotalLimit(qc),
-        current_count: getQcImageCurrentCount(qc) + uploadedCount,
-        remaining_slots: Math.max(0, remainingUploadSlots - uploadedCount),
+        image_type: imageType,
+        total_limit: totalLimit,
+        current_count: currentCount + uploadedCount,
+        remaining_slots: Math.max(0, maxSuccessfulUploads - uploadedCount),
         inspection_record_count: getQcInspectionRecordCount(qc),
       },
     });
@@ -10590,15 +10713,27 @@ exports.deleteQcImages = async (req, res) => {
       });
     }
 
-    const qcImages = Array.isArray(qc?.qc_images) ? qc.qc_images : [];
-    const imagesToDelete = qcImages.filter((image) => {
-      const imageId = String(image?._id || "").trim();
-      const imageKey = normalizeText(image?.key || "");
-      return (
-        (imageId && requestedImageIds.includes(imageId)) ||
-        (imageKey && requestedImageKeys.includes(imageKey))
-      );
-    });
+    const imageCollections = [
+      { field: "qc_images", images: getImageListFromQc(qc, "qc_images") },
+      {
+        field: "hardware_inspection",
+        images: getImageListFromQc(qc, "hardware_inspection"),
+      },
+    ];
+    const imagesToDeleteByField = imageCollections.map((collection) => ({
+      field: collection.field,
+      images: collection.images.filter((image) => {
+        const imageId = String(image?._id || "").trim();
+        const imageKey = normalizeText(image?.key || "");
+        return (
+          (imageId && requestedImageIds.includes(imageId)) ||
+          (imageKey && requestedImageKeys.includes(imageKey))
+        );
+      }),
+    }));
+    const imagesToDelete = imagesToDeleteByField.flatMap(
+      (entry) => entry.images,
+    );
 
     if (imagesToDelete.length === 0) {
       return res.status(404).json({
@@ -10607,23 +10742,38 @@ exports.deleteQcImages = async (req, res) => {
       });
     }
 
-    const objectIdsToDelete = imagesToDelete
-      .map((image) => String(image?._id || "").trim())
-      .filter((value) => mongoose.Types.ObjectId.isValid(value))
-      .map((value) => new mongoose.Types.ObjectId(value));
     const objectKeysToDelete = imagesToDelete
       .map((image) => normalizeText(image?.key || ""))
       .filter(Boolean);
 
-    const pullConditions = [];
-    if (objectIdsToDelete.length > 0) {
-      pullConditions.push({ _id: { $in: objectIdsToDelete } });
-    }
-    if (objectKeysToDelete.length > 0) {
-      pullConditions.push({ key: { $in: objectKeysToDelete } });
-    }
+    const buildPullCondition = (images = []) => {
+      const ids = images
+        .map((image) => String(image?._id || "").trim())
+        .filter((value) => mongoose.Types.ObjectId.isValid(value))
+        .map((value) => new mongoose.Types.ObjectId(value));
+      const keys = images.map((image) => normalizeText(image?.key || "")).filter(Boolean);
+      const conditions = [];
 
-    if (pullConditions.length === 0) {
+      if (ids.length > 0) {
+        conditions.push({ _id: { $in: ids } });
+      }
+      if (keys.length > 0) {
+        conditions.push({ key: { $in: keys } });
+      }
+
+      if (conditions.length === 0) return null;
+      return conditions.length === 1 ? conditions[0] : { $or: conditions };
+    };
+    const pullPayload = {};
+
+    imagesToDeleteByField.forEach((entry) => {
+      const condition = buildPullCondition(entry.images);
+      if (condition) {
+        pullPayload[entry.field] = condition;
+      }
+    });
+
+    if (Object.keys(pullPayload).length === 0) {
       return res.status(400).json({
         success: false,
         message: "Selected QC images are invalid",
@@ -10633,12 +10783,7 @@ exports.deleteQcImages = async (req, res) => {
     await QC.updateOne(
       { _id: qc._id },
       {
-        $pull: {
-          qc_images:
-            pullConditions.length === 1
-              ? pullConditions[0]
-              : { $or: pullConditions },
-        },
+        $pull: pullPayload,
         $set: {
           updated_by: buildAuditActor(req.user),
         },
@@ -10698,7 +10843,7 @@ exports.downloadQcImageFile = async (req, res) => {
     }
 
     const qc = await QC.findById(qcId)
-      .select("order order_id inspector qc_images")
+      .select("order order_id inspector qc_images hardware_inspection")
       .populate({
         path: "order",
         match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
@@ -10733,7 +10878,10 @@ exports.downloadQcImageFile = async (req, res) => {
       }
     }
 
-    const qcImages = Array.isArray(qc?.qc_images) ? qc.qc_images : [];
+    const qcImages = [
+      ...getImageListFromQc(qc, "qc_images"),
+      ...getImageListFromQc(qc, "hardware_inspection"),
+    ];
     const imageToDownload = qcImages.find((image) => {
       const imageId = String(image?._id || "").trim();
       const imageKey = normalizeText(image?.key || "");
@@ -10796,7 +10944,9 @@ exports.downloadQcImages = async (req, res) => {
     }
 
     const qc = await QC.findById(qcId)
-      .select("order order_id inspector qc_images")
+      .select(
+        "order order_id order_meta item last_inspected_date inspector qc_images hardware_inspection",
+      )
       .populate({
         path: "order",
         match: applyDataAccessMatch(ACTIVE_ORDER_MATCH, req.user),
@@ -10856,8 +11006,28 @@ exports.downloadQcImages = async (req, res) => {
       });
     }
 
-    const qcImages = Array.isArray(qc?.qc_images) ? qc.qc_images : [];
-    const imagesToDownload = qcImages.filter((image) => {
+    const previousInspectionRecords =
+      await findPreviousInspectedQcRecordsForItem({
+        qcDoc: qc,
+        user: req.user,
+      });
+    const eligibleImages = [
+      ...getImageListFromQc(qc, "qc_images"),
+      ...getImageListFromQc(qc, "hardware_inspection"),
+      ...previousInspectionRecords.flatMap((record) => [
+        ...getImageListFromQc(record, "qc_images"),
+        ...getImageListFromQc(record, "hardware_inspection"),
+      ]),
+    ];
+    const dedupedEligibleImages = [
+      ...new Map(
+        eligibleImages.map((image, index) => [
+          String(image?._id || image?.key || `image-${index}`).trim(),
+          image,
+        ]),
+      ).values(),
+    ];
+    const imagesToDownload = dedupedEligibleImages.filter((image) => {
       const imageId = String(image?._id || "").trim();
       const imageKey = normalizeText(image?.key || "");
       return (
@@ -10873,20 +11043,29 @@ exports.downloadQcImages = async (req, res) => {
       });
     }
 
-    const archive = await buildQcImagesArchive({
-      images: imagesToDownload,
-      archiveLabel: normalizeText(qc?.order_id || qc?._id || "qc-images"),
-    });
+    const archiveLabel = normalizeText(qc?.order_id || qc?._id || "qc-images");
+    const archiveFileName = buildArchiveFileName(archiveLabel);
 
     res.setHeader("Content-Type", "application/zip");
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="${String(archive.archiveFileName || "qc-images.zip").replace(/"/g, "")}"`,
+      `attachment; filename="${String(archiveFileName || "qc-images.zip").replace(/"/g, "")}"`,
     );
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders?.();
 
-    return res.status(200).send(archive.archiveBuffer);
+    await streamQcImagesArchive({
+      images: imagesToDownload,
+      archiveLabel,
+      outputStream: res,
+    });
+    return undefined;
   } catch (error) {
     console.error("Download QC Images Error:", error);
+    if (res.headersSent) {
+      return res.end();
+    }
+
     return res.status(500).json({
       success: false,
       message: error?.message || "Failed to download QC images",
@@ -11093,41 +11272,35 @@ exports.getQCById = async (req, res) => {
           },
         }
       : null;
-    const qcImagesWithSignedUrls = await Promise.all(
-      (Array.isArray(qcData?.qc_images) ? [...qcData.qc_images] : [])
-        .sort(
-          (a, b) =>
-            toSortableTimestamp(b?.uploadedAt || b?.createdAt) -
-            toSortableTimestamp(a?.uploadedAt || a?.createdAt),
-        )
-        .map(
-        async (image) => {
-          const signedImage = await buildSignedQcImage(image);
-          return {
-            ...image,
-            ...(signedImage || {}),
-            comment: normalizeText(image?.comment || ""),
-          };
-        },
-      ),
-    );
-    const goodsNotReadyImagesWithSignedUrls = await Promise.all(
-      (Array.isArray(qcData?.goods_not_ready_images)
-        ? [...qcData.goods_not_ready_images]
-        : [])
-        .sort(
-          (a, b) =>
-            toSortableTimestamp(b?.uploadedAt || b?.createdAt) -
-            toSortableTimestamp(a?.uploadedAt || a?.createdAt),
-        )
-        .map(async (image) => {
-          const signedImage = await buildSignedQcImage(image);
-          return {
-            ...image,
-            ...(signedImage || {}),
-            comment: normalizeText(image?.comment || ""),
-          };
-        }),
+    const qcImagesWithSignedUrls = await buildSignedQcImageList(qcData?.qc_images);
+    const hardwareInspectionImagesWithSignedUrls =
+      await buildSignedQcImageList(qcData?.hardware_inspection);
+    const goodsNotReadyImagesWithSignedUrls =
+      await buildSignedQcImageList(qcData?.goods_not_ready_images);
+    const previousInspectionRecords =
+      await findPreviousInspectedQcRecordsForItem({
+        qcDoc: qcData,
+        user: req.user,
+      });
+    const previousInspectedPoImages = await Promise.all(
+      previousInspectionRecords.map(async (record) => ({
+        qc_id: record?._id,
+        order_id:
+          normalizeText(record?.order_meta?.order_id) ||
+          normalizeText(record?.order?.order_id),
+        brand:
+          normalizeText(record?.order_meta?.brand) ||
+          normalizeText(record?.order?.brand),
+        vendor:
+          normalizeText(record?.order_meta?.vendor) ||
+          normalizeText(record?.order?.vendor),
+        item_code: normalizeText(record?.item?.item_code || itemCode),
+        last_inspected_date: record?.last_inspected_date || "",
+        qc_images: await buildSignedQcImageList(record?.qc_images),
+        hardware_inspection: await buildSignedQcImageList(
+          record?.hardware_inspection,
+        ),
+      })),
     );
     const rejectedImageWithSignedUrl = qcData?.rejected_image
       ? await buildSignedQcImage(qcData.rejected_image)
@@ -11170,6 +11343,8 @@ exports.getQCById = async (req, res) => {
         ...qcData,
         item_master: itemMasterWithSignedUrls,
         qc_images: qcImagesWithSignedUrls,
+        hardware_inspection: hardwareInspectionImagesWithSignedUrls,
+        previous_inspected_po_images: previousInspectedPoImages,
         goods_not_ready_images: goodsNotReadyImagesWithSignedUrls,
         rejected_image: rejectedImageWithSignedUrl
           ? {

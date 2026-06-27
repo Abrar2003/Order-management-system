@@ -50,6 +50,7 @@ import {
 } from "../utils/orderStatus";
 import {
   downloadSelectedQcImages,
+  HARDWARE_INSPECTION_IMAGE_LIMIT,
   MAX_QC_IMAGE_UPLOAD_FILES_PER_REQUEST,
   QC_IMAGE_UPLOAD_LIMIT_PER_INSPECTION_RECORD,
 } from "../services/qcImages.service";
@@ -254,6 +255,19 @@ const RELATED_FILE_OPTIONS = Object.freeze([
       "Only JPG, JPEG, or PNG files are allowed for QC images.",
     supportsBulk: true,
   },
+  {
+    value: "hardware_inspection",
+    label: "Hardware Inspection",
+    buttonLabel: "hardware inspection images",
+    scope: "qc",
+    previewMode: "image",
+    accept: ".jpg,.jpeg,.png,image/jpeg,image/png",
+    extensions: [".jpg", ".jpeg", ".png"],
+    mimeTypes: ["image/jpeg", "image/png"],
+    invalidMessage:
+      "Only JPG, JPEG, or PNG files are allowed for hardware inspection images.",
+    supportsBulk: true,
+  },
 ]);
 
 const RELATED_FILE_OPTIONS_BY_VALUE = Object.freeze(
@@ -285,7 +299,14 @@ const getSelectedFileSignature = (file) =>
 const getQcImageSelectionValue = (image) =>
   image?.gallery_source === "goods_not_ready"
     ? ""
-    : String(image?._id || image?.key || "").trim();
+    : [
+        image?.gallery_parent_qc_id || "",
+        image?.gallery_image_field || image?.gallery_source || "qc_images",
+        image?._id || image?.key || "",
+      ]
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+        .join("__");
 
 const isMongoObjectIdLike = (value) => /^[a-f0-9]{24}$/i.test(String(value || "").trim());
 
@@ -301,6 +322,19 @@ const getQcImageUploaderName = (image = {}) =>
       "",
   ).trim() || "Unknown Inspector";
 
+const getInspectionRecordInspectorName = (record = {}) =>
+  String(record?.inspector?.name || record?.inspector_name || "").trim();
+
+const getInspectionRecordDateLabel = (record = {}) => {
+  const value =
+    record?.inspection_date ||
+    record?.requested_date ||
+    record?.request_date ||
+    record?.createdAt ||
+    "";
+  return value ? formatDateDDMMYYYY(value) : "Date Not Set";
+};
+
 const getQcImageUploadedDateLabel = (image = {}) => {
   const value =
     image?.uploadedAt ||
@@ -313,6 +347,7 @@ const getQcImageUploadedDateLabel = (image = {}) => {
 };
 
 const getQcImageGroupKey = (image = {}) =>
+  image?.gallery_group_key ||
   `${getQcImageUploadedDateLabel(image)}__${getQcImageUploaderName(image)}`;
 
 const getDownloadFileName = (response, fallbackName) => {
@@ -425,12 +460,23 @@ const QcDetails = () => {
   const qcImageCurrentTotalCount = Array.isArray(qc?.qc_images)
     ? qc.qc_images.length
     : 0;
+  const hardwareInspectionCurrentTotalCount = Array.isArray(qc?.hardware_inspection)
+    ? qc.hardware_inspection.length
+    : 0;
   const qcImageUploadTotalLimit =
     qcInspectionRecordCount * QC_IMAGE_UPLOAD_LIMIT_PER_INSPECTION_RECORD;
   const qcImageUploadRemainingSlots = Math.max(
     0,
     qcImageUploadTotalLimit - qcImageCurrentTotalCount,
   );
+  const hardwareInspectionRemainingSlots = Math.max(
+    0,
+    HARDWARE_INSPECTION_IMAGE_LIMIT - hardwareInspectionCurrentTotalCount,
+  );
+  const activeQcScopedImageUploadRemainingSlots =
+    relatedFileType === "hardware_inspection"
+      ? hardwareInspectionRemainingSlots
+      : qcImageUploadRemainingSlots;
   const relatedFileInputRef = useRef(null);
   const relatedFileUploadInFlightRef = useRef(false);
   const relatedFileUploadBatchKeyRef = useRef("");
@@ -443,7 +489,7 @@ const QcDetails = () => {
     reset: resetQcImageUpload,
   } = useBulkQcImageUpload({
     qcId: id,
-    maxFiles: qcImageUploadRemainingSlots,
+    maxFiles: activeQcScopedImageUploadRemainingSlots,
   });
   const user = getUserFromToken();
   const isViewOnly = isViewOnlyUser(user);
@@ -583,7 +629,17 @@ const QcDetails = () => {
   );
   const canUploadQcImages = isAdmin || isQcUser;
   const canUploadItemMasterFiles = isAdmin && canUpdateQc;
-  const canUploadMoreQcImages = qcImageUploadRemainingSlots > 0;
+  const isQcImageUploadType = activeRelatedFileConfig?.scope === "qc";
+  const activeQcScopedImageUploadTotalLimit =
+    activeRelatedFileConfig?.value === "hardware_inspection"
+      ? HARDWARE_INSPECTION_IMAGE_LIMIT
+      : qcImageUploadTotalLimit;
+  const activeQcScopedImageCurrentTotalCount =
+    activeRelatedFileConfig?.value === "hardware_inspection"
+      ? hardwareInspectionCurrentTotalCount
+      : qcImageCurrentTotalCount;
+  const canUploadMoreQcImages =
+    !isQcImageUploadType || activeQcScopedImageUploadRemainingSlots > 0;
   const canUploadRelatedFile =
     activeRelatedFileConfig?.scope === "qc"
       ? canUploadQcImages
@@ -599,7 +655,6 @@ const QcDetails = () => {
       ) ||
       Boolean(qc?.item_master?._id)
     );
-  const isQcImageUploadType = activeRelatedFileConfig?.value === "qc_images";
   const isRelatedUploadBusy = uploadingRelatedFile || qcImageUploadState.isUploading;
   const activeRelatedUploadProgress = isQcImageUploadType
     ? qcImageUploadState.progressPercent
@@ -621,7 +676,7 @@ const QcDetails = () => {
       : activeRelatedFileConfig?.scope === "qc" && qcInspectionRecordCount <= 0
       ? "QC image uploads are available after at least one inspection record exists."
       : activeRelatedFileConfig?.scope === "qc" && !canUploadMoreQcImages
-      ? `QC image upload limit reached (${qcImageCurrentTotalCount}/${qcImageUploadTotalLimit}).`
+      ? `${activeRelatedFileConfig?.label || "QC image"} upload limit reached (${activeQcScopedImageCurrentTotalCount}/${activeQcScopedImageUploadTotalLimit}).`
       : activeRelatedFileConfig?.scope === "qc"
       ? "Only admin, manager, or QC can upload QC images."
       : "Only admin or manager can upload item related files."
@@ -838,27 +893,156 @@ const QcDetails = () => {
     [itemMasterFiles],
   );
   const qcImages = useMemo(
-    () => [
-      ...(Array.isArray(qc?.qc_images)
-        ? qc.qc_images.map((image) => ({
-            ...image,
-            gallery_source: "qc",
-            gallery_source_label: "QC Image",
-          }))
-        : []),
-      ...(Array.isArray(qc?.goods_not_ready_images)
+    () => {
+      const orderId =
+        String(qc?.order?.order_id || qc?.order_meta?.order_id || "").trim() ||
+        "Current PO";
+      const inspectionRecords = Array.isArray(qc?.inspection_record)
+        ? qc.inspection_record
+        : [];
+      const fallbackInspectionRecord = inspectionRecords[0] || null;
+      const resolveCurrentInspectionGroup = (image = {}) => {
+        const imageDateLabel = getQcImageUploadedDateLabel(image);
+        const uploaderName = getQcImageUploaderName(image).toLowerCase();
+        const matchedRecord =
+          inspectionRecords.find((record) => {
+            const recordDateLabel = getInspectionRecordDateLabel(record);
+            const inspectorName = getInspectionRecordInspectorName(record).toLowerCase();
+            return (
+              recordDateLabel === imageDateLabel &&
+              (!inspectorName || !uploaderName || inspectorName === uploaderName)
+            );
+          }) || fallbackInspectionRecord;
+        const recordId = String(matchedRecord?._id || "").trim();
+        const title = matchedRecord
+          ? `Inspection ${getInspectionRecordDateLabel(matchedRecord)}`
+          : "Current QC Images";
+        const subtitleParts = [
+          `PO ${orderId}`,
+          getInspectionRecordInspectorName(matchedRecord) ||
+            getQcImageUploaderName(image),
+        ].filter(Boolean);
+
+        return {
+          key: recordId ? `current-inspection-${recordId}` : "current-qc-images",
+          title,
+          subtitle: subtitleParts.join(" | "),
+          inspectionRecordId: recordId,
+        };
+      };
+      const currentQcImages = Array.isArray(qc?.qc_images)
+        ? qc.qc_images.map((image) => {
+            const group = resolveCurrentInspectionGroup(image);
+            return {
+              ...image,
+              gallery_source: "qc",
+              gallery_source_label: "QC Image",
+              gallery_parent_qc_id: String(qc?._id || id || "").trim(),
+              gallery_image_field: "qc_images",
+              gallery_group_key: group.key,
+              gallery_group_title: group.title,
+              gallery_group_subtitle: group.subtitle,
+              gallery_inspection_record_id: group.inspectionRecordId,
+              gallery_can_delete: true,
+            };
+          })
+        : [];
+      const currentHardwareImages = Array.isArray(qc?.hardware_inspection)
+        ? qc.hardware_inspection.map((image) => {
+            const group = resolveCurrentInspectionGroup(image);
+            return {
+              ...image,
+              gallery_source: "hardware_inspection",
+              gallery_source_label: "Hardware",
+              gallery_parent_qc_id: String(qc?._id || id || "").trim(),
+              gallery_image_field: "hardware_inspection",
+              gallery_group_key: group.key,
+              gallery_group_title: group.title,
+              gallery_group_subtitle: group.subtitle,
+              gallery_inspection_record_id: group.inspectionRecordId,
+              gallery_can_delete: true,
+            };
+          })
+        : [];
+      const previousPoImages = (Array.isArray(qc?.previous_inspected_po_images)
+        ? qc.previous_inspected_po_images
+        : []
+      ).flatMap((record) => {
+        const previousOrderId = String(record?.order_id || "").trim() || "Previous PO";
+        const groupKey = `previous-qc-${String(record?.qc_id || previousOrderId)}`;
+        const groupTitle = `Previous PO ${previousOrderId}`;
+        const groupSubtitle = [
+          record?.last_inspected_date
+            ? `Last inspected ${formatDateDDMMYYYY(record.last_inspected_date)}`
+            : "",
+          String(record?.vendor || "").trim(),
+        ].filter(Boolean).join(" | ");
+        const decoratePreviousImage = (image, field, label) => ({
+          ...image,
+          gallery_source: field === "hardware_inspection"
+            ? "previous_hardware_inspection"
+            : "previous_qc",
+          gallery_source_label: label,
+          gallery_parent_qc_id: String(record?.qc_id || "").trim(),
+          gallery_image_field: field,
+          gallery_group_key: groupKey,
+          gallery_group_title: groupTitle,
+          gallery_group_subtitle: groupSubtitle,
+          gallery_is_previous: true,
+          gallery_can_delete: false,
+        });
+
+        return [
+          ...(Array.isArray(record?.qc_images)
+            ? record.qc_images.map((image) =>
+                decoratePreviousImage(image, "qc_images", "Previous QC"),
+              )
+            : []),
+          ...(Array.isArray(record?.hardware_inspection)
+            ? record.hardware_inspection.map((image) =>
+                decoratePreviousImage(
+                  image,
+                  "hardware_inspection",
+                  "Previous Hardware",
+                ),
+              )
+            : []),
+        ];
+      });
+      const goodsNotReadyImages = Array.isArray(qc?.goods_not_ready_images)
         ? qc.goods_not_ready_images.map((image) => ({
             ...image,
             gallery_source: "goods_not_ready",
             gallery_source_label: "Goods Not Ready",
+            gallery_group_key: "goods-not-ready",
+            gallery_group_title: "Goods Not Ready",
+            gallery_group_subtitle: `PO ${orderId}`,
+            gallery_can_delete: false,
           }))
-        : []),
-    ].sort(
-      (left, right) =>
-        toTimestamp(right?.uploadedAt || right?.createdAt) -
-        toTimestamp(left?.uploadedAt || left?.createdAt),
-    ),
-    [qc?.goods_not_ready_images, qc?.qc_images],
+        : [];
+
+      return [
+        ...currentQcImages,
+        ...currentHardwareImages,
+        ...previousPoImages,
+        ...goodsNotReadyImages,
+      ].sort(
+        (left, right) =>
+          toTimestamp(right?.uploadedAt || right?.createdAt) -
+          toTimestamp(left?.uploadedAt || left?.createdAt),
+      );
+    },
+    [
+      id,
+      qc?._id,
+      qc?.goods_not_ready_images,
+      qc?.hardware_inspection,
+      qc?.inspection_record,
+      qc?.order?.order_id,
+      qc?.order_meta?.order_id,
+      qc?.previous_inspected_po_images,
+      qc?.qc_images,
+    ],
   );
   const visibleQcImages = useMemo(
     () =>
@@ -876,12 +1060,21 @@ const QcDetails = () => {
       const groupKey = getQcImageGroupKey(entry.image);
       const group = groups.get(groupKey) || {
         key: groupKey,
-        dateLabel: getQcImageUploadedDateLabel(entry.image),
-        inspectorName: getQcImageUploaderName(entry.image),
+        title:
+          entry.image?.gallery_group_title ||
+          getQcImageUploadedDateLabel(entry.image),
+        subtitle:
+          entry.image?.gallery_group_subtitle ||
+          getQcImageUploaderName(entry.image),
         images: [],
+        selectableIds: [],
       };
 
       group.images.push(entry);
+      const selectionValue = getQcImageSelectionValue(entry.image);
+      if (selectionValue) {
+        group.selectableIds.push(selectionValue);
+      }
       groups.set(groupKey, group);
     });
 
@@ -936,6 +1129,18 @@ const QcDetails = () => {
     () => qcImages.filter((image) => selectedQcImageIds.includes(getQcImageSelectionValue(image))),
     [qcImages, selectedQcImageIds],
   );
+  const selectedDeletableQcImages = useMemo(
+    () =>
+      selectedQcImages.filter(
+        (image) =>
+          image?.gallery_can_delete !== false &&
+          image?.gallery_source !== "goods_not_ready" &&
+          !image?.gallery_is_previous,
+      ),
+    [selectedQcImages],
+  );
+  const selectedHasNonDeletableQcImages =
+    selectedQcImages.length !== selectedDeletableQcImages.length;
   const allSelectableQcImagesSelected = useMemo(
     () =>
       selectableQcImageIds.length > 0 &&
@@ -1315,12 +1520,15 @@ const QcDetails = () => {
 
       let response;
 
-      if (fileConfig.value === "qc_images") {
+      if (fileConfig.scope === "qc") {
         relatedFileUploadInFlightRef.current = false;
         relatedFileUploadBatchKeyRef.current = "";
         setUploadingRelatedFile(false);
         setRelatedFileUploadProgress(0);
-        selectQcImageFiles(selectedFiles, { uploadMode: qcImageUploadMode });
+        selectQcImageFiles(selectedFiles, {
+          uploadMode: qcImageUploadMode,
+          imageType: fileConfig.value,
+        });
         return;
       } else {
         if (!qc?.item_master?._id) {
@@ -1376,6 +1584,7 @@ const QcDetails = () => {
   const handleStartQcImageUpload = useCallback(async () => {
     const result = await startQcImageUpload({
       uploadMode: qcImageUploadMode,
+      imageType: activeRelatedFileConfig?.value || "qc_images",
       comment: qcImageUploadMode === "single" ? qcSingleImageComment : "",
     });
 
@@ -1387,6 +1596,7 @@ const QcDetails = () => {
     }
   }, [
     fetchQcDetails,
+    activeRelatedFileConfig?.value,
     qcImageUploadMode,
     qcSingleImageComment,
     startQcImageUpload,
@@ -1395,6 +1605,7 @@ const QcDetails = () => {
   const handleRetryQcImageUpload = useCallback(async () => {
     const result = await retryFailedQcImageFiles({
       uploadMode: qcImageUploadMode,
+      imageType: activeRelatedFileConfig?.value || "qc_images",
       comment: qcImageUploadMode === "single" ? qcSingleImageComment : "",
     });
 
@@ -1406,6 +1617,7 @@ const QcDetails = () => {
     }
   }, [
     fetchQcDetails,
+    activeRelatedFileConfig?.value,
     qcImageUploadMode,
     qcSingleImageComment,
     retryFailedQcImageFiles,
@@ -1426,7 +1638,12 @@ const QcDetails = () => {
   useEffect(() => {
     if (!isQcImageUploadType) return;
     handleResetQcImageUpload();
-  }, [handleResetQcImageUpload, isQcImageUploadType, qcImageUploadMode]);
+  }, [
+    activeRelatedFileConfig?.value,
+    handleResetQcImageUpload,
+    isQcImageUploadType,
+    qcImageUploadMode,
+  ]);
 
   const handleDeleteInspectionRecord = useCallback(
     async (recordId) => {
@@ -1534,6 +1751,38 @@ const QcDetails = () => {
     );
   }, [deletingQcImages, downloadingQcImages, selectableQcImageIds]);
 
+  const handleToggleQcImageGroupSelection = useCallback((group) => {
+    const groupSelectableIds = Array.isArray(group?.selectableIds)
+      ? group.selectableIds.filter(Boolean)
+      : [];
+    if (
+      groupSelectableIds.length === 0 ||
+      deletingQcImages ||
+      downloadingQcImages
+    ) {
+      return;
+    }
+
+    setSelectedQcImageIds((previous) => {
+      const existing = new Set(previous);
+      const allSelected = groupSelectableIds.every((selectionValue) =>
+        existing.has(selectionValue),
+      );
+
+      if (allSelected) {
+        groupSelectableIds.forEach((selectionValue) => {
+          existing.delete(selectionValue);
+        });
+      } else {
+        groupSelectableIds.forEach((selectionValue) => {
+          existing.add(selectionValue);
+        });
+      }
+
+      return [...existing];
+    });
+  }, [deletingQcImages, downloadingQcImages]);
+
   const handleDownloadSelectedQcImages = useCallback(async () => {
     if (downloadingQcImages || selectedQcImages.length === 0) return;
 
@@ -1574,15 +1823,20 @@ const QcDetails = () => {
   const handleDeleteSelectedQcImages = useCallback(async () => {
     if (deletingQcImages || selectedQcImages.length === 0) return;
 
+    if (selectedHasNonDeletableQcImages) {
+      alert("Previous PO images cannot be deleted from this QC record.");
+      return;
+    }
+
     const confirmed = window.confirm(
-      `Delete ${selectedQcImages.length} selected QC image${selectedQcImages.length === 1 ? "" : "s"}?`,
+      `Delete ${selectedDeletableQcImages.length} selected image${selectedDeletableQcImages.length === 1 ? "" : "s"}?`,
     );
     if (!confirmed) return;
 
-    const imageIds = selectedQcImages
+    const imageIds = selectedDeletableQcImages
       .map((image) => String(image?._id || "").trim())
       .filter((value) => isMongoObjectIdLike(value));
-    const imageKeys = selectedQcImages
+    const imageKeys = selectedDeletableQcImages
       .filter((image) => !isMongoObjectIdLike(String(image?._id || "").trim()))
       .map((image) => String(image?.key || "").trim())
       .filter(Boolean);
@@ -1609,7 +1863,14 @@ const QcDetails = () => {
     } finally {
       setDeletingQcImages(false);
     }
-  }, [deletingQcImages, fetchQcDetails, id, selectedQcImages]);
+  }, [
+    deletingQcImages,
+    fetchQcDetails,
+    id,
+    selectedDeletableQcImages,
+    selectedHasNonDeletableQcImages,
+    selectedQcImages.length,
+  ]);
 
   useEffect(() => {
     if (qcImages.length === 0) {
@@ -1730,7 +1991,8 @@ const QcDetails = () => {
           disabled={!canUploadActiveRelatedFile || isRelatedUploadBusy}
           accept={activeRelatedFileConfig.accept}
           multiple={
-            activeRelatedFileConfig?.value === "qc_images" &&
+            activeRelatedFileConfig?.scope === "qc" &&
+            activeRelatedFileConfig?.supportsBulk &&
             qcImageUploadMode === "bulk"
           }
           onChange={handleRelatedFileChange}
@@ -1783,7 +2045,7 @@ const QcDetails = () => {
                     </select>
                   )}
 
-                  {activeRelatedFileConfig?.value === "qc_images" && (
+                  {activeRelatedFileConfig?.scope === "qc" && (
                     <>
                       <select
                         className="form-select form-select-sm qc-details-toolbar-select qc-details-mode-select"
@@ -1815,12 +2077,12 @@ const QcDetails = () => {
                     disabled={!canUploadActiveRelatedFile || isRelatedUploadBusy || deletingRelatedFile}
                     title={relatedFileUploadDisabledReason}
                   >
-                    {isRelatedUploadBusy
-                      ? "Uploading..."
-                      : activeRelatedFileConfig?.value === "qc_images"
+                      {isRelatedUploadBusy
+                        ? "Uploading..."
+                      : activeRelatedFileConfig?.scope === "qc"
                       ? hasQueuedQcImageFiles
                         ? "Change Selection"
-                        : "Select QC Images"
+                        : `Select ${activeRelatedFileConfig?.label || "QC Images"}`
                       : "Upload Related File"}
                   </button>
 
@@ -2883,13 +3145,19 @@ const QcDetails = () => {
                     onClick={handleDeleteSelectedQcImages}
                     disabled={
                       selectedQcImages.length === 0 ||
+                      selectedHasNonDeletableQcImages ||
                       deletingQcImages ||
                       downloadingQcImages
+                    }
+                    title={
+                      selectedHasNonDeletableQcImages
+                        ? "Previous PO images cannot be deleted from this QC record."
+                        : undefined
                     }
                   >
                     {deletingQcImages
                       ? "Deleting..."
-                      : `Delete Selected${selectedQcImages.length > 0 ? ` (${selectedQcImages.length})` : ""}`}
+                      : `Delete Selected${selectedDeletableQcImages.length > 0 ? ` (${selectedDeletableQcImages.length})` : ""}`}
                   </button>
                 )}
                 <button
@@ -2918,9 +3186,39 @@ const QcDetails = () => {
                       key={group.key}
                     >
                       <summary className="qc-image-gallery-accordion-summary">
-                        <span>
-                          <span className="fw-semibold">{group.dateLabel}</span>
-                          <span className="text-muted"> | {group.inspectorName}</span>
+                        <span className="qc-image-gallery-summary-main">
+                          {group.selectableIds.length > 0 && (
+                            <label
+                              className="qc-image-gallery-group-check"
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              <input
+                                type="checkbox"
+                                className="form-check-input m-0"
+                                checked={group.selectableIds.every((selectionValue) =>
+                                  selectedQcImageIds.includes(selectionValue),
+                                )}
+                                ref={(input) => {
+                                  if (!input) return;
+                                  input.indeterminate =
+                                    group.selectableIds.some((selectionValue) =>
+                                      selectedQcImageIds.includes(selectionValue),
+                                    ) &&
+                                    !group.selectableIds.every((selectionValue) =>
+                                      selectedQcImageIds.includes(selectionValue),
+                                    );
+                                }}
+                                onChange={() => handleToggleQcImageGroupSelection(group)}
+                                disabled={deletingQcImages || downloadingQcImages}
+                              />
+                            </label>
+                          )}
+                          <span>
+                            <span className="fw-semibold">{group.title}</span>
+                            {group.subtitle && (
+                              <span className="text-muted"> | {group.subtitle}</span>
+                            )}
+                          </span>
                         </span>
                         <span className="qc-image-gallery-count-pill">
                           {group.images.length}
@@ -2969,9 +3267,10 @@ const QcDetails = () => {
                                     Comment
                                   </span>
                                 )}
-                                {image?.gallery_source === "goods_not_ready" && (
+                                {image?.gallery_source_label &&
+                                  image?.gallery_source !== "qc" && (
                                   <span className="qc-image-gallery-source-indicator">
-                                    Goods Not Ready
+                                    {image.gallery_source_label}
                                   </span>
                                 )}
                               </button>

@@ -289,6 +289,7 @@ const persistSingleQcImageEntry = async ({
   imageEntry = null,
   hash = "",
   uploadedBy = null,
+  targetField = "qc_images",
 } = {}) => {
   const normalizedHash = normalizeQcImageHash(hash);
   if (!qcId || !imageEntry || !normalizedHash) {
@@ -300,11 +301,11 @@ const persistSingleQcImageEntry = async ({
   return QC.updateOne(
     {
       _id: qcId,
-      "qc_images.hash": { $ne: normalizedHash },
+      [`${targetField}.hash`]: { $ne: normalizedHash },
     },
     {
       $push: {
-        qc_images: imageEntry,
+        [targetField]: imageEntry,
       },
       $set: {
         updated_by: uploadedBy || {},
@@ -321,6 +322,8 @@ const processSingleQcImageFile = async ({
   uploadedAt = null,
   existingHashes = new Set(),
   requestHashes = new Set(),
+  targetField = "qc_images",
+  storageFolder = "qc-images",
   uploadSlotState = null,
   uploadLimitMessage = "",
 } = {}) => {
@@ -391,7 +394,7 @@ const processSingleQcImageFile = async ({
 
     uploadResult = await uploadPreparedQcImage({
       preparedUpload,
-      folder: "qc-images",
+      folder: storageFolder,
     });
 
     const imageEntry = buildStoredQcImageEntry({
@@ -407,6 +410,7 @@ const processSingleQcImageFile = async ({
       imageEntry,
       hash: normalizedHash,
       uploadedBy,
+      targetField,
     });
 
     if (Number(persistResult?.modifiedCount || 0) <= 0) {
@@ -468,13 +472,15 @@ const processQcImageBatch = async ({
   uploadMode = "",
   singleImageComment = "",
   uploadedBy = null,
+  targetField = "qc_images",
+  storageFolder = "qc-images",
   maxSuccessfulUploads = null,
   uploadLimitMessage = "",
   requestStartedAt = Date.now(),
 } = {}) => {
   const safeFiles = flattenUploadedFiles(files);
   const existingHashes = new Set(
-    (Array.isArray(qc?.qc_images) ? qc.qc_images : [])
+    (Array.isArray(qc?.[targetField]) ? qc[targetField] : [])
       .map((image) => normalizeQcImageHash(image?.hash))
       .filter(Boolean),
   );
@@ -517,6 +523,8 @@ const processQcImageBatch = async ({
           uploadedAt: new Date(),
           existingHashes,
           requestHashes,
+          targetField,
+          storageFolder,
           uploadSlotState,
           uploadLimitMessage,
         }),

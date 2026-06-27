@@ -6596,6 +6596,21 @@ small,
   list-style: none;
 }
 
+.qc-image-gallery-summary-main {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 0.65rem;
+}
+
+.qc-image-gallery-group-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
 .qc-image-gallery-accordion-summary::-webkit-details-marker {
   display: none;
 }
