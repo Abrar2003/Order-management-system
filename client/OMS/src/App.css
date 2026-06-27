@@ -7107,6 +7107,8 @@ small,
   .qc-details-toolbar {
     display: grid !important;
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .qc-barcode-input-row .input-group {
     min-width: 0;
   }
@@ -9022,18 +9024,29 @@ button.om-item-order-presence-label {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  flex: 0 0 36px;
+  width: 36px !important;
+  min-width: 36px;
+  max-width: 36px;
+  height: 36px !important;
+  min-height: 36px;
+  max-height: 36px;
   padding: 0.25rem;
   border-radius: 50%;
   overflow: visible;
+  line-height: 1;
 }
 
 .om-notification-bell-icon {
   display: block;
-  width: 24px;
-  height: 24px;
+  width: 24px !important;
+  min-width: 24px;
+  max-width: 24px;
+  height: 24px !important;
+  min-height: 24px;
+  max-height: 24px;
   object-fit: contain;
+  flex: 0 0 24px;
 }
 
 .om-notification-badge {
