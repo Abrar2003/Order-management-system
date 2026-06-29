@@ -31,7 +31,7 @@ const finishSchema = new mongoose.Schema(
       uppercase: true,
       index: true,
     },
-  },
+  }, 
   { timestamps: true },
 );
 

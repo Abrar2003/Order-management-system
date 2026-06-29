@@ -738,20 +738,23 @@ const serializeBatchTaskGroup = ({ batch = {}, tasks = [] } = {}) => {
   };
 };
 
-const groupTaskRowsForBoard = async (rows = []) => {
-  const batchIds = uniqueIds((Array.isArray(rows) ? rows : []).map(getBatchRefId));
+const groupTaskRowsForBoard = async (rows = [], { includeAllBatchTasks = false } = {}) => {
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  const batchIds = uniqueIds(sourceRows.map(getBatchRefId));
   if (batchIds.length === 0) {
-    return rows.map((row) => serializeTask(row));
+    return sourceRows.map((row) => serializeTask(row));
   }
 
   const [batchDocs, batchTaskRows] = await Promise.all([
     Batch.find({ _id: { $in: batchIds }, is_deleted: false }).lean(),
-    populateTaskQuery(
-      Task.find({
-        batch: { $in: batchIds },
-        is_deleted: false,
-      }).sort({ task_no: 1, createdAt: 1 }),
-    ),
+    includeAllBatchTasks
+      ? populateTaskQuery(
+          Task.find({
+            batch: { $in: batchIds },
+            is_deleted: false,
+          }).sort({ task_no: 1, createdAt: 1 }),
+        )
+      : Promise.resolve(sourceRows),
   ]);
   const batchById = new Map(batchDocs.map((batch) => [normalizeId(batch?._id), batch]));
   const tasksByBatchId = batchTaskRows.reduce((acc, row) => {
@@ -764,7 +767,7 @@ const groupTaskRowsForBoard = async (rows = []) => {
   const emittedBatchIds = new Set();
   const groupedRows = [];
 
-  rows.forEach((row) => {
+  sourceRows.forEach((row) => {
     const batchId = getBatchRefId(row);
     if (!batchId) {
       groupedRows.push(serializeTask(row));
@@ -1283,6 +1286,21 @@ const addAndMatch = (match, condition) => {
   match.$and.push(condition);
 };
 
+const TASK_LIST_NARROWING_FILTER_KEYS = Object.freeze([
+  "status",
+  "task_type_key",
+  "assignee",
+  "creator",
+  "department",
+  "brand",
+  "search",
+  "due_date_from",
+  "due_date_to",
+]);
+
+const hasTaskListNarrowingFilter = (query = {}) =>
+  TASK_LIST_NARROWING_FILTER_KEYS.some((key) => Boolean(normalizeText(query?.[key])));
+
 const buildTaskListMatch = ({ query = {}, user = {} } = {}) => {
   const privilegedReader = isAdmin(user);
   const match = buildTaskVisibilityMatch(user);
@@ -1609,44 +1627,7 @@ const listWorkflowTasks = async ({ query = {}, user = {} } = {}) => {
   const page = parsePositiveInt(query?.page, 1);
   const limit = Math.min(MAX_PAGE_LIMIT, parsePositiveInt(query?.limit, DEFAULT_PAGE_LIMIT));
   const skip = (page - 1) * limit;
-  const normalizedStatusFilter = normalizeKey(query?.status);
-
-  if (normalizedStatusFilter === "complete" || normalizedStatusFilter === "complete_done") {
-    const queryWithoutStatus = { ...query, status: "" };
-    const { match: unitMatch } = buildTaskListMatch({ query: queryWithoutStatus, user });
-    const rows = await populateTaskQuery(
-      Task.find(unitMatch).sort({ createdAt: -1, task_no: 1 }),
-    );
-    const completionCommentMap = await getLatestCompletionCommentMap(
-      rows.map((row) => row?._id),
-    );
-    const rowsWithCompletionComments = rows.map((row) => ({
-      ...row,
-      completion_comment: completionCommentMap.get(normalizeId(row?._id)) || null,
-    }));
-    const groupedRows = await groupTaskRowsForBoard(rowsWithCompletionComments);
-    const completeRows = groupedRows.filter((row) => {
-      const rowStatus = normalizeWorkflowTaskStatus(row?.status, { fallback: "" });
-      if (normalizedStatusFilter === "complete") {
-        return rowStatus === "complete";
-      }
-      return (
-        ["uploaded", "completed"].includes(rowStatus) ||
-        (rowStatus === "approved" && row?.upload_required === false)
-      );
-    });
-    const pagedRows = completeRows.slice(skip, skip + limit);
-
-    return {
-      rows: pagedRows,
-      pagination: {
-        page,
-        limit,
-        totalPages: Math.max(1, Math.ceil(completeRows.length / limit)),
-        totalRecords: completeRows.length,
-      },
-    };
-  }
+  const includeAllBatchTasks = !hasTaskListNarrowingFilter(query);
 
   const { match } = buildTaskListMatch({ query, user });
 
@@ -1669,7 +1650,7 @@ const listWorkflowTasks = async ({ query = {}, user = {} } = {}) => {
   }));
 
   return {
-    rows: await groupTaskRowsForBoard(rowsWithCompletionComments),
+    rows: await groupTaskRowsForBoard(rowsWithCompletionComments, { includeAllBatchTasks }),
     pagination: {
       page,
       limit,
