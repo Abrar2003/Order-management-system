@@ -792,6 +792,14 @@ const buildWorkflowDashboardCounts = (doc = {}) =>
     return acc;
   }, {});
 
+const mergeWorkflowDashboardCounts = (rows = []) =>
+  (Array.isArray(rows) ? rows : []).reduce((acc, row) => {
+    DASHBOARD_COUNT_FIELDS.forEach((key) => {
+      acc[key] = Number(acc[key] || 0) + Number(row?.[key] || 0);
+    });
+    return acc;
+  }, buildWorkflowDashboardCounts({}));
+
 const buildTaskVisibilityMatch = (user = {}) => {
   if (isAdmin(user)) {
     return { is_deleted: false };
@@ -2161,7 +2169,7 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
     unassigned_tasks: Number(summary?.overall?.[0]?.unassigned_tasks || 0),
   };
 
-  const [unitOverallSummary] = await Task.aggregate([
+  const unitOverallSummaries = await Task.aggregate([
     { $match: match },
     {
       $addFields: {
@@ -2186,6 +2194,7 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
             { $concat: ["task:", { $toString: "$_id" }] },
           ],
         },
+        workflow_unit_is_batch: { $ne: ["$batch", null] },
         unit_is_open: openTaskExpression,
         unit_is_complete_done: completeTaskExpression,
         unit_is_hold: { $eq: ["$normalized_status", "hold"] },
@@ -2236,6 +2245,7 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
     {
       $group: {
         _id: "$workflow_unit_key",
+        is_batch_unit: { $max: { $cond: ["$workflow_unit_is_batch", 1, 0] } },
         child_count: { $sum: 1 },
         open_count: { $sum: { $cond: ["$unit_is_open", 1, 0] } },
         complete_done_count: { $sum: { $cond: ["$unit_is_complete_done", 1, 0] } },
@@ -2286,7 +2296,7 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
     },
     {
       $group: {
-        _id: null,
+        _id: "$is_batch_unit",
         total_tasks: { $sum: 1 },
         open_tasks: { $sum: { $cond: ["$is_open_unit", 1, 0] } },
         assigned_tasks: {
@@ -2415,7 +2425,16 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
     },
   ]);
 
-  Object.assign(overall, buildWorkflowDashboardCounts(unitOverallSummary || overall));
+  const batchUnitSummary = (Array.isArray(unitOverallSummaries) ? unitOverallSummaries : [])
+    .find((entry) => Number(entry?._id || 0) === 1);
+  const individualTaskUnitSummary = (Array.isArray(unitOverallSummaries) ? unitOverallSummaries : [])
+    .find((entry) => Number(entry?._id || 0) !== 1);
+  const batchCounts = buildWorkflowDashboardCounts(batchUnitSummary);
+  const individualTaskCounts = buildWorkflowDashboardCounts(individualTaskUnitSummary);
+
+  Object.assign(overall, mergeWorkflowDashboardCounts([batchCounts, individualTaskCounts]));
+  overall.batch_counts = batchCounts;
+  overall.individual_task_counts = individualTaskCounts;
 
   const userById = new Map();
   (Array.isArray(summary?.users) ? summary.users : []).forEach((entry) => {

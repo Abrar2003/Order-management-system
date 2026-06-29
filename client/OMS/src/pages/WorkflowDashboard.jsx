@@ -362,102 +362,109 @@ const WorkflowDashboard = () => {
 
   const statCards = useMemo(() => {
     const overall = dashboard?.overall || {};
+    const buildCard = (card = {}) => ({
+      ...card,
+      value: Number(overall?.[card.countKey] || 0),
+      batchValue: Number(overall?.batch_counts?.[card.countKey] || 0),
+      taskValue: Number(overall?.individual_task_counts?.[card.countKey] || 0),
+    });
+
     return [
       {
         key: "total",
         label: "Total Tasks",
-        value: Number(overall.total_tasks || 0),
+        countKey: "total_tasks",
         note: "All tasks in the current dashboard slice.",
         status: "",
       },
       {
         key: "complete",
         label: "Complete",
-        value: Number(overall.complete_done_tasks || 0),
+        countKey: "complete_done_tasks",
         note: "Uploaded tasks, plus approved tasks that do not need upload.",
         status: "complete_done",
       },
       {
         key: "open",
         label: "Open Tasks",
-        value: Number(overall.open_tasks || 0),
+        countKey: "open_tasks",
         note: "Tasks still not fully uploaded.",
         status: "open",
       },
       {
         key: "hold",
         label: "Hold",
-        value: Number(overall.hold_tasks || 0),
+        countKey: "hold_tasks",
         note: "Tasks paused by an approved hold request.",
         status: "hold",
       },
       {
         key: "hold-approval-pending",
         label: "Hold Approval Pending",
-        value: Number(overall.hold_approval_pending_tasks || 0),
+        countKey: "hold_approval_pending_tasks",
         note: "Hold requests waiting for creator or admin approval.",
         status: "hold_approval_pending",
       },
       {
         key: "approval",
         label: "Needs Approval",
-        value: Number(overall.needs_approval_tasks || 0),
+        countKey: "needs_approval_tasks",
         note: "Completed work waiting on admin approval.",
         status: "needs_approval",
       },
       {
         key: "overdue",
         label: "Overdue",
-        value: Number(overall.overdue_tasks || 0),
+        countKey: "overdue_tasks",
         note: "Tasks not completed after the active due date crossed in IST.",
         status: "overdue",
       },
       {
         key: "approval-overdue",
         label: "Approval Overdue",
-        value: Number(overall.approval_overdue_tasks || 0),
+        countKey: "approval_overdue_tasks",
         note: "Completed tasks past their approval deadline.",
         status: "approval_overdue",
       },
       {
         key: "upload-overdue",
         label: "Upload Overdue",
-        value: Number(overall.upload_overdue_tasks || 0),
+        countKey: "upload_overdue_tasks",
         note: "Approved tasks past their upload deadline.",
         status: "upload_overdue",
       },
       {
         key: "delayed",
         label: "Delayed",
-        value: Number(overall.delayed_tasks || 0),
+        countKey: "delayed_tasks",
         note: "Tasks completed after due date with later stages still in window.",
         status: "delayed",
       },
       {
         key: "approval-delay",
         label: "Approval Delay",
-        value: Number(overall.approval_delayed_tasks || 0),
+        countKey: "approval_delayed_tasks",
         note: "Final tasks approved after the approval deadline.",
         status: "approval_delay",
       },
       {
         key: "upload-delay",
         label: "Upload Delay",
-        value: Number(overall.upload_delayed_tasks || 0),
+        countKey: "upload_delayed_tasks",
         note: "Final tasks uploaded after the upload deadline.",
         status: "upload_delay",
       },
       {
         key: "due-today",
         label: "Due Today",
-        value: Number(overall.due_today_tasks || 0),
+        countKey: "due_today_tasks",
         note: "Due today in IST and still not approved.",
         status: "due_today",
       },
       {
         key: "rework-before-approval",
         label: "Rework Before Approval",
-        value: Number(overall.reworked_before_approval_tasks || 0),
+        countKey: "reworked_before_approval_tasks",
         note: "Tasks sent to rework from the completed stage before approval.",
         status: "",
         disableNavigation: true,
@@ -465,7 +472,7 @@ const WorkflowDashboard = () => {
       {
         key: "rework-after-approval",
         label: "Rework After Approval",
-        value: Number(overall.reworked_after_approval_tasks || 0),
+        countKey: "reworked_after_approval_tasks",
         note: "Tasks sent to rework after approval or upload.",
         status: "",
         disableNavigation: true,
@@ -473,11 +480,11 @@ const WorkflowDashboard = () => {
       {
         key: "upload-remaining",
         label: "Upload Remaining",
-        value: Number(overall.upload_remaining_tasks || 0),
+        countKey: "upload_remaining_tasks",
         note: "Approved tasks still waiting to be uploaded.",
         status: "upload_remaining",
       },
-    ];
+    ].map(buildCard);
   }, [dashboard?.overall]);
 
   if (!canViewWorkflow) {
@@ -727,7 +734,15 @@ const WorkflowDashboard = () => {
                 >
                   <div className="card-body">
                     <div className="workflow-dashboard-stat-label">{card.label}</div>
-                    <div className="workflow-dashboard-stat-value">{card.value}</div>
+                    <div
+                      className="workflow-dashboard-stat-value workflow-dashboard-stat-value--split"
+                      aria-label={`${card.batchValue} batches, ${card.taskValue} individual tasks`}
+                    >
+                      <span>{card.batchValue}</span>
+                      <span className="workflow-dashboard-stat-separator">/</span>
+                      <span>{card.taskValue}</span>
+                    </div>
+                    <div className="workflow-dashboard-stat-split-label">Batch / Task</div>
                     <div className="workflow-dashboard-stat-note">{card.note}</div>
                   </div>
                 </button>
