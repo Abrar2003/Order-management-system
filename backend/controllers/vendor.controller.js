@@ -33,6 +33,7 @@ const normalizeContactPersons = (value = []) => {
 const serializeVendor = (vendor = {}) => ({
   _id: String(vendor._id || ""),
   name: normalizeText(vendor.name),
+  owner_name: normalizeText(vendor.owner_name),
   email: normalizeEmail(vendor.email),
   phone: normalizeText(vendor.phone),
   country: normalizeText(vendor.country),
@@ -69,6 +70,7 @@ const getVendors = async (_req, res) => {
 const createVendor = async (req, res) => {
   try {
     const name = normalizeText(req.body?.name);
+    const owner_name = normalizeText(req.body?.owner_name);
     const email = normalizeEmail(req.body?.email);
     const phone = normalizeText(req.body?.phone);
     const country = normalizeText(req.body?.country);
@@ -77,30 +79,37 @@ const createVendor = async (req, res) => {
     const contact_person = normalizeContactPersons(req.body?.contact_person);
     const is_active = req.body?.is_active !== false;
 
-    if (!name || !email || !phone || !vendor_code) {
+    if (!name || !vendor_code) {
       return res.status(400).json({
         success: false,
-        message: "Name, email, phone, and vendor code are required",
+        message: "Name and vendor code are required",
       });
     }
 
+    const duplicateConditions = [
+      { name: { $regex: `^${escapeRegex(name)}$`, $options: "i" } },
+      { vendor_code: { $regex: `^${escapeRegex(vendor_code)}$`, $options: "i" } },
+    ];
+    if (email) {
+      duplicateConditions.push({ email });
+    }
+
     const existingVendor = await Vendor.findOne({
-      $or: [
-        { name: { $regex: `^${escapeRegex(name)}$`, $options: "i" } },
-        { email },
-        { vendor_code: { $regex: `^${escapeRegex(vendor_code)}$`, $options: "i" } },
-      ],
+      $or: duplicateConditions,
     }).lean();
 
     if (existingVendor) {
       return res.status(409).json({
         success: false,
-        message: "Vendor with this name, email, or vendor code already exists",
+        message: email
+          ? "Vendor with this name, email, or vendor code already exists"
+          : "Vendor with this name or vendor code already exists",
       });
     }
 
     const vendor = await Vendor.create({
       name,
+      owner_name,
       email,
       phone,
       country,
@@ -128,6 +137,7 @@ const updateVendor = async (req, res) => {
   try {
     const { id } = req.params;
     const name = normalizeText(req.body?.name);
+    const owner_name = normalizeText(req.body?.owner_name);
     const email = normalizeEmail(req.body?.email);
     const phone = normalizeText(req.body?.phone);
     const country = normalizeText(req.body?.country);
@@ -143,10 +153,10 @@ const updateVendor = async (req, res) => {
       });
     }
 
-    if (!name || !email || !phone || !vendor_code) {
+    if (!name || !vendor_code) {
       return res.status(400).json({
         success: false,
-        message: "Name, email, phone, and vendor code are required",
+        message: "Name and vendor code are required",
       });
     }
 
@@ -158,23 +168,30 @@ const updateVendor = async (req, res) => {
       });
     }
 
+    const duplicateConditions = [
+      { name: { $regex: `^${escapeRegex(name)}$`, $options: "i" } },
+      { vendor_code: { $regex: `^${escapeRegex(vendor_code)}$`, $options: "i" } },
+    ];
+    if (email) {
+      duplicateConditions.push({ email });
+    }
+
     const duplicateVendor = await Vendor.findOne({
       _id: { $ne: id },
-      $or: [
-        { name: { $regex: `^${escapeRegex(name)}$`, $options: "i" } },
-        { email },
-        { vendor_code: { $regex: `^${escapeRegex(vendor_code)}$`, $options: "i" } },
-      ],
+      $or: duplicateConditions,
     }).lean();
 
     if (duplicateVendor) {
       return res.status(409).json({
         success: false,
-        message: "Another vendor with this name, email, or vendor code already exists",
+        message: email
+          ? "Another vendor with this name, email, or vendor code already exists"
+          : "Another vendor with this name or vendor code already exists",
       });
     }
 
     existingVendor.name = name;
+    existingVendor.owner_name = owner_name;
     existingVendor.email = email;
     existingVendor.phone = phone;
     existingVendor.country = country;
@@ -236,6 +253,7 @@ const exportVendors = async (req, res) => {
 
     const columns = [
       { header: "Vendor Name", value: (v) => v.name || "N/A" },
+      { header: "Owner Name", value: (v) => v.owner_name || "N/A" },
       { header: "Vendor Code", value: (v) => v.vendor_code || "N/A" },
       { header: "Email", value: (v) => v.email || "N/A" },
       { header: "Phone", value: (v) => v.phone || "N/A" },

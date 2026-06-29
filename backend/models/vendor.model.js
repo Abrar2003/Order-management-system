@@ -5,13 +5,14 @@ const vendorSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  owner_name: {
+    type: String,
+  },
   email: {
     type: String,
-    required: true,
   },
   phone: {
     type: String,
-    required: true,
   },
   address: {
     type: String,

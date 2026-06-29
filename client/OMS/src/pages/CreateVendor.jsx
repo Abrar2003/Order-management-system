@@ -7,6 +7,7 @@ import "../App.css";
 
 const initialForm = {
   name: "",
+  owner_name: "",
   email: "",
   phone: "",
   country: "",
@@ -80,6 +81,7 @@ const CreateVendor = () => {
     return vendors.filter((vendor) =>
       [
         vendor?.name,
+        vendor?.owner_name,
         vendor?.vendor_code,
         vendor?.email,
         vendor?.phone,
@@ -148,13 +150,8 @@ const CreateVendor = () => {
     setError("");
     setSuccess("");
 
-    if (
-      !form.name.trim() ||
-      !form.email.trim() ||
-      !form.phone.trim() ||
-      !form.vendor_code.trim()
-    ) {
-      setError("Name, email, phone, and vendor code are required.");
+    if (!form.name.trim() || !form.vendor_code.trim()) {
+      setError("Name and vendor code are required.");
       return;
     }
 
@@ -164,6 +161,7 @@ const CreateVendor = () => {
       setSaving(true);
       await api.post("/vendors", {
         name: form.name.trim(),
+        owner_name: form.owner_name.trim() || undefined,
         email: form.email.trim(),
         phone: form.phone.trim(),
         country: form.country.trim() || undefined,
@@ -231,7 +229,18 @@ const CreateVendor = () => {
               </div>
 
               <div className="col-md-6">
-                <label className="form-label">Email *</label>
+                <label className="form-label">Owner Name</label>
+                <input
+                  name="owner_name"
+                  value={form.owner_name}
+                  onChange={handleChange}
+                  className="form-control"
+                  placeholder="Owner name"
+                />
+              </div>
+
+              <div className="col-md-6">
+                <label className="form-label">Email</label>
                 <input
                   name="email"
                   type="email"
@@ -239,7 +248,6 @@ const CreateVendor = () => {
                   onChange={handleChange}
                   className="form-control"
                   placeholder="Email address"
-                  required
                 />
               </div>
 
@@ -256,14 +264,13 @@ const CreateVendor = () => {
               </div>
 
               <div className="col-md-6">
-                <label className="form-label">Phone *</label>
+                <label className="form-label">Phone</label>
                 <input
                   name="phone"
                   value={form.phone}
                   onChange={handleChange}
                   className="form-control"
                   placeholder="Phone number"
-                  required
                 />
               </div>
 
@@ -435,6 +442,7 @@ const CreateVendor = () => {
                   <thead>
                     <tr>
                       <th>Name</th>
+                      <th>Owner Name</th>
                       <th>Vendor Code</th>
                       <th>Email</th>
                       <th>Phone</th>
@@ -448,6 +456,7 @@ const CreateVendor = () => {
                     {filteredVendors.map((vendor) => (
                       <tr key={vendor._id || `${vendor.name}-${vendor.email}`}>
                         <td className="fw-semibold">{vendor.name || "N/A"}</td>
+                        <td>{vendor.owner_name || "N/A"}</td>
                         <td>{vendor.vendor_code || "N/A"}</td>
                         <td>{vendor.email || "N/A"}</td>
                         <td>{vendor.phone || "N/A"}</td>

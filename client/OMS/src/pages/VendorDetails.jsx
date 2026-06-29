@@ -119,6 +119,7 @@ const VendorDetails = () => {
 
       const searchableString = [
         vendor?.name,
+        vendor?.owner_name,
         vendor?.vendor_code,
         vendor?.email,
         vendor?.phone,
@@ -202,6 +203,7 @@ const VendorDetails = () => {
     setEditForm({
       _id: vendor._id,
       name: vendor.name || "",
+      owner_name: vendor.owner_name || "",
       vendor_code: vendor.vendor_code || "",
       email: vendor.email || "",
       phone: vendor.phone || "",
@@ -267,13 +269,8 @@ const VendorDetails = () => {
     if (!editForm) return;
 
     setEditError("");
-    if (
-      !editForm.name.trim() ||
-      !editForm.email.trim() ||
-      !editForm.phone.trim() ||
-      !editForm.vendor_code.trim()
-    ) {
-      setEditError("Name, email, phone, and vendor code are required.");
+    if (!editForm.name.trim() || !editForm.vendor_code.trim()) {
+      setEditError("Name and vendor code are required.");
       return;
     }
 
@@ -283,6 +280,7 @@ const VendorDetails = () => {
       setSavingEdit(true);
       await api.put(`/vendors/${editForm._id}`, {
         name: editForm.name.trim(),
+        owner_name: editForm.owner_name.trim() || undefined,
         email: editForm.email.trim(),
         phone: editForm.phone.trim(),
         country: editForm.country.trim() || undefined,
@@ -361,7 +359,7 @@ const VendorDetails = () => {
                 <input
                   type="search"
                   className="form-control"
-                  placeholder="Search by name, code, email, phone, address..."
+                  placeholder="Search by name, owner, code, email, phone, address..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
@@ -444,6 +442,7 @@ const VendorDetails = () => {
                     <thead className="table-light">
                       <tr>
                         <th className="ps-4">Vendor Name</th>
+                        <th>Owner Name</th>
                         <th>Vendor Code</th>
                         <th>Email</th>
                         <th>Phone</th>
@@ -457,6 +456,7 @@ const VendorDetails = () => {
                       {group.vendors.map((vendor) => (
                         <tr key={vendor._id}>
                           <td className="ps-4 fw-bold text-dark">{vendor.name || "N/A"}</td>
+                          <td>{vendor.owner_name || "N/A"}</td>
                           <td>
                             <code className="text-primary bg-light px-2 py-1 rounded">
                               {vendor.vendor_code || "N/A"}
@@ -565,25 +565,33 @@ const VendorDetails = () => {
                     </div>
 
                     <div className="col-md-6">
-                      <label className="form-label fw-semibold">Email *</label>
+                      <label className="form-label fw-semibold">Owner Name</label>
+                      <input
+                        name="owner_name"
+                        className="form-control"
+                        value={editForm.owner_name}
+                        onChange={handleEditChange}
+                      />
+                    </div>
+
+                    <div className="col-md-6">
+                      <label className="form-label fw-semibold">Email</label>
                       <input
                         name="email"
                         type="email"
                         className="form-control"
                         value={editForm.email}
                         onChange={handleEditChange}
-                        required
                       />
                     </div>
 
                     <div className="col-md-6">
-                      <label className="form-label fw-semibold">Phone *</label>
+                      <label className="form-label fw-semibold">Phone</label>
                       <input
                         name="phone"
                         className="form-control"
                         value={editForm.phone}
                         onChange={handleEditChange}
-                        required
                       />
                     </div>
 
