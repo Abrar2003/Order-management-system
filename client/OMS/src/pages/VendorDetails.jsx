@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
+import { getUserFromToken } from "../auth/auth.service";
+import { isStrictAdminRole } from "../auth/permissions";
 import api from "../api/axios";
 import Navbar from "../components/Navbar";
 import { usePermissions } from "../auth/PermissionContext";
@@ -34,7 +36,9 @@ const normalizeContactPersons = (contacts = []) =>
     .filter((contact) => contact.name || contact.email || contact.phone);
 
 const VendorDetails = () => {
-  const { hasPermission } = usePermissions();
+  const { hasPermission, isAdmin, role: permissionRole } = usePermissions();
+  const userRole = permissionRole || getUserFromToken()?.role;
+  const isVendorAdmin = isStrictAdminRole(userRole) || isAdmin;
   const canViewVendors = hasPermission("vendors", "view");
   const canEditVendors = hasPermission("vendors", "edit");
   const canCreateVendors = hasPermission("vendors", "create");
@@ -298,7 +302,7 @@ const VendorDetails = () => {
     }
   };
 
-  if (!canViewVendors) {
+  if (!canViewVendors || !isVendorAdmin) {
     return <Navigate to="/" replace />;
   }
 

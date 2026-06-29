@@ -9,6 +9,8 @@ import CheckLabelsModal from "./CheckLabelsModal";
 import {
   buildItemFilesPagePath,
   ITEM_FILE_NAV_OPTIONS,
+  ITEM_FILE_OPTIONS,
+  SHIPPING_MARKS_SUB_OPTIONS,
 } from "../constants/itemFiles";
 import NotificationBell from "../notifications/NotificationBell";
 import {
@@ -55,6 +57,7 @@ const Navbar = () => {
   const normalizedRole = normalizeUserRole(role);
   const { hasPermission, isAdmin, role: permissionRole } = usePermissions();
   const isWorkflowAdmin = isStrictAdminRole(permissionRole || role);
+  const isVendorAdmin = isStrictAdminRole(permissionRole || role) || isAdmin;
 
   const navigate = useNavigate();
   const navShellRef = useRef(null);
@@ -209,8 +212,12 @@ const Navbar = () => {
       links.push(routeMenuItem("containers", "Containers", "/containers"));
     }
 
+    if (isVendorAdmin) {
+      links.push(routeMenuItem("vendors", "Vendors", "/vendors"));
+    }
+
     return links;
-  }, [canAccessQc, hasPermission, isQcOnlyRole, permissionRole]);
+  }, [canAccessQc, hasPermission, isQcOnlyRole, isVendorAdmin, permissionRole]);
 
   const generalMenuItems = useMemo(
     () => (isQcOnlyRole ? [] : [routeMenuItem("home", "Home", "/")]),
@@ -262,7 +269,7 @@ const Navbar = () => {
     const performanceReports = [
       routeMenuItem("inspector-reports", "Inspector Performance Report", "/reports/inspectors"),
       routeMenuItem("vendor-reports", "Vendor Performance Report", "/reports/vendors"),
-      routeMenuItem("vendor-details", "Vendor Details", "/vendors"),
+      ...(isVendorAdmin ? [routeMenuItem("vendor-details", "Vendor Details", "/vendors")] : []),
       routeMenuItem(
         "vendor-wise-qa",
         "Vendor Wise QA Performance Report",
@@ -402,15 +409,29 @@ const Navbar = () => {
     if (uploadOrdersMenuItems.length > 0) {
       items.push(groupMenuItem("upload-orders", "Upload Orders", uploadOrdersMenuItems));
     }
+
+    const mainItemFileOptions = ITEM_FILE_OPTIONS.filter(
+      (option) => option.value !== "shipping_marks"
+    );
     items.push(
-      ...ITEM_FILE_NAV_OPTIONS.map((option) =>
+      ...mainItemFileOptions.map((option) =>
         routeMenuItem(
           `items-file-${option.value}`,
           option.label,
           buildItemFilesPagePath(option.value),
         )
-      ),
-    )
+      )
+    );
+
+    const shippingMarksMenuItems = SHIPPING_MARKS_SUB_OPTIONS.map((option) =>
+      routeMenuItem(
+        `items-file-${option.value}`,
+        option.label,
+        buildItemFilesPagePath(option.value),
+      )
+    );
+
+    items.push(groupMenuItem("shipping-marks-group", "Shipping Marks", shippingMarksMenuItems));
 
     return sortEntriesByLabel(items);
   }, [
@@ -466,7 +487,7 @@ const Navbar = () => {
         items.push(routeMenuItem("create-users", "Create User", "/users/new"));
       }
 
-      if (canCreateVendors || hasPermission("vendors", "view")) {
+      if (isVendorAdmin) {
         items.push(routeMenuItem("vendor-details", "Vendor Details", "/vendors"));
       }
 
