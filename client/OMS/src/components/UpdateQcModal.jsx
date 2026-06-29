@@ -1169,6 +1169,27 @@ const UpdateQcModal = ({
     const restoredBarcodeValidationType = getQcBarcodeValidationOption(
       validation.barcodeValidationType,
     ).value;
+    const restoredBarcodeScannedInSession = Boolean(validation.barcodeScannedInSession);
+    const restoredInnerBarcodeScannedInSession = Boolean(
+      validation.innerBarcodeScannedInSession,
+    );
+    const restoredHasRequiredScans = getQcBarcodeValidationRequirements(
+      restoredBarcodeValidationType,
+    ).every((requirement) => {
+      if (requirement.inputKey === "inner_barcode") {
+        return (
+          restoredInnerBarcodeScannedInSession &&
+          Boolean(normalizeComparableBarcode(nextForm.inner_barcode))
+        );
+      }
+      return (
+        restoredBarcodeScannedInSession &&
+        Boolean(normalizeComparableBarcode(nextForm.barcode))
+      );
+    });
+    const restoredBarcodeValidated = isQcUser
+      ? Boolean(validation.barcodeValidated) && restoredHasRequiredScans
+      : Boolean(validation.barcodeValidated);
     const restoredForm = isQcUser
       ? (() => {
         let requiredMode = getBoxModeForQcBarcodeValidationType(
@@ -1183,8 +1204,6 @@ const UpdateQcModal = ({
         }
         return {
           ...nextForm,
-          barcode: "",
-          inner_barcode: "",
           inspected_box_mode: requiredMode,
           inspected_box_count:
             requiredMode === BOX_PACKAGING_MODES.CARTON
@@ -1204,20 +1223,23 @@ const UpdateQcModal = ({
     skipNextBarcodeValidationResetRef.current = true;
     setForm(restoredForm);
     setBarcodeScannedInSession(
-      isQcUser ? false : Boolean(validation.barcodeScannedInSession),
+      restoredBarcodeScannedInSession,
     );
     setInnerBarcodeScannedInSession(
-      isQcUser ? false : Boolean(validation.innerBarcodeScannedInSession),
+      restoredInnerBarcodeScannedInSession,
     );
     setBarcodeValidationType(
       restoredBarcodeValidationType,
     );
-    setBarcodeValidated(isQcUser ? false : Boolean(validation.barcodeValidated));
+    setBarcodeValidated(restoredBarcodeValidated);
     setBarcodeValidationError(
-      isQcUser ? "" : String(validation.barcodeValidationError || ""),
+      restoredBarcodeValidated ? "" : String(validation.barcodeValidationError || ""),
     );
     setBarcodeValidationStatus(
-      isQcUser ? "" : String(validation.barcodeValidationStatus || ""),
+      restoredBarcodeValidated
+        ? String(validation.barcodeValidationStatus || "") ||
+          `${getQcBarcodeValidationOption(restoredBarcodeValidationType).label} barcode validated. You can proceed.`
+        : String(validation.barcodeValidationStatus || ""),
     );
   };
   const {
