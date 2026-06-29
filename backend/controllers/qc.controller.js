@@ -85,6 +85,9 @@ const {
 } = require("../services/qcImageDownload.service");
 const { formatEan13BarcodeDisplay } = require("../helpers/barcodeFormat");
 const {
+  buildFormDraftCleanupPipeline,
+  buildFormDraftDeletePipeline,
+  buildFormDraftUpsertPipeline,
   cleanupExpiredFormDrafts,
   deleteFormDraft,
   findFormDraft,
@@ -4661,19 +4664,8 @@ exports.getQcFormDraft = async (req, res) => {
     if (hadExpiredDrafts) {
       await QC.updateOne(
         { _id: qc._id },
-        [
-          {
-            $set: {
-              form_drafts: {
-                $filter: {
-                  input: { $ifNull: ["$form_drafts", []] },
-                  as: "draft",
-                  cond: { $gt: ["$$draft.expires_at", now] },
-                },
-              },
-            },
-          },
-        ],
+        buildFormDraftCleanupPipeline(now),
+        { updatePipeline: true },
       );
     }
 
@@ -4705,53 +4697,12 @@ exports.saveQcFormDraft = async (req, res) => {
       payload: req.body?.payload,
     }, now);
 
-    const draftUserId = new mongoose.Types.ObjectId(String(draft.user));
-    const draftMode = String(draft.mode || "").trim().toLowerCase();
-    const draftRecordId = String(draft.record_id || "").trim();
-    const nextDraft = {
-      user: draftUserId,
-      mode: draftMode,
-      record_id: draftRecordId,
-      payload: draft.payload,
-      updated_at: draft.updated_at,
-      expires_at: draft.expires_at,
-    };
+    const { nextDraft, pipeline } = buildFormDraftUpsertPipeline({ draft, now });
 
     await QC.updateOne(
       { _id: qc._id },
-      [
-        {
-          $set: {
-            form_drafts: {
-              $concatArrays: [
-                {
-                  $filter: {
-                    input: { $ifNull: ["$form_drafts", []] },
-                    as: "draft",
-                    cond: {
-                      $and: [
-                        { $gt: ["$$draft.expires_at", now] },
-                        {
-                          $not: [
-                            {
-                              $and: [
-                                { $eq: ["$$draft.user", draftUserId] },
-                                { $eq: ["$$draft.mode", draftMode] },
-                                { $eq: ["$$draft.record_id", draftRecordId] },
-                              ],
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                  },
-                },
-                [{ $literal: nextDraft }],
-              ],
-            },
-          },
-        },
-      ],
+      pipeline,
+      { updatePipeline: true },
     );
 
     return res.json({
@@ -4788,38 +4739,16 @@ exports.deleteQcFormDraft = async (req, res) => {
     });
 
     if (changed) {
-      const draftUserId = new mongoose.Types.ObjectId(draftUserIdValue);
       const now = new Date();
       await QC.updateOne(
         { _id: qc._id },
-        [
-          {
-            $set: {
-              form_drafts: {
-                $filter: {
-                  input: { $ifNull: ["$form_drafts", []] },
-                  as: "draft",
-                  cond: {
-                    $and: [
-                      { $gt: ["$$draft.expires_at", now] },
-                      {
-                        $not: [
-                          {
-                            $and: [
-                              { $eq: ["$$draft.user", draftUserId] },
-                              { $eq: ["$$draft.mode", draftMode] },
-                              { $eq: ["$$draft.record_id", draftRecordId] },
-                            ],
-                          },
-                        ],
-                      },
-                    ],
-                  },
-                },
-              },
-            },
-          },
-        ],
+        buildFormDraftDeletePipeline({
+          userId: draftUserIdValue,
+          mode: draftMode,
+          recordId: draftRecordId,
+          now,
+        }),
+        { updatePipeline: true },
       );
     }
 

@@ -147,8 +147,109 @@ const serializeFormDraft = (draft = null) => {
   };
 };
 
+const createStoredDraftArrayExpression = () => ({
+  $cond: [{ $isArray: "$form_drafts" }, "$form_drafts", []],
+});
+
+const createDraftIdentityExpression = ({ userId = "", mode = "", recordId = "" } = {}) => {
+  const normalizedUserId = String(userId || "").trim();
+  const normalizedMode = normalizeDraftMode(mode);
+  const normalizedRecordId = normalizeDraftRecordId(recordId);
+
+  return {
+    $and: [
+      { $eq: [{ $toString: "$$draft.user" }, normalizedUserId] },
+      { $eq: ["$$draft.mode", normalizedMode] },
+      { $eq: ["$$draft.record_id", normalizedRecordId] },
+    ],
+  };
+};
+
+const createActiveDraftsExpression = ({ now = new Date(), exclude = null } = {}) => {
+  const conditions = [{ $gt: ["$$draft.expires_at", now] }];
+  if (exclude) {
+    conditions.push({ $not: [exclude] });
+  }
+
+  return {
+    $filter: {
+      input: createStoredDraftArrayExpression(),
+      as: "draft",
+      cond: conditions.length === 1 ? conditions[0] : { $and: conditions },
+    },
+  };
+};
+
+const toStoredFormDraft = (draft = {}) => {
+  const userId = String(draft?.user || "").trim();
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    throw new Error("Valid user is required for draft storage");
+  }
+
+  return {
+    user: new mongoose.Types.ObjectId(userId),
+    mode: normalizeDraftMode(draft.mode),
+    record_id: normalizeDraftRecordId(draft.record_id),
+    payload: draft.payload && typeof draft.payload === "object" ? draft.payload : {},
+    updated_at: draft.updated_at || new Date(),
+    expires_at: draft.expires_at,
+  };
+};
+
+const buildFormDraftCleanupPipeline = (now = new Date()) => [
+  {
+    $set: {
+      form_drafts: createActiveDraftsExpression({ now }),
+    },
+  },
+];
+
+const buildFormDraftUpsertPipeline = ({ draft = {}, now = new Date() } = {}) => {
+  const nextDraft = toStoredFormDraft(draft);
+  const exclude = createDraftIdentityExpression({
+    userId: nextDraft.user,
+    mode: nextDraft.mode,
+    recordId: nextDraft.record_id,
+  });
+
+  return {
+    nextDraft,
+    pipeline: [
+      {
+        $set: {
+          form_drafts: {
+            $concatArrays: [
+              createActiveDraftsExpression({ now, exclude }),
+              [{ $literal: nextDraft }],
+            ],
+          },
+        },
+      },
+    ],
+  };
+};
+
+const buildFormDraftDeletePipeline = ({
+  userId = "",
+  mode = "",
+  recordId = "",
+  now = new Date(),
+} = {}) => [
+  {
+    $set: {
+      form_drafts: createActiveDraftsExpression({
+        now,
+        exclude: createDraftIdentityExpression({ userId, mode, recordId }),
+      }),
+    },
+  },
+];
+
 module.exports = {
   FORM_DRAFT_TTL_MS,
+  buildFormDraftCleanupPipeline,
+  buildFormDraftDeletePipeline,
+  buildFormDraftUpsertPipeline,
   formDraftSchema,
   cleanupExpiredFormDrafts,
   deleteFormDraft,

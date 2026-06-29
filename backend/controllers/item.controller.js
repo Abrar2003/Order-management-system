@@ -95,6 +95,9 @@ const {
   cleanupLegacyItemSizeFields,
 } = require("../helpers/itemLegacySizeCleanup");
 const {
+  buildFormDraftCleanupPipeline,
+  buildFormDraftDeletePipeline,
+  buildFormDraftUpsertPipeline,
   cleanupExpiredFormDrafts,
   deleteFormDraft,
   findFormDraft,
@@ -6018,8 +6021,11 @@ exports.getItemFormDraft = async (req, res) => {
     }, now);
 
     if (hadExpiredDrafts) {
-      item.markModified("form_drafts");
-      await item.save();
+      await Item.updateOne(
+        { _id: item._id },
+        buildFormDraftCleanupPipeline(now),
+        { updatePipeline: true },
+      );
     }
 
     return res.json({
@@ -6059,12 +6065,17 @@ exports.saveItemFormDraft = async (req, res) => {
       payload: req.body?.payload,
     });
 
-    item.markModified("form_drafts");
-    await item.save();
+    const now = new Date();
+    const { nextDraft, pipeline } = buildFormDraftUpsertPipeline({ draft, now });
+    await Item.updateOne(
+      { _id: item._id },
+      pipeline,
+      { updatePipeline: true },
+    );
 
     return res.json({
       success: true,
-      data: serializeFormDraft(draft),
+      data: serializeFormDraft(nextDraft),
     });
   } catch (error) {
     return res.status(400).json({
@@ -6099,8 +6110,17 @@ exports.deleteItemFormDraft = async (req, res) => {
     });
 
     if (changed) {
-      item.markModified("form_drafts");
-      await item.save();
+      const now = new Date();
+      await Item.updateOne(
+        { _id: item._id },
+        buildFormDraftDeletePipeline({
+          userId: getDraftUserId(req.user),
+          mode: req.query?.mode || req.body?.mode,
+          recordId: req.query?.record_id || req.body?.record_id,
+          now,
+        }),
+        { updatePipeline: true },
+      );
     }
 
     return res.json({
