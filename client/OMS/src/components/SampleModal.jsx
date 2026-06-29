@@ -24,6 +24,10 @@ import {
 import {
   useShippingInspectors,
 } from "../hooks/useShippingInspectors";
+import {
+  CONTAINER_FORMAT_ERROR_MESSAGE,
+  isValidContainerNumber,
+} from "../utils/container";
 import "../App.css";
 
 const createInitialSampleForm = () => ({
@@ -398,6 +402,9 @@ const SampleModal = ({
     if (!parsedContainer) {
       throw new Error("Container number is required.");
     }
+    if (!isValidContainerNumber(parsedContainer)) {
+      throw new Error(CONTAINER_FORMAT_ERROR_MESSAGE);
+    }
 
     return {
       stuffing_date: stuffingDateIso,
@@ -693,6 +700,7 @@ const SampleModal = ({
                         className="form-control"
                         value={containerNumber}
                         onChange={(event) => setContainerNumber(event.target.value)}
+                        placeholder="e.g. AAAA-111111-2"
                         disabled={saving}
                       />
                     </div>

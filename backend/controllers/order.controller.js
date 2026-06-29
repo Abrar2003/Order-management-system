@@ -183,6 +183,14 @@ const normalizeShipmentInvoiceNumber = (value, fallback = "N/A") => {
   return String(fallback ?? "").trim();
 };
 
+const normalizeObjectIdValue = (value = null) => {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") {
+    return String(value?._id || value?.id || value?.$oid || "").trim();
+  }
+  return String(value).trim();
+};
+
 const normalizeShipmentStuffedBy = (value = null) => {
   const idValue = value?.id ?? value?._id ?? value?.inspector_id ?? value?.inspectorId;
   const normalizedId = String(idValue ?? "").trim();
@@ -213,7 +221,9 @@ const normalizeShipmentStuffedBy = (value = null) => {
 
 const normalizeShipmentChecked = (value = null) => {
   const isChecked = Boolean(value?.checked);
-  const checkedBy = String(value?.checked_by || value?.checkedBy || "").trim();
+  const checkedBy = normalizeObjectIdValue(
+    value?.checked_by ?? value?.checkedBy,
+  );
 
   return {
     checked: isChecked,
@@ -222,6 +232,13 @@ const normalizeShipmentChecked = (value = null) => {
         ? new mongoose.Types.ObjectId(checkedBy)
         : null,
   };
+};
+
+const normalizeShipmentEntryId = (entry = {}) => {
+  const normalizedId = normalizeObjectIdValue(entry?._id ?? entry?.id);
+  return mongoose.Types.ObjectId.isValid(normalizedId)
+    ? new mongoose.Types.ObjectId(normalizedId)
+    : null;
 };
 
 const toPositiveCbmNumber = (value) => {
@@ -2795,8 +2812,9 @@ const normalizeShipmentEntries = (shipmentPayload) => {
     const stuffedBy = normalizeShipmentStuffedBy(
       entry?.stuffed_by ?? entry?.stuffedBy,
     );
+    const shipmentEntryId = normalizeShipmentEntryId(entry);
 
-    return {
+    const normalizedEntry = {
       container,
       invoice_number: invoiceNumber,
       stuffing_date: stuffingDate,
@@ -2809,6 +2827,8 @@ const normalizeShipmentEntries = (shipmentPayload) => {
         : null,
       updated_by: normalizeHistoryActor(entry?.updated_by),
     };
+    if (shipmentEntryId) normalizedEntry._id = shipmentEntryId;
+    return normalizedEntry;
   });
 };
 
@@ -2835,7 +2855,7 @@ const fitShipmentEntriesToOrderQuantity = (
     if (adjustedQuantity <= 0) continue;
 
     cumulativeShipped += adjustedQuantity;
-    nextEntries.push({
+    const nextEntry = {
       container: String(entry?.container ?? "").trim(),
       invoice_number: normalizeShipmentInvoiceNumber(
         entry?.invoice_number,
@@ -2856,7 +2876,10 @@ const fitShipmentEntriesToOrderQuantity = (
       updated_by: user
         ? buildAuditActor(user)
         : normalizeHistoryActor(entry?.updated_by),
-    });
+    };
+    const shipmentEntryId = normalizeShipmentEntryId(entry);
+    if (shipmentEntryId) nextEntry._id = shipmentEntryId;
+    nextEntries.push(nextEntry);
   }
 
   return nextEntries;
@@ -11046,6 +11069,12 @@ exports.finalizeOrder = async (req, res) => {
     if (!parsedContainer) {
       return res.status(400).json({
         message: "container must be a valid non-empty string",
+      });
+    }
+    const CONTAINER_REGEX = /^[A-Za-z]{4}-\d{6}-\d{1}$/;
+    if (!CONTAINER_REGEX.test(parsedContainer)) {
+      return res.status(400).json({
+        message: "Container number must be in the format 'AAAA-111111-2' (4 letters, hyphen, 6 digits, hyphen, 1 digit)",
       });
     }
 

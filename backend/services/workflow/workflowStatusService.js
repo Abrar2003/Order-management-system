@@ -2032,6 +2032,16 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
             },
           },
         ],
+        sourceCounts: [
+          {
+            $group: {
+              _id: {
+                $cond: [{ $ne: ["$batch", null] }, "batch", "individual"],
+              },
+              ...baseGroup,
+            },
+          },
+        ],
         users: [
           { $unwind: "$assigned_to" },
           {
@@ -2169,268 +2179,13 @@ const getWorkflowDashboardSummary = async ({ query = {}, user = {} } = {}) => {
     unassigned_tasks: Number(summary?.overall?.[0]?.unassigned_tasks || 0),
   };
 
-  const unitOverallSummaries = await Task.aggregate([
-    { $match: match },
-    {
-      $addFields: {
-        normalized_status: buildWorkflowTaskStatusNormalizationExpression(),
-        normalized_rework_count: {
-          $ifNull: ["$reworked.count", { $ifNull: ["$rework_count", 0] }],
-        },
-        normalized_rework_before_approval_count: {
-          $ifNull: ["$reworked.before_approval_count", 0],
-        },
-        normalized_rework_after_approval_count: {
-          $ifNull: ["$reworked.after_approval_count", 0],
-        },
-      },
-    },
-    {
-      $addFields: {
-        workflow_unit_key: {
-          $cond: [
-            { $ne: ["$batch", null] },
-            { $concat: ["batch:", { $toString: "$batch" }] },
-            { $concat: ["task:", { $toString: "$_id" }] },
-          ],
-        },
-        workflow_unit_is_batch: { $ne: ["$batch", null] },
-        unit_is_open: openTaskExpression,
-        unit_is_complete_done: completeTaskExpression,
-        unit_is_hold: { $eq: ["$normalized_status", "hold"] },
-        unit_is_hold_approval_pending: { $eq: ["$hold.status", "pending"] },
-        unit_is_started_or_beyond: {
-          $in: ["$normalized_status", ["started", "complete", "approved", "uploaded"]],
-        },
-        unit_is_complete_or_beyond: {
-          $or: [
-            { $in: ["$normalized_status", ["complete", "approved", "uploaded"]] },
-            completeTaskExpression,
-          ],
-        },
-        unit_is_approved_or_beyond: {
-          $or: [
-            { $in: ["$normalized_status", ["approved", "uploaded"]] },
-            completeTaskExpression,
-          ],
-        },
-        unit_is_overdue: completionOverdueExpression,
-        unit_is_approval_overdue: approvalOverdueExpression,
-        unit_is_upload_overdue: uploadOverdueExpression,
-        unit_is_delayed: {
-          $and: [
-            completionDelayExpression,
-            { $not: [approvalDelayExpression] },
-            { $not: [uploadDelayExpression] },
-          ],
-        },
-        unit_is_approval_delayed: {
-          $and: [
-            approvalDelayExpression,
-            { $not: [uploadDelayExpression] },
-          ],
-        },
-        unit_is_upload_delayed: uploadDelayExpression,
-        unit_is_due_today: {
-          $and: [
-            { $in: ["$normalized_status", DUE_TRACKED_TASK_STATUSES] },
-            { $ne: [buildActiveDueDateExpression(), null] },
-            { $gte: [buildActiveDueDateExpression(), todayStart] },
-            { $lt: [buildActiveDueDateExpression(), tomorrowStart] },
-            notApprovedByDueDate,
-          ],
-        },
-      },
-    },
-    {
-      $group: {
-        _id: "$workflow_unit_key",
-        is_batch_unit: { $max: { $cond: ["$workflow_unit_is_batch", 1, 0] } },
-        child_count: { $sum: 1 },
-        open_count: { $sum: { $cond: ["$unit_is_open", 1, 0] } },
-        complete_done_count: { $sum: { $cond: ["$unit_is_complete_done", 1, 0] } },
-        hold_count: { $sum: { $cond: ["$unit_is_hold", 1, 0] } },
-        hold_approval_pending_count: {
-          $sum: { $cond: ["$unit_is_hold_approval_pending", 1, 0] },
-        },
-        started_or_beyond_count: { $sum: { $cond: ["$unit_is_started_or_beyond", 1, 0] } },
-        complete_or_beyond_count: { $sum: { $cond: ["$unit_is_complete_or_beyond", 1, 0] } },
-        approved_or_beyond_count: { $sum: { $cond: ["$unit_is_approved_or_beyond", 1, 0] } },
-        reworked_count: {
-          $sum: {
-            $cond: [{ $gt: ["$normalized_rework_count", 0] }, 1, 0],
-          },
-        },
-        reworked_before_approval_count: {
-          $sum: {
-            $cond: [{ $gt: ["$normalized_rework_before_approval_count", 0] }, 1, 0],
-          },
-        },
-        reworked_after_approval_count: {
-          $sum: {
-            $cond: [{ $gt: ["$normalized_rework_after_approval_count", 0] }, 1, 0],
-          },
-        },
-        overdue_count: { $sum: { $cond: ["$unit_is_overdue", 1, 0] } },
-        approval_overdue_count: { $sum: { $cond: ["$unit_is_approval_overdue", 1, 0] } },
-        upload_overdue_count: { $sum: { $cond: ["$unit_is_upload_overdue", 1, 0] } },
-        delayed_count: { $sum: { $cond: ["$unit_is_delayed", 1, 0] } },
-        approval_delayed_count: { $sum: { $cond: ["$unit_is_approval_delayed", 1, 0] } },
-        upload_delayed_count: { $sum: { $cond: ["$unit_is_upload_delayed", 1, 0] } },
-        due_today_count: { $sum: { $cond: ["$unit_is_due_today", 1, 0] } },
-      },
-    },
-    {
-      $addFields: {
-        is_uploaded_unit: { $eq: ["$complete_done_count", "$child_count"] },
-        is_hold_unit: { $gt: ["$hold_count", 0] },
-        is_hold_approval_pending_unit: { $gt: ["$hold_approval_pending_count", 0] },
-        is_approved_unit: { $eq: ["$approved_or_beyond_count", "$child_count"] },
-        is_complete_unit: { $eq: ["$complete_or_beyond_count", "$child_count"] },
-        is_started_unit: { $gt: ["$started_or_beyond_count", 0] },
-        is_open_unit: { $gt: ["$open_count", 0] },
-        is_reworked_unit: { $gt: ["$reworked_count", 0] },
-        is_reworked_before_approval_unit: { $gt: ["$reworked_before_approval_count", 0] },
-        is_reworked_after_approval_unit: { $gt: ["$reworked_after_approval_count", 0] },
-      },
-    },
-    {
-      $group: {
-        _id: "$is_batch_unit",
-        total_tasks: { $sum: 1 },
-        open_tasks: { $sum: { $cond: ["$is_open_unit", 1, 0] } },
-        assigned_tasks: {
-          $sum: {
-            $cond: [
-              {
-                $and: [
-                  { $not: ["$is_started_unit"] },
-                  { $not: ["$is_complete_unit"] },
-                  { $not: ["$is_approved_unit"] },
-                  { $not: ["$is_uploaded_unit"] },
-                  { $not: ["$is_hold_unit"] },
-                ],
-              },
-              1,
-              0,
-            ],
-          },
-        },
-        started_tasks: {
-          $sum: {
-            $cond: [
-              {
-                $and: [
-                  "$is_started_unit",
-                  { $not: ["$is_complete_unit"] },
-                  { $not: ["$is_approved_unit"] },
-                  { $not: ["$is_uploaded_unit"] },
-                  { $not: ["$is_hold_unit"] },
-                ],
-              },
-              1,
-              0,
-            ],
-          },
-        },
-        complete_tasks: {
-          $sum: {
-            $cond: [
-              {
-                $and: [
-                  "$is_complete_unit",
-                  { $not: ["$is_approved_unit"] },
-                  { $not: ["$is_uploaded_unit"] },
-                  { $not: ["$is_hold_unit"] },
-                ],
-              },
-              1,
-              0,
-            ],
-          },
-        },
-        complete_done_tasks: { $sum: { $cond: ["$is_uploaded_unit", 1, 0] } },
-        hold_tasks: { $sum: { $cond: ["$is_hold_unit", 1, 0] } },
-        hold_approval_pending_tasks: {
-          $sum: { $cond: ["$is_hold_approval_pending_unit", 1, 0] },
-        },
-        approved_tasks: {
-          $sum: {
-            $cond: [
-              {
-                $and: [
-                  "$is_approved_unit",
-                  { $not: ["$is_uploaded_unit"] },
-                  { $not: ["$is_hold_unit"] },
-                ],
-              },
-              1,
-              0,
-            ],
-          },
-        },
-        uploaded_tasks: { $sum: { $cond: ["$is_uploaded_unit", 1, 0] } },
-        upload_remaining_tasks: {
-          $sum: {
-            $cond: [
-              {
-                $and: [
-                  "$is_approved_unit",
-                  { $not: ["$is_uploaded_unit"] },
-                ],
-              },
-              1,
-              0,
-            ],
-          },
-        },
-        reworked_tasks: { $sum: { $cond: ["$is_reworked_unit", 1, 0] } },
-        reworked_before_approval_tasks: {
-          $sum: { $cond: ["$is_reworked_before_approval_unit", 1, 0] },
-        },
-        reworked_after_approval_tasks: {
-          $sum: { $cond: ["$is_reworked_after_approval_unit", 1, 0] },
-        },
-        needs_approval_tasks: {
-          $sum: {
-            $cond: [
-              {
-                $and: [
-                  "$is_complete_unit",
-                  { $not: ["$is_approved_unit"] },
-                  { $not: ["$is_uploaded_unit"] },
-                ],
-              },
-              1,
-              0,
-            ],
-          },
-        },
-        overdue_tasks: { $sum: { $cond: [{ $gt: ["$overdue_count", 0] }, 1, 0] } },
-        approval_overdue_tasks: {
-          $sum: { $cond: [{ $gt: ["$approval_overdue_count", 0] }, 1, 0] },
-        },
-        upload_overdue_tasks: {
-          $sum: { $cond: [{ $gt: ["$upload_overdue_count", 0] }, 1, 0] },
-        },
-        delayed_tasks: { $sum: { $cond: [{ $gt: ["$delayed_count", 0] }, 1, 0] } },
-        approval_delayed_tasks: {
-          $sum: { $cond: [{ $gt: ["$approval_delayed_count", 0] }, 1, 0] },
-        },
-        upload_delayed_tasks: {
-          $sum: { $cond: [{ $gt: ["$upload_delayed_count", 0] }, 1, 0] },
-        },
-        due_today_tasks: { $sum: { $cond: [{ $gt: ["$due_today_count", 0] }, 1, 0] } },
-      },
-    },
-  ]);
-
-  const batchUnitSummary = (Array.isArray(unitOverallSummaries) ? unitOverallSummaries : [])
-    .find((entry) => Number(entry?._id || 0) === 1);
-  const individualTaskUnitSummary = (Array.isArray(unitOverallSummaries) ? unitOverallSummaries : [])
-    .find((entry) => Number(entry?._id || 0) !== 1);
-  const batchCounts = buildWorkflowDashboardCounts(batchUnitSummary);
-  const individualTaskCounts = buildWorkflowDashboardCounts(individualTaskUnitSummary);
+  const sourceCountRows = Array.isArray(summary?.sourceCounts) ? summary.sourceCounts : [];
+  const batchCounts = buildWorkflowDashboardCounts(
+    sourceCountRows.find((entry) => normalizeText(entry?._id) === "batch"),
+  );
+  const individualTaskCounts = buildWorkflowDashboardCounts(
+    sourceCountRows.find((entry) => normalizeText(entry?._id) === "individual"),
+  );
 
   Object.assign(overall, mergeWorkflowDashboardCounts([batchCounts, individualTaskCounts]));
   overall.batch_counts = batchCounts;

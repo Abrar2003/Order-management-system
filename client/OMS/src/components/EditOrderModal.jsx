@@ -15,6 +15,7 @@ import {
   SHIPPED_BY_VENDOR_OPTION,
   useShippingInspectors,
 } from "../hooks/useShippingInspectors";
+import { normalizeShipmentCheckedDraft } from "../utils/shipmentRows";
 import "../App.css";
 
 const normalizeShipmentDraftInvoiceNumber = (value) => {
@@ -42,6 +43,7 @@ const normalizeStuffedById = (entry = {}) => {
 
 const makeInitialShipmentRows = (shipment = []) =>
   (Array.isArray(shipment) ? shipment : []).map((entry) => ({
+    _id: String(entry?._id ?? ""),
     container: String(entry?.container ?? ""),
     invoice_number: normalizeShipmentDraftInvoiceNumber(entry?.invoice_number),
     stuffing_date: toDDMMYYYYInputValue(entry?.stuffing_date, ""),
@@ -49,9 +51,11 @@ const makeInitialShipmentRows = (shipment = []) =>
     remaining_remarks: String(entry?.remaining_remarks ?? ""),
     stuffed_by_id: normalizeStuffedById(entry),
     stuffed_by_name: String(entry?.stuffed_by?.name ?? ""),
+    checked: normalizeShipmentCheckedDraft(entry?.checked),
   }));
 
 const createEmptyShipmentRow = () => ({
+  _id: "",
   container: "",
   invoice_number: "",
   stuffing_date: getTodayDDMMYYYY(),
@@ -59,6 +63,7 @@ const createEmptyShipmentRow = () => ({
   remaining_remarks: "",
   stuffed_by_id: "",
   stuffed_by_name: "",
+  checked: normalizeShipmentCheckedDraft(),
 });
 
 const toSafeNumber = (value) => {
@@ -330,6 +335,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
     if (canEditShipmentDetails) {
       payload.quantity = Number(form.quantity);
       payload.shipment = form.shipment.map((entry) => ({
+        _id: String(entry?._id || "").trim(),
         stuffed_by: {
           id: String(entry?.stuffed_by_id || "").trim(),
           name:
@@ -341,6 +347,7 @@ const EditOrderModal = ({ order, onClose, onSuccess }) => {
         stuffing_date: toISODateString(entry?.stuffing_date),
         quantity: Number(entry?.quantity),
         remaining_remarks: String(entry?.remaining_remarks ?? "").trim(),
+        checked: normalizeShipmentCheckedDraft(entry?.checked),
       }));
 
       if (payload.quantity === 0) {

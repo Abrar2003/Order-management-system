@@ -188,8 +188,23 @@ const Shipments = () => {
         },
       });
 
-      setRows(Array.isArray(res?.data?.data) ? res.data.data : []);
-      setSelectedShipmentKeys(new Set());
+      const nextRows = Array.isArray(res?.data?.data) ? res.data.data : [];
+      setRows(nextRows);
+      setSelectedShipmentKeys((previous) => {
+        if (previous.size === 0) return previous;
+
+        const selectableKeys = new Set(
+          nextRows
+            .filter(canSelectShipmentRow)
+            .map((row) => getShipmentSelectionKey(row)),
+        );
+        const retainedKeys = [...previous].filter((key) =>
+          selectableKeys.has(key),
+        );
+
+        if (retainedKeys.length === previous.size) return previous;
+        return new Set(retainedKeys);
+      });
       setSummary(res?.data?.summary || EMPTY_SUMMARY);
       setPage(Math.max(1, Number(res?.data?.pagination?.page || 1)));
       setTotalPages(
@@ -213,6 +228,7 @@ const Shipments = () => {
     } catch (err) {
       setError(err?.response?.data?.message || "Failed to load shipments.");
       setRows([]);
+      setSelectedShipmentKeys(new Set());
       setSummary(EMPTY_SUMMARY);
       setTotalPages(1);
       setTotalRecords(0);

@@ -15,3 +15,21 @@ export const getShipmentPrimaryQuantityDisplay = (row = {}) =>
 
 export const getShipmentEntityKey = (row = {}) =>
   `${String(row?.line_type || "order").trim().toLowerCase()}:${String(row?._id || "").trim()}`;
+
+const normalizeIdLike = (value) => {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") {
+    return String(value?._id || value?.id || value?.$oid || "").trim();
+  }
+  return String(value).trim();
+};
+
+export const normalizeShipmentCheckedDraft = (checked = {}) => {
+  const isChecked = Boolean(checked?.checked);
+  return {
+    checked: isChecked,
+    checked_by: isChecked
+      ? normalizeIdLike(checked?.checked_by ?? checked?.checkedBy)
+      : "",
+  };
+};

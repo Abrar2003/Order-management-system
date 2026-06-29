@@ -736,13 +736,13 @@ const WorkflowDashboard = () => {
                     <div className="workflow-dashboard-stat-label">{card.label}</div>
                     <div
                       className="workflow-dashboard-stat-value workflow-dashboard-stat-value--split"
-                      aria-label={`${card.batchValue} batches, ${card.taskValue} individual tasks`}
+                      aria-label={`${card.batchValue} batch tasks, ${card.taskValue} individual tasks`}
                     >
                       <span>{card.batchValue}</span>
                       <span className="workflow-dashboard-stat-separator">/</span>
                       <span>{card.taskValue}</span>
                     </div>
-                    <div className="workflow-dashboard-stat-split-label">Batch / Task</div>
+                    <div className="workflow-dashboard-stat-split-label">Batch Tasks / Individual</div>
                     <div className="workflow-dashboard-stat-note">{card.note}</div>
                   </div>
                 </button>

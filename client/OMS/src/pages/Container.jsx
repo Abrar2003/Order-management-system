@@ -20,6 +20,10 @@ import {
   sortClientRows,
 } from "../utils/clientSort";
 import { areSearchParamsEquivalent } from "../utils/searchParams";
+import {
+  CONTAINER_FORMAT_ERROR_MESSAGE,
+  isValidContainerNumber,
+} from "../utils/container";
 import "../App.css";
 
 const toSafeNumber = (value) => {
@@ -432,6 +436,10 @@ const Container = () => {
       setError("Container number is required.");
       return;
     }
+    if (!isValidContainerNumber(container)) {
+      setError(CONTAINER_FORMAT_ERROR_MESSAGE);
+      return;
+    }
 
     const invoiceNumberValue = String(invoiceNumber || "").trim();
     const stuffedBy = inspectorById.get(String(stuffedById || "").trim());
@@ -579,7 +587,7 @@ const Container = () => {
                     className="form-control"
                     value={containerNumber}
                     onChange={(e) => setContainerNumber(e.target.value)}
-                    placeholder="Enter container number"
+                    placeholder="e.g. AAAA-111111-2"
                   />
                 </div>
               )}

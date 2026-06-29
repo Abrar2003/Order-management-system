@@ -143,6 +143,14 @@ const normalizeShipmentInvoiceNumber = (value, fallback = "") => {
   return normalized || normalizeText(fallback);
 };
 
+const normalizeObjectIdValue = (value = null) => {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") {
+    return normalizeText(value?._id || value?.id || value?.$oid);
+  }
+  return normalizeText(value);
+};
+
 const normalizeShipmentStuffedBy = (input = {}) => {
   const id = normalizeText(input?.id || input?._id);
   const name = normalizeText(input?.name);
@@ -151,6 +159,28 @@ const normalizeShipmentStuffedBy = (input = {}) => {
   }
   if (!id && !name) throw new Error("stuffed_by is required");
   return { id: id && mongoose.Types.ObjectId.isValid(id) ? id : null, name: name || id };
+};
+
+const normalizeShipmentChecked = (value = null) => {
+  const isChecked = Boolean(value?.checked);
+  const checkedBy = normalizeObjectIdValue(
+    value?.checked_by ?? value?.checkedBy,
+  );
+
+  return {
+    checked: isChecked,
+    checked_by:
+      isChecked && mongoose.Types.ObjectId.isValid(checkedBy)
+        ? new mongoose.Types.ObjectId(checkedBy)
+        : null,
+  };
+};
+
+const normalizeShipmentEntryId = (entry = {}) => {
+  const normalizedId = normalizeObjectIdValue(entry?._id ?? entry?.id);
+  return mongoose.Types.ObjectId.isValid(normalizedId)
+    ? new mongoose.Types.ObjectId(normalizedId)
+    : null;
 };
 
 const isBlankItemSizeEntry = (entry = {}) =>
@@ -298,10 +328,15 @@ const normalizeShipmentEntries = (entries = [], actor = {}) => {
     const stuffingDate = parseDate(entry?.stuffing_date, `shipment[${index + 1}].stuffing_date`);
     const quantity = Number(entry?.quantity);
     if (!container) throw new Error(`shipment[${index + 1}] container is required`);
+    const CONTAINER_REGEX = /^[A-Za-z]{4}-\d{6}-\d{1}$/;
+    if (!CONTAINER_REGEX.test(container)) {
+      throw new Error(`shipment[${index + 1}] container number must be in the format 'AAAA-111111-2' (4 letters, hyphen, 6 digits, hyphen, 1 digit)`);
+    }
     if (!Number.isFinite(quantity) || quantity <= 0) {
       throw new Error(`shipment[${index + 1}] quantity must be a positive number`);
     }
-    return {
+    const shipmentEntryId = normalizeShipmentEntryId(entry);
+    const normalizedEntry = {
       container,
       invoice_number: normalizeShipmentInvoiceNumber(entry?.invoice_number, ""),
       stuffing_date: stuffingDate,
@@ -309,10 +344,13 @@ const normalizeShipmentEntries = (entries = [], actor = {}) => {
       pending: Math.max(0, toSafeNumber(entry?.pending, 0)),
       remaining_remarks: normalizeText(entry?.remaining_remarks),
       stuffed_by: normalizeShipmentStuffedBy(entry?.stuffed_by),
+      checked: normalizeShipmentChecked(entry?.checked),
       cases: Array.isArray(entry?.cases) ? entry.cases : [],
       updated_at: new Date(),
       updated_by: actor,
     };
+    if (shipmentEntryId) normalizedEntry._id = shipmentEntryId;
+    return normalizedEntry;
   });
 };
 

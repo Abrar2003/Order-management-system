@@ -7,6 +7,10 @@ import {
   toISODateString,
 } from "../utils/date";
 import { useShippingInspectors } from "../hooks/useShippingInspectors";
+import {
+  CONTAINER_FORMAT_ERROR_MESSAGE,
+  isValidContainerNumber,
+} from "../utils/container";
 import "../App.css";
 
 const ShippingModal = ({ order, onClose, onSuccess }) => {
@@ -59,6 +63,10 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
 
     if (!parsedContainer) {
       setError("Container number must be a non-empty value.");
+      return;
+    }
+    if (!isValidContainerNumber(parsedContainer)) {
+      setError(CONTAINER_FORMAT_ERROR_MESSAGE);
       return;
     }
     if (!stuffedBy) {
@@ -142,6 +150,7 @@ const ShippingModal = ({ order, onClose, onSuccess }) => {
                 className="form-control"
                 value={containerNumber}
                 onChange={(e) => setContainerNumber(e.target.value)}
+                placeholder="e.g. AAAA-111111-2"
               />
             </div>
 
