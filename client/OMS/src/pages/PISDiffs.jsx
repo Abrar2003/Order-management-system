@@ -204,7 +204,7 @@ const CombinedMeasurementCell = ({ item, source }) => {
                 {formatSizeTableNumber(entry?.H)}
               </td>
               <td>
-                {formatSizeTableNumber(entry?.weight, 3)}
+                {formatSizeTableNumber(entry?.weight)}
                 <span className="pis-diff-size-weight-label"> {entry.weightLabel}</span>
               </td>
             </tr>

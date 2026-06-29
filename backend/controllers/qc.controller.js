@@ -1512,6 +1512,15 @@ const buildSignedItemFile = async (file = {}, { logLabel = "Item file" } = {}) =
 const buildSignedItemImage = async (image = {}) =>
   buildSignedItemFile(image, { logLabel: "Item image" });
 
+const buildSignedItemFileList = async (files = [], { logLabel = "Item file" } = {}) =>
+  Promise.all(
+    (Array.isArray(files) ? files : [])
+      .filter(Boolean)
+      .map((file, index) =>
+        buildSignedItemFile(file, { logLabel: `${logLabel} ${index + 1}` }),
+      ),
+  ).then((signedFiles) => signedFiles.filter(Boolean));
+
 const buildSignedQcImage = async (image = {}) =>
   buildSignedItemFile(image, { logLabel: "QC image" });
 
@@ -3048,7 +3057,7 @@ const getPreviousUtcWeekRange = (referenceDate = new Date()) => {
   };
 };
 
-const toRoundedNumber = (value, decimals = 3) => {
+const toRoundedNumber = (value, decimals = 2) => {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 0;
   const precision = 10 ** Math.max(0, Number(decimals) || 0);
@@ -7211,18 +7220,18 @@ exports.getInspectorReports = async (req, res) => {
         total_requested: entry.total_requested,
         total_checked: entry.total_checked,
         total_passed: entry.total_passed,
-        total_inspected_cbm: toRoundedNumber(entry.total_inspected_cbm, 3),
+        total_inspected_cbm: toRoundedNumber(entry.total_inspected_cbm),
         orders_touched: entry.order_keys.size,
         daily: Array.from(entry.daily.values())
           .map((bucket) => ({
             ...bucket,
-            inspected_cbm: toRoundedNumber(bucket.inspected_cbm, 3),
+            inspected_cbm: toRoundedNumber(bucket.inspected_cbm),
           }))
           .sort((a, b) => sortByDateDesc(a, b, "date")),
         weekly: Array.from(entry.weekly.values())
           .map((bucket) => ({
             ...bucket,
-            inspected_cbm: toRoundedNumber(bucket.inspected_cbm, 3),
+            inspected_cbm: toRoundedNumber(bucket.inspected_cbm),
           }))
           .sort((a, b) => sortByDateDesc(a, b, "week_start")),
       }))
@@ -7235,13 +7244,13 @@ exports.getInspectorReports = async (req, res) => {
     const daily_totals = Array.from(dailyTotalsMap.values())
       .map((bucket) => ({
         ...bucket,
-        inspected_cbm: toRoundedNumber(bucket.inspected_cbm, 3),
+        inspected_cbm: toRoundedNumber(bucket.inspected_cbm),
       }))
       .sort((a, b) => sortByDateDesc(a, b, "date"));
     const weekly_totals = Array.from(weeklyTotalsMap.values())
       .map((bucket) => ({
         ...bucket,
-        inspected_cbm: toRoundedNumber(bucket.inspected_cbm, 3),
+        inspected_cbm: toRoundedNumber(bucket.inspected_cbm),
       }))
       .sort((a, b) => sortByDateDesc(a, b, "week_start"));
     const inspector_options = Array.from(inspectorOptionsMap.values()).sort(
@@ -7266,7 +7275,7 @@ exports.getInspectorReports = async (req, res) => {
         total_requested: totalRequested,
         total_checked: totalChecked,
         total_passed: totalPassed,
-        total_inspected_cbm: toRoundedNumber(totalInspectedCbm, 3),
+        total_inspected_cbm: toRoundedNumber(totalInspectedCbm),
       },
       inspectors,
       daily_totals,
@@ -7894,7 +7903,7 @@ exports.getWeeklyOrderSummary = async (req, res) => {
       const quantityPassed = toNonNegativeNumber(qcDoc?.quantities?.qc_passed, 0);
       const itemCbm = resolveWeeklySummaryCbmPerUnit(itemDoc, qcDoc);
       const totalCbm = itemCbm > 0
-        ? toRoundedNumber(itemCbm * quantityPassed, 3)
+        ? toRoundedNumber(itemCbm * quantityPassed)
         : 0;
 
       return {
@@ -7908,7 +7917,7 @@ exports.getWeeklyOrderSummary = async (req, res) => {
         ),
         order_status: resolveQcOrderStatus(qcDoc, qcDoc?.order),
         quantity_passed: quantityPassed,
-        item_cbm: toRoundedNumber(itemCbm, 3),
+        item_cbm: toRoundedNumber(itemCbm),
         total_cbm: totalCbm,
         pending: toNonNegativeNumber(qcDoc?.quantities?.pending, 0),
         goods_not_ready: Boolean(weeklyInspection?.goods_not_ready),
@@ -10175,7 +10184,7 @@ exports.getDailyReport = async (req, res) => {
           );
           const hasReportCbm = reportCbmPerUnit > 0;
           const inspectedCbmTotal = hasReportCbm
-            ? toRoundedNumber(reportCbmPerUnit * inspectedQty, 3)
+            ? toRoundedNumber(reportCbmPerUnit * inspectedQty)
             : null;
           const derivedInspectionStatus = resolveInspectionRecordStatus({
             checked: latestInspection?.checked,
@@ -10231,7 +10240,7 @@ exports.getDailyReport = async (req, res) => {
               latestInspection?.pending_after ?? qc?.quantities?.pending ?? 0,
             ),
             report_cbm_per_unit: hasReportCbm
-              ? toRoundedNumber(reportCbmPerUnit, 3)
+              ? toRoundedNumber(reportCbmPerUnit)
               : null,
             inspected_cbm_total: inspectedCbmTotal,
             inspection_status: inspectionStatus,
@@ -10319,10 +10328,10 @@ exports.getDailyReport = async (req, res) => {
           inspection?.remarks || "",
         ),
         report_cbm_per_unit: hasReportCbm
-          ? toRoundedNumber(reportCbmPerUnit, 3)
+          ? toRoundedNumber(reportCbmPerUnit)
           : null,
         report_cbm_total: hasReportCbm
-          ? toRoundedNumber(inspectedCbmTotal, 3)
+          ? toRoundedNumber(inspectedCbmTotal)
           : null,
         inspected_cbm_total: inspectedCbmTotal,
         cbm: cbmSnapshot,
@@ -10432,7 +10441,7 @@ exports.getDailyReport = async (req, res) => {
         inspectors_count: inspector_compiled.length,
         inspections_count: filteredInspectionRows.length,
         total_inspected_quantity: totalInspectedQty,
-        total_inspected_cbm: toRoundedNumber(totalInspectedCbm, 3),
+        total_inspected_cbm: toRoundedNumber(totalInspectedCbm),
       },
       aligned_requests: sortedAlignedRequests,
       inspector_compiled,
@@ -11232,23 +11241,29 @@ exports.getQCById = async (req, res) => {
           buildSignedItemFile(itemMaster?.packeging_ppt, {
             logLabel: "Packaging PPT",
           }),
+          buildSignedItemFileList(itemMaster?.shipping_marks?.files, {
+            logLabel: "Shipping mark",
+          }),
+          buildSignedItemFile(itemMaster?.shipping_marks?.ean, {
+            logLabel: "EAN",
+          }),
+          buildSignedItemFileList(itemMaster?.shipping_marks?.flat_carton, {
+            logLabel: "Flat carton",
+          }),
+          buildSignedItemFile(itemMaster?.shipping_marks?.three_d_carton, {
+            logLabel: "3D carton",
+          }),
           buildSignedItemFile(itemMaster?.shipping_marks?.shipping_marks_1, {
             logLabel: "Shipping marks 1",
           }),
           buildSignedItemFile(itemMaster?.shipping_marks?.shipping_marks_2, {
             logLabel: "Shipping marks 2",
           }),
-          buildSignedItemFile(itemMaster?.shipping_marks?.ean, {
-            logLabel: "EAN",
-          }),
           buildSignedItemFile(itemMaster?.shipping_marks?.flat_carton_1, {
             logLabel: "Flat carton 1",
           }),
           buildSignedItemFile(itemMaster?.shipping_marks?.flat_carton_2, {
             logLabel: "Flat carton 2",
-          }),
-          buildSignedItemFile(itemMaster?.shipping_marks?.three_d_carton, {
-            logLabel: "3D carton",
           }),
         ])
       : [];
@@ -11263,12 +11278,14 @@ exports.getQCById = async (req, res) => {
           mounting_file: signedItemFiles[4],
           packeging_ppt: signedItemFiles[5],
           shipping_marks: {
-            shipping_marks_1: signedItemFiles[6],
-            shipping_marks_2: signedItemFiles[7],
-            ean: signedItemFiles[8],
-            flat_carton_1: signedItemFiles[9],
-            flat_carton_2: signedItemFiles[10],
-            three_d_carton: signedItemFiles[11],
+            files: signedItemFiles[6],
+            ean: signedItemFiles[7],
+            flat_carton: signedItemFiles[8],
+            three_d_carton: signedItemFiles[9],
+            shipping_marks_1: signedItemFiles[10],
+            shipping_marks_2: signedItemFiles[11],
+            flat_carton_1: signedItemFiles[12],
+            flat_carton_2: signedItemFiles[13],
           },
         }
       : null;

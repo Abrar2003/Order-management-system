@@ -21,7 +21,7 @@ const parsePositiveInt = (value, fallback = 1) => {
 const formatNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed)
-    ? parsed.toFixed(3).replace(/\.?0+$/, "")
+    ? parsed.toFixed(2).replace(/\.?0+$/, "")
     : "-";
 };
 const formatRemark = (value) => {

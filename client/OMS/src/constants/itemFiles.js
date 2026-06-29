@@ -4,6 +4,10 @@ const PPT_MIME_TYPES = [
   "application/vnd.ms-powerpoint.presentation.macroenabled.12",
 ];
 
+const PDF_IMAGE_ACCEPT = ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png";
+const PDF_IMAGE_EXTENSIONS = [".pdf", ".jpg", ".jpeg", ".png"];
+const PDF_IMAGE_MIME_TYPES = ["application/pdf", "image/jpeg", "image/png"];
+
 export const ITEM_FILE_OPTIONS = Object.freeze([
   {
     value: "product_image",
@@ -105,35 +109,30 @@ export const ITEM_FILE_OPTIONS = Object.freeze([
     label: "Shipping Marks",
     buttonLabel: "Shipping Marks",
     field: "shipping_marks",
+    isGroup: true,
     previewMode: "pdf",
-    accept: ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png",
-    extensions: [".pdf", ".jpg", ".jpeg", ".png"],
-    mimeTypes: ["application/pdf", "image/jpeg", "image/png"],
+    accept: PDF_IMAGE_ACCEPT,
+    extensions: PDF_IMAGE_EXTENSIONS,
+    mimeTypes: PDF_IMAGE_MIME_TYPES,
     invalidMessage: "Only PDF, JPG, JPEG, or PNG files are allowed for Shipping Marks.",
   },
 ]);
 
 export const SHIPPING_MARKS_SUB_OPTIONS = Object.freeze([
   {
-    value: "shipping_marks_1",
-    label: "Shipping Marks (First)",
-    buttonLabel: "Shipping marks (First)",
-    field: "shipping_marks.shipping_marks_1",
+    value: "shipping_marks",
+    label: "Shipping Mark",
+    buttonLabel: "Shipping Mark",
+    field: "shipping_marks.files",
+    legacyFields: [
+      "shipping_marks.shipping_marks_1",
+      "shipping_marks.shipping_marks_2",
+    ],
+    supportsMultiple: true,
     previewMode: "pdf",
-    accept: ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png",
-    extensions: [".pdf", ".jpg", ".jpeg", ".png"],
-    mimeTypes: ["application/pdf", "image/jpeg", "image/png"],
-    invalidMessage: "Only PDF, JPG, JPEG, or PNG files are allowed for Shipping marks.",
-  },
-  {
-    value: "shipping_marks_2",
-    label: "Shipping Marks (Optional)",
-    buttonLabel: "Shipping marks (Optional)",
-    field: "shipping_marks.shipping_marks_2",
-    previewMode: "pdf",
-    accept: ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png",
-    extensions: [".pdf", ".jpg", ".jpeg", ".png"],
-    mimeTypes: ["application/pdf", "image/jpeg", "image/png"],
+    accept: PDF_IMAGE_ACCEPT,
+    extensions: PDF_IMAGE_EXTENSIONS,
+    mimeTypes: PDF_IMAGE_MIME_TYPES,
     invalidMessage: "Only PDF, JPG, JPEG, or PNG files are allowed for Shipping marks.",
   },
   {
@@ -142,31 +141,25 @@ export const SHIPPING_MARKS_SUB_OPTIONS = Object.freeze([
     buttonLabel: "EAN",
     field: "shipping_marks.ean",
     previewMode: "pdf",
-    accept: ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png",
-    extensions: [".pdf", ".jpg", ".jpeg", ".png"],
-    mimeTypes: ["application/pdf", "image/jpeg", "image/png"],
+    accept: PDF_IMAGE_ACCEPT,
+    extensions: PDF_IMAGE_EXTENSIONS,
+    mimeTypes: PDF_IMAGE_MIME_TYPES,
     invalidMessage: "Only PDF, JPG, JPEG, or PNG files are allowed for EAN.",
   },
   {
-    value: "flat_carton_1",
+    value: "flat_carton",
     label: "Flat Carton",
     buttonLabel: "Flat Carton",
-    field: "shipping_marks.flat_carton_1",
+    field: "shipping_marks.flat_carton",
+    legacyFields: [
+      "shipping_marks.flat_carton_1",
+      "shipping_marks.flat_carton_2",
+    ],
+    supportsMultiple: true,
     previewMode: "pdf",
-    accept: ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png",
-    extensions: [".pdf", ".jpg", ".jpeg", ".png"],
-    mimeTypes: ["application/pdf", "image/jpeg", "image/png"],
-    invalidMessage: "Only PDF, JPG, JPEG, or PNG files are allowed for Flat carton.",
-  },
-  {
-    value: "flat_carton_2",
-    label: "Flat Carton (Optional)",
-    buttonLabel: "Flat Carton (Optional)",
-    field: "shipping_marks.flat_carton_2",
-    previewMode: "pdf",
-    accept: ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png",
-    extensions: [".pdf", ".jpg", ".jpeg", ".png"],
-    mimeTypes: ["application/pdf", "image/jpeg", "image/png"],
+    accept: PDF_IMAGE_ACCEPT,
+    extensions: PDF_IMAGE_EXTENSIONS,
+    mimeTypes: PDF_IMAGE_MIME_TYPES,
     invalidMessage: "Only PDF, JPG, JPEG, or PNG files are allowed for Flat carton.",
   },
   {
@@ -175,15 +168,22 @@ export const SHIPPING_MARKS_SUB_OPTIONS = Object.freeze([
     buttonLabel: "3D Carton",
     field: "shipping_marks.three_d_carton",
     previewMode: "pdf",
-    accept: ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png",
-    extensions: [".pdf", ".jpg", ".jpeg", ".png"],
-    mimeTypes: ["application/pdf", "image/jpeg", "image/png"],
+    accept: PDF_IMAGE_ACCEPT,
+    extensions: PDF_IMAGE_EXTENSIONS,
+    mimeTypes: PDF_IMAGE_MIME_TYPES,
     invalidMessage: "Only PDF, JPG, JPEG, or PNG files are allowed for 3D carton.",
   },
 ]);
 
+export const ITEM_FILE_UPLOAD_OPTIONS = Object.freeze([
+  ...ITEM_FILE_OPTIONS.filter((option) => option.value !== "shipping_marks"),
+  ...SHIPPING_MARKS_SUB_OPTIONS,
+]);
+
+export const ITEM_FILE_NAV_OPTIONS = ITEM_FILE_UPLOAD_OPTIONS;
+
 export const ITEM_FILE_OPTIONS_BY_VALUE = Object.freeze(
-  ITEM_FILE_OPTIONS.reduce((accumulator, option) => {
+  [...ITEM_FILE_OPTIONS, ...SHIPPING_MARKS_SUB_OPTIONS].reduce((accumulator, option) => {
     accumulator[option.value] = option;
     return accumulator;
   }, {}),
@@ -207,14 +207,44 @@ export const isItemFileOptionAvailableForItem = (option, item = {}) => {
 };
 
 export const hasStoredItemFile = (file = {}) =>
-  Boolean(
-    String(
-      file?.key || file?.url || file?.link || file?.public_id || "",
-    ).trim(),
-  );
+  Array.isArray(file)
+    ? file.some((entry) => hasStoredItemFile(entry))
+    : Boolean(
+        String(
+          file?.key || file?.url || file?.link || file?.public_id || "",
+        ).trim(),
+      );
 
 export const getStoredItemFileUrl = (file = {}) =>
-  String(file?.url || file?.link || "").trim();
+  Array.isArray(file)
+    ? getStoredItemFileUrl(file.find((entry) => hasStoredItemFile(entry)) || {})
+    : String(file?.url || file?.link || "").trim();
+
+export const getNestedItemFileValue = (item = {}, field = "") => {
+  const normalizedField = String(field || "").trim();
+  if (!item || !normalizedField) return null;
+  return normalizedField.split(".").reduce(
+    (current, segment) => (current && current[segment] !== undefined ? current[segment] : null),
+    item,
+  );
+};
+
+export const getItemFileValues = (item = {}, option = {}) => {
+  const resolvedOption =
+    typeof option === "string" ? getItemFileOption(option) : option;
+  if (!resolvedOption) return [];
+
+  return [
+    resolvedOption.field,
+    ...(Array.isArray(resolvedOption.legacyFields) ? resolvedOption.legacyFields : []),
+  ].flatMap((field) => {
+    const value = getNestedItemFileValue(item, field);
+    return Array.isArray(value) ? value : [value];
+  }).filter((file) => hasStoredItemFile(file));
+};
+
+export const getPrimaryStoredItemFile = (item = {}, option = {}) =>
+  getItemFileValues(item, option)[0] || null;
 
 export const buildItemFilesPagePath = (fileType = DEFAULT_ITEM_FILE_TYPE) => {
   const resolvedType = getItemFileOption(fileType)?.value || DEFAULT_ITEM_FILE_TYPE;
@@ -234,12 +264,16 @@ export const buildItemFileUploadRequest = ({
   itemId = "",
   fileType = "",
   file = null,
+  files = [],
 } = {}) => {
   const normalizedItemId = String(itemId || "").trim();
   const normalizedFileType = String(fileType || "").trim().toLowerCase();
+  const selectedFiles = Array.isArray(files) && files.length > 0 ? files : [file].filter(Boolean);
   const formData = new FormData();
 
-  formData.append("file", file);
+  selectedFiles.forEach((selectedFile) => {
+    formData.append(selectedFiles.length > 1 ? "files" : "file", selectedFile);
+  });
 
   if (isPisSpreadsheetUploadType(normalizedFileType)) {
     return {

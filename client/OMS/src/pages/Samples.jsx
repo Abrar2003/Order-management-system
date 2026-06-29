@@ -231,7 +231,7 @@ const Samples = () => {
                     </td>
                     <td>{sample.brand || "-"}</td>
                     <td>{Array.isArray(sample.vendors) && sample.vendors.length ? sample.vendors.join(", ") : "-"}</td>
-                    <td>{Number(sample.cbm || 0).toFixed(4)}</td>
+                    <td>{Number(sample.cbm || 0).toFixed(2)}</td>
                     <td>{formatDateDDMMYYYY(sample.updatedAt, "-")}</td>
                   </tr>
                 ))}

@@ -8,7 +8,7 @@ import ChangePasswordModal from "./ChangePasswordModal";
 import CheckLabelsModal from "./CheckLabelsModal";
 import {
   buildItemFilesPagePath,
-  ITEM_FILE_OPTIONS,
+  ITEM_FILE_NAV_OPTIONS,
 } from "../constants/itemFiles";
 import NotificationBell from "../notifications/NotificationBell";
 import {
@@ -225,7 +225,7 @@ const Navbar = () => {
       routeMenuItem("item-masters", "Item Masters", "/item-masters"),
       routeMenuItem("item-database", "Item Database", "/item-database"),
 
-      ...ITEM_FILE_OPTIONS.map((option) =>
+      ...ITEM_FILE_NAV_OPTIONS.map((option) =>
         routeMenuItem(
           `items-file-${option.value}`,
           option.label,
@@ -262,6 +262,7 @@ const Navbar = () => {
     const performanceReports = [
       routeMenuItem("inspector-reports", "Inspector Performance Report", "/reports/inspectors"),
       routeMenuItem("vendor-reports", "Vendor Performance Report", "/reports/vendors"),
+      routeMenuItem("vendor-details", "Vendor Details", "/vendors"),
       routeMenuItem(
         "vendor-wise-qa",
         "Vendor Wise QA Performance Report",
@@ -402,7 +403,7 @@ const Navbar = () => {
       items.push(groupMenuItem("upload-orders", "Upload Orders", uploadOrdersMenuItems));
     }
     items.push(
-      ...ITEM_FILE_OPTIONS.map((option) =>
+      ...ITEM_FILE_NAV_OPTIONS.map((option) =>
         routeMenuItem(
           `items-file-${option.value}`,
           option.label,
@@ -463,6 +464,10 @@ const Navbar = () => {
 
       if (canCreateUsers) {
         items.push(routeMenuItem("create-users", "Create User", "/users/new"));
+      }
+
+      if (canCreateVendors || hasPermission("vendors", "view")) {
+        items.push(routeMenuItem("vendor-details", "Vendor Details", "/vendors"));
       }
 
       if (canCreateVendors) {

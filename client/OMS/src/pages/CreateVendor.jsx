@@ -9,6 +9,7 @@ const initialForm = {
   name: "",
   email: "",
   phone: "",
+  country: "",
   address: "",
   vendor_code: "",
   contact_person: [{ name: "", email: "", phone: "", type: "merchant" }],
@@ -82,6 +83,7 @@ const CreateVendor = () => {
         vendor?.vendor_code,
         vendor?.email,
         vendor?.phone,
+        vendor?.country,
         vendor?.address,
         vendor?.is_active === false ? "inactive" : "active",
         ...(Array.isArray(vendor?.contact_person)
@@ -164,6 +166,7 @@ const CreateVendor = () => {
         name: form.name.trim(),
         email: form.email.trim(),
         phone: form.phone.trim(),
+        country: form.country.trim() || undefined,
         address: form.address.trim() || undefined,
         vendor_code: form.vendor_code.trim(),
         contact_person: contactPersonPayload,
@@ -190,13 +193,22 @@ const CreateVendor = () => {
         <div className="card om-card shadow-sm">
           <div className="card-body p-4">
             <div className="d-flex justify-content-between align-items-center mb-3">
-              <button
-                type="button"
-                className="btn btn-outline-secondary btn-sm"
-                onClick={() => navigate(-1)}
-              >
-                Back
-              </button>
+              <div className="d-flex align-items-center gap-2">
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary btn-sm"
+                  onClick={() => navigate(-1)}
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-outline-primary btn-sm"
+                  onClick={() => navigate("/vendors")}
+                >
+                  View Vendor Details
+                </button>
+              </div>
               <h2 className="h4 mb-0">Create Vendor</h2>
             </div>
 
@@ -252,6 +264,17 @@ const CreateVendor = () => {
                   className="form-control"
                   placeholder="Phone number"
                   required
+                />
+              </div>
+
+              <div className="col-md-6">
+                <label className="form-label">Country</label>
+                <input
+                  name="country"
+                  value={form.country}
+                  onChange={handleChange}
+                  className="form-control"
+                  placeholder="e.g. India, China, Vietnam"
                 />
               </div>
 
@@ -415,6 +438,7 @@ const CreateVendor = () => {
                       <th>Vendor Code</th>
                       <th>Email</th>
                       <th>Phone</th>
+                      <th>Country</th>
                       <th>Contact Persons</th>
                       <th>Status</th>
                       <th>Address</th>
@@ -427,6 +451,11 @@ const CreateVendor = () => {
                         <td>{vendor.vendor_code || "N/A"}</td>
                         <td>{vendor.email || "N/A"}</td>
                         <td>{vendor.phone || "N/A"}</td>
+                        <td>
+                          <span className="badge bg-light text-dark border">
+                            {vendor.country || "Unspecified"}
+                          </span>
+                        </td>
                         <td>
                           {Array.isArray(vendor.contact_person) &&
                           vendor.contact_person.length > 0

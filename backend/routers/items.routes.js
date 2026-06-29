@@ -464,7 +464,10 @@ router.post(
   "/:id/files",
   auth,
   requirePermission("images_documents", "upload"),
-  upload.safeSingle("file"),
+  upload.safeFields([
+    { name: "file", maxCount: 20 },
+    { name: "files", maxCount: 20 },
+  ]),
   invalidateItemsOnSuccess,
   uploadItemFile,
 );

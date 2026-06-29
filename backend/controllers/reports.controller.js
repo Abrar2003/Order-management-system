@@ -329,9 +329,11 @@ const hasFinishUploaded = (item = {}) =>
 const hasShippingMarksUploaded = (item = {}) => {
   const marks = item?.shipping_marks || {};
   return (
+    (Array.isArray(marks.files) && marks.files.some((file) => hasStoredItemFile(file))) ||
     hasStoredItemFile(marks.shipping_marks_1) ||
     hasStoredItemFile(marks.shipping_marks_2) ||
     hasStoredItemFile(marks.ean) ||
+    (Array.isArray(marks.flat_carton) && marks.flat_carton.some((file) => hasStoredItemFile(file))) ||
     hasStoredItemFile(marks.flat_carton_1) ||
     hasStoredItemFile(marks.flat_carton_2) ||
     hasStoredItemFile(marks.three_d_carton)
@@ -1577,8 +1579,8 @@ exports.getVendorWiseQaSummary = async (req, res) => {
       summary: {
         inspectors_count: inspectors.length,
         inspection_count: totals.inspection_count,
-        inspected_quantity: Number(totals.inspected_quantity.toFixed(3)),
-        inspected_cbm: Number(totals.inspected_cbm.toFixed(3)),
+        inspected_quantity: Number(totals.inspected_quantity.toFixed(2)),
+        inspected_cbm: Number(totals.inspected_cbm.toFixed(2)),
       },
       inspectors,
     });
@@ -1832,9 +1834,9 @@ exports.getVendorWiseQaDetailed = async (req, res) => {
         brand_tables_count: overallSummary.brand_tables_count,
         total_inspections: overallSummary.total_inspections,
         total_passed_quantity: Number(
-          overallSummary.total_passed_quantity.toFixed(3),
+          overallSummary.total_passed_quantity.toFixed(2),
         ),
-        total_cbm: Number(overallSummary.total_cbm.toFixed(3)),
+        total_cbm: Number(overallSummary.total_cbm.toFixed(2)),
       },
       vendors,
     });

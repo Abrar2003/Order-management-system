@@ -459,7 +459,7 @@ const SampleWorkflowPage = () => {
                     </div>
                     <div className="col-sm-4">
                       <div className="small text-secondary">Estimated CBM</div>
-                      <div className="fw-semibold">{Number(selectedWorkflow.cbm || 0).toFixed(4)}</div>
+                      <div className="fw-semibold">{Number(selectedWorkflow.cbm || 0).toFixed(2)}</div>
                     </div>
                     <div className="col-sm-4">
                       <div className="small text-secondary">Description</div>

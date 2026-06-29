@@ -26,7 +26,7 @@ const toSafeNumber = (value, fallback = 0) => {
 const formatNumber = (value) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return "";
-  return parsed.toFixed(4).replace(/\.?0+$/, "") || "0";
+  return parsed.toFixed(2).replace(/\.?0+$/, "") || "0";
 };
 
 const formatText = (value, fallback = "Not Set") => {

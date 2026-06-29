@@ -64,7 +64,7 @@ const MeasuredSizeDisplayTable = ({
               <td>
                 {formatNumber(entry?.L)} x {formatNumber(entry?.B)} x {formatNumber(entry?.H)}
               </td>
-              <td>{formatNumber(getEntryWeight(entry, weightKey), 3)}</td>
+              <td>{formatNumber(getEntryWeight(entry, weightKey))}</td>
             </tr>
           ))}
         </tbody>

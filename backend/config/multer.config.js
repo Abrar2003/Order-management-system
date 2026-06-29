@@ -17,6 +17,10 @@ const GENERIC_UPLOAD_MAX_FILE_SIZE = Math.max(
     10,
   ) || DEFAULT_GENERIC_UPLOAD_MAX_FILE_SIZE,
 );
+const GENERIC_UPLOAD_MAX_FILE_COUNT = Math.max(
+  1,
+  Number.parseInt(String(process.env.GENERIC_UPLOAD_MAX_FILE_COUNT || 20), 10) || 20,
+);
 
 const GENERIC_UPLOAD_MIME_TYPES = new Set([
   "application/octet-stream",
@@ -144,7 +148,7 @@ const genericFileFilter = (_req, file, cb) => {
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    files: 1,
+    files: GENERIC_UPLOAD_MAX_FILE_COUNT,
     fileSize: GENERIC_UPLOAD_MAX_FILE_SIZE,
   },
   fileFilter: genericFileFilter,
@@ -391,6 +395,8 @@ const handleSampleUploadErrors = (err, _req, res, next) => {
 module.exports = upload;
 module.exports.safeSingle = (fieldName) =>
   applyGenericMulterMiddleware(upload.single(fieldName));
+module.exports.safeFields = (fields) =>
+  applyGenericMulterMiddleware(upload.fields(fields));
 module.exports.qcImageUpload = qcImageUpload;
 module.exports.qcImageAnyUpload = applyMulterMiddleware(qcImageUpload.any());
 module.exports.qcImageSingleUpload = (fieldName = "image") =>

@@ -165,7 +165,7 @@ const renderSizeEntries = (entries = [], { emptyLabel = "No master sizes saved" 
                 {formatNumber(entry?.L)} x {formatNumber(entry?.B)} x {formatNumber(entry?.H)}
               </td>
               <td>
-                {formatNumber(entry?.[entry?.weightKey], 3)}
+                {formatNumber(entry?.[entry?.weightKey])}
                 <span className="item-master-size-weight-label"> {entry?.weightLabel || ""}</span>
               </td>
               <td>

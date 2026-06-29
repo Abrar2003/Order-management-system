@@ -23,6 +23,8 @@ import {
 } from "../auth/permissions";
 import {
   buildItemFileUploadRequest,
+  getItemFileValues,
+  getPrimaryStoredItemFile,
   ITEM_FILE_OPTIONS,
   isItemFileOptionAvailableForItem,
   shouldOpenFilePreviewExternally,
@@ -271,22 +273,38 @@ const RELATED_FILE_OPTIONS = Object.freeze([
 ]);
 
 const RELATED_FILE_OPTIONS_BY_VALUE = Object.freeze(
-  RELATED_FILE_OPTIONS.reduce((acc, option) => {
+  [
+    ...RELATED_FILE_OPTIONS,
+    ...SHIPPING_MARKS_SUB_OPTIONS.map((option) => ({
+      ...option,
+      scope: "item_master",
+    })),
+  ].reduce((acc, option) => {
     acc[option.value] = option;
     return acc;
   }, {}),
 );
 
 const ITEM_MASTER_FILE_OPTIONS = Object.freeze(
-  RELATED_FILE_OPTIONS.filter((option) => option.scope === "item_master"),
+  [
+    ...RELATED_FILE_OPTIONS.filter(
+      (option) => option.scope === "item_master" && option.value !== "shipping_marks",
+    ),
+    ...SHIPPING_MARKS_SUB_OPTIONS.map((option) => ({
+      ...option,
+      scope: "item_master",
+    })),
+  ],
 );
 
 const hasStoredFile = (file = {}) =>
-  Boolean(
-    String(
-      file?.key || file?.url || file?.link || file?.public_id || "",
-    ).trim(),
-  );
+  Array.isArray(file)
+    ? file.some((entry) => hasStoredFile(entry))
+    : Boolean(
+        String(
+          file?.key || file?.url || file?.link || file?.public_id || "",
+        ).trim(),
+      );
 
 const getSelectedFileSignature = (file) =>
   [
@@ -422,7 +440,7 @@ const QcDetails = () => {
     const initialRole = String(getUserFromToken()?.role || "").trim().toLowerCase();
     return initialRole === "qc" ? "qc_images" : "product_image";
   });
-  const [subFileType, setSubFileType] = useState("shipping_marks_1");
+  const [subFileType, setSubFileType] = useState("shipping_marks");
   const [qcImageUploadMode, setQcImageUploadMode] = useState("single");
   const [qcSingleImageComment, setQcSingleImageComment] = useState("");
   const [uploadingRelatedFile, setUploadingRelatedFile] = useState(false);
@@ -614,7 +632,7 @@ const QcDetails = () => {
           || RELATED_FILE_OPTIONS[0];
       }
       if (baseConfig?.scope === "item_master" && baseConfig?.field) {
-        const fileObj = getNestedValue(qc?.item_master, baseConfig.field);
+        const fileObj = getPrimaryStoredItemFile(qc?.item_master, baseConfig);
         const isImage = fileObj?.contentType?.startsWith("image/") || /\.(jpg|jpeg|png)$/i.test(fileObj?.originalName || "");
         if (isImage) {
           return {
@@ -882,10 +900,20 @@ const QcDetails = () => {
     () =>
       ITEM_MASTER_FILE_OPTIONS.filter((option) =>
         isItemFileOptionAvailableForItem(option, qc?.item_master),
-      ).map((option) => ({
-        ...option,
-        file: qc?.item_master?.[option.field] || null,
-      })),
+      ).flatMap((option) => {
+        const files = getItemFileValues(qc?.item_master, option);
+        if (files.length === 0) {
+          return [{ ...option, file: null }];
+        }
+        return files.map((file, index) => ({
+          ...option,
+          value: files.length > 1 ? `${option.value}-${index}` : option.value,
+          fileType: option.value,
+          label: files.length > 1 ? `${option.label} ${index + 1}` : option.label,
+          buttonLabel: files.length > 1 ? `${option.buttonLabel} ${index + 1}` : option.buttonLabel,
+          file,
+        }));
+      }),
     [qc?.item_master],
   );
   const hasAnyItemMasterFile = useMemo(
@@ -1087,7 +1115,7 @@ const QcDetails = () => {
   const activeRelatedStoredFile = useMemo(
     () => (
       activeRelatedFileConfig?.scope === "item_master" && activeRelatedFileConfig?.field
-        ? getNestedValue(qc?.item_master, activeRelatedFileConfig.field) || null
+        ? getPrimaryStoredItemFile(qc?.item_master, activeRelatedFileConfig)
         : null
     ),
     [activeRelatedFileConfig, qc?.item_master],
@@ -1341,26 +1369,35 @@ const QcDetails = () => {
     relatedFileInputRef.current?.click();
   }, [canUploadActiveRelatedFile, isRelatedUploadBusy]);
 
-  const handleOpenRelatedFile = useCallback(async (fileType) => {
+  const handleOpenRelatedFile = useCallback(async (fileTypeOrEntry) => {
+    const directEntry =
+      fileTypeOrEntry && typeof fileTypeOrEntry === "object" ? fileTypeOrEntry : null;
+    const fileType = directEntry?.fileType || directEntry?.value || fileTypeOrEntry;
     const fileConfig =
       RELATED_FILE_OPTIONS_BY_VALUE[String(fileType || "").trim().toLowerCase()];
     if (!fileConfig || fileConfig.scope !== "item_master" || !qc?.item_master?._id) return;
 
-    const currentFile = qc?.item_master?.[fileConfig.field];
+    const currentFile = hasStoredFile(directEntry?.file)
+      ? directEntry.file
+      : getPrimaryStoredItemFile(qc?.item_master, fileConfig);
     if (!hasStoredFile(currentFile)) {
       alert(`${fileConfig.label} is not uploaded yet.`);
       return;
     }
 
     try {
-      setOpeningRelatedFileType(fileConfig.value);
-      const response = await api.get(
-        `/items/${encodeURIComponent(qc.item_master._id)}/files/${encodeURIComponent(fileConfig.value)}/url`,
-        {
-        },
-      );
-
-      const fileUrl = String(response?.data?.data?.url || "").trim();
+      setOpeningRelatedFileType(directEntry?.value || fileConfig.value);
+      let responseFile = currentFile;
+      let fileUrl = String(currentFile?.url || currentFile?.link || "").trim();
+      if (!fileUrl) {
+        const response = await api.get(
+          `/items/${encodeURIComponent(qc.item_master._id)}/files/${encodeURIComponent(fileConfig.value)}/url`,
+          {
+          },
+        );
+        responseFile = response?.data?.data?.file || currentFile;
+        fileUrl = String(response?.data?.data?.url || "").trim();
+      }
       if (!fileUrl) {
         throw new Error(`${fileConfig.label} URL is not available.`);
       }
@@ -1375,7 +1412,7 @@ const QcDetails = () => {
           title: fileConfig.label,
           url: fileUrl,
           originalName:
-            String(response?.data?.data?.file?.originalName || currentFile?.originalName || "").trim(),
+            String(responseFile?.originalName || currentFile?.originalName || "").trim(),
           previewMode: fileConfig.previewMode,
         });
       } else {
@@ -1482,7 +1519,7 @@ const QcDetails = () => {
     );
     const batchKey = buildSelectedFileBatchKey({
       qcId: id,
-      fileType: relatedFileType,
+      fileType: fileConfig.value,
       uploadMode: qcImageUploadMode,
       comment: qcImageUploadMode === "single" ? qcSingleImageComment : "",
       files: selectedFiles,
@@ -1537,8 +1574,8 @@ const QcDetails = () => {
 
         const uploadRequest = buildItemFileUploadRequest({
           itemId: qc.item_master._id,
-          fileType: relatedFileType,
-          file: selectedFiles[0],
+          fileType: fileConfig.value,
+          files: fileConfig.supportsMultiple ? selectedFiles : selectedFiles.slice(0, 1),
         });
 
         response = await api.post(
@@ -1991,9 +2028,15 @@ const QcDetails = () => {
           disabled={!canUploadActiveRelatedFile || isRelatedUploadBusy}
           accept={activeRelatedFileConfig.accept}
           multiple={
-            activeRelatedFileConfig?.scope === "qc" &&
-            activeRelatedFileConfig?.supportsBulk &&
-            qcImageUploadMode === "bulk"
+            (
+              activeRelatedFileConfig?.scope === "qc" &&
+              activeRelatedFileConfig?.supportsBulk &&
+              qcImageUploadMode === "bulk"
+            ) ||
+            (
+              activeRelatedFileConfig?.scope === "item_master" &&
+              activeRelatedFileConfig?.supportsMultiple
+            )
           }
           onChange={handleRelatedFileChange}
         />
@@ -2034,7 +2077,7 @@ const QcDetails = () => {
                     <select
                       className="form-select form-select-sm qc-details-toolbar-select"
                       value={subFileType}
-                      onChange={(e) => setSubFileType(String(e.target.value || "shipping_marks_1"))}
+                      onChange={(e) => setSubFileType(String(e.target.value || "shipping_marks"))}
                       disabled={isRelatedUploadBusy || deletingRelatedFile}
                     >
                       {SHIPPING_MARKS_SUB_OPTIONS.map((subOpt) => (
@@ -2394,7 +2437,7 @@ const QcDetails = () => {
                       key={entry.value}
                       type="button"
                       className="btn btn-outline-secondary btn-sm rounded-pill"
-                      onClick={() => handleOpenRelatedFile(entry.value)}
+                      onClick={() => handleOpenRelatedFile(entry)}
                       disabled={!hasFile || isOpening}
                       title={
                         hasFile

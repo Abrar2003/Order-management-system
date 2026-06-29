@@ -6,6 +6,7 @@ import Navbar from "../components/Navbar";
 import FilePreviewModal from "../components/FilePreviewModal";
 import SortHeaderButton from "../components/SortHeaderButton";
 import {
+  getItemFileValues,
   getStoredItemFileUrl,
   hasStoredItemFile,
   ITEM_FILE_OPTIONS as ITEM_MASTER_FILE_OPTIONS,
@@ -862,15 +863,20 @@ const InspectionReport = () => {
   );
 
   const shippingMarksFiles = useMemo(() => {
-    return SHIPPING_MARKS_SUB_OPTIONS.map((opt) => {
-      const file = getNestedValue(qc?.item_master, opt.field) || null;
-      const isImage = file?.contentType?.startsWith("image/") || /\.(jpg|jpeg|png)$/i.test(file?.originalName || "");
-      return {
-        ...opt,
-        file,
-        previewMode: isImage ? "image" : "pdf",
-      };
-    }).filter((entry) => hasStoredItemFile(entry.file));
+    return SHIPPING_MARKS_SUB_OPTIONS.flatMap((opt) => {
+      const files = getItemFileValues(qc?.item_master, opt);
+      return files.map((file, index) => {
+        const isImage = file?.contentType?.startsWith("image/")
+          || /\.(jpg|jpeg|png)$/i.test(file?.originalName || "");
+        return {
+          ...opt,
+          value: `${opt.value}-${index}`,
+          label: files.length > 1 ? `${opt.label} ${index + 1}` : opt.label,
+          file,
+          previewMode: isImage ? "image" : "pdf",
+        };
+      });
+    });
   }, [qc?.item_master]);
 
   const activeReportShippingMarkFile = useMemo(() => {

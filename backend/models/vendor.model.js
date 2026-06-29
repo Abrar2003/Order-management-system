@@ -16,6 +16,11 @@ const vendorSchema = new mongoose.Schema({
   address: {
     type: String,
   },
+  country: {
+    type: String,
+    trim: true,
+    default: "",
+  },
   vendor_code: {
     type: String,
     required: true,

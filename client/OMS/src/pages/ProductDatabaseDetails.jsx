@@ -35,7 +35,7 @@ const formatProductTypeDisplayLabel = (value = "") =>
 const formatNumber = (value) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return "Not Set";
-  return parsed.toFixed(3).replace(/\.?0+$/, "");
+  return parsed.toFixed(2).replace(/\.?0+$/, "");
 };
 const formatActor = (actor = {}, dateKeys = []) => {
   const name = normalizeText(actor?.name);

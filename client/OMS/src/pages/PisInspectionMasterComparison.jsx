@@ -20,7 +20,7 @@ const formatValue = (value) => {
   }
   const parsed = Number(value);
   if (Number.isFinite(parsed) && String(value).trim() !== "") {
-    return parsed.toFixed(3).replace(/\.?0+$/, "");
+    return parsed.toFixed(2).replace(/\.?0+$/, "");
   }
   return String(value);
 };

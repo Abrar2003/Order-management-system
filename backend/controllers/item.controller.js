@@ -780,6 +780,28 @@ const ITEM_FILE_CONFIG = Object.freeze({
     defaultExtension: ".pptx",
     invalidTypeMessage: "Only PPT, PPTX, or PPTM files are allowed for Packaging PPT",
   },
+  shipping_marks: {
+    field: "shipping_marks.files",
+    legacyFields: ["shipping_marks.shipping_marks_1", "shipping_marks.shipping_marks_2"],
+    folder: "item-shipping-marks",
+    label: "Shipping mark",
+    multiple: true,
+    mimeTypes: ITEM_PDF_AND_IMAGE_MIME_TYPES,
+    extensions: ITEM_PDF_AND_IMAGE_EXTENSIONS,
+    defaultExtension: ".pdf",
+    invalidTypeMessage: "Only PDF, JPG, JPEG, and PNG files are allowed for Shipping marks",
+  },
+  flat_carton: {
+    field: "shipping_marks.flat_carton",
+    legacyFields: ["shipping_marks.flat_carton_1", "shipping_marks.flat_carton_2"],
+    folder: "item-shipping-marks",
+    label: "Flat carton",
+    multiple: true,
+    mimeTypes: ITEM_PDF_AND_IMAGE_MIME_TYPES,
+    extensions: ITEM_PDF_AND_IMAGE_EXTENSIONS,
+    defaultExtension: ".pdf",
+    invalidTypeMessage: "Only PDF, JPG, JPEG, and PNG files are allowed for Flat carton",
+  },
   shipping_marks_1: {
     field: "shipping_marks.shipping_marks_1",
     folder: "item-shipping-marks",
@@ -877,6 +899,40 @@ const normalizeStoredItemFile = (file = {}) => {
     public_id: normalizeTextField(file?.public_id || key),
     url: link,
   };
+};
+
+const normalizeStoredItemFileList = (files = []) =>
+  (Array.isArray(files) ? files : [files])
+    .map((file) => normalizeStoredItemFile(file || {}))
+    .filter((file) => file.key || file.link || file.public_id);
+
+const getPathValue = (obj = {}, field = "") => {
+  const normalizedField = normalizeTextField(field);
+  if (!obj || !normalizedField) return undefined;
+  if (typeof obj.get === "function") {
+    return obj.get(normalizedField);
+  }
+  return normalizedField.split(".").reduce(
+    (current, segment) => (current && current[segment] !== undefined ? current[segment] : undefined),
+    obj,
+  );
+};
+
+const getItemFileValues = (item = {}, fileConfig = {}) => [
+  ...normalizeStoredItemFileList(getPathValue(item, fileConfig.field)),
+  ...(Array.isArray(fileConfig.legacyFields) ? fileConfig.legacyFields : [])
+    .flatMap((field) => normalizeStoredItemFileList(getPathValue(item, field))),
+];
+
+const getUploadedItemFiles = (req = {}) => {
+  const files = [];
+  if (req.file) files.push(req.file);
+  if (req.files && typeof req.files === "object") {
+    Object.values(req.files).forEach((entry) => {
+      if (Array.isArray(entry)) files.push(...entry);
+    });
+  }
+  return files.filter(Boolean);
 };
 
 const createHttpError = (statusCode, message) => {
@@ -982,6 +1038,29 @@ const buildItemFileResponse = async (
     link,
     public_id: normalizedFile.public_id || normalizedFile.key,
   };
+};
+
+const buildItemFileResponseList = async (
+  files = [],
+  {
+    itemCode = "",
+    fallbackBaseName = "item-file",
+    extension = ".pdf",
+  } = {},
+) => {
+  const normalizedFiles = normalizeStoredItemFileList(files);
+  const responses = await Promise.all(
+    normalizedFiles.map((file, index) =>
+      buildItemFileResponse(file, {
+        itemCode,
+        fallbackBaseName: normalizedFiles.length > 1
+          ? `${fallbackBaseName}-${index + 1}`
+          : fallbackBaseName,
+        extension,
+      }),
+    ),
+  );
+  return responses.filter(Boolean);
 };
 
 const shouldIncludeProductImageThumbnails = (req) => {
@@ -4727,12 +4806,14 @@ const buildItemDetailFilePayloads = async (item = {}) => {
   ];
 
   const shippingMarksEntries = [
+    { type: "shipping_marks", key: "files", field: "shipping_marks.files", fallbackBaseName: "shipping-mark", extension: ".pdf", multiple: true },
+    { type: "ean", key: "ean", field: "shipping_marks.ean", fallbackBaseName: "ean", extension: ".pdf" },
+    { type: "flat_carton", key: "flat_carton", field: "shipping_marks.flat_carton", fallbackBaseName: "flat-carton", extension: ".pdf", multiple: true },
+    { type: "three_d_carton", key: "three_d_carton", field: "shipping_marks.three_d_carton", fallbackBaseName: "three-d-carton", extension: ".pdf" },
     { type: "shipping_marks_1", key: "shipping_marks_1", field: "shipping_marks.shipping_marks_1", fallbackBaseName: "shipping-marks-1", extension: ".pdf" },
     { type: "shipping_marks_2", key: "shipping_marks_2", field: "shipping_marks.shipping_marks_2", fallbackBaseName: "shipping-marks-2", extension: ".pdf" },
-    { type: "ean", key: "ean", field: "shipping_marks.ean", fallbackBaseName: "ean", extension: ".pdf" },
     { type: "flat_carton_1", key: "flat_carton_1", field: "shipping_marks.flat_carton_1", fallbackBaseName: "flat-carton-1", extension: ".pdf" },
     { type: "flat_carton_2", key: "flat_carton_2", field: "shipping_marks.flat_carton_2", fallbackBaseName: "flat-carton-2", extension: ".pdf" },
-    { type: "three_d_carton", key: "three_d_carton", field: "shipping_marks.three_d_carton", fallbackBaseName: "three-d-carton", extension: ".pdf" },
   ];
 
   const pairs = await Promise.all(
@@ -4761,6 +4842,14 @@ const buildItemDetailFilePayloads = async (item = {}) => {
     shippingMarksEntries.map(async (entry) => {
       try {
         const rawFile = getNestedValue(item, entry.field);
+        if (entry.multiple) {
+          const files = await buildItemFileResponseList(rawFile || [], {
+            itemCode: normalizeTextField(item?.code || item?._id),
+            fallbackBaseName: entry.fallbackBaseName,
+            extension: entry.extension,
+          });
+          return [entry.key, files.length > 0 ? files : normalizeStoredItemFileList(rawFile || [])];
+        }
         const file = await buildItemFileResponse(rawFile, {
           itemCode: normalizeTextField(item?.code || item?._id),
           fallbackBaseName: entry.fallbackBaseName,
@@ -4774,6 +4863,9 @@ const buildItemDetailFilePayloads = async (item = {}) => {
           field: entry.field,
           error: error?.message || String(error),
         });
+        if (entry.multiple) {
+          return [entry.key, normalizeStoredItemFileList(getNestedValue(item, entry.field) || [])];
+        }
         return [entry.key, normalizeStoredItemFile(getNestedValue(item, entry.field) || {})];
       }
     }),
@@ -6644,8 +6736,14 @@ exports.getItemFileUrl = async (req, res) => {
       });
     }
 
+    const fileSelectFields = [
+      "code",
+      "mounting_file_needed",
+      fileConfig.field,
+      ...(Array.isArray(fileConfig.legacyFields) ? fileConfig.legacyFields : []),
+    ].join(" ");
     const item = await Item.findOne(applyItemDataAccess({ _id: itemId }, req.user))
-      .select(`code mounting_file_needed ${fileConfig.field}`);
+      .select(fileSelectFields);
     if (!item) {
       return res.status(404).json({
         success: false,
@@ -6659,11 +6757,21 @@ exports.getItemFileUrl = async (req, res) => {
       });
     }
 
-    const filePayload = await buildItemFileResponse(item.get(fileConfig.field), {
-      itemCode: normalizeTextField(item?.code || itemId),
-      fallbackBaseName: fileType,
-      extension: fileConfig.defaultExtension,
-    });
+    const fileValues = getItemFileValues(item, fileConfig);
+    const filePayloads = fileConfig.multiple
+      ? await buildItemFileResponseList(fileValues, {
+          itemCode: normalizeTextField(item?.code || itemId),
+          fallbackBaseName: fileType,
+          extension: fileConfig.defaultExtension,
+        })
+      : [
+          await buildItemFileResponse(getPathValue(item, fileConfig.field), {
+            itemCode: normalizeTextField(item?.code || itemId),
+            fallbackBaseName: fileType,
+            extension: fileConfig.defaultExtension,
+          }),
+        ].filter(Boolean);
+    const filePayload = filePayloads[0] || null;
 
     if (!filePayload) {
       return res.status(404).json({
@@ -6684,6 +6792,15 @@ exports.getItemFileUrl = async (req, res) => {
           size: filePayload.size,
           public_id: filePayload.public_id,
         },
+        files: filePayloads.map((file) => ({
+          key: file.key,
+          originalName: file.originalName,
+          contentType: file.contentType,
+          size: file.size,
+          public_id: file.public_id,
+          url: file.link,
+          link: file.link,
+        })),
         url: filePayload.link,
       },
     });
@@ -6717,12 +6834,22 @@ exports.uploadItemFile = async (req, res) => {
       });
     }
 
-    if (!req.file) {
+    const uploadedFiles = getUploadedItemFiles(req);
+    if (uploadedFiles.length === 0) {
       return res.status(400).json({
         success: false,
         message: "No file uploaded",
       });
     }
+
+    if (!fileConfig.multiple && uploadedFiles.length > 1) {
+      return res.status(400).json({
+        success: false,
+        message: `${fileConfig.label} accepts only one file`,
+      });
+    }
+
+    req.file = uploadedFiles[0];
 
     if (fileType === "pis_file") {
       return exports.uploadItemPisFile(req, res);
@@ -6735,16 +6862,18 @@ exports.uploadItemFile = async (req, res) => {
       });
     }
 
-    const mimeType = normalizeTextField(req.file.mimetype).toLowerCase();
-    const extension = path.extname(String(req.file.originalname || "")).toLowerCase();
-    if (
-      !fileConfig.mimeTypes.has(mimeType)
-      || !fileConfig.extensions.has(extension)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: fileConfig.invalidTypeMessage,
-      });
+    for (const file of uploadedFiles) {
+      const mimeType = normalizeTextField(file.mimetype).toLowerCase();
+      const extension = path.extname(String(file.originalname || "")).toLowerCase();
+      if (
+        !fileConfig.mimeTypes.has(mimeType)
+        || !fileConfig.extensions.has(extension)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: fileConfig.invalidTypeMessage,
+        });
+      }
     }
 
     const item = await Item.findOne(applyItemDataAccess({ _id: itemId }, req.user));
@@ -6762,26 +6891,37 @@ exports.uploadItemFile = async (req, res) => {
     }
     const beforeItemSnapshot = item.toObject();
 
-    const previousFile = normalizeStoredItemFile(item.get(fileConfig.field));
-    const previousStorageKey = previousFile.key;
-    const fallbackOriginalName =
-      req.file.originalname ||
-      `${normalizeTextField(item?.code || itemId)}${extension || fileConfig.defaultExtension}`;
-    let uploadResult = null;
+    const previousFiles = fileConfig.multiple
+      ? normalizeStoredItemFileList(getPathValue(item, fileConfig.field))
+      : [normalizeStoredItemFile(getPathValue(item, fileConfig.field))].filter((file) => file.key);
+    const previousStorageKeys = previousFiles.map((file) => file.key).filter(Boolean);
+    const uploadResults = [];
 
     try {
-      uploadResult = await uploadBuffer({
-        buffer: req.file.buffer,
-        key: createStorageKey({
-          folder: fileConfig.folder,
-          originalName: fallbackOriginalName,
-          extension: extension || fileConfig.defaultExtension,
-        }),
-        originalName: fallbackOriginalName,
-        contentType: mimeType || "application/octet-stream",
-      });
+      for (const file of uploadedFiles) {
+        const mimeType = normalizeTextField(file.mimetype).toLowerCase();
+        const extension = path.extname(String(file.originalname || "")).toLowerCase();
+        const fallbackOriginalName =
+          file.originalname ||
+          `${normalizeTextField(item?.code || itemId)}${extension || fileConfig.defaultExtension}`;
 
-      item.set(fileConfig.field, buildStoredWasabiItemFile(uploadResult));
+        const uploadResult = await uploadBuffer({
+          buffer: file.buffer,
+          key: createStorageKey({
+            folder: fileConfig.folder,
+            originalName: fallbackOriginalName,
+            extension: extension || fileConfig.defaultExtension,
+          }),
+          originalName: fallbackOriginalName,
+          contentType: mimeType || "application/octet-stream",
+        });
+        uploadResults.push(uploadResult);
+      }
+
+      const nextValue = fileConfig.multiple
+        ? uploadResults.map((uploadResult) => buildStoredWasabiItemFile(uploadResult))
+        : buildStoredWasabiItemFile(uploadResults[0]);
+      item.set(fileConfig.field, nextValue);
       appendItemUpdateHistory(item, {
         before: beforeItemSnapshot,
         after: item.toObject(),
@@ -6792,38 +6932,48 @@ exports.uploadItemFile = async (req, res) => {
         metadata: {
           file_type: fileType,
           label: fileConfig.label,
-          original_name: fallbackOriginalName,
-          previous_storage_key: previousStorageKey,
+          original_name: uploadedFiles.map((file) => file?.originalname || "").filter(Boolean).join(", "),
+          previous_storage_key: previousStorageKeys.join(", "),
         },
       });
       await item.save();
     } catch (saveError) {
-      if (uploadResult?.key) {
-        try {
-          await deleteObject(uploadResult.key);
-        } catch (rollbackError) {
-          console.error("Rollback item file upload failed:", {
-            itemId,
-            fileType,
-            storageKey: uploadResult.key,
-            error: rollbackError?.message || String(rollbackError),
-          });
-        }
-      }
+      await Promise.all(
+        uploadResults
+          .map((uploadResult) => uploadResult?.key)
+          .filter(Boolean)
+          .map((storageKey) =>
+            deleteObject(storageKey).catch((rollbackError) => {
+              console.error("Rollback item file upload failed:", {
+                itemId,
+                fileType,
+                storageKey,
+                error: rollbackError?.message || String(rollbackError),
+              });
+            }),
+          ),
+      );
 
       throw saveError;
     }
 
-    if (previousStorageKey && previousStorageKey !== uploadResult.key) {
-      deleteObject(previousStorageKey).catch((error) => {
-        console.error("Delete previous item file failed:", {
-          itemId,
-          previousStorageKey,
-          fileType,
-          error: error?.message || String(error),
+    const nextStorageKeys = new Set(uploadResults.map((result) => result.key).filter(Boolean));
+    previousStorageKeys
+      .filter((storageKey) => storageKey && !nextStorageKeys.has(storageKey))
+      .forEach((storageKey) => {
+        deleteObject(storageKey).catch((error) => {
+          console.error("Delete previous item file failed:", {
+            itemId,
+            previousStorageKey: storageKey,
+            fileType,
+            error: error?.message || String(error),
+          });
         });
       });
-    }
+
+    const responseFiles = fileConfig.multiple
+      ? normalizeStoredItemFileList(getPathValue(item, fileConfig.field))
+      : [buildStoredWasabiItemFile(getPathValue(item, fileConfig.field))];
 
     return res.status(200).json({
       success: true,
@@ -6831,7 +6981,8 @@ exports.uploadItemFile = async (req, res) => {
       data: {
         item_id: item._id,
         file_type: fileType,
-        file: buildStoredWasabiItemFile(item.get(fileConfig.field)),
+        file: responseFiles[0] || {},
+        files: responseFiles,
       },
     });
   } catch (error) {
@@ -7123,8 +7274,12 @@ exports.deleteItemFile = async (req, res) => {
       });
     }
 
-    const existingFile = normalizeStoredItemFile(item.get(fileConfig.field));
-    if (!existingFile.key && !existingFile.url) {
+    const existingFiles = fileConfig.multiple
+      ? getItemFileValues(item, fileConfig)
+      : [normalizeStoredItemFile(getPathValue(item, fileConfig.field))].filter(
+          (file) => file.key || file.link || file.url,
+        );
+    if (existingFiles.length === 0) {
       return res.status(404).json({
         success: false,
         message: `${fileConfig.label} not found`,
@@ -7132,7 +7287,10 @@ exports.deleteItemFile = async (req, res) => {
     }
 
     const beforeItemSnapshot = item.toObject();
-    item.set(fileConfig.field, {});
+    item.set(fileConfig.field, fileConfig.multiple ? [] : {});
+    if (fileConfig.multiple && Array.isArray(fileConfig.legacyFields)) {
+      fileConfig.legacyFields.forEach((field) => item.set(field, {}));
+    }
     appendItemUpdateHistory(item, {
       before: beforeItemSnapshot,
       after: item.toObject(),
@@ -7143,26 +7301,32 @@ exports.deleteItemFile = async (req, res) => {
       metadata: {
         file_type: fileType,
         label: fileConfig.label,
-        previous_storage_key: existingFile.key,
-        previous_original_name: existingFile.originalName,
+        previous_storage_key: existingFiles.map((file) => file.key).filter(Boolean).join(", "),
+        previous_original_name: existingFiles
+          .map((file) => file.originalName)
+          .filter(Boolean)
+          .join(", "),
       },
     });
     await item.save();
 
     let storageDeleteWarning = "";
-    if (existingFile.key) {
-      try {
-        await deleteObject(existingFile.key);
-      } catch (storageError) {
-        storageDeleteWarning = storageError?.message || String(storageError);
-        console.error("Delete item file storage object failed:", {
-          itemId,
-          fileType,
-          storageKey: existingFile.key,
-          error: storageDeleteWarning,
-        });
-      }
-    }
+    await Promise.all(
+      existingFiles
+        .map((file) => file.key)
+        .filter(Boolean)
+        .map((storageKey) =>
+          deleteObject(storageKey).catch((storageError) => {
+            storageDeleteWarning = storageError?.message || String(storageError);
+            console.error("Delete item file storage object failed:", {
+              itemId,
+              fileType,
+              storageKey,
+              error: storageDeleteWarning,
+            });
+          }),
+        ),
+    );
 
     return res.status(200).json({
       success: true,

@@ -11,7 +11,9 @@ import { useRememberSearchParams } from "../hooks/useRememberSearchParams";
 import {
   buildItemFileUploadRequest,
   DEFAULT_ITEM_FILE_TYPE,
+  getItemFileValues,
   getItemFileOption,
+  getPrimaryStoredItemFile,
   hasStoredItemFile,
   isItemFileOptionAvailableForItem,
   isPisSpreadsheetUploadType,
@@ -248,7 +250,7 @@ const SizeDataCell = ({ item, preferPis = false }) => {
                 {formatSizeTableNumber(entry?.H)}
               </td>
               <td>
-                {formatSizeTableNumber(entry?.weight, 3)}
+                {formatSizeTableNumber(entry?.weight)}
                 <span className="items-size-weight-label"> {entry.weightLabel}</span>
               </td>
             </tr>
@@ -505,7 +507,7 @@ const ItemFilesPage = () => {
             ];
           }
           if (column === "file") {
-            const storedFile = item?.[activeFileOption.field];
+            const storedFile = getPrimaryStoredItemFile(item, activeFileOption);
             return hasStoredItemFile(storedFile)
               ? String(storedFile?.originalName || activeFileOption.label).trim()
               : "";
@@ -524,8 +526,8 @@ const ItemFilesPage = () => {
   );
 
   const uploadedVisibleCount = useMemo(
-    () => sortedRows.filter((item) => hasStoredItemFile(item?.[activeFileOption.field])).length,
-    [activeFileOption.field, sortedRows],
+    () => sortedRows.filter((item) => getItemFileValues(item, activeFileOption).length > 0).length,
+    [activeFileOption, sortedRows],
   );
 
   const navigateToItemOrdersHistory = useCallback(
@@ -590,9 +592,9 @@ const ItemFilesPage = () => {
 
   const handleItemFileChange = useCallback(async (event) => {
     const inputElement = event.target;
-    const selectedFile = inputElement?.files?.[0];
+    const selectedFiles = Array.from(inputElement?.files || []);
 
-    if (!selectedFile || !itemFilePickerItemId) {
+    if (selectedFiles.length === 0 || !itemFilePickerItemId) {
       if (inputElement) inputElement.value = "";
       return;
     }
@@ -602,22 +604,24 @@ const ItemFilesPage = () => {
       setSuccess("");
       setUploadingItemId(itemFilePickerItemId);
 
-      const normalizedName = String(selectedFile.name || "").toLowerCase();
-      const normalizedType = String(selectedFile.type || "").toLowerCase();
-      const hasAllowedExtension = activeFileOption.extensions.some((extension) =>
-        normalizedName.endsWith(extension)
-      );
-      const hasAllowedMimeType =
-        !normalizedType || activeFileOption.mimeTypes.includes(normalizedType);
+      for (const selectedFile of selectedFiles) {
+        const normalizedName = String(selectedFile.name || "").toLowerCase();
+        const normalizedType = String(selectedFile.type || "").toLowerCase();
+        const hasAllowedExtension = activeFileOption.extensions.some((extension) =>
+          normalizedName.endsWith(extension)
+        );
+        const hasAllowedMimeType =
+          !normalizedType || activeFileOption.mimeTypes.includes(normalizedType);
 
-      if (!hasAllowedExtension || !hasAllowedMimeType) {
-        throw new Error(activeFileOption.invalidMessage);
+        if (!hasAllowedExtension || !hasAllowedMimeType) {
+          throw new Error(activeFileOption.invalidMessage);
+        }
       }
 
       const uploadRequest = buildItemFileUploadRequest({
         itemId: itemFilePickerItemId,
         fileType: activeFileType,
-        file: selectedFile,
+        files: activeFileOption.supportsMultiple ? selectedFiles : selectedFiles.slice(0, 1),
       });
 
       const response = await api.post(
@@ -644,7 +648,7 @@ const ItemFilesPage = () => {
 
   const handlePreviewFile = useCallback(async (item) => {
     const itemId = String(item?._id || "").trim();
-    const storedFile = item?.[activeFileOption.field];
+    const storedFile = getPrimaryStoredItemFile(item, activeFileOption);
 
     if (!itemId || !hasStoredItemFile(storedFile)) {
       setSuccess("");
@@ -696,6 +700,7 @@ const ItemFilesPage = () => {
           type="file"
           className="d-none"
           accept={activeFileOption.accept}
+          multiple={Boolean(activeFileOption.supportsMultiple)}
           disabled={!canUploadActiveFile || Boolean(uploadingItemId)}
           onChange={handleItemFileChange}
         />
@@ -877,8 +882,9 @@ const ItemFilesPage = () => {
                       const itemId = String(item?._id || "").trim();
                       const isUploadingThisItem = uploadingItemId === itemId;
                       const isOpeningThisItem = openingFileItemId === itemId;
-                      const storedFile = item?.[activeFileOption.field];
-                      const hasFile = hasStoredItemFile(storedFile);
+                      const storedFiles = getItemFileValues(item, activeFileOption);
+                      const storedFile = storedFiles[0] || null;
+                      const hasFile = storedFiles.length > 0;
 
                       return (
                         <tr key={item?._id || item?.code}>
@@ -919,7 +925,9 @@ const ItemFilesPage = () => {
                                 )}
                                 {!isProductImageFileType(activeFileType) && (
                                   <span className="badge text-bg-success align-self-start">
-                                    Uploaded
+                                    {storedFiles.length > 1
+                                      ? `${storedFiles.length} Uploaded`
+                                      : "Uploaded"}
                                   </span>
                                 )}
                               </div>

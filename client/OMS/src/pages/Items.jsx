@@ -16,8 +16,9 @@ import { createComplaint } from "../services/complaints.service";
 import {
   buildItemFileUploadRequest,
   DEFAULT_ITEM_FILE_TYPE,
-  ITEM_FILE_OPTIONS,
+  ITEM_FILE_UPLOAD_OPTIONS,
   ITEM_FILE_OPTIONS_BY_VALUE,
+  getItemFileValues,
   isItemFileOptionAvailableForItem,
 } from "../constants/itemFiles";
 import {
@@ -201,7 +202,7 @@ const InspectedSizeCell = ({ item }) => {
                 {formatSizeTableNumber(entry?.H)}
               </td>
               <td>
-                {formatSizeTableNumber(entry?.weight, 3)}
+                {formatSizeTableNumber(entry?.weight)}
                 <span className="items-size-weight-label"> {entry.weightLabel}</span>
               </td>
             </tr>
@@ -252,6 +253,9 @@ const formatClaimPercentage = (value) => {
   if (!Number.isFinite(parsed)) return "0";
   return parsed.toFixed(2).replace(/\.?0+$/, "");
 };
+
+const hasUploadedItemFile = (item, option) =>
+  getItemFileValues(item, option).length > 0;
 
 const ClaimPercentageModal = ({
   item,
@@ -709,7 +713,7 @@ const Items = () => {
   const activeItemFilePickerConfig = useMemo(
     () =>
       ITEM_FILE_OPTIONS_BY_VALUE[itemFilePickerContext?.fileType]
-      || ITEM_FILE_OPTIONS[0],
+      || ITEM_FILE_UPLOAD_OPTIONS[0],
     [itemFilePickerContext?.fileType],
   );
 
@@ -745,7 +749,7 @@ const Items = () => {
 
       const itemId = String(item?._id || "").trim();
       if (!itemId) return;
-      const availableOptions = ITEM_FILE_OPTIONS.filter((option) =>
+      const availableOptions = ITEM_FILE_UPLOAD_OPTIONS.filter((option) =>
         isItemFileOptionAvailableForItem(option, item),
       );
       const storedFileType = getSelectedItemFileType(itemId);
@@ -772,13 +776,13 @@ const Items = () => {
 
   const handleItemFileChange = useCallback(async (event) => {
     const inputElement = event.target;
-    const selectedFile = inputElement?.files?.[0];
+    const selectedFiles = Array.from(inputElement?.files || []);
     const uploadContext = itemFilePickerContext;
     const fileConfig =
       ITEM_FILE_OPTIONS_BY_VALUE[uploadContext?.fileType]
-      || ITEM_FILE_OPTIONS[0];
+      || ITEM_FILE_UPLOAD_OPTIONS[0];
 
-    if (!selectedFile || !uploadContext?.itemId) {
+    if (selectedFiles.length === 0 || !uploadContext?.itemId) {
       if (inputElement) inputElement.value = "";
       return;
     }
@@ -788,22 +792,24 @@ const Items = () => {
       setSuccess("");
       setUploadingItemId(uploadContext.itemId);
 
-      const normalizedName = String(selectedFile.name || "").toLowerCase();
-      const normalizedType = String(selectedFile.type || "").toLowerCase();
-      const hasAllowedExtension = fileConfig.extensions.some((extension) =>
-        normalizedName.endsWith(extension)
-      );
-      const hasAllowedMimeType =
-        !normalizedType || fileConfig.mimeTypes.includes(normalizedType);
+      for (const selectedFile of selectedFiles) {
+        const normalizedName = String(selectedFile.name || "").toLowerCase();
+        const normalizedType = String(selectedFile.type || "").toLowerCase();
+        const hasAllowedExtension = fileConfig.extensions.some((extension) =>
+          normalizedName.endsWith(extension)
+        );
+        const hasAllowedMimeType =
+          !normalizedType || fileConfig.mimeTypes.includes(normalizedType);
 
-      if (!hasAllowedExtension || !hasAllowedMimeType) {
-        throw new Error(fileConfig.invalidMessage);
+        if (!hasAllowedExtension || !hasAllowedMimeType) {
+          throw new Error(fileConfig.invalidMessage);
+        }
       }
 
       const uploadRequest = buildItemFileUploadRequest({
         itemId: uploadContext.itemId,
         fileType: uploadContext.fileType,
-        file: selectedFile,
+        files: fileConfig.supportsMultiple ? selectedFiles : selectedFiles.slice(0, 1),
       });
 
       const response = await api.post(
@@ -838,6 +844,7 @@ const Items = () => {
           type="file"
           className="d-none"
           accept={activeItemFilePickerConfig.accept}
+          multiple={Boolean(activeItemFilePickerConfig.supportsMultiple)}
           disabled={!canUploadItemFiles || Boolean(uploadingItemId)}
           onChange={handleItemFileChange}
         />
@@ -1054,7 +1061,7 @@ const Items = () => {
                     )}
                     {sortedRows.map((item) => {
                       const itemId = String(item?._id || "").trim();
-                      const availableItemFileOptions = ITEM_FILE_OPTIONS.filter((option) =>
+                      const availableItemFileOptions = ITEM_FILE_UPLOAD_OPTIONS.filter((option) =>
                         isItemFileOptionAvailableForItem(option, item),
                       );
                       const storedSelectedFileType = getSelectedItemFileType(itemId);
@@ -1172,6 +1179,7 @@ const Items = () => {
                                     {availableItemFileOptions.map((option) => (
                                       <option key={option.value} value={option.value}>
                                         {option.label}
+                                        {hasUploadedItemFile(item, option) ? " (Uploaded)" : ""}
                                       </option>
                                     ))}
                                   </select>

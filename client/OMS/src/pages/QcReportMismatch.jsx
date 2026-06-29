@@ -121,7 +121,7 @@ const formatNumberValue = (value) => {
   if (!Number.isFinite(parsed) || Math.abs(parsed) <= NUMBER_TOLERANCE) {
     return "Not Set";
   }
-  return parsed.toFixed(3).replace(/\.?0+$/, "");
+  return parsed.toFixed(2).replace(/\.?0+$/, "");
 };
 
 const formatTextValue = (value) => {

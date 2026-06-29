@@ -1,3 +1,4 @@
+const XLSX = require("xlsx");
 const Vendor = require("../models/vendor.model");
 
 const normalizeText = (value = "") => String(value ?? "").trim();
@@ -34,6 +35,7 @@ const serializeVendor = (vendor = {}) => ({
   name: normalizeText(vendor.name),
   email: normalizeEmail(vendor.email),
   phone: normalizeText(vendor.phone),
+  country: normalizeText(vendor.country),
   address: normalizeText(vendor.address),
   vendor_code: normalizeText(vendor.vendor_code),
   contact_person: normalizeContactPersons(vendor.contact_person),
@@ -48,7 +50,7 @@ const getVendors = async (_req, res) => {
     const vendors = await Vendor.find({
       $or: [{ deleted_at: { $exists: false } }, { deleted_at: null }],
     })
-      .sort({ name: 1, vendor_code: 1, email: 1 })
+      .sort({ country: 1, name: 1, vendor_code: 1 })
       .lean();
 
     return res.status(200).json({
@@ -69,6 +71,7 @@ const createVendor = async (req, res) => {
     const name = normalizeText(req.body?.name);
     const email = normalizeEmail(req.body?.email);
     const phone = normalizeText(req.body?.phone);
+    const country = normalizeText(req.body?.country);
     const address = normalizeText(req.body?.address);
     const vendor_code = normalizeText(req.body?.vendor_code);
     const contact_person = normalizeContactPersons(req.body?.contact_person);
@@ -100,6 +103,7 @@ const createVendor = async (req, res) => {
       name,
       email,
       phone,
+      country,
       address,
       vendor_code,
       contact_person,
@@ -120,7 +124,174 @@ const createVendor = async (req, res) => {
   }
 };
 
+const updateVendor = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const name = normalizeText(req.body?.name);
+    const email = normalizeEmail(req.body?.email);
+    const phone = normalizeText(req.body?.phone);
+    const country = normalizeText(req.body?.country);
+    const address = normalizeText(req.body?.address);
+    const vendor_code = normalizeText(req.body?.vendor_code);
+    const contact_person = normalizeContactPersons(req.body?.contact_person);
+    const is_active = req.body?.is_active !== false;
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Vendor ID is required",
+      });
+    }
+
+    if (!name || !email || !phone || !vendor_code) {
+      return res.status(400).json({
+        success: false,
+        message: "Name, email, phone, and vendor code are required",
+      });
+    }
+
+    const existingVendor = await Vendor.findById(id);
+    if (!existingVendor || existingVendor.deleted_at) {
+      return res.status(404).json({
+        success: false,
+        message: "Vendor not found",
+      });
+    }
+
+    const duplicateVendor = await Vendor.findOne({
+      _id: { $ne: id },
+      $or: [
+        { name: { $regex: `^${escapeRegex(name)}$`, $options: "i" } },
+        { email },
+        { vendor_code: { $regex: `^${escapeRegex(vendor_code)}$`, $options: "i" } },
+      ],
+    }).lean();
+
+    if (duplicateVendor) {
+      return res.status(409).json({
+        success: false,
+        message: "Another vendor with this name, email, or vendor code already exists",
+      });
+    }
+
+    existingVendor.name = name;
+    existingVendor.email = email;
+    existingVendor.phone = phone;
+    existingVendor.country = country;
+    existingVendor.address = address;
+    existingVendor.vendor_code = vendor_code;
+    existingVendor.contact_person = contact_person;
+    existingVendor.is_active = is_active;
+    existingVendor.updated_at = new Date();
+
+    await existingVendor.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Vendor updated successfully",
+      data: serializeVendor(existingVendor.toObject()),
+    });
+  } catch (error) {
+    console.error("Update Vendor Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update vendor",
+    });
+  }
+};
+
+const exportVendors = async (req, res) => {
+  try {
+    let selectedCountries = [];
+    const rawParam = req.query.countries || req.query.country;
+    if (rawParam) {
+      if (Array.isArray(rawParam)) {
+        selectedCountries = rawParam.map(normalizeText).filter(Boolean);
+      } else {
+        selectedCountries = String(rawParam)
+          .split(",")
+          .map(normalizeText)
+          .filter(Boolean);
+      }
+    }
+
+    const rawVendors = await Vendor.find({
+      $or: [{ deleted_at: { $exists: false } }, { deleted_at: null }],
+    })
+      .sort({ country: 1, name: 1, vendor_code: 1 })
+      .lean();
+
+    let vendors = rawVendors.map(serializeVendor);
+
+    if (selectedCountries.length > 0) {
+      const lowerCountries = selectedCountries.map((c) => c.toLowerCase());
+      vendors = vendors.filter((v) => {
+        const vCountry = (v.country || "").toLowerCase();
+        if (!vCountry) {
+          return lowerCountries.includes("unspecified") || lowerCountries.includes("n/a");
+        }
+        return lowerCountries.includes(vCountry);
+      });
+    }
+
+    const columns = [
+      { header: "Vendor Name", value: (v) => v.name || "N/A" },
+      { header: "Vendor Code", value: (v) => v.vendor_code || "N/A" },
+      { header: "Email", value: (v) => v.email || "N/A" },
+      { header: "Phone", value: (v) => v.phone || "N/A" },
+      { header: "Country", value: (v) => v.country || "Unspecified" },
+      { header: "Status", value: (v) => (v.is_active ? "Active" : "Inactive") },
+      { header: "Address", value: (v) => v.address || "N/A" },
+      {
+        header: "Contact Persons",
+        value: (v) =>
+          Array.isArray(v.contact_person) && v.contact_person.length > 0
+            ? v.contact_person
+                .map((c) =>
+                  [c.name, c.email, c.phone, c.type ? `Type: ${c.type}` : ""]
+                    .filter(Boolean)
+                    .join(" / ")
+                )
+                .join("; ")
+            : "N/A",
+      },
+    ];
+
+    const headerRow = columns.map((col) => col.header);
+    const dataRows = vendors.map((v) => columns.map((col) => col.value(v)));
+
+    const worksheet = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
+    worksheet["!cols"] = columns.map((col, colIdx) => {
+      const maxLen = Math.max(
+        col.header.length,
+        ...dataRows.map((row) => String(row[colIdx] ?? "").length)
+      );
+      return { wch: Math.min(45, Math.max(12, maxLen + 2)) };
+    });
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Vendors");
+    const fileBuffer = XLSX.write(workbook, { type: "buffer", bookType: "xls" });
+    const fileDate = new Date().toISOString().slice(0, 10);
+
+    res.setHeader("Content-Type", "application/vnd.ms-excel");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="vendors-export-${fileDate}.xls"`
+    );
+    return res.status(200).send(fileBuffer);
+  } catch (error) {
+    console.error("Export Vendors Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to export vendor details",
+    });
+  }
+};
+
 module.exports = {
   createVendor,
   getVendors,
+  updateVendor,
+  exportVendors,
 };

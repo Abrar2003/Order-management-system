@@ -219,12 +219,12 @@ const compareTextValues = (inspectedValue, pisValue) => {
   };
 };
 
-const trimFormattedNumber = (value, decimals = 3) =>
+const trimFormattedNumber = (value, decimals = 2) =>
   Number(value).toFixed(decimals).replace(/\.?0+$/, "");
 
 const formatNumberDisplay = (
   value,
-  { decimals = 3, unit = "", emptyLabel = EMPTY_LABEL, fixedDecimals = false } = {},
+  { decimals = 2, unit = "", emptyLabel = EMPTY_LABEL, fixedDecimals = false } = {},
 ) => {
   const parsed = toFiniteNumber(value);
   if (parsed === null || Math.abs(parsed) <= COMPARE_TOLERANCE) return emptyLabel;
@@ -246,7 +246,7 @@ const formatSizeDisplay = (entry = {}) => {
 const formatSignedDeltaDisplay = (
   value,
   unit = "",
-  decimals = 3,
+  decimals = 2,
   { tolerance = COMPARE_TOLERANCE, fixedDecimals = false } = {},
 ) => {
   const parsed = toFiniteNumber(value);
@@ -509,7 +509,7 @@ const createNumericDifference = ({
   inspectedValue,
   pisValue,
   unit = "",
-  decimals = 3,
+  decimals = 2,
   compareTolerance = COMPARE_TOLERANCE,
   compareDecimals = null,
   fixedDecimals = false,

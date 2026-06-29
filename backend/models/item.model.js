@@ -254,6 +254,8 @@ const fileSubSchema = new mongoose.Schema(
 
 const shippingMarksSchema = new mongoose.Schema(
   {
+    files: { type: [fileSubSchema], default: [] },
+    flat_carton: { type: [fileSubSchema], default: [] },
     shipping_marks_1: { type: fileSubSchema, default: () => ({}) },
     shipping_marks_2: { type: fileSubSchema, default: () => ({}) },
     ean: { type: fileSubSchema, default: () => ({}) },
