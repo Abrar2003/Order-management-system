@@ -4,11 +4,12 @@ const XLSX = require("xlsx");
 
 const { loadEnvFiles } = require("../config/loadEnv");
 
-const SHIPPING_MARK_FILE_PATTERN = /^(.+?)_Shippingmark(?:[_\s.-].*)?\.pdf$/i;
+const SHIPPING_MARK_FILE_PATTERN = /^(.+?)_Shippingmarks?(?:[_\s.-].*)?\.pdf$/i;
 const SHIPPING_MARK_CONTENT_TYPE = "application/pdf";
 const DEFAULT_API_BASE_URL = "https://api.ghouse-sourcing.com";
 const ISSUE_STATUSES = new Set([
   "lookup-failed",
+  "missing-code",
   "missing-item",
   "skipped-existing",
   "upload-failed",
@@ -212,30 +213,86 @@ const ensureReportParentDirectory = async (reportPath) => {
   await fs.mkdir(parentDirectory, { recursive: true });
 };
 
-const getShippingMarkFileMatch = (filePath) => {
-  const fileName = path.basename(filePath);
-  const match = fileName.match(SHIPPING_MARK_FILE_PATTERN);
-  if (!match) return null;
+const isPdfFile = (filePath) =>
+  path.extname(String(filePath || "")).toLowerCase() === ".pdf";
 
-  const itemCode = normalizeCode(match[1]);
-  if (!itemCode) return null;
+const extractCodeFromText = (value = "") => {
+  const normalizedValue = normalizeText(value);
+  if (!normalizedValue) return "";
+
+  const shippingFolderMatch =
+    normalizedValue.match(/shipping\s*marks?\s*[_\s.-]*(\d{3,})/i)
+    || normalizedValue.match(/(\d{3,})[_\s.-]*shipping\s*marks?/i);
+  if (shippingFolderMatch?.[1]) return normalizeCode(shippingFolderMatch[1]);
+
+  const leadingCodeMatch = normalizedValue.match(/^(\d{3,})(?:[_\s.-]|$)/);
+  if (leadingCodeMatch?.[1]) return normalizeCode(leadingCodeMatch[1]);
+
+  return "";
+};
+
+const getRelativePathParts = (rootPath, filePath) => {
+  const relativePath = path.relative(rootPath, filePath);
+  if (!relativePath || relativePath.startsWith("..")) {
+    return path.normalize(filePath).split(path.sep).filter(Boolean);
+  }
+  return relativePath.split(path.sep).filter(Boolean);
+};
+
+const getShippingMarkFileMatch = (filePath, { rootPath = path.dirname(filePath) } = {}) => {
+  if (!isPdfFile(filePath)) return null;
+
+  const fileName = path.basename(filePath);
+  const shippingMarkNameMatch = fileName.match(SHIPPING_MARK_FILE_PATTERN);
+  const fileNameCode = normalizeCode(shippingMarkNameMatch?.[1])
+    || extractCodeFromText(path.parse(fileName).name);
+
+  if (fileNameCode) {
+    return {
+      itemCode: fileNameCode,
+      filePath,
+    };
+  }
+
+  const relativeParts = getRelativePathParts(rootPath, filePath);
+  const directoryParts = relativeParts.slice(0, -1).reverse();
+  for (const directoryName of directoryParts) {
+    const directoryCode = extractCodeFromText(directoryName);
+    if (directoryCode) {
+      return {
+        itemCode: directoryCode,
+        filePath,
+      };
+    }
+  }
 
   return {
-    itemCode,
+    itemCode: "",
     filePath,
   };
 };
 
-const collectShippingMarkFiles = async (targetPath, { recursive = true } = {}) => {
+const collectShippingMarkFiles = async (
+  targetPath,
+  { recursive = true, rootPath = "" } = {},
+) => {
   const resolvedPath = path.resolve(targetPath);
   const stats = await fs.stat(resolvedPath);
+  const scanRootPath = rootPath
+    ? path.resolve(rootPath)
+    : stats.isFile()
+      ? path.dirname(resolvedPath)
+      : resolvedPath;
 
   if (stats.isFile()) {
-    const match = getShippingMarkFileMatch(resolvedPath);
+    const match = getShippingMarkFileMatch(resolvedPath, { rootPath: scanRootPath });
+    const isPdf = isPdfFile(resolvedPath);
     return {
       scannedFiles: 1,
-      ignoredFiles: match ? 0 : 1,
-      files: match ? [match] : [],
+      ignoredFiles: isPdf ? 0 : 1,
+      pdfFiles: isPdf ? 1 : 0,
+      files: match?.itemCode ? [match] : [],
+      missingCodeFiles: isPdf && !match?.itemCode ? [resolvedPath] : [],
     };
   }
 
@@ -243,7 +300,9 @@ const collectShippingMarkFiles = async (targetPath, { recursive = true } = {}) =
     return {
       scannedFiles: 0,
       ignoredFiles: 0,
+      pdfFiles: 0,
       files: [],
+      missingCodeFiles: [],
     };
   }
 
@@ -251,7 +310,9 @@ const collectShippingMarkFiles = async (targetPath, { recursive = true } = {}) =
   const result = {
     scannedFiles: 0,
     ignoredFiles: 0,
+    pdfFiles: 0,
     files: [],
+    missingCodeFiles: [],
   };
 
   for (const entry of entries) {
@@ -259,10 +320,15 @@ const collectShippingMarkFiles = async (targetPath, { recursive = true } = {}) =
 
     if (entry.isDirectory()) {
       if (recursive) {
-        const nestedResult = await collectShippingMarkFiles(entryPath, { recursive });
+        const nestedResult = await collectShippingMarkFiles(entryPath, {
+          recursive,
+          rootPath: scanRootPath,
+        });
         result.scannedFiles += nestedResult.scannedFiles;
         result.ignoredFiles += nestedResult.ignoredFiles;
+        result.pdfFiles += nestedResult.pdfFiles;
         result.files.push(...nestedResult.files);
+        result.missingCodeFiles.push(...nestedResult.missingCodeFiles);
       }
       continue;
     }
@@ -270,15 +336,22 @@ const collectShippingMarkFiles = async (targetPath, { recursive = true } = {}) =
     if (!entry.isFile()) continue;
 
     result.scannedFiles += 1;
-    const match = getShippingMarkFileMatch(entryPath);
-    if (match) {
+    if (!isPdfFile(entryPath)) {
+      result.ignoredFiles += 1;
+      continue;
+    }
+
+    result.pdfFiles += 1;
+    const match = getShippingMarkFileMatch(entryPath, { rootPath: scanRootPath });
+    if (match?.itemCode) {
       result.files.push(match);
     } else {
-      result.ignoredFiles += 1;
+      result.missingCodeFiles.push(entryPath);
     }
   }
 
   result.files.sort((left, right) => left.filePath.localeCompare(right.filePath));
+  result.missingCodeFiles.sort((left, right) => left.localeCompare(right));
   return result;
 };
 
@@ -509,8 +582,11 @@ const formatDetailRecord = ({
   relativeFileList = "",
   message = "",
 } = {}) => {
+  const itemLabel = itemCode
+    ? `[${status}] ${itemCode}${itemId ? ` -> ${itemId}` : ""}`
+    : `[${status}]`;
   const parts = [
-    `[${status}] ${itemCode}${itemId ? ` -> ${itemId}` : ""}`,
+    itemLabel,
     `folder=${folderList || "."}`,
     `files=${relativeFileList}`,
   ];
@@ -587,9 +663,10 @@ const writeExcelReport = async ({
     { Metric: "Skip Existing", Value: options.skipExisting ? "yes" : "no" },
     { Metric: "Scanned Files", Value: scanResult.scannedFiles },
     { Metric: "Ignored Files", Value: scanResult.ignoredFiles },
-    { Metric: "Shipping PDFs", Value: scanResult.files.length },
+    { Metric: "PDF Files", Value: scanResult.pdfFiles },
     { Metric: "Item Groups", Value: summary.itemGroups },
     { Metric: "Files Matched", Value: summary.filesMatched },
+    { Metric: "Missing Code", Value: summary.missingCode },
     { Metric: "Uploaded Groups", Value: summary.uploadedGroups },
     { Metric: "Uploaded Files", Value: summary.uploadedFiles },
     { Metric: "Dry-run Groups", Value: summary.dryRunMatchedGroups },
@@ -654,8 +731,9 @@ const printUsage = () => {
   console.log("  --replace-existing     Upload even when shipping marks already exist");
   console.log("  --no-recursive         Only scan the top-level folder");
   console.log("");
-  console.log("Expected filename:");
-  console.log("  {item_code}_Shippingmark....pdf");
+  console.log("Item code detection:");
+  console.log("  Scans every .pdf and uses the code from the PDF name or nearest folder.");
+  console.log("  Examples: 95650_Shippingmarks_Box1.pdf, Shipping marks 95650, 95650_Item name");
 };
 
 const main = async () => {
@@ -681,17 +759,19 @@ const main = async () => {
   });
   const groupedFiles = groupFilesByItemCode(scanResult.files);
 
-  if (groupedFiles.length === 0) {
-    throw new Error(`No matching {item_code}_Shippingmark*.pdf files found in ${targetPath}`);
+  if (scanResult.pdfFiles === 0) {
+    throw new Error(`No .pdf files found in ${targetPath}`);
   }
 
-  const authHeaders = await resolveAuthHeaders(options);
+  const authHeaders = groupedFiles.length > 0
+    ? await resolveAuthHeaders(options)
+    : null;
 
   console.log(`Backend          : ${options.apiBaseUrl}`);
   console.log(`Target           : ${targetPath}`);
   console.log(`Scanned files    : ${scanResult.scannedFiles}`);
   console.log(`Ignored files    : ${scanResult.ignoredFiles}`);
-  console.log(`Shipping PDFs    : ${scanResult.files.length}`);
+  console.log(`PDF files        : ${scanResult.pdfFiles}`);
   console.log(`Item groups      : ${groupedFiles.length}`);
   console.log(`Recursive        : ${options.recursive ? "yes" : "no"}`);
   console.log(`Skip existing    : ${options.skipExisting ? "yes" : "no"}`);
@@ -700,6 +780,7 @@ const main = async () => {
   const summary = {
     itemGroups: groupedFiles.length,
     filesMatched: scanResult.files.length,
+    missingCode: scanResult.missingCodeFiles.length,
     uploadedGroups: 0,
     uploadedFiles: 0,
     dryRunMatchedGroups: 0,
@@ -709,11 +790,34 @@ const main = async () => {
     failed: 0,
   };
   const detailRecords = {
+    missingCodeFiles: [],
     missingItems: [],
     skippedItems: [],
     failedItems: [],
   };
   const reportRows = [];
+
+  for (const filePath of scanResult.missingCodeFiles) {
+    const relativeFileList = formatRelativeFileList(targetPath, [filePath]);
+    const folderList = formatFolderList([filePath]);
+    const message = "Could not derive item code from PDF name or parent folders";
+    detailRecords.missingCodeFiles.push({
+      status: "missing-code",
+      itemCode: "",
+      folderList,
+      relativeFileList,
+      message,
+    });
+    reportRows.push(buildReportRow({
+      status: "missing-code",
+      itemCode: "",
+      folderList,
+      relativeFileList,
+      fileCount: 1,
+      message,
+    }));
+    console.warn(`[missing-code] folder=${folderList} :: files=${relativeFileList} :: ${message}`);
+  }
 
   for (const group of groupedFiles) {
     const relativeFileList = formatRelativeFileList(targetPath, group.files);
@@ -869,6 +973,7 @@ const main = async () => {
   console.log("Summary");
   console.log(`  Item groups       : ${summary.itemGroups}`);
   console.log(`  Files matched     : ${summary.filesMatched}`);
+  console.log(`  Missing code      : ${summary.missingCode}`);
   console.log(`  Uploaded groups   : ${summary.uploadedGroups}`);
   console.log(`  Uploaded files    : ${summary.uploadedFiles}`);
   console.log(`  Dry-run groups    : ${summary.dryRunMatchedGroups}`);
@@ -877,6 +982,7 @@ const main = async () => {
   console.log(`  Missing item      : ${summary.missingItem}`);
   console.log(`  Failed            : ${summary.failed}`);
 
+  printDetailSection("Missing Code Files", detailRecords.missingCodeFiles);
   printDetailSection("Missing Items", detailRecords.missingItems);
   printDetailSection("Skipped Items", detailRecords.skippedItems);
   printDetailSection("Failed Items", detailRecords.failedItems);
