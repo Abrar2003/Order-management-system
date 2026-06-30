@@ -18,6 +18,7 @@
     "backfill:item-kd": "node scripts/backfillItemKdFromLegacyFields.js",
     "sync:items-inspected-from-latest-inspections": "node scripts/syncItemsInspectedDataFromLatestInspections.js",
     "upload:pis:folder": "node scripts/uploadPisFolderViaApi.js",
+    "upload:shipping-marks:folder": "node scripts/uploadShippingMarksFolderViaApi.js",
     "test": "node --test tests/*.test.js",
     "test:pdf": "node --test tests/pdfArchitecture.test.js tests/pdfRenderer.test.js",
     "serve": "npm run dev"
