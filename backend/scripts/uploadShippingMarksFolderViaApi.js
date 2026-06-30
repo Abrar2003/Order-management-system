@@ -6,6 +6,7 @@ const { loadEnvFiles } = require("../config/loadEnv");
 
 const SHIPPING_MARK_FILE_PATTERN = /^(.+?)_Shippingmark(?:[_\s.-].*)?\.pdf$/i;
 const SHIPPING_MARK_CONTENT_TYPE = "application/pdf";
+const DEFAULT_API_BASE_URL = "https://api.ghouse-sourcing.com";
 const ISSUE_STATUSES = new Set([
   "lookup-failed",
   "missing-item",
@@ -169,8 +170,7 @@ const resolveApiBaseUrl = (value = "") => {
     return normalizedValue.replace(/\/+$/g, "");
   }
 
-  const port = Number.parseInt(String(process.env.PORT || "8008"), 10) || 8008;
-  return `http://127.0.0.1:${port}`;
+  return DEFAULT_API_BASE_URL;
 };
 
 const buildReportTimestamp = () =>
@@ -643,7 +643,7 @@ const printUsage = () => {
   console.log("");
   console.log("Options:");
   console.log("  --folder <path>        Folder or single shipping mark PDF to process");
-  console.log("  --api-base-url <url>   Backend base URL, defaults to http://127.0.0.1:<PORT>");
+  console.log(`  --api-base-url <url>   Backend base URL, defaults to ${DEFAULT_API_BASE_URL}`);
   console.log("  --token <jwt>          Use an existing backend JWT");
   console.log("  --username <value>     Backend username for /auth/signin");
   console.log("  --password <value>     Backend password for /auth/signin");
