@@ -516,6 +516,7 @@ const createNumericDifference = ({
   sourceLabel = "Inspected",
   referenceLabel = "PIS",
   comparator = null,
+  update = null,
 } = {}) => {
   const comparisonResult = normalizeNumericComparisonResult(
     typeof comparator === "function"
@@ -554,7 +555,7 @@ const createNumericDifference = ({
       })
     : EMPTY_LABEL;
 
-  return {
+  const difference = {
     key,
     section,
     segment,
@@ -580,6 +581,18 @@ const createNumericDifference = ({
       referenceLabel,
     }),
   };
+  if (update && typeof update === "object") {
+    difference.master_update = {
+      ...update,
+      value_type: update.value_type || "number",
+      suggested_value:
+        update.suggested_value !== undefined
+          ? update.suggested_value
+          : inspectedValue,
+      unit,
+    };
+  }
+  return difference;
 };
 
 const createTextDifference = ({
@@ -591,6 +604,7 @@ const createTextDifference = ({
   pisValue,
   sourceLabel = "Inspected",
   referenceLabel = "PIS",
+  update = null,
 } = {}) => {
   const comparison = compareTextValues(inspectedValue, pisValue);
   if (!comparison.mismatch) return null;
@@ -598,7 +612,7 @@ const createTextDifference = ({
   const inspectedDisplay = comparison.inspected || EMPTY_LABEL;
   const pisDisplay = comparison.pis || EMPTY_LABEL;
 
-  return {
+  const difference = {
     key,
     section,
     segment,
@@ -621,6 +635,17 @@ const createTextDifference = ({
       referenceLabel,
     }),
   };
+  if (update && typeof update === "object") {
+    difference.master_update = {
+      ...update,
+      value_type: update.value_type || "text",
+      suggested_value:
+        update.suggested_value !== undefined
+          ? update.suggested_value
+          : inspectedValue,
+    };
+  }
+  return difference;
 };
 
 const buildReferenceFirstEntryPairs = (
@@ -733,6 +758,12 @@ const buildItemSizeDifferences = (
         comparator: compareItemSizeDimensionVariance,
         sourceLabel,
         referenceLabel,
+        update: {
+          target: "master_item_sizes",
+          index,
+          field: axis,
+          remark: normalizeKey(labelEntry?.remark || inspectedEntry?.remark || pisEntry?.remark || key),
+        },
       });
       if (difference) differences.push(difference);
     });
@@ -748,6 +779,12 @@ const buildItemSizeDifferences = (
       comparator: compareWeightVariance,
       sourceLabel,
       referenceLabel,
+      update: {
+        target: "master_item_sizes",
+        index,
+        field: "net_weight",
+        remark: normalizeKey(labelEntry?.remark || inspectedEntry?.remark || pisEntry?.remark || key),
+      },
     });
     if (weightDifference) differences.push(weightDifference);
   });
@@ -773,6 +810,12 @@ const buildBoxSizeDifferences = ({
     pisValue: pisMode,
     sourceLabel,
     referenceLabel,
+    update: {
+      target: "master_box_mode",
+      field: "master_box_mode",
+      value_type: "box_mode",
+      suggested_value: inspectedMode,
+    },
   });
   if (modeDifference) differences.push(modeDifference);
 
@@ -800,6 +843,13 @@ const buildBoxSizeDifferences = ({
         comparator: compareBoxSizeDimensionVariance,
         sourceLabel,
         referenceLabel,
+        update: {
+          target: "master_box_sizes",
+          index,
+          field: axis,
+          remark: normalizeKey(labelEntry?.remark || inspectedEntry?.remark || pisEntry?.remark || key),
+          box_type: normalizeKey(labelEntry?.box_type || inspectedEntry?.box_type || pisEntry?.box_type || ""),
+        },
       });
       if (difference) differences.push(difference);
     });
@@ -841,6 +891,17 @@ const buildBoxSizeDifferences = ({
             : null,
         sourceLabel,
         referenceLabel,
+        update: {
+          target: "master_box_sizes",
+          index,
+          field: entryConfig.keySuffix === "gross-weight"
+            ? "gross_weight"
+            : entryConfig.keySuffix === "item-count-in-inner"
+              ? "item_count_in_inner"
+              : "box_count_in_master",
+          remark: normalizeKey(labelEntry?.remark || inspectedEntry?.remark || pisEntry?.remark || key),
+          box_type: normalizeKey(labelEntry?.box_type || inspectedEntry?.box_type || pisEntry?.box_type || ""),
+        },
       });
       if (difference) differences.push(difference);
     });
@@ -935,6 +996,12 @@ const buildCbmDifferences = ({
     fixedDecimals: true,
     sourceLabel,
     referenceLabel,
+    update: {
+      target: "cbm.calculated_master_total",
+      field: "calculated_master_total",
+      value_type: "number",
+      suggested_value: inspectedCbm,
+    },
   });
 
   return difference ? [difference] : [];

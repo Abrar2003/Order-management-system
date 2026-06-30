@@ -51,6 +51,24 @@ const sortEntriesByLabel = (entries) =>
     })
   );
 
+const ITEM_DOC_FILE_TYPES = new Set([
+  "pis_file",
+  "assembly_file",
+  "mounting_file",
+  "packeging_ppt",
+]);
+
+const SHIPPING_MARKS_FILE_TYPES = new Set(
+  SHIPPING_MARKS_SUB_OPTIONS.map((option) => option.value),
+);
+
+const itemFileRouteMenuItem = (option) =>
+  routeMenuItem(
+    `items-file-${option.value}`,
+    option.label,
+    buildItemFilesPagePath(option.value),
+  );
+
 const Navbar = () => {
   const user = getUserFromToken();
   const role = user?.role;
@@ -227,18 +245,31 @@ const Navbar = () => {
   const itemMenuItems = useMemo(() => {
     if (!hasPermission("items", "view") || isQcOnlyRole) return [];
 
+    const itemDocMenuItems = ITEM_FILE_NAV_OPTIONS
+      .filter((option) => ITEM_DOC_FILE_TYPES.has(option.value))
+      .map(itemFileRouteMenuItem);
+
+    const shippingMarksMenuItems = SHIPPING_MARKS_SUB_OPTIONS.map(itemFileRouteMenuItem);
+
+    const otherItemFileMenuItems = ITEM_FILE_NAV_OPTIONS
+      .filter(
+        (option) =>
+          !ITEM_DOC_FILE_TYPES.has(option.value) &&
+          !SHIPPING_MARKS_FILE_TYPES.has(option.value),
+      )
+      .map(itemFileRouteMenuItem);
+
     return [
       routeMenuItem("items-all", "View Items", "/items"),
       routeMenuItem("item-masters", "Item Masters", "/item-masters"),
       routeMenuItem("item-database", "Item Database", "/item-database"),
-
-      ...ITEM_FILE_NAV_OPTIONS.map((option) =>
-        routeMenuItem(
-          `items-file-${option.value}`,
-          option.label,
-          buildItemFilesPagePath(option.value),
-        )
-      ),
+      ...otherItemFileMenuItems,
+      ...(itemDocMenuItems.length > 0
+        ? [groupMenuItem("items-docs", "Item's Docs", itemDocMenuItems)]
+        : []),
+      ...(shippingMarksMenuItems.length > 0
+        ? [groupMenuItem("items-shipping-marks", "Shipping Marks", shippingMarksMenuItems)]
+        : []),
     ];
   }, [hasPermission, isQcOnlyRole]);
 
@@ -704,7 +735,10 @@ const Navbar = () => {
 
     const submenuKey = `${sectionKey}:${item.key}`;
     const isSubmenuOpen = openDesktopSubmenu === submenuKey;
-    const opensOnHover = sectionKey === "reports" || sectionKey === "upload-add";
+    const opensOnHover =
+      sectionKey === "reports" ||
+      sectionKey === "upload-add" ||
+      sectionKey === "items";
 
     return (
       <div

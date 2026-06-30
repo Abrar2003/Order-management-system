@@ -34,6 +34,7 @@ const {
   createFinalPisCheckComment,
   updateFinalPisCheckComment,
   deleteFinalPisCheckComment,
+  updateFinalPisCheckMasterValues,
   getPisUpdateLogs,
   getProductDatabaseItems,
   exportProductDatabaseItems,
@@ -221,6 +222,15 @@ router.delete(
   requirePermission("pis", "view"),
   invalidateItemsOnSuccess,
   deleteFinalPisCheckComment,
+);
+
+router.patch(
+  "/final-pis-check/:code/master-values",
+  auth,
+  requireAdminOnlyPisEdit,
+  requirePermission("pis", "edit"),
+  invalidateItemsOnSuccess,
+  updateFinalPisCheckMasterValues,
 );
 
 router.get(

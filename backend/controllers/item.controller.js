@@ -2578,6 +2578,155 @@ const FINAL_PIS_COMMENT_ROLE_KEYS = new Set([
 const canCreateFinalPisComment = (user = {}) =>
   FINAL_PIS_COMMENT_ROLE_KEYS.has(normalizeUserRoleKey(user?.role));
 
+const canUpdateFinalPisMasterValues = (user = {}) =>
+  ["admin", "super_admin"].includes(normalizeUserRoleKey(user?.role));
+
+const clonePlainObject = (value = {}) =>
+  JSON.parse(JSON.stringify(value || {}));
+
+const normalizeFinalPisBoxModeInput = (value = "") => {
+  const normalized = normalizeTextField(value).toLowerCase();
+  if (!normalized) return BOX_PACKAGING_MODES.INDIVIDUAL;
+  if (
+    normalized === BOX_PACKAGING_MODES.CARTON ||
+    normalized.includes("carton") ||
+    normalized.includes("inner")
+  ) {
+    return BOX_PACKAGING_MODES.CARTON;
+  }
+  if (
+    normalized === BOX_PACKAGING_MODES.INDIVIDUAL_MASTER ||
+    normalized.includes("individual_master") ||
+    normalized.includes("individual packing") ||
+    normalized.includes("individual + master")
+  ) {
+    return BOX_PACKAGING_MODES.INDIVIDUAL_MASTER;
+  }
+  if (normalized === BOX_PACKAGING_MODES.INDIVIDUAL || normalized.includes("individual")) {
+    return BOX_PACKAGING_MODES.INDIVIDUAL;
+  }
+  throw new Error("Box mode must be Individual, Carton, or Individual packing + master");
+};
+
+const buildDefaultMasterItemSizeEntry = ({ remark = "" } = {}) => ({
+  L: 0,
+  B: 0,
+  H: 0,
+  remark: normalizeTextField(remark).toLowerCase() || "item",
+  net_weight: 0,
+});
+
+const buildDefaultMasterBoxSizeEntry = ({ remark = "", boxType = "" } = {}) => {
+  const normalizedBoxType = normalizeTextField(boxType).toLowerCase();
+  const normalizedRemark = normalizeTextField(remark).toLowerCase();
+  return {
+    L: 0,
+    B: 0,
+    H: 0,
+    remark: normalizedRemark || normalizedBoxType || "box",
+    box_type: normalizedBoxType || "individual",
+    gross_weight: 0,
+    item_count_in_inner: 0,
+    box_count_in_master: 0,
+  };
+};
+
+const ensureArrayEntry = (entries = [], index = 0, fallbackEntry = {}) => {
+  const safeIndex = Number.parseInt(String(index), 10);
+  if (!Number.isInteger(safeIndex) || safeIndex < 0 || safeIndex >= SIZE_ENTRY_LIMIT) {
+    throw new Error("Difference row points to an invalid master entry");
+  }
+
+  const nextEntries = (Array.isArray(entries) ? entries : []).map((entry) =>
+    clonePlainObject(entry),
+  );
+  while (nextEntries.length <= safeIndex) {
+    nextEntries.push(clonePlainObject(fallbackEntry));
+  }
+
+  nextEntries[safeIndex] = {
+    ...clonePlainObject(fallbackEntry),
+    ...clonePlainObject(nextEntries[safeIndex]),
+  };
+  return { entries: nextEntries, entry: nextEntries[safeIndex], index: safeIndex };
+};
+
+const applyFinalPisMasterOverride = ({
+  item,
+  difference,
+  rawValue,
+  state,
+} = {}) => {
+  const metadata = difference?.master_update || {};
+  const target = normalizeTextField(metadata?.target);
+  const field = normalizeTextField(metadata?.field);
+  const valueText = normalizeTextField(rawValue);
+  if (!valueText) return false;
+
+  if (target === "master_item_sizes") {
+    const parsedValue = toNonNegativeNumber(valueText, `${difference?.key || "difference"}.value`);
+    const { entries, entry } = ensureArrayEntry(
+      state.masterItemSizes,
+      metadata.index,
+      buildDefaultMasterItemSizeEntry({ remark: metadata.remark }),
+    );
+    if (!["L", "B", "H", "net_weight"].includes(field)) {
+      throw new Error(`Unsupported item size field for ${difference?.key}`);
+    }
+    entry[field] = parsedValue;
+    state.masterItemSizes = parseSizeEntriesPayload(entries, {
+      fieldLabel: "master_item_sizes",
+      remarkOptions: ITEM_SIZE_REMARK_OPTIONS,
+      weightKey: "net_weight",
+      weightLabel: "net_weight",
+      allowIncomplete: true,
+    });
+    return true;
+  }
+
+  if (target === "master_box_sizes") {
+    const parsedValue = toNonNegativeNumber(valueText, `${difference?.key || "difference"}.value`);
+    const currentMode = state.masterBoxMode || detectBoxPackagingMode(item?.master_box_mode, state.masterBoxSizes);
+    const { entries, entry } = ensureArrayEntry(
+      state.masterBoxSizes,
+      metadata.index,
+      buildDefaultMasterBoxSizeEntry({
+        remark: metadata.remark,
+        boxType: metadata.box_type,
+      }),
+    );
+    if (!["L", "B", "H", "gross_weight", "item_count_in_inner", "box_count_in_master"].includes(field)) {
+      throw new Error(`Unsupported box size field for ${difference?.key}`);
+    }
+    entry[field] = parsedValue;
+    state.masterBoxSizes = parseSizeEntriesPayload(entries, {
+      fieldLabel: "master_box_sizes",
+      remarkOptions: BOX_SIZE_REMARK_OPTIONS,
+      weightKey: "gross_weight",
+      weightLabel: "gross_weight",
+      mode: currentMode,
+      allowIncomplete: true,
+    });
+    state.masterBoxMode = detectBoxPackagingMode(currentMode, state.masterBoxSizes);
+    return true;
+  }
+
+  if (target === "master_box_mode") {
+    state.masterBoxMode = normalizeFinalPisBoxModeInput(valueText);
+    return true;
+  }
+
+  if (target === "cbm.calculated_master_total") {
+    state.masterCbmOverride = toNormalizedDecimalText(
+      valueText,
+      `${difference?.key || "difference"}.value`,
+    );
+    return true;
+  }
+
+  throw new Error(`Difference row ${difference?.key || ""} cannot update master data`);
+};
+
 const getActorDisplayName = (user = {}) =>
   normalizeTextField(user?.name || user?.username || user?.email || user?.role) || "User";
 
@@ -4431,6 +4580,169 @@ exports.deleteFinalPisCheckComment = async (req, res) => {
       success: false,
       message: "Failed to delete Final PIS Check comment",
       error: error.message,
+    });
+  }
+};
+
+exports.updateFinalPisCheckMasterValues = async (req, res) => {
+  try {
+    if (!canUpdateFinalPisMasterValues(req.user)) {
+      return res.status(403).json({
+        success: false,
+        message: "Only Admin or Super Admin can update master values.",
+      });
+    }
+
+    const itemCodeInput = normalizeTextField(req.params.code || req.params.itemCode);
+    const submittedUpdates = Array.isArray(req.body?.updates) ? req.body.updates : [];
+    const normalizedUpdates = submittedUpdates
+      .map((entry) => ({
+        differenceKey: normalizeTextField(entry?.difference_key || entry?.differenceKey || entry?.key),
+        value: normalizeTextField(entry?.value),
+      }))
+      .filter((entry) => entry.differenceKey && entry.value);
+
+    if (!itemCodeInput) {
+      return res.status(400).json({
+        success: false,
+        message: "Item code is required.",
+      });
+    }
+    if (normalizedUpdates.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No master values provided.",
+      });
+    }
+
+    const itemCodeMatch = new RegExp(`^\\s*${escapeRegex(itemCodeInput)}\\s*$`, "i");
+    const item = await Item.findOne(applyItemDataAccess({ code: itemCodeMatch }, req.user));
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: "Item not found.",
+      });
+    }
+
+    const currentRow = buildFinalPisCheckRows([item.toObject()])[0] || null;
+    const differenceLookup = new Map(
+      (Array.isArray(currentRow?.differences) ? currentRow.differences : [])
+        .map((difference) => [normalizeTextField(difference?.key), difference])
+        .filter(([key]) => key),
+    );
+    if (differenceLookup.size === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No active Final PIS Check differences found for this item.",
+      });
+    }
+
+    const beforeItemSnapshot = item.toObject();
+    const beforeAuditSnapshot = buildItemUpdateAuditSnapshot(beforeItemSnapshot);
+    const state = {
+      masterItemSizes: clonePlainObject(item?.master_item_sizes || []),
+      masterBoxSizes: clonePlainObject(item?.master_box_sizes || []),
+      masterBoxMode: detectBoxPackagingMode(item?.master_box_mode, item?.master_box_sizes),
+      masterCbmOverride: null,
+    };
+    const applied = [];
+
+    for (const update of normalizedUpdates) {
+      const difference = differenceLookup.get(update.differenceKey);
+      if (!difference) {
+        return res.status(400).json({
+          success: false,
+          message: `Difference row is no longer available: ${update.differenceKey}`,
+        });
+      }
+      if (!difference?.master_update) {
+        return res.status(400).json({
+          success: false,
+          message: `Difference row cannot be updated inline: ${update.differenceKey}`,
+        });
+      }
+
+      const changed = applyFinalPisMasterOverride({
+        item,
+        difference,
+        rawValue: update.value,
+        state,
+      });
+      if (changed) {
+        applied.push({
+          difference_key: update.differenceKey,
+          section: difference.section || "",
+          segment: difference.segment || "",
+          attribute: difference.attribute || "",
+          value: update.value,
+          target: difference.master_update?.target || "",
+          field: difference.master_update?.field || "",
+        });
+      }
+    }
+
+    if (applied.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No master values provided.",
+      });
+    }
+
+    item.set("master_item_sizes", state.masterItemSizes);
+    item.set("master_box_sizes", state.masterBoxSizes);
+    item.set("master_box_mode", state.masterBoxMode);
+    item.set("pis_checked_flag", true);
+    applyCalculatedCbmTotals(item, (pathKey, pathValue) => {
+      item.set(pathKey, pathValue);
+    });
+    if (state.masterCbmOverride !== null) {
+      item.set("cbm.calculated_master_total", state.masterCbmOverride);
+    }
+
+    appendItemUpdateHistory(item, {
+      before: beforeItemSnapshot,
+      after: item.toObject(),
+      reqUser: req.user,
+      action: "pis_diff_update",
+      source: "final_pis_check_inline",
+      route: "PATCH /items/final-pis-check/:code/master-values",
+      metadata: {
+        updates: applied,
+      },
+    });
+    await item.save();
+
+    const afterAuditSnapshot = buildItemUpdateAuditSnapshot(item.toObject());
+    await createPisUpdateLog({
+      reqUser: req.user,
+      beforeSnapshot: beforeAuditSnapshot,
+      afterSnapshot: afterAuditSnapshot,
+      operationType: "pis_diff_update",
+      pageName: "Final PIS Check Inline",
+      source: "final_pis_check_inline",
+      dataScopes: [AUDIT_SCOPES.MASTER],
+      extraRemarks: ["Final PIS Check inline row values were saved to master data."],
+      metadata: {
+        updates: applied,
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Updated ${applied.length} master field${applied.length === 1 ? "" : "s"}.`,
+      data: {
+        item: item.toObject(),
+        updates: applied,
+      },
+    });
+  } catch (error) {
+    console.error("Update Final PIS Check Master Values Error:", error);
+    const status = /must be|invalid|unsupported|cannot|no master|difference row/i.test(error?.message || "")
+      ? 400
+      : 500;
+    return res.status(status).json({
+      success: false,
+      message: error.message || "Failed to update Final PIS Check master values.",
     });
   }
 };

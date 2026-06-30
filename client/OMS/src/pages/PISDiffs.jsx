@@ -327,7 +327,17 @@ const PisDiffPdfReport = ({ report, reportRef = null }) => {
             >
               <div className="pis-diff-report-item-head">
                 <div>
-                  <div className="pis-diff-report-code">{row?.code || "N/A"}</div>
+                  <div className="d-flex align-items-center flex-wrap gap-2">
+                    <div className="pis-diff-report-code">{row?.code || "N/A"}</div>
+                    <div className="pis-diff-report-badges">
+                      {row?.inspection_report_mismatch && (
+                        <span className="badge bg-danger text-white border-0">Inspection report mismatch</span>
+                      )}
+                      {(Array.isArray(row?.diff_fields) ? row.diff_fields : []).map((field) => (
+                        <span key={`${row?.code}-${field}`}>{field}</span>
+                      ))}
+                    </div>
+                  </div>
                   <div className="pis-diff-report-description">
                     {row?.description || "N/A"}
                   </div>
@@ -337,24 +347,24 @@ const PisDiffPdfReport = ({ report, reportRef = null }) => {
                     {row?.updated_at && <span>Updated {row.updated_at}</span>}
                   </div>
                 </div>
-                <div className="pis-diff-report-badges">
-                  {row?.inspection_report_mismatch && (
-                    <span className="text-bg-danger">Inspection report mismatch</span>
-                  )}
-                  {(Array.isArray(row?.diff_fields) ? row.diff_fields : []).map((field) => (
-                    <span key={`${row?.code}-${field}`}>{field}</span>
-                  ))}
-                </div>
               </div>
 
               <div className="pis-diff-report-measure-grid">
-                {measurementCards.map((entry) => (
-                  <div key={`${row?.code}-${entry.label}`}>
-                    <span>{entry.label}</span>
-                    <strong>Size: {entry.size || "Not Set"}</strong>
-                    <strong>{entry.weightLabel}: {entry.weight || "Not Set"}</strong>
-                  </div>
-                ))}
+                {measurementCards.map((entry) => {
+                  const isInspected = entry.label.startsWith("Inspected");
+                  const isBox = entry.label.endsWith("Box");
+                  const cardClass = isInspected
+                    ? (isBox ? "measure-card-inspected-box" : "measure-card-inspected-item")
+                    : (isBox ? "measure-card-pis-box" : "measure-card-pis-item");
+
+                  return (
+                    <div key={`${row?.code}-${entry.label}`} className={cardClass}>
+                      <span>{entry.label}</span>
+                      <strong>Size: {entry.size || "Not Set"}</strong>
+                      <strong>{entry.weightLabel}: {entry.weight || "Not Set"}</strong>
+                    </div>
+                  );
+                })}
               </div>
 
               <div className="table-responsive">

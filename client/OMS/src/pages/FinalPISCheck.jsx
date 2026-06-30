@@ -107,6 +107,27 @@ const formatDifferenceCellValue = (difference = {}, field = "") => {
   return formatEan13BarcodeDisplay(value);
 };
 
+const BOX_MODE_INLINE_OPTIONS = Object.freeze([
+  { value: "", label: "Select" },
+  { value: "individual", label: "Individual" },
+  { value: "carton", label: "Carton" },
+  { value: "individual_master", label: "Individual + Master" },
+]);
+
+const getInlineMasterInputKey = (row = {}, difference = {}) =>
+  `${String(row?.code || row?.id || "").trim()}::${String(difference?.key || "").trim()}`;
+
+const formatInlineSuggestedValue = (difference = {}) => {
+  const value = difference?.master_update?.suggested_value;
+  if (value === undefined || value === null || value === "") return "";
+  return String(value);
+};
+
+const getInlineMasterPlaceholder = (difference = {}) => {
+  const suggested = formatInlineSuggestedValue(difference);
+  return suggested ? `Use ${suggested}` : "Value";
+};
+
 const waitForFontsReady = async () => {
   if (typeof document !== "undefined" && document.fonts?.ready) {
     await document.fonts.ready;
@@ -132,6 +153,11 @@ const FinalPisCheckReport = ({
   onEditComment = null,
   onDeleteComment = null,
   activeCommentAction = "",
+  canInlineUpdateMaster = false,
+  inlineMasterValues = {},
+  onInlineMasterValueChange = null,
+  onSubmitInlineMasterUpdates = null,
+  activeInlineUpdateCode = "",
 }) => {
   const rows = Array.isArray(report?.rows) ? report.rows : [];
   const summary = report?.summary || {};
@@ -244,6 +270,10 @@ const FinalPisCheckReport = ({
               },
             ];
 
+            const hasInlineEditableRows =
+              canInlineUpdateMaster &&
+              differences.some((difference) => difference?.master_update);
+
             return (
               <section
                 className="pis-diff-report-item"
@@ -251,7 +281,17 @@ const FinalPisCheckReport = ({
               >
                 <div className="pis-diff-report-item-head">
                   <div>
-                    <div className="pis-diff-report-code">{row?.code || "N/A"}</div>
+                    <div className="d-flex align-items-center flex-wrap gap-2">
+                      <div className="pis-diff-report-code">{row?.code || "N/A"}</div>
+                      <div className="pis-diff-report-badges">
+                        {row?.inspection_report_mismatch && (
+                          <span className="badge bg-danger text-white border-0">Inspection report mismatch</span>
+                        )}
+                        {(Array.isArray(row?.diff_fields) ? row.diff_fields : []).map((field) => (
+                          <span key={`${row?.code}-${field}`}>{field}</span>
+                        ))}
+                      </div>
+                    </div>
                     <div className="pis-diff-report-description">
                       {row?.description || row?.name || "N/A"}
                     </div>
@@ -268,29 +308,31 @@ const FinalPisCheckReport = ({
                       </div>
                     )}
                   </div>
-                  <div className="d-flex flex-column align-items-end gap-2">
-                    <div className="pis-diff-report-badges">
-                      {row?.inspection_report_mismatch && (
-                        <span className="text-bg-danger">Inspection report mismatch</span>
-                      )}
-                      {(Array.isArray(row?.diff_fields) ? row.diff_fields : []).map((field) => (
-                        <span key={`${row?.code}-${field}`}>{field}</span>
-                      ))}
-                    </div>
+                  <div className="d-flex align-items-center gap-2 flex-wrap">
                     {canEditPis && typeof onEditPis === "function" && (
                       <button
                         type="button"
-                        className="btn btn-outline-primary btn-sm"
+                        className="btn btn-outline-primary btn-sm px-3"
                         onClick={() => onEditPis(row)}
                         disabled={activeEditCode === row?.code}
                       >
                         {activeEditCode === row?.code ? "Loading..." : editButtonLabel}
                       </button>
                     )}
+                    {hasInlineEditableRows && typeof onSubmitInlineMasterUpdates === "function" && (
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm px-3"
+                        onClick={() => onSubmitInlineMasterUpdates(row)}
+                        disabled={activeInlineUpdateCode === row?.code}
+                      >
+                        {activeInlineUpdateCode === row?.code ? "Saving..." : "Apply Row Changes"}
+                      </button>
+                    )}
                     {canAddComment && typeof onAddComment === "function" && (
                       <button
                         type="button"
-                        className="btn btn-outline-secondary btn-sm"
+                        className="btn btn-outline-secondary btn-sm px-3"
                         onClick={() => onAddComment(row)}
                         disabled={activeCommentCode === row?.code}
                       >
@@ -301,13 +343,21 @@ const FinalPisCheckReport = ({
                 </div>
 
                 <div className="pis-diff-report-measure-grid">
-                  {measurementCards.map((entry) => (
-                    <div key={`${row?.code}-${entry.label}`}>
-                      <span>{entry.label}</span>
-                      <strong>Size: {entry.size || "Not Set"}</strong>
-                      <strong>{entry.weightLabel}: {entry.weight || "Not Set"}</strong>
-                    </div>
-                  ))}
+                  {measurementCards.map((entry) => {
+                    const isInspected = entry.label.startsWith(sourceLabel);
+                    const isBox = entry.label.endsWith("Box");
+                    const cardClass = isInspected
+                      ? (isBox ? "measure-card-inspected-box" : "measure-card-inspected-item")
+                      : (isBox ? "measure-card-pis-box" : "measure-card-pis-item");
+
+                    return (
+                      <div key={`${row?.code}-${entry.label}`} className={cardClass}>
+                        <span>{entry.label}</span>
+                        <strong>Size: {entry.size || "Not Set"}</strong>
+                        <strong>{entry.weightLabel}: {entry.weight || "Not Set"}</strong>
+                      </div>
+                    );
+                  })}
                 </div>
 
                 <div className="table-responsive">
@@ -320,37 +370,88 @@ const FinalPisCheckReport = ({
                         <th>Master</th>
                         <th>Difference</th>
                         <th>Remark</th>
+                        {canInlineUpdateMaster && <th>New Master</th>}
                       </tr>
                     </thead>
                     <tbody>
                       {differences.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="text-secondary">
+                          <td colSpan={canInlineUpdateMaster ? 7 : 6} className="text-secondary">
                             No detailed comparison rows available.
                           </td>
                         </tr>
                       ) : (
-                        differences.map((difference, index) => (
-                          <tr key={difference?.key || `${row?.code}-diff-${index}`}>
-                            <td>{difference?.section || "Difference"}</td>
-                            <td>
-                              <div className="fw-semibold">
-                                {difference?.segment || "Value"}
-                              </div>
-                              <div className="small text-secondary">
-                                {difference?.attribute || "-"}
-                              </div>
-                            </td>
-                            <td>{formatDifferenceCellValue(difference, "inspected")}</td>
-                            <td>{formatDifferenceCellValue(difference, "pis")}</td>
-                            <td>
-                              <span className="pis-diff-delta-badge">
-                                {difference?.delta || "Mismatch"}
-                              </span>
-                            </td>
-                            <td>{difference?.note || "-"}</td>
-                          </tr>
-                        ))
+                        differences.map((difference, index) => {
+                          const inlineInputKey = getInlineMasterInputKey(row, difference);
+                          const inlineValue = inlineMasterValues?.[inlineInputKey] || "";
+                          const masterUpdate = difference?.master_update || null;
+                          const isBoxModeInput = masterUpdate?.value_type === "box_mode";
+
+                          return (
+                            <tr key={difference?.key || `${row?.code}-diff-${index}`}>
+                              <td>{difference?.section || "Difference"}</td>
+                              <td>
+                                <div className="fw-semibold">
+                                  {difference?.segment || "Value"}
+                                </div>
+                                <div className="small text-secondary">
+                                  {difference?.attribute || "-"}
+                                </div>
+                              </td>
+                              <td>{formatDifferenceCellValue(difference, "inspected")}</td>
+                              <td>{formatDifferenceCellValue(difference, "pis")}</td>
+                              <td>
+                                <span className="pis-diff-delta-badge">
+                                  {difference?.delta || "Mismatch"}
+                                </span>
+                              </td>
+                              <td>{difference?.note || "-"}</td>
+                              {canInlineUpdateMaster && (
+                                <td className="pis-diff-inline-master-cell">
+                                  {masterUpdate ? (
+                                    isBoxModeInput ? (
+                                      <select
+                                        className="form-select form-select-sm pis-diff-inline-master-input"
+                                        value={inlineValue}
+                                        onChange={(event) =>
+                                          onInlineMasterValueChange?.(
+                                            row,
+                                            difference,
+                                            event.target.value,
+                                          )
+                                        }
+                                      >
+                                        {BOX_MODE_INLINE_OPTIONS.map((option) => (
+                                          <option key={option.value || "blank"} value={option.value}>
+                                            {option.label}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    ) : (
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        step="any"
+                                        className="form-control form-control-sm pis-diff-inline-master-input"
+                                        value={inlineValue}
+                                        placeholder={getInlineMasterPlaceholder(difference)}
+                                        onChange={(event) =>
+                                          onInlineMasterValueChange?.(
+                                            row,
+                                            difference,
+                                            event.target.value,
+                                          )
+                                        }
+                                      />
+                                    )
+                                  ) : (
+                                    <span className="text-secondary">-</span>
+                                  )}
+                                </td>
+                              )}
+                            </tr>
+                          );
+                        })
                       )}
                     </tbody>
                   </table>
@@ -442,6 +543,8 @@ const FinalPISCheck = () => {
   const [commentSaving, setCommentSaving] = useState(false);
   const [activeCommentAction, setActiveCommentAction] = useState("");
   const [commentError, setCommentError] = useState("");
+  const [inlineMasterValues, setInlineMasterValues] = useState({});
+  const [activeInlineUpdateCode, setActiveInlineUpdateCode] = useState("");
   const [loading, setLoading] = useState(true);
   const [optionsLoading, setOptionsLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
@@ -742,6 +845,71 @@ const FinalPISCheck = () => {
     setCommentError("");
   }, []);
 
+  const handleInlineMasterValueChange = useCallback((row = {}, difference = {}, value = "") => {
+    const inputKey = getInlineMasterInputKey(row, difference);
+    if (!inputKey || !difference?.master_update) return;
+
+    setInlineMasterValues((prev) => {
+      const next = { ...prev };
+      const normalizedValue = String(value ?? "");
+      if (!normalizedValue.trim()) {
+        delete next[inputKey];
+      } else {
+        next[inputKey] = normalizedValue;
+      }
+      return next;
+    });
+  }, []);
+
+  const handleSubmitInlineMasterUpdates = useCallback(async (row = {}) => {
+    const targetCode = String(row?.code || "").trim();
+    const differences = Array.isArray(row?.differences) ? row.differences : [];
+    const updates = differences
+      .map((difference) => {
+        const inputKey = getInlineMasterInputKey(row, difference);
+        return {
+          difference_key: difference?.key || "",
+          value: String(inlineMasterValues?.[inputKey] || "").trim(),
+          editable: Boolean(difference?.master_update),
+        };
+      })
+      .filter((entry) => entry.editable && entry.difference_key && entry.value)
+      .map(({ difference_key, value }) => ({ difference_key, value }));
+
+    if (!targetCode) {
+      setError("Unable to update master values for this item.");
+      return;
+    }
+    if (updates.length === 0) {
+      setError(`Enter at least one master value for item ${targetCode}.`);
+      return;
+    }
+
+    try {
+      setActiveInlineUpdateCode(targetCode);
+      setError("");
+      await api.patch(
+        `/items/final-pis-check/${encodeURIComponent(targetCode)}/master-values`,
+        { updates },
+      );
+      setInlineMasterValues((prev) => {
+        const next = { ...prev };
+        differences.forEach((difference) => {
+          delete next[getInlineMasterInputKey(row, difference)];
+        });
+        return next;
+      });
+      fetchFinalPisCheckRows();
+    } catch (updateError) {
+      setError(
+        updateError?.response?.data?.message
+          || `Failed to update master values for item ${targetCode}.`,
+      );
+    } finally {
+      setActiveInlineUpdateCode("");
+    }
+  }, [fetchFinalPisCheckRows, inlineMasterValues]);
+
   const handleOpenEditComment = useCallback((row = {}, comment = {}) => {
     setCommentTarget(row);
     setCommentMode("edit");
@@ -1041,7 +1209,7 @@ const FinalPISCheck = () => {
                 </select>
               </div>
 
-              <div className="col-lg-1 col-md-6">
+              <div className="col-lg-2 col-md-6">
                 <label className="form-label">Sort</label>
                 <select
                   className="form-select"
@@ -1133,6 +1301,11 @@ const FinalPISCheck = () => {
               onEditPis={handleOpenEditPis}
               activeEditCode={activeEditCode}
               editButtonLabel="Update Master"
+              canInlineUpdateMaster={canUpdateMaster}
+              inlineMasterValues={inlineMasterValues}
+              onInlineMasterValueChange={handleInlineMasterValueChange}
+              onSubmitInlineMasterUpdates={handleSubmitInlineMasterUpdates}
+              activeInlineUpdateCode={activeInlineUpdateCode}
               canAddComment={canAddFinalPisComment}
               onAddComment={handleOpenComment}
               currentUserId={currentUserId}
