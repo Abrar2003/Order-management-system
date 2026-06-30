@@ -1196,13 +1196,6 @@ const ItemDetails = () => {
                         </DetailCard>
                       </div>
                     )}
-                    {rawValueRows.length > 0 && (
-                      <div className="col-12">
-                        <DetailCard title="Raw Product Values">
-                          <KeyValueGrid rows={rawValueRows} />
-                        </DetailCard>
-                      </div>
-                    )}
                   </div>
                 </section>
               </>

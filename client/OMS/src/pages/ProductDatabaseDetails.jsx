@@ -421,14 +421,6 @@ const ProductDatabaseDetails = () => {
               </div>
             )}
 
-            {rawValueRows.length > 0 && (
-              <div className="col-12">
-                <DetailCard title="Raw Product Values">
-                  <KeyValueGrid rows={rawValueRows} />
-                </DetailCard>
-              </div>
-            )}
-
             <div className="col-12">
               <DetailCard title="Product Database History">
                 {Array.isArray(productDatabase.pd_history) && productDatabase.pd_history.length > 0 ? (
