@@ -598,6 +598,61 @@ small,
   background: var(--om-color-surface-alt);
 }
 
+.pis-diff-comment-list {
+  padding: 0.85rem 1rem;
+  margin-top: 0.5rem;
+}
+
+.pis-diff-comment-list-title {
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 0.6rem;
+  color: var(--om-color-text-muted, #6b5e50);
+}
+
+.pis-diff-comment-item {
+  padding: 0.55rem 0.65rem;
+}
+
+.pis-diff-comment-item + .pis-diff-comment-item {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(120, 95, 68, 0.18);
+}
+
+.pis-diff-comment-item div {
+  color: var(--om-color-text);
+  font-size: 0.85rem;
+  font-weight: 400;
+  line-height: 1.6;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.pis-diff-comment-item small {
+  display: inline-block;
+  margin-top: 0.3rem;
+  font-size: 0.75rem;
+  color: var(--om-color-text-muted);
+}
+
+.finish-code-preview {
+  min-height: 2.9rem;
+  display: flex;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--om-color-border);
+  border-radius: 0.95rem;
+  background: var(--om-color-surface-muted);
+  color: var(--om-color-text);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
 .goods-not-ready-file-row > span {
   min-width: 0;
   overflow: hidden;
@@ -5561,41 +5616,6 @@ small,
   box-shadow: 0 0 0 3px rgba(124, 109, 89, 0.15);
 }
 
-.pis-diff-comment-list {
-  font-size: 0.74rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.pis-diff-comment-item + .pis-diff-comment-item {
-  margin-top: 0.65rem;
-  padding-top: 0.65rem;
-  border-top: 1px solid rgba(120, 95, 68, 0.18);
-}
-
-.pis-diff-comment-item div {
-  color: var(--om-color-text);
-  line-height: 1.45;
-  white-space: pre-wrap;
-}
-
-.pis-diff-comment-item small {
-  color: var(--om-color-text-muted);
-}
-
-.finish-code-preview {
-  min-height: 2.9rem;
-  display: flex;
-  align-items: center;
-  padding: 0.75rem 1rem;
-  border: 1px solid var(--om-color-border);
-  border-radius: 0.95rem;
-  background: var(--om-color-surface-muted);
-  color: var(--om-color-text);
-  font-weight: 700;
-  letter-spacing: 0.04em;
-}
 
 .finish-item-picker {
   max-height: 24rem;
