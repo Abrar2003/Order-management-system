@@ -1099,7 +1099,8 @@ const UpdateQcModal = ({
   const barcodeValidationItemMaster = isInspectionRecordUpdate
     ? buildInspectionRecordMeasurementSource(inspectionRecord)
     : qc?.item_master || {};
-  const requiresBarcodeValidation = isQcUser && !isCurrentUserLabelExempt;
+  const requiresBarcodeValidation =
+    isQcUser && !(isInspectionRecordUpdate && isCurrentUserLabelExempt);
   const qcBarcodeValidationLocked =
     requiresBarcodeValidation && !barcodeValidated;
   const latestInspectionRecord = getLatestInspectionRecord(qc);
