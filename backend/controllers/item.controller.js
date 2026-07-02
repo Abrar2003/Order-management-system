@@ -89,6 +89,11 @@ const { appendItemUpdateHistory } = require("../helpers/itemUpdateHistory");
 const { formatEan13BarcodeDisplay } = require("../helpers/barcodeFormat");
 const { isSuperAdminLikeRole, normalizeUserRoleKey } = require("../helpers/userRole");
 const {
+  normalizeSingleMasterItemSizeRemarks,
+  normalizeSingleMasterBoxSizeRemarks,
+  normalizeSingleMasterSizeRemarks,
+} = require("../helpers/masterSizeRemarks");
+const {
   buildComparisonRows,
 } = require("../helpers/pisInspectionMasterComparison");
 const {
@@ -4712,8 +4717,12 @@ exports.updateFinalPisCheckMasterValues = async (req, res) => {
       });
     }
 
-    item.set("master_item_sizes", state.masterItemSizes);
-    item.set("master_box_sizes", state.masterBoxSizes);
+    const normalizedMasterSizes = normalizeSingleMasterSizeRemarks({
+      masterItemSizes: state.masterItemSizes,
+      masterBoxSizes: state.masterBoxSizes,
+    });
+    item.set("master_item_sizes", normalizedMasterSizes.master_item_sizes);
+    item.set("master_box_sizes", normalizedMasterSizes.master_box_sizes);
     item.set("master_box_mode", state.masterBoxMode);
     item.set("pis_checked_flag", true);
     applyCalculatedCbmTotals(item, (pathKey, pathValue) => {
@@ -6536,8 +6545,17 @@ exports.updateItemPis = async (req, res) => {
       setPath(path, value);
       pisFieldsTouched = true;
     };
+    const normalizeMasterPathValue = (path, value) => {
+      if (path === "master_item_sizes") {
+        return normalizeSingleMasterItemSizeRemarks(value);
+      }
+      if (path === "master_box_sizes") {
+        return normalizeSingleMasterBoxSizeRemarks(value);
+      }
+      return value;
+    };
     const setMasterPath = (path, value) => {
-      setPath(path, value);
+      setPath(path, normalizeMasterPathValue(path, value));
       masterFieldsTouched = true;
     };
     const nextPisWeight = buildWeightRecord(item?.pis_weight);

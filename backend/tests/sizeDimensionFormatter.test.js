@@ -188,6 +188,35 @@ test("final PIS check does not return a row when inspected dimensions only diffe
   assert.deepEqual(rows, []);
 });
 
+test("final PIS check does not mismatch single Master blank remarks against inspected default remarks", () => {
+  const rows = buildFinalPisCheckRows([
+    {
+      code: "ITEM-BLANK-MASTER-REMARKS",
+      description: "Single blank Master remarks",
+      inspected_item_sizes: [
+        { remark: "item", L: 100, B: 50, H: 75, net_weight: 12 },
+      ],
+      master_item_sizes: [
+        { remark: "", L: 100, B: 50, H: 75, net_weight: 12 },
+      ],
+      inspected_box_mode: "individual",
+      inspected_box_sizes: [
+        { remark: "box", box_type: "individual", L: 60, B: 40, H: 30, gross_weight: 14 },
+      ],
+      master_box_mode: "individual",
+      master_box_sizes: [
+        { remark: "", box_type: "individual", L: 60, B: 40, H: 30, gross_weight: 14 },
+      ],
+      cbm: {
+        calculated_inspected_total: "0.072",
+        calculated_master_total: "0.072",
+      },
+    },
+  ]);
+
+  assert.deepEqual(rows, []);
+});
+
 test("final PIS check reports inspected item size differences against Master", () => {
   const rows = buildFinalPisCheckRows([
     {
@@ -206,34 +235,86 @@ test("final PIS check reports inspected item size differences against Master", (
   assert.equal(rows[0].differences[0].pis, "100 cm");
 });
 
-test("final PIS check drives item detail rows from Master entries", () => {
+test("final PIS check reports extra inspected item size rows against empty Master rows", () => {
   const rows = buildFinalPisCheckRows([
     {
       code: "96412",
       description: "Ettafel Taylor 140x120 cm",
       inspected_item_sizes: [
+        { remark: "item", L: 140, B: 120, H: 76, net_weight: 37.9 },
         { remark: "top", L: 140, B: 120, H: 4.5, net_weight: 31 },
         { remark: "base", L: 17, B: 5, H: 73.5, net_weight: 6.6 },
       ],
       master_item_sizes: [
-        { L: 140, B: 120, H: 76, net_weight: 37.9 },
+        { remark: "item", L: 140, B: 120, H: 76, net_weight: 37.9 },
       ],
     },
   ]);
 
+  const itemSizeDifferences = rows[0].differences.filter(
+    (difference) => difference.section === "Item Size",
+  );
+  const topLengthDifference = itemSizeDifferences.find(
+    (difference) => difference.segment === "Top" && difference.attribute === "L",
+  );
+  const baseWeightDifference = itemSizeDifferences.find(
+    (difference) => difference.segment === "Base" && difference.attribute === "Net Weight",
+  );
+
   assert.equal(rows.length, 1);
-  assert.deepEqual(
-    rows[0].differences.map((difference) => difference.segment),
-    ["Entry 1", "Entry 1", "Entry 1", "Entry 1"],
+  assert.deepEqual([...new Set(itemSizeDifferences.map((difference) => difference.segment))], ["Top", "Base"]);
+  assert.equal(topLengthDifference.inspected, "140 cm");
+  assert.equal(topLengthDifference.pis, "Not Set");
+  assert.equal(topLengthDifference.delta, "Master not set");
+  assert.equal(baseWeightDifference.inspected, "6.6 kg");
+  assert.equal(baseWeightDifference.pis, "Not Set");
+});
+
+test("final PIS check reports extra Master item size rows against empty inspected rows", () => {
+  const rows = buildFinalPisCheckRows([
+    {
+      code: "ITEM-MASTER-EXTRA",
+      description: "Master has more item rows",
+      inspected_item_sizes: [
+        { remark: "item", L: 100, B: 50, H: 75, net_weight: 12 },
+      ],
+      master_item_sizes: [
+        { remark: "item", L: 100, B: 50, H: 75, net_weight: 12 },
+        { remark: "top", L: 100, B: 50, H: 5, net_weight: 4 },
+      ],
+    },
+  ]);
+
+  const topDifferences = rows[0].differences.filter(
+    (difference) => difference.segment === "Top",
   );
-  assert.ok(
-    rows[0].differences.every((difference) => difference.inspected === "Not Set"),
+  const topHeightDifference = topDifferences.find(
+    (difference) => difference.attribute === "H",
   );
-  assert.ok(
-    rows[0].differences.every(
-      (difference) => !["Top", "Base"].includes(difference.segment),
-    ),
-  );
+
+  assert.equal(rows.length, 1);
+  assert.equal(topHeightDifference.inspected, "Not Set");
+  assert.equal(topHeightDifference.pis, "5 cm");
+  assert.equal(topHeightDifference.delta, "Inspected not set");
+});
+
+test("final PIS check matches item size rows by remark when order differs", () => {
+  const rows = buildFinalPisCheckRows([
+    {
+      code: "ITEM-ORDER",
+      description: "Same item rows in different order",
+      inspected_item_sizes: [
+        { remark: "item", L: 100, B: 50, H: 75, net_weight: 12 },
+        { remark: "top", L: 120, B: 60, H: 5, net_weight: 4 },
+      ],
+      master_item_sizes: [
+        { remark: "top", L: 120, B: 60, H: 5, net_weight: 4 },
+        { remark: "item", L: 100, B: 50, H: 75, net_weight: 12 },
+      ],
+    },
+  ]);
+
+  assert.deepEqual(rows, []);
 });
 
 test("final PIS check normalizes inspected box base dimensions against Master before mismatch rows", () => {
@@ -297,7 +378,7 @@ test("final PIS check reports master box entries missing from inspected data", (
       inspected_box_mode: "individual",
       inspected_box_sizes: [
         {
-          remark: "box",
+          remark: "box1",
           L: 64,
           B: 65,
           H: 52.5,
@@ -353,6 +434,63 @@ test("final PIS check reports master box entries missing from inspected data", (
   assert.equal(box2MissingWeightDifference.pis, "18.6 kg");
 });
 
+test("final PIS check reports extra inspected box size rows against empty Master rows", () => {
+  const rows = buildFinalPisCheckRows([
+    {
+      code: "ITEM-BOX-EXTRA",
+      description: "Inspected has more box rows",
+      inspected_box_mode: "individual",
+      inspected_box_sizes: [
+        {
+          remark: "box1",
+          L: 60,
+          B: 50,
+          H: 40,
+          gross_weight: 10,
+        },
+        {
+          remark: "box2",
+          L: 30,
+          B: 20,
+          H: 10,
+          gross_weight: 4,
+        },
+      ],
+      master_box_mode: "individual",
+      master_box_sizes: [
+        {
+          remark: "box1",
+          L: 60,
+          B: 50,
+          H: 40,
+          gross_weight: 10,
+        },
+      ],
+      cbm: {
+        calculated_inspected_total: "0.126",
+        calculated_master_total: "0.12",
+      },
+    },
+  ]);
+
+  const box2Differences = rows[0].differences.filter(
+    (difference) => difference.section === "Box Size" && difference.segment === "Box 2",
+  );
+  const box2LengthDifference = box2Differences.find(
+    (difference) => difference.attribute === "L",
+  );
+  const box2WeightDifference = box2Differences.find(
+    (difference) => difference.attribute === "Gross Weight",
+  );
+
+  assert.equal(rows.length, 1);
+  assert.equal(box2LengthDifference.inspected, "30 cm");
+  assert.equal(box2LengthDifference.pis, "Not Set");
+  assert.equal(box2LengthDifference.delta, "Master not set");
+  assert.equal(box2WeightDifference.inspected, "4 kg");
+  assert.equal(box2WeightDifference.pis, "Not Set");
+});
+
 test("final PIS check reports inspected box mode count and weight differences against Master", () => {
   const rows = buildFinalPisCheckRows([
     {
@@ -406,7 +544,13 @@ test("final PIS check reports missing Master data instead of falling back to PIS
   assert.deepEqual(rows[0].diff_fields, ["Item Size"]);
   assert.equal(rows[0].references.source_label, "Inspected");
   assert.equal(rows[0].references.item_label, "Master");
-  assert.equal(rows[0].differences[0].delta, "Master data missing");
+  assert.equal(rows[0].differences[0].inspected, "100 cm");
+  assert.equal(rows[0].differences[0].pis, "Not Set");
+  assert.equal(rows[0].differences[0].delta, "Master not set");
+  assert.equal(
+    rows[0].differences.some((difference) => difference.delta === "Master data missing"),
+    false,
+  );
 });
 
 test("final PIS check does not compare barcode differences", () => {

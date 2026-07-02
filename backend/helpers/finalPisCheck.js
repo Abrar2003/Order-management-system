@@ -13,6 +13,10 @@ const {
   formatSizeArrayToReference,
   hasReferenceSizeArray,
 } = require("./sizeDimensionFormatter");
+const {
+  normalizeSingleItemSizeRemarks,
+  normalizeSingleBoxSizeRemarks,
+} = require("./masterSizeRemarks");
 
 const FINAL_PIS_CHECK_ITEM_SELECT = [
   "code",
@@ -743,7 +747,7 @@ const buildItemSizeDifferences = (
     buildItemEntryKey,
     {
       allowIndexFallback: false,
-      includeUnmatchedInspected: false,
+      includeUnmatchedInspected: true,
     },
   );
 
@@ -828,7 +832,8 @@ const buildBoxSizeDifferences = ({
     pisEntries,
     buildBoxEntryKey,
     {
-      includeUnmatchedInspected: false,
+      allowIndexFallback: false,
+      includeUnmatchedInspected: true,
     },
   );
 
@@ -1077,18 +1082,30 @@ const formatBoxModeLabel = (mode = "") => {
 };
 
 const buildFinalPisCheckRow = (item = {}) => {
+  const masterItemSizes = normalizeSingleItemSizeRemarks(
+    item?.master_item_sizes,
+  );
+  const inspectedItemSizes = normalizeSingleItemSizeRemarks(
+    item?.inspected_item_sizes,
+  );
+  const masterBoxSizes = normalizeSingleBoxSizeRemarks(
+    item?.master_box_sizes,
+  );
+  const inspectedBoxSizes = normalizeSingleBoxSizeRemarks(
+    item?.inspected_box_sizes,
+  );
   const masterItemEntries = buildItemMeasurementEntries({
-    sizes: item?.master_item_sizes,
+    sizes: masterItemSizes,
   });
   const inspectedItemEntries = buildItemMeasurementEntries({
-    sizes: item?.inspected_item_sizes,
+    sizes: inspectedItemSizes,
   });
   const masterBoxEntries = buildBoxMeasurementEntries({
-    sizes: item?.master_box_sizes,
+    sizes: masterBoxSizes,
     mode: item?.master_box_mode,
   });
   const inspectedBoxEntries = buildBoxMeasurementEntries({
-    sizes: item?.inspected_box_sizes,
+    sizes: inspectedBoxSizes,
     mode: item?.inspected_box_mode,
   });
   const hasMasterItemEntries = masterItemEntries.length > 0;
@@ -1109,30 +1126,27 @@ const buildFinalPisCheckRow = (item = {}) => {
       })
     : inspectedBoxEntries;
 
-  const resolvedInspectedBoxMode = formatBoxModeLabel(
-    detectBoxPackagingMode(item?.inspected_box_mode, item?.inspected_box_sizes),
-  );
-  const resolvedMasterBoxMode = formatBoxModeLabel(
-    detectBoxPackagingMode(item?.master_box_mode, item?.master_box_sizes),
-  );
+  const resolvedInspectedBoxMode =
+    hasInspectedBoxEntries || normalizeText(item?.inspected_box_mode)
+      ? formatBoxModeLabel(
+          detectBoxPackagingMode(item?.inspected_box_mode, inspectedBoxSizes),
+        )
+      : "";
+  const resolvedMasterBoxMode =
+    hasMasterBoxEntries || normalizeText(item?.master_box_mode)
+      ? formatBoxModeLabel(
+          detectBoxPackagingMode(item?.master_box_mode, masterBoxSizes),
+        )
+      : "";
 
   const differences = [
-    ...buildMasterPresenceDifferences({
-      hasSourceItemEntries: hasInspectedItemEntries,
-      hasMasterItemEntries,
-      hasSourceBoxEntries: hasInspectedBoxEntries,
-      hasMasterBoxEntries,
-      sourceItemEntries: inspectedItemEntries,
-      sourceBoxEntries: inspectedBoxEntries,
-      sourceLabel,
-    }),
-    ...(hasMasterItemEntries
+    ...(hasMasterItemEntries || hasInspectedItemEntries
       ? buildItemSizeDifferences(normalizedInspectedItemEntries, masterItemEntries, {
           sourceLabel,
           referenceLabel: itemReferenceLabel,
         })
       : []),
-    ...(hasMasterBoxEntries
+    ...(hasMasterBoxEntries || hasInspectedBoxEntries
       ? buildBoxSizeDifferences({
           inspectedEntries: normalizedInspectedBoxEntries,
           pisEntries: masterBoxEntries,
@@ -1146,7 +1160,7 @@ const buildFinalPisCheckRow = (item = {}) => {
       inspectedCbm: item?.cbm?.calculated_inspected_total || item?.cbm?.inspected_total,
       masterCbm: item?.cbm?.calculated_master_total,
       masterBoxEntries,
-      masterBoxMode: item?.master_box_mode,
+      masterBoxMode: detectBoxPackagingMode(item?.master_box_mode, masterBoxSizes),
       sourceLabel,
       referenceLabel: boxReferenceLabel,
     }),

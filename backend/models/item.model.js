@@ -8,6 +8,10 @@ const {
   formatSizeArrayToReference,
   pickReferenceSizeArray,
 } = require("../helpers/sizeDimensionFormatter");
+const {
+  normalizeSingleMasterItemSizeRemarks,
+  normalizeSingleMasterBoxSizeRemarks,
+} = require("../helpers/masterSizeRemarks");
 
 const ITEM_SIZE_ENTRY_LIMIT = 5;
 const BOX_SIZE_ENTRY_LIMIT = 4;
@@ -634,6 +638,16 @@ itemSchema.pre("validate", function syncBarcodeAliases() {
         source_header: String(entry?.source_header || "").trim(),
       }));
     }
+  }
+});
+
+itemSchema.pre("validate", function normalizeSingleMasterSizeRemarksForSave() {
+  if (Array.isArray(this.master_item_sizes)) {
+    this.master_item_sizes = normalizeSingleMasterItemSizeRemarks(this.master_item_sizes);
+  }
+
+  if (Array.isArray(this.master_box_sizes)) {
+    this.master_box_sizes = normalizeSingleMasterBoxSizeRemarks(this.master_box_sizes);
   }
 });
 
