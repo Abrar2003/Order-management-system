@@ -23,6 +23,10 @@ const CRITERIA_OPTIONS = [
   { value: "product_image", label: "Product Image Uploaded" },
   { value: "finish", label: "Finish Uploaded" },
   { value: "shipping_marks", label: "Shipping Marks Uploaded" },
+  { value: "ean", label: "EAN Uploaded" },
+  { value: "flat_carton", label: "Flat Carton Uploaded" },
+  { value: "three_d_carton", label: "3D Carton Uploaded" },
+  { value: "product_database", label: "Product Database Created" },
 ];
 
 const STATUS_OPTIONS = [
@@ -41,6 +45,10 @@ const SUMMARY_KEYS = [
   "product_image",
   "finish",
   "shipping_marks",
+  "ean",
+  "flat_carton",
+  "three_d_carton",
+  "product_database",
 ];
 
 const normalizeText = (value) => String(value || "").trim();
@@ -416,6 +424,10 @@ const InspectedItemsReport = () => {
                       <th>Product Image</th>
                       <th>Finish</th>
                       <th>Shipping Marks</th>
+                      <th>EAN</th>
+                      <th>Flat Carton</th>
+                      <th>3D Carton</th>
+                      <th>Product Database</th>
                       <th>Last Inspected</th>
                     </tr>
                   </thead>
@@ -452,12 +464,16 @@ const InspectedItemsReport = () => {
                           )}
                         </td>
                         <td><FlagBadge value={row.flags?.shipping_marks} /></td>
+                        <td><FlagBadge value={row.flags?.ean} /></td>
+                        <td><FlagBadge value={row.flags?.flat_carton} /></td>
+                        <td><FlagBadge value={row.flags?.three_d_carton} /></td>
+                        <td><FlagBadge value={row.flags?.product_database} /></td>
                         <td>{row.last_inspected_date ? formatDateDDMMYYYY(row.last_inspected_date) : "N/A"}</td>
                       </tr>
                     ))}
                     {rows.length === 0 && (
                       <tr>
-                        <td colSpan={14} className="text-center py-4">
+                        <td colSpan={18} className="text-center py-4">
                           No items found
                         </td>
                       </tr>

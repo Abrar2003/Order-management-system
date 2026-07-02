@@ -95,6 +95,7 @@ const INSPECTED_ITEMS_REPORT_SELECT = [
   "shipping_marks",
   "inspected_item_sizes",
   "inspected_box_sizes",
+  "pd_checked",
   "updatedAt",
 ].join(" ");
 const INSPECTED_ITEMS_ORDER_SELECT = [
@@ -116,6 +117,10 @@ const INSPECTED_ITEM_CRITERIA = Object.freeze({
   PRODUCT_IMAGE: "product_image",
   FINISH: "finish",
   SHIPPING_MARKS: "shipping_marks",
+  EAN: "ean",
+  FLAT_CARTON: "flat_carton",
+  THREE_D_CARTON: "three_d_carton",
+  PRODUCT_DATABASE: "product_database",
 });
 
 const normalizeInspectedItemsCodeKey = (value) =>
@@ -350,6 +355,28 @@ const hasItemBeenInspected = (item = {}) =>
       (Array.isArray(item?.inspected_box_sizes) && item.inspected_box_sizes.length > 0),
   );
 
+const hasEanUploaded = (item = {}) => {
+  const marks = item?.shipping_marks || {};
+  return hasStoredItemFile(marks.ean);
+};
+
+const hasFlatCartonUploaded = (item = {}) => {
+  const marks = item?.shipping_marks || {};
+  return (
+    (Array.isArray(marks.flat_carton) && marks.flat_carton.some((file) => hasStoredItemFile(file))) ||
+    hasStoredItemFile(marks.flat_carton_1) ||
+    hasStoredItemFile(marks.flat_carton_2)
+  );
+};
+
+const hasThreeDCartonUploaded = (item = {}) => {
+  const marks = item?.shipping_marks || {};
+  return hasStoredItemFile(marks.three_d_carton);
+};
+
+const isProductDatabaseCreated = (item = {}) =>
+  ["created", "checked", "approved"].includes(normalizeText(item?.pd_checked).toLowerCase());
+
 const buildInspectedItemsReportFlags = (item = {}) => ({
   inspected: hasItemBeenInspected(item),
   cad: hasStoredItemFile(item?.cad_file),
@@ -360,6 +387,10 @@ const buildInspectedItemsReportFlags = (item = {}) => ({
   product_image: hasStoredItemFile(item?.image),
   finish: hasFinishUploaded(item),
   shipping_marks: hasShippingMarksUploaded(item),
+  ean: hasEanUploaded(item),
+  flat_carton: hasFlatCartonUploaded(item),
+  three_d_carton: hasThreeDCartonUploaded(item),
+  product_database: isProductDatabaseCreated(item),
 });
 
 const isInspectedItemsCriterionApplicable = (row = {}, criterion = "all") => {
@@ -501,6 +532,10 @@ const buildInspectedItemsSummary = (rows = []) => {
     product_image: createSummaryEntry(INSPECTED_ITEM_CRITERIA.PRODUCT_IMAGE, "Product Image Uploaded"),
     finish: createSummaryEntry(INSPECTED_ITEM_CRITERIA.FINISH, "Finish Uploaded"),
     shipping_marks: createSummaryEntry(INSPECTED_ITEM_CRITERIA.SHIPPING_MARKS, "Shipping Marks Uploaded"),
+    ean: createSummaryEntry(INSPECTED_ITEM_CRITERIA.EAN, "EAN Uploaded"),
+    flat_carton: createSummaryEntry(INSPECTED_ITEM_CRITERIA.FLAT_CARTON, "Flat Carton Uploaded"),
+    three_d_carton: createSummaryEntry(INSPECTED_ITEM_CRITERIA.THREE_D_CARTON, "3D Carton Uploaded"),
+    product_database: createSummaryEntry(INSPECTED_ITEM_CRITERIA.PRODUCT_DATABASE, "Product Database Created"),
   };
 };
 
@@ -1929,6 +1964,10 @@ exports.exportInspectedItemsReport = async (req, res) => {
       { header: "Product Image", value: (row) => (row.flags?.product_image ? "Yes" : "No") },
       { header: "Finish", value: (row) => (row.flags?.finish ? "Yes" : "No") },
       { header: "Shipping Marks", value: (row) => (row.flags?.shipping_marks ? "Yes" : "No") },
+      { header: "EAN", value: (row) => (row.flags?.ean ? "Yes" : "No") },
+      { header: "Flat Carton", value: (row) => (row.flags?.flat_carton ? "Yes" : "No") },
+      { header: "3D Carton", value: (row) => (row.flags?.three_d_carton ? "Yes" : "No") },
+      { header: "Product Database", value: (row) => (row.flags?.product_database ? "Yes" : "No") },
       {
         header: "Finish Count",
         value: (row) => Number(row.files?.finish_count || 0),
